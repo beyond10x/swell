@@ -201,6 +201,17 @@ parseResult is a non-empty List of SyntaxError objects, throw a SyntaxError exce
 Limits reached while running and not while parsing (frames, re-entry, `JSON`, regular
 expression matching) stay as `engine.md` decision 3 has them.
 
+**What `min_stack_bytes()` covers.** Added on 2026-11-21 for slice 2. It covers the outermost
+run, `reentry_depth` re-entries, and at the deepest re-entry one parse at `parser_nesting`
+levels through any entry that parses: `cx.parse_script` (HOST-17), `eval` (HOST-152) and the
+`Function` constructor (HOST-163), each with the Rust frames between the re-entry and the parser
+on its own path. CreateDynamicFunction parses the parameter text, then the body text, then the
+whole source text `function anonymous(<parameters>\n) {\n<body>\n}`
+(`ecma262:sec-createdynamicfunction`); the three parses run one after another, never one
+inside another, so the parser's share is that of one parse, but the path to it (ToString of
+each argument, the source text built, the wrapping function expression of the third parse,
+which counts as a level like any function) is not `eval`'s, and is measured on its own.
+
 `CreateError::AgentKeysExhausted`: every handle carries its agent's key (decision 4), a `u32`
 from a process-wide counter; creating more than 2^32 - 1 agents in one process fails.
 
@@ -234,6 +245,8 @@ limit off; `AGENTS.md`: "Each limit ends in an outcome the host reads"); a wall-
 
 **HOST-152** (swell:D2) On a thread whose stack has `limits.min_stack_bytes()` bytes, a script that reaches `reentry_depth` re-entries and at the deepest one calls `eval` on a source nested `parser_nesting` levels ends without a stack overflow. [slice 2]
 
+**HOST-163** (swell:D2) On a thread whose stack has `limits.min_stack_bytes()` bytes, a script that reaches `reentry_depth` re-entries and at the deepest one calls `Function(p, b)` with a parameter text `p` and a body text `b` each nested `parser_nesting` levels ends without a stack overflow, in `Normal` or in `Throw` of a `SyntaxError`. [slice 2]
+
 **HOST-18** (swell:D2) A source of 100,000 nested brackets with `parser_nesting` 1,000 makes `parse_script` answer `Parsed::Errors` with one error object and no stack overflow. [slice 1]
 
 **HOST-19** (swell:D2) With `parser_nesting` 0, `parse_script` of any non-empty source answers `Parsed::Errors`. [slice 1]
@@ -256,7 +269,7 @@ limit off; `AGENTS.md`: "Each limit ends in an outcome the host reads"); a wall-
 
 **HOST-140** (ecma262:sec-performeval) With the same `parser_nesting` and `s`, the indirect eval `(0, eval)(s)` throws a `SyntaxError` whose `message` contains `parser_nesting`, which the script catches. [slice 2]
 
-**HOST-141** (ecma262:sec-createdynamicfunction) With the same `parser_nesting` and `s`, `Function("return " + s)` throws a `SyntaxError` whose `message` contains `parser_nesting`, which the script catches. [slice 3]
+**HOST-141** (ecma262:sec-createdynamicfunction) With the same `parser_nesting` and `s`, `Function("return " + s)` throws a `SyntaxError` whose `message` contains `parser_nesting`, which the script catches. [slice 2]
 
 **HOST-142** (ecma262:sec-parsepattern) With `parser_nesting` 1,000, `parse_script` of a regular expression literal of 2,000 nested groups `/((...(a)...))/` answers `Parsed::Errors` with one `SyntaxError` whose `message` contains `parser_nesting`, and the literal of 10 nested groups parses. [slice 5]
 
@@ -479,7 +492,8 @@ host's mistake on to the script as its own completion).
 **Every call the draft "only asserts away", and every handle the call should not get, ends in
 `Err(HostError::...)`, changes nothing and leaves the agent usable. A load cannot be finished
 twice: the token is moved into the call. A faulted agent answers every entry point and every
-read but `state()` with `Err(HostError::Faulted)`.** This answers finding 5.
+read but `state()` and `refusals()` (decision 13) with `Err(HostError::Faulted)`.** This
+answers finding 5.
 
 | call | the draft | answer |
 |---|---|---|
@@ -506,18 +520,23 @@ or `Abrupt::Throw` value of a `HostFn`, the `GlobalObjects` of a `GlobalSetup`, 
 override, the answer of a hook such as `host_get_code_for_eval` or
 `host_get_import_meta_properties`) is checked before the engine uses it. A stale handle, a handle
 of another agent, or one of the wrong kind where the engine needs a kind ends the run with
-`Terminated(EngineFault)`: the agent is faulted, `state()` then reads `Faulted`, and every other
-entry point and read answers `Err(HostError::Faulted)` (HOST-48). No call is there to answer
+`Terminated(EngineFault)`: the agent is faulted, `state()` then reads `Faulted`, and every
+entry point and read but `state()` and `refusals()` answers `Err(HostError::Faulted)` (HOST-48). No call is there to answer
 `Err` to, and the run cannot go on with a value it cannot read. Decision 15's sentence on an
 override result is this rule applied to overrides, and a stale handle listed by `trace` answers
 the same (HOST-110). A value the engine does not use, such as what a host function returns in a
 terminated run (decision 10), is not checked.
 
-**HOST-160** (swell:D6) A host function whose `Ok` value or `Abrupt::Throw` value holds a stale handle or a handle of another agent ends the run with `Terminated(EngineFault)`, and a `GlobalSetup` closure whose `GlobalObjects` hold one ends its `create_realm` call with `Terminated(EngineFault)`; in both cases `state()` then reads `Faulted`, every other entry point and read answers `Err(HostError::Faulted)`, and nothing panics. [slice 1]
+**HOST-160** (swell:D6) A host function whose `Ok` value or `Abrupt::Throw` value holds a stale handle or a handle of another agent ends the run with `Terminated(EngineFault)`, and a `GlobalSetup` closure whose `GlobalObjects` hold one ends its `create_realm` call with `Terminated(EngineFault)`; in both cases `state()` then reads `Faulted`, every entry point and read but `state()` and `refusals()` answers `Err(HostError::Faulted)`, and nothing panics. [slice 1]
 
-The other return sites (an override's result, `host_get_code_for_eval`,
-`host_get_import_meta_properties` and the other hooks whose answer holds a handle) get their own
-requirement when their slice is decomposed.
+The other return sites (an override's result, `host_get_import_meta_properties` and the other
+hooks whose answer holds a handle) get their own requirement when their slice is decomposed.
+Slice 2's two, both reached from `eval` or `Function`, are HOST-162: the `Some` of
+`host_get_code_for_eval`, an `Option<StringRef>` that cannot throw, so only a stale or a
+foreign String handle can reach the engine; and the thrown value of an `Abrupt::Throw` from
+`host_ensure_can_compile_strings`, whose answer is a `Completion<()>` (decision 16).
+
+**HOST-162** (swell:D6) A `host_get_code_for_eval` whose `Some` value is a stale String handle or a String handle of another agent ends the run of the script that called `eval(o)` with `Terminated(EngineFault)`, and a `host_ensure_can_compile_strings` whose `Abrupt::Throw` value holds a stale handle or a handle of another agent ends the run of the script that called `eval` or `Function` with `Terminated(EngineFault)`; in both cases no code of a string runs, `state()` then reads `Faulted`, every entry point and read but `state()` and `refusals()` answers `Err(HostError::Faulted)`, and nothing panics. [slice 2]
 
 **HOST-42** (ecma262:sec-moduledeclarationlinking) `link` of a module whose status is `New` answers `Err(HostError::ModuleStatus { found: New })` and `module_status` still reads `New`. [slice 11]
 
@@ -535,7 +554,7 @@ requirement when their slice is decomposed.
 
 **HOST-47** (ecma262:sec-call) `agent.call` of a root that reads a non-callable value answers `Throw` of a `TypeError`, and `agent.construct` of a non-constructor answers `Throw` of a `TypeError`. [slice 1]
 
-**HOST-48** (swell:D6) After an entry answered `Terminated(EngineFault)`, `state()` reads `Faulted` and every other entry point and read of the agent answers `Err(HostError::Faulted)` without calling a hook. [slice 1]
+**HOST-48** (swell:D6) After an entry answered `Terminated(EngineFault)`, `state()` reads `Faulted` and every entry point and read of the agent but `state()` and `refusals()` answers `Err(HostError::Faulted)` without calling a hook. [slice 1]
 
 Inside a scope still on the Rust stack when the agent faults (a host function whose returned
 handle faulted it, HOST-160, say), HOST-48 holds for every scoped method whose type carries
@@ -969,7 +988,8 @@ impl<H: Host> Agent<H> {
 
 **The host can read the agent's state, a module's [[Status]] and whether it was cut by a
 termination, a module's evaluation error, a promise's state and result and its
-[[PromiseIsHandled]], set [[PromiseIsHandled]], and read what the last entry spent. A
+[[PromiseIsHandled]], set [[PromiseIsHandled]], read what the last entry spent and how many
+refusals of a later slice's construct the agent raised. A
 checkpoint and a collection answer a report. Reads run no code, call no hook and spend no
 step.** This answers finding 1.
 
@@ -1002,11 +1022,30 @@ impl<H: Host> Agent<H> {   // module_status and promise reads also on Cx and Hoo
     pub fn last_entry_steps(&self) -> Result<u64, HostError>;
     pub fn heap_bytes(&self) -> Result<u64, HostError>;
     pub fn pending_microtasks(&self) -> Result<usize, HostError>;
+    pub fn refusals(&self) -> u64;
 }
 ```
 
 `Linking` is in the enumeration for completeness; Link calls no host code, so the host never
 reads it.
+
+**A count of refusals.** Decided on 2026-11-21 for slice 2. While the engine is delivered slice
+by slice, it raises a `SyntaxError` whose message names a later slice when a construct belongs
+to that slice (`engine.md` section 12, "A part before its slice": the message
+`<construct> is not supported before slice <n>`, which `swell_syntax::message_kind` reads as a
+refusal). It raises one while parsing, through
+`parse_script`, `parse_module`, `eval` or `Function`, and while running: a regular expression
+literal evaluated before slice 5. Through `eval`, `Function` or a literal a script can catch
+that error, and a host that measures conformance cannot then tell a refusal from a
+`SyntaxError` of the language. So the agent counts every refusal it raises, whatever entry or
+instruction raised it and whether or not the script catches it, and `refusals()` reads the
+count: a `u64` that starts at 0, is never reset, saturates instead of wrapping, and is read in
+every state of the agent, `Faulted` included (it has no `Result`). The nesting limit
+(decision 2) is not a refusal, nor is any other `SyntaxError`. Once the last slice is
+delivered the engine refuses no construct, and the count stays 0 for every source. The
+conformance runner fails every run in which the count moved (`engine.md` decision 11).
+Rejected: a mark on the error object a script could read or remove; counting parses only (a
+caught refusal of a regular expression literal would be missed).
 
 **HOST-97** (ecma262:sec-cyclic-module-records) `module_status` reads `New` after `parse_module`, `Unlinked` after the graph's last load finished, `Linked` after `link`, and `Evaluated` or `EvaluatingAsync` after `evaluate_module`, for a graph of three modules. [slice 11]
 
@@ -1019,6 +1058,8 @@ reads it.
 **HOST-101** (webidl:mark-a-promise-as-handled) After `mark_promise_as_handled` of a rejected promise with no handler, `promise_is_handled` reads true, and a handler added to it later causes no `host_promise_rejection_tracker` call with `Handle`. [slice 10]
 
 **HOST-102** (swell:D13) A read changes no value `last_entry_steps()` and `heap_bytes()` report, and calls no hook. [slice 1]
+
+**HOST-164** (swell:D13) `refusals()` reads 0 on a new agent; with `r` a source the engine refuses (its error's `message` read by `swell_syntax::message_kind` as a refusal), it reads 1 more after `parse_script` of `r`, 1 more after the script `try { eval(r); } catch (e) {}` answers `Normal`, and 1 more after the script `try { Function(r); } catch (e) {}` answers `Normal`, and while a regular expression literal is refused, 1 more after the script `try { /a/; } catch (e) {}` answers `Normal`; it reads the same after `parse_script` of a grammar error and of `0` inside 2,000 nested parentheses with `parser_nesting` 1,000; it is read, as a `u64`, after the agent faulted; and once the engine refuses no construct, it reads 0 after each of those scripts. [slice 2]
 
 ## 14. `call`, `construct`, host functions, re-entrancy
 
@@ -1245,7 +1286,7 @@ HostEnsureCanAddPrivateElement where the draft says "If the host is a web browse
 
 **HOST-116** (ecma262:sec-performeval) `eval("1")` calls `host_ensure_can_compile_strings` once with `body_string` `"1"`, `compilation_type` `DirectEval` or `IndirectEval` as called, before parsing; a `Throw` from the hook is thrown by `eval` and no code of the string runs. [slice 2]
 
-**HOST-117** (ecma262:sec-createdynamicfunction) `Function("a", "return a")` calls `host_ensure_can_compile_strings` with `param_strings` `["a"]`, `body_string` `"return a"` and `compilation_type` `Function`. [slice 3]
+**HOST-117** (ecma262:sec-createdynamicfunction) `Function("a", "return a")` calls `host_ensure_can_compile_strings` with `param_strings` `["a"]`, `body_string` `"return a"` and `compilation_type` `Function`. [slice 2]
 
 **HOST-118** (ecma262:sec-hostgetcodeforeval) `eval(o)` with an object `o` calls `host_get_code_for_eval(o)`; `None` makes `eval` return `o`, and `Some(s)` makes it evaluate `s`. [slice 2]
 

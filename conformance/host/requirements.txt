@@ -114,7 +114,7 @@ HOST-113 pending slice 9
 HOST-114 pending slice 9
 HOST-115 pending slice 18
 HOST-116 pending slice 2
-HOST-117 pending slice 3
+HOST-117 pending slice 2
 HOST-118 pending slice 2
 HOST-119 pending slice 8
 HOST-120 pending slice 3
@@ -138,7 +138,7 @@ HOST-137 test swell::scripts::host_137_nesting_error_names_parser_nesting_and_10
 HOST-138 pending slice 11
 HOST-139 pending slice 2
 HOST-140 pending slice 2
-HOST-141 pending slice 3
+HOST-141 pending slice 2
 HOST-142 pending slice 5
 HOST-143 pending slice 5
 HOST-144 pending slice 4
@@ -159,3 +159,6 @@ HOST-158 pending slice 11
 HOST-159 pending slice 11
 HOST-160 test swell::misuse::host_160_a_handle_returned_by_the_host_faults_the_agent
 HOST-161 test swell::lib::realm::tests::host_161_the_entry_names_the_current_realm
+HOST-162 pending slice 2
+HOST-163 pending slice 2
+HOST-164 pending slice 2
