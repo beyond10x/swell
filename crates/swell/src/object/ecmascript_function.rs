@@ -50,15 +50,15 @@ pub(crate) struct EcmascriptFunction {
     pub(crate) realm: Option<Handle>,
     /// [[ScriptOrModule]].
     pub(crate) script: Option<Handle>,
-    /// [[HomeObject]]: the object of an accessor of an object literal (MakeMethod,
-    /// `#sec-makemethod`).
+    /// [[HomeObject]]: the object of an accessor or a plain method of an object literal
+    /// (MakeMethod, `#sec-makemethod`).
     pub(crate) home_object: Option<ObjectRef>,
     /// The compiled code of [[ScriptOrModule]], whose template `template` is [[ECMAScriptCode]]
     /// and [[FormalParameters]].
     pub(crate) compiled: Option<Rc<Compiled>>,
     pub(crate) template: u32,
     /// Whether it has a [[Construct]] (MakeConstructor): a function declaration or expression,
-    /// not an accessor.
+    /// not an accessor or a method.
     pub(crate) constructor: bool,
     /// [[Strict]]; [[ThisMode]] is strict exactly when it is.
     pub(crate) strict: bool,
@@ -326,11 +326,13 @@ impl<H: Host> Agent<H> {
     /// InstantiateOrdinaryFunctionObject (`#sec-runtime-semantics-instantiateordinaryfunctionobject`),
     /// InstantiateOrdinaryFunctionExpression
     /// (`#sec-runtime-semantics-instantiateordinaryfunctionexpression`) or the closure of an
-    /// accessor's MethodDefinitionEvaluation (`#sec-runtime-semantics-methoddefinitionevaluation`)
+    /// accessor's or a plain method's MethodDefinitionEvaluation
+    /// (`#sec-runtime-semantics-methoddefinitionevaluation`, `#sec-runtime-semantics-definemethod`)
     /// of template `index` of `compiled`, in the environment `env`: OrdinaryFunctionCreate with
     /// `%Function.prototype%` of `realm` (`#sec-ordinaryfunctioncreate`: SetFunctionLength,
     /// `#sec-setfunctionlength`), SetFunctionName (`#sec-setfunctionname`), and MakeConstructor
-    /// (`#sec-makeconstructor`) but for an accessor. A named function expression that refers to
+    /// (`#sec-makeconstructor`) but for an accessor or a method, which have no [[Construct]]. A
+    /// named function expression that refers to
     /// its own name gets an environment of one immutable binding holding it.
     pub(crate) fn instantiate_function(
         &mut self,
@@ -410,7 +412,8 @@ impl<H: Host> Agent<H> {
         Ok(function)
     }
 
-    /// MakeMethod (`#sec-makemethod`): [[HomeObject]] of the accessor `function` is `home`.
+    /// MakeMethod (`#sec-makemethod`): [[HomeObject]] of the accessor or method `function` is
+    /// `home`.
     pub(crate) fn make_method(&mut self, function: ObjectRef, home: ObjectRef) -> Completion<()> {
         match &mut self.engine_object_mut(function)?.kind {
             ObjectKind::EcmascriptFunction(f) => {

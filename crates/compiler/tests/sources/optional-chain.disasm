@@ -1,0 +1,37 @@
+script locals 0
+  0000 2:1 GetGlobal "a"
+  0001 2:1 Dup
+  0002 2:1 Null
+  0003 2:1 Eq
+  0004 2:1 JumpIfTrue 0008
+  0005 2:1 GetNamed "b"
+  0006 2:1 GetNamed "c"
+  0007 2:1 Jump 0010
+  0008 2:1 Pop
+  0009 2:1 Undefined
+  0010 2:1 StoreCompletion
+  0011 3:1 GetGlobal "o"
+  0012 3:1 Dup
+  0013 3:1 GetNamed "m"
+  0014 3:1 Dup
+  0015 3:1 Null
+  0016 3:1 Eq
+  0017 3:1 JumpIfTrue 0020
+  0018 3:1 Call 0
+  0019 3:1 Jump 0023
+  0020 3:1 Nip 1
+  0021 3:1 Pop
+  0022 3:1 Undefined
+  0023 3:1 StoreCompletion
+  0024 4:8 GetGlobal "a"
+  0025 4:8 Dup
+  0026 4:8 Null
+  0027 4:8 Eq
+  0028 4:8 JumpIfTrue 0031
+  0029 4:1 DeleteNamed "b"
+  0030 4:8 Jump 0033
+  0031 4:8 Pop
+  0032 4:8 True
+  0033 4:1 StoreCompletion
+  0034 0:0 LoadCompletion
+  0035 0:0 Return

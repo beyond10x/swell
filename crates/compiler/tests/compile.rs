@@ -404,6 +404,25 @@ fn deepest_accepted_tree_compiles_on_a_256_kib_stack() {
                 "; }".repeat(n)
             )
         }),
+        ("labels", |n| {
+            format!(
+                "{}while (a) {{ break l0; continue l{}; }}",
+                (0..n).map(|i| format!("l{i}: ")).collect::<String>(),
+                n.saturating_sub(1)
+            )
+        }),
+        ("optional chain", |n| format!("x = a{}();", "?.b".repeat(n))),
+        ("coalesce chain", |n| format!("x = a{};", " ?? a".repeat(n))),
+        ("logical assignments", |n| {
+            format!("{}0;", "a ??= ".repeat(n))
+        }),
+        ("methods", |n| {
+            format!(
+                "x = {}a{};",
+                "{ m(a) { return ".repeat(n),
+                "; } }".repeat(n)
+            )
+        }),
     ];
     let mut deepest_depth = 0;
     let mut cases = Vec::new();
@@ -451,7 +470,7 @@ fn regexp_literal_compiles_to_its_syntax_error_throw() {
         .collect();
     assert_eq!(
         throws,
-        vec!["regular expression literals are not supported before slice 5".to_string()]
+        vec!["regular expression literal is not supported before slice 5".to_string()]
     );
     // No value of the literal is produced: no constant holds its pattern or flags.
     for k in 0..code.strings.len() as u32 {

@@ -62,6 +62,7 @@ pub fn disassemble(code: &Code) -> String {
             FunctionKind::Expression => "expression",
             FunctionKind::Getter => "getter",
             FunctionKind::Setter => "setter",
+            FunctionKind::Method => "method",
         };
         let _ = write!(
             out,
@@ -189,6 +190,7 @@ fn text(code: &Code, instruction: &Instruction) -> String {
         I::DefineField(k) => format!("DefineField {}", s(k)),
         I::DefineGetter(k) => format!("DefineGetter {}", s(k)),
         I::DefineSetter(k) => format!("DefineSetter {}", s(k)),
+        I::DefineMethod(k) => format!("DefineMethod {}", s(k)),
         I::DefineIndex(n) => format!("DefineIndex {n}"),
         I::ArrayLength(n) => format!("ArrayLength {n}"),
         I::Call(n) => format!("Call {n}"),

@@ -80,6 +80,7 @@ pub(crate) fn parse(source: &[u16], max: u32) -> Result<Parsed, SyntaxError> {
             line: 1,
             column: 1,
             newline_before: false,
+            escaped: false,
         },
         peeked: None,
         prev_end: 0,
@@ -254,8 +255,25 @@ impl<'a> Parser<'a> {
         self.tok.kind == TokenKind::Keyword(k)
     }
 
+    /// Whether the current token is the contextual keyword `name` (`let`, `of`, `get`, ...):
+    /// the name written without an escape (`#sec-keywords-and-reserved-words`, Note 1).
     fn is_name(&self, name: &str) -> bool {
-        matches!(&self.tok.kind, TokenKind::Name(n) if n == name)
+        !self.tok.escaped && matches!(&self.tok.kind, TokenKind::Name(n) if n == name)
+    }
+
+    /// An `Identifier` at the current token, a name written with an escape, may not have the
+    /// StringValue of a reserved word (`#sec-identifiers-static-semantics-early-errors`);
+    /// `await` and `yield` are left to their own rules.
+    #[inline(never)]
+    fn check_escaped_keyword(&mut self) -> R<()> {
+        if let TokenKind::Name(n) = &self.tok.kind
+            && self.tok.escaped
+            && Keyword::from_name(n).is_some()
+        {
+            let message = crate::early::escaped_keyword(n);
+            return self.fail_here(message);
+        }
+        Ok(())
     }
 
     #[inline(never)]
@@ -283,18 +301,30 @@ impl<'a> Parser<'a> {
         self.unexpected()
     }
 
-    /// The `;` that ends a statement. Where `#sec-rules-of-automatic-semicolon-insertion` would
-    /// insert one (before `}`, at the end of the input, or before a token on a new line), the
-    /// insertion is refused: it is slice 2's.
+    /// The `;` that ends a statement, or the one `#sec-rules-of-automatic-semicolon-insertion`
+    /// inserts: before a `}`, at the end of the input, or before a token on a new line (the
+    /// offending token, as the grammar wants a `;` here). The parser asks for it only where a
+    /// statement ends, so an inserted `;` is never an empty statement and never one of the two in
+    /// the head of a `for`, which read their `;` themselves.
     #[inline(never)]
     fn semicolon(&mut self) -> R<()> {
         if self.eat(Punct::Semicolon)? {
             return Ok(());
         }
         if self.is(Punct::RBrace) || self.at_eof() || self.tok.newline_before {
-            return self.refuse("automatic semicolon insertion", 2);
+            return Ok(());
         }
         self.unexpected()
+    }
+
+    /// Whether `#sec-rules-of-automatic-semicolon-insertion` inserts a `;` before the current
+    /// token after a restricted production's keyword: a `}`, the end of the input or a line
+    /// terminator before it (`return`, `break`, `continue`).
+    fn ends_statement_here(&self) -> bool {
+        self.is(Punct::Semicolon)
+            || self.is(Punct::RBrace)
+            || self.at_eof()
+            || self.tok.newline_before
     }
 
     // ---- positions and nodes -------------------------------------------------------------------

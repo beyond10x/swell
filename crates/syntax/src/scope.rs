@@ -12,6 +12,9 @@
 //!   and FunctionDeclarationInstantiation take them from the var scoped declarations), and the
 //!   identifiers its own code references.
 //!
+//! A method is a function scope like any other; a `catch` without a parameter binds nothing, and
+//! a label is no binding: neither changes what a body declares.
+//!
 //! The walk does not recurse: its pending work is a stack on the heap, so the Rust stack it uses
 //! is the same at any depth of the tree.
 

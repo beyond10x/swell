@@ -56,9 +56,32 @@ fn sources(directory: &str) -> Result<Vec<(PathBuf, String)>, String> {
         .collect()
 }
 
-/// The header of a source file: its anchor and the rest of its first line after `: `.
+/// The first line of `text` when it is a `HashbangComment` (`#sec-hashbang`), with its line
+/// terminator: such a comment stands only at the very start of a source, so a source that has
+/// one carries its header comment on the second line.
+fn hashbang_line(text: &str) -> &str {
+    if !text.starts_with("#!") {
+        return "";
+    }
+    match text.find('\n') {
+        Some(end) => &text[..=end],
+        None => text,
+    }
+}
+
+/// `text` with a `"use strict";` prologue, after its hashbang comment if it has one.
+fn with_use_strict(text: &str) -> String {
+    let hashbang = hashbang_line(text);
+    format!("{hashbang}\"use strict\";\n{}", &text[hashbang.len()..])
+}
+
+/// The header of a source file: its anchor and the rest of its first line after `: ` (of its
+/// second line after a hashbang comment).
 fn header(path: &Path, text: &str) -> Result<(String, String), String> {
-    let first = text.lines().next().unwrap_or("");
+    let first = text[hashbang_line(text).len()..]
+        .lines()
+        .next()
+        .unwrap_or("");
     let rest = first
         .strip_prefix("// ")
         .ok_or_else(|| format!("{}: no header comment", path.display()))?;
@@ -103,7 +126,7 @@ fn valid_sources_parse_in_both_modes() {
             ),
             Err(errors) => panic!("{} as written: {:?}", path.display(), errors),
         }
-        let strict = format!("\"use strict\";\n{text}");
+        let strict = with_use_strict(text);
         match parse(&strict) {
             Ok(script) => assert!(
                 script.strict,
@@ -175,14 +198,47 @@ fn refused_sources_name_their_slice() {
             ),
         }
     }
-    // A hashbang comment stands only at the very start of a source, where a file's header
-    // comment is, so it is checked here.
-    let errors = parse("#! a hashbang comment\nx = 1;").err().unwrap();
-    assert_eq!(
-        messages(&errors),
-        vec!["hashbang comment is not supported before slice 2".to_string()]
-    );
     println!("refused: {} file(s)", files.len());
+}
+
+/// A hashbang comment (`#sec-hashbang`) is a comment at the very start of a source only: it
+/// may run to the end of the input, it holds no line terminator of its own, and after anything
+/// else, white space included, `#!` is an error.
+#[test]
+fn hashbang_comment_only_at_the_start() {
+    for text in [
+        "#!",
+        "#! a b c",
+        "#!\nx = 1;",
+        "#!/x\r\nx = 1;",
+        "#!\u{2028}x",
+    ] {
+        assert!(parse(text).is_ok(), "{text:?}: {:?}", parse(text).err());
+    }
+    for text in [" #!\n", "\n#!\n", "x = 1;\n#!\n", "/**/#!\n"] {
+        let errors = parse(text)
+            .err()
+            .unwrap_or_else(|| panic!("{text:?} parsed"));
+        assert_eq!(
+            messages(&errors),
+            vec!["hashbang comment not at the start of the source".to_string()],
+            "{text:?}"
+        );
+    }
+}
+
+/// The message a regular expression literal throws before slice 5 is a refusal of slice 5 as
+/// [`message_kind`] reads it (`docs/design/engine.md`, decision 11, "Refusals").
+#[test]
+fn message_kind_reads_the_regular_expression_literal_refusal() {
+    assert_eq!(
+        swell_syntax::REGEXP_REFUSAL,
+        "regular expression literal is not supported before slice 5"
+    );
+    assert_eq!(
+        message_kind(swell_syntax::REGEXP_REFUSAL),
+        MessageKind::Refusal { slice: 5 }
+    );
 }
 
 /// `message_kind` tells the three kinds of message apart from the text alone, as a host reads it
@@ -356,11 +412,19 @@ fn nested(kind: &str, n: usize) -> Option<String> {
         "switch" => format!("{}{}", r("switch (a) { case 0: "), r("}")),
         "string_inside" => format!("x = {}\"a\\u{{1F600}}\\x41\\101\"{};", r("("), r(")")),
         "regexp_inside" => format!("x = {}/a[/]b\\//gi{};", r("("), r(")")),
+        // Each label of a chain has a name of its own: a label inside the same label is an
+        // early error.
+        "labelled" => format!("{};", (0..n).map(|i| format!("l{i}: ")).collect::<String>()),
+        "optional_chain" => format!("x = a{};", r("?.b")),
+        "optional_index" => format!("x = {}0{};", r("a?.["), r("]")),
+        "optional_call" => format!("x = {}0{};", r("f?.("), r(")")),
+        "coalesce" => format!("x = a{};", r(" ?? a")),
+        "method" => format!("x = {}0{};", r("{m(){ return "), r("; }}")),
         _ => return None,
     })
 }
 
-const NESTING_KINDS: [&str; 29] = [
+const NESTING_KINDS: [&str; 35] = [
     "array",
     "paren",
     "block",
@@ -390,6 +454,12 @@ const NESTING_KINDS: [&str; 29] = [
     "switch",
     "string_inside",
     "regexp_inside",
+    "labelled",
+    "optional_chain",
+    "optional_index",
+    "optional_call",
+    "coalesce",
+    "method",
 ];
 
 /// Whether `n` nested `kind`s parse at `limit` (`Some(true)`), fail with the nesting error alone

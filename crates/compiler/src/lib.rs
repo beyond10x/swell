@@ -5,10 +5,12 @@
 //! `f64`s, and the interpreter interns them.
 //!
 //! Slice 1 compiles the ES5 grammar the parser accepts: the statements of clause 14 but `with`
-//! and labelled statements (`statement.rs`), the expressions of clause 13 (`expression.rs`), and
-//! function declarations and expressions of 15.2 (`function.rs`), with the runtime semantics of
-//! each clause in their evaluation order. A regular expression literal compiles to the
-//! `SyntaxError` the design gives it before slice 5. Slots and environments are assigned by
+//! (`statement.rs`), the expressions of clause 13 (`expression.rs`), and function declarations
+//! and expressions of 15.2 (`function.rs`), with the runtime semantics of each clause in their
+//! evaluation order. Slice 2 adds labelled statements, `??`, optional chains, the logical
+//! assignments, a `catch` without a parameter, and plain methods and shorthand properties of
+//! object literals. A regular expression literal compiles to the `SyntaxError` the design gives
+//! it before slice 5 ([`swell_syntax::REGEXP_REFUSAL`]). Slots and environments are assigned by
 //! `resolve.rs`; `disasm.rs` writes a [`Code`] as text.
 //!
 //! # Bounds
@@ -159,15 +161,26 @@ pub(crate) enum JumpKind {
 #[derive(Clone, Debug)]
 pub(crate) enum Control {
     /// A loop: `break` goes to `exit`, `continue` to `next`, with `items` operand stack entries
-    /// and `envs` environments in place.
+    /// and `envs` environments in place. `labels` is its label set
+    /// (`#sec-labelled-statements-runtime-semantics-labelledevaluation`): a `break` or
+    /// `continue` with one of them goes to this loop.
     Loop {
         exit: Label,
         next: Label,
         items: u32,
         envs: u32,
+        labels: Vec<String>,
     },
     /// A switch statement: `break` goes to `exit`.
     Switch { exit: Label, items: u32, envs: u32 },
+    /// A labelled statement that is no loop: a `break` with one of its `labels` goes to `exit`,
+    /// where its LabelledEvaluation turns the break completion into a normal one.
+    Label {
+        labels: Vec<String>,
+        exit: Label,
+        items: u32,
+        envs: u32,
+    },
     /// The try block and catch block of a try statement with a `finally` block, entered at
     /// `entry` with a completion record on top of `items` entries.
     Finally {
@@ -193,6 +206,8 @@ pub(crate) struct Exits {
 #[derive(Clone, Debug)]
 pub(crate) enum Task {
     Stmt(StmtId),
+    /// A loop with the label set of the labelled statements around it.
+    LabelledLoop(StmtId, Vec<String>),
     /// Pushes the value of an expression.
     Expr(ExprId),
     /// Emits an instruction; a jump's target is a [`Label`] until the template is finished.
@@ -210,8 +225,16 @@ pub(crate) enum Task {
     PushControl(Control),
     /// Pops a control entry; a finally's exits are kept under the given key.
     PopControl(Option<u32>),
-    /// `break` or `continue` at the current position.
-    Jump(JumpKind, Span),
+    /// `break` or `continue` at the current position, with its label if it has one.
+    Jump(JumpKind, Option<String>, Span),
+    /// Opens an optional chain (`#sec-optional-chains`) whose short-circuit leaves `Short`.
+    ChainOpen(Short),
+    /// The test of a `?.` in the innermost open chain: the value on top, with `depth - 1` values
+    /// of the chain under it, is checked for `undefined` or `null`, which short-circuits the
+    /// chain.
+    ChainCheck(u32, Span),
+    /// Closes the innermost chain: the code its short-circuits jump to.
+    ChainClose(Span),
     /// `return` of the value on top of the stack at the current position.
     Return(Span),
     /// The tag dispatch after the `finally` block whose exits were kept under the key.
@@ -225,6 +248,29 @@ pub(crate) enum Task {
         items: u32,
         envs: u32,
     },
+}
+
+/// What a short-circuited optional chain leaves on the stack
+/// (`#sec-optional-chaining-evaluation`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Short {
+    /// `undefined`, the value of the chain.
+    Undefined,
+    /// `true`, the value of `delete` of the chain
+    /// (`#sec-delete-operator-runtime-semantics-evaluation`: the chain gives the value
+    /// `undefined`, no reference).
+    True,
+    /// `undefined` as the this value and `undefined` as the function: the chain is the callee of
+    /// a call, which then throws a `TypeError`.
+    Pair,
+}
+
+/// An optional chain being compiled: its short-circuit jumps, each with how many values of the
+/// chain are on the stack there.
+#[derive(Clone, Debug)]
+struct Chain {
+    short: Short,
+    stubs: Vec<(Label, u32)>,
 }
 
 /// The code generator of one template: the script or one function.
@@ -247,6 +293,8 @@ pub(crate) struct Compiler<'a> {
     finished: BTreeMap<u32, Exits>,
     next_key: u32,
     tasks: Vec<Task>,
+    /// The optional chains being compiled, innermost last.
+    chains: Vec<Chain>,
 }
 
 /// The finished code of one template.
@@ -282,6 +330,7 @@ impl<'a> Compiler<'a> {
             finished: BTreeMap::new(),
             next_key: 0,
             tasks: Vec::new(),
+            chains: Vec::new(),
         }
     }
 
@@ -361,8 +410,24 @@ impl<'a> Compiler<'a> {
         while self.tasks.len() > base {
             let Some(task) = self.tasks.pop() else { break };
             let expanded = match task {
-                Task::Stmt(id) => self.statement(id)?,
+                Task::Stmt(id) => self.statement(id, Vec::new())?,
+                Task::LabelledLoop(id, labels) => self.statement(id, labels)?,
                 Task::Expr(id) => self.expression(id)?,
+                Task::ChainOpen(short) => {
+                    self.chains.push(Chain {
+                        short,
+                        stubs: Vec::new(),
+                    });
+                    continue;
+                }
+                Task::ChainCheck(depth, span) => {
+                    self.chain_check(depth, span)?;
+                    continue;
+                }
+                Task::ChainClose(span) => {
+                    self.chain_close(span)?;
+                    continue;
+                }
                 Task::Emit(instruction, span) => {
                     self.emit(instruction, span)?;
                     continue;
@@ -403,8 +468,8 @@ impl<'a> Compiler<'a> {
                     }
                     continue;
                 }
-                Task::Jump(kind, span) => {
-                    self.exit_jump(kind, span)?;
+                Task::Jump(kind, label, span) => {
+                    self.exit_jump(kind, label.as_deref(), span)?;
                     continue;
                 }
                 Task::Return(span) => {
@@ -472,19 +537,78 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// `break` or `continue` at the current position: to the innermost loop, or switch for a
-    /// `break` (labels are slice 2's).
-    fn exit_jump(&mut self, kind: JumpKind, span: Span) -> Result<(), CompileError> {
+    /// `break` or `continue` at the current position: without a label to the innermost loop, or
+    /// switch for a `break`; with one to the innermost statement whose label set holds it, a
+    /// loop for a `continue` (`#sec-break-statement-runtime-semantics-evaluation`,
+    /// `#sec-continue-statement-runtime-semantics-evaluation`, `#sec-loopcontinues`).
+    fn exit_jump(
+        &mut self,
+        kind: JumpKind,
+        label: Option<&str>,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let has = |labels: &[String], l: &str| labels.iter().any(|x| x == l);
         let target = self
             .control
             .iter()
-            .rposition(|c| match c {
-                Control::Loop { .. } => true,
-                Control::Switch { .. } => kind == JumpKind::Break,
-                Control::Finally { .. } => false,
+            .rposition(|c| match (c, label) {
+                (Control::Loop { .. }, None) => true,
+                (Control::Switch { .. }, None) => kind == JumpKind::Break,
+                (Control::Loop { labels, .. }, Some(l)) => has(labels, l),
+                (Control::Label { labels, .. }, Some(l)) => {
+                    kind == JumpKind::Break && has(labels, l)
+                }
+                _ => false,
             })
-            .ok_or_else(|| malformed("a break or continue outside a loop"))?;
+            .ok_or_else(|| malformed("a break or continue outside its target"))?;
         self.exit_jump_to(kind, target, span)
+    }
+
+    /// A `?.` of the innermost chain: the value on top is `undefined` or `null` exactly when it
+    /// is loosely equal to `null` (`#sec-islooselyequal`), and then the chain short-circuits.
+    fn chain_check(&mut self, depth: u32, span: Span) -> Result<(), CompileError> {
+        let stub = self.label();
+        self.emit(Instruction::Dup, span)?;
+        self.emit(Instruction::Null, span)?;
+        self.emit(Instruction::Eq, span)?;
+        self.emit(Instruction::JumpIfTrue(stub), span)?;
+        let chain = self
+            .chains
+            .last_mut()
+            .ok_or_else(|| malformed("a ?. outside an optional chain"))?;
+        chain.stubs.push((stub, depth));
+        Ok(())
+    }
+
+    /// The end of the innermost chain: past the code of its short-circuits, one per `?.`, each
+    /// of which drops the chain's values and leaves its short value.
+    fn chain_close(&mut self, span: Span) -> Result<(), CompileError> {
+        let chain = self
+            .chains
+            .pop()
+            .ok_or_else(|| malformed("an optional chain closed twice"))?;
+        let end = self.label();
+        self.goto(end, span)?;
+        let last = chain.stubs.len().saturating_sub(1);
+        for (i, (stub, depth)) in chain.stubs.into_iter().enumerate() {
+            self.bind(stub)?;
+            if depth > 1 {
+                self.emit(Instruction::Nip(depth - 1), span)?;
+            }
+            self.emit(Instruction::Pop, span)?;
+            match chain.short {
+                Short::Undefined => self.emit(Instruction::Undefined, span)?,
+                Short::True => self.emit(Instruction::True, span)?,
+                Short::Pair => {
+                    self.emit(Instruction::Undefined, span)?;
+                    self.emit(Instruction::Undefined, span)?;
+                }
+            }
+            if i < last {
+                self.goto(end, span)?;
+            }
+        }
+        self.bind(end)
     }
 
     /// A `break` or `continue` to the control entry `target`, from the current position: through
@@ -532,6 +656,7 @@ impl<'a> Compiler<'a> {
                     next,
                     items,
                     envs,
+                    ..
                 }) => (
                     if kind == JumpKind::Break {
                         *exit
@@ -541,7 +666,12 @@ impl<'a> Compiler<'a> {
                     *items,
                     *envs,
                 ),
-                Some(Control::Switch { exit, items, envs }) => (*exit, *items, *envs),
+                Some(
+                    Control::Switch { exit, items, envs }
+                    | Control::Label {
+                        exit, items, envs, ..
+                    },
+                ) => (*exit, *items, *envs),
                 _ => return Err(malformed("a jump target")),
             },
         };

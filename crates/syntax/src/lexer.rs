@@ -1,16 +1,19 @@
 //! The lexer (`#sec-ecmascript-language-lexical-grammar`), over UTF-16 code units.
 //!
-//! It reads white space (`#sec-white-space`, `USP` through `swell_unicode::is_space_separator`),
-//! line terminators (`#sec-line-terminators`), comments (`#sec-comments`), ASCII identifier names
-//! and reserved words (`#sec-names-and-keywords`), punctuators (`#sec-punctuators`), numeric
-//! literals (`#sec-literals-numeric-literals`), string literals with every escape
+//! It reads a hashbang comment at the very start of the source (`#sec-hashbang`), white space
+//! (`#sec-white-space`, `USP` through `swell_unicode::is_space_separator`), line terminators
+//! (`#sec-line-terminators`), comments (`#sec-comments`), ASCII identifier names, with `\u`
+//! escapes whose code point is ASCII (`#sec-identifier-names`), and reserved words
+//! (`#sec-keywords-and-reserved-words`: a name written with an escape is never a keyword),
+//! punctuators (`#sec-punctuators`), numeric literals with their separators
+//! (`#sec-literals-numeric-literals`), string literals with every escape
 //! (`#sec-literals-string-literals`) and, when the parser asks for the `InputElementRegExp` goal,
 //! regular expression literals (`#sec-literals-regular-expression-literals`).
 //!
 //! Refused here, each with the slice that brings it: an identifier with a code point outside
-//! ASCII or a `\u` escape (5, a recorded omission of `sec-names-and-keywords`), template literals
-//! (6), private names (8), numeric separators (2), BigInt literals (12), hashbang comments (2) and
-//! the HTML-like comments of Annex B (`#sec-html-like-comments`, 18).
+//! ASCII, written or through a `\u` escape (5, a recorded omission of `sec-names-and-keywords`),
+//! template literals (6), private names (8), BigInt literals (12) and the HTML-like comments of
+//! Annex B (`#sec-html-like-comments`, 18).
 //!
 //! The lexer runs once over the source and every loop advances by at least one code unit, so its
 //! work is linear in the length of the source. It runs before any script does; the step and
@@ -19,6 +22,20 @@
 use crate::ast::{NumberForm, NumberLiteral, RegExpLiteral, StringLiteral};
 use crate::error::SyntaxError;
 use crate::token::{Keyword, Punct, Token, TokenKind};
+
+/// `#!` anywhere but at the very start of the source (`#sec-hashbang`).
+const HASHBANG_NOT_AT_START: &str = "hashbang comment not at the start of the source";
+
+/// A `NumericLiteralSeparator` with no digit on one side of it: at the end of the digits, next to
+/// `.`, `e`, a sign or a prefix (`#sec-literals-numeric-literals`, `DecimalDigits[+Sep]`).
+const SEPARATOR_NOT_BETWEEN_DIGITS: &str = "numeric separator not between two digits";
+
+/// Two `NumericLiteralSeparator`s in a row.
+const SEPARATOR_DOUBLED: &str = "numeric separator doubled";
+
+/// A `NumericLiteralSeparator` after the leading `0` of `0`, a `LegacyOctalIntegerLiteral` or a
+/// `NonOctalDecimalIntegerLiteral`, none of which take one.
+const SEPARATOR_AFTER_LEADING_ZERO: &str = "numeric separator after a leading 0";
 
 const LF: u16 = 0x0A;
 const CR: u16 = 0x0D;
@@ -167,7 +184,10 @@ impl<'a> Lexer<'a> {
     /// them (`#sec-comments`: a `MultiLineComment` with one counts as one).
     fn skip_trivia(&mut self) -> Result<bool, SyntaxError> {
         if self.pos == 0 && self.cur() == Some(ascii(b'#')) && self.ahead(1) == Some(ascii(b'!')) {
-            return Err(self.refused("hashbang comment", 2));
+            // `HashbangComment :: #! SingleLineCommentChars?`, up to the line terminator.
+            while self.cur().is_some_and(|c| !is_line_terminator(c)) {
+                self.pos += 1;
+            }
         }
         let mut newline = false;
         while let Some(c) = self.cur() {
@@ -207,8 +227,14 @@ impl<'a> Lexer<'a> {
         let newline_before = self.skip_trivia()?;
         let start = self.pos;
         let (line, column) = (self.line, self.column());
+        let mut escaped = false;
         let kind = match self.cur() {
             None => TokenKind::Eof,
+            Some(c) if is_ascii_id_start(c) || c == ascii(b'\\') => {
+                let (kind, with_escape) = self.identifier_name()?;
+                escaped = with_escape;
+                kind
+            }
             Some(c) => self.token_kind(c)?,
         };
         Ok(Token {
@@ -218,31 +244,24 @@ impl<'a> Lexer<'a> {
             line,
             column,
             newline_before,
+            escaped,
         })
     }
 
     fn token_kind(&mut self, c: u16) -> Result<TokenKind, SyntaxError> {
-        if is_ascii_id_start(c) {
-            return self.identifier_name();
-        }
         if is_decimal(c) || (c == ascii(b'.') && self.ahead(1).is_some_and(is_decimal)) {
             return self.number();
         }
         if c == ascii(b'"') || c == ascii(b'\'') {
             return self.string(c).map(TokenKind::String);
         }
-        if c == ascii(b'\\') {
-            return Err(if self.ahead(1) == Some(ascii(b'u')) {
-                self.refused("identifier with a \\u escape", 5)
-            } else {
-                self.error("unexpected character \\")
-            });
-        }
         if c == ascii(b'`') {
             return Err(self.refused("template literal", 6));
         }
         if c == ascii(b'#') {
-            return Err(if self.ahead(1).is_some_and(is_ascii_id_start) {
+            return Err(if self.ahead(1) == Some(ascii(b'!')) {
+                self.error(HASHBANG_NOT_AT_START)
+            } else if self.ahead(1).is_some_and(is_ascii_id_start) {
                 self.refused("private name", 8)
             } else {
                 self.error("unexpected character #")
@@ -259,39 +278,70 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Ends an identifier name or a literal: a `\` or a code point outside ASCII that is no white
-    /// space or line terminator would continue the token, and is refused.
-    fn check_identifier_end(&self) -> Result<(), SyntaxError> {
-        match self.cur() {
-            Some(0x5C) => Err(self.refused("identifier with a \\u escape", 5)),
-            Some(c) if c >= 0x80 && !is_white_space(c) && !is_line_terminator(c) => {
-                Err(self.refused("identifier with a code point outside ASCII", 5))
+    /// An `IdentifierName` (`#sec-identifier-names`) at the current position: ASCII code points
+    /// and `\ UnicodeEscapeSequence`s, each of whose code point must be one the place allows
+    /// (`#sec-identifier-names-static-semantics-early-errors`: an `IdentifierStartChar` first,
+    /// an `IdentifierPartChar` after). Answers the token and whether an escape was among it: a
+    /// name with an escape is a [`TokenKind::Name`] whatever its StringValue, never a keyword.
+    /// A code point outside ASCII, written or escaped, is refused (slice 5's tables).
+    fn identifier_name(&mut self) -> Result<(TokenKind, bool), SyntaxError> {
+        let mut name = String::new();
+        let mut escaped = false;
+        loop {
+            match self.cur() {
+                Some(c) if is_ascii_id_part(c) => {
+                    name.push(char::from(u8::try_from(c).unwrap_or(b'?')));
+                    self.pos += 1;
+                }
+                Some(0x5C) => {
+                    let (line, column) = (self.line, self.column());
+                    if self.ahead(1) != Some(ascii(b'u')) {
+                        return Err(self.error("unexpected character \\"));
+                    }
+                    self.pos += 2;
+                    let cp = self.unicode_escape()?;
+                    if cp >= 0x80 {
+                        return Err(SyntaxError::refused(
+                            "identifier with a \\u escape outside ASCII",
+                            5,
+                            line,
+                            column,
+                        ));
+                    }
+                    let unit = u16::try_from(cp).unwrap_or(0);
+                    let allowed = if name.is_empty() {
+                        is_ascii_id_start(unit)
+                    } else {
+                        is_ascii_id_part(unit)
+                    };
+                    if !allowed {
+                        return Err(SyntaxError::new(
+                            format!("the escape \\u{{{cp:X}}} is no identifier code point here"),
+                            line,
+                            column,
+                        ));
+                    }
+                    name.push(char::from(u8::try_from(cp).unwrap_or(b'?')));
+                    escaped = true;
+                }
+                Some(c) if c >= 0x80 && !is_white_space(c) && !is_line_terminator(c) => {
+                    return Err(self.refused("identifier with a code point outside ASCII", 5));
+                }
+                _ => break,
             }
-            _ => Ok(()),
         }
-    }
-
-    fn identifier_name(&mut self) -> Result<TokenKind, SyntaxError> {
-        let start = self.pos;
-        while self.cur().is_some_and(is_ascii_id_part) {
-            self.pos += 1;
+        if escaped {
+            return Ok((TokenKind::Name(name), true));
         }
-        self.check_identifier_end()?;
-        let name: String = self
-            .src
-            .get(start..self.pos)
-            .unwrap_or(&[])
-            .iter()
-            .map(|&u| char::from(u8::try_from(u).unwrap_or(b'?')))
-            .collect();
         Ok(match Keyword::from_name(&name) {
-            Some(k) => TokenKind::Keyword(k),
-            None => TokenKind::Name(name),
+            Some(k) => (TokenKind::Keyword(k), false),
+            None => (TokenKind::Name(name), false),
         })
     }
 
-    /// Consumes digits of `radix`; refuses a `_` between digits (a numeric separator). Returns
-    /// how many digits it read.
+    /// Consumes digits of `radix` (`DecimalDigits[+Sep]` and its binary, octal and hexadecimal
+    /// forms, `#sec-literals-numeric-literals`): a `NumericLiteralSeparator` stands only between
+    /// two digits. Returns how many digits it read.
     fn digits(&mut self, radix: u32) -> Result<usize, SyntaxError> {
         let mut n = 0;
         loop {
@@ -300,8 +350,15 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                     n += 1;
                 }
-                Some(0x5F) if n > 0 && self.ahead(1).is_some_and(|c| digit_of_radix(c, radix)) => {
-                    return Err(self.refused("numeric separator", 2));
+                Some(0x5F) => {
+                    if n == 0 {
+                        return Err(self.error(SEPARATOR_NOT_BETWEEN_DIGITS));
+                    }
+                    match self.ahead(1) {
+                        Some(0x5F) => return Err(self.error(SEPARATOR_DOUBLED)),
+                        Some(c) if digit_of_radix(c, radix) => self.pos += 1,
+                        _ => return Err(self.error(SEPARATOR_NOT_BETWEEN_DIGITS)),
+                    }
                 }
                 _ => return Ok(n),
             }
@@ -334,6 +391,10 @@ impl<'a> Lexer<'a> {
                 octal &= is_octal(c);
                 self.pos += 1;
             }
+            // `LegacyOctalIntegerLiteral` and `NonOctalDecimalIntegerLiteral` take no separator.
+            if self.cur() == Some(0x5F) {
+                return Err(self.error(SEPARATOR_AFTER_LEADING_ZERO));
+            }
             if octal {
                 NumberForm::LegacyOctal
             } else {
@@ -341,11 +402,14 @@ impl<'a> Lexer<'a> {
                 NumberForm::NonOctalDecimal
             }
         } else {
-            if first != Some(ascii(b'.')) {
-                self.digits(10)?;
-                if first == Some(ascii(b'0')) && self.cur() == Some(0x5F) {
-                    return Err(self.refused("numeric separator", 2));
+            if first == Some(ascii(b'0')) {
+                // `DecimalIntegerLiteral :: 0` is one digit, which no separator follows.
+                self.pos += 1;
+                if self.cur() == Some(0x5F) {
+                    return Err(self.error(SEPARATOR_AFTER_LEADING_ZERO));
                 }
+            } else if first != Some(ascii(b'.')) {
+                self.digits(10)?;
             }
             integer = !self.decimal_tail()?;
             NumberForm::Decimal
@@ -585,6 +649,7 @@ impl<'a> Lexer<'a> {
             line: token.line,
             column: token.column,
             newline_before: token.newline_before,
+            escaped: false,
         })
     }
 

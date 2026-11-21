@@ -516,6 +516,26 @@ impl<H: Host> Agent<H> {
                 self.drop_entries(1)?;
                 Ok(Flow::Next)
             }
+            // `#sec-runtime-semantics-definemethod` (MakeMethod; the closure is of kind method, so
+            // it has no [[Construct]]) and `#sec-definemethodproperty` with enumerable true.
+            I::DefineMethod(index) => {
+                let object = self.peek_value(1)?;
+                let object = self.expect_object(object)?;
+                let function = self.peek_value(0)?;
+                let function = self.expect_object(function)?;
+                let key = self.constant_key(index)?;
+                self.make_method(function, object)?;
+                let descriptor = Descriptor {
+                    value: Some(Value::Object(function)),
+                    writable: Some(true),
+                    enumerable: Some(true),
+                    configurable: Some(true),
+                    ..Descriptor::default()
+                };
+                self.define_property_or_throw(object, key, descriptor)?;
+                self.drop_entries(1)?;
+                Ok(Flow::Next)
+            }
             I::InitProto => {
                 let object = self.peek_value(1)?;
                 let object = self.expect_object(object)?;
