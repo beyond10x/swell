@@ -1,0 +1,46 @@
+script locals 0
+  declare 0
+  0000 2:8 GetGlobal "a"
+  0001 2:1 DeleteNamed "b"
+  0002 2:1 StoreCompletion
+  0003 3:8 GetGlobal "a"
+  0004 3:10 GetGlobal "c"
+  0005 3:1 DeleteIndex
+  0006 3:1 StoreCompletion
+  0007 4:1 DeleteGlobal "x"
+  0008 4:1 StoreCompletion
+  0009 5:8 Number 1
+  0010 5:1 Pop
+  0011 5:1 True
+  0012 5:1 StoreCompletion
+  0013 6:6 Number 0
+  0014 6:1 Pop
+  0015 6:1 Undefined
+  0016 6:1 StoreCompletion
+  0017 7:1 TypeofGlobal "y"
+  0018 7:1 StoreCompletion
+  0019 8:8 GetGlobal "a"
+  0020 8:8 GetNamed "b"
+  0021 8:1 Typeof
+  0022 8:1 StoreCompletion
+  0023 9:2 GetGlobal "a"
+  0024 9:1 ToNumber
+  0025 9:1 StoreCompletion
+  0026 10:2 GetGlobal "a"
+  0027 10:1 Negate
+  0028 10:1 StoreCompletion
+  0029 11:2 GetGlobal "a"
+  0030 11:1 BitNot
+  0031 11:1 StoreCompletion
+  0032 12:2 GetGlobal "a"
+  0033 12:1 Not
+  0034 12:1 StoreCompletion
+  0035 0:0 LoadCompletion
+  0036 0:0 Return
+
+function 0 declaration "f" length 1 locals 1
+  params local 0
+  0000 13:24 False
+  0001 13:17 Return
+  0002 13:1 Undefined
+  0003 13:1 Return

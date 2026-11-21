@@ -1,0 +1,18 @@
+script locals 0
+  0000 2:1 Undefined
+  0001 2:1 StoreCompletion
+  0002 2:9 GetGlobal "a"
+  0003 3:8 Number 1
+  0004 3:3 CaseJump 0009
+  0005 5:8 Number 2
+  0006 5:3 CaseJump 0013
+  0007 2:1 Pop
+  0008 2:1 Jump 0011
+  0009 3:11 GetGlobal "b"
+  0010 3:11 StoreCompletion
+  0011 4:12 GetGlobal "c"
+  0012 4:12 StoreCompletion
+  0013 5:11 GetGlobal "d"
+  0014 5:11 StoreCompletion
+  0015 0:0 LoadCompletion
+  0016 0:0 Return

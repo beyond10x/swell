@@ -1,0 +1,5 @@
+script locals 0
+  0000 2:1 ThrowSyntaxError "regular expression literals are not supported before slice 5"
+  0001 2:1 StoreCompletion
+  0002 0:0 LoadCompletion
+  0003 0:0 Return

@@ -1,0 +1,5 @@
+script locals 0
+  0000 2:7 GetGlobal "a"
+  0001 2:1 Throw
+  0002 0:0 LoadCompletion
+  0003 0:0 Return

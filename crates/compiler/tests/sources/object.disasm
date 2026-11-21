@@ -1,0 +1,34 @@
+script locals 0
+  0000 2:2 NewObject
+  0001 3:6 Number 1
+  0002 3:3 DefineField "a"
+  0003 4:8 GetGlobal "c"
+  0004 4:3 DefineField "b"
+  0005 5:6 GetGlobal "d"
+  0006 5:3 DefineField "2"
+  0007 6:3 Closure 0
+  0008 6:3 DefineGetter "e"
+  0009 7:3 Closure 1
+  0010 7:3 DefineSetter "e"
+  0011 8:14 Null
+  0012 8:3 InitProto
+  0013 9:6 Closure 2
+  0014 9:3 DefineField "f"
+  0015 2:1 StoreCompletion
+  0016 0:0 LoadCompletion
+  0017 0:0 Return
+
+function 0 getter "get e" length 0 locals 0
+  0000 6:20 Number 1
+  0001 6:13 Return
+  0002 6:3 Undefined
+  0003 6:3 Return
+
+function 1 setter "set e" length 1 locals 1
+  params local 0
+  0000 7:3 Undefined
+  0001 7:3 Return
+
+function 2 expression "f" length 0 locals 0
+  0000 9:6 Undefined
+  0001 9:6 Return

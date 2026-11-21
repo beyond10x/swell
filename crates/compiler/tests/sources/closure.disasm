@@ -1,0 +1,32 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "outer" length 2 locals 2
+  params local 0, env 0
+  captured "b" "d"
+  0000 4:3 Jump 0007
+  0001 4:17 PushEnv 1
+  0002 4:17 SetEnv 0 0
+  0003 4:17 Pop
+  0004 4:29 Closure 1
+  0005 4:22 Return
+  0006 4:3 PopEnv
+  0007 5:10 GetLocal 0
+  0008 5:14 GetLocal 1
+  0009 5:10 Add
+  0010 5:3 Return
+  0011 2:1 Undefined
+  0012 2:1 Return
+  catch 0000..0001 -> 0001 items 0 envs 0
+
+function 1 expression "" length 0 locals 0
+  0000 4:50 GetEnv 1 0
+  0001 4:54 GetEnv 1 1
+  0002 4:50 Add
+  0003 4:58 GetEnv 0 0
+  0004 4:50 Add
+  0005 4:43 Return
+  0006 4:29 Undefined
+  0007 4:29 Return

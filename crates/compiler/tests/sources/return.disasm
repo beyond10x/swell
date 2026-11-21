@@ -1,0 +1,16 @@
+script locals 0
+  declare 0 1
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 0 locals 0
+  0000 2:16 Undefined
+  0001 2:16 Return
+  0002 2:1 Undefined
+  0003 2:1 Return
+
+function 1 declaration "g" length 0 locals 0
+  0000 3:23 Number 1
+  0001 3:16 Return
+  0002 3:1 Undefined
+  0003 3:1 Return

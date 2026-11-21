@@ -1,0 +1,15 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 2
+  params local 0
+  0000 4:10 GetLocal 0
+  0001 4:14 GetLocal 1
+  0002 4:10 Add
+  0003 4:18 GetGlobal "c"
+  0004 4:10 Add
+  0005 4:3 Return
+  0006 2:1 Undefined
+  0007 2:1 Return

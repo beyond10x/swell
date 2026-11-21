@@ -1,0 +1,62 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 2
+  params local 0
+  0000 3:17 GetLocal 0
+  0001 3:3 ForInStart
+  0002 3:3 ForInNext 0043
+  0003 3:12 SetLocal 1
+  0004 3:12 Pop
+  0005 6:9 Undefined
+  0006 6:9 Tag 3
+  0007 6:9 Jump 0010
+  0008 5:7 Undefined
+  0009 5:7 Tag 0
+  0010 8:9 GetGlobal "a"
+  0011 8:9 Pop
+  0012 5:7 JumpIfTag 3 0015
+  0013 5:7 EndFinally
+  0014 5:7 Jump 0019
+  0015 5:7 Pop
+  0016 5:7 Undefined
+  0017 5:7 Tag 3
+  0018 5:7 Jump 0032
+  0019 4:5 Jump 0030
+  0020 10:14 PushEnv 1
+  0021 10:14 SetEnv 0 0
+  0022 10:14 Pop
+  0023 11:8 Closure 1
+  0024 11:7 Pop
+  0025 12:7 PopEnv
+  0026 12:7 Undefined
+  0027 12:7 Tag 4
+  0028 12:7 Jump 0032
+  0029 4:5 PopEnv
+  0030 4:5 Undefined
+  0031 4:5 Tag 0
+  0032 14:7 GetGlobal "b"
+  0033 14:7 Pop
+  0034 4:5 JumpIfTag 3 0038
+  0035 4:5 JumpIfTag 4 0040
+  0036 4:5 EndFinally
+  0037 4:5 Jump 0042
+  0038 4:5 Pop
+  0039 4:5 Jump 0043
+  0040 4:5 Pop
+  0041 4:5 LoopJump 0002
+  0042 3:3 LoopJump 0002
+  0043 3:3 Pop
+  0044 2:1 Undefined
+  0045 2:1 Return
+  finally 0005..0008 -> 0010 items 1 envs 0
+  catch 0005..0020 -> 0020 items 1 envs 0
+  finally 0005..0030 -> 0032 items 1 envs 0
+
+function 1 expression "" length 0 locals 0
+  0000 11:29 GetEnv 0 0
+  0001 11:22 Return
+  0002 11:8 Undefined
+  0003 11:8 Return

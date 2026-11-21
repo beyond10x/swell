@@ -1,0 +1,10 @@
+script locals 0
+  0000 2:1 GetGlobal "a"
+  0001 2:1 GetNamed "b"
+  0002 2:1 StoreCompletion
+  0003 3:1 GetGlobal "a"
+  0004 3:3 GetGlobal "c"
+  0005 3:1 GetIndex
+  0006 3:1 StoreCompletion
+  0007 0:0 LoadCompletion
+  0008 0:0 Return

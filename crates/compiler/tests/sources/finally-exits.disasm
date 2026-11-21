@@ -1,0 +1,62 @@
+script locals 0
+  declare 0 1
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 0 locals 0
+  0000 3:10 GetGlobal "a"
+  0001 3:3 JumpIfFalse 0030
+  0002 5:11 GetGlobal "b"
+  0003 5:7 JumpIfFalse 0007
+  0004 5:21 Number 1
+  0005 5:14 Tag 2
+  0006 5:14 Jump 0017
+  0007 6:11 GetGlobal "c"
+  0008 6:7 JumpIfFalse 0012
+  0009 6:14 Undefined
+  0010 6:14 Tag 3
+  0011 6:14 Jump 0017
+  0012 7:7 Undefined
+  0013 7:7 Tag 4
+  0014 7:7 Jump 0017
+  0015 4:5 Undefined
+  0016 4:5 Tag 0
+  0017 9:7 GetGlobal "d"
+  0018 9:7 Pop
+  0019 4:5 JumpIfTag 2 0024
+  0020 4:5 JumpIfTag 3 0025
+  0021 4:5 JumpIfTag 4 0027
+  0022 4:5 EndFinally
+  0023 4:5 Jump 0029
+  0024 4:5 Return
+  0025 4:5 Pop
+  0026 4:5 Jump 0030
+  0027 4:5 Pop
+  0028 4:5 LoopJump 0000
+  0029 3:3 LoopJump 0000
+  0030 2:1 Undefined
+  0031 2:1 Return
+  finally 0002..0015 -> 0017 items 0 envs 0
+
+function 1 declaration "g" length 1 locals 2
+  params local 0
+  0000 15:19 GetLocal 0
+  0001 15:5 ForInStart
+  0002 15:5 ForInNext 0010
+  0003 15:14 SetLocal 1
+  0004 15:14 Pop
+  0005 15:29 GetLocal 1
+  0006 15:22 Nip 1
+  0007 15:22 Tag 2
+  0008 15:22 Jump 0013
+  0009 15:5 LoopJump 0002
+  0010 15:5 Pop
+  0011 14:3 Undefined
+  0012 14:3 Tag 0
+  0013 14:3 JumpIfTag 2 0016
+  0014 14:3 EndFinally
+  0015 14:3 Jump 0017
+  0016 14:3 Return
+  0017 13:1 Undefined
+  0018 13:1 Return
+  finally 0000..0011 -> 0013 items 0 envs 0
