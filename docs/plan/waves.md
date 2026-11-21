@@ -94,7 +94,8 @@ run: automatic semicolon insertion 411, `\u` escapes 352, `eval` 305, `Number` 2
 | 3 | `eval-and-function-constructor` | `eval` and `Function` through one entry, the two hooks, the count of refusals; 10 requirements |
 | 4 | `slice-02-conformance-close` | the cases that need a later slice move, each with its evidence in a list the gate checks; every run of the slice passes |
 
-Delivered: [wave 1](slice-02-wave-1.md), [wave 2](slice-02-wave-2.md). After wave 2 slice 2 passes 3,743 of its 5,245 cases, the gate
+Delivered: [wave 1](slice-02-wave-1.md), [wave 2](slice-02-wave-2.md), and between waves 2 and 3
+[the run loop's frame](slice-02-run-loop-frame.md). After wave 2 slice 2 passes 3,743 of its 5,245 cases, the gate
 counts 6,262 cases as passed, and 44,212 of the 85,556 runs end at a refusal. The base run lines
 for the next wave are the run lines of this wave on its branch after its close.
 
@@ -162,11 +163,12 @@ that slice reads its entries first.
   with the realm index as the data of `$262.evalScript`, every run ended in
   `Terminated(EngineFault)`; it compares the callee with roots it keeps instead. Decide
   whether a host function reads its data (and through which method) or the parameter goes.
-- After wave 2 of slice 2, before wave 3: the frame of the run loop. `Agent::execute` is 19,216
-  of the 31,314 bytes one re-entry takes in a debug build, and every instruction adds its
-  locals to it ([slice 2, wave 1](slice-02-wave-1.md)). A unit moves the arms of the dispatch
-  into functions of their own and measures the bytes per re-entry before and after; the
-  constant `STACK_BYTES_PER_REENTRY` (37 KiB) follows the measurement.
+- The slice that completes `JSON`: the stack one re-entry takes
+  is now mostly outside the run loop ([the run loop's frame](slice-02-run-loop-frame.md)):
+  of 11,100 bytes on the worst path, `json_serialize_property` is 2,080, `json_stringify`
+  1,632, `json_property_list` 1,584, `call_function` 1,344 and `builtin_call` 720. A unit
+  that adds to a builtin on a re-entry path has 1,560 bytes per re-entry before a stack test
+  fails; it then measures again and the constant follows, or the frame is taken apart.
 - The slice that brings the first allocation-heavy cases (slice 3 at the latest): a run that
   fills its memory budget with `a.push({})` takes 0.5 s for 1 MiB, 1.2 s for 2 MiB and 4.1 s
   for 4 MiB in a debug build, and did not finish 64 MiB in about nine minutes

@@ -157,6 +157,12 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   others do. A test of a stack bound runs its subject in a child process, and a test that
   says `min_stack_bytes()` is enough runs it on seven eighths of that
   (`tests/support/host.rs`, `stack_with_room`), so that a frame that grows fails here first.
+- The run loop, `Agent::execute` (`crates/swell/src/interp/dispatch.rs`), holds no instruction's
+  locals: an instruction that needs locals does its work in a function of its own, and the run
+  loop calls it. Every re-entry of the engine pays that frame (336 bytes; 19,280 before,
+  `docs/plan/slice-02-run-loop-frame.md`). `STACK_BYTES_PER_REENTRY` is 14 KiB: the measured
+  need on the worst path (11,100 bytes, through `toJSON`) plus a fifth. When a stack test fails,
+  measure the bytes per re-entry again as that record does; do not raise the constant unmeasured.
 - `test-collect` runs every test of `crates/swell` with the feature
   `collect-every-safe-point`: a value held across a safe point without a root fails there.
 - A gate task lives in an include file under `taskfiles/` that the root `Taskfile.yml`
@@ -178,11 +184,11 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot task check` on 2026-11-21, after wave 2 of slice 2, with the variables of the runner,
+`slot task check` on 2026-11-21, after the run loop unit of slice 2, with the variables of the runner,
 exit 0:
 
 ```
-python-check: no Python file among 959 file(s)
+python-check: no Python file among 960 file(s)
 forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
 Cargo.lock: 7 package(s), none from outside this repository
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked

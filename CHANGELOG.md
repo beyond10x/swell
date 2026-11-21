@@ -38,11 +38,12 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Changed
 
-- `Limits::min_stack_bytes()` asks for 37 KiB per re-entry instead of 30 KiB: measured as the
-  gate builds, one re-entry takes up to 31,314 bytes in a debug build (through `toJSON`). An
-  agent with `reentry_depth` 1,000 and `parser_nesting` 1,000 needs a thread of 38,248,192
-  bytes (31,073,024 in 0.1.0, where a debug build with full debug information could overflow
-  it).
+- `Limits::min_stack_bytes()` asks for 14 KiB per re-entry instead of 30 KiB. In 0.1.0 a debug
+  build with full debug information could overflow the promised stack: one re-entry took up
+  to 31,314 bytes. The run loop no longer holds the locals of every instruction in its frame:
+  one re-entry takes up to 11,100 bytes in a debug build (through `toJSON`), and an agent
+  with `reentry_depth` 1,000 and `parser_nesting` 1,000 needs a thread of 14,672,640 bytes
+  (31,073,024 in 0.1.0).
 
 - The design gives the global `Function`, plain method definitions and shorthand properties,
   `Number`, `Boolean`, `isNaN` and `isFinite` to the second delivery slice. The host interface

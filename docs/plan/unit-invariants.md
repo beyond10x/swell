@@ -47,6 +47,11 @@ report and does not work around it.
   undefined. In wave 1 of slice 2 all three units met one outside their `Writes:` line. If
   it is outside yours, stop and report it with the file and line before you go on; the
   coordinator extends the story.
+- A new instruction does its work in a function of its own, called from the run loop
+  (`crates/swell/src/interp/dispatch.rs`); it adds no local to `Agent::execute`, whose frame
+  every re-entry pays. A unit does not change `STACK_BYTES_PER_REENTRY` or a stack test unless
+  its brief says so: a stack test that fails is reported with the bytes per re-entry before and
+  after the change.
 - A wait is a wait on a file or a process (`tail --pid`, a loop with `sleep`), never a loop
   that prints: one unit wrote 64 MB into the session's tool results that way.
 - No network, unless the brief names the address (the test262 fetch, the Unicode data). No
