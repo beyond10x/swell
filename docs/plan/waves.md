@@ -94,9 +94,10 @@ run: automatic semicolon insertion 411, `\u` escapes 352, `eval` 305, `Number` 2
 | 3 | `eval-and-function-constructor` | `eval` and `Function` through one entry, the two hooks, the count of refusals; 10 requirements |
 | 4 | `slice-02-conformance-close` | the cases that need a later slice move, each with its evidence in a list the gate checks; every run of the slice passes |
 
-Delivered: [wave 1](slice-02-wave-1.md), [wave 2](slice-02-wave-2.md), and between waves 2 and 3
-[the run loop's frame](slice-02-run-loop-frame.md). After wave 2 slice 2 passes 3,743 of its 5,245 cases, the gate
-counts 6,262 cases as passed, and 44,212 of the 85,556 runs end at a refusal. The base run lines
+Delivered: [wave 1](slice-02-wave-1.md), [wave 2](slice-02-wave-2.md), [wave 3](slice-02-wave-3.md), and between waves 2 and 3
+[the run loop's frame](slice-02-run-loop-frame.md). After wave 3 slice 2 passes 4,257 of its 5,267 cases (22 cases of
+`test/harness` came to it with `Function`), 80 of 164 host requirements have a test, the gate
+counts 7,721 cases as passed, and 46,493 of the 85,556 runs meet a refusal. The base run lines
 for the next wave are the run lines of this wave on its branch after its close.
 
 Open, to decide before wave 4 with the run lines: `Array.prototype.toString` is missing (slice
@@ -169,6 +170,11 @@ that slice reads its entries first.
   1,632, `json_property_list` 1,584, `call_function` 1,344 and `builtin_call` 720. A unit
   that adds to a builtin on a re-entry path has 1,560 bytes per re-entry before a stack test
   fails; it then measures again and the constant follows, or the frame is taken apart.
+- The index map of the design ("Objects": an ordered list with an index map above a small
+  size) is not built: a property is found by a scan of the list, and so is a binding that a
+  non-strict direct `eval` added to a record ([slice 2, wave 3](slice-02-wave-3.md)); the
+  comparisons of neither scan are charged as steps. The slice that builds the map (slice 3 at
+  the latest) covers both, or charges the scan.
 - The slice that brings the first allocation-heavy cases (slice 3 at the latest): a run that
   fills its memory budget with `a.push({})` takes 0.5 s for 1 MiB, 1.2 s for 2 MiB and 4.1 s
   for 4 MiB in a debug build, and did not finish 64 MiB in about nine minutes

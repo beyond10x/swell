@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T17:42:46Z",
+  "actor": "human:operator",
+  "artifact": "story:eval-and-function-constructor",
+  "kind": "story",
+  "revision": 12,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "the unit's claim run again by the coordinator in the unit's tree before its commit (tests of the workspace with the five stack tests in the forge's build, clippy, test-collect, test-faults, host requirements, suite, conform-engine, slot task test262, exit 0 each) and its run lines compared with the base run by run (docs/plan/slice-02-wave-3.md)"
+  }
+}

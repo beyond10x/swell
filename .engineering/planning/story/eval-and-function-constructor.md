@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:eval-and-function-constructor
 kind: story
-status: active
+status: implemented
 title: eval and the Function constructor through one parse entry and one engine entry, with the host hooks, every limit and refusals counted; 10 host requirements to test
 summary: parse_eval, parse_dynamic_function and the direct-eval mark; PerformEval, EvalDeclarationInstantiation, direct eval, CreateDynamicFunction; HostEnsureCanCompileStrings and HostGetCodeForEval checked; refused parses counted per agent and failing the run in the runner; HOST-116, 117, 118, 139, 140, 141, 152, 162, 163, 164; the 23 harness cases placed again.
 relations:
@@ -135,10 +135,11 @@ scope:
   path: crates/test262/tests/run.rs
 - confidence: cited
   path: docs/design/engine.md
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 12, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T17:42:46Z", actor: "human:operator", revision: 13, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

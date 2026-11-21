@@ -23,10 +23,16 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The `with` statement and the `arguments` object, mapped and unmapped. A name inside the body
   of a `with` is looked up at run time, each record visited charged as one step; every other
   name keeps the slot the compiler gave it.
-- test262 after these: `test262 total 53801 8982 7 44812 6262 38550 0`, 6,262 of the 44,812
-  cases that run pass (14.0 %; 3,969 in 0.1.0). The second slice passes 3,743 of its 5,245
-  cases. 44,212 of the 85,556 runs end at a refusal of a construct the parser does not have
-  yet (53,564 in 0.1.0).
+- `eval`, direct and indirect, and the global `Function`. A non-strict direct `eval` can add
+  bindings to the scope of its caller.
+- The host is asked before a string is compiled (`host_ensure_can_compile_strings`) and may
+  give the code for an object passed to `eval` (`host_get_code_for_eval`).
+- `Agent::refusals()`: a count of the refusals the engine raised, at parse or run time, caught
+  by the script or not. The conformance runner fails a run in which it moved.
+- test262 after these: `test262 total 53801 8982 7 44812 7721 37091 0`, 7,721 of the 44,812
+  cases that run pass (17.2 %; 3,969 in 0.1.0). The second slice passes 4,257 of its 5,267
+  cases. 46,493 of the 85,556 runs meet a refusal of a construct the parser does not have
+  yet (53,564 ended at one in 0.1.0, where a refusal a script caught was not counted).
 - The gate runs the scenarios of the host interface model against the engine itself
   (`conformance/ess`, the task `conform-engine`): `58 scenarios: 14 passed, 0 failed, 0 error,
   44 unsupported`. An unsupported scenario names the later slice or the reason it waits for,
@@ -48,8 +54,8 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The design gives the global `Function`, plain method definitions and shorthand properties,
   `Number`, `Boolean`, `isNaN` and `isFinite` to the second delivery slice. The host interface
   gains three requirements (`HOST-162` to `HOST-164`), among them `Agent::refusals()`, a count
-  of the refusals the engine raised; none is implemented yet
-  (`host-requirements: 164 requirement(s), 164 line(s): 70 test, 94 pending`).
+  of the refusals the engine raised. 80 of the 164 requirements have a test
+  (`host-requirements: 164 requirement(s), 164 line(s): 80 test, 84 pending`; 70 in 0.1.0).
 
 ## [0.1.0] - 2026-11-21
 

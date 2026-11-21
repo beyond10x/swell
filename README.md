@@ -10,7 +10,7 @@ not trust.
 ## State
 
 swell runs scripts of the ES5 grammar, in both modes, under a step and a memory budget, and its
-gate runs test262: 6,262 of the 44,812 cases it runs pass (14.0 %), measured on 2026-11-21. The
+gate runs test262: 7,721 of the 44,812 cases it runs pass (17.2 %), measured on 2026-11-21. The
 first of nineteen delivery slices is delivered: the test262 harness itself, 31 cases, all
 passing.
 
@@ -22,13 +22,14 @@ passing.
   interpreter; the gate runs them against the engine too, and 14 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
   pinned by checksum, both specifications checked, and 31 planted defects that the gate must
-  refuse. Measured on 2026-11-21: it passes, here and on the forge, and 70 of 164 host
+  refuse. Measured on 2026-11-21: it passes, here and on the forge, and 80 of 164 host
   requirements have a test.
 - The test262 runner, `swell-test262`: it reads all 53,801 cases, excludes 8,982 by recorded
   decision, runs the rest in both modes under budgets, and counts them per directory, per
-  delivery slice and per section of ECMA-262 (39). Its 284 lines are compared with a committed
+  delivery slice and per section of ECMA-262 (41). Its 286 lines are compared with a committed
   file on every run. A construct the parser does not have yet is refused, and a refusal never
-  counts as a pass: 44,212 of the 85,556 runs end at such a refusal.
+  counts as a pass, also when the script catches its `SyntaxError`: the engine counts its
+  refusals, and 46,493 of the 85,556 runs meet one.
 - The first parts of the engine: a parser for the ES5 grammar with strict mode
   (`crates/syntax`), a compiler to bytecode (`crates/compiler`), the heap, the values, objects,
   realms, the interpreter, the builtins the test262 harness calls and the host entry points
@@ -38,8 +39,8 @@ passing.
 Releases are listed in [`CHANGELOG.md`](CHANGELOG.md), each with what works and its limits;
 [`docs/releasing.md`](docs/releasing.md) says how one is cut.
 
-Next: the rest of the ES5 language (`eval`, the global `Function`; `with` and `arguments` are in): the
-second of nineteen slices, 5,245 cases, of which 3,743 pass after the second of its four waves.
+Next: the close of the ES5 language (`with`, `arguments`, `eval` and the global `Function` are in): the
+second of nineteen slices, 5,267 cases, of which 4,257 pass after the third of its four waves.
 
 ## What swell is
 
