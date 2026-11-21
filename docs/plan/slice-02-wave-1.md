@@ -106,6 +106,40 @@ Passed cases per slice in that run, of the cases the slice has: 01 31 of 31, 02 
 4 of 6,188, 09 0 of 1,750, 10 10 of 6,573, 11 11 of 1,277, 12 39 of 317, 13 0 of 3,044, 14 0
 of 479 run, 15 30 of 1,094, 16 0 of 82, 17 0 of 35, 18 18 of 1,155, 19 118 of 1,474.
 
+## After the wave: the forge's run failed, and why the gate here had not
+
+The `check` run on the wave's closing commit (`4c921d3`) aborted on the forge in
+`min_stack_bytes_is_enough_through_builtins`: a stack overflow on a thread of
+`min_stack_bytes()` = 31,073,024 bytes. The gate here, run "as the runner runs it", had
+passed. A unit of its own measured before it changed anything (`221f382`):
+
+- **The need per re-entry had passed the promise.** By bisection of the smallest thread stack,
+  as the forge builds: 31,314 bytes per re-entry through `toJSON` and through a replacer of
+  `JSON.stringify`, against 30 KiB (30,720) promised. Before the wave it was 30,223: 497
+  bytes of room. The grammar unit added 942 bytes to every path (the instruction
+  `DefineMethod` grew the frame of the run loop, `Agent::execute`, from 18,272 to 19,216
+  bytes) and the builtins unit 143 bytes to the builtin paths (three dispatch arms).
+- **The gate here was not the forge's build.** This workstation's own cargo configuration,
+  outside the repository, builds the dev profile with line tables only; the forge builds
+  with full debug information, and in a debug build the frames are about 5 % larger there
+  (29,855 against 31,314 bytes per re-entry). With the setting forced, the abort reproduced
+  here and the test binary got the runner's hash. Incremental compilation, which wave 3 of
+  slice 1 had named as the difference, changes nothing in the frames (31,314 with and
+  without).
+- **The fix.** `STACK_BYTES_PER_REENTRY` is 37 KiB, the measured need plus a fifth
+  (`min_stack_bytes()` for the tests' limits: 38,248,192 bytes). The three tests that say
+  "`min_stack_bytes()` is enough" run on seven eighths of the promise, so that a frame that
+  grows by about 6 % fails a test while the promise still holds. The repository has a
+  `.cargo/config.toml` that sets the dev profile's debug information as the forge builds it,
+  whatever a user's own configuration says; a target directory is about half as large again
+  (877 MB against 574 MB after the workspace's tests).
+- **Not fixed by a constant**: the run loop's frame is 61 % of the stack per re-entry and
+  grows with every instruction's locals. A unit after wave 2 moves the arms of the dispatch
+  into functions of their own (the wave plan).
+
+The numbers in `slice-01-wave-4.md` (30 KiB, 25,375 bytes per re-entry, 31,073,024 bytes) are
+those of that wave, measured in a build with line tables only.
+
 ## Where each finding went
 
 - The data of a host function, and `Array.prototype.toString`: the wave plan.

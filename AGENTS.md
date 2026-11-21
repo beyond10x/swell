@@ -145,12 +145,17 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   says what it reads and what makes it fail.
 - Before `main` moves, the gate is run on the wave branch once more as the forge's runner runs
   it: `CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0 RUSTC_WRAPPER=""
-  slot task check`. Measured in wave 3 of slice 1: a build without incremental compilation and
-  without the compiler cache has frames up to 20 % larger (a stack test passed here and
-  aborted there), and with `CI` and `GITHUB_ACTIONS` set go-task colours its failure line and
-  adds an `::error` line (14 planted scripts failed there). A planted script clears those
-  variables in its first lines, as the others do; a test of a stack bound runs its subject
-  in a child process on a thread of the stated size.
+  slot task check`. The repository's `.cargo/config.toml` sets the dev profile's debug
+  information as the forge builds it, whatever a user's own cargo configuration says: in a
+  debug build with line tables only the frames are about 5 % smaller, and a stack test passed
+  here and aborted there twice (wave 3 of slice 1, wave 1 of slice 2; measured in the second:
+  29,855 against 31,314 bytes per re-entry, and no difference from incremental compilation).
+  Do not override that setting, and measure a stack bound only in such a build. With `CI` and
+  `GITHUB_ACTIONS` set go-task colours its failure line and adds an `::error` line (14 planted
+  scripts failed there); a planted script clears those variables in its first lines, as the
+  others do. A test of a stack bound runs its subject in a child process, and a test that
+  says `min_stack_bytes()` is enough runs it on seven eighths of that
+  (`tests/support/host.rs`, `stack_with_room`), so that a frame that grows fails here first.
 - `test-collect` runs every test of `crates/swell` with the feature
   `collect-every-safe-point`: a value held across a safe point without a root fails there.
 - A gate task lives in an include file under `taskfiles/` that the root `Taskfile.yml`
@@ -176,7 +181,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 exit 0:
 
 ```
-python-check: no Python file among 930 file(s)
+python-check: no Python file among 931 file(s)
 forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
 Cargo.lock: 7 package(s), none from outside this repository
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked

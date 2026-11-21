@@ -162,6 +162,11 @@ that slice reads its entries first.
   with the realm index as the data of `$262.evalScript`, every run ended in
   `Terminated(EngineFault)`; it compares the callee with roots it keeps instead. Decide
   whether a host function reads its data (and through which method) or the parameter goes.
+- After wave 2 of slice 2, before wave 3: the frame of the run loop. `Agent::execute` is 19,216
+  of the 31,314 bytes one re-entry takes in a debug build, and every instruction adds its
+  locals to it ([slice 2, wave 1](slice-02-wave-1.md)). A unit moves the arms of the dispatch
+  into functions of their own and measures the bytes per re-entry before and after; the
+  constant `STACK_BYTES_PER_REENTRY` (37 KiB) follows the measurement.
 - The slice that brings the first allocation-heavy cases (slice 3 at the latest): a run that
   fills its memory budget with `a.push({})` takes 0.5 s for 1 MiB, 1.2 s for 2 MiB and 4.1 s
   for 4 MiB in a debug build, and did not finish 64 MiB in about nine minutes
