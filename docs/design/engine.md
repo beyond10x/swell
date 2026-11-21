@@ -322,7 +322,10 @@ The rule:
    item 2 still use its slot.
 4. A function whose code contains a direct `eval` gets its arguments object whenever
    FunctionDeclarationInstantiation creates one (`sec-functiondeclarationinstantiation`,
-   steps 15 to 22), whether or not its own code names `arguments`.
+   steps 15 to 22), whether or not its own code names `arguments`. A direct `eval` in an arrow
+   function, at any depth of arrows, counts for the nearest enclosing function that is not an
+   arrow: an arrow never has an arguments object (step 16), and the eval code's `arguments`
+   is that function's ("`this` and `arguments` in an arrow function" below).
 5. Budgets. A lookup by name charges one step per Environment Record it visits, so that a read
    through n records spends at least n steps more than a slot read (`last_entry_steps()`);
    the HasProperty and the `@@unscopables` Get of an Object Environment Record are property
@@ -333,6 +336,211 @@ The rule:
 
 The results are the standard's and test262 holds them; which form a reference takes is held by
 the compiler's source tests, whose disassembly shows a slot or a lookup by name.
+
+**Lexical bindings.** Added on 2026-11-22 for slice 6. What a script sees, the standard's:
+
+- A `let` or `const` binding exists from the entry of its scope and is uninitialized until its
+  declaration is evaluated (`let x;` initializes it to `undefined`,
+  `sec-let-and-const-declarations-runtime-semantics-evaluation`). The scopes: a Block
+  (`sec-block-runtime-semantics-evaluation`, BlockDeclarationInstantiation
+  `sec-blockdeclarationinstantiation`); the CaseBlock of a `switch`, one scope for all its
+  clauses, entered after the discriminant (`sec-switch-statement-runtime-semantics-evaluation`);
+  the head of `for (;;)` (`sec-runtime-semantics-forloopevaluation`); the head of a `for`-`in`
+  (and later `for`-`of`), whose expression is evaluated in a scope of its own that binds the
+  head's names uninitialized for good, and whose body gets new bindings each iteration
+  (`sec-runtime-semantics-forinofheadevaluation`, step 2;
+  `sec-runtime-semantics-forinofloopevaluation`); the top level of a function body
+  (`sec-functiondeclarationinstantiation`, steps 31 to 35); the script (the global
+  environment's [[DeclarativeRecord]], below); eval code (below). A `catch` Block is a Block
+  inside the scope of the `catch` parameter.
+- Reading an uninitialized binding, writing it (`=`, a compound or logical assignment, `++`,
+  `--`) and `typeof` of it throw a `ReferenceError`
+  (`sec-declarative-environment-records-getbindingvalue-n-s`, step 2;
+  `sec-declarative-environment-records-setmutablebinding-n-v-s`, step 3;
+  `sec-typeof-operator-runtime-semantics-evaluation`). A write throws when the value is
+  stored, after its right side was evaluated. `delete x` of a lexical binding (non-strict code
+  only) answers `false` and checks nothing (`sec-declarative-environment-records-deletebinding-n`).
+- Every assignment to a `const` binding throws a `TypeError`, in strict and in non-strict code:
+  it is an immutable binding created strict (CreateImmutableBinding(N, true),
+  `sec-declarative-environment-records-createimmutablebinding-n-s`;
+  `sec-declarative-environment-records-setmutablebinding-n-v-s`, steps 2 and 5). The check of
+  step 3 comes first: a write to a `const` before its declaration is the `ReferenceError`.
+- `for (let ...; ...; ...)` gives each iteration a copy of the head's `let` bindings, made
+  before the first test and after each body, before the update
+  (`sec-forbodyevaluation`, `sec-createperiterationenvironment`), so a closure made in the body
+  of one iteration keeps that iteration's value; `const` in that head has one binding.
+- A script's lexical bindings are the global environment's: no property of the global object,
+  seen by name by every later script of the realm. GlobalDeclarationInstantiation
+  (`sec-globaldeclarationinstantiation`) throws a `SyntaxError` before it makes any binding of
+  the script when one of its lexical names is already a lexical binding of the realm or a
+  restricted global property (an own non-configurable property of the global object, such as
+  a `var` of an earlier script or `undefined`, `sec-hasrestrictedglobalproperty`; step 3), or
+  one of its `var` or function names is a lexical binding of the realm (step 4). A lexical
+  name over a configurable property of the global object is allowed and shadows it. A binding
+  whose script threw before its declaration ran stays uninitialized for the realm's life
+  (HOST-156 holds the case of one script evaluated twice).
+- Eval code's lexical bindings live in the declarative record PerformEval makes, direct or
+  indirect, strict or not (`sec-performeval`, steps 17 to 19), and end with the eval code.
+  Non-strict eval code whose `var` or function name is a lexical binding of the global
+  environment, or of a record between the eval's LexicalEnvironment and its
+  VariableEnvironment, throws a `SyntaxError` before it binds anything
+  (`sec-evaldeclarationinstantiation`, step 3); a `catch` parameter's record lets it pass
+  (B.3.4, applied since slice 2).
+
+The mechanism, in the form of "Names":
+
+1. Every scope above but the script's is a scope of the compiler (`resolve.rs`), as a function
+   and a `catch` clause are. A binding of it is a local slot of its function's frame unless a
+   nested function (an arrow included) refers to it or a lookup by name can reach it (item 3
+   of "Names"); such a binding is a slot of a declarative record the code makes at the entry of
+   the scope and leaves on every exit, abrupt ones included (`PopEnv` on a `break`, `continue`
+   or `return` through it, a handler's `envs` on a throw, as for a `catch` clause today). A
+   scope with no such binding makes no record. The top level of a function body is a scope of
+   its own inside the function's scope, never slots of the function environment, so that
+   step 3 of EvalDeclarationInstantiation finds it between the two environments (FDI step 32);
+   for strict code the separation is not observable and is kept anyway.
+2. The uninitialized state is a state of the slot, never a `Value`: a local slot and a slot of
+   a declarative record hold either a `Value` or "uninitialized", in a type of the engine that
+   no host interface and no builtin receives. An instruction that reads or writes a binding
+   that may be uninitialized there is an instruction of its own kind that checks and accesses
+   in one, so the check spends no step beyond the access (one unit per instruction). The
+   compiler leaves the check out only for an access in the same function's code that follows
+   the end of the declaration in the StatementList of the same Block, function body or script,
+   never in a CaseBlock (a jump to a later clause passes over a declaration). Each entry of a
+   scope sets its local slots that are checked anywhere to "uninitialized", and a record's
+   lexical slots start in that state; a declaration's evaluation is InitializeBinding
+   (`sec-declarative-environment-records-initializebinding-n-v`). The names table of a record
+   (`SlotNames`) marks each `const` slot immutable and strict, so that a write through a
+   lookup by name throws the same `TypeError`.
+3. `for (let ...)`: when a `let` binding of the head lives in a record (item 1), each
+   iteration makes a new record of the same table whose record slots are copies of the last
+   one's, CreatePerIterationEnvironment, and makes it the frame's LexicalEnvironment in place
+   of the last; head bindings in local slots are copied by nothing, since without a closure or
+   a lookup by name no code can tell one slot from one per iteration. A `for`-`in` with `let`
+   or `const` makes the record of an iteration under the same rule, and the head expression's
+   scope of uninitialized names under the same rule.
+4. The [[DeclarativeRecord]] of a realm's global environment is a declarative record of the
+   `environments` arena whose bindings are kept by name, each with its state and whether it is
+   `const`, found through a keyed map (decision 4) and never deleted; the caller of CreateRealm
+   makes it once the realm record is stored, and `RealmGlobalEnv` holds and traces it
+   (`env/global.rs`, "What slice 6 adds"). A script's lexical names are therefore global names
+   of its code, not slots: GlobalDeclarationInstantiation creates them uninitialized (step
+   15), the declaration initializes them, and the global name instructions, and a lookup by
+   name that reaches the global environment, ask this record first and the global object only
+   when it has no such binding (`sec-global-environment-records-hasbinding-n` and the other
+   concrete methods). Rejected: slots for them (a later script, compiled apart, finds them by
+   name).
+5. Eval code's lexical declarations are a scope of the eval code under item 1: its record is
+   the one of PerformEval, step 17 or 18, made when one of them lives in a record and left out
+   otherwise (a record with no binding in it changes nothing a script can see). Strict eval
+   code makes that record always, being its VariableEnvironment too (step 19), and its record
+   slots are its lexical bindings beside the `var` bindings it adds by name. Step 3 of
+   EvalDeclarationInstantiation walks the records from the LexicalEnvironment of the call to
+   its VariableEnvironment, passing a `catch` parameter's and a `with` statement's; item 3 of
+   "Names" makes every lexical binding on that way a named slot it can ask.
+6. Budgets. A record of a block, a head, an iteration or eval code is an allocation charged as
+   any record (`new_environment`); a binding of the global [[DeclarativeRecord]] is charged
+   when GlobalDeclarationInstantiation creates it and is credited with the realm. The copy of
+   CreatePerIterationEnvironment charges one step per binding it copies, beside its
+   instruction's. The check of item 2 is no step of its own, nor is the global record's map
+   lookup inside a global name instruction; a lookup by name still charges one step per record
+   it visits, the global environment counting as one. Every check of GlobalDeclarationInstantiation
+   and EvalDeclarationInstantiation is a step, as today.
+
+**`this` and `arguments` in an arrow function.** Added on 2026-11-22 for slice 6. What a script
+sees, the standard's: an arrow function has no `this`, `arguments`, `super` or `new.target` of
+its own; in its parameters and body each means what it means in the code around the arrow
+(`sec-arrow-function-definitions-runtime-semantics-evaluation`,
+`sec-runtime-semantics-instantiatearrowfunctionexpression`). OrdinaryCallBindThis does nothing
+for it (`sec-ordinarycallbindthis`, step 2: [[ThisMode]] lexical), so the `this` argument of
+`call`, `apply` or `bind` is ignored; GetThisEnvironment passes over its function environment
+(`sec-getthisenvironment`), FunctionDeclarationInstantiation makes it no arguments object
+(step 16), and it has no [[Construct]] (`new` throws the `TypeError` of a value that is not a
+constructor) and no `prototype`. A direct `eval` in an arrow sees the same `this` and
+`arguments`; its `var` names go to the arrow's own VariableEnvironment.
+
+The mechanism:
+
+1. `this` is taken when the arrow is made. The closure instruction of an arrow stores the
+   `this` value of the frame that makes it in the function object, which the collector traces;
+   a call of the arrow puts that value in its frame's `this` and runs no OrdinaryCallBindThis.
+   The `This` instruction and the `this` a direct `eval` takes from its caller's frame
+   (`dynamic_code.rs`) stay as they are, so an arrow in an arrow, and eval code in an arrow,
+   get it too. This equals the standard while every function's `this` binding is initialized
+   before its code runs and never changes afterwards (OrdinaryCallBindThis runs before
+   FunctionDeclarationInstantiation; BindThisValue, `sec-bindthisvalue`, throws on a second
+   binding), which holds for every function of slices 6, 7 and 10.
+2. `arguments` resolves outward like any name. The scope analysis counts an arrow's references
+   to `arguments` and its direct `eval` (item 4 of "Names") for the nearest enclosing function
+   that is not an arrow, which then makes its arguments object when FunctionDeclarationInstantiation
+   does; the reference resolves to that function's binding `arguments`, a slot of its
+   function environment, since another function's code uses it. An arrow that has a parameter
+   or a declaration named `arguments` binds that name itself, as any name; at the top of a
+   script the reference is a global name.
+3. Rejected for now: `this` as a binding of the enclosing function's environment, read by the
+   arrow through a slot as a captured name is. It gives every function whose arrows read
+   `this` a function environment per call, an allocation where the copy costs one value per
+   arrow, and before slice 8 no script can tell the two apart: a method that makes an arrow
+   and is called with another `this` through `call`, an arrow kept after its function returned,
+   eval code in an arrow, all give the same value in both. What tells them apart comes with
+   the derived constructors of slice 8, whose `this` is uninitialized until `super()` returns
+   (`sec-super-keyword-runtime-semantics-evaluation`): in `constructor() { const f = () =>
+   this; super(); return f(); }` the call must answer the new object, where a copy made
+   before `super()` has nothing to copy; in `constructor() { const f = () => this; f(); }` it
+   must throw a `ReferenceError`; and in `constructor() { const s = () => super(); s(); }` the
+   `super()` inside the arrow must initialize the constructor's binding, which a copy cannot.
+   Slice 8 therefore changes item 1 for the arrows of a derived constructor only: there `this`
+   becomes a slot of the constructor's function environment, uninitialized until `super()`
+   returns (the state of item 2 of "Lexical bindings"), which those arrows read and a `super()`
+   in one of them initializes, in place of a value copied when the arrow is made.
+
+**A parameter list that is not simple.** Added on 2026-11-22 for slice 6. What a script sees, the
+standard's (`sec-functiondeclarationinstantiation`, steps 19 to 30;
+IsSimpleParameterList and ContainsExpression, `sec-static-semantics-issimpleparameterlist`,
+`sec-static-semantics-containsexpression`): a list with a default, a rest parameter or a
+pattern binds its parameters left to right, each uninitialized until its turn; a default is
+evaluated only when its argument is `undefined` or missing, and may read an earlier parameter,
+while reading the parameter itself or a later one throws the `ReferenceError` of an
+uninitialized binding; a rest parameter is a new Array of the remaining arguments. The
+parameter expressions see `this`, the function's `arguments`, the function's own name and the
+scopes around the function, and none of the body's declarations: a closure made in a default
+reads the parameter of a name, not the body's `var` of that name, which is a binding of its own
+that starts with the parameter's value (step 30). A direct `eval` in a parameter expression of
+non-strict code puts its `var` names in a record outside the parameters (step 20), so that one
+of a parameter's name, or `arguments`, is the `SyntaxError` of EvalDeclarationInstantiation,
+step 3. The function's arguments object is unmapped (step 22, CreateUnmappedArgumentsObject,
+`sec-createunmappedargumentsobject`), also in non-strict code, and none is made when a
+parameter is named `arguments` (step 17) or, in a list without an expression, when the body
+declares a function or a lexical binding of that name (step 18). `length` is
+ExpectedArgumentCount, the parameters before the first default or rest parameter
+(`sec-static-semantics-expectedargumentcount`, `sec-setfunctionlength`).
+
+The mechanism:
+
+1. The function's code binds the parameters, not the call. A call of such a function binds
+   `this`, makes the function environment as today, keeps its argument list in the frame
+   (charged to the memory budget with the frame and traced with its locals), stores the
+   arguments object in its slot when the template asks for one, and starts the code, which
+   initializes each parameter in order from the kept list (IteratorBindingInitialization,
+   `sec-runtime-semantics-iteratorbindinginitialization`, over a list iterator that no script
+   can reach), evaluating a default with NamedEvaluation for an anonymous function. A
+   parameter is a slot by the rules above, uninitialized until its turn (item 2 of "Lexical
+   bindings"). A simple list keeps the call's binding of today.
+2. Scopes. Such a function has a scope for its parameters and `arguments` and, when the list
+   has an expression, a second one for the body's `var` names and function declarations
+   (step 30), each a local slot or a record slot by item 1 of "Lexical bindings", the body's
+   top-level lexical scope inside it. A record of the second scope is pushed by the code once
+   the last parameter is bound, and becomes the frame's VariableEnvironment. When a direct
+   `eval` stands in a parameter expression of non-strict code, the parameters' scope lives in
+   a record pushed inside the function environment, which stays the VariableEnvironment while
+   the parameters are bound (step 20); otherwise the parameters are slots of the function
+   environment or locals, which no code can tell from step 20's two records. For item 1 of
+   "Names", the scope a direct `eval` adds `var` bindings to is the function scope for an
+   `eval` in a parameter expression and the body's `var` scope for one in the body; a
+   reference that crosses it is looked up by name.
+3. Budgets. Binding the parameters is the code's instructions, one step each; the rest Array
+   charges a step per element and its allocation (`create_array_from_list`); the records of
+   item 2 are charged as any record.
 
 **The step budget.** One unit per bytecode instruction, plus units charged by builtins in
 proportion to their work: per element for array, typed array and collection loops, per code unit
