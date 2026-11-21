@@ -70,8 +70,8 @@ impl<H: Host> Agent<H> {
     pub fn host(&self) -> &H;
     pub fn host_mut(&mut self) -> &mut H;
     /// A context for creating and converting values while no code runs. Calls made through it
-    /// are outermost entries (decision 2).
-    pub fn with_cx<R>(&mut self, f: impl FnOnce(&mut Cx<'_, H>) -> R) -> Result<R, HostError>;
+    /// are outermost entries (decision 2); `realm` is their current realm (decision 7).
+    pub fn with_cx<R>(&mut self, realm: &Realm, f: impl FnOnce(&mut Cx<'_, H>) -> R) -> Result<R, HostError>;
 }
 impl<'a, H: Host> Cx<'a, H> {
     pub fn host(&self) -> &H;
@@ -574,6 +574,26 @@ impl<H: Host> Agent<H> {
 
 `$262.createRealm` and same-origin frames are realms of one agent (`engine.md` decision 9).
 
+**The current realm is the running context's; outside a run, the host names it.** The draft's
+current Realm Record is "The value of the Realm component of the running execution context"
+(`ecma262:sec-execution-contexts`), so inside a run it is that: a host function runs in its own
+[[Realm]], a hook in the realm of the code that reached it. Outside a run no context runs, and
+the entry decides: `with_cx`, `Agent::call` and `Agent::construct` take a `&Realm` that is current
+for the whole call; every other entry point has its realm from its arguments: `create_realm` the
+new realm (InitializeHostDefinedRealm: "Set the Realm of newContext to realm. ... Push newContext
+onto the execution context stack", `ecma262:sec-initializehostdefinedrealm`), `parse_script`, `parse_module` and `parse_json_module` the
+realm given, `evaluate_script` the script's ("Set the Realm of scriptContext to
+scriptRecord.[[Realm]]", `ecma262:sec-runtime-semantics-scriptevaluation`),
+`load_requested_modules`, `link` and `evaluate_module` the module's [[Realm]],
+`finish_loading_imported_module` the referrer's, `run_job` the job's. `HookCx` needs none: each of
+its methods that makes an object names the realm or the prototype. A `Realm` is a root, so the
+answer depends on no collection and no creation order, an agent with no realm cannot reach a call
+that needs one, and a stale or foreign `Realm` answers `Err(StaleHandle)` or `Err(ForeignHandle)`
+(decision 6). Rejected: the realm created last that no collection has freed yet, with a null
+prototype when there is none (the answer would change with when the collector ran, which
+decision 19 and the collect-at-every-safe-point mode would observe, and the host could not see
+which realm it got).
+
 **HOST-49** (ecma262:sec-initializehostdefinedrealm) The setup closure is called once per `create_realm`, can create an object whose prototype is the new realm's `%Object.prototype%`, and the global it returns has the clause 19 properties the engine defines (with no `this` returned, the script `this.Array === Array` answers `true` in the realm). [slice 1]
 
 **HOST-50** (ecma262:sec-initializehostdefinedrealm) When the setup returns a `this` object, the script `this` in the realm answers that object. [slice 1]
@@ -583,6 +603,8 @@ impl<H: Host> Agent<H> {
 **HOST-51** (ecma262:sec-initializehostdefinedrealm) Without a setup closure, the realm's global object is an ordinary object whose prototype is the realm's `%Object.prototype%`. [slice 1]
 
 **HOST-52** (swell:D7) After the host drops every root of a realm and of objects of that realm, and no other realm reaches them, the second `collect` returns `heap_bytes()` to the value read before `create_realm`. [slice 1]
+
+**HOST-161** (swell:D7) With realm A created and then realm B, `cx.to_object(Value::Boolean(true))` in `with_cx` of A answers an object whose prototype is A's `%Boolean.prototype%`, and `agent.call` with A of the Number 1 answers `Throw` of a `TypeError` whose prototype is A's `%TypeError.prototype%`; both hold after the host dropped every root of B and with the collector run at every safe point. [slice 1]
 
 ## 8. Scripts
 
@@ -1038,8 +1060,8 @@ impl<'a, H: Host> Cx<'a, H> {   // a method that takes a handle: Result<Completi
     pub fn evaluate_script(&mut self, script: ScriptRef) -> Result<Completion<Value>, HostError>;
 }
 impl<H: Host> Agent<H> {
-    pub fn call(&mut self, function: &Root, this: &Root, args: &[&Root]) -> Result<Outcome<Root>, HostError>;
-    pub fn construct(&mut self, function: &Root, args: &[&Root], new_target: Option<&Root>) -> Result<Outcome<Root>, HostError>;
+    pub fn call(&mut self, realm: &Realm, function: &Root, this: &Root, args: &[&Root]) -> Result<Outcome<Root>, HostError>;
+    pub fn construct(&mut self, realm: &Realm, function: &Root, args: &[&Root], new_target: Option<&Root>) -> Result<Outcome<Root>, HostError>;
 }
 // PropertyDescriptor, PreferredType, IteratorKind, IteratorRecord, PromiseCapability: the draft's
 // records of the same names, as plain Rust structs and enums over Value.
