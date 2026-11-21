@@ -1,7 +1,7 @@
 version: '3'
 
 vars:
-  SPEC_REFUSALS_MAX: '{{.SPEC_REFUSALS_MAX | default 32}}'
+  SPEC_REFUSALS_MAX: '{{.SPEC_REFUSALS_MAX | default 41}}'
   SPEC_OUT: '{{.SPEC_OUT | default ".out"}}'
   SPEC_SYNTHESIZE_LOG: '{{.SPEC_SYNTHESIZE_LOG | default (printf "%s/synthesize.log" .SPEC_OUT)}}'
   SPEC_CONFORM_LOG: '{{.SPEC_CONFORM_LOG | default (printf "%s/conform.log" .SPEC_OUT)}}'

@@ -1,0 +1,107 @@
+# Terminated(MemoryBudget) ends one entry and leaves the agent Alive (decision 2, `memory_bytes`;
+# decision 10): a parse that passes the budget creates no script and the next source parses, and
+# a run that passes it is followed by a script that completes (HOST-10 for the run's source, here
+# inside a function; HOST-70 for the run after it). host-interface.md has no requirement of its
+# own for a parse that passes the budget. Both answers are forced (`external:`), as in
+# `step-budget-ends-one-run`, so this states the sequence of answers, not that an allocation of N
+# bytes passes the budget: ESS has no construct for "at most N bytes". No limit here makes a
+# parse of `1 + 1;` pass the budget; an engine under test reaches the run's answer with the
+# step budget given and the parse's only by forcing it. Synthesis writes neither (it arranges
+# no realm whose agent is the one called, ESS-SYNTH-003). Every call is made on the agent that
+# owns the realm and the scripts.
+type: ess-scenario/6
+domain: swell.host
+scenario: memory-budget-ends-one-entry
+summary: A parse and a run that pass the memory budget end with Terminated(MemoryBudget), and the agent parses and runs the next script.
+
+arrange:
+  - instance: agent
+    entity: swell.host.Agent
+  - instance: realm
+    entity: swell.host.Realm
+  - instance: script
+    entity: swell.host.Script
+  - instance: next
+    entity: swell.host.Script
+
+timeline:
+  - at: 2026-01-06T09:00:00Z
+    command: swell.host.CreateAgent
+    actor: swell.host.Host
+    input:
+      limits:
+        steps_per_entry: 1000000000
+        memory_bytes: 67108864
+        frame_depth: 10000
+        reentry_depth: 256
+        parser_nesting: 1000
+        string_length: 1073741824
+        bigint_bits: 1048576
+      hash_key: AAECAwQFBgcICQoLDA0ODw==
+      random_seed: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    outcome: created
+    capture: {instance: agent, event: swell.host.AgentCreated, field: agent_id}
+
+  - at: 2026-01-06T09:00:01Z
+    command: swell.host.CreateRealm
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: created
+    capture: {instance: realm, event: swell.host.RealmCreated, field: realm_id}
+
+  - at: 2026-01-06T09:00:02Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "1 + 1;"
+    outcome: memory-budget
+    error:
+      name: swell.host.Terminated
+
+  - at: 2026-01-06T09:00:03Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "function fill() { var a = []; while (true) a.push({}); } fill();"
+    outcome: parsed
+    capture: {instance: script, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:04Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: script}
+    outcome: memory-budget
+    events:
+      - event: swell.host.RunTerminated
+        payload:
+          agent_id: {$instance: agent}
+          reason: MemoryBudget
+
+  - at: 2026-01-06T09:00:05Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "1 + 1;"
+    outcome: parsed
+    capture: {instance: next, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:06Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: next}
+    outcome: completed
+    events:
+      - event: swell.host.ScriptCompleted
+        payload:
+          script_id: {$instance: next}

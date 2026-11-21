@@ -427,6 +427,14 @@ errors:
       - name: agent_id
         type: swell.host.AgentId
 
+  # Err(HostError::ForeignHandle) (host-interface.md decision 6): a handle of another agent than
+  # the one called. An agent's constituents "belong exclusively to that agent" (9.6).
+  - name: swell.host.ForeignHandle
+    summary: >-
+      Err(HostError::ForeignHandle): a handle of another agent than the one called; nothing
+      changed (decision 6).
+    fields: []
+
   # UNMAPPED: the List of SyntaxError objects ParseScript and ParseModule return (16.1.5,
   # 16.2.1.7.1) are engine values, and ESS has no type for an engine value. Decision 9 also does not
   # say what a parse failure carries to the host ("as a parse failure", decision 3).
@@ -527,9 +535,13 @@ commands:
   # parse_script (decision 9).
   # UNMAPPED: hostDefined, the value the host attaches to the Script Record ([[HostDefined]]).
   # Carried by HOST-55.
-  # UNMAPPED: a realm of another agent than the one called. A handle carries no agent (decision 4:
-  # an index and a generation), and decision 9 does not say what the engine answers.
-  # Carried by HOST-31, HOST-45.
+  # A realm is the agent's its CreateRealm was called on (Realm `agent_id`, which Agent `realms`
+  # owns). A realm of another agent answers `foreign-realm`, Err(ForeignHandle) (HOST-45); it
+  # comes after `faulted`, as `parse_script` checks the agent before the realm (HOST-48).
+  # Synthesis in ess 0.96.0 arranges no realm whose `agent_id` equals `input.agent_id`
+  # (ESS-SYNTH-003 on `parsed`), so `parsed` and every outcome of EvaluateScript, whose script
+  # only `parsed` creates, have no synthesized scenario; the authored scenarios parse and run
+  # on the realm's own agent.
   - name: swell.host.ParseScript
     naming:
       summary: Parse source text as a Script in a realm.
@@ -541,7 +553,7 @@ commands:
         type: swell.host.RealmId
       - name: source_text
         type: swell.host.SourceText
-        example: "1 + 1"
+        example: "1 + 1;"
     outcomes:
       - name: no-agent
         when_related: {via: input.agent_id, exists: false}
@@ -554,6 +566,9 @@ commands:
         error: swell.host.Faulted
         payload:
           swell.host.Faulted: {agent_id: input.agent_id}
+      - name: foreign-realm
+        when_related: {via: input.realm_id, predicate: agent_id != input.agent_id}
+        error: swell.host.ForeignHandle
       - name: parse-failed
         external: ParseText returns a List of errors, or the source nests deeper than parser_nesting
         error: swell.host.ParseFailed
@@ -577,6 +592,14 @@ commands:
 
   # evaluate_script (decision 9). Each way a run ends is an `external:` branch: which one a script
   # takes is decided by running it, which is ECMA-262's to say and test262's to check.
+  # A script is its realm's agent's: its [[Realm]] (Script `realm_id`) is a realm of the agent
+  # `parse_script` was called on, since `foreign-realm` refuses any other.
+  # UNMAPPED: a script of another agent than the one called, which answers Err(ForeignHandle)
+  # after Err(Faulted). ESS limit: a guard through the script's `realm_id` beside the guards
+  # through `input.agent_id` is refused (ESS-COMMAND-004, "a command reads one related row"),
+  # and a guard on a stored agent of the script answers before `no-agent` and `faulted`
+  # (ESS-COMMAND-004, precedence step 3 before step 4), where HOST-48 answers Faulted first.
+  # Carried by HOST-45, HOST-48.
   - name: swell.host.EvaluateScript
     naming:
       summary: Evaluate a parsed script; the answer is the run's Outcome.
@@ -623,7 +646,7 @@ commands:
           swell.host.RunTerminated: {agent_id: input.agent_id, reason: MemoryBudget}
         summary: Terminated(MemoryBudget).
       - name: interrupted
-        external: the host sets the interrupt handle while the script runs
+        external: the host set the interrupt handle before the run or sets it while the script runs
         updates: swell.host.Script
         instance: script_id
         emits: [swell.host.RunTerminated]
@@ -651,8 +674,13 @@ commands:
         summary: Normal(value).
 
   # parse_module (decision 9).
-  # UNMAPPED: hostDefined, as for ParseScript; and a realm of another agent, as for ParseScript.
-  # Carried by HOST-45, HOST-55.
+  # UNMAPPED: hostDefined, as for ParseScript.
+  # Carried by HOST-55.
+  # UNMAPPED: a realm of another agent than the one called, which answers Err(ForeignHandle).
+  # ESS limit: the guard ParseScript has (`foreign-realm`) states it, but synthesis in ess 0.96.0
+  # then arranges no `parsed` (ESS-SYNTH-003), and every later step of the module lifecycle goes
+  # with it: measured on a copy, 28 scenarios and 65 refusals against 55 and 41 without it.
+  # Carried by HOST-31.
   - name: swell.host.ParseModule
     naming:
       summary: Parse source text as a Module in a realm.
@@ -687,7 +715,7 @@ commands:
         payload:
           swell.host.Terminated: {reason: MemoryBudget}
       # UNMAPPED: an engine fault while parsing, as for ParseScript.
-      # Carried by HOST-71.
+      # Carried by HOST-157.
       - name: parsed
         creates: swell.host.Module
         instance: module_id
@@ -879,7 +907,7 @@ commands:
           swell.host.Terminated: {reason: MemoryBudget}
       # UNMAPPED: an engine fault while linking. The refusal that leaves the module unlinked
       # cannot also fault the agent: an ESS refusal changes no record but its own subject.
-      # Carried by HOST-71.
+      # Carried by HOST-157.
       - name: linked
         when_subject_state: Unlinked
         moves: swell.host.Module.link
@@ -1178,8 +1206,10 @@ commands:
   # command while it runs. The `interrupted` branches of the run commands are the other half,
   # unconnected to this one.
   # Carried by HOST-90, HOST-96.
-  # UNMAPPED: whether the flag is cleared when it ends a run, and what a run that starts while it
-  # is set does. Decision 9 does not say.
+  # UNMAPPED: that the engine clears the flag when it ends a run, and that a flag set while no
+  # entry runs ends the next entry before its first step (host-interface.md decision 12). The
+  # `interrupted` branches are `external:`, so nothing here ties them to this command; the
+  # authored scenario `interrupt-ends-the-next-run` states the sequence of answers.
   # Carried by HOST-91, HOST-92, HOST-93.
   - name: swell.host.Interrupt
     naming:
