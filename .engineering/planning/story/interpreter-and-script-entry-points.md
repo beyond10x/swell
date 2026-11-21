@@ -15,15 +15,27 @@ scope:
 - confidence: cited
   path: crates/swell/Cargo.toml
 - confidence: cited
+  path: crates/swell/src/heap/collect.rs
+- confidence: cited
+  path: crates/swell/src/heap/roots.rs
+- confidence: cited
   path: crates/swell/src/host
 - confidence: cited
   path: crates/swell/src/interp
 - confidence: cited
   path: crates/swell/src/object/mod.rs
 - confidence: cited
+  path: crates/swell/src/ops/conversion.rs
+- confidence: cited
   path: crates/swell/src/ops/objects.rs
 - confidence: cited
+  path: crates/swell/src/ops/operators.rs
+- confidence: cited
+  path: crates/swell/src/ops/testing.rs
+- confidence: cited
   path: crates/swell/src/script.rs
+- confidence: cited
+  path: crates/swell/src/value.rs
 - confidence: cited
   path: crates/swell/tests
 - confidence: cited
@@ -32,7 +44,7 @@ scope:
   path: crates/swell/tests/language.rs
 - confidence: cited
   path: crates/swell/tests/support/script.rs
-revision: 13
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
@@ -162,6 +174,13 @@ design governs.
   `[[Realm]]`, `is_constructor`, `instanceof_operator`, and their marks). The other story of
   the wave changes its own hunks in the same two files; the unit that lands second takes the
   other one's in.
+- `Writes:` is extended once more (2026-11-21, found by this story's unit before it wrote
+  anything): `crates/swell/src/value.rs` (the field of `Script` becomes visible in the crate)
+  and `crates/swell/src/heap/roots.rs` (a root slot that holds a script record, with its
+  trace). `RealmGlobalEnv` stays empty in slice 1: the declarative part of the global
+  environment is empty until slice 6, which edits `realm/mod.rs`. Every call from Rust into
+  an ECMAScript function or a script pushes an activation, so that `reentry_depth` and the
+  current realm hold without a change to `object/builtin_function.rs`.
 
 ## Change
 
