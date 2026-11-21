@@ -7,12 +7,14 @@ taken from surf's needs. The design is `docs/design/engine.md`; read it before c
 Status on 2026-11-21: the gate, the pins, the counting runner, the first parts of `swell-num`
 and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the bytecode compiler
 (`swell-compiler`), and in `swell` the heap, the values, the object model, realms, the
-interpreter and the builtins the test262 harness calls exist (slice 1, waves 1 to 5 of 6:
-`docs/plan/slice-01-wave-1.md` to `-5.md`); 70 of 161 host requirements have a test, none is
-pending for slice 1.
+interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
+6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
+requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
+(the other 44 need a later slice and say so). 70 of 164 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate runs test262: 3,969 of the 44,812 run cases pass, and slice 1 passes its 31 cases in all 62
-runs. Open in slice 1: the ESS conformance target (wave 6).
+gate runs test262: 3,969 of the 44,812 run cases pass. Release `0.1.0` was cut at the close of
+wave 5. Next: slice 2, `language-core`, decomposed into six stories in four waves
+(`docs/plan/waves.md`, "Slice 2"); its design changes are in the design already.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
@@ -59,8 +61,8 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   an ESS model under `spec/` before its code (decision 10). Do not restate language semantics in
   ESS. Names follow the standard's terms; a builtin's module and comments cite its clause.
 - The host interface has two specifications, and both come before its code. ESS states about
-  half of it: the first model (`spec/`, ess 0.96.0, 2026-11-21) validates and its 64 scenarios
-  pass on the interpreter, with 33 refusals and 50 `UNMAPPED:` markers
+  half of it: the model (`spec/`, ess 0.96.0) validates and its 58 scenarios, 8 of them authored,
+  pass on the interpreter, with 41 refusals and 51 `UNMAPPED:` markers
   (`docs/design/host-interface-model.md`). What ESS cannot state (engine values in outcomes,
   hooks that answer the engine, `call` and `construct`, host objects and roots, re-entrancy,
   the interrupt, budgets as bounds, determinism) is stated in `docs/design/host-interface.md`
@@ -157,7 +159,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 - Task facts, measured in wave 1 (Task 3.54):
   - Task takes a variable from the environment when none is passed on the command line. A
     gate variable therefore carries a prefix (`GATE_`, `TEST262_`, `UNICODE_DATA_`, `SPEC_`,
-    `HOST_REQ_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
+    `HOST_REQ_`, `ESS_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
     ones that have a value as the gate's first line.
   - A variable is written as `'{{.X | default "..."}}'`: in an included file a plain value
     ignores the command line.
@@ -169,24 +171,26 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot task check` on 2026-11-21, after wave 5 of slice 1, with the variables of the runner,
+`slot task check` on 2026-11-21, after wave 6 of slice 1, with the variables of the runner,
 exit 0:
 
 ```
-python-check: no Python file among 807 file(s)
+python-check: no Python file among 849 file(s)
 forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
 Cargo.lock: 7 package(s), none from outside this repository
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
 data/unicode/17.0.0: 17 file(s), each with the SHA-256 its SOURCE line gives; 17 required path(s) present
 unicode-tables: 1 table(s) equal the generator output
-swell v1 — 2 file(s), 3 scenario(s), valid
-61 scenario(s) (3 authored), 32 refusal(s), written to .out/suite.json
-  61 scenarios: 61 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 161 requirement(s), 161 line(s): 70 test, 91 pending, 0 omitted; 50 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 2:5 3:5 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
+swell v1 — 2 file(s), 8 scenario(s), valid
+58 scenario(s) (8 authored), 41 refusal(s), written to .out/suite.json
+  58 scenarios: 58 passed, 0 failed, 0 error, 0 unsupported
+host-requirements: 164 requirement(s), 164 line(s): 70 test, 94 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 2:10 3:3 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
 55 test suites: 268 passed, 0 failed, 1 ignored
 test-collect: 31 test suites: 194 passed, 0 failed, 1 ignored
 test-faults: 1 test suites: 1 passed, 0 failed, 0 ignored
+conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok
+  58 scenarios: 14 passed, 0 failed, 0 error, 44 unsupported
 test262-refused 53564
 test262 total 53801 8982 7 44812 3969 40843 0
 test262: 221 directory lines sum to the total
@@ -197,7 +201,7 @@ test262: 283 lines equal conformance/test262/expected.txt
 gate-selftest: 31 passed, 0 failed
 ```
 
-The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (32); a change to `spec/`
+The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`
 that moves the count moves the number in the same change. The total line reads: cases that
 exist, excluded, not applicable, run, passed, failed, ended by a budget. A slice line
 (`test262-slice 01 31 62 0 0 31 31 0 0`) reads: slice, cases, runs, excluded, not applicable,
@@ -225,9 +229,12 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   never pushed; nothing is deleted. Commit ids in the wave records up to that point name
   commits of that branch. Branches start from `main`; a branch of the old history is never
   merged into it. The remote is `origin`; the gates' hooks are installed in the repository.
-  The policy holds three exceptions for the `hash_key` value of the scenario fixtures under
-  `spec/scenarios/`, bound to the content of those lines: a change to one of them is refused
-  until the session that decides for the operator admits the new content.
+  The policy holds one exception per scenario file under `spec/scenarios/` that carries the test
+  value of `hash_key` (ten after wave 6 of slice 1), bound to the SHA-256 of the whole file:
+  a new file of that kind, and any edit of one of them, is refused at the bot commit until
+  the session that decides for the operator admits the new content. Send it the paths and
+  checksums of the staged files; do not change a staged byte afterwards. A line the previous
+  version of a file already carried is no new finding, so the refusal counts the new files.
 - **Every commit after the first publication is the organization bot's**, also a merge; a
   plain `git commit` is not used, because the gates refuse a pushed commit with another author
   or committer:
@@ -252,7 +259,8 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   commit of `main`, and a GitHub Release with the version's section of `CHANGELOG.md`:
   `docs/releasing.md`. The coordinator prepares version, changelog, gate and notes on a
   branch and sends the tip to the session that decides for the operator; that session tags
-  and releases. First release: `0.1.0`, 2026-11-21, at the close of wave 5 of slice 1.
+  and releases. First release: `0.1.0`, 2026-11-21, tagged on `6319af2`, the close of wave 5
+  of slice 1.
 - **Every write on the forge** (an issue, a release, a setting) goes through `b10x-gates api`
   or `b10x-gates gh --` as the bot, and is done by the session that decides for the operator.
   Never raw `gh`.

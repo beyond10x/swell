@@ -58,21 +58,47 @@ today).
 | 3 | `bytecode-compiler`, `object-model-and-realms` | 10 requirements (`HOST-161` added in wave 3) |
 | 4 | `interpreter-and-script-entry-points`, `harness-builtins` | 28 requirements; a script runs |
 | 5 | `host-interface-hardening`, `test262-run-path` (planned in wave 6, moved here) | 15 requirements (`HOST-160` added in wave 2); none pending for slice 1; the 31 cases pass |
-| 6 | `ess-conformance-target` | 13 of the model's 61 scenarios pass on the engine |
+| 6 | `ess-conformance-target`, and the change of `spec/` it asked for | 14 of the model's 58 scenarios pass on the engine (planned: 13 of 61) |
 
 The first wave of slice 1 runs beside wave 3 of the foundation: the two stories write
 different files. `Cargo.lock` in a wave of several units: each unit regenerates it in its own
 tree, and the coordinator regenerates it on the wave branch after the merges.
 
-Delivered: [wave 1](slice-01-wave-1.md), [wave 2](slice-01-wave-2.md), [wave 3](slice-01-wave-3.md), [wave 4](slice-01-wave-4.md), [wave 5](slice-01-wave-5.md). After wave 5: 70 of 161
-host requirements have a test, none is pending for slice 1, and the gate counts 3,969 test262
-cases as passed, the 31 of slice 1 among them.
+Delivered: [wave 1](slice-01-wave-1.md), [wave 2](slice-01-wave-2.md), [wave 3](slice-01-wave-3.md), [wave 4](slice-01-wave-4.md), [wave 5](slice-01-wave-5.md), [wave 6](slice-01-wave-6.md). Slice 1 is
+delivered: 70 of 164 host requirements have a test, none is pending for slice 1, the gate
+counts 3,969 test262 cases as passed, the 31 of slice 1 among them, and 14 of the model's 58
+scenarios pass on the engine.
 
 What works after which wave: after wave 4 the engine evaluates a script through
 `evaluate_script` under step and memory budgets; after wave 5 `slot task check` prints the 31
-cases of slice 1 as passed. The other slice epics are drafts and are decomposed when their turn
-comes; slice 2 starts with the measurement of how many cases per slice include
-`propertyHelper.js`.
+cases of slice 1 as passed; after wave 6 it runs the model's scenarios against the engine.
+The other slice epics are drafts and are decomposed when their turn comes.
+
+## Slice 2, `language-core`
+
+`epic:slice-02-language-core`: the rest of the ES5-level language (`eval`, `with`, `arguments`,
+labels, automatic semicolon insertion) and the global `Function`. Decomposed on 2026-11-21
+into six stories (accepted, `active`), read by the four plan critics in two rounds (`review-result:slice-02-*`: 13
+findings, all applied). Measured on `main` before the slice
+(`test262-slice 02 5245 9173 0 0 5245 2125 3120 0`): 2,125 of its 5,245 cases pass. The first
+cause of the 3,120 failing cases, by a throwaway copy of the runner that prints one line per
+run: automatic semicolon insertion 411, `\u` escapes 352, `eval` 305, `Number` 201, `let` and
+`const` 295, `Boolean` 164, `arguments` 128, `with` 115, labels 86, and smaller groups. About
+1,000 cases need syntax or builtins of a later slice and move by rule lines in wave 4; about
+4,270 stay. The slice is done when every run of what stays passes.
+
+| wave | stories | closes |
+|---|---|---|
+| 1 | `test262-run-causes`, `syntax-language-core`, `number-boolean-and-global-functions-early` | one line per run with its cause, and `$262.evalScript`; the grammar of slice 2 (semicolon insertion, labels, `??`, `?.`, logical assignment, plain methods and shorthand properties); `Number`, `Boolean`, `isNaN`, `isFinite` |
+| 2 | `with-arguments-and-dynamic-names` | `with` and the `arguments` object; names looked up at run time where the design says |
+| 3 | `eval-and-function-constructor` | `eval` and `Function` through one entry, the two hooks, the count of refusals; 10 requirements |
+| 4 | `slice-02-conformance-close` | the cases that need a later slice move, each with its evidence in a list the gate checks; every run of the slice passes |
+
+In wave 1 the three stories share no file but `conformance/test262/expected.txt`, which the
+coordinator regenerates on the wave branch after the merges. The design changes the stories
+wait for are in the design since wave 6 of slice 1 (`20c1f35`): the parts taken before their
+slice, `Function` in slice 2, name resolution under `with` and direct `eval`, the omission
+rule, `HOST-162` to `HOST-164`.
 
 ## What later slices take over
 
@@ -89,8 +115,22 @@ that slice reads its entries first.
 - The gate, any wave: a planted-defect script under `tests/gate/` for `unicode-tables-check`;
   a check of the ECMA-262 pin; the sort order of `conformance/host/requirements.txt`; planted
   scripts for `not a checkout` and `not a slice number`.
-- The next change to `spec/`: two markers name `HOST-71` for what is now `HOST-157`, and the
-  marker table of `docs/design/host-interface-model.md` predates the split of nine requirements.
+- The next change to `spec/`: the seed of the scenarios. The pinned secret scanner with its
+  default rules reports the present value of `hash_key` (the bytes 0 to 15, in base64) and
+  not a seed of 16 zero bytes, probed by the session that decides for the operator on
+  2026-11-21; the gates run the scanner with their own configuration, so a staged file and a
+  bot commit are the test. If it holds, change the seed in all scenario files in one wave
+  and tell that session, which then removes the ten exceptions.
+- The next change to `spec/`: where `spec/domains/host.yaml` (the notes at `ParseScript` and
+  `EvaluateScript`) and `docs/design/host-interface-model.md` call the refused synthesis of
+  `parsed` (`ESS-SYNTH-003`, `ESS-SYNTH-004`) "an ESS limit", write "a defect of ESS, issue 801
+  of beyond10x/ess": ruled a defect and filed by the session that decides for the operator on
+  2026-11-21 (an owner-link guard beside an owner-existence guard is not witnessed). Check
+  that `host-requirements-check` still accepts the marker text. When ESS fixes it, the
+  synthesized scenarios return and the authored ones that replace them are reviewed.
+  `ESS-COMMAND-004` (a command reads one related row) is a documented limit and stays.
+- Done in wave 6 of slice 1: the two markers that named `HOST-71` name `HOST-157`, and the
+  marker table of `docs/design/host-interface-model.md` is regenerated.
 - Slices 2, 9 and 11: a requirement for a stale or foreign handle returned by the host at the
   return sites of that slice (`host_get_code_for_eval`; an override's result;
   `host_get_import_meta_properties`; the other hooks whose answer holds a handle). The rule is
@@ -108,6 +148,11 @@ that slice reads its entries first.
 - Slice 2, at its decomposition: the 23 `propertyhelper-*` cases of `test/harness` move from
   slice 3 to slice 2 with the global `Function` (`AGENTS.md`, "How the work is run").
 - Slice 4: the operator `**` (the parser refuses it today; it needs the deterministic `pow`).
+- The slice that brings the first allocation-heavy cases (slice 3 at the latest): a run that
+  fills its memory budget with `a.push({})` takes 0.5 s for 1 MiB, 1.2 s for 2 MiB and 4.1 s
+  for 4 MiB in a debug build, and did not finish 64 MiB in about nine minutes
+  ([slice 1, wave 6](slice-01-wave-6.md)). Measure where the time goes (when a collection
+  starts, how an array grows) before the builtins of slice 3 depend on it.
 - Slice 5: say in the design whether a regular expression pattern is parsed inside the
   parser's recursion (its levels then add to the script's for the stack bound) or after it.
 - The gate, any wave: about 15 planted scripts end a failure message with a path under `.out/`,

@@ -57,17 +57,22 @@ deciding session's, from a checkout of the repository:
        $gates gh -- run list --workflow check.yml --branch main --limit 1
        $gates gh -- run watch <run-id> --exit-status
 
-6. **Tag.** Scan the notes file, then tag the commit with it as the message and push the tag:
+6. **Tag.** Scan the notes file, then tag the commit with it as the message and push the tag.
+   `--cleanup=whitespace` keeps the lines that start with `#`, the headings of the notes;
+   without it git removes them:
 
        $gates scan-text .out/release-<version>-notes.md
-       $gates bot -- tag -a <version> -F .out/release-<version>-notes.md <commit>
+       $gates bot -- tag --cleanup=whitespace -a <version> \
+         -F .out/release-<version>-notes.md <commit>
        $gates bot -- push origin <version>
 
 7. **Release.** Create the release as the bot, with no asset, and view it:
 
-       $gates gh -- release create <version> --verify-tag --title "swell <version>" \
+       $gates gh -- release create <version> --repo beyond10x/swell --verify-tag \
+         --title "swell <version>" \
          --notes-file .out/release-<version>-notes.md
-       $gates gh -- release view <version> --json author,tagName,isDraft
+       $gates gh -- release view <version> --repo beyond10x/swell \
+         --json author,tagName,isDraft
 
    The release is done when it is owned by `b10x-bot[bot]`, names the tag `<version>` and is
    not a draft.

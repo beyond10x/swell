@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T13:39:23Z",
+  "actor": "human:operator",
+  "artifact": "epic:slice-01-harness",
+  "kind": "epic",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot task check on wave/s1-6-conformance with the runner's variables, exit 0: 58 scenarios: 14 passed, 0 failed, 0 error, 44 unsupported (conform-engine); 58 scenarios: 58 passed on ESS's interpreter; 55 test suites: 268 passed; host-requirements: 164 requirement(s), 70 test, 94 pending, none for slice 1; test262-slice 01 31 62 0 0 31 31 0 0; gate-selftest: 31 passed, 0 failed (docs/plan/slice-01-wave-6.md)"
+  }
+}

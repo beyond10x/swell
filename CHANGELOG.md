@@ -10,6 +10,25 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Added
+
+- The gate runs the scenarios of the host interface model against the engine itself
+  (`conformance/ess`, the task `conform-engine`): `58 scenarios: 14 passed, 0 failed, 0 error,
+  44 unsupported`. An unsupported scenario names the later slice or the reason it waits for,
+  and a planted defect (an interrupt that does nothing) must fail a scenario.
+- The model states whose realm it is: a script is parsed in a realm of the agent that is
+  called, and a realm of another agent is refused as `ForeignHandle`.
+- The first delivery slice is delivered: no requirement of the host interface is pending for
+  it, and the gate fails if one ever is again.
+
+### Changed
+
+- The design gives the global `Function`, plain method definitions and shorthand properties,
+  `Number`, `Boolean`, `isNaN` and `isFinite` to the second delivery slice. The host interface
+  gains three requirements (`HOST-162` to `HOST-164`), among them `Agent::refusals()`, a count
+  of the refusals the engine raised; none is implemented yet
+  (`host-requirements: 164 requirement(s), 164 line(s): 70 test, 94 pending`).
+
 ## [0.1.0] - 2026-11-21
 
 The first release. swell is an ECMAScript engine written from scratch in Rust, with no

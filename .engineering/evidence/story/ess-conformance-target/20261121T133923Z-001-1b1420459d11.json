@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T13:39:23Z",
+  "actor": "human:operator",
+  "artifact": "story:ess-conformance-target",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "the unit's claim run again by the coordinator in the unit's tree before its commit: the tasks suite and conform-engine, the planted-defect test, the crate's tests and clippy on its workspace, exit 0 each (docs/plan/slice-01-wave-6.md)"
+  }
+}

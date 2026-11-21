@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: epic:slice-01-harness
 kind: epic
-status: active
+status: implemented
 title: 'Slice 1, harness: the first engine and the test262 runner'
 summary: 'First engine that runs a script, with the test262 run path and the host limits: 31 cases and 62 runs of test/harness (82 by directory; 51 need later slices), and the 68 host requirements marked for slice 1.'
 relations:
 - depends_on: epic:foundation
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:58Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:58Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T13:39:23Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

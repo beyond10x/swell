@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-conformance-target
 kind: story
-status: active
+status: implemented
 title: The ESS conformance target runs the model scenarios against the slice 1 interface
 summary: conformance/ess, its own workspace and lock with ess-conformance at tag 0.96.0, six commands mapped, the rest unsupported under a ceiling, a planted-defect test, task conform-engine.
 relations:
@@ -20,10 +20,11 @@ scope:
   path: conformance/ess/tests/planted_defect.rs
 - confidence: cited
   path: taskfiles/conform-engine.yml
-revision: 5
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:50:00Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:50:00Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T13:39:23Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
@@ -76,6 +77,23 @@ prints 19. Of these, by their `configure_external_outcome` and `await_outcome` s
 So the slice 1 run is 61 scenarios: 13 passed, 0 failed, 0 error, 48 unsupported (the 42 that
 execute another command, the 5 and the 1 above). The ceiling on unsupported is that number, 48,
 and later slices lower it.
+
+## Additions in wave 6 of slice 1 (2026-11-21)
+
+Binding; where this section and the text below differ, this section governs.
+
+- **The numbers are 14 passed and 44 unsupported of 58**, not 13 and 48 of 61. The unit's
+  first run gave 9 of 61: the model's synthesized scenarios parsed on one agent with a realm
+  created on another, and the model's example source had no semicolon. The model was
+  corrected in the same wave (`spec/`: a Realm carries its agent, `ParseScript` refuses a
+  realm of another agent with `foreign-realm`, authored scenarios on the realm's own agent),
+  and the numbers were measured on it. The task `conform-engine` fails on fewer than 14
+  passed and on more than `ESS_UNSUPPORTED_MAX` (44) unsupported.
+- **The planted defect is a target whose `Interrupt` leaves the flag unset.** It must fail the
+  authored scenario `interrupt-ends-the-next-run`, and the correct target must fail none.
+- **The target depends on `swell-syntax`** beside `swell`: it reads `message_kind` to report a
+  refusal of the parser for a later slice as unsupported, never as `parse-failed`.
+- **Gate variables**: `ESS_SUITE` and `ESS_UNSUPPORTED_MAX`, both in `GATE_VARIABLES`.
 
 ## Change
 

@@ -11,17 +11,18 @@ not trust.
 
 swell runs scripts of the ES5 grammar, in both modes, under a step and a memory budget, and its
 gate runs test262: 3,969 of the 44,812 cases it runs pass (8.9 %), measured on 2026-11-21. The
-first delivery slice, the test262 harness itself, passes its 31 cases.
+first of nineteen delivery slices is delivered: the test262 harness itself, 31 cases, all
+passing.
 
 - The design, [`docs/design/engine.md`](docs/design/engine.md): what swell targets, how it is
   built, how it is measured, and the order in which it is delivered.
 - The host interface, specified before its code:
-  [`docs/design/host-interface.md`](docs/design/host-interface.md) with 161 numbered
-  requirements, and an ESS model under [`spec/`](spec/) whose 61 scenarios pass on ESS's
-  interpreter.
+  [`docs/design/host-interface.md`](docs/design/host-interface.md) with 164 numbered
+  requirements, and an ESS model under [`spec/`](spec/) whose 58 scenarios pass on ESS's
+  interpreter; the gate runs them against the engine too, and 14 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
   pinned by checksum, both specifications checked, and 31 planted defects that the gate must
-  refuse. Measured on 2026-11-21: it passes, here and on the forge, and 70 of 161 host
+  refuse. Measured on 2026-11-21: it passes, here and on the forge, and 70 of 164 host
   requirements have a test.
 - The test262 runner, `swell-test262`: it reads all 53,801 cases, excludes 8,982 by recorded
   decision, runs the rest in both modes under budgets, and counts them per directory, per
@@ -37,8 +38,8 @@ first delivery slice, the test262 harness itself, passes its 31 cases.
 Releases are listed in [`CHANGELOG.md`](CHANGELOG.md), each with what works and its limits;
 [`docs/releasing.md`](docs/releasing.md) says how one is cut.
 
-Next: the model of the host interface run against the engine, which closes the first slice;
-then the rest of the ES5 language (the second of nineteen slices, 5,244 cases).
+Next: the rest of the ES5 language (`eval`, `with`, `arguments`, labels, semicolon insertion, the
+global `Function`): the second of nineteen slices, 5,245 cases, of which 2,125 pass today.
 
 ## What swell is
 
@@ -80,9 +81,10 @@ Three texts say what swell must do, and each is held by something that runs:
   counts the cases that exist, are excluded, run and pass, per directory and per delivery slice.
 - **The host interface, the part a model can state**: an
   [ESS](https://github.com/beyond10x/ess) model under [`spec/`](spec/) of agents, realms,
-  scripts, modules and jobs, their commands and outcomes. It validates, and its 61 scenarios
-  pass on ESS's interpreter. ESS states about half of the interface: the first model has 50
-  places marked as not expressible.
+  scripts, modules and jobs, their commands and outcomes. It validates, and its 58 scenarios
+  pass on ESS's interpreter; 14 of them run against the engine itself, and the other 44 name
+  the later slice or the reason they wait for. ESS states about half of the interface: the
+  model has 51 places marked as not expressible.
 - **The host interface, the rest**: numbered requirements in
   `docs/design/host-interface.md` (values, hooks that answer the engine, host objects, budgets,
   determinism), each tied to a test or to a written omission, and checked by the gate.
