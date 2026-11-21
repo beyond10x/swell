@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T19:28:42Z",
+  "actor": "human:operator",
+  "artifact": "story:slice-02-conformance-close",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "the unit's claim run again by the coordinator in the unit's tree before its commit (tests of the workspace, clippy, test-collect, host requirements, test262-moves-check and its planted script, slot task test262, exit 0 each); against the coordinator's own base run lines every moved case of slice 2 fails on the base and no moved case passes; 42 runs pass newly, none that passed fails (docs/plan/slice-02-wave-4.md)"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T19:28:42Z",
+  "actor": "human:operator",
+  "artifact": "epic:slice-02-language-core",
+  "kind": "epic",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot task check on wave/s2-4-close with the runner's variables, the three units merged and test262-moves-check in check, exit 0: 62 test suites: 341 passed; test-collect: 238 passed; test-faults: 1 passed; conform-engine: 14 passed, 0 failed; host-requirements: 164 requirement(s), 80 test, 84 pending, none for slices 1 and 2; test262 total 53801 8982 7 44812 7742 37070 0; test262-slice 02 4259 7543 0 0 4259 4259 0 0; test262-moves: 1032 case(s) moved; gate-selftest: 32 passed, 0 failed (docs/plan/slice-02-wave-4.md)"
+  }
+}

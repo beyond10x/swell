@@ -10,9 +10,10 @@ not trust.
 ## State
 
 swell runs scripts of the ES5 grammar, in both modes, under a step and a memory budget, and its
-gate runs test262: 7,721 of the 44,812 cases it runs pass (17.2 %), measured on 2026-11-21. The
-first of nineteen delivery slices is delivered: the test262 harness itself, 31 cases, all
-passing.
+gate runs test262: 7,742 of the 44,812 cases it runs pass (17.3 %), measured on 2026-11-21. The
+first two of nineteen delivery slices are delivered: the test262 harness itself (31 cases) and
+the ES5-level language with `with`, `arguments`, `eval` and the global `Function` (4,259
+cases); every case of both passes.
 
 - The design, [`docs/design/engine.md`](docs/design/engine.md): what swell targets, how it is
   built, how it is measured, and the order in which it is delivered.
@@ -21,7 +22,7 @@ passing.
   requirements, and an ESS model under [`spec/`](spec/) whose 58 scenarios pass on ESS's
   interpreter; the gate runs them against the engine too, and 14 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
-  pinned by checksum, both specifications checked, and 31 planted defects that the gate must
+  pinned by checksum, both specifications checked, and 32 planted defects that the gate must
   refuse. Measured on 2026-11-21: it passes, here and on the forge, and 80 of 164 host
   requirements have a test.
 - The test262 runner, `swell-test262`: it reads all 53,801 cases, excludes 8,982 by recorded
@@ -39,8 +40,8 @@ passing.
 Releases are listed in [`CHANGELOG.md`](CHANGELOG.md), each with what works and its limits;
 [`docs/releasing.md`](docs/releasing.md) says how one is cut.
 
-Next: the close of the ES5 language (`with`, `arguments`, `eval` and the global `Function` are in): the
-second of nineteen slices, 5,267 cases, of which 4,257 pass after the third of its four waves.
+Next: the core library (`Object`, `Function`, `Array`, `String`, `Error`, `JSON`): the
+third of nineteen slices, 7,635 cases, of which 2,762 pass today.
 
 ## What swell is
 

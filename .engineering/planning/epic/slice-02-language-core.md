@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: epic:slice-02-language-core
 kind: epic
-status: active
+status: implemented
 title: 'Slice 2, language-core: the ES5-level language'
 summary: 'The rest of the ES5-level language: eval, with, arguments, labels, semicolon insertion and the global Function; 5,245 cases on main after slice 1, about 4,270 after the moves.'
 relations:
 - depends_on: epic:slice-01-harness
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T13:41:54Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T19:28:42Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

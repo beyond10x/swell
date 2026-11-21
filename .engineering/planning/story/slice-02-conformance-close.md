@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slice-02-conformance-close
 kind: story
-status: active
+status: implemented
 title: 'Every run of slice 2 passes: the cases that need a later slice move by rule lines with their reasons'
 summary: 'Measured with the per-run file once every part of slice 2 exists: about 1,000 cases move to slices 3 to 12 by rule lines and feature exponentiation 4, each named with its evidence in moves.tsv and checked by test262-moves-check; the design counts and expected.txt in the same change.'
 relations:
@@ -21,10 +21,11 @@ scope:
   path: taskfiles/test262.yml
 - confidence: cited
   path: tests/gate/test262-moves-check-refuses-a-line-without-evidence.sh
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T19:28:42Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

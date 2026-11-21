@@ -61,6 +61,7 @@ tasks:
       - task: test-faults
       - task: conform-engine
       - task: test262
+      - task: test262-moves-check
       - task: gate-selftest
 
   gate-vars:
@@ -84,6 +85,7 @@ tasks:
         ESS_SUITE ESS_UNSUPPORTED_MAX
         HOST_REQ_DOC HOST_REQ_LIST HOST_REQ_SPEC HOST_REQ_DELIVERED HOST_REQ_TEST_LIST
         TEST262_DESIGN TEST262_FEATURES TEST262_SECTIONS TEST262_EXPECTED TEST262_OUT TEST262_WORKERS TEST262_RUN
+        TEST262_MOVES TEST262_LATER_PARTS
     silent: true
     cmds:
       - |

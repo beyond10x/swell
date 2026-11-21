@@ -12,13 +12,15 @@ interpreter and the builtins the test262 harness calls exist. **Slice 1 is deliv
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
 (the other 44 need a later slice and say so). 80 of 164 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate runs test262: 7,721 of the 44,812 run cases pass. Release `0.1.0` was cut at the close of
-wave 5 of slice 1. Slice 2, `language-core`, is six stories in four waves (`docs/plan/waves.md`,
-"Slice 2"); waves 1 to 3 are delivered (`docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
+gate runs test262: 7,742 of the 44,812 run cases pass. Release `0.1.0` was cut at the close of
+wave 5 of slice 1. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
+"Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
 `arguments` object, names looked up at run time; `docs/plan/slice-02-wave-3.md`: `eval`, the
-global `Function`, the two hooks of the host, `Agent::refusals()`), and slice 2 passes 4,257 of
-its 5,267 cases; no host requirement is pending for it.
+global `Function`, the two hooks of the host, `Agent::refusals()`; `docs/plan/slice-02-wave-4.md`:
+the close, `Array.prototype.toString` early, 1,008 cases moved to later slices with evidence
+the gate checks): all 4,259 cases of slice 2 pass in all 7,543 runs, and no host requirement
+is pending for it. Next is slice 3, `builtins-core` (`epic:slice-03-builtins-core`).
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
@@ -188,11 +190,11 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot task check` on 2026-11-21, after wave 3 of slice 2, with the variables of the runner,
+`slot task check` on 2026-11-21, after wave 4 of slice 2, with the variables of the runner,
 exit 0:
 
 ```
-python-check: no Python file among 995 file(s)
+python-check: no Python file among 1009 file(s)
 forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
 Cargo.lock: 7 package(s), none from outside this repository
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
@@ -203,20 +205,21 @@ swell v1 — 2 file(s), 8 scenario(s), valid
   58 scenarios: 58 passed, 0 failed, 0 error, 0 unsupported
 host-requirements: 164 requirement(s), 164 line(s): 80 test, 84 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
 host-requirements: pending by slice: 3:3 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
-62 test suites: 330 passed, 0 failed, 1 ignored
-test-collect: 38 test suites: 227 passed, 0 failed, 1 ignored
+62 test suites: 341 passed, 0 failed, 1 ignored
+test-collect: 38 test suites: 238 passed, 0 failed, 1 ignored
 test-faults: 1 test suites: 1 passed, 0 failed, 0 ignored
 conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok
   58 scenarios: 14 passed, 0 failed, 0 error, 44 unsupported
 test262-refused 46493
-test262 total 53801 8982 7 44812 7721 37091 0
+test262 total 53801 8982 7 44812 7742 37070 0
 test262: 221 directory lines sum to the total
 test262-slice 01 31 62 0 0 31 31 0 0
-test262-slice 02 5267 9217 0 0 5267 4257 1010 0
+test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262: 22 slice lines equal the design
 test262-errors 0
 test262: 286 lines equal conformance/test262/expected.txt
-gate-selftest: 31 passed, 0 failed
+test262-moves: 1032 case(s) moved, 3:78 4:125 5:136 6:487 7:41 8:85 9:2 10:74 11:4; slices 1 to 19: 44931 85794
+gate-selftest: 32 passed, 0 failed
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`
@@ -409,4 +412,9 @@ session coordinates; this section is its procedure, taken from how surf is run
 - **A case that cannot pass in its slice.** The slice counts say when a case can first pass,
   not that it will (design, section 12). A case found to need a later slice is moved by a rule
   line in the `swell-slices` block with its reason, in the change that moves both slices'
-  counts; none is skipped silently.
+  counts; none is skipped silently. Since the close of slice 2 every move has a line in
+  `conformance/test262/moves.tsv` with its evidence (a token of
+  `conformance/test262/later-parts.tsv` found in the case or its includes, or a feature the
+  block names), and the gate task `test262-moves-check` refuses a line without it. A case that
+  fails on a part of its own slice is never moved: its owner fixes it
+  (`docs/plan/slice-02-wave-4.md`).

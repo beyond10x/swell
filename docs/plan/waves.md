@@ -94,15 +94,15 @@ run: automatic semicolon insertion 411, `\u` escapes 352, `eval` 305, `Number` 2
 | 3 | `eval-and-function-constructor` | `eval` and `Function` through one entry, the two hooks, the count of refusals; 10 requirements |
 | 4 | `slice-02-conformance-close` | the cases that need a later slice move, each with its evidence in a list the gate checks; every run of the slice passes |
 
-Delivered: [wave 1](slice-02-wave-1.md), [wave 2](slice-02-wave-2.md), [wave 3](slice-02-wave-3.md), and between waves 2 and 3
-[the run loop's frame](slice-02-run-loop-frame.md). After wave 3 slice 2 passes 4,257 of its 5,267 cases (22 cases of
-`test/harness` came to it with `Function`), 80 of 164 host requirements have a test, the gate
-counts 7,721 cases as passed, and 46,493 of the 85,556 runs meet a refusal. The base run lines
-for the next wave are the run lines of this wave on its branch after its close.
+**Delivered**, 2026-11-21: [wave 1](slice-02-wave-1.md), [wave 2](slice-02-wave-2.md),
+[wave 3](slice-02-wave-3.md), [wave 4](slice-02-wave-4.md), and between waves 2 and 3
+[the run loop's frame](slice-02-run-loop-frame.md). All 4,259 cases of slice 2 pass in all 7,543
+runs; 1,008 cases moved to the slices they need, each with evidence the gate checks; 80 of
+164 host requirements have a test and none is pending for slices 1 and 2; the gate counts
+7,742 cases as passed, and 46,493 of the 85,556 runs meet a refusal.
 
-Open, to decide before wave 4 with the run lines: `Array.prototype.toString` is missing (slice
-3), so an array converts through `Object.prototype.toString` and answers `[object Array]`;
-`isNaN([])` is `true`. Count the runs of slice 2 that fail on it and take it early if they do.
+`Array.prototype.toString` was decided at the boundary of wave 3 by the deciding session:
+slice 2 took it early and complete (11 cases failed on it, one of them of slice 2).
 
 In wave 1 the three stories share no file but `conformance/test262/expected.txt`, which the
 coordinator regenerates on the wave branch after the merges. The design changes the stories
@@ -170,6 +170,10 @@ that slice reads its entries first.
   1,632, `json_property_list` 1,584, `call_function` 1,344 and `builtin_call` 720. A unit
   that adds to a builtin on a re-entry path has 1,560 bytes per re-entry before a stack test
   fails; it then measures again and the constant follows, or the frame is taken apart.
+- The next change of `taskfiles/test262.yml`: a variable that is both exported and passed on
+  the command line keeps the exported value in a task's `env:` and the command line's in
+  its templates (go-task 3.54.0, [slice 2, wave 4](slice-02-wave-4.md)). The task `test262`
+  reads its paths through `env:`; `test262-moves-check` reads them as template values.
 - The index map of the design ("Objects": an ordered list with an index map above a small
   size) is not built: a property is found by a scan of the list, and so is a binding that a
   non-strict direct `eval` added to a record ([slice 2, wave 3](slice-02-wave-3.md)); the

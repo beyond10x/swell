@@ -29,9 +29,13 @@ Every number below comes from the gate, `task check`, on the released commit.
   give the code for an object passed to `eval` (`host_get_code_for_eval`).
 - `Agent::refusals()`: a count of the refusals the engine raised, at parse or run time, caught
   by the script or not. The conformance runner fails a run in which it moved.
-- test262 after these: `test262 total 53801 8982 7 44812 7721 37091 0`, 7,721 of the 44,812
-  cases that run pass (17.2 %; 3,969 in 0.1.0). The second slice passes 4,257 of its 5,267
-  cases. 46,493 of the 85,556 runs meet a refusal of a construct the parser does not have
+- `Array.prototype.toString`, before the rest of `Array`: `[] + ""` is `""`.
+- The second delivery slice is delivered: all of its 4,259 test262 cases pass in all 7,543
+  runs. 1,008 cases that need a later slice moved there, each with its evidence in
+  `conformance/test262/moves.tsv`, which the gate checks (`test262-moves-check`).
+- test262 after these: `test262 total 53801 8982 7 44812 7742 37070 0`, 7,742 of the 44,812
+  cases that run pass (17.3 %; 3,969 in 0.1.0).
+  46,493 of the 85,556 runs meet a refusal of a construct the parser does not have
   yet (53,564 ended at one in 0.1.0, where a refusal a script caught was not counted).
 - The gate runs the scenarios of the host interface model against the engine itself
   (`conformance/ess`, the task `conform-engine`): `58 scenarios: 14 passed, 0 failed, 0 error,
@@ -50,6 +54,10 @@ Every number below comes from the gate, `task check`, on the released commit.
   one re-entry takes up to 11,100 bytes in a debug build (through `toJSON`), and an agent
   with `reentry_depth` 1,000 and `parser_nesting` 1,000 needs a thread of 14,672,640 bytes
   (31,073,024 in 0.1.0).
+
+- The completion value of a `try` statement whose `finally` block is left by `break` or
+  `continue` is `undefined`, as the standard says; it was the value of the `try` or `catch`
+  block. A script sees it through `eval` and as the result of a script.
 
 - The design gives the global `Function`, plain method definitions and shorthand properties,
   `Number`, `Boolean`, `isNaN` and `isFinite` to the second delivery slice. The host interface
