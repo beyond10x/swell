@@ -189,18 +189,23 @@ Decided on 2026-11-21: the repository becomes the public repository `beyond10x/s
 operator's answer, given in the session that decides for him and relayed by it to the
 coordinating session (not heard in the coordinating session itself): "A. Yes, both" to
 "Publish `swell` as public repository `beyond10x/swell` (enrolled in the gates, history
-replaced by one bot-made first commit, as surf)". The first publication is at the close of
-wave 2 of slice 1.
+replaced by one bot-made first commit, as surf)". Published on 2026-11-21 at the close of wave 2
+of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made by the bot.
 
 - **Who does what.** The session that decides for the operator does the whole forge side: the
   bot-made first commit of `main`'s tree, the policy entry, audit, `check`, `verify`,
   `publish`. The coordinating session and its units make no call to a forge, add no remote
   and push nothing. At each wave boundary the coordinator sends that session `main`'s commit
   and the gate's numbers and waits for its answer before the next wave opens.
-- **History.** `main` is replaced by one first commit made by the bot, with the same tree. The
+- **History.** `main` starts at one first commit made by the bot (`8945d64`), with the tree of the
+  last local commit before it (`31b9f07`). The
   history before it stays in the local repository as the branch `archive/pre-public` and is
   never pushed; nothing is deleted. Commit ids in the wave records up to that point name
-  commits of that branch. Unit branches start from the new `main`.
+  commits of that branch. Branches start from `main`; a branch of the old history is never
+  merged into it. The remote is `origin`; the gates' hooks are installed in the repository.
+  The policy holds three exceptions for the `hash_key` value of the scenario fixtures under
+  `spec/scenarios/`, bound to the content of those lines: a change to one of them is refused
+  until the session that decides for the operator admits the new content.
 - **Every commit after the first publication is the organization bot's**, also a merge; a
   plain `git commit` is not used, because the gates refuse a pushed commit with another author
   or committer:
