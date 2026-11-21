@@ -18,16 +18,30 @@ scope:
 - confidence: cited
   path: crates/swell/src/compile_fail.rs
 - confidence: cited
+  path: crates/swell/src/heap
+- confidence: cited
   path: crates/swell/src/host
+- confidence: cited
+  path: crates/swell/src/host/host_object.rs
 - confidence: cited
   path: crates/swell/src/ops
 - confidence: cited
   path: crates/swell/src/realm
 - confidence: cited
+  path: crates/swell/src/value.rs
+- confidence: cited
   path: crates/swell/tests
 - confidence: cited
+  path: crates/swell/tests/budgets.rs
+- confidence: cited
+  path: crates/swell/tests/collect.rs
+- confidence: cited
+  path: crates/swell/tests/host_objects.rs
+- confidence: cited
+  path: crates/swell/tests/interrupt.rs
+- confidence: cited
   path: crates/swell/tests/support/host.rs
-revision: 9
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
@@ -138,6 +152,19 @@ design governs.
   writes the check, with a unit test of its own for each of the two sites.
 - The counts of Acceptance are measured on the base of the wave: with `HOST-160` the list has
   160 lines.
+- `Writes:` is extended (2026-11-21, found by this story's unit before it wrote anything: with a
+  required hook and the corrected `new_host_object` the crate does not compile unless these
+  change too): `crates/swell/src/value.rs` (the field of `Realm`, so that `create_realm`,
+  `global_object` and `realm_ref` can be written), `crates/swell/src/heap/mod.rs`, `arena.rs`,
+  `collect.rs`, `map.rs`, `roots.rs`, `string.rs` (a root slot that holds a realm record; an
+  arena for Symbols with its trace function, so that a collection that reaches a well-known
+  symbol does not fault the agent; the `expect(dead_code)` marks of items this story now
+  uses; the test hosts inside the crate, which gain the required hooks),
+  `crates/swell/src/host/host_object.rs` (its test host), and
+  `crates/swell/tests/host_objects.rs`, `collect.rs`, `interrupt.rs`, `budgets.rs` (callers of
+  `new_host_object` and test hosts). In these files the unit changes what the list names and
+  nothing else; the tests of `story:heap-values-and-host-surface` keep their names and what
+  they assert.
 
 ## Change
 
