@@ -15,12 +15,14 @@ scope:
 - confidence: cited
   path: crates/swell/Cargo.toml
 - confidence: cited
+  path: crates/swell/src
+- confidence: cited
   path: crates/swell/src/host/agent.rs
 - confidence: cited
   path: crates/swell/src/host/limits.rs
 - confidence: cited
   path: crates/swell/tests
-revision: 7
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
@@ -109,6 +111,15 @@ host returns", with the new requirement `HOST-160`; found by the unit of
   `story:object-model-and-realms`): the fuzz test and `misuse.rs` cover `with_cx`, `Agent::call`
   and `Agent::construct` with a stale, a released and a foreign `Realm` (`Err(StaleHandle)` or
   `Err(ForeignHandle)`, the agent `Alive`).
+
+- `Writes:` is extended for this wave (2026-11-21): any file under `crates/swell/src/` for a
+  defect of the engine that a test of this story exposes. Each fix is the smallest change that
+  makes the engine do what the requirement or the clause says, has a test that failed before
+  it, and is listed in the unit's report (file, function, what was wrong, the `HOST-<n>` or
+  clause). A defect that needs a design decision is reported with the test output and left
+  failing. The sentence above that a missing check is "reported, not fixed here" is withdrawn:
+  the earlier stories are closed and this is the last story that writes the engine in slice
+  1.
 
 ## Change
 
