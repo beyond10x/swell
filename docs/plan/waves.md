@@ -110,6 +110,47 @@ wait for are in the design since wave 6 of slice 1 (`20c1f35`): the parts taken 
 slice, `Function` in slice 2, name resolution under `with` and direct `eval`, the omission
 rule, `HOST-162` to `HOST-164`.
 
+## Slice 3, `builtins-core`
+
+`epic:slice-03-builtins-core`: `Object`, `Function`, `Array`, `String`, `Error`, `JSON`,
+`globalThis` and the URI functions, and the object model of decision 4 (an index map above a
+small size, dense elements of arrays). Decomposed on 2026-11-21 into thirteen stories
+(accepted, `active`), read by the four plan critics in two rounds
+(`review-result:slice-03-*`: 21 findings in round 1, 3 in round 2, all applied). Measured on
+`main` after slice 2 (`test262-slice 03 7635 15074 0 0 7635 2762 4873 0`): 2,762 of its 7,635
+cases pass. The 4,873 failing cases are on lists the stories read, under
+[`slice-03/`](slice-03/): 4,050 on the ten lists of the builtin stories
+(`story-<key>.cases.txt`), 203 that need the builtin of two stories (`cross-story.tsv`), 620
+that are estimated to need a later slice (`move-estimate.tsv`).
+
+| wave | stories | closes |
+|---|---|---|
+| 1 | `builtin-group-modules`, `property-index-and-dense-elements` | one file per group of builtins, and the operations two stories of wave 2 need, each with its tests; the object model, so that a lookup's time does not grow with the object |
+| 2 | `object-integrity-and-prototype-methods`, `object-enumeration-and-copy-methods`, `function-apply-and-source-text`, `global-this-uri-functions-and-is-error`, `json-parse-and-raw-json`, `array-iteration-methods`, `array-search-and-copy-methods`, `array-mutation-and-sort-methods`, `string-access-and-search-methods`, `string-transform-and-compare-methods` | the builtins, ten units side by side, each writing its group file and its tests |
+| 3 | `slice-03-conformance-close` | the cases that need a later slice move with their evidence; four requirement lines and four `omit` lines; every run of the slice passes |
+
+`aep plan artifact waves` prints four waves for this set: it puts the two stories of wave 1
+one after the other because both record `crates/swell/src/object/mod.rs`. They run side by
+side by decision: each story names its lines of that file. The ten stories of wave 2 share
+mark lines in four files (`ops/objects.rs`, `ops/testing.rs`, `object/mod.rs`,
+`builtins/string/mod.rs`); each story says which, and the recorded scope leaves them out.
+
+Before wave 1, `story:gate-test-steps-within-budget`: the gate's test steps took 284 s on
+`29f674c` (`test` 84 s, `test-collect` 110 s, `test262` 90 s) against a budget of 120 s set on
+2026-11-21. A unit of slice 3 runs the tests of the code it touched and not the gate.
+
+The design changes wave 2 waits for are in the design (`8d5828d`): a String method that needs
+the tables of slice 5 refuses a code unit outside ASCII with a counted refusal (`HOST-165`),
+and a function's source text lives as long as the function and is charged to the memory
+budget.
+
+Decided by the deciding session on 2026-11-21: the seven directories of builtins that need
+iterators or the normalization tables (`Array/from`, `Object/fromEntries`, `Object/groupBy`,
+`Array/prototype/keys`, `values`, `entries`, `String/prototype/normalize`; 79 cases) move
+whole to slices 6 and 5 at the close, the 9 included that pass today on the `TypeError` of the
+missing method. Each of the 9 has its own line of evidence that says it passed at the move,
+`expected.txt` keeps them as passing, and `test262-moves-check` is not loosened for it.
+
 ## What later slices take over
 
 Findings of delivered waves that belong to a slice not yet decomposed. The decomposition of

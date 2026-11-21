@@ -1,0 +1,203 @@
+test/built-ins/Array/prototype/copyWithin/coerced-values-start-change-start.js	array-mutation,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/every/15.4.4.16-5-22.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/every/15.4.4.16-5-23.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/every/15.4.4.16-5-24.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/every/15.4.4.16-7-c-ii-16.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/every/15.4.4.16-7-c-ii-17.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/every/15.4.4.16-7-c-ii-18.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/fill/return-abrupt-from-setting-property-value.js	array-mutation,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/filter/15.4.4.20-5-22.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/filter/15.4.4.20-5-23.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/filter/15.4.4.20-5-24.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/filter/15.4.4.20-9-c-ii-16.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/filter/15.4.4.20-9-c-ii-17.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/filter/15.4.4.20-9-c-ii-18.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/find/array-altered-during-loop.js	array-iteration,array-mutation	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/findIndex/array-altered-during-loop.js	array-iteration,array-mutation	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/findLast/array-altered-during-loop.js	array-iteration,array-mutation	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/findLastIndex/array-altered-during-loop.js	array-iteration,array-mutation	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/forEach/15.4.4.18-5-22.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/forEach/15.4.4.18-5-23.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/forEach/15.4.4.18-5-24.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/forEach/15.4.4.18-7-c-ii-16.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/forEach/15.4.4.18-7-c-ii-17.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/forEach/15.4.4.18-7-c-ii-18.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/forEach/S15.4.4.18_A1.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/forEach/S15.4.4.18_A2.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/pop/set-length-array-is-frozen.js	array-mutation,object-integrity	threw Test262Error: Expected SameValue(«0», «1») to be true
+test/built-ins/Array/prototype/pop/set-length-zero-array-is-frozen.js	array-mutation,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/shift/set-length-array-is-frozen.js	array-mutation,object-integrity	threw Test262Error: Expected SameValue(«0», «1») to be true
+test/built-ins/Array/prototype/shift/set-length-zero-array-is-frozen.js	array-mutation,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/some/15.4.4.17-5-22.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/some/15.4.4.17-5-23.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/some/15.4.4.17-5-24.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/some/15.4.4.17-7-c-ii-16.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/some/15.4.4.17-7-c-ii-17.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/some/15.4.4.17-7-c-ii-18.js	array-iteration,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Array/prototype/toLocaleString/S15.4.4.3_A1_T1.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/toLocaleString/S15.4.4.3_A3_T1.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/toLocaleString/length.js	array-search,object-integrity	threw TypeError: Cannot convert undefined or null to object
+test/built-ins/Array/prototype/toLocaleString/name.js	array-search,object-integrity	threw TypeError: Cannot convert undefined or null to object
+test/built-ins/Array/prototype/toLocaleString/primitive_this_value.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/toLocaleString/primitive_this_value_getter.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/toLocaleString/prop-desc.js	array-search,object-integrity	threw Test262Error: typeof Expected SameValue(«"undefined"», «"function"») to be true
+test/built-ins/Array/prototype/toReversed/frozen-this-value.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/toSorted/frozen-this-value.js	array-mutation,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/toSpliced/frozen-this-value.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/unshift/set-length-array-is-frozen.js	array-mutation,object-integrity	threw Test262Error: Expected SameValue(«0», «1») to be true
+test/built-ins/Array/prototype/unshift/set-length-zero-array-is-frozen.js	array-mutation,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Array/prototype/with/frozen-this-value.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Function/S15.3_A2_T2.js	?	counted refusal: 1 refusal(s)
+test/built-ins/JSON/isRawJSON/builtin.js	json,object-integrity	threw TypeError: the value is not a function
+test/built-ins/JSON/parse/reviver-wrapper.js	json,object-integrity	threw TypeError: the value is not a function
+test/built-ins/JSON/rawJSON/builtin.js	json,object-integrity	threw TypeError: the value is not a function
+test/built-ins/JSON/rawJSON/returns-expected-object.js	json,object-enumeration	threw TypeError: the value is not a function
+test/built-ins/JSON/stringify/value-tojson-not-function.js	?	counted refusal: 1 refusal(s)
+test/built-ins/NativeErrors/cause_property_native_error.js	array-search,string-access	nativeErrors.js: threw TypeError: the value is not a function
+test/built-ins/NativeErrors/message_property_native_error.js	array-search,string-access	nativeErrors.js: threw TypeError: the value is not a function
+test/built-ins/Object/S15.2.1.1_A1_T1.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/S15.2.1.1_A1_T2.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/S15.2.1.1_A1_T3.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/S15.2.1.1_A1_T4.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/S15.2.1.1_A1_T5.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/assign/OnlyOneArgument.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/assign/Target-Boolean.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/assign/Target-Number.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/assign/Target-String.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/create/15.2.3.5-4-14.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/create/15.2.3.5-4-37.js	array-iteration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/defineProperty/15.2.3.6-4-603.js	?	threw Test262Error: defineProperties should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-604.js	?	threw Test262Error: seal should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-605.js	?	threw Test262Error: freeze should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-606.js	?	threw Test262Error: preventExtensions should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-607.js	?	threw Test262Error: isSealed should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-608.js	?	threw Test262Error: isFrozen should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-609.js	?	threw Test262Error: isExtensible should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-610.js	?	threw Test262Error: keys should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-612.js	?	threw Test262Error: indexOf should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-613.js	?	threw Test262Error: lastIndexOf should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-614.js	?	threw Test262Error: every should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-615.js	?	threw Test262Error: some should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-616.js	?	threw Test262Error: forEach should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-618.js	?	threw Test262Error: filter should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-619.js	?	threw Test262Error: reduce should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-620.js	?	threw Test262Error: reduceRight should be an own property
+test/built-ins/Object/defineProperty/15.2.3.6-4-621.js	?	threw Test262Error: trim should be an own property
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-202.js	?	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-203.js	?	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-204.js	?	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-205.js	?	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-206.js	?	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-207.js	?	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-208.js	?	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-209.js	?	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-33.js	array-search,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-35.js	?	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-40.js	array-search,string-access	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-43.js	array-search,string-access	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-51.js	array-search,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-53.js	array-search,string-access	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-65.js	array-search,string-access	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-67.js	array-search,string-access	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-71.js	array-search,string-access	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-90.js	array-search,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-1.js	?	threw Test262Error: result1[expResult[p1]] !== true
+test/built-ins/Object/hasOwn/hasown_inherited_exists.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_getter.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_getter_and_setter.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_getter_and_setter_configurable_enumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_getter_and_setter_configurable_nonenumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_getter_and_setter_nonconfigurable_enumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_getter_and_setter_nonconfigurable_nonenumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_getter_configurable_enumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_getter_configurable_nonenumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_getter_nonconfigurable_enumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_getter_nonconfigurable_nonenumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_nonwritable_configurable_enumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_nonwritable_configurable_nonenumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_nonwritable_nonconfigurable_enumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_nonwritable_nonconfigurable_nonenumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_setter.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_setter_configurable_enumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_setter_configurable_nonenumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_setter_nonconfigurable_enumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_setter_nonconfigurable_nonenumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_writable_configurable_enumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_writable_configurable_nonenumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_writable_nonconfigurable_enumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/hasOwn/hasown_inherited_writable_nonconfigurable_nonenumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/keys/15.2.3.14-2-4.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/keys/15.2.3.14-2-5.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/keys/15.2.3.14-2-6.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/prototype/toLocaleString/S15.2.4.3_A1.js	array-search,object-integrity	threw Test262Error: The value of `typeof Object.prototype.toLocaleString` is expected to be "function" Expected SameValue(«"undefined"», «"function"») to be true
+test/built-ins/Object/prototype/toLocaleString/S15.2.4.3_A10.js	array-search,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/prototype/toLocaleString/S15.2.4.3_A11.js	array-search,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/prototype/toLocaleString/S15.2.4.3_A6.js	array-search,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/prototype/toLocaleString/S15.2.4.3_A8.js	array-search,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/prototype/toLocaleString/S15.2.4.3_A9.js	array-search,object-integrity	threw TypeError: Cannot use a property of undefined
+test/built-ins/Object/prototype/toLocaleString/name.js	array-search,object-integrity	threw TypeError: Cannot convert undefined or null to object
+test/built-ins/Object/prototype/toLocaleString/primitive_this_value.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/Object/prototype/toLocaleString/primitive_this_value_getter.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/built-ins/String/prop-desc.js	?	threw ReferenceError: String is not defined
+test/built-ins/String/prototype/charAt/pos-coerce-err.js	object-integrity,string-access	threw TypeError: the value is not a function
+test/built-ins/String/prototype/charCodeAt/pos-coerce-err.js	object-integrity,string-access	threw TypeError: the value is not a function
+test/built-ins/String/prototype/indexOf/S15.5.4.7_A1_T12.js	?	threw TypeError: the value is not a function
+test/built-ins/String/prototype/lastIndexOf/S15.5.4.8_A4_T5.js	object-integrity,string-access	threw Test262Error: #1.1: Exception === "intostr". Actual: TypeError: the value is not a function
+test/built-ins/String/prototype/slice/S15.5.4.13_A1_T5.js	object-integrity,string-access	threw TypeError: the value is not a function
+test/built-ins/String/prototype/substring/S15.5.4.15_A1_T5.js	object-integrity,string-access	threw TypeError: the value is not a function
+test/built-ins/String/prototype/trim/15.5.4.20-2-43.js	object-integrity,string-transform	threw TypeError: Cannot use a property of undefined
+test/built-ins/decodeURI/S15.1.3.1_A1.10_T1.js	global,string-access	threw Test262Error: #1: If B = 110xxxxx (n = 2) and (string.charAt(k + 4) and  string.charAt(k + 5)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURI/S15.1.3.1_A1.11_T1.js	global,string-access	threw Test262Error: #1: If B = 1110xxxx (n = 3) and (string.charAt(k + 4) and  string.charAt(k + 5)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURI/S15.1.3.1_A1.11_T2.js	global,string-access	threw Test262Error: #1: If B = 1110xxxx (n = 3) and (string.charAt(k + 7) and  string.charAt(k + 8)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURI/S15.1.3.1_A1.12_T1.js	global,string-access	threw Test262Error: #1: If B = 11110xxx (n = 4) and (string.charAt(k + 4) and string.charAt(k + 5)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURI/S15.1.3.1_A1.12_T2.js	global,string-access	threw Test262Error: #1: If B = 11110xxx (n = 4) and (string.charAt(k + 7) and string.charAt(k + 8)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURI/S15.1.3.1_A1.12_T3.js	global,string-access	threw Test262Error: #1: If B = 11110xxx (n = 4) and (string.charAt(k + 10) and string.charAt(k + 11)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURI/S15.1.3.1_A1.2_T1.js	global,string-access	threw Test262Error: #1: If string.charAt(k+1) does not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURI/S15.1.3.1_A1.2_T2.js	global,string-access	threw Test262Error: #1: If string.charAt(k+2) does not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURI/S15.1.3.1_A2.1_T1.js	global,string-access	threw Test262Error: #0000 throws
+test/built-ins/decodeURI/S15.1.3.1_A2.2_T1.js	global,string-access	threw TypeError: the value is not a function
+test/built-ins/decodeURI/S15.1.3.1_A2.3_T1.js	global,string-access	threw ReferenceError: decodeURI is not defined
+test/built-ins/decodeURI/S15.1.3.1_A2.4_T1.js	global,string-access	threw ReferenceError: decodeURI is not defined
+test/built-ins/decodeURI/S15.1.3.1_A2.5_T1.js	global,string-access	threw ReferenceError: decodeURI is not defined
+test/built-ins/decodeURIComponent/S15.1.3.2_A1.10_T1.js	global,string-access	threw Test262Error: #1: If B = 110xxxxx (n = 2) and (string.charAt(k + 4) and  string.charAt(k + 5)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURIComponent/S15.1.3.2_A1.11_T1.js	global,string-access	threw Test262Error: #1: If B = 1110xxxx (n = 3) and (string.charAt(k + 4) and  string.charAt(k + 5)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURIComponent/S15.1.3.2_A1.11_T2.js	global,string-access	threw Test262Error: #1: If B = 1110xxxx (n = 3) and (string.charAt(k + 7) and  string.charAt(k + 8)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURIComponent/S15.1.3.2_A1.12_T1.js	global,string-access	threw Test262Error: #1: If B = 11110xxx (n = 4) and (string.charAt(k + 4) and string.charAt(k + 5)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURIComponent/S15.1.3.2_A1.12_T2.js	global,string-access	threw Test262Error: #1: If B = 11110xxx (n = 4) and (string.charAt(k + 7) and string.charAt(k + 8)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURIComponent/S15.1.3.2_A1.12_T3.js	global,string-access	threw Test262Error: #1: If B = 11110xxx (n = 4) and (string.charAt(k + 10) and string.charAt(k + 11)) do not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURIComponent/S15.1.3.2_A1.2_T1.js	global,string-access	threw Test262Error: #1: If string.charAt(k+1) does not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURIComponent/S15.1.3.2_A1.2_T2.js	global,string-access	threw Test262Error: #1: If string.charAt(k+2) does not represent hexadecimal digits, throw URIError
+test/built-ins/decodeURIComponent/S15.1.3.2_A2.1_T1.js	global,string-access	threw Test262Error: #0000 throws
+test/built-ins/decodeURIComponent/S15.1.3.2_A2.2_T1.js	global,string-access	threw TypeError: the value is not a function
+test/built-ins/decodeURIComponent/S15.1.3.2_A2.3_T1.js	global,string-access	threw ReferenceError: decodeURIComponent is not defined
+test/built-ins/decodeURIComponent/S15.1.3.2_A2.4_T1.js	global,string-access	threw ReferenceError: decodeURIComponent is not defined
+test/built-ins/decodeURIComponent/S15.1.3.2_A2.5_T1.js	global,string-access	threw ReferenceError: decodeURIComponent is not defined
+test/built-ins/encodeURI/S15.1.3.3_A1.1_T1.js	global,string-access	threw Test262Error: #DC00-DFFF 
+test/built-ins/encodeURI/S15.1.3.3_A1.1_T2.js	global,string-access	threw Test262Error: #DC00-DFFF 
+test/built-ins/encodeURI/S15.1.3.3_A1.2_T1.js	global,string-access	threw Test262Error: #D800-DBFF 
+test/built-ins/encodeURI/S15.1.3.3_A1.2_T2.js	global,string-access	threw Test262Error: #D800-DBFF 
+test/built-ins/encodeURI/S15.1.3.3_A1.3_T1.js	global,string-access	threw Test262Error: #D800-DBFF 
+test/built-ins/encodeURI/S15.1.3.3_A2.1_T1.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/encodeURI/S15.1.3.3_A2.2_T1.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/encodeURI/S15.1.3.3_A2.3_T1.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/encodeURI/S15.1.3.3_A2.4_T1.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/encodeURI/S15.1.3.3_A2.4_T2.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/encodeURI/S15.1.3.3_A2.5_T1.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/encodeURIComponent/S15.1.3.4_A1.1_T1.js	global,string-access	threw Test262Error: #DC00-DFFF 
+test/built-ins/encodeURIComponent/S15.1.3.4_A1.1_T2.js	global,string-access	threw Test262Error: #DC00-DFFF 
+test/built-ins/encodeURIComponent/S15.1.3.4_A1.2_T1.js	global,string-access	threw Test262Error: #D800-DBFF 
+test/built-ins/encodeURIComponent/S15.1.3.4_A1.2_T2.js	global,string-access	threw Test262Error: #D800-DBFF 
+test/built-ins/encodeURIComponent/S15.1.3.4_A1.3_T1.js	global,string-access	threw Test262Error: #D800-DBFF 
+test/built-ins/encodeURIComponent/S15.1.3.4_A2.1_T1.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/encodeURIComponent/S15.1.3.4_A2.2_T1.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/encodeURIComponent/S15.1.3.4_A2.3_T1.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/encodeURIComponent/S15.1.3.4_A2.4_T1.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/encodeURIComponent/S15.1.3.4_A2.4_T2.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/encodeURIComponent/S15.1.3.4_A2.5_T1.js	global,string-access,string-transform	threw TypeError: the value is not a function
+test/built-ins/global/property-descriptor.js	?	threw Test262Error: globalThis should be an own property
+test/language/comments/S7.4_A6.js	?	threw Test262Error: #0000 throws
+test/language/expressions/in/S8.12.6_A2_T1.js	?	threw Test262Error: #1: var __obj={}; "valueOf" in __obj
+test/language/expressions/in/S8.12.6_A2_T2.js	?	threw Test262Error: #1: var __proto={phylum:"avis"}; "valueOf" in __proto
+test/language/statements/for-in/S12.6.4_A7_T2.js	array-search,object-integrity	threw TypeError: the value is not a function
+test/language/statements/throw/S12.13_A3_T4.js	array-search,string-access	threw Test262Error: #1.0: Exception[0]===mycars[0](operation .concat). Actual:  Exception[0]===undefined
+test/language/statements/try/S12.14_A18_T7.js	array-search,string-access	threw Test262Error: #2.0: Exception[0]===mycars[0]. Actual:  Exception[0]===undefined
