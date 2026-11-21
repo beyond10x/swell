@@ -1,0 +1,90 @@
+# Terminated(StepBudget) ends one run and leaves the agent Alive: the next entry runs with a budget
+# of its own (decision 3, "The step budget"; decision 9, "steps per entry"). Synthesis writes each
+# Terminated branch on its own and never a call after one, and it writes no scenario for
+# PerformMicrotaskCheckpoint's `drained` (its `affects:` needs a view of the jobs). The answers are
+# forced (`external:`), so this states the sequence of answers, not that a script of N steps
+# spends the budget: ESS has no construct for "at most N steps".
+type: ess-scenario/6
+domain: swell.host
+scenario: step-budget-ends-one-run
+summary: A run that spends its steps ends with Terminated(StepBudget), and the next call runs.
+
+arrange:
+  - instance: agent
+    entity: swell.host.Agent
+  - instance: realm
+    entity: swell.host.Realm
+  - instance: script
+    entity: swell.host.Script
+
+timeline:
+  - at: 2026-01-06T09:00:00Z
+    command: swell.host.CreateAgent
+    actor: swell.host.Host
+    input:
+      limits:
+        steps_per_entry: 1000
+        memory_bytes: 67108864
+        frame_depth: 10000
+        reentry_depth: 256
+        parser_nesting: 1000
+        string_length: 1073741824
+        bigint_bits: 1048576
+      hash_key: AAECAwQFBgcICQoLDA0ODw==
+      random_seed: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    outcome: created
+    capture: {instance: agent, event: swell.host.AgentCreated, field: agent_id}
+
+  - at: 2026-01-06T09:00:01Z
+    command: swell.host.CreateRealm
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: created
+    capture: {instance: realm, event: swell.host.RealmCreated, field: realm_id}
+
+  - at: 2026-01-06T09:00:02Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "for (;;) {}"
+    outcome: parsed
+    capture: {instance: script, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:03Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: script}
+    outcome: step-budget
+    events:
+      - event: swell.host.RunTerminated
+        payload:
+          agent_id: {$instance: agent}
+          reason: StepBudget
+
+  - at: 2026-01-06T09:00:04Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: script}
+    outcome: completed
+    events:
+      - event: swell.host.ScriptCompleted
+        payload:
+          script_id: {$instance: script}
+
+  - at: 2026-01-06T09:00:05Z
+    command: swell.host.PerformMicrotaskCheckpoint
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: drained
+    events:
+      - event: swell.host.MicrotaskCheckpointPerformed
+        payload:
+          agent_id: {$instance: agent}

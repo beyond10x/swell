@@ -1,0 +1,122 @@
+# After Terminated(EngineFault) the agent answers every call with Err(HostError::Faulted) (decision 6,
+# HOST-48), and its interrupt handle can still be set. Synthesis cannot arrange a faulted agent: the
+# only way in is an `external:` branch (`engine-fault`), which arrangement does not take, and its
+# `affects:` needs a view of the agent the interface does not have. Covers the `faulted` outcomes
+# of CreateRealm, ParseScript, EvaluateScript, PerformMicrotaskCheckpoint and Collect, and
+# Interrupt's `set` on a faulted agent.
+type: ess-scenario/6
+domain: swell.host
+scenario: faulted-agent-refuses-every-call
+summary: An agent that ended a run with EngineFault refuses every later call with Faulted.
+
+arrange:
+  - instance: agent
+    entity: swell.host.Agent
+  - instance: realm
+    entity: swell.host.Realm
+  - instance: script
+    entity: swell.host.Script
+
+timeline:
+  - at: 2026-01-06T09:00:00Z
+    command: swell.host.CreateAgent
+    actor: swell.host.Host
+    input:
+      limits:
+        steps_per_entry: 1000000
+        memory_bytes: 67108864
+        frame_depth: 10000
+        reentry_depth: 256
+        parser_nesting: 1000
+        string_length: 1073741824
+        bigint_bits: 1048576
+      hash_key: AAECAwQFBgcICQoLDA0ODw==
+      random_seed: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    outcome: created
+    capture: {instance: agent, event: swell.host.AgentCreated, field: agent_id}
+
+  - at: 2026-01-06T09:00:01Z
+    command: swell.host.CreateRealm
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: created
+    capture: {instance: realm, event: swell.host.RealmCreated, field: realm_id}
+
+  - at: 2026-01-06T09:00:02Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "1 + 1"
+    outcome: parsed
+    capture: {instance: script, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:03Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: script}
+    outcome: engine-fault
+    events:
+      - event: swell.host.RunTerminated
+        payload:
+          agent_id: {$instance: agent}
+          reason: EngineFault
+
+  - at: 2026-01-06T09:00:04Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: script}
+    outcome: faulted
+    error:
+      name: swell.host.Faulted
+
+  - at: 2026-01-06T09:00:05Z
+    command: swell.host.PerformMicrotaskCheckpoint
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: faulted
+    error:
+      name: swell.host.Faulted
+
+  - at: 2026-01-06T09:00:06Z
+    command: swell.host.Collect
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: faulted
+    error:
+      name: swell.host.Faulted
+
+  - at: 2026-01-06T09:00:07Z
+    command: swell.host.CreateRealm
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: faulted
+    error:
+      name: swell.host.Faulted
+
+  - at: 2026-01-06T09:00:08Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "2 + 2"
+    outcome: faulted
+    error:
+      name: swell.host.Faulted
+
+  - at: 2026-01-06T09:00:09Z
+    command: swell.host.Interrupt
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: set

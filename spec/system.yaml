@@ -1,0 +1,23 @@
+format: ess/37
+system: swell
+version: v1
+
+summary: >-
+  swell is an ECMAScript engine. This model states its host interface (design decision 9): what a
+  host can do to an engine and what it gets back. The language itself is ECMA-262's, held by
+  test262, and is not restated here: no value, object, property or algorithm of the draft is an
+  entity, a field or a rule of this model.
+
+# `refs:` name a clause of the ECMA-262 draft pinned in docs/design/engine.md (decision 1) as
+# `ecma262:<anchor>`, which is https://tc39.es/ecma262/#<anchor>. ESS takes a reference as
+# `provider:key` and refuses a URL, and admits `refs:` on commands and outcomes only, so an entity
+# or a type that follows the draft names its clause in a comment beside it.
+
+# UNMAPPED: determinism. Decision 9's command-line host gives the clock, the time zone and the
+# random seed on the command line "so a run repeats exactly", and decision 4 makes collections
+# count bytes, never time, for the same reason: the same host answers give the same run. ESS
+# states what each command may answer, not that two runs given the same answers answer alike.
+# Carried by HOST-133, HOST-134, HOST-135.
+
+domains:
+  - swell.host

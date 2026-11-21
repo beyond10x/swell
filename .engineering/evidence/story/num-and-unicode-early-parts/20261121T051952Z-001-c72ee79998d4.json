@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T05:19:52Z",
+  "actor": "human:operator",
+  "artifact": "story:num-and-unicode-early-parts",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "the unit's tests, the task unicode-tables-check and clippy run again by the coordinator in the unit's tree before its commit"
+  }
+}

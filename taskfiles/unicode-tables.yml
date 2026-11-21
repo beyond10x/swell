@@ -1,0 +1,21 @@
+version: '3'
+
+tasks:
+  unicode-tables-check:
+    desc: Fail when a committed table of swell-unicode differs from what swell-unicode-gen writes from the vendored Unicode data.
+    summary: |
+      Fail when a committed table of swell-unicode differs from what swell-unicode-gen writes
+      from the vendored Unicode data (design, decision 8).
+
+      Runs "cargo run --locked -p swell-unicode-gen -- --check", which reads
+      data/unicode/17.0.0/, renders every table under crates/unicode/src/tables/ in memory and
+      compares it with the committed file; it writes nothing. It prints
+      "unicode-tables: <n> table(s) equal the generator output" and passes, or names each table
+      that differs and fails; "cargo run -p swell-unicode-gen" writes them. A data file it cannot
+      read or parse, a data file of another Unicode version, or a table that would be empty
+      fails too. The log is .out/unicode-tables.log.
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - cargo run --locked -q -p swell-unicode-gen -- --check > .out/unicode-tables.log 2>&1 || { cat .out/unicode-tables.log; exit 1; }
+      - tail -n 1 .out/unicode-tables.log

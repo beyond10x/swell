@@ -1,0 +1,94 @@
+//! Outcomes and the result type of each entry point (`docs/design/host-interface.md`, decisions
+//! 5, 6, 13 and 18): `Err(HostError)` for a call the host should not have made, `Ok` with a
+//! result type of its own taken from the draft's return type. Written by
+//! `story:heap-values-and-host-surface`.
+
+use crate::value::{Root, Value};
+
+/// Why a run ended without a completion (decision 2 and decision 10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Termination {
+    /// The entry spent `steps_per_entry`.
+    StepBudget,
+    /// An allocation would take the heap over `memory_bytes`.
+    MemoryBudget,
+    /// The interrupt handle was set.
+    Interrupted,
+    /// The engine found one of its own invariants broken; the agent is faulted for good.
+    EngineFault,
+}
+
+/// The result of an entry point that runs code.
+#[derive(Debug)]
+pub enum Outcome<T> {
+    Normal(T),
+    Throw(Root),
+    Terminated(Termination),
+}
+
+/// The result of a parse: ParseScript "returns a Script Record or a non-empty List of
+/// SyntaxError objects" (`#sec-parse-script`).
+#[derive(Debug)]
+pub enum Parsed<T> {
+    Parsed(T),
+    Errors(Vec<Root>),
+    Terminated(Termination),
+}
+
+/// An abrupt completion inside a scope: a thrown value, or the end of the run.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Abrupt {
+    Throw(Value),
+    Terminated(Termination),
+}
+
+/// The result of a call made inside a scope (`Cx`, `HookCx`, a host function).
+pub type Completion<T> = Result<T, Abrupt>;
+
+/// A call the host should not have made (decision 6). It changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HostError {
+    /// The agent ended a run in `Terminated(EngineFault)`; it answers nothing but `state()`.
+    Faulted,
+    /// A handle whose record was freed, or a released root.
+    StaleHandle,
+    /// A handle or root of another agent.
+    ForeignHandle,
+    /// A value of the wrong kind where the interface needs a kind.
+    WrongKind { expected: ValueKind },
+    /// A module whose [[Status]] the call does not allow.
+    ModuleStatus { found: ModuleStatus },
+    /// A module whose graph holds a module cut by a termination (decision 10).
+    ModuleTerminated,
+    /// An Evaluate while another one runs in the agent.
+    EvaluationInProgress,
+}
+
+/// The kind `HostError::WrongKind` expected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ValueKind {
+    Function,
+    Constructor,
+    Object,
+    Promise,
+    String,
+}
+
+/// A module's [[Status]] (`#sec-cyclic-module-records`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ModuleStatus {
+    New,
+    Unlinked,
+    Linking,
+    Linked,
+    Evaluating,
+    EvaluatingAsync,
+    Evaluated,
+}
+
+/// What a collection did (decision 18): the bytes `heap_bytes()` read before it and after it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CollectReport {
+    pub heap_bytes_before: u64,
+    pub heap_bytes_after: u64,
+}

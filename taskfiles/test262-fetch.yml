@@ -1,0 +1,85 @@
+version: '3'
+
+set: [pipefail]
+
+tasks:
+  test262-fetch:
+    desc: Fetch test262 at the commit of conformance/test262/PIN into .cache/test262/<commit>/ when it is missing, and check it
+    silent: true
+    vars:
+      PIN: conformance/test262/PIN
+      PIN_URL:
+        sh: awk '$1 == "url" {print $2}' conformance/test262/PIN
+      PIN_COMMIT:
+        sh: awk '$1 == "commit" {print $2}' conformance/test262/PIN
+      PIN_TREE:
+        sh: awk '$1 == "tree" {print $2}' conformance/test262/PIN
+      PIN_LS_TREE_SHA256:
+        sh: awk '$1 == "ls-tree-sha256" {print $2}' conformance/test262/PIN
+      TEST262_URL: '{{.TEST262_URL | default .PIN_URL}}'
+      TEST262_COMMIT: '{{.TEST262_COMMIT | default .PIN_COMMIT}}'
+      TEST262_TREE: '{{.TEST262_TREE | default .PIN_TREE}}'
+      TEST262_LS_TREE_SHA256: '{{.TEST262_LS_TREE_SHA256 | default .PIN_LS_TREE_SHA256}}'
+      TEST262_CACHE: '{{.TEST262_CACHE | default ".cache/test262"}}'
+    env:
+      PIN: '{{.PIN}}'
+      TEST262_URL: '{{.TEST262_URL}}'
+      TEST262_COMMIT: '{{.TEST262_COMMIT}}'
+      TEST262_TREE: '{{.TEST262_TREE}}'
+      TEST262_LS_TREE_SHA256: '{{.TEST262_LS_TREE_SHA256}}'
+      TEST262_CACHE: '{{.TEST262_CACHE}}'
+    cmds:
+      - |
+        for v in TEST262_URL TEST262_COMMIT TEST262_TREE TEST262_LS_TREE_SHA256 TEST262_CACHE; do
+          eval "value=\${$v}"
+          if [ -z "$value" ]; then
+            echo "test262-fetch: $v is empty: give it or set it in $PIN" >&2
+            exit 1
+          fi
+        done
+        dir="$TEST262_CACHE/$TEST262_COMMIT"
+        again="remove $dir and run task test262-fetch again"
+        if [ -e "$dir" ] || [ -L "$dir" ]; then
+          how=present
+        else
+          how=fetched
+          if ! { mkdir -p "$dir" &&
+                 git init -q "$dir" &&
+                 git -C "$dir" fetch -q --depth 1 "$TEST262_URL" "$TEST262_COMMIT" &&
+                 git -C "$dir" checkout -q --detach FETCH_HEAD; }; then
+            echo "$dir: fetch of $TEST262_COMMIT from $TEST262_URL failed; $again" >&2
+            exit 1
+          fi
+        fi
+        top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || top=
+        real=$(cd "$dir" 2>/dev/null && pwd -P) || real=
+        if [ -z "$top" ] || [ "$top" != "$real" ] ||
+           ! git -C "$dir" cat-file -e "$TEST262_COMMIT^{commit}" 2>/dev/null; then
+          echo "$dir: not a checkout of $TEST262_COMMIT; $again" >&2
+          exit 1
+        fi
+        failed=0
+        tree=$(git -C "$dir" rev-parse "$TEST262_COMMIT^{tree}")
+        if [ "$tree" != "$TEST262_TREE" ]; then
+          echo "$dir: tree $tree, pinned $TEST262_TREE; $again" >&2
+          failed=1
+        fi
+        sum=$(git -C "$dir" ls-tree -r "$TEST262_COMMIT" | sha256sum | cut -d ' ' -f 1)
+        if [ "$sum" != "$TEST262_LS_TREE_SHA256" ]; then
+          echo "$dir: ls-tree sha256 $sum, pinned $TEST262_LS_TREE_SHA256; $again" >&2
+          failed=1
+        fi
+        head=$(git -C "$dir" rev-parse --verify -q HEAD) || head=unborn
+        if [ "$head" != "$TEST262_COMMIT" ]; then
+          echo "$dir: HEAD $head, pinned $TEST262_COMMIT; $again" >&2
+          failed=1
+        fi
+        changed=$(git -C "$dir" status --porcelain | awk 'END {print NR}')
+        if [ "$changed" != 0 ]; then
+          echo "$dir: $changed changed path(s) in the working tree; $again" >&2
+          failed=1
+        fi
+        if [ "$failed" != 0 ]; then
+          exit 1
+        fi
+        echo "test262 $TEST262_COMMIT: $how and checked"

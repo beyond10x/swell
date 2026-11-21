@@ -1,0 +1,4 @@
+section sec-object-objects
+path sec-object-objects test/built-ins/Object/
+section sec-no-such-objects
+path sec-no-such-objects test/built-ins/NoSuch/

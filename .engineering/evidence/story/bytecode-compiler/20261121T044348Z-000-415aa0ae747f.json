@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T04:43:48Z",
+  "actor": "human:operator",
+  "artifact": "story:bytecode-compiler",
+  "kind": "story",
+  "revision": 2,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:slice-01-parallel-safety-round-1",
+    "review": "review-result:slice-01-parallel-safety-round-1",
+    "outcome": "fixed"
+  }
+}

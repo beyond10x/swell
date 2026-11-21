@@ -1,0 +1,199 @@
+run AggregateError
+run Array.fromAsync
+run Array.prototype.at
+run Array.prototype.flat
+run Array.prototype.flatMap
+run Array.prototype.includes
+run Array.prototype.values
+run ArrayBuffer
+run Atomics
+run Atomics.pause
+run Atomics.waitAsync
+run BigInt
+run DataView
+run DataView.prototype.getFloat32
+run DataView.prototype.getFloat64
+run DataView.prototype.getInt16
+run DataView.prototype.getInt32
+run DataView.prototype.getInt8
+run DataView.prototype.getUint16
+run DataView.prototype.getUint32
+run DataView.prototype.setUint8
+run Error.isError
+run FinalizationRegistry
+run Float16Array
+run Float32Array
+run Float64Array
+run Int16Array
+run Int32Array
+run Int8Array
+exclude Intl-enumeration intl402 decision-1
+exclude Intl.DateTimeFormat-datetimestyle intl402 decision-1
+exclude Intl.DateTimeFormat-dayPeriod intl402 decision-1
+exclude Intl.DateTimeFormat-extend-timezonename intl402 decision-1
+exclude Intl.DateTimeFormat-formatRange intl402 decision-1
+exclude Intl.DateTimeFormat-fractionalSecondDigits intl402 decision-1
+exclude Intl.DisplayNames intl402 decision-1
+exclude Intl.DisplayNames-v2 intl402 decision-1
+exclude Intl.DurationFormat intl402 decision-1
+exclude Intl.Era-monthcode stage3 decision-1
+exclude Intl.ListFormat intl402 decision-1
+exclude Intl.Locale intl402 decision-1
+exclude Intl.Locale-info stage3 decision-1
+exclude Intl.NumberFormat-unified intl402 decision-1
+exclude Intl.NumberFormat-v3 stage3 decision-1
+exclude Intl.RelativeTimeFormat intl402 decision-1
+exclude Intl.Segmenter intl402 decision-1
+run IsHTMLDDA
+exclude Iterator.prototype.join stage3 decision-1
+run Map
+run Math.sumPrecise
+run Object.fromEntries
+run Object.hasOwn
+run Object.is
+run Promise
+run Promise.allSettled
+run Promise.any
+run Promise.prototype.finally
+run Proxy
+run Reflect
+run Reflect.construct
+run Reflect.set
+run Reflect.setPrototypeOf
+run RegExp.escape
+run Set
+exclude ShadowRealm stage3 decision-1
+run SharedArrayBuffer
+run String.fromCodePoint
+run String.prototype.at
+run String.prototype.endsWith
+run String.prototype.includes
+run String.prototype.isWellFormed
+run String.prototype.matchAll
+run String.prototype.replaceAll
+run String.prototype.toWellFormed
+run String.prototype.trimEnd
+run String.prototype.trimStart
+run Symbol
+run Symbol.asyncIterator
+run Symbol.hasInstance
+run Symbol.isConcatSpreadable
+run Symbol.iterator
+run Symbol.match
+run Symbol.matchAll
+run Symbol.prototype.description
+run Symbol.replace
+run Symbol.search
+run Symbol.species
+run Symbol.split
+run Symbol.toPrimitive
+run Symbol.toStringTag
+run Symbol.unscopables
+exclude Temporal temporal decision-1
+run TypedArray
+run TypedArray.prototype.at
+run Uint16Array
+run Uint32Array
+run Uint8Array
+run Uint8ClampedArray
+run WeakMap
+run WeakRef
+run WeakSet
+run __getter__
+run __proto__
+run __setter__
+run align-detached-buffer-semantics-with-web-reality
+run arbitrary-module-namespace-names
+run array-find-from-last
+run array-grouping
+run arraybuffer-transfer
+run arrow-function
+run async-functions
+run async-iteration
+exclude await-dictionary stage3 decision-1
+run caller
+exclude canonical-tz temporal decision-1
+run change-array-by-copy
+run class
+run class-fields-private
+run class-fields-private-in
+run class-fields-public
+run class-methods-private
+run class-static-block
+run class-static-fields-private
+run class-static-fields-public
+run class-static-methods-private
+run coalesce-expression
+run computed-property-names
+run const
+run cross-realm
+exclude decorators stage3 decision-1
+run default-parameters
+run destructuring-assignment
+run destructuring-binding
+run dynamic-import
+run error-cause
+exclude error-stack-accessor stage3 decision-1
+run explicit-resource-management
+run exponentiation
+exclude export-defer stage3 decision-1
+run export-star-as-namespace-from-module
+run for-in-order
+run for-of
+run generators
+run globalThis
+run hashbang
+run host-gc-required
+exclude immutable-arraybuffer stage3 decision-1
+run import-attributes
+exclude import-bytes stage3 decision-1
+exclude import-defer stage3 decision-1
+exclude import-text stage3 decision-1
+run import.meta
+exclude intl-normative-optional intl402 decision-1
+run iterator-chunking
+run iterator-helpers
+run iterator-includes
+run iterator-sequencing
+run joint-iteration
+run json-modules
+run json-parse-with-source
+run json-superset
+exclude legacy-regexp stage3 decision-1
+run let
+run logical-assignment-operators
+run new.target
+exclude nonextensible-applies-to-private stage3 decision-1
+run numeric-separator-literal
+run object-rest
+run object-spread
+run optional-catch-binding
+run optional-chaining
+run promise-try
+run promise-with-resolvers
+run proxy-missing-checks
+run regexp-dotall
+run regexp-duplicate-named-groups
+run regexp-lookbehind
+run regexp-match-indices
+run regexp-modifiers
+run regexp-named-groups
+run regexp-unicode-property-escapes
+run regexp-v-flag
+run resizable-arraybuffer
+run rest-parameters
+run set-methods
+exclude source-phase-imports stage3 decision-1
+exclude source-phase-imports-module-source stage3 decision-1
+run stable-array-sort
+run stable-typedarray-sort
+run string-trimming
+run super
+run symbols-as-weakmap-keys
+run tail-call-optimization
+run template
+run top-level-await
+run u180e
+run uint8array-base64
+run upsert
+run well-formed-json-stringify

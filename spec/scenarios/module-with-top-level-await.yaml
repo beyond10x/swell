@@ -1,0 +1,113 @@
+# A module that requests nothing goes through the draft's [[Status]] values in order: new,
+# unlinked, linked, evaluating-async, and evaluated once the engine settles it inside a promise
+# job; Evaluate on it then returns at once. Synthesis writes each move on its own, and refuses
+# `already-evaluated` (a `preserves:` needs a view of the module, and decision 9 gives the host no
+# read of [[Status]]). The engine's settle step is awaited, not sent: it is the engine's own.
+type: ess-scenario/6
+domain: swell.host
+scenario: module-with-top-level-await
+summary: A module with a top-level await is evaluated in two steps, and a second Evaluate changes nothing.
+
+arrange:
+  - instance: agent
+    entity: swell.host.Agent
+  - instance: realm
+    entity: swell.host.Realm
+  - instance: module
+    entity: swell.host.Module
+
+timeline:
+  - at: 2026-01-06T09:00:00Z
+    command: swell.host.CreateAgent
+    actor: swell.host.Host
+    input:
+      limits:
+        steps_per_entry: 1000000
+        memory_bytes: 67108864
+        frame_depth: 10000
+        reentry_depth: 256
+        parser_nesting: 1000
+        string_length: 1073741824
+        bigint_bits: 1048576
+      hash_key: AAECAwQFBgcICQoLDA0ODw==
+      random_seed: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    outcome: created
+    capture: {instance: agent, event: swell.host.AgentCreated, field: agent_id}
+
+  - at: 2026-01-06T09:00:01Z
+    command: swell.host.CreateRealm
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: created
+    capture: {instance: realm, event: swell.host.RealmCreated, field: realm_id}
+
+  - at: 2026-01-06T09:00:02Z
+    command: swell.host.ParseModule
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "await 0;"
+    outcome: parsed
+    capture: {instance: module, event: swell.host.ModuleParsed, field: module_id}
+
+  - at: 2026-01-06T09:00:03Z
+    command: swell.host.LoadRequestedModules
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      module_id: {$instance: module}
+    outcome: loaded
+    events:
+      - event: swell.host.ModuleStatusChanged
+        payload:
+          module_id: {$instance: module}
+          status: Unlinked
+
+  - at: 2026-01-06T09:00:04Z
+    command: swell.host.LinkModule
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      module_id: {$instance: module}
+    outcome: linked
+    events:
+      - event: swell.host.ModuleStatusChanged
+        payload:
+          module_id: {$instance: module}
+          status: Linked
+
+  - at: 2026-01-06T09:00:05Z
+    command: swell.host.EvaluateModule
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      module_id: {$instance: module}
+    outcome: waiting
+    events:
+      - event: swell.host.ModuleStatusChanged
+        payload:
+          module_id: {$instance: module}
+          status: EvaluatingAsync
+
+  - at: 2026-01-06T09:00:06Z
+    command: swell.host.AsyncModuleExecutionSettled
+    input:
+      agent_id: {$instance: agent}
+      module_id: {$instance: module}
+    outcome: settled
+    events:
+      - event: swell.host.ModuleStatusChanged
+        payload:
+          module_id: {$instance: module}
+          status: Evaluated
+
+  - at: 2026-01-06T09:00:07Z
+    command: swell.host.EvaluateModule
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      module_id: {$instance: module}
+    outcome: already-evaluated
+    events: []

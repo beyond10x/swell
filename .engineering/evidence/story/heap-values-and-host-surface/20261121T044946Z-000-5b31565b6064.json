@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T04:49:46Z",
+  "actor": "human:operator",
+  "artifact": "story:heap-values-and-host-surface",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:slice-01-design-round-2",
+    "review": "review-result:slice-01-design-round-2",
+    "outcome": "fixed"
+  }
+}

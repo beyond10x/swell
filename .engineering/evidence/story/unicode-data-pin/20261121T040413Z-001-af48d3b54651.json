@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T04:04:13Z",
+  "actor": "human:operator",
+  "artifact": "story:unicode-data-pin",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "the unit's task and planted tests run again by the coordinator in the unit's tree before its commit"
+  }
+}

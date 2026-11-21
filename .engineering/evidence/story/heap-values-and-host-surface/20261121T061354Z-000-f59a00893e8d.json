@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T06:13:54Z",
+  "actor": "human:operator",
+  "artifact": "story:heap-values-and-host-surface",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot task check on wave/s1-2-syntax-heap, exit 0, 29 test suites: 82 passed, host-requirements: 17 test, 143 pending, test262: 280 lines equal conformance/test262/expected.txt, gate-selftest: 28 passed, 0 failed (docs/plan/slice-01-wave-2.md)"
+  }
+}

@@ -1,0 +1,21 @@
+swell
+Copyright 2026 beyond10x
+
+This product includes software developed by beyond10x
+(https://github.com/beyond10x).
+
+If you use swell, or a part of it, in a product or a publication, say so and
+name beyond10x and swell.
+
+Third-party material in this repository:
+
+- data/unicode/17.0.0: data files of the Unicode Character Database and of
+  UTS #51, version 17.0.0, copyright Unicode, Inc., under the Unicode License
+  V3 (data/unicode/17.0.0/LICENSE). Each file's address and SHA-256 are in
+  data/unicode/17.0.0/SOURCE.
+
+Third-party material used for tests only, fetched by the tooling at a pinned
+commit, not part of this repository and not part of any shipped binary:
+
+- test262 (https://github.com/tc39/test262): the ECMAScript test suite, under
+  the BSD License of its LICENSE file, copyright Ecma International.

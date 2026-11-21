@@ -1,0 +1,5 @@
+run Atomics
+run decorators
+run generators
+run intl-normative-optional
+run not-declared

@@ -1,0 +1,14 @@
+[package]
+name = "swell-syntax"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+swell-unicode = { path = "../unicode" }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"

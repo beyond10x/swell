@@ -1,0 +1,10 @@
+## Fixture feature list, written for the tests of swell-test262
+#
+# Comment lines and blank lines declare nothing.
+
+decorators
+
+generators  # a comment after the name
+Atomics
+intl-normative-optional
+json-modules

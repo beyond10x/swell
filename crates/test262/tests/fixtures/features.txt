@@ -1,0 +1,5 @@
+run Atomics
+exclude decorators stage3 decision-1
+run generators
+run intl-normative-optional
+run json-modules

@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T05:19:52Z",
+  "actor": "human:operator",
+  "artifact": "story:num-and-unicode-early-parts",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot task check on wave/s1-1-num, exit 0, 19 test suites: 36 passed, unicode-tables: 1 table(s) equal the generator output, gate-selftest: 28 passed, 0 failed (docs/plan/slice-01-wave-1.md)"
+  }
+}

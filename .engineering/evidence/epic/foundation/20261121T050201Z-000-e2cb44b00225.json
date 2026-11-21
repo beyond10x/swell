@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T05:02:01Z",
+  "actor": "human:operator",
+  "artifact": "epic:foundation",
+  "kind": "epic",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot task check on wave/3-expected, exit 0; the nine acceptance items hold (docs/plan/wave-3.md, 'The foundation epic')"
+  }
+}

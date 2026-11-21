@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T06:13:54Z",
+  "actor": "human:operator",
+  "artifact": "story:ci-check-workflow",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "shared-gates.yml compared with surf's by cmp; slot task check on a shallow clone with an empty target directory run by the coordinator, exit 0"
+  }
+}

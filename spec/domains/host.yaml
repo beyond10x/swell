@@ -1,0 +1,1337 @@
+domain: swell.host
+
+summary: >-
+  What a host can do to one engine instance and what it gets back (design decision 9). A command
+  is one call of the Rust interface; `agent_id` in an input is the agent the call is made on.
+
+naming:
+  wire: host
+  display: Host interface
+
+types:
+  - name: swell.host.AgentId
+    kind: newtype
+    of: Uuid
+
+  - name: swell.host.RealmId
+    kind: newtype
+    of: Uuid
+
+  - name: swell.host.ScriptId
+    kind: newtype
+    of: Uuid
+
+  - name: swell.host.ModuleId
+    kind: newtype
+    of: Uuid
+
+  - name: swell.host.ModuleLoadId
+    kind: newtype
+    of: Uuid
+
+  - name: swell.host.JobId
+    kind: newtype
+    of: Uuid
+
+  # The limits an agent is created with (decision 9, "Agents and realms"; decision 3 for what each
+  # bounds; decision 4 for the memory budget). One value, given once at creation and never
+  # changed, so it is one type held by the agent rather than an entity of its own: nothing moves
+  # it, and nothing reads one limit apart from the others.
+  # UNMAPPED: the unit, width and bounds of each limit. host-interface.md decision 2 gives them:
+  # `string_length` counts UTF-16 code units, `bigint_bits` bits; 0 is a limit of zero, never
+  # "no limit", and the type's maximum (u32 for the depths and `parser_nesting`, u64 for the
+  # rest) is the host's way to ask for no practical limit. ESS holds each limit as an Integer,
+  # which carries no unit and no width, and no construct states what a limit of 0 or of the
+  # maximum does.
+  # Carried by HOST-9, HOST-12, HOST-14, HOST-16, HOST-19, HOST-20, HOST-22, HOST-23, HOST-24.
+  # UNMAPPED: what a budget is, as opposed to what it is called. `steps_per_entry` is "at most N
+  # steps between one entry from the host and its return"; ESS holds it as a number the agent
+  # carries and nothing more. No construct says that a run that spends N steps ends with
+  # Terminated(StepBudget), or that the count restarts at every entry (a microtask checkpoint is
+  # one entry, host-interface.md decision 11). The same holds for `memory_bytes`, which is
+  # not per entry but over the agent's life, credited back by a sweep (decision 4).
+  # Carried by HOST-6, HOST-7, HOST-8, HOST-10, HOST-80.
+  - name: swell.host.Limits
+    kind: struct
+    naming:
+      summary: The limits an agent is created with; each ends in an outcome the host reads.
+    fields:
+      - name: steps_per_entry
+        type: Integer
+        summary: Steps one entry from the host may spend (decision 3, "The step budget").
+      - name: memory_bytes
+        type: Integer
+        summary: Bytes the agent's heap may hold (decision 4, "Memory budget").
+      - name: frame_depth
+        type: Integer
+        summary: ECMAScript frames on the engine stack; exceeded, a RangeError in the script.
+      - name: reentry_depth
+        type: Integer
+        summary: Re-entries from Rust into the interpreter; exceeded, a RangeError in the script.
+      - name: parser_nesting
+        type: Integer
+        summary: Nesting depth the parser accepts; exceeded, the parse fails.
+      - name: string_length
+        type: Integer
+        summary: The longest String the agent creates.
+      - name: bigint_bits
+        type: Integer
+        summary: The largest BigInt the agent creates.
+
+  - name: swell.host.TerminationReason
+    kind: enum
+    naming:
+      summary: Why a run ended without completing or throwing (decision 3, decision 9).
+    variants:
+      - name: StepBudget
+        summary: The run spent the steps of its entry.
+      - name: MemoryBudget
+        summary: An allocation other than a buffer's would pass the memory budget.
+      - name: Interrupted
+        summary: The host set the agent's interrupt handle.
+      - name: EngineFault
+        summary: >-
+          The engine found a broken invariant of its own or a host override that broke one of
+          6.1.7.3. The agent answers every later call with Err(HostError::Faulted) (decision 6).
+
+  - name: swell.host.JobKind
+    kind: enum
+    naming:
+      summary: Which host hook scheduled a job (9.5).
+    variants:
+      - name: PromiseJob
+        summary: HostEnqueuePromiseJob. The agent keeps it and runs it at a microtask checkpoint.
+      - name: GenericJob
+        summary: HostEnqueueGenericJob. Handed to the host, which runs it with run_job when it chooses.
+      - name: TimeoutJob
+        summary: HostEnqueueTimeoutJob. Handed to the host, to run after at least its delay.
+
+  # The draft's operation argument of HostPromiseRejectionTracker, spelled as the draft spells it.
+  - name: swell.host.RejectionOperation
+    kind: enum
+    variants: [reject, handle]
+
+  # An ImportAttribute Record (16.2.1.x, the [[Attributes]] of a ModuleRequest Record).
+  - name: swell.host.ImportAttribute
+    kind: struct
+    fields:
+      - name: key
+        type: String
+      - name: value
+        type: String
+
+  # UNMAPPED: the representation of source text across the interface. ParseScript and ParseModule
+  # take "a String or a sequence of Unicode code points"; a Rust `&str` cannot hold a lone
+  # surrogate, a UTF-16 slice can. Decision 9 does not say which the host passes.
+  # Carried by HOST-35.
+  - name: swell.host.SourceText
+    kind: newtype
+    of: String
+
+entities:
+  # An agent (9.6, https://tc39.es/ecma262/#sec-agents): one heap, one frame stack, one job queue,
+  # single-threaded. Its lifecycle is decision 9's, not the draft's: the draft gives an agent no
+  # states.
+  # UNMAPPED: the host object that answers the hooks (a Rust trait object, decision 9 "Host
+  # hooks"). Every hook is a call from the engine into the host that returns a value the engine
+  # waits for; ESS has commands a caller sends to the system, events the system publishes, and
+  # system-issued commands, and none of them is a call back to the caller with an answer the
+  # system waits for. The hooks that only notify (HostEnqueuePromiseJob, HostLoadImportedModule,
+  # HostPromiseRejectionTracker, HostEnqueueGenericJob, HostEnqueueTimeoutJob) are stated below
+  # as system-issued commands that publish an event. The hooks that answer
+  # (HostEnsureCanCompileStrings, HostEnsureCanAddPrivateElement, HostGetCodeForEval,
+  # HostGetImportMetaProperties, HostFinalizeImportMeta, HostGetSupportedImportAttributes,
+  # HostHasSourceTextAvailable, HostMakeJobCallback, HostCallJobCallback, HostResizeArrayBuffer,
+  # HostGrowSharedArrayBuffer, HostEventSet, HostEnqueueFinalizationRegistryCleanupJob), the
+  # clock, the time zone operations and the random bytes are not stated at all.
+  # Carried by HOST-4, HOST-26, HOST-27, HOST-83, HOST-84, HOST-116 to HOST-128.
+  - name: swell.host.Agent
+    naming:
+      summary: One engine instance (ECMA-262 9.6), created with its limits.
+    identity:
+      name: agent_id
+      type: swell.host.AgentId
+    fields:
+      - name: limits
+        type: swell.host.Limits
+    relations:
+      # A Realm Record's [[AgentSignifier]] is "the agent that owns this realm" (Table 20).
+      - name: realms
+        kind: owns
+        target: swell.host.Realm
+        cardinality: many
+        via: agent_id
+      # The job queue is the agent's (decision 9, "Jobs").
+      - name: jobs
+        kind: owns
+        target: swell.host.Job
+        cardinality: many
+        via: agent_id
+    lifecycle:
+      initial: Alive
+      states:
+        - name: Alive
+          summary: Answers calls.
+        - name: Faulted
+          summary: Ended a run with Terminated(EngineFault); answers every call with Faulted.
+      terminal: [Faulted]
+      transitions:
+        - name: fault
+          from: [Alive]
+          to: Faulted
+          summary: A run ended with Terminated(EngineFault).
+
+  # A realm (9.3, https://tc39.es/ecma262/#sec-code-realms), created by InitializeHostDefinedRealm.
+  # The draft gives a realm no lifecycle; ESS needs one, so it has one state.
+  # UNMAPPED: whether a realm ends (is released by the host, or collected when nothing reaches
+  # it). Decision 9 says how a realm is created and nothing about its end.
+  # Carried by HOST-52.
+  - name: swell.host.Realm
+    naming:
+      summary: A realm of an agent (ECMA-262 9.3) - its intrinsics and its global environment.
+    identity:
+      name: realm_id
+      type: swell.host.RealmId
+    fields:
+      - name: agent_id
+        type: swell.host.AgentId
+    lifecycle:
+      initial: Initialized
+      states:
+        - name: Initialized
+          summary: InitializeHostDefinedRealm returned.
+      terminal: [Initialized]
+
+  # A Script Record (16.1.4, https://tc39.es/ecma262/#sec-script-records).
+  - name: swell.host.Script
+    naming:
+      summary: A parsed script (ECMA-262 16.1.4), evaluated in its realm.
+    identity:
+      name: script_id
+      type: swell.host.ScriptId
+    fields:
+      - name: realm_id
+        type: swell.host.RealmId
+    relations:
+      # A Script Record's [[Realm]] is "the realm within which this script was created" (Table 35).
+      - name: realm
+        kind: references
+        target: swell.host.Realm
+        cardinality: one
+        via: realm_id
+    # UNMAPPED: whether a script may be evaluated more than once. ScriptEvaluation does not forbid
+    # it, HTML creates a new script for each run, and decision 9 does not say; so the script has
+    # one state and EvaluateScript leaves it there.
+    # Carried by HOST-54.
+    lifecycle:
+      initial: Parsed
+      states:
+        - name: Parsed
+          summary: ParseScript returned a Script Record.
+      terminal: [Parsed]
+
+  # A Cyclic Module Record (16.2.1.6, https://tc39.es/ecma262/#sec-cyclic-module-records). Its
+  # states are the draft's [[Status]] values, which ESS spells upper-case:
+  # New = new, Unlinked = unlinked, Linked = linked, EvaluatingAsync = evaluating-async,
+  # Evaluated = evaluated.
+  # UNMAPPED: [[Status]] linking and evaluating. Both hold only inside one call (Link, Evaluate)
+  # and are left before it returns, so no command outcome moves a module into them, and ESS
+  # refuses a transition no outcome takes. A host function called by the module's own code
+  # during Evaluate would see it evaluating (re-entrancy), which ESS cannot state either.
+  # Carried by HOST-74, HOST-98.
+  - name: swell.host.Module
+    naming:
+      summary: A parsed module (ECMA-262 16.2.1.6), with the draft's [[Status]] as its lifecycle.
+    identity:
+      name: module_id
+      type: swell.host.ModuleId
+    fields:
+      - name: realm_id
+        type: swell.host.RealmId
+    relations:
+      - name: realm
+        kind: references
+        target: swell.host.Realm
+        cardinality: one
+        via: realm_id
+    lifecycle:
+      initial: New
+      states:
+        - name: New
+          wire: new
+          summary: Parsed; its requested modules are not all loaded.
+        - name: Unlinked
+          wire: unlinked
+          summary: Every module of its graph is loaded.
+        - name: Linked
+          wire: linked
+          summary: Link succeeded.
+        - name: EvaluatingAsync
+          wire: evaluating-async
+          summary: Waits for its asynchronous dependencies or its own top-level await.
+        - name: Evaluated
+          wire: evaluated
+          summary: Evaluation ended, normally or with [[EvaluationError]].
+      terminal: [Evaluated]
+      transitions:
+        - name: load
+          from: [New]
+          to: Unlinked
+          summary: The last pending load of the graph finished (InnerModuleLoading).
+        - name: link
+          from: [Unlinked]
+          to: Linked
+        - name: evaluate
+          from: [Linked]
+          to: Evaluated
+        - name: evaluate_async
+          from: [Linked]
+          to: EvaluatingAsync
+        - name: settle
+          from: [EvaluatingAsync]
+          to: Evaluated
+          summary: AsyncModuleExecutionFulfilled or AsyncModuleExecutionRejected.
+
+  # One pending call of HostLoadImportedModule (16.2.1.10): the (referrer, moduleRequest, payload)
+  # the host must hand back to FinishLoadingImportedModule. The draft has no record for it; it is
+  # what the host holds between the two calls.
+  # UNMAPPED: the referrer of a load requested by import() is a Script Record or a Realm Record,
+  # and its payload a PromiseCapability Record (ContinueDynamicImport). Only a module referrer, the
+  # one LoadRequestedModules has, is stated.
+  # Carried by HOST-65, HOST-66.
+  - name: swell.host.ModuleLoad
+    naming:
+      summary: A module load the engine asked the host for and the host has not finished yet.
+    identity:
+      name: load_id
+      type: swell.host.ModuleLoadId
+    fields:
+      - name: referrer
+        type: swell.host.ModuleId
+      - name: specifier
+        type: String
+      - name: attributes
+        type: List<swell.host.ImportAttribute>
+    relations:
+      - name: referrer_module
+        kind: references
+        target: swell.host.Module
+        cardinality: one
+        via: referrer
+    lifecycle:
+      initial: Requested
+      states:
+        - name: Requested
+          summary: HostLoadImportedModule was called.
+        - name: Finished
+          summary: The host finished it with a module.
+        - name: Failed
+          summary: The host finished it with an error.
+      terminal: [Finished, Failed]
+      transitions:
+        - name: finish
+          from: [Requested]
+          to: Finished
+        - name: fail
+          from: [Requested]
+          to: Failed
+
+  # A Job (9.5, https://tc39.es/ecma262/#sec-jobs) the engine scheduled through a host hook.
+  - name: swell.host.Job
+    naming:
+      summary: A job the engine scheduled through one of the draft's host hooks (ECMA-262 9.5).
+    identity:
+      name: job_id
+      type: swell.host.JobId
+    fields:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: kind
+        type: swell.host.JobKind
+      # HostEnqueuePromiseJob may pass a null realm; the other two always pass one.
+      - name: realm_id
+        type: Optional<swell.host.RealmId>
+      # HostEnqueueTimeoutJob's milliseconds, a non-negative finite Number.
+      - name: milliseconds
+        type: Optional<Binary64>
+    relations:
+      # The hooks schedule a job "in the realm realm" (9.5.4 to 9.5.6).
+      - name: realm
+        kind: references
+        target: swell.host.Realm
+        cardinality: one
+        via: realm_id
+    lifecycle:
+      initial: Enqueued
+      states:
+        - name: Enqueued
+          summary: Scheduled and not run.
+        - name: Ran
+          summary: Ran to completion (a job returns a normal completion, 9.5).
+      terminal: [Ran]
+      transitions:
+        - name: run
+          from: [Enqueued]
+          to: Ran
+
+actors:
+  - name: swell.host.Host
+    naming:
+      summary: The program that embeds the engine and calls its interface.
+    may:
+      - swell.host.CreateAgent
+      - swell.host.CreateRealm
+      - swell.host.ParseScript
+      - swell.host.EvaluateScript
+      - swell.host.ParseModule
+      - swell.host.LoadRequestedModules
+      - swell.host.FinishLoadingImportedModule
+      - swell.host.LinkModule
+      - swell.host.EvaluateModule
+      - swell.host.PerformMicrotaskCheckpoint
+      - swell.host.Interrupt
+      - swell.host.Collect
+
+  # The engine's own steps that a host sees: the notifying hooks, and the settling of an
+  # asynchronous module inside a promise job.
+  - name: swell.host.Engine
+    system: true
+    naming:
+      summary: The engine itself, calling a host hook or taking a step inside a job.
+    may:
+      - swell.host.HostLoadImportedModule
+      - swell.host.HostEnqueuePromiseJob
+      - swell.host.HostEnqueueGenericJob
+      - swell.host.HostEnqueueTimeoutJob
+      - swell.host.HostPromiseRejectionTracker
+      - swell.host.AsyncModuleExecutionSettled
+
+errors:
+  # Answered by whatever maps identities to Rust values (the conformance adapter), never by the
+  # engine: in the Rust interface the agent is the receiver of every call and a handle cannot be
+  # forged, so there is no identity that names nothing.
+  # UNMAPPED: ESS addresses every row by an identity and requires an answer for one no row
+  # carries; the interface of decision 9 has no such case. This error is that answer, and is not
+  # part of decision 9.
+  # ESS limit.
+  - name: swell.host.NotHeld
+    summary: No agent, realm, script, module or load has this identity.
+    fields: []
+
+  - name: swell.host.Faulted
+    summary: >-
+      Err(HostError::Faulted), not a Terminated outcome: the agent ended a run with
+      Terminated(EngineFault) before, and every entry point and read but state() answers this
+      (decision 6).
+    fields:
+      - name: agent_id
+        type: swell.host.AgentId
+
+  # UNMAPPED: the List of SyntaxError objects ParseScript and ParseModule return (16.1.5,
+  # 16.2.1.7.1) are engine values, and ESS has no type for an engine value. Decision 9 also does not
+  # say what a parse failure carries to the host ("as a parse failure", decision 3).
+  # Carried by HOST-18, HOST-36, HOST-137, HOST-138.
+  - name: swell.host.ParseFailed
+    summary: The source text is not a Script (or Module), or it passes the parser's nesting limit.
+    fields: []
+
+  # UNMAPPED: the thrown value (an engine value) of Throw(value).
+  # Carried by HOST-37.
+  - name: swell.host.Thrown
+    summary: Throw(value) - an exception the engine threw and nothing caught; nothing changed.
+    fields: []
+
+  # UNMAPPED: not part of decision 9; see EvaluateModule's `not-linked`.
+  # Carried by HOST-43.
+  - name: swell.host.ModuleStatusConflict
+    summary: The module's [[Status]] is one EvaluateModule does not start from.
+    fields:
+      - name: status
+        type: swell.host.Module.State
+
+  - name: swell.host.Terminated
+    summary: Terminated(reason), from a call that creates nothing when it ends this way.
+    fields:
+      - name: reason
+        type: swell.host.TerminationReason
+
+commands:
+  - name: swell.host.CreateAgent
+    naming:
+      summary: Create an engine instance with its limits and its seeds.
+    refs: ["ecma262:sec-agents"]
+    input:
+      - name: limits
+        type: swell.host.Limits
+        example:
+          steps_per_entry: 1000000
+          memory_bytes: 67108864
+          frame_depth: 10000
+          reentry_depth: 256
+          parser_nesting: 1000
+          string_length: 1073741824
+          bigint_bits: 1048576
+      # UNMAPPED: the length of each seed. `hash_key` is exactly 16 bytes and keys the engine's
+      # SipHash; `random_seed` is exactly 32 bytes and seeds Math.random (host-interface.md,
+      # decision 3, `[u8; 16]` and `[u8; 32]`). A seed of another length has no call in the
+      # interface, but ESS cannot bound the length of a Bytes value (`value.count` is not
+      # selectable on Bytes, ESS-TYPE-003), so both inputs accept any length here.
+      # Carried by HOST-25, HOST-26, HOST-27, HOST-144, HOST-145, HOST-146.
+      - name: hash_key
+        type: Bytes
+      - name: random_seed
+        type: Bytes
+    outcomes:
+      - name: created
+        creates: swell.host.Agent
+        instance: agent_id
+        sets:
+          limits: input.limits
+        emits: [swell.host.AgentCreated]
+        payload:
+          swell.host.AgentCreated: {agent_id: {generated: true}}
+        summary: The agent is Alive and holds no realm.
+
+  - name: swell.host.CreateRealm
+    naming:
+      summary: Create a realm in an agent.
+    refs: ["ecma262:sec-initializehostdefinedrealm"]
+    # UNMAPPED: the global object and the global `this` value the host may give (HTML's Window
+    # and WindowProxy). Both are engine values, and ESS has no type for one.
+    # Carried by HOST-49, HOST-50, HOST-51.
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+    outcomes:
+      - name: no-agent
+        when_related: {via: input.agent_id, exists: false}
+        error: swell.host.NotHeld
+      - name: faulted
+        when_related: {via: input.agent_id, predicate: state == Faulted}
+        error: swell.host.Faulted
+        payload:
+          swell.host.Faulted: {agent_id: input.agent_id}
+      # UNMAPPED: what CreateRealm answers when creating the intrinsics passes the memory budget,
+      # and how an engine fault in it faults the agent. Decision 9 lists create_realm among no
+      # entry point that returns an Outcome.
+      # Carried by HOST-12, HOST-41, HOST-71.
+      - name: created
+        creates: swell.host.Realm
+        instance: realm_id
+        sets: {agent_id: input.agent_id}
+        emits: [swell.host.RealmCreated]
+        payload:
+          swell.host.RealmCreated: {realm_id: {generated: true}, agent_id: input.agent_id}
+        refs: ["ecma262:sec-initializehostdefinedrealm"]
+
+  # parse_script (decision 9).
+  # UNMAPPED: hostDefined, the value the host attaches to the Script Record ([[HostDefined]]).
+  # Carried by HOST-55.
+  # UNMAPPED: a realm of another agent than the one called. A handle carries no agent (decision 4:
+  # an index and a generation), and decision 9 does not say what the engine answers.
+  # Carried by HOST-31, HOST-45.
+  - name: swell.host.ParseScript
+    naming:
+      summary: Parse source text as a Script in a realm.
+    refs: ["ecma262:sec-parse-script"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: realm_id
+        type: swell.host.RealmId
+      - name: source_text
+        type: swell.host.SourceText
+        example: "1 + 1"
+    outcomes:
+      - name: no-agent
+        when_related: {via: input.agent_id, exists: false}
+        error: swell.host.NotHeld
+      - name: no-realm
+        when_related: {via: input.realm_id, exists: false}
+        error: swell.host.NotHeld
+      - name: faulted
+        when_related: {via: input.agent_id, predicate: state == Faulted}
+        error: swell.host.Faulted
+        payload:
+          swell.host.Faulted: {agent_id: input.agent_id}
+      - name: parse-failed
+        external: ParseText returns a List of errors, or the source nests deeper than parser_nesting
+        error: swell.host.ParseFailed
+        refs: ["ecma262:sec-parse-script"]
+      - name: memory-budget
+        external: the parser's tree or the bytecode would pass the memory budget
+        error: swell.host.Terminated
+        payload:
+          swell.host.Terminated: {reason: MemoryBudget}
+      # UNMAPPED: an engine fault while parsing. It must fault the agent, and ESS lets a refusal
+      # change no record but its own subject, which a parse that creates nothing does not have.
+      # Carried by HOST-71.
+      - name: parsed
+        creates: swell.host.Script
+        instance: script_id
+        sets: {realm_id: input.realm_id}
+        emits: [swell.host.ScriptParsed]
+        payload:
+          swell.host.ScriptParsed: {script_id: {generated: true}, realm_id: input.realm_id}
+        summary: A Script Record of the realm.
+
+  # evaluate_script (decision 9). Each way a run ends is an `external:` branch: which one a script
+  # takes is decided by running it, which is ECMA-262's to say and test262's to check.
+  - name: swell.host.EvaluateScript
+    naming:
+      summary: Evaluate a parsed script; the answer is the run's Outcome.
+    refs: ["ecma262:sec-runtime-semantics-scriptevaluation"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: script_id
+        type: swell.host.ScriptId
+    outcomes:
+      - name: no-script
+        unknown_instance: true
+        error: swell.host.NotHeld
+      - name: no-agent
+        when_related: {via: input.agent_id, exists: false}
+        error: swell.host.NotHeld
+      - name: faulted
+        when_related: {via: input.agent_id, predicate: state == Faulted}
+        error: swell.host.Faulted
+        payload:
+          swell.host.Faulted: {agent_id: input.agent_id}
+      - name: threw
+        external: the script throws an exception it does not catch
+        updates: swell.host.Script
+        instance: script_id
+        emits: [swell.host.ScriptThrew]
+        payload:
+          swell.host.ScriptThrew: {script_id: input.script_id}
+        summary: Throw(value).
+      - name: step-budget
+        external: the run spends the steps of its entry
+        updates: swell.host.Script
+        instance: script_id
+        emits: [swell.host.RunTerminated]
+        payload:
+          swell.host.RunTerminated: {agent_id: input.agent_id, reason: StepBudget}
+        summary: Terminated(StepBudget); no catch or finally block ran.
+      - name: memory-budget
+        external: an allocation other than a buffer's would pass the memory budget
+        updates: swell.host.Script
+        instance: script_id
+        emits: [swell.host.RunTerminated]
+        payload:
+          swell.host.RunTerminated: {agent_id: input.agent_id, reason: MemoryBudget}
+        summary: Terminated(MemoryBudget).
+      - name: interrupted
+        external: the host sets the interrupt handle while the script runs
+        updates: swell.host.Script
+        instance: script_id
+        emits: [swell.host.RunTerminated]
+        payload:
+          swell.host.RunTerminated: {agent_id: input.agent_id, reason: Interrupted}
+        summary: Terminated(Interrupted).
+      - name: engine-fault
+        external: the engine finds a broken invariant of its own or of a host override
+        updates: swell.host.Script
+        instance: script_id
+        emits: [swell.host.RunTerminated]
+        payload:
+          swell.host.RunTerminated: {agent_id: input.agent_id, reason: EngineFault}
+        affects:
+          - entity: swell.host.Agent
+            where: agent_id == input.agent_id
+            moves: swell.host.Agent.fault
+        summary: Terminated(EngineFault); the agent is Faulted from now on.
+      - name: completed
+        updates: swell.host.Script
+        instance: script_id
+        emits: [swell.host.ScriptCompleted]
+        payload:
+          swell.host.ScriptCompleted: {script_id: input.script_id}
+        summary: Normal(value).
+
+  # parse_module (decision 9).
+  # UNMAPPED: hostDefined, as for ParseScript; and a realm of another agent, as for ParseScript.
+  # Carried by HOST-45, HOST-55.
+  - name: swell.host.ParseModule
+    naming:
+      summary: Parse source text as a Module in a realm.
+    refs: ["ecma262:sec-parsemodule"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: realm_id
+        type: swell.host.RealmId
+      - name: source_text
+        type: swell.host.SourceText
+        example: "export default 1;"
+    outcomes:
+      - name: no-agent
+        when_related: {via: input.agent_id, exists: false}
+        error: swell.host.NotHeld
+      - name: no-realm
+        when_related: {via: input.realm_id, exists: false}
+        error: swell.host.NotHeld
+      - name: faulted
+        when_related: {via: input.agent_id, predicate: state == Faulted}
+        error: swell.host.Faulted
+        payload:
+          swell.host.Faulted: {agent_id: input.agent_id}
+      - name: parse-failed
+        external: ParseText returns a List of errors, or the source nests deeper than parser_nesting
+        error: swell.host.ParseFailed
+        refs: ["ecma262:sec-parsemodule"]
+      - name: memory-budget
+        external: the parser's tree or the bytecode would pass the memory budget
+        error: swell.host.Terminated
+        payload:
+          swell.host.Terminated: {reason: MemoryBudget}
+      # UNMAPPED: an engine fault while parsing, as for ParseScript.
+      # Carried by HOST-71.
+      - name: parsed
+        creates: swell.host.Module
+        instance: module_id
+        sets: {realm_id: input.realm_id}
+        emits: [swell.host.ModuleParsed]
+        payload:
+          swell.host.ModuleParsed: {module_id: {generated: true}, realm_id: input.realm_id}
+        summary: A Source Text Module Record whose [[Status]] is new.
+
+  # load_requested_modules (decision 9).
+  # UNMAPPED: its result. LoadRequestedModules returns a Promise that settles when the whole graph
+  # is loaded or a load failed; that Promise is an engine value, and it is the only way the draft
+  # tells the host the graph is done.
+  # Carried by HOST-39, HOST-60, HOST-61.
+  # UNMAPPED: hostDefined, passed on to every HostLoadImportedModule of the graph.
+  # Carried by HOST-57.
+  - name: swell.host.LoadRequestedModules
+    naming:
+      summary: Start loading every module a module's graph requests.
+    refs: ["ecma262:sec-LoadRequestedModules"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: module_id
+        type: swell.host.ModuleId
+    outcomes:
+      # A faulted agent answers before anything else is read. ESS answers the module's held
+      # state (step 3 of its precedence order) before any related row (step 4), so a guard on the
+      # agent's Faulted state would come after `already-loaded`; an `external:` refusal decided
+      # before the row is read is the one construct that answers first, and it cannot also read
+      # the agent (ESS refuses `before_row:` beside `when_related:`).
+      # UNMAPPED: the tie between this refusal and the agent's Faulted state, which the commands
+      # whose subject holds no state (CreateRealm, ParseScript, EvaluateScript) do state.
+      # Carried by HOST-48.
+      - name: faulted
+        external: the agent ended a run with Terminated(EngineFault) before
+        before_row: true
+        error: swell.host.Faulted
+        payload:
+          swell.host.Faulted: {agent_id: input.agent_id}
+      - name: no-module
+        unknown_instance: true
+        error: swell.host.NotHeld
+      # InnerModuleLoading visits a module only while its [[Status]] is new; for any other the
+      # Promise is resolved at once and nothing changes.
+      - name: already-loaded
+        when_subject_state: [Unlinked, Linked, EvaluatingAsync, Evaluated]
+        preserves: swell.host.Module
+        instance: module_id
+      - name: loaded
+        external: every module the graph requests is loaded already, or it requests none
+        moves: swell.host.Module.load
+        instance: module_id
+        emits: [swell.host.ModuleStatusChanged]
+        payload:
+          swell.host.ModuleStatusChanged: {module_id: input.module_id, status: Unlinked}
+        summary: The graph is loaded; its modules are unlinked.
+      # The engine has called HostLoadImportedModule once for each request not loaded yet
+      # (HostLoadImportedModule below), and the module stays new until the last one finishes.
+      - name: loading
+        preserves: swell.host.Module
+        instance: module_id
+
+  # The hook HostLoadImportedModule (16.2.1.10), which the engine calls and which returns at once
+  # (decision 9, "Host hooks"). It starts a step that takes time: FinishLoadingImportedModule ends
+  # it, once, with a module or with an error.
+  - name: swell.host.HostLoadImportedModule
+    naming:
+      summary: The engine asks the host to load the module one request names.
+    refs: ["ecma262:sec-HostLoadImportedModule"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: referrer
+        type: swell.host.ModuleId
+      - name: specifier
+        type: String
+        example: "./dependency.mjs"
+      - name: attributes
+        type: List<swell.host.ImportAttribute>
+        example: []
+    outcomes:
+      - name: requested
+        creates: swell.host.ModuleLoad
+        instance: load_id
+        sets:
+          referrer: input.referrer
+          specifier: input.specifier
+          attributes: input.attributes
+        emits: [swell.host.ModuleLoadRequested]
+        payload:
+          swell.host.ModuleLoadRequested:
+            load_id: {generated: true}
+            agent_id: input.agent_id
+            referrer: input.referrer
+            specifier: input.specifier
+            attributes: input.attributes
+
+  # finish_loading_imported_module (decision 9; 16.2.1.11).
+  # UNMAPPED: what the host passes. Decision 9 says "with the module's source or an error"; the
+  # draft's FinishLoadingImportedModule takes a Module Record (a module the host parsed first with
+  # ParseModule) or a throw completion; the brief of this model says "with a module or with an
+  # error". This model states a module, and flags the difference as a finding.
+  # Carried by HOST-57, HOST-59, HOST-62, HOST-63, HOST-64.
+  # UNMAPPED: the error value of the throw completion (an engine value the host would have to
+  # create), and the realm a module from another realm or agent belongs to.
+  # Carried by HOST-31, HOST-61.
+  # UNMAPPED: the effect on the graph. When the last pending load finishes, every module the graph
+  # visited moves from new to unlinked (InnerModuleLoading), and a finished module's own requests
+  # start new loads; which modules those are is decided by their source text.
+  # Carried by HOST-56, HOST-60.
+  - name: swell.host.FinishLoadingImportedModule
+    naming:
+      summary: The host ends a module load the engine asked for, with a module or with an error.
+    refs: ["ecma262:sec-FinishLoadingImportedModule"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: load_id
+        type: swell.host.ModuleLoadId
+      - name: module_id
+        type: Optional<swell.host.ModuleId>
+    outcomes:
+      - name: no-load
+        unknown_instance: true
+        error: swell.host.NotHeld
+      - name: no-agent
+        when_related: {via: input.agent_id, exists: false}
+        error: swell.host.NotHeld
+      - name: faulted
+        when_related: {via: input.agent_id, predicate: state == Faulted}
+        error: swell.host.Faulted
+        payload:
+          swell.host.Faulted: {agent_id: input.agent_id}
+      - name: finished
+        when: defined(module_id)
+        moves: swell.host.ModuleLoad.finish
+        instance: load_id
+        emits: [swell.host.ModuleLoadEnded]
+        payload:
+          swell.host.ModuleLoadEnded: {load_id: input.load_id, state: Finished}
+        refs: ["ecma262:sec-FinishLoadingImportedModule"]
+      - name: failed
+        when: not defined(module_id)
+        moves: swell.host.ModuleLoad.fail
+        instance: load_id
+        emits: [swell.host.ModuleLoadEnded]
+        payload:
+          swell.host.ModuleLoadEnded: {load_id: input.load_id, state: Failed}
+        refs: ["ecma262:sec-FinishLoadingImportedModule"]
+
+
+  # link (decision 9; Link() of a Cyclic Module Record).
+  # UNMAPPED: Link on a module whose [[Status]] is new. The draft asserts it never happens;
+  # decision 9 does not say what the engine answers a host that does it, so no branch answers it.
+  # Carried by HOST-42.
+  - name: swell.host.LinkModule
+    naming:
+      summary: Link a loaded module and its graph.
+    refs: ["ecma262:sec-moduledeclarationlinking"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: module_id
+        type: swell.host.ModuleId
+    outcomes:
+      # As in LoadRequestedModules.
+      # UNMAPPED: the tie between this refusal and the agent's Faulted state.
+      # Carried by HOST-48.
+      - name: faulted
+        external: the agent ended a run with Terminated(EngineFault) before
+        before_row: true
+        error: swell.host.Faulted
+        payload:
+          swell.host.Faulted: {agent_id: input.agent_id}
+      - name: no-module
+        unknown_instance: true
+        error: swell.host.NotHeld
+      - name: threw
+        external: an import does not resolve, or resolves ambiguously
+        when_subject: {predicate: state == Unlinked}
+        error: swell.host.Thrown
+        summary: Throw(value); the module stays unlinked, as Link leaves it on failure.
+      - name: memory-budget
+        external: an environment or binding would pass the memory budget
+        when_subject: {predicate: state == Unlinked}
+        error: swell.host.Terminated
+        payload:
+          swell.host.Terminated: {reason: MemoryBudget}
+      # UNMAPPED: an engine fault while linking. The refusal that leaves the module unlinked
+      # cannot also fault the agent: an ESS refusal changes no record but its own subject.
+      # Carried by HOST-71.
+      - name: linked
+        when_subject_state: Unlinked
+        moves: swell.host.Module.link
+        instance: module_id
+        emits: [swell.host.ModuleStatusChanged]
+        payload:
+          swell.host.ModuleStatusChanged: {module_id: input.module_id, status: Linked}
+      # Link returns at once for a module already past unlinked.
+      - name: already-linked
+        when_subject_state: [Linked, EvaluatingAsync, Evaluated]
+        preserves: swell.host.Module
+        instance: module_id
+
+  # evaluate_module (decision 9; Evaluate() of a Cyclic Module Record).
+  # UNMAPPED: its result. Evaluate returns a Promise, rejected with the exception where the graph
+  # threw, so a module's exception reaches the host as an engine value inside a Normal outcome,
+  # never as Throw(value).
+  # Carried by HOST-38.
+  # UNMAPPED: Evaluate on a module whose [[Status]] is new or unlinked. The draft asserts it never
+  # happens; decision 9 does not say what the engine answers, so no branch answers it.
+  # Carried by HOST-43.
+  # UNMAPPED: a run of Evaluate that ends with Terminated. The modules that were evaluating stay
+  # at evaluating, marked terminated, and a later evaluate_module of the graph answers
+  # Err(ModuleTerminated) (host-interface.md, decision 10). This model has no evaluating state
+  # and no mark, and a Terminated branch here would leave the module linked, from which a second
+  # EvaluateModule is accepted; so no branch states a Terminated end of EvaluateModule, an
+  # engine fault included.
+  # Carried by HOST-70, HOST-74, HOST-48.
+  - name: swell.host.EvaluateModule
+    naming:
+      summary: Evaluate a linked module and its graph.
+    refs: ["ecma262:sec-moduleevaluation"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: module_id
+        type: swell.host.ModuleId
+    outcomes:
+      # As in LoadRequestedModules.
+      # UNMAPPED: the tie between this refusal and the agent's Faulted state.
+      # Carried by HOST-48.
+      - name: faulted
+        external: the agent ended a run with Terminated(EngineFault) before
+        before_row: true
+        error: swell.host.Faulted
+        payload:
+          swell.host.Faulted: {agent_id: input.agent_id}
+      - name: no-module
+        unknown_instance: true
+        error: swell.host.NotHeld
+      # Evaluate returns the same Promise again for a module already evaluated or waiting.
+      - name: already-evaluated
+        when_subject:
+          predicate: {any: [state == EvaluatingAsync, state == Evaluated]}
+        preserves: swell.host.Module
+        instance: module_id
+      # UNMAPPED: this answer. Evaluate on a new or unlinked module breaks an assertion of the
+      # draft, and decision 9 does not say what the engine answers. ESS forces one here: a branch
+      # that takes a move from Linked without a held-state guard (an `external:` branch may not
+      # carry one) answers every other state unless a branch claims it. Link, whose outcomes
+      # outside Linked are refusals, leaves the same case unanswered.
+      # Carried by HOST-43.
+      - name: not-linked
+        wrong_state: true
+        error: swell.host.ModuleStatusConflict
+        payload:
+          swell.host.ModuleStatusConflict: {status: {subject: state}}
+      - name: waiting
+        external: the module or one of its dependencies has a top-level await
+        moves: swell.host.Module.evaluate_async
+        instance: module_id
+        emits: [swell.host.ModuleStatusChanged]
+        payload:
+          swell.host.ModuleStatusChanged: {module_id: input.module_id, status: EvaluatingAsync}
+        summary: evaluating-async; it settles inside a promise job.
+      - name: evaluated
+        moves: swell.host.Module.evaluate
+        instance: module_id
+        emits: [swell.host.ModuleStatusChanged]
+        payload:
+          swell.host.ModuleStatusChanged: {module_id: input.module_id, status: Evaluated}
+        summary: evaluated, with or without an [[EvaluationError]].
+
+  # The engine's own step inside a promise job (AsyncModuleExecutionFulfilled and
+  # AsyncModuleExecutionRejected, 16.2.1.6.1.3.4 and .5): a module waiting on its top-level await
+  # settles. The host sees it only as the module's [[Status]], so it is stated as a step the
+  # engine takes itself; the job it runs in is run by PerformMicrotaskCheckpoint.
+  - name: swell.host.AsyncModuleExecutionSettled
+    naming:
+      summary: A module waiting on a top-level await, or on a dependency's, finishes.
+    refs: ["ecma262:sec-async-module-execution-fulfilled", "ecma262:sec-async-module-execution-rejected"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: module_id
+        type: swell.host.ModuleId
+    # UNMAPPED: the step on a module that is evaluated already, where both operations return at
+    # once (16.2.1.6.1.3.4 and .5, step 1). Stating it as a `when_subject_state: Evaluated` branch
+    # makes ESS require an answer for new, unlinked and linked too (`non_exhaustive_branches`),
+    # states the draft asserts the step is never taken in; so no branch answers any of the four.
+    # ESS limit.
+    outcomes:
+      - name: settled
+        moves: swell.host.Module.settle
+        instance: module_id
+        emits: [swell.host.ModuleStatusChanged]
+        payload:
+          swell.host.ModuleStatusChanged: {module_id: input.module_id, status: Evaluated}
+
+  # perform_microtask_checkpoint (decision 9): runs promise jobs until the queue is empty, under
+  # one step budget for the whole call (host-interface.md, decision 11). This is HTML's microtask
+  # checkpoint, which the host decides when to perform.
+  # UNMAPPED: the jobs a checkpoint runs that were enqueued while it ran. A set effect selects the
+  # rows as they were before the outcome, so only the jobs enqueued before the call are stated.
+  # Carried by HOST-79.
+  # UNMAPPED: which jobs ran when the checkpoint ends with Terminated. It returns; the jobs before
+  # the one it ended in have run, that one never runs again, and the rest stay queued for the
+  # next checkpoint (host-interface.md, decision 11). The Terminated branches below state none of
+  # this: they move no job.
+  # Carried by HOST-77, HOST-80.
+  - name: swell.host.PerformMicrotaskCheckpoint
+    naming:
+      summary: Run the agent's promise jobs until its queue is empty.
+    # UNMAPPED: the reference to HTML's "perform a microtask checkpoint". The HTML Standard is
+    # not on disk, so its anchor was not read, and this model cites no anchor it has not read.
+    # Carried by HOST-79.
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+    outcomes:
+      - name: no-agent
+        unknown_instance: true
+        error: swell.host.NotHeld
+      - name: faulted
+        when_subject:
+          predicate: state == Faulted
+        error: swell.host.Faulted
+        payload:
+          swell.host.Faulted: {agent_id: input.agent_id}
+      - name: step-budget
+        external: the checkpoint's promise jobs together spend the steps of the call
+        updates: swell.host.Agent
+        instance: agent_id
+        emits: [swell.host.RunTerminated]
+        payload:
+          swell.host.RunTerminated: {agent_id: input.agent_id, reason: StepBudget}
+      - name: memory-budget
+        external: an allocation other than a buffer's would pass the memory budget
+        updates: swell.host.Agent
+        instance: agent_id
+        emits: [swell.host.RunTerminated]
+        payload:
+          swell.host.RunTerminated: {agent_id: input.agent_id, reason: MemoryBudget}
+      - name: interrupted
+        external: the host sets the interrupt handle while a promise job runs
+        updates: swell.host.Agent
+        instance: agent_id
+        emits: [swell.host.RunTerminated]
+        payload:
+          swell.host.RunTerminated: {agent_id: input.agent_id, reason: Interrupted}
+      - name: engine-fault
+        external: the engine finds a broken invariant of its own or of a host override
+        moves: swell.host.Agent.fault
+        instance: agent_id
+        emits: [swell.host.RunTerminated]
+        payload:
+          swell.host.RunTerminated: {agent_id: input.agent_id, reason: EngineFault}
+      - name: drained
+        updates: swell.host.Agent
+        instance: agent_id
+        emits: [swell.host.MicrotaskCheckpointPerformed]
+        payload:
+          swell.host.MicrotaskCheckpointPerformed: {agent_id: input.agent_id}
+        affects:
+          - entity: swell.host.Job
+            where:
+              all:
+                - agent_id == input.agent_id
+                - kind == PromiseJob
+                - state == Enqueued
+            moves: swell.host.Job.run
+        summary: Every promise job ran; the queue is empty.
+
+  # The hook HostEnqueuePromiseJob (9.5.5): the engine keeps the job and tells the host, so HTML
+  # can attach its incumbent settings through HostMakeJobCallback (decision 9, "Jobs").
+  - name: swell.host.HostEnqueuePromiseJob
+    naming:
+      summary: The engine tells the host it queued a promise job.
+    refs: ["ecma262:sec-hostenqueuepromisejob"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: realm_id
+        type: Optional<swell.host.RealmId>
+    outcomes:
+      - name: enqueued
+        creates: swell.host.Job
+        instance: job_id
+        sets:
+          agent_id: input.agent_id
+          kind: PromiseJob
+          realm_id: input.realm_id
+        emits: [swell.host.PromiseJobEnqueued]
+        payload:
+          swell.host.PromiseJobEnqueued:
+            job_id: {generated: true}
+            agent_id: input.agent_id
+            realm_id: input.realm_id
+
+  # The hooks HostEnqueueGenericJob (9.5.4) and HostEnqueueTimeoutJob (9.5.6): the job is handed
+  # to the host as a `Job` token, which the host runs with `run_job` when it chooses, one entry
+  # each (host-interface.md, decision 11).
+  # UNMAPPED: running a generic or timeout job. The model has no `run_job` command, so no
+  # command here moves such a job out of Enqueued.
+  # Carried by HOST-85, HOST-86, HOST-88.
+  - name: swell.host.HostEnqueueGenericJob
+    naming:
+      summary: The engine hands the host a job to run when it chooses.
+    refs: ["ecma262:sec-hostenqueuegenericjob"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: realm_id
+        type: swell.host.RealmId
+    outcomes:
+      - name: enqueued
+        creates: swell.host.Job
+        instance: job_id
+        sets:
+          agent_id: input.agent_id
+          kind: GenericJob
+          realm_id: input.realm_id
+        emits: [swell.host.GenericJobEnqueued]
+        payload:
+          swell.host.GenericJobEnqueued:
+            job_id: {generated: true}
+            agent_id: input.agent_id
+            realm_id: input.realm_id
+
+  - name: swell.host.HostEnqueueTimeoutJob
+    naming:
+      summary: The engine hands the host a job to run after at least a delay.
+    refs: ["ecma262:sec-hostenqueuetimeoutjob"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: realm_id
+        type: swell.host.RealmId
+      - name: milliseconds
+        type: Binary64
+    outcomes:
+      - name: enqueued
+        creates: swell.host.Job
+        instance: job_id
+        sets:
+          agent_id: input.agent_id
+          kind: TimeoutJob
+          realm_id: input.realm_id
+          milliseconds: input.milliseconds
+        emits: [swell.host.TimeoutJobEnqueued]
+        payload:
+          swell.host.TimeoutJobEnqueued:
+            job_id: {generated: true}
+            agent_id: input.agent_id
+            realm_id: input.realm_id
+            milliseconds: input.milliseconds
+
+  # The hook HostPromiseRejectionTracker (27.5.1.9).
+  # UNMAPPED: the promise, an engine value. Without it the host cannot pair a "handle" with the
+  # "reject" it withdraws.
+  # Carried by HOST-100, HOST-101, HOST-121.
+  - name: swell.host.HostPromiseRejectionTracker
+    naming:
+      summary: The engine tells the host a promise was rejected with no handler, or got one.
+    refs: ["ecma262:sec-host-promise-rejection-tracker"]
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+      - name: operation
+        type: swell.host.RejectionOperation
+    outcomes:
+      - name: tracked
+        updates: swell.host.Agent
+        instance: agent_id
+        emits: [swell.host.PromiseRejectionTracked]
+        payload:
+          swell.host.PromiseRejectionTracked:
+            agent_id: input.agent_id
+            operation: input.operation
+
+  # Agent::interrupt_handle (decision 9, "Interrupting"): a `Send` handle holding an
+  # `Arc<AtomicBool>`, set from any host thread. Setting it is a store, so it answers nothing and
+  # is the same for an alive and a faulted agent.
+  # UNMAPPED: the effect. The run in progress on the agent's thread ends at its next check with
+  # Terminated(Interrupted); ESS has one caller at a time and no command that acts on another
+  # command while it runs. The `interrupted` branches of the run commands are the other half,
+  # unconnected to this one.
+  # Carried by HOST-90, HOST-96.
+  # UNMAPPED: whether the flag is cleared when it ends a run, and what a run that starts while it
+  # is set does. Decision 9 does not say.
+  # Carried by HOST-91, HOST-92, HOST-93.
+  - name: swell.host.Interrupt
+    naming:
+      summary: Set the agent's interrupt handle from any thread.
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+    outcomes:
+      - name: no-agent
+        unknown_instance: true
+        error: swell.host.NotHeld
+      - name: set
+        preserves: swell.host.Agent
+        instance: agent_id
+
+  # collect (decision 9; decision 4, "Collector").
+  # UNMAPPED: what a collection changes that the host sees: WeakRef targets cleared and
+  # FinalizationRegistry cleanup jobs scheduled through HostEnqueueFinalizationRegistryCleanupJob,
+  # whose running decision 9 does not assign to the host or to the checkpoint.
+  # Carried by HOST-87, HOST-129, HOST-130, HOST-131.
+  - name: swell.host.Collect
+    naming:
+      summary: Run a full collection now.
+    input:
+      - name: agent_id
+        type: swell.host.AgentId
+    outcomes:
+      - name: no-agent
+        unknown_instance: true
+        error: swell.host.NotHeld
+      - name: faulted
+        when_subject:
+          predicate: state == Faulted
+        error: swell.host.Faulted
+        payload:
+          swell.host.Faulted: {agent_id: input.agent_id}
+      - name: engine-fault
+        external: the collector finds a stale handle or a host trace that names one
+        moves: swell.host.Agent.fault
+        instance: agent_id
+        emits: [swell.host.RunTerminated]
+        payload:
+          swell.host.RunTerminated: {agent_id: input.agent_id, reason: EngineFault}
+      - name: collected
+        preserves: swell.host.Agent
+        instance: agent_id
+
+  # UNMAPPED: call(function, this, arguments) and construct (decision 9, "Entry points"), and every
+  # abstract operation the interface exposes to the host's binding layer (to_number, to_string,
+  # get, iteration). Each takes and returns engine values (a function object, the this value, an
+  # argument list, the result), and ESS has no type for a value whose meaning is the heap it lives
+  # in. A host function (a host object's operation, decision 9 "Host objects for the DOM") is
+  # Rust code the engine calls, which may call `call` again (re-entrancy); neither is stated.
+  # Carried by HOST-15, HOST-47, HOST-103 to HOST-107.
+  # UNMAPPED: host objects: their classes, brand, host data, the `trace` method, and the internal
+  # methods a host may override with the engine checking 6.1.7.3 on what they return.
+  # Carried by HOST-108 to HOST-115.
+  # UNMAPPED: the root table (decision 4, "Host-held values"): a Root is valid until it is
+  # released or its owner drops it, and a handle is valid only while a collection has not freed
+  # it. ESS identities are valid until a command deletes the row; no construct ties validity to a
+  # collection.
+  # Carried by HOST-28, HOST-29, HOST-30.
+
+events:
+  - name: swell.host.AgentCreated
+    fields:
+      - {name: agent_id, type: swell.host.AgentId}
+
+  - name: swell.host.RealmCreated
+    fields:
+      - {name: realm_id, type: swell.host.RealmId}
+      - {name: agent_id, type: swell.host.AgentId}
+
+  - name: swell.host.ScriptParsed
+    fields:
+      - {name: script_id, type: swell.host.ScriptId}
+      - {name: realm_id, type: swell.host.RealmId}
+
+  - name: swell.host.ModuleParsed
+    fields:
+      - {name: module_id, type: swell.host.ModuleId}
+      - {name: realm_id, type: swell.host.RealmId}
+
+  # Normal(value).
+  # UNMAPPED: the completion value, an engine value.
+  # Carried by HOST-37.
+  - name: swell.host.ScriptCompleted
+    fields:
+      - {name: script_id, type: swell.host.ScriptId}
+
+  # Throw(value).
+  # UNMAPPED: the thrown value, an engine value "the host can read" (decision 9).
+  # Carried by HOST-37.
+  - name: swell.host.ScriptThrew
+    fields:
+      - {name: script_id, type: swell.host.ScriptId}
+
+  # Terminated(reason).
+  - name: swell.host.RunTerminated
+    fields:
+      - {name: agent_id, type: swell.host.AgentId}
+      - {name: reason, type: swell.host.TerminationReason}
+
+  - name: swell.host.ModuleLoadRequested
+    fields:
+      - {name: load_id, type: swell.host.ModuleLoadId}
+      - {name: agent_id, type: swell.host.AgentId}
+      - {name: referrer, type: swell.host.ModuleId}
+      - {name: specifier, type: String}
+      - {name: attributes, type: List<swell.host.ImportAttribute>}
+
+  - name: swell.host.PromiseJobEnqueued
+    fields:
+      - {name: job_id, type: swell.host.JobId}
+      - {name: agent_id, type: swell.host.AgentId}
+      - {name: realm_id, type: Optional<swell.host.RealmId>}
+
+  - name: swell.host.GenericJobEnqueued
+    fields:
+      - {name: job_id, type: swell.host.JobId}
+      - {name: agent_id, type: swell.host.AgentId}
+      - {name: realm_id, type: swell.host.RealmId}
+
+  - name: swell.host.TimeoutJobEnqueued
+    fields:
+      - {name: job_id, type: swell.host.JobId}
+      - {name: agent_id, type: swell.host.AgentId}
+      - {name: realm_id, type: swell.host.RealmId}
+      - {name: milliseconds, type: Binary64}
+
+  # The next three stand for a return value, not for a notification. Decision 9's calls answer
+  # with their Outcome and tell the host nothing else; ESS refuses an accepting outcome that
+  # publishes no event (`empty_change`), so each state move publishes the state it reached.
+  # UNMAPPED: how the host reads a module's [[Status]] or a checkpoint's result. Decision 9 gives
+  # no read of either; the return value of the call is the only answer, and it carries an engine
+  # value (a Promise for LoadRequestedModules and Evaluate).
+  # Carried by HOST-79, HOST-97, HOST-100.
+  - name: swell.host.ModuleStatusChanged
+    fields:
+      - {name: module_id, type: swell.host.ModuleId}
+      - {name: status, type: swell.host.Module.State}
+
+  - name: swell.host.ModuleLoadEnded
+    fields:
+      - {name: load_id, type: swell.host.ModuleLoadId}
+      - {name: state, type: swell.host.ModuleLoad.State}
+
+  - name: swell.host.MicrotaskCheckpointPerformed
+    fields:
+      - {name: agent_id, type: swell.host.AgentId}
+
+  - name: swell.host.PromiseRejectionTracked
+    fields:
+      - {name: agent_id, type: swell.host.AgentId}
+      - {name: operation, type: swell.host.RejectionOperation}

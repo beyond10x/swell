@@ -1,0 +1,10 @@
+section sec-object-objects
+path sec-object-objects test/built-ins/Object/
+section sec-number-objects
+path sec-number-objects test/built-ins/Number/
+section sec-atomics-object
+path sec-atomics-object test/built-ins/Atomics/
+omit sec-atomics-object concurrent-agents open-item-B
+section sec-fixture-language
+path sec-fixture-language test/language/expressions/
+path sec-fixture-language test/language/statements/if/

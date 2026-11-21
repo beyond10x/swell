@@ -1,0 +1,75 @@
+section sec-object-objects
+path sec-object-objects test/built-ins/Object/
+section sec-function-objects
+path sec-function-objects test/built-ins/Function/
+section sec-boolean-objects
+path sec-boolean-objects test/built-ins/Boolean/
+section sec-symbol-objects
+path sec-symbol-objects test/built-ins/Symbol/
+section sec-error-objects
+path sec-error-objects test/built-ins/Error/
+section sec-number-objects
+path sec-number-objects test/built-ins/Number/
+section sec-bigint-objects
+path sec-bigint-objects test/built-ins/BigInt/
+section sec-math-object
+path sec-math-object test/built-ins/Math/
+section sec-date-objects
+path sec-date-objects test/built-ins/Date/
+section sec-string-objects
+path sec-string-objects test/built-ins/String/
+omit sec-string-objects unicode-17.0.0 open-item-C
+section sec-regexp-regular-expression-objects
+path sec-regexp-regular-expression-objects test/built-ins/RegExp/
+omit sec-regexp-regular-expression-objects unicode-17.0.0 open-item-C
+section sec-array-objects
+path sec-array-objects test/built-ins/Array/
+section sec-typedarray-objects
+path sec-typedarray-objects test/built-ins/TypedArray/
+section sec-uint8array
+path sec-uint8array test/built-ins/Uint8Array/
+section sec-map-objects
+path sec-map-objects test/built-ins/Map/
+section sec-set-objects
+path sec-set-objects test/built-ins/Set/
+section sec-weakmap-objects
+path sec-weakmap-objects test/built-ins/WeakMap/
+section sec-weakset-objects
+path sec-weakset-objects test/built-ins/WeakSet/
+section sec-arraybuffer-objects
+path sec-arraybuffer-objects test/built-ins/ArrayBuffer/
+section sec-sharedarraybuffer-objects
+path sec-sharedarraybuffer-objects test/built-ins/SharedArrayBuffer/
+section sec-dataview-objects
+path sec-dataview-objects test/built-ins/DataView/
+section sec-atomics-object
+path sec-atomics-object test/built-ins/Atomics/
+omit sec-atomics-object concurrent-agents open-item-B
+section sec-json-object
+path sec-json-object test/built-ins/JSON/
+section sec-weak-ref-objects
+path sec-weak-ref-objects test/built-ins/WeakRef/
+section sec-finalization-registry-objects
+path sec-finalization-registry-objects test/built-ins/FinalizationRegistry/
+section sec-disposablestack-objects
+path sec-disposablestack-objects test/built-ins/DisposableStack/
+section sec-asyncdisposablestack-objects
+path sec-asyncdisposablestack-objects test/built-ins/AsyncDisposableStack/
+section sec-promise-objects
+path sec-promise-objects test/built-ins/Promise/
+section sec-generatorfunction-objects
+path sec-generatorfunction-objects test/built-ins/GeneratorFunction/
+section sec-asyncgeneratorfunction-objects
+path sec-asyncgeneratorfunction-objects test/built-ins/AsyncGeneratorFunction/
+section sec-async-function-objects
+path sec-async-function-objects test/built-ins/AsyncFunction/
+section sec-reflect-object
+path sec-reflect-object test/built-ins/Reflect/
+section sec-proxy-objects
+path sec-proxy-objects test/built-ins/Proxy/
+section sec-names-and-keywords
+path sec-names-and-keywords test/language/identifiers/
+omit sec-names-and-keywords identifiers-outside-ascii section-12-part-before-its-slice
+section sec-literals-regular-expression-literals
+path sec-literals-regular-expression-literals test/language/literals/regexp/
+omit sec-literals-regular-expression-literals regexp-literals section-12-part-before-its-slice

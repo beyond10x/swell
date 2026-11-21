@@ -1,0 +1,270 @@
+version: '3'
+
+set: [pipefail]
+
+includes:
+  test262-fetch:
+    taskfile: taskfiles/test262-fetch.yml
+    flatten: true
+    optional: true
+  test262:
+    taskfile: taskfiles/test262.yml
+    flatten: true
+    optional: true
+  unicode-data:
+    taskfile: taskfiles/unicode-data.yml
+    flatten: true
+    optional: true
+  unicode-tables:
+    taskfile: taskfiles/unicode-tables.yml
+    flatten: true
+    optional: true
+  spec:
+    taskfile: taskfiles/spec.yml
+    flatten: true
+    optional: true
+  host-requirements:
+    taskfile: taskfiles/host-requirements.yml
+    flatten: true
+    optional: true
+
+tasks:
+  check:
+    desc: The one gate. Every check, in order; the first that fails stops it.
+    cmds:
+      - task: gate-vars
+      - task: python-check
+      - task: forbid-unsafe-check
+      - task: lock-check
+      - task: test262-fetch
+      - task: unicode-data-check
+      - task: unicode-tables-check
+      - task: validate
+      - task: conform
+      - task: host-requirements-check
+      - task: build
+      - task: clippy
+      - task: test
+      - task: test262
+      - task: gate-selftest
+
+  gate-vars:
+    desc: Print, on one line, every gate variable that has a value before the checks run; a redirected run shows in its own output.
+    summary: |
+      Print, on one line, every gate variable that has a value before the checks run.
+
+      Task takes a variable from the environment when none is passed on the command line, so an
+      exported GATE_ROOT, TEST262_CACHE, SPEC_REFUSALS_MAX and the like changes what a check
+      reads. The gate's variables carry a prefix so that this does not happen by accident; this
+      task prints each of them that has a value from the command line, the environment or a
+      task file's own defaults, as "gate: variables in effect: NAME=value ...". The SPEC_ ones
+      always show, with their defaults; any other name on the line was set by the caller. It never
+      fails. A new gate variable is added to GATE_VARIABLES in the change that adds it.
+    vars:
+      GATE_VARIABLES: >-
+        GATE_ROOT GATE_CRATES GATE_LOCK
+        TEST262_URL TEST262_COMMIT TEST262_TREE TEST262_LS_TREE_SHA256 TEST262_CACHE
+        UNICODE_DATA_DIR UNICODE_DATA_REQUIRED
+        SPEC_REFUSALS_MAX SPEC_OUT SPEC_SYNTHESIZE_LOG SPEC_CONFORM_LOG
+        HOST_REQ_DOC HOST_REQ_LIST HOST_REQ_SPEC HOST_REQ_DELIVERED HOST_REQ_TEST_LIST
+        TEST262_DESIGN TEST262_FEATURES TEST262_SECTIONS TEST262_EXPECTED TEST262_OUT
+    silent: true
+    cmds:
+      - |
+        set="{{range $n := splitList " " .GATE_VARIABLES}}{{with index $ $n}} {{$n}}={{.}}{{end}}{{end}}"
+        if [ -n "$set" ]; then echo "gate: variables in effect:$set"; else echo "gate: variables in effect: none"; fi
+
+  python-check:
+    desc: Fail, naming each, when a file of the tree is a Python file.
+    summary: |
+      Fail, naming each, when a file of the tree is a Python file (AGENTS.md, Rules).
+
+      Reads the files git lists for GATE_ROOT (default .), tracked or untracked but not ignored,
+      so .cache/, .out/ and target/ are not read. A file whose name ends in .py, .pyw or .pyi, or
+      whose first line starts with #! and contains python, is named as "<path>: a Python file".
+      No file at all fails too. The log is .out/python-check.log.
+    vars:
+      GATE_ROOT: '{{.GATE_ROOT | default "."}}'
+    env:
+      GATE_ROOT: '{{.GATE_ROOT}}'
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        files=$(git -C "$GATE_ROOT" ls-files --cached --others --exclude-standard) || { echo "python-check: git cannot list the files of $GATE_ROOT"; exit 1; }
+        printf '%s\n' "$files" | awk -v root="$GATE_ROOT" '
+          $0 == "" { next }
+          {
+            files++
+            path = (root == "." ? $0 : root "/" $0)
+            python = ($0 ~ /\.(py|pyw|pyi)$/)
+            if (!python) {
+              line = ""
+              if ((getline line < path) > 0 && line ~ /^#!/ && line ~ /python/) python = 1
+              close(path)
+            }
+            if (python) { print path ": a Python file"; found++ }
+          }
+          END {
+            if (found) { print "python-check: " found " Python file(s) among " files " file(s); no Python anywhere (AGENTS.md, Rules)"; exit 1 }
+            if (!files) { print "python-check: git lists no file under " root; exit 1 }
+            print "python-check: no Python file among " files+0 " file(s)"
+          }
+        ' | tee .out/python-check.log
+
+  forbid-unsafe-check:
+    desc: 'Fail, naming each, when a crate root lacks the line #![forbid(unsafe_code)].'
+    summary: |
+      Fail, naming each, when a crate root lacks the line #![forbid(unsafe_code)] (AGENTS.md, Rules).
+
+      The crate roots are src/lib.rs, src/main.rs and src/bin/*.rs of every directory under
+      GATE_CRATES (default crates). Each must hold #![forbid(unsafe_code)] as a line of its own; one
+      without it is named as "<path>: no #![forbid(unsafe_code)]". No crate root at all fails
+      too. The log is .out/forbid-unsafe-check.log.
+    vars:
+      GATE_CRATES: '{{.GATE_CRATES | default "crates"}}'
+    env:
+      GATE_CRATES: '{{.GATE_CRATES}}'
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        {
+          roots=0
+          missing=0
+          for root in "$GATE_CRATES"/*/src/lib.rs "$GATE_CRATES"/*/src/main.rs "$GATE_CRATES"/*/src/bin/*.rs; do
+            [ -f "$root" ] || continue
+            roots=$((roots + 1))
+            if ! grep -qxF '#![forbid(unsafe_code)]' "$root"; then
+              echo "$root: no #![forbid(unsafe_code)]"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$roots" -eq 0 ]; then
+            echo "forbid-unsafe-check: no crate root under $GATE_CRATES"
+            exit 1
+          fi
+          if [ "$missing" -gt 0 ]; then
+            echo "forbid-unsafe-check: $missing of $roots crate root(s) without #![forbid(unsafe_code)]"
+            exit 1
+          fi
+          echo "forbid-unsafe-check: $roots crate root(s), each with #![forbid(unsafe_code)]"
+        } | tee .out/forbid-unsafe-check.log
+
+  lock-check:
+    desc: Fail, naming each package, when the root Cargo.lock holds one from outside this repository.
+    summary: |
+      Fail, naming each package, when the root Cargo.lock holds one from outside this repository.
+
+      Nothing that ships uses a third-party crate (AGENTS.md, Rules), and the root Cargo.lock
+      proves it. cargo writes a source line for every package it takes from a registry or a git
+      repository, and none for a crate it reaches by path. Each package with a source line is
+      named as "Cargo.lock: <name> <version> from <source>". A missing lock fails too. GATE_LOCK
+      (default Cargo.lock) is the file read. The log is .out/lock-check.log.
+
+      A path dependency on a directory outside this repository has no source line either, and is
+      not caught here.
+    vars:
+      GATE_LOCK: '{{.GATE_LOCK | default "Cargo.lock"}}'
+    env:
+      GATE_LOCK: '{{.GATE_LOCK}}'
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        {
+          test -f "$GATE_LOCK" || { echo "Cargo.lock: $GATE_LOCK is missing; the root workspace's lock is committed"; exit 1; }
+          awk '
+            /^\[\[package\]\]$/ { packages++; name = ""; version = "" }
+            /^name = / { name = $3; gsub(/"/, "", name) }
+            /^version = / { version = $3; gsub(/"/, "", version) }
+            /^source = / { source = $3; gsub(/"/, "", source); print "Cargo.lock: " name " " version " from " source; outside++ }
+            END {
+              if (outside) { print outside " package(s) from outside this repository; nothing that ships may use a third-party crate"; exit 1 }
+              print "Cargo.lock: " packages+0 " package(s), none from outside this repository"
+            }
+          ' "$GATE_LOCK"
+        } | tee .out/lock-check.log
+
+  build:
+    desc: Build every crate and target of the workspace with warnings denied.
+    env:
+      RUSTFLAGS: -D warnings
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - cargo build --workspace --all-targets --locked > .out/build.log 2>&1 || { cat .out/build.log; exit 1; }
+      - tail -n 1 .out/build.log
+
+  clippy:
+    desc: Run clippy over every crate and target of the workspace; a warning or a denied lint fails it.
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - cargo clippy --workspace --all-targets --locked -- -D warnings > .out/clippy.log 2>&1 || { cat .out/clippy.log; exit 1; }
+      - tail -n 1 .out/clippy.log
+
+  test:
+    desc: Run every test of the workspace with warnings denied, and print the summed counts.
+    summary: |
+      Run every test of the workspace with warnings denied, and print the summed counts.
+
+      The log is .out/test.log. The line printed sums its "test result:" lines as
+      "<n> test suites: <p> passed, <f> failed, <i> ignored". A run that prints no
+      "test result:" line fails.
+    env:
+      RUSTFLAGS: -D warnings
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        status=0
+        cargo test --workspace --locked > .out/test.log 2>&1 || status=$?
+        if [ "$status" -ne 0 ]; then cat .out/test.log; fi
+        awk -v status="$status" '
+          /^test result: / {
+            suites++
+            for (i = 1; i < NF; i++) {
+              count = $i
+              gsub(/[^0-9]/, "", count)
+              if ($(i + 1) ~ /^passed/) passed += count
+              if ($(i + 1) ~ /^failed/) failed += count
+              if ($(i + 1) ~ /^ignored/) ignored += count
+            }
+          }
+          END {
+            print suites+0 " test suites: " passed+0 " passed, " failed+0 " failed, " ignored+0 " ignored"
+            if (status != 0 || failed > 0 || suites == 0) exit 1
+          }
+        ' .out/test.log
+
+  gate-selftest:
+    desc: Run every planted-defect script of tests/gate/ and fail when one does not refuse its defect.
+    summary: |
+      Run every planted-defect script of tests/gate/ and fail when one does not refuse its defect.
+
+      Each tests/gate/<name>.sh runs with sh from the root, in byte order of the names, and
+      works under .out/gate-tests/<name>/. It passes when it exits 0 and its last line is
+      "<name>: ok". Its output goes to .out/gate-tests/<name>.log, and its last line is printed.
+      No script at all fails too. The summary is in .out/gate-selftest.log.
+    silent: true
+    cmds:
+      - mkdir -p .out/gate-tests
+      - |
+        passed=0
+        failed=0
+        scripts=$(find tests/gate -maxdepth 1 -type f -name '*.sh' | LC_ALL=C sort)
+        for script in $scripts; do
+          name=${script##*/}
+          name=${name%.sh}
+          log=.out/gate-tests/$name.log
+          if sh "$script" > "$log" 2>&1 && [ "$(tail -n 1 "$log")" = "$name: ok" ]; then
+            passed=$((passed + 1))
+          else
+            failed=$((failed + 1))
+          fi
+          tail -n 1 "$log"
+        done
+        echo "gate-selftest: $passed passed, $failed failed" | tee .out/gate-selftest.log
+        if [ $((passed + failed)) -eq 0 ]; then echo "gate-selftest: no script under tests/gate"; exit 1; fi
+        test "$failed" -eq 0

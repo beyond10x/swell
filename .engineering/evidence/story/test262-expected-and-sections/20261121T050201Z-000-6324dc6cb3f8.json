@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T05:02:01Z",
+  "actor": "human:operator",
+  "artifact": "story:test262-expected-and-sections",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot task check on wave/3-expected, exit 0, 8 test suites: 25 passed, test262: 278 lines equal conformance/test262/expected.txt, gate-selftest: 28 passed, 0 failed (docs/plan/wave-3.md)"
+  }
+}

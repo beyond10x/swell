@@ -1,0 +1,389 @@
+version: '3'
+
+set: [pipefail]
+
+tasks:
+  host-requirements-check:
+    desc: Check the HOST-<n> requirements of the host interface document against their list, the delivered slices and the UNMAPPED markers of spec/.
+    summary: |
+      Check the HOST-<n> requirements of the host interface document against their list, the
+      delivered slices and the UNMAPPED markers of spec/.
+
+      Reads HOST_REQ_DOC (default docs/design/host-interface.md), HOST_REQ_LIST (default
+      conformance/host/requirements.txt), HOST_REQ_DELIVERED (default
+      conformance/slices-delivered.txt), HOST_REQ_TEST_LIST and every file under HOST_REQ_SPEC
+      (default spec). When HOST_REQ_TEST_LIST is not given, the task host-requirements-test-list
+      runs first and writes it to .out/host-requirements/tests.txt, the default: every test of
+      the workspace as "<package>::<target>::<test path>".
+      A line of the list is "HOST-<n> test <package>::<target>::<test path>", "HOST-<n> pending
+      slice <s>" or "HOST-<n> omitted <reason>". The test named by a test line must be a line of
+      the test list; a name ending in * matches every test that starts with what is before the
+      *, and must match at least one (one requirement held by one test per hook, say).
+      Fails, one line per fault, on a missing file; a document with no requirement, a spec
+      directory with no file or a test list with no test; a requirement with no line, stated
+      twice, or listed twice; a line for a requirement the document does not have; a line of
+      neither form; an omitted line in the old form "omitted slice <s> not delivered"; a test
+      line whose test is not in the test list ("<id>: test <name> is not a test of the
+      workspace"); a pending line whose slice is not the requirement's [slice <t>] mark, or whose
+      slice the delivered file names; a line of the delivered file that is neither a comment,
+      blank, nor a slice number; and an UNMAPPED marker that names neither a HOST-<n> of the
+      document nor ESS limit, or names a HOST-<n> it does not have.
+      Prints the counts and the pending requirements by slice when it passes.
+    silent: true
+    vars:
+      HOST_REQ_DOC: '{{.HOST_REQ_DOC | default "docs/design/host-interface.md"}}'
+      HOST_REQ_LIST: '{{.HOST_REQ_LIST | default "conformance/host/requirements.txt"}}'
+      HOST_REQ_SPEC: '{{.HOST_REQ_SPEC | default "spec"}}'
+      HOST_REQ_DELIVERED: '{{.HOST_REQ_DELIVERED | default "conformance/slices-delivered.txt"}}'
+      HOST_REQ_TEST_LIST: '{{.HOST_REQ_TEST_LIST | default ""}}'
+    env:
+      HOST_REQ_DOC: '{{.HOST_REQ_DOC}}'
+      HOST_REQ_LIST: '{{.HOST_REQ_LIST}}'
+      HOST_REQ_SPEC: '{{.HOST_REQ_SPEC}}'
+      HOST_REQ_DELIVERED: '{{.HOST_REQ_DELIVERED}}'
+      HOST_REQ_TEST_LIST: '{{.HOST_REQ_TEST_LIST | default ".out/host-requirements/tests.txt"}}'
+    cmds:
+      - task: host-requirements-test-list
+        if: '[ -z "{{.HOST_REQ_TEST_LIST}}" ]'
+      - |
+        missing=0
+        if [ ! -f "$HOST_REQ_DOC" ]; then
+          echo "$HOST_REQ_DOC: missing"
+          missing=1
+        fi
+        if [ ! -f "$HOST_REQ_TEST_LIST" ]; then
+          echo "$HOST_REQ_TEST_LIST: missing"
+          missing=1
+        fi
+        if [ ! -f "$HOST_REQ_LIST" ]; then
+          echo "$HOST_REQ_LIST: missing"
+          missing=1
+        fi
+        if [ ! -f "$HOST_REQ_DELIVERED" ]; then
+          echo "$HOST_REQ_DELIVERED: missing"
+          missing=1
+        fi
+        if [ ! -d "$HOST_REQ_SPEC" ]; then
+          echo "$HOST_REQ_SPEC: missing"
+          missing=1
+        fi
+        if [ "$missing" != 0 ]; then
+          exit 1
+        fi
+        find "$HOST_REQ_SPEC" -type f | LC_ALL=C sort | awk '
+          function fault(msg) {
+            if (!(msg in said)) {
+              said[msg] = 1
+              print msg
+            }
+            bad = 1
+          }
+          function read_error(path) {
+            fault(path ": cannot be read")
+          }
+          function check_marker(    text, id, named) {
+            markers++
+            text = mtext
+            named = 0
+            while (match(text, /HOST-[0-9]+/)) {
+              id = substr(text, RSTART, RLENGTH)
+              text = substr(text, RSTART + RLENGTH)
+              named = 1
+              if (!(id in stated)) {
+                fault(mfile ":" mline ": UNMAPPED: names " id ", which host-interface.md does not have")
+              }
+            }
+            if (!named && index(mtext, "ESS limit") == 0) {
+              fault(mfile ":" mline ": UNMAPPED: names neither a HOST-<n> of host-interface.md nor ESS limit")
+            }
+          }
+          BEGIN {
+            doc = ENVIRON["HOST_REQ_DOC"]
+            list = ENVIRON["HOST_REQ_LIST"]
+            delivered_file = ENVIRON["HOST_REQ_DELIVERED"]
+            bad = 0
+            nr = 0
+            ln = 0
+            while ((r = (getline line < doc)) > 0) {
+              ln++
+              if (line !~ /^\*\*HOST-/) {
+                continue
+              }
+              if (!match(line, /^\*\*HOST-[0-9]+\*\*/)) {
+                fault("host-interface.md:" ln ": starts with **HOST- and is not a requirement **HOST-<n>**")
+                continue
+              }
+              id = substr(line, 3, RLENGTH - 4)
+              if (!(id in stated)) {
+                nr++
+                req[nr] = id
+                sub(/[ \t\r]+$/, "", line)
+                if (match(line, /\[slice [0-9]+\]$/)) {
+                  slice[id] = substr(line, RSTART + 7, RLENGTH - 8)
+                } else {
+                  slice[id] = "unassigned"
+                }
+              }
+              stated[id]++
+            }
+            if (r < 0) {
+              read_error(doc)
+            }
+            close(doc)
+            if (nr == 0 && r >= 0) {
+              fault("host-interface.md: no requirement")
+            }
+            ln = 0
+            while ((r = (getline line < delivered_file)) > 0) {
+              ln++
+              if (line ~ /^#/ || line ~ /^[ \t]*$/) {
+                continue
+              }
+              if (line !~ /^[0-9]+$/) {
+                fault("slices-delivered.txt:" ln ": not a slice number")
+                continue
+              }
+              delivered[line + 0] = 1
+            }
+            if (r < 0) {
+              read_error(delivered_file)
+            }
+            close(delivered_file)
+            test_list = ENVIRON["HOST_REQ_TEST_LIST"]
+            ntests = 0
+            while ((r = (getline line < test_list)) > 0) {
+              if (line ~ /^[ \t]*$/ || (line in is_test)) {
+                continue
+              }
+              ntests++
+              test_names[ntests] = line
+              is_test[line] = 1
+            }
+            if (r < 0) {
+              read_error(test_list)
+            }
+            close(test_list)
+            if (ntests == 0 && r >= 0) {
+              fault(test_list ": no test")
+            }
+            nl = 0
+            nu = 0
+            tests = 0
+            pending = 0
+            omitted = 0
+            ln = 0
+            while ((r = (getline line < list)) > 0) {
+              ln++
+              if (line ~ /^HOST-[0-9]+ test [A-Za-z0-9_-]+::[A-Za-z0-9_]+(::[A-Za-z0-9_]+)*\*?$/) {
+                kind = "test"
+              } else if (line ~ /^HOST-[0-9]+ pending slice [^ \t]+$/) {
+                kind = "pending"
+              } else if (line ~ /^HOST-[0-9]+ omitted [^ \t]/) {
+                kind = "omitted"
+              } else {
+                fault("requirements.txt:" ln ": neither HOST-<n> test <crate>::<test>, HOST-<n> pending slice <s> nor HOST-<n> omitted <reason>")
+                continue
+              }
+              split(line, f, " ")
+              id = f[1]
+              nl++
+              lkind[nl] = kind
+              lid[nl] = id
+              ltext[nl] = line
+              if (kind == "test") {
+                tests++
+              } else if (kind == "pending") {
+                pending++
+              } else {
+                omitted++
+              }
+              if (!(id in listed)) {
+                nu++
+                uid[nu] = id
+              }
+              listed[id]++
+            }
+            if (r < 0) {
+              read_error(list)
+            }
+            close(list)
+            for (i = 1; i <= nr; i++) {
+              id = req[i]
+              if (!(id in listed)) {
+                fault(id ": in host-interface.md, no line in requirements.txt")
+              }
+              if (stated[id] > 1) {
+                fault(id ": stated " stated[id] " times in host-interface.md")
+              }
+            }
+            for (i = 1; i <= nu; i++) {
+              id = uid[i]
+              if (!(id in stated)) {
+                fault(id ": in requirements.txt, not in host-interface.md")
+              }
+              if (listed[id] > 1) {
+                fault(id ": listed " listed[id] " times in requirements.txt")
+              }
+            }
+            for (i = 1; i <= nl; i++) {
+              id = lid[i]
+              split(ltext[i], f, " ")
+              if (lkind[i] == "test") {
+                name = f[3]
+                found = 0
+                if (substr(name, length(name)) == "*") {
+                  prefix = substr(name, 1, length(name) - 1)
+                  for (k = 1; k <= ntests && !found; k++) {
+                    if (index(test_names[k], prefix) == 1) {
+                      found = 1
+                    }
+                  }
+                } else {
+                  found = (name in is_test)
+                }
+                if (!found) {
+                  fault(id ": test " name " is not a test of the workspace")
+                }
+              } else if (lkind[i] == "pending") {
+                s = f[4]
+                by_slice[s]++
+                if ((id in stated) && s != slice[id]) {
+                  fault(id ": pending slice " s ", and host-interface.md marks it [slice " slice[id] "]")
+                }
+                if (s ~ /^[0-9]+$/ && ((s + 0) in delivered)) {
+                  fault(id ": pending, and slice " s " is delivered")
+                }
+              } else {
+                reason = substr(ltext[i], length(id) + 10)
+                if (reason ~ /^slice/ && reason ~ /not delivered$/) {
+                  fault(id ": omitted " reason ", the old form of pending slice <s>")
+                }
+              }
+            }
+            markers = 0
+            files = 0
+          }
+          {
+            files++
+            mfile = ""
+            open = 0
+            ln = 0
+            file = $0
+            while ((r = (getline line < file)) > 0) {
+              ln++
+              if (index(line, "UNMAPPED:")) {
+                if (open) {
+                  check_marker()
+                }
+                open = 1
+                mfile = file
+                mline = ln
+                mtext = line
+              } else if (open && line ~ /^[ \t]*#/) {
+                mtext = mtext "\n" line
+              } else if (open) {
+                check_marker()
+                open = 0
+              }
+            }
+            if (open) {
+              check_marker()
+            }
+            if (r < 0) {
+              read_error(file)
+            }
+            close(file)
+          }
+          END {
+            if (files == 0) {
+              fault(ENVIRON["HOST_REQ_SPEC"] ": no file")
+            }
+            if (bad) {
+              exit 1
+            }
+            print "host-requirements: " nr " requirement(s), " nl " line(s): " tests " test, " pending " pending, " omitted " omitted; " markers " UNMAPPED marker(s), each naming a HOST-<n> or ESS limit"
+            ns = 0
+            for (s in by_slice) {
+              ns++
+              order[ns] = s
+            }
+            for (i = 2; i <= ns; i++) {
+              v = order[i]
+              for (j = i - 1; j >= 1 && order[j] + 0 > v + 0; j--) {
+                order[j + 1] = order[j]
+              }
+              order[j + 1] = v
+            }
+            out = "host-requirements: pending by slice:"
+            for (i = 1; i <= ns; i++) {
+              out = out " " order[i] ":" by_slice[order[i]]
+            }
+            if (ns == 0) {
+              out = out " none"
+            }
+            print out
+          }
+        '
+
+  host-requirements-test-list:
+    desc: Write every test of the workspace, one per line as <package>::<target>::<test path>, to .out/host-requirements/tests.txt.
+    summary: |
+      Write every test of the workspace, one per line as "<package>::<target>::<test path>", to
+      .out/host-requirements/tests.txt, the test list host-requirements-check reads when it is
+      given none.
+
+      Builds every test target once (cargo test --locked --workspace --no-run, with warnings
+      denied as the gate's build and test steps have them, so that they share their artifacts)
+      and runs each target with --list; then lists the doc tests of each package that has a
+      library (cargo test --locked -p <package> --doc -- --list). <target> is "lib" for the unit
+      tests of a library, the stem of the file under tests/ for an integration test, the name of
+      the binary with "-" written "_" for the unit tests of a binary, and "doc" for doc tests.
+      <test path> is the path the target's --list prints; for a doc test, the item path rustdoc
+      prints, without the file and the line. Prints nothing when it passes. Fails when a target
+      does not build or does not list its tests, and when no test is found. Its files are
+      under .out/host-requirements/.
+    silent: true
+    env:
+      RUSTFLAGS: -D warnings
+    cmds:
+      - |
+        out=.out/host-requirements
+        mkdir -p "$out"
+        cargo metadata --locked --offline --no-deps --format-version 1 >"$out/metadata.json" 2>"$out/metadata.log" \
+          || { cat "$out/metadata.log"; echo "host-requirements-test-list: cargo metadata failed"; exit 1; }
+        cargo test --locked --workspace --no-run --message-format=json >"$out/build.json" 2>"$out/build.log" \
+          || { cat "$out/build.log"; echo "host-requirements-test-list: the tests of the workspace do not build"; exit 1; }
+        jq -r --slurpfile meta "$out/metadata.json" '
+          ($meta[0].packages | map({key: .id, value: .name}) | from_entries) as $names
+          | select(.reason == "compiler-artifact" and .profile.test and .executable != null)
+          | [$names[.package_id],
+             (if (.target.kind | index("lib")) then "lib"
+              elif (.target.kind | index("test")) then .target.name
+              else (.target.name | gsub("-"; "_")) end),
+             .executable]
+          | @tsv
+        ' "$out/build.json" >"$out/targets.tsv" \
+          || { echo "host-requirements-test-list: cannot read the targets of the build"; exit 1; }
+        [ -s "$out/targets.tsv" ] || { echo "host-requirements-test-list: the build made no test target"; exit 1; }
+        : >"$out/tests.unsorted"
+        tab=$(printf '\t')
+        while IFS="$tab" read -r package target executable; do
+          "$executable" --list >"$out/list.txt" 2>"$out/list.log" \
+            || { cat "$out/list.log"; echo "host-requirements-test-list: $package::$target does not list its tests"; exit 1; }
+          awk -v p="$package::$target::" '/: test$/ { sub(/: test$/, ""); print p $0 }' "$out/list.txt" >>"$out/tests.unsorted"
+        done <"$out/targets.tsv"
+        jq -r '.packages[] | select(any(.targets[]; .kind | index("lib"))) | .name' "$out/metadata.json" >"$out/libraries.txt"
+        while read -r package; do
+          cargo test --locked -p "$package" --doc -- --list >"$out/list.txt" 2>"$out/list.log" \
+            || { cat "$out/list.log"; echo "host-requirements-test-list: $package does not list its doc tests"; exit 1; }
+          awk -v p="$package::doc::" '
+            /: test$/ {
+              sub(/: test$/, "")
+              sub(/ \(line [0-9]+\).*$/, "")
+              sub(/^.* - /, "")
+              print p $0
+            }
+          ' "$out/list.txt" >>"$out/tests.unsorted"
+        done <"$out/libraries.txt"
+        LC_ALL=C sort -u "$out/tests.unsorted" >"$out/tests.txt"
+        [ -s "$out/tests.txt" ] || { echo "host-requirements-test-list: no test found"; exit 1; }

@@ -1,0 +1,7 @@
+# Fixture feature list, written for the tests of swell-test262. It declares the names the
+# list ../features.txt holds; the cases of this tree name one more.
+Atomics
+decorators
+generators
+intl-normative-optional
+json-modules
