@@ -171,13 +171,11 @@ impl<T> Arena<T> {
 mod tests {
     use super::{Access, Arena, Handle};
     use crate::{
-        Abrupt, Agent, AgentState, Brand, Host, HostError, HostObjectSpec, Limits, Seeds,
-        Termination, Value,
+        Abrupt, Agent, AgentState, Brand, HostError, HostObjectSpec, Limits, Seeds, Termination,
+        Value,
     };
 
-    struct NoHooks;
-
-    impl Host for NoHooks {}
+    use crate::host::hooks::test_host::NoHooks;
 
     fn agent() -> Agent<NoHooks> {
         let limits = Limits {
@@ -230,6 +228,7 @@ mod tests {
                         brand: Brand(1),
                         data: None,
                     })
+                    .unwrap()
                     .unwrap();
                 let string = cx.new_string("s").unwrap();
                 cx.agent.heap.objects.free(object.handle);

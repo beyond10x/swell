@@ -64,6 +64,7 @@ fn host_95_interrupt_on_a_faulted_agent_returns() {
                 data: None,
             })
             .unwrap()
+            .unwrap()
         })
         .unwrap();
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
@@ -75,6 +76,7 @@ fn host_95_interrupt_on_a_faulted_agent_returns() {
                     brand: Brand(2),
                     data: Some(Box::new(Stale(freed))),
                 })
+                .unwrap()
                 .unwrap();
             cx.root(Value::Object(holder)).unwrap()
         })

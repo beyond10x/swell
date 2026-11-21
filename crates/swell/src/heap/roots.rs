@@ -1,16 +1,18 @@
 //! The root table (`docs/design/host-interface.md`, decision 4, `Root`; `docs/design/engine.md`,
-//! decision 4, "Host-held values"): the values the host keeps across calls. A [`Root`] is an
-//! index and a generation into this table; dropping it pushes it on a release queue that the
-//! agent drains at its next safe point and at every collection, so dropping needs no access to
-//! the agent. The queue is an `Rc`, which keeps `Root` and with it `Agent` from being `Send`
-//! (decision 1).
+//! decision 4, "Host-held values"): the values the host keeps across calls, and the realm
+//! records its `Realm`s hold. A [`Root`] is an index and a generation into this table; dropping
+//! it pushes it on a release queue that the agent drains at its next safe point and at every
+//! collection, so dropping needs no access to the agent. The queue is an `Rc`, which keeps
+//! `Root` and with it `Agent` from being `Send` (decision 1).
 //!
-//! The table is a root site of the collector: [`trace_roots`] reports every value it holds.
+//! The table is a root site of the collector: [`trace_roots`] reports every value and realm
+//! record it holds.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
-use super::collect::Mark;
+use super::arena::Handle;
+use super::collect::{Item, Mark};
 use crate::host::agent::Agent;
 use crate::host::{Host, HostError};
 use crate::value::{Root, Value};
@@ -18,9 +20,16 @@ use crate::value::{Root, Value};
 /// The queue of released roots, as (index, generation) pairs.
 pub(crate) type ReleaseQueue = Rc<Cell<Vec<(u32, u32)>>>;
 
+/// What a root holds: a value, or the realm record of a `Realm`.
+#[derive(Clone, Copy)]
+enum Held {
+    Value(Value),
+    Realm(Handle),
+}
+
 struct RootSlot {
     generation: u32,
-    value: Option<Value>,
+    held: Option<Held>,
 }
 
 /// The root table of one agent.
@@ -42,13 +51,13 @@ impl RootTable {
         }
     }
 
-    /// A new root holding `value`. The caller has checked that `value` is live.
-    pub(crate) fn add(&mut self, value: Value) -> Root {
+    /// A new root holding `held`.
+    fn hold(&mut self, held: Held) -> Root {
         let reused = self.free.pop().and_then(|index| {
             let slot = usize::try_from(index)
                 .ok()
                 .and_then(|i| self.slots.get_mut(i))?;
-            slot.value = Some(value);
+            slot.held = Some(held);
             Some((index, slot.generation))
         });
         let (index, generation) = match reused {
@@ -57,7 +66,7 @@ impl RootTable {
                 let index = u32::try_from(self.slots.len()).unwrap_or(u32::MAX);
                 self.slots.push(RootSlot {
                     generation: 0,
-                    value: Some(value),
+                    held: Some(held),
                 });
                 (index, 0)
             }
@@ -70,9 +79,19 @@ impl RootTable {
         }
     }
 
-    /// The value `root` holds: `ForeignHandle` for a root of another agent, `StaleHandle` for a
+    /// A new root holding `value`. The caller has checked that `value` is live.
+    pub(crate) fn add(&mut self, value: Value) -> Root {
+        self.hold(Held::Value(value))
+    }
+
+    /// A new root holding the realm record `realm`, for a `Realm`.
+    pub(crate) fn add_realm(&mut self, realm: Handle) -> Root {
+        self.hold(Held::Realm(realm))
+    }
+
+    /// What `root` holds: `ForeignHandle` for a root of another agent, `StaleHandle` for a
     /// released one.
-    pub(crate) fn get(&self, root: &Root) -> Result<Value, HostError> {
+    fn lookup(&self, root: &Root) -> Result<Held, HostError> {
         if root.key != self.key {
             return Err(HostError::ForeignHandle);
         }
@@ -82,9 +101,27 @@ impl RootTable {
         {
             Some(RootSlot {
                 generation,
-                value: Some(value),
-            }) if *generation == root.generation => Ok(*value),
+                held: Some(held),
+            }) if *generation == root.generation => Ok(*held),
             _ => Err(HostError::StaleHandle),
+        }
+    }
+
+    /// The value `root` holds: `ForeignHandle` for a root of another agent, `StaleHandle` for a
+    /// released one. The root of a `Realm` holds no value; the host cannot reach it, since a
+    /// `Realm` does not give its root out.
+    pub(crate) fn get(&self, root: &Root) -> Result<Value, HostError> {
+        match self.lookup(root)? {
+            Held::Value(value) => Ok(value),
+            Held::Realm(_) => Err(HostError::StaleHandle),
+        }
+    }
+
+    /// The realm record the root of a `Realm` holds, with the answers of [`RootTable::get`].
+    pub(crate) fn get_realm(&self, root: &Root) -> Result<Handle, HostError> {
+        match self.lookup(root)? {
+            Held::Realm(realm) => Ok(realm),
+            Held::Value(_) => Err(HostError::StaleHandle),
         }
     }
 
@@ -97,10 +134,10 @@ impl RootTable {
             else {
                 continue;
             };
-            if slot.generation != generation || slot.value.is_none() {
+            if slot.generation != generation || slot.held.is_none() {
                 continue;
             }
-            slot.value = None;
+            slot.held = None;
             if let Some(next) = slot.generation.checked_add(1) {
                 slot.generation = next;
                 if next < u32::MAX {
@@ -113,19 +150,18 @@ impl RootTable {
     /// The number of roots held.
     #[cfg(test)]
     pub(crate) fn held(&self) -> usize {
-        self.slots
-            .iter()
-            .filter(|slot| slot.value.is_some())
-            .count()
+        self.slots.iter().filter(|slot| slot.held.is_some()).count()
     }
 }
 
-/// Root site of the collector: every value of the root table.
+/// Root site of the collector: every value and realm record of the root table.
 pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
     mark.count("heap/roots.rs trace_roots");
     for slot in &agent.heap.roots.slots {
-        if let Some(value) = slot.value {
-            mark.value(value);
+        match slot.held {
+            Some(Held::Value(value)) => mark.value(value),
+            Some(Held::Realm(realm)) => mark.push(Item::Realm(realm)),
+            None => {}
         }
     }
 }
@@ -133,6 +169,7 @@ pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
 #[cfg(test)]
 mod tests {
     use super::RootTable;
+    use crate::heap::arena::Handle;
     use crate::{HostError, Value};
 
     #[test]
@@ -161,5 +198,25 @@ mod tests {
         drop(foreign);
         other.drain();
         assert_eq!(other.held(), 0);
+    }
+
+    /// The root of a `Realm` holds a realm record: `get_realm` reads it, `get` does not, and a
+    /// value root is no realm.
+    #[test]
+    fn a_realm_root_holds_a_realm_record() {
+        let mut table = RootTable::new(5);
+        let realm = Handle {
+            key: 5,
+            index: 0,
+            generation: 0,
+        };
+        let root = table.add_realm(realm);
+        let value = table.add(Value::Null);
+        assert_eq!(table.get_realm(&root), Ok(realm));
+        assert_eq!(table.get(&root), Err(HostError::StaleHandle));
+        assert_eq!(table.get_realm(&value), Err(HostError::StaleHandle));
+        drop(root);
+        table.drain();
+        assert_eq!(table.held(), 1);
     }
 }

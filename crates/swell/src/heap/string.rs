@@ -133,10 +133,6 @@ impl Heap {
 
     /// The atom of `units`: the String every property key of these code units uses. The first
     /// call makes it and charges its String and its table entry.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "property keys: story:object-model-and-realms")
-    )]
     pub(crate) fn intern(&mut self, units: &[u16]) -> Result<StringRef, OverBudget> {
         if let Some(&(handle, _)) = self.atoms.map.get(units)
             && self
@@ -213,11 +209,9 @@ impl Atoms {
 #[cfg(test)]
 mod tests {
     use super::HeapString;
-    use crate::{Agent, Host, Limits, Outcome, Seeds, Value};
+    use crate::{Agent, Limits, Outcome, Seeds, Value};
 
-    struct NoHooks;
-
-    impl Host for NoHooks {}
+    use crate::host::hooks::test_host::NoHooks;
 
     fn agent() -> Agent<NoHooks> {
         let limits = Limits {

@@ -92,7 +92,7 @@ impl fmt::Debug for Root {
 /// A realm (9.3, `#sec-code-realms`), held through a root. Made by `create_realm`
 /// (`story:object-model-and-realms`).
 #[derive(Debug)]
-pub struct Realm(#[expect(dead_code, reason = "realms: story:object-model-and-realms")] Root);
+pub struct Realm(pub(crate) Root);
 
 /// A parsed script (16.1, `#sec-scripts`), held through a root. Made by `parse_script`
 /// (`story:interpreter-and-script-entry-points`).

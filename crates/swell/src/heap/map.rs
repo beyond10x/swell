@@ -66,11 +66,9 @@ mod tests {
     use swell_num::siphash::SipBuildHasher;
 
     use super::KeyedMap;
-    use crate::{Agent, Host, Limits, Seeds};
+    use crate::{Agent, Limits, Seeds};
 
-    struct NoHooks;
-
-    impl Host for NoHooks {}
+    use crate::host::hooks::test_host::NoHooks;
 
     fn keys() -> Vec<Vec<u16>> {
         (0..1_000)

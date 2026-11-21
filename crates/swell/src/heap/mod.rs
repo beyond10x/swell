@@ -5,7 +5,10 @@
 //! table and its release queue (`roots`), strings and atoms (`string`), and the keyed hash map
 //! (`map`). Written by `story:heap-values-and-host-surface`.
 //!
-//! A later kind of record adds its arena here and its two sites (`heap/collect.rs`).
+//! A later kind of record adds its arena here and its two sites (`heap/collect.rs`). Symbols
+//! (6.1.5, `#sec-ecmascript-language-types-symbol-type`) have their arena and their record here,
+//! [`SymbolRecord`]; the first ones are the well-known symbols of
+//! `story:object-model-and-realms`.
 
 pub(crate) mod accounting;
 pub(crate) mod arena;
@@ -18,11 +21,34 @@ use crate::env::EnvironmentRecord;
 use crate::object::ObjectRecord;
 use crate::realm::RealmRecord;
 use crate::script::ScriptRecord;
-use crate::value::{ObjectRef, StringRef, Value};
+use crate::value::{ObjectRef, StringRef, SymbolRef, Value};
 use accounting::{Accounting, OverBudget};
 use arena::{Access, Arena, Handle, slot_bytes};
+use collect::Mark;
 use roots::RootTable;
 use string::{Atoms, HeapString};
+
+/// A Symbol record (6.1.5): its [[Description]], a String or undefined.
+pub(crate) struct SymbolRecord {
+    /// [[Description]].
+    pub(crate) description: Option<StringRef>,
+}
+
+impl SymbolRecord {
+    /// Kind site of the collector: the description.
+    pub(crate) fn trace(&self, mark: &mut Mark) {
+        mark.count("heap/mod.rs SymbolRecord::trace");
+        if let Some(description) = self.description {
+            mark.value(Value::String(description));
+        }
+    }
+
+    /// A Symbol with no description, for the tests of the collector.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> SymbolRecord {
+        SymbolRecord { description: None }
+    }
+}
 
 /// The bytes allocated since the last collection that start one at the next safe point, when the
 /// heap is smaller than this. Above it, the threshold is the live size after the last collection,
@@ -36,6 +62,7 @@ pub(crate) struct Heap {
     pub(crate) key: u32,
     pub(crate) accounting: Accounting,
     pub(crate) strings: Arena<HeapString>,
+    pub(crate) symbols: Arena<SymbolRecord>,
     pub(crate) objects: Arena<ObjectRecord>,
     pub(crate) realms: Arena<RealmRecord>,
     pub(crate) environments: Arena<EnvironmentRecord>,
@@ -54,6 +81,7 @@ impl Heap {
             key,
             accounting: Accounting::new(memory_bytes),
             strings: Arena::new(key),
+            symbols: Arena::new(key),
             objects: Arena::new(key),
             realms: Arena::new(key),
             environments: Arena::new(key),
@@ -101,14 +129,28 @@ impl Heap {
         Ok(StringRef { handle })
     }
 
-    /// Whether `value` names a live record of this heap. A primitive always does; a Symbol or a
-    /// BigInt never does yet, since no arena holds them before slices 6 and 12.
+    /// Store a Symbol record with the description `description`.
+    pub(crate) fn new_symbol(
+        &mut self,
+        description: Option<StringRef>,
+    ) -> Result<SymbolRef, OverBudget> {
+        let handle = store(
+            &mut self.accounting,
+            &mut self.symbols,
+            SymbolRecord { description },
+            0,
+        )?;
+        Ok(SymbolRef { handle })
+    }
+
+    /// Whether `value` names a live record of this heap. A primitive always does; a BigInt
+    /// never does yet, since no arena holds them before slice 12.
     pub(crate) fn check_value(&self, value: Value) -> Result<(), Access> {
         match value {
             Value::Undefined | Value::Null | Value::Boolean(_) | Value::Number(_) => Ok(()),
             Value::String(string) => self.strings.get(string.handle).map(|_| ()),
             Value::Object(object) => self.objects.get(object.handle).map(|_| ()),
-            Value::Symbol(symbol) => Err(self.no_arena(symbol.handle)),
+            Value::Symbol(symbol) => self.symbols.get(symbol.handle).map(|_| ()),
             Value::BigInt(bigint) => Err(self.no_arena(bigint.handle)),
         }
     }
