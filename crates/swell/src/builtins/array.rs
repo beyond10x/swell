@@ -4,7 +4,9 @@
 //! (`#sec-array.prototype.constructor`), `.join` (`#sec-array.prototype.join`) with
 //! JoinIndexedProperties (`#sec-joinindexedproperties`), `.push` (`#sec-array.prototype.push`)
 //! and `.map` (`#sec-array.prototype.map`) with ArraySpeciesCreate (`#sec-arrayspeciescreate`).
-//! Written by `story:harness-builtins`; the other members are slice 3.
+//! Written by `story:harness-builtins`. Slice 2 takes `.toString`
+//! (`#sec-array.prototype.tostring`) early (`docs/design/engine.md`, section 12, "A part before
+//! its slice"); the other members are slice 3.
 //!
 //! Every loop over indices charges a step per index (decision 2), so a length of 2^32 - 1 or
 //! 2^53 - 1 ends in `Terminated(StepBudget)`; `join` builds its String with the builder of
@@ -38,6 +40,8 @@ pub(crate) enum ArrayBuiltin {
     Map,
     /// `Array.prototype.push ( ...items )` (23.1.3.23).
     Push,
+    /// `Array.prototype.toString ( )` (23.1.3.36), taken early by slice 2.
+    ToString,
 }
 
 /// 2^53 - 1, the largest length (`#sec-tolength`).
@@ -93,6 +97,7 @@ impl<H: Host> Agent<H> {
             ("join", 1, ArrayBuiltin::Join),
             ("map", 1, ArrayBuiltin::Map),
             ("push", 1, ArrayBuiltin::Push),
+            ("toString", 0, ArrayBuiltin::ToString),
         ] {
             self.define_builtin_method(
                 making,
@@ -123,6 +128,7 @@ impl<H: Host> Agent<H> {
             ArrayBuiltin::Join => self.array_join(this, args),
             ArrayBuiltin::Map => self.array_map(this, args),
             ArrayBuiltin::Push => self.array_push(this, args),
+            ArrayBuiltin::ToString => self.array_to_string(this),
         }
     }
 
@@ -288,6 +294,32 @@ impl<H: Host> Agent<H> {
         Ok(Value::Number(length))
     }
 
+    /// `Array.prototype.toString ( )` (`#sec-array.prototype.tostring`).
+    fn array_to_string(&mut self, this: Value) -> Completion<Value> {
+        // 1. Let array be ? ToObject(this value). It may be new, and the steps after run code:
+        // kept.
+        let array = self.to_object(this)?;
+        let keep = self.keep(Value::Object(array));
+        let answer = self.array_to_string_steps(array);
+        self.release(keep);
+        answer
+    }
+
+    /// Steps 2 to 4 of `toString`, with array kept. Nothing runs between the Get and the Call
+    /// that could collect func, and the Call holds it in its activation.
+    fn array_to_string_steps(&mut self, array: ObjectRef) -> Completion<Value> {
+        // 2. Let func be ? Get(array, "join").
+        let key = self.name_key("join")?;
+        let mut func = self.get(array, key)?;
+        // 3. If IsCallable(func) is false, set func to the intrinsic function
+        // %Object.prototype.toString%.
+        if !self.is_callable(func)? {
+            func = Value::Object(self.current_intrinsic(Intrinsic::ObjectPrototypeToString)?);
+        }
+        // 4. Return ? Call(func, array).
+        self.call_value(func, Value::Object(array), &[])
+    }
+
     /// `Array.prototype.map ( callback [ , thisArg ] )` (`#sec-array.prototype.map`).
     fn array_map(&mut self, this: Value, args: &[Value]) -> Completion<Value> {
         // 1. Let O be ? ToObject(this value). It may be new and the callback runs code: kept.
@@ -428,6 +460,107 @@ mod tests {
             crate::object::ordinary::OrdinaryData::Plain,
         )?;
         Ok(Value::Object(made))
+    }
+
+    /// A getter that records, as its callee's "seen" property, the function whose call it runs
+    /// in (the activation below its own), and answers "Tagged".
+    fn record_caller(cx: &mut Cx<'_, NoHooks>, call: HostCall<'_>) -> Completion<Value> {
+        let agent = &mut *cx.agent;
+        let caller = agent
+            .activations
+            .iter()
+            .rev()
+            .nth(1)
+            .map(|below| below.callee);
+        let key = agent.name_key("seen")?;
+        let seen = caller.map_or(Value::Undefined, Value::Object);
+        agent.create_data_property(call.callee, key, seen)?;
+        Ok(Value::String(agent.new_string_str("Tagged")?))
+    }
+
+    /// `#sec-array.prototype.tostring`, step 3: the function called when "join" is not
+    /// callable is the intrinsic `%Object.prototype.toString%` of the realm of the running
+    /// `toString`, the function `Object.prototype.toString` held when the realm was made, one
+    /// for each realm. Realm B's `toString` called on a plain object of realm A runs B's
+    /// intrinsic (the @@toStringTag getter sees it below itself), and so it does after both
+    /// realms' `Object.prototype.toString` are deleted.
+    #[test]
+    fn to_string_falls_back_to_the_intrinsic_of_its_own_realm() {
+        let (mut agent, realm_a) = agent_with_realm();
+        let realm_b = crate::host::hooks::test_host::new_realm(&mut agent);
+        enter(&mut agent, &realm_a);
+        let a = agent.heap.roots.get_realm(&realm_a.0).unwrap();
+        let b = agent.heap.roots.get_realm(&realm_b.0).unwrap();
+        let to_string_key = agent.name_key("toString").unwrap();
+        let mut intrinsics = Vec::new();
+        for realm in [a, b] {
+            let intrinsic = agent
+                .intrinsic(realm, Intrinsic::ObjectPrototypeToString)
+                .unwrap();
+            let object_prototype = agent.intrinsic(realm, Intrinsic::ObjectPrototype).unwrap();
+            assert_eq!(
+                agent.get(object_prototype, to_string_key),
+                Ok(Value::Object(intrinsic))
+            );
+            intrinsics.push((intrinsic, object_prototype));
+        }
+        assert_ne!(intrinsics[0].0, intrinsics[1].0);
+
+        let getter = agent
+            .create_host_function(a, "tag", 0, record_caller, false, None)
+            .unwrap();
+        agent.keep(Value::Object(getter));
+        // A plain object of realm A: it has no "join", own or inherited.
+        let object = agent
+            .ordinary_object_create(
+                Some(intrinsics[0].1),
+                crate::object::ordinary::OrdinaryData::Plain,
+            )
+            .unwrap();
+        agent.keep(Value::Object(object));
+        let tag_key = Key::Symbol(agent.well_known().unwrap().to_string_tag);
+        agent
+            .define_own_property(
+                object,
+                tag_key,
+                crate::object::property::Descriptor {
+                    get: Some(Some(getter)),
+                    set: Some(None),
+                    enumerable: Some(false),
+                    configurable: Some(true),
+                    ..crate::object::property::Descriptor::default()
+                },
+            )
+            .unwrap();
+        // A key is made again after each call: with `collect-every-safe-point` an atom that
+        // only a Rust local holds is collected at the call.
+        for delete in [false, true] {
+            let to_string_key = agent.name_key("toString").unwrap();
+            if delete {
+                for (_, object_prototype) in &intrinsics {
+                    agent
+                        .delete_property_or_throw(*object_prototype, to_string_key)
+                        .unwrap();
+                }
+            }
+            for (realm, (intrinsic, _)) in [a, b].into_iter().zip(&intrinsics) {
+                let array_prototype = agent.intrinsic(realm, Intrinsic::ArrayPrototype).unwrap();
+                let to_string_key = agent.name_key("toString").unwrap();
+                let to_string = agent.get(array_prototype, to_string_key).unwrap();
+                let answer = agent.call_value(to_string, Value::Object(object), &[]);
+                let Ok(Value::String(answer)) = answer else {
+                    panic!("{answer:?}");
+                };
+                let answer = agent.string_units(answer).unwrap();
+                assert_eq!(String::from_utf16_lossy(&answer), "[object Tagged]");
+                let seen_key = agent.name_key("seen").unwrap();
+                assert_eq!(
+                    agent.get(getter, seen_key),
+                    Ok(Value::Object(*intrinsic)),
+                    "delete {delete}"
+                );
+            }
+        }
     }
 
     /// A callback that answers its value.

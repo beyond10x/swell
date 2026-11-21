@@ -63,6 +63,9 @@ pub(crate) enum Intrinsic {
     Eval,
     /// `%Function%` (20.2.1), the constructor that slice 2 delivers.
     Function,
+    /// `%Object.prototype.toString%` (20.1.3.6), which `Array.prototype.toString` calls when
+    /// its object's "join" is not callable (`#sec-array.prototype.tostring`, step 3).
+    ObjectPrototypeToString,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -105,6 +108,7 @@ pub(crate) struct Intrinsics {
     is_finite: ObjectRef,
     eval: ObjectRef,
     function: ObjectRef,
+    object_prototype_to_string: ObjectRef,
 }
 
 impl Intrinsics {
@@ -131,6 +135,7 @@ impl Intrinsics {
             Intrinsic::IsFinite => self.is_finite,
             Intrinsic::Eval => self.eval,
             Intrinsic::Function => self.function,
+            Intrinsic::ObjectPrototypeToString => self.object_prototype_to_string,
         }
     }
 
@@ -168,6 +173,7 @@ impl Intrinsics {
             self.is_finite,
             self.eval,
             self.function,
+            self.object_prototype_to_string,
         ] {
             mark.object(object);
         }
@@ -318,6 +324,14 @@ impl<H: Host> Agent<H> {
             symbols,
         };
         let object = self.create_object_constructor(making)?;
+        // %Object.prototype.toString% (20.1.3.6): the method `create_object_constructor` has
+        // just defined on %Object.prototype%, read before any code runs.
+        let to_string_key = self.name_key("toString")?;
+        let Value::Object(object_prototype_to_string) =
+            self.get(object_prototype, to_string_key)?
+        else {
+            return Err(self.fault());
+        };
         self.install_function_prototype_methods(making)?;
         let array = self.create_array_constructor(making, array_prototype)?;
         let string = self.create_string_constructor(making, string_prototype)?;
@@ -348,6 +362,7 @@ impl<H: Host> Agent<H> {
             is_finite,
             eval,
             function,
+            object_prototype_to_string,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {
