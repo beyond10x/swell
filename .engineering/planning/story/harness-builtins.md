@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:harness-builtins
 kind: story
-status: active
+status: implemented
 title: The builtins the harness files call, complete for every argument
 summary: Object, Function.prototype, Array, String, Math and JSON members the epic lists and the measurement adds, the bound function object, registered in the realm; tested from Rust beside the interpreter.
 relations:
@@ -25,10 +25,11 @@ scope:
   path: crates/swell/src/realm/global_object.rs
 - confidence: cited
   path: crates/swell/src/realm/intrinsics.rs
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T09:29:44Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -9,8 +9,8 @@ not trust.
 
 ## State
 
-swell runs no JavaScript yet. What exists is what the engine will be held to, and its first
-parts.
+swell runs its first scripts: the ES5 grammar, in both modes, under a step and a memory budget. No
+test262 case is counted as passed yet: the runner runs them in the last step of this slice.
 
 - The design, [`docs/design/engine.md`](docs/design/engine.md): what swell targets, how it is
   built, how it is measured, and the order in which it is delivered.
@@ -20,7 +20,7 @@ parts.
   interpreter.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
   pinned by checksum, both specifications checked, and 30 planted defects that the gate must
-  refuse. Measured on 2026-11-21: it passes, here and on the forge, and 27 of 161 host
+  refuse. Measured on 2026-11-21: it passes, here and on the forge, and 55 of 161 host
   requirements have a test.
 - The test262 runner, `swell-test262`: it reads all 53,801 cases, excludes 8,982 by recorded
   decision, and counts the rest per directory, per delivery slice and per section of ECMA-262
@@ -28,9 +28,9 @@ parts.
   nothing runs them yet.
 - The first parts of the engine: a parser for the ES5 grammar with strict mode
   (`crates/syntax`), a compiler to bytecode (`crates/compiler`), the heap, the values, objects,
-  realms and the part of the host interface that creates and calls
-  (`crates/swell`), number parsing and printing (`crates/num`). Nothing evaluates a script yet:
-  the interpreter is next.
+  realms, the interpreter, the builtins the test262 harness calls and the host entry points
+  that parse and evaluate a script
+  (`crates/swell`), number parsing and printing (`crates/num`).
 
 Next: the first engine. Its first delivery slice is done when 31 test262 cases pass under
 step and memory budgets.

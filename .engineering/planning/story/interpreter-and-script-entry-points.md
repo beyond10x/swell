@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:interpreter-and-script-entry-points
 kind: story
-status: active
+status: implemented
 title: 'The interpreter runs scripts: environments, functions, parse_script and evaluate_script with every budget'
 summary: Environments, ECMAScript functions, the frame stack interpreter, ScriptEvaluation and GlobalDeclarationInstantiation, strict runtime semantics, steps, depths, interrupt, termination, min_stack_bytes; 28 HOST lines to test, HOST-54 after its split.
 relations:
@@ -44,10 +44,11 @@ scope:
   path: crates/swell/tests/language.rs
 - confidence: cited
   path: crates/swell/tests/support/script.rs
-revision: 15
+revision: 16
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T09:29:43Z", actor: "human:operator", revision: 16, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

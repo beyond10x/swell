@@ -6,10 +6,11 @@ taken from surf's needs. The design is `docs/design/engine.md`; read it before c
 
 Status on 2026-11-21: the gate, the pins, the counting runner, the first parts of `swell-num`
 and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the bytecode compiler
-(`swell-compiler`), and in `swell` the heap, the values, the object model, realms and the
-host surface up to creating and calling exist (slice 1, waves 1 to 3 of 6:
-`docs/plan/slice-01-wave-1.md`, `-2.md`, `-3.md`); 27 of 161 host requirements have a test. The
-engine runs no script yet (wave 4).
+(`swell-compiler`), and in `swell` the heap, the values, the object model, realms, the
+interpreter and the builtins the test262 harness calls exist (slice 1, waves 1 to 4 of 6:
+`docs/plan/slice-01-wave-1.md` to `-4.md`); 55 of 161 host requirements have a test.
+`Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
+gate runs no test262 case yet: the runner gets its run path in wave 6.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
@@ -166,10 +167,10 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot task check` on 2026-11-21, after wave 3 of slice 1, exit 0:
+`slot task check` on 2026-11-21, after wave 4 of slice 1, exit 0:
 
 ```
-python-check: no Python file among 629 file(s)
+python-check: no Python file among 754 file(s)
 forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
 Cargo.lock: 7 package(s), none from outside this repository
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
@@ -178,10 +179,10 @@ unicode-tables: 1 table(s) equal the generator output
 swell v1 — 2 file(s), 3 scenario(s), valid
 61 scenario(s) (3 authored), 32 refusal(s), written to .out/suite.json
   61 scenarios: 61 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 161 requirement(s), 161 line(s): 27 test, 134 pending, 0 omitted; 50 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 1:43 2:5 3:5 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
-38 test suites: 163 passed, 0 failed, 0 ignored
-test-collect: 15 test suites: 106 passed, 0 failed, 0 ignored
+host-requirements: 161 requirement(s), 161 line(s): 55 test, 106 pending, 0 omitted; 50 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 1:15 2:5 3:5 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
+48 test suites: 230 passed, 0 failed, 0 ignored
+test-collect: 25 test suites: 173 passed, 0 failed, 0 ignored
 test262 total 53801 8982 7 44812 0 44812 0
 test262: 221 directory lines sum to the total
 test262: 22 slice lines equal the design
@@ -265,6 +266,17 @@ session coordinates; this section is its procedure, taken from how surf is run
   other unit of the wave writes, the failing test first. Its brief is a file; its report starts
   with the six lines surf's wave records show. A finding the unit introduced goes back to the
   unit; a pre-existing one becomes a draft in the store.
+- **A story's `Writes:` line is checked against the code it builds on, not only against the
+  plan.** Three stories of slice 1 were accepted before that code existed and could not be met
+  as written (waves 3 and 4): a private field, a root slot or an arena that was missing, and
+  `expect(dead_code, reason = "<story>")` marks in files the story did not list. So: a story
+  may always remove a mark whose reason names it, in any file, changing nothing else there; a
+  decomposition after the first wave of a slice reads the code on `main` and names the
+  private items, root slots and arenas each story needs opened; and a unit that cannot
+  compile on its `Writes:` line stops before it writes anything and reports the compiler's
+  output, after which the coordinator extends the story and resumes it. Two stories of one
+  wave that turn out to write one file each write their own hunks, and the unit that lands
+  second gets the wave branch merged into its tree and resolves the overlap.
 - **A number in an acceptance is measured before it is written.** surf's wave 2 had a scenario
   floor carried over from a draft (120 asked, 77 measured). Here every count comes from the
   pinned test262 checkout or from a run, and the story says which command printed it.

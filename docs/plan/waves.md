@@ -64,8 +64,8 @@ The first wave of slice 1 runs beside wave 3 of the foundation: the two stories 
 different files. `Cargo.lock` in a wave of several units: each unit regenerates it in its own
 tree, and the coordinator regenerates it on the wave branch after the merges.
 
-Delivered: [wave 1](slice-01-wave-1.md), [wave 2](slice-01-wave-2.md), [wave 3](slice-01-wave-3.md). After wave 3: 27 of 161
-host requirements have a test, 43 are pending for slice 1.
+Delivered: [wave 1](slice-01-wave-1.md), [wave 2](slice-01-wave-2.md), [wave 3](slice-01-wave-3.md), [wave 4](slice-01-wave-4.md). After wave 4: 55 of 161
+host requirements have a test, 15 are pending for slice 1, and a script runs.
 
 What works after which wave: after wave 4 the engine evaluates a script through
 `evaluate_script` under step and memory budgets; after wave 6 `slot task check` prints the 31

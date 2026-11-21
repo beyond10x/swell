@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T09:29:43Z",
+  "actor": "human:operator",
+  "artifact": "story:harness-builtins",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot task check on wave/s1-4-interpreter-builtins with the runner's variables, exit 0, 48 test suites: 230 passed, test-collect: 173 passed, host-requirements: 55 test, 106 pending, gate-selftest: 30 passed, 0 failed (docs/plan/slice-01-wave-4.md)"
+  }
+}
