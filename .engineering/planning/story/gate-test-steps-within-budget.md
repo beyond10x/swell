@@ -4,7 +4,7 @@ id: story:gate-test-steps-within-budget
 kind: story
 status: active
 title: The gate's test steps end within two minutes
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:08:02Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:08:03Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
@@ -50,10 +50,17 @@ on the release commit, the build included. Slice 3 starts after this story.
    test of `test` and `test-collect`. For each of the twenty slowest tests, say what it spends
    its time on.
 2. **The time of each step is printed.** `check` prints one line per test step,
-   `gate-time <step> <seconds>`, and a last line `gate-time test-steps <sum> of 120`. The gate
-   does not fail on that sum (the pool's queue is not the repository's); the wave record and
-   the gate block of `AGENTS.md` carry the line. Say in the report whether time spent waiting
-   for a pool slot is inside the number.
+   `gate-time <step> <seconds>`, and a last line `gate-time test-steps <sum> of 120`. **The
+   gate fails when that sum is over 120**, locally and on the forge (the rule, as extended on
+   2026-11-21: "the step itself fails when it runs over 120 s"), with a line that names the
+   sum and the three slowest steps. The seconds of a step are the time it ran: time a command
+   waited in the pool's queue for a slot is not the repository's and is left out where `slot`
+   reports it; say in the report how you separate the two, and what the number means on the
+   forge, where there is no pool. The budget, 120, is a variable of the gate with that
+   default, so that a planted script can show the failure with a small budget; it is a gate
+   variable, and nothing raises it. The wave record and the gate block of `AGENTS.md` carry
+   the line. A planted script shows the refusal: a gate run whose test steps exceed the
+   budget fails.
 3. **`test`, `test-collect` and `test-faults` run through cargo-nextest** (0.9.143 is on the
    machine; it is a tool of the gate and ships with nothing). `.config/nextest.toml`: a test
    is terminated at 60 s and counts as failed. Each of the three steps prints its ten slowest
