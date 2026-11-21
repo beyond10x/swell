@@ -6,13 +6,21 @@
 //! and `.map` (`#sec-array.prototype.map`) with ArraySpeciesCreate (`#sec-arrayspeciescreate`).
 //! Written by `story:harness-builtins`. Slice 2 takes `.toString`
 //! (`#sec-array.prototype.tostring`) early (`docs/design/engine.md`, section 12, "A part before
-//! its slice"); the other members are slice 3.
+//! its slice"); the other members are slice 3, in the group modules beside this file
+//! (`story:builtin-group-modules`): `iteration.rs` (`story:array-iteration-methods`),
+//! `search.rs` (`story:array-search-and-copy-methods`) and `mutation.rs`
+//! (`story:array-mutation-and-sort-methods`). Their keys follow the keys of this file on
+//! `%Array%` and `%Array.prototype%`, in that order of the groups.
 //!
 //! Every loop over indices charges a step per index (decision 2), so a length of 2^32 - 1 or
 //! 2^53 - 1 ends in `Terminated(StepBudget)`; `join` builds its String with the builder of
-//! `builtins/string.rs`, bounded by `string_length`. What `map` holds across its callback (the
-//! object it reads and the array it fills) is kept on the agent's kept stack, which the root
-//! site of `object/builtin_function.rs` reports (decision 4).
+//! `builtins/string/mod.rs`, bounded by `string_length`. What `map` holds across its callback
+//! (the object it reads and the array it fills) is kept on the agent's kept stack, which the
+//! root site of `object/builtin_function.rs` reports (decision 4).
+
+pub(crate) mod iteration;
+pub(crate) mod mutation;
+pub(crate) mod search;
 
 use crate::builtins::object::argument;
 use crate::builtins::string::{StringBuilder, units_of};
@@ -42,17 +50,25 @@ pub(crate) enum ArrayBuiltin {
     Push,
     /// `Array.prototype.toString ( )` (23.1.3.36), taken early by slice 2.
     ToString,
+    /// A builtin of the group `iteration.rs`.
+    Iteration(iteration::IterationBuiltin),
+    /// A builtin of the group `search.rs`.
+    Search(search::SearchBuiltin),
+    /// A builtin of the group `mutation.rs`.
+    Mutation(mutation::MutationBuiltin),
 }
 
 /// 2^53 - 1, the largest length (`#sec-tolength`).
-const MAX_SAFE_LENGTH: f64 = 9_007_199_254_740_991.0;
+pub(crate) const MAX_SAFE_LENGTH: f64 = 9_007_199_254_740_991.0;
 
 /// 2^32 - 1: indices below it are array indices.
-const ARRAY_INDEX_END: f64 = 4_294_967_295.0;
+pub(crate) const ARRAY_INDEX_END: f64 = 4_294_967_295.0;
 
 impl<H: Host> Agent<H> {
     /// `%Array%` (23.1.1) with `isArray`, `[@@species]`, and the methods of
-    /// `%Array.prototype%` this part has.
+    /// `%Array.prototype%` this part has; then the methods of each group on both, and the
+    /// groups' data properties keyed by a well-known symbol on `%Array.prototype%`, the groups
+    /// in the order `iteration`, `search`, `mutation`.
     pub(crate) fn create_array_constructor(
         &mut self,
         making: Making,
@@ -107,6 +123,41 @@ impl<H: Host> Agent<H> {
                 BuiltinId::Array(id),
             )?;
         }
+        for (object, on_prototype) in [(constructor, false), (array_prototype, true)] {
+            self.define_group_methods(
+                making,
+                object,
+                if on_prototype {
+                    iteration::PROTOTYPE_METHODS
+                } else {
+                    iteration::CONSTRUCTOR_METHODS
+                },
+                |id| BuiltinId::Array(ArrayBuiltin::Iteration(id)),
+            )?;
+            self.define_group_methods(
+                making,
+                object,
+                if on_prototype {
+                    search::PROTOTYPE_METHODS
+                } else {
+                    search::CONSTRUCTOR_METHODS
+                },
+                |id| BuiltinId::Array(ArrayBuiltin::Search(id)),
+            )?;
+            self.define_group_methods(
+                making,
+                object,
+                if on_prototype {
+                    mutation::PROTOTYPE_METHODS
+                } else {
+                    mutation::CONSTRUCTOR_METHODS
+                },
+                |id| BuiltinId::Array(ArrayBuiltin::Mutation(id)),
+            )?;
+        }
+        self.define_symbol_data(making, array_prototype, &iteration::prototype_symbol_data())?;
+        self.define_symbol_data(making, array_prototype, &search::prototype_symbol_data())?;
+        self.define_symbol_data(making, array_prototype, &mutation::prototype_symbol_data())?;
         Ok(constructor)
     }
 
@@ -129,6 +180,15 @@ impl<H: Host> Agent<H> {
             ArrayBuiltin::Map => self.array_map(this, args),
             ArrayBuiltin::Push => self.array_push(this, args),
             ArrayBuiltin::ToString => self.array_to_string(this),
+            ArrayBuiltin::Iteration(id) => {
+                self.run_array_iteration_builtin(id, function, this, args, new_target)
+            }
+            ArrayBuiltin::Search(id) => {
+                self.run_array_search_builtin(id, function, this, args, new_target)
+            }
+            ArrayBuiltin::Mutation(id) => {
+                self.run_array_mutation_builtin(id, function, this, args, new_target)
+            }
         }
     }
 
@@ -369,12 +429,7 @@ impl<H: Host> Agent<H> {
                 // 6.c.iii. Perform ? CreateDataPropertyOrThrow(A, Pk, mappedValue). The key is
                 // made again: the call may have collected the atom of an index above 2^32 - 2.
                 let key = self.index_key(index)?;
-                if !self.create_data_property(array, key, mapped)? {
-                    return Err(self.throw_error(
-                        ErrorKind::TypeError,
-                        "Array.prototype.map cannot define an element of its result",
-                    ));
-                }
+                self.create_data_property_or_throw(array, key, mapped)?;
             }
             index += 1.0;
         }
@@ -440,12 +495,71 @@ impl<H: Host> Agent<H> {
 
 #[cfg(test)]
 mod tests {
+    use super::{ArrayBuiltin, iteration, mutation, search};
+    use crate::builtins::group_testing::{GroupMethod, check_group_keys, group_methods};
     use crate::host::hooks::test_host::{NoHooks, agent_with_realm, enter};
     use crate::host::outcome::{Abrupt, Completion};
     use crate::host::{Cx, HostCall};
+    use crate::object::builtin_function::BuiltinId;
     use crate::object::property::{Key, Slot};
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::Value;
+
+    /// The order of keys the next wave's stories agree on (`story:builtin-group-modules`): on a
+    /// new realm the own String keys of `Array` and of `Array.prototype` are the keys of the
+    /// base, in the base's order, followed by the keys of the groups' lists, the groups in the
+    /// order `iteration`, `search`, `mutation`, and nothing else; each key of a group is a
+    /// method with its name and length whose steps are the group's id, and it runs through the
+    /// function object without ending the run; the Symbol keys of the base are still own keys.
+    /// The lists are empty in this story and grow in the next wave, and the test holds in each
+    /// of its trees.
+    #[test]
+    fn every_group_module_installs_and_runs_through_its_constructor() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        let handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let constructor = agent.intrinsic(handle, Intrinsic::Array).unwrap();
+        let prototype = agent.intrinsic(handle, Intrinsic::ArrayPrototype).unwrap();
+        let species = Key::Symbol(agent.well_known().unwrap().species);
+        let constructor_groups: Vec<GroupMethod> = [
+            group_methods(iteration::CONSTRUCTOR_METHODS, |i| {
+                BuiltinId::Array(ArrayBuiltin::Iteration(i))
+            }),
+            group_methods(search::CONSTRUCTOR_METHODS, |i| {
+                BuiltinId::Array(ArrayBuiltin::Search(i))
+            }),
+            group_methods(mutation::CONSTRUCTOR_METHODS, |i| {
+                BuiltinId::Array(ArrayBuiltin::Mutation(i))
+            }),
+        ]
+        .concat();
+        let prototype_groups: Vec<GroupMethod> = [
+            group_methods(iteration::PROTOTYPE_METHODS, |i| {
+                BuiltinId::Array(ArrayBuiltin::Iteration(i))
+            }),
+            group_methods(search::PROTOTYPE_METHODS, |i| {
+                BuiltinId::Array(ArrayBuiltin::Search(i))
+            }),
+            group_methods(mutation::PROTOTYPE_METHODS, |i| {
+                BuiltinId::Array(ArrayBuiltin::Mutation(i))
+            }),
+        ]
+        .concat();
+        check_group_keys(
+            &mut agent,
+            constructor,
+            &["length", "name", "prototype", "isArray"],
+            &constructor_groups,
+            &[species],
+        );
+        check_group_keys(
+            &mut agent,
+            prototype,
+            &["length", "constructor", "join", "map", "push", "toString"],
+            &prototype_groups,
+            &[],
+        );
+    }
 
     /// A species constructor that records the length it is given in the host's place, the
     /// callee's "seen" property, and answers a new ordinary object.

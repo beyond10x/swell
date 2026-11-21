@@ -277,10 +277,6 @@ impl<H: Host> Agent<H> {
     }
 
     /// [[PreventExtensions]].
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Object.preventExtensions: story:harness-builtins")
-    )]
     pub(crate) fn prevent_extensions(&mut self, object: ObjectRef) -> Completion<bool> {
         self.ordinary_prevent_extensions(object)
     }
