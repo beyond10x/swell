@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use swell_syntax::ast::{Expr, FunctionId, Stmt};
-use swell_syntax::{ParseOptions, Script, SyntaxError, parse_script};
+use swell_syntax::{MessageKind, ParseOptions, Script, SyntaxError, message_kind, parse_script};
 
 const LIMIT: u32 = 1_000;
 
@@ -183,6 +183,71 @@ fn refused_sources_name_their_slice() {
         vec!["hashbang comment is not supported before slice 2".to_string()]
     );
     println!("refused: {} file(s)", files.len());
+}
+
+/// `message_kind` tells the three kinds of message apart from the text alone, as a host reads it
+/// from a `SyntaxError` object: every refusal under `refused/` is a refusal of the slice its
+/// header names, every message of a source under `early-errors/` is a grammar or early error,
+/// and the nesting limit is the nesting limit.
+#[test]
+fn message_kind_tells_refusals_from_early_errors() {
+    let refused = sources("refused").unwrap();
+    for (path, text) in &refused {
+        let (_, result) = header(path, text).unwrap();
+        let expected = quoted(path, &result, "refused").unwrap();
+        let slice: u32 = expected
+            .rsplit_once(' ')
+            .and_then(|(_, n)| n.parse().ok())
+            .unwrap_or_else(|| panic!("{}: no slice in {expected:?}", path.display()));
+        let errors = parse(text)
+            .err()
+            .unwrap_or_else(|| panic!("{}: parsed", path.display()));
+        for error in &errors {
+            assert_eq!(
+                message_kind(&error.message),
+                MessageKind::Refusal { slice },
+                "{}: {:?}",
+                path.display(),
+                error.message
+            );
+        }
+    }
+    let early = sources("early-errors").unwrap();
+    let mut messages_seen = 0;
+    for (path, text) in &early {
+        let errors = parse(text)
+            .err()
+            .unwrap_or_else(|| panic!("{}: parsed", path.display()));
+        for error in &errors {
+            messages_seen += 1;
+            assert_eq!(
+                message_kind(&error.message),
+                MessageKind::Grammar,
+                "{}: {:?}",
+                path.display(),
+                error.message
+            );
+        }
+    }
+    let errors = parse_units(&units("[[[1]]];"), 2).err().unwrap();
+    assert_eq!(
+        message_kind(&errors[0].message),
+        MessageKind::Nesting { limit: 2 }
+    );
+    for text in [
+        " is not supported before slice 2",
+        "x is not supported before slice ",
+        "x is not supported before slice 2a",
+        "nesting deeper than parser_nesting (2",
+        "nesting deeper than parser_nesting ()",
+    ] {
+        assert_eq!(message_kind(text), MessageKind::Grammar, "{text:?}");
+    }
+    println!(
+        "message kinds: {} refused file(s), {} early-error file(s) with {messages_seen} message(s)",
+        refused.len(),
+        early.len()
+    );
 }
 
 /// Set in the environment of a child process a test starts: the nesting limit the child runs its

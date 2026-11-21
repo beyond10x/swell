@@ -1,8 +1,12 @@
 #!/bin/sh
-# Planted defect of taskfiles/test262.yml: a copy of conformance/test262/expected.txt that marks
+# Planted defect of taskfiles/test262.yml: a copy of the expected file that marks
 # the section sec-proxy-objects complete while its cases fail (the engine passes none). The
 # runner judges it incomplete, so `task test262` must exit non-zero and print the planted line
 # with - and the printed one with +. The unchanged copy passes first.
+# The defect is on the counting side, so every run of the task counts the real pinned checkout
+# with TEST262_RUN=none (no case is run; every run case is counted failed, so the section is
+# incomplete in this mode as it is with the cases run), and the expected file is that mode's,
+# made here from the task's own lines.
 # Run from the repository root: sh tests/gate/test262-refuses-a-section-marked-complete-with-a-failing-case.sh
 # The same output from task, cargo and ess on any machine: no colour, and no "::error" line
 # that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
@@ -19,7 +23,13 @@ fail() {
   exit 1
 }
 
-cp conformance/test262/expected.txt "$dir/expected.txt" || fail "cannot copy expected.txt"
+export TEST262_RUN=none
+: > "$dir/empty.txt"
+if task -d . test262 TEST262_EXPECTED="$dir/empty.txt" TEST262_OUT="$dir/mode" > "$dir/mode.out" 2>&1; then
+  fail "task test262 exited 0 against an empty expected file ($dir/mode.out)"
+fi
+grep -q '^test262 total ' "$dir/mode/lines.txt" || fail "task test262 printed no total line ($dir/mode.out)"
+cp "$dir/mode/lines.txt" "$dir/expected.txt" || fail "cannot copy $dir/mode/lines.txt"
 task -d . test262 TEST262_EXPECTED="$dir/expected.txt" TEST262_OUT="$dir/base" > "$dir/base.out" 2>&1 ||
   fail "task test262 on the unchanged expected file exited non-zero ($dir/base.out)"
 grep -qF "lines equal $dir/expected.txt" "$dir/base.out" ||

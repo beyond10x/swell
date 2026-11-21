@@ -687,19 +687,19 @@ first pass, not that it will; the runner gives the real numbers.
 
 | slice | name | cases | runs |
 |---|---|---|---|
-| 1 | `harness` | 82 | 164 |
-| 2 | `language-core` | 5,244 | 9,171 |
-| 3 | `builtins-core` | 7,580 | 14,992 |
-| 4 | `numbers-and-dates` | 1,196 | 2,392 |
+| 1 | `harness` | 31 | 62 |
+| 2 | `language-core` | 5,245 | 9,173 |
+| 3 | `builtins-core` | 7,603 | 15,038 |
+| 4 | `numbers-and-dates` | 1,198 | 2,396 |
 | 5 | `regexp` | 2,118 | 4,234 |
-| 6 | `bindings-and-iteration` | 3,701 | 7,130 |
+| 6 | `bindings-and-iteration` | 3,717 | 7,162 |
 | 7 | `generators` | 1,432 | 2,771 |
 | 8 | `classes` | 6,188 | 12,286 |
-| 9 | `collections-proxy-reflect` | 1,744 | 3,459 |
+| 9 | `collections-proxy-reflect` | 1,750 | 3,471 |
 | 10 | `promises-and-async` | 6,573 | 12,879 |
 | 11 | `modules` | 1,277 | 1,825 |
-| 12 | `bigint` | 316 | 632 |
-| 13 | `binary-data` | 3,042 | 6,040 |
+| 12 | `bigint` | 317 | 634 |
+| 13 | `binary-data` | 3,044 | 6,044 |
 | 14 | `shared-memory` | 598 | 1,192 |
 | 15 | `iterator-helpers-and-resources` | 1,094 | 2,170 |
 | 16 | `weak-references` | 82 | 164 |
@@ -712,12 +712,20 @@ first pass, not that it will; the runner gives the real numbers.
 | x | stage 3 (excluded) | 2,591 | 5,008 |
 | | total | 53,801 | 103,360 |
 
+Slice 1 had 82 cases and 164 runs: the share of `test/harness/` by the rule `dir
+test/harness/ 1`. 31 cases and 62 runs are what slice 1 passes. Measured on 2026-11-21 with the
+check under "How the counts were made" (`awk -f slices.awk` over this block, which holds the 51
+lines `dir test/harness/<file> <slice>`, and the inventory's `meta.tsv`, counting slice `01`):
+`01 31 62`. Every moved case goes to a slice from 2 to 13, so slices 1 to 19 still hold 44,931
+cases and 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
+
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
-1. `harness`: lexer, parser and compile step for the ES5 grammar, the interpreter, the heap, the
-   builtins the three harness files call, `$262`, `print`, the runner. `harness` 82.
-2. `language-core`: the rest of the ES5-level language: strict mode, `eval`, `with`,
-   `arguments`, labels, automatic semicolon insertion. `expressions/compound-assignment` 407,
+1. `harness`: lexer, parser and compile step for the ES5 grammar with strict mode (the runner
+   makes a strict run of every case), the interpreter, the heap, the builtins `assert.js` and
+   `sta.js` call, `$262`, `print`, the runner. `harness` 31.
+2. `language-core`: the rest of the ES5-level language: `eval`, `with`, `arguments`, labels,
+   automatic semicolon insertion. `expressions/compound-assignment` 407,
    `expressions/assignmenttargettype` 318, `expressions/object` 282, `eval-code` 253.
 3. `builtins-core`: `Object`, `Function`, `Array`, `String`, `Boolean`, `Error`, `JSON`, the
    global functions. `Object` 3,160, `Array` 2,665, `String` 780, `Function` 417.
@@ -756,8 +764,38 @@ Excluded at first: `temporal`, `built-ins/Temporal` 4,606; `intl402`, `intl402/T
 and `intl402/DateTimeFormat` 239; stage 3, `intl402/Temporal` 1,548 and
 `expressions/dynamic-import` 385.
 
-35 of the 117 files in `test/harness/` fall after slice 1: they test `asyncHelpers.js`,
-`deepEqual.js` on maps and sets, and others that need later slices. Within slices 1 to 19 the
+86 of the 117 files in `test/harness/` fall after slice 1: 35 by their features and flags
+(they test `asyncHelpers.js`, `deepEqual.js` on maps and sets, and others that need later
+slices), and 51 by a `dir test/harness/<file> <slice>` line of the block below, each because
+the case or a harness file it includes needs a later slice (a scan of each case and its
+includes, comments removed and string contents blanked, for later syntax, automatic semicolon
+insertion and the builtins called):
+
+- to slice 2, 1 case: `asyncHelpers-asyncTest-func-throws-sync` (`asyncHelpers.js` needs
+  automatic semicolon insertion: line 82 ends `res.then(onResFulfilled, onResRejected)` without
+  a semicolon);
+- to slice 3, 23: the 14 `propertyhelper-*` cases and the `verifyProperty-` cases
+  `configurable-object`, `restore`, `restore-accessor`, `same-value`, `string-prop`, `value` and
+  `value-error` (`propertyHelper.js` reads `arguments.length` and calls
+  `Function.prototype.call.bind` on the global `Function`, whose `CreateDynamicFunction` is slice
+  3; `-restore-accessor` also uses a method shorthand), `asyncHelpers-asyncTest-without-async-flag`
+  (`Object.hasOwn` and a method shorthand) and `fnGlobalObject` (`Function("return this;")()`);
+- to slice 4, 2: `assertRelativeDateMs` (`Date`) and `nans` (`Number.NaN`, `Math.pow`);
+- to slice 6, 16: `verifyProperty-arguments`, `-noproperty` and `-undefined-desc` (arrow
+  functions), the `compare-array-` cases `arguments`, `arraylike`, `different-elements`,
+  `different-length`, `falsy-arguments`, `same-elements-different-order`, `samevalue` and
+  `sparse` (arrow functions, templates, `const` or spread),
+  `asyncHelpers-asyncTest-rejects-non-callable` and `asyncHelpers-asyncTest-return-not-thenable`
+  (`const`), `nativeFunctionMatcher`, `promiseHelper` and `wellKnownIntrinsicObjects` (`const`,
+  arrow functions);
+- to slice 9, 6: the `deepEqual-*` cases without a feature (`deepEqual.js` calls `new Map()`);
+- to slice 12, 1: `testIntl-getLocaleBaseName` (`testIntl.js` holds the BigInt literal
+  `1_000n`);
+- to slice 13, 2: `detachArrayBuffer` and `detachArrayBuffer-host-detachArrayBuffer` (`new
+  ArrayBuffer`).
+
+The rules are prefixes and the longest wins, so each file's line beats `dir test/harness/ 1`.
+Within slices 1 to 19 the
 order is that of dependencies: nothing can be counted before slice 1, slices 2 to 5 are the
 language and library of ES5, 6 to 8 the syntax most later tests are written in (4,916 cases carry
 `class`), 10 needs 7's suspended frames, and 13 needs 12 for `BigInt64Array`.
@@ -778,14 +816,22 @@ from `swell-unicode`. The rule:
 - Where the early part cannot be complete without a later slice's data or engine, the gap is a
   recorded omission the gate reads (`conformance/test262/sections.txt`), and the engine refuses
   the input with a defined outcome instead of guessing: before slice 5, an identifier character
-  outside ASCII, or a white space code point that only the Unicode category `Zs` admits (12.2
-  names the others itself), is a `SyntaxError`, a regular expression
+  outside ASCII is a `SyntaxError`, a regular expression
   literal is lexed to its end and evaluating it throws a `SyntaxError`, and the `String` methods
   that need Unicode tables (`normalize`, case mapping outside ASCII) are slice 5's, with their
-  cases moved there by rule lines when slice 3 measures them.
-- The builtins the three harness files call are built in slice 1 as far as those files and the
-  82 cases need them; slice 3 completes each builtin. A method that exists is correct for every
-  argument, or it does not exist yet.
+  cases moved there by rule lines when slice 3 measures them. White space is not among these
+  gaps: `story:syntax-es5-and-strict` accepts every `Zs` code point in slice 1 with the table of
+  `story:num-and-unicode-early-parts`.
+- The builtins the harness files call are built in slice 1 as far as `assert.js`, `sta.js` and
+  the 31 cases need them; slice 3 completes each builtin. A method that exists is correct for
+  every argument, or it does not exist yet.
+- A refusal is a `SyntaxError`, but not the one a `negative: parse` case names: the runner
+  reads the kind of a parse error from its message (`swell_syntax::message_kind`), and a run
+  that a refusal or the nesting limit ends, in a harness file or in the case, fails whatever the
+  case's `negative` says. It prints the number of such runs as `test262-refused <runs>`, so the
+  share of the checkout a later slice's parser still declines stays visible (53,564 of 85,556
+  runs at slice 1). Before this rule, 3,011 negative parse cases of slices 2 to 18 were counted
+  passed on a refusal.
 
 **For surf.** A script that touches no DOM and uses only ES5 can run after slice 4, and with
 regular expressions after slice 5; most present-day scripts with no DOM (classes, `async`,
@@ -795,6 +841,57 @@ exists or is planned in surf's current 22 waves.
 
 ```swell-slices
 dir test/harness/ 1
+dir test/harness/asyncHelpers-asyncTest-func-throws-sync.js 2
+dir test/harness/propertyhelper-verifyconfigurable-configurable.js 3
+dir test/harness/propertyhelper-verifyconfigurable-configurable-object.js 3
+dir test/harness/propertyhelper-verifyconfigurable-not-configurable.js 3
+dir test/harness/propertyhelper-verifyenumerable-enumerable.js 3
+dir test/harness/propertyhelper-verifyenumerable-not-enumerable.js 3
+dir test/harness/propertyhelper-verifynotconfigurable-configurable.js 3
+dir test/harness/propertyhelper-verifynotconfigurable-not-configurable.js 3
+dir test/harness/propertyhelper-verifynotenumerable-enumerable.js 3
+dir test/harness/propertyhelper-verifynotenumerable-not-enumerable.js 3
+dir test/harness/propertyhelper-verifynotwritable-not-writable-strict.js 3
+dir test/harness/propertyhelper-verifynotwritable-writable.js 3
+dir test/harness/propertyhelper-verifywritable-array-length.js 3
+dir test/harness/propertyhelper-verifywritable-not-writable.js 3
+dir test/harness/propertyhelper-verifywritable-writable.js 3
+dir test/harness/verifyProperty-configurable-object.js 3
+dir test/harness/verifyProperty-restore.js 3
+dir test/harness/verifyProperty-restore-accessor.js 3
+dir test/harness/verifyProperty-same-value.js 3
+dir test/harness/verifyProperty-string-prop.js 3
+dir test/harness/verifyProperty-value.js 3
+dir test/harness/verifyProperty-value-error.js 3
+dir test/harness/asyncHelpers-asyncTest-without-async-flag.js 3
+dir test/harness/fnGlobalObject.js 3
+dir test/harness/assertRelativeDateMs.js 4
+dir test/harness/nans.js 4
+dir test/harness/verifyProperty-arguments.js 6
+dir test/harness/verifyProperty-noproperty.js 6
+dir test/harness/verifyProperty-undefined-desc.js 6
+dir test/harness/compare-array-arguments.js 6
+dir test/harness/compare-array-arraylike.js 6
+dir test/harness/compare-array-different-elements.js 6
+dir test/harness/compare-array-different-length.js 6
+dir test/harness/compare-array-falsy-arguments.js 6
+dir test/harness/compare-array-same-elements-different-order.js 6
+dir test/harness/compare-array-samevalue.js 6
+dir test/harness/compare-array-sparse.js 6
+dir test/harness/asyncHelpers-asyncTest-rejects-non-callable.js 6
+dir test/harness/asyncHelpers-asyncTest-return-not-thenable.js 6
+dir test/harness/nativeFunctionMatcher.js 6
+dir test/harness/promiseHelper.js 6
+dir test/harness/wellKnownIntrinsicObjects.js 6
+dir test/harness/deepEqual-array.js 9
+dir test/harness/deepEqual-circular.js 9
+dir test/harness/deepEqual-deep.js 9
+dir test/harness/deepEqual-mapset.js 9
+dir test/harness/deepEqual-object.js 9
+dir test/harness/deepEqual-primitives.js 9
+dir test/harness/testIntl-getLocaleBaseName.js 12
+dir test/harness/detachArrayBuffer.js 13
+dir test/harness/detachArrayBuffer-host-detachArrayBuffer.js 13
 dir test/language/ 2
 dir test/built-ins/ 3
 dir test/built-ins/Number/ 4
@@ -1257,19 +1354,19 @@ awk -f slices.awk rules.txt meta.tsv | awk -F'\t' '{c[$1]++
 Its output on this document:
 
 ```
-01 82 164
-02 5244 9171
-03 7580 14992
-04 1196 2392
+01 31 62
+02 5245 9173
+03 7603 15038
+04 1198 2396
 05 2118 4234
-06 3701 7130
+06 3717 7162
 07 1432 2771
 08 6188 12286
-09 1744 3459
+09 1750 3471
 10 6573 12879
 11 1277 1825
-12 316 632
-13 3042 6040
+12 317 634
+13 3044 6044
 14 598 1192
 15 1094 2170
 16 82 164

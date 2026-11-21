@@ -4,13 +4,17 @@ set: [pipefail]
 
 tasks:
   test262:
-    desc: Count every test262 case of the pinned checkout per directory, slice and ECMA-262 section with swell-test262, and check the lines against the design and the expected file.
+    desc: Run every test262 case of the pinned checkout that is run on the engine with swell-test262, count every case per directory, slice and ECMA-262 section, and check the lines against the design and the expected file.
     summary: |
-      Count every test262 case of the pinned checkout per directory, slice and ECMA-262 section
-      with swell-test262, and check the lines against the design and the expected file.
+      Run every test262 case of the pinned checkout that is run on the engine with swell-test262,
+      count every case per directory, slice and ECMA-262 section, and check the lines against the
+      design and the expected file.
 
-      Runs "swell-test262 count" (release build) on TEST262_CACHE/TEST262_COMMIT (default
-      .cache/test262/<commit of conformance/test262/PIN>, checked by test262-fetch first), the
+      Runs "swell-test262 count" (release build) with TEST262_WORKERS worker threads (default 4)
+      and TEST262_RUN (default all; none counts every run case failed without running it, for
+      the planted scripts of tests/gate/ that check the counting alone) on
+      TEST262_CACHE/TEST262_COMMIT (default .cache/test262/<commit of conformance/test262/PIN>,
+      checked by test262-fetch first), the
       swell-slices block of TEST262_DESIGN (default docs/design/engine.md), TEST262_FEATURES
       (default conformance/test262/features.txt), the sections of TEST262_SECTIONS (default
       conformance/test262/sections.txt) and TEST262_EXPECTED (default
@@ -23,9 +27,14 @@ tasks:
       -<expected line> and +<printed line>, then "test262: <n> line(s) differ from <file>").
       It fails when the directory lines do not sum to the total line, or there is none, and when
       fields 2 to 4 of the slice lines differ from the block after "Its output on this document:"
-      in the design, or that block is empty. It prints the total line, the two checks, the
-      test262-errors line and "test262: <n> lines equal <expected file>", and names each case
-      whose front matter cannot be read (counted run and failed).
+      in the design, or that block is empty. It prints the total line, the two checks with the
+      slice lines before the second, the test262-errors line and "test262: <n> lines equal
+      <expected file>", and names each case whose front matter cannot be read (counted run and
+      failed). To standard error it prints
+      the runner's test262-budget line of each run a budget ended, its test262-panic line of
+      each run that panicked, its test262-refused line (the runs a refusal of the parser ended,
+      each failed whatever the case's negative says), its twenty test262-steps lines (the runs
+      with the most steps) and its test262-time line per slice (runs and milliseconds).
     deps: [test262-fetch]
     silent: true
     vars:
@@ -38,6 +47,8 @@ tasks:
       TEST262_SECTIONS: '{{.TEST262_SECTIONS | default "conformance/test262/sections.txt"}}'
       TEST262_EXPECTED: '{{.TEST262_EXPECTED | default "conformance/test262/expected.txt"}}'
       TEST262_OUT: '{{.TEST262_OUT | default ".out/test262"}}'
+      TEST262_WORKERS: '{{.TEST262_WORKERS | default "4"}}'
+      TEST262_RUN: '{{.TEST262_RUN | default "all"}}'
     env:
       TEST262_COMMIT: '{{.TEST262_COMMIT}}'
       TEST262_CACHE: '{{.TEST262_CACHE}}'
@@ -46,6 +57,8 @@ tasks:
       TEST262_SECTIONS: '{{.TEST262_SECTIONS}}'
       TEST262_EXPECTED: '{{.TEST262_EXPECTED}}'
       TEST262_OUT: '{{.TEST262_OUT}}'
+      TEST262_WORKERS: '{{.TEST262_WORKERS}}'
+      TEST262_RUN: '{{.TEST262_RUN}}'
     cmds:
       - mkdir -p "$TEST262_OUT"
       - |
@@ -57,13 +70,15 @@ tasks:
           --design "$TEST262_DESIGN" \
           --features "$TEST262_FEATURES" \
           --sections "$TEST262_SECTIONS" \
-          --expected "$TEST262_EXPECTED" > "$lines" 2> "$log" || status=$?
+          --expected "$TEST262_EXPECTED" \
+          --workers "$TEST262_WORKERS" --run "$TEST262_RUN" > "$lines" 2> "$log" || status=$?
         if [ "$status" -ne 0 ]; then
           cat "$lines" "$log"
           echo "test262: swell-test262 count exited $status"
           exit 1
         fi
         grep '^test262-error ' "$log" || true
+        grep -E '^test262-(budget|panic|refused|steps|time) ' "$log" >&2 || true
         awk -v file="$lines" '
           $1 == "test262" && $2 == "total" { totals++; total = $0; for (i = 3; i <= 9; i++) t[i] = $i; next }
           $1 == "test262" {
@@ -95,6 +110,7 @@ tasks:
           cat "$TEST262_OUT/slices.diff"
           exit 1
         fi
+        awk '$1 == "test262-slice"' "$lines"
         echo "test262: $n slice lines equal the design"
         errors=$(grep '^test262-errors ' "$lines") || { echo "test262: no test262-errors line in $lines"; exit 1; }
         echo "$errors"

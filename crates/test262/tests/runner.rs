@@ -5,7 +5,7 @@
 use std::error::Error;
 use std::process::Command;
 
-use swell_test262::count::{self, Case, Outcome, Run};
+use swell_test262::count;
 use swell_test262::front_matter;
 use swell_test262::slices::{self, Slice};
 
@@ -96,14 +96,14 @@ test262 built-ins/String 1 1 0 0 0 0 0
 test262 harness 1 0 0 1 0 1 0
 test262 intl402 1 1 0 0 0 0 0
 test262 intl402/Locale 1 1 0 0 0 0 0
-test262 language/expressions 1 0 0 1 0 1 0
+test262 language/expressions 1 0 0 1 1 0 0
 test262 language/expressions/yield 2 0 0 2 0 2 0
-test262 language/statements/if 1 0 0 1 0 1 0
+test262 language/statements/if 1 0 0 1 1 0 0
 test262 language/statements/malformed 4 0 0 4 0 4 0
-test262 language/types 1 0 0 1 0 1 0
-test262 total 22 5 1 16 0 16 0
+test262 language/types 1 0 0 1 1 0 0
+test262 total 22 5 1 16 3 13 0
 test262-slice 01 1 2 0 0 1 0 1 0
-test262-slice 02 6 11 0 0 6 0 6 0
+test262-slice 02 6 11 0 0 6 3 3 0
 test262-slice 03 2 3 0 0 2 0 2 0
 test262-slice 04 1 2 0 0 1 0 1 0
 test262-slice 07 3 4 0 0 3 0 3 0
@@ -210,7 +210,7 @@ fn fixture_files_are_not_cases() -> TestResult {
     assert!(!printed.stdout.contains("harness/assert.js"));
     let counted = count_tree()?;
     assert!(
-        counted.has("test262 total 22 5 1 16 0 16 0"),
+        counted.has("test262 total 22 5 1 16 3 13 0"),
         "{}",
         counted.stdout
     );
@@ -238,8 +238,8 @@ fn directory_is_second_level_and_third_under_expressions_and_statements() -> Tes
     let printed = count_tree()?;
     for line in [
         "test262 language/expressions/yield 2 0 0 2 0 2 0",
-        "test262 language/statements/if 1 0 0 1 0 1 0",
-        "test262 language/types 1 0 0 1 0 1 0",
+        "test262 language/statements/if 1 0 0 1 1 0 0",
+        "test262 language/types 1 0 0 1 1 0 0",
         "test262 built-ins/Number 3 0 0 3 0 3 0",
     ] {
         assert!(printed.has(line), "{line} not in\n{}", printed.stdout);
@@ -272,7 +272,7 @@ fn a_shallow_case_keeps_its_own_directory() -> TestResult {
     for line in [
         "test262 harness 1 0 0 1 0 1 0",
         "test262 intl402 1 1 0 0 0 0 0",
-        "test262 language/expressions 1 0 0 1 0 1 0",
+        "test262 language/expressions 1 0 0 1 1 0 0",
     ] {
         assert!(printed.has(line), "{line} not in\n{}", printed.stdout);
     }
@@ -387,7 +387,7 @@ fn can_block_is_true_counts_as_not_applicable() -> TestResult {
         "{}",
         printed.stdout
     );
-    assert!(printed.has("test262 total 22 5 1 16 0 16 0"));
+    assert!(printed.has("test262 total 22 5 1 16 3 13 0"));
     assert!(printed.has("test262-slice 14 4 8 1 1 2 0 2 0"));
     Ok(())
 }
@@ -444,7 +444,7 @@ fn features_file_must_list_exactly_the_declared_features() -> TestResult {
         assert!(printed.has(line), "{line} not in\n{}", printed.stdout);
     }
     assert!(
-        printed.has("test262 total 22 4 1 17 0 17 0"),
+        printed.has("test262 total 22 4 1 17 4 13 0"),
         "{}",
         printed.stdout
     );
@@ -482,27 +482,27 @@ fn directory_lines_sum_to_the_total_line() -> TestResult {
 }
 
 #[test]
-fn every_run_case_is_counted_failed() -> TestResult {
-    let case = Case {
-        path: "test/harness/fixture-check.js".to_string(),
-        meta: front_matter::parse(b"/*---\n---*/\n").meta,
-    };
-    for run in [Run::NonStrict, Run::Strict, Run::Module, Run::Raw] {
-        assert_eq!(count::run_outcome(&case, run), Outcome::Failed);
-    }
-    let printed = count_tree()?;
-    let rows = printed.rows("test262");
-    assert!(!rows.is_empty());
-    for (directory, n) in rows {
-        // exist, excluded, not-applicable, run, passed, failed, budget
-        assert_eq!((n[4], n[5], n[6]), (0, n[3], 0), "{directory}");
-    }
-    let slices = printed.rows("test262-slice");
-    assert!(!slices.is_empty());
-    for (slice, n) in slices {
-        // cases, runs, excluded, not-applicable, run, passed, failed, budget
-        assert_eq!((n[5], n[6], n[7]), (0, n[4], 0), "{slice}");
-    }
+fn a_case_that_throws_is_counted_failed() -> TestResult {
+    // The run tree of tests/run.rs: throws/error.js throws an Error and is not negative; the
+    // cases of harness/ pass, so a failure is the case's own.
+    let printed = count_with("run", "design.md", "features.txt")?;
+    assert_eq!(
+        printed.code,
+        Some(0),
+        "{}{}",
+        printed.stdout,
+        printed.stderr
+    );
+    assert!(
+        printed.has("test262 language/throws 1 0 0 1 0 1 0"),
+        "{}",
+        printed.stdout
+    );
+    assert!(
+        printed.has("test262 harness 2 0 0 2 2 0 0"),
+        "{}",
+        printed.stdout
+    );
     Ok(())
 }
 
@@ -523,7 +523,7 @@ fn an_unknown_rule_kind_fails_the_run() -> TestResult {
     );
     // Without the exclude-slice and exclude-include lines only decorated.js is excluded.
     assert!(
-        printed.has("test262 total 22 1 1 20 0 20 0"),
+        printed.has("test262 total 22 1 1 20 3 17 0"),
         "{}",
         printed.stdout
     );
