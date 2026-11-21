@@ -9,6 +9,10 @@
 #    and print "line(s) differ from".
 # The unchanged copies pass first.
 # Run from the repository root: sh tests/gate/test262-refuses-a-count-that-differs-from-expected.sh
+# The same output from task, cargo and ess on any machine: no colour, and no "::error" line
+# that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
+export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=test262-refuses-a-count-that-differs-from-expected
 dir=.out/gate-tests/$name
 feature=generators

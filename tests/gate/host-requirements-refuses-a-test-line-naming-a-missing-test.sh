@@ -4,6 +4,10 @@
 # of the workspace" line of HOST-2. The valid set must pass first, with a test line naming a
 # test of its list and a test line ending in * that matches one, so the refusal comes from the
 # planted defect and not from test lines as such.
+# The same output from task, cargo and ess on any machine: no colour, and no "::error" line
+# that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
+export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=host-requirements-refuses-a-test-line-naming-a-missing-test
 work=.out/gate-tests/$name
 fail() { echo "$name: FAIL $*"; exit 1; }

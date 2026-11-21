@@ -245,12 +245,23 @@ tasks:
 
       Each tests/gate/<name>.sh runs with sh from the root, in byte order of the names, and
       works under .out/gate-tests/<name>/. It passes when it exits 0 and its last line is
-      "<name>: ok". Its output goes to .out/gate-tests/<name>.log, and its last line is printed.
-      No script at all fails too. The summary is in .out/gate-selftest.log.
+      "<name>: ok". Its output goes to .out/gate-tests/<name>.log. A passing script prints its
+      last line. A failing one prints "<name>: failed, exit <n>; the last 20 lines of <log>:"
+      and those lines, each after "  | ", with every control byte written as \ooo and a
+      backslash as \\, so that a CI log shows the reason and nothing in it is interpreted.
+      The scripts run without colour and without the variables of a GitHub Actions runner
+      (CI, GITHUB_ACTIONS, FORCE_COLOR and CLICOLOR_FORCE unset; NO_COLOR=1,
+      CARGO_TERM_COLOR=never): there go-task colours its messages and adds a "::error" line
+      to a failing task's output, and cargo colours its own. Each script sets the same itself,
+      so that it passes when run alone; gate-selftest-is-colour-proof checks that. No script at
+      all fails too. The last line is "gate-selftest: <p> passed, <f> failed", also written to
+      .out/gate-selftest.log.
     silent: true
     cmds:
       - mkdir -p .out/gate-tests
       - |
+        unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
+        export NO_COLOR=1 CARGO_TERM_COLOR=never
         passed=0
         failed=0
         scripts=$(find tests/gate -maxdepth 1 -type f -name '*.sh' | LC_ALL=C sort)
@@ -258,13 +269,32 @@ tasks:
           name=${script##*/}
           name=${name%.sh}
           log=.out/gate-tests/$name.log
-          if sh "$script" > "$log" 2>&1 && [ "$(tail -n 1 "$log")" = "$name: ok" ]; then
+          status=0
+          sh "$script" > "$log" 2>&1 || status=$?
+          if [ "$status" -eq 0 ] && [ "$(tail -n 1 "$log")" = "$name: ok" ]; then
             passed=$((passed + 1))
+            tail -n 1 "$log"
           else
             failed=$((failed + 1))
+            echo "$name: failed, exit $status; the last 20 lines of $log:"
+            tail -n 20 "$log" | LC_ALL=C awk '
+              BEGIN {
+                for (i = 1; i < 32; i++) code[sprintf("%c", i)] = sprintf("\\%03o", i)
+                code[sprintf("%c", 127)] = "\\177"
+                code["\\"] = "\\\\"
+              }
+              {
+                out = ""
+                n = length($0)
+                for (i = 1; i <= n; i++) {
+                  c = substr($0, i, 1)
+                  out = out ((c in code) ? code[c] : c)
+                }
+                print "  | " out
+              }
+            '
           fi
-          tail -n 1 "$log"
         done
+        if [ $((passed + failed)) -eq 0 ]; then echo "gate-selftest: no script under tests/gate"; fi
         echo "gate-selftest: $passed passed, $failed failed" | tee .out/gate-selftest.log
-        if [ $((passed + failed)) -eq 0 ]; then echo "gate-selftest: no script under tests/gate"; exit 1; fi
-        test "$failed" -eq 0
+        test "$((passed + failed))" -gt 0 && test "$failed" -eq 0

@@ -3,6 +3,10 @@
 # task test262-fetch must fail, print the `tree` line and leave the directory in place.
 # Run from the repository root: sh tests/gate/test262-fetch-refuses-a-different-tree.sh
 
+# The same output from task, cargo and ess on any machine: no colour, and no "::error" line
+# that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
+export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=test262-fetch-refuses-a-different-tree
 root=$(pwd)
 sandbox=$root/.out/gate-tests/$name

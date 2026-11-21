@@ -4,6 +4,10 @@
 # differ from the design: `task test262` must exit non-zero and say so, printing the line on both
 # sides. The unchanged copy passes first.
 # Run from the repository root: sh tests/gate/test262-refuses-a-slice-line-that-differs-from-the-design.sh
+# The same output from task, cargo and ess on any machine: no colour, and no "::error" line
+# that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
+export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=test262-refuses-a-slice-line-that-differs-from-the-design
 dir=.out/gate-tests/$name
 rm -rf "$dir"

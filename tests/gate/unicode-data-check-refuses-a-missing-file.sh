@@ -3,6 +3,10 @@
 # SOURCE line. The task unicode-data-check must refuse it with exactly one fault line,
 # "ucd/Scripts.txt: required, missing". The unchanged copy must pass first, so the refusal
 # comes from the planted defect and from nothing else.
+# The same output from task, cargo and ess on any machine: no colour, and no "::error" line
+# that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
+export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=unicode-data-check-refuses-a-missing-file
 work=.out/gate-tests/$name
 data=data/unicode/17.0.0
