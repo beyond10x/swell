@@ -151,6 +151,41 @@ whole to slices 6 and 5 at the close, the 9 included that pass today on the `Typ
 missing method. Each of the 9 has its own line of evidence that says it passed at the move,
 `expected.txt` keeps them as passing, and `test262-moves-check` is not loosened for it.
 
+## The order after slice 3
+
+The consumer of swell is the browser surf. A rule of the organization of 2026-11-21 ("Goal
+first") orders the waves by the consumer's first gap. surf's first use of a script engine,
+named by the deciding session: the testharness.js tests of its HTML parser (101 files of
+web-platform-tests at the commit surf pins; none runs today).
+
+Measured on 2026-11-21 with the parser of `main` (`6a43e18`): `resources/testharness.js`,
+`resources/testharnessreport.js`, `html/syntax/parsing/html5lib_url.html` and the three
+scripts it loads. Each script was parsed, the first refused construct rewritten into text
+slice 2 accepts, and parsed again until it was accepted, so every refused construct is
+counted and not only the first.
+
+| slice | refused constructs | what |
+|---|---|---|
+| 6 | 191 | `const` 75, arrow functions 41, `let` 23, template literals 22, `for`-`of` 12, default parameters 9, destructuring 6, rest parameters 2, spread 1 |
+| 5 | 12 | regular expression literals (parsed; evaluating one is refused) |
+| 10 | 3 | one async function and two `await`, all in `testharness.js` |
+| 7, 8, 11 to 19 | 0 | |
+
+`testharnessreport.js` and two of the three loaded scripts are accepted as they are. Builtins
+the scripts name that swell lacks after slice 3, by a count of identifiers (an estimate:
+references, not calls): `Promise` 13 (slice 10), `Math` and `Date` 8 (slice 4), `Map` and
+`Set` 4 (slice 9), `RegExp` 2 (slice 5); no `Symbol`, typed array, `WeakMap`, `Proxy` or
+`Reflect`.
+
+The order that follows: **6, 5, 7, 10, 4, 9**, then the design's order for the rest. Slice 7
+has no use of its own in these scripts and comes before 10 because async functions need its
+suspended frames (the design, section 12). The design's slice table and its counts do not
+change; only the order of delivery does, and it is decided again at each boundary.
+
+Not measured: the inline and linked scripts of the 101 test files themselves (the listing of
+the repository at that commit was cut off at 61,341 entries), and which paths of the harness
+run. Objects of the DOM and of the host are surf's side.
+
 ## What later slices take over
 
 Findings of delivered waves that belong to a slice not yet decomposed. The decomposition of
