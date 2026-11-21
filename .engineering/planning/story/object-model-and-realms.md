@@ -41,7 +41,7 @@ scope:
   path: crates/swell/tests/interrupt.rs
 - confidence: cited
   path: crates/swell/tests/support/host.rs
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
@@ -151,7 +151,7 @@ design governs.
   that holds this, `HOST-160`, is closed by `story:host-interface-hardening`; this story
   writes the check, with a unit test of its own for each of the two sites.
 - The counts of Acceptance are measured on the base of the wave: with `HOST-160` the list has
-  160 lines.
+  161 lines (`HOST-161` was added on the same day).
 - `Writes:` is extended (2026-11-21, found by this story's unit before it wrote anything: with a
   required hook and the corrected `new_host_object` the crate does not compile unless these
   change too): `crates/swell/src/value.rs` (the field of `Realm`, so that `create_realm`,
@@ -165,6 +165,13 @@ design governs.
   `new_host_object` and test hosts). In these files the unit changes what the list names and
   nothing else; the tests of `story:heap-values-and-host-surface` keep their names and what
   they assert.
+
+- The current realm (2026-11-21, `docs/design/host-interface.md` decision 7, `HOST-161`): `with_cx`,
+  `Agent::call` and `Agent::construct` take a `&Realm` that is current for the whole call;
+  `current_realm` is the running activation's realm, else that one, and never depends on a
+  collection or on creation order. This story closes `HOST-161` as its tenth requirement
+  (27 `test` lines after it), with the collector run at every safe point too. `Writes:` gains
+  `crates/swell/tests/values.rs` and the callers of the three entry points.
 
 ## Change
 
@@ -271,8 +278,8 @@ Requirements and the tests named in Change (`intrinsic_reachable_only_through_th
 and `string_data_and_property_values_survive_collect` among them);
 `cargo test --locked -p swell --test hooks -- --list` prints 17 lines starting
 `host_124_`, the 17 names of Requirements; and `slot task -d . -t taskfiles/host-requirements.yml
-host-requirements-check` exits 0 and prints `host-requirements: 160 requirement(s), 160
-line(s): 26 test, 134 pending, 0 omitted; 50 UNMAPPED marker(s), each naming a HOST-<n> or ESS
+host-requirements-check` exits 0 and prints `host-requirements: 161 requirement(s), 161
+line(s): 27 test, 134 pending, 0 omitted; 50 UNMAPPED marker(s), each naming a HOST-<n> or ESS
 limit` and `host-requirements: pending by slice: 1:43 2:5 3:5 4:9 5:2 6:1 7:1 8:1 9:5 10:14
 11:32 12:2 13:2 14:6 16:5 18:1`.
 

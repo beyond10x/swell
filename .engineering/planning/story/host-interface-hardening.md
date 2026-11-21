@@ -20,7 +20,7 @@ scope:
   path: crates/swell/src/host/limits.rs
 - confidence: cited
   path: crates/swell/tests
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
@@ -102,8 +102,13 @@ host returns", with the new requirement `HOST-160`; found by the unit of
   `test` with the fourteen of Requirements. If the check is missing in the code of
   `story:object-model-and-realms`, that is a finding against that story, reported, not fixed
   here.
-- Acceptance reads, with the fifteen lines: `host-requirements: 160 requirement(s), 160
-  line(s): 69 test, 91 pending, 0 omitted`, and no entry for slice 1 in the second line.
+- Acceptance reads, with the fifteen lines: `host-requirements: 161 requirement(s), 161
+  line(s): 70 test, 91 pending, 0 omitted`, and no entry for slice 1 in the second line.
+
+- The current realm (2026-11-21, `docs/design/host-interface.md` decision 7, `HOST-161`, closed by
+  `story:object-model-and-realms`): the fuzz test and `misuse.rs` cover `with_cx`, `Agent::call`
+  and `Agent::construct` with a stale, a released and a foreign `Realm` (`Err(StaleHandle)` or
+  `Err(ForeignHandle)`, the agent `Alive`).
 
 ## Change
 
@@ -153,7 +158,7 @@ points), `crates/swell/src/host/limits.rs` (the constants, only when
 --test faults` exit 0 and run the fifteen tests of Requirements (`HOST-160` among them),
 `min_stack_bytes_is_enough_through_builtins` and the four tests of `builtins_scripts.rs`, and
 `slot task -d . -t taskfiles/host-requirements.yml host-requirements-check` exits 0 and prints
-`host-requirements: 160 requirement(s), 160 line(s): 69 test, 91 pending, 0 omitted; 50
+`host-requirements: 161 requirement(s), 161 line(s): 70 test, 91 pending, 0 omitted; 50
 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit` and `host-requirements: pending by
 slice: 2:5 3:5 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1`, with no entry for
 slice 1.

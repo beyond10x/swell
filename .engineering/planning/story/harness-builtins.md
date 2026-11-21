@@ -17,7 +17,7 @@ scope:
   path: crates/swell/src/realm/global_object.rs
 - confidence: cited
   path: crates/swell/src/realm/intrinsics.rs
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
@@ -73,6 +73,9 @@ The design changed after this story was accepted (`docs/design/host-interface.md
 `docs/plan/slice-01-wave-2.md`). No method this story writes changes. Its tests call the
 engine through `cx`, and those calls now return `Result<Completion<T>, HostError>`: a test
 reads the outer `Result` first.
+
+- The current realm (2026-11-21, `docs/design/host-interface.md` decision 7): `with_cx`,
+  `Agent::call` and `Agent::construct` take a `&Realm`; this story's tests pass one.
 
 ## Change
 
