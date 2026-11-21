@@ -8,24 +8,29 @@ version's section of [`CHANGELOG.md`](../CHANGELOG.md).
 - The tag is annotated, made by the organization bot (`b10x-bot[bot]`), and named exactly as
   the workspace version: `0.1.0`, no prefix.
 - It is on a commit of `main` whose `check` run on the forge is green.
-- The tag message and the release notes are one text, the notes file: a lead of one sentence
-  (at most 25 words); `**Breaking**`, with `- None.` when nothing breaks; `**Changed**`, with
-  at most five bullets of one clause each; and as its last line a link to the version's
-  section of `CHANGELOG.md`, absolute at the tag
-  (`https://github.com/beyond10x/swell/blob/<version>/CHANGELOG.md#<anchor>`). It has at most
-  900 characters without the link line and states nothing the changelog section does not
-  state. The changelog section keeps its full form, with the gate's lines. Since `0.2.0`;
-  release `0.1.0` carries its whole changelog section and is not rewritten.
+- The tag message and the release notes are one text, the notes file. Its parts:
+
+  | part | form |
+  |---|---|
+  | lead | one sentence, at most 25 words |
+  | `**Breaking**` | `- None.` when nothing breaks |
+  | `**Changed**` | at most five bullets of one clause each |
+  | last line | a link to the version's section of `CHANGELOG.md`, absolute at the tag: `https://github.com/beyond10x/swell/blob/<version>/CHANGELOG.md#<anchor>` |
+
+  The file has at most 900 characters without the link line and states nothing the changelog
+  section does not state. The changelog section keeps its full form, with the gate's lines.
+  This form holds since `0.2.0`. Release `0.1.0` carries its whole changelog section and is
+  not rewritten.
 - Every step on the forge goes through `b10x-gates` as the bot and is done by the session that
   decides for the operator. The coordinating session prepares the commit and makes no call to
   the forge ([`AGENTS.md`](../AGENTS.md), "Publishing").
 - No workflow builds anything for a release. `.github/workflows/check.yml` runs the gate on
-  the commit; that run is the release's evidence.
+  the commit, and that run is the release's evidence.
 
 ## Versions
 
-One version for the whole workspace: `[workspace.package] version` in the root `Cargo.toml`;
-every crate takes it with `version.workspace = true`. Versions follow Semantic Versioning.
+One version for the whole workspace: `[workspace.package] version` in the root `Cargo.toml`.
+All crates take it with `version.workspace = true`. Versions follow Semantic Versioning.
 Before `1.0.0` the host interface may change in any release, and the changelog says where.
 
 A release is cut from a green `main`. It does not wait for a delivery slice to end, and work of
@@ -34,7 +39,7 @@ works and what does not, with the gate's own lines.
 
 ## Cutting a release
 
-Steps 1 to 4 are the coordinating session's, on a branch from `main`; steps 5 to 8 are the
+Steps 1 to 4 are the coordinating session's, on a branch from `main`. Steps 5 to 8 are the
 deciding session's, from a checkout of the repository:
 
     gates="b10x-gates --policy ../gates-policy/policy.json --repository beyond10x/swell"
@@ -42,13 +47,13 @@ deciding session's, from a checkout of the repository:
 1. **Version.** Set `[workspace.package] version` in the root `Cargo.toml`, then
    `cargo generate-lockfile --offline`. `Cargo.lock` holds the workspace's own packages and
    nothing else. The workspace of `conformance/ess` has its own manifest and lock: set its
-   `version` to the same and let cargo rewrite that lock
-   (`cargo metadata --offline --format-version 1` in `conformance/ess`); only the version
+   `version` to the same and let cargo rewrite that lock with
+   `cargo metadata --offline --format-version 1` in `conformance/ess`. Only the version
    lines of the six packages of this repository change there.
 2. **Changelog.** In `CHANGELOG.md`, rename `## [Unreleased]` to `## [<version>] - <date>`,
    put an empty `## [Unreleased]` above it, and set the two link lines at the end. Every number
-   in the section is copied from the gate's output on this commit (step 3); a number that
-   cannot be copied from there is not written.
+   in the section is copied from the gate's output on this commit (step 3). A number that
+   cannot be copied from that output is not written.
 3. **Gate.** One commit by the bot holds steps 1 and 2. Run the gate on it as the forge's
    runner does and compare its lines with the changelog section:
 
@@ -60,7 +65,7 @@ deciding session's, from a checkout of the repository:
    characters without the link line (at most 900) and check each statement against the
    changelog section. The same file is the tag's message (step 6) and the release's notes
    (step 7). The branch tip, the path of the notes file, its character count and the
-   gate's lines are sent to the deciding session; on its answer `main` is moved to the commit
+   gate's lines are sent to the deciding session. On its answer `main` is moved to the commit
    (fast-forward).
 5. **Publish.** The deciding session checks and verifies the commit, pushes `main`, and waits
    for the `check` run on it to be green:
@@ -69,8 +74,8 @@ deciding session's, from a checkout of the repository:
        $gates gh -- run watch <run-id> --exit-status
 
 6. **Tag.** Scan the notes file, then tag the commit with it as the message and push the tag.
-   `--cleanup=whitespace` keeps a line of the notes that starts with `#`, should one do so;
-   without it git removes such a line:
+   `--cleanup=whitespace` keeps a line of the notes that starts with `#`. Without it git
+   removes such a line:
 
        $gates scan-text .out/release-<version>-notes.md
        $gates bot -- tag --cleanup=whitespace -a <version> \
@@ -85,7 +90,7 @@ deciding session's, from a checkout of the repository:
        $gates gh -- release view <version> --repo beyond10x/swell \
          --json author,tagName,isDraft
 
-   The release is done when it is owned by `b10x-bot[bot]`, names the tag `<version>` and is
+   The release is done when its author is `b10x-bot[bot]`, its tag is `<version>` and it is
    not a draft.
 8. **Report.** The deciding session reports the version, the tag's commit and the release's
    address to the coordinating session, which merges `main` into the open wave branch.
