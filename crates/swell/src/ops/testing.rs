@@ -39,10 +39,6 @@ impl<H: Host> Agent<H> {
     }
 
     /// IsArray (`#sec-isarray`).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Array.isArray: story:harness-builtins")
-    )]
     pub(crate) fn is_array(&mut self, value: Value) -> Completion<bool> {
         match value {
             Value::Object(object) => Ok(self.kind_of(object)? == KindTag::Array),
