@@ -23,8 +23,8 @@ use std::collections::VecDeque;
 
 use swell::{
     Abrupt, Agent, Brand, Completion, Cx, HookCx, Host, HostCall, HostError, HostObjectSpec,
-    InterruptHandle, Job, LoadRequest, ObjectRef, Outcome, PropertyDescriptor, PropertyKey, Realm,
-    Root, Termination, Value, ValueKind,
+    InterruptHandle, Job, LoadRequest, ObjectRef, Outcome, PropertyDescriptor, PropertyKey,
+    Prototype, Realm, Root, Termination, Value, ValueKind,
 };
 
 /// The brand of the `$262` objects.
@@ -135,7 +135,7 @@ fn install(
         Err(abrupt) => return Ok(Err(abrupt)),
     };
     let dollar = match cx.new_host_object(HostObjectSpec {
-        prototype: Some(object_prototype),
+        prototype: Prototype::Object(object_prototype),
         brand: BRAND_262,
         data: None,
     })? {

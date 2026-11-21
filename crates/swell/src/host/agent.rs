@@ -18,6 +18,10 @@
 //! is the one function that charges steps and checks the counter and the flag; each call into a
 //! function charges one and counts against `reentry_depth` (`object/builtin_function.rs`).
 //!
+//! The test-only switch of the feature `fault-injection` ([`FaultPoint`], HOST-71) makes
+//! `parse_script`, `create_realm` or `collect` find a broken invariant; written by
+//! `story:host-interface-hardening`.
+//!
 //! Root site of the collector: [`trace_roots`] reports the values handed to host code in the
 //! running `with_cx`, host function and hook scopes, and the scripts handed out as `ScriptRef`s.
 
@@ -100,6 +104,39 @@ pub struct Agent<H: Host> {
     /// A run ended in `Terminated(MemoryBudget)`: the next safe point collects, so that what
     /// that run left unreachable does not hold the budget the next entry needs (HOST-70).
     pub(crate) collect_pending: bool,
+    /// The call the test-only switch makes find a broken invariant next ([`FaultPoint`]).
+    #[cfg(feature = "fault-injection")]
+    pub(crate) injected: Option<FaultPoint>,
+}
+
+/// The calls a test build with the feature `fault-injection` can make find a broken engine
+/// invariant (HOST-71; `story:ess-conformance-target` uses it for the `engine-fault` outcome of
+/// `Collect`). The feature is off by default; no build of the engine for a host has it.
+#[cfg(feature = "fault-injection")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FaultPoint {
+    ParseScript,
+    CreateRealm,
+    Collect,
+}
+
+#[cfg(feature = "fault-injection")]
+impl<H: Host> Agent<H> {
+    /// Test only: the next call of `point` finds a broken engine invariant after it did its
+    /// work, and answers `Terminated(EngineFault)` as such a finding does (decision 10). The
+    /// switch fires once; another call of `inject_fault` replaces it.
+    pub fn inject_fault(&mut self, point: FaultPoint) {
+        self.injected = Some(point);
+    }
+
+    /// Whether the switch is set at `point`; it is cleared when it fires.
+    fn injected(&mut self, point: FaultPoint) -> bool {
+        if self.injected == Some(point) {
+            self.injected = None;
+            return true;
+        }
+        false
+    }
 }
 
 impl<H: Host> Agent<H> {
@@ -125,6 +162,8 @@ impl<H: Host> Agent<H> {
             interp: Interp::default(),
             scoped_scripts: Vec::new(),
             collect_pending: false,
+            #[cfg(feature = "fault-injection")]
+            injected: None,
         })
     }
 
@@ -153,7 +192,14 @@ impl<H: Host> Agent<H> {
     /// reported by a trace answers `Terminated(EngineFault)` and faults the agent.
     pub fn collect(&mut self) -> Result<Outcome<CollectReport>, HostError> {
         self.alive()?;
-        match self.collect_now() {
+        let found = self.collect_now();
+        #[cfg(feature = "fault-injection")]
+        let found = if self.injected(FaultPoint::Collect) {
+            Err(Stale)
+        } else {
+            found
+        };
+        match found {
             Ok(report) => Ok(Outcome::Normal(report)),
             Err(Stale) => {
                 self.fault();
@@ -194,6 +240,13 @@ impl<H: Host> Agent<H> {
         }
         let start = self.scope.len();
         let outcome = self.initialize_host_defined_realm(setup, host_defined);
+        #[cfg(feature = "fault-injection")]
+        let outcome = if self.injected(FaultPoint::CreateRealm) {
+            self.fault();
+            Outcome::Terminated(Termination::EngineFault)
+        } else {
+            outcome
+        };
         self.scope.truncate(start);
         self.end_entry();
         Ok(outcome)
@@ -379,6 +432,12 @@ impl<H: Host> Agent<H> {
         let answer = self.in_entry_realm(realm, |agent| {
             agent.parse_script_in(realm, source, host_defined)
         });
+        #[cfg(feature = "fault-injection")]
+        let answer = if self.injected(FaultPoint::ParseScript) {
+            Err(self.fault())
+        } else {
+            answer
+        };
         let parsed = match answer {
             Ok(ParseAnswer::Script(script)) => {
                 Parsed::Parsed(Script(self.heap.roots.add_script(script)))

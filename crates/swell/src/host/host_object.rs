@@ -11,7 +11,7 @@
 use std::any::Any;
 
 use crate::heap::collect::Mark;
-use crate::value::{ObjectRef, Value};
+use crate::value::{ObjectRef, RealmRef, Value};
 
 /// The brand of a host object: which Web IDL interface it implements, in the host's numbering
 /// (`webidl:is-a-platform-object`).
@@ -42,10 +42,20 @@ impl Tracer<'_> {
     }
 }
 
+/// The [[Prototype]] of a new host object (`docs/design/host-interface.md`, decision 15).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Prototype {
+    Object(ObjectRef),
+    Null,
+    /// The `%Object.prototype%` of that realm, the one intrinsic a host can name (decision 7:
+    /// the setup closure builds the global's prototype chain from it).
+    ObjectPrototypeOf(RealmRef),
+}
+
 /// What `new_host_object` makes.
 pub struct HostObjectSpec {
     /// [[Prototype]].
-    pub prototype: Option<ObjectRef>,
+    pub prototype: Prototype,
     pub brand: Brand,
     pub data: Option<Box<dyn HostData>>,
 }

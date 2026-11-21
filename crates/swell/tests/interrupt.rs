@@ -10,7 +10,7 @@ use std::time::Duration;
 use support::script::{Outcome as Shown, define_function, describe, eval_text, parse};
 use swell::{
     AgentState, Brand, Completion, Cx, HostCall, HostData, HostError, HostObjectSpec,
-    InterruptHandle, ObjectRef, Outcome, Termination, Tracer, Value,
+    InterruptHandle, ObjectRef, Outcome, Prototype, Termination, Tracer, Value,
 };
 
 fn send_and_sync<T: Send + Sync + 'static>(_: &T) {}
@@ -62,7 +62,7 @@ fn host_95_interrupt_on_a_faulted_agent_returns() {
     let freed = agent
         .with_cx(&realm, |cx| {
             cx.new_host_object(HostObjectSpec {
-                prototype: None,
+                prototype: Prototype::Null,
                 brand: Brand(1),
                 data: None,
             })
@@ -75,7 +75,7 @@ fn host_95_interrupt_on_a_faulted_agent_returns() {
         .with_cx(&realm, |cx| {
             let holder = cx
                 .new_host_object(HostObjectSpec {
-                    prototype: None,
+                    prototype: Prototype::Null,
                     brand: Brand(2),
                     data: Some(Box::new(Stale(freed))),
                 })

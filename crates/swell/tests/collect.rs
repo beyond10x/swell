@@ -3,7 +3,7 @@
 
 mod support;
 
-use swell::{Brand, HostData, HostError, HostObjectSpec, Outcome, Tracer, Value};
+use swell::{Brand, HostData, HostError, HostObjectSpec, Outcome, Prototype, Tracer, Value};
 
 const BRAND: Brand = Brand(1);
 
@@ -18,7 +18,7 @@ impl HostData for Payload {
 
 fn spec(data: Option<Box<dyn HostData>>) -> HostObjectSpec {
     HostObjectSpec {
-        prototype: None,
+        prototype: Prototype::Null,
         brand: BRAND,
         data,
     }

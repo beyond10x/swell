@@ -28,6 +28,7 @@ pub use outcome::*;
 use crate::heap::arena::Access;
 use crate::object::property::{Descriptor, Key};
 use crate::object::{ObjectKind, ObjectRecord};
+use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, PropertyKey, Realm, RealmRef, Root, ScriptRef, StringRef, Value};
 
 /// The kind of an error object (20.5.5, `#sec-native-error-types-used-in-this-standard`, and
@@ -216,14 +217,28 @@ impl<H: Host> Agent<H> {
         spec: HostObjectSpec,
     ) -> Result<Completion<ObjectRef>, HostError> {
         self.alive()?;
-        if let Some(prototype) = spec.prototype {
-            self.check_object(prototype)?;
-        }
+        // The prototype's handle is checked before the run's termination (decision 5); a
+        // realm `create_realm` did not make is stale (`Agent::host_realm`).
+        let prototype = match spec.prototype {
+            Prototype::Object(object) => {
+                self.check_object(object)?;
+                Some(object)
+            }
+            Prototype::Null => None,
+            Prototype::ObjectPrototypeOf(realm) => {
+                let record = self.host_realm(realm.handle).map_err(host_error)?;
+                match &record.intrinsics {
+                    Some(intrinsics) => Some(intrinsics.get(Intrinsic::ObjectPrototype)),
+                    // A realm the host can name has its intrinsics: a broken invariant.
+                    None => return Ok(Err(self.fault())),
+                }
+            }
+        };
         Ok(self.running().and_then(|()| {
             let owned = spec.data.as_deref().map_or(0, size_of_val);
             let owned = u64::try_from(owned).unwrap_or(u64::MAX);
             let record = ObjectRecord::new(
-                spec.prototype,
+                prototype,
                 ObjectKind::Host(HostObject {
                     brand: spec.brand,
                     data: spec.data,
@@ -292,7 +307,7 @@ impl<H: Host> Agent<H> {
         message: &str,
     ) -> Result<Completion<ObjectRef>, HostError> {
         self.alive()?;
-        self.heap.realms.get(realm.handle).map_err(host_error)?;
+        self.host_realm(realm.handle).map_err(host_error)?;
         Ok(self.running().and_then(|()| {
             let error = self.new_error_in(realm.handle, kind, message)?;
             self.hand_out(Value::Object(error));
@@ -516,7 +531,7 @@ impl<H: Host> Cx<'_, H> {
     ) -> Result<Completion<ObjectRef>, HostError> {
         let agent = &mut *self.agent;
         agent.alive()?;
-        agent.heap.realms.get(realm.handle).map_err(host_error)?;
+        agent.host_realm(realm.handle).map_err(host_error)?;
         Ok(agent.running().and_then(|()| {
             let function =
                 agent.create_host_function(realm.handle, name, length, steps, constructor, data)?;
@@ -746,7 +761,7 @@ impl<H: Host> Cx<'_, H> {
     ) -> Result<Parsed<ScriptRef>, HostError> {
         let agent = &mut *self.agent;
         agent.alive()?;
-        agent.heap.realms.get(realm.handle).map_err(host_error)?;
+        agent.host_realm(realm.handle).map_err(host_error)?;
         if let Err(abrupt) = agent.running() {
             return Ok(Parsed::Terminated(crate::script::parse_termination(abrupt)));
         }

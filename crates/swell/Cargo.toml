@@ -12,6 +12,7 @@ swell-unicode = { path = "../unicode" }
 
 [features]
 collect-every-safe-point = []
+fault-injection = []
 
 [lints.clippy]
 unwrap_used = "deny"
