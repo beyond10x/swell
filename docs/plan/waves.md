@@ -55,7 +55,7 @@ today).
 |---|---|---|
 | 1 | `num-and-unicode-early-parts` | the early parts of `swell-num` and `swell-unicode` |
 | 2 | `syntax-es5-and-strict`, `heap-values-and-host-surface` | the ES5 grammar with strict mode; 17 requirements |
-| 3 | `bytecode-compiler`, `object-model-and-realms` | 9 requirements |
+| 3 | `bytecode-compiler`, `object-model-and-realms` | 10 requirements (`HOST-161` added in wave 3) |
 | 4 | `interpreter-and-script-entry-points`, `harness-builtins` | 28 requirements; a script runs |
 | 5 | `host-interface-hardening` | 15 requirements (`HOST-160` added in wave 2); none pending for slice 1 |
 | 6 | `test262-run-path`, `ess-conformance-target` | the 31 cases pass; 13 of the model's 61 scenarios pass on the engine |
@@ -64,8 +64,8 @@ The first wave of slice 1 runs beside wave 3 of the foundation: the two stories 
 different files. `Cargo.lock` in a wave of several units: each unit regenerates it in its own
 tree, and the coordinator regenerates it on the wave branch after the merges.
 
-Delivered: [wave 1](slice-01-wave-1.md), [wave 2](slice-01-wave-2.md). After wave 2: 17 of 160
-host requirements have a test, 52 are pending for slice 1.
+Delivered: [wave 1](slice-01-wave-1.md), [wave 2](slice-01-wave-2.md), [wave 3](slice-01-wave-3.md). After wave 3: 27 of 161
+host requirements have a test, 43 are pending for slice 1.
 
 What works after which wave: after wave 4 the engine evaluates a script through
 `evaluate_script` under step and memory budgets; after wave 6 `slot task check` prints the 31
@@ -99,3 +99,10 @@ that slice reads its entries first.
   slice is decomposed.
 - The gate, any wave: `host-requirements-check` builds every test of the workspace before the
   `build` step, and each older planted script of the task builds the list again.
+- Slice 3: `Error.isError` (not written with the Error constructors of slice 1, wave 3).
+- Slice 4: the operator `**` (the parser refuses it today; it needs the deterministic `pow`).
+- Slice 5: say in the design whether a regular expression pattern is parsed inside the
+  parser's recursion (its levels then add to the script's for the stack bound) or after it.
+- The gate, any wave: about 15 planted scripts end a failure message with a path under `.out/`,
+  which the log of a run on the forge does not show; the self-test prints the last 20 lines of
+  the script's own log only.

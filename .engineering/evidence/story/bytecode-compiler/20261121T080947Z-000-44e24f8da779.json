@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T08:09:47Z",
+  "actor": "human:operator",
+  "artifact": "story:bytecode-compiler",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot task check on wave/s1-3-compiler-objects with the runner's variables, exit 0, 38 test suites: 163 passed, test-collect: 106 passed, host-requirements: 27 test, 134 pending, gate-selftest: 30 passed, 0 failed (docs/plan/slice-01-wave-3.md)"
+  }
+}

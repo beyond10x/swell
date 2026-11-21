@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bytecode-compiler
 kind: story
-status: active
+status: implemented
 title: swell-compiler turns the parsed tree into stack bytecode with marked backward jumps
 summary: Bytecode format, slot and environment resolution, statements, expressions and functions of the slice 1 grammar, try/finally completions, a disassembler; tested by golden disassembly.
 relations:
@@ -20,10 +20,11 @@ scope:
   path: tests/compile.rs
 - confidence: cited
   path: tests/sources
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T08:09:48Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

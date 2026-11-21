@@ -15,19 +15,22 @@ parts.
 - The design, [`docs/design/engine.md`](docs/design/engine.md): what swell targets, how it is
   built, how it is measured, and the order in which it is delivered.
 - The host interface, specified before its code:
-  [`docs/design/host-interface.md`](docs/design/host-interface.md) with 160 numbered
+  [`docs/design/host-interface.md`](docs/design/host-interface.md) with 161 numbered
   requirements, and an ESS model under [`spec/`](spec/) whose 61 scenarios pass on ESS's
   interpreter.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
-  pinned by checksum, both specifications checked, and 28 planted defects that the gate must
-  refuse. Measured on 2026-11-21: it passes, and 17 of 160 host requirements have a test.
+  pinned by checksum, both specifications checked, and 30 planted defects that the gate must
+  refuse. Measured on 2026-11-21: it passes, here and on the forge, and 27 of 161 host
+  requirements have a test.
 - The test262 runner, `swell-test262`: it reads all 53,801 cases, excludes 8,982 by recorded
   decision, and counts the rest per directory, per delivery slice and per section of ECMA-262
   (35). Its 280 lines are compared with a committed file on every run. 0 cases pass, since
   nothing runs them yet.
 - The first parts of the engine: a parser for the ES5 grammar with strict mode
-  (`crates/syntax`), the heap, the values and the first part of the host interface
-  (`crates/swell`), number parsing and printing (`crates/num`). Nothing evaluates a script yet.
+  (`crates/syntax`), a compiler to bytecode (`crates/compiler`), the heap, the values, objects,
+  realms and the part of the host interface that creates and calls
+  (`crates/swell`), number parsing and printing (`crates/num`). Nothing evaluates a script yet:
+  the interpreter is next.
 
 Next: the first engine. Its first delivery slice is done when 31 test262 cases pass under
 step and memory budgets.

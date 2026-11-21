@@ -5,9 +5,10 @@ the sibling repository `beyond10x/surf`; swell is implemented independently, wit
 taken from surf's needs. The design is `docs/design/engine.md`; read it before changing anything.
 
 Status on 2026-11-21: the gate, the pins, the counting runner, the first parts of `swell-num`
-and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`) and the heap, the values
-and the first host surface of `swell` exist (slice 1, waves 1 and 2 of 6:
-`docs/plan/slice-01-wave-1.md`, `slice-01-wave-2.md`); 17 of 160 host requirements have a test. The
+and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the bytecode compiler
+(`swell-compiler`), and in `swell` the heap, the values, the object model, realms and the
+host surface up to creating and calling exist (slice 1, waves 1 to 3 of 6:
+`docs/plan/slice-01-wave-1.md`, `-2.md`, `-3.md`); 27 of 161 host requirements have a test. The
 engine runs no script yet (wave 4).
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
@@ -136,6 +137,16 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 - `slot task check` is the one gate. `task --list` names every task; each task's `summary`
   says what it reads and what makes it fail.
+- Before `main` moves, the gate is run on the wave branch once more as the forge's runner runs
+  it: `CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0 RUSTC_WRAPPER=""
+  slot task check`. Measured in wave 3 of slice 1: a build without incremental compilation and
+  without the compiler cache has frames up to 20 % larger (a stack test passed here and
+  aborted there), and with `CI` and `GITHUB_ACTIONS` set go-task colours its failure line and
+  adds an `::error` line (14 planted scripts failed there). A planted script clears those
+  variables in its first lines, as the others do; a test of a stack bound runs its subject
+  in a child process on a thread of the stated size.
+- `test-collect` runs every test of `crates/swell` with the feature
+  `collect-every-safe-point`: a value held across a safe point without a root fails there.
 - A gate task lives in an include file under `taskfiles/` that the root `Taskfile.yml`
   includes; the coordinator adds its `- task:` line to `check`. A planted-defect test is a
   script `tests/gate/<name>.sh` that prints `<name>: ok` and exits 0 when the defect is
@@ -155,27 +166,28 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot task check` on 2026-11-21, after wave 2 of slice 1, exit 0:
+`slot task check` on 2026-11-21, after wave 3 of slice 1, exit 0:
 
 ```
-python-check: no Python file among 514 file(s)
-forbid-unsafe-check: 7 crate root(s), each with #![forbid(unsafe_code)]
-Cargo.lock: 6 package(s), none from outside this repository
+python-check: no Python file among 629 file(s)
+forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
+Cargo.lock: 7 package(s), none from outside this repository
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
 data/unicode/17.0.0: 17 file(s), each with the SHA-256 its SOURCE line gives; 17 required path(s) present
 unicode-tables: 1 table(s) equal the generator output
 swell v1 — 2 file(s), 3 scenario(s), valid
 61 scenario(s) (3 authored), 32 refusal(s), written to .out/suite.json
   61 scenarios: 61 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 160 requirement(s), 160 line(s): 17 test, 143 pending, 0 omitted; 50 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 1:52 2:5 3:5 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
-29 test suites: 82 passed, 0 failed, 0 ignored
+host-requirements: 161 requirement(s), 161 line(s): 27 test, 134 pending, 0 omitted; 50 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 1:43 2:5 3:5 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
+38 test suites: 163 passed, 0 failed, 0 ignored
+test-collect: 15 test suites: 106 passed, 0 failed, 0 ignored
 test262 total 53801 8982 7 44812 0 44812 0
 test262: 221 directory lines sum to the total
 test262: 22 slice lines equal the design
 test262-errors 0
 test262: 280 lines equal conformance/test262/expected.txt
-gate-selftest: 28 passed, 0 failed
+gate-selftest: 30 passed, 0 failed
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (32); a change to `spec/`

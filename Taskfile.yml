@@ -19,6 +19,10 @@ includes:
     taskfile: taskfiles/unicode-tables.yml
     flatten: true
     optional: true
+  collect-mode:
+    taskfile: taskfiles/collect-mode.yml
+    flatten: true
+    optional: true
   spec:
     taskfile: taskfiles/spec.yml
     flatten: true
@@ -45,6 +49,7 @@ tasks:
       - task: build
       - task: clippy
       - task: test
+      - task: test-collect
       - task: test262
       - task: gate-selftest
 

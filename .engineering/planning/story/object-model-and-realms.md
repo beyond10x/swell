@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:object-model-and-realms
 kind: story
-status: active
+status: implemented
 title: Objects, abstract operations, realms, Error objects and the Host trait, tested from Rust
 summary: Ordinary, Array, String and built-in function objects, clause 7 operations and operators, realms and intrinsics, 19.1 and 20.5, every hook with its default, Cx and Agent call paths, the step counter; 9 HOST lines to test.
 relations:
@@ -41,10 +41,11 @@ scope:
   path: crates/swell/tests/interrupt.rs
 - confidence: cited
   path: crates/swell/tests/support/host.rs
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T08:09:48Z", actor: "human:operator", revision: 13, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
