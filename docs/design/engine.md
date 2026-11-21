@@ -753,16 +753,16 @@ first pass, not that it will; the runner gives the real numbers.
 | slice | name | cases | runs |
 |---|---|---|---|
 | 1 | `harness` | 31 | 62 |
-| 2 | `language-core` | 5,267 | 9,217 |
-| 3 | `builtins-core` | 7,581 | 14,994 |
-| 4 | `numbers-and-dates` | 1,198 | 2,396 |
-| 5 | `regexp` | 2,118 | 4,234 |
-| 6 | `bindings-and-iteration` | 3,717 | 7,162 |
-| 7 | `generators` | 1,432 | 2,771 |
-| 8 | `classes` | 6,188 | 12,286 |
-| 9 | `collections-proxy-reflect` | 1,750 | 3,471 |
-| 10 | `promises-and-async` | 6,573 | 12,879 |
-| 11 | `modules` | 1,277 | 1,825 |
+| 2 | `language-core` | 4,259 | 7,543 |
+| 3 | `builtins-core` | 7,635 | 15,074 |
+| 4 | `numbers-and-dates` | 1,323 | 2,606 |
+| 5 | `regexp` | 2,254 | 4,503 |
+| 6 | `bindings-and-iteration` | 4,204 | 7,952 |
+| 7 | `generators` | 1,473 | 2,817 |
+| 8 | `classes` | 6,273 | 12,453 |
+| 9 | `collections-proxy-reflect` | 1,752 | 3,475 |
+| 10 | `promises-and-async` | 6,647 | 12,979 |
+| 11 | `modules` | 1,281 | 1,833 |
 | 12 | `bigint` | 317 | 634 |
 | 13 | `binary-data` | 3,044 | 6,044 |
 | 14 | `shared-memory` | 598 | 1,192 |
@@ -783,6 +783,14 @@ check under "How the counts were made" (`awk -f slices.awk` over this block, whi
 lines `dir test/harness/<file> <slice>`, and the inventory's `meta.tsv`, counting slice `01`):
 `01 31 62`. Every moved case goes to a slice from 2 to 13, so slices 1 to 19 still hold 44,931
 cases and 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
+
+Slice 2 had 5,267 cases and 9,217 runs by its rules (`dir test/language/ 2` and the 22
+lines `dir test/harness/<file> 2`). 4,259 cases and 7,543 runs are what slice 2 passes:
+1,008 cases that need a later slice move by the lines below the paragraph "Slice 2's cases
+that need a later slice". Measured on 2026-11-21 with the same check (`awk -f slices.awk`
+over this block and the inventory's `meta.tsv`, counting slice `02`): `02 4259 7543`. Every
+moved case goes to a slice from 3 to 11, so slices 1 to 19 still hold 44,931 cases and
+85,794 runs and the 22 lines still sum to 53,801 and 103,360.
 
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
@@ -843,9 +851,7 @@ the case or a harness file it includes needs a later slice (a scan of each case 
 includes, comments removed and string contents blanked, for later syntax, automatic semicolon
 insertion and the builtins called):
 
-- to slice 2, 23 cases: `asyncHelpers-asyncTest-func-throws-sync` (`asyncHelpers.js` needs
-  automatic semicolon insertion: line 82 ends `res.then(onResFulfilled, onResRejected)` without
-  a semicolon); the 14 `propertyhelper-*` cases and the `verifyProperty-` cases
+- to slice 2, 22 cases: the 14 `propertyhelper-*` cases and the `verifyProperty-` cases
   `configurable-object`, `restore`, `restore-accessor`, `same-value`, `string-prop`, `value` and
   `value-error` (`propertyHelper.js` reads `arguments.length` and calls
   `Function.prototype.call.bind` on the global `Function`, which slice 2 delivers with its
@@ -853,8 +859,10 @@ insertion and the builtins called):
   slice 2 parses); and `fnGlobalObject` (`Function("return this;")()`). These 22 were placed in
   slice 3 while this design gave `Function` to slice 3, and were placed again in slice 2 when
   slice 2 took it;
-- to slice 3, 1: `asyncHelpers-asyncTest-without-async-flag` (`Object.hasOwn` and `globalThis`
-  of slice 3, besides its method shorthand);
+- to slice 3, 2: `asyncHelpers-asyncTest-without-async-flag` (`Object.hasOwn` and `globalThis`
+  of slice 3, besides its method shorthand) and `asyncHelpers-asyncTest-func-throws-sync`
+  (`asyncHelpers.js` reads `globalThis` in `asyncTest`; placed in slice 2 for automatic
+  semicolon insertion, which slice 2 parses, and in slice 3 at the close of slice 2);
 - to slice 4, 2: `assertRelativeDateMs` (`Date`) and `nans` (`Number.NaN`, `Math.pow`);
 - to slice 6, 16: `verifyProperty-arguments`, `-noproperty` and `-undefined-desc` (arrow
   functions), the `compare-array-` cases `arguments`, `arraylike`, `different-elements`,
@@ -964,9 +972,58 @@ modules) after slice 11. A script on a real page becomes realistic after slice 1
 and only once surf has the DOM, Web IDL bindings and event loop of decision 9, none of which
 exists or is planned in surf's current 22 waves.
 
+**Slice 2's cases that need a later slice.** Measured at the close of slice 2 (2026-11-21,
+`story:slice-02-conformance-close`), with the run lines of the runner on the code of the slice:
+1,008 of the 5,267 cases of slice 2 fail, every one on a part of a later slice, and move by the
+lines of the block below; with them the line `feature exponentiation 4` moves 24 cases of slice
+3. Each of the 1,032 moves is a line of `conformance/test262/moves.tsv` (path, from, to, kind,
+evidence): the evidence is a token of `conformance/test262/later-parts.tsv` (the text the scan
+looked for, its slice and the item or refusal that gives it that slice) present in the case or
+a harness file it includes, or the feature of a `feature` line, and the task
+`test262-moves-check` holds every line against this block and the pinned checkout. The block
+gains 933 lines `dir <path> <slice>`: 8 for a directory whose cases of slice 2 all move to one
+slice, 925 for a single file; the line of `test/harness/asyncHelpers-asyncTest-func-throws-sync.js`
+changes from 2 to 3. The groups, by target slice and kind (lines of the list):
+
+- to slice 3, part, 78: builtins of slice 3 the case calls: `Object.preventExtensions` 22,
+  `Function.prototype.apply` 20, `String.fromCharCode` 13, `charAt` and `charCodeAt` 2,
+  `Object.prototype.isPrototypeOf` 6, `Object.prototype.valueOf` 4 (read in the case: the
+  receiver is an ordinary object or a function, not a Number, Boolean or String), `Object.create`
+  3, `Object.setPrototypeOf` 1, `Object.defineProperties` 1, the `Array` methods `concat` 2,
+  `reduce`, `reverse` and `sort` 1 each, and `globalThis` 1:
+  `test/harness/asyncHelpers-asyncTest-func-throws-sync`, whose `asyncTest` reads `globalThis`
+  before the function it calls throws;
+- to slice 4, feature, 65: `feature exponentiation 4`, 41 cases of slice 2 and 24 of slice 3:
+  `**` needs the deterministic `pow` of `swell-num`, which slice 4 brings, and is refused naming
+  slice 4 until then (the 42nd case of slice 2 with the feature needs `const` and goes to 6);
+- to slice 4, part, 60: `parseInt` 37 (33 of them `with` cases of `S12.10_A1`), `Math` beyond
+  `max` 18, `Date` 4, `Number.prototype.toFixed` 1;
+- to slice 5, part, 136: an identifier with a code point outside ASCII, written or as an escape,
+  84 (the Unicode tables of slice 5 decide `ID_Start` and `ID_Continue`; one through `eval`), a
+  regular expression literal 37 (25 `white-space/after-regular-expression-literal-*`, 12
+  `statementList` cases), `RegExp` 6, `String.prototype.replace` 6 and `split` 3;
+- to slice 6, part, 487: `let` declarations 161; the lookahead rule of the `let` declaration 19
+  (`let-array-with-newline`, `let-block-with-newline` and `let-identifier-with-newline` under
+  `statements/` `for`, `for-in`, `if`, `labeled`, `while` and `with`, and
+  `do-while/let-array-with-newline`: `let` as an identifier before a line end, which slice 6
+  decides with the declaration);
+  `const` 65, arrow functions 53, a function declaration in a block or a `switch` 46, default
+  parameters 45, spread and rest 36, computed property names 30, templates 11, `Symbol` 9,
+  destructuring 9, a CoverInitializedName 2, `for-of` 1;
+- to slice 7, part, 41: generator functions and methods, 36 of them `eval-code/direct` cases
+  whose function has a parameter named `arguments`;
+- to slice 8, part, 85: `class` 71, `super` 14;
+- to slice 9, part, 2: `Reflect`;
+- to slice 10, part, 74: async functions, arrows and generators, 48 of them in
+  `eval-code/direct`;
+- to slice 11, part, 4: `import.meta` 2, an `import` and an `export` declaration 1 each.
+
+The counts sum to the 1,032 lines of the list. None of these cases passed on `main` before the
+move, and none fails first on a part of slice 2 (the story's acceptance, run on its base).
+
 ```swell-slices
 dir test/harness/ 1
-dir test/harness/asyncHelpers-asyncTest-func-throws-sync.js 2
+dir test/harness/asyncHelpers-asyncTest-func-throws-sync.js 3
 dir test/harness/propertyhelper-verifyconfigurable-configurable.js 2
 dir test/harness/propertyhelper-verifyconfigurable-configurable-object.js 2
 dir test/harness/propertyhelper-verifyconfigurable-not-configurable.js 2
@@ -1017,6 +1074,939 @@ dir test/harness/deepEqual-primitives.js 9
 dir test/harness/testIntl-getLocaleBaseName.js 12
 dir test/harness/detachArrayBuffer.js 13
 dir test/harness/detachArrayBuffer-host-detachArrayBuffer.js 13
+dir test/language/arguments-object/cls-decl-meth-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-decl-meth-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-decl-meth-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-decl-meth-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-decl-meth-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-expr-meth-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-expr-meth-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-expr-meth-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-expr-meth-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-expr-meth-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-expr-meth-static-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-expr-meth-static-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-expr-meth-static-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-expr-meth-static-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-expr-meth-static-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/func-decl-args-trailing-comma-spread-operator.js 6
+dir test/language/arguments-object/func-expr-args-trailing-comma-spread-operator.js 6
+dir test/language/arguments-object/mapped/enumerable-configurable-accessor-descriptor.js 6
+dir test/language/arguments-object/mapped/nonconfigurable-descriptors-define-failure.js 6
+dir test/language/arguments-object/meth-args-trailing-comma-spread-operator.js 6
+dir test/language/arguments-object/unmapped/via-params-dflt.js 6
+dir test/language/arguments-object/unmapped/via-params-dstr.js 6
+dir test/language/arguments-object/unmapped/via-params-rest.js 6
+dir test/language/block-scope/leave/ 6
+dir test/language/block-scope/return-from/ 6
+dir test/language/block-scope/shadowing/catch-parameter-shadowing-let-declaration.js 6
+dir test/language/block-scope/shadowing/const-declaration-shadowing-catch-parameter.js 6
+dir test/language/block-scope/shadowing/const-declarations-shadowing-parameter-name-let-const-and-var-variables.js 6
+dir test/language/block-scope/shadowing/dynamic-lookup-from-closure.js 6
+dir test/language/block-scope/shadowing/dynamic-lookup-in-and-through-block-contexts.js 6
+dir test/language/block-scope/shadowing/let-declaration-shadowing-catch-parameter.js 6
+dir test/language/block-scope/shadowing/let-declarations-shadowing-parameter-name-let-const-and-var.js 6
+dir test/language/block-scope/shadowing/lookup-from-closure.js 6
+dir test/language/block-scope/shadowing/lookup-in-and-through-block-contexts.js 6
+dir test/language/block-scope/shadowing/parameter-name-shadowing-parameter-name-let-const-and-var.js 6
+dir test/language/block-scope/syntax/for-in/ 6
+dir test/language/block-scope/syntax/function-declarations/in-statement-position-case-expression-statement-list.js 6
+dir test/language/block-scope/syntax/function-declarations/in-statement-position-default-statement-list.js 6
+dir test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-class.js 8
+dir test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-const.js 8
+dir test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-function.js 8
+dir test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-let.js 8
+dir test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-var.js 8
+dir test/language/block-scope/syntax/redeclaration/const-name-redeclaration-attempt-with-class.js 8
+dir test/language/block-scope/syntax/redeclaration/const-name-redeclaration-attempt-with-const.js 6
+dir test/language/block-scope/syntax/redeclaration/const-name-redeclaration-attempt-with-function.js 6
+dir test/language/block-scope/syntax/redeclaration/const-name-redeclaration-attempt-with-let.js 6
+dir test/language/block-scope/syntax/redeclaration/const-name-redeclaration-attempt-with-var.js 6
+dir test/language/block-scope/syntax/redeclaration/fn-scope-var-name-redeclaration-attempt-with-class.js 8
+dir test/language/block-scope/syntax/redeclaration/fn-scope-var-name-redeclaration-attempt-with-const.js 6
+dir test/language/block-scope/syntax/redeclaration/fn-scope-var-name-redeclaration-attempt-with-function.js 6
+dir test/language/block-scope/syntax/redeclaration/fn-scope-var-name-redeclaration-attempt-with-let.js 6
+dir test/language/block-scope/syntax/redeclaration/function-declaration-attempt-to-redeclare-with-var-declaration-nested-in-function.js 6
+dir test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-class.js 8
+dir test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-const.js 6
+dir test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-function.js 6
+dir test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-let.js 6
+dir test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-var.js 6
+dir test/language/block-scope/syntax/redeclaration/inner-block-var-name-redeclaration-attempt-with-class.js 8
+dir test/language/block-scope/syntax/redeclaration/inner-block-var-name-redeclaration-attempt-with-const.js 6
+dir test/language/block-scope/syntax/redeclaration/inner-block-var-name-redeclaration-attempt-with-function.js 6
+dir test/language/block-scope/syntax/redeclaration/inner-block-var-name-redeclaration-attempt-with-let.js 6
+dir test/language/block-scope/syntax/redeclaration/inner-block-var-redeclaration-attempt-after-class.js 8
+dir test/language/block-scope/syntax/redeclaration/inner-block-var-redeclaration-attempt-after-const.js 6
+dir test/language/block-scope/syntax/redeclaration/inner-block-var-redeclaration-attempt-after-function.js 6
+dir test/language/block-scope/syntax/redeclaration/inner-block-var-redeclaration-attempt-after-let.js 6
+dir test/language/block-scope/syntax/redeclaration/let-name-redeclaration-attempt-with-class.js 8
+dir test/language/block-scope/syntax/redeclaration/let-name-redeclaration-attempt-with-const.js 6
+dir test/language/block-scope/syntax/redeclaration/let-name-redeclaration-attempt-with-function.js 6
+dir test/language/block-scope/syntax/redeclaration/let-name-redeclaration-attempt-with-let.js 6
+dir test/language/block-scope/syntax/redeclaration/let-name-redeclaration-attempt-with-var.js 6
+dir test/language/block-scope/syntax/redeclaration/var-name-redeclaration-attempt-with-class.js 8
+dir test/language/block-scope/syntax/redeclaration/var-name-redeclaration-attempt-with-const.js 6
+dir test/language/block-scope/syntax/redeclaration/var-name-redeclaration-attempt-with-function.js 6
+dir test/language/block-scope/syntax/redeclaration/var-name-redeclaration-attempt-with-let.js 6
+dir test/language/block-scope/syntax/redeclaration/var-redeclaration-attempt-after-class.js 8
+dir test/language/block-scope/syntax/redeclaration/var-redeclaration-attempt-after-const.js 6
+dir test/language/block-scope/syntax/redeclaration/var-redeclaration-attempt-after-function.js 6
+dir test/language/block-scope/syntax/redeclaration/var-redeclaration-attempt-after-let.js 6
+dir test/language/comments/S7.4_A5.js 3
+dir test/language/comments/S7.4_A6.js 3
+dir test/language/comments/hashbang/function-constructor.js 10
+dir test/language/eval-code/direct/arrow-fn-a-following-parameter-is-named-arguments-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js 6
+dir test/language/eval-code/direct/arrow-fn-a-following-parameter-is-named-arguments-arrow-func-declare-arguments-assign.js 6
+dir test/language/eval-code/direct/arrow-fn-a-preceding-parameter-is-named-arguments-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js 6
+dir test/language/eval-code/direct/arrow-fn-a-preceding-parameter-is-named-arguments-arrow-func-declare-arguments-assign.js 6
+dir test/language/eval-code/direct/arrow-fn-body-cntns-arguments-func-decl-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js 6
+dir test/language/eval-code/direct/arrow-fn-body-cntns-arguments-func-decl-arrow-func-declare-arguments-assign.js 6
+dir test/language/eval-code/direct/arrow-fn-body-cntns-arguments-lex-bind-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js 6
+dir test/language/eval-code/direct/arrow-fn-body-cntns-arguments-lex-bind-arrow-func-declare-arguments-assign.js 6
+dir test/language/eval-code/direct/arrow-fn-body-cntns-arguments-var-bind-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js 6
+dir test/language/eval-code/direct/arrow-fn-body-cntns-arguments-var-bind-arrow-func-declare-arguments-assign.js 6
+dir test/language/eval-code/direct/arrow-fn-no-pre-existing-arguments-bindings-are-present-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js 6
+dir test/language/eval-code/direct/arrow-fn-no-pre-existing-arguments-bindings-are-present-arrow-func-declare-arguments-assign.js 6
+dir test/language/eval-code/direct/async-gen-func-decl-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-decl-a-following-parameter-is-named-arguments-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-func-decl-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-decl-a-preceding-parameter-is-named-arguments-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-func-decl-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-var-bind-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-a-following-parameter-is-named-arguments-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-a-preceding-parameter-is-named-arguments-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-func-decl-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-var-bind-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-meth-a-following-parameter-is-named-arguments-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-a-following-parameter-is-named-arguments-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-a-preceding-parameter-is-named-arguments-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-func-decl-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-var-bind-declare-arguments.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 10
+dir test/language/eval-code/direct/async-gen-named-func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 10
+dir test/language/eval-code/direct/block-decl-eval-source-is-strict-nostrict.js 6
+dir test/language/eval-code/direct/block-decl-eval-source-is-strict-onlystrict.js 6
+dir test/language/eval-code/direct/block-decl-onlystrict.js 6
+dir test/language/eval-code/direct/func-decl-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-decl-a-following-parameter-is-named-arguments-declare-arguments.js 6
+dir test/language/eval-code/direct/func-decl-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-decl-a-preceding-parameter-is-named-arguments-declare-arguments.js 6
+dir test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-func-decl-declare-arguments.js 6
+dir test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments.js 6
+dir test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-var-bind-declare-arguments.js 6
+dir test/language/eval-code/direct/func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 6
+dir test/language/eval-code/direct/func-expr-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-expr-a-following-parameter-is-named-arguments-declare-arguments.js 6
+dir test/language/eval-code/direct/func-expr-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-expr-a-preceding-parameter-is-named-arguments-declare-arguments.js 6
+dir test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-func-decl-declare-arguments.js 6
+dir test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments.js 6
+dir test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-var-bind-declare-arguments.js 6
+dir test/language/eval-code/direct/func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 6
+dir test/language/eval-code/direct/gen-func-decl-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-decl-a-following-parameter-is-named-arguments-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-decl-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-decl-a-preceding-parameter-is-named-arguments-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-func-decl-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-var-bind-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-a-following-parameter-is-named-arguments-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-a-preceding-parameter-is-named-arguments-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-func-decl-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-lex-bind-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-var-bind-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-named-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-a-following-parameter-is-named-arguments-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-a-preceding-parameter-is-named-arguments-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-func-decl-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-lex-bind-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-var-bind-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-func-expr-nameless-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments.js 6
+dir test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments.js 6
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments.js 6
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js 6
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments.js 6
+dir test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 6
+dir test/language/eval-code/direct/meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/meth-a-following-parameter-is-named-arguments-declare-arguments.js 6
+dir test/language/eval-code/direct/meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/meth-a-preceding-parameter-is-named-arguments-declare-arguments.js 6
+dir test/language/eval-code/direct/meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/meth-fn-body-cntns-arguments-func-decl-declare-arguments.js 6
+dir test/language/eval-code/direct/meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js 6
+dir test/language/eval-code/direct/meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/meth-fn-body-cntns-arguments-var-bind-declare-arguments.js 6
+dir test/language/eval-code/direct/meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 6
+dir test/language/eval-code/direct/meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 6
+dir test/language/eval-code/direct/switch-case-decl-eval-source-is-strict-nostrict.js 6
+dir test/language/eval-code/direct/switch-case-decl-eval-source-is-strict-onlystrict.js 6
+dir test/language/eval-code/direct/switch-case-decl-onlystrict.js 6
+dir test/language/eval-code/direct/switch-dflt-decl-eval-source-is-strict-nostrict.js 6
+dir test/language/eval-code/direct/switch-dflt-decl-eval-source-is-strict-onlystrict.js 6
+dir test/language/eval-code/direct/switch-dflt-decl-onlystrict.js 6
+dir test/language/eval-code/indirect/block-decl-strict.js 6
+dir test/language/eval-code/indirect/switch-case-decl-strict.js 6
+dir test/language/eval-code/indirect/switch-dflt-decl-strict.js 6
+dir test/language/expressions/addition/S11.6.1_A2.2_T2.js 4
+dir test/language/expressions/array/spread-err-mult-err-unresolvable.js 6
+dir test/language/expressions/array/spread-err-sngl-err-unresolvable.js 6
+dir test/language/expressions/array/spread-mult-empty.js 6
+dir test/language/expressions/array/spread-mult-expr.js 6
+dir test/language/expressions/array/spread-mult-literal.js 6
+dir test/language/expressions/array/spread-sngl-empty.js 6
+dir test/language/expressions/array/spread-sngl-expr.js 6
+dir test/language/expressions/array/spread-sngl-literal.js 6
+dir test/language/expressions/assignment/11.13.1-3-s.js 3
+dir test/language/expressions/assignment/11.13.1-4-28gs.js 4
+dir test/language/expressions/assignment/11.13.1-4-29gs.js 4
+dir test/language/expressions/assignment/8.12.5-3-b_1.js 3
+dir test/language/expressions/assignment/S8.12.4_A1.js 4
+dir test/language/expressions/assignment/assignment-operator-calls-putvalue-lref--rval--1.js 6
+dir test/language/expressions/assignment/assignment-operator-calls-putvalue-lref--rval-.js 6
+dir test/language/expressions/assignment/destructuring/ 6
+dir test/language/expressions/assignment/fn-name-arrow.js 6
+dir test/language/expressions/assignment/target-super-computed-reference-null.js 8
+dir test/language/expressions/assignment/target-super-computed-reference.js 8
+dir test/language/expressions/assignment/target-super-identifier-reference-null.js 8
+dir test/language/expressions/assignmenttargettype/direct-arrowfunction-0.js 6
+dir test/language/expressions/assignmenttargettype/direct-arrowfunction-1.js 6
+dir test/language/expressions/assignmenttargettype/direct-arrowfunction-2.js 6
+dir test/language/expressions/assignmenttargettype/direct-arrowfunction-3.js 6
+dir test/language/expressions/assignmenttargettype/direct-arrowfunction-4.js 6
+dir test/language/expressions/assignmenttargettype/direct-arrowfunction-5.js 6
+dir test/language/expressions/assignmenttargettype/direct-arrowfunction-6.js 6
+dir test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-0.js 10
+dir test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-1.js 10
+dir test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-2.js 10
+dir test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-3.js 10
+dir test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-4.js 10
+dir test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-5.js 10
+dir test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-6.js 10
+dir test/language/expressions/assignmenttargettype/direct-callexpression-as-for-of-lhs.js 6
+dir test/language/expressions/assignmenttargettype/direct-callexpression-templateliteral.js 6
+dir test/language/expressions/assignmenttargettype/direct-import.meta.js 11
+dir test/language/expressions/assignmenttargettype/direct-memberexpression-templateliteral.js 6
+dir test/language/expressions/assignmenttargettype/direct-primaryexpression-asyncfunctionexpression.js 10
+dir test/language/expressions/assignmenttargettype/direct-primaryexpression-asyncgeneratorexpression.js 10
+dir test/language/expressions/assignmenttargettype/direct-primaryexpression-classexpression.js 8
+dir test/language/expressions/assignmenttargettype/direct-primaryexpression-generatorexpression.js 7
+dir test/language/expressions/assignmenttargettype/direct-primaryexpression-templateliteral.js 6
+dir test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-0.js 6
+dir test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-1.js 6
+dir test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-2.js 6
+dir test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-3.js 6
+dir test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-4.js 6
+dir test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-5.js 6
+dir test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-6.js 6
+dir test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-0.js 10
+dir test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-1.js 10
+dir test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-2.js 10
+dir test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-3.js 10
+dir test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-4.js 10
+dir test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-5.js 10
+dir test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-6.js 10
+dir test/language/expressions/assignmenttargettype/parenthesized-callexpression-templateliteral.js 6
+dir test/language/expressions/assignmenttargettype/parenthesized-import.meta.js 11
+dir test/language/expressions/assignmenttargettype/parenthesized-memberexpression-templateliteral.js 6
+dir test/language/expressions/assignmenttargettype/parenthesized-primaryexpression-asyncfunctionexpression.js 10
+dir test/language/expressions/assignmenttargettype/parenthesized-primaryexpression-asyncgeneratorexpression.js 10
+dir test/language/expressions/assignmenttargettype/parenthesized-primaryexpression-classexpression.js 8
+dir test/language/expressions/assignmenttargettype/parenthesized-primaryexpression-generatorexpression.js 7
+dir test/language/expressions/assignmenttargettype/parenthesized-primaryexpression-templateliteral.js 6
+dir test/language/expressions/assignmenttargettype/simple-complex-callexpression-expression.js 6
+dir test/language/expressions/assignmenttargettype/simple-complex-callexpression.identifiername.js 6
+dir test/language/expressions/assignmenttargettype/simple-complex-memberexpression-expression.js 6
+dir test/language/expressions/assignmenttargettype/simple-complex-memberexpression.identifiername.js 6
+dir test/language/expressions/call/spread-err-mult-err-unresolvable.js 6
+dir test/language/expressions/call/spread-err-sngl-err-unresolvable.js 6
+dir test/language/expressions/call/spread-mult-empty.js 6
+dir test/language/expressions/call/spread-mult-expr.js 6
+dir test/language/expressions/call/spread-mult-literal.js 6
+dir test/language/expressions/call/spread-sngl-empty.js 6
+dir test/language/expressions/call/spread-sngl-expr.js 6
+dir test/language/expressions/call/spread-sngl-literal.js 6
+dir test/language/expressions/call/trailing-comma.js 6
+dir test/language/expressions/coalesce/short-circuit-number-symbol.js 6
+dir test/language/expressions/compound-assignment/11.13.2-45-s.js 3
+dir test/language/expressions/compound-assignment/11.13.2-46-s.js 3
+dir test/language/expressions/compound-assignment/11.13.2-47-s.js 3
+dir test/language/expressions/compound-assignment/11.13.2-48-s.js 3
+dir test/language/expressions/compound-assignment/11.13.2-49-s.js 3
+dir test/language/expressions/compound-assignment/11.13.2-50-s.js 3
+dir test/language/expressions/compound-assignment/11.13.2-51-s.js 3
+dir test/language/expressions/compound-assignment/11.13.2-52-s.js 3
+dir test/language/expressions/compound-assignment/11.13.2-53-s.js 3
+dir test/language/expressions/compound-assignment/11.13.2-54-s.js 3
+dir test/language/expressions/compound-assignment/11.13.2-55-s.js 3
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--1.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--10.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--11.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--12.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--13.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--14.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--15.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--16.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--17.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--18.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--19.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--2.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--20.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--21.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--3.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--4.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--5.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--6.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--7.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--8.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--9.js 6
+dir test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v-.js 6
+dir test/language/expressions/conditional/coalesce-expr-ternary.js 6
+dir test/language/expressions/delete/11.4.1-4.a-9-s.js 4
+dir test/language/expressions/delete/11.4.1-4.a-9.js 4
+dir test/language/expressions/delete/11.4.1-5-a-27-s.js 3
+dir test/language/expressions/delete/11.4.1-5-a-28-s.js 5
+dir test/language/expressions/delete/S11.4.1_A5.js 5
+dir test/language/expressions/delete/S8.12.7_A1.js 4
+dir test/language/expressions/delete/delete-unresolvable-base-object-reference-throws-typeerror.js 6
+dir test/language/expressions/delete/super-property-topropertykey.js 8
+dir test/language/expressions/delete/super-property-uninitialized-this.js 8
+dir test/language/expressions/exponentiation/applying-the-exp-operator_A10.js 4
+dir test/language/expressions/exponentiation/int32_min-exponent.js 6
+dir test/language/expressions/function/arguments-with-arguments-fn.js 6
+dir test/language/expressions/function/arguments-with-arguments-lex.js 6
+dir test/language/expressions/function/dflt-params-trailing-comma.js 6
+dir test/language/expressions/function/early-body-super-call.js 8
+dir test/language/expressions/function/early-body-super-prop.js 8
+dir test/language/expressions/function/early-params-super-call.js 8
+dir test/language/expressions/function/early-params-super-prop.js 8
+dir test/language/expressions/function/forbidden-ext/b2/ 6
+dir test/language/expressions/function/named-no-strict-reassign-fn-name-in-body-in-arrow.js 6
+dir test/language/expressions/function/named-no-strict-reassign-fn-name-in-body-in-eval.js 6
+dir test/language/expressions/function/named-no-strict-reassign-fn-name-in-body.js 6
+dir test/language/expressions/function/named-strict-error-reassign-fn-name-in-body-in-arrow.js 6
+dir test/language/expressions/function/named-strict-error-reassign-fn-name-in-body-in-eval.js 6
+dir test/language/expressions/function/named-strict-error-reassign-fn-name-in-body.js 6
+dir test/language/expressions/function/param-eval-non-strict-is-correct-value.js 6
+dir test/language/expressions/function/rest-params-trailing-comma-early-error.js 6
+dir test/language/expressions/function/scope-name-var-open-non-strict.js 6
+dir test/language/expressions/function/scope-name-var-open-strict.js 6
+dir test/language/expressions/function/scope-param-elem-var-close.js 6
+dir test/language/expressions/function/scope-param-elem-var-open.js 6
+dir test/language/expressions/function/scope-param-rest-elem-var-close.js 6
+dir test/language/expressions/function/scope-param-rest-elem-var-open.js 6
+dir test/language/expressions/function/scope-paramsbody-var-close.js 6
+dir test/language/expressions/function/scope-paramsbody-var-open.js 6
+dir test/language/expressions/function/use-strict-with-non-simple-param.js 6
+dir test/language/expressions/in/S8.12.6_A2_T1.js 3
+dir test/language/expressions/in/S8.12.6_A2_T2.js 3
+dir test/language/expressions/in/rhs-yield-present.js 7
+dir test/language/expressions/logical-assignment/lgcl-and-assignment-operator-namedevaluation-arrow-function.js 6
+dir test/language/expressions/logical-assignment/lgcl-and-assignment-operator-namedevaluation-class-expression.js 8
+dir test/language/expressions/logical-assignment/lgcl-and-assignment-operator-non-extensible.js 3
+dir test/language/expressions/logical-assignment/lgcl-and-assignment-operator.js 6
+dir test/language/expressions/logical-assignment/lgcl-nullish-assignment-operator-namedevaluation-arrow-function.js 6
+dir test/language/expressions/logical-assignment/lgcl-nullish-assignment-operator-namedevaluation-class-expression.js 8
+dir test/language/expressions/logical-assignment/lgcl-nullish-assignment-operator-non-extensible.js 3
+dir test/language/expressions/logical-assignment/lgcl-nullish-assignment-operator.js 6
+dir test/language/expressions/logical-assignment/lgcl-or-assignment-operator-namedevaluation-arrow-function.js 6
+dir test/language/expressions/logical-assignment/lgcl-or-assignment-operator-namedevaluation-class-expression.js 8
+dir test/language/expressions/logical-assignment/lgcl-or-assignment-operator-non-extensible.js 3
+dir test/language/expressions/logical-assignment/lgcl-or-assignment-operator.js 6
+dir test/language/expressions/logical-not/S9.2_A6_T2.js 4
+dir test/language/expressions/modulus/S11.5.3_A4_T7.js 4
+dir test/language/expressions/new/non-ctor-err-realm.js 4
+dir test/language/expressions/new/spread-err-mult-err-unresolvable.js 6
+dir test/language/expressions/new/spread-err-sngl-err-unresolvable.js 6
+dir test/language/expressions/new/spread-mult-empty.js 6
+dir test/language/expressions/new/spread-mult-expr.js 6
+dir test/language/expressions/new/spread-mult-literal.js 6
+dir test/language/expressions/new/spread-sngl-empty.js 6
+dir test/language/expressions/new/spread-sngl-expr.js 6
+dir test/language/expressions/new/spread-sngl-literal.js 6
+dir test/language/expressions/object/__proto__-duplicate-computed.js 6
+dir test/language/expressions/object/accessor-name-computed-err-evaluation.js 6
+dir test/language/expressions/object/accessor-name-computed-err-to-prop-key.js 6
+dir test/language/expressions/object/accessor-name-computed-err-unresolvable.js 6
+dir test/language/expressions/object/accessor-name-computed-in.js 6
+dir test/language/expressions/object/accessor-name-computed-yield-id.js 6
+dir test/language/expressions/object/accessor-name-computed.js 6
+dir test/language/expressions/object/accessor-name-literal-numeric-binary.js 6
+dir test/language/expressions/object/accessor-name-literal-numeric-exponent.js 6
+dir test/language/expressions/object/accessor-name-literal-numeric-hex.js 6
+dir test/language/expressions/object/accessor-name-literal-numeric-leading-decimal.js 6
+dir test/language/expressions/object/accessor-name-literal-numeric-non-canonical.js 6
+dir test/language/expressions/object/accessor-name-literal-numeric-octal.js 6
+dir test/language/expressions/object/accessor-name-literal-numeric-zero.js 6
+dir test/language/expressions/object/accessor-name-literal-string-char-escape.js 6
+dir test/language/expressions/object/accessor-name-literal-string-default-escaped-ext.js 6
+dir test/language/expressions/object/accessor-name-literal-string-default-escaped.js 6
+dir test/language/expressions/object/accessor-name-literal-string-default.js 6
+dir test/language/expressions/object/accessor-name-literal-string-double-quote.js 6
+dir test/language/expressions/object/accessor-name-literal-string-empty.js 6
+dir test/language/expressions/object/accessor-name-literal-string-hex-escape.js 6
+dir test/language/expressions/object/accessor-name-literal-string-line-continuation.js 6
+dir test/language/expressions/object/accessor-name-literal-string-single-quote.js 6
+dir test/language/expressions/object/accessor-name-literal-string-unicode-escape.js 6
+dir test/language/expressions/object/computed-property-evaluation-order.js 6
+dir test/language/expressions/object/computed-property-name-topropertykey-before-value-evaluation.js 6
+dir test/language/expressions/object/cover-initialized-name.js 6
+dir test/language/expressions/object/getter-super-prop.js 8
+dir test/language/expressions/object/identifier-shorthand-invalid-computed-name.js 6
+dir test/language/expressions/object/method-definition/early-errors-object-async-method-duplicate-parameters.js 10
+dir test/language/expressions/object/method-definition/early-errors-object-method-NSPL-with-USD.js 6
+dir test/language/expressions/object/method-definition/early-errors-object-method-formals-contains-super-call.js 10
+dir test/language/expressions/object/method-definition/forbidden-ext/b2/ 6
+dir test/language/expressions/object/method-definition/meth-dflt-params-trailing-comma.js 6
+dir test/language/expressions/object/method-definition/meth-rest-params-trailing-comma-early-error.js 6
+dir test/language/expressions/object/method-definition/name-param-init-yield.js 6
+dir test/language/expressions/object/method-definition/name-param-redecl.js 6
+dir test/language/expressions/object/method-definition/name-prop-name-eval-error.js 6
+dir test/language/expressions/object/method-definition/name-prop-name-yield-id.js 6
+dir test/language/expressions/object/method-definition/name-super-call-body.js 8
+dir test/language/expressions/object/method-definition/name-super-call-param.js 8
+dir test/language/expressions/object/method-definition/setter-use-strict-with-non-simple-param.js 6
+dir test/language/expressions/object/method-definition/use-strict-with-non-simple-param.js 6
+dir test/language/expressions/object/method.js 8
+dir test/language/expressions/object/prop-def-invalid-async-prefix.js 10
+dir test/language/expressions/object/prop-def-invalid-star-prefix.js 7
+dir test/language/expressions/object/scope-meth-param-elem-var-close.js 6
+dir test/language/expressions/object/scope-meth-param-elem-var-open.js 6
+dir test/language/expressions/object/scope-meth-param-rest-elem-var-close.js 6
+dir test/language/expressions/object/scope-meth-param-rest-elem-var-open.js 6
+dir test/language/expressions/object/scope-meth-paramsbody-var-close.js 6
+dir test/language/expressions/object/scope-meth-paramsbody-var-open.js 6
+dir test/language/expressions/object/scope-setter-paramsbody-var-close.js 6
+dir test/language/expressions/object/scope-setter-paramsbody-var-open.js 6
+dir test/language/expressions/object/setter-super-prop.js 8
+dir test/language/expressions/optional-chaining/call-expression-super-no-base.js 8
+dir test/language/expressions/optional-chaining/call-expression.js 8
+dir test/language/expressions/optional-chaining/early-errors-tail-position-null-op-template-string-esi.js 6
+dir test/language/expressions/optional-chaining/early-errors-tail-position-null-op-template-string.js 6
+dir test/language/expressions/optional-chaining/early-errors-tail-position-null-optchain-template-string-esi.js 6
+dir test/language/expressions/optional-chaining/early-errors-tail-position-null-optchain-template-string.js 6
+dir test/language/expressions/optional-chaining/early-errors-tail-position-op-template-string-esi.js 6
+dir test/language/expressions/optional-chaining/early-errors-tail-position-op-template-string.js 6
+dir test/language/expressions/optional-chaining/early-errors-tail-position-optchain-template-string-esi.js 6
+dir test/language/expressions/optional-chaining/early-errors-tail-position-optchain-template-string.js 6
+dir test/language/expressions/optional-chaining/eval-optional-call.js 6
+dir test/language/expressions/optional-chaining/iteration-statement-do.js 6
+dir test/language/expressions/optional-chaining/iteration-statement-for-in.js 6
+dir test/language/expressions/optional-chaining/iteration-statement-for-of-type-error.js 6
+dir test/language/expressions/optional-chaining/iteration-statement-for.js 6
+dir test/language/expressions/optional-chaining/iteration-statement-while.js 6
+dir test/language/expressions/optional-chaining/member-expression.js 10
+dir test/language/expressions/optional-chaining/new-target-optional-call.js 9
+dir test/language/expressions/optional-chaining/optional-call-preserves-this.js 6
+dir test/language/expressions/optional-chaining/optional-chain-expression-optional-expression.js 6
+dir test/language/expressions/optional-chaining/optional-chain-prod-arguments.js 6
+dir test/language/expressions/optional-chaining/optional-chain-prod-expression.js 6
+dir test/language/expressions/optional-chaining/optional-chain-prod-identifiername.js 6
+dir test/language/expressions/optional-chaining/optional-chain.js 6
+dir test/language/expressions/optional-chaining/optional-expression.js 6
+dir test/language/expressions/optional-chaining/punctuator-decimal-lookahead.js 6
+dir test/language/expressions/optional-chaining/runtime-semantics-evaluation.js 6
+dir test/language/expressions/optional-chaining/short-circuiting.js 6
+dir test/language/expressions/optional-chaining/static-semantics-simple-assignment.js 6
+dir test/language/expressions/optional-chaining/super-property-optional-call.js 8
+dir test/language/expressions/optional-chaining/update-expression-postfix.js 6
+dir test/language/expressions/optional-chaining/update-expression-prefix.js 6
+dir test/language/expressions/postfix-decrement/operator-x-postfix-decrement-calls-putvalue-lhs-newvalue--1.js 6
+dir test/language/expressions/postfix-decrement/operator-x-postfix-decrement-calls-putvalue-lhs-newvalue-.js 6
+dir test/language/expressions/postfix-increment/operator-x-postfix-increment-calls-putvalue-lhs-newvalue--1.js 6
+dir test/language/expressions/postfix-increment/operator-x-postfix-increment-calls-putvalue-lhs-newvalue-.js 6
+dir test/language/expressions/prefix-decrement/operator-prefix-decrement-x-calls-putvalue-lhs-newvalue--1.js 6
+dir test/language/expressions/prefix-decrement/operator-prefix-decrement-x-calls-putvalue-lhs-newvalue-.js 6
+dir test/language/expressions/prefix-increment/operator-prefix-increment-x-calls-putvalue-lhs-newvalue--1.js 6
+dir test/language/expressions/prefix-increment/operator-prefix-increment-x-calls-putvalue-lhs-newvalue-.js 6
+dir test/language/expressions/property-accessors/S11.2.1_A3_T2.js 4
+dir test/language/expressions/property-accessors/S11.2.1_A3_T3.js 3
+dir test/language/expressions/property-accessors/S11.2.1_A4_T1.js 4
+dir test/language/expressions/property-accessors/S11.2.1_A4_T2.js 3
+dir test/language/expressions/property-accessors/S11.2.1_A4_T3.js 3
+dir test/language/expressions/property-accessors/S11.2.1_A4_T4.js 3
+dir test/language/expressions/property-accessors/S11.2.1_A4_T5.js 5
+dir test/language/expressions/property-accessors/S11.2.1_A4_T8.js 4
+dir test/language/expressions/property-accessors/S11.2.1_A4_T9.js 4
+dir test/language/expressions/typeof/built-in-exotic-objects-no-call.js 5
+dir test/language/expressions/typeof/built-in-functions.js 4
+dir test/language/expressions/typeof/built-in-ordinary-objects-no-call.js 9
+dir test/language/expressions/typeof/get-value.js 3
+dir test/language/expressions/typeof/native-call.js 5
+dir test/language/expressions/typeof/null.js 5
+dir test/language/expressions/typeof/number.js 4
+dir test/language/expressions/typeof/string.js 4
+dir test/language/function-code/10.4.3-1-100-s.js 5
+dir test/language/function-code/10.4.3-1-100gs.js 5
+dir test/language/function-code/10.4.3-1-101-s.js 5
+dir test/language/function-code/10.4.3-1-101gs.js 5
+dir test/language/function-code/10.4.3-1-102-s.js 5
+dir test/language/function-code/10.4.3-1-102gs.js 5
+dir test/language/function-code/10.4.3-1-66-s.js 3
+dir test/language/function-code/10.4.3-1-66gs.js 3
+dir test/language/function-code/10.4.3-1-67-s.js 3
+dir test/language/function-code/10.4.3-1-67gs.js 3
+dir test/language/function-code/10.4.3-1-68-s.js 3
+dir test/language/function-code/10.4.3-1-68gs.js 3
+dir test/language/function-code/10.4.3-1-69-s.js 3
+dir test/language/function-code/10.4.3-1-69gs.js 3
+dir test/language/function-code/10.4.3-1-70-s.js 3
+dir test/language/function-code/10.4.3-1-70gs.js 3
+dir test/language/function-code/10.4.3-1-85-s.js 3
+dir test/language/function-code/10.4.3-1-85gs.js 3
+dir test/language/function-code/10.4.3-1-86-s.js 3
+dir test/language/function-code/10.4.3-1-86gs.js 3
+dir test/language/function-code/10.4.3-1-87-s.js 3
+dir test/language/function-code/10.4.3-1-87gs.js 3
+dir test/language/function-code/10.4.3-1-88-s.js 3
+dir test/language/function-code/10.4.3-1-88gs.js 3
+dir test/language/function-code/10.4.3-1-89-s.js 3
+dir test/language/function-code/10.4.3-1-89gs.js 3
+dir test/language/function-code/block-decl-onlystrict.js 6
+dir test/language/function-code/eval-param-env-with-computed-key.js 6
+dir test/language/function-code/eval-param-env-with-prop-initializer.js 6
+dir test/language/function-code/switch-case-decl-onlystrict.js 6
+dir test/language/function-code/switch-dflt-decl-onlystrict.js 6
+dir test/language/future-reserved-words/implements.js 6
+dir test/language/future-reserved-words/interface.js 6
+dir test/language/future-reserved-words/package.js 6
+dir test/language/future-reserved-words/private.js 6
+dir test/language/future-reserved-words/protected.js 6
+dir test/language/future-reserved-words/public.js 6
+dir test/language/future-reserved-words/static.js 6
+dir test/language/global-code/block-decl-strict.js 6
+dir test/language/global-code/decl-lex-configurable-global.js 6
+dir test/language/global-code/decl-lex-deletion.js 8
+dir test/language/global-code/decl-lex-restricted-global.js 6
+dir test/language/global-code/decl-lex.js 8
+dir test/language/global-code/export.js 11
+dir test/language/global-code/import.js 11
+dir test/language/global-code/script-decl-func-err-non-extensible.js 3
+dir test/language/global-code/script-decl-func.js 3
+dir test/language/global-code/script-decl-lex-deletion.js 8
+dir test/language/global-code/script-decl-lex-lex.js 8
+dir test/language/global-code/script-decl-lex-restricted-global.js 6
+dir test/language/global-code/script-decl-lex-var-declared-via-eval.js 6
+dir test/language/global-code/script-decl-lex-var.js 6
+dir test/language/global-code/script-decl-lex.js 8
+dir test/language/global-code/script-decl-var-collision.js 8
+dir test/language/global-code/script-decl-var-err.js 3
+dir test/language/global-code/script-decl-var.js 3
+dir test/language/global-code/switch-case-decl-strict.js 6
+dir test/language/global-code/switch-dflt-decl-strict.js 6
+dir test/language/identifiers/other_id_continue-escaped.js 5
+dir test/language/identifiers/other_id_continue.js 5
+dir test/language/identifiers/other_id_start-escaped.js 5
+dir test/language/identifiers/other_id_start.js 5
+dir test/language/identifiers/part-unicode-10.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-10.0.0.js 5
+dir test/language/identifiers/part-unicode-11.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-11.0.0.js 5
+dir test/language/identifiers/part-unicode-12.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-12.0.0.js 5
+dir test/language/identifiers/part-unicode-13.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-13.0.0.js 5
+dir test/language/identifiers/part-unicode-14.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-14.0.0.js 5
+dir test/language/identifiers/part-unicode-15.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-15.0.0.js 5
+dir test/language/identifiers/part-unicode-15.1.0-escaped.js 5
+dir test/language/identifiers/part-unicode-15.1.0.js 5
+dir test/language/identifiers/part-unicode-16.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-16.0.0.js 5
+dir test/language/identifiers/part-unicode-17.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-17.0.0.js 5
+dir test/language/identifiers/part-unicode-5.2.0-escaped.js 5
+dir test/language/identifiers/part-unicode-5.2.0.js 5
+dir test/language/identifiers/part-unicode-6.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-6.0.0.js 5
+dir test/language/identifiers/part-unicode-6.1.0-escaped.js 5
+dir test/language/identifiers/part-unicode-6.1.0.js 5
+dir test/language/identifiers/part-unicode-7.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-7.0.0.js 5
+dir test/language/identifiers/part-unicode-8.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-8.0.0.js 5
+dir test/language/identifiers/part-unicode-9.0.0-escaped.js 5
+dir test/language/identifiers/part-unicode-9.0.0.js 5
+dir test/language/identifiers/part-zwj-zwnj-escaped.js 5
+dir test/language/identifiers/start-unicode-10.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-10.0.0.js 5
+dir test/language/identifiers/start-unicode-11.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-11.0.0.js 5
+dir test/language/identifiers/start-unicode-12.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-12.0.0.js 5
+dir test/language/identifiers/start-unicode-13.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-13.0.0.js 5
+dir test/language/identifiers/start-unicode-14.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-14.0.0.js 5
+dir test/language/identifiers/start-unicode-15.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-15.0.0.js 5
+dir test/language/identifiers/start-unicode-15.1.0-escaped.js 5
+dir test/language/identifiers/start-unicode-15.1.0.js 5
+dir test/language/identifiers/start-unicode-16.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-16.0.0.js 5
+dir test/language/identifiers/start-unicode-17.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-17.0.0.js 5
+dir test/language/identifiers/start-unicode-5.2.0-escaped.js 5
+dir test/language/identifiers/start-unicode-5.2.0.js 5
+dir test/language/identifiers/start-unicode-6.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-6.0.0.js 5
+dir test/language/identifiers/start-unicode-6.1.0-escaped.js 5
+dir test/language/identifiers/start-unicode-6.1.0.js 5
+dir test/language/identifiers/start-unicode-7.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-7.0.0.js 5
+dir test/language/identifiers/start-unicode-8.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-8.0.0.js 5
+dir test/language/identifiers/start-unicode-9.0.0-escaped.js 5
+dir test/language/identifiers/start-unicode-9.0.0.js 5
+dir test/language/identifiers/start-zwj-escaped.js 5
+dir test/language/identifiers/start-zwnj-escaped.js 5
+dir test/language/identifiers/vals-cjk-escaped.js 5
+dir test/language/identifiers/vals-cjk.js 5
+dir test/language/identifiers/vals-rus-alpha-lower-via-escape-hex.js 5
+dir test/language/identifiers/vals-rus-alpha-lower-via-escape-hex4.js 5
+dir test/language/identifiers/vals-rus-alpha-lower.js 5
+dir test/language/identifiers/vals-rus-alpha-upper-via-escape-hex.js 5
+dir test/language/identifiers/vals-rus-alpha-upper-via-escape-hex4.js 5
+dir test/language/identifiers/vals-rus-alpha-upper.js 5
+dir test/language/identifiers/vertical-tilde-continue-escaped.js 5
+dir test/language/identifiers/vertical-tilde-continue.js 5
+dir test/language/identifiers/vertical-tilde-start-escaped.js 5
+dir test/language/identifiers/vertical-tilde-start.js 5
+dir test/language/line-terminators/S7.3_A6_T3.js 5
+dir test/language/line-terminators/S7.3_A6_T4.js 5
+dir test/language/literals/null/S7.8.1_A1_T2.js 5
+dir test/language/literals/string/S7.8.4_A4.1_T1.js 3
+dir test/language/literals/string/S7.8.4_A4.1_T2.js 3
+dir test/language/literals/string/S7.8.4_A4.2_T1.js 3
+dir test/language/literals/string/S7.8.4_A4.2_T3.js 3
+dir test/language/literals/string/S7.8.4_A4.2_T5.js 3
+dir test/language/literals/string/S7.8.4_A4.2_T7.js 3
+dir test/language/literals/string/S7.8.4_A5.1_T1.js 3
+dir test/language/literals/string/S7.8.4_A6.1_T1.js 3
+dir test/language/literals/string/S7.8.4_A6.3_T1.js 3
+dir test/language/literals/string/S7.8.4_A7.1_T1.js 3
+dir test/language/literals/string/S7.8.4_A7.3_T1.js 3
+dir test/language/source-text/ 3
+dir test/language/statementList/block-let-declaration.js 6
+dir test/language/statementList/block-regexp-literal-flags.js 5
+dir test/language/statementList/block-regexp-literal.js 5
+dir test/language/statementList/block-with-statment-let-declaration.js 6
+dir test/language/statementList/block-with-statment-regexp-literal-flags.js 5
+dir test/language/statementList/block-with-statment-regexp-literal.js 5
+dir test/language/statementList/eval-block-let-declaration.js 6
+dir test/language/statementList/eval-block-regexp-literal-flags.js 5
+dir test/language/statementList/eval-block-regexp-literal.js 5
+dir test/language/statementList/eval-block-with-statment-let-declaration.js 6
+dir test/language/statementList/eval-block-with-statment-regexp-literal-flags.js 5
+dir test/language/statementList/eval-block-with-statment-regexp-literal.js 5
+dir test/language/statementList/eval-fn-let-declaration.js 6
+dir test/language/statementList/eval-fn-regexp-literal-flags.js 5
+dir test/language/statementList/eval-fn-regexp-literal.js 5
+dir test/language/statementList/fn-let-declaration.js 6
+dir test/language/statementList/fn-regexp-literal-flags.js 5
+dir test/language/statementList/fn-regexp-literal.js 5
+dir test/language/statements/break/S12.8_A3.js 6
+dir test/language/statements/break/S12.8_A4_T1.js 6
+dir test/language/statements/break/S12.8_A4_T2.js 6
+dir test/language/statements/break/S12.8_A4_T3.js 6
+dir test/language/statements/break/S12.8_A5_T1.js 6
+dir test/language/statements/break/S12.8_A5_T2.js 6
+dir test/language/statements/break/S12.8_A5_T3.js 6
+dir test/language/statements/continue/S12.7_A5_T1.js 6
+dir test/language/statements/continue/S12.7_A5_T2.js 6
+dir test/language/statements/continue/S12.7_A5_T3.js 6
+dir test/language/statements/continue/labeled-continue.js 6
+dir test/language/statements/continue/nested-let-bound-for-loops-inner-continue.js 6
+dir test/language/statements/continue/nested-let-bound-for-loops-labeled-continue.js 6
+dir test/language/statements/continue/nested-let-bound-for-loops-outer-continue.js 6
+dir test/language/statements/continue/no-label-continue.js 6
+dir test/language/statements/continue/shadowing-loop-variable-in-same-scope-as-continue.js 6
+dir test/language/statements/continue/simple-and-labeled.js 6
+dir test/language/statements/do-while/S12.6.1_A8.js 5
+dir test/language/statements/do-while/decl-cls.js 8
+dir test/language/statements/do-while/decl-const.js 6
+dir test/language/statements/do-while/decl-let.js 6
+dir test/language/statements/do-while/let-array-with-newline.js 6
+dir test/language/statements/for-in/S12.6.4_A7_T2.js 3
+dir test/language/statements/for-in/decl-cls.js 8
+dir test/language/statements/for-in/decl-const.js 6
+dir test/language/statements/for-in/decl-let.js 6
+dir test/language/statements/for-in/head-const-bound-names-dup.js 6
+dir test/language/statements/for-in/head-const-bound-names-fordecl-tdz.js 6
+dir test/language/statements/for-in/head-const-bound-names-in-stmt.js 6
+dir test/language/statements/for-in/head-const-bound-names-let.js 6
+dir test/language/statements/for-in/head-const-fresh-binding-per-iteration.js 6
+dir test/language/statements/for-in/head-decl-expr.js 6
+dir test/language/statements/for-in/head-let-bound-names-dup.js 6
+dir test/language/statements/for-in/head-let-bound-names-fordecl-tdz.js 6
+dir test/language/statements/for-in/head-let-bound-names-in-stmt.js 6
+dir test/language/statements/for-in/head-let-bound-names-let.js 6
+dir test/language/statements/for-in/head-let-destructuring.js 6
+dir test/language/statements/for-in/head-let-fresh-binding-per-iteration.js 6
+dir test/language/statements/for-in/head-lhs-invalid-asnmt-ptrn-ary.js 6
+dir test/language/statements/for-in/head-lhs-invalid-asnmt-ptrn-obj.js 6
+dir test/language/statements/for-in/head-lhs-let.js 3
+dir test/language/statements/for-in/head-var-bound-names-dup.js 6
+dir test/language/statements/for-in/labelled-fn-stmt-const.js 6
+dir test/language/statements/for-in/labelled-fn-stmt-let.js 6
+dir test/language/statements/for-in/let-array-with-newline.js 6
+dir test/language/statements/for-in/let-block-with-newline.js 6
+dir test/language/statements/for-in/let-identifier-with-newline.js 6
+dir test/language/statements/for-in/order-enumerable-shadowed.js 3
+dir test/language/statements/for-in/order-property-on-prototype.js 3
+dir test/language/statements/for-in/scope-head-var-none.js 6
+dir test/language/statements/for/S12.6.3_A8_T3.js 6
+dir test/language/statements/for/decl-cls.js 8
+dir test/language/statements/for/decl-const.js 6
+dir test/language/statements/for/decl-let.js 6
+dir test/language/statements/for/head-const-bound-names-in-stmt.js 6
+dir test/language/statements/for/head-const-fresh-binding-per-iteration.js 6
+dir test/language/statements/for/head-init-async-of.js 10
+dir test/language/statements/for/head-let-bound-names-in-stmt.js 6
+dir test/language/statements/for/head-let-destructuring.js 6
+dir test/language/statements/for/head-let-fresh-binding-per-iteration.js 6
+dir test/language/statements/for/labelled-fn-stmt-const.js 6
+dir test/language/statements/for/labelled-fn-stmt-let.js 6
+dir test/language/statements/for/let-array-with-newline.js 6
+dir test/language/statements/for/let-block-with-newline.js 6
+dir test/language/statements/for/let-identifier-with-newline.js 6
+dir test/language/statements/function/S13.2.1_A5_T1.js 3
+dir test/language/statements/function/S13.2.1_A5_T2.js 4
+dir test/language/statements/function/S13.2.2_A1_T1.js 3
+dir test/language/statements/function/S13.2.2_A1_T2.js 3
+dir test/language/statements/function/S13.2.2_A3_T1.js 3
+dir test/language/statements/function/S13.2.2_A3_T2.js 3
+dir test/language/statements/function/S13.2_A5.js 3
+dir test/language/statements/function/S13_A18.js 4
+dir test/language/statements/function/arguments-with-arguments-fn.js 6
+dir test/language/statements/function/arguments-with-arguments-lex.js 6
+dir test/language/statements/function/dflt-params-trailing-comma.js 6
+dir test/language/statements/function/early-body-super-call.js 8
+dir test/language/statements/function/early-body-super-prop.js 8
+dir test/language/statements/function/early-params-super-call.js 8
+dir test/language/statements/function/early-params-super-prop.js 8
+dir test/language/statements/function/forbidden-ext/b2/ 6
+dir test/language/statements/function/param-eval-non-strict-is-correct-value.js 6
+dir test/language/statements/function/rest-params-trailing-comma-early-error.js 6
+dir test/language/statements/function/scope-param-elem-var-close.js 6
+dir test/language/statements/function/scope-param-elem-var-open.js 6
+dir test/language/statements/function/scope-param-rest-elem-var-close.js 6
+dir test/language/statements/function/scope-param-rest-elem-var-open.js 6
+dir test/language/statements/function/scope-paramsbody-var-close.js 6
+dir test/language/statements/function/scope-paramsbody-var-open.js 6
+dir test/language/statements/function/use-strict-with-non-simple-param.js 6
+dir test/language/statements/if/if-cls-else-cls.js 8
+dir test/language/statements/if/if-cls-else-stmt.js 8
+dir test/language/statements/if/if-cls-no-else.js 8
+dir test/language/statements/if/if-const-else-const.js 6
+dir test/language/statements/if/if-const-else-stmt.js 6
+dir test/language/statements/if/if-const-no-else.js 6
+dir test/language/statements/if/if-let-else-let.js 6
+dir test/language/statements/if/if-let-else-stmt.js 6
+dir test/language/statements/if/if-let-no-else.js 6
+dir test/language/statements/if/if-stmt-else-cls.js 8
+dir test/language/statements/if/if-stmt-else-const.js 6
+dir test/language/statements/if/if-stmt-else-let.js 6
+dir test/language/statements/if/let-array-with-newline.js 6
+dir test/language/statements/if/let-block-with-newline.js 6
+dir test/language/statements/if/let-identifier-with-newline.js 6
+dir test/language/statements/labeled/decl-cls.js 8
+dir test/language/statements/labeled/decl-const.js 6
+dir test/language/statements/labeled/decl-let.js 6
+dir test/language/statements/labeled/let-array-with-newline.js 6
+dir test/language/statements/labeled/let-block-with-newline.js 6
+dir test/language/statements/labeled/let-identifier-with-newline.js 6
+dir test/language/statements/return/S12.9_A4.js 4
+dir test/language/statements/switch/S12.11_A1_T4.js 4
+dir test/language/statements/switch/scope-lex-async-function.js 10
+dir test/language/statements/switch/scope-lex-async-generator.js 10
+dir test/language/statements/switch/scope-lex-class.js 8
+dir test/language/statements/switch/scope-lex-const.js 6
+dir test/language/statements/switch/scope-lex-generator.js 7
+dir test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-class.js 8
+dir test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-const.js 8
+dir test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-function.js 8
+dir test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-let.js 8
+dir test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-var.js 8
+dir test/language/statements/switch/syntax/redeclaration/const-name-redeclaration-attempt-with-class.js 8
+dir test/language/statements/switch/syntax/redeclaration/const-name-redeclaration-attempt-with-const.js 6
+dir test/language/statements/switch/syntax/redeclaration/const-name-redeclaration-attempt-with-function.js 6
+dir test/language/statements/switch/syntax/redeclaration/const-name-redeclaration-attempt-with-let.js 6
+dir test/language/statements/switch/syntax/redeclaration/const-name-redeclaration-attempt-with-var.js 6
+dir test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-class.js 8
+dir test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-const.js 6
+dir test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-function.js 6
+dir test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-let.js 6
+dir test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-var.js 6
+dir test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-class.js 8
+dir test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-const.js 6
+dir test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-function.js 6
+dir test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-let.js 6
+dir test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-var.js 6
+dir test/language/statements/switch/syntax/redeclaration/var-name-redeclaration-attempt-with-class.js 8
+dir test/language/statements/switch/syntax/redeclaration/var-name-redeclaration-attempt-with-const.js 6
+dir test/language/statements/switch/syntax/redeclaration/var-name-redeclaration-attempt-with-function.js 6
+dir test/language/statements/switch/syntax/redeclaration/var-name-redeclaration-attempt-with-let.js 6
+dir test/language/statements/throw/S12.13_A3_T4.js 3
+dir test/language/statements/try/S12.14_A17.js 4
+dir test/language/statements/try/S12.14_A18_T7.js 3
+dir test/language/statements/try/early-catch-duplicates.js 6
+dir test/language/statements/try/early-catch-function.js 6
+dir test/language/statements/try/optional-catch-binding-lexical.js 6
+dir test/language/statements/try/scope-catch-param-lex-open.js 6
+dir test/language/statements/try/scope-catch-param-var-none.js 6
+dir test/language/statements/variable/fn-name-arrow.js 6
+dir test/language/statements/while/S12.6.2_A8.js 5
+dir test/language/statements/while/decl-cls.js 8
+dir test/language/statements/while/decl-const.js 6
+dir test/language/statements/while/decl-let.js 6
+dir test/language/statements/while/let-array-with-newline.js 6
+dir test/language/statements/while/let-block-with-newline.js 6
+dir test/language/statements/while/let-identifier-with-newline.js 6
+dir test/language/statements/with/S12.10_A1.10_T1.js 4
+dir test/language/statements/with/S12.10_A1.10_T2.js 4
+dir test/language/statements/with/S12.10_A1.10_T4.js 4
+dir test/language/statements/with/S12.10_A1.11_T1.js 4
+dir test/language/statements/with/S12.10_A1.11_T2.js 4
+dir test/language/statements/with/S12.10_A1.11_T4.js 4
+dir test/language/statements/with/S12.10_A1.12_T1.js 4
+dir test/language/statements/with/S12.10_A1.12_T2.js 4
+dir test/language/statements/with/S12.10_A1.12_T4.js 4
+dir test/language/statements/with/S12.10_A1.1_T1.js 4
+dir test/language/statements/with/S12.10_A1.1_T2.js 4
+dir test/language/statements/with/S12.10_A1.2_T1.js 4
+dir test/language/statements/with/S12.10_A1.2_T2.js 4
+dir test/language/statements/with/S12.10_A1.2_T4.js 4
+dir test/language/statements/with/S12.10_A1.3_T1.js 4
+dir test/language/statements/with/S12.10_A1.3_T2.js 4
+dir test/language/statements/with/S12.10_A1.3_T4.js 4
+dir test/language/statements/with/S12.10_A1.4_T1.js 4
+dir test/language/statements/with/S12.10_A1.4_T2.js 4
+dir test/language/statements/with/S12.10_A1.4_T4.js 4
+dir test/language/statements/with/S12.10_A1.5_T1.js 4
+dir test/language/statements/with/S12.10_A1.5_T2.js 4
+dir test/language/statements/with/S12.10_A1.5_T4.js 4
+dir test/language/statements/with/S12.10_A1.6_T1.js 4
+dir test/language/statements/with/S12.10_A1.6_T2.js 4
+dir test/language/statements/with/S12.10_A1.7_T1.js 4
+dir test/language/statements/with/S12.10_A1.7_T2.js 4
+dir test/language/statements/with/S12.10_A1.7_T4.js 4
+dir test/language/statements/with/S12.10_A1.8_T1.js 4
+dir test/language/statements/with/S12.10_A1.8_T2.js 4
+dir test/language/statements/with/S12.10_A1.8_T4.js 4
+dir test/language/statements/with/S12.10_A1.9_T1.js 4
+dir test/language/statements/with/S12.10_A1.9_T2.js 4
+dir test/language/statements/with/decl-cls.js 8
+dir test/language/statements/with/decl-const.js 6
+dir test/language/statements/with/decl-let.js 6
+dir test/language/statements/with/let-array-with-newline.js 6
+dir test/language/statements/with/let-block-with-newline.js 6
+dir test/language/statements/with/let-identifier-with-newline.js 6
+dir test/language/types/number/S8.5_A13_T2.js 4
+dir test/language/types/number/S8.5_A14_T1.js 4
+dir test/language/types/number/S8.5_A14_T2.js 4
+dir test/language/types/object/S8.6.1_A1.js 4
+dir test/language/types/object/S8.6.2_A1.js 3
+dir test/language/types/object/S8.6.2_A8.js 3
+dir test/language/types/reference/8.7.2-5-s.js 3
+dir test/language/white-space/S7.2_A5_T5.js 5
+dir test/language/white-space/after-regular-expression-literal-carriage-return.js 5
+dir test/language/white-space/after-regular-expression-literal-em-quad.js 5
+dir test/language/white-space/after-regular-expression-literal-em-space.js 5
+dir test/language/white-space/after-regular-expression-literal-en-quad.js 5
+dir test/language/white-space/after-regular-expression-literal-en-space.js 5
+dir test/language/white-space/after-regular-expression-literal-figure-space.js 5
+dir test/language/white-space/after-regular-expression-literal-form-feed.js 5
+dir test/language/white-space/after-regular-expression-literal-four-per-em-space.js 5
+dir test/language/white-space/after-regular-expression-literal-hair-space.js 5
+dir test/language/white-space/after-regular-expression-literal-ideographic-space.js 5
+dir test/language/white-space/after-regular-expression-literal-line-feed.js 5
+dir test/language/white-space/after-regular-expression-literal-line-separator.js 5
+dir test/language/white-space/after-regular-expression-literal-medium-mathematical-space.js 5
+dir test/language/white-space/after-regular-expression-literal-nbsp.js 5
+dir test/language/white-space/after-regular-expression-literal-nnbsp.js 5
+dir test/language/white-space/after-regular-expression-literal-ogham-space.js 5
+dir test/language/white-space/after-regular-expression-literal-paragraph-separator.js 5
+dir test/language/white-space/after-regular-expression-literal-punctuation-space.js 5
+dir test/language/white-space/after-regular-expression-literal-six-per-em-space.js 5
+dir test/language/white-space/after-regular-expression-literal-space.js 5
+dir test/language/white-space/after-regular-expression-literal-tab.js 5
+dir test/language/white-space/after-regular-expression-literal-thin-space.js 5
+dir test/language/white-space/after-regular-expression-literal-three-per-em-space.js 5
+dir test/language/white-space/after-regular-expression-literal-vertical-tab.js 5
+dir test/language/white-space/after-regular-expression-literal-zwnbsp.js 5
+dir test/language/white-space/mongolian-vowel-separator-eval.js 5
+dir test/language/white-space/mongolian-vowel-separator.js 5
 dir test/language/ 2
 dir test/built-ins/ 3
 dir test/built-ins/Number/ 4
@@ -1102,6 +2092,7 @@ dir test/staging/ 19
 dir test/built-ins/Temporal/ 20
 dir test/staging/Temporal/ 20
 dir test/intl402/ 21
+feature exponentiation 4
 feature regexp-named-groups 5
 feature regexp-lookbehind 5
 feature regexp-dotall 5
@@ -1271,7 +2262,7 @@ exclude-slice 21 intl402
 exclude-include atomicsHelper.js agents
 ```
 
-The 39 features with no line (`exponentiation`, `optional-chaining`, `Object.hasOwn` and so on)
+The 38 features with no line (`optional-chaining`, `Object.hasOwn`, `globalThis` and so on)
 are small additions inside the directory's own slice.
 
 ## 13. Security
@@ -1481,16 +2472,16 @@ Its output on this document:
 
 ```
 01 31 62
-02 5267 9217
-03 7581 14994
-04 1198 2396
-05 2118 4234
-06 3717 7162
-07 1432 2771
-08 6188 12286
-09 1750 3471
-10 6573 12879
-11 1277 1825
+02 4259 7543
+03 7635 15074
+04 1323 2606
+05 2254 4503
+06 4204 7952
+07 1473 2817
+08 6273 12453
+09 1752 3475
+10 6647 12979
+11 1281 1833
 12 317 634
 13 3044 6044
 14 598 1192

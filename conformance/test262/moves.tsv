@@ -1,0 +1,1032 @@
+test/built-ins/Array/prototype/pop/clamps-to-integer-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/pop/length-near-integer-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/push/clamps-to-integer-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/push/length-near-integer-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/push/throws-if-integer-limit-exceeded.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/reverse/length-exceeding-integer-limit-with-object.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/reverse/length-exceeding-integer-limit-with-proxy.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/slice/length-exceeding-integer-limit-proxied-array.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/slice/length-exceeding-integer-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/splice/clamps-length-to-integer-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/splice/length-and-deleteCount-exceeding-integer-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/splice/length-exceeding-integer-limit-shrink-array.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/splice/length-near-integer-limit-grow-array.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/splice/throws-if-integer-limit-exceeded.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/toReversed/length-exceeding-array-length-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/toSorted/length-exceeding-array-length-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/toSpliced/length-clamped-to-2pow53minus1.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/toSpliced/length-exceeding-array-length-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/unshift/clamps-to-integer-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/unshift/length-near-integer-limit.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/unshift/throws-if-integer-limit-exceeded.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/with/index-bigger-or-eq-than-length.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/with/index-smaller-than-minus-length.js	3	4	feature	exponentiation
+test/built-ins/Array/prototype/with/length-exceeding-array-length-limit.js	3	4	feature	exponentiation
+test/harness/asyncHelpers-asyncTest-func-throws-sync.js	2	3	part	globalThis
+test/language/arguments-object/cls-decl-meth-args-trailing-comma-multiple.js	2	8	part	class
+test/language/arguments-object/cls-decl-meth-args-trailing-comma-null.js	2	8	part	class
+test/language/arguments-object/cls-decl-meth-args-trailing-comma-single-args.js	2	8	part	class
+test/language/arguments-object/cls-decl-meth-args-trailing-comma-spread-operator.js	2	8	part	class
+test/language/arguments-object/cls-decl-meth-args-trailing-comma-undefined.js	2	8	part	class
+test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-multiple.js	2	8	part	class
+test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-null.js	2	8	part	class
+test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-single-args.js	2	8	part	class
+test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-spread-operator.js	2	8	part	class
+test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-undefined.js	2	8	part	class
+test/language/arguments-object/cls-expr-meth-args-trailing-comma-multiple.js	2	8	part	class
+test/language/arguments-object/cls-expr-meth-args-trailing-comma-null.js	2	8	part	class
+test/language/arguments-object/cls-expr-meth-args-trailing-comma-single-args.js	2	8	part	class
+test/language/arguments-object/cls-expr-meth-args-trailing-comma-spread-operator.js	2	8	part	class
+test/language/arguments-object/cls-expr-meth-args-trailing-comma-undefined.js	2	8	part	class
+test/language/arguments-object/cls-expr-meth-static-args-trailing-comma-multiple.js	2	8	part	class
+test/language/arguments-object/cls-expr-meth-static-args-trailing-comma-null.js	2	8	part	class
+test/language/arguments-object/cls-expr-meth-static-args-trailing-comma-single-args.js	2	8	part	class
+test/language/arguments-object/cls-expr-meth-static-args-trailing-comma-spread-operator.js	2	8	part	class
+test/language/arguments-object/cls-expr-meth-static-args-trailing-comma-undefined.js	2	8	part	class
+test/language/arguments-object/func-decl-args-trailing-comma-spread-operator.js	2	6	part	...
+test/language/arguments-object/func-expr-args-trailing-comma-spread-operator.js	2	6	part	...
+test/language/arguments-object/mapped/enumerable-configurable-accessor-descriptor.js	2	6	part	let
+test/language/arguments-object/mapped/nonconfigurable-descriptors-define-failure.js	2	6	part	=>
+test/language/arguments-object/meth-args-trailing-comma-spread-operator.js	2	6	part	...
+test/language/arguments-object/unmapped/via-params-dflt.js	2	6	part	dflt(a, b = 0)
+test/language/arguments-object/unmapped/via-params-dstr.js	2	6	part	dstr(a, [b])
+test/language/arguments-object/unmapped/via-params-rest.js	2	6	part	...
+test/language/block-scope/leave/finally-block-let-declaration-only-shadows-outer-parameter-value-1.js	2	6	part	let
+test/language/block-scope/leave/finally-block-let-declaration-only-shadows-outer-parameter-value-2.js	2	6	part	let
+test/language/block-scope/leave/for-loop-block-let-declaration-only-shadows-outer-parameter-value-1.js	2	6	part	let
+test/language/block-scope/leave/for-loop-block-let-declaration-only-shadows-outer-parameter-value-2.js	2	6	part	let
+test/language/block-scope/leave/nested-block-let-declaration-only-shadows-outer-parameter-value-1.js	2	6	part	let
+test/language/block-scope/leave/nested-block-let-declaration-only-shadows-outer-parameter-value-2.js	2	6	part	let
+test/language/block-scope/leave/outermost-binding-updated-in-catch-block-nested-block-let-declaration-unseen-outside-of-block.js	2	6	part	let
+test/language/block-scope/leave/try-block-let-declaration-only-shadows-outer-parameter-value-1.js	2	6	part	let
+test/language/block-scope/leave/try-block-let-declaration-only-shadows-outer-parameter-value-2.js	2	6	part	let
+test/language/block-scope/leave/verify-context-in-finally-block.js	2	6	part	let
+test/language/block-scope/leave/verify-context-in-for-loop-block.js	2	6	part	let
+test/language/block-scope/leave/verify-context-in-labelled-block.js	2	6	part	let
+test/language/block-scope/leave/verify-context-in-try-block.js	2	6	part	let
+test/language/block-scope/leave/x-after-break-to-label.js	2	6	part	let
+test/language/block-scope/leave/x-before-continue.js	2	6	part	let
+test/language/block-scope/return-from/block-const.js	2	6	part	const
+test/language/block-scope/return-from/block-let.js	2	6	part	let
+test/language/block-scope/shadowing/catch-parameter-shadowing-let-declaration.js	2	6	part	let
+test/language/block-scope/shadowing/const-declaration-shadowing-catch-parameter.js	2	6	part	const
+test/language/block-scope/shadowing/const-declarations-shadowing-parameter-name-let-const-and-var-variables.js	2	6	part	let
+test/language/block-scope/shadowing/dynamic-lookup-from-closure.js	2	6	part	let
+test/language/block-scope/shadowing/dynamic-lookup-in-and-through-block-contexts.js	2	6	part	let
+test/language/block-scope/shadowing/let-declaration-shadowing-catch-parameter.js	2	6	part	let
+test/language/block-scope/shadowing/let-declarations-shadowing-parameter-name-let-const-and-var.js	2	6	part	let
+test/language/block-scope/shadowing/lookup-from-closure.js	2	6	part	let
+test/language/block-scope/shadowing/lookup-in-and-through-block-contexts.js	2	6	part	let
+test/language/block-scope/shadowing/parameter-name-shadowing-parameter-name-let-const-and-var.js	2	6	part	let
+test/language/block-scope/syntax/for-in/acquire-properties-from-array.js	2	6	part	let
+test/language/block-scope/syntax/for-in/acquire-properties-from-object.js	2	6	part	let
+test/language/block-scope/syntax/for-in/disallow-initialization-assignment.js	2	6	part	let
+test/language/block-scope/syntax/for-in/disallow-multiple-lexical-bindings-with-and-without-initializer.js	2	6	part	let
+test/language/block-scope/syntax/for-in/disallow-multiple-lexical-bindings-with-initializer.js	2	6	part	let
+test/language/block-scope/syntax/for-in/disallow-multiple-lexical-bindings-without-and-with-initializer.js	2	6	part	let
+test/language/block-scope/syntax/for-in/disallow-multiple-lexical-bindings.js	2	6	part	let
+test/language/block-scope/syntax/for-in/mixed-values-in-iteration.js	2	6	part	let
+test/language/block-scope/syntax/function-declarations/in-statement-position-case-expression-statement-list.js	2	6	part	case true: function g()
+test/language/block-scope/syntax/function-declarations/in-statement-position-default-statement-list.js	2	6	part	default: function g()
+test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-const.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-function.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-let.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-var.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/const-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/const-name-redeclaration-attempt-with-const.js	2	6	part	const
+test/language/block-scope/syntax/redeclaration/const-name-redeclaration-attempt-with-function.js	2	6	part	const
+test/language/block-scope/syntax/redeclaration/const-name-redeclaration-attempt-with-let.js	2	6	part	const
+test/language/block-scope/syntax/redeclaration/const-name-redeclaration-attempt-with-var.js	2	6	part	const
+test/language/block-scope/syntax/redeclaration/fn-scope-var-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/fn-scope-var-name-redeclaration-attempt-with-const.js	2	6	part	const
+test/language/block-scope/syntax/redeclaration/fn-scope-var-name-redeclaration-attempt-with-function.js	2	6	part	{ function f()
+test/language/block-scope/syntax/redeclaration/fn-scope-var-name-redeclaration-attempt-with-let.js	2	6	part	let
+test/language/block-scope/syntax/redeclaration/function-declaration-attempt-to-redeclare-with-var-declaration-nested-in-function.js	2	6	part	{ function f()
+test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-const.js	2	6	part	{ function f()
+test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-function.js	2	6	part	{ function f()
+test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-let.js	2	6	part	{ function f()
+test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-var.js	2	6	part	{ function f()
+test/language/block-scope/syntax/redeclaration/inner-block-var-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/inner-block-var-name-redeclaration-attempt-with-const.js	2	6	part	const
+test/language/block-scope/syntax/redeclaration/inner-block-var-name-redeclaration-attempt-with-function.js	2	6	part	} function f() {} }
+test/language/block-scope/syntax/redeclaration/inner-block-var-name-redeclaration-attempt-with-let.js	2	6	part	let
+test/language/block-scope/syntax/redeclaration/inner-block-var-redeclaration-attempt-after-class.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/inner-block-var-redeclaration-attempt-after-const.js	2	6	part	const
+test/language/block-scope/syntax/redeclaration/inner-block-var-redeclaration-attempt-after-function.js	2	6	part	{ function f()
+test/language/block-scope/syntax/redeclaration/inner-block-var-redeclaration-attempt-after-let.js	2	6	part	let
+test/language/block-scope/syntax/redeclaration/let-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/let-name-redeclaration-attempt-with-const.js	2	6	part	let
+test/language/block-scope/syntax/redeclaration/let-name-redeclaration-attempt-with-function.js	2	6	part	let
+test/language/block-scope/syntax/redeclaration/let-name-redeclaration-attempt-with-let.js	2	6	part	let
+test/language/block-scope/syntax/redeclaration/let-name-redeclaration-attempt-with-var.js	2	6	part	let
+test/language/block-scope/syntax/redeclaration/var-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/var-name-redeclaration-attempt-with-const.js	2	6	part	const
+test/language/block-scope/syntax/redeclaration/var-name-redeclaration-attempt-with-function.js	2	6	part	; function f() {} }
+test/language/block-scope/syntax/redeclaration/var-name-redeclaration-attempt-with-let.js	2	6	part	let
+test/language/block-scope/syntax/redeclaration/var-redeclaration-attempt-after-class.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/var-redeclaration-attempt-after-const.js	2	6	part	const
+test/language/block-scope/syntax/redeclaration/var-redeclaration-attempt-after-function.js	2	6	part	{ function f()
+test/language/block-scope/syntax/redeclaration/var-redeclaration-attempt-after-let.js	2	6	part	let
+test/language/comments/S7.4_A5.js	2	3	part	String.fromCharCode
+test/language/comments/S7.4_A6.js	2	3	part	String.fromCharCode
+test/language/comments/hashbang/function-constructor.js	2	10	part	async
+test/language/eval-code/direct/arrow-fn-a-following-parameter-is-named-arguments-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js	2	6	part	const
+test/language/eval-code/direct/arrow-fn-a-following-parameter-is-named-arguments-arrow-func-declare-arguments-assign.js	2	6	part	const
+test/language/eval-code/direct/arrow-fn-a-preceding-parameter-is-named-arguments-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js	2	6	part	const
+test/language/eval-code/direct/arrow-fn-a-preceding-parameter-is-named-arguments-arrow-func-declare-arguments-assign.js	2	6	part	const
+test/language/eval-code/direct/arrow-fn-body-cntns-arguments-func-decl-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js	2	6	part	const
+test/language/eval-code/direct/arrow-fn-body-cntns-arguments-func-decl-arrow-func-declare-arguments-assign.js	2	6	part	const
+test/language/eval-code/direct/arrow-fn-body-cntns-arguments-lex-bind-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js	2	6	part	const
+test/language/eval-code/direct/arrow-fn-body-cntns-arguments-lex-bind-arrow-func-declare-arguments-assign.js	2	6	part	const
+test/language/eval-code/direct/arrow-fn-body-cntns-arguments-var-bind-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js	2	6	part	const
+test/language/eval-code/direct/arrow-fn-body-cntns-arguments-var-bind-arrow-func-declare-arguments-assign.js	2	6	part	const
+test/language/eval-code/direct/arrow-fn-no-pre-existing-arguments-bindings-are-present-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js	2	6	part	const
+test/language/eval-code/direct/arrow-fn-no-pre-existing-arguments-bindings-are-present-arrow-func-declare-arguments-assign.js	2	6	part	const
+test/language/eval-code/direct/async-gen-func-decl-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-decl-a-following-parameter-is-named-arguments-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-decl-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-decl-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-decl-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-a-following-parameter-is-named-arguments-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-a-following-parameter-is-named-arguments-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-a-following-parameter-is-named-arguments-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	10	part	async
+test/language/eval-code/direct/async-gen-named-func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	10	part	async
+test/language/eval-code/direct/block-decl-eval-source-is-strict-nostrict.js	2	6	part	{ function f()
+test/language/eval-code/direct/block-decl-eval-source-is-strict-onlystrict.js	2	6	part	{ function f()
+test/language/eval-code/direct/block-decl-onlystrict.js	2	6	part	{ function f()
+test/language/eval-code/direct/func-decl-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	f(p = eval(
+test/language/eval-code/direct/func-decl-a-following-parameter-is-named-arguments-declare-arguments.js	2	6	part	f(p = eval(
+test/language/eval-code/direct/func-decl-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	f(arguments, p = eval(
+test/language/eval-code/direct/func-decl-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	6	part	f(arguments, p = eval(
+test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	6	part	f(p = eval(
+test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	6	part	f(p = eval(
+test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	6	part	f(p = eval(
+test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	6	part	f(p = eval(
+test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	6	part	f(p = eval(
+test/language/eval-code/direct/func-decl-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	6	part	f(p = eval(
+test/language/eval-code/direct/func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	6	part	f(p = eval(
+test/language/eval-code/direct/func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	6	part	f(p = eval(
+test/language/eval-code/direct/func-expr-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/func-expr-a-following-parameter-is-named-arguments-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/func-expr-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/func-expr-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/func-expr-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/func-expr-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/gen-func-decl-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-decl-a-following-parameter-is-named-arguments-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-decl-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-decl-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-decl-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-decl-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-a-following-parameter-is-named-arguments-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-named-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-a-following-parameter-is-named-arguments-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	7	part	function *
+test/language/eval-code/direct/gen-func-expr-nameless-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	7	part	function *
+test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/meth-a-following-parameter-is-named-arguments-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/meth-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/meth-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/meth-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	6	part	let
+test/language/eval-code/direct/meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/switch-case-decl-eval-source-is-strict-nostrict.js	2	6	part	case 1:\ function f()
+test/language/eval-code/direct/switch-case-decl-eval-source-is-strict-onlystrict.js	2	6	part	case 1:\ function f()
+test/language/eval-code/direct/switch-case-decl-onlystrict.js	2	6	part	case 1:\ function f()
+test/language/eval-code/direct/switch-dflt-decl-eval-source-is-strict-nostrict.js	2	6	part	default:\ function f()
+test/language/eval-code/direct/switch-dflt-decl-eval-source-is-strict-onlystrict.js	2	6	part	default:\ function f()
+test/language/eval-code/direct/switch-dflt-decl-onlystrict.js	2	6	part	default:\ function f()
+test/language/eval-code/indirect/block-decl-strict.js	2	6	part	{ function f()
+test/language/eval-code/indirect/switch-case-decl-strict.js	2	6	part	case 1:\ function f()
+test/language/eval-code/indirect/switch-dflt-decl-strict.js	2	6	part	default:\ function f()
+test/language/expressions/addition/S11.6.1_A2.2_T2.js	2	4	part	Date
+test/language/expressions/array/spread-err-mult-err-unresolvable.js	2	6	part	...
+test/language/expressions/array/spread-err-sngl-err-unresolvable.js	2	6	part	...
+test/language/expressions/array/spread-mult-empty.js	2	6	part	...
+test/language/expressions/array/spread-mult-expr.js	2	6	part	...
+test/language/expressions/array/spread-mult-literal.js	2	6	part	...
+test/language/expressions/array/spread-sngl-empty.js	2	6	part	...
+test/language/expressions/array/spread-sngl-expr.js	2	6	part	...
+test/language/expressions/array/spread-sngl-literal.js	2	6	part	...
+test/language/expressions/assignment/11.13.1-3-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/assignment/11.13.1-4-28gs.js	2	4	part	Math.PI
+test/language/expressions/assignment/11.13.1-4-29gs.js	2	4	part	Math.PI
+test/language/expressions/assignment/8.12.5-3-b_1.js	2	3	part	.reduce
+test/language/expressions/assignment/S8.12.4_A1.js	2	4	part	Math.E
+test/language/expressions/assignment/assignment-operator-calls-putvalue-lref--rval--1.js	2	6	part	=>
+test/language/expressions/assignment/assignment-operator-calls-putvalue-lref--rval-.js	2	6	part	=>
+test/language/expressions/assignment/destructuring/default-expr-throws-iterator-return-get-throws.js	2	6	part	Symbol
+test/language/expressions/assignment/destructuring/default-expr-throws-iterator-return-is-not-callable.js	2	6	part	Symbol
+test/language/expressions/assignment/destructuring/keyed-destructuring-property-reference-target-evaluation-order.js	2	6	part	({[sourceKey()]:
+test/language/expressions/assignment/destructuring/obj-prop-__proto__dup.js	2	6	part	{ __proto__: x, __proto__: y } =
+test/language/expressions/assignment/destructuring/target-assign-throws-iterator-return-get-throws.js	2	6	part	Symbol
+test/language/expressions/assignment/destructuring/target-assign-throws-iterator-return-is-not-callable.js	2	6	part	Symbol
+test/language/expressions/assignment/fn-name-arrow.js	2	6	part	=>
+test/language/expressions/assignment/target-super-computed-reference-null.js	2	8	part	class
+test/language/expressions/assignment/target-super-computed-reference.js	2	8	part	class
+test/language/expressions/assignment/target-super-identifier-reference-null.js	2	8	part	class
+test/language/expressions/assignmenttargettype/direct-arrowfunction-0.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/direct-arrowfunction-1.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/direct-arrowfunction-2.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/direct-arrowfunction-3.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/direct-arrowfunction-4.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/direct-arrowfunction-5.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/direct-arrowfunction-6.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-0.js	2	10	part	async
+test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-1.js	2	10	part	async
+test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-2.js	2	10	part	async
+test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-3.js	2	10	part	async
+test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-4.js	2	10	part	async
+test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-5.js	2	10	part	async
+test/language/expressions/assignmenttargettype/direct-asyncarrowfunction-6.js	2	10	part	async
+test/language/expressions/assignmenttargettype/direct-callexpression-as-for-of-lhs.js	2	6	part	for (f() of [1])
+test/language/expressions/assignmenttargettype/direct-callexpression-templateliteral.js	2	6	part	`
+test/language/expressions/assignmenttargettype/direct-import.meta.js	2	11	part	import.meta
+test/language/expressions/assignmenttargettype/direct-memberexpression-templateliteral.js	2	6	part	`
+test/language/expressions/assignmenttargettype/direct-primaryexpression-asyncfunctionexpression.js	2	10	part	async
+test/language/expressions/assignmenttargettype/direct-primaryexpression-asyncgeneratorexpression.js	2	10	part	async
+test/language/expressions/assignmenttargettype/direct-primaryexpression-classexpression.js	2	8	part	class
+test/language/expressions/assignmenttargettype/direct-primaryexpression-generatorexpression.js	2	7	part	function *
+test/language/expressions/assignmenttargettype/direct-primaryexpression-templateliteral.js	2	6	part	`
+test/language/expressions/assignmenttargettype/direct-updateexpression-star-star-exponentiationexpression-0.js	2	4	feature	exponentiation
+test/language/expressions/assignmenttargettype/direct-updateexpression-star-star-exponentiationexpression-1.js	2	4	feature	exponentiation
+test/language/expressions/assignmenttargettype/direct-updateexpression-star-star-exponentiationexpression-2.js	2	4	feature	exponentiation
+test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-0.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-1.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-2.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-3.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-4.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-5.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/parenthesized-arrowfunction-6.js	2	6	part	=>
+test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-0.js	2	10	part	async
+test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-1.js	2	10	part	async
+test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-2.js	2	10	part	async
+test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-3.js	2	10	part	async
+test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-4.js	2	10	part	async
+test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-5.js	2	10	part	async
+test/language/expressions/assignmenttargettype/parenthesized-asyncarrowfunction-6.js	2	10	part	async
+test/language/expressions/assignmenttargettype/parenthesized-callexpression-templateliteral.js	2	6	part	`
+test/language/expressions/assignmenttargettype/parenthesized-import.meta.js	2	11	part	import.meta
+test/language/expressions/assignmenttargettype/parenthesized-memberexpression-templateliteral.js	2	6	part	`
+test/language/expressions/assignmenttargettype/parenthesized-primaryexpression-asyncfunctionexpression.js	2	10	part	async
+test/language/expressions/assignmenttargettype/parenthesized-primaryexpression-asyncgeneratorexpression.js	2	10	part	async
+test/language/expressions/assignmenttargettype/parenthesized-primaryexpression-classexpression.js	2	8	part	class
+test/language/expressions/assignmenttargettype/parenthesized-primaryexpression-generatorexpression.js	2	7	part	function *
+test/language/expressions/assignmenttargettype/parenthesized-primaryexpression-templateliteral.js	2	6	part	`
+test/language/expressions/assignmenttargettype/parenthesized-updateexpression-star-star-exponentiationexpression-0.js	2	4	feature	exponentiation
+test/language/expressions/assignmenttargettype/parenthesized-updateexpression-star-star-exponentiationexpression-1.js	2	4	feature	exponentiation
+test/language/expressions/assignmenttargettype/parenthesized-updateexpression-star-star-exponentiationexpression-2.js	2	4	feature	exponentiation
+test/language/expressions/assignmenttargettype/simple-complex-callexpression-expression.js	2	6	part	let
+test/language/expressions/assignmenttargettype/simple-complex-callexpression.identifiername.js	2	6	part	let
+test/language/expressions/assignmenttargettype/simple-complex-memberexpression-expression.js	2	6	part	let
+test/language/expressions/assignmenttargettype/simple-complex-memberexpression.identifiername.js	2	6	part	let
+test/language/expressions/call/spread-err-mult-err-unresolvable.js	2	6	part	...
+test/language/expressions/call/spread-err-sngl-err-unresolvable.js	2	6	part	...
+test/language/expressions/call/spread-mult-empty.js	2	6	part	...
+test/language/expressions/call/spread-mult-expr.js	2	6	part	...
+test/language/expressions/call/spread-mult-literal.js	2	6	part	...
+test/language/expressions/call/spread-sngl-empty.js	2	6	part	...
+test/language/expressions/call/spread-sngl-expr.js	2	6	part	...
+test/language/expressions/call/spread-sngl-literal.js	2	6	part	...
+test/language/expressions/call/trailing-comma.js	2	6	part	...
+test/language/expressions/coalesce/short-circuit-number-symbol.js	2	6	part	Symbol
+test/language/expressions/compound-assignment/11.13.2-45-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/compound-assignment/11.13.2-46-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/compound-assignment/11.13.2-47-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/compound-assignment/11.13.2-48-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/compound-assignment/11.13.2-49-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/compound-assignment/11.13.2-50-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/compound-assignment/11.13.2-51-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/compound-assignment/11.13.2-52-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/compound-assignment/11.13.2-53-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/compound-assignment/11.13.2-54-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/compound-assignment/11.13.2-55-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--1.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--10.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--11.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--12.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--13.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--14.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--15.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--16.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--17.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--18.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--19.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--2.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--20.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--21.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--3.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--4.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--5.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--6.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--7.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--8.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v--9.js	2	6	part	=>
+test/language/expressions/compound-assignment/compound-assignment-operator-calls-putvalue-lref--v-.js	2	6	part	=>
+test/language/expressions/compound-assignment/left-hand-side-property-reference-topropertykey-once-exp.js	2	4	feature	exponentiation
+test/language/expressions/conditional/coalesce-expr-ternary.js	2	6	part	Symbol
+test/language/expressions/delete/11.4.1-4.a-9-s.js	2	4	part	Math.LN2
+test/language/expressions/delete/11.4.1-4.a-9.js	2	4	part	Math.LN2
+test/language/expressions/delete/11.4.1-5-a-27-s.js	2	3	part	Object.preventExtensions
+test/language/expressions/delete/11.4.1-5-a-28-s.js	2	5	part	RegExp
+test/language/expressions/delete/S11.4.1_A5.js	2	5	part	RegExp
+test/language/expressions/delete/S8.12.7_A1.js	2	4	part	Math.E
+test/language/expressions/delete/delete-unresolvable-base-object-reference-throws-typeerror.js	2	6	part	=>
+test/language/expressions/delete/super-property-topropertykey.js	2	8	part	super
+test/language/expressions/delete/super-property-uninitialized-this.js	2	8	part	class
+test/language/expressions/exponentiation/applying-the-exp-operator_A1.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A10.js	2	4	part	Math.pow
+test/language/expressions/exponentiation/applying-the-exp-operator_A11.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A12.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A13.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A14.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A15.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A16.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A17.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A18.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A19.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A2.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A20.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A21.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A22.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A23.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A3.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A4.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A5.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A6.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A7.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A8.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/applying-the-exp-operator_A9.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-assignment-operator.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-operator-evaluation-order.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-operator-precedence-unary-expression-semantics.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-operator-precedence-update-expression-semantics.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-operator-syntax-error-bitnot-unary-expression-base.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-operator-syntax-error-delete-unary-expression-base.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-operator-syntax-error-logical-not-unary-expression-base.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-operator-syntax-error-negate-unary-expression-base.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-operator-syntax-error-plus-unary-expression-base.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-operator-syntax-error-typeof-unary-expression-base.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-operator-syntax-error-void-unary-expression-base.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/exp-operator.js	2	4	feature	exponentiation
+test/language/expressions/exponentiation/int32_min-exponent.js	2	6	part	const
+test/language/expressions/function/arguments-with-arguments-fn.js	2	6	part	(x = args = arguments)
+test/language/expressions/function/arguments-with-arguments-lex.js	2	6	part	(x = args = arguments)
+test/language/expressions/function/dflt-params-trailing-comma.js	2	6	part	, b = 39,)
+test/language/expressions/function/early-body-super-call.js	2	8	part	super
+test/language/expressions/function/early-body-super-prop.js	2	8	part	super
+test/language/expressions/function/early-params-super-call.js	2	8	part	super
+test/language/expressions/function/early-params-super-prop.js	2	8	part	super
+test/language/expressions/function/forbidden-ext/b2/func-expr-forbidden-ext-indirect-access-own-prop-caller-get.js	2	6	part	let
+test/language/expressions/function/forbidden-ext/b2/func-expr-forbidden-ext-indirect-access-own-prop-caller-value.js	2	6	part	let
+test/language/expressions/function/forbidden-ext/b2/func-expr-forbidden-ext-indirect-access-prop-caller.js	2	6	part	let
+test/language/expressions/function/named-no-strict-reassign-fn-name-in-body-in-arrow.js	2	6	part	let
+test/language/expressions/function/named-no-strict-reassign-fn-name-in-body-in-eval.js	2	6	part	let
+test/language/expressions/function/named-no-strict-reassign-fn-name-in-body.js	2	6	part	let
+test/language/expressions/function/named-strict-error-reassign-fn-name-in-body-in-arrow.js	2	6	part	let
+test/language/expressions/function/named-strict-error-reassign-fn-name-in-body-in-eval.js	2	6	part	let
+test/language/expressions/function/named-strict-error-reassign-fn-name-in-body.js	2	6	part	let
+test/language/expressions/function/param-eval-non-strict-is-correct-value.js	2	6	part	let
+test/language/expressions/function/rest-params-trailing-comma-early-error.js	2	6	part	...
+test/language/expressions/function/scope-name-var-open-non-strict.js	2	6	part	( _ = (
+test/language/expressions/function/scope-name-var-open-strict.js	2	6	part	( _ = (
+test/language/expressions/function/scope-param-elem-var-close.js	2	6	part	( _ = (
+test/language/expressions/function/scope-param-elem-var-open.js	2	6	part	( _ = probe1
+test/language/expressions/function/scope-param-rest-elem-var-close.js	2	6	part	...
+test/language/expressions/function/scope-param-rest-elem-var-open.js	2	6	part	( _ = probe1
+test/language/expressions/function/scope-paramsbody-var-close.js	2	6	part	(_ = null)
+test/language/expressions/function/scope-paramsbody-var-open.js	2	6	part	(_ = probeParams
+test/language/expressions/function/use-strict-with-non-simple-param.js	2	6	part	function(a = 0)
+test/language/expressions/in/S8.12.6_A2_T1.js	2	3	part	valueOf
+test/language/expressions/in/S8.12.6_A2_T2.js	2	3	part	valueOf
+test/language/expressions/in/rhs-yield-present.js	2	7	part	function *
+test/language/expressions/logical-assignment/lgcl-and-assignment-operator-namedevaluation-arrow-function.js	2	6	part	=>
+test/language/expressions/logical-assignment/lgcl-and-assignment-operator-namedevaluation-class-expression.js	2	8	part	class
+test/language/expressions/logical-assignment/lgcl-and-assignment-operator-non-extensible.js	2	3	part	Object.preventExtensions
+test/language/expressions/logical-assignment/lgcl-and-assignment-operator.js	2	6	part	Symbol
+test/language/expressions/logical-assignment/lgcl-nullish-assignment-operator-namedevaluation-arrow-function.js	2	6	part	=>
+test/language/expressions/logical-assignment/lgcl-nullish-assignment-operator-namedevaluation-class-expression.js	2	8	part	class
+test/language/expressions/logical-assignment/lgcl-nullish-assignment-operator-non-extensible.js	2	3	part	Object.preventExtensions
+test/language/expressions/logical-assignment/lgcl-nullish-assignment-operator.js	2	6	part	Symbol
+test/language/expressions/logical-assignment/lgcl-or-assignment-operator-namedevaluation-arrow-function.js	2	6	part	=>
+test/language/expressions/logical-assignment/lgcl-or-assignment-operator-namedevaluation-class-expression.js	2	8	part	class
+test/language/expressions/logical-assignment/lgcl-or-assignment-operator-non-extensible.js	2	3	part	Object.preventExtensions
+test/language/expressions/logical-assignment/lgcl-or-assignment-operator.js	2	6	part	Symbol
+test/language/expressions/logical-not/S9.2_A6_T2.js	2	4	part	Date
+test/language/expressions/modulus/S11.5.3_A4_T7.js	2	4	part	Math.ceil
+test/language/expressions/new/non-ctor-err-realm.js	2	4	part	parseInt
+test/language/expressions/new/spread-err-mult-err-unresolvable.js	2	6	part	...
+test/language/expressions/new/spread-err-sngl-err-unresolvable.js	2	6	part	...
+test/language/expressions/new/spread-mult-empty.js	2	6	part	...
+test/language/expressions/new/spread-mult-expr.js	2	6	part	...
+test/language/expressions/new/spread-mult-literal.js	2	6	part	...
+test/language/expressions/new/spread-sngl-empty.js	2	6	part	...
+test/language/expressions/new/spread-sngl-expr.js	2	6	part	...
+test/language/expressions/new/spread-sngl-literal.js	2	6	part	...
+test/language/expressions/object/__proto__-duplicate-computed.js	2	6	part	['__proto__']:
+test/language/expressions/object/accessor-name-computed-err-evaluation.js	2	6	part	get [
+test/language/expressions/object/accessor-name-computed-err-to-prop-key.js	2	6	part	get [
+test/language/expressions/object/accessor-name-computed-err-unresolvable.js	2	6	part	get [
+test/language/expressions/object/accessor-name-computed-in.js	2	6	part	get [
+test/language/expressions/object/accessor-name-computed-yield-id.js	2	6	part	get [
+test/language/expressions/object/accessor-name-computed.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-numeric-binary.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-numeric-exponent.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-numeric-hex.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-numeric-leading-decimal.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-numeric-non-canonical.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-numeric-octal.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-numeric-zero.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-string-char-escape.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-string-default-escaped-ext.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-string-default-escaped.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-string-default.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-string-double-quote.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-string-empty.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-string-hex-escape.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-string-line-continuation.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-string-single-quote.js	2	6	part	get [
+test/language/expressions/object/accessor-name-literal-string-unicode-escape.js	2	6	part	get [
+test/language/expressions/object/computed-property-evaluation-order.js	2	6	part	[++counter]:
+test/language/expressions/object/computed-property-name-topropertykey-before-value-evaluation.js	2	6	part	[key]: value
+test/language/expressions/object/cover-initialized-name.js	2	6	part	({ a = 1 })
+test/language/expressions/object/getter-super-prop.js	2	8	part	super
+test/language/expressions/object/identifier-shorthand-invalid-computed-name.js	2	6	part	({[x]})
+test/language/expressions/object/method-definition/early-errors-object-async-method-duplicate-parameters.js	2	10	part	async
+test/language/expressions/object/method-definition/early-errors-object-method-NSPL-with-USD.js	2	6	part	foo(x = 1)
+test/language/expressions/object/method-definition/early-errors-object-method-formals-contains-super-call.js	2	10	part	async
+test/language/expressions/object/method-definition/forbidden-ext/b2/meth-forbidden-ext-indirect-access-own-prop-caller-get.js	2	6	part	let
+test/language/expressions/object/method-definition/forbidden-ext/b2/meth-forbidden-ext-indirect-access-own-prop-caller-value.js	2	6	part	let
+test/language/expressions/object/method-definition/forbidden-ext/b2/meth-forbidden-ext-indirect-access-prop-caller.js	2	6	part	let
+test/language/expressions/object/method-definition/meth-dflt-params-trailing-comma.js	2	6	part	, b = 39,)
+test/language/expressions/object/method-definition/meth-rest-params-trailing-comma-early-error.js	2	6	part	...
+test/language/expressions/object/method-definition/name-param-init-yield.js	2	6	part	method(x = yield)
+test/language/expressions/object/method-definition/name-param-redecl.js	2	6	part	let
+test/language/expressions/object/method-definition/name-prop-name-eval-error.js	2	6	part	{ [(function() {
+test/language/expressions/object/method-definition/name-prop-name-yield-id.js	2	6	part	[yield]()
+test/language/expressions/object/method-definition/name-super-call-body.js	2	8	part	super
+test/language/expressions/object/method-definition/name-super-call-param.js	2	8	part	super
+test/language/expressions/object/method-definition/setter-use-strict-with-non-simple-param.js	2	6	part	m(a = 0)
+test/language/expressions/object/method-definition/use-strict-with-non-simple-param.js	2	6	part	m(a = 0)
+test/language/expressions/object/method.js	2	8	part	super
+test/language/expressions/object/prop-def-invalid-async-prefix.js	2	10	part	async
+test/language/expressions/object/prop-def-invalid-star-prefix.js	2	7	part	({* foo})
+test/language/expressions/object/scope-meth-param-elem-var-close.js	2	6	part	( _ = (
+test/language/expressions/object/scope-meth-param-elem-var-open.js	2	6	part	( _ = probe1
+test/language/expressions/object/scope-meth-param-rest-elem-var-close.js	2	6	part	...
+test/language/expressions/object/scope-meth-param-rest-elem-var-open.js	2	6	part	( _ = probe1
+test/language/expressions/object/scope-meth-paramsbody-var-close.js	2	6	part	(_ = null)
+test/language/expressions/object/scope-meth-paramsbody-var-open.js	2	6	part	(_ = probeParams
+test/language/expressions/object/scope-setter-paramsbody-var-close.js	2	6	part	(_ = null)
+test/language/expressions/object/scope-setter-paramsbody-var-open.js	2	6	part	(_ = probeParams
+test/language/expressions/object/setter-super-prop.js	2	8	part	super
+test/language/expressions/optional-chaining/call-expression-super-no-base.js	2	8	part	class
+test/language/expressions/optional-chaining/call-expression.js	2	8	part	class
+test/language/expressions/optional-chaining/early-errors-tail-position-null-op-template-string-esi.js	2	6	part	`
+test/language/expressions/optional-chaining/early-errors-tail-position-null-op-template-string.js	2	6	part	`
+test/language/expressions/optional-chaining/early-errors-tail-position-null-optchain-template-string-esi.js	2	6	part	`
+test/language/expressions/optional-chaining/early-errors-tail-position-null-optchain-template-string.js	2	6	part	`
+test/language/expressions/optional-chaining/early-errors-tail-position-op-template-string-esi.js	2	6	part	const
+test/language/expressions/optional-chaining/early-errors-tail-position-op-template-string.js	2	6	part	const
+test/language/expressions/optional-chaining/early-errors-tail-position-optchain-template-string-esi.js	2	6	part	const
+test/language/expressions/optional-chaining/early-errors-tail-position-optchain-template-string.js	2	6	part	const
+test/language/expressions/optional-chaining/eval-optional-call.js	2	6	part	const
+test/language/expressions/optional-chaining/iteration-statement-do.js	2	6	part	let
+test/language/expressions/optional-chaining/iteration-statement-for-in.js	2	6	part	const
+test/language/expressions/optional-chaining/iteration-statement-for-of-type-error.js	2	6	part	const
+test/language/expressions/optional-chaining/iteration-statement-for.js	2	6	part	let
+test/language/expressions/optional-chaining/iteration-statement-while.js	2	6	part	let
+test/language/expressions/optional-chaining/member-expression.js	2	10	part	async
+test/language/expressions/optional-chaining/new-target-optional-call.js	2	9	part	Reflect
+test/language/expressions/optional-chaining/optional-call-preserves-this.js	2	6	part	const
+test/language/expressions/optional-chaining/optional-chain-expression-optional-expression.js	2	6	part	const
+test/language/expressions/optional-chaining/optional-chain-prod-arguments.js	2	6	part	...
+test/language/expressions/optional-chaining/optional-chain-prod-expression.js	2	6	part	const
+test/language/expressions/optional-chaining/optional-chain-prod-identifiername.js	2	6	part	const
+test/language/expressions/optional-chaining/optional-chain.js	2	6	part	const
+test/language/expressions/optional-chaining/optional-expression.js	2	6	part	const
+test/language/expressions/optional-chaining/punctuator-decimal-lookahead.js	2	6	part	const
+test/language/expressions/optional-chaining/runtime-semantics-evaluation.js	2	6	part	const
+test/language/expressions/optional-chaining/short-circuiting.js	2	6	part	const
+test/language/expressions/optional-chaining/static-semantics-simple-assignment.js	2	6	part	const
+test/language/expressions/optional-chaining/super-property-optional-call.js	2	8	part	class
+test/language/expressions/optional-chaining/update-expression-postfix.js	2	6	part	const
+test/language/expressions/optional-chaining/update-expression-prefix.js	2	6	part	const
+test/language/expressions/postfix-decrement/operator-x-postfix-decrement-calls-putvalue-lhs-newvalue--1.js	2	6	part	=>
+test/language/expressions/postfix-decrement/operator-x-postfix-decrement-calls-putvalue-lhs-newvalue-.js	2	6	part	=>
+test/language/expressions/postfix-increment/operator-x-postfix-increment-calls-putvalue-lhs-newvalue--1.js	2	6	part	=>
+test/language/expressions/postfix-increment/operator-x-postfix-increment-calls-putvalue-lhs-newvalue-.js	2	6	part	=>
+test/language/expressions/prefix-decrement/operator-prefix-decrement-x-calls-putvalue-lhs-newvalue--1.js	2	6	part	=>
+test/language/expressions/prefix-decrement/operator-prefix-decrement-x-calls-putvalue-lhs-newvalue-.js	2	6	part	=>
+test/language/expressions/prefix-increment/operator-prefix-increment-x-calls-putvalue-lhs-newvalue--1.js	2	6	part	=>
+test/language/expressions/prefix-increment/operator-prefix-increment-x-calls-putvalue-lhs-newvalue-.js	2	6	part	=>
+test/language/expressions/property-accessors/S11.2.1_A3_T2.js	2	4	part	.toFixed
+test/language/expressions/property-accessors/S11.2.1_A3_T3.js	2	3	part	.charAt
+test/language/expressions/property-accessors/S11.2.1_A4_T1.js	2	4	part	parseInt
+test/language/expressions/property-accessors/S11.2.1_A4_T2.js	2	3	part	valueOf
+test/language/expressions/property-accessors/S11.2.1_A4_T3.js	2	3	part	valueOf
+test/language/expressions/property-accessors/S11.2.1_A4_T4.js	2	3	part	.reverse
+test/language/expressions/property-accessors/S11.2.1_A4_T5.js	2	5	part	.split
+test/language/expressions/property-accessors/S11.2.1_A4_T8.js	2	4	part	Math.E
+test/language/expressions/property-accessors/S11.2.1_A4_T9.js	2	4	part	Date
+test/language/expressions/typeof/built-in-exotic-objects-no-call.js	2	5	part	RegExp
+test/language/expressions/typeof/built-in-functions.js	2	4	part	parseInt
+test/language/expressions/typeof/built-in-ordinary-objects-no-call.js	2	9	part	Reflect
+test/language/expressions/typeof/get-value.js	2	3	part	Object.defineProperties
+test/language/expressions/typeof/native-call.js	2	5	part	RegExp
+test/language/expressions/typeof/null.js	2	5	part	RegExp
+test/language/expressions/typeof/number.js	2	4	part	Math.PI
+test/language/expressions/typeof/string.js	2	4	part	Date
+test/language/function-code/10.4.3-1-100-s.js	2	5	part	.replace
+test/language/function-code/10.4.3-1-100gs.js	2	5	part	.replace
+test/language/function-code/10.4.3-1-101-s.js	2	5	part	.replace
+test/language/function-code/10.4.3-1-101gs.js	2	5	part	.replace
+test/language/function-code/10.4.3-1-102-s.js	2	5	part	.replace
+test/language/function-code/10.4.3-1-102gs.js	2	5	part	.replace
+test/language/function-code/10.4.3-1-66-s.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-66gs.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-67-s.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-67gs.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-68-s.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-68gs.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-69-s.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-69gs.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-70-s.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-70gs.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-85-s.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-85gs.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-86-s.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-86gs.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-87-s.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-87gs.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-88-s.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-88gs.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-89-s.js	2	3	part	.apply
+test/language/function-code/10.4.3-1-89gs.js	2	3	part	.apply
+test/language/function-code/block-decl-onlystrict.js	2	6	part	{ function f()
+test/language/function-code/eval-param-env-with-computed-key.js	2	6	part	({[eval(
+test/language/function-code/eval-param-env-with-prop-initializer.js	2	6	part	({a: ignored = eval(
+test/language/function-code/switch-case-decl-onlystrict.js	2	6	part	case 1: function f()
+test/language/function-code/switch-dflt-decl-onlystrict.js	2	6	part	default: function f()
+test/language/future-reserved-words/implements.js	2	6	part	let
+test/language/future-reserved-words/interface.js	2	6	part	let
+test/language/future-reserved-words/package.js	2	6	part	let
+test/language/future-reserved-words/private.js	2	6	part	let
+test/language/future-reserved-words/protected.js	2	6	part	let
+test/language/future-reserved-words/public.js	2	6	part	let
+test/language/future-reserved-words/static.js	2	6	part	let
+test/language/global-code/block-decl-strict.js	2	6	part	{ function f()
+test/language/global-code/decl-lex-configurable-global.js	2	6	part	let
+test/language/global-code/decl-lex-deletion.js	2	8	part	class
+test/language/global-code/decl-lex-restricted-global.js	2	6	part	let
+test/language/global-code/decl-lex.js	2	8	part	class
+test/language/global-code/export.js	2	11	part	export
+test/language/global-code/import.js	2	11	part	import
+test/language/global-code/script-decl-func-err-non-extensible.js	2	3	part	Object.preventExtensions
+test/language/global-code/script-decl-func.js	2	3	part	Object.preventExtensions
+test/language/global-code/script-decl-lex-deletion.js	2	8	part	class
+test/language/global-code/script-decl-lex-lex.js	2	8	part	class
+test/language/global-code/script-decl-lex-restricted-global.js	2	6	part	let
+test/language/global-code/script-decl-lex-var-declared-via-eval.js	2	6	part	let
+test/language/global-code/script-decl-lex-var.js	2	6	part	let
+test/language/global-code/script-decl-lex.js	2	8	part	class
+test/language/global-code/script-decl-var-collision.js	2	8	part	class
+test/language/global-code/script-decl-var-err.js	2	3	part	Object.preventExtensions
+test/language/global-code/script-decl-var.js	2	3	part	Object.preventExtensions
+test/language/global-code/switch-case-decl-strict.js	2	6	part	case 1: function f()
+test/language/global-code/switch-dflt-decl-strict.js	2	6	part	default: function f()
+test/language/identifiers/other_id_continue-escaped.js	2	5	part	var a\u2118
+test/language/identifiers/other_id_continue.js	2	5	part	var a℘
+test/language/identifiers/other_id_start-escaped.js	2	5	part	var \u2118
+test/language/identifiers/other_id_start.js	2	5	part	var ℘
+test/language/identifiers/part-unicode-10.0.0-escaped.js	2	5	part	var _\u0AFA
+test/language/identifiers/part-unicode-10.0.0.js	2	5	part	var _ૺ
+test/language/identifiers/part-unicode-11.0.0-escaped.js	2	5	part	var _\u07FD
+test/language/identifiers/part-unicode-11.0.0.js	2	5	part	var _߽
+test/language/identifiers/part-unicode-12.0.0-escaped.js	2	5	part	var _\u0EBA
+test/language/identifiers/part-unicode-12.0.0.js	2	5	part	var _຺
+test/language/identifiers/part-unicode-13.0.0-escaped.js	2	5	part	var _\u0B55
+test/language/identifiers/part-unicode-13.0.0.js	2	5	part	var _୕
+test/language/identifiers/part-unicode-14.0.0-escaped.js	2	5	part	var _\u0898
+test/language/identifiers/part-unicode-14.0.0.js	2	5	part	var _࢘
+test/language/identifiers/part-unicode-15.0.0-escaped.js	2	5	part	var _\u0CF3
+test/language/identifiers/part-unicode-15.0.0.js	2	5	part	var _ೳ
+test/language/identifiers/part-unicode-15.1.0-escaped.js	2	5	part	var _\u200C
+test/language/identifiers/part-unicode-15.1.0.js	2	5	part	var _‌
+test/language/identifiers/part-unicode-16.0.0-escaped.js	2	5	part	var _\u0897
+test/language/identifiers/part-unicode-16.0.0.js	2	5	part	var _ࢗ
+test/language/identifiers/part-unicode-17.0.0-escaped.js	2	5	part	var _\u1ACF
+test/language/identifiers/part-unicode-17.0.0.js	2	5	part	var _᫏
+test/language/identifiers/part-unicode-5.2.0-escaped.js	2	5	part	var _\u0816
+test/language/identifiers/part-unicode-5.2.0.js	2	5	part	var _ࠖ
+test/language/identifiers/part-unicode-6.0.0-escaped.js	2	5	part	var _\u065F
+test/language/identifiers/part-unicode-6.0.0.js	2	5	part	var _ٟ
+test/language/identifiers/part-unicode-6.1.0-escaped.js	2	5	part	var _\u08E4
+test/language/identifiers/part-unicode-6.1.0.js	2	5	part	var _ࣤ
+test/language/identifiers/part-unicode-7.0.0-escaped.js	2	5	part	var _\u08FF
+test/language/identifiers/part-unicode-7.0.0.js	2	5	part	var _ࣿ
+test/language/identifiers/part-unicode-8.0.0-escaped.js	2	5	part	var _\u08E3
+test/language/identifiers/part-unicode-8.0.0.js	2	5	part	var _ࣣ
+test/language/identifiers/part-unicode-9.0.0-escaped.js	2	5	part	var _\u08D4
+test/language/identifiers/part-unicode-9.0.0.js	2	5	part	var _ࣔ
+test/language/identifiers/part-zwj-zwnj-escaped.js	2	5	part	var $\u200D
+test/language/identifiers/start-unicode-10.0.0-escaped.js	2	5	part	var \u0860
+test/language/identifiers/start-unicode-10.0.0.js	2	5	part	var ࡠ
+test/language/identifiers/start-unicode-11.0.0-escaped.js	2	5	part	var \u0560
+test/language/identifiers/start-unicode-11.0.0.js	2	5	part	var ՠ
+test/language/identifiers/start-unicode-12.0.0-escaped.js	2	5	part	var \u0E86
+test/language/identifiers/start-unicode-12.0.0.js	2	5	part	var ຆ
+test/language/identifiers/start-unicode-13.0.0-escaped.js	2	5	part	var \u08BE
+test/language/identifiers/start-unicode-13.0.0.js	2	5	part	var ࢾ
+test/language/identifiers/start-unicode-14.0.0-escaped.js	2	5	part	var \u0870
+test/language/identifiers/start-unicode-14.0.0.js	2	5	part	var ࡰ
+test/language/identifiers/start-unicode-15.0.0-escaped.js	2	5	part	var \u{1123F}
+test/language/identifiers/start-unicode-15.0.0.js	2	5	part	var 𑈿
+test/language/identifiers/start-unicode-15.1.0-escaped.js	2	5	part	var \u{2EBF0}
+test/language/identifiers/start-unicode-15.1.0.js	2	5	part	var 𮯰
+test/language/identifiers/start-unicode-16.0.0-escaped.js	2	5	part	var \u1C89
+test/language/identifiers/start-unicode-16.0.0.js	2	5	part	var Ᲊ
+test/language/identifiers/start-unicode-17.0.0-escaped.js	2	5	part	var \u088F
+test/language/identifiers/start-unicode-17.0.0.js	2	5	part	var ࢏
+test/language/identifiers/start-unicode-5.2.0-escaped.js	2	5	part	var \u0524
+test/language/identifiers/start-unicode-5.2.0.js	2	5	part	var Ԥ
+test/language/identifiers/start-unicode-6.0.0-escaped.js	2	5	part	var \u0526
+test/language/identifiers/start-unicode-6.0.0.js	2	5	part	var Ԧ
+test/language/identifiers/start-unicode-6.1.0-escaped.js	2	5	part	var \u08A0
+test/language/identifiers/start-unicode-6.1.0.js	2	5	part	var ࢠ
+test/language/identifiers/start-unicode-7.0.0-escaped.js	2	5	part	var \u037F
+test/language/identifiers/start-unicode-7.0.0.js	2	5	part	var Ϳ
+test/language/identifiers/start-unicode-8.0.0-escaped.js	2	5	part	var \u08B3
+test/language/identifiers/start-unicode-8.0.0.js	2	5	part	var ࢳ
+test/language/identifiers/start-unicode-9.0.0-escaped.js	2	5	part	var \u08B6
+test/language/identifiers/start-unicode-9.0.0.js	2	5	part	var ࢶ
+test/language/identifiers/start-zwj-escaped.js	2	5	part	var \u200D
+test/language/identifiers/start-zwnj-escaped.js	2	5	part	var \u200C
+test/language/identifiers/vals-cjk-escaped.js	2	5	part	var \u4e00
+test/language/identifiers/vals-cjk.js	2	5	part	var 一
+test/language/identifiers/vals-rus-alpha-lower-via-escape-hex.js	2	5	part	var \u{430}
+test/language/identifiers/vals-rus-alpha-lower-via-escape-hex4.js	2	5	part	var \u0430
+test/language/identifiers/vals-rus-alpha-lower.js	2	5	part	var а
+test/language/identifiers/vals-rus-alpha-upper-via-escape-hex.js	2	5	part	var \u{410}
+test/language/identifiers/vals-rus-alpha-upper-via-escape-hex4.js	2	5	part	var \u0410
+test/language/identifiers/vals-rus-alpha-upper.js	2	5	part	var А
+test/language/identifiers/vertical-tilde-continue-escaped.js	2	5	part	var a\u2E2F
+test/language/identifiers/vertical-tilde-continue.js	2	5	part	var aⸯ
+test/language/identifiers/vertical-tilde-start-escaped.js	2	5	part	var \u2E2F
+test/language/identifiers/vertical-tilde-start.js	2	5	part	var ⸯ
+test/language/line-terminators/S7.3_A6_T3.js	2	5	part	var\u2028x
+test/language/line-terminators/S7.3_A6_T4.js	2	5	part	var\u2029x
+test/language/literals/null/S7.8.1_A1_T2.js	2	5	part	RegExp
+test/language/literals/string/S7.8.4_A4.1_T1.js	2	3	part	String.fromCharCode
+test/language/literals/string/S7.8.4_A4.1_T2.js	2	3	part	String.fromCharCode
+test/language/literals/string/S7.8.4_A4.2_T1.js	2	3	part	String.fromCharCode
+test/language/literals/string/S7.8.4_A4.2_T3.js	2	3	part	String.fromCharCode
+test/language/literals/string/S7.8.4_A4.2_T5.js	2	3	part	String.fromCharCode
+test/language/literals/string/S7.8.4_A4.2_T7.js	2	3	part	String.fromCharCode
+test/language/literals/string/S7.8.4_A5.1_T1.js	2	3	part	String.fromCharCode
+test/language/literals/string/S7.8.4_A6.1_T1.js	2	3	part	String.fromCharCode
+test/language/literals/string/S7.8.4_A6.3_T1.js	2	3	part	String.fromCharCode
+test/language/literals/string/S7.8.4_A7.1_T1.js	2	3	part	String.fromCharCode
+test/language/literals/string/S7.8.4_A7.3_T1.js	2	3	part	String.fromCharCode
+test/language/source-text/6.1.js	2	3	part	.charCodeAt
+test/language/statementList/block-let-declaration.js	2	6	part	let
+test/language/statementList/block-regexp-literal-flags.js	2	5	part	}/1/
+test/language/statementList/block-regexp-literal.js	2	5	part	}/1/
+test/language/statementList/block-with-statment-let-declaration.js	2	6	part	let
+test/language/statementList/block-with-statment-regexp-literal-flags.js	2	5	part	}/1/
+test/language/statementList/block-with-statment-regexp-literal.js	2	5	part	}/1/
+test/language/statementList/eval-block-let-declaration.js	2	6	part	let
+test/language/statementList/eval-block-regexp-literal-flags.js	2	5	part	}/1/
+test/language/statementList/eval-block-regexp-literal.js	2	5	part	}/1/
+test/language/statementList/eval-block-with-statment-let-declaration.js	2	6	part	let
+test/language/statementList/eval-block-with-statment-regexp-literal-flags.js	2	5	part	}/1/
+test/language/statementList/eval-block-with-statment-regexp-literal.js	2	5	part	}/1/
+test/language/statementList/eval-fn-let-declaration.js	2	6	part	let
+test/language/statementList/eval-fn-regexp-literal-flags.js	2	5	part	}/1/
+test/language/statementList/eval-fn-regexp-literal.js	2	5	part	}/1/
+test/language/statementList/fn-let-declaration.js	2	6	part	let
+test/language/statementList/fn-regexp-literal-flags.js	2	5	part	}/1/
+test/language/statementList/fn-regexp-literal.js	2	5	part	}/1/
+test/language/statements/break/S12.8_A3.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/break/S12.8_A4_T1.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/break/S12.8_A4_T2.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/break/S12.8_A4_T3.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/break/S12.8_A5_T1.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/break/S12.8_A5_T2.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/break/S12.8_A5_T3.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/continue/S12.7_A5_T1.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/continue/S12.7_A5_T2.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/continue/S12.7_A5_T3.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/continue/labeled-continue.js	2	6	part	let
+test/language/statements/continue/nested-let-bound-for-loops-inner-continue.js	2	6	part	let
+test/language/statements/continue/nested-let-bound-for-loops-labeled-continue.js	2	6	part	let
+test/language/statements/continue/nested-let-bound-for-loops-outer-continue.js	2	6	part	let
+test/language/statements/continue/no-label-continue.js	2	6	part	let
+test/language/statements/continue/shadowing-loop-variable-in-same-scope-as-continue.js	2	6	part	let
+test/language/statements/continue/simple-and-labeled.js	2	6	part	let
+test/language/statements/do-while/S12.6.1_A8.js	2	5	part	.split
+test/language/statements/do-while/decl-cls.js	2	8	part	class
+test/language/statements/do-while/decl-const.js	2	6	part	const
+test/language/statements/do-while/decl-let.js	2	6	part	let
+test/language/statements/do-while/let-array-with-newline.js	2	6	part	let
+test/language/statements/for-in/S12.6.4_A7_T2.js	2	3	part	Object.create
+test/language/statements/for-in/decl-cls.js	2	8	part	class
+test/language/statements/for-in/decl-const.js	2	6	part	const
+test/language/statements/for-in/decl-let.js	2	6	part	let
+test/language/statements/for-in/head-const-bound-names-dup.js	2	6	part	const
+test/language/statements/for-in/head-const-bound-names-fordecl-tdz.js	2	6	part	let
+test/language/statements/for-in/head-const-bound-names-in-stmt.js	2	6	part	const
+test/language/statements/for-in/head-const-bound-names-let.js	2	6	part	const
+test/language/statements/for-in/head-const-fresh-binding-per-iteration.js	2	6	part	let
+test/language/statements/for-in/head-decl-expr.js	2	6	part	let
+test/language/statements/for-in/head-let-bound-names-dup.js	2	6	part	let
+test/language/statements/for-in/head-let-bound-names-fordecl-tdz.js	2	6	part	let
+test/language/statements/for-in/head-let-bound-names-in-stmt.js	2	6	part	let
+test/language/statements/for-in/head-let-bound-names-let.js	2	6	part	let
+test/language/statements/for-in/head-let-destructuring.js	2	6	part	let
+test/language/statements/for-in/head-let-fresh-binding-per-iteration.js	2	6	part	let
+test/language/statements/for-in/head-lhs-invalid-asnmt-ptrn-ary.js	2	6	part	for ([(x, y)] in
+test/language/statements/for-in/head-lhs-invalid-asnmt-ptrn-obj.js	2	6	part	for ({ m() {} } in
+test/language/statements/for-in/head-lhs-let.js	2	3	part	Object.create
+test/language/statements/for-in/head-var-bound-names-dup.js	2	6	part	for (var [x, x] in
+test/language/statements/for-in/labelled-fn-stmt-const.js	2	6	part	const
+test/language/statements/for-in/labelled-fn-stmt-let.js	2	6	part	let
+test/language/statements/for-in/let-array-with-newline.js	2	6	part	let
+test/language/statements/for-in/let-block-with-newline.js	2	6	part	let
+test/language/statements/for-in/let-identifier-with-newline.js	2	6	part	let
+test/language/statements/for-in/order-enumerable-shadowed.js	2	3	part	Object.create
+test/language/statements/for-in/order-property-on-prototype.js	2	3	part	Object.setPrototypeOf
+test/language/statements/for-in/scope-head-var-none.js	2	6	part	let
+test/language/statements/for/S12.6.3_A8_T3.js	2	6	part	for({index=0;
+test/language/statements/for/decl-cls.js	2	8	part	class
+test/language/statements/for/decl-const.js	2	6	part	const
+test/language/statements/for/decl-let.js	2	6	part	let
+test/language/statements/for/head-const-bound-names-in-stmt.js	2	6	part	const
+test/language/statements/for/head-const-fresh-binding-per-iteration.js	2	6	part	let
+test/language/statements/for/head-init-async-of.js	2	10	part	async
+test/language/statements/for/head-let-bound-names-in-stmt.js	2	6	part	let
+test/language/statements/for/head-let-destructuring.js	2	6	part	let
+test/language/statements/for/head-let-fresh-binding-per-iteration.js	2	6	part	let
+test/language/statements/for/labelled-fn-stmt-const.js	2	6	part	const
+test/language/statements/for/labelled-fn-stmt-let.js	2	6	part	let
+test/language/statements/for/let-array-with-newline.js	2	6	part	let
+test/language/statements/for/let-block-with-newline.js	2	6	part	let
+test/language/statements/for/let-identifier-with-newline.js	2	6	part	let
+test/language/statements/function/S13.2.1_A5_T1.js	2	3	part	.sort
+test/language/statements/function/S13.2.1_A5_T2.js	2	4	part	Math.PI
+test/language/statements/function/S13.2.2_A1_T1.js	2	3	part	.isPrototypeOf
+test/language/statements/function/S13.2.2_A1_T2.js	2	3	part	.isPrototypeOf
+test/language/statements/function/S13.2.2_A3_T1.js	2	3	part	.isPrototypeOf
+test/language/statements/function/S13.2.2_A3_T2.js	2	3	part	.isPrototypeOf
+test/language/statements/function/S13.2_A5.js	2	3	part	.isPrototypeOf
+test/language/statements/function/S13_A18.js	2	4	part	Math.sin
+test/language/statements/function/arguments-with-arguments-fn.js	2	6	part	(x = args = arguments)
+test/language/statements/function/arguments-with-arguments-lex.js	2	6	part	(x = args = arguments)
+test/language/statements/function/dflt-params-trailing-comma.js	2	6	part	, b = 39,)
+test/language/statements/function/early-body-super-call.js	2	8	part	super
+test/language/statements/function/early-body-super-prop.js	2	8	part	super
+test/language/statements/function/early-params-super-call.js	2	8	part	super
+test/language/statements/function/early-params-super-prop.js	2	8	part	super
+test/language/statements/function/forbidden-ext/b2/func-decl-forbidden-ext-indirect-access-own-prop-caller-get.js	2	6	part	let
+test/language/statements/function/forbidden-ext/b2/func-decl-forbidden-ext-indirect-access-own-prop-caller-value.js	2	6	part	let
+test/language/statements/function/forbidden-ext/b2/func-decl-forbidden-ext-indirect-access-prop-caller.js	2	6	part	let
+test/language/statements/function/param-eval-non-strict-is-correct-value.js	2	6	part	let
+test/language/statements/function/rest-params-trailing-comma-early-error.js	2	6	part	...
+test/language/statements/function/scope-param-elem-var-close.js	2	6	part	( _ = (
+test/language/statements/function/scope-param-elem-var-open.js	2	6	part	( _ = probe1
+test/language/statements/function/scope-param-rest-elem-var-close.js	2	6	part	...
+test/language/statements/function/scope-param-rest-elem-var-open.js	2	6	part	( _ = probe1
+test/language/statements/function/scope-paramsbody-var-close.js	2	6	part	(_ = null)
+test/language/statements/function/scope-paramsbody-var-open.js	2	6	part	(_ = probeParams
+test/language/statements/function/use-strict-with-non-simple-param.js	2	6	part	function f(a = 0)
+test/language/statements/if/if-cls-else-cls.js	2	8	part	class
+test/language/statements/if/if-cls-else-stmt.js	2	8	part	class
+test/language/statements/if/if-cls-no-else.js	2	8	part	class
+test/language/statements/if/if-const-else-const.js	2	6	part	const
+test/language/statements/if/if-const-else-stmt.js	2	6	part	const
+test/language/statements/if/if-const-no-else.js	2	6	part	const
+test/language/statements/if/if-let-else-let.js	2	6	part	let
+test/language/statements/if/if-let-else-stmt.js	2	6	part	let
+test/language/statements/if/if-let-no-else.js	2	6	part	let
+test/language/statements/if/if-stmt-else-cls.js	2	8	part	class
+test/language/statements/if/if-stmt-else-const.js	2	6	part	const
+test/language/statements/if/if-stmt-else-let.js	2	6	part	let
+test/language/statements/if/let-array-with-newline.js	2	6	part	let
+test/language/statements/if/let-block-with-newline.js	2	6	part	let
+test/language/statements/if/let-identifier-with-newline.js	2	6	part	let
+test/language/statements/labeled/decl-cls.js	2	8	part	class
+test/language/statements/labeled/decl-const.js	2	6	part	const
+test/language/statements/labeled/decl-let.js	2	6	part	let
+test/language/statements/labeled/let-array-with-newline.js	2	6	part	let
+test/language/statements/labeled/let-block-with-newline.js	2	6	part	let
+test/language/statements/labeled/let-identifier-with-newline.js	2	6	part	let
+test/language/statements/return/S12.9_A4.js	2	4	part	Math.PI
+test/language/statements/switch/S12.11_A1_T4.js	2	4	part	parseInt
+test/language/statements/switch/scope-lex-async-function.js	2	10	part	async
+test/language/statements/switch/scope-lex-async-generator.js	2	10	part	async
+test/language/statements/switch/scope-lex-class.js	2	8	part	class
+test/language/statements/switch/scope-lex-const.js	2	6	part	const
+test/language/statements/switch/scope-lex-generator.js	2	7	part	function *
+test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-const.js	2	8	part	class
+test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-function.js	2	8	part	class
+test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-let.js	2	8	part	class
+test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-var.js	2	8	part	class
+test/language/statements/switch/syntax/redeclaration/const-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/statements/switch/syntax/redeclaration/const-name-redeclaration-attempt-with-const.js	2	6	part	const
+test/language/statements/switch/syntax/redeclaration/const-name-redeclaration-attempt-with-function.js	2	6	part	const
+test/language/statements/switch/syntax/redeclaration/const-name-redeclaration-attempt-with-let.js	2	6	part	const
+test/language/statements/switch/syntax/redeclaration/const-name-redeclaration-attempt-with-var.js	2	6	part	const
+test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-const.js	2	6	part	case 1: function f()
+test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-function.js	2	6	part	case 1: function f()
+test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-let.js	2	6	part	case 1: function f()
+test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-var.js	2	6	part	case 1: function f()
+test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-const.js	2	6	part	let
+test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-function.js	2	6	part	let
+test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-let.js	2	6	part	let
+test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-var.js	2	6	part	let
+test/language/statements/switch/syntax/redeclaration/var-name-redeclaration-attempt-with-class.js	2	8	part	class
+test/language/statements/switch/syntax/redeclaration/var-name-redeclaration-attempt-with-const.js	2	6	part	const
+test/language/statements/switch/syntax/redeclaration/var-name-redeclaration-attempt-with-function.js	2	6	part	default: function f()
+test/language/statements/switch/syntax/redeclaration/var-name-redeclaration-attempt-with-let.js	2	6	part	let
+test/language/statements/throw/S12.13_A3_T4.js	2	3	part	.concat
+test/language/statements/try/S12.14_A17.js	2	4	part	Math.LN2
+test/language/statements/try/S12.14_A18_T7.js	2	3	part	.concat
+test/language/statements/try/early-catch-duplicates.js	2	6	part	catch ([x,
+test/language/statements/try/early-catch-function.js	2	6	part	catch (e) { function e(){}
+test/language/statements/try/optional-catch-binding-lexical.js	2	6	part	let
+test/language/statements/try/scope-catch-param-lex-open.js	2	6	part	catch ([x,
+test/language/statements/try/scope-catch-param-var-none.js	2	6	part	`
+test/language/statements/variable/fn-name-arrow.js	2	6	part	=>
+test/language/statements/while/S12.6.2_A8.js	2	5	part	.split
+test/language/statements/while/decl-cls.js	2	8	part	class
+test/language/statements/while/decl-const.js	2	6	part	const
+test/language/statements/while/decl-let.js	2	6	part	let
+test/language/statements/while/let-array-with-newline.js	2	6	part	let
+test/language/statements/while/let-block-with-newline.js	2	6	part	let
+test/language/statements/while/let-identifier-with-newline.js	2	6	part	let
+test/language/statements/with/S12.10_A1.10_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.10_T2.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.10_T4.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.11_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.11_T2.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.11_T4.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.12_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.12_T2.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.12_T4.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.1_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.1_T2.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.2_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.2_T2.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.2_T4.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.3_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.3_T2.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.3_T4.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.4_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.4_T2.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.4_T4.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.5_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.5_T2.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.5_T4.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.6_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.6_T2.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.7_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.7_T2.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.7_T4.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.8_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.8_T2.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.8_T4.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.9_T1.js	2	4	part	parseInt
+test/language/statements/with/S12.10_A1.9_T2.js	2	4	part	parseInt
+test/language/statements/with/decl-cls.js	2	8	part	class
+test/language/statements/with/decl-const.js	2	6	part	const
+test/language/statements/with/decl-let.js	2	6	part	let
+test/language/statements/with/let-array-with-newline.js	2	6	part	let
+test/language/statements/with/let-block-with-newline.js	2	6	part	let
+test/language/statements/with/let-identifier-with-newline.js	2	6	part	let
+test/language/types/number/S8.5_A13_T2.js	2	4	part	Math.pow
+test/language/types/number/S8.5_A14_T1.js	2	4	part	Math.pow
+test/language/types/number/S8.5_A14_T2.js	2	4	part	Math.pow
+test/language/types/object/S8.6.1_A1.js	2	4	part	Math.E
+test/language/types/object/S8.6.2_A1.js	2	3	part	.isPrototypeOf
+test/language/types/object/S8.6.2_A8.js	2	3	part	Object.preventExtensions
+test/language/types/reference/8.7.2-5-s.js	2	3	part	Object.preventExtensions
+test/language/white-space/S7.2_A5_T5.js	2	5	part	var\u00A0x
+test/language/white-space/after-regular-expression-literal-carriage-return.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-em-quad.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-em-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-en-quad.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-en-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-figure-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-form-feed.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-four-per-em-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-hair-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-ideographic-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-line-feed.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-line-separator.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-medium-mathematical-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-nbsp.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-nnbsp.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-ogham-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-paragraph-separator.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-punctuation-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-six-per-em-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-tab.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-thin-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-three-per-em-space.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-vertical-tab.js	2	5	part	/x/g
+test/language/white-space/after-regular-expression-literal-zwnbsp.js	2	5	part	/x/g
+test/language/white-space/mongolian-vowel-separator-eval.js	2	5	part	var\u180Efoo
+test/language/white-space/mongolian-vowel-separator.js	2	5	part	var᠎
