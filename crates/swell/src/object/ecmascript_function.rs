@@ -317,6 +317,7 @@ impl<H: Host> Agent<H> {
             stack: Vec::new(),
             locals: slots,
             env,
+            var_env: env,
             pushed_envs: 0,
             this,
             function: Some(function),

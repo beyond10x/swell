@@ -23,17 +23,25 @@
 //! slots ([`SlotNames`], a table of the compiled code); a record without names binds no name a
 //! lookup asks for and is passed.
 //!
+//! Non-strict eval code adds its `var` and function bindings to the VariableEnvironment of its
+//! caller at run time (`#sec-evaldeclarationinstantiation`, `dynamic_code.rs`), and strict eval
+//! code to a declarative record of its own: a declarative record keeps such bindings by name
+//! beside its slots ([`Added`]), mutable and deletable, and a lookup by name finds them. A
+//! reference that may reach one is looked up by name (decision 3, "Names", item 1).
+//!
 //! Each record's slots are charged to the memory budget when it is made and credited when the
-//! collector frees it.
+//! collector frees it; the bindings eval code adds are charged as they are made and credited the
+//! same way.
 //!
 //! Kind site of the collector: [`EnvironmentRecord::trace`] (the outer record, the slots, the
-//! binding object and the script whose code names the slots).
+//! bindings eval code added, the binding object and the script whose code names the slots).
 
 pub(crate) mod declarative;
 pub(crate) mod function;
 pub(crate) mod global;
 pub(crate) mod object;
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::heap::arena::Handle;
@@ -95,16 +103,60 @@ impl SlotNames {
     }
 }
 
+/// The bindings eval code added to a declarative record at run time
+/// (`#sec-evaldeclarationinstantiation`, steps 17 and 18: CreateMutableBinding(name, true) and
+/// InitializeBinding), each mutable and deletable, in the order they were made. Their growth is
+/// charged to the memory budget as it is made; the drop queues the bytes for the agent to
+/// credit after the sweep that frees the record, as an object's property map does.
+#[derive(Default)]
+pub(crate) struct Added {
+    bindings: Vec<(Key, Value)>,
+    bytes: u64,
+    queue: Option<Rc<Cell<u64>>>,
+}
+
+impl Added {
+    /// The index of the binding of `key`.
+    fn find(&self, key: Key) -> Option<usize> {
+        self.bindings.iter().position(|(name, _)| *name == key)
+    }
+
+    /// The bytes one more binding takes.
+    fn entry_bytes() -> u64 {
+        u64::try_from(size_of::<(Key, Value)>()).unwrap_or(u64::MAX)
+    }
+}
+
+impl Drop for Added {
+    fn drop(&mut self) {
+        if let Some(queue) = &self.queue {
+            queue.set(queue.get().saturating_add(self.bytes));
+        }
+    }
+}
+
 /// An Environment Record with its [[OuterEnv]]: another record, or `None` for the global
 /// environment of the realm. A declarative record (9.1.1.1) is its numbered slots, named when
-/// a lookup by name may reach them; an Object Environment Record of a `with` statement (9.1.1.2,
-/// [[IsWithEnvironment]] true) is its binding object, with no slot.
+/// a lookup by name may reach them, and the bindings eval code added to it; an Object
+/// Environment Record of a `with` statement (9.1.1.2, [[IsWithEnvironment]] true) is its binding
+/// object, with no slot.
 pub(crate) struct EnvironmentRecord {
     pub(crate) outer: Option<Handle>,
     pub(crate) slots: Vec<Value>,
     pub(crate) names: Option<SlotNames>,
+    /// The bindings eval code added at run time.
+    pub(crate) added: Added,
     /// [[BindingObject]] of an Object Environment Record.
     pub(crate) binding_object: Option<ObjectRef>,
+}
+
+/// Where a declarative record binds a name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Bound {
+    /// A named slot, and whether it is mutable.
+    Slot(u32, bool),
+    /// A binding eval code added, by index.
+    Added(usize),
 }
 
 impl EnvironmentRecord {
@@ -117,6 +169,10 @@ impl EnvironmentRecord {
         }
         for &value in &self.slots {
             mark.value(value);
+        }
+        for (key, value) in &self.added.bindings {
+            key.trace(mark);
+            mark.value(*value);
         }
         if let Some(object) = self.binding_object {
             mark.object(object);
@@ -133,6 +189,7 @@ impl EnvironmentRecord {
             outer: None,
             slots: Vec::new(),
             names: None,
+            added: Added::default(),
             binding_object: None,
         }
     }
@@ -178,6 +235,7 @@ impl<H: Host> Agent<H> {
                 outer,
                 slots: values,
                 names,
+                added: Added::default(),
                 binding_object: None,
             },
             owned,
@@ -209,6 +267,7 @@ impl<H: Host> Agent<H> {
                 outer,
                 slots: Vec::new(),
                 names: None,
+                added: Added::default(),
                 binding_object: Some(object),
             },
             0,
@@ -314,36 +373,133 @@ impl<H: Host> Agent<H> {
                 (
                     record.outer,
                     record.binding_object,
-                    record.names.as_ref().and_then(|names| names.find(key)),
+                    record
+                        .names
+                        .as_ref()
+                        .and_then(|names| names.find(key))
+                        .is_some()
+                        || record.added.find(key).is_some(),
                 )
             };
             if let Some(object) = object {
                 if self.with_has_binding(object, key)? {
                     return Ok(NameReference::Object(object));
                 }
-            } else if found.is_some() {
+            } else if found {
                 return Ok(NameReference::Declarative(handle));
             }
             current = outer;
         }
     }
 
-    /// The slot of the declarative record `env` that binds `key`, and whether it is mutable: a
-    /// record a lookup found binds it.
-    fn named_slot(&mut self, env: Handle, key: Key) -> Completion<(u32, bool)> {
-        let found = self
-            .environment(env)?
-            .names
-            .as_ref()
-            .and_then(|names| names.find(key));
-        match found {
-            Some(found) => Ok(found),
+    /// Where the declarative record `env` binds `key`: a named slot or a binding eval code
+    /// added; `None` when it binds no such name (an added binding a `delete` removed).
+    fn bound(&mut self, env: Handle, key: Key) -> Completion<Option<Bound>> {
+        let record = self.environment(env)?;
+        if let Some((slot, mutable)) = record.names.as_ref().and_then(|names| names.find(key)) {
+            return Ok(Some(Bound::Slot(slot, mutable)));
+        }
+        Ok(record.added.find(key).map(Bound::Added))
+    }
+
+    /// HasBinding of the declarative record `env`
+    /// (`#sec-declarative-environment-records-hasbinding-n`) for a name: a named slot or a
+    /// binding eval code added.
+    pub(crate) fn declarative_has_binding(&mut self, env: Handle, key: Key) -> Completion<bool> {
+        Ok(self.bound(env, key)?.is_some())
+    }
+
+    /// CreateMutableBinding(`key`, true) and InitializeBinding(`key`, `value`) of the
+    /// declarative record `env` (`#sec-declarative-environment-records-createmutablebinding-n-d`,
+    /// `#sec-declarative-environment-records-initializebinding-n-v`), which binds no such name: a
+    /// binding eval code adds at run time, deletable. Its growth is charged before it is made
+    /// (decision 3, "Names", item 5); over the budget the run ends in
+    /// `Terminated(MemoryBudget)`.
+    pub(crate) fn add_binding(&mut self, env: Handle, key: Key, value: Value) -> Completion<()> {
+        let (full, capacity) = {
+            let added = &self.environment(env)?.added.bindings;
+            (added.len() == added.capacity(), added.capacity())
+        };
+        if full {
+            let wanted = capacity.saturating_mul(2).max(4);
+            let more = u64::try_from(wanted.saturating_sub(capacity)).unwrap_or(u64::MAX);
+            let bytes = more.saturating_mul(Added::entry_bytes());
+            if self.heap.accounting.charge(bytes).is_err() {
+                return Err(self.terminate(Termination::MemoryBudget));
+            }
+            let queue = Rc::clone(&self.credit);
+            let reserved = match self.heap.environments.get_mut(env) {
+                Ok(record) => {
+                    let added = &mut record.added;
+                    let additional = wanted.saturating_sub(added.bindings.len());
+                    let reserved = added.bindings.try_reserve_exact(additional).is_ok();
+                    if reserved {
+                        added.bytes = added.bytes.saturating_add(bytes);
+                        if added.queue.is_none() {
+                            added.queue = Some(queue);
+                        }
+                    }
+                    reserved
+                }
+                Err(_) => false,
+            };
+            if !reserved {
+                self.heap.accounting.credit(bytes);
+                return Err(self.terminate(Termination::MemoryBudget));
+            }
+        }
+        match self.heap.environments.get_mut(env) {
+            Ok(record) => {
+                record.added.bindings.push((key, value));
+                Ok(())
+            }
+            Err(_) => Err(self.fault()),
+        }
+    }
+
+    /// SetMutableBinding(`key`, `value`, false) of a binding the declarative record `env` has
+    /// (`#sec-declarative-environment-records-setmutablebinding-n-v-s`): a named slot or a
+    /// binding eval code added; an immutable one keeps its value.
+    pub(crate) fn set_declarative_binding(
+        &mut self,
+        env: Handle,
+        key: Key,
+        value: Value,
+    ) -> Completion<()> {
+        match self.bound(env, key)? {
+            Some(Bound::Slot(slot, true)) => self.set_slot(Some(env), 0, slot, value),
+            Some(Bound::Slot(_, false)) => Ok(()),
+            Some(Bound::Added(index)) => self.set_added(env, index, value),
+            None => Err(self.fault()),
+        }
+    }
+
+    /// The value of the binding eval code added to `env` at `index`.
+    fn added_value(&mut self, env: Handle, index: usize) -> Completion<Value> {
+        match self.environment(env)?.added.bindings.get(index) {
+            Some(&(_, value)) => Ok(value),
+            None => Err(self.fault()),
+        }
+    }
+
+    /// Set the binding eval code added to `env` at `index`.
+    fn set_added(&mut self, env: Handle, index: usize, value: Value) -> Completion<()> {
+        let stored = self
+            .heap
+            .environments
+            .get_mut(env)
+            .ok()
+            .and_then(|record| record.added.bindings.get_mut(index))
+            .map(|binding| binding.1 = value);
+        match stored {
+            Some(()) => Ok(()),
             None => Err(self.fault()),
         }
     }
 
     /// GetValue (`#sec-getvalue`) of the resolved `reference` to `key`: GetBindingValue of its
-    /// record; `None` for an unresolvable one, which the caller throws for.
+    /// record; `None` for an unresolvable one, which the caller throws for, and for a binding of
+    /// a declarative record that a `delete` removed since the lookup.
     pub(crate) fn name_value(
         &mut self,
         reference: NameReference,
@@ -354,10 +510,11 @@ impl<H: Host> Agent<H> {
         match reference {
             NameReference::Unresolvable => Ok(None),
             NameReference::Global => self.global_get_binding_value(realm, key, strict).map(Some),
-            NameReference::Declarative(env) => {
-                let (slot, _) = self.named_slot(env, key)?;
-                self.get_slot(Some(env), 0, slot).map(Some)
-            }
+            NameReference::Declarative(env) => match self.bound(env, key)? {
+                Some(Bound::Slot(slot, _)) => self.get_slot(Some(env), 0, slot).map(Some),
+                Some(Bound::Added(index)) => self.added_value(env, index).map(Some),
+                None => Ok(None),
+            },
             NameReference::Object(object) => {
                 self.object_get_binding_value(object, key, strict).map(Some)
             }
@@ -382,12 +539,20 @@ impl<H: Host> Agent<H> {
                 Ok(())
             }
             NameReference::Global => self.global_set_mutable_binding(realm, key, value, strict),
-            NameReference::Declarative(env) => match self.named_slot(env, key)? {
-                (slot, true) => self.set_slot(Some(env), 0, slot, value),
-                (_, false) => {
+            NameReference::Declarative(env) => match self.bound(env, key)? {
+                Some(Bound::Slot(slot, true)) => self.set_slot(Some(env), 0, slot, value),
+                Some(Bound::Slot(_, false)) => {
                     let name = self.key_text(key);
                     self.assign_immutable(strict, &name)
                 }
+                Some(Bound::Added(index)) => self.set_added(env, index, value),
+                // Step 1: a binding a `delete` removed since the lookup.
+                None if strict => {
+                    let name = self.key_text(key);
+                    let message = format!("{name} is not defined");
+                    Err(self.throw_error(crate::host::ErrorKind::ReferenceError, &message))
+                }
+                None => self.add_binding(env, key, value),
             },
             NameReference::Object(object) => {
                 self.object_set_mutable_binding(object, key, value, strict)
@@ -397,9 +562,10 @@ impl<H: Host> Agent<H> {
 
     /// The `delete` of the resolved `reference` to `key`
     /// (`#sec-delete-operator-runtime-semantics-evaluation`, step 6): `true` when it is
-    /// unresolvable, otherwise DeleteBinding of its record; a declarative record's binding is
-    /// never deleted (`#sec-declarative-environment-records-deletebinding-n`: its bindings are
-    /// not deletable).
+    /// unresolvable, otherwise DeleteBinding of its record. Of a declarative record
+    /// (`#sec-declarative-environment-records-deletebinding-n`): a named slot is not deletable,
+    /// a binding eval code added is (CreateMutableBinding(name, true)) and is removed, and a
+    /// name the record no longer binds answers `true`.
     pub(crate) fn delete_name(
         &mut self,
         reference: NameReference,
@@ -409,7 +575,23 @@ impl<H: Host> Agent<H> {
         match reference {
             NameReference::Unresolvable => Ok(true),
             NameReference::Global => self.global_delete_binding(realm, key),
-            NameReference::Declarative(_) => Ok(false),
+            NameReference::Declarative(env) => match self.bound(env, key)? {
+                Some(Bound::Slot(..)) => Ok(false),
+                Some(Bound::Added(index)) => {
+                    let removed = self
+                        .heap
+                        .environments
+                        .get_mut(env)
+                        .ok()
+                        .filter(|record| index < record.added.bindings.len())
+                        .map(|record| record.added.bindings.remove(index));
+                    match removed {
+                        Some(_) => Ok(true),
+                        None => Err(self.fault()),
+                    }
+                }
+                None => Ok(true),
+            },
             NameReference::Object(object) => self.object_delete_binding(object, key),
         }
     }

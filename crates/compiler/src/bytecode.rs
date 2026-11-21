@@ -262,6 +262,13 @@ pub enum Instruction {
     /// `[this, f, a1 .. an] -> [v]`: EvaluateCall (`#sec-evaluatecall`): a `TypeError` when `f`
     /// is not callable, then Call(f, this, «a1 .. an»).
     Call(u32),
+    /// `[this, f, a1 .. an] -> [v]`: a call that scope analysis marked as a direct `eval`
+    /// (`#sec-function-calls-runtime-semantics-evaluation`, step 6): when `f` is `%eval%` of the
+    /// current realm (SameValue), PerformEval (`#sec-performeval`) of `a1`, or `undefined` with
+    /// no argument, with the strictness of the calling code and `direct`, the eval code running
+    /// in a frame of its own with the caller's `this`, LexicalEnvironment and
+    /// VariableEnvironment; otherwise `Call(n)`.
+    CallEval(u32),
     /// `[f, a1 .. an] -> [v]`: EvaluateNew (`#sec-evaluatenew`): a `TypeError` when `f` is not a
     /// constructor, then Construct(f, «a1 .. an»).
     New(u32),
@@ -414,6 +421,7 @@ impl Instruction {
             | Instruction::BitXor
             | Instruction::BitOr
             | Instruction::Call(_)
+            | Instruction::CallEval(_)
             | Instruction::New(_)
             | Instruction::ForInStart
             | Instruction::Throw

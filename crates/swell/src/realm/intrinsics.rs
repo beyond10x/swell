@@ -7,8 +7,9 @@
 //! by `story:harness-builtins` (each builtin module installs its own, `builtins/`); `%Number%`,
 //! `%Boolean%`, `%isNaN%` and `%isFinite%`, with the "constructor" properties of
 //! `%Number.prototype%` and `%Boolean.prototype%` and their methods, taken early by slice 2
-//! (`story:number-boolean-and-global-functions-early`). The other constructors and methods are
-//! later slices.
+//! (`story:number-boolean-and-global-functions-early`); `%eval%` and `%Function%` with
+//! `Function.prototype.constructor`, written by `story:eval-and-function-constructor`. The other
+//! constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
 //! first need no root until the realm record holds them all.
@@ -58,6 +59,10 @@ pub(crate) enum Intrinsic {
     IsNaN,
     /// `%isFinite%` (19.2.2), taken early by slice 2.
     IsFinite,
+    /// `%eval%` (19.2.1), slice 2.
+    Eval,
+    /// `%Function%` (20.2.1), the constructor that slice 2 delivers.
+    Function,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -98,6 +103,8 @@ pub(crate) struct Intrinsics {
     boolean: ObjectRef,
     is_nan: ObjectRef,
     is_finite: ObjectRef,
+    eval: ObjectRef,
+    function: ObjectRef,
 }
 
 impl Intrinsics {
@@ -122,6 +129,8 @@ impl Intrinsics {
             Intrinsic::Boolean => self.boolean,
             Intrinsic::IsNaN => self.is_nan,
             Intrinsic::IsFinite => self.is_finite,
+            Intrinsic::Eval => self.eval,
+            Intrinsic::Function => self.function,
         }
     }
 
@@ -157,6 +166,8 @@ impl Intrinsics {
             self.boolean,
             self.is_nan,
             self.is_finite,
+            self.eval,
+            self.function,
         ] {
             mark.object(object);
         }
@@ -315,6 +326,8 @@ impl<H: Host> Agent<H> {
         let number = self.create_number_constructor(making, number_prototype)?;
         let boolean = self.create_boolean_constructor(making, boolean_prototype)?;
         let (is_finite, is_nan) = self.create_global_functions(making)?;
+        let eval = self.create_eval_function(making)?;
+        let function = self.create_function_constructor(making)?;
         let intrinsics = Intrinsics {
             object_prototype,
             function_prototype,
@@ -333,6 +346,8 @@ impl<H: Host> Agent<H> {
             boolean,
             is_nan,
             is_finite,
+            eval,
+            function,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {

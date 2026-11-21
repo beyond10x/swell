@@ -389,12 +389,17 @@ pub struct Scope {
     pub references: Vec<String>,
     /// Whether a function needs an arguments object (`#sec-functiondeclarationinstantiation`,
     /// steps 15 to 18; made only where its code can observe it, `docs/design/engine.md`,
-    /// decision 3): its own code references `arguments`, and neither a parameter nor a function
-    /// it declares is named `arguments`. Always false for the script.
+    /// decision 3): its own code references `arguments` or holds a direct `eval` call (decision
+    /// 3, "Names", item 4), and neither a parameter nor a function it declares is named
+    /// `arguments`. Always false for the script.
     pub arguments_object: bool,
     /// Whether the body's own code (not a nested function's) holds a `with` statement, whose
     /// body's references are looked up by name (decision 3, "Names").
     pub contains_with: bool,
+    /// Whether the body's own code (not a nested function's) holds a direct `eval` call: a call
+    /// whose callee, its parentheses removed, is the IdentifierReference `eval`
+    /// (`#sec-function-calls-runtime-semantics-evaluation`, step 6), not an optional call.
+    pub contains_direct_eval: bool,
 }
 
 /// A `FunctionDeclaration`, `FunctionExpression`, or an accessor or method of an object literal.
@@ -445,6 +450,15 @@ impl Ast {
     /// Every function, in source order.
     pub fn functions(&self) -> &[Function] {
         &self.functions
+    }
+
+    /// Whether a call (not an optional call) of `callee` is a direct `eval`, as far as the source
+    /// tells (`#sec-function-calls-runtime-semantics-evaluation`, step 6): the callee, its
+    /// parentheses removed, is the IdentifierReference `eval`. Whether the call then performs
+    /// PerformEval depends on the value it calls, `%eval%` of the current realm, and is known
+    /// only when it runs.
+    pub fn is_direct_eval_callee(&self, callee: ExprId) -> bool {
+        matches!(self.expr(callee).map(|n| &n.expr), Some(Expr::Identifier(name)) if name == "eval")
     }
 
     /// Pushes the children of the node `of` onto the work stack of a walk, each made a step by

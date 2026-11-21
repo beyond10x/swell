@@ -220,6 +220,7 @@ fn text(code: &Code, scopes: &[Vec<u32>], instruction: &Instruction) -> String {
         I::DefineIndex(n) => format!("DefineIndex {n}"),
         I::ArrayLength(n) => format!("ArrayLength {n}"),
         I::Call(n) => format!("Call {n}"),
+        I::CallEval(n) => format!("CallEval {n}"),
         I::New(n) => format!("New {n}"),
         I::Jump(t) => format!("Jump {t:04}"),
         I::JumpIfTrue(t) => format!("JumpIfTrue {t:04}"),

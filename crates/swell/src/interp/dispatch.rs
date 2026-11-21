@@ -324,6 +324,7 @@ impl<H: Host> Agent<H> {
 
             // ---- calls ----
             I::Call(count) => self.call_instruction(count),
+            I::CallEval(count) => self.call_eval_instruction(count, strict),
             I::New(count) => self.new_instruction(count),
 
             // ---- control ----
@@ -885,9 +886,11 @@ impl<H: Host> Agent<H> {
         Err(Abrupt::Throw(value))
     }
 
-    /// `ThrowSyntaxError(k)`.
+    /// `ThrowSyntaxError(k)`; a refusal (the regular expression literal before slice 5) is
+    /// counted ([`Agent::refusals`]).
     fn throw_syntax_error(&mut self, index: u32) -> Completion<Flow> {
         let message = self.constant_text(index);
+        self.count_refusal(&message);
         Err(self.throw_error(ErrorKind::SyntaxError, &message))
     }
 
@@ -1326,6 +1329,44 @@ impl<H: Host> Agent<H> {
         let result = self.internal_call(object, this, &args)?;
         self.check_interrupt()?;
         self.replace(count.saturating_add(2), result)
+    }
+
+    /// `CallEval(n)`: a call whose callee is the IdentifierReference `eval`
+    /// (`#sec-function-calls-runtime-semantics-evaluation`, step 6). When the function is
+    /// `%eval%` of the current realm (SameValue), the direct `eval`: `undefined` with no
+    /// argument (step 6.a.ii), otherwise PerformEval of the first argument with the strictness
+    /// of this code, direct (`dynamic_code.rs`), whose eval code gets a frame on this loop that
+    /// replaces the `count + 2` entries of the call; any other function is called as `Call(n)`
+    /// calls it. Not inlined, so that the run loop's frame holds none of its locals.
+    #[inline(never)]
+    fn call_eval_instruction(&mut self, count: u32, strict: bool) -> Completion<Flow> {
+        let entries = usize::try_from(count)
+            .unwrap_or(usize::MAX)
+            .saturating_add(2);
+        let function = self.peek_value(entries.saturating_sub(2))?;
+        let realm = self.top_frame()?.realm;
+        let eval = self.intrinsic(realm, Intrinsic::Eval)?;
+        if function != Value::Object(eval) {
+            return self.call_instruction(count);
+        }
+        if count == 0 {
+            return self.replace(entries, Value::Undefined);
+        }
+        let source = self.peek_value(entries.saturating_sub(3))?;
+        self.drop_entries(entries)?;
+        // The source stays held by the activation the hooks run under, then by the eval code's
+        // frame; a value the eval answers at once goes where the call's entries were.
+        let keep = self.keep(source);
+        let answer = self.direct_eval(eval, source, strict);
+        self.release(keep);
+        match answer? {
+            Some(value) => {
+                // No frame was pushed: the value of the call.
+                self.push_value(value)?;
+                Ok(Flow::Next)
+            }
+            None => Ok(Flow::Next),
+        }
     }
 
     /// The call of the ECMAScript function `function` of `Call(count)` on this loop: its frame

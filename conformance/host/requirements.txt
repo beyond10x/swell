@@ -113,9 +113,9 @@ HOST-112 pending slice 9
 HOST-113 pending slice 9
 HOST-114 pending slice 9
 HOST-115 pending slice 18
-HOST-116 pending slice 2
-HOST-117 pending slice 2
-HOST-118 pending slice 2
+HOST-116 test swell::eval::host_116_eval_asks_the_host_before_parsing
+HOST-117 test swell::dynamic_function::host_117_function_asks_the_host_with_its_parts
+HOST-118 test swell::eval::host_118_eval_of_an_object_asks_host_get_code_for_eval
 HOST-119 pending slice 8
 HOST-120 pending slice 3
 HOST-121 pending slice 10
@@ -136,9 +136,9 @@ HOST-135 pending slice 4
 HOST-136 test swell::doc::compile_fail::host_136_agent_is_not_send
 HOST-137 test swell::scripts::host_137_nesting_error_names_parser_nesting_and_10_levels_parse
 HOST-138 pending slice 11
-HOST-139 pending slice 2
-HOST-140 pending slice 2
-HOST-141 pending slice 2
+HOST-139 test swell::eval::host_139_direct_eval_past_parser_nesting_throws_a_catchable_syntax_error
+HOST-140 test swell::eval::host_140_indirect_eval_past_parser_nesting_throws_a_syntax_error
+HOST-141 test swell::dynamic_function::host_141_function_past_parser_nesting_throws_a_catchable_syntax_error
 HOST-142 pending slice 5
 HOST-143 pending slice 5
 HOST-144 pending slice 4
@@ -149,7 +149,7 @@ HOST-148 pending slice 10
 HOST-149 pending slice 10
 HOST-150 pending slice 11
 HOST-151 pending slice 14
-HOST-152 pending slice 2
+HOST-152 test swell::eval_stack::host_152_deepest_reentry_evals_at_full_nesting
 HOST-153 pending slice 11
 HOST-154 pending slice 14
 HOST-155 pending slice 3
@@ -159,6 +159,6 @@ HOST-158 pending slice 11
 HOST-159 pending slice 11
 HOST-160 test swell::misuse::host_160_a_handle_returned_by_the_host_faults_the_agent
 HOST-161 test swell::lib::realm::tests::host_161_the_entry_names_the_current_realm
-HOST-162 pending slice 2
-HOST-163 pending slice 2
-HOST-164 pending slice 2
+HOST-162 test swell::eval::host_162_a_stale_or_foreign_handle_from_either_hook_faults_the_agent
+HOST-163 test swell::eval_stack::host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting
+HOST-164 test swell::eval::host_164_refusals_counts_every_refusal_caught_or_not

@@ -1,0 +1,24 @@
+script locals 0
+  var "x"
+  declare 0
+  0000 2:5 ResolveName "x"
+  0001 2:9 Number 1
+  0002 2:5 PutNameRef "x"
+  0003 2:5 Pop
+  0004 4:1 GetName "x"
+  0005 4:5 GetNameForCall "h"
+  0006 4:7 Number 2
+  0007 4:5 Call 1
+  0008 4:1 Add
+  0009 4:1 StoreCompletion
+  0010 0:0 LoadCompletion
+  0011 0:0 Return
+
+function 0 declaration "h" length 1 locals 1
+  params local 0
+  0000 3:24 GetLocal 0
+  0001 3:28 GetName "x"
+  0002 3:24 Add
+  0003 3:17 Return
+  0004 3:1 Undefined
+  0005 3:1 Return

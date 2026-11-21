@@ -1,0 +1,61 @@
+script locals 0
+  var "g"
+  declare 0 2
+  0000 2:5 ResolveGlobal "g"
+  0001 2:9 Number 1
+  0002 2:5 PutGlobalRef "g"
+  0003 2:5 Pop
+  0004 0:0 LoadCompletion
+  0005 0:0 Return
+
+function 0 declaration "f" length 1 locals 0
+  params env 0
+  captured "a" "arguments" "b" "inner"
+  arguments mapped env 1
+  0000 3:39 Closure 1
+  0001 3:39 SetEnv 0 3
+  0002 3:39 Pop
+  0003 3:25 GetEnv 0 0
+  0004 3:21 SetEnv 0 2
+  0005 3:21 Pop
+  0006 3:28 GetNameForCall "eval"
+  0007 3:33 String "b"
+  0008 3:28 CallEval 1
+  0009 3:28 Pop
+  0010 3:85 GetEnv 0 2
+  0011 3:89 GetName "g"
+  0012 3:85 Add
+  0013 3:78 Return
+  0014 3:1 Undefined
+  0015 3:1 Return
+
+function 1 declaration "inner" length 0 locals 0
+  0000 3:65 GetEnv 0 0
+  0001 3:69 GetEnv 0 2
+  0002 3:65 Add
+  0003 3:73 GetName "g"
+  0004 3:65 Add
+  0005 3:58 Return
+  0006 3:39 Undefined
+  0007 3:39 Return
+
+function 2 declaration "s" length 1 locals 0 strict
+  params env 0
+  captured "a" "arguments" "b"
+  arguments unmapped env 1
+  0000 4:17 String "use strict"
+  0001 4:17 Pop
+  0002 4:39 GetEnv 0 0
+  0003 4:35 SetEnv 0 2
+  0004 4:35 Pop
+  0005 4:42 Undefined
+  0006 4:42 GetGlobal "eval"
+  0007 4:47 String "b"
+  0008 4:42 CallEval 1
+  0009 4:42 Pop
+  0010 4:60 GetEnv 0 2
+  0011 4:64 GetGlobal "g"
+  0012 4:60 Add
+  0013 4:53 Return
+  0014 4:1 Undefined
+  0015 4:1 Return

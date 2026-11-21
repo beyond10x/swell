@@ -10,7 +10,9 @@
 //! evaluation order. Slice 2 adds labelled statements, `??`, optional chains, the logical
 //! assignments, a `catch` without a parameter, and plain methods and shorthand properties of
 //! object literals, the `with` statement with the names its body looks up at run time, and the
-//! arguments object of a function (`docs/design/engine.md`, decision 3, "Names"). A regular
+//! arguments object of a function (`docs/design/engine.md`, decision 3, "Names"), the direct
+//! `eval` call and eval code ([`compile_eval`]), whose names are looked up as the same rule
+//! says. A regular
 //! expression literal compiles to the `SyntaxError` the design gives
 //! it before slice 5 ([`swell_syntax::REGEXP_REFUSAL`]). Slots and environments are assigned by
 //! `resolve.rs`; `disasm.rs` writes a [`Code`] as text.
@@ -70,7 +72,23 @@ impl std::error::Error for CompileError {}
 /// Compiles a parsed script into its [`Code`]: the script's own instructions and a template for
 /// every function in it.
 pub fn compile_script(script: &Script) -> Result<Code, CompileError> {
-    let resolution = resolve::resolve(script)?;
+    compile(script, false)
+}
+
+/// Compiles eval code, a script that `swell_syntax::parse_eval` parsed, into its [`Code`]
+/// (`#sec-performeval`, step 30 onward). A name the eval code does not bind is looked up by name
+/// at run time, through the environments of the code that called `eval` (decision 3, "Names",
+/// item 1). [`Code::var_names`] and [`Code::function_declarations`] are the VarDeclaredNames
+/// and the function declarations to hoist that `parse_eval` answered in [`Script::scope`], for
+/// EvalDeclarationInstantiation (`#sec-evaldeclarationinstantiation`); the code returns its
+/// completion value, as a script's does.
+pub fn compile_eval(script: &Script) -> Result<Code, CompileError> {
+    compile(script, true)
+}
+
+/// The compile step of a script or of eval code.
+fn compile(script: &Script, eval_code: bool) -> Result<Code, CompileError> {
+    let resolution = resolve::resolve(script, eval_code)?;
     let mut constants = Constants::default();
     let body = function::compile_script_body(script, &resolution, &mut constants)?;
     let mut functions = Vec::with_capacity(script.ast.functions().len());

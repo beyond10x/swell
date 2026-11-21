@@ -2,11 +2,12 @@
 //! operand stack, local slots, environment, handler table; ECMA-262 9.4,
 //! `#sec-execution-contexts`). Filled by `story:interpreter-and-script-entry-points`.
 //!
-//! A frame is an ECMAScript code execution context: of a script (its Function is null) or of a
-//! call of an ECMAScript function. It holds the code it runs (the script's [`Compiled`] and, for a
-//! function, the index of its template), the instruction index, the operand stack, the local
-//! slots, the LexicalEnvironment (`None` for the global environment of the frame's realm) with
-//! the number of environments it made itself (`PushEnv`, `PushNamedEnv`, `PushWith`), the `this`
+//! A frame is an ECMAScript code execution context: of a script or of eval code (its Function is
+//! null) or of a call of an ECMAScript function. It holds the code it runs (the script's
+//! [`Compiled`] and, for a function, the index of its template), the instruction index, the
+//! operand stack, the local slots, the LexicalEnvironment (`None` for the global environment of
+//! the frame's realm) with the number of environments it made itself (`PushEnv`,
+//! `PushNamedEnv`, `PushWith`), the VariableEnvironment, the `this`
 //! value, the function, the realm, the script, and for a script the completion value register.
 //!
 //! What a frame takes beyond its fixed part (its locals and its operand stack as it grows) is
@@ -88,6 +89,13 @@ pub(crate) struct Frame {
     /// The LexicalEnvironment: a record of the `environments` arena, or `None` for the global
     /// environment of `realm`.
     pub(crate) env: Option<Handle>,
+    /// The VariableEnvironment, where a direct `eval` of non-strict code adds its `var` and
+    /// function bindings (`#sec-performeval`, `#sec-evaldeclarationinstantiation`): `None` for
+    /// the global environment of `realm` (a script), the record the call made for a function
+    /// (one whose code contains a direct `eval` always makes one, `swell-compiler`'s
+    /// `resolve.rs`), and the caller's, or the record of its own for strict eval code, for eval
+    /// code.
+    pub(crate) var_env: Option<Handle>,
     /// How many of the environments on the way out from `env` this frame made (`PushEnv`,
     /// `PushNamedEnv` and `PushWith`).
     pub(crate) pushed_envs: u32,
@@ -170,6 +178,9 @@ impl Frame {
             mark.value(value);
         }
         if let Some(env) = self.env {
+            mark.push(Item::Environment(env));
+        }
+        if let Some(env) = self.var_env {
             mark.push(Item::Environment(env));
         }
         mark.value(self.this);

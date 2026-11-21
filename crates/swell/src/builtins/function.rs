@@ -4,8 +4,9 @@
 //! and `Function.prototype[@@hasInstance]` (`#sec-function.prototype-%symbol.hasinstance%`),
 //! which `InstanceofOperator` reads first (`#sec-instanceofoperator`). The bound function
 //! exotic object `bind` makes is `object/bound_function.rs`. Written by
-//! `story:harness-builtins`. The global `Function`, which needs CreateDynamicFunction, and the
-//! other methods are slice 3.
+//! `story:harness-builtins`. The `Function` constructor (`#sec-function-constructor`), given
+//! to slice 2 by decision (`AGENTS.md`), with CreateDynamicFunction in `dynamic_code.rs`, was
+//! added by `story:eval-and-function-constructor`; the other methods are slice 3.
 
 use crate::builtins::object::argument;
 use crate::builtins::string::StringBuilder;
@@ -27,9 +28,25 @@ pub(crate) enum FunctionBuiltin {
     Call,
     /// `Function.prototype [ @@hasInstance ] ( V )` (20.2.3.6).
     HasInstance,
+    /// `Function ( ...parameterArgs, bodyArg )` (20.2.1.1).
+    Constructor,
 }
 
 impl<H: Host> Agent<H> {
+    /// `%Function%` (20.2.1, 20.2.2): a built-in constructor of length 1 whose [[Prototype]] is
+    /// `%Function.prototype%`, with "prototype" `%Function.prototype%` ({ [[Writable]]: false,
+    /// [[Enumerable]]: false, [[Configurable]]: false }, 20.2.2.1) and
+    /// `Function.prototype.constructor` (20.2.3.4).
+    pub(crate) fn create_function_constructor(&mut self, making: Making) -> Completion<ObjectRef> {
+        self.create_builtin_constructor(
+            making,
+            "Function",
+            1,
+            BuiltinId::Function(FunctionBuiltin::Constructor),
+            making.function_prototype,
+        )
+    }
+
     /// `bind`, `call` and `[@@hasInstance]` of `%Function.prototype%`.
     pub(crate) fn install_function_prototype_methods(&mut self, making: Making) -> Completion<()> {
         let prototype = making.function_prototype;
@@ -66,12 +83,14 @@ impl<H: Host> Agent<H> {
     pub(crate) fn run_function_builtin(
         &mut self,
         id: FunctionBuiltin,
-        _function: ObjectRef,
+        function: ObjectRef,
         this: Value,
         args: &[Value],
-        _new_target: Option<ObjectRef>,
+        new_target: Option<ObjectRef>,
     ) -> Completion<Value> {
         match id {
+            // `#sec-function-p1-p2-pn-body` with CreateDynamicFunction (`dynamic_code.rs`).
+            FunctionBuiltin::Constructor => self.function_constructor(function, args, new_target),
             FunctionBuiltin::Bind => self.function_bind(this, args),
             FunctionBuiltin::Call => self.function_call(this, args),
             // "Let F be the this value. Return ? OrdinaryHasInstance(F, V)."

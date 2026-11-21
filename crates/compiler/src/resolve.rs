@@ -1,9 +1,9 @@
 //! Slot and environment assignment (`#sec-environment-records`), from the scope analysis of
 //! `swell-syntax`.
 //!
-//! Slice 2 has no direct `eval` yet, so every binding of a function is known when the script is
-//! compiled: the parameters, the binding `arguments` of a function that needs an arguments object
-//! and the `VarDeclaredNames` of a function (`#sec-functiondeclarationinstantiation`), the
+//! The bindings the compiler knows are the parameters, the binding `arguments` of a function
+//! that needs an arguments object and the `VarDeclaredNames` of a function
+//! (`#sec-functiondeclarationinstantiation`), the
 //! parameter of a `catch` clause (`#sec-runtime-semantics-catchclauseevaluation`) and the own
 //! name of a named function expression
 //! (`#sec-runtime-semantics-instantiateordinaryfunctionexpression`). A name is resolved as
@@ -32,6 +32,20 @@
 //!   `FunctionTemplate::captured`), the environment of a `catch` clause (a named one,
 //!   `PushNamedEnv`) and that of a named function expression's own name; references to it from
 //!   outside the body keep its slot.
+//!
+//! A direct `eval` call in non-strict code may add `var` and function bindings to the variable
+//! environment of its caller at run time (`#sec-performeval`, `#sec-evaldeclarationinstantiation`),
+//! which the same rule covers:
+//!
+//! - a reference with a function or script scope between it and its binding scope whose own code
+//!   is non-strict and contains a direct `eval` call is looked up by name; a call in a nested
+//!   function does not count for the outer scope, and a strict function keeps its slots even when
+//!   it calls `eval` itself;
+//! - every binding of every scope that encloses a direct `eval` call, strict or not, the scope of
+//!   the call included, lives in an environment whose slots have names, so that the eval code
+//!   finds it by name;
+//! - in eval code ([`crate::compile_eval`]), a reference that the eval code does not bind is looked
+//!   up by name, through the environments of the code that called `eval`.
 //!
 //! A record whose slots have no names is passed by a lookup: no lookup can find its name there,
 //! since a name a record between the reference and the `with` binds would have resolved the
@@ -179,6 +193,12 @@ struct Resolver<'a> {
     self_scopes: BTreeMap<FunctionId, usize>,
     /// The scope of the parameters and `var` declarations of each function.
     function_scopes: BTreeMap<FunctionId, usize>,
+    /// The scope of each direct `eval` call.
+    eval_calls: Vec<usize>,
+    /// Whether the tree is eval code: a name it does not bind is looked up by name.
+    eval_code: bool,
+    /// Whether the script's own code is non-strict and contains a direct `eval` call.
+    script_adds_bindings: bool,
     work: Vec<Walk>,
 }
 
@@ -186,8 +206,8 @@ fn malformed(what: &str) -> CompileError {
     CompileError::Tree(what.to_string())
 }
 
-/// Resolves every name of `script`.
-pub(crate) fn resolve(script: &Script) -> Result<Resolution, CompileError> {
+/// Resolves every name of `script`; of eval code when `eval_code` is true.
+pub(crate) fn resolve(script: &Script, eval_code: bool) -> Result<Resolution, CompileError> {
     let mut r = Resolver {
         ast: &script.ast,
         scopes: vec![ScopeData {
@@ -206,6 +226,9 @@ pub(crate) fn resolve(script: &Script) -> Result<Resolution, CompileError> {
         given_names: BTreeMap::new(),
         self_scopes: BTreeMap::new(),
         function_scopes: BTreeMap::new(),
+        eval_calls: Vec::new(),
+        eval_code,
+        script_adds_bindings: !script.strict && script.scope.contains_direct_eval,
         work: Vec::new(),
     };
     r.push_list(&script.body);
@@ -559,6 +582,10 @@ impl<'a> Resolver<'a> {
                 children.push(Walk::Expr(*index));
             }
             Expr::Call { callee, arguments } | Expr::OptionalCall { callee, arguments } => {
+                if matches!(node.expr, Expr::Call { .. }) && self.ast.is_direct_eval_callee(*callee)
+                {
+                    self.eval_calls.push(self.current);
+                }
                 children.push(Walk::Expr(*callee));
                 children.extend(arguments.iter().map(|e| Walk::Expr(*e)));
             }
@@ -656,14 +683,22 @@ impl<'a> Resolver<'a> {
         Ok(())
     }
 
-    /// Decision 3, item 3: every scope that encloses a `with` body, up to the global scope, keeps
-    /// the names of its slots, and each of its bindings lives in its environment. The parameters
-    /// of a function that makes a mapped arguments object live in its function environment
-    /// (`#sec-createmappedargumentsobject`: the map reads and writes their bindings).
+    /// Decision 3, item 3: every scope that encloses a `with` body or a direct `eval` call
+    /// (strict or not), up to the global scope, keeps the names of its slots, and each of its
+    /// bindings lives in its environment; the scope of the call itself is one of them. The
+    /// parameters of a function that makes a mapped arguments object live in its function
+    /// environment (`#sec-createmappedargumentsobject`: the map reads and writes their bindings).
     fn mark_named(&mut self) -> Result<(), CompileError> {
         let mut named = BTreeSet::new();
-        for s in self.scopes.iter().filter(|s| s.kind == Kind::With) {
-            let mut outer = s.parent;
+        let starts: Vec<Option<usize>> = self
+            .scopes
+            .iter()
+            .filter(|s| s.kind == Kind::With)
+            .map(|s| s.parent)
+            .chain(self.eval_calls.iter().map(|c| Some(*c)))
+            .collect();
+        for start in starts {
+            let mut outer = start;
             while let Some(p) = outer {
                 // Each scope is walked once: what encloses a named scope is named already.
                 if !named.insert(p) {
@@ -737,6 +772,23 @@ impl<'a> Resolver<'a> {
         Ok(frames)
     }
 
+    /// Whether bindings may appear in `scope` at run time, so a reference crossing it is looked
+    /// up by name: the script or a function whose own code is non-strict and contains a direct
+    /// `eval` call (`#sec-performeval`, varEnv; `#sec-evaldeclarationinstantiation`), and the top
+    /// of eval code, whose names lie in the environments of the code that called `eval`.
+    fn adds_bindings(&self, scope: &ScopeData) -> bool {
+        if scope.kind != Kind::Function {
+            return false;
+        }
+        match scope.owner {
+            Some(id) => self
+                .ast
+                .function(id)
+                .is_some_and(|f| !f.strict && f.scope.contains_direct_eval),
+            None => self.eval_code || self.script_adds_bindings,
+        }
+    }
+
     /// The binding of every site.
     fn locate(&self) -> Result<BTreeMap<Site, Binding>, CompileError> {
         let mut sites = BTreeMap::new();
@@ -752,14 +804,16 @@ impl<'a> Resolver<'a> {
                 None => None,
             };
             // The environments between the site and the scope that binds the name, or the
-            // global scope; a `with` body among them makes it a lookup by name.
+            // global scope; a `with` body among them, a function or script scope whose own code
+            // is non-strict with a direct `eval`, or the top of eval code makes it a lookup by
+            // name (decision 3, "Names", item 1).
             let mut hops = 0u32;
-            let mut crosses_with = false;
+            let mut by_name = false;
             let mut s = *scope;
             while Some(s) != home {
                 let here = self.scopes.get(s).ok_or_else(|| malformed("a scope"))?;
-                if here.kind == Kind::With {
-                    crosses_with = true;
+                if here.kind == Kind::With || self.adds_bindings(here) {
+                    by_name = true;
                 }
                 if here.env_slots > 0 || here.kind == Kind::With {
                     hops = hops
@@ -773,7 +827,7 @@ impl<'a> Resolver<'a> {
                 }
             }
             let binding = match found {
-                _ if crosses_with => Binding::Dynamic(name.clone()),
+                _ if by_name => Binding::Dynamic(name.clone()),
                 None => Binding::Global(name.clone()),
                 Some(b) => {
                     let data = self.bindings.get(b).ok_or_else(|| malformed("a binding"))?;

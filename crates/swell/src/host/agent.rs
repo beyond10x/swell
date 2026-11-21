@@ -104,6 +104,8 @@ pub struct Agent<H: Host> {
     /// A run ended in `Terminated(MemoryBudget)`: the next safe point collects, so that what
     /// that run left unreachable does not hold the budget the next entry needs (HOST-70).
     pub(crate) collect_pending: bool,
+    /// The refusals of a later slice's construct the agent raised ([`Agent::refusals`]).
+    pub(crate) refusals: u64,
     /// The call the test-only switch makes find a broken invariant next ([`FaultPoint`]).
     #[cfg(feature = "fault-injection")]
     pub(crate) injected: Option<FaultPoint>,
@@ -162,9 +164,32 @@ impl<H: Host> Agent<H> {
             interp: Interp::default(),
             scoped_scripts: Vec::new(),
             collect_pending: false,
+            refusals: 0,
             #[cfg(feature = "fault-injection")]
             injected: None,
         })
+    }
+
+    /// How many refusals of a later slice's construct the agent raised (`host-interface.md`,
+    /// section 13, "A count of refusals"): every `SyntaxError` whose message
+    /// `swell_syntax::message_kind` reads as a refusal, raised by a parse through
+    /// `parse_script`, `eval` or `Function` or by an instruction (a regular expression literal
+    /// before slice 5), caught by the script or not. The nesting limit and every other
+    /// `SyntaxError` are not counted. It starts at 0, is never reset, saturates, and is read in
+    /// every state of the agent, `Faulted` included. A read: it runs no code, calls no hook and
+    /// spends no step.
+    pub fn refusals(&self) -> u64 {
+        self.refusals
+    }
+
+    /// Count the `SyntaxError` of `message` if it is a refusal.
+    pub(crate) fn count_refusal(&mut self, message: &str) {
+        if matches!(
+            swell_syntax::message_kind(message),
+            swell_syntax::MessageKind::Refusal { .. }
+        ) {
+            self.refusals = self.refusals.saturating_add(1);
+        }
     }
 
     /// The host value.
