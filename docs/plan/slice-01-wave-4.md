@@ -25,6 +25,13 @@ language scripts written after the two units met (`Object.defineProperty` and
 `instanceof` on a bound function, `Array.prototype.push`) answer what their clauses say.
 No test262 case is run by the gate yet: the runner's run path is wave 6.
 
+**The 31 cases, measured early.** A throwaway probe outside the repository ran the 31 cases of
+the slice on this engine the way the runner will (a fresh agent and realm per run, `assert.js`
+and `sta.js` first, both modes, 2^30 steps and 512 MiB, a thread of exactly
+`min_stack_bytes()`): 60 of 62 runs pass, 30 of 31 cases. `assert-throws-same-realm` throws
+`ReferenceError: $262 is not defined`; `$262.createRealm` belongs to the runner's host, which
+wave 6 writes. The largest passing run takes 1,782 steps.
+
 ## What went wrong, and what was decided
 
 - **Both units stopped before they wrote anything, and were right.** Neither story could be met
