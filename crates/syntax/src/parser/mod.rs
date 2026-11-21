@@ -8,11 +8,16 @@
 //!
 //! - every recursive entry of the parser, each function on a path that can come back to itself,
 //!   goes through one depth counter, and a script that is not empty enters it once; so the Rust
-//!   stack the parser uses is a function of the limit, and at limit 0 any non-empty source is
-//!   refused;
+//!   stack the parser uses is a function of the limit (`ParseOptions::stack_bytes`), and at limit
+//!   0 any non-empty source is refused;
 //! - every node records its depth, the longest path from it to a leaf, and a node deeper than the
-//!   limit is refused; so a chain built by a loop (`a + a + ...`, `a.b.c...`) is bounded too, and
-//!   every later walk over the tree recurses at most the limit deep.
+//!   limit is refused; so a chain built by a loop (`a + a + ...`, `a.b.c...`) is bounded too.
+//!
+//! A frame that stays on the stack while the parser recurses holds little: nodes are reserved and
+//! filled in by leaf helpers, and every helper a recursive function calls that is not on a
+//! recursive path itself (tokens, nodes, errors) is `#[inline(never)]`, so an optimised build
+//! does not move the helper's locals into the recursive frame. `crate::STACK_BYTES_PER_LEVEL`
+//! is the bound those frames hold.
 //!
 //! The parser stops at its first error: a parse that fails has exactly one error.
 
@@ -58,6 +63,9 @@ pub(crate) struct Parser<'a> {
     functions: u32,
     /// The operator stack of the binary expression parser, shared by its nested calls.
     operators: Vec<expression::Pending>,
+    /// The prefix operators of the unary expression parser waiting for their operand, shared by
+    /// its nested calls, with where each starts.
+    prefixes: Vec<(expression::Prefix, Span)>,
 }
 
 /// Parses `source` as a `Script` with nesting limit `max`.
@@ -82,6 +90,7 @@ pub(crate) fn parse(source: &[u16], max: u32) -> Result<Parsed, SyntaxError> {
         strict: false,
         functions: 0,
         operators: Vec::new(),
+        prefixes: Vec::new(),
     };
     match parser.script() {
         Ok((body, strict)) => Ok(Parsed {
@@ -113,6 +122,7 @@ impl<'a> Parser<'a> {
 
     // ---- errors -------------------------------------------------------------------------------
 
+    #[inline(never)]
     fn fail<T>(&mut self, error: SyntaxError) -> R<T> {
         if self.error.is_none() {
             self.error = Some(error);
@@ -120,21 +130,25 @@ impl<'a> Parser<'a> {
         Err(Stop)
     }
 
+    #[inline(never)]
     fn fail_here<T>(&mut self, message: impl Into<String>) -> R<T> {
         let e = SyntaxError::new(message, self.tok.line, self.tok.column);
         self.fail(e)
     }
 
+    #[inline(never)]
     fn fail_at<T>(&mut self, message: impl Into<String>, span: Span) -> R<T> {
         self.fail(SyntaxError::new(message, span.line, span.column))
     }
 
     /// Refuses the construct at the current token, which slice `slice` brings.
+    #[inline(never)]
     fn refuse<T>(&mut self, construct: &str, slice: u32) -> R<T> {
         let e = SyntaxError::refused(construct, slice, self.tok.line, self.tok.column);
         self.fail(e)
     }
 
+    #[inline(never)]
     fn refuse_at<T>(&mut self, construct: &str, slice: u32, span: Span) -> R<T> {
         self.fail(SyntaxError::refused(
             construct,
@@ -144,6 +158,7 @@ impl<'a> Parser<'a> {
         ))
     }
 
+    #[inline(never)]
     fn unexpected<T>(&mut self) -> R<T> {
         let message = match &self.tok.kind {
             TokenKind::Eof => "unexpected end of input".to_string(),
@@ -160,6 +175,7 @@ impl<'a> Parser<'a> {
     // ---- the nesting bound ---------------------------------------------------------------------
 
     /// One recursive entry: refused when it passes the limit.
+    #[inline(never)]
     fn enter(&mut self) -> R<()> {
         self.depth += 1;
         if self.depth > self.max {
@@ -169,11 +185,13 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    #[inline(never)]
     fn leave(&mut self) {
         self.depth = self.depth.saturating_sub(1);
     }
 
     /// Checks a node depth against the limit.
+    #[inline(never)]
     fn check_depth(&mut self, depth: u32, span: Span) -> R<()> {
         if depth > self.max {
             return self.fail(SyntaxError::nesting(self.max, span.line, span.column));
@@ -183,6 +201,7 @@ impl<'a> Parser<'a> {
 
     // ---- tokens --------------------------------------------------------------------------------
 
+    #[inline(never)]
     fn advance(&mut self) -> R<()> {
         self.prev_end = self.tok.end;
         let next = match self.peeked.take() {
@@ -197,6 +216,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The token after the current one, lexed in the `InputElementDiv` goal.
+    #[inline(never)]
     fn peek(&mut self) -> R<&Token> {
         if self.peeked.is_none() {
             match self.lexer.next_token() {
@@ -211,6 +231,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Lexes the current `/` or `/=` again as a regular expression literal.
+    #[inline(never)]
     fn rescan_regexp(&mut self) -> R<()> {
         match self.lexer.rescan_regexp(&self.tok) {
             Ok(t) => {
@@ -237,6 +258,7 @@ impl<'a> Parser<'a> {
         matches!(&self.tok.kind, TokenKind::Name(n) if n == name)
     }
 
+    #[inline(never)]
     fn eat(&mut self, p: Punct) -> R<bool> {
         if self.is(p) {
             self.advance()?;
@@ -245,6 +267,7 @@ impl<'a> Parser<'a> {
         Ok(false)
     }
 
+    #[inline(never)]
     fn expect(&mut self, p: Punct) -> R<()> {
         if self.is(p) {
             return self.advance();
@@ -252,6 +275,7 @@ impl<'a> Parser<'a> {
         self.unexpected()
     }
 
+    #[inline(never)]
     fn expect_keyword(&mut self, k: Keyword) -> R<()> {
         if self.is_keyword(k) {
             return self.advance();
@@ -262,6 +286,7 @@ impl<'a> Parser<'a> {
     /// The `;` that ends a statement. Where `#sec-rules-of-automatic-semicolon-insertion` would
     /// insert one (before `}`, at the end of the input, or before a token on a new line), the
     /// insertion is refused: it is slice 2's.
+    #[inline(never)]
     fn semicolon(&mut self) -> R<()> {
         if self.eat(Punct::Semicolon)? {
             return Ok(());
@@ -289,10 +314,12 @@ impl<'a> Parser<'a> {
         span
     }
 
+    #[inline(never)]
     fn expr_span(&self, id: ExprId) -> Span {
         self.ast.expr(id).map(|n| n.span).unwrap_or_default()
     }
 
+    #[inline(never)]
     fn push_expr(&mut self, expr: Expr, span: Span) -> R<ExprId> {
         let mut deepest = 0;
         expr.children(|c: Child| deepest = deepest.max(self.ast.depth(c)));
@@ -308,6 +335,7 @@ impl<'a> Parser<'a> {
         Ok(id)
     }
 
+    #[inline(never)]
     fn push_stmt(&mut self, stmt: Stmt, span: Span) -> R<StmtId> {
         let mut deepest = 0;
         stmt.children(|c: Child| deepest = deepest.max(self.ast.depth(c)));
@@ -321,6 +349,7 @@ impl<'a> Parser<'a> {
     /// Pushes `stmt` as a node whose parts are filled in while its children are parsed; its
     /// depth and span are set by [`Parser::complete_stmt`]. A frame that stays on the stack while
     /// the children are parsed then holds only the id.
+    #[inline(never)]
     fn reserve_stmt(&mut self, stmt: Stmt) -> StmtId {
         let id = StmtId(u32::try_from(self.ast.stmts.len()).unwrap_or(u32::MAX));
         self.ast.stmts.push(StmtNode {
@@ -336,6 +365,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Sets the span (from `start` to the previous token) and the depth of a reserved statement.
+    #[inline(never)]
     fn complete_stmt(&mut self, id: StmtId, start: Span) -> R<StmtId> {
         let span = self.finish(start);
         let mut deepest = 0;
@@ -353,6 +383,7 @@ impl<'a> Parser<'a> {
     }
 
     /// As [`Parser::reserve_stmt`], for an expression.
+    #[inline(never)]
     fn reserve_expr(&mut self, expr: Expr) -> ExprId {
         let id = ExprId(u32::try_from(self.ast.exprs.len()).unwrap_or(u32::MAX));
         self.ast.exprs.push(ExprNode {
@@ -369,6 +400,7 @@ impl<'a> Parser<'a> {
     }
 
     /// As [`Parser::complete_stmt`], for an expression.
+    #[inline(never)]
     fn complete_expr(&mut self, id: ExprId, start: Span) -> R<ExprId> {
         let span = self.finish(start);
         let mut deepest = 0;
@@ -386,6 +418,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Reserves the next function number, so functions are numbered in source order.
+    #[inline(never)]
     fn reserve_function(&mut self, function: Function) -> FunctionId {
         let id = FunctionId(u32::try_from(self.ast.functions.len()).unwrap_or(u32::MAX));
         self.ast.functions.push(function);

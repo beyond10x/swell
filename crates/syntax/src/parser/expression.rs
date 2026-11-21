@@ -52,7 +52,7 @@ enum Suffix {
 
 /// A prefix operator.
 #[derive(Clone, Copy)]
-enum Prefix {
+pub(crate) enum Prefix {
     Unary(UnaryOp),
     Update(UpdateOp),
 }
@@ -196,6 +196,7 @@ impl<'a> Parser<'a> {
 
     /// The binary operator at the current token with its precedence, `in` excepted under
     /// `no_in`; `**` and `??` are refused.
+    #[inline(never)]
     fn binary_operator(&mut self, no_in: bool) -> R<Option<(Binary, u8)>> {
         use BinaryOp::*;
         let op = match &self.tok.kind {
@@ -268,6 +269,7 @@ impl<'a> Parser<'a> {
 
     /// Reads the operator after `left`, if any: reduces the pending operators that bind at
     /// least as tightly and pushes it with `left`. False when no operator follows.
+    #[inline(never)]
     fn binary_step(&mut self, base: usize, left: ExprId, no_in: bool) -> R<bool> {
         let Some((op, precedence)) = self.binary_operator(no_in)? else {
             return Ok(false);
@@ -283,6 +285,7 @@ impl<'a> Parser<'a> {
 
     /// Combines the pending operators above `base` whose precedence is at least `precedence`
     /// with `right`, innermost first.
+    #[inline(never)]
     fn reduce(&mut self, base: usize, precedence: u8, mut right: ExprId) -> R<ExprId> {
         while self.operators.len() > base
             && self
@@ -322,24 +325,45 @@ impl<'a> Parser<'a> {
 
     /// `UnaryExpression` and `UpdateExpression` (`#sec-unary-operators`,
     /// `#sec-update-expressions`).
+    /// A chain of prefix operators adds no recursion: they wait on the shared stack
+    /// `Parser::prefixes` for their operand, and the chain's depth in the tree is bounded by the
+    /// node depth check, as a chain of binary operators is.
     fn unary(&mut self) -> R<ExprId> {
         self.enter()?;
+        let base = self.prefixes.len();
+        self.prefix_operators()?;
         let start = self.start();
-        let e = match self.prefix() {
-            Some(prefix) => {
-                self.advance()?;
-                let operand = self.unary()?;
-                self.make_prefix(prefix, operand, start)?
-            }
-            None => {
-                let operand = self.left_hand_side()?;
-                self.postfix(operand, start)?
-            }
-        };
+        let operand = self.left_hand_side()?;
+        let e = self.postfix(operand, start)?;
+        let e = self.apply_prefixes(base, e)?;
         self.leave();
         Ok(e)
     }
 
+    /// Pushes the prefix operators at the current token, each with where it starts.
+    #[inline(never)]
+    fn prefix_operators(&mut self) -> R<()> {
+        while let Some(prefix) = self.prefix() {
+            let start = self.start();
+            self.prefixes.push((prefix, start));
+            self.advance()?;
+        }
+        Ok(())
+    }
+
+    /// Applies the prefix operators above `base` to `operand`, innermost first.
+    #[inline(never)]
+    fn apply_prefixes(&mut self, base: usize, mut operand: ExprId) -> R<ExprId> {
+        while self.prefixes.len() > base {
+            let Some((prefix, start)) = self.prefixes.pop() else {
+                break;
+            };
+            operand = self.make_prefix(prefix, operand, start)?;
+        }
+        Ok(operand)
+    }
+
+    #[inline(never)]
     fn make_prefix(&mut self, prefix: Prefix, operand: ExprId, start: Span) -> R<ExprId> {
         let expr = match prefix {
             Prefix::Unary(op) => Expr::Unary { op, operand },
@@ -353,6 +377,7 @@ impl<'a> Parser<'a> {
     }
 
     /// A postfix `++` or `--` after `operand`, on the same line (a restricted production).
+    #[inline(never)]
     fn postfix(&mut self, operand: ExprId, start: Span) -> R<ExprId> {
         let op = match &self.tok.kind {
             TokenKind::Punct(Punct::PlusPlus) if !self.tok.newline_before => UpdateOp::Increment,
@@ -372,6 +397,7 @@ impl<'a> Parser<'a> {
 
     /// What follows a member expression: a call (when `calls`), `.name`, `[index]` or nothing;
     /// `?.` is refused.
+    #[inline(never)]
     fn suffix(&mut self, calls: bool) -> R<Suffix> {
         Ok(match &self.tok.kind {
             TokenKind::Punct(Punct::LParen) if calls => Suffix::Call,
@@ -428,17 +454,24 @@ impl<'a> Parser<'a> {
             return self.refuse_at("new.target", 8, start);
         }
         let callee = self.member_or_new()?;
-        let with_arguments = self.is(Punct::LParen);
-        let id = self.reserve_expr(Expr::New {
-            callee,
-            arguments: with_arguments.then(Vec::new),
-        });
-        if with_arguments {
+        let id = self.reserve_new(callee);
+        if self.is(Punct::LParen) {
             self.arguments(id)?;
         }
         let id = self.complete_expr(id, start)?;
         self.leave();
         Ok(id)
+    }
+
+    /// Reserves the node of a `new` expression with callee `callee`, with arguments when an
+    /// `Arguments` follows. A leaf, so the node is not built in [`Parser::new_rest`]'s frame.
+    #[inline(never)]
+    fn reserve_new(&mut self, callee: ExprId) -> ExprId {
+        let with_arguments = self.is(Punct::LParen);
+        self.reserve_expr(Expr::New {
+            callee,
+            arguments: with_arguments.then(Vec::new),
+        })
     }
 
     fn call_rest(&mut self, callee: ExprId, start: Span) -> R<ExprId> {
@@ -547,6 +580,7 @@ impl<'a> Parser<'a> {
 
     /// Which parser takes the primary expression at the current token; refuses the forms of
     /// later slices.
+    #[inline(never)]
     fn primary_kind(&mut self) -> R<ExprParser<'a>> {
         Ok(match &self.tok.kind {
             TokenKind::Keyword(k) => match *k {
@@ -599,6 +633,7 @@ impl<'a> Parser<'a> {
     }
 
     /// A primary expression of one token: `this`, a literal or an identifier reference.
+    #[inline(never)]
     fn leaf(&mut self) -> R<ExprId> {
         let start = self.start();
         let expr = match &self.tok.kind {
@@ -726,6 +761,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The `PropertyName` at the current token, consumed.
+    #[inline(never)]
     fn property_key(&mut self) -> R<PropertyKey> {
         let key = match &self.tok.kind {
             TokenKind::Name(n) => PropertyKey::Identifier(n.clone()),
@@ -753,6 +789,7 @@ impl<'a> Parser<'a> {
 
     /// Whether the property at the current token is a getter or setter: `get` or `set` followed
     /// by a property name. Refuses spread, computed names, generator and `async` methods.
+    #[inline(never)]
     fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
         let word = match &self.tok.kind {
             TokenKind::Punct(Punct::Ellipsis) => return self.refuse("spread element", 6),
@@ -814,6 +851,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The `PropertyName` of an accessor: numbers its function and appends the property.
+    #[inline(never)]
     fn accessor_head(
         &mut self,
         object: ExprId,
@@ -851,6 +889,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The `PropertyName :` of a value property, appended to `object` with its value to come.
+    #[inline(never)]
     fn value_property_head(&mut self, object: ExprId, start: Span) -> R<()> {
         let key = self.value_property_key(start)?;
         if let Some(list) = self.properties(object) {
@@ -864,6 +903,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The `PropertyName :` of a value property.
+    #[inline(never)]
     fn value_property_key(&mut self, start: Span) -> R<PropertyKey> {
         let shorthand_candidate = matches!(self.tok.kind, TokenKind::Name(_));
         let key = self.property_key()?;
@@ -882,6 +922,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Pushes `expr`, which started at `start` and ends at the previous token.
+    #[inline(never)]
     pub(super) fn make(&mut self, expr: Expr, start: Span) -> R<ExprId> {
         let span = self.finish(start);
         self.push_expr(expr, span)

@@ -394,22 +394,38 @@ impl Ast {
         &self.functions
     }
 
-    /// The children of an expression, in source order.
-    pub(crate) fn expr_children(&self, id: ExprId) -> Vec<Child> {
-        let mut list = Vec::new();
-        if let Some(n) = self.expr(id) {
-            n.expr.children(|c| list.push(c));
+    /// Pushes the children of the node `of` onto the work stack of a walk, each made a step by
+    /// `step`, so that popping them gives them in source order. A walk that pops one step at a
+    /// time keeps its work on the heap: its Rust stack does not grow with the depth of the tree.
+    pub(crate) fn push_children<S>(
+        &self,
+        of: Child,
+        stack: &mut Vec<S>,
+        step: impl Fn(Child) -> S,
+    ) {
+        let mark = stack.len();
+        match of {
+            Child::Expr(id) => {
+                if let Some(n) = self.expr(id) {
+                    n.expr.children(|c| stack.push(step(c)));
+                }
+            }
+            Child::Stmt(id) => {
+                if let Some(n) = self.stmt(id) {
+                    n.stmt.children(|c| stack.push(step(c)));
+                }
+            }
+            Child::Function(id) => {
+                if let Some(f) = self.function(id) {
+                    for s in &f.body {
+                        stack.push(step(Child::Stmt(*s)));
+                    }
+                }
+            }
         }
-        list
-    }
-
-    /// The children of a statement, in source order.
-    pub(crate) fn stmt_children(&self, id: StmtId) -> Vec<Child> {
-        let mut list = Vec::new();
-        if let Some(n) = self.stmt(id) {
-            n.stmt.children(|c| list.push(c));
+        if let Some(pushed) = stack.get_mut(mark..) {
+            pushed.reverse();
         }
-        list
     }
 
     /// The depth of a child, 0 for an index that names nothing.

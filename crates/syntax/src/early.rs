@@ -30,7 +30,8 @@
 //!   flags of IsValidRegularExpressionLiteral. Its pattern is not parsed before slice 5 (a
 //!   recorded omission of `sec-literals-regular-expression-literals`).
 //!
-//! The walk recurses once per node level, so it is bounded by the node depth the parser bounds.
+//! The walk does not recurse: its pending work is a stack on the heap, so the Rust stack it uses
+//! is the same at any depth of the tree.
 
 use std::collections::BTreeSet;
 
@@ -57,28 +58,33 @@ const STRICT_RESERVED: [&str; 9] = [
 ];
 
 /// The early errors of the script `body` of `ast`, strict when `strict`, in source order.
-pub(crate) fn check(ast: &Ast, body: &[StmtId], strict: bool, max: u32) -> Vec<SyntaxError> {
+pub(crate) fn check(ast: &Ast, body: &[StmtId], strict: bool) -> Vec<SyntaxError> {
     let mut checker = Checker {
         ast,
         errors: Vec::new(),
         strict,
-        max,
-        depth: 0,
         loops: 0,
         breakables: 0,
     };
-    for s in body {
-        checker.stmt(*s);
-    }
+    checker.walk(body);
     checker.errors
+}
+
+/// One piece of the walk's pending work.
+enum Step {
+    Node(Child),
+    /// Puts back the context a statement or a function changed, once its children are walked.
+    Restore {
+        strict: bool,
+        loops: u32,
+        breakables: u32,
+    },
 }
 
 struct Checker<'a> {
     ast: &'a Ast,
     errors: Vec<SyntaxError>,
     strict: bool,
-    max: u32,
-    depth: u32,
     /// Loops around the current position inside the current function.
     loops: u32,
     /// Loops and `switch` statements around the current position inside the current function.
@@ -89,23 +95,6 @@ impl<'a> Checker<'a> {
     fn error(&mut self, message: impl Into<String>, span: Span) {
         self.errors
             .push(SyntaxError::new(message, span.line, span.column));
-    }
-
-    /// One level deeper; false when that passes the limit (the parser bounds node depth, so this
-    /// only holds the walk to the same bound).
-    fn enter(&mut self, span: Span) -> bool {
-        self.depth += 1;
-        if self.depth > self.max {
-            self.errors
-                .push(SyntaxError::nesting(self.max, span.line, span.column));
-            self.depth -= 1;
-            return false;
-        }
-        true
-    }
-
-    fn leave(&mut self) {
-        self.depth = self.depth.saturating_sub(1);
     }
 
     /// A `BindingIdentifier` in code of the current strictness.
@@ -213,32 +202,55 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn child(&mut self, c: Child) {
-        match c {
-            Child::Expr(e) => self.expr(e),
-            Child::Stmt(s) => self.stmt(s),
-            Child::Function(f) => self.function(f),
+    /// Walks the statements `body` and everything in them, each node before its children and the
+    /// children in source order, so the errors come in source order.
+    fn walk(&mut self, body: &[StmtId]) {
+        let mut stack: Vec<Step> = body
+            .iter()
+            .rev()
+            .map(|s| Step::Node(Child::Stmt(*s)))
+            .collect();
+        while let Some(step) = stack.pop() {
+            let node = match step {
+                Step::Node(node) => node,
+                Step::Restore {
+                    strict,
+                    loops,
+                    breakables,
+                } => {
+                    (self.strict, self.loops, self.breakables) = (strict, loops, breakables);
+                    continue;
+                }
+            };
+            let restore = Step::Restore {
+                strict: self.strict,
+                loops: self.loops,
+                breakables: self.breakables,
+            };
+            match node {
+                Child::Stmt(id) => {
+                    let (loops, breakables) = self.check_stmt(id);
+                    if loops + breakables > 0 {
+                        stack.push(restore);
+                        self.loops += loops;
+                        self.breakables += breakables;
+                    }
+                }
+                Child::Expr(id) => self.check_expr(id),
+                // A function is walked with its own strictness, outside every loop and `switch`.
+                Child::Function(id) => {
+                    let Some(f) = self.ast.function(id) else {
+                        continue;
+                    };
+                    stack.push(restore);
+                    self.strict = f.strict;
+                    self.loops = 0;
+                    self.breakables = 0;
+                    self.check_function(id);
+                }
+            }
+            self.ast.push_children(node, &mut stack, Step::Node);
         }
-    }
-
-    /// Walks a statement. The checks of the node itself are in [`Checker::check_stmt`], so the
-    /// frame that stays on the stack while the children are walked is small.
-    fn stmt(&mut self, id: StmtId) {
-        let Some(node) = self.ast.stmt(id) else {
-            return;
-        };
-        if !self.enter(node.span) {
-            return;
-        }
-        let (loops, breakables) = self.check_stmt(id);
-        self.loops += loops;
-        self.breakables += breakables;
-        for c in self.ast.stmt_children(id) {
-            self.child(c);
-        }
-        self.loops -= loops;
-        self.breakables -= breakables;
-        self.leave();
     }
 
     /// The early errors of the statement `id` itself; returns how many loops and how many
@@ -280,21 +292,6 @@ impl<'a> Checker<'a> {
             Stmt::Switch { .. } => (0, 1),
             _ => (0, 0),
         }
-    }
-
-    /// Walks an expression; its own checks are in [`Checker::check_expr`].
-    fn expr(&mut self, id: ExprId) {
-        let Some(node) = self.ast.expr(id) else {
-            return;
-        };
-        if !self.enter(node.span) {
-            return;
-        }
-        self.check_expr(id);
-        for c in self.ast.expr_children(id) {
-            self.child(c);
-        }
-        self.leave();
     }
 
     /// The early errors of the expression `id` itself.
@@ -344,26 +341,6 @@ impl<'a> Checker<'a> {
             Expr::Assign { target, .. } => self.target(*target),
             _ => {}
         }
-    }
-
-    /// Walks a function with its own strictness, outside every loop and `switch`.
-    fn function(&mut self, id: FunctionId) {
-        let Some(f) = self.ast.function(id) else {
-            return;
-        };
-        if !self.enter(f.span) {
-            return;
-        }
-        let saved = (self.strict, self.loops, self.breakables);
-        self.strict = f.strict;
-        self.loops = 0;
-        self.breakables = 0;
-        self.check_function(id);
-        for s in &f.body {
-            self.stmt(*s);
-        }
-        (self.strict, self.loops, self.breakables) = saved;
-        self.leave();
     }
 
     /// The function's name and parameters, checked with its own strictness.
