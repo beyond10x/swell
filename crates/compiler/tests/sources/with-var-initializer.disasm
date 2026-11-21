@@ -1,0 +1,27 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 0
+  params env 0
+  captured "o" "x"
+  0000 2:36 Number 0
+  0001 2:30 Throw
+  0002 2:24 Jump 0014
+  0003 2:48 PushNamedEnv 0 "e"
+  0004 2:48 SetEnv 0 0
+  0005 2:48 Pop
+  0006 2:59 GetEnv 1 0
+  0007 2:53 PushWith
+  0008 2:68 ResolveName "x"
+  0009 2:72 GetName "e"
+  0010 2:68 PutNameRef "x"
+  0011 2:68 Pop
+  0012 2:53 PopEnv
+  0013 2:24 PopEnv
+  0014 2:86 GetEnv 0 1
+  0015 2:79 Return
+  0016 2:1 Undefined
+  0017 2:1 Return
+  catch 0000..0003 -> 0003 items 0 envs 0

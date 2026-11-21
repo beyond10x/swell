@@ -736,8 +736,6 @@ impl<'a> Parser<'a> {
                             return self.refuse("await expression", 10);
                         }
                     }
-                } else if n == "arguments" && self.functions > 0 {
-                    return self.refuse("reference to arguments inside a function", 2);
                 }
                 Parser::leaf
             }
@@ -1084,9 +1082,6 @@ impl<'a> Parser<'a> {
         };
         if escaped && Keyword::from_name(name).is_some() {
             return self.fail_at(crate::early::escaped_keyword(name), at);
-        }
-        if name == "arguments" && self.functions > 0 {
-            return self.refuse_at("reference to arguments inside a function", 2, at);
         }
         let span = self.finish(at);
         self.push_expr(Expr::Identifier(name.clone()), span)

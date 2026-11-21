@@ -122,13 +122,24 @@ fn vec_bytes<T>(len: usize) -> u64 {
 }
 
 /// The bytes the compiled code owns, charged with its record.
+/// The bytes of the names tables of the environments `PushNamedEnv` makes (decision 3, "Names":
+/// they are charged with the compiled code).
+fn scopes_bytes(scopes: &[Vec<u32>]) -> u64 {
+    scopes
+        .iter()
+        .fold(vec_bytes::<Vec<u32>>(scopes.len()), |bytes, names| {
+            bytes.saturating_add(vec_bytes::<u32>(names.len()))
+        })
+}
+
 fn code_bytes(code: &Code) -> u64 {
     let mut bytes = vec_bytes::<Instruction>(code.instructions.len())
         .saturating_add(vec_bytes::<Span>(code.positions.len()))
         .saturating_add(vec_bytes::<Handler>(code.handlers.len()))
         .saturating_add(vec_bytes::<f64>(code.numbers.len()))
         .saturating_add(vec_bytes::<u32>(code.var_names.len()))
-        .saturating_add(vec_bytes::<u32>(code.function_declarations.len()));
+        .saturating_add(vec_bytes::<u32>(code.function_declarations.len()))
+        .saturating_add(scopes_bytes(&code.scopes));
     for string in &code.strings {
         bytes = bytes
             .saturating_add(vec_bytes::<u16>(string.len()))
@@ -146,6 +157,7 @@ fn code_bytes(code: &Code) -> u64 {
                 function.params.len(),
             ))
             .saturating_add(vec_bytes::<u32>(function.captured.len()))
+            .saturating_add(scopes_bytes(&function.scopes))
             .saturating_add(vec_bytes::<Instruction>(function.instructions.len()))
             .saturating_add(vec_bytes::<Span>(function.positions.len()))
             .saturating_add(vec_bytes::<Handler>(function.handlers.len()));

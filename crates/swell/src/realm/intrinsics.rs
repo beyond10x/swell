@@ -33,13 +33,8 @@ pub(crate) enum Intrinsic {
     StringPrototype,
     BooleanPrototype,
     NumberPrototype,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the restricted properties of functions: story:interpreter-and-script-entry-points"
-        )
-    )]
+    /// `%ThrowTypeError%`: the `callee` accessor of an unmapped arguments object
+    /// (`#sec-createunmappedargumentsobject`).
     ThrowTypeError,
     /// `%Error%` and the NativeError constructors.
     Error(ErrorKind),

@@ -4,12 +4,14 @@
 //! [`bytecode`], with no heap value: string and Number constants are kept as code units and
 //! `f64`s, and the interpreter interns them.
 //!
-//! Slice 1 compiles the ES5 grammar the parser accepts: the statements of clause 14 but `with`
+//! Slice 1 compiles the ES5 grammar the parser accepts: the statements of clause 14
 //! (`statement.rs`), the expressions of clause 13 (`expression.rs`), and function declarations
 //! and expressions of 15.2 (`function.rs`), with the runtime semantics of each clause in their
 //! evaluation order. Slice 2 adds labelled statements, `??`, optional chains, the logical
 //! assignments, a `catch` without a parameter, and plain methods and shorthand properties of
-//! object literals. A regular expression literal compiles to the `SyntaxError` the design gives
+//! object literals, the `with` statement with the names its body looks up at run time, and the
+//! arguments object of a function (`docs/design/engine.md`, decision 3, "Names"). A regular
+//! expression literal compiles to the `SyntaxError` the design gives
 //! it before slice 5 ([`swell_syntax::REGEXP_REFUSAL`]). Slots and environments are assigned by
 //! `resolve.rs`; `disasm.rs` writes a [`Code`] as text.
 //!
@@ -103,6 +105,7 @@ pub fn compile_script(script: &Script) -> Result<Code, CompileError> {
         positions: body.positions,
         handlers: body.handlers,
         locals: resolution.script_locals,
+        scopes: body.scopes,
         strings: constants.strings,
         numbers: constants.numbers,
         functions,
@@ -295,6 +298,8 @@ pub(crate) struct Compiler<'a> {
     tasks: Vec<Task>,
     /// The optional chains being compiled, innermost last.
     chains: Vec<Chain>,
+    /// The names of the slots of each environment `PushNamedEnv` makes, as `strings` indices.
+    pub(crate) scopes: Vec<Vec<u32>>,
 }
 
 /// The finished code of one template.
@@ -302,6 +307,7 @@ pub(crate) struct Body {
     pub instructions: Vec<Instruction>,
     pub positions: Vec<Span>,
     pub handlers: Vec<Handler>,
+    pub scopes: Vec<Vec<u32>>,
 }
 
 pub(crate) fn malformed(what: &str) -> CompileError {
@@ -331,6 +337,7 @@ impl<'a> Compiler<'a> {
             next_key: 0,
             tasks: Vec::new(),
             chains: Vec::new(),
+            scopes: Vec::new(),
         }
     }
 
@@ -764,6 +771,7 @@ impl<'a> Compiler<'a> {
             instructions,
             positions: self.positions,
             handlers,
+            scopes: self.scopes,
         })
     }
 }

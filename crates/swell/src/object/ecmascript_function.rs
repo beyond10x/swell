@@ -3,10 +3,11 @@
 //! OrdinaryFunctionCreate (`#sec-ordinaryfunctioncreate`) with SetFunctionLength, SetFunctionName
 //! and MakeConstructor (`#sec-makeconstructor`), [[Call]] (10.2.1) and [[Construct]] (10.2.2) from
 //! Rust, PrepareForOrdinaryCall, OrdinaryCallBindThis (`#sec-ordinarycallbindthis`) and
-//! FunctionDeclarationInstantiation (`#sec-functiondeclarationinstantiation`) without an
-//! arguments object, which the parser refuses until slice 2. `story:object-model-and-realms`
-//! wrote the dispatch arms of `object/mod.rs`; `story:interpreter-and-script-entry-points` the
-//! rest.
+//! FunctionDeclarationInstantiation (`#sec-functiondeclarationinstantiation`) with the
+//! arguments object (`object/arguments.rs`). `story:object-model-and-realms` wrote the dispatch
+//! arms of `object/mod.rs`; `story:interpreter-and-script-entry-points` the rest;
+//! `story:with-arguments-and-dynamic-names` the arguments object and the names of the
+//! environments a call and a named function expression make.
 //!
 //! A function's code is a template of its script's compiled code (`swell-compiler`'s
 //! `FunctionTemplate`), whose constants the script record holds: the function reports its
@@ -16,7 +17,9 @@
 //!
 //! FunctionDeclarationInstantiation is split as the compiler split it: the call stores the
 //! arguments in the parameters' slots (step 22, "IteratorBindingInitialization" of a simple
-//! parameter list, a later parameter of a name overwriting an earlier one), every other binding
+//! parameter list, a later parameter of a name overwriting an earlier one), then the
+//! arguments object in the slot of `arguments` when the template asks for one (steps 15 to 22:
+//! no code runs between, so the order of the two is not observable), every other binding
 //! starts as `undefined` (steps 27 and 28), and the function's code begins with the
 //! instantiation of its function declarations (step 36).
 
@@ -24,6 +27,7 @@ use std::rc::Rc;
 
 use swell_syntax::ast::FunctionKind;
 
+use crate::env::{NameTable, SlotNames};
 use crate::heap::arena::Handle;
 use crate::heap::collect::{Item, Mark};
 use crate::host::Host;
@@ -31,6 +35,7 @@ use crate::host::agent::Agent;
 use crate::host::outcome::{Completion, Termination};
 use crate::interp::frame::{Frame, frame_bytes};
 use crate::object::ObjectKind;
+use crate::object::arguments::Mapping;
 use crate::object::builtin_function::Activation;
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::Property;
@@ -238,13 +243,19 @@ impl<H: Host> Agent<H> {
         let locals = template.locals;
         let captured = u32::try_from(template.captured.len()).unwrap_or(u32::MAX);
         let params = template.params.clone();
+        let arguments = template.arguments;
 
         let this = match constructed {
             Some(object) => Value::Object(object),
             None => self.ordinary_call_bind_this(&callee, this_argument)?,
         };
         let env = if captured > 0 {
-            Some(self.new_function_environment(callee.environment, captured)?)
+            let names = SlotNames {
+                script: callee.script,
+                compiled: Rc::clone(&callee.compiled),
+                table: NameTable::Function(callee.template),
+            };
+            Some(self.new_function_environment(callee.environment, captured, names)?)
         } else {
             callee.environment
         };
@@ -280,6 +291,25 @@ impl<H: Host> Agent<H> {
             }
         }
 
+        // Steps 15 to 22: the arguments object, once the parameters hold their values.
+        if let Some(arguments) = arguments {
+            let mapping = arguments.mapped.then_some(Mapping {
+                env,
+                params: &params,
+            });
+            let made = self.instantiate_arguments(
+                function,
+                args,
+                (callee.realm, mapping),
+                (arguments.slot, env),
+                &mut slots,
+            );
+            if let Err(abrupt) = made {
+                self.heap.accounting.credit(charged);
+                return Err(abrupt);
+            }
+        }
+
         Ok(Frame {
             compiled: callee.compiled,
             template: Some(callee.template),
@@ -297,6 +327,34 @@ impl<H: Host> Agent<H> {
             constructed,
             charged,
         })
+    }
+
+    /// FunctionDeclarationInstantiation, steps 15 to 22: the arguments object of a call of
+    /// `function` with `args` stored in `slot`, a local of `locals` or a slot of the function
+    /// environment of `mapping`. Not inlined into the call, whose frame stays as small as it
+    /// was.
+    #[inline(never)]
+    fn instantiate_arguments(
+        &mut self,
+        function: ObjectRef,
+        args: &[Value],
+        mapping: (Handle, Option<Mapping<'_>>),
+        slot: (Slot, Option<Handle>),
+        locals: &mut [Value],
+    ) -> Completion<()> {
+        let (realm, mapping) = mapping;
+        let object = self.create_arguments_object(realm, function, args, mapping)?;
+        let value = Value::Object(object);
+        match slot {
+            (Slot::Local(n), _) => match usize::try_from(n).ok().and_then(|n| locals.get_mut(n)) {
+                Some(binding) => {
+                    *binding = value;
+                    Ok(())
+                }
+                None => Err(self.fault()),
+            },
+            (Slot::Env(n), env) => self.set_slot(env, 0, n, value),
+        }
     }
 
     /// OrdinaryCallBindThis (`#sec-ordinarycallbindthis`): strict code takes `this` as given;
@@ -359,7 +417,12 @@ impl<H: Host> Agent<H> {
         let strict = template.strict;
 
         let environment = if self_binding {
-            Some(self.new_declarative_environment(env, 1)?)
+            let names = SlotNames {
+                script,
+                compiled: Rc::clone(compiled),
+                table: NameTable::SelfName(index),
+            };
+            Some(self.new_declarative_environment(env, 1, Some(names))?)
         } else {
             env
         };

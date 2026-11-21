@@ -1,13 +1,14 @@
 //! Slot and environment assignment (`#sec-environment-records`), from the scope analysis of
 //! `swell-syntax`.
 //!
-//! Slices 1 and 2 have no direct `eval`, no `with` and no `arguments` (the parser refuses them),
-//! so every binding of a function is known when the script is compiled: the parameters and the
-//! `VarDeclaredNames` of a function (`#sec-functiondeclarationinstantiation`), the parameter of
-//! a `catch` clause (`#sec-runtime-semantics-catchclauseevaluation`) and the own name of a named
-//! function expression (`#sec-runtime-semantics-instantiateordinaryfunctionexpression`). A name
-//! is resolved as ResolveBinding does (`#sec-resolvebinding`), through the environments that
-//! enclose it, innermost first:
+//! Slice 2 has no direct `eval` yet, so every binding of a function is known when the script is
+//! compiled: the parameters, the binding `arguments` of a function that needs an arguments object
+//! and the `VarDeclaredNames` of a function (`#sec-functiondeclarationinstantiation`), the
+//! parameter of a `catch` clause (`#sec-runtime-semantics-catchclauseevaluation`) and the own
+//! name of a named function expression
+//! (`#sec-runtime-semantics-instantiateordinaryfunctionexpression`). A name is resolved as
+//! ResolveBinding does (`#sec-resolvebinding`), through the environments that enclose it,
+//! innermost first:
 //!
 //! - a binding that only its own function's code uses is a local slot of that function's frame;
 //! - a binding that a nested function uses lives in an environment: the function environment
@@ -16,13 +17,32 @@
 //! - a name no enclosing function declares is resolved at run time through the global
 //!   environment, and so are the script's own `var` and function declarations.
 //!
-//! An environment is created only for a scope with a binding in it; the hop count of an access
-//! counts those environments between the access and the binding.
+//! An environment is created only for a scope with a binding in it, and for each `with`
+//! statement (its Object Environment Record); the hop count of an access counts those
+//! environments between the access and the binding.
+//!
+//! A `with` statement makes what a name means depend on the run (`docs/design/engine.md`,
+//! decision 3, "Names"):
+//!
+//! - a reference with a `with` body between it and the scope that binds it (the global scope when
+//!   none does) is looked up by name at run time ([`Binding::Dynamic`]); a function nested in the
+//!   body is inside it, and a reference whose binding lies inside the same body keeps its slot;
+//! - every binding of every scope that encloses a `with` body, up to the global scope, lives in
+//!   an environment whose slots have names: the function environment (named by
+//!   `FunctionTemplate::captured`), the environment of a `catch` clause (a named one,
+//!   `PushNamedEnv`) and that of a named function expression's own name; references to it from
+//!   outside the body keep its slot.
+//!
+//! A record whose slots have no names is passed by a lookup: no lookup can find its name there,
+//! since a name a record between the reference and the `with` binds would have resolved the
+//! reference at compile time. The parameters of a function that makes a mapped arguments object
+//! live in its function environment, whose slots the object reads and writes
+//! (`#sec-createmappedargumentsobject`).
 //!
 //! The walk over the tree keeps its work on a stack of its own, so it uses no Rust stack in
 //! proportion to the depth of the tree.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use swell_num::literal::numeric_literal;
 use swell_num::to_string::number_to_string;
@@ -33,7 +53,7 @@ use swell_syntax::ast::{
 };
 
 use crate::CompileError;
-use crate::bytecode::Slot;
+use crate::bytecode::{ArgumentsObject, Slot};
 
 /// A place in the tree where a name is bound or referenced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -50,6 +70,9 @@ pub(crate) enum Site {
     Declaration(FunctionId),
     /// The parameter of the `catch` clause of a try statement, from inside the clause.
     CatchParam(StmtId),
+    /// The binding `arguments` of a function that needs an arguments object, from the top of
+    /// the function.
+    Arguments(FunctionId),
 }
 
 /// Where a name resolves to, from one site.
@@ -68,6 +91,9 @@ pub(crate) enum Binding {
     },
     /// Resolved at run time in the global environment.
     Global(String),
+    /// Looked up by name at run time, through the environments from the LexicalEnvironment
+    /// outward: a `with` body lies between the reference and the scope that binds it.
+    Dynamic(String),
 }
 
 /// What the compiler needs of a function beyond its code.
@@ -78,6 +104,8 @@ pub(crate) struct FunctionInfo {
     pub captured: Vec<String>,
     pub params: Vec<Slot>,
     pub self_binding: bool,
+    /// The arguments object a call makes, if any.
+    pub arguments: Option<ArgumentsObject>,
     /// The name NamedEvaluation or an accessor gives an anonymous function.
     pub given_name: Option<Vec<u16>>,
 }
@@ -87,6 +115,8 @@ pub(crate) struct Resolution {
     pub script_locals: u32,
     /// Indexed by `FunctionId`.
     pub functions: Vec<FunctionInfo>,
+    /// The try statements whose `catch` clause has an environment with named slots.
+    pub named_catches: BTreeSet<StmtId>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -94,6 +124,8 @@ enum Kind {
     Function,
     Catch,
     SelfName,
+    /// The body of a `with` statement: no binding, an Object Environment Record at run time.
+    With,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -112,6 +144,10 @@ struct ScopeData {
     /// The scope's bindings in declaration order.
     order: Vec<usize>,
     env_slots: u32,
+    /// Whether its environment keeps the names of its slots: it encloses a `with` body.
+    named: bool,
+    /// The try statement of a `catch` scope.
+    catch: Option<StmtId>,
 }
 
 struct BindingData {
@@ -126,6 +162,8 @@ enum Walk {
     Expr(ExprId),
     Function(FunctionId),
     Catch(StmtId),
+    /// Enters the body of the `with` statement.
+    With,
     Leave,
 }
 
@@ -139,6 +177,8 @@ struct Resolver<'a> {
     given_names: BTreeMap<FunctionId, Vec<u16>>,
     /// The scope of the own name of each named function expression.
     self_scopes: BTreeMap<FunctionId, usize>,
+    /// The scope of the parameters and `var` declarations of each function.
+    function_scopes: BTreeMap<FunctionId, usize>,
     work: Vec<Walk>,
 }
 
@@ -157,12 +197,15 @@ pub(crate) fn resolve(script: &Script) -> Result<Resolution, CompileError> {
             names: BTreeMap::new(),
             order: Vec::new(),
             env_slots: 0,
+            named: false,
+            catch: None,
         }],
         bindings: Vec::new(),
         current: 0,
         occurrences: Vec::new(),
         given_names: BTreeMap::new(),
         self_scopes: BTreeMap::new(),
+        function_scopes: BTreeMap::new(),
         work: Vec::new(),
     };
     r.push_list(&script.body);
@@ -170,6 +213,7 @@ pub(crate) fn resolve(script: &Script) -> Result<Resolution, CompileError> {
         r.step(task)?;
     }
     r.mark_captured()?;
+    r.mark_named()?;
     let mut frames = r.allocate()?;
     let sites = r.locate()?;
     let script_locals = frames.remove(&None).unwrap_or(0);
@@ -181,10 +225,17 @@ pub(crate) fn resolve(script: &Script) -> Result<Resolution, CompileError> {
         info.given_name = r.given_names.remove(&id);
         functions.push(info);
     }
+    let named_catches = r
+        .scopes
+        .iter()
+        .filter(|s| s.named)
+        .filter_map(|s| s.catch)
+        .collect();
     Ok(Resolution {
         sites,
         script_locals,
         functions,
+        named_catches,
     })
 }
 
@@ -203,6 +254,8 @@ impl<'a> Resolver<'a> {
             names: BTreeMap::new(),
             order: Vec::new(),
             env_slots: 0,
+            named: false,
+            catch: None,
         });
         self.current = self.scopes.len() - 1;
         self.current
@@ -238,6 +291,11 @@ impl<'a> Resolver<'a> {
             Walk::Expr(id) => self.expr(id),
             Walk::Function(id) => self.function(id),
             Walk::Catch(id) => self.catch(id),
+            Walk::With => {
+                let owner = self.scopes.get(self.current).and_then(|s| s.owner);
+                self.new_scope(Kind::With, owner);
+                Ok(())
+            }
             Walk::Leave => {
                 let parent = self
                     .scopes
@@ -375,6 +433,13 @@ impl<'a> Resolver<'a> {
                 self.push_list(block);
             }
             Stmt::FunctionDeclaration(f) => self.work.push(Walk::Function(*f)),
+            // The object is evaluated outside the scope of the body.
+            Stmt::With { object, body } => {
+                self.work.push(Walk::Leave);
+                self.work.push(Walk::Stmt(*body));
+                self.work.push(Walk::With);
+                self.work.push(Walk::Expr(*object));
+            }
         }
         Ok(())
     }
@@ -393,6 +458,9 @@ impl<'a> Resolver<'a> {
             .ok_or_else(|| malformed("a catch clause without a parameter"))?;
         let owner = self.scopes.get(self.current).and_then(|s| s.owner);
         let scope = self.new_scope(Kind::Catch, owner);
+        if let Some(s) = self.scopes.get_mut(scope) {
+            s.catch = Some(id);
+        }
         self.declare(scope, &param.name);
         self.occur(Site::CatchParam(id), &param.name);
         Ok(())
@@ -520,10 +588,17 @@ impl<'a> Resolver<'a> {
             self.work.push(Walk::Leave);
         }
         let scope = self.new_scope(Kind::Function, Some(id));
+        self.function_scopes.insert(id, scope);
         for (i, p) in f.params.iter().enumerate() {
             self.declare(scope, &p.name);
             let n = u32::try_from(i).map_err(|_| CompileError::TooMany("parameters"))?;
             self.occur(Site::Param(id, n), &p.name);
+        }
+        // `#sec-functiondeclarationinstantiation`, steps 22 and 27: the binding `arguments` after
+        // the parameters, before the `var` names (a `var arguments` is the same binding).
+        if f.scope.arguments_object {
+            self.declare(scope, "arguments");
+            self.occur(Site::Arguments(id), "arguments");
         }
         for name in &f.scope.var_names {
             self.declare(scope, name);
@@ -581,6 +656,54 @@ impl<'a> Resolver<'a> {
         Ok(())
     }
 
+    /// Decision 3, item 3: every scope that encloses a `with` body, up to the global scope, keeps
+    /// the names of its slots, and each of its bindings lives in its environment. The parameters
+    /// of a function that makes a mapped arguments object live in its function environment
+    /// (`#sec-createmappedargumentsobject`: the map reads and writes their bindings).
+    fn mark_named(&mut self) -> Result<(), CompileError> {
+        let mut named = BTreeSet::new();
+        for s in self.scopes.iter().filter(|s| s.kind == Kind::With) {
+            let mut outer = s.parent;
+            while let Some(p) = outer {
+                // Each scope is walked once: what encloses a named scope is named already.
+                if !named.insert(p) {
+                    break;
+                }
+                outer = self.scopes.get(p).and_then(|s| s.parent);
+            }
+        }
+        let mut marks = Vec::new();
+        for &scope in &named {
+            let s = self
+                .scopes
+                .get_mut(scope)
+                .ok_or_else(|| malformed("a scope"))?;
+            s.named = true;
+            marks.extend(s.order.iter().copied());
+        }
+        for (id, scope) in &self.function_scopes {
+            let mapped = self
+                .ast
+                .function(*id)
+                .is_some_and(|f| f.scope.arguments_object && !f.strict);
+            if !mapped {
+                continue;
+            }
+            let (Some(f), Some(s)) = (self.ast.function(*id), self.scopes.get(*scope)) else {
+                return Err(malformed("a function scope"));
+            };
+            for p in &f.params {
+                marks.extend(s.names.get(&p.name).copied());
+            }
+        }
+        for b in marks {
+            if let Some(binding) = self.bindings.get_mut(b) {
+                binding.captured = true;
+            }
+        }
+        Ok(())
+    }
+
     /// Gives each binding its place; the number of local slots of each frame.
     fn allocate(&mut self) -> Result<BTreeMap<Option<FunctionId>, u32>, CompileError> {
         let mut frames: BTreeMap<Option<FunctionId>, u32> = BTreeMap::new();
@@ -618,21 +741,42 @@ impl<'a> Resolver<'a> {
     fn locate(&self) -> Result<BTreeMap<Site, Binding>, CompileError> {
         let mut sites = BTreeMap::new();
         for (site, scope, name) in &self.occurrences {
-            let binding = match self.lookup(*scope, name) {
+            let found = self.lookup(*scope, name);
+            let home = match found {
+                Some(b) => Some(
+                    self.bindings
+                        .get(b)
+                        .ok_or_else(|| malformed("a binding"))?
+                        .scope,
+                ),
+                None => None,
+            };
+            // The environments between the site and the scope that binds the name, or the
+            // global scope; a `with` body among them makes it a lookup by name.
+            let mut hops = 0u32;
+            let mut crosses_with = false;
+            let mut s = *scope;
+            while Some(s) != home {
+                let here = self.scopes.get(s).ok_or_else(|| malformed("a scope"))?;
+                if here.kind == Kind::With {
+                    crosses_with = true;
+                }
+                if here.env_slots > 0 || here.kind == Kind::With {
+                    hops = hops
+                        .checked_add(1)
+                        .ok_or(CompileError::TooMany("environment hops"))?;
+                }
+                match here.parent {
+                    Some(parent) => s = parent,
+                    None if home.is_none() => break,
+                    None => return Err(malformed("a scope chain")),
+                }
+            }
+            let binding = match found {
+                _ if crosses_with => Binding::Dynamic(name.clone()),
                 None => Binding::Global(name.clone()),
                 Some(b) => {
                     let data = self.bindings.get(b).ok_or_else(|| malformed("a binding"))?;
-                    let mut hops = 0u32;
-                    let mut s = *scope;
-                    while s != data.scope {
-                        let here = self.scopes.get(s).ok_or_else(|| malformed("a scope"))?;
-                        if here.env_slots > 0 {
-                            hops = hops
-                                .checked_add(1)
-                                .ok_or(CompileError::TooMany("environment hops"))?;
-                        }
-                        s = here.parent.ok_or_else(|| malformed("a scope chain"))?;
-                    }
                     let home = self
                         .scopes
                         .get(data.scope)
@@ -692,6 +836,17 @@ impl<'a> Resolver<'a> {
             .get(&id)
             .and_then(|s| self.scopes.get(*s))
             .is_some_and(|s| s.env_slots > 0);
+        if f.scope.arguments_object {
+            let slot = match sites.get(&Site::Arguments(id)) {
+                Some(Binding::Local(s)) => Slot::Local(*s),
+                Some(Binding::Env { slot, .. }) => Slot::Env(*slot),
+                _ => return Err(malformed("an arguments binding with no slot")),
+            };
+            info.arguments = Some(ArgumentsObject {
+                mapped: !f.strict,
+                slot,
+            });
+        }
         Ok(info)
     }
 }

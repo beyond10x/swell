@@ -1,0 +1,17 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 2 strict
+  params local 0
+  arguments unmapped local 1
+  0000 2:17 String "use strict"
+  0001 2:17 Pop
+  0002 2:38 GetLocal 1
+  0003 2:38 GetNamed "length"
+  0004 2:57 GetLocal 0
+  0005 2:38 Add
+  0006 2:31 Return
+  0007 2:1 Undefined
+  0008 2:1 Return

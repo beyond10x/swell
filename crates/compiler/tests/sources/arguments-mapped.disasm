@@ -1,0 +1,17 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 2 locals 1
+  params env 0, env 1
+  captured "a" "b"
+  arguments mapped local 0
+  0000 2:27 GetLocal 0
+  0001 2:37 Number 0
+  0002 2:27 GetIndex
+  0003 2:42 GetEnv 0 0
+  0004 2:27 Add
+  0005 2:20 Return
+  0006 2:1 Undefined
+  0007 2:1 Return

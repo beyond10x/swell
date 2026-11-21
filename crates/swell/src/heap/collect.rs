@@ -265,6 +265,7 @@ mod tests {
     use crate::heap::string::HeapString;
     use crate::host::hooks::test_host::NoHooks;
     use crate::host::host_object::HostObject;
+    use crate::object::arguments::ArgumentsObject;
     use crate::object::array::Array;
     use crate::object::bound_function::BoundFunction;
     use crate::object::builtin_function::BuiltinFunction;
@@ -288,13 +289,14 @@ mod tests {
 
     /// The trace function of each kind of the layout but the common object record, which is
     /// called once per object.
-    const KIND_SITES: [&str; 13] = [
+    const KIND_SITES: [&str; 14] = [
         "heap/string.rs HeapString::trace",
         "heap/mod.rs SymbolRecord::trace",
         "host/host_object.rs HostObject::trace",
         "object/ordinary.rs Ordinary::trace",
         "object/array.rs Array::trace",
         "object/string.rs StringObject::trace",
+        "object/arguments.rs ArgumentsObject::trace",
         "object/builtin_function.rs BuiltinFunction::trace",
         "object/bound_function.rs BoundFunction::trace",
         "object/ecmascript_function.rs EcmascriptFunction::trace",
@@ -333,6 +335,7 @@ mod tests {
             ObjectKind::Ordinary(Ordinary::for_test()),
             ObjectKind::Array(Array::for_test()),
             ObjectKind::String(StringObject::for_test(StringRef { handle: string })),
+            ObjectKind::Arguments(ArgumentsObject::for_test()),
             ObjectKind::BuiltinFunction(BuiltinFunction::for_test()),
             ObjectKind::BoundFunction(BoundFunction::for_test()),
             ObjectKind::EcmascriptFunction(EcmascriptFunction::for_test()),

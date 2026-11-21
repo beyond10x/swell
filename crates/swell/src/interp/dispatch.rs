@@ -15,6 +15,8 @@
 use swell_compiler::bytecode::{HandlerKind, Instruction, TAG_NORMAL, TAG_THROW};
 
 use super::frame::{Entry, Enumerator};
+use crate::env::{NameReference, NameTable, SlotNames};
+use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion};
 use crate::host::{ErrorKind, Host};
@@ -395,6 +397,15 @@ impl<H: Host> Agent<H> {
                 self.replace(0, Value::Boolean(deleted))
             }
 
+            // ---- names looked up at run time: each in a function of its own ----
+            I::GetName(index) => self.get_name(index, strict),
+            I::ResolveName(index) => self.resolve_name_entry(index),
+            I::GetNameRef(index) => self.get_name_ref(index, strict),
+            I::PutNameRef(index) => self.put_name_ref(index, strict),
+            I::TypeofName(index) => self.typeof_name(index, strict),
+            I::DeleteName(index) => self.delete_name_instruction(index),
+            I::GetNameForCall(index) => self.get_name_for_call(index, strict),
+
             // ---- properties ----
             I::GetNamed(index) => {
                 let base = self.peek_value(0)?;
@@ -718,12 +729,14 @@ impl<H: Host> Agent<H> {
             }
             I::PushEnv(slots) => {
                 let outer = self.top_frame()?.env;
-                let env = self.new_declarative_environment(outer, slots)?;
+                let env = self.new_declarative_environment(outer, slots, None)?;
                 let frame = self.top_frame()?;
                 frame.env = Some(env);
                 frame.pushed_envs = frame.pushed_envs.saturating_add(1);
                 Ok(Flow::Next)
             }
+            I::PushNamedEnv(table) => self.push_named_env(table),
+            I::PushWith => self.push_with(),
             I::PopEnv => {
                 let Some(env) = self.top_frame()?.env else {
                     return Err(self.fault());
@@ -791,6 +804,185 @@ impl<H: Host> Agent<H> {
             Some(Entry::Reference(resolvable)) => Ok(*resolvable),
             _ => Err(self.fault()),
         }
+    }
+
+    /// ResolveBinding of String constant `index` from the running frame's LexicalEnvironment
+    /// (`env/mod.rs`): the reference, the name's key and the frame's realm.
+    #[inline(never)]
+    fn look_up(&mut self, index: u32) -> Completion<(NameReference, Key, Handle)> {
+        let key = self.constant_key(index)?;
+        let (env, realm) = {
+            let frame = self.top_frame()?;
+            (frame.env, frame.realm)
+        };
+        let reference = self.resolve_name(env, realm, key)?;
+        Ok((reference, key, realm))
+    }
+
+    /// The Reference Record of a name `depth` entries below the top.
+    fn name_reference_at(&mut self, depth: usize) -> Completion<NameReference> {
+        let frame = self.top_frame()?;
+        let found = frame
+            .stack
+            .len()
+            .checked_sub(depth.saturating_add(1))
+            .and_then(|index| frame.stack.get(index))
+            .and_then(Entry::name_reference);
+        match found {
+            Some(reference) => Ok(reference),
+            None => Err(self.fault()),
+        }
+    }
+
+    /// GetValue of `reference` to String constant `index`: a `ReferenceError` when it is
+    /// unresolvable.
+    fn name_value_or_throw(
+        &mut self,
+        reference: NameReference,
+        index: u32,
+        key: Key,
+        realm: Handle,
+        strict: bool,
+    ) -> Completion<Value> {
+        match self.name_value(reference, realm, key, strict)? {
+            Some(value) => Ok(value),
+            None => Err(self.not_defined(index)),
+        }
+    }
+
+    /// `GetName(k)`.
+    #[inline(never)]
+    fn get_name(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        let (reference, key, realm) = self.look_up(index)?;
+        let value = self.name_value_or_throw(reference, index, key, realm, strict)?;
+        self.replace(0, value)
+    }
+
+    /// `ResolveName(k)`.
+    #[inline(never)]
+    fn resolve_name_entry(&mut self, index: u32) -> Completion<Flow> {
+        let (reference, _, _) = self.look_up(index)?;
+        self.push_entry(Entry::of_name(reference))?;
+        Ok(Flow::Next)
+    }
+
+    /// `GetNameRef(k)`.
+    #[inline(never)]
+    fn get_name_ref(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        let reference = self.name_reference_at(0)?;
+        let key = self.constant_key(index)?;
+        let realm = self.top_frame()?.realm;
+        let value = self.name_value_or_throw(reference, index, key, realm, strict)?;
+        self.replace(0, value)
+    }
+
+    /// `PutNameRef(k)`.
+    #[inline(never)]
+    fn put_name_ref(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let reference = self.name_reference_at(1)?;
+        if reference == NameReference::Unresolvable && strict {
+            return Err(self.not_defined(index));
+        }
+        let key = self.constant_key(index)?;
+        let realm = self.top_frame()?.realm;
+        self.put_name_value(reference, realm, key, value, strict)?;
+        self.replace(2, value)
+    }
+
+    /// `TypeofName(k)`.
+    #[inline(never)]
+    fn typeof_name(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        let (reference, key, realm) = self.look_up(index)?;
+        let kind = match self.name_value(reference, realm, key, strict)? {
+            Some(value) => self.type_of(value)?,
+            None => "undefined",
+        };
+        let string = self.atom(kind)?;
+        self.replace(0, Value::String(string))
+    }
+
+    /// `DeleteName(k)`.
+    #[inline(never)]
+    fn delete_name_instruction(&mut self, index: u32) -> Completion<Flow> {
+        let (reference, key, realm) = self.look_up(index)?;
+        let deleted = self.delete_name(reference, realm, key)?;
+        self.replace(0, Value::Boolean(deleted))
+    }
+
+    /// `GetNameForCall(k)`: the function, and as the this value WithBaseObject of the record
+    /// that binds the name (`#sec-evaluatecall`, step 1.b).
+    #[inline(never)]
+    fn get_name_for_call(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        let (reference, key, realm) = self.look_up(index)?;
+        let function = self.name_value_or_throw(reference, index, key, realm, strict)?;
+        let this = match reference {
+            NameReference::Object(object) => Value::Object(object),
+            _ => Value::Undefined,
+        };
+        self.push_value(this)?;
+        self.replace(0, function)
+    }
+
+    /// `PushNamedEnv(t)`: a declarative record of one slot per name of `scopes[t]` of the
+    /// running code, which names its slots.
+    #[inline(never)]
+    fn push_named_env(&mut self, table: u32) -> Completion<Flow> {
+        let (outer, names, slots) = {
+            let frame = self.top_frame()?;
+            let code = &frame.compiled.code;
+            let scopes = match frame.template {
+                Some(t) => code
+                    .functions
+                    .get(usize::try_from(t).unwrap_or(usize::MAX))
+                    .map(|template| &template.scopes),
+                None => Some(&code.scopes),
+            };
+            let slots = scopes
+                .and_then(|scopes| scopes.get(usize::try_from(table).unwrap_or(usize::MAX)))
+                .map(|names| u32::try_from(names.len()).unwrap_or(u32::MAX));
+            let names = SlotNames {
+                script: frame.script,
+                compiled: std::rc::Rc::clone(&frame.compiled),
+                table: NameTable::Scope {
+                    template: frame.template,
+                    index: table,
+                },
+            };
+            (frame.env, names, slots)
+        };
+        let Some(slots) = slots else {
+            return Err(self.fault());
+        };
+        let env = self.new_declarative_environment(outer, slots, Some(names))?;
+        let frame = self.top_frame()?;
+        frame.env = Some(env);
+        frame.pushed_envs = frame.pushed_envs.saturating_add(1);
+        Ok(Flow::Next)
+    }
+
+    /// `PushWith`: the start of a `with` statement
+    /// (`#sec-with-statement-runtime-semantics-evaluation`, steps 2 to 5).
+    #[inline(never)]
+    fn push_with(&mut self) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        if matches!(value, Value::Undefined | Value::Null) {
+            return Err(self.throw_error(
+                ErrorKind::TypeError,
+                "the object of a with statement is undefined or null",
+            ));
+        }
+        let object = self.to_object(value)?;
+        let keep = self.keep(Value::Object(object));
+        let outer = self.top_frame()?.env;
+        let env = self.new_with_environment(object, outer);
+        self.release(keep);
+        let env = env?;
+        self.drop_entries(1)?;
+        let frame = self.top_frame()?;
+        frame.env = Some(env);
+        frame.pushed_envs = frame.pushed_envs.saturating_add(1);
+        Ok(Flow::Next)
     }
 
     /// The object of a property reference's base (GetValue and PutValue, `#sec-getvalue`,

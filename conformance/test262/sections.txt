@@ -82,3 +82,6 @@ omit sec-ecmascript-function-objects-call-thisargument-argumentslist frame-depth
 section sec-applystringornumericbinaryoperator
 path sec-applystringornumericbinaryoperator test/language/expressions/addition/
 omit sec-applystringornumericbinaryoperator string-length-limit decision-3
+section sec-arguments-exotic-objects
+path sec-arguments-exotic-objects test/language/arguments-object/
+omit sec-arguments-exotic-objects symbol-iterator-property section-12-slice-6

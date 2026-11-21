@@ -1,0 +1,34 @@
+script locals 0
+  var "o"
+  0000 2:5 ResolveGlobal "o"
+  0001 2:9 NewObject
+  0002 2:14 Number 1
+  0003 2:11 DefineField "a"
+  0004 2:5 PutGlobalRef "o"
+  0005 2:5 Pop
+  0006 3:1 Undefined
+  0007 3:1 StoreCompletion
+  0008 3:7 GetGlobal "o"
+  0009 3:1 PushWith
+  0010 3:12 ResolveName "a"
+  0011 3:16 GetName "b"
+  0012 3:20 Number 1
+  0013 3:16 Add
+  0014 3:12 PutNameRef "a"
+  0015 3:12 StoreCompletion
+  0016 3:23 ResolveName "a"
+  0017 3:23 GetNameRef "a"
+  0018 3:23 ToNumeric
+  0019 3:23 Dup
+  0020 3:23 Bury 2
+  0021 3:23 Increment
+  0022 3:23 PutNameRef "a"
+  0023 3:23 Pop
+  0024 3:23 StoreCompletion
+  0025 3:28 TypeofName "c"
+  0026 3:28 StoreCompletion
+  0027 3:38 DeleteName "d"
+  0028 3:38 StoreCompletion
+  0029 3:1 PopEnv
+  0030 0:0 LoadCompletion
+  0031 0:0 Return

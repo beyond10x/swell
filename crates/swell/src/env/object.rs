@@ -1,10 +1,12 @@
 //! Object Environment Records (ECMA-262 9.1.1.2, `#sec-object-environment-records`). Filled by
 //! `story:interpreter-and-script-entry-points`.
 //!
-//! The one Object Environment Record of slice 1 is the [[ObjectRecord]] of a global environment,
-//! whose [[BindingObject]] is the realm's global object and whose [[IsWithEnvironment]] is false
-//! (`with` comes with slice 2). So a record is its binding object, and each concrete method here
-//! takes it.
+//! An Object Environment Record is the [[ObjectRecord]] of a global environment, whose
+//! [[BindingObject]] is the realm's global object and whose [[IsWithEnvironment]] is false, or
+//! the record of a `with` statement (`EnvironmentRecord::binding_object` of `env/mod.rs`), whose
+//! [[IsWithEnvironment]] is true. A record is its binding object, and each concrete method here
+//! takes it; HasBinding has one method for each value of [[IsWithEnvironment]], and
+//! WithBaseObject is answered by the lookup that found the record (`interp/dispatch.rs`).
 
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
@@ -17,6 +19,28 @@ impl<H: Host> Agent<H> {
     /// false: HasProperty of the binding object.
     pub(crate) fn object_has_binding(&mut self, binding: ObjectRef, name: Key) -> Completion<bool> {
         self.has_property(binding, name)
+    }
+
+    /// HasBinding (`#sec-object-environment-records-hasbinding-n`) with [[IsWithEnvironment]]
+    /// true: HasProperty of the binding object, then a name its @@unscopables object blocks
+    /// (ToBoolean of Get of the name) is no binding.
+    pub(crate) fn with_has_binding(&mut self, binding: ObjectRef, name: Key) -> Completion<bool> {
+        if !self.has_property(binding, name)? {
+            return Ok(false);
+        }
+        let Some(symbols) = self.well_known() else {
+            return Err(self.fault());
+        };
+        let unscopables = self.get(binding, Key::Symbol(symbols.unscopables))?;
+        let Value::Object(unscopables) = unscopables else {
+            return Ok(true);
+        };
+        let keep = self.keep(Value::Object(unscopables));
+        let blocked = self
+            .get(unscopables, name)
+            .and_then(|value| self.to_boolean(value));
+        self.release(keep);
+        Ok(!blocked?)
     }
 
     /// CreateMutableBinding (`#sec-object-environment-records-createmutablebinding-n-d`) and

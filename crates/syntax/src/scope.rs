@@ -10,7 +10,9 @@
 //!   `#sec-function-definitions-static-semantics-vardeclarednames`), the function declarations to
 //!   instantiate (the last one of each name, in source order, as GlobalDeclarationInstantiation
 //!   and FunctionDeclarationInstantiation take them from the var scoped declarations), and the
-//!   identifiers its own code references.
+//!   identifiers its own code references; whether a function needs an arguments object
+//!   (`#sec-functiondeclarationinstantiation`, steps 15 to 18) and whether a body holds a `with`
+//!   statement (`#sec-with-statement`).
 //!
 //! A method is a function scope like any other; a `catch` without a parameter binds nothing, and
 //! a label is no binding: neither changes what a body declares.
@@ -20,7 +22,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::ast::{Ast, Child, Expr, ForInTarget, ForInit, FunctionId, Scope, Stmt, StmtId};
+use crate::ast::{Ast, Child, Expr, ForInTarget, ForInit, FunctionId, Name, Scope, Stmt, StmtId};
 
 /// Whether `raw`, the source text of a string literal in a directive prologue, is a Use Strict
 /// Directive.
@@ -50,6 +52,7 @@ struct Collect {
     declarations: Vec<(String, FunctionId)>,
     references: Vec<String>,
     reference_seen: BTreeSet<String>,
+    contains_with: bool,
 }
 
 impl Collect {
@@ -65,8 +68,20 @@ impl Collect {
         }
     }
 
-    /// The scope of the body whose walk ends.
-    fn finish(self) -> Scope {
+    /// The scope of the body whose walk ends; `params` are the parameters of a function, `None`
+    /// for the script.
+    fn finish(self, params: Option<&[Name]>) -> Scope {
+        // `#sec-functiondeclarationinstantiation`, steps 15 to 18: no arguments object when a
+        // parameter or a function declaration of the body is named `arguments`; a `var` of that
+        // name keeps it.
+        let arguments_object = params.is_some_and(|params| {
+            self.reference_seen.contains("arguments")
+                && !params.iter().any(|p| p.name == "arguments")
+                && !self
+                    .declarations
+                    .iter()
+                    .any(|(name, _)| name == "arguments")
+        });
         // The last declaration of each name, in source order.
         let mut taken = BTreeSet::new();
         let mut functions = Vec::new();
@@ -80,6 +95,8 @@ impl Collect {
             var_names: self.var_names,
             functions,
             references: self.references,
+            arguments_object,
+            contains_with: self.contains_with,
         }
     }
 }
@@ -124,7 +141,8 @@ fn walk(ast: &Ast, body: &[StmtId]) -> (Scope, Vec<(FunctionId, Scope)>) {
             }
             Step::End(id) => {
                 if let Some(done) = open.pop() {
-                    scopes.push((id, done.finish()));
+                    let params = ast.function(id).map(|f| f.params.as_slice()).unwrap_or(&[]);
+                    scopes.push((id, done.finish(Some(params))));
                 }
             }
             Step::Node(Child::Function(id)) => {
@@ -149,7 +167,7 @@ fn walk(ast: &Ast, body: &[StmtId]) -> (Scope, Vec<(FunctionId, Scope)>) {
             }
         }
     }
-    (script.finish(), scopes)
+    (script.finish(None), scopes)
 }
 
 /// The `var` names the statement `id` declares itself (`VarDeclaredNames` of a variable
@@ -171,6 +189,7 @@ fn collect_stmt(ast: &Ast, id: StmtId, c: &mut Collect) {
             target: ForInTarget::Var(name),
             ..
         }) => c.var(&name.name),
+        Some(Stmt::With { .. }) => c.contains_with = true,
         _ => {}
     }
 }

@@ -6,8 +6,8 @@
 //! call of an ECMAScript function. It holds the code it runs (the script's [`Compiled`] and, for a
 //! function, the index of its template), the instruction index, the operand stack, the local
 //! slots, the LexicalEnvironment (`None` for the global environment of the frame's realm) with
-//! the number of environments its own `PushEnv`s made, the `this` value, the function, the
-//! realm, the script, and for a script the completion value register.
+//! the number of environments it made itself (`PushEnv`, `PushNamedEnv`, `PushWith`), the `this`
+//! value, the function, the realm, the script, and for a script the completion value register.
 //!
 //! What a frame takes beyond its fixed part (its locals and its operand stack as it grows) is
 //! charged to the memory budget and credited when the frame is popped.
@@ -16,23 +16,54 @@ use std::rc::Rc;
 
 use swell_compiler::bytecode::{Handler, Instruction};
 
+use crate::env::NameReference;
 use crate::heap::arena::Handle;
 use crate::heap::collect::{Item, Mark};
 use crate::object::property::Key;
 use crate::script::Compiled;
 use crate::value::{ObjectRef, Value};
 
-/// An entry of the operand stack: a language value, or one of the three engine entries of the
+/// An entry of the operand stack: a language value, or one of the four engine entries of the
 /// bytecode (`swell_compiler::bytecode`, "Values on the operand stack").
 pub(crate) enum Entry {
     Value(Value),
-    /// The Reference Record of a global name (`ResolveGlobal`): whether it is resolvable, its
-    /// [[Base]] then being the global environment.
+    /// The Reference Record of a global name (`ResolveGlobal`), or of a name looked up at run
+    /// time (`ResolveName`) that is unresolvable or that the global environment binds: whether
+    /// it is resolvable, its [[Base]] then being the global environment.
     Reference(bool),
+    /// The Reference Record of a name looked up at run time (`ResolveName`) whose [[Base]] is
+    /// this declarative record.
+    DeclarativeReference(Handle),
+    /// The Reference Record of a name looked up at run time whose [[Base]] is the Object
+    /// Environment Record of a `with` statement with this binding object.
+    ObjectReference(ObjectRef),
     /// The enumerator of a for-in statement (`ForInStart`).
     Enumerator(Box<Enumerator>),
     /// The tag of a completion record (`Tag`).
     Tag(u32),
+}
+
+impl Entry {
+    /// The entry of the Reference Record `reference`.
+    pub(crate) fn of_name(reference: NameReference) -> Entry {
+        match reference {
+            NameReference::Unresolvable => Entry::Reference(false),
+            NameReference::Global => Entry::Reference(true),
+            NameReference::Declarative(env) => Entry::DeclarativeReference(env),
+            NameReference::Object(object) => Entry::ObjectReference(object),
+        }
+    }
+
+    /// The Reference Record of a name the entry holds, if it holds one.
+    pub(crate) fn name_reference(&self) -> Option<NameReference> {
+        match *self {
+            Entry::Reference(false) => Some(NameReference::Unresolvable),
+            Entry::Reference(true) => Some(NameReference::Global),
+            Entry::DeclarativeReference(env) => Some(NameReference::Declarative(env)),
+            Entry::ObjectReference(object) => Some(NameReference::Object(object)),
+            Entry::Value(_) | Entry::Enumerator(_) | Entry::Tag(_) => None,
+        }
+    }
 }
 
 /// The state of a for-in statement's enumeration: the object and its keys as
@@ -57,7 +88,8 @@ pub(crate) struct Frame {
     /// The LexicalEnvironment: a record of the `environments` arena, or `None` for the global
     /// environment of `realm`.
     pub(crate) env: Option<Handle>,
-    /// How many of the environments on the way out from `env` this frame's `PushEnv`s made.
+    /// How many of the environments on the way out from `env` this frame made (`PushEnv`,
+    /// `PushNamedEnv` and `PushWith`).
     pub(crate) pushed_envs: u32,
     /// The `this` binding (ResolveThisBinding, `#sec-resolvethisbinding`).
     pub(crate) this: Value,
@@ -129,6 +161,8 @@ impl Frame {
                         key.trace(mark);
                     }
                 }
+                Entry::DeclarativeReference(env) => mark.push(Item::Environment(*env)),
+                Entry::ObjectReference(object) => mark.object(*object),
                 Entry::Reference(_) | Entry::Tag(_) => {}
             }
         }
