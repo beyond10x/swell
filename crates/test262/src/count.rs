@@ -243,6 +243,32 @@ fn plan(loaded: &Loaded, rules: &Rules, listed: &Listed) -> (Slice, Plan) {
     (slice, plan)
 }
 
+/// The lines [`run_cases`] answers.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RunLines {
+    /// The lines for standard error.
+    pub log: Vec<String>,
+    /// One line per run, in the order of the jobs: `test262-run`, the slice, the path, the mode
+    /// (`strict`, `non-strict` or `module`), the outcome (`Passed`, `Failed` or `Budget`) and
+    /// the detail of the run ([`run::Ran::detail`]), separated by tabs; a tab or a line end in a
+    /// field is written as a space, so that a line is one line of six fields.
+    pub runs: Vec<String>,
+}
+
+/// `text` as one field of a run line: each tab and line end (LF, CR, U+2028, U+2029) a space.
+fn one_field(text: &str) -> String {
+    text.replace(['\t', '\n', '\r', '\u{2028}', '\u{2029}'], " ")
+}
+
+/// The name of an outcome as a run line has it.
+fn outcome_name(outcome: Outcome) -> &'static str {
+    match outcome {
+        Outcome::Passed => "Passed",
+        Outcome::Failed => "Failed",
+        Outcome::Budget => "Budget",
+    }
+}
+
 /// Runs every run of every case that is run, on `workers` threads with `limits` (the runner gives
 /// [`run::LIMITS`]), and keeps each case's outcome in its [`Loaded`]. Answers the lines for
 /// standard error: one `test262-budget <path> <strict|non-strict> <reason>` per run a budget
@@ -250,7 +276,7 @@ fn plan(loaded: &Loaded, rules: &Rules, listed: &Listed) -> (Slice, Plan) {
 /// then `test262-refused <runs>`, the runs a refusal of the parser ended, all failed ([`run`]);
 /// then the twenty runs with the most steps, `test262-steps <steps> <path> <mode>`, the most
 /// first; then one `test262-time <slice> <runs> <milliseconds>` per slice, the time its runs
-/// took summed.
+/// took summed. Beside them, one run line per run ([`RunLines::runs`]).
 pub fn run_cases(
     checkout: &Path,
     loaded: &mut [Loaded],
@@ -258,7 +284,7 @@ pub fn run_cases(
     listed: &Listed,
     workers: NonZeroUsize,
     limits: &swell::Limits,
-) -> Result<Vec<String>, String> {
+) -> Result<RunLines, String> {
     let mut slices: BTreeMap<String, (u64, Duration)> = BTreeMap::new();
     let mut jobs: Vec<(&Case, Run)> = Vec::new();
     let mut owners: Vec<(usize, String)> = Vec::new();
@@ -275,11 +301,19 @@ pub fn run_cases(
     }
     let ran = run::run_all(checkout, &jobs, workers, limits)?;
     let mut lines = Vec::new();
+    let mut run_lines = Vec::with_capacity(ran.len());
     let mut outcomes: BTreeMap<usize, Vec<Outcome>> = BTreeMap::new();
     let mut steps = Vec::with_capacity(ran.len());
     let mut refused = 0u64;
     for (((case, run), (index, slice)), ran) in jobs.iter().zip(&owners).zip(&ran) {
         let mode = run::mode(*run);
+        run_lines.push(format!(
+            "test262-run\t{}\t{}\t{mode}\t{}\t{}",
+            one_field(slice),
+            one_field(&case.path),
+            outcome_name(ran.outcome),
+            one_field(&ran.detail)
+        ));
         if let (Outcome::Budget, Some(reason)) = (ran.outcome, ran.budget) {
             lines.push(format!("test262-budget {} {mode} {reason:?}", case.path));
         }
@@ -309,7 +343,10 @@ pub fn run_cases(
             item.outcome = Some(case_outcome(&outcomes));
         }
     }
-    Ok(lines)
+    Ok(RunLines {
+        log: lines,
+        runs: run_lines,
+    })
 }
 
 /// Counts the cases, with the outcomes [`run_cases`] kept.
@@ -400,5 +437,16 @@ impl Report {
         }
         lines.push(format!("test262-errors {}", self.errors));
         lines
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::one_field;
+
+    #[test]
+    fn a_tab_or_line_end_in_a_field_is_a_space() {
+        assert_eq!(one_field("a\tb\nc\r\nd\u{2028}e\u{2029}f"), "a b c  d e f");
+        assert_eq!(one_field("threw Error: x"), "threw Error: x");
     }
 }

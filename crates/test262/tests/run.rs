@@ -6,6 +6,12 @@
 //! <budget>`. `tests/fixtures/budget/` holds one case that never ends, run with a smaller step
 //! budget than the runner's. `tests/fixtures/refused/` holds cases whose source or include the
 //! parser refuses or nests too deep, and one early error the ES5 grammar has.
+//! `tests/fixtures/eval-script/` holds the cases of `$262.evalScript`: three that pass, and two
+//! that catch the `SyntaxError` of a refusal or of the nesting limit inside it and fail.
+//!
+//! With `--runs <file>` the runner writes one line per run to the file, `test262-run`, the slice,
+//! the path, the mode, the outcome and the detail, separated by tabs; the tests read it from
+//! `CARGO_TARGET_TMPDIR`, one file per test.
 
 use std::error::Error;
 use std::num::NonZeroUsize;
@@ -169,7 +175,7 @@ fn an_endless_case_is_printed_as_budget() -> TestResult {
     assert_eq!(problems, Vec::<String>::new());
     let tree = std::path::PathBuf::from(fixture("budget"));
     let mut loaded = count::load(&tree)?;
-    let lines = count::run_cases(
+    let ran = count::run_cases(
         &tree,
         &mut loaded,
         &rules,
@@ -177,6 +183,13 @@ fn an_endless_case_is_printed_as_budget() -> TestResult {
         NonZeroUsize::MIN,
         &limits,
     )?;
+    assert_eq!(
+        ran.runs,
+        [
+            "test262-run\t02\ttest/language/budget/endless.js\tnon-strict\tBudget\tcase: Terminated(StepBudget)"
+        ],
+    );
+    let lines = ran.log;
     let budget: Vec<&String> = lines
         .iter()
         .filter(|l| l.starts_with("test262-budget "))
@@ -339,5 +352,281 @@ fn refused_runs_are_printed() -> TestResult {
     let printed = counted_refused()?;
     assert_eq!(printed.errors("test262-refused"), ["test262-refused 6"]);
     assert_eq!(counted()?.errors("test262-refused"), ["test262-refused 0"]);
+    Ok(())
+}
+
+/// One line of the runs file, split at its tabs.
+type RunLine = Vec<String>;
+
+/// The path of the runs file of the test `name`, removed if a former run left it.
+fn runs_path(name: &str) -> Result<String, Box<dyn Error>> {
+    let path = format!("{}/runs-{name}.tsv", env!("CARGO_TARGET_TMPDIR"));
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    Ok(path)
+}
+
+/// `count` over the fixture tree `tree` with `--runs` and `extra`; it must exit 0. Answers what
+/// it printed and the lines of the runs file, each split at its tabs.
+fn counted_runs(
+    tree: &str,
+    name: &str,
+    extra: &[&str],
+) -> Result<(Printed, Vec<RunLine>), Box<dyn Error>> {
+    let path = runs_path(name)?;
+    let mut args = vec!["--runs", path.as_str()];
+    args.extend_from_slice(extra);
+    let printed = count_tree(tree, &args)?;
+    assert_eq!(printed.code, Some(0), "{}", printed.all());
+    let text = std::fs::read_to_string(&path)?;
+    let lines = text
+        .lines()
+        .map(|line| line.split('\t').map(str::to_string).collect())
+        .collect();
+    Ok((printed, lines))
+}
+
+/// The run lines of the case `path`, in the order of its runs.
+fn runs_of<'l>(lines: &'l [RunLine], path: &str) -> Vec<&'l RunLine> {
+    lines
+        .iter()
+        .filter(|line| line.get(2).map(String::as_str) == Some(path))
+        .collect()
+}
+
+/// Field `n` (from 1, as `awk` counts) of a run line.
+fn field(line: &RunLine, n: usize) -> &str {
+    line.get(n - 1).map_or("", String::as_str)
+}
+
+#[test]
+fn runs_file_has_one_line_per_run() -> TestResult {
+    let (printed, lines) = counted_runs("run", "one-line-per-run", &[])?;
+    // The run tree has 27 runs: 6 of slice 01 (test/harness/), 21 of slice 02 (test/language/),
+    // as its slice lines count them.
+    assert_line(&printed, "test262-slice 01 3 6 0 0 3 3 0 0");
+    assert_line(&printed, "test262-slice 02 12 21 0 0 12 5 7 0");
+    assert_eq!(lines.len(), 27, "{lines:?}");
+    let mut paths: Vec<&str> = Vec::new();
+    for line in &lines {
+        assert_eq!(line.len(), 6, "{line:?}");
+        assert_eq!(field(line, 1), "test262-run", "{line:?}");
+        let path = field(line, 3);
+        let slice = if path.starts_with("test/harness/") {
+            "01"
+        } else {
+            "02"
+        };
+        assert_eq!(field(line, 2), slice, "{line:?}");
+        assert!(
+            std::path::Path::new(&fixture("run")).join(path).is_file(),
+            "{line:?}"
+        );
+        assert!(
+            matches!(field(line, 4), "strict" | "non-strict"),
+            "{line:?}"
+        );
+        assert!(
+            matches!(field(line, 5), "Passed" | "Failed" | "Budget"),
+            "{line:?}"
+        );
+        if paths.last() != Some(&path) {
+            paths.push(path);
+        }
+    }
+    // In the order of the jobs: the cases in byte order, each with its runs together, the
+    // non-strict run first.
+    let mut sorted = paths.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(paths, sorted, "each case once, in byte order");
+    assert_eq!(paths.len(), 15, "{paths:?}");
+    let both = runs_of(&lines, "test/language/strict/both.js");
+    let modes: Vec<&str> = both.iter().map(|l| field(l, 4)).collect();
+    assert_eq!(modes, ["non-strict", "strict"]);
+    let outcomes: Vec<&str> = both.iter().map(|l| field(l, 5)).collect();
+    assert_eq!(
+        outcomes,
+        ["Passed", "Failed"],
+        "both.js fails in strict code only"
+    );
+    // A case passes when every run passed: the passed cases of the slice lines.
+    for (slice, passed) in [("01", 3), ("02", 5)] {
+        let cases = paths
+            .iter()
+            .filter(|path| {
+                let runs = runs_of(&lines, path);
+                runs.iter()
+                    .all(|l| field(l, 2) == slice && field(l, 5) == "Passed")
+            })
+            .count();
+        assert_eq!(cases, passed, "slice {slice}");
+    }
+    // With --run none the file is written and holds no line.
+    let (none, empty) = counted_runs("run", "run-none", &["--run", "none"])?;
+    assert_line(&none, "test262-slice 02 12 21 0 0 12 0 12 0");
+    assert_eq!(empty, Vec::<RunLine>::new());
+    // A file that cannot be written is a command the runner cannot carry out.
+    let missing = format!("{}/no-such-directory/runs.tsv", env!("CARGO_TARGET_TMPDIR"));
+    let printed = count_tree("run", &["--runs", &missing, "--run", "none"])?;
+    assert_eq!(printed.code, Some(2), "{}", printed.all());
+    assert_eq!(
+        printed.stdout, "",
+        "nothing is printed before the file is written"
+    );
+    Ok(())
+}
+
+#[test]
+fn runs_file_names_the_refusal_and_the_thrown_error() -> TestResult {
+    let (_, refused) = counted_runs("refused", "refusal", &[])?;
+    let positive = runs_of(&refused, "test/language/refused/positive.js");
+    assert_eq!(positive.len(), 2, "{refused:?}");
+    for line in positive {
+        assert_eq!(field(line, 5), "Failed", "{line:?}");
+        let detail = field(line, 6);
+        assert!(
+            detail.starts_with("parse: refused: SyntaxError: ")
+                && detail.contains(" is not supported before slice "),
+            "{line:?}"
+        );
+    }
+    let nesting = runs_of(&refused, "test/language/nesting/negative.js");
+    assert_eq!(nesting.len(), 1, "{refused:?}");
+    assert!(
+        nesting.iter().all(|l| field(l, 6)
+            .starts_with("parse: nesting limit: SyntaxError: nesting deeper than parser_nesting")),
+        "{nesting:?}"
+    );
+    let (_, run) = counted_runs("run", "thrown", &[])?;
+    let thrown = runs_of(&run, "test/language/throws/error.js");
+    let details: Vec<&str> = thrown.iter().map(|l| field(l, 6)).collect();
+    assert_eq!(
+        details,
+        [
+            "threw Error: thrown by the case",
+            "threw Error: thrown by the case"
+        ]
+    );
+    // A pass that is not negative has an empty detail; a negative case names the error it
+    // passed with.
+    let pass = runs_of(&run, "test/harness/pass.js");
+    assert!(
+        pass.iter()
+            .all(|l| field(l, 5) == "Passed" && field(l, 6).is_empty()),
+        "{pass:?}"
+    );
+    let named = runs_of(&run, "test/language/negative-runtime/named.js");
+    assert!(
+        named
+            .iter()
+            .all(|l| field(l, 5) == "Passed" && field(l, 6).starts_with("threw Test262Error")),
+        "{named:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn runs_file_does_not_change_the_counted_lines() -> TestResult {
+    for tree in ["run", "refused"] {
+        let without = count_tree(tree, &[])?;
+        let (with, _) = counted_runs(tree, &format!("unchanged-{tree}"), &[])?;
+        assert_eq!(without.code, Some(0), "{}", without.all());
+        assert_eq!(with.stdout, without.stdout, "{tree}");
+        // Standard error keeps its lines but the times, which differ from run to run.
+        let kept = |p: &Printed| -> Vec<String> {
+            p.stderr
+                .lines()
+                .filter(|l| !l.starts_with("test262-time "))
+                .map(str::to_string)
+                .collect()
+        };
+        assert_eq!(kept(&with), kept(&without), "{tree}");
+    }
+    Ok(())
+}
+
+/// The eval-script tree counted with `--runs`.
+fn counted_eval_script(name: &str) -> Result<(Printed, Vec<RunLine>), Box<dyn Error>> {
+    counted_runs("eval-script", name, &[])
+}
+
+/// The case `name` of the eval-script tree passes in both its runs, with an empty detail.
+fn assert_eval_script_passes(lines: &[RunLine], name: &str) {
+    let path = format!("test/language/eval-script/{name}");
+    let runs = runs_of(lines, &path);
+    let seen: Vec<(&str, &str, &str)> = runs
+        .iter()
+        .map(|l| (field(l, 4), field(l, 5), field(l, 6)))
+        .collect();
+    assert_eq!(
+        seen,
+        [("non-strict", "Passed", ""), ("strict", "Passed", "")],
+        "{path}"
+    );
+}
+
+#[test]
+fn eval_script_declares_in_the_global_scope() -> TestResult {
+    let (_, lines) = counted_eval_script("declares")?;
+    assert_eval_script_passes(&lines, "declares-a-global.js");
+    Ok(())
+}
+
+#[test]
+fn eval_script_throws_the_first_syntax_error() -> TestResult {
+    let (_, lines) = counted_eval_script("syntax-error")?;
+    assert_eval_script_passes(&lines, "throws-the-syntax-error.js");
+    Ok(())
+}
+
+#[test]
+fn eval_script_answers_the_completion_value() -> TestResult {
+    let (_, lines) = counted_eval_script("completion")?;
+    assert_eval_script_passes(&lines, "answers-the-completion.js");
+    Ok(())
+}
+
+#[test]
+fn a_refusal_inside_eval_script_fails_the_run() -> TestResult {
+    let (printed, lines) = counted_eval_script("refusal-inside")?;
+    // Three cases pass; refusal-fails-the-run.js and nesting-fails-the-run.js catch the
+    // SyntaxError they name and fail.
+    assert_line(&printed, "test262 language/eval-script 5 0 0 5 3 2 0");
+    let runs = runs_of(&lines, "test/language/eval-script/refusal-fails-the-run.js");
+    assert_eq!(runs.len(), 2, "{lines:?}");
+    for line in runs {
+        assert_eq!(field(line, 5), "Failed", "{line:?}");
+        let detail = field(line, 6);
+        assert!(
+            detail.starts_with("evalScript: refused: ")
+                && detail.contains(" is not supported before slice "),
+            "{line:?}"
+        );
+    }
+    // The two runs of refusal-fails-the-run.js are counted as refused, and not the two of
+    // nesting-fails-the-run.js: the nesting limit is not a refusal.
+    assert_eq!(printed.errors("test262-refused"), ["test262-refused 2"]);
+    Ok(())
+}
+
+#[test]
+fn the_nesting_limit_inside_eval_script_fails_the_run() -> TestResult {
+    // The case nests 2000 parentheses, past the runner's limit.
+    assert_eq!(run::LIMITS.parser_nesting, 1_000);
+    let (_, lines) = counted_eval_script("nesting-inside")?;
+    let runs = runs_of(&lines, "test/language/eval-script/nesting-fails-the-run.js");
+    assert_eq!(runs.len(), 2, "{lines:?}");
+    for line in runs {
+        assert_eq!(field(line, 5), "Failed", "{line:?}");
+        assert!(
+            field(line, 6)
+                .starts_with("evalScript: nesting: nesting deeper than parser_nesting (1000)"),
+            "{line:?}"
+        );
+    }
     Ok(())
 }

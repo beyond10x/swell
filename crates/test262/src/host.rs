@@ -1,8 +1,19 @@
 //! The runner's host (design, decision 11; test262 `INTERPRETING.md`, "Host-Defined
 //! Functions"): the [`Host`] of every agent the runner makes, and the two host-defined globals
-//! a case may call, `print` and `$262` with `createRealm` and `global`. The other members of
-//! `$262` come with their slices: `evalScript` (2), `detachArrayBuffer` (13), `gc` (16),
-//! `IsHTMLDDA` (18), `AbstractModuleSource` (11); `agent` is excluded (decision 1).
+//! a case may call, `print` and `$262` with `createRealm`, `evalScript` and `global`. The other
+//! members of `$262` come with their slices: `detachArrayBuffer` (13), `gc` (16), `IsHTMLDDA`
+//! (18), `AbstractModuleSource` (11); `agent` is excluded (decision 1).
+//!
+//! `$262.evalScript(sourceText)` follows the steps `INTERPRETING.md` gives: ParseScript
+//! (`#sec-parse-script`) of the string in the current realm; if that answers a list of errors,
+//! a throw completion of the first; otherwise ScriptEvaluation
+//! (`#sec-runtime-semantics-scriptevaluation`) of the script. The current realm while a host
+//! function runs is its [[Realm]], so each realm has its own `evalScript`, and the host keeps
+//! every realm of the run, the first one included, beside the `evalScript` made in it: a call
+//! finds its realm by its callee. A refusal of the parser or its nesting limit inside the string
+//! is a `SyntaxError` like an error of the grammar and is thrown as one, but it is not an error
+//! a case can ask for (`run.rs`): the first such error marks the run, as `createRealm` marks a
+//! run that wants another realm, and `run.rs` fails a marked run.
 //!
 //! `$262.createRealm` creates "a new ECMAScript Realm, defines this API on the new realm's global
 //! object, and returns the `$262` property of the new realm's global object". A host function
@@ -20,12 +31,16 @@
 //! it is called, and the realms made before the run and the runs made again go.
 
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 use swell::{
     Abrupt, Agent, Brand, Completion, Cx, HookCx, Host, HostCall, HostError, HostObjectSpec,
-    InterruptHandle, Job, LoadRequest, ObjectRef, Outcome, PropertyDescriptor, PropertyKey,
-    Prototype, Realm, Root, Termination, Value, ValueKind,
+    InterruptHandle, Job, LoadRequest, ObjectRef, Outcome, Parsed, PropertyDescriptor, PropertyKey,
+    Prototype, Realm, RealmRef, Root, Source, Termination, Value, ValueKind,
 };
+use swell_syntax::{MessageKind, message_kind};
+
+use crate::run::without_position;
 
 /// The brand of the `$262` objects.
 const BRAND_262: Brand = Brand(262);
@@ -36,17 +51,30 @@ const NOT_AN_OBJECT: HostError = HostError::WrongKind {
     expected: ValueKind::Object,
 };
 
+/// A refusal of the parser or its nesting limit that `$262.evalScript` met: the kind and the
+/// `message` of the `SyntaxError` it threw.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct EvalScriptMark {
+    pub(crate) kind: MessageKind,
+    pub(crate) message: String,
+}
+
 /// The host of one run.
 #[derive(Default)]
 pub(crate) struct RunnerHost {
     /// The `$262` objects of the realms made for `createRealm` that no call has taken yet, in
     /// the order they were made.
     spare: VecDeque<Root>,
-    /// The `$262` objects `createRealm` handed out, and the realms made for it.
+    /// The `$262` objects `createRealm` handed out.
     kept: Vec<Root>,
-    realms: Vec<Realm>,
+    /// Every realm of the run in the order it was made, the first one included, and beside each
+    /// the `evalScript` function made in it, at the same index.
+    realms: Vec<Rc<Realm>>,
+    eval_scripts: Vec<Root>,
     /// `createRealm` was called when no realm was left.
     pub(crate) wanted_realm: bool,
+    /// The first refusal or nesting limit `evalScript` met.
+    pub(crate) eval_script_mark: Option<EvalScriptMark>,
     /// The agent's interrupt handle.
     pub(crate) interrupt: Option<InterruptHandle>,
     /// What `print` received, each as its string value.
@@ -94,17 +122,23 @@ impl From<HostError> for SetupError {
     }
 }
 
-/// A new realm with `print` and `$262` on its global object, and the root of its `$262`.
-pub(crate) fn new_realm(agent: &mut Agent<RunnerHost>) -> Result<(Realm, Root), SetupError> {
+/// A new realm with `print` and `$262` on its global object, kept by the host with its
+/// `evalScript`, and the root of its `$262`.
+pub(crate) fn new_realm(agent: &mut Agent<RunnerHost>) -> Result<(Rc<Realm>, Root), SetupError> {
     let realm = match agent.create_realm(None, None)? {
-        Outcome::Normal(realm) => realm,
+        Outcome::Normal(realm) => Rc::new(realm),
         Outcome::Throw(_) => return Err(SetupError::Other("create_realm threw".to_string())),
         Outcome::Terminated(termination) => return Err(SetupError::Terminated(termination)),
     };
     let global = agent.global_object(&realm)?;
     let installed = agent.with_cx(&realm, |cx| install(cx, &realm, &global))?;
     match installed {
-        Ok(Ok(dollar)) => Ok((realm, dollar)),
+        Ok(Ok((dollar, eval_script))) => {
+            let host = agent.host_mut();
+            host.realms.push(Rc::clone(&realm));
+            host.eval_scripts.push(eval_script);
+            Ok((realm, dollar))
+        }
         Ok(Err(Abrupt::Terminated(termination))) => Err(SetupError::Terminated(termination)),
         Ok(Err(Abrupt::Throw(_))) => Err(SetupError::Other(
             "defining print and $262 threw".to_string(),
@@ -113,19 +147,18 @@ pub(crate) fn new_realm(agent: &mut Agent<RunnerHost>) -> Result<(Realm, Root), 
     }
 }
 
-/// Keeps `realm` and its `$262` for a later `createRealm`.
-pub(crate) fn keep_spare(agent: &mut Agent<RunnerHost>, realm: Realm, dollar: Root) {
-    let host = agent.host_mut();
-    host.realms.push(realm);
-    host.spare.push_back(dollar);
+/// Keeps the `$262` of a realm made for a later `createRealm`.
+pub(crate) fn keep_spare(agent: &mut Agent<RunnerHost>, dollar: Root) {
+    agent.host_mut().spare.push_back(dollar);
 }
 
-/// Defines `print` and `$262` on the global object `global` holds, in `realm`.
+/// Defines `print` and `$262` on the global object `global` holds, in `realm`; answers the roots
+/// of `$262` and of its `evalScript`.
 fn install(
     cx: &mut Cx<'_, RunnerHost>,
     realm: &Realm,
     global: &Root,
-) -> Result<Completion<Root>, HostError> {
+) -> Result<Completion<(Root, Root)>, HostError> {
     let realm_ref = cx.realm_ref(realm)?;
     let Value::Object(global) = cx.get(global)? else {
         return Err(NOT_AN_OBJECT);
@@ -151,8 +184,14 @@ fn install(
             Ok(function) => function,
             Err(abrupt) => return Ok(Err(abrupt)),
         };
+    let eval_script =
+        match cx.new_host_function(realm_ref, "evalScript", 1, eval_script_steps, false, None)? {
+            Ok(function) => function,
+            Err(abrupt) => return Ok(Err(abrupt)),
+        };
     for (object, name, value) in [
         (dollar, "createRealm", Value::Object(create_realm)),
+        (dollar, "evalScript", Value::Object(eval_script)),
         (dollar, "global", Value::Object(global)),
         (global, "print", Value::Object(print)),
         (global, "$262", Value::Object(dollar)),
@@ -161,7 +200,9 @@ fn install(
             return Ok(Err(abrupt));
         }
     }
-    cx.root(Value::Object(dollar)).map(Ok)
+    let dollar = cx.root(Value::Object(dollar))?;
+    let eval_script = cx.root(Value::Object(eval_script))?;
+    Ok(Ok((dollar, eval_script)))
 }
 
 /// `%Object.prototype%` of the realm whose global object is `global`, read as `Object.prototype`
@@ -233,6 +274,70 @@ fn create_realm_steps(cx: &mut Cx<'_, RunnerHost>, _call: HostCall<'_>) -> Compl
     let value = fault_on_host_error(cx.get(&dollar))?;
     cx.host_mut().kept.push(dollar);
     Ok(value)
+}
+
+/// `$262.evalScript(sourceText)` (`INTERPRETING.md`, "Host-Defined Functions"): ToString
+/// (`#sec-tostring`) of the argument, ParseScript (`#sec-parse-script`) of its code units in the
+/// realm of the function; a list of errors throws the first, and marks the run when it is a
+/// refusal or the nesting limit; otherwise ScriptEvaluation
+/// (`#sec-runtime-semantics-scriptevaluation`) of the script and its completion.
+fn eval_script_steps(cx: &mut Cx<'_, RunnerHost>, call: HostCall<'_>) -> Completion<Value> {
+    let source = call.args.first().copied().unwrap_or(Value::Undefined);
+    let string = fault_on_host_error(cx.to_string(source))??;
+    let units = fault_on_host_error(cx.to_utf16(string))?;
+    let Some(realm) = fault_on_host_error(realm_of(cx, call.callee))? else {
+        return Err(Abrupt::Terminated(Termination::EngineFault));
+    };
+    let parsed = fault_on_host_error(cx.parse_script(realm, Source::Utf16(&units), None))?;
+    let script = match parsed {
+        Parsed::Parsed(script) => script,
+        Parsed::Errors(errors) => {
+            let Some(first) = errors.first() else {
+                return Err(Abrupt::Terminated(Termination::EngineFault));
+            };
+            let error = fault_on_host_error(cx.get(first))?;
+            mark(cx, error)?;
+            return Err(Abrupt::Throw(error));
+        }
+        Parsed::Terminated(termination) => return Err(Abrupt::Terminated(termination)),
+    };
+    fault_on_host_error(cx.evaluate_script(script))?
+}
+
+/// The realm of the `evalScript` function `callee`: the realm the host keeps at the index of
+/// that function. The host data of a host function cannot be read back through `Cx`
+/// (`host_data` reads host objects only), so the function is found among those the host keeps.
+fn realm_of(cx: &Cx<'_, RunnerHost>, callee: ObjectRef) -> Result<Option<RealmRef>, HostError> {
+    let host = cx.host();
+    for (eval_script, realm) in host.eval_scripts.iter().zip(&host.realms) {
+        if cx.get(eval_script)? == Value::Object(callee) {
+            return cx.realm_ref(realm).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+/// Marks the run when `error`, the first error ParseScript gave, is a refusal or the nesting
+/// limit, read from its `message` as `run.rs` reads one; the first mark stays.
+fn mark(cx: &mut Cx<'_, RunnerHost>, error: Value) -> Completion<()> {
+    let Value::Object(object) = error else {
+        return Ok(());
+    };
+    let key = PropertyKey::String(cx.new_string("message")?);
+    let Value::String(message) = fault_on_host_error(cx.get_property(object, key))?? else {
+        return Ok(());
+    };
+    let message = fault_on_host_error(cx.to_rust_string_lossy(message))?;
+    let kind = message_kind(without_position(&message));
+    let host = cx.host_mut();
+    if matches!(
+        kind,
+        MessageKind::Refusal { .. } | MessageKind::Nesting { .. }
+    ) && host.eval_script_mark.is_none()
+    {
+        host.eval_script_mark = Some(EvalScriptMark { kind, message });
+    }
+    Ok(())
 }
 
 /// A host error on a handle the engine gave this host is a broken engine invariant: the run

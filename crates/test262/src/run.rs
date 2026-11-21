@@ -19,6 +19,13 @@
 //! A run whose harness file or case ends in a refusal or the nesting limit fails, whatever the
 //! case's `negative` says; the kind is read from the `message` of the error object the engine
 //! gives, through [`swell_syntax::message_kind`], and the source is not parsed again.
+//!
+//! `$262.evalScript` keeps that rule for the source it parses (`host.rs`): it throws the first
+//! parse error as the steps say, and when that is a refusal or the nesting limit it marks the
+//! run. After the case, a marked run ends failed whatever the case and its `negative` answered,
+//! read as a run that wants another realm is read, with the detail `evalScript: refused:
+//! <message>` or `evalScript: nesting: <message>`. A run marked for a refusal is a refused run
+//! ([`Ran::refused`]) and counts in `test262-refused`; one marked for the nesting limit is not.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -38,7 +45,7 @@ use swell::{
 use swell_syntax::{MessageKind, message_kind};
 
 use crate::count::{Case, Outcome, Run};
-use crate::host::{self, RunnerHost, SetupError};
+use crate::host::{self, EvalScriptMark, RunnerHost, SetupError};
 
 /// The limits of every run, in one table. The two budgets are the design's first values (decision
 /// 11: "2^30 steps and 512 MiB, chosen, not derived"); the twenty most expensive runs are printed
@@ -74,7 +81,8 @@ pub struct Ran {
     /// What ended it: the parse error, the thrown error or the termination; for a negative case
     /// that passed, the error it passed with; empty for any other pass.
     pub detail: String,
-    /// The kind of the parse error that ended it, of a harness file or of the case.
+    /// The kind of the parse error that ended it, of a harness file, of the case or of the
+    /// source of a `$262.evalScript` that marked the run.
     pub parse_error: Option<MessageKind>,
     /// The run panicked; it is counted failed.
     pub panicked: bool,
@@ -95,7 +103,8 @@ impl Ran {
         }
     }
 
-    /// The run ended in a refusal of the parser.
+    /// The run ended in a refusal of the parser, of its own sources or inside
+    /// `$262.evalScript`.
     pub fn refused(&self) -> bool {
         matches!(self.parse_error, Some(MessageKind::Refusal { .. }))
     }
@@ -340,6 +349,21 @@ impl End {
             ..End::failed(format!("{what}parse: {cause}{error}"))
         }
     }
+
+    /// A run `$262.evalScript` marked: failed, with the kind of the error, so that a refusal
+    /// counts as one ([`Ran::refused`]) and the nesting limit does not.
+    fn eval_script_marked(mark: EvalScriptMark) -> End {
+        let cause = match mark.kind {
+            MessageKind::Nesting { .. } => "nesting",
+            MessageKind::Refusal { .. } => "refused",
+            // `host.rs` marks no error of the grammar.
+            MessageKind::Grammar => "grammar",
+        };
+        End {
+            parse_error: Some(mark.kind),
+            ..End::failed(format!("evalScript: {cause}: {}", mark.message))
+        }
+    }
 }
 
 /// The kind of a parse error the engine gave, from its `message`. The engine writes the message
@@ -349,7 +373,8 @@ fn parse_kind(error: &Thrown) -> MessageKind {
     message_kind(without_position(&error.text))
 }
 
-fn without_position(text: &str) -> &str {
+/// `text` without the ` (<line>:<column>)` the engine writes after the message of a parse error.
+pub(crate) fn without_position(text: &str) -> &str {
     let Some((message, position)) = text.rsplit_once(" (") else {
         return text;
     };
@@ -389,7 +414,7 @@ fn attempt(
     };
     for _ in 0..realms {
         match host::new_realm(&mut agent) {
-            Ok((spare, dollar)) => host::keep_spare(&mut agent, spare, dollar),
+            Ok((_, dollar)) => host::keep_spare(&mut agent, dollar),
             Err(error) => return Attempt::Done(Ran::ended(setup_failed(error), 0)),
         }
     }
@@ -398,6 +423,12 @@ fn attempt(
     if agent.host().wanted_realm {
         return Attempt::MoreRealms;
     }
+    // A refusal or the nesting limit `$262.evalScript` met fails the run, whatever the case and
+    // its `negative` answered.
+    let end = match agent.host_mut().eval_script_mark.take() {
+        Some(mark) => End::eval_script_marked(mark),
+        None => end,
+    };
     Attempt::Done(Ran::ended(end, steps))
 }
 
