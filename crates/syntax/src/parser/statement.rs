@@ -58,6 +58,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The offsets of the string literal at the current token, while in the prologue.
+    #[inline(never)]
     fn directive_candidate(&self, prologue: bool) -> Option<(u32, u32)> {
         match &self.tok.kind {
             TokenKind::String(_) if prologue => Some((self.tok.start, self.tok.end)),
@@ -67,6 +68,7 @@ impl<'a> Parser<'a> {
 
     /// After a statement of the prologue: whether the prologue goes on. A Use Strict Directive
     /// makes the code from here on strict.
+    #[inline(never)]
     fn directive_end(
         &mut self,
         stmt: StmtId,
@@ -89,6 +91,7 @@ impl<'a> Parser<'a> {
 
     /// Whether `stmt` is an `ExpressionStatement` that consists entirely of the string literal
     /// token at `start..end`.
+    #[inline(never)]
     fn is_directive(&self, stmt: StmtId, start: u32, end: u32) -> bool {
         let Some(Stmt::Expression(e)) = self.ast.stmt(stmt).map(|n| &n.stmt) else {
             return false;
@@ -112,6 +115,7 @@ impl<'a> Parser<'a> {
 
     /// Which parser takes the statement at the current token; refuses the statements of later
     /// slices and reports the ones that cannot stand at `place`.
+    #[inline(never)]
     fn statement_kind(&mut self, place: Place) -> R<StmtParser<'a>> {
         Ok(match &self.tok.kind {
             TokenKind::Punct(Punct::LBrace) => Parser::block_statement,
@@ -188,6 +192,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Pushes `stmt`, which started at `start` and ends at the previous token.
+    #[inline(never)]
     fn make_stmt(&mut self, stmt: Stmt, start: Span) -> R<StmtId> {
         let span = self.finish(start);
         self.push_stmt(stmt, span)
@@ -264,6 +269,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Appends `s` to the list `list` of the statement `id`.
+    #[inline(never)]
     fn append(&mut self, id: StmtId, list: List, s: StmtId) {
         let target = match (self.stmt_mut(id), list) {
             (Some(Stmt::Block(body)), List::Block) => body,
@@ -301,6 +307,7 @@ impl<'a> Parser<'a> {
     }
 
     /// A `BindingIdentifier`. A binding pattern is refused (slice 6).
+    #[inline(never)]
     pub(super) fn binding_identifier(&mut self) -> R<Name> {
         let span = self.start();
         match &self.tok.kind {
@@ -361,6 +368,7 @@ impl<'a> Parser<'a> {
     }
 
     /// The `BindingIdentifier` of a declarator, appended to the declarators of `id`.
+    #[inline(never)]
     fn declarator_name(&mut self, id: StmtId) -> R<()> {
         let name = self.binding_identifier()?;
         if let Some(list) = self.declarators(id) {
@@ -369,6 +377,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    #[inline(never)]
     fn declarator_init(&mut self, id: StmtId, e: ExprId) {
         if let Some(d) = self.declarators(id).and_then(|l| l.last_mut()) {
             d.init = Some(e);
@@ -497,6 +506,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Sets the `init` of the `for` statement `id`: an expression, or an empty `var` list.
+    #[inline(never)]
     fn set_for_init(&mut self, id: StmtId, e: Option<ExprId>) {
         if let Some(Stmt::For { init, .. }) = self.stmt_mut(id) {
             *init = Some(match e {
@@ -514,6 +524,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Refuses `const` and `let` declarations in the head of a `for`.
+    #[inline(never)]
     fn for_head_refusals(&mut self) -> R<()> {
         if self.is_keyword(Keyword::Const) {
             return self.refuse("const declaration", 6);
@@ -533,6 +544,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Sets a part of the loop `id` once it is parsed.
+    #[inline(never)]
     fn set_loop_part(&mut self, id: StmtId, part: LoopPart) {
         match (self.stmt_mut(id), part) {
             (Some(Stmt::For { test, .. }), LoopPart::Test(e)) => *test = e,
@@ -746,27 +758,55 @@ impl<'a> Parser<'a> {
         Ok(true)
     }
 
+    /// `try Block Catch`, `try Block Finally` and `try Block Catch Finally`. The node is built and
+    /// checked by leaf helpers, so the frame that stays on the stack while the blocks are parsed
+    /// holds little more than the id.
     fn try_statement(&mut self) -> R<StmtId> {
         self.enter()?;
         let start = self.start();
+        let id = self.reserve_try()?;
+        self.statement_list(id, List::Try)?;
+        if self.is_keyword(Keyword::Catch) {
+            self.catch_parameter(id)?;
+            self.statement_list(id, List::Catch)?;
+        }
+        if self.finally_keyword(id)? {
+            self.statement_list(id, List::Finally)?;
+        }
+        let id = self.complete_try(id, start)?;
+        self.leave();
+        Ok(id)
+    }
+
+    /// Reserves the node of the `try` at the current token and consumes the keyword.
+    #[inline(never)]
+    fn reserve_try(&mut self) -> R<StmtId> {
         let id = self.reserve_stmt(Stmt::Try {
             block: Vec::new(),
             handler: None,
             finalizer: None,
         });
         self.advance()?;
-        self.statement_list(id, List::Try)?;
-        if self.is_keyword(Keyword::Catch) {
-            self.catch_parameter(id)?;
-            self.statement_list(id, List::Catch)?;
+        Ok(id)
+    }
+
+    /// Consumes `finally` and opens the finalizer of `id`; false when the current token is not
+    /// `finally`.
+    #[inline(never)]
+    fn finally_keyword(&mut self, id: StmtId) -> R<bool> {
+        if !self.is_keyword(Keyword::Finally) {
+            return Ok(false);
         }
-        if self.is_keyword(Keyword::Finally) {
-            self.advance()?;
-            if let Some(Stmt::Try { finalizer, .. }) = self.stmt_mut(id) {
-                *finalizer = Some(Vec::new());
-            }
-            self.statement_list(id, List::Finally)?;
+        self.advance()?;
+        if let Some(Stmt::Try { finalizer, .. }) = self.stmt_mut(id) {
+            *finalizer = Some(Vec::new());
         }
+        Ok(true)
+    }
+
+    /// Completes the `try` statement `id`, which needs a `catch` or a `finally`.
+    #[inline(never)]
+    fn complete_try(&mut self, id: StmtId, start: Span) -> R<StmtId> {
         let complete = matches!(
             self.ast.stmt(id).map(|n| &n.stmt),
             Some(
@@ -782,13 +822,12 @@ impl<'a> Parser<'a> {
         if !complete {
             return self.unexpected();
         }
-        let id = self.complete_stmt(id, start)?;
-        self.leave();
-        Ok(id)
+        self.complete_stmt(id, start)
     }
 
     /// `catch ( BindingIdentifier )`, recorded as the handler of `id`; a catch without a binding
     /// is refused (slice 2).
+    #[inline(never)]
     fn catch_parameter(&mut self, id: StmtId) -> R<()> {
         self.advance()?;
         if self.is(Punct::LBrace) {

@@ -185,47 +185,189 @@ fn refused_sources_name_their_slice() {
     println!("refused: {} file(s)", files.len());
 }
 
+/// Set in the environment of a child process a test starts: the nesting limit the child runs its
+/// test body with.
+const STACK_CHILD: &str = "SWELL_SYNTAX_STACK_CHILD";
+
+/// Runs `body` with nesting limit `limit` on a thread whose stack is
+/// `ParseOptions::stack_bytes` for that limit, in a child process that runs only the test
+/// `test`. A stack overflow aborts the process, which no test can catch in its own process; in
+/// the child it fails this test alone, with the child's output.
+fn on_bounded_stack(test: &str, limit: u32, body: fn(u32)) -> Result<(), String> {
+    let stack = ParseOptions { max_nesting: limit }.stack_bytes();
+    let done = format!("{STACK_CHILD}: {test} at {limit} done");
+    if let Some(value) = std::env::var_os(STACK_CHILD) {
+        if value.to_str() != Some(limit.to_string().as_str()) {
+            return Ok(());
+        }
+        std::thread::Builder::new()
+            .stack_size(stack)
+            .spawn(move || body(limit))
+            .map_err(|e| e.to_string())?
+            .join()
+            .map_err(|_| format!("{test} at {limit}: the body failed"))?;
+        println!("{done}");
+        return Ok(());
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let out = std::process::Command::new(exe)
+        .args([test, "--exact", "--nocapture", "--test-threads=1"])
+        .env(STACK_CHILD, limit.to_string())
+        .output()
+        .map_err(|e| e.to_string())?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    if out.status.success() && stdout.contains(&done) {
+        return Ok(());
+    }
+    Err(format!(
+        "{test} with parser_nesting {limit} on a stack of {stack} bytes: {}\n{stdout}\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    ))
+}
+
 #[test]
 fn nesting_of_100000_brackets_is_one_error() {
-    let worker = std::thread::Builder::new()
-        .stack_size(256 * 1024)
-        .spawn(|| {
-            let mut source = vec![u16::from(b'['); 100_000];
-            source.extend(std::iter::repeat_n(u16::from(b']'), 100_000));
-            let errors = parse_units(&source, LIMIT).err().unwrap();
-            assert_eq!(
-                messages(&errors),
-                vec!["nesting deeper than parser_nesting (1000)".to_string()]
-            );
-            let mut parens = vec![u16::from(b'('); 100_000];
-            parens.push(u16::from(b'0'));
-            parens.extend(std::iter::repeat_n(u16::from(b')'), 100_000));
-            let errors = parse_units(&parens, LIMIT).err().unwrap();
-            assert_eq!(errors.len(), 1);
-            // A long chain built by a loop, not by recursion, is bounded the same way.
-            let chain = format!("x = a{};", "+a".repeat(100_000));
-            let errors = parse_units(&units(&chain), LIMIT).err().unwrap();
-            assert_eq!(
-                messages(&errors),
-                vec!["nesting deeper than parser_nesting (1000)".to_string()]
-            );
-            let blocks = format!("{}{}", "{".repeat(100_000), "}".repeat(100_000));
-            let errors = parse_units(&units(&blocks), LIMIT).err().unwrap();
-            assert_eq!(errors.len(), 1);
-            // The deepest trees the limit admits parse, and the early errors and the scope
-            // analysis walk them, on the same stack.
-            for deep in [
-                format!("x = a{};", "+a".repeat(990)),
-                format!("x = a{};", ".b".repeat(990)),
-                format!("f{};", "()".repeat(990)),
-                format!("x = {}a;", "!".repeat(950)),
-            ] {
-                let script = parse_units(&units(&deep), LIMIT);
-                assert!(script.is_ok(), "{:?}", script.err());
+    on_bounded_stack("nesting_of_100000_brackets_is_one_error", LIMIT, |limit| {
+        let mut source = vec![u16::from(b'['); 100_000];
+        source.extend(std::iter::repeat_n(u16::from(b']'), 100_000));
+        let errors = parse_units(&source, limit).err().unwrap();
+        assert_eq!(
+            messages(&errors),
+            vec!["nesting deeper than parser_nesting (1000)".to_string()]
+        );
+        let mut parens = vec![u16::from(b'('); 100_000];
+        parens.push(u16::from(b'0'));
+        parens.extend(std::iter::repeat_n(u16::from(b')'), 100_000));
+        let errors = parse_units(&parens, limit).err().unwrap();
+        assert_eq!(errors.len(), 1);
+        // A long chain built by a loop, not by recursion, is bounded the same way.
+        let chain = format!("x = a{};", "+a".repeat(100_000));
+        let errors = parse_units(&units(&chain), limit).err().unwrap();
+        assert_eq!(
+            messages(&errors),
+            vec!["nesting deeper than parser_nesting (1000)".to_string()]
+        );
+        let blocks = format!("{}{}", "{".repeat(100_000), "}".repeat(100_000));
+        let errors = parse_units(&units(&blocks), limit).err().unwrap();
+        assert_eq!(errors.len(), 1);
+    })
+    .unwrap();
+    // The bound fits the stack of a 256 KiB thread at this limit.
+    assert!(ParseOptions { max_nesting: LIMIT }.stack_bytes() <= 256 * 1024);
+}
+
+/// A source of `n` nested `kind`s; each kind drives another recursion of the parser, or, for the
+/// chains, a tree as deep as the limit that the parser builds by a loop.
+fn nested(kind: &str, n: usize) -> Option<String> {
+    let r = |s: &str| s.repeat(n);
+    Some(match kind {
+        "array" => format!("{}{};", r("["), r("]")),
+        "paren" => format!("{}0{};", r("("), r(")")),
+        "block" => format!("{}{}", r("{"), r("}")),
+        "object" => format!("x = {}0{};", r("{a:"), r("}")),
+        "arguments" => format!("{}0{};", r("f("), r(")")),
+        "index" => format!("{}0{};", r("a["), r("]")),
+        "new" => format!("{}X;", r("new ")),
+        "not" => format!("x = {}a;", r("!")),
+        "typeof" => format!("{}a;", r("typeof ")),
+        "assign" => format!("{}0;", r("a = ")),
+        "conditional" => format!("{}c;", r("a ? b : ")),
+        "conditional_middle" => format!("{}b{};", r("a ? "), r(" : c")),
+        "sum_chain" => format!("x = a{};", r("+a")),
+        "member_chain" => format!("x = a{};", r(".b")),
+        "call_chain" => format!("f{};", r("()")),
+        "function_declaration" => format!("{}{}", r("function f(){"), r("}")),
+        "function_expression" => format!("x = {}0{};", r("function(){ return "), r("; }")),
+        "getter" => format!("x = {}0{};", r("{get a(){ return "), r("; }}")),
+        "if" => format!("{};", r("if (a) ")),
+        "else" => format!("{};", r("if (a) ; else ")),
+        "while" => format!("{};", r("while (a) ")),
+        "for" => format!("{};", r("for (;;) ")),
+        "for_in" => format!("{};", r("for (x in o) ")),
+        "do_while" => format!("{};{}", r("do "), r(" while (a);")),
+        "try" => format!("{}{}", r("try {"), r("} finally {}")),
+        "catch" => format!("{}{}", r("try {} catch (e) {"), r("}")),
+        "switch" => format!("{}{}", r("switch (a) { case 0: "), r("}")),
+        "string_inside" => format!("x = {}\"a\\u{{1F600}}\\x41\\101\"{};", r("("), r(")")),
+        "regexp_inside" => format!("x = {}/a[/]b\\//gi{};", r("("), r(")")),
+        _ => return None,
+    })
+}
+
+const NESTING_KINDS: [&str; 29] = [
+    "array",
+    "paren",
+    "block",
+    "object",
+    "arguments",
+    "index",
+    "new",
+    "not",
+    "typeof",
+    "assign",
+    "conditional",
+    "conditional_middle",
+    "sum_chain",
+    "member_chain",
+    "call_chain",
+    "function_declaration",
+    "function_expression",
+    "getter",
+    "if",
+    "else",
+    "while",
+    "for",
+    "for_in",
+    "do_while",
+    "try",
+    "catch",
+    "switch",
+    "string_inside",
+    "regexp_inside",
+];
+
+/// Whether `n` nested `kind`s parse at `limit` (`Some(true)`), fail with the nesting error alone
+/// (`Some(false)`), or fail otherwise (`None`).
+fn admitted(kind: &str, n: usize, limit: u32) -> Option<bool> {
+    let text = nested(kind, n)?;
+    match parse_units(&units(&text), limit) {
+        Ok(_) => Some(true),
+        Err(e) if e.len() == 1 && e.first()?.message.contains("parser_nesting") => Some(false),
+        Err(_) => None,
+    }
+}
+
+/// Every kind of nesting, at the deepest the limit admits and 100,000 deep, parses or fails on
+/// the stack `ParseOptions::stack_bytes` gives, in a child process: the test fails when a frame
+/// of the parser grows past `STACK_BYTES_PER_LEVEL`, or its fixed part past
+/// `STACK_BYTES_FIXED`, and the stack overflows. At 10,000 levels the per-level bound decides; at
+/// 10 the fixed part does.
+#[test]
+fn every_nesting_kind_fits_the_stack_bound() {
+    for limit in [10, 10_000] {
+        on_bounded_stack("every_nesting_kind_fits_the_stack_bound", limit, |limit| {
+            for kind in NESTING_KINDS {
+                // The deepest source the limit admits, found by bisection on this stack.
+                let (mut parses, mut refused) = (0, limit as usize + 2);
+                assert_eq!(admitted(kind, refused, limit), Some(false), "{kind}");
+                while refused - parses > 1 {
+                    let mid = (parses + refused) / 2;
+                    match admitted(kind, mid, limit) {
+                        Some(true) => parses = mid,
+                        Some(false) => refused = mid,
+                        None => panic!("{kind} {mid}: an error other than the nesting error"),
+                    }
+                }
+                assert!(
+                    parses > 0 || limit < 20,
+                    "{kind}: nothing parses at {limit}"
+                );
+                assert_eq!(admitted(kind, 100_000, limit), Some(false), "{kind}");
             }
         })
         .unwrap();
-    worker.join().unwrap();
+    }
 }
 
 #[test]

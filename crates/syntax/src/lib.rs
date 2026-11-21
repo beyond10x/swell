@@ -14,7 +14,10 @@
 //! (`sec-literals-regular-expression-literals`).
 //!
 //! The parser's depth is bounded by [`ParseOptions::max_nesting`], the host's `parser_nesting`
-//! (`docs/design/host-interface.md`); every walk over the tree is bounded by the same depth.
+//! (`docs/design/host-interface.md`), and the Rust stack a parse takes by
+//! [`ParseOptions::stack_bytes`]. The parser is the only recursion: the walks after it (early
+//! errors, scope analysis) keep their work on the heap, and the tree is arenas whose nodes name
+//! their children by index, so dropping it does not recurse.
 //!
 //! Modules: [`error`], `token` and `lexer` (clause 12), [`ast`], `parser` (clauses 13 to 15),
 //! `early` (the early errors) and `scope` (directives, strictness, declared and referenced names).
@@ -41,6 +44,29 @@ pub struct ParseOptions {
     pub max_nesting: u32,
 }
 
+/// The Rust stack, in bytes, one level of [`ParseOptions::max_nesting`] may take: the bound the
+/// frames of every recursion of the parser hold, in an unoptimised build and an optimised one.
+/// Measured on x86_64 with rustc 1.99.1 without incremental compilation: at most 172 bytes per
+/// level in the debug profile (nested `if`, `switch`, function declarations and conditional
+/// expressions), 115 in the release profile (function declarations). `tests/sources.rs` holds
+/// every kind of nesting to it (`every_nesting_kind_fits_the_stack_bound`).
+pub const STACK_BYTES_PER_LEVEL: usize = 224;
+
+/// The Rust stack, in bytes, a parse takes besides its levels, the thread's own start included.
+/// Measured as above: about 16 KiB.
+pub const STACK_BYTES_FIXED: usize = 32 * 1024;
+
+impl ParseOptions {
+    /// The Rust stack, in bytes, a thread must have for [`parse_script`] with these options to
+    /// end without a stack overflow, whatever the source: [`STACK_BYTES_FIXED`] plus
+    /// `max_nesting` times [`STACK_BYTES_PER_LEVEL`]. The parser's part of the host's
+    /// `Limits::min_stack_bytes()` (`docs/design/host-interface.md`, decision 2).
+    pub const fn stack_bytes(&self) -> usize {
+        STACK_BYTES_FIXED
+            .saturating_add((self.max_nesting as usize).saturating_mul(STACK_BYTES_PER_LEVEL))
+    }
+}
+
 /// A parsed `Script` (`#sec-scripts`) with its analysis.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Script {
@@ -62,11 +88,11 @@ pub fn parse_script(source: &[u16], options: ParseOptions) -> Result<Script, Vec
     let max = options.max_nesting;
     let parsed = parser::parse(source, max).map_err(|e| vec![e])?;
     let mut ast = parsed.ast;
-    let errors = early::check(&ast, &parsed.body, parsed.strict, max);
+    let errors = early::check(&ast, &parsed.body, parsed.strict);
     if !errors.is_empty() {
         return Err(errors);
     }
-    let scope = scope::analyse(&mut ast, &parsed.body, max).map_err(|e| vec![e])?;
+    let scope = scope::analyse(&mut ast, &parsed.body);
     Ok(Script {
         body: parsed.body,
         strict: parsed.strict,
