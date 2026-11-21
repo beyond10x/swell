@@ -32,6 +32,9 @@ test262 case is counted as passed yet: the runner runs them in the last step of 
   that parse and evaluate a script
   (`crates/swell`), number parsing and printing (`crates/num`).
 
+Releases are listed in [`CHANGELOG.md`](CHANGELOG.md), each with what works and its limits;
+[`docs/releasing.md`](docs/releasing.md) says how one is cut.
+
 Next: the first engine. Its first delivery slice is done when 31 test262 cases pass under
 step and memory budgets.
 

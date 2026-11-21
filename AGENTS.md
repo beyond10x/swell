@@ -237,7 +237,13 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   `.github/workflows/check.yml` (runs `task check` on a push to `main` and on a pull request;
   it installs the Rust toolchain, go-task and `ess` by pinned release assets, and the gate
   fetches test262 by its pin) and `shared-gates.yml` (the organization's shared source gates,
-  as surf has it). No `b10x.docs.yaml`, no documentation site workflow, no release workflow.
+  as surf has it). No `b10x.docs.yaml`, no documentation site workflow, and no release
+  workflow while a release holds no binary.
+- **A release** is an annotated tag by the bot, named as the workspace version, on a green
+  commit of `main`, and a GitHub Release with the version's section of `CHANGELOG.md`:
+  `docs/releasing.md`. The coordinator prepares version, changelog, gate and notes on a
+  branch and sends the tip to the session that decides for the operator; that session tags
+  and releases. First release: `0.1.0`, prepared 2026-11-21 from `main` at wave 4 of slice 1.
 - **Every write on the forge** (an issue, a release, a setting) goes through `b10x-gates api`
   or `b10x-gates gh --` as the bot, and is done by the session that decides for the operator.
   Never raw `gh`.
