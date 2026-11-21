@@ -105,8 +105,8 @@ fn a_changed_count_in_the_expected_file_fails_the_run() -> TestResult {
     assert_eq!(
         differences,
         [
-            "-test262 total 23 5 1 16 0 16 0",
-            "+test262 total 22 5 1 16 0 16 0"
+            "-test262 total 23 5 1 16 3 13 0",
+            "+test262 total 22 5 1 16 3 13 0"
         ],
         "{}",
         printed.stderr
@@ -149,13 +149,13 @@ fn a_changed_count_in_the_printed_lines_fails_the_run() -> TestResult {
         differences,
         [
             "-test262 built-ins/Number 3 0 0 3 0 3 0",
-            "+test262 built-ins/Number 4 0 0 4 0 4 0",
-            "-test262 total 22 5 1 16 0 16 0",
-            "+test262 total 23 5 1 17 0 17 0",
+            "+test262 built-ins/Number 4 0 0 4 1 3 0",
+            "-test262 total 22 5 1 16 3 13 0",
+            "+test262 total 23 5 1 17 4 13 0",
             "-test262-slice 04 1 2 0 0 1 0 1 0",
-            "+test262-slice 04 2 4 0 0 2 0 2 0",
+            "+test262-slice 04 2 4 0 0 2 1 1 0",
             "-test262-section sec-number-objects incomplete 3 0 0",
-            "+test262-section sec-number-objects incomplete 4 0 0",
+            "+test262-section sec-number-objects incomplete 4 1 0",
         ],
         "{}",
         printed.stderr

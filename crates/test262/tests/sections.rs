@@ -1,7 +1,8 @@
 //! The tests of `sections.txt` and the section block of `swell-test262 count`, run against the
 //! fixture tree `tests/fixtures/tree/` with `sections.txt` (four sections, one with an omission)
-//! and `sections-no-case.txt` (a path that matches no case). The engine passes nothing, so the
-//! judgement `complete` is shown on counts.
+//! and `sections-no-case.txt` (a path that matches no case). Of the cases of those sections only
+//! two of `sec-fixture-language` pass (`1 + 1;` and `if (true) {}`), so the judgement `complete`
+//! is shown on counts.
 
 use std::error::Error;
 use std::process::Command;
@@ -123,7 +124,7 @@ fn sections_file_reads_sections_paths_and_omissions() -> TestResult {
             "test262-section sec-object-objects incomplete 3 0 0",
             "test262-section sec-number-objects incomplete 3 0 0",
             "test262-section sec-atomics-object incomplete 3 0 1",
-            "test262-section sec-fixture-language incomplete 4 0 0",
+            "test262-section sec-fixture-language incomplete 4 2 0",
         ]
     );
     // The section block comes after the test262-errors line.

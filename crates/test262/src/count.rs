@@ -7,17 +7,23 @@
 //! not applicable when it has the flag `CanBlockIsTrue` (the [[CanBlock]] of the agent is false);
 //! otherwise it is run. A case whose front matter cannot be read is run (and fails) whatever it
 //! names. A run case has one run with `onlyStrict`, `noStrict`, `module` or `raw`, else two
-//! (INTERPRETING.md, "Strict Mode"), and passes when every run passes. [`run_outcome`] gives the
-//! outcome of a run; nothing else here knows the engine.
+//! (INTERPRETING.md, "Strict Mode"), and passes when every run passes, and is counted as ended by
+//! a budget when a run is. [`run_cases`] runs every run case on the engine through [`run`] and
+//! keeps each case's outcome in its [`Loaded`]; [`tally`] counts what was kept, and counts a run
+//! case that was not run as failed. Nothing else here knows the engine.
 
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{self, BufReader};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::features::Listed;
 use crate::front_matter::{self, FrontMatter};
-use crate::slices::Rules;
+use crate::run;
+use crate::slices::{Rules, Slice};
 
 /// One run of a case.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,15 +59,15 @@ pub struct Case {
     pub meta: FrontMatter,
 }
 
-/// The outcome of one run of a case.
-///
-/// **This is the one place slice 1 changes.** No engine exists in the foundation, so every run
-/// fails. Slice 1 replaces this body with the call decision 11 states: a fresh agent and realm
-/// per run, `$262` and `print`, `assert.js` and `sta.js` (not for `raw`), `doneprintHandle.js`
-/// for `async`, the `includes:` in order, then the case, judged by its `negative` and `async`.
-/// Nothing else of the runner calls or knows the engine.
-pub fn run_outcome(_case: &Case, _run: Run) -> Outcome {
-    Outcome::Failed
+/// The outcome of one run of a case of the checkout at `checkout`, run on the engine as decision
+/// 11 states ([`run`]): a fresh agent and realm, `$262` and `print`, `assert.js` and `sta.js`
+/// (not for `raw`), the `includes:` in order, then the case, judged by its `negative`.
+/// `doneprintHandle.js` and the `async` judgement come with slice 10.
+pub fn run_outcome(checkout: &Path, case: &Case, run: Run) -> Outcome {
+    match run::run_all(checkout, &[(case, run)], NonZeroUsize::MIN, &run::LIMITS) {
+        Ok(ran) => ran.first().map_or(Outcome::Failed, |ran| ran.outcome),
+        Err(_) => Outcome::Failed,
+    }
 }
 
 /// The runs a case has.
@@ -102,6 +108,8 @@ pub struct Loaded {
     pub case: Case,
     /// Why its front matter cannot be read, if it cannot.
     pub error: Option<String>,
+    /// Its outcome, once [`run_cases`] ran it.
+    pub outcome: Option<Outcome>,
 }
 
 /// The paths of every case under `<checkout>/test`, in byte order, each with its file. Only
@@ -140,6 +148,7 @@ pub fn load(checkout: &Path) -> io::Result<Vec<Loaded>> {
         loaded.push(Loaded {
             case: Case { path, meta },
             error,
+            outcome: None,
         });
     }
     Ok(loaded)
@@ -205,12 +214,110 @@ pub struct Report {
     pub unlisted: BTreeMap<String, u64>,
 }
 
-/// Counts the cases.
+/// What becomes of a case before it runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Plan {
+    Excluded,
+    NotApplicable,
+    /// Its front matter cannot be read: run, and failed without running.
+    Unreadable,
+    Run,
+}
+
+/// The slice of a case and what becomes of it.
+fn plan(loaded: &Loaded, rules: &Rules, listed: &Listed) -> (Slice, Plan) {
+    let meta = &loaded.case.meta;
+    let slice = rules.slice_of(&loaded.case.path, meta.feature_list(), meta.flag_list());
+    let excluded = meta.feature_list().any(|name| listed.excludes(name))
+        || rules.excludes_slice(&slice).is_some()
+        || rules.excludes_include(meta.include_list());
+    let plan = if loaded.error.is_some() {
+        Plan::Unreadable
+    } else if excluded {
+        Plan::Excluded
+    } else if meta.has_flag("CanBlockIsTrue") {
+        Plan::NotApplicable
+    } else {
+        Plan::Run
+    };
+    (slice, plan)
+}
+
+/// Runs every run of every case that is run, on `workers` threads with `limits` (the runner gives
+/// [`run::LIMITS`]), and keeps each case's outcome in its [`Loaded`]. Answers the lines for
+/// standard error: one `test262-budget <path> <strict|non-strict> <reason>` per run a budget
+/// ended and one `test262-panic <path> <mode> <message>` per run that panicked, in case order;
+/// then `test262-refused <runs>`, the runs a refusal of the parser ended, all failed ([`run`]);
+/// then the twenty runs with the most steps, `test262-steps <steps> <path> <mode>`, the most
+/// first; then one `test262-time <slice> <runs> <milliseconds>` per slice, the time its runs
+/// took summed.
+pub fn run_cases(
+    checkout: &Path,
+    loaded: &mut [Loaded],
+    rules: &Rules,
+    listed: &Listed,
+    workers: NonZeroUsize,
+    limits: &swell::Limits,
+) -> Result<Vec<String>, String> {
+    let mut slices: BTreeMap<String, (u64, Duration)> = BTreeMap::new();
+    let mut jobs: Vec<(&Case, Run)> = Vec::new();
+    let mut owners: Vec<(usize, String)> = Vec::new();
+    for (index, item) in loaded.iter().enumerate() {
+        let (slice, plan) = plan(item, rules, listed);
+        let slice = slice.to_string();
+        slices.entry(slice.clone()).or_default();
+        if plan == Plan::Run {
+            for run in runs(&item.case.meta) {
+                jobs.push((&item.case, run));
+                owners.push((index, slice.clone()));
+            }
+        }
+    }
+    let ran = run::run_all(checkout, &jobs, workers, limits)?;
+    let mut lines = Vec::new();
+    let mut outcomes: BTreeMap<usize, Vec<Outcome>> = BTreeMap::new();
+    let mut steps = Vec::with_capacity(ran.len());
+    let mut refused = 0u64;
+    for (((case, run), (index, slice)), ran) in jobs.iter().zip(&owners).zip(&ran) {
+        let mode = run::mode(*run);
+        if let (Outcome::Budget, Some(reason)) = (ran.outcome, ran.budget) {
+            lines.push(format!("test262-budget {} {mode} {reason:?}", case.path));
+        }
+        if ran.panicked {
+            lines.push(format!("test262-panic {} {mode} {}", case.path, ran.detail));
+        }
+        if ran.refused() {
+            refused += 1;
+        }
+        outcomes.entry(*index).or_default().push(ran.outcome);
+        steps.push((Reverse(ran.steps), case.path.as_str(), mode));
+        if let Some((runs, time)) = slices.get_mut(slice) {
+            *runs += 1;
+            *time = time.saturating_add(ran.elapsed);
+        }
+    }
+    lines.push(format!("test262-refused {refused}"));
+    steps.sort();
+    for (Reverse(spent), path, mode) in steps.into_iter().take(20) {
+        lines.push(format!("test262-steps {spent} {path} {mode}"));
+    }
+    for (slice, (runs, time)) in &slices {
+        lines.push(format!("test262-time {slice} {runs} {}", time.as_millis()));
+    }
+    for (index, outcomes) in outcomes {
+        if let Some(item) = loaded.get_mut(index) {
+            item.outcome = Some(case_outcome(&outcomes));
+        }
+    }
+    Ok(lines)
+}
+
+/// Counts the cases, with the outcomes [`run_cases`] kept.
 pub fn tally(cases: &[Loaded], rules: &Rules, listed: &Listed) -> Report {
     let mut report = Report::default();
-    for Loaded { case, error } in cases {
+    for loaded in cases {
+        let Loaded { case, error, .. } = loaded;
         let meta = &case.meta;
-        let slice = rules.slice_of(&case.path, meta.feature_list(), meta.flag_list());
         let names: BTreeSet<&str> = meta.feature_list().collect();
         for name in &names {
             if !listed.lists(name) {
@@ -218,15 +325,12 @@ pub fn tally(cases: &[Loaded], rules: &Rules, listed: &Listed) -> Report {
             }
         }
         let runs = runs(meta);
-        let excluded = names.iter().any(|name| listed.excludes(name))
-            || rules.excludes_slice(&slice).is_some()
-            || rules.excludes_include(meta.include_list());
-        let status = if error.is_none() && excluded {
-            Status::Excluded
-        } else if error.is_none() && meta.has_flag("CanBlockIsTrue") {
-            Status::NotApplicable
-        } else {
-            Status::Run(case_outcome(case, &runs))
+        let (slice, plan) = plan(loaded, rules, listed);
+        let status = match plan {
+            Plan::Excluded => Status::Excluded,
+            Plan::NotApplicable => Status::NotApplicable,
+            Plan::Unreadable => Status::Run(Outcome::Failed),
+            Plan::Run => Status::Run(loaded.outcome.unwrap_or(Outcome::Failed)),
         };
         if error.is_some() {
             report.errors += 1;
@@ -243,8 +347,9 @@ pub fn tally(cases: &[Loaded], rules: &Rules, listed: &Listed) -> Report {
     report
 }
 
-fn case_outcome(case: &Case, runs: &[Run]) -> Outcome {
-    let outcomes: Vec<Outcome> = runs.iter().map(|&run| run_outcome(case, run)).collect();
+/// The outcome of a case from those of its runs: ended by a budget when one run was, passed when
+/// every run passed, else failed.
+fn case_outcome(outcomes: &[Outcome]) -> Outcome {
     if outcomes.contains(&Outcome::Budget) {
         Outcome::Budget
     } else if outcomes.iter().all(|&o| o == Outcome::Passed) {

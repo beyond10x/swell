@@ -6,9 +6,10 @@
 //! and function declarations, every ES5 statement but `with` and labelled statements, every ES5
 //! expression form, the directive prologue and the strict early errors. Every construct of a
 //! later slice is refused with a `SyntaxError` that names the slice: `<construct> is not
-//! supported before slice <n>` ("A part before its slice"). Two of those refusals fall inside
-//! sections whose cases are counted in slice 2 and are recorded as omissions in
-//! `conformance/test262/sections.txt`: an identifier with a code point outside ASCII or a `\u`
+//! supported before slice <n>` ("A part before its slice"), which [`message_kind`] tells from a
+//! grammar or early error and from the nesting limit by the message alone. Two of those
+//! refusals fall inside sections whose cases are counted in slice 2 and are recorded as omissions
+//! in `conformance/test262/sections.txt`: an identifier with a code point outside ASCII or a `\u`
 //! escape (`sec-names-and-keywords`), and a regular expression literal, which is lexed to its
 //! end and kept as a node, its pattern unparsed, so that evaluating it throws a `SyntaxError`
 //! (`sec-literals-regular-expression-literals`).
@@ -31,7 +32,7 @@ mod scope;
 mod token;
 
 pub use ast::Scope;
-pub use error::SyntaxError;
+pub use error::{MessageKind, SyntaxError, message_kind};
 
 use ast::{Ast, StmtId};
 
