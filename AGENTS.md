@@ -277,7 +277,9 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   as surf has it). No `b10x.docs.yaml`, no documentation site workflow, and no release
   workflow while a release holds no binary.
 - **A release** is an annotated tag by the bot, named as the workspace version, on a green
-  commit of `main`, and a GitHub Release with the version's section of `CHANGELOG.md`:
+  commit of `main`, and a GitHub Release whose notes are a short summary (a lead sentence,
+  `**Breaking**`, `**Changed**` with at most five bullets, at most 900 characters) that ends
+  with a link to the version's section of `CHANGELOG.md`; the tag's message is the same text:
   `docs/releasing.md`. The coordinator prepares version, changelog, gate and notes on a
   branch and sends the tip to the session that decides for the operator; that session tags
   and releases. First release: `0.1.0`, 2026-11-21, tagged on `6319af2`, the close of wave 5

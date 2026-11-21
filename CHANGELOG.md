@@ -10,6 +10,14 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-21
+
+The second release. swell now runs the whole ES5 level of the language: a script may leave out
+its semicolons, label its loops, and use `with`, `arguments`, `eval` and the global
+`Function`. The first two of nineteen delivery slices are delivered, and every test262 case
+of both passes. Most of the standard library and everything after ES5 is still missing; the
+limits below say how much.
+
 ### Added
 
 - The language of the second delivery slice, first part: automatic semicolon insertion,
@@ -54,16 +62,55 @@ Every number below comes from the gate, `task check`, on the released commit.
   one re-entry takes up to 11,100 bytes in a debug build (through `toJSON`), and an agent
   with `reentry_depth` 1,000 and `parser_nesting` 1,000 needs a thread of 14,672,640 bytes
   (31,073,024 in 0.1.0).
-
 - The completion value of a `try` statement whose `finally` block is left by `break` or
   `continue` is `undefined`, as the standard says; it was the value of the `try` or `catch`
   block. A script sees it through `eval` and as the result of a script.
-
 - The design gives the global `Function`, plain method definitions and shorthand properties,
   `Number`, `Boolean`, `isNaN` and `isFinite` to the second delivery slice. The host interface
   gains three requirements (`HOST-162` to `HOST-164`), among them `Agent::refusals()`, a count
   of the refusals the engine raised. 80 of the 164 requirements have a test
   (`host-requirements: 164 requirement(s), 164 line(s): 80 test, 84 pending`; 70 in 0.1.0).
+
+### Limits of this release
+
+- Not in the language yet: regular expression literals, identifiers outside ASCII, and
+  everything after ES5 (`let` and `const`, arrow functions, classes, generators, promises,
+  modules, and the rest). A script that uses one is refused with a `SyntaxError` that names
+  the delivery slice that brings it.
+  [`docs/design/engine.md`](docs/design/engine.md), section 12, lists the nineteen delivery
+  slices and what each brings.
+- Most methods of the builtins are missing. Of `Array`, for example, `isArray`, `join`, `map`,
+  `push` and `toString` exist; `Function.prototype.apply`, `JSON.parse`, `parseInt`, `Date`,
+  `RegExp` and all of `Math` but `max` do not. The third delivery slice brings the core
+  library.
+- test262: 7,742 of the 44,812 cases the gate runs pass, 17.3 %. Its line reads
+  `test262 total 53801 8982 7 44812 7742 37070 0`: 53,801 cases exist, 8,982 are excluded by
+  recorded decision (`Temporal`, `Intl` and proposals at stage 3), 7 do not apply, 44,812
+  run, 7,742 pass, 37,070 fail, none ends at a budget. The first two delivery slices pass all
+  their cases in all their runs (`test262-slice 01 31 62 0 0 31 31 0 0`,
+  `test262-slice 02 4259 7543 0 0 4259 4259 0 0`).
+- What that number says: the second slice counted 5,267 cases before its close; 1,008 of them
+  need a construct or a builtin of a later slice and are counted there now
+  (`test262-moves: 1032 case(s) moved`, 24 of them cases of the third slice that need `**`).
+  A refusal never counts as a pass, also when the script catches it: `test262-refused 46493`
+  of the 85,556 runs meet one.
+- A property is found by a scan of its object's property list, and the comparisons of that
+  scan are not charged to the step budget: a script with very large objects runs longer than
+  its step count says.
+- The host interface: 80 of its 164 numbered requirements
+  ([`docs/design/host-interface.md`](docs/design/host-interface.md)) are held by a test in
+  this commit (`host-requirements: 164 requirement(s), 164 line(s): 80 test, 84 pending`);
+  none is pending for the first two slices. 14 of the 58 scenarios of the interface's model
+  pass on the engine, and the other 44 name what they wait for. The interface will change
+  before 1.0.
+- The engine's own tests: `62 test suites: 341 passed, 0 failed, 1 ignored`, the same tests of
+  the engine crate in the mode that collects garbage at every safe point (`test-collect: 38
+  test suites: 238 passed, 0 failed, 1 ignored`), and the test of an injected engine fault
+  (`test-faults: 1 test suites: 1 passed, 0 failed, 0 ignored`).
+- No binary, no command line, and the crates are not on a package registry. To use the
+  library, depend on the repository at the tag:
+  `swell = { git = "https://github.com/beyond10x/swell", tag = "0.2.0" }`.
+- Measured on x86_64 Linux with rustc 1.99.1 only.
 
 ## [0.1.0] - 2026-11-21
 
@@ -135,5 +182,6 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/beyond10x/swell/releases/tag/0.2.0
 [0.1.0]: https://github.com/beyond10x/swell/releases/tag/0.1.0

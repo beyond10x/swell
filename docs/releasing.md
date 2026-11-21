@@ -2,15 +2,20 @@
 
 A release of swell is a version of its source. swell is a library: a release holds no binary and
 no archive of its own, and nothing is uploaded to a package registry. The release is a tag on
-the public repository and a GitHub Release whose text is the version's section of
-[`CHANGELOG.md`](../CHANGELOG.md).
+the public repository and a GitHub Release whose text is a short summary that links to the
+version's section of [`CHANGELOG.md`](../CHANGELOG.md).
 
 - The tag is annotated, made by the organization bot (`b10x-bot[bot]`), and named exactly as
   the workspace version: `0.1.0`, no prefix.
 - It is on a commit of `main` whose `check` run on the forge is green.
-- The tag message and the release notes are the `[<version>]` section of `CHANGELOG.md`, with
-  each relative link made absolute at the tag
-  (`https://github.com/beyond10x/swell/blob/<version>/<path>`).
+- The tag message and the release notes are one text, the notes file: a lead of one sentence
+  (at most 25 words); `**Breaking**`, with `- None.` when nothing breaks; `**Changed**`, with
+  at most five bullets of one clause each; and as its last line a link to the version's
+  section of `CHANGELOG.md`, absolute at the tag
+  (`https://github.com/beyond10x/swell/blob/<version>/CHANGELOG.md#<anchor>`). It has at most
+  900 characters without the link line and states nothing the changelog section does not
+  state. The changelog section keeps its full form, with the gate's lines. Since `0.2.0`;
+  release `0.1.0` carries its whole changelog section and is not rewritten.
 - Every step on the forge goes through `b10x-gates` as the bot and is done by the session that
   decides for the operator. The coordinating session prepares the commit and makes no call to
   the forge ([`AGENTS.md`](../AGENTS.md), "Publishing").
@@ -36,7 +41,10 @@ deciding session's, from a checkout of the repository:
 
 1. **Version.** Set `[workspace.package] version` in the root `Cargo.toml`, then
    `cargo generate-lockfile --offline`. `Cargo.lock` holds the workspace's own packages and
-   nothing else.
+   nothing else. The workspace of `conformance/ess` has its own manifest and lock: set its
+   `version` to the same and let cargo rewrite that lock
+   (`cargo metadata --offline --format-version 1` in `conformance/ess`); only the version
+   lines of the six packages of this repository change there.
 2. **Changelog.** In `CHANGELOG.md`, rename `## [Unreleased]` to `## [<version>] - <date>`,
    put an empty `## [Unreleased]` above it, and set the two link lines at the end. Every number
    in the section is copied from the gate's output on this commit (step 3); a number that
@@ -47,8 +55,11 @@ deciding session's, from a checkout of the repository:
        CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0 \
          RUSTC_WRAPPER="" slot task check
 
-4. **Notes.** Write the `[<version>]` section, without its heading line and with relative
-   links made absolute at the tag, to `.out/release-<version>-notes.md`. The branch tip and the
+4. **Notes.** Write the notes file, `.out/release-<version>-notes.md`, in the form the
+   introduction gives: the lead, `**Breaking**`, `**Changed**`, the link line. Count its
+   characters without the link line (at most 900) and check each statement against the
+   changelog section. The same file is the tag's message (step 6) and the release's notes
+   (step 7). The branch tip, the path of the notes file, its character count and the
    gate's lines are sent to the deciding session; on its answer `main` is moved to the commit
    (fast-forward).
 5. **Publish.** The deciding session checks and verifies the commit, pushes `main`, and waits
@@ -58,8 +69,8 @@ deciding session's, from a checkout of the repository:
        $gates gh -- run watch <run-id> --exit-status
 
 6. **Tag.** Scan the notes file, then tag the commit with it as the message and push the tag.
-   `--cleanup=whitespace` keeps the lines that start with `#`, the headings of the notes;
-   without it git removes them:
+   `--cleanup=whitespace` keeps a line of the notes that starts with `#`, should one do so;
+   without it git removes such a line:
 
        $gates scan-text .out/release-<version>-notes.md
        $gates bot -- tag --cleanup=whitespace -a <version> \

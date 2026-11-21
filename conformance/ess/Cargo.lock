@@ -363,7 +363,7 @@ dependencies = [
 
 [[package]]
 name = "swell"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "swell-compiler",
  "swell-num",
@@ -373,7 +373,7 @@ dependencies = [
 
 [[package]]
 name = "swell-compiler"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "swell-num",
  "swell-syntax",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "swell-conformance"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ess-conformance",
  "ess-domain",
@@ -392,18 +392,18 @@ dependencies = [
 
 [[package]]
 name = "swell-num"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "swell-syntax"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "swell-unicode",
 ]
 
 [[package]]
 name = "swell-unicode"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "syn"
