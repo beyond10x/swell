@@ -20,9 +20,12 @@ Every number below comes from the gate, `task check`, on the released commit.
   `toString` and `valueOf` of the String wrapper.
 - The conformance runner writes one line per run with what ended it, and its host has
   `$262.evalScript`.
-- test262 after these: `test262 total 53801 8982 7 44812 5924 38888 0`, 5,924 of the 44,812
-  cases that run pass (13.2 %; 3,969 in 0.1.0). The second slice passes 3,468 of its 5,245
-  cases. 50,596 of the 85,556 runs end at a refusal of a construct the parser does not have
+- The `with` statement and the `arguments` object, mapped and unmapped. A name inside the body
+  of a `with` is looked up at run time, each record visited charged as one step; every other
+  name keeps the slot the compiler gave it.
+- test262 after these: `test262 total 53801 8982 7 44812 6262 38550 0`, 6,262 of the 44,812
+  cases that run pass (14.0 %; 3,969 in 0.1.0). The second slice passes 3,743 of its 5,245
+  cases. 44,212 of the 85,556 runs end at a refusal of a construct the parser does not have
   yet (53,564 in 0.1.0).
 - The gate runs the scenarios of the host interface model against the engine itself
   (`conformance/ess`, the task `conform-engine`): `58 scenarios: 14 passed, 0 failed, 0 error,

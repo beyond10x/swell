@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:with-arguments-and-dynamic-names
 kind: story
-status: active
+status: implemented
 title: 'with and the arguments object: names resolved at run time where a with body reaches them, numbered slots everywhere else'
 summary: Object environment records with @@unscopables, named records and lookups by name charged per record, mapped and unmapped arguments objects; the with and arguments refusals lifted; one omission recorded (@@iterator, slice 6).
 relations:
@@ -127,10 +127,11 @@ scope:
   path: crates/syntax/tests/sources
 - confidence: cited
   path: crates/syntax/tests/sources.rs
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T15:49:47Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

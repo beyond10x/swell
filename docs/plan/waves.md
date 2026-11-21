@@ -94,8 +94,8 @@ run: automatic semicolon insertion 411, `\u` escapes 352, `eval` 305, `Number` 2
 | 3 | `eval-and-function-constructor` | `eval` and `Function` through one entry, the two hooks, the count of refusals; 10 requirements |
 | 4 | `slice-02-conformance-close` | the cases that need a later slice move, each with its evidence in a list the gate checks; every run of the slice passes |
 
-Delivered: [wave 1](slice-02-wave-1.md). After it slice 2 passes 3,468 of its 5,245 cases, the gate
-counts 5,924 cases as passed, and 50,596 of the 85,556 runs end at a refusal. The base run lines
+Delivered: [wave 1](slice-02-wave-1.md), [wave 2](slice-02-wave-2.md). After wave 2 slice 2 passes 3,743 of its 5,245 cases, the gate
+counts 6,262 cases as passed, and 44,212 of the 85,556 runs end at a refusal. The base run lines
 for the next wave are the run lines of this wave on its branch after its close.
 
 Open, to decide before wave 4 with the run lines: `Array.prototype.toString` is missing (slice

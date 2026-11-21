@@ -12,14 +12,15 @@ interpreter and the builtins the test262 harness calls exist. **Slice 1 is deliv
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
 (the other 44 need a later slice and say so). 70 of 164 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate runs test262: 5,924 of the 44,812 run cases pass. Release `0.1.0` was cut at the close of
+gate runs test262: 6,262 of the 44,812 run cases pass. Release `0.1.0` was cut at the close of
 wave 5 of slice 1. Slice 2, `language-core`, is six stories in four waves (`docs/plan/waves.md`,
-"Slice 2"); wave 1 is delivered (`docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
-and `Boolean`, one line per run from the runner), and slice 2 passes 3,468 of its 5,245 cases.
+"Slice 2"); waves 1 and 2 are delivered (`docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
+and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
+`arguments` object, names looked up at run time), and slice 2 passes 3,743 of its 5,245 cases.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
-per directory, per slice and per ECMA-262 section and compares its 283 lines
+per directory, per slice and per ECMA-262 section and compares its 284 lines
 with `conformance/test262/expected.txt`. The numbers
 are under "The gate's numbers".
 The operator accepted the design on 2026-11-21. Its four open questions stand at the option the
@@ -177,11 +178,11 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot task check` on 2026-11-21, after wave 1 of slice 2, with the variables of the runner,
+`slot task check` on 2026-11-21, after wave 2 of slice 2, with the variables of the runner,
 exit 0:
 
 ```
-python-check: no Python file among 931 file(s)
+python-check: no Python file among 959 file(s)
 forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
 Cargo.lock: 7 package(s), none from outside this repository
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
@@ -192,19 +193,19 @@ swell v1 — 2 file(s), 8 scenario(s), valid
   58 scenarios: 58 passed, 0 failed, 0 error, 0 unsupported
 host-requirements: 164 requirement(s), 164 line(s): 70 test, 94 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
 host-requirements: pending by slice: 2:10 3:3 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
-58 test suites: 292 passed, 0 failed, 1 ignored
-test-collect: 34 test suites: 203 passed, 0 failed, 1 ignored
+59 test suites: 300 passed, 0 failed, 1 ignored
+test-collect: 35 test suites: 208 passed, 0 failed, 1 ignored
 test-faults: 1 test suites: 1 passed, 0 failed, 0 ignored
 conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok
   58 scenarios: 14 passed, 0 failed, 0 error, 44 unsupported
-test262-refused 50596
-test262 total 53801 8982 7 44812 5924 38888 0
+test262-refused 44212
+test262 total 53801 8982 7 44812 6262 38550 0
 test262: 221 directory lines sum to the total
 test262-slice 01 31 62 0 0 31 31 0 0
-test262-slice 02 5245 9173 0 0 5245 3468 1777 0
+test262-slice 02 5245 9173 0 0 5245 3743 1502 0
 test262: 22 slice lines equal the design
 test262-errors 0
-test262: 283 lines equal conformance/test262/expected.txt
+test262: 284 lines equal conformance/test262/expected.txt
 gate-selftest: 31 passed, 0 failed
 ```
 
