@@ -904,12 +904,12 @@ mod tests {
     #[test]
     fn a_construct_the_parser_refuses_until_a_later_slice_is_unsupported_not_parse_failed() {
         let mut scenario = agent_and_realm();
-        let answer = parse(&mut scenario, "1 + 1");
+        let answer = parse(&mut scenario, "<!-- an HTML-like comment, Annex B");
         assert!(
             answer.as_ref().is_err_and(|error| error.is_unsupported()
                 && error
                     .to_string()
-                    .contains("is not supported before slice 2")),
+                    .contains("HTML-like comment is not supported before slice 18")),
             "{answer:?}"
         );
     }

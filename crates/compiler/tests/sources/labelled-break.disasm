@@ -1,0 +1,19 @@
+script locals 0
+  0000 2:6 GetGlobal "b"
+  0001 2:6 StoreCompletion
+  0002 2:9 Jump 0005
+  0003 2:18 GetGlobal "c"
+  0004 2:18 StoreCompletion
+  0005 3:4 Undefined
+  0006 3:4 StoreCompletion
+  0007 3:11 GetGlobal "e"
+  0008 3:4 JumpIfFalse 0016
+  0009 3:16 Undefined
+  0010 3:16 StoreCompletion
+  0011 3:23 GetGlobal "f"
+  0012 3:16 JumpIfFalse 0015
+  0013 3:26 Jump 0016
+  0014 3:16 LoopJump 0011
+  0015 3:4 LoopJump 0007
+  0016 0:0 LoadCompletion
+  0017 0:0 Return

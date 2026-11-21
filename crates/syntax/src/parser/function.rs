@@ -1,8 +1,9 @@
-//! Function definitions (15.2, `#sec-function-definitions`) and the accessors of object literals
-//! (`#sec-method-definitions`, the `get` and `set` forms ES5 has).
+//! Function definitions (15.2, `#sec-function-definitions`) and the accessors and plain methods
+//! of object literals (`#sec-method-definitions`).
 //!
-//! The parameters are a list of `BindingIdentifier`s; a default value, a rest parameter and a
-//! binding pattern are refused (slice 6), as are generators (7) and a trailing comma (2). A
+//! The parameters are a list of `BindingIdentifier`s, with a trailing comma allowed
+//! (`#sec-parameter-lists`); a default value, a rest parameter and a binding pattern are refused
+//! (slice 6), as are generators (7). A
 //! function's code is strict mode code when the code around it is or when its body starts with
 //! a Use Strict Directive (`#sec-strict-mode-code`); the parser tracks that while it reads the
 //! body, and the early errors that depend on it are checked afterwards (`src/early.rs`).
@@ -125,15 +126,10 @@ impl<'a> Parser<'a> {
         match kind {
             FunctionKind::Getter => {}
             FunctionKind::Setter => params.push(self.parameter()?),
-            FunctionKind::Declaration | FunctionKind::Expression => {
+            FunctionKind::Declaration | FunctionKind::Expression | FunctionKind::Method => {
                 while !self.is(Punct::RParen) {
                     params.push(self.parameter()?);
-                    if self.eat(Punct::Comma)? {
-                        if self.is(Punct::RParen) {
-                            return self
-                                .refuse("trailing comma in an argument or parameter list", 2);
-                        }
-                    } else {
+                    if !self.eat(Punct::Comma)? {
                         break;
                     }
                 }

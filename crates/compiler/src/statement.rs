@@ -1,7 +1,16 @@
 //! Statements (clause 14, `#sec-ecmascript-language-statements-and-declarations`): block, `var`,
 //! empty, expression, `if`, `do-while`, `while`, `for`, `for-in` with `var` or a left-hand side,
-//! `continue`, `break`, `return`, `switch`, `throw`, `try` with `catch` and `finally`, and
-//! `debugger`. `with` and labelled statements are slice 2's; the parser refuses them.
+//! `continue`, `break`, `return`, `switch`, `throw`, `try` with `catch` and `finally`,
+//! `debugger`, and labelled statements with `break` and `continue` to a label. `with` is slice
+//! 2's too, with its run time; the parser refuses it.
+//!
+//! # Labels
+//!
+//! LabelledEvaluation (`#sec-labelled-statements-runtime-semantics-labelledevaluation`) passes
+//! the label set of a run of labels to the statement they label. A loop keeps it in its control
+//! entry, so a `break` or `continue` with one of its labels is that loop's own
+//! (`#sec-loopcontinues`); any other statement gets a control entry of its own, whose exit is
+//! where a `break` with its label turns into a normal completion. Labels make no code.
 //!
 //! # Completion values
 //!
@@ -25,8 +34,12 @@ use crate::resolve::{Binding, Site};
 use crate::{CompileError, Compiler, Control, JumpKind, Task, malformed};
 
 impl<'a> Compiler<'a> {
-    /// The tasks of the statement `id`.
-    pub(crate) fn statement(&mut self, id: StmtId) -> Result<Vec<Task>, CompileError> {
+    /// The tasks of the statement `id`; a loop gets the label set `labels`.
+    pub(crate) fn statement(
+        &mut self,
+        id: StmtId,
+        mut labels: Vec<String>,
+    ) -> Result<Vec<Task>, CompileError> {
         let node = self
             .ast
             .stmt(id)
@@ -34,6 +47,40 @@ impl<'a> Compiler<'a> {
         let span = node.span;
         let mut t = Vec::new();
         match &node.stmt {
+            // `#sec-labelled-statements-runtime-semantics-labelledevaluation`: the labels of a run
+            // of labelled statements go to the statement they label.
+            Stmt::Labelled { .. } => {
+                let mut item = id;
+                while let Some(Stmt::Labelled { label, body }) =
+                    self.ast.stmt(item).map(|n| &n.stmt)
+                {
+                    labels.push(label.name.clone());
+                    item = *body;
+                }
+                let is_loop = matches!(
+                    self.ast.stmt(item).map(|n| &n.stmt),
+                    Some(
+                        Stmt::DoWhile { .. }
+                            | Stmt::While { .. }
+                            | Stmt::For { .. }
+                            | Stmt::ForIn { .. }
+                    )
+                );
+                if is_loop {
+                    t.push(Task::LabelledLoop(item, labels));
+                } else {
+                    let exit = self.label();
+                    t.push(Task::PushControl(Control::Label {
+                        labels,
+                        exit,
+                        items: self.items,
+                        envs: self.envs,
+                    }));
+                    t.push(Task::Stmt(item));
+                    t.push(Task::PopControl(None));
+                    t.push(Task::Bind(exit));
+                }
+            }
             // `#sec-block-runtime-semantics-evaluation`.
             Stmt::Block(list) => t.extend(list.iter().map(|s| Task::Stmt(*s))),
             // `#sec-variable-statement-runtime-semantics-evaluation`.
@@ -76,7 +123,7 @@ impl<'a> Compiler<'a> {
                 self.reset_completion(span, &mut t);
                 let (top, next, exit) = (self.label(), self.label(), self.label());
                 t.push(Task::Bind(top));
-                t.push(self.enter_loop(exit, next, self.items));
+                t.push(self.enter_loop(exit, next, self.items, std::mem::take(&mut labels)));
                 t.push(Task::Stmt(*body));
                 t.push(Task::PopControl(None));
                 t.push(Task::Bind(next));
@@ -92,7 +139,7 @@ impl<'a> Compiler<'a> {
                 t.push(Task::Bind(top));
                 t.push(Task::Expr(*test));
                 t.push(Task::Emit(Instruction::JumpIfFalse(exit), span));
-                t.push(self.enter_loop(exit, top, self.items));
+                t.push(self.enter_loop(exit, top, self.items, std::mem::take(&mut labels)));
                 t.push(Task::Stmt(*body));
                 t.push(Task::PopControl(None));
                 t.push(Task::Goto(top, span));
@@ -120,7 +167,7 @@ impl<'a> Compiler<'a> {
                     t.push(Task::Expr(*test));
                     t.push(Task::Emit(Instruction::JumpIfFalse(exit), span));
                 }
-                t.push(self.enter_loop(exit, next, self.items));
+                t.push(self.enter_loop(exit, next, self.items, std::mem::take(&mut labels)));
                 t.push(Task::Stmt(*body));
                 t.push(Task::PopControl(None));
                 t.push(Task::Bind(next));
@@ -165,7 +212,12 @@ impl<'a> Compiler<'a> {
                 }
                 t.push(Task::Emit(self.put(&target)?, target_span));
                 t.push(Task::Emit(Instruction::Pop, target_span));
-                t.push(self.enter_loop(exit, top, self.items.saturating_add(1)));
+                t.push(self.enter_loop(
+                    exit,
+                    top,
+                    self.items.saturating_add(1),
+                    std::mem::take(&mut labels),
+                ));
                 t.push(Task::Stmt(*body));
                 t.push(Task::PopControl(None));
                 t.push(Task::Goto(top, span));
@@ -174,9 +226,17 @@ impl<'a> Compiler<'a> {
                 t.push(Task::ItemsDown);
             }
             // `#sec-continue-statement-runtime-semantics-evaluation`.
-            Stmt::Continue => t.push(Task::Jump(JumpKind::Continue, span)),
+            Stmt::Continue(label) => t.push(Task::Jump(
+                JumpKind::Continue,
+                label.as_ref().map(|l| l.name.clone()),
+                span,
+            )),
             // `#sec-break-statement-runtime-semantics-evaluation`.
-            Stmt::Break => t.push(Task::Jump(JumpKind::Break, span)),
+            Stmt::Break(label) => t.push(Task::Jump(
+                JumpKind::Break,
+                label.as_ref().map(|l| l.name.clone()),
+                span,
+            )),
             // `#sec-return-statement-runtime-semantics-evaluation`.
             Stmt::Return(e) => {
                 match e {
@@ -259,12 +319,13 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn enter_loop(&self, exit: u32, next: u32, items: u32) -> Task {
+    fn enter_loop(&self, exit: u32, next: u32, items: u32, labels: Vec<String>) -> Task {
         Task::PushControl(Control::Loop {
             exit,
             next,
             items,
             envs: self.envs,
+            labels,
         })
     }
 
@@ -331,23 +392,32 @@ impl<'a> Compiler<'a> {
             t.push(Task::Goto(normal, span));
             t.push(Task::Bind(block_end));
             // The exception is on top: it initializes the parameter, in an environment of its
-            // own when a function inside the clause uses it.
-            let param = self.binding(Site::CatchParam(id))?;
-            let pspan = h.param.span;
-            let env = match param {
-                Binding::Local(n) => {
-                    t.push(Task::Emit(Instruction::SetLocal(n), pspan));
+            // own when a function inside the clause uses it. A `catch` without a parameter
+            // drops it and makes no environment (`Catch : catch Block`).
+            let env = match &h.param {
+                Some(param) => {
+                    let pspan = param.span;
+                    let env = match self.binding(Site::CatchParam(id))? {
+                        Binding::Local(n) => {
+                            t.push(Task::Emit(Instruction::SetLocal(n), pspan));
+                            false
+                        }
+                        Binding::Env { slot, .. } => {
+                            t.push(Task::Emit(Instruction::PushEnv(1), pspan));
+                            t.push(Task::Emit(Instruction::SetEnv { hops: 0, slot }, pspan));
+                            t.push(Task::EnvsUp);
+                            true
+                        }
+                        _ => return Err(malformed("a catch parameter")),
+                    };
+                    t.push(Task::Emit(Instruction::Pop, pspan));
+                    env
+                }
+                None => {
+                    t.push(Task::Emit(Instruction::Pop, span));
                     false
                 }
-                Binding::Env { slot, .. } => {
-                    t.push(Task::Emit(Instruction::PushEnv(1), pspan));
-                    t.push(Task::Emit(Instruction::SetEnv { hops: 0, slot }, pspan));
-                    t.push(Task::EnvsUp);
-                    true
-                }
-                _ => return Err(malformed("a catch parameter")),
             };
-            t.push(Task::Emit(Instruction::Pop, pspan));
             self.reset_completion(span, t);
             t.extend(h.body.iter().map(|s| Task::Stmt(*s)));
             if env {

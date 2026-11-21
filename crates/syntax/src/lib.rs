@@ -3,16 +3,20 @@
 //! decision 2).
 //!
 //! Slice 1 takes the ES5 grammar with strict mode (`docs/design/engine.md`, section 12): `var`
-//! and function declarations, every ES5 statement but `with` and labelled statements, every ES5
-//! expression form, the directive prologue and the strict early errors. Every construct of a
-//! later slice is refused with a `SyntaxError` that names the slice: `<construct> is not
-//! supported before slice <n>` ("A part before its slice"), which [`message_kind`] tells from a
-//! grammar or early error and from the nesting limit by the message alone. Two of those
-//! refusals fall inside sections whose cases are counted in slice 2 and are recorded as omissions
-//! in `conformance/test262/sections.txt`: an identifier with a code point outside ASCII or a `\u`
-//! escape (`sec-names-and-keywords`), and a regular expression literal, which is lexed to its
-//! end and kept as a node, its pattern unparsed, so that evaluating it throws a `SyntaxError`
-//! (`sec-literals-regular-expression-literals`).
+//! and function declarations, every ES5 statement but `with`, every ES5 expression form, the
+//! directive prologue and the strict early errors. Slice 2 adds the language core around them:
+//! automatic semicolon insertion, labelled statements, `??`, optional chains, the logical
+//! assignments, optional catch bindings, trailing commas in calls and parameter lists, numeric
+//! separators, a hashbang comment, `\u` escapes in ASCII identifiers, and plain methods and
+//! shorthand properties in object literals. Every construct of a later slice is refused with a
+//! `SyntaxError` that names the slice: `<construct> is not supported before slice <n>` ("A part
+//! before its slice"), which [`message_kind`] tells from a grammar or early error and from the
+//! nesting limit by the message alone. Two of those refusals fall inside sections whose cases are
+//! counted in slice 2 and are recorded as omissions in `conformance/test262/sections.txt`: an
+//! identifier with a code point outside ASCII, written or escaped (slice 5,
+//! `sec-names-and-keywords`), and a regular expression literal ([`REGEXP_REFUSAL`]), which is
+//! lexed to its end and kept as a node, its pattern unparsed, so that evaluating it throws a
+//! `SyntaxError` (`sec-literals-regular-expression-literals`).
 //!
 //! The parser's depth is bounded by [`ParseOptions::max_nesting`], the host's `parser_nesting`
 //! (`docs/design/host-interface.md`), and the Rust stack a parse takes by
@@ -32,7 +36,7 @@ mod scope;
 mod token;
 
 pub use ast::Scope;
-pub use error::{MessageKind, SyntaxError, message_kind};
+pub use error::{MessageKind, REGEXP_REFUSAL, SyntaxError, message_kind};
 
 use ast::{Ast, StmtId};
 

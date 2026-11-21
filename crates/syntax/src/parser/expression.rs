@@ -1,13 +1,15 @@
 //! Expressions (clause 13, `#sec-ecmascript-language-expressions`): primary expressions with
 //! array and object literals and function expressions, member access, `new` and calls, update
 //! and unary operators, the binary operators by precedence, the conditional operator, assignment
-//! and the comma operator.
+//! and the comma operator. Slice 2 adds `??` (`#sec-binary-logical-operators`), optional chains
+//! (`#sec-optional-chains`), the logical assignments (`#sec-assignment-operators`), a trailing
+//! comma in `Arguments` (`#sec-left-hand-side-expressions`), and plain methods and shorthand
+//! properties in object literals (`#sec-object-initializer`, `#sec-method-definitions`).
 //!
-//! Refused, each with its slice: arrow functions, spread elements, destructuring assignment,
-//! computed and shorthand properties and methods (6), generator methods (7), `class`, `super`,
-//! `new.target` (8), `async` functions and `await` (10), `import.meta` and dynamic `import` (11),
-//! and `**`, `??`, `?.`, logical assignment and trailing commas in argument lists (2, the slice of
-//! their directories: the design names no feature rule for them).
+//! Refused, each with its slice: `**` and `**=` (4), arrow functions, spread elements,
+//! destructuring assignment, computed property names and a `CoverInitializedName` (6), generator
+//! methods (7), `class`, `super`, `new.target` (8), `async` functions and `await` (10),
+//! `import.meta` and dynamic `import` (11).
 //!
 //! The functions that stay on the Rust stack while the parser recurses (each one an entry of the
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
@@ -15,7 +17,7 @@
 
 use super::{Parser, R};
 use crate::ast::{
-    AssignOp, BinaryOp, Expr, ExprId, FunctionKind, LogicalOp, Property, PropertyKey,
+    AssignOp, BinaryOp, Expr, ExprId, FunctionId, FunctionKind, LogicalOp, Property, PropertyKey,
     PropertyValue, Span, UnaryOp, UpdateOp,
 };
 use crate::token::{Keyword, Punct, TokenKind};
@@ -48,6 +50,19 @@ enum Suffix {
     Call,
     Dot,
     Index,
+    /// `?.`
+    Optional,
+}
+
+/// What the `PropertyName` of a value property starts.
+#[derive(Clone, Copy)]
+enum Head {
+    /// `PropertyName :`, its value to come.
+    Value,
+    /// A method, its parameters and body to come.
+    Method(FunctionId),
+    /// A shorthand property, complete.
+    Done,
 }
 
 /// A prefix operator.
@@ -97,6 +112,9 @@ impl<'a> Parser<'a> {
                     | Expr::Call {
                         arguments: list, ..
                     }
+                    | Expr::OptionalCall {
+                        arguments: list, ..
+                    }
                     | Expr::New {
                         arguments: Some(list),
                         ..
@@ -130,8 +148,8 @@ impl<'a> Parser<'a> {
         Ok(e)
     }
 
-    /// What follows the operand `left` of an assignment expression; refuses `=>`, `**=`, the
-    /// logical assignments and a destructuring assignment.
+    /// What follows the operand `left` of an assignment expression; refuses `=>`, `**=` and a
+    /// destructuring assignment.
     fn assign_tail(&mut self, left: ExprId) -> R<AssignTail> {
         let op = match &self.tok.kind {
             TokenKind::Punct(p) => match p {
@@ -149,10 +167,10 @@ impl<'a> Parser<'a> {
                 Punct::AmpEq => AssignOp::Compound(BinaryOp::BitAnd),
                 Punct::PipeEq => AssignOp::Compound(BinaryOp::BitOr),
                 Punct::CaretEq => AssignOp::Compound(BinaryOp::BitXor),
-                Punct::StarStarEq => return self.refuse("exponentiation operator", 2),
-                Punct::AmpAmpEq | Punct::PipePipeEq | Punct::QuestionQuestionEq => {
-                    return self.refuse("logical assignment", 2);
-                }
+                Punct::StarStarEq => return self.refuse("exponentiation operator", 4),
+                Punct::AmpAmpEq => AssignOp::Logical(LogicalOp::And),
+                Punct::PipePipeEq => AssignOp::Logical(LogicalOp::Or),
+                Punct::QuestionQuestionEq => AssignOp::Logical(LogicalOp::Coalesce),
                 _ => return Ok(AssignTail::None),
             },
             _ => return Ok(AssignTail::None),
@@ -195,12 +213,14 @@ impl<'a> Parser<'a> {
     // ---- binary operators ----------------------------------------------------------------------
 
     /// The binary operator at the current token with its precedence, `in` excepted under
-    /// `no_in`; `**` and `??` are refused.
+    /// `no_in`; `**` is refused. `??` takes the precedence of `||`: the grammar lets neither
+    /// stand as an operand of the other, which [`Parser::reduce`] checks.
     #[inline(never)]
     fn binary_operator(&mut self, no_in: bool) -> R<Option<(Binary, u8)>> {
         use BinaryOp::*;
         let op = match &self.tok.kind {
             TokenKind::Punct(p) => match p {
+                Punct::QuestionQuestion => return self.logical(LogicalOp::Coalesce, 1),
                 Punct::PipePipe => return self.logical(LogicalOp::Or, 1),
                 Punct::AmpAmp => return self.logical(LogicalOp::And, 2),
                 Punct::Pipe => BitOr,
@@ -222,10 +242,7 @@ impl<'a> Parser<'a> {
                 Punct::Star => Mul,
                 Punct::Slash => Div,
                 Punct::Percent => Rem,
-                Punct::StarStar => return self.refuse("exponentiation operator", 2),
-                Punct::QuestionQuestion => {
-                    return self.refuse("nullish coalescing operator", 2);
-                }
+                Punct::StarStar => return self.refuse("exponentiation operator", 4),
                 _ => return Ok(None),
             },
             TokenKind::Keyword(Keyword::Instanceof) => Instanceof,
@@ -246,7 +263,7 @@ impl<'a> Parser<'a> {
         Ok(Some((Binary::Arithmetic(op), precedence)))
     }
 
-    /// `||` or `&&` at the current token, consumed.
+    /// `||`, `&&` or `??` at the current token, consumed.
     fn logical(&mut self, op: LogicalOp, precedence: u8) -> R<Option<(Binary, u8)>> {
         self.advance()?;
         Ok(Some((Binary::Logical(op), precedence)))
@@ -284,7 +301,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Combines the pending operators above `base` whose precedence is at least `precedence`
-    /// with `right`, innermost first.
+    /// with `right`, innermost first. A `??` with an `&&` or `||` operand, or the other way
+    /// round, outside parentheses is an error: `CoalesceExpressionHead` is a `CoalesceExpression`
+    /// or a `BitwiseORExpression`, and the operands of `&&` and `||` hold no `??`
+    /// (`#sec-binary-logical-operators`). As `&&` and `||` bind more loosely than every other
+    /// binary operator, two of them always meet as operator and operand.
     #[inline(never)]
     fn reduce(&mut self, base: usize, precedence: u8, mut right: ExprId) -> R<ExprId> {
         while self.operators.len() > base
@@ -299,11 +320,26 @@ impl<'a> Parser<'a> {
             let left = p.left;
             let expr = match p.op {
                 Binary::Arithmetic(op) => Expr::Binary { op, left, right },
-                Binary::Logical(op) => Expr::Logical { op, left, right },
+                Binary::Logical(op) => {
+                    let coalesce = op == LogicalOp::Coalesce;
+                    if self.mixes_coalesce(left, coalesce) || self.mixes_coalesce(right, coalesce) {
+                        return self.fail_at(crate::early::COALESCE_MIXED, span);
+                    }
+                    Expr::Logical { op, left, right }
+                }
             };
             right = self.push_expr(expr, span)?;
         }
         Ok(right)
+    }
+
+    /// Whether `operand`, an operand of `??` (`coalesce`) or of `&&` or `||`, is an unparenthesized
+    /// logical expression of the other kind.
+    fn mixes_coalesce(&self, operand: ExprId, coalesce: bool) -> bool {
+        self.expr_node(operand).is_some_and(|n| {
+            !n.parenthesized
+                && matches!(n.expr, Expr::Logical { op, .. } if (op == LogicalOp::Coalesce) != coalesce)
+        })
     }
 
     // ---- unary, update, call and member expressions --------------------------------------------
@@ -395,35 +431,85 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// What follows a member expression: a call (when `calls`), `.name`, `[index]` or nothing;
-    /// `?.` is refused.
+    /// What follows a member expression: a call (when `calls`), `.name`, `[index]`, `?.` or
+    /// nothing.
     #[inline(never)]
     fn suffix(&mut self, calls: bool) -> R<Suffix> {
         Ok(match &self.tok.kind {
             TokenKind::Punct(Punct::LParen) if calls => Suffix::Call,
             TokenKind::Punct(Punct::Dot) => Suffix::Dot,
             TokenKind::Punct(Punct::LBracket) => Suffix::Index,
-            TokenKind::Punct(Punct::QuestionDot) => return self.refuse("optional chaining", 2),
+            TokenKind::Punct(Punct::QuestionDot) => Suffix::Optional,
             _ => Suffix::None,
         })
     }
 
     /// `LeftHandSideExpression`: a member or `new` expression followed by calls and property
-    /// accesses (`#sec-left-hand-side-expressions`).
+    /// accesses (`#sec-left-hand-side-expressions`), or an `OptionalExpression`
+    /// (`#sec-optional-chains`), which a first `?.` starts: the expression is then wrapped in
+    /// [`Expr::OptionalChain`], so the chain ends where this expression ends (a parenthesized
+    /// chain is a chain of its own).
     fn left_hand_side(&mut self) -> R<ExprId> {
         self.enter()?;
         let start = self.start();
         let mut e = self.member_or_new()?;
+        let mut chain = false;
         loop {
             e = match self.suffix(true)? {
                 Suffix::None => break,
-                Suffix::Call => self.call_rest(e, start)?,
+                Suffix::Call => self.call_rest(e, start, false)?,
                 Suffix::Dot => self.dot_rest(e, start)?,
-                Suffix::Index => self.index_rest(e, start)?,
+                Suffix::Index => self.index_rest(e, start, false)?,
+                Suffix::Optional => {
+                    chain = true;
+                    self.optional_rest(e, start)?
+                }
             };
+        }
+        if chain {
+            e = self.make(Expr::OptionalChain(e), start)?;
         }
         self.leave();
         Ok(e)
+    }
+
+    /// `?.` and the link after it: `?. IdentifierName`, `?. [ Expression ]` or `?. Arguments`.
+    fn optional_rest(&mut self, object: ExprId, start: Span) -> R<ExprId> {
+        self.enter()?;
+        let e = match self.optional_link(object)? {
+            Suffix::Call => self.call_rest(object, start, true)?,
+            Suffix::Index => self.index_rest(object, start, true)?,
+            _ => self.member_name(object, start, true)?,
+        };
+        self.leave();
+        Ok(e)
+    }
+
+    /// Consumes the `?.` and tells which link follows. A `new` without `Arguments` may not be the
+    /// start of an optional chain: `new a?.b` is no `OptionalExpression`
+    /// (`#sec-optional-chains`).
+    #[inline(never)]
+    fn optional_link(&mut self, object: ExprId) -> R<Suffix> {
+        let bare_new = self.expr_node(object).is_some_and(|n| {
+            !n.parenthesized
+                && matches!(
+                    n.expr,
+                    Expr::New {
+                        arguments: None,
+                        ..
+                    }
+                )
+        });
+        if bare_new {
+            return self.unexpected();
+        }
+        self.advance()?;
+        Ok(match &self.tok.kind {
+            TokenKind::Punct(Punct::LParen) => Suffix::Call,
+            TokenKind::Punct(Punct::LBracket) => Suffix::Index,
+            TokenKind::Name(_) | TokenKind::Keyword(_) => Suffix::Dot,
+            _ => return self.unexpected(),
+        })
     }
 
     /// `MemberExpression` and `new MemberExpression Arguments?` (`#sec-new-operator`).
@@ -438,8 +524,8 @@ impl<'a> Parser<'a> {
         loop {
             e = match self.suffix(false)? {
                 Suffix::Dot => self.dot_rest(e, start)?,
-                Suffix::Index => self.index_rest(e, start)?,
-                Suffix::None | Suffix::Call => break,
+                Suffix::Index => self.index_rest(e, start, false)?,
+                Suffix::None | Suffix::Call | Suffix::Optional => break,
             };
         }
         self.leave();
@@ -474,42 +560,77 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn call_rest(&mut self, callee: ExprId, start: Span) -> R<ExprId> {
+    /// `Arguments` after `callee`: a call, or the optional call `callee?.(...)` when `optional`.
+    fn call_rest(&mut self, callee: ExprId, start: Span, optional: bool) -> R<ExprId> {
         self.enter()?;
-        let id = self.reserve_expr(Expr::Call {
-            callee,
-            arguments: Vec::new(),
-        });
+        let id = self.reserve_call(callee, optional);
         self.arguments(id)?;
         let id = self.complete_expr(id, start)?;
         self.leave();
         Ok(id)
     }
 
+    #[inline(never)]
+    fn reserve_call(&mut self, callee: ExprId, optional: bool) -> ExprId {
+        let arguments = Vec::new();
+        self.reserve_expr(if optional {
+            Expr::OptionalCall { callee, arguments }
+        } else {
+            Expr::Call { callee, arguments }
+        })
+    }
+
     /// `.IdentifierName` after `object`.
     fn dot_rest(&mut self, object: ExprId, start: Span) -> R<ExprId> {
         self.advance()?;
+        self.member_name(object, start, false)
+    }
+
+    /// The `IdentifierName` of a property access on `object`, at the current token.
+    #[inline(never)]
+    fn member_name(&mut self, object: ExprId, start: Span, optional: bool) -> R<ExprId> {
         let property = match &self.tok.kind {
             TokenKind::Name(n) => n.clone(),
             TokenKind::Keyword(k) => k.as_str().to_string(),
             _ => return self.unexpected(),
         };
         self.advance()?;
-        self.make(Expr::Member { object, property }, start)
+        let expr = if optional {
+            Expr::OptionalMember { object, property }
+        } else {
+            Expr::Member { object, property }
+        };
+        self.make(expr, start)
     }
 
-    /// `[ Expression ]` after `object`.
-    fn index_rest(&mut self, object: ExprId, start: Span) -> R<ExprId> {
+    /// `[ Expression ]` after `object`, or after its `?.` when `optional`.
+    fn index_rest(&mut self, object: ExprId, start: Span, optional: bool) -> R<ExprId> {
         self.enter()?;
         self.advance()?;
         let index = self.expression(false)?;
         self.expect(Punct::RBracket)?;
-        let e = self.make(Expr::Index { object, index }, start)?;
+        let e = self.make_index(object, index, start, optional)?;
         self.leave();
         Ok(e)
     }
 
-    /// `Arguments` (`#sec-argument-lists`); spread and a trailing comma are refused.
+    #[inline(never)]
+    fn make_index(
+        &mut self,
+        object: ExprId,
+        index: ExprId,
+        start: Span,
+        optional: bool,
+    ) -> R<ExprId> {
+        let expr = if optional {
+            Expr::OptionalIndex { object, index }
+        } else {
+            Expr::Index { object, index }
+        };
+        self.make(expr, start)
+    }
+
+    /// `Arguments` (`#sec-argument-lists`), with a trailing comma allowed; spread is refused.
     /// The arguments are appended to the call or `new` expression `id`.
     fn arguments(&mut self, id: ExprId) -> R<()> {
         self.enter()?;
@@ -531,8 +652,8 @@ impl<'a> Parser<'a> {
         }
         if !first {
             self.expect(Punct::Comma)?;
-            if self.is(Punct::RParen) {
-                return self.refuse("trailing comma in an argument or parameter list", 2);
+            if self.eat(Punct::RParen)? {
+                return Ok(false);
             }
         }
         if self.is(Punct::Ellipsis) {
@@ -599,7 +720,7 @@ impl<'a> Parser<'a> {
                 _ => return self.unexpected(),
             },
             TokenKind::Name(n) => {
-                if n == "async" || n == "await" {
+                if !self.tok.escaped && (n == "async" || n == "await") {
                     let is_async = n == "async";
                     let next = self.peek()?;
                     if !next.newline_before {
@@ -632,9 +753,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// A primary expression of one token: `this`, a literal or an identifier reference.
+    /// A primary expression of one token: `this`, a literal or an identifier reference, which may
+    /// not spell a reserved word with an escape.
     #[inline(never)]
     fn leaf(&mut self) -> R<ExprId> {
+        self.check_escaped_keyword()?;
         let start = self.start();
         let expr = match &self.tok.kind {
             TokenKind::Keyword(Keyword::This) => Expr::This,
@@ -787,17 +910,19 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    /// Whether the property at the current token is a getter or setter: `get` or `set` followed
-    /// by a property name. Refuses spread, computed names, generator and `async` methods.
+    /// Whether the property at the current token is a getter or setter: `get` or `set`, written
+    /// without an escape, followed by a property name. Refuses spread, computed names, generator
+    /// and `async` methods.
     #[inline(never)]
     fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
+        let plain = !self.tok.escaped;
         let word = match &self.tok.kind {
             TokenKind::Punct(Punct::Ellipsis) => return self.refuse("spread element", 6),
             TokenKind::Punct(Punct::LBracket) => return self.refuse("computed property name", 6),
             TokenKind::Punct(Punct::Star) => return self.refuse("generator function", 7),
-            TokenKind::Name(n) if n == "get" => FunctionKind::Getter,
-            TokenKind::Name(n) if n == "set" => FunctionKind::Setter,
-            TokenKind::Name(n) if n == "async" => {
+            TokenKind::Name(n) if plain && n == "get" => FunctionKind::Getter,
+            TokenKind::Name(n) if plain && n == "set" => FunctionKind::Setter,
+            TokenKind::Name(n) if plain && n == "async" => {
                 let next = self.peek()?;
                 if !next.newline_before
                     && (Parser::is_property_name(&next.kind)
@@ -874,51 +999,97 @@ impl<'a> Parser<'a> {
         Ok(id)
     }
 
-    /// `PropertyName : AssignmentExpression`, appended to `object`; refuses methods and
-    /// shorthand properties.
+    /// `PropertyName : AssignmentExpression`, a plain method `PropertyName ( params ) { body }`
+    /// or a shorthand `IdentifierReference`, appended to `object`.
     fn value_property_rest(&mut self, object: ExprId, start: Span) -> R<()> {
         self.enter()?;
-        self.value_property_head(object, start)?;
-        let value = self.assignment(false)?;
-        if let Some(p) = self.properties(object).and_then(|l| l.last_mut()) {
-            p.value = PropertyValue::Init(value);
+        match self.value_property_head(object, start)? {
+            Head::Value => {
+                let value = self.assignment(false)?;
+                self.set_property_value(object, value);
+            }
+            Head::Method(id) => self.function_rest(id)?,
+            Head::Done => {}
         }
         self.property_end(object);
         self.leave();
         Ok(())
     }
 
-    /// The `PropertyName :` of a value property, appended to `object` with its value to come.
     #[inline(never)]
-    fn value_property_head(&mut self, object: ExprId, start: Span) -> R<()> {
-        let key = self.value_property_key(start)?;
+    fn set_property_value(&mut self, object: ExprId, value: ExprId) {
+        if let Some(p) = self.properties(object).and_then(|l| l.last_mut()) {
+            p.value = PropertyValue::Init(value);
+        }
+    }
+
+    /// The `PropertyName` of a value property and what follows it, appended to `object`: with
+    /// `:` its value comes next, with `(` a method's parameters (`#sec-method-definitions`); a
+    /// shorthand property is complete (`#sec-object-initializer`). A shorthand property is an
+    /// `IdentifierReference`, so no reserved word, and a `CoverInitializedName` (`a = 1`) is
+    /// refused (slice 6, with destructuring assignment, the only place it may stand).
+    #[inline(never)]
+    fn value_property_head(&mut self, object: ExprId, start: Span) -> R<Head> {
+        let name_token = self.start();
+        let escaped = self.tok.escaped;
+        let keyword = match &self.tok.kind {
+            TokenKind::Keyword(k) => Some(*k),
+            _ => None,
+        };
+        let key = self.property_key()?;
+        let (head, value) = if self.eat(Punct::Colon)? {
+            (Head::Value, PropertyValue::Init(ExprId(u32::MAX)))
+        } else if self.is(Punct::LParen) {
+            let id = self.begin_function(FunctionKind::Method, start, None);
+            (Head::Method(id), PropertyValue::Method(id))
+        } else if self.is(Punct::Comma) || self.is(Punct::RBrace) {
+            let e = self.shorthand(&key, keyword, escaped, name_token)?;
+            (Head::Done, PropertyValue::Shorthand(e))
+        } else if self.is(Punct::Eq)
+            && keyword.is_none()
+            && matches!(key, PropertyKey::Identifier(_))
+        {
+            return self.refuse_at("CoverInitializedName", 6, start);
+        } else {
+            return self.unexpected();
+        };
         if let Some(list) = self.properties(object) {
             list.push(Property {
                 key,
-                value: PropertyValue::Init(ExprId(u32::MAX)),
+                value,
                 span: start,
             });
         }
-        Ok(())
+        Ok(head)
     }
 
-    /// The `PropertyName :` of a value property.
+    /// The `IdentifierReference` of a shorthand property with key `key`, read from the token at
+    /// `at` (a `keyword` token, or a name `escaped` or not).
     #[inline(never)]
-    fn value_property_key(&mut self, start: Span) -> R<PropertyKey> {
-        let shorthand_candidate = matches!(self.tok.kind, TokenKind::Name(_));
-        let key = self.property_key()?;
-        if self.eat(Punct::Colon)? {
-            return Ok(key);
+    fn shorthand(
+        &mut self,
+        key: &PropertyKey,
+        keyword: Option<Keyword>,
+        escaped: bool,
+        at: Span,
+    ) -> R<ExprId> {
+        if let Some(k) = keyword {
+            return self.fail_at(
+                format!("reserved word {} as a shorthand property", k.as_str()),
+                at,
+            );
         }
-        if self.is(Punct::LParen) {
-            return self.refuse_at("method definition", 6, start);
+        let PropertyKey::Identifier(name) = key else {
+            return self.unexpected();
+        };
+        if escaped && Keyword::from_name(name).is_some() {
+            return self.fail_at(crate::early::escaped_keyword(name), at);
         }
-        if shorthand_candidate
-            && (self.is(Punct::Comma) || self.is(Punct::RBrace) || self.is(Punct::Eq))
-        {
-            return self.refuse_at("shorthand property", 6, start);
+        if name == "arguments" && self.functions > 0 {
+            return self.refuse_at("reference to arguments inside a function", 2, at);
         }
-        self.unexpected()
+        let span = self.finish(at);
+        self.push_expr(Expr::Identifier(name.clone()), span)
     }
 
     /// Pushes `expr`, which started at `start` and ends at the previous token.

@@ -8,7 +8,9 @@ use crate::ast::{NumberLiteral, RegExpLiteral, StringLiteral};
 /// A token with its source position: `start` and `end` are code unit offsets, `line` and
 /// `column` count from 1. `newline_before` says whether a `LineTerminator`, or a
 /// `MultiLineComment` holding one, comes between the previous token and this one
-/// (`#sec-rules-of-automatic-semicolon-insertion`).
+/// (`#sec-rules-of-automatic-semicolon-insertion`). `escaped` says whether the token is an
+/// `IdentifierName` written with a `\u` escape (`#sec-identifier-names`): such a name is never a
+/// keyword (`#sec-keywords-and-reserved-words`, Note 1).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Token {
     pub kind: TokenKind,
@@ -17,13 +19,16 @@ pub(crate) struct Token {
     pub line: u32,
     pub column: u32,
     pub newline_before: bool,
+    pub escaped: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum TokenKind {
     Eof,
-    /// An `IdentifierName` that is not a `ReservedWord`, ASCII only: `let`, `yield`, `await`,
-    /// `async`, `get`, `set`, `of`, `static` and the other contextual words are names.
+    /// An `IdentifierName` that is not a `ReservedWord` written without escapes, or any
+    /// `IdentifierName` written with one (its StringValue, which may then be a reserved word);
+    /// ASCII only: `let`, `yield`, `await`, `async`, `get`, `set`, `of`, `static` and the other
+    /// contextual words are names.
     Name(String),
     Keyword(Keyword),
     Punct(Punct),

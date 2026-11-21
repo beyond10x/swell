@@ -2,10 +2,13 @@
 //! and the bodies of scripts and functions with their directive prologues
 //! (`#sec-directive-prologues-and-the-use-strict-directive`).
 //!
-//! Every ES5 statement is parsed but `with` and labelled statements, which are refused (slice 2),
-//! as are the declarations of later slices: a function declaration inside a block, `let` and
-//! `const` (6), `class` (8), `async function` (10), `import` and `export` (11), and the Annex B
-//! forms `if (x) function f() {}` and `for (var a = 0 in o)` (18).
+//! Every ES5 statement is parsed but `with` in non-strict code, which is refused (slice 2, with
+//! its run time), as are the declarations of later slices: a function declaration inside a
+//! block, `let` and `const` (6), `class` (8), `async function` (10), `import` and `export` (11),
+//! and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
+//! `for (var a = 0 in o)` (18). Labelled statements and labelled `break` and `continue`
+//! (`#sec-labelled-statements`), a `catch` without a parameter (`#sec-try-statement`) and
+//! automatic semicolon insertion (`#sec-rules-of-automatic-semicolon-insertion`) are slice 2's.
 //!
 //! As in `expression.rs`, the functions that stay on the Rust stack while the parser recurses are
 //! kept small; [`Parser::statement`] picks the parser of a statement through one function
@@ -34,6 +37,14 @@ pub(super) enum Place {
     IfClause,
     /// The `Statement` of a loop, where no declaration stands.
     Statement,
+    /// The `LabelledItem` of a labelled statement at the top of a body or in a block, where
+    /// Annex B allows a function declaration in non-strict code
+    /// (`#sec-labelled-function-declarations`).
+    Labelled,
+    /// The `LabelledItem` of a labelled statement that is itself the statement of a loop or an
+    /// `if` clause, where IsLabelledFunction rules a function declaration out in any code
+    /// (`#sec-labelled-function-declarations`, Note).
+    LabelledInStatement,
 }
 
 type StmtParser<'a> = fn(&mut Parser<'a>) -> R<StmtId>;
@@ -149,6 +160,16 @@ impl<'a> Parser<'a> {
                     Place::IfClause | Place::Statement => {
                         return self.fail_here("function declaration as the body of a statement");
                     }
+                    Place::Labelled if !self.strict => {
+                        return self.refuse("labelled function declaration", 18);
+                    }
+                    Place::Labelled => {
+                        return self.fail_here("labelled function declaration in strict mode code");
+                    }
+                    Place::LabelledInStatement => {
+                        return self
+                            .fail_here("labelled function declaration as the body of a statement");
+                    }
                 },
                 Keyword::Class => return self.refuse("class", 8),
                 Keyword::Const => return self.refuse("const declaration", 6),
@@ -164,10 +185,16 @@ impl<'a> Parser<'a> {
                 _ => Parser::expression_statement,
             },
             TokenKind::Name(name) => {
-                let (is_let, is_async) = (name == "let", name == "async");
+                let plain = !self.tok.escaped;
+                let (is_let, is_async) = (plain && name == "let", plain && name == "async");
                 let next = self.peek()?;
                 if next.kind == TokenKind::Punct(Punct::Colon) {
-                    return self.refuse("labelled statement", 2);
+                    return Ok(match place {
+                        Place::Statement | Place::IfClause | Place::LabelledInStatement => {
+                            Parser::labelled_statement_in_statement
+                        }
+                        Place::Body | Place::Block | Place::Labelled => Parser::labelled_statement,
+                    });
                 }
                 if is_let
                     && matches!(
@@ -211,20 +238,59 @@ impl<'a> Parser<'a> {
         self.make_stmt(Stmt::Debugger, start)
     }
 
-    /// `continue ;` and `break ;`; a label is refused (slice 2).
+    /// `continue LabelIdentifier? ;` and `break LabelIdentifier? ;`: a restricted production, so a
+    /// label on the next line is a statement of its own.
     fn break_or_continue(&mut self) -> R<StmtId> {
         let start = self.start();
-        let stmt = if self.is_keyword(Keyword::Break) {
-            Stmt::Break
-        } else {
-            Stmt::Continue
-        };
+        let is_break = self.is_keyword(Keyword::Break);
         self.advance()?;
-        if matches!(self.tok.kind, TokenKind::Name(_)) && !self.tok.newline_before {
-            return self.refuse("break or continue with a label", 2);
-        }
+        let label = if matches!(self.tok.kind, TokenKind::Name(_)) && !self.ends_statement_here() {
+            Some(self.binding_identifier()?)
+        } else {
+            None
+        };
         self.semicolon()?;
+        let stmt = if is_break {
+            Stmt::Break(label)
+        } else {
+            Stmt::Continue(label)
+        };
         self.make_stmt(stmt, start)
+    }
+
+    /// `LabelIdentifier : LabelledItem` (`#sec-labelled-statements`) at the top of a body or in a
+    /// block.
+    fn labelled_statement(&mut self) -> R<StmtId> {
+        self.labelled(Place::Labelled)
+    }
+
+    /// A labelled statement that is the statement of a loop or an `if` clause.
+    fn labelled_statement_in_statement(&mut self) -> R<StmtId> {
+        self.labelled(Place::LabelledInStatement)
+    }
+
+    fn labelled(&mut self, item: Place) -> R<StmtId> {
+        self.enter()?;
+        let start = self.start();
+        let id = self.label_head()?;
+        let body = self.statement(item)?;
+        if let Some(Stmt::Labelled { body: b, .. }) = self.stmt_mut(id) {
+            *b = body;
+        }
+        let id = self.complete_stmt(id, start)?;
+        self.leave();
+        Ok(id)
+    }
+
+    /// The `LabelIdentifier :` of a labelled statement: reserves its node.
+    #[inline(never)]
+    fn label_head(&mut self) -> R<StmtId> {
+        let label = self.binding_identifier()?;
+        self.expect(Punct::Colon)?;
+        Ok(self.reserve_stmt(Stmt::Labelled {
+            label,
+            body: StmtId(u32::MAX),
+        }))
     }
 
     fn expression_statement(&mut self) -> R<StmtId> {
@@ -306,9 +372,11 @@ impl<'a> Parser<'a> {
         Ok(true)
     }
 
-    /// A `BindingIdentifier`. A binding pattern is refused (slice 6).
+    /// A `BindingIdentifier` or a `LabelIdentifier`; a name written with an escape may not spell a
+    /// reserved word. A binding pattern is refused (slice 6).
     #[inline(never)]
     pub(super) fn binding_identifier(&mut self) -> R<Name> {
+        self.check_escaped_keyword()?;
         let span = self.start();
         match &self.tok.kind {
             TokenKind::Name(n) => {
@@ -435,16 +503,15 @@ impl<'a> Parser<'a> {
         Ok(s)
     }
 
-    /// `while ( Expression ) ;` after the body of a do-while. After its `)` every token but `;`
-    /// would get an inserted semicolon, which is refused.
+    /// `while ( Expression ) ;` after the body of a do-while. A missing `;` after its `)` is
+    /// inserted whatever follows (`#sec-rules-of-automatic-semicolon-insertion`, rule 1, third
+    /// case).
     fn do_while_end(&mut self) -> R<ExprId> {
         if !self.is_keyword(Keyword::While) {
             return self.unexpected();
         }
         let test = self.condition()?;
-        if !self.eat(Punct::Semicolon)? {
-            return self.refuse("automatic semicolon insertion", 2);
-        }
+        self.eat(Punct::Semicolon)?;
         Ok(test)
     }
 
@@ -642,17 +709,16 @@ impl<'a> Parser<'a> {
         Ok(s)
     }
 
-    /// The operand of `return` and the `;` after it.
+    /// The operand of `return` and the `;` after it: a restricted production, so an operand on the
+    /// next line is a statement of its own.
     fn return_value(&mut self) -> R<Option<ExprId>> {
         if self.functions == 0 {
             return self.fail_here("return outside of a function");
         }
         self.advance()?;
-        if self.eat(Punct::Semicolon)? {
+        if self.ends_statement_here() {
+            self.semicolon()?;
             return Ok(None);
-        }
-        if self.is(Punct::RBrace) || self.at_eof() || self.tok.newline_before {
-            return self.refuse("automatic semicolon insertion", 2);
         }
         let e = self.expression(false)?;
         self.semicolon()?;
@@ -825,17 +891,19 @@ impl<'a> Parser<'a> {
         self.complete_stmt(id, start)
     }
 
-    /// `catch ( BindingIdentifier )`, recorded as the handler of `id`; a catch without a binding
-    /// is refused (slice 2).
+    /// `catch ( BindingIdentifier )` or `catch` alone (`#sec-try-statement`), recorded as the
+    /// handler of `id`.
     #[inline(never)]
     fn catch_parameter(&mut self, id: StmtId) -> R<()> {
         self.advance()?;
-        if self.is(Punct::LBrace) {
-            return self.refuse("optional catch binding", 2);
-        }
-        self.expect(Punct::LParen)?;
-        let param = self.binding_identifier()?;
-        self.expect(Punct::RParen)?;
+        let param = if self.is(Punct::LBrace) {
+            None
+        } else {
+            self.expect(Punct::LParen)?;
+            let param = self.binding_identifier()?;
+            self.expect(Punct::RParen)?;
+            Some(param)
+        };
         if let Some(Stmt::Try { handler, .. }) = self.stmt_mut(id) {
             *handler = Some(CatchClause {
                 param,

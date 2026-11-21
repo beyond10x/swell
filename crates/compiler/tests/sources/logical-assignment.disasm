@@ -1,0 +1,68 @@
+script locals 0
+  declare 1
+  0000 2:1 ResolveGlobal "a"
+  0001 2:1 GetGlobalRef "a"
+  0002 2:1 Dup
+  0003 2:1 JumpIfTrue 0008
+  0004 2:1 Pop
+  0005 2:7 Number 1
+  0006 2:1 PutGlobalRef "a"
+  0007 2:1 Jump 0009
+  0008 2:1 Nip 1
+  0009 2:1 StoreCompletion
+  0010 3:1 GetGlobal "o"
+  0011 3:1 Dup
+  0012 3:1 GetNamed "p"
+  0013 3:1 Dup
+  0014 3:1 JumpIfFalse 0019
+  0015 3:1 Pop
+  0016 3:9 Number 2
+  0017 3:1 PutNamed "p"
+  0018 3:1 Jump 0020
+  0019 3:1 Nip 1
+  0020 3:1 StoreCompletion
+  0021 4:1 GetGlobal "o"
+  0022 4:3 GetGlobal "k"
+  0023 4:1 PropertyKey
+  0024 4:1 Dup2
+  0025 4:1 GetIndex
+  0026 4:1 Dup
+  0027 4:1 Null
+  0028 4:1 Eq
+  0029 4:1 JumpIfFalse 0034
+  0030 4:1 Pop
+  0031 4:10 Number 3
+  0032 4:1 PutIndex
+  0033 4:1 Jump 0035
+  0034 4:1 Nip 2
+  0035 4:1 StoreCompletion
+  0036 5:1 ResolveGlobal "f"
+  0037 5:1 GetGlobalRef "f"
+  0038 5:1 Dup
+  0039 5:1 Null
+  0040 5:1 Eq
+  0041 5:1 JumpIfFalse 0046
+  0042 5:1 Pop
+  0043 5:7 Closure 0
+  0044 5:1 PutGlobalRef "f"
+  0045 5:1 Jump 0047
+  0046 5:1 Nip 1
+  0047 5:1 StoreCompletion
+  0048 0:0 LoadCompletion
+  0049 0:0 Return
+
+function 0 expression "f" length 0 locals 0
+  0000 5:7 Undefined
+  0001 5:7 Return
+
+function 1 declaration "g" length 1 locals 1
+  params local 0
+  0000 6:17 GetLocal 0
+  0001 6:17 Dup
+  0002 6:17 JumpIfTrue 0006
+  0003 6:17 Pop
+  0004 6:23 Number 4
+  0005 6:17 SetLocal 0
+  0006 6:17 Pop
+  0007 6:1 Undefined
+  0008 6:1 Return

@@ -4,7 +4,9 @@
 //! as `support::script::show` writes it) or `throw <name>` (the `name` of the thrown error, or
 //! the thrown value as `show` writes it). A line `// strict-only` or `// sloppy-only` among the
 //! leading comment lines limits the modes; without one the script runs as written and with a
-//! `"use strict";` prologue (`support::script::run_both`). Run also with the feature
+//! `"use strict";` prologue (`support::script::run_both`). A script may start with a
+//! `HashbangComment` line (`#sec-hashbang`) before that first line; its strict run then gets the
+//! prologue after the hashbang line, where a hashbang may not stand. Run also with the feature
 //! `collect-every-safe-point`.
 #![cfg(test)]
 
@@ -30,9 +32,12 @@ struct Expectation {
     modes: Modes,
 }
 
-/// The expectation of `source`, or why it has none.
+/// The expectation of `source`, or why it has none; a hashbang line before it is skipped.
 fn expectation(source: &str) -> Result<Expectation, String> {
-    let mut lines = source.lines();
+    let mut lines = source.lines().peekable();
+    if lines.peek().is_some_and(|line| line.starts_with("#!")) {
+        lines.next();
+    }
     let first = lines.next().ok_or("the file is empty")?;
     let rest = first
         .strip_prefix("// ")
@@ -67,6 +72,16 @@ fn expectation(source: &str) -> Result<Expectation, String> {
     })
 }
 
+/// `source` with a `"use strict";` prologue: after its hashbang line, if it has one.
+fn with_use_strict(source: &str) -> String {
+    match source.split_once('\n') {
+        Some((hashbang, rest)) if hashbang.starts_with("#!") => {
+            format!("{hashbang}\n\"use strict\";\n{rest}")
+        }
+        _ => format!("\"use strict\";\n{source}"),
+    }
+}
+
 #[test]
 fn language_scripts_answer_their_expected_outcome() {
     let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/language");
@@ -99,7 +114,7 @@ fn language_scripts_answer_their_expected_outcome() {
             modes.push(("sloppy", source.clone()));
         }
         if expected.modes != Modes::SloppyOnly {
-            modes.push(("strict", format!("\"use strict\";\n{source}")));
+            modes.push(("strict", with_use_strict(&source)));
         }
         for (mode, text) in modes {
             runs += 1;

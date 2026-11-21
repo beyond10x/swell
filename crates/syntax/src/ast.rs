@@ -1,6 +1,6 @@
 //! The syntax tree of a script: the productions of clauses 13 (`#sec-ecmascript-language-expressions`),
-//! 14 (`#sec-ecmascript-language-statements-and-declarations`) and 15.2 (`#sec-function-definitions`)
-//! that slice 1 parses.
+//! 14 (`#sec-ecmascript-language-statements-and-declarations`), 15.2 (`#sec-function-definitions`)
+//! and 15.4 (`#sec-method-definitions`: accessors and plain methods) that slices 1 and 2 parse.
 //!
 //! The tree lives in three arenas, one per kind of node, and a node names its children by index.
 //! So dropping a tree is no recursion at all, and a walk over it recurses once per level, a depth
@@ -120,17 +120,21 @@ pub enum BinaryOp {
     BitOr,
 }
 
+/// `&&`, `||` (`#sec-binary-logical-operators`) and `??`, a `CoalesceExpression`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LogicalOp {
     And,
     Or,
+    Coalesce,
 }
 
-/// `=` or a compound assignment of `#sec-assignment-operators`; `Some(op)` names the operator.
+/// `=`, a compound assignment or a logical assignment (`&&=`, `||=`, `??=`) of
+/// `#sec-assignment-operators`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AssignOp {
     Assign,
     Compound(BinaryOp),
+    Logical(LogicalOp),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -143,9 +147,14 @@ pub enum PropertyKey {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PropertyValue {
+    /// `PropertyName : AssignmentExpression`.
     Init(ExprId),
     Get(FunctionId),
     Set(FunctionId),
+    /// A plain `MethodDefinition`, `name(params) { body }` (`#sec-method-definitions`).
+    Method(FunctionId),
+    /// `PropertyDefinition : IdentifierReference`, the identifier expression of its value.
+    Shorthand(ExprId),
 }
 
 /// A `PropertyDefinition` of an object literal (`#sec-object-initializer`).
@@ -220,6 +229,26 @@ pub enum Expr {
         callee: ExprId,
         arguments: Option<Vec<ExprId>>,
     },
+    /// An `OptionalExpression` (`#sec-optional-chains`): the expression whose links from its
+    /// first `?.` on are skipped, giving `undefined`, when the value before a `?.` is
+    /// `undefined` or `null`. Its links are the `Optional...` nodes and ordinary member
+    /// accesses and calls.
+    OptionalChain(ExprId),
+    /// `object?.property`.
+    OptionalMember {
+        object: ExprId,
+        property: String,
+    },
+    /// `object?.[index]`.
+    OptionalIndex {
+        object: ExprId,
+        index: ExprId,
+    },
+    /// `callee?.(arguments)`.
+    OptionalCall {
+        callee: ExprId,
+        arguments: Vec<ExprId>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -260,9 +289,10 @@ pub struct SwitchCase {
     pub span: Span,
 }
 
+/// A `Catch`; `param` is `None` for `catch Block`, which binds nothing.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CatchClause {
-    pub param: Name,
+    pub param: Option<Name>,
     pub body: Vec<StmtId>,
 }
 
@@ -296,8 +326,10 @@ pub enum Stmt {
         object: ExprId,
         body: StmtId,
     },
-    Continue,
-    Break,
+    /// `continue` with its `LabelIdentifier`, if any.
+    Continue(Option<Name>),
+    /// `break` with its `LabelIdentifier`, if any.
+    Break(Option<Name>),
     Return(Option<ExprId>),
     Switch {
         discriminant: ExprId,
@@ -311,6 +343,11 @@ pub enum Stmt {
     },
     Debugger,
     FunctionDeclaration(FunctionId),
+    /// `LabelIdentifier : LabelledItem` (`#sec-labelled-statements`); the item is a statement.
+    Labelled {
+        label: Name,
+        body: StmtId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -327,6 +364,9 @@ pub enum FunctionKind {
     Expression,
     Getter,
     Setter,
+    /// A plain method of an object literal (`#sec-method-definitions`): no own name binding,
+    /// no [[Construct]].
+    Method,
 }
 
 /// What scope analysis found for a function body or the script (`src/scope.rs`).
@@ -344,7 +384,7 @@ pub struct Scope {
     pub references: Vec<String>,
 }
 
-/// A `FunctionDeclaration`, `FunctionExpression` or an accessor of an object literal.
+/// A `FunctionDeclaration`, `FunctionExpression`, or an accessor or method of an object literal.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Function {
     pub kind: FunctionKind,
@@ -457,8 +497,10 @@ impl Expr {
             Expr::Object(properties) => {
                 for p in properties {
                     match p.value {
-                        PropertyValue::Init(e) => f(Child::Expr(e)),
-                        PropertyValue::Get(id) | PropertyValue::Set(id) => f(Child::Function(id)),
+                        PropertyValue::Init(e) | PropertyValue::Shorthand(e) => f(Child::Expr(e)),
+                        PropertyValue::Get(id)
+                        | PropertyValue::Set(id)
+                        | PropertyValue::Method(id) => f(Child::Function(id)),
                     }
                 }
             }
@@ -486,12 +528,15 @@ impl Expr {
                     f(Child::Expr(*e));
                 }
             }
-            Expr::Member { object, .. } => f(Child::Expr(*object)),
-            Expr::Index { object, index } => {
+            Expr::Member { object, .. } | Expr::OptionalMember { object, .. } => {
+                f(Child::Expr(*object))
+            }
+            Expr::OptionalChain(e) => f(Child::Expr(*e)),
+            Expr::Index { object, index } | Expr::OptionalIndex { object, index } => {
                 f(Child::Expr(*object));
                 f(Child::Expr(*index));
             }
-            Expr::Call { callee, arguments } => {
+            Expr::Call { callee, arguments } | Expr::OptionalCall { callee, arguments } => {
                 f(Child::Expr(*callee));
                 for e in arguments {
                     f(Child::Expr(*e));
@@ -524,7 +569,8 @@ impl Stmt {
                     }
                 }
             }
-            Stmt::Empty | Stmt::Continue | Stmt::Break | Stmt::Debugger => {}
+            Stmt::Empty | Stmt::Continue(_) | Stmt::Break(_) | Stmt::Debugger => {}
+            Stmt::Labelled { body, .. } => f(Child::Stmt(*body)),
             Stmt::Expression(e) | Stmt::Throw(e) => f(Child::Expr(*e)),
             Stmt::If {
                 test,

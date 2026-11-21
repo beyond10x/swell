@@ -21,14 +21,24 @@
 //!   mode code;
 //! - `#sec-with-statement-static-semantics-early-errors`: `with` in strict mode code (the parser
 //!   reports it, with [`WITH_IN_STRICT`], as it reads the statement);
-//! - `#sec-break-statement-static-semantics-early-errors` and
-//!   `#sec-continue-statement-static-semantics-early-errors`: `break` outside a loop or `switch`,
-//!   `continue` outside a loop, neither crossing a function;
+//! - `#sec-break-statement-static-semantics-early-errors`,
+//!   `#sec-continue-statement-static-semantics-early-errors` and
+//!   `#sec-labelled-statements-static-semantics-early-errors`: `break` outside a loop or `switch`,
+//!   `continue` outside a loop, a label that no enclosing statement has (ContainsUndefinedBreakTarget,
+//!   ContainsUndefinedContinueTarget), a `continue` whose label is on no iteration statement, a
+//!   label inside a statement with the same label (ContainsDuplicateLabels), none crossing a
+//!   function; in strict mode code a label is no reserved word either;
 //! - `#sec-object-initializer-static-semantics-early-errors`: `__proto__` twice as a
 //!   `PropertyName : AssignmentExpression`;
+//! - `#sec-method-definitions-static-semantics-early-errors`: the `UniqueFormalParameters` of a
+//!   method, in any code;
 //! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`: the
 //!   flags of IsValidRegularExpressionLiteral. Its pattern is not parsed before slice 5 (a
 //!   recorded omission of `sec-literals-regular-expression-literals`).
+//!
+//! The parser reports the early errors it meets as it reads: a name written with an escape that
+//! spells a reserved word ([`escaped_keyword`], `#sec-identifiers-static-semantics-early-errors`)
+//! and `??` mixed with `&&` or `||` ([`COALESCE_MIXED`]).
 //!
 //! The walk does not recurse: its pending work is a stack on the heap, so the Rust stack it uses
 //! is the same at any depth of the tree.
@@ -36,13 +46,25 @@
 use std::collections::BTreeSet;
 
 use crate::ast::{
-    Ast, Child, Expr, ExprId, ForInTarget, ForInit, FunctionId, Name, NumberForm, NumberLiteral,
-    PropertyKey, PropertyValue, RegExpLiteral, Span, Stmt, StmtId, StringLiteral, UnaryOp,
+    Ast, Child, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind, Name, NumberForm,
+    NumberLiteral, PropertyKey, PropertyValue, RegExpLiteral, Span, Stmt, StmtId, StringLiteral,
+    UnaryOp,
 };
 use crate::error::SyntaxError;
 
 /// The message of a `with` statement in strict mode code.
 pub(crate) const WITH_IN_STRICT: &str = "with statement in strict mode code";
+
+/// The message of a `??` with an `&&` or `||` operand, or the other way round, outside
+/// parentheses (`#sec-binary-logical-operators`).
+pub(crate) const COALESCE_MIXED: &str = "?? mixed with && or || without parentheses";
+
+/// The message of an `IdentifierName` written with an escape whose StringValue is the reserved
+/// word `name`, used as an identifier or where the keyword stands
+/// (`#sec-identifiers-static-semantics-early-errors`, `#sec-keywords-and-reserved-words`).
+pub(crate) fn escaped_keyword(name: &str) -> String {
+    format!("keyword {name} must not contain escaped characters")
+}
 
 /// The identifiers strict mode code reserves (`#sec-identifiers-static-semantics-early-errors`).
 const STRICT_RESERVED: [&str; 9] = [
@@ -65,6 +87,8 @@ pub(crate) fn check(ast: &Ast, body: &[StmtId], strict: bool) -> Vec<SyntaxError
         strict,
         loops: 0,
         breakables: 0,
+        labels: Vec::new(),
+        label_base: 0,
     };
     checker.walk(body);
     checker.errors
@@ -78,7 +102,10 @@ enum Step {
         strict: bool,
         loops: u32,
         breakables: u32,
+        label_base: usize,
     },
+    /// Drops the label of a labelled statement, once its body is walked.
+    PopLabel,
 }
 
 struct Checker<'a> {
@@ -89,6 +116,10 @@ struct Checker<'a> {
     loops: u32,
     /// Loops and `switch` statements around the current position inside the current function.
     breakables: u32,
+    /// The labels around the current position, each with whether it labels an iteration
+    /// statement (through other labels); those from `label_base` on are the current function's.
+    labels: Vec<(String, bool)>,
+    label_base: usize,
 }
 
 impl<'a> Checker<'a> {
@@ -217,8 +248,14 @@ impl<'a> Checker<'a> {
                     strict,
                     loops,
                     breakables,
+                    label_base,
                 } => {
                     (self.strict, self.loops, self.breakables) = (strict, loops, breakables);
+                    self.label_base = label_base;
+                    continue;
+                }
+                Step::PopLabel => {
+                    self.labels.pop();
                     continue;
                 }
             };
@@ -226,6 +263,7 @@ impl<'a> Checker<'a> {
                 strict: self.strict,
                 loops: self.loops,
                 breakables: self.breakables,
+                label_base: self.label_base,
             };
             match node {
                 Child::Stmt(id) => {
@@ -235,9 +273,13 @@ impl<'a> Checker<'a> {
                         self.loops += loops;
                         self.breakables += breakables;
                     }
+                    if self.label(id) {
+                        stack.push(Step::PopLabel);
+                    }
                 }
                 Child::Expr(id) => self.check_expr(id),
-                // A function is walked with its own strictness, outside every loop and `switch`.
+                // A function is walked with its own strictness, outside every loop, `switch` and
+                // label.
                 Child::Function(id) => {
                     let Some(f) = self.ast.function(id) else {
                         continue;
@@ -246,6 +288,7 @@ impl<'a> Checker<'a> {
                     self.strict = f.strict;
                     self.loops = 0;
                     self.breakables = 0;
+                    self.label_base = self.labels.len();
                     self.check_function(id);
                 }
             }
@@ -274,15 +317,41 @@ impl<'a> Checker<'a> {
                 ForInTarget::Var(name) => self.binding(name),
                 ForInTarget::Expression(e) => self.target(*e),
             },
-            Stmt::Continue if self.loops == 0 => {
+            Stmt::Continue(None) if self.loops == 0 => {
                 self.error("continue outside of a loop", node.span);
             }
-            Stmt::Break if self.breakables == 0 => {
+            Stmt::Break(None) if self.breakables == 0 => {
                 self.error("break outside of a loop or switch", node.span);
+            }
+            Stmt::Continue(Some(label)) => match self.find_label(&label.name) {
+                None => self.error(
+                    format!("continue to undefined label {}", label.name),
+                    label.span,
+                ),
+                Some(false) => self.error(
+                    format!(
+                        "continue to label {}, which labels no iteration statement",
+                        label.name
+                    ),
+                    label.span,
+                ),
+                Some(true) => {}
+            },
+            Stmt::Break(Some(label)) => {
+                if self.find_label(&label.name).is_none() {
+                    self.error(
+                        format!("break to undefined label {}", label.name),
+                        label.span,
+                    );
+                }
             }
             Stmt::Try {
                 handler: Some(h), ..
-            } => self.binding(&h.param),
+            } => {
+                if let Some(param) = &h.param {
+                    self.binding(param);
+                }
+            }
             _ => {}
         }
         match node.stmt {
@@ -292,6 +361,42 @@ impl<'a> Checker<'a> {
             Stmt::Switch { .. } => (0, 1),
             _ => (0, 0),
         }
+    }
+
+    /// Whether the label `name` is around the current position in the current function, and if
+    /// so whether it labels an iteration statement.
+    fn find_label(&self, name: &str) -> Option<bool> {
+        self.labels
+            .get(self.label_base..)
+            .unwrap_or(&[])
+            .iter()
+            .rev()
+            .find(|(l, _)| l == name)
+            .map(|(_, is_loop)| *is_loop)
+    }
+
+    /// When `id` is a labelled statement: checks its label and pushes it for the statement's
+    /// body; returns whether it pushed one.
+    fn label(&mut self, id: StmtId) -> bool {
+        let Some(Stmt::Labelled { label, body }) = self.ast.stmt(id).map(|n| &n.stmt) else {
+            return false;
+        };
+        if self.strict && STRICT_RESERVED.contains(&label.name.as_str()) {
+            self.reserved(&label.name, label.span);
+        }
+        if self.find_label(&label.name).is_some() {
+            self.error(format!("duplicate label {}", label.name), label.span);
+        }
+        let mut item = *body;
+        while let Some(Stmt::Labelled { body, .. }) = self.ast.stmt(item).map(|n| &n.stmt) {
+            item = *body;
+        }
+        let is_loop = matches!(
+            self.ast.stmt(item).map(|n| &n.stmt),
+            Some(Stmt::DoWhile { .. } | Stmt::While { .. } | Stmt::For { .. } | Stmt::ForIn { .. })
+        );
+        self.labels.push((label.name.clone(), is_loop));
+        true
     }
 
     /// The early errors of the expression `id` itself.
@@ -354,7 +459,15 @@ impl<'a> Checker<'a> {
         let mut seen = BTreeSet::new();
         for p in &f.params {
             self.binding(p);
-            if !seen.insert(p.name.as_str()) && self.strict {
+            if seen.insert(p.name.as_str()) {
+                continue;
+            }
+            if f.kind == FunctionKind::Method {
+                self.error(
+                    format!("duplicate parameter name {} in a method", p.name),
+                    p.span,
+                );
+            } else if self.strict {
                 self.error(
                     format!("duplicate parameter name {} in strict mode code", p.name),
                     p.span,

@@ -167,6 +167,11 @@ pub enum Instruction {
     DefineGetter(u32),
     /// `[o, f] -> [o]`: the setter `f` as property `strings[k]`.
     DefineSetter(u32),
+    /// `[o, f] -> [o]`: the plain method `f` (a closure of kind method) with `o` as its
+    /// [[HomeObject]] (MakeMethod), then a data property `strings[k]` of `o` with value `f`,
+    /// writable, enumerable and configurable (`#sec-runtime-semantics-definemethod`,
+    /// `#sec-definemethodproperty`).
+    DefineMethod(u32),
     /// `[o, v] -> [o]`: `__proto__: v` in an object literal: o.[[SetPrototypeOf]](v) when `v` is
     /// an Object or `null`, nothing otherwise.
     InitProto,
@@ -327,6 +332,7 @@ impl Instruction {
             | Instruction::DefineField(_)
             | Instruction::DefineGetter(_)
             | Instruction::DefineSetter(_)
+            | Instruction::DefineMethod(_)
             | Instruction::InitProto
             | Instruction::DefineIndex(_)
             | Instruction::ArrayLength(_)

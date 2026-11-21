@@ -7,21 +7,24 @@
 //! first, for a property the base value (and the key expression) are evaluated first; a binding
 //! of a function or a `catch` clause cannot be unresolvable, so it needs no instruction before the
 //! value. A binary operator evaluates its left operand, then its right one, then applies itself
-//! (`#sec-evaluatestringornumericbinaryexpression`); `&&`, `||` and `?:` evaluate an operand only
-//! when it decides the result.
+//! (`#sec-evaluatestringornumericbinaryexpression`); `&&`, `||`, `??`, `?:` and the logical
+//! assignments evaluate an operand only when it decides the result.
+//!
+//! An optional chain (`#sec-optional-chains`) tests the value before each `?.` with
+//! `Dup; Null; Eq` (IsLooselyEqual to `null` is true for `undefined` and `null` alone) and jumps
+//! to a short-circuit at the end of the chain, which drops what the chain pushed and leaves
+//! `undefined`; so a short-circuit skips every link after it to the end of the chain, and a
+//! parenthesized chain is a chain of its own (`#sec-optional-chaining-evaluation`).
 
 use swell_num::literal::numeric_literal;
+use swell_syntax::REGEXP_REFUSAL;
 use swell_syntax::ast::{
     AssignOp, BinaryOp, Expr, ExprId, LogicalOp, PropertyValue, Span, UnaryOp, UpdateOp,
 };
 
 use crate::bytecode::Instruction;
 use crate::resolve::{Binding, Site, property_key};
-use crate::{CompileError, Compiler, Task, malformed};
-
-/// The message of the `SyntaxError` a regular expression literal throws before slice 5 (design,
-/// "A part before its slice"; `sec-literals-regular-expression-literals` records the omission).
-pub const REGEXP_REFUSAL: &str = "regular expression literals are not supported before slice 5";
+use crate::{CompileError, Compiler, Short, Task, malformed};
 
 /// The reference an assignment, an update, a `delete` or a for-in head works on.
 pub(crate) enum Target {
@@ -45,6 +48,20 @@ impl Target {
             Target::Binding(Binding::Global(_)) | Target::Member { .. } => 1,
             Target::Binding(_) => 0,
             Target::Index { .. } => 2,
+        }
+    }
+}
+
+/// The jump to `decided`, taken when the value on top (a copy of the left value, which the jump
+/// consumes) decides a logical operator `op` on its own.
+fn logical_test(op: LogicalOp, decided: u32, span: Span, t: &mut Vec<Task>) {
+    match op {
+        LogicalOp::And => t.push(Task::Emit(Instruction::JumpIfFalse(decided), span)),
+        LogicalOp::Or => t.push(Task::Emit(Instruction::JumpIfTrue(decided), span)),
+        LogicalOp::Coalesce => {
+            t.push(Task::Emit(Instruction::Null, span));
+            t.push(Task::Emit(Instruction::Eq, span));
+            t.push(Task::Emit(Instruction::JumpIfFalse(decided), span));
         }
     }
 }
@@ -271,6 +288,19 @@ impl<'a> Compiler<'a> {
                             };
                             t.push(Task::Emit(define, p.span));
                         }
+                        // `#sec-method-definitions-runtime-semantics-propertydefinitionevaluation`:
+                        // DefineMethod, then DefineMethodProperty, enumerable.
+                        PropertyValue::Method(f) => {
+                            let fspan = self.ast.function(f).map(|x| x.span).unwrap_or(p.span);
+                            t.push(Task::Emit(Instruction::Closure(f.0), fspan));
+                            t.push(Task::Emit(Instruction::DefineMethod(k), p.span));
+                        }
+                        // `PropertyDefinition : IdentifierReference`: the value of the reference,
+                        // defined as a data property even when the name is `__proto__`.
+                        PropertyValue::Shorthand(e) => {
+                            t.push(Task::Expr(e));
+                            t.push(Task::Emit(Instruction::DefineField(k), p.span));
+                        }
                     }
                 }
             }
@@ -311,15 +341,14 @@ impl<'a> Compiler<'a> {
                 t.push(Task::Expr(*right));
                 t.push(emit(binary(*op)));
             }
-            // `#sec-binary-logical-operators-runtime-semantics-evaluation`.
+            // `#sec-binary-logical-operators-runtime-semantics-evaluation`: the left value
+            // decides when it is falsy for `&&`, truthy for `||`, and neither `undefined` nor
+            // `null` for `??`.
             Expr::Logical { op, left, right } => {
                 let end = self.label();
                 t.push(Task::Expr(*left));
                 t.push(emit(Instruction::Dup));
-                t.push(emit(match op {
-                    LogicalOp::And => Instruction::JumpIfFalse(end),
-                    LogicalOp::Or => Instruction::JumpIfTrue(end),
-                }));
+                logical_test(*op, end, span, &mut t);
                 t.push(emit(Instruction::Pop));
                 t.push(Task::Expr(*right));
                 t.push(Task::Bind(end));
@@ -354,6 +383,29 @@ impl<'a> Compiler<'a> {
                         t.push(Task::Expr(*value));
                         t.push(emit(binary(*op)));
                     }
+                    // `&&=`, `||=` and `??=`: when the left value decides, it is the result and
+                    // nothing is put; the reference under it is dropped.
+                    AssignOp::Logical(op) => {
+                        let r = target.reference_items();
+                        let keep = self.label();
+                        t.extend(self.reference(&target, true, span)?);
+                        t.extend(self.get_keeping(&target, span)?);
+                        t.push(emit(Instruction::Dup));
+                        logical_test(*op, keep, span, &mut t);
+                        t.push(emit(Instruction::Pop));
+                        t.push(Task::Expr(*value));
+                        t.push(emit(self.put(&target)?));
+                        if r > 0 {
+                            let end = self.label();
+                            t.push(Task::Goto(end, span));
+                            t.push(Task::Bind(keep));
+                            t.push(emit(Instruction::Nip(r)));
+                            t.push(Task::Bind(end));
+                        } else {
+                            t.push(Task::Bind(keep));
+                        }
+                        return Ok(t);
+                    }
                 }
                 t.push(emit(self.put(&target)?));
             }
@@ -376,30 +428,32 @@ impl<'a> Compiler<'a> {
                 t.push(Task::Expr(*index));
                 t.push(emit(Instruction::GetIndex));
             }
+            // `#sec-optional-chaining-evaluation`: the chain's links, then its short-circuits.
+            Expr::OptionalChain(inner) => {
+                t.push(Task::ChainOpen(Short::Undefined));
+                t.push(Task::Expr(*inner));
+                t.push(Task::ChainClose(span));
+            }
+            // `#sec-optional-chaining-chain-evaluation`: `?.` tests the base value first.
+            Expr::OptionalMember { object, property } => {
+                t.push(Task::Expr(*object));
+                t.push(Task::ChainCheck(1, span));
+                t.push(emit(Instruction::GetNamed(self.string(property)?)));
+            }
+            Expr::OptionalIndex { object, index } => {
+                t.push(Task::Expr(*object));
+                t.push(Task::ChainCheck(1, span));
+                t.push(Task::Expr(*index));
+                t.push(emit(Instruction::GetIndex));
+            }
             // `#sec-function-calls-runtime-semantics-evaluation`: the function and its this value
             // (the base of a property reference, otherwise `undefined`: a binding of slice 1 has
-            // no base object), the arguments in order, then EvaluateCall.
-            Expr::Call { callee, arguments } => {
-                let callee_node = self
-                    .ast
-                    .expr(*callee)
-                    .ok_or_else(|| malformed("a callee"))?;
-                match &callee_node.expr {
-                    Expr::Member { object, property } => {
-                        t.push(Task::Expr(*object));
-                        t.push(emit(Instruction::Dup));
-                        t.push(emit(Instruction::GetNamed(self.string(property)?)));
-                    }
-                    Expr::Index { object, index } => {
-                        t.push(Task::Expr(*object));
-                        t.push(emit(Instruction::Dup));
-                        t.push(Task::Expr(*index));
-                        t.push(emit(Instruction::GetIndex));
-                    }
-                    _ => {
-                        t.push(emit(Instruction::Undefined));
-                        t.push(Task::Expr(*callee));
-                    }
+            // no base object), the arguments in order, then EvaluateCall. `?.(...)` tests the
+            // function value, with its this value under it.
+            Expr::Call { callee, arguments } | Expr::OptionalCall { callee, arguments } => {
+                self.callee(*callee, span, &mut t)?;
+                if matches!(node.expr, Expr::OptionalCall { .. }) {
+                    t.push(Task::ChainCheck(2, span));
                 }
                 t.extend(arguments.iter().map(|e| Task::Expr(*e)));
                 let n = u32::try_from(arguments.len())
@@ -417,6 +471,110 @@ impl<'a> Compiler<'a> {
             }
         }
         Ok(t)
+    }
+
+    /// The this value and the function of a call with callee `callee` (`#sec-function-calls`),
+    /// `[this, f]`: a property access gives its base as this value, also after a `?.` and in a
+    /// parenthesized optional chain, whose short-circuit then leaves `undefined` for both
+    /// (`#sec-optional-chaining-evaluation` gives the Reference of the chain's last link).
+    fn callee(
+        &mut self,
+        callee: ExprId,
+        span: Span,
+        t: &mut Vec<Task>,
+    ) -> Result<(), CompileError> {
+        let node = self.ast.expr(callee).ok_or_else(|| malformed("a callee"))?;
+        let (link, chain) = match &node.expr {
+            Expr::OptionalChain(inner) => {
+                let inner_node = self
+                    .ast
+                    .expr(*inner)
+                    .ok_or_else(|| malformed("an optional chain"))?;
+                if !matches!(
+                    inner_node.expr,
+                    Expr::Member { .. }
+                        | Expr::Index { .. }
+                        | Expr::OptionalMember { .. }
+                        | Expr::OptionalIndex { .. }
+                ) {
+                    t.push(Task::Emit(Instruction::Undefined, span));
+                    t.push(Task::Expr(callee));
+                    return Ok(());
+                }
+                t.push(Task::ChainOpen(Short::Pair));
+                (inner_node, Some(node.span))
+            }
+            _ => (node, None),
+        };
+        match &link.expr {
+            Expr::Member { object, property } | Expr::OptionalMember { object, property } => {
+                t.push(Task::Expr(*object));
+                if matches!(link.expr, Expr::OptionalMember { .. }) {
+                    t.push(Task::ChainCheck(1, link.span));
+                }
+                t.push(Task::Emit(Instruction::Dup, span));
+                t.push(Task::Emit(
+                    Instruction::GetNamed(self.string(property)?),
+                    span,
+                ));
+            }
+            Expr::Index { object, index } | Expr::OptionalIndex { object, index } => {
+                t.push(Task::Expr(*object));
+                if matches!(link.expr, Expr::OptionalIndex { .. }) {
+                    t.push(Task::ChainCheck(1, link.span));
+                }
+                t.push(Task::Emit(Instruction::Dup, span));
+                t.push(Task::Expr(*index));
+                t.push(Task::Emit(Instruction::GetIndex, span));
+            }
+            _ => {
+                t.push(Task::Emit(Instruction::Undefined, span));
+                t.push(Task::Expr(callee));
+            }
+        }
+        if let Some(chain_span) = chain {
+            t.push(Task::ChainClose(chain_span));
+        }
+        Ok(())
+    }
+
+    /// `delete` of an optional chain whose last link is a property access: the property is
+    /// deleted unless the chain short-circuits, which gives `true`
+    /// (`#sec-delete-operator-runtime-semantics-evaluation`). `None` for any other chain.
+    fn delete_chain(
+        &mut self,
+        inner: ExprId,
+        chain_span: Span,
+        span: Span,
+    ) -> Result<Option<Vec<Task>>, CompileError> {
+        let link = self
+            .ast
+            .expr(inner)
+            .ok_or_else(|| malformed("an optional chain"))?;
+        let mut t = vec![Task::ChainOpen(Short::True)];
+        match &link.expr {
+            Expr::Member { object, property } | Expr::OptionalMember { object, property } => {
+                t.push(Task::Expr(*object));
+                if matches!(link.expr, Expr::OptionalMember { .. }) {
+                    t.push(Task::ChainCheck(1, link.span));
+                }
+                t.push(Task::Emit(
+                    Instruction::DeleteNamed(self.string(property)?),
+                    span,
+                ));
+            }
+            Expr::Index { object, index } | Expr::OptionalIndex { object, index } => {
+                t.push(Task::Expr(*object));
+                if matches!(link.expr, Expr::OptionalIndex { .. }) {
+                    t.push(Task::ChainCheck(1, link.span));
+                }
+                t.push(Task::Expr(*index));
+                t.push(Task::Emit(Instruction::DeleteIndex, span));
+            }
+            _ => return Ok(None),
+        }
+        t.push(Task::ChainClose(chain_span));
+        Ok(Some(t))
     }
 
     /// The unary operators (`#sec-unary-operators`).
@@ -452,6 +610,16 @@ impl<'a> Compiler<'a> {
                     t.push(Task::Expr(*object));
                     t.push(Task::Expr(*index));
                     t.push(emit(Instruction::DeleteIndex));
+                }
+                Expr::OptionalChain(inner) => {
+                    match self.delete_chain(*inner, operand_node.span, span)? {
+                        Some(tasks) => t.extend(tasks),
+                        None => {
+                            t.push(Task::Expr(operand));
+                            t.push(emit(Instruction::Pop));
+                            t.push(emit(Instruction::True));
+                        }
+                    }
                 }
                 _ => {
                     t.push(Task::Expr(operand));

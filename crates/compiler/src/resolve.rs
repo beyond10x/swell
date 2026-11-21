@@ -1,8 +1,8 @@
 //! Slot and environment assignment (`#sec-environment-records`), from the scope analysis of
 //! `swell-syntax`.
 //!
-//! Slice 1 has no direct `eval`, no `with` and no `arguments` (the parser refuses them), so every
-//! binding of a function is known when the script is compiled: the parameters and the
+//! Slices 1 and 2 have no direct `eval`, no `with` and no `arguments` (the parser refuses them),
+//! so every binding of a function is known when the script is compiled: the parameters and the
 //! `VarDeclaredNames` of a function (`#sec-functiondeclarationinstantiation`), the parameter of
 //! a `catch` clause (`#sec-runtime-semantics-catchclauseevaluation`) and the own name of a named
 //! function expression (`#sec-runtime-semantics-instantiateordinaryfunctionexpression`). A name
@@ -296,7 +296,9 @@ impl<'a> Resolver<'a> {
                 }
                 self.work.extend(children.into_iter().rev());
             }
-            Stmt::Empty | Stmt::Continue | Stmt::Break | Stmt::Debugger => {}
+            Stmt::Empty | Stmt::Continue(_) | Stmt::Break(_) | Stmt::Debugger => {}
+            // A label binds nothing (`#sec-labelled-statements`).
+            Stmt::Labelled { body, .. } => self.work.push(Walk::Stmt(*body)),
             Stmt::Expression(e) | Stmt::Throw(e) => self.work.push(Walk::Expr(*e)),
             Stmt::Return(e) => self.work.extend(e.map(Walk::Expr)),
             Stmt::If {
@@ -359,10 +361,16 @@ impl<'a> Resolver<'a> {
                 if let Some(list) = finalizer {
                     self.push_list(list);
                 }
+                // A `catch` without a parameter makes no scope
+                // (`#sec-runtime-semantics-catchclauseevaluation`, `Catch : catch Block`).
                 if let Some(h) = handler {
-                    self.work.push(Walk::Leave);
-                    self.push_list(&h.body);
-                    self.work.push(Walk::Catch(id));
+                    if h.param.is_some() {
+                        self.work.push(Walk::Leave);
+                        self.push_list(&h.body);
+                        self.work.push(Walk::Catch(id));
+                    } else {
+                        self.push_list(&h.body);
+                    }
                 }
                 self.push_list(block);
             }
@@ -379,10 +387,14 @@ impl<'a> Resolver<'a> {
         else {
             return Err(malformed("a catch clause"));
         };
+        let param = h
+            .param
+            .as_ref()
+            .ok_or_else(|| malformed("a catch clause without a parameter"))?;
         let owner = self.scopes.get(self.current).and_then(|s| s.owner);
         let scope = self.new_scope(Kind::Catch, owner);
-        self.declare(scope, &h.param.name);
-        self.occur(Site::CatchParam(id), &h.param.name);
+        self.declare(scope, &param.name);
+        self.occur(Site::CatchParam(id), &param.name);
         Ok(())
     }
 
@@ -426,6 +438,14 @@ impl<'a> Resolver<'a> {
                             self.given_names.insert(f, name);
                             children.push(Walk::Function(f));
                         }
+                        // DefineMethod gives a method its key as name
+                        // (`#sec-runtime-semantics-definemethod`, SetFunctionName in
+                        // DefineMethodProperty's caller).
+                        PropertyValue::Method(f) => {
+                            self.given_names.insert(f, key);
+                            children.push(Walk::Function(f));
+                        }
+                        PropertyValue::Shorthand(e) => children.push(Walk::Expr(e)),
                     }
                 }
             }
@@ -448,8 +468,9 @@ impl<'a> Resolver<'a> {
             }
             Expr::Assign { op, target, value } => {
                 // `#sec-assignment-operators-runtime-semantics-evaluation`: NamedEvaluation when
-                // the target IsIdentifierRef (not in parentheses) and the operator is `=`.
-                if *op == swell_syntax::ast::AssignOp::Assign
+                // the target IsIdentifierRef (not in parentheses) and the operator is `=` or a
+                // logical assignment, not a compound one.
+                if !matches!(op, swell_syntax::ast::AssignOp::Compound(_))
                     && let Some(t) = self.ast.expr(*target)
                     && !t.parenthesized
                     && let Expr::Identifier(name) = &t.expr
@@ -461,12 +482,15 @@ impl<'a> Resolver<'a> {
                 children.push(Walk::Expr(*value));
             }
             Expr::Sequence(list) => children.extend(list.iter().map(|e| Walk::Expr(*e))),
-            Expr::Member { object, .. } => children.push(Walk::Expr(*object)),
-            Expr::Index { object, index } => {
+            Expr::Member { object, .. } | Expr::OptionalMember { object, .. } => {
+                children.push(Walk::Expr(*object));
+            }
+            Expr::OptionalChain(e) => children.push(Walk::Expr(*e)),
+            Expr::Index { object, index } | Expr::OptionalIndex { object, index } => {
                 children.push(Walk::Expr(*object));
                 children.push(Walk::Expr(*index));
             }
-            Expr::Call { callee, arguments } => {
+            Expr::Call { callee, arguments } | Expr::OptionalCall { callee, arguments } => {
                 children.push(Walk::Expr(*callee));
                 children.extend(arguments.iter().map(|e| Walk::Expr(*e)));
             }

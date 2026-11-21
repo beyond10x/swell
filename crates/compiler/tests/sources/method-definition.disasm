@@ -1,0 +1,20 @@
+script locals 0
+  0000 2:2 NewObject
+  0001 2:4 Closure 0
+  0002 2:4 DefineMethod "m"
+  0003 2:24 Closure 1
+  0004 2:24 DefineMethod "s"
+  0005 2:1 StoreCompletion
+  0006 0:0 LoadCompletion
+  0007 0:0 Return
+
+function 0 method "m" length 1 locals 1
+  params local 0
+  0000 2:18 GetLocal 0
+  0001 2:11 Return
+  0002 2:4 Undefined
+  0003 2:4 Return
+
+function 1 method "s" length 0 locals 0
+  0000 2:24 Undefined
+  0001 2:24 Return
