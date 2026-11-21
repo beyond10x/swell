@@ -25,7 +25,8 @@ version's section of [`CHANGELOG.md`](../CHANGELOG.md).
   decides for the operator. The coordinating session prepares the commit and makes no call to
   the forge ([`AGENTS.md`](../AGENTS.md), "Publishing").
 - No workflow builds anything for a release. `.github/workflows/check.yml` runs the gate on
-  the commit, and that run is the release's evidence.
+  the commit when `main` is pushed, and that run is the release's evidence. The push of the
+  tag starts one run of `.github/workflows/shared-gates.yml` and no run of `check.yml`.
 
 ## Versions
 
@@ -81,6 +82,11 @@ deciding session's, from a checkout of the repository:
        $gates bot -- tag --cleanup=whitespace -a <version> \
          -F .out/release-<version>-notes.md <commit>
        $gates bot -- push origin <version>
+
+   The push starts one run of "Shared source gates" on the tag. Wait until it ends with
+   success before step 7:
+
+       $gates gh -- run list --workflow shared-gates.yml --limit 1
 
 7. **Release.** Create the release as the bot, with no asset, and view it:
 

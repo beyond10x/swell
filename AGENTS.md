@@ -13,7 +13,7 @@ requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass 
 (the other 44 need a later slice and say so). 80 of 164 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
 gate runs test262: 7,742 of the 44,812 run cases pass. Release `0.1.0` was cut at the close of
-wave 5 of slice 1. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
+wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
 "Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
 `arguments` object, names looked up at run time; `docs/plan/slice-02-wave-3.md`: `eval`, the
@@ -282,8 +282,11 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   with a link to the version's section of `CHANGELOG.md`; the tag's message is the same text:
   `docs/releasing.md`. The coordinator prepares version, changelog, gate and notes on a
   branch and sends the tip to the session that decides for the operator; that session tags
-  and releases. First release: `0.1.0`, 2026-11-21, tagged on `6319af2`, the close of wave 5
-  of slice 1.
+  and releases. Releases: `0.1.0`, 2026-11-21, tagged on `6319af2`, the close of wave 5
+  of slice 1; `0.2.0`, 2026-11-21, tagged on `29f674c`, the commit after the close of slice 2
+  (https://github.com/beyond10x/swell/releases/tag/0.2.0). The push of a tag starts one run of
+  `shared-gates.yml` (`tags: ['*']`) and none of `check.yml`; the release is created after
+  that run ends with success.
 - **Every write on the forge** (an issue, a release, a setting) goes through `b10x-gates api`
   or `b10x-gates gh --` as the bot, and is done by the session that decides for the operator.
   Never raw `gh`.
