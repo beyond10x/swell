@@ -6,7 +6,7 @@ status: active
 title: One pinned compiler, the runner's differences as a task, planning changes skip the tests
 relations:
 - depends_on: story:gate-test-steps-within-budget
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:45:40Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:45:40Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
@@ -54,6 +54,18 @@ What swell has today:
    stack of the stack tests (`crates/swell/tests/support/host.rs`), the files that exist only
    in a local tree (`.cache/`, `.out/`, `target/`; a test that reads the tree reads tracked
    files only: search the tests for one that does not, and report it).
+   **The debug information of the dev profile, measured.** `.cargo/config.toml` sets
+   `debug = true` so that the local build has the frames of the forge's. A cargo config file
+   wins over a manifest, and a developer's own cargo config may set another level, which is
+   why the setting is in the repository's config file and stays there. Measure, on one test
+   binary, with `readelf -S`: its size and the size of its `.debug_*` sections under `true`,
+   `"line-tables-only"` and `false`, and the wall time of a clean build of the test binaries
+   under each (one `cargo clean` between them, each build in the background). If a lower
+   level saves more than a third of the size, report it with the three rows and the bytes
+   per re-entry the stack tests would then see (the measuring harness of
+   `docs/plan/slice-02-run-loop-frame.md`); do not change the level: the constant
+   `STACK_BYTES_PER_REENTRY` was measured under `true`, and the coordinator decides with the
+   numbers.
 3. **Planning and prose changes skip build and test on the forge.** The required job of
    `check.yml` still runs on every pull request and every push to `main`. Its first step
    lists the changed files (for a pull request against its base; for a push against the
