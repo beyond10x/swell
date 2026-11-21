@@ -30,23 +30,25 @@ pub struct Limits {
 /// The Rust stack, in bytes, one re-entry into the interpreter may take: the frames from a
 /// builtin's or a host function's call into a function, or from an instruction's call of a
 /// getter, through [[Call]] and the run loop to the next such call (`interp/mod.rs`). Measured
-/// on x86_64 at `4c921d3` as the forge's gate builds its tests (rustc 1.99.1, debug with full
-/// debug information, without incremental compilation and without a compiler cache), by
-/// bisection of the smallest thread stack in a child process, over every path of the stack
-/// tests (`tests/budgets.rs`, `tests/limits_scripts.rs`). The largest need is through `toJSON`
-/// and through a replacer of `JSON.stringify`: 31,506,432 bytes at `reentry_depth` 1,000 and
-/// 6,455,296 at 200, 31,314 bytes per re-entry (a host function 27,710, a getter 24,018,
-/// `Function.prototype.call` 27,664, a `map` callback 29,021). This is that plus a fifth, for
-/// the frames of another compiler version. The frame of the run loop (`Agent::execute`, 19,216
-/// bytes of it) grows with every instruction: `DefineMethod` added 944 bytes per re-entry and
-/// the dispatch of `Number`, `Boolean` and the global functions 144 bytes per builtin re-entry,
-/// which took the need past the 30 KiB this was before.
-const STACK_BYTES_PER_REENTRY: usize = 37 * 1024;
+/// on x86_64 on `247333c` with the bodies of the instructions moved out of the run loop, as the
+/// forge's gate builds its tests (rustc 1.99.1, debug with full debug information, without
+/// incremental compilation and without a compiler cache), by bisection of the smallest thread
+/// stack in a child process, over every path of the stack tests (`tests/budgets.rs`,
+/// `tests/limits_scripts.rs`). The largest need is through `toJSON` and through a replacer of
+/// `JSON.stringify`: 11,276,288 bytes at `reentry_depth` 1,000 and 2,396,160 at 200, 11,100
+/// bytes per re-entry (a host function 7,506, a getter 5,535, `Function.prototype.call` 7,455,
+/// a `map` callback 8,817). This is that plus a fifth, for the frames of another compiler
+/// version, rounded up to a whole KiB. The frame of the run loop (`Agent::execute`,
+/// `interp/dispatch.rs`) is 336 bytes of it: every instruction that needs locals runs in a
+/// function of its own, so an instruction adds no locals to that frame. Before, it held the
+/// locals of every instruction: 19,280 of the 31,375 bytes per re-entry at `247333c`, when
+/// this was 37 KiB.
+const STACK_BYTES_PER_REENTRY: usize = 14 * 1024;
 
 /// The Rust stack, in bytes, an agent takes besides its re-entries and its parser: the host's
 /// entry point and the outermost run loop, and the thread's own start. The measurement above
-/// puts all of it, with the parse at 1,000 levels at the deepest re-entry, at 169,518 bytes or
-/// less on every path, within the parser's stated need of 256,768 bytes at 1,000 levels, so this
+/// puts all of it, with the parse at 1,000 levels at the deepest re-entry, at 169,569 bytes or
+/// less on every path (the most through a getter), within the parser's stated need of 256,768 bytes at 1,000 levels, so this
 /// is a margin.
 const STACK_BYTES_FIXED: usize = 64 * 1024;
 
