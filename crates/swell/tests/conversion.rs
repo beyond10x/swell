@@ -19,7 +19,7 @@ use swell::{Abrupt, Completion, Cx, HostCall, PreferredType, Value};
 #[test]
 fn to_number_of_strings() {
     let mut agent = agent().unwrap();
-    let _realm = realm(&mut agent);
+    let realm = realm(&mut agent);
     let mut padding: Vec<u16> = vec![0x09, 0x0B, 0x0C, 0xFEFF, 0x0A, 0x0D, 0x2028, 0x2029];
     let zs: Vec<u16> = (0..=0xFFFF_u32)
         .filter(|&c| swell_unicode::is_space_separator(c))
@@ -30,7 +30,7 @@ fn to_number_of_strings() {
     padding.extend(&zs);
 
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let mut number = |units: &[u16]| -> f64 {
                 let s = cx.new_string_utf16(units).unwrap();
                 cx.to_number(Value::String(s)).unwrap().unwrap()
@@ -98,9 +98,9 @@ fn to_number_of_strings() {
 #[test]
 fn to_string_of_numbers() {
     let mut agent = agent().unwrap();
-    let _realm = realm(&mut agent);
+    let realm = realm(&mut agent);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             for (number, expected) in [
                 (f64::NAN, "NaN"),
                 (0.0, "0"),
@@ -175,7 +175,7 @@ fn to_primitive_calls_valueof_and_tostring_in_hint_order() {
     let realm = realm(&mut agent);
     let global_root = global(&mut agent, &realm);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm_ref = cx.realm_ref(&realm).unwrap();
             let global = object(cx, &global_root);
             let make = |cx: &mut Cx<'_, TestHost>, objects: bool| {
@@ -261,7 +261,7 @@ fn to_object_of_primitives() {
     let realm = realm(&mut agent);
     let global_root = global(&mut agent, &realm);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let global = object(cx, &global_root);
             for value in [Value::Undefined, Value::Null] {
                 let error = thrown(cx.to_object(value).unwrap());

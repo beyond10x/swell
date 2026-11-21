@@ -133,17 +133,26 @@ impl<H: Host> Agent<H> {
     /// sticky until `f` returns; after `StepBudget`, `MemoryBudget` and `Interrupted` the next
     /// entry runs afresh, after `EngineFault` the agent is faulted.
     ///
+    /// `realm` is the current realm of every call made through it (decision 7) and is checked
+    /// first: a stale or released one answers `Err(StaleHandle)`, one of another agent
+    /// `Err(ForeignHandle)`, and `f` does not run.
+    ///
     /// `with_cx` is a safe point: it releases the dropped roots and may collect first. If that
     /// collection finds a stale handle, the agent is faulted and `f` does not run.
-    pub fn with_cx<R>(&mut self, f: impl FnOnce(&mut Cx<'_, H>) -> R) -> Result<R, HostError> {
+    pub fn with_cx<R>(
+        &mut self,
+        realm: &Realm,
+        f: impl FnOnce(&mut Cx<'_, H>) -> R,
+    ) -> Result<R, HostError> {
         self.alive()?;
+        let realm = self.live_realm(realm)?;
         self.termination = None;
         if self.safe_point().is_err() {
             self.fault();
             return Err(HostError::Faulted);
         }
         let start = self.scope.len();
-        let result = f(&mut Cx { agent: self });
+        let result = self.in_entry_realm(realm, |agent| f(&mut Cx { agent }));
         self.scope.truncate(start);
         if self.state == AgentState::Alive {
             self.termination = None;

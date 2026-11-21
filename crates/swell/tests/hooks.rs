@@ -45,7 +45,7 @@ fn host_124_host_ensure_can_compile_strings_default() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
     let answer = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let callee_realm = cx.realm_ref(&realm).unwrap();
             let body = cx.new_string("1").unwrap();
             let request = CompileStrings {
@@ -108,7 +108,7 @@ fn host_124_host_call_job_callback_default() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
     let answer = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm = cx.realm_ref(&realm).unwrap();
             let function = cx
                 .new_host_function(realm, "callback", 1, callback, false, None)

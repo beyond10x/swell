@@ -272,17 +272,18 @@ mod tests {
         let key: Vec<u16> = "length".encode_utf16().collect();
         let empty = agent.heap.bytes();
         let first = agent.heap.intern(&key).unwrap();
+        // The root is made before any safe point: an atom held only weakly is gone at the next
+        // one, which the feature `collect-every-safe-point` makes every entry.
+        let root = agent.heap.roots.add(Value::String(first));
         let second = agent.heap.intern(&key).unwrap();
         assert_eq!(first, second);
         let other = agent.heap.intern(&[0xD800]).unwrap();
         assert_ne!(first, other);
         assert_eq!(agent.heap.atoms.len(), 2);
 
-        // Held by a root, the atom survives; once nothing holds it, the sweep drops its entry
-        // and credits everything it charged.
-        let root = agent
-            .with_cx(|cx| cx.root(Value::String(first)).unwrap())
-            .unwrap();
+        // Held by a root, the atom survives; the other one, which nothing holds, is dropped.
+        // Once nothing holds the first either, the sweep drops its entry and credits
+        // everything it charged.
         assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
         assert_eq!(agent.heap.atoms.len(), 1);
         assert_eq!(agent.heap.intern(&key).unwrap(), first);

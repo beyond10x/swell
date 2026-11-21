@@ -236,16 +236,14 @@ impl<H: Host> Agent<H> {
             )),
             Value::Boolean(boolean) => {
                 let prototype = self.current_intrinsic(Intrinsic::BooleanPrototype)?;
-                self.ordinary_object_create(prototype, OrdinaryData::Boolean(boolean))
+                self.ordinary_object_create(Some(prototype), OrdinaryData::Boolean(boolean))
             }
             Value::Number(number) => {
                 let prototype = self.current_intrinsic(Intrinsic::NumberPrototype)?;
-                self.ordinary_object_create(prototype, OrdinaryData::Number(number))
+                self.ordinary_object_create(Some(prototype), OrdinaryData::Number(number))
             }
             Value::String(string) => {
-                let Some(prototype) = self.current_intrinsic(Intrinsic::StringPrototype)? else {
-                    return Err(self.fault());
-                };
+                let prototype = self.current_intrinsic(Intrinsic::StringPrototype)?;
                 self.string_create(string, prototype)
             }
             Value::Symbol(_) | Value::BigInt(_) => Err(self.fault()),
@@ -325,7 +323,7 @@ impl<H: Host> Agent<H> {
 #[cfg(test)]
 mod tests {
     use super::{number_to_int32, number_to_uint32};
-    use crate::host::hooks::test_host::agent_with_realm;
+    use crate::host::hooks::test_host::{agent_with_realm, enter};
     use crate::value::Value;
 
     /// ToInt32 and ToUint32 (`#sec-toint32`, `#sec-touint32`): truncation modulo 2^32.
@@ -352,7 +350,8 @@ mod tests {
     /// (`#sec-tolength`, `#sec-tointegerorinfinity`, `#sec-canonicalnumericindexstring`).
     #[test]
     fn to_length_and_canonical_numeric_index_string() {
-        let (mut agent, _realm) = agent_with_realm();
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
         assert_eq!(agent.to_length(Value::Number(-3.0)), Ok(0.0));
         assert_eq!(agent.to_int32(Value::Number(-1.5)), Ok(-1));
         assert_eq!(agent.to_length(Value::Number(2.7)), Ok(2.0));

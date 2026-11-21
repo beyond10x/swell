@@ -49,7 +49,7 @@ fn host_52_dropped_realm_returns_heap_bytes() {
     let realm = realm(&mut agent);
     let global = global(&mut agent, &realm);
     let error = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm = cx.realm_ref(&realm).unwrap();
             let error = cx
                 .new_error(realm, swell::ErrorKind::RangeError, "out of range")
@@ -78,7 +78,7 @@ fn global_value_properties() {
     let realm = realm(&mut agent);
     let global = global(&mut agent, &realm);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let global = object(cx, &global);
             assert_eq!(get(cx, global, "Infinity"), Value::Number(f64::INFINITY));
             assert!(matches!(get(cx, global, "NaN"), Value::Number(n) if n.is_nan()));
@@ -151,7 +151,7 @@ fn intrinsic_reachable_only_through_the_realm_survives_collect() {
     let realm = realm(&mut agent);
     let global_root = global(&mut agent, &realm);
     let (global, before) = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let global = object(cx, &global_root);
             let error = read_prototype(cx, global, "Error");
             let range_error = read_prototype(cx, global, "RangeError");
@@ -164,7 +164,7 @@ fn intrinsic_reachable_only_through_the_realm_survives_collect() {
 
     let global_root = agent.global_object(&realm).unwrap();
     let after = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let found = object(cx, &global_root);
             assert_eq!(found, global, "the same global object");
             (
@@ -224,7 +224,7 @@ fn the_setup_closure_gives_the_global_object() {
 
     let global_root = global(&mut agent, &realm);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let global = object(cx, &global_root);
             assert_eq!(cx.brand(global), Ok(Some(Brand(9))));
             assert_eq!(get(cx, global, "undefined"), Value::Undefined);
@@ -242,8 +242,9 @@ fn the_setup_closure_gives_the_global_object() {
 #[test]
 fn a_setup_returning_a_stale_or_foreign_global_faults_the_agent() {
     let mut other = agent().unwrap();
+    let other_realm = realm(&mut other);
     let foreign = other
-        .with_cx(|cx| {
+        .with_cx(&other_realm, |cx| {
             cx.new_host_object(HostObjectSpec {
                 prototype: None,
                 brand: Brand(1),
@@ -256,8 +257,9 @@ fn a_setup_returning_a_stale_or_foreign_global_faults_the_agent() {
 
     for case in 0..3 {
         let mut agent = agent().unwrap();
+        let realm = realm(&mut agent);
         let stale = agent
-            .with_cx(|cx| {
+            .with_cx(&realm, |cx| {
                 cx.new_host_object(HostObjectSpec {
                     prototype: None,
                     brand: Brand(1),
@@ -309,6 +311,7 @@ fn a_setup_returning_a_stale_or_foreign_global_faults_the_agent() {
 #[test]
 fn a_setup_that_throws_makes_create_realm_throw() {
     let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
     let mut setup = |_cx: &mut HookCx<'_, TestHost>,
                      _realm: RealmRef|
      -> Completion<GlobalObjects> { Err(Abrupt::Throw(Value::Number(7.0))) };
@@ -316,7 +319,7 @@ fn a_setup_that_throws_makes_create_realm_throw() {
         panic!("create_realm did not throw");
     };
     assert_eq!(
-        agent.with_cx(|cx| cx.get(&root)).unwrap(),
+        agent.with_cx(&realm, |cx| cx.get(&root)).unwrap(),
         Ok(Value::Number(7.0))
     );
     assert_eq!(agent.state(), AgentState::Alive);
@@ -327,6 +330,7 @@ fn a_setup_that_throws_makes_create_realm_throw() {
 fn a_realm_of_another_agent_is_foreign() {
     let mut a = agent().unwrap();
     let mut b = agent().unwrap();
+    let realm_b = realm(&mut b);
     let realm = realm(&mut a);
     assert!(matches!(
         b.global_object(&realm),
@@ -337,7 +341,8 @@ fn a_realm_of_another_agent_is_foreign() {
         Err(HostError::ForeignHandle)
     ));
     assert_eq!(
-        b.with_cx(|cx| cx.realm_ref(&realm).map(|_| ())).unwrap(),
+        b.with_cx(&realm_b, |cx| cx.realm_ref(&realm).map(|_| ()))
+            .unwrap(),
         Err(HostError::ForeignHandle)
     );
 }

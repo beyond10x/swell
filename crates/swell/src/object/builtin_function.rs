@@ -115,8 +115,9 @@ pub(crate) struct Activation {
     pub(crate) realm: Option<Handle>,
 }
 
-/// Root site of the collector: what the running builtins hold, their activations and the values
-/// they keep across calls into code.
+/// Root site of the collector: the execution contexts, that is what the running builtins hold,
+/// their activations and the values they keep across calls into code, and the realm of the
+/// entry.
 pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
     mark.count("object/builtin_function.rs trace_roots");
     for activation in &agent.activations {
@@ -134,6 +135,11 @@ pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
     }
     for &value in &agent.kept {
         mark.value(value);
+    }
+    // The realm the entry names (decision 7) is held by the host's `Realm` for the whole entry,
+    // but the one `create_realm` sets is not yet: it is reported here, under the activations.
+    if let Some(realm) = agent.entry_realm {
+        mark.push(Item::Realm(realm));
     }
 }
 

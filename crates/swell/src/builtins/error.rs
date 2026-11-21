@@ -83,10 +83,10 @@ impl<H: Host> Agent<H> {
     /// `new Error(message)` makes one.
     pub(crate) fn create_error(
         &mut self,
-        prototype: Option<ObjectRef>,
+        prototype: ObjectRef,
         message: &str,
     ) -> Completion<ObjectRef> {
-        let error = self.ordinary_object_create(prototype, OrdinaryData::Error)?;
+        let error = self.ordinary_object_create(Some(prototype), OrdinaryData::Error)?;
         let message = self.new_string_str(message)?;
         let key = self.name_key("message")?;
         self.add_property(
@@ -97,9 +97,8 @@ impl<H: Host> Agent<H> {
         Ok(error)
     }
 
-    /// The throw completion of a new error of `kind` in the current realm. With no realm in
-    /// the agent the error has a null [[Prototype]]; over the memory budget the run ends
-    /// instead.
+    /// The throw completion of a new error of `kind` in the current realm; over the memory
+    /// budget the run ends instead.
     pub(crate) fn throw_error(&mut self, kind: ErrorKind, message: &str) -> Abrupt {
         let made = self
             .current_intrinsic(Intrinsic::ErrorPrototype(kind))
@@ -225,6 +224,6 @@ impl<H: Host> Agent<H> {
         message: &str,
     ) -> Completion<ObjectRef> {
         let prototype = self.intrinsic(realm, Intrinsic::ErrorPrototype(kind))?;
-        self.create_error(Some(prototype), message)
+        self.create_error(prototype, message)
     }
 }

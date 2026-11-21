@@ -161,13 +161,13 @@ impl<H: Host> Agent<H> {
 
     /// GetFunctionRealm (`#sec-getfunctionrealm`): a built-in function's [[Realm]], else the
     /// current realm. Bound functions and proxies come with their stories.
-    pub(crate) fn get_function_realm(&mut self, object: ObjectRef) -> Completion<Option<Handle>> {
+    pub(crate) fn get_function_realm(&mut self, object: ObjectRef) -> Completion<Handle> {
         if let ObjectKind::BuiltinFunction(function) = &self.engine_object(object)?.kind
             && let Some(realm) = function.realm
         {
-            return Ok(Some(realm));
+            return Ok(realm);
         }
-        Ok(self.current_realm())
+        self.current_realm()
     }
 
     /// OrdinaryHasInstance (`#sec-ordinaryhasinstance`). A step per object of the chain.
@@ -280,7 +280,7 @@ impl<H: Host> Agent<H> {
 mod tests {
     use crate::host::Host;
     use crate::host::agent::Agent;
-    use crate::host::hooks::test_host::{NoHooks, agent_with_realm};
+    use crate::host::hooks::test_host::{NoHooks, agent_with_realm, enter};
     use crate::host::outcome::{Abrupt, Completion};
     use crate::host::{Cx, HostCall};
     use crate::object::ordinary::OrdinaryData;
@@ -310,6 +310,7 @@ mod tests {
     #[test]
     fn instanceof_uses_ordinary_has_instance() {
         let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
         let f = function(&mut agent, &realm, constructor);
         let prototype = agent
             .ordinary_object_create(None, OrdinaryData::Plain)
@@ -371,7 +372,8 @@ mod tests {
     /// LengthOfArrayLike.
     #[test]
     fn enumerate_object_properties_skips_shadowed_and_symbols() {
-        let (mut agent, _realm) = agent_with_realm();
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
         let parent = agent
             .ordinary_object_create(None, OrdinaryData::Plain)
             .unwrap();

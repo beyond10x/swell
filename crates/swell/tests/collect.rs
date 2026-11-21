@@ -29,8 +29,9 @@ fn spec(data: Option<Box<dyn HostData>>) -> HostObjectSpec {
 #[test]
 fn host_28_an_object_held_only_by_a_root_survives_collect() {
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     let (root, kept, dropped) = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let kept = cx.new_host_object(spec(None)).unwrap().unwrap();
             let dropped = cx.new_host_object(spec(None)).unwrap().unwrap();
             (cx.root(Value::Object(kept)).unwrap(), kept, dropped)
@@ -40,7 +41,7 @@ fn host_28_an_object_held_only_by_a_root_survives_collect() {
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
 
     let (read, brand, gone) = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let read = cx.get(&root).unwrap();
             (read, cx.brand(kept), cx.brand(dropped))
         })
@@ -55,8 +56,9 @@ fn host_28_an_object_held_only_by_a_root_survives_collect() {
 #[test]
 fn host_29_dropping_the_last_root_lowers_heap_bytes() {
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     let root = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let object = cx
                 .new_host_object(spec(Some(Box::new(Payload { _bytes: [0; 256] }))))
                 .unwrap()
@@ -86,8 +88,9 @@ fn host_29_dropping_the_last_root_lowers_heap_bytes() {
 #[test]
 fn host_132_report_matches_heap_bytes() {
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     let _root = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             for _ in 0..10 {
                 cx.new_string("garbage nothing holds").unwrap();
             }
@@ -120,15 +123,17 @@ fn host_132_report_matches_heap_bytes() {
 #[test]
 fn a_root_is_checked_and_can_be_duplicated() {
     let mut a = support::host::agent().unwrap();
+    let realm_a = support::host::realm(&mut a);
     let mut b = support::host::agent().unwrap();
+    let realm_b = support::host::realm(&mut b);
     let (root, s) = a
-        .with_cx(|cx| {
+        .with_cx(&realm_a, |cx| {
             let s = cx.new_string("held").unwrap();
             (cx.root(Value::String(s)).unwrap(), s)
         })
         .unwrap();
     assert_eq!(
-        b.with_cx(|cx| cx.get(&root)).unwrap(),
+        b.with_cx(&realm_b, |cx| cx.get(&root)).unwrap(),
         Err(HostError::ForeignHandle)
     );
     assert!(matches!(b.duplicate(&root), Err(HostError::ForeignHandle)));
@@ -137,7 +142,7 @@ fn a_root_is_checked_and_can_be_duplicated() {
     drop(root);
     assert!(matches!(a.collect(), Ok(Outcome::Normal(_))));
     let units = a
-        .with_cx(|cx| {
+        .with_cx(&realm_a, |cx| {
             assert_eq!(cx.get(&second), Ok(Value::String(s)));
             cx.to_utf16(s).unwrap()
         })

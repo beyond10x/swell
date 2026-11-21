@@ -150,32 +150,36 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// The current realm (`#sec-execution-contexts`): the realm of the running builtin; while
-    /// no code runs, the realm created last that is still alive (a choice of swell: the draft
-    /// has no current realm then); `None` when the agent has no realm.
-    pub(crate) fn current_realm(&mut self) -> Option<Handle> {
-        if let Some(realm) = self
-            .activations
-            .last()
-            .and_then(|activation| activation.realm)
-        {
-            return Some(realm);
+    /// The current realm (`#sec-execution-contexts`, "The value of the Realm component of the
+    /// running execution context"): the [[Realm]] of the running builtin; while no code runs,
+    /// the realm the entry names (`docs/design/host-interface.md`, decision 7: `with_cx`,
+    /// `Agent::call` and `Agent::construct` take it, `create_realm` sets the new one). Every
+    /// engine operation runs inside an entry, so no current realm, or a dead one, is a broken
+    /// invariant and faults the agent.
+    pub(crate) fn current_realm(&mut self) -> Completion<Handle> {
+        let realm = match self.activations.last() {
+            Some(activation) => activation.realm,
+            None => self.entry_realm,
+        };
+        match realm {
+            Some(realm) if self.heap.realms.get(realm).is_ok() => Ok(realm),
+            _ => Err(self.fault()),
         }
-        while let Some(&realm) = self.realm_list.last() {
-            if self.heap.realms.get(realm).is_ok() {
-                return Some(realm);
-            }
-            self.realm_list.pop();
-        }
-        None
     }
 
-    /// The intrinsic `which` of the current realm, `None` when the agent has no realm.
-    pub(crate) fn current_intrinsic(&mut self, which: Intrinsic) -> Completion<Option<ObjectRef>> {
-        match self.current_realm() {
-            Some(realm) => self.intrinsic(realm, which).map(Some),
-            None => Ok(None),
-        }
+    /// The intrinsic `which` of the current realm.
+    pub(crate) fn current_intrinsic(&mut self, which: Intrinsic) -> Completion<ObjectRef> {
+        let realm = self.current_realm()?;
+        self.intrinsic(realm, which)
+    }
+
+    /// Run `f` with `realm` as the realm of the entry, the current realm while no builtin runs;
+    /// the realm before is restored after.
+    pub(crate) fn in_entry_realm<R>(&mut self, realm: Handle, f: impl FnOnce(&mut Self) -> R) -> R {
+        let before = self.entry_realm.replace(realm);
+        let result = f(self);
+        self.entry_realm = before;
+        result
     }
 
     /// The well-known symbols, when they are alive.
@@ -229,12 +233,7 @@ impl<H: Host> Agent<H> {
         host_defined: Option<HostDefined>,
     ) -> Outcome<Realm> {
         match self.create_realm_steps(setup, host_defined) {
-            Ok(realm) => {
-                self.realm_list
-                    .retain(|&kept| self.heap.realms.get(kept).is_ok());
-                self.realm_list.push(realm);
-                Outcome::Normal(Realm(self.heap.roots.add_realm(realm)))
-            }
+            Ok(realm) => Outcome::Normal(Realm(self.heap.roots.add_realm(realm))),
             Err(Abrupt::Throw(value)) => Outcome::Throw(self.heap.roots.add(value)),
             Err(Abrupt::Terminated(termination)) => Outcome::Terminated(termination),
         }
@@ -259,6 +258,19 @@ impl<H: Host> Agent<H> {
                 Ok(realm) => realm,
                 Err(_) => return Err(self.terminate(Termination::MemoryBudget)),
             };
+        // "Set the Realm of newContext to realm. ... Push newContext onto the execution context
+        // stack": the new realm is the current realm until the realm is made.
+        self.in_entry_realm(realm, |agent| agent.populate_realm(realm, setup))?;
+        Ok(realm)
+    }
+
+    /// CreateIntrinsics, the setup closure, SetRealmGlobalObject and SetDefaultGlobalBindings
+    /// of the realm record `realm`.
+    fn populate_realm(
+        &mut self,
+        realm: Handle,
+        setup: Option<GlobalSetup<'_, H>>,
+    ) -> Completion<()> {
         self.create_intrinsics(realm)?;
 
         let (global, this) = match setup {
@@ -299,16 +311,19 @@ impl<H: Host> Agent<H> {
             record.global = Some(global);
             record.global_this = Some(this.unwrap_or(global));
         }
-        self.set_default_global_bindings(realm)?;
-        Ok(realm)
+        self.set_default_global_bindings(realm)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::host::hooks::test_host::agent_with_realm;
+    use crate::host::ErrorKind;
+    use crate::host::agent::Agent;
+    use crate::host::hooks::test_host::{NoHooks, agent_with_realm};
+    use crate::host::outcome::Outcome;
     use crate::object::KindTag;
     use crate::realm::intrinsics::Intrinsic;
+    use crate::value::{ObjectRef, Realm, Value};
 
     /// HOST-51 (`#sec-initializehostdefinedrealm`, step 7: "Let global be
     /// OrdinaryObjectCreate(realm.[[Intrinsics]].[[%Object.prototype%]])"): without a setup
@@ -343,5 +358,70 @@ mod tests {
         assert!(agent.heap.objects.get(before.handle).is_ok());
         assert_eq!(agent.get_prototype_of(global), Ok(Some(before)));
         assert_eq!(agent.kind_of(before), Ok(KindTag::ImmutablePrototype));
+    }
+
+    /// What HOST-161 reads of realm `a`: ToObject of `true` in `with_cx` of `a`, and the
+    /// TypeError of `agent.call` with `a` of the Number 1, have `a`'s prototypes.
+    fn check_current_realm_is(
+        agent: &mut Agent<NoHooks>,
+        a: &Realm,
+        boolean_prototype: ObjectRef,
+        type_error_prototype: ObjectRef,
+    ) {
+        let (wrapper_prototype, one, undefined) = agent
+            .with_cx(a, |cx| {
+                let wrapper = cx.to_object(Value::Boolean(true)).unwrap().unwrap();
+                (
+                    cx.agent.get_prototype_of(wrapper),
+                    cx.root(Value::Number(1.0)).unwrap(),
+                    cx.root(Value::Undefined).unwrap(),
+                )
+            })
+            .unwrap();
+        assert_eq!(wrapper_prototype, Ok(Some(boolean_prototype)));
+        let thrown = match agent.call(a, &one, &undefined, &[]) {
+            Ok(Outcome::Throw(thrown)) => agent.heap.roots.get(&thrown).unwrap(),
+            other => panic!("agent.call answered {other:?}"),
+        };
+        let Value::Object(error) = thrown else {
+            panic!("thrown {thrown:?}");
+        };
+        assert_eq!(
+            agent.get_prototype_of(error),
+            Ok(Some(type_error_prototype))
+        );
+    }
+
+    /// HOST-161 (`docs/design/host-interface.md`, decision 7, "The current realm is the running
+    /// context's; outside a run, the host names it"): with realm A created and then realm B,
+    /// `with_cx` of A and `agent.call` with A use A's intrinsics while B is alive, after the
+    /// host dropped every root of B, and after B is collected. Run also with the feature
+    /// `collect-every-safe-point`.
+    #[test]
+    fn host_161_the_entry_names_the_current_realm() {
+        let (mut agent, a) = agent_with_realm();
+        let b = match agent.create_realm(None, None) {
+            Ok(Outcome::Normal(b)) => b,
+            other => panic!("create_realm answered {other:?}"),
+        };
+        let a_handle = agent.heap.roots.get_realm(&a.0).unwrap();
+        let b_handle = agent.heap.roots.get_realm(&b.0).unwrap();
+        let boolean_prototype = agent
+            .intrinsic(a_handle, Intrinsic::BooleanPrototype)
+            .unwrap();
+        let type_error_prototype = agent
+            .intrinsic(a_handle, Intrinsic::ErrorPrototype(ErrorKind::TypeError))
+            .unwrap();
+        assert_ne!(
+            agent.intrinsic(b_handle, Intrinsic::BooleanPrototype),
+            Ok(boolean_prototype)
+        );
+
+        check_current_realm_is(&mut agent, &a, boolean_prototype, type_error_prototype);
+        drop(b);
+        check_current_realm_is(&mut agent, &a, boolean_prototype, type_error_prototype);
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        assert!(agent.heap.realms.get(b_handle).is_err());
+        check_current_realm_is(&mut agent, &a, boolean_prototype, type_error_prototype);
     }
 }
