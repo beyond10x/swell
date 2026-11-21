@@ -5,4 +5,5 @@ includes: [compareArray.js]
 features: [Atomics]
 ---*/
 
-Atomics.notify;
+// Not defined by any slice: the case fails whatever the engine implements.
+notDefinedInAnySlice;

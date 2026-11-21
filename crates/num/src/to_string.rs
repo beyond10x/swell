@@ -1,20 +1,43 @@
-//! `Number::toString ( x, radix )` for radix 10 (`#sec-numeric-types-number-tostring`).
+//! `Number::toString ( x, radix )` (`#sec-numeric-types-number-tostring`) for every radix from 2
+//! to 36.
 //!
-//! Step 5 asks for integers n, k and s such that k ≥ 1, 10^(k-1) ≤ s < 10^k, 𝔽(s × 10^(n-k)) is
-//! x, and k is as small as possible. [`shortest_digits`] finds them exactly, with the free-format
-//! algorithm of Steele and White as Burger and Dybvig give it ("Printing Floating-Point Numbers
-//! Quickly and Accurately", 1996, figure 1 with the scaling of section 2.2), over the small
-//! unsigned big integers of this module: no floating-point arithmetic decides a digit. Where two
-//! values of s of that length round to x it takes the one closer to x, and of two equally close
-//! the even one, as the clause's Note 2 recommends. Steps 6 to 12 then lay the digits out.
+//! Step 5 asks for integers n, k and s such that k ≥ 1, radix^(k-1) ≤ s < radix^k,
+//! 𝔽(s × radix^(n-k)) is x, and k is as small as possible. [`shortest_digits`] finds them
+//! exactly, with the free-format algorithm of Steele and White as Burger and Dybvig give it
+//! ("Printing Floating-Point Numbers Quickly and Accurately", 1996, figure 1 with the scaling of
+//! section 2.2; the algorithm is written for any output base), over the small unsigned big
+//! integers of this module: no floating-point arithmetic decides a digit. Where two values of s
+//! of that length round to x it takes the one closer to x, and of two equally close the even
+//! one, as the clause's Note 2 recommends (in an odd radix s is even when the sum of its digits
+//! is). Steps 6 to 12 then lay the digits out with the first `radix` code units of
+//! "0123456789abcdefghijklmnopqrstuvwxyz": in radix 10 as a decimal or in scientific E notation,
+//! in any other radix always as step 6 does, with no exponent.
 //!
-//! The other radices, `toFixed`, `toExponential` and `toPrecision` are slice 4's (design,
-//! section 12, "A part before its slice").
+//! Slice 1 took radix 10 early and slice 2 the other radices (design, section 12, "A part before
+//! its slice"); `toFixed`, `toExponential` and `toPrecision` are slice 4's.
 
 use std::cmp::Ordering;
 
+/// The digits of every radix, from the clause: "taken from the first r code units of
+/// "0123456789abcdefghijklmnopqrstuvwxyz" in order".
+const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+
 /// `Number::toString(x, 10)`.
 pub fn number_to_string(x: f64) -> String {
+    to_string_in_radix(x, 10)
+}
+
+/// `Number::toString(x, radix)`, or `None` for a radix outside 2 to 36, which the clause does
+/// not take.
+pub fn number_to_string_radix(x: f64, radix: u32) -> Option<String> {
+    if !(2..=36).contains(&radix) {
+        return None;
+    }
+    Some(to_string_in_radix(x, radix))
+}
+
+/// `Number::toString(x, radix)` for a radix from 2 to 36.
+fn to_string_in_radix(x: f64, radix: u32) -> String {
     // Steps 1 to 4.
     if x.is_nan() {
         return "NaN".to_string();
@@ -31,21 +54,26 @@ pub fn number_to_string(x: f64) -> String {
         out.push_str("Infinity");
         return out;
     }
-    let (digits, n) = shortest_digits(x);
-    layout(&mut out, &digits, n);
+    let (digits, n) = shortest_digits(x, radix);
+    layout(&mut out, &digits, n, radix);
     out
 }
 
-/// Steps 6 to 12: the digits of s (k of them) and n, as a decimal or in scientific E notation.
-fn layout(out: &mut String, digits: &[u8], n: i32) {
+/// Steps 6 to 12: the digits of s (k of them) and n, as a positional numeral, or in radix 10
+/// outside n from -5 to 21 in scientific E notation.
+fn layout(out: &mut String, digits: &[u8], n: i32, radix: u32) {
     let k = i32::try_from(digits.len()).unwrap_or(i32::MAX);
-    let text: String = digits.iter().map(|&d| char::from(b'0' + d)).collect();
+    let text: String = digits
+        .iter()
+        .map(|&d| char::from(DIGITS.get(usize::from(d)).copied().unwrap_or(b'0')))
+        .collect();
     let zeros = |out: &mut String, count: i32| {
         for _ in 0..count {
             out.push('0');
         }
     };
-    if (-5..=21).contains(&n) {
+    // Step 6: "If radix ≠ 10 or n is in the inclusive interval from -5 to 21".
+    if radix != 10 || (-5..=21).contains(&n) {
         if n >= k {
             // Step 6.a.
             out.push_str(&text);
@@ -79,9 +107,13 @@ fn layout(out: &mut String, digits: &[u8], n: i32) {
     out.push_str(&exponent.to_string());
 }
 
-/// For a finite positive `x`: the decimal digits of s, most significant first, and n, of step 5
-/// of `Number::toString`, so that x is the Number nearest to 0.d₁d₂…d_k × 10^n.
-pub(crate) fn shortest_digits(x: f64) -> (Vec<u8>, i32) {
+/// For a finite positive `x` and a radix from 2 to 36: the digits of s in that radix, most
+/// significant first, and n, of step 5 of `Number::toString`, so that x is the Number nearest to
+/// 0.d₁d₂…d_k × radix^n.
+pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
+    // The callers pass a radix from 2 to 36; the clamp keeps every loop below finite whatever
+    // they pass.
+    let base = u64::from(radix.clamp(2, 36));
     let bits = x.to_bits();
     let biased = ((bits >> 52) & 0x7ff) as i32;
     let fraction = bits & ((1u64 << 52) - 1);
@@ -127,18 +159,26 @@ pub(crate) fn shortest_digits(x: f64) -> (Vec<u8>, i32) {
         ),
     };
 
-    // n is the least integer with (r + m⁺) / s < 10^n (≤ when the upper bound reads back as x is
-    // excluded). An estimate from the binary exponent, floor(L × log10 2) + 1 with
-    // floor(L × log10 2) = (L × 78913) >> 18 for |L| ≤ 1650, is corrected below.
+    // n is the least integer with (r + m⁺) / s < radix^n (≤ when the upper bound reads back as x
+    // is excluded). An estimate from the binary exponent L, floor(L / log2 radix) + 1, is
+    // corrected by the two loops below. For radix 10 it is floor(L × log10 2) + 1 with
+    // floor(L × log10 2) = (L × 78913) >> 18 for |L| ≤ 1650; for another radix it divides by
+    // log2 radix in fixed point ([`log2_q16`]). Only the number of passes of the loops depends on
+    // how close the estimate is, not the result.
     let top = e + 63 - f.leading_zeros() as i32;
-    let mut n = ((top * 78913) >> 18) + 1;
+    let mut n = if base == 10 {
+        ((top * 78913) >> 18) + 1
+    } else {
+        let estimate = (i64::from(top) * 65536).div_euclid(log2_q16(base)) + 1;
+        i32::try_from(estimate).unwrap_or(0)
+    };
     if n >= 0 {
-        s.mul_pow10(n.unsigned_abs());
+        s.mul_pow(base, n.unsigned_abs());
     } else {
         let scale = n.unsigned_abs();
-        r.mul_pow10(scale);
-        m_plus.mul_pow10(scale);
-        m_minus.mul_pow10(scale);
+        r.mul_pow(base, scale);
+        m_plus.mul_pow(base, scale);
+        m_minus.mul_pow(base, scale);
     }
     let upper_reached = |r: &Big, m_plus: &Big, s: &Big| match Big::cmp_sum(r, m_plus, s) {
         Ordering::Greater => true,
@@ -146,12 +186,12 @@ pub(crate) fn shortest_digits(x: f64) -> (Vec<u8>, i32) {
         Ordering::Less => false,
     };
     while upper_reached(&r, &m_plus, &s) {
-        s.mul_small(10);
+        s.mul_small(base);
         n += 1;
     }
     loop {
         let mut high = r.add(&m_plus);
-        high.mul_small(10);
+        high.mul_small(base);
         let n_too_large = match high.cmp(&s) {
             Ordering::Less => true,
             Ordering::Equal => !even,
@@ -160,24 +200,27 @@ pub(crate) fn shortest_digits(x: f64) -> (Vec<u8>, i32) {
         if !n_too_large {
             break;
         }
-        r.mul_small(10);
-        m_plus.mul_small(10);
-        m_minus.mul_small(10);
+        r.mul_small(base);
+        m_plus.mul_small(base);
+        m_minus.mul_small(base);
         n -= 1;
     }
 
     // Digit generation.
     let mut digits = Vec::with_capacity(17);
+    // The sum of the digits so far: in an odd radix, s is even when it is.
+    let mut digit_sum = 0u64;
     let mut product = Big::from_u64(0);
+    let top_digit = u8::try_from(base - 1).unwrap_or(9);
     loop {
-        r.mul_small(10);
-        m_plus.mul_small(10);
-        m_minus.mul_small(10);
-        // The digit is floor(r / s), below 10. Its estimate from the leading 128 bits of both is
-        // off by at most one either way, and corrected.
+        r.mul_small(base);
+        m_plus.mul_small(base);
+        m_minus.mul_small(base);
+        // The digit is floor(r / s), below the radix. Its estimate from the leading 128 bits of
+        // both is off by at most one either way, and corrected.
         let shift = r.bit_len().saturating_sub(128);
         let estimate = r.bits_from(shift) / s.bits_from(shift).max(1);
-        let mut digit = u8::try_from(estimate.min(9)).unwrap_or(9);
+        let mut digit = u8::try_from(estimate.min(u128::from(top_digit))).unwrap_or(top_digit);
         if digit > 0 {
             product.limbs.clear();
             product.limbs.extend_from_slice(&s.limbs);
@@ -199,7 +242,10 @@ pub(crate) fn shortest_digits(x: f64) -> (Vec<u8>, i32) {
         };
         let high = upper_reached(&r, &m_plus, &s);
         match (low, high) {
-            (false, false) => digits.push(digit),
+            (false, false) => {
+                digits.push(digit);
+                digit_sum += u64::from(digit);
+            }
             (true, false) => {
                 digits.push(digit);
                 break;
@@ -209,22 +255,29 @@ pub(crate) fn shortest_digits(x: f64) -> (Vec<u8>, i32) {
                 break;
             }
             (true, true) => {
-                // Both d and d + 1 read back as x: the closer, and of two equally close the even.
+                // Both d and d + 1 read back as x: the closer, and of two equally close the even
+                // s. In an even radix s has the parity of its last digit; in an odd one, every
+                // power of the radix being odd, the parity of the sum of its digits.
                 let twice = r.clone().shl(1);
+                let s_with_digit_odd = if base.is_multiple_of(2) {
+                    digit % 2 == 1
+                } else {
+                    (digit_sum + u64::from(digit)) % 2 == 1
+                };
                 let up = match twice.cmp(&s) {
                     Ordering::Less => false,
                     Ordering::Greater => true,
-                    Ordering::Equal => digit % 2 == 1,
+                    Ordering::Equal => s_with_digit_odd,
                 };
                 digits.push(if up { digit + 1 } else { digit });
                 break;
             }
         }
     }
-    // The algorithm never produces a digit 10 or a trailing zero; this keeps the result a valid
-    // s if it did.
+    // The algorithm never produces a digit equal to the radix or a trailing zero; this keeps the
+    // result a valid s if it did.
     while let Some(&last) = digits.last() {
-        if last < 10 {
+        if u64::from(last) < base {
             break;
         }
         digits.pop();
@@ -240,6 +293,30 @@ pub(crate) fn shortest_digits(x: f64) -> (Vec<u8>, i32) {
         digits.pop();
     }
     (digits, n)
+}
+
+/// floor(log2(base) × 2^16) for a base of 2 or more, in integers: the integer part from the
+/// highest set bit, then the 16 binary digits of the fraction of log2 of y = base / 2^integer,
+/// one per squaring of y (a square of 2 or more gives a 1 and is halved), y held with 62
+/// fractional bits. The truncation of each square can only lower the result; it steers the
+/// estimate of n, which the loops of [`shortest_digits`] correct, and is exact for a power of
+/// two.
+fn log2_q16(base: u64) -> i64 {
+    let base = base.max(2);
+    let integer = 63 - base.leading_zeros();
+    // y in [1, 2): y × 2^62 is below 2^63, so its square fits in 128 bits.
+    let mut y = u128::from(base) << 62u32.saturating_sub(integer);
+    let two = 2u128 << 62;
+    let mut fraction = 0i64;
+    for _ in 0..16 {
+        y = (y * y) >> 62;
+        fraction <<= 1;
+        if y >= two {
+            y >>= 1;
+            fraction |= 1;
+        }
+    }
+    (i64::from(integer) << 16) | fraction
 }
 
 /// An unsigned integer of any size: 64-bit limbs, least significant first, with no zero limb at
@@ -321,13 +398,26 @@ impl Big {
         self.trim();
     }
 
-    fn mul_pow10(&mut self, mut exponent: u32) {
-        while exponent >= 19 {
-            self.mul_small(10_000_000_000_000_000_000);
-            exponent -= 19;
+    /// self × base^exponent, for a base from 2 to 36: by the largest power of the base that fits
+    /// in a limb (10^19 for radix 10), then by the rest.
+    fn mul_pow(&mut self, base: u64, mut exponent: u32) {
+        let base = base.max(2);
+        let (mut chunk, mut factor) = (0u32, 1u64);
+        while let Some(next) = factor.checked_mul(base) {
+            factor = next;
+            chunk += 1;
         }
-        if exponent > 0 {
-            self.mul_small(10u64.pow(exponent));
+        while exponent >= chunk {
+            self.mul_small(factor);
+            exponent -= chunk;
+        }
+        // base^exponent < factor, so it fits.
+        let mut rest = 1u64;
+        for _ in 0..exponent {
+            rest *= base;
+        }
+        if rest > 1 {
+            self.mul_small(rest);
         }
     }
 

@@ -1,4 +1,4 @@
-//! `Number::toString ( x, 10 )` (`#sec-numeric-types-number-tostring`): the shortest digits
+//! `Number::toString ( x, radix )` (`#sec-numeric-types-number-tostring`): the shortest digits
 //! that round-trip, laid out as steps 6 to 12 say.
 //!
 //! The round trip draws its bit patterns from the crate's own SipHash with a fixed key, reads
@@ -6,10 +6,22 @@
 //! against the Rust standard library's `{:e}`, which prints the shortest round-trip digits in
 //! radix 10 (design, decision 6: "its `{:e}` output is used in tests as a check of the radix-10
 //! digits").
+//!
+//! The other radices are checked against values this file derives itself, not against another
+//! engine: in a radix that is a power of two the digits are the bits of x written out
+//! (`power_of_two_radices_are_exact`); in every radix the digits are read back exactly with the
+//! big integers of [`Nat`], and checked to lie in the interval of the reals that round to x, to
+//! be the closer of two neighbours that do (the even one on a tie, Note 2), and to have no
+//! shorter digit string in that interval (step 5, "k is as small as possible").
+
+#![cfg(test)]
+
+use std::cell::RefCell;
+use std::cmp::Ordering;
 
 use swell_num::literal::string_to_number_trimmed;
 use swell_num::siphash::siphash24;
-use swell_num::to_string::number_to_string;
+use swell_num::to_string::{number_to_string, number_to_string_radix};
 
 #[test]
 fn number_to_string_layouts() {
@@ -154,4 +166,521 @@ fn to_string_then_parse_round_trips() {
     println!(
         "to_string_then_parse_round_trips: {finite} finite, {drawn} drawn, {ties} exact tie(s) resolved to the even digit"
     );
+}
+
+/// The first `count` finite bit patterns drawn with `key`, as `to_string_then_parse_round_trips`
+/// draws them.
+fn drawn_finite(key: &[u8; 16], count: usize) -> Vec<f64> {
+    let mut values = Vec::with_capacity(count);
+    let mut drawn = 0u64;
+    while values.len() < count {
+        let x = f64::from_bits(siphash24(key, &drawn.to_le_bytes()));
+        drawn += 1;
+        if x.is_finite() {
+            values.push(x);
+        }
+    }
+    values
+}
+
+/// Values at the edges of the Number type, added to the drawn ones.
+const EDGES: [f64; 12] = [
+    5e-324,
+    -5e-324,
+    f64::MIN_POSITIVE,
+    f64::MAX,
+    -f64::MAX,
+    1.0,
+    0.5,
+    0.1,
+    1e21,
+    9007199254740993.0,
+    123.456,
+    1.0 / 3.0,
+];
+
+/// `number_to_string_radix(x, 10)` is `Some(number_to_string(x))` on the 200,000 bit patterns
+/// `to_string_then_parse_round_trips` draws, and on the edges; a radix outside 2 to 36 has no
+/// result.
+#[test]
+fn radix_ten_entry_is_unchanged() {
+    let key = *b"swell to_string\0";
+    let values = drawn_finite(&key, 200_000);
+    for &x in values.iter().chain(EDGES.iter()) {
+        assert_eq!(
+            number_to_string_radix(x, 10),
+            Some(number_to_string(x)),
+            "bits {:#018x}",
+            x.to_bits()
+        );
+    }
+    for x in [f64::NAN, 0.0, -0.0, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(number_to_string_radix(x, 10), Some(number_to_string(x)));
+    }
+    for radix in [0, 1, 37, 100, u32::MAX] {
+        assert_eq!(number_to_string_radix(1.0, radix), None, "radix {radix}");
+    }
+}
+
+/// x as f × 2^e with f a positive integer below 2^53, for a finite x other than ±0, and
+/// whether the gap below |x| is half the gap above (a power of two above the smallest normal).
+fn decompose(x: f64) -> (u64, i32, bool) {
+    let bits = x.abs().to_bits();
+    let biased = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1u64 << 52) - 1);
+    if biased == 0 {
+        (fraction, -1074, false)
+    } else {
+        (
+            fraction | (1u64 << 52),
+            biased - 1075,
+            biased > 1 && fraction == 0,
+        )
+    }
+}
+
+/// The digits of x in radix 2^w, written out from its bits: x = f × 2^e is exact in that radix,
+/// and no shorter digit string lies within half a unit in the last place of x, so these are the
+/// digits of step 5, laid out by step 6.
+fn bits_written_out(x: f64, w: u32) -> String {
+    let (f, e, _) = decompose(x);
+    let w = w as i32;
+    let lowest = e + f.trailing_zeros() as i32;
+    let top = e + 63 - f.leading_zeros() as i32;
+    let bit = |position: i32| -> u32 {
+        let i = position - e;
+        if (0..64).contains(&i) {
+            ((f >> i) & 1) as u32
+        } else {
+            0
+        }
+    };
+    let digit = |j: i32| -> char {
+        let value: u32 = (0..w).map(|b| bit(j * w + b) << b).sum();
+        char::from_digit(value, 1 << w).unwrap()
+    };
+    let (high, low) = (top.div_euclid(w), lowest.div_euclid(w));
+    let mut out = String::new();
+    if x < 0.0 {
+        out.push('-');
+    }
+    if high >= 0 {
+        for j in (0..=high).rev() {
+            out.push(digit(j));
+        }
+        if low < 0 {
+            out.push('.');
+            for j in (low..0).rev() {
+                out.push(digit(j));
+            }
+        }
+    } else {
+        out.push_str("0.");
+        for j in (low..0).rev() {
+            out.push(digit(j));
+        }
+    }
+    out
+}
+
+/// In the radices 2, 4, 8, 16 and 32 the result is the bits of x written out
+/// ([`bits_written_out`]), on 10,000 drawn bit patterns and the edges.
+#[test]
+fn power_of_two_radices_are_exact() {
+    let key = *b"swell radix bits";
+    let values = drawn_finite(&key, 10_000);
+    for w in 1..=5u32 {
+        let radix = 1u32 << w;
+        for &x in values.iter().chain(EDGES.iter()) {
+            if x == 0.0 {
+                continue;
+            }
+            assert_eq!(
+                number_to_string_radix(x, radix).as_deref(),
+                Some(bits_written_out(x, w).as_str()),
+                "radix {radix}, bits {:#018x}",
+                x.to_bits()
+            );
+        }
+    }
+    // Written out by hand from the bits. 0.1 is 0x3fb999999999999a: 1.999999999999a (hex) ×
+    // 2^-4. -6.5 is 1 × 4 + 2 + 2 / 4. 5e-324 is 2^-1074 = 2 × 32^-215. f64::MAX is
+    // (2^53 - 1) × 2^971 = 0x1fffffffffffff × 2^3 × 16^242.
+    let tenth = format!("0.0001{}101", "1001".repeat(12));
+    assert_eq!(number_to_string_radix(0.1, 2), Some(tenth));
+    assert_eq!(number_to_string_radix(-6.5, 4).as_deref(), Some("-12.2"));
+    let smallest = format!("0.{}2", "0".repeat(214));
+    assert_eq!(number_to_string_radix(5e-324, 32), Some(smallest));
+    let largest = format!("{}8{}", "f".repeat(13), "0".repeat(242));
+    assert_eq!(number_to_string_radix(f64::MAX, 16), Some(largest));
+}
+
+/// An unsigned integer of any size, 32-bit limbs, least significant first, no zero limb at the
+/// top: the exact reading of the test.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Nat(Vec<u32>);
+
+impl Nat {
+    fn from_u64(value: u64) -> Nat {
+        let mut nat = Nat(vec![value as u32, (value >> 32) as u32]);
+        nat.trim();
+        nat
+    }
+
+    fn trim(&mut self) {
+        while self.0.last() == Some(&0) {
+            self.0.pop();
+        }
+    }
+
+    fn is_zero(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn mul_add_small(&mut self, factor: u32, addend: u32) {
+        let mut carry = u64::from(addend);
+        for limb in &mut self.0 {
+            let product = u64::from(*limb) * u64::from(factor) + carry;
+            *limb = product as u32;
+            carry = product >> 32;
+        }
+        if carry != 0 {
+            self.0.push(carry as u32);
+        }
+        self.trim();
+    }
+
+    fn add_small(&self, addend: u32) -> Nat {
+        let mut sum = self.clone();
+        sum.mul_add_small(1, addend);
+        sum
+    }
+
+    /// self - 1, for self ≥ 1.
+    fn sub_one(&self) -> Nat {
+        let mut difference = self.clone();
+        for limb in &mut difference.0 {
+            let (value, borrow) = limb.overflowing_sub(1);
+            *limb = value;
+            if !borrow {
+                break;
+            }
+        }
+        difference.trim();
+        difference
+    }
+
+    /// floor(self / divisor).
+    fn div_small(&self, divisor: u32) -> Nat {
+        let mut quotient = vec![0u32; self.0.len()];
+        let mut remainder = 0u64;
+        for (i, &limb) in self.0.iter().enumerate().rev() {
+            let current = (remainder << 32) | u64::from(limb);
+            quotient[i] = (current / u64::from(divisor)) as u32;
+            remainder = current % u64::from(divisor);
+        }
+        let mut quotient = Nat(quotient);
+        quotient.trim();
+        quotient
+    }
+
+    fn mul(&self, other: &Nat) -> Nat {
+        let mut limbs = vec![0u32; self.0.len() + other.0.len()];
+        for (i, &a) in self.0.iter().enumerate() {
+            let mut carry = 0u64;
+            for (j, &b) in other.0.iter().enumerate() {
+                let current = u64::from(limbs[i + j]) + u64::from(a) * u64::from(b) + carry;
+                limbs[i + j] = current as u32;
+                carry = current >> 32;
+            }
+            let mut k = i + other.0.len();
+            while carry != 0 {
+                let current = u64::from(limbs[k]) + carry;
+                limbs[k] = current as u32;
+                carry = current >> 32;
+                k += 1;
+            }
+        }
+        let mut product = Nat(limbs);
+        product.trim();
+        product
+    }
+
+    fn pow(base: u32, exponent: u32) -> Nat {
+        let mut power = Nat::from_u64(1);
+        for _ in 0..exponent {
+            power.mul_add_small(base, 0);
+        }
+        power
+    }
+
+    fn shl(&self, bits: u32) -> Nat {
+        let mut limbs = vec![0u32; (bits / 32) as usize];
+        let shift = bits % 32;
+        let mut carry = 0u32;
+        for &limb in &self.0 {
+            if shift == 0 {
+                limbs.push(limb);
+            } else {
+                limbs.push((limb << shift) | carry);
+                carry = limb >> (32 - shift);
+            }
+        }
+        if carry != 0 {
+            limbs.push(carry);
+        }
+        let mut shifted = Nat(limbs);
+        shifted.trim();
+        shifted
+    }
+
+    fn compare(&self, other: &Nat) -> Ordering {
+        self.0
+            .len()
+            .cmp(&other.0.len())
+            .then_with(|| self.0.iter().rev().cmp(other.0.iter().rev()))
+    }
+}
+
+/// The exact reading of a result in `radix`: the value of the digits as D × radix^p, D without
+/// a trailing zero digit, and k, the number of digits of D. Checks the form steps 6 to 12 give:
+/// an optional "-", digits of the radix in lower case, a "." only between digits, no leading
+/// zero before a digit, no trailing zero after "."; an exponent ("e", a sign, decimal digits)
+/// only in radix 10, after a single digit or a digit, "." and more digits.
+fn read_exactly(text: &str, radix: u32) -> (Nat, i32, usize) {
+    let unsigned = text.strip_prefix('-').unwrap_or(text);
+    let (unsigned, exponent) = match unsigned.split_once('e') {
+        Some((mantissa, exponent)) if radix == 10 => {
+            assert!(
+                exponent.starts_with('+') || exponent.starts_with('-'),
+                "{text}: an exponent without its sign"
+            );
+            let (head, _) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+            assert!(
+                head.len() == 1 && head != "0",
+                "{text}: not one non-zero digit before the point"
+            );
+            (mantissa, exponent.parse::<i32>().unwrap())
+        }
+        _ => (unsigned, 0),
+    };
+    let (int, frac) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    assert!(!int.is_empty(), "{text}: no integer digits");
+    assert!(
+        !unsigned.contains('.') || !frac.is_empty(),
+        "{text}: nothing after the point"
+    );
+    assert!(
+        int == "0" || !int.starts_with('0'),
+        "{text}: a leading zero"
+    );
+    assert!(
+        !frac.ends_with('0'),
+        "{text}: a trailing zero after the point"
+    );
+    let mut digits: Vec<u32> = Vec::new();
+    for c in int.chars().chain(frac.chars()) {
+        assert!(!c.is_ascii_uppercase(), "{text}: an upper-case digit");
+        let Some(digit) = c.to_digit(radix) else {
+            panic!("{text}: {c:?} is not a digit of radix {radix}");
+        };
+        digits.push(digit);
+    }
+    let mut p = exponent - frac.len() as i32;
+    while digits.len() > 1 && digits.last() == Some(&0) {
+        digits.pop();
+        p += 1;
+    }
+    let first = digits.iter().position(|&d| d != 0).unwrap_or(digits.len());
+    let significant = &digits[first..];
+    let mut d = Nat(Vec::new());
+    for &digit in significant {
+        d.mul_add_small(radix, digit);
+    }
+    (d, p, significant.len())
+}
+
+/// The interval of the reals that round to the positive finite x (round to nearest, ties to
+/// even), and comparisons of D × radix^p with its bounds and with x, exactly.
+struct Interval {
+    f: u64,
+    e: i32,
+    unequal: bool,
+    radix: u32,
+    /// radix^|p| for the exponents p asked so far.
+    powers: RefCell<Vec<(u32, Nat)>>,
+}
+
+impl Interval {
+    fn new(x: f64, radix: u32) -> Interval {
+        let (f, e, unequal) = decompose(x);
+        Interval {
+            f,
+            e,
+            unequal,
+            radix,
+            powers: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// radix^exponent.
+    fn power(&self, exponent: u32) -> Nat {
+        let mut powers = self.powers.borrow_mut();
+        if let Some((_, power)) = powers.iter().find(|(e, _)| *e == exponent) {
+            return power.clone();
+        }
+        let power = Nat::pow(self.radix, exponent);
+        powers.push((exponent, power.clone()));
+        power
+    }
+
+    /// D × radix^p compared with A × 2^q.
+    fn compare(&self, d: &Nat, p: i32, a: &Nat, q: i32) -> Ordering {
+        let power = self.power(p.unsigned_abs());
+        let (mut left, mut right) = if p >= 0 {
+            (d.mul(&power), a.clone())
+        } else {
+            (d.clone(), a.mul(&power))
+        };
+        if q >= 0 {
+            right = right.shl(q as u32);
+        } else {
+            left = left.shl(q.unsigned_abs());
+        }
+        left.compare(&right)
+    }
+
+    /// Whether D × radix^p reads back as x: inside the interval, its bounds included when f is
+    /// even.
+    fn reads_back(&self, d: &Nat, p: i32) -> bool {
+        let even = self.f.is_multiple_of(2);
+        let (low, low_q) = if self.unequal {
+            (Nat::from_u64(4 * self.f - 1), self.e - 2)
+        } else {
+            (Nat::from_u64(2 * self.f - 1), self.e - 1)
+        };
+        let high = Nat::from_u64(2 * self.f + 1);
+        let above = match self.compare(d, p, &low, low_q) {
+            Ordering::Greater => true,
+            Ordering::Equal => even,
+            Ordering::Less => false,
+        };
+        let below = match self.compare(d, p, &high, self.e - 1) {
+            Ordering::Less => true,
+            Ordering::Equal => even,
+            Ordering::Greater => false,
+        };
+        above && below
+    }
+
+    /// The midpoint of D × radix^p and (D + 1) × radix^p compared with x:
+    /// (2D + 1) × radix^p against f × 2^(e+1).
+    fn midpoint_above(&self, d: &Nat, p: i32) -> Ordering {
+        let twice = d.shl(1).add_small(1);
+        self.compare(&twice, p, &Nat::from_u64(self.f), self.e + 1)
+    }
+}
+
+/// Checks `text`, the result of `number_to_string_radix(x, radix)` for a finite x other than
+/// ±0, against step 5 and Note 2: its digits read back as x, no digit string of the same length
+/// next to it reads back as x and is closer (of two equally close, s is even), and no shorter
+/// digit string reads back as x.
+fn check_shortest(x: f64, radix: u32, text: &str) {
+    assert_eq!(text.starts_with('-'), x < 0.0, "{text}: sign of {x:e}");
+    let (d, p, k) = read_exactly(text, radix);
+    let interval = Interval::new(x, radix);
+    let context = format!("radix {radix}, {text}, bits {:#018x}", x.to_bits());
+    assert!(interval.reads_back(&d, p), "does not read back: {context}");
+    let even = d.0.first().copied().unwrap_or(0).is_multiple_of(2);
+    // The neighbour above: x at or below the midpoint, on it only when s is even.
+    let up = d.add_small(1);
+    if interval.reads_back(&up, p) {
+        match interval.midpoint_above(&d, p) {
+            Ordering::Greater => {}
+            Ordering::Equal => assert!(even, "an odd s on a tie: {context}"),
+            Ordering::Less => panic!("the digits above are closer: {context}"),
+        }
+    }
+    // The neighbour below: x at or above the midpoint.
+    let down = d.sub_one();
+    if !down.is_zero() && interval.reads_back(&down, p) {
+        match interval.midpoint_above(&down, p) {
+            Ordering::Less => {}
+            Ordering::Equal => assert!(even, "an odd s on a tie: {context}"),
+            Ordering::Greater => panic!("the digits below are closer: {context}"),
+        }
+    }
+    // A shorter digit string near x is a multiple of radix^(p+1): the two around x.
+    if k > 1 {
+        let shorter = d.div_small(radix);
+        for candidate in [shorter.clone(), shorter.add_small(1)] {
+            assert!(
+                candidate.is_zero() || !interval.reads_back(&candidate, p + 1),
+                "a shorter digit string reads back: {candidate:?} × {radix}^{}: {context}",
+                p + 1
+            );
+        }
+    }
+}
+
+/// For each radix from 2 to 36, on 10,000 drawn bit patterns and the edges, the digits read
+/// back as x exactly and no shorter digit string does ([`check_shortest`]); NaN, the zeros and
+/// the infinities are written as in every radix.
+#[test]
+fn every_radix_reads_back() {
+    let key = *b"swell radix test";
+    let values = drawn_finite(&key, 10_000);
+    let mut checked = 0u32;
+    for radix in 2..=36u32 {
+        for &x in values.iter().chain(EDGES.iter()) {
+            if x == 0.0 {
+                continue;
+            }
+            let text = number_to_string_radix(x, radix).unwrap();
+            check_shortest(x, radix, &text);
+            checked += 1;
+        }
+        assert_eq!(
+            number_to_string_radix(f64::NAN, radix).as_deref(),
+            Some("NaN")
+        );
+        assert_eq!(number_to_string_radix(0.0, radix).as_deref(), Some("0"));
+        assert_eq!(number_to_string_radix(-0.0, radix).as_deref(), Some("0"));
+        assert_eq!(
+            number_to_string_radix(f64::INFINITY, radix).as_deref(),
+            Some("Infinity")
+        );
+        assert_eq!(
+            number_to_string_radix(f64::NEG_INFINITY, radix).as_deref(),
+            Some("-Infinity")
+        );
+    }
+    println!("every_radix_reads_back: {checked} result(s) checked");
+}
+
+/// The layout of steps 6 to 12 in a radix other than 10: the clause's examples worked out by
+/// hand. 255 is 15 × 16 + 15 and 7 × 36 + 3; 0.5 is 1 × 2^-1; 1e21 lies between 36^13 and 36^14,
+/// so it has 14 digits before the point and, the radix not being 10, no exponent.
+#[test]
+fn radix_layout_examples() {
+    assert_eq!(number_to_string_radix(255.0, 16).as_deref(), Some("ff"));
+    assert_eq!(number_to_string_radix(0.5, 2).as_deref(), Some("0.1"));
+    assert_eq!(number_to_string_radix(-255.0, 36).as_deref(), Some("-73"));
+    assert_eq!(number_to_string_radix(35.0, 36).as_deref(), Some("z"));
+    assert_eq!(number_to_string_radix(36.0, 36).as_deref(), Some("10"));
+    assert_eq!(number_to_string_radix(-0.25, 2).as_deref(), Some("-0.01"));
+    // 1.5 is 1.111… in radix 3, and 1.5 ± 3^-33 / 2 both lie within 2^-53 of it, as no point
+    // with 32 digits after it does (3^-32 / 2 > 2^-53 > 3^-33 / 2): of 1.(33 ones) and
+    // 1.(32 ones)2, equally close, s is even for the first (its digit sum, 34, is even; the
+    // radix is odd).
+    let ones = format!("1.{}", "1".repeat(33));
+    assert_eq!(number_to_string_radix(1.5, 3), Some(ones));
+    let big = number_to_string_radix(1e21, 36).unwrap();
+    assert_eq!(big.len(), 14, "{big}");
+    assert!(
+        big.chars()
+            .all(|c| c.is_ascii_digit() || c.is_ascii_lowercase()),
+        "{big}"
+    );
+    assert_eq!(number_to_string(1e21), "1e+21");
 }

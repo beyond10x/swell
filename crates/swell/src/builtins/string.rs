@@ -3,7 +3,12 @@
 //! (`#sec-string.prototype.constructor`) and `String.prototype.indexOf`
 //! (`#sec-string.prototype.indexof`) with StringIndexOf (`#sec-stringindexof`), and the
 //! builder of the Strings the builtins make at run time from other values. Written by
-//! `story:harness-builtins`; the other methods are slice 3.
+//! `story:harness-builtins`. Slice 2 takes `String.prototype.toString`
+//! (`#sec-string.prototype.tostring`) and `String.prototype.valueOf`
+//! (`#sec-string.prototype.valueof`) with ThisStringValue (`#sec-thisstringvalue`) early
+//! (`docs/design/engine.md`, section 12, "A part before its slice";
+//! `story:number-boolean-and-global-functions-early`): with them ToPrimitive of a String object
+//! finds its String. The other methods are slice 3, the ones that need Unicode tables slice 5.
 //!
 //! A String built at run time from other values is bounded by `string_length`
 //! (`docs/design/host-interface.md`, section 2): [`StringBuilder`] throws a `RangeError` before
@@ -14,6 +19,7 @@ use crate::builtins::object::argument;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host, Termination};
+use crate::object::ObjectKind;
 use crate::object::builtin_function::BuiltinId;
 use crate::realm::intrinsics::{Intrinsic, Making};
 use crate::value::{ObjectRef, StringRef, SymbolRef, Value};
@@ -25,6 +31,10 @@ pub(crate) enum StringBuiltin {
     Constructor,
     /// `String.prototype.indexOf ( searchString [ , position ] )` (22.1.3.9).
     IndexOf,
+    /// `String.prototype.toString ( )` (22.1.3.29).
+    ToString,
+    /// `String.prototype.valueOf ( )` (22.1.3.35).
+    ValueOf,
 }
 
 /// The code units of a String being built.
@@ -92,7 +102,8 @@ impl<H: Host> Agent<H> {
         self.new_string_value(&builder.units)
     }
 
-    /// `%String%` (22.1.1) with `String.prototype.constructor` and `indexOf`.
+    /// `%String%` (22.1.1) with `String.prototype.constructor`, `indexOf`, `toString` and
+    /// `valueOf`.
     pub(crate) fn create_string_constructor(
         &mut self,
         making: Making,
@@ -105,13 +116,19 @@ impl<H: Host> Agent<H> {
             BuiltinId::String(StringBuiltin::Constructor),
             string_prototype,
         )?;
-        self.define_builtin_method(
-            making,
-            string_prototype,
-            "indexOf",
-            1,
-            BuiltinId::String(StringBuiltin::IndexOf),
-        )?;
+        for (name, length, id) in [
+            ("indexOf", 1, StringBuiltin::IndexOf),
+            ("toString", 0, StringBuiltin::ToString),
+            ("valueOf", 0, StringBuiltin::ValueOf),
+        ] {
+            self.define_builtin_method(
+                making,
+                string_prototype,
+                name,
+                length,
+                BuiltinId::String(id),
+            )?;
+        }
         Ok(constructor)
     }
 
@@ -127,7 +144,36 @@ impl<H: Host> Agent<H> {
         match id {
             StringBuiltin::Constructor => self.string_constructor(args, new_target),
             StringBuiltin::IndexOf => self.string_index_of_method(this, args),
+            // `#sec-string.prototype.tostring`: 1. Return ? ThisStringValue(this value).
+            StringBuiltin::ToString => self
+                .this_string_value(this, "String.prototype.toString")
+                .map(Value::String),
+            // `#sec-string.prototype.valueof`: 1. Return ? ThisStringValue(this value).
+            StringBuiltin::ValueOf => self
+                .this_string_value(this, "String.prototype.valueOf")
+                .map(Value::String),
         }
+    }
+
+    /// ThisStringValue ( arg ) (`#sec-thisstringvalue`), for the method `method`.
+    fn this_string_value(&mut self, value: Value, method: &str) -> Completion<StringRef> {
+        match value {
+            // 1. If arg is a String, return arg.
+            Value::String(string) => return Ok(string),
+            // 2. If arg is an Object and arg has a [[StringData]] internal slot, then return
+            // arg.[[StringData]].
+            Value::Object(object) => {
+                if let ObjectKind::String(string) = &self.engine_object(object)?.kind {
+                    return Ok(string.data);
+                }
+            }
+            _ => {}
+        }
+        // 3. Throw a TypeError exception.
+        Err(self.throw_error(
+            ErrorKind::TypeError,
+            &format!("{method} requires that 'this' be a String"),
+        ))
     }
 
     /// `String ( value )` (`#sec-string-constructor-string-value`).
