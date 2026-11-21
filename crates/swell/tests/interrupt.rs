@@ -53,11 +53,12 @@ impl HostData for Stale {
 #[test]
 fn host_95_interrupt_on_a_faulted_agent_returns() {
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     let handle = agent.interrupt_handle();
 
     // Fault the agent: a host object whose trace lists a freed object.
     let freed = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             cx.new_host_object(HostObjectSpec {
                 prototype: None,
                 brand: Brand(1),
@@ -69,7 +70,7 @@ fn host_95_interrupt_on_a_faulted_agent_returns() {
         .unwrap();
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     let _root = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let holder = cx
                 .new_host_object(HostObjectSpec {
                     prototype: None,
@@ -95,9 +96,15 @@ fn host_95_interrupt_on_a_faulted_agent_returns() {
     assert!(handle.is_set());
 
     assert_eq!(agent.state(), AgentState::Faulted);
-    assert!(matches!(agent.with_cx(|_| ()), Err(HostError::Faulted)));
+    assert!(matches!(
+        agent.with_cx(&realm, |_| ()),
+        Err(HostError::Faulted)
+    ));
     assert!(matches!(agent.collect(), Err(HostError::Faulted)));
     assert_eq!(agent.heap_bytes(), Err(HostError::Faulted));
     handle.clear();
-    assert!(matches!(agent.with_cx(|_| ()), Err(HostError::Faulted)));
+    assert!(matches!(
+        agent.with_cx(&realm, |_| ()),
+        Err(HostError::Faulted)
+    ));
 }

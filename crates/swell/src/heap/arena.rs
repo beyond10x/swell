@@ -175,7 +175,7 @@ mod tests {
         Value,
     };
 
-    use crate::host::hooks::test_host::NoHooks;
+    use crate::host::hooks::test_host::{NoHooks, new_realm};
 
     fn agent() -> Agent<NoHooks> {
         let limits = Limits {
@@ -220,8 +220,9 @@ mod tests {
 
         // Inside an entry: the engine meets a stale handle of its own.
         let mut agent = agent();
+        let realm = new_realm(&mut agent);
         let (outcome, later_call, later_read) = agent
-            .with_cx(|cx| {
+            .with_cx(&realm, |cx| {
                 let object = cx
                     .new_host_object(HostObjectSpec {
                         prototype: None,
@@ -244,13 +245,19 @@ mod tests {
         assert_eq!(later_read, Err(HostError::Faulted));
 
         assert_eq!(agent.state(), AgentState::Faulted);
-        assert!(matches!(agent.with_cx(|_| ()), Err(HostError::Faulted)));
+        assert!(matches!(
+            agent.with_cx(&realm, |_| ()),
+            Err(HostError::Faulted)
+        ));
         assert!(matches!(agent.collect(), Err(HostError::Faulted)));
         assert_eq!(agent.heap_bytes(), Err(HostError::Faulted));
 
         // A root made before the fault cannot be duplicated after it.
         let mut other = self::agent();
-        let root = other.with_cx(|cx| cx.root(Value::Null).unwrap()).unwrap();
+        let other_realm = new_realm(&mut other);
+        let root = other
+            .with_cx(&other_realm, |cx| cx.root(Value::Null).unwrap())
+            .unwrap();
         assert!(matches!(agent.duplicate(&root), Err(HostError::Faulted)));
     }
 }

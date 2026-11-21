@@ -111,7 +111,7 @@ pub fn host_4_hook_cx_cannot_call_construct_or_evaluate_a_script() {}
 /// that runs the closure:
 ///
 /// ```compile_fail,E0499
-/// # use swell::{Agent, HookCx, Job, Limits, LoadRequest, ObjectRef, Seeds, Value};
+/// # use swell::{Agent, HookCx, Job, Limits, LoadRequest, ObjectRef, Outcome, Seeds, Value};
 /// # struct NoHooks;
 /// # impl swell::Host for NoHooks {
 /// #   fn host_enqueue_generic_job(_: &mut HookCx<'_, Self>, _: Job) {}
@@ -121,11 +121,12 @@ pub fn host_4_hook_cx_cannot_call_construct_or_evaluate_a_script() {}
 /// #   fn host_system_utc_epoch_nanoseconds(_: &mut HookCx<'_, Self>, _: ObjectRef) -> i128 { 0 }
 /// # }
 /// # let limits = Limits { steps_per_entry: 1, memory_bytes: 1 << 20, frame_depth: 1,
-/// #     reentry_depth: 1, parser_nesting: 1, string_length: 1, bigint_bits: 1 };
+/// #     reentry_depth: 1, parser_nesting: 1, string_length: 1 << 10, bigint_bits: 1 };
 /// # let seeds = Seeds { hash_key: [0; 16], random_seed: [0; 32] };
 /// let mut agent = Agent::new(NoHooks, limits, seeds).unwrap();
-/// let root = agent.with_cx(|cx| cx.root(Value::Null).unwrap()).unwrap();
-/// let _ = agent.with_cx(|cx| {
+/// let Ok(Outcome::Normal(realm)) = agent.create_realm(None, None) else { panic!() };
+/// let root = agent.with_cx(&realm, |cx| cx.root(Value::Null).unwrap()).unwrap();
+/// let _ = agent.with_cx(&realm, |cx| {
 ///     let _ = agent.duplicate(&root);
 /// });
 /// ```
@@ -133,7 +134,7 @@ pub fn host_4_hook_cx_cannot_call_construct_or_evaluate_a_script() {}
 /// and the same call through the context compiles:
 ///
 /// ```
-/// # use swell::{Agent, HookCx, Job, Limits, LoadRequest, ObjectRef, Seeds, Value};
+/// # use swell::{Agent, HookCx, Job, Limits, LoadRequest, ObjectRef, Outcome, Seeds, Value};
 /// # struct NoHooks;
 /// # impl swell::Host for NoHooks {
 /// #   fn host_enqueue_generic_job(_: &mut HookCx<'_, Self>, _: Job) {}
@@ -143,11 +144,12 @@ pub fn host_4_hook_cx_cannot_call_construct_or_evaluate_a_script() {}
 /// #   fn host_system_utc_epoch_nanoseconds(_: &mut HookCx<'_, Self>, _: ObjectRef) -> i128 { 0 }
 /// # }
 /// # let limits = Limits { steps_per_entry: 1, memory_bytes: 1 << 20, frame_depth: 1,
-/// #     reentry_depth: 1, parser_nesting: 1, string_length: 1, bigint_bits: 1 };
+/// #     reentry_depth: 1, parser_nesting: 1, string_length: 1 << 10, bigint_bits: 1 };
 /// # let seeds = Seeds { hash_key: [0; 16], random_seed: [0; 32] };
 /// let mut agent = Agent::new(NoHooks, limits, seeds).unwrap();
-/// let root = agent.with_cx(|cx| cx.root(Value::Null).unwrap()).unwrap();
-/// let _ = agent.with_cx(|cx| {
+/// let Ok(Outcome::Normal(realm)) = agent.create_realm(None, None) else { panic!() };
+/// let root = agent.with_cx(&realm, |cx| cx.root(Value::Null).unwrap()).unwrap();
+/// let _ = agent.with_cx(&realm, |cx| {
 ///     let _ = cx.duplicate(&root);
 /// });
 /// ```

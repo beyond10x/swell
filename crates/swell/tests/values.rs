@@ -10,8 +10,9 @@ use swell::HostError;
 #[test]
 fn host_32_to_utf16_keeps_lone_surrogates() {
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     let units = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let s = cx.new_string_utf16(&[0xD800, 0x61]).unwrap();
             cx.to_utf16(s).unwrap()
         })
@@ -20,7 +21,7 @@ fn host_32_to_utf16_keeps_lone_surrogates() {
 
     // A trailing lone surrogate and a lone low surrogate as well, and the Latin-1 form.
     let units = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let a = cx.new_string_utf16(&[0x61, 0xDC00, 0x62, 0xD800]).unwrap();
             let b = cx.new_string_utf16(&[0x61, 0xFF]).unwrap();
             (cx.to_utf16(a).unwrap(), cx.to_utf16(b).unwrap())
@@ -34,8 +35,9 @@ fn host_32_to_utf16_keeps_lone_surrogates() {
 #[test]
 fn host_33_lossy_string_replaces_lone_surrogates() {
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     let text = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let s = cx
                 .new_string_utf16(&[0xD800, 0x61, 0xD83D, 0xDE00])
                 .unwrap();
@@ -45,7 +47,7 @@ fn host_33_lossy_string_replaces_lone_surrogates() {
     assert_eq!(text, "\u{FFFD}a\u{1F600}");
 
     let text = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let s = cx.new_string_utf16(&[0xDE00, 0xD83D, 0xFF]).unwrap();
             cx.to_rust_string_lossy(s).unwrap()
         })
@@ -57,6 +59,7 @@ fn host_33_lossy_string_replaces_lone_surrogates() {
 #[test]
 fn host_34_new_string_is_utf16_of_the_str() {
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     for text in [
         "",
         "abc",
@@ -66,7 +69,7 @@ fn host_34_new_string_is_utf16_of_the_str() {
         "\u{FFFF}\u{10FFFF}",
     ] {
         let (units, lossy) = agent
-            .with_cx(|cx| {
+            .with_cx(&realm, |cx| {
                 let s = cx.new_string(text).unwrap();
                 (cx.to_utf16(s).unwrap(), cx.to_rust_string_lossy(s).unwrap())
             })
@@ -81,15 +84,19 @@ fn host_34_new_string_is_utf16_of_the_str() {
 #[test]
 fn a_string_of_another_agent_or_a_freed_one_is_refused() {
     let mut a = support::host::agent().unwrap();
+    let realm_a = support::host::realm(&mut a);
     let mut b = support::host::agent().unwrap();
-    let s = a.with_cx(|cx| cx.new_string("x").unwrap()).unwrap();
+    let realm_b = support::host::realm(&mut b);
+    let s = a
+        .with_cx(&realm_a, |cx| cx.new_string("x").unwrap())
+        .unwrap();
     assert_eq!(
-        b.with_cx(|cx| cx.to_utf16(s)).unwrap(),
+        b.with_cx(&realm_b, |cx| cx.to_utf16(s)).unwrap(),
         Err(HostError::ForeignHandle)
     );
     assert!(matches!(a.collect(), Ok(swell::Outcome::Normal(_))));
     assert_eq!(
-        a.with_cx(|cx| cx.to_utf16(s)).unwrap(),
+        a.with_cx(&realm_a, |cx| cx.to_utf16(s)).unwrap(),
         Err(HostError::StaleHandle)
     );
 }

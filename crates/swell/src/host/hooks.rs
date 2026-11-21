@@ -417,8 +417,25 @@ pub(crate) mod test_host {
     /// An agent with `limits` and a realm made with no setup closure.
     pub(crate) fn agent_with_realm_and(limits: Limits) -> (Agent<NoHooks>, Realm) {
         let mut agent = agent_with(limits);
+        let realm = new_realm(&mut agent);
+        (agent, realm)
+    }
+
+    /// Make `realm` the realm of the entry, as `with_cx` of it does, for a unit test that runs
+    /// engine operations on the agent directly (decision 7: every operation runs in an entry
+    /// that names its realm).
+    pub(crate) fn enter(agent: &mut Agent<NoHooks>, realm: &Realm) {
+        match agent.heap.roots.get_realm(&realm.0) {
+            Ok(handle) => agent.entry_realm = Some(handle),
+            Err(error) => panic!("the realm answered {error:?}"),
+        }
+    }
+
+    /// A realm of `agent` made with no setup closure: what `with_cx`, `Agent::call` and
+    /// `Agent::construct` name as the current realm (decision 7).
+    pub(crate) fn new_realm(agent: &mut Agent<NoHooks>) -> Realm {
         match agent.create_realm(None, None) {
-            Ok(Outcome::Normal(realm)) => (agent, realm),
+            Ok(Outcome::Normal(realm)) => realm,
             other => panic!("create_realm answered {other:?}"),
         }
     }

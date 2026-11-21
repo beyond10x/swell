@@ -70,8 +70,9 @@ fn spec(brand: Brand, data: Option<Box<dyn HostData>>) -> HostObjectSpec {
 #[test]
 fn host_108_host_data_checks_brand_and_type() {
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let node = cx
                 .new_host_object(spec(NODE, Some(Box::new(Node { id: 7 }))))
                 .unwrap()
@@ -99,15 +100,16 @@ fn host_108_host_data_checks_brand_and_type() {
 
     // A handle of another agent is refused, not read.
     let mut other = support::host::agent().unwrap();
+    let other_realm = support::host::realm(&mut other);
     let node = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             cx.new_host_object(spec(NODE, Some(Box::new(Node { id: 1 }))))
                 .unwrap()
                 .unwrap()
         })
         .unwrap();
     other
-        .with_cx(|cx| {
+        .with_cx(&other_realm, |cx| {
             assert_eq!(cx.brand(node), Err(HostError::ForeignHandle));
             assert!(matches!(
                 cx.host_data::<Node>(node, NODE),
@@ -122,8 +124,9 @@ fn host_108_host_data_checks_brand_and_type() {
 #[test]
 fn host_109_trace_keeps_listed_values() {
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     let (_root, listed, unlisted) = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let listed = cx.new_host_object(spec(NODE, None)).unwrap().unwrap();
             let unlisted = cx.new_host_object(spec(NODE, None)).unwrap().unwrap();
             let holder = cx
@@ -143,7 +146,7 @@ fn host_109_trace_keeps_listed_values() {
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
 
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             assert_eq!(cx.brand(listed), Ok(Some(NODE)));
             assert_eq!(cx.brand(unlisted), Err(HostError::StaleHandle));
         })
@@ -156,17 +159,20 @@ fn host_109_trace_keeps_listed_values() {
 #[test]
 fn host_110_trace_of_a_stale_handle_faults_collect() {
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     let freed = agent
-        .with_cx(|cx| cx.new_host_object(spec(NODE, None)).unwrap().unwrap())
+        .with_cx(&realm, |cx| {
+            cx.new_host_object(spec(NODE, None)).unwrap().unwrap()
+        })
         .unwrap();
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert_eq!(
-        agent.with_cx(|cx| cx.brand(freed)).unwrap(),
+        agent.with_cx(&realm, |cx| cx.brand(freed)).unwrap(),
         Err(HostError::StaleHandle)
     );
 
     let _root = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let holder = cx
                 .new_host_object(spec(
                     OTHER,
@@ -187,7 +193,10 @@ fn host_110_trace_of_a_stale_handle_faults_collect() {
     ));
     assert_eq!(agent.state(), AgentState::Faulted);
     assert!(matches!(agent.collect(), Err(HostError::Faulted)));
-    assert!(matches!(agent.with_cx(|_| ()), Err(HostError::Faulted)));
+    assert!(matches!(
+        agent.with_cx(&realm, |_| ()),
+        Err(HostError::Faulted)
+    ));
     assert_eq!(agent.heap_bytes(), Err(HostError::Faulted));
 }
 
@@ -197,8 +206,9 @@ fn host_110_trace_of_a_stale_handle_faults_collect() {
 fn host_111_host_data_is_dropped_with_its_object() {
     let drops = Rc::new(Cell::new(0));
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     let root = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let kept = cx
                 .new_host_object(spec(
                     NODE,
@@ -248,8 +258,9 @@ fn host_111_host_data_is_dropped_with_its_object() {
 #[test]
 fn a_prototype_is_kept_by_its_object() {
     let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
     let (_root, prototype) = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let prototype = cx.new_host_object(spec(OTHER, None)).unwrap().unwrap();
             let object = cx
                 .new_host_object(HostObjectSpec {
@@ -264,7 +275,7 @@ fn a_prototype_is_kept_by_its_object() {
         .unwrap();
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert_eq!(
-        agent.with_cx(|cx| cx.brand(prototype)).unwrap(),
+        agent.with_cx(&realm, |cx| cx.brand(prototype)).unwrap(),
         Ok(Some(OTHER))
     );
 }

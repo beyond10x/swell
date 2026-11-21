@@ -398,23 +398,22 @@ impl<H: Host> Agent<H> {
         data: OrdinaryData,
     ) -> Completion<ObjectRef> {
         let prototype = self.get_prototype_from_constructor(constructor, default)?;
-        self.ordinary_object_create(prototype, data)
+        self.ordinary_object_create(Some(prototype), data)
     }
 
-    /// GetPrototypeFromConstructor (`#sec-getprototypefromconstructor`); `None` when the
-    /// prototype is not an object and the agent has no realm to take the default from.
+    /// GetPrototypeFromConstructor (`#sec-getprototypefromconstructor`).
     pub(crate) fn get_prototype_from_constructor(
         &mut self,
         constructor: ObjectRef,
         default: Intrinsic,
-    ) -> Completion<Option<ObjectRef>> {
+    ) -> Completion<ObjectRef> {
         let key = self.name_key("prototype")?;
         match self.get(constructor, key)? {
-            Value::Object(prototype) => Ok(Some(prototype)),
-            _ => match self.get_function_realm(constructor)? {
-                Some(realm) => self.intrinsic(realm, default).map(Some),
-                None => Ok(None),
-            },
+            Value::Object(prototype) => Ok(prototype),
+            _ => {
+                let realm = self.get_function_realm(constructor)?;
+                self.intrinsic(realm, default)
+            }
         }
     }
 
@@ -427,7 +426,7 @@ impl<H: Host> Agent<H> {
 
 #[cfg(test)]
 mod tests {
-    use crate::host::hooks::test_host::agent_with_realm;
+    use crate::host::hooks::test_host::{agent_with_realm, enter};
     use crate::object::ordinary::OrdinaryData;
     use crate::object::property::{Descriptor, Key};
     use crate::value::Value;
@@ -437,7 +436,8 @@ mod tests {
     /// numeric String that is not an array index (`"4294967295"`, `"-1"`) is a String key.
     #[test]
     fn own_property_keys_order() {
-        let (mut agent, _realm) = agent_with_realm();
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
         let object = agent
             .ordinary_object_create(None, OrdinaryData::Plain)
             .unwrap();
@@ -481,7 +481,8 @@ mod tests {
     /// non-configurable cases is `tests/objects.rs`.
     #[test]
     fn define_on_a_non_extensible_object_fails() {
-        let (mut agent, _realm) = agent_with_realm();
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
         let object = agent
             .ordinary_object_create(None, OrdinaryData::Plain)
             .unwrap();
@@ -514,6 +515,7 @@ mod tests {
     #[test]
     fn set_prototype_of_refuses_cycles_and_the_immutable_prototype() {
         let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
         let a = agent
             .ordinary_object_create(None, OrdinaryData::Plain)
             .unwrap();

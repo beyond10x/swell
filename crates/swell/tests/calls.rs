@@ -36,7 +36,7 @@ fn host_15_reentry_depth_bounds_cx_call() {
         let realm = realm(&mut agent);
         let global = global(&mut agent, &realm);
         let (thrown, is_range_error) = agent
-            .with_cx(|cx| {
+            .with_cx(&realm, |cx| {
                 let realm = cx.realm_ref(&realm).unwrap();
                 let f = cx
                     .new_host_function(realm, "recurse", 0, recurse, false, None)
@@ -70,7 +70,7 @@ fn host_47_call_and_construct_of_the_wrong_kind_throw_type_error() {
     let realm = realm(&mut agent);
     let global_root = global(&mut agent, &realm);
     let (number, undefined, ordinary, function) = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm = cx.realm_ref(&realm).unwrap();
             let f = cx
                 .new_host_function(realm, "plain", 0, plain, false, None)
@@ -88,24 +88,26 @@ fn host_47_call_and_construct_of_the_wrong_kind_throw_type_error() {
 
     let mut throws = Vec::new();
     for callee in [&number, &ordinary] {
-        match agent.call(callee, &undefined, &[]).unwrap() {
+        match agent.call(&realm, callee, &undefined, &[]).unwrap() {
             Outcome::Throw(root) => throws.push(root),
             other => panic!("call answered {other:?}"),
         }
     }
     for callee in [&number, &ordinary, &function] {
-        match agent.construct(callee, &[], None).unwrap() {
+        match agent.construct(&realm, callee, &[], None).unwrap() {
             Outcome::Throw(root) => throws.push(root),
             other => panic!("construct answered {other:?}"),
         }
     }
     // The function itself is callable.
     assert!(matches!(
-        agent.call(&function, &undefined, &[&number]).unwrap(),
+        agent
+            .call(&realm, &function, &undefined, &[&number])
+            .unwrap(),
         Outcome::Normal(_)
     ));
     let all_type_errors = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let global = object(cx, &global_root);
             throws.iter().all(|root| {
                 let value = cx.get(root).unwrap();
@@ -133,7 +135,7 @@ fn host_106_host_function_name_and_length() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm = cx.realm_ref(&realm).unwrap();
             let f = cx
                 .new_host_function(realm, "print", 1, plain, false, None)
@@ -240,7 +242,7 @@ fn a_host_function_receives_this_arguments_and_new_target() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
     let (called, constructed, f) = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm = cx.realm_ref(&realm).unwrap();
             let f = cx
                 .new_host_function(realm, "F", 2, record_call, true, None)
@@ -293,8 +295,9 @@ fn answer(_cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> 
 #[test]
 fn a_host_function_returning_a_stale_or_foreign_handle_faults_the_agent() {
     let mut other = agent().unwrap();
+    let other_realm = realm(&mut other);
     let foreign = other
-        .with_cx(|cx| cx.new_string("foreign").unwrap())
+        .with_cx(&other_realm, |cx| cx.new_string("foreign").unwrap())
         .unwrap();
 
     let returns: [fn(Value) -> Completion<Value>; 2] = [Ok, |v| Err(Abrupt::Throw(v))];
@@ -303,7 +306,7 @@ fn a_host_function_returning_a_stale_or_foreign_handle_faults_the_agent() {
             let mut agent = agent().unwrap();
             let realm = realm(&mut agent);
             let stale = agent
-                .with_cx(|cx| {
+                .with_cx(&realm, |cx| {
                     cx.new_host_object(HostObjectSpec {
                         prototype: None,
                         brand: Brand(1),
@@ -320,7 +323,7 @@ fn a_host_function_returning_a_stale_or_foreign_handle_faults_the_agent() {
                 Value::String(foreign)
             };
             let (outcome, later) = agent
-                .with_cx(|cx| {
+                .with_cx(&realm, |cx| {
                     let realm = cx.realm_ref(&realm).unwrap();
                     let f = cx
                         .new_host_function(realm, "answer", 0, answer, false, None)
@@ -338,7 +341,10 @@ fn a_host_function_returning_a_stale_or_foreign_handle_faults_the_agent() {
             );
             assert_eq!(later, Err(Abrupt::Terminated(Termination::EngineFault)));
             assert_eq!(agent.state(), AgentState::Faulted);
-            assert!(matches!(agent.with_cx(|_| ()), Err(HostError::Faulted)));
+            assert!(matches!(
+                agent.with_cx(&realm, |_| ()),
+                Err(HostError::Faulted)
+            ));
             assert!(matches!(agent.collect(), Err(HostError::Faulted)));
         }
     }
@@ -353,10 +359,12 @@ fn cx_methods_check_their_handles_before_the_sticky_termination() {
     let mut other = agent().unwrap();
     let other_realm = realm(&mut other);
     let foreign = other
-        .with_cx(|cx| cx.to_object(Value::Boolean(true)).unwrap().unwrap())
+        .with_cx(&other_realm, |cx| {
+            cx.to_object(Value::Boolean(true)).unwrap().unwrap()
+        })
         .unwrap();
     let foreign_realm = other
-        .with_cx(|cx| cx.realm_ref(&other_realm).unwrap())
+        .with_cx(&other_realm, |cx| cx.realm_ref(&other_realm).unwrap())
         .unwrap();
 
     let mut limits = limits();
@@ -364,12 +372,14 @@ fn cx_methods_check_their_handles_before_the_sticky_termination() {
     let mut agent = agent_with(limits).unwrap();
     let realm = realm(&mut agent);
     let stale = agent
-        .with_cx(|cx| cx.to_object(Value::Boolean(true)).unwrap().unwrap())
+        .with_cx(&realm, |cx| {
+            cx.to_object(Value::Boolean(true)).unwrap().unwrap()
+        })
         .unwrap();
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
 
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm = cx.realm_ref(&realm).unwrap();
             let live = cx.to_object(Value::Boolean(true)).unwrap().unwrap();
             let f = cx
@@ -461,7 +471,7 @@ fn a_call_spends_the_step_budget_of_the_outermost_entry() {
         let mut agent = agent_with(limits).unwrap();
         let realm = realm(&mut agent);
         let outcome = agent
-            .with_cx(|cx| {
+            .with_cx(&realm, |cx| {
                 let realm = cx.realm_ref(&realm).unwrap();
                 let f = cx
                     .new_host_function(realm, "spin", 0, spin, false, None)
@@ -502,7 +512,7 @@ fn an_interrupt_ends_the_run_at_the_next_check() {
 
     handle.interrupt();
     let outcome = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm = cx.realm_ref(&realm).unwrap();
             let f = cx
                 .new_host_function(realm, "interrupt_self", 0, interrupt_self, false, None)
@@ -517,7 +527,7 @@ fn an_interrupt_ends_the_run_at_the_next_check() {
 
     INTERRUPT.with(|slot| slot.set(Some(handle.clone())));
     let outcome = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm = cx.realm_ref(&realm).unwrap();
             let f = cx
                 .new_host_function(realm, "interrupt_self", 0, interrupt_self, false, None)
@@ -542,7 +552,7 @@ fn agent_call_reads_and_answers_roots() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
     let (f, this, one) = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm = cx.realm_ref(&realm).unwrap();
             let f = cx
                 .new_host_function(realm, "F", 2, record_call, true, None)
@@ -555,18 +565,18 @@ fn agent_call_reads_and_answers_roots() {
             )
         })
         .unwrap();
-    let Outcome::Normal(result) = agent.call(&f, &this, &[&one, &one]).unwrap() else {
+    let Outcome::Normal(result) = agent.call(&realm, &f, &this, &[&one, &one]).unwrap() else {
         panic!("call did not answer Normal");
     };
     assert_eq!(
-        agent.with_cx(|cx| cx.get(&result)).unwrap(),
+        agent.with_cx(&realm, |cx| cx.get(&result)).unwrap(),
         Ok(Value::Number(2.0))
     );
-    let Outcome::Normal(made) = agent.construct(&f, &[&one], Some(&f)).unwrap() else {
+    let Outcome::Normal(made) = agent.construct(&realm, &f, &[&one], Some(&f)).unwrap() else {
         panic!("construct did not answer Normal");
     };
     let brand = agent
-        .with_cx(|cx| match cx.get(&made).unwrap() {
+        .with_cx(&realm, |cx| match cx.get(&made).unwrap() {
             Value::Object(object) => cx.brand(object),
             other => panic!("{other:?}"),
         })
@@ -574,14 +584,65 @@ fn agent_call_reads_and_answers_roots() {
     assert_eq!(brand, Ok(Some(Brand(3))));
 
     let mut other = support::host::agent().unwrap();
-    let foreign = other.with_cx(|cx| cx.root(Value::Null).unwrap()).unwrap();
+    let other_realm = support::host::realm(&mut other);
+    let foreign = other
+        .with_cx(&other_realm, |cx| cx.root(Value::Null).unwrap())
+        .unwrap();
     assert!(matches!(
-        agent.call(&f, &foreign, &[]),
+        agent.call(&realm, &f, &foreign, &[]),
         Err(HostError::ForeignHandle)
     ));
     assert!(matches!(
-        agent.construct(&f, &[&foreign], None),
+        agent.construct(&realm, &f, &[&foreign], None),
         Err(HostError::ForeignHandle)
     ));
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// Decision 7: `with_cx`, `Agent::call` and `Agent::construct` check the `Realm` they are given
+/// first, before every other argument, and a realm of another agent answers
+/// `Err(ForeignHandle)` with nothing run, nothing changed and the agent `Alive`.
+#[test]
+fn entries_check_their_realm_first() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let (f, null) = agent
+        .with_cx(&realm, |cx| {
+            let realm = cx.realm_ref(&realm).unwrap();
+            let f = cx
+                .new_host_function(realm, "F", 0, record_call, true, None)
+                .unwrap()
+                .unwrap();
+            (
+                cx.root(Value::Object(f)).unwrap(),
+                cx.root(Value::Null).unwrap(),
+            )
+        })
+        .unwrap();
+    let mut other = support::host::agent().unwrap();
+    let other_realm = support::host::realm(&mut other);
+    let before = agent.heap_bytes().unwrap();
+
+    let mut ran = false;
+    assert!(matches!(
+        agent.with_cx(&other_realm, |_| ran = true),
+        Err(HostError::ForeignHandle)
+    ));
+    assert!(!ran);
+    assert!(matches!(
+        agent.call(&other_realm, &f, &null, &[]),
+        Err(HostError::ForeignHandle)
+    ));
+    // A `null` new target alone answers `WrongKind`; the realm is checked before it.
+    assert!(matches!(
+        agent.construct(&realm, &f, &[], Some(&null)),
+        Err(HostError::WrongKind { .. })
+    ));
+    assert!(matches!(
+        agent.construct(&other_realm, &f, &[], Some(&null)),
+        Err(HostError::ForeignHandle)
+    ));
+    assert!(agent.host().calls.is_empty());
+    assert_eq!(agent.heap_bytes().unwrap(), before);
     assert_eq!(agent.state(), AgentState::Alive);
 }

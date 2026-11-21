@@ -99,7 +99,7 @@ mod tests {
     use crate::object::{ObjectKind, ObjectRecord};
     use crate::{Agent, Brand, HostData, Limits, Seeds, Tracer, Value};
 
-    use crate::host::hooks::test_host::NoHooks;
+    use crate::host::hooks::test_host::{NoHooks, new_realm};
 
     struct Data;
 
@@ -132,8 +132,9 @@ mod tests {
         let record = ObjectRecord::new(None, ObjectKind::Ordinary(Ordinary::for_test()));
         let object = agent.heap.new_object(record, 0).unwrap();
         let _root = agent.heap.roots.add(Value::Object(object));
+        let realm = new_realm(&mut agent);
         agent
-            .with_cx(|cx| {
+            .with_cx(&realm, |cx| {
                 assert_eq!(cx.brand(object), Ok(None));
                 assert!(cx.host_data::<Data>(object, Brand(0)).unwrap().is_none());
                 assert!(

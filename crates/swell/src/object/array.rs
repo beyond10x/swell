@@ -47,10 +47,10 @@ impl<H: Host> Agent<H> {
             return Err(self.throw_error(ErrorKind::RangeError, "Invalid array length"));
         }
         let prototype = match prototype {
-            Some(prototype) => Some(prototype),
+            Some(prototype) => prototype,
             None => self.current_intrinsic(Intrinsic::ArrayPrototype)?,
         };
-        let array = self.allocate_object(prototype, ObjectKind::Array(Array {}))?;
+        let array = self.allocate_object(Some(prototype), ObjectKind::Array(Array {}))?;
         let key = self.name_key("length")?;
         self.add_property(
             array,
@@ -170,7 +170,7 @@ impl<H: Host> Agent<H> {
 
 #[cfg(test)]
 mod tests {
-    use crate::host::hooks::test_host::agent_with_realm;
+    use crate::host::hooks::test_host::{agent_with_realm, enter};
     use crate::host::outcome::Abrupt;
     use crate::object::property::{Descriptor, Key};
     use crate::value::Value;
@@ -182,7 +182,8 @@ mod tests {
     /// uint32 throws a RangeError.
     #[test]
     fn array_length_truncates_and_refuses_non_writable() {
-        let (mut agent, _realm) = agent_with_realm();
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
         let array = agent.array_create(0.0, None).unwrap();
         let length = agent.name_key("length").unwrap();
         for index in 0..5 {

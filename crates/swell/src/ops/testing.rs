@@ -196,7 +196,7 @@ impl<H: Host> Agent<H> {
 
 #[cfg(test)]
 mod tests {
-    use crate::host::hooks::test_host::agent_with_realm;
+    use crate::host::hooks::test_host::{agent_with_realm, enter};
     use crate::value::Value;
 
     /// SameValue, SameValueZero and IsStrictlyEqual differ on NaN and the signed zeros
@@ -204,7 +204,8 @@ mod tests {
     /// same code units are the same value; IsArray is true for an Array only.
     #[test]
     fn same_value_family_and_is_array() {
-        let (mut agent, _realm) = agent_with_realm();
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
         let (nan, zero, minus) = (
             Value::Number(f64::NAN),
             Value::Number(0.0),

@@ -64,9 +64,9 @@ fn eight(_cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
 #[test]
 fn string_exotic_indices_are_read_only() {
     let mut agent = agent().unwrap();
-    let _realm = realm(&mut agent);
+    let realm = realm(&mut agent);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let s = string(cx, "abc");
             let o = cx.to_object(s).unwrap().unwrap();
             let b = get(cx, o, "1");
@@ -182,7 +182,7 @@ fn define_own_property_validates_every_case_of_10_1_6_3() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm = cx.realm_ref(&realm).unwrap();
             let g = cx
                 .new_host_function(realm, "g", 0, seven, false, None)
@@ -553,7 +553,7 @@ fn string_data_and_property_values_survive_collect() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
     let (wrapper, holder) = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm = cx.realm_ref(&realm).unwrap();
             let units: Vec<u16> = "kept \u{2603} string".encode_utf16().collect();
             let s = cx.new_string_utf16(&units).unwrap();
@@ -589,7 +589,7 @@ fn string_data_and_property_values_survive_collect() {
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
 
     let (read, value, accessor) = agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let wrapper = support::host::object(cx, &wrapper);
             let holder = support::host::object(cx, &holder);
             let Value::Number(length) = get(cx, wrapper, "length") else {

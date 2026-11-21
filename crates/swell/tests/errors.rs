@@ -59,7 +59,7 @@ fn error_constructors_set_message_and_cause() {
     let realm = realm(&mut agent);
     let global_root = global(&mut agent, &realm);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let global = object(cx, &global_root);
             for name in ERRORS {
                 let constructor = get(cx, global, name);
@@ -149,7 +149,7 @@ fn native_errors_inherit_from_error() {
     let realm = realm(&mut agent);
     let global_root = global(&mut agent, &realm);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let global = object(cx, &global_root);
             let error = get_object(cx, global, "Error");
             let error_prototype = get_object(cx, error, "prototype");
@@ -211,7 +211,7 @@ fn error_prototype_to_string() {
     let realm = realm(&mut agent);
     let global_root = global(&mut agent, &realm);
     agent
-        .with_cx(|cx| {
+        .with_cx(&realm, |cx| {
             let realm_ref = cx.realm_ref(&realm).unwrap();
             let global = object(cx, &global_root);
             let error = get_object(cx, global, "Error");

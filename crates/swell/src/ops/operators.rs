@@ -196,15 +196,25 @@ impl<H: Host> Agent<H> {
 mod tests {
     use super::{BinaryOperator, number_bitwise_not, number_operation, number_unary_minus};
     use crate::host::agent::Agent;
-    use crate::host::hooks::test_host::{NoHooks, agent_with_realm, agent_with_realm_and, limits};
+    use crate::host::hooks::test_host::{
+        NoHooks, agent_with_realm, agent_with_realm_and, enter, limits,
+    };
     use crate::host::outcome::{Abrupt, Completion};
     use crate::host::{Cx, ErrorKind, HostCall};
     use crate::object::ordinary::OrdinaryData;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
 
+    /// `value`, held by a root for the rest of the test, so that a collection at a safe point
+    /// (the feature `collect-every-safe-point`) keeps it.
+    fn held(agent: &mut Agent<NoHooks>, value: Value) -> Value {
+        std::mem::forget(agent.heap.roots.add(value));
+        value
+    }
+
     fn string(agent: &mut Agent<NoHooks>, text: &str) -> Value {
-        Value::String(agent.new_string_str(text).unwrap())
+        let string = Value::String(agent.new_string_str(text).unwrap());
+        held(agent, string)
     }
 
     fn text(agent: &mut Agent<NoHooks>, value: Value) -> String {
@@ -233,6 +243,7 @@ mod tests {
         agent
             .create_data_property(object, key, Value::Object(value_of))
             .unwrap();
+        held(agent, Value::Object(object));
         object
     }
 
@@ -240,6 +251,7 @@ mod tests {
     #[test]
     fn loose_equality_table() {
         let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
         let seven = Value::Object(object_of_seven(&mut agent, &realm));
         let other = Value::Object(object_of_seven(&mut agent, &realm));
         let one = string(&mut agent, "1");
@@ -288,6 +300,7 @@ mod tests {
     #[test]
     fn addition_and_relational() {
         let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
         let seven = Value::Object(object_of_seven(&mut agent, &realm));
         let a = string(&mut agent, "a");
         let two = string(&mut agent, "2");
@@ -390,6 +403,7 @@ mod tests {
         let mut limits = limits();
         limits.string_length = 4;
         let (mut agent, realm) = agent_with_realm_and(limits);
+        enter(&mut agent, &realm);
         let realm = agent.heap.roots.get_realm(&realm.0).unwrap();
         let ab = string(&mut agent, "ab");
         let cd = string(&mut agent, "cd");

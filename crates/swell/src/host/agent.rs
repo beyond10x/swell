@@ -83,8 +83,9 @@ pub struct Agent<H: Host> {
     pub(crate) steps: u64,
     /// The bytes of property maps freed by the last sweep, to credit (`object/mod.rs`).
     pub(crate) credit: Rc<Cell<u64>>,
-    /// The realms made, most recent last, held weakly: the current realm while no code runs.
-    pub(crate) realm_list: Vec<Handle>,
+    /// The realm the running entry names (decision 7), the current realm while no builtin runs
+    /// (`realm/mod.rs`); `None` between entries.
+    pub(crate) entry_realm: Option<Handle>,
     /// The well-known symbols, held weakly (`realm/mod.rs`).
     pub(crate) symbols: Option<WellKnown>,
 }
@@ -107,7 +108,7 @@ impl<H: Host> Agent<H> {
             kept: Vec::new(),
             steps: 0,
             credit: Rc::new(Cell::new(0)),
-            realm_list: Vec::new(),
+            entry_realm: None,
             symbols: None,
         })
     }
@@ -211,31 +212,38 @@ impl<H: Host> Agent<H> {
 
     /// Call (`#sec-call`) of the function `function` holds, with the `this` value and arguments
     /// the roots hold, as an outermost entry (decision 14). A value that is not callable answers
-    /// `Throw` of a `TypeError` (HOST-47). A safe point.
+    /// `Throw` of a `TypeError` (HOST-47). `realm` is the current realm of the call (decision
+    /// 7) and is checked first: a stale or released one answers `Err(StaleHandle)`, one of
+    /// another agent `Err(ForeignHandle)`. A safe point.
     pub fn call(
         &mut self,
+        realm: &Realm,
         function: &Root,
         this: &Root,
         args: &[&Root],
     ) -> Result<Outcome<Root>, HostError> {
         self.alive()?;
+        let realm = self.live_realm(realm)?;
         let function = self.heap.roots.get(function)?;
         let this = self.heap.roots.get(this)?;
         let args = self.root_values(args)?;
-        Ok(self.outermost_entry(|agent| agent.call_value(function, this, &args)))
+        Ok(self.outermost_entry(realm, |agent| agent.call_value(function, this, &args)))
     }
 
     /// Construct (`#sec-construct`) of the constructor `function` holds, `new_target` being
     /// `function` when `None`, as an outermost entry. A value that is not a constructor answers
     /// `Throw` of a `TypeError` (HOST-47); a `new_target` that is not a constructor answers
-    /// `Err(WrongKind)`. A safe point.
+    /// `Err(WrongKind)`. `realm` is the current realm of the call and is checked first, as for
+    /// [`Agent::call`]. A safe point.
     pub fn construct(
         &mut self,
+        realm: &Realm,
         function: &Root,
         args: &[&Root],
         new_target: Option<&Root>,
     ) -> Result<Outcome<Root>, HostError> {
         self.alive()?;
+        let realm = self.live_realm(realm)?;
         let function = self.heap.roots.get(function)?;
         let args = self.root_values(args)?;
         let new_target = match new_target {
@@ -245,7 +253,9 @@ impl<H: Host> Agent<H> {
             }
             None => None,
         };
-        Ok(self.outermost_entry(|agent| agent.construct_checked(function, &args, new_target)))
+        Ok(self.outermost_entry(realm, |agent| {
+            agent.construct_checked(function, &args, new_target)
+        }))
     }
 
     /// The values of `roots`.
@@ -298,16 +308,20 @@ impl<H: Host> Agent<H> {
         Err(self.throw_error(ErrorKind::TypeError, "the value is not a constructor"))
     }
 
-    /// An outermost entry from `Agent` (decision 2): a safe point, a fresh run, and its
-    /// completion as roots.
-    fn outermost_entry(&mut self, f: impl FnOnce(&mut Self) -> Completion<Value>) -> Outcome<Root> {
+    /// An outermost entry from `Agent` (decision 2) whose current realm is `realm` (decision 7):
+    /// a safe point, a fresh run, and its completion as roots.
+    fn outermost_entry(
+        &mut self,
+        realm: Handle,
+        f: impl FnOnce(&mut Self) -> Completion<Value>,
+    ) -> Outcome<Root> {
         self.termination = None;
         if self.safe_point().is_err() {
             self.fault();
             return Outcome::Terminated(Termination::EngineFault);
         }
         let start = self.scope.len();
-        let completion = self.begin().and_then(|()| f(self));
+        let completion = self.in_entry_realm(realm, |agent| agent.begin().and_then(|()| f(agent)));
         self.scope.truncate(start);
         let outcome = match completion {
             Ok(value) => Outcome::Normal(self.heap.roots.add(value)),
