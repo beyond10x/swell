@@ -502,8 +502,9 @@ impl<H: Host> Agent<H> {
                 next: 0,
             }
         } else {
-            // SerializeJSONObject, 6. Let K be ? EnumerableOwnProperties(value, key).
-            let keys = self.json_enumerable_own_keys(object)?;
+            // SerializeJSONObject, 6. Let K be ? EnumerableOwnProperties(value, key)
+            // (`ops/objects.rs`): each key kept until the frame's mark is released.
+            let keys = self.enumerable_own_keys(object)?;
             Members::Object {
                 keys: Some(keys),
                 next: 0,
@@ -538,34 +539,6 @@ impl<H: Host> Agent<H> {
             charged,
         });
         Ok(())
-    }
-
-    /// EnumerableOwnProperties (`#sec-enumerableownproperties`) of kind key: the String keys
-    /// of `object` whose own property is enumerable, each kept. A step per key.
-    fn json_enumerable_own_keys(&mut self, object: ObjectRef) -> Completion<Vec<Key>> {
-        // 1. Let ownKeys be ? obj.[[OwnPropertyKeys]]().
-        let own_keys = self.own_property_keys(object)?;
-        let mut keys = Vec::new();
-        if keys.try_reserve(own_keys.len()).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        // 3. For each element key of ownKeys that is a String.
-        for key in own_keys {
-            self.charge_steps(1)?;
-            if matches!(key, Key::Symbol(_)) {
-                continue;
-            }
-            // 3.a.i, ii. Let desc be ? obj.[[GetOwnProperty]](key); keep the key if it is
-            // enumerable.
-            if self
-                .get_own_property(object, key)?
-                .is_some_and(|property| property.enumerable)
-            {
-                self.keep_key(key);
-                keys.push(key);
-            }
-        }
-        Ok(keys)
     }
 
     /// The members of the open frames, the innermost first, until none is open: a step per
