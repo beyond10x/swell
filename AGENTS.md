@@ -364,6 +364,14 @@ session coordinates; this section is its procedure, taken from how surf is run
   and accept all the drafts for the ECMA engine." So the coordinator moves a draft epic or
   story to `proposed` and `active` itself, once the plan-critic panel's findings on it are
   resolved and its scope is recorded. The panel and the measured acceptance numbers stay.
+- **Planning never holds code back.** On 2026-11-21 no code reached `main` for two hours while
+  the thirteen stories of slice 3 went through two rounds of the panel and three revisions,
+  one after the other; the operator: "You really should get things moving now", "you're not
+  implementing anything". So: a story's unit starts as soon as no blocker finding is open on
+  that story, with the remaining corrections in its brief, while the rest of the set is still
+  revised; a design author starts when the decomposition names the change it needs, not after
+  the panel; and review, design and a gate repair run side by side, not in a row. A unit that
+  starts before its story is on `main` reads the story from a file in its scratch directory.
 - **Quota is shared with surf's session.** Prefer fewer, longer units to many short ones, and
   keep every unit resumable (a brief file, a worktree, a report form): a sub-agent cut off by a
   rate limit is resumed with its context on the same model, never restarted.
