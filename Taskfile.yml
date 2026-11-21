@@ -19,6 +19,10 @@ includes:
     taskfile: taskfiles/unicode-tables.yml
     flatten: true
     optional: true
+  fault-injection:
+    taskfile: taskfiles/fault-injection.yml
+    flatten: true
+    optional: true
   collect-mode:
     taskfile: taskfiles/collect-mode.yml
     flatten: true
@@ -50,6 +54,7 @@ tasks:
       - task: clippy
       - task: test
       - task: test-collect
+      - task: test-faults
       - task: test262
       - task: gate-selftest
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:host-interface-hardening
 kind: story
-status: active
+status: implemented
 title: Fuzzing, misuse, fault injection and determinism across the slice 1 host interface
 summary: A seeded fuzz test of every entry point, stale, foreign and faulted answers everywhere, fault injection, determinism in one and two processes, the limit tests that need builtins and scripts; 13 HOST lines, four after their split.
 relations:
@@ -22,10 +22,11 @@ scope:
   path: crates/swell/src/host/limits.rs
 - confidence: cited
   path: crates/swell/tests
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T12:20:35Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

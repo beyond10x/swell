@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:test262-run-path
 kind: story
-status: active
+status: implemented
 title: 'swell-test262 runs cases: 31 cases and 62 runs of slice 1 pass, 51 cases move to later slices'
 summary: The run path of decision 11 with $262, print, budgets, the twenty most expensive runs and workers; the 51 move lines and new counts in the design; three limit omissions; expected.txt from the run.
 relations:
@@ -27,10 +27,11 @@ scope:
   path: docs/design/engine.md
 - confidence: cited
   path: taskfiles/test262.yml
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T12:20:36Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

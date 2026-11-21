@@ -35,13 +35,19 @@ language; it is a small part of the standard, and the limits below say how small
 - No ambient authority: the engine reads no file, clock, random source or environment
   variable. What a script may observe of the outside comes through the host's hooks, and two
   runs with the same seeds and the same hook answers are the same.
+- Misuse of the interface has an answer: a stale, released or foreign handle gets
+  `Err(StaleHandle)` or `Err(ForeignHandle)`, and a broken invariant of the engine ends the
+  run with `Terminated(EngineFault)` and leaves the agent faulted. A seeded generator of call
+  sequences holds this in the gate.
 - The builtins that the test262 harness files call: members of `Object`, `Function.prototype`,
   `Array`, `String`, `Math` and `JSON` (`JSON.stringify` among them), the Error constructors,
   and bound functions.
 - The supporting crates: `swell-syntax` (lexer and parser), `swell-compiler` (bytecode),
   `swell-num` (number parsing and printing, the keyed hash) and `swell-unicode`.
-- The conformance runner `swell-test262` and the gate, `task check`, which pins test262 by
-  commit and checksum and holds the counts below.
+- The conformance runner `swell-test262`: it runs every test262 case that is not excluded, as
+  written and in strict mode, each run in a fresh agent and realm under a step and a memory
+  budget, with `print` and `$262` from its host.
+- The gate, `task check`, which pins test262 by commit and checksum and holds the counts below.
 
 ### Limits of this release
 
@@ -51,17 +57,24 @@ language; it is a small part of the standard, and the limits below say how small
   the rest). The global `Function` and most methods of the builtins are missing.
   [`docs/design/engine.md`](docs/design/engine.md), section 12, lists the nineteen delivery
   slices and what each brings.
-- test262: the gate of this commit counts no case as passed. Its line reads
-  `test262 total 53801 8982 7 44812 0 44812 0`: 53,801 cases exist, 8,982 are excluded by
-  recorded decision (`Temporal`, `Intl` and proposals at stage 3), 7 do not apply, and the
-  runner of this commit counts the other 44,812 without running them. Running them is the next
-  change on `main`.
-- The host interface: 55 of its 161 numbered requirements
+- test262: 3,969 of the 44,812 cases the gate runs pass, 8.9 %. Its line reads
+  `test262 total 53801 8982 7 44812 3969 40843 0`: 53,801 cases exist, 8,982 are excluded by
+  recorded decision (`Temporal`, `Intl` and proposals at stage 3), 7 do not apply, 44,812
+  run, 3,969 pass, 40,843 fail, none ends at a budget. The first delivery slice, the test262
+  harness itself, passes its 31 cases in all 62 runs (`test262-slice 01 31 62 0 0 31 31 0 0`).
+- What that number says: a construct the parser does not have yet is refused, and a refusal
+  never counts as the `SyntaxError` a negative case asks for. 53,564 of the 85,556 runs end at
+  such a refusal (`test262-refused 53564`). A case outside the first slice passes when it
+  needs only the ES5 grammar and the builtins above; 269 negative cases pass on a generic
+  syntax error, and 129 passing cases hold no assertion and pass by not throwing.
+- The host interface: 70 of its 161 numbered requirements
   ([`docs/design/host-interface.md`](docs/design/host-interface.md)) are held by a test in
-  this commit (`host-requirements: 161 requirement(s), 161 line(s): 55 test, 106 pending`).
-  The interface will change before 1.0.
-- The engine's own tests: `48 test suites: 230 passed, 0 failed`, and `test-collect: 25 test
-  suites: 173 passed, 0 failed` in the mode that collects garbage at every safe point.
+  this commit (`host-requirements: 161 requirement(s), 161 line(s): 70 test, 91 pending`);
+  none is pending for the first slice. The interface will change before 1.0.
+- The engine's own tests: `55 test suites: 268 passed, 0 failed, 1 ignored`, the same tests of
+  the engine crate in the mode that collects garbage at every safe point (`test-collect: 31
+  test suites: 194 passed, 0 failed, 1 ignored`), and the test of an injected engine fault
+  (`test-faults: 1 test suites: 1 passed, 0 failed, 0 ignored`).
 - No binary, no command line, and the crates are not on a package registry. To use the
   library, depend on the repository at the tag:
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.

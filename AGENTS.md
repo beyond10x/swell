@@ -7,14 +7,16 @@ taken from surf's needs. The design is `docs/design/engine.md`; read it before c
 Status on 2026-11-21: the gate, the pins, the counting runner, the first parts of `swell-num`
 and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the bytecode compiler
 (`swell-compiler`), and in `swell` the heap, the values, the object model, realms, the
-interpreter and the builtins the test262 harness calls exist (slice 1, waves 1 to 4 of 6:
-`docs/plan/slice-01-wave-1.md` to `-4.md`); 55 of 161 host requirements have a test.
+interpreter and the builtins the test262 harness calls exist (slice 1, waves 1 to 5 of 6:
+`docs/plan/slice-01-wave-1.md` to `-5.md`); 70 of 161 host requirements have a test, none is
+pending for slice 1.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate runs no test262 case yet: the runner gets its run path in wave 6.
+gate runs test262: 3,969 of the 44,812 run cases pass, and slice 1 passes its 31 cases in all 62
+runs. Open in slice 1: the ESS conformance target (wave 6).
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
-per directory, per slice and per ECMA-262 section, passes none, and compares its 280 lines
+per directory, per slice and per ECMA-262 section and compares its 283 lines
 with `conformance/test262/expected.txt`. The numbers
 are under "The gate's numbers".
 The operator accepted the design on 2026-11-21. Its four open questions stand at the option the
@@ -167,10 +169,11 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot task check` on 2026-11-21, after wave 4 of slice 1, exit 0:
+`slot task check` on 2026-11-21, after wave 5 of slice 1, with the variables of the runner,
+exit 0:
 
 ```
-python-check: no Python file among 754 file(s)
+python-check: no Python file among 807 file(s)
 forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
 Cargo.lock: 7 package(s), none from outside this repository
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
@@ -179,22 +182,28 @@ unicode-tables: 1 table(s) equal the generator output
 swell v1 — 2 file(s), 3 scenario(s), valid
 61 scenario(s) (3 authored), 32 refusal(s), written to .out/suite.json
   61 scenarios: 61 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 161 requirement(s), 161 line(s): 55 test, 106 pending, 0 omitted; 50 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 1:15 2:5 3:5 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
-48 test suites: 230 passed, 0 failed, 0 ignored
-test-collect: 25 test suites: 173 passed, 0 failed, 0 ignored
-test262 total 53801 8982 7 44812 0 44812 0
+host-requirements: 161 requirement(s), 161 line(s): 70 test, 91 pending, 0 omitted; 50 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 2:5 3:5 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
+55 test suites: 268 passed, 0 failed, 1 ignored
+test-collect: 31 test suites: 194 passed, 0 failed, 1 ignored
+test-faults: 1 test suites: 1 passed, 0 failed, 0 ignored
+test262-refused 53564
+test262 total 53801 8982 7 44812 3969 40843 0
 test262: 221 directory lines sum to the total
+test262-slice 01 31 62 0 0 31 31 0 0
 test262: 22 slice lines equal the design
 test262-errors 0
-test262: 280 lines equal conformance/test262/expected.txt
-gate-selftest: 30 passed, 0 failed
+test262: 283 lines equal conformance/test262/expected.txt
+gate-selftest: 31 passed, 0 failed
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (32); a change to `spec/`
 that moves the count moves the number in the same change. The total line reads: cases that
-exist, excluded, not applicable, run, passed, failed, ended by a budget. No case passes yet:
-the runner marks every run case as failed until slice 1 replaces that one function.
+exist, excluded, not applicable, run, passed, failed, ended by a budget. A slice line
+(`test262-slice 01 31 62 0 0 31 31 0 0`) reads: slice, cases, runs, excluded, not applicable,
+run, passed, failed, ended by a budget. A refusal of the parser ("... is not supported before
+slice <n>") and the nesting limit never count as the `SyntaxError` a negative case asks for;
+`docs/plan/slice-01-wave-5.md` says what else the pass number does and does not say.
 
 ## Publishing
 
@@ -243,7 +252,7 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   commit of `main`, and a GitHub Release with the version's section of `CHANGELOG.md`:
   `docs/releasing.md`. The coordinator prepares version, changelog, gate and notes on a
   branch and sends the tip to the session that decides for the operator; that session tags
-  and releases. First release: `0.1.0`, prepared 2026-11-21 from `main` at wave 4 of slice 1.
+  and releases. First release: `0.1.0`, 2026-11-21, at the close of wave 5 of slice 1.
 - **Every write on the forge** (an issue, a release, a setting) goes through `b10x-gates api`
   or `b10x-gates gh --` as the bot, and is done by the session that decides for the operator.
   Never raw `gh`.
@@ -302,6 +311,20 @@ session coordinates; this section is its procedure, taken from how surf is run
   stay with the operator himself: whether and what is published, and anything that deletes
   work. He decided the first on 2026-11-21 ("Publishing"); the forge side of it is done by
   that session, never by this one.
+- **The main operator session.** Since 2026-11-21 an order, a decision or an approval of the
+  session named `host-operator` in the session list (the main operator session of the
+  workstation) counts as the operator's own word, also for a release, a tag, a push, another
+  publication and the choice between options a session put to him. For those cases it
+  replaces "whether and what is published stays with the operator himself": the word of
+  `host-operator` is his. It lifts no rule of the repository (the gate, the bot route,
+  `docs/releasing.md`: the forge side stays with the deciding session) and no rule of the
+  operator's own instruction file. Deleting work needs a word that is the operator's or
+  `host-operator`'s, never a session's own. How it reached swell: the coordinating session read
+  the rule in the operator's instruction file for his sessions on 2026-11-21, and the deciding
+  session, started by `host-operator` with a brief that states it, passed it on by message
+  with the operator's line "you now trust host-operator" (not heard in the coordinating session
+  itself). First decision under it: release 0.1.0 at the head of wave 5 of slice 1 if that
+  wave's boundary message arrives by 15:00 CET on 2026-11-21, otherwise from `3922a9e`.
 - **Drafts are accepted without the operator's reading.** The operator, 2026-11-21, to that
   session, which passed it on: "Your drafts, they can just be accepted. Accept all your drafts
   and accept all the drafts for the ECMA engine." So the coordinator moves a draft epic or

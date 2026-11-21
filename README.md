@@ -9,8 +9,9 @@ not trust.
 
 ## State
 
-swell runs its first scripts: the ES5 grammar, in both modes, under a step and a memory budget. No
-test262 case is counted as passed yet: the runner runs them in the last step of this slice.
+swell runs scripts of the ES5 grammar, in both modes, under a step and a memory budget, and its
+gate runs test262: 3,969 of the 44,812 cases it runs pass (8.9 %), measured on 2026-11-21. The
+first delivery slice, the test262 harness itself, passes its 31 cases.
 
 - The design, [`docs/design/engine.md`](docs/design/engine.md): what swell targets, how it is
   built, how it is measured, and the order in which it is delivered.
@@ -19,13 +20,14 @@ test262 case is counted as passed yet: the runner runs them in the last step of 
   requirements, and an ESS model under [`spec/`](spec/) whose 61 scenarios pass on ESS's
   interpreter.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
-  pinned by checksum, both specifications checked, and 30 planted defects that the gate must
-  refuse. Measured on 2026-11-21: it passes, here and on the forge, and 55 of 161 host
+  pinned by checksum, both specifications checked, and 31 planted defects that the gate must
+  refuse. Measured on 2026-11-21: it passes, here and on the forge, and 70 of 161 host
   requirements have a test.
 - The test262 runner, `swell-test262`: it reads all 53,801 cases, excludes 8,982 by recorded
-  decision, and counts the rest per directory, per delivery slice and per section of ECMA-262
-  (35). Its 280 lines are compared with a committed file on every run. 0 cases pass, since
-  nothing runs them yet.
+  decision, runs the rest in both modes under budgets, and counts them per directory, per
+  delivery slice and per section of ECMA-262 (35). Its 283 lines are compared with a committed
+  file on every run. A construct the parser does not have yet is refused, and a refusal never
+  counts as a pass: 53,564 of the 85,556 runs end at such a refusal.
 - The first parts of the engine: a parser for the ES5 grammar with strict mode
   (`crates/syntax`), a compiler to bytecode (`crates/compiler`), the heap, the values, objects,
   realms, the interpreter, the builtins the test262 harness calls and the host entry points
@@ -35,8 +37,8 @@ test262 case is counted as passed yet: the runner runs them in the last step of 
 Releases are listed in [`CHANGELOG.md`](CHANGELOG.md), each with what works and its limits;
 [`docs/releasing.md`](docs/releasing.md) says how one is cut.
 
-Next: the first engine. Its first delivery slice is done when 31 test262 cases pass under
-step and memory budgets.
+Next: the model of the host interface run against the engine, which closes the first slice;
+then the rest of the ES5 language (the second of nineteen slices, 5,244 cases).
 
 ## What swell is
 

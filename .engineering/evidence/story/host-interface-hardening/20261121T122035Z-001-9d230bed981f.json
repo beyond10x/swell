@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T12:20:35Z",
+  "actor": "human:operator",
+  "artifact": "story:host-interface-hardening",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "the unit's claim run again by the coordinator in the unit's tree before its commit: tests, tasks and clippy on the workspace, exit 0 each (docs/plan/slice-01-wave-5.md)"
+  }
+}

@@ -57,18 +57,19 @@ today).
 | 2 | `syntax-es5-and-strict`, `heap-values-and-host-surface` | the ES5 grammar with strict mode; 17 requirements |
 | 3 | `bytecode-compiler`, `object-model-and-realms` | 10 requirements (`HOST-161` added in wave 3) |
 | 4 | `interpreter-and-script-entry-points`, `harness-builtins` | 28 requirements; a script runs |
-| 5 | `host-interface-hardening` | 15 requirements (`HOST-160` added in wave 2); none pending for slice 1 |
-| 6 | `test262-run-path`, `ess-conformance-target` | the 31 cases pass; 13 of the model's 61 scenarios pass on the engine |
+| 5 | `host-interface-hardening`, `test262-run-path` (planned in wave 6, moved here) | 15 requirements (`HOST-160` added in wave 2); none pending for slice 1; the 31 cases pass |
+| 6 | `ess-conformance-target` | 13 of the model's 61 scenarios pass on the engine |
 
 The first wave of slice 1 runs beside wave 3 of the foundation: the two stories write
 different files. `Cargo.lock` in a wave of several units: each unit regenerates it in its own
 tree, and the coordinator regenerates it on the wave branch after the merges.
 
-Delivered: [wave 1](slice-01-wave-1.md), [wave 2](slice-01-wave-2.md), [wave 3](slice-01-wave-3.md), [wave 4](slice-01-wave-4.md). After wave 4: 55 of 161
-host requirements have a test, 15 are pending for slice 1, and a script runs.
+Delivered: [wave 1](slice-01-wave-1.md), [wave 2](slice-01-wave-2.md), [wave 3](slice-01-wave-3.md), [wave 4](slice-01-wave-4.md), [wave 5](slice-01-wave-5.md). After wave 5: 70 of 161
+host requirements have a test, none is pending for slice 1, and the gate counts 3,969 test262
+cases as passed, the 31 of slice 1 among them.
 
 What works after which wave: after wave 4 the engine evaluates a script through
-`evaluate_script` under step and memory budgets; after wave 6 `slot task check` prints the 31
+`evaluate_script` under step and memory budgets; after wave 5 `slot task check` prints the 31
 cases of slice 1 as passed. The other slice epics are drafts and are decomposed when their turn
 comes; slice 2 starts with the measurement of how many cases per slice include
 `propertyHelper.js`.
@@ -100,6 +101,12 @@ that slice reads its entries first.
 - The gate, any wave: `host-requirements-check` builds every test of the workspace before the
   `build` step, and each older planted script of the task builds the list again.
 - Slice 3: `Error.isError` (not written with the Error constructors of slice 1, wave 3).
+- Slice 3: a way for a host function to create a realm. The runner's `$262.createRealm` makes
+  its realms before the case runs and runs the case again when they do not suffice
+  (`crates/test262/src/host.rs`, [slice 1, wave 5](slice-01-wave-5.md)); the cross-realm cases
+  of the builtins start in slice 3. A design change before the code.
+- Slice 2, at its decomposition: the 23 `propertyhelper-*` cases of `test/harness` move from
+  slice 3 to slice 2 with the global `Function` (`AGENTS.md`, "How the work is run").
 - Slice 4: the operator `**` (the parser refuses it today; it needs the deterministic `pow`).
 - Slice 5: say in the design whether a regular expression pattern is parsed inside the
   parser's recursion (its levels then add to the script's for the stack bound) or after it.
