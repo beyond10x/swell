@@ -30,16 +30,24 @@ pub struct Limits {
 /// The Rust stack, in bytes, one re-entry into the interpreter may take: the frames from a
 /// builtin's or a host function's call into a function, or from an instruction's call of a
 /// getter, through [[Call]] and the run loop to the next such call (`interp/mod.rs`). Measured
-/// on x86_64 in the test build without incremental compilation and without a compiler cache, as
-/// the forge's gate builds, with the script of `min_stack_bytes_is_enough` (`tests/budgets.rs`):
-/// the smallest thread stack it ends on is 25,512,840 bytes at `reentry_depth` 1,000 and
-/// 5,212,717 at 200, 25,375 bytes per re-entry; this is that plus a fifth, for the frames of
-/// another compiler version.
-const STACK_BYTES_PER_REENTRY: usize = 30 * 1024;
+/// on x86_64 at `4c921d3` as the forge's gate builds its tests (rustc 1.99.1, debug with full
+/// debug information, without incremental compilation and without a compiler cache), by
+/// bisection of the smallest thread stack in a child process, over every path of the stack
+/// tests (`tests/budgets.rs`, `tests/limits_scripts.rs`). The largest need is through `toJSON`
+/// and through a replacer of `JSON.stringify`: 31,506,432 bytes at `reentry_depth` 1,000 and
+/// 6,455,296 at 200, 31,314 bytes per re-entry (a host function 27,710, a getter 24,018,
+/// `Function.prototype.call` 27,664, a `map` callback 29,021). This is that plus a fifth, for
+/// the frames of another compiler version. The frame of the run loop (`Agent::execute`, 19,216
+/// bytes of it) grows with every instruction: `DefineMethod` added 944 bytes per re-entry and
+/// the dispatch of `Number`, `Boolean` and the global functions 144 bytes per builtin re-entry,
+/// which took the need past the 30 KiB this was before.
+const STACK_BYTES_PER_REENTRY: usize = 37 * 1024;
 
 /// The Rust stack, in bytes, an agent takes besides its re-entries and its parser: the host's
 /// entry point and the outermost run loop, and the thread's own start. The measurement above
-/// leaves nothing for it (the parser's stated need covers it with room), so it is a margin.
+/// puts all of it, with the parse at 1,000 levels at the deepest re-entry, at 169,518 bytes or
+/// less on every path, within the parser's stated need of 256,768 bytes at 1,000 levels, so this
+/// is a margin.
 const STACK_BYTES_FIXED: usize = 64 * 1024;
 
 impl Limits {

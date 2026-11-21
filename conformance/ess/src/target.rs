@@ -74,7 +74,7 @@ use swell_syntax::{MessageKind, message_kind};
 use crate::values::{self, Input};
 
 /// The stack, in bytes, of the thread every scenario runs on: 64 MiB. The limits of every
-/// `CreateAgent` of the suite (1,000 parser levels, 256 re-entries) need 8,217,344 bytes by
+/// `CreateAgent` of the suite (1,000 parser levels, 256 re-entries) need 10,059,520 bytes by
 /// `Limits::min_stack_bytes()`.
 pub const STACK_BYTES: usize = 64 * 1024 * 1024;
 
@@ -837,14 +837,27 @@ mod tests {
         answer.outcome == "created" && answer.error.is_none() && answer.events.len() == 1
     }
 
+    /// The limits a `CreateAgent` input of the suite gives are read as exactly these limits, and
+    /// the stack they need by `Limits::min_stack_bytes()` fits [`STACK_BYTES`]. The need is the
+    /// engine's own answer, not a number held here, so a measured change of its constants does
+    /// not break this test; a need beyond the thread does.
     #[test]
     fn the_suites_limits_fit_the_targets_stack() {
         let fields = create_agent_input(limits());
         let mut input = Input::new("swell.host.CreateAgent", &fields);
-        let limits = input.limits("limits").map_err(|error| error.to_string());
-        let needed = limits.map(|limits| limits.min_stack_bytes());
-        assert_eq!(needed, Ok(8_217_344));
-        assert!(needed.is_ok_and(|needed| needed <= STACK_BYTES));
+        let read = input.limits("limits").map_err(|error| error.to_string());
+        let suite = swell::Limits {
+            steps_per_entry: 1_000_000,
+            memory_bytes: 67_108_864,
+            frame_depth: 10_000,
+            reentry_depth: 256,
+            parser_nesting: 1_000,
+            string_length: 1_073_741_824,
+            bigint_bits: 1_048_576,
+        };
+        assert_eq!(read, Ok(suite));
+        let needed = suite.min_stack_bytes();
+        assert!(needed <= STACK_BYTES, "{needed} > {STACK_BYTES}");
     }
 
     #[test]
