@@ -1035,7 +1035,8 @@ to that slice (`engine.md` section 12, "A part before its slice": the message
 `<construct> is not supported before slice <n>`, which `swell_syntax::message_kind` reads as a
 refusal). It raises one while parsing, through
 `parse_script`, `parse_module`, `eval` or `Function`, and while running: a regular expression
-literal evaluated before slice 5. Through `eval`, `Function` or a literal a script can catch
+literal evaluated before slice 5, and a `String` method given a code unit outside ASCII before
+slice 5 (below). Through `eval`, `Function` or a literal a script can catch
 that error, and a host that measures conformance cannot then tell a refusal from a
 `SyntaxError` of the language. So the agent counts every refusal it raises, whatever entry or
 instruction raised it and whether or not the script catches it, and `refusals()` reads the
@@ -1046,6 +1047,24 @@ delivered the engine refuses no construct, and the count stays 0 for every sourc
 conformance runner fails every run in which the count moved (`engine.md` decision 11).
 Rejected: a mark on the error object a script could read or remove; counting parses only (a
 caught refusal of a regular expression literal would be missed).
+
+**A refusal raised by a builtin method.** Added on 2026-11-21 for slice 3. Before slice 5 the
+four case methods of `String.prototype` (`toLowerCase`, `toUpperCase`, `toLocaleLowerCase`,
+`toLocaleUpperCase`) and `localeCompare` refuse a String with a code unit of 0x80 or above
+(`engine.md` section 12, "A part before its slice", the third form). That refusal is raised
+while running and is counted like a refused parse. The script sees a `SyntaxError` object
+whose prototype is `%SyntaxError.prototype%` of the method's realm (the current realm while a
+built-in function runs, `ecma262:sec-built-in-function-objects-call-thisargument-argumentslist`)
+and whose `message` is exactly `case mapping outside ASCII is not supported before slice 5`
+(the four case methods) or `comparison outside ASCII is not supported before slice 5`
+(`localeCompare`), with no position after it, since nothing was parsed;
+`swell_syntax::message_kind` reads either as a refusal of slice 5. Each such throw moves
+`refusals()` by 1, and a script that catches the error does not undo the count, as for a
+refused parse through `eval` or `Function`. An error that RequireObjectCoercible or ToString
+throws before the method reaches its refusal is not a refusal and is not counted. Once slice 5
+is delivered the five methods refuse no input, and the count stays 0 for every input of them.
+HOST-164 names the refusals of a parse and of a regular expression literal only; HOST-165
+holds these.
 
 **HOST-97** (ecma262:sec-cyclic-module-records) `module_status` reads `New` after `parse_module`, `Unlinked` after the graph's last load finished, `Linked` after `link`, and `Evaluated` or `EvaluatingAsync` after `evaluate_module`, for a graph of three modules. [slice 11]
 
@@ -1060,6 +1079,8 @@ caught refusal of a regular expression literal would be missed).
 **HOST-102** (swell:D13) A read changes no value `last_entry_steps()` and `heap_bytes()` report, and calls no hook. [slice 1]
 
 **HOST-164** (swell:D13) `refusals()` reads 0 on a new agent; with `r` a source the engine refuses (its error's `message` read by `swell_syntax::message_kind` as a refusal), it reads 1 more after `parse_script` of `r`, 1 more after the script `try { eval(r); } catch (e) {}` answers `Normal`, and 1 more after the script `try { Function(r); } catch (e) {}` answers `Normal`, and while a regular expression literal is refused, 1 more after the script `try { /a/; } catch (e) {}` answers `Normal`; it reads the same after `parse_script` of a grammar error and of `0` inside 2,000 nested parentheses with `parser_nesting` 1,000; it is read, as a `u64`, after the agent faulted; and once the engine refuses no construct, it reads 0 after each of those scripts. [slice 2]
+
+**HOST-165** (swell:D13) Before slice 5, on a new agent, the script `try { "é".toLowerCase(); false } catch (e) { e instanceof SyntaxError && e.message === "case mapping outside ASCII is not supported before slice 5" }` answers `Normal(true)` and `refusals()` then reads 1; the same script with `toUpperCase`, `toLocaleLowerCase` and `toLocaleUpperCase` each answers `Normal(true)` and moves the count by 1 more; `try { "a".localeCompare("é"); false } catch (e) { e instanceof SyntaxError && e.message === "comparison outside ASCII is not supported before slice 5" }` and the same with `"é".localeCompare("a")` each answer `Normal(true)` and move it by 1 more; `"AbC".toLowerCase() === "abc" && "AbC".toUpperCase() === "ABC" && "a".localeCompare("b") < 0` answers `Normal(true)`, and `try { String.prototype.toLowerCase.call({ toString: function () { throw 1; } }); } catch (e) { e === 1 }` answers `Normal(true)`, each with the count unchanged; and once slice 5 is delivered, each of these method calls leaves the count unchanged. [slice 3]
 
 ## 14. `call`, `construct`, host functions, re-entrancy
 

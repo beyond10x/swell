@@ -246,6 +246,13 @@ a case with an excluded feature.
 - `swell-unicode-gen`: a tool that writes `swell-unicode`'s tables from the vendored Unicode
   data. Depends on nothing; never ships.
 
+Seven of the nine exist (corrected on 2026-11-21: the root `Cargo.toml` takes every directory
+under `crates/` as a member, and the root `Cargo.lock` lists seven packages): the five library
+crates `swell-unicode`, `swell-num`, `swell-syntax`, `swell-compiler` and `swell`, and the two
+binary crates `swell-test262` and `swell-unicode-gen`. `swell-regexp` and `swell-cli` are not
+created yet: a crate is created in the first slice that needs any part of it (section 12, "A
+part before its slice"), which for `swell-regexp` is slice 5.
+
 Why: each crate below `swell` holds no heap value and can be tested and fuzzed alone (the parser
 on source text, the matcher on a pattern and a string, the number code on bit patterns), and the
 dependency graph has no cycle. The builtins stay inside `swell` because every one of them reads
@@ -415,6 +422,28 @@ instead of an abort. Over the budget: `new ArrayBuffer` and the typed array cons
 `RangeError`, as `CreateByteDataBlock` allows; any other allocation ends the run with
 `Terminated(MemoryBudget)`.
 
+**Source text.** Added on 2026-11-21 for slice 3. The source text of a script, of eval code
+and of a dynamic function stays alive as long as a function made from it, and is charged to
+the memory budget with the compiled code. The text is the code units the parse read: the
+source given to ParseScript, the String PerformEval parsed, and for CreateDynamicFunction the
+whole text of its last parse, `function anonymous(` P `\n) {\n` body `\n}`
+(`sec-createdynamicfunction`). It is kept with the compiled code made from it, which lives
+while the host holds the script, while that code runs, and while a function object made from
+it is reachable (its [[ScriptOrModule]], "Collector" above). The charge is taken with the
+compiled code's, when the parse and compile step that made the code ends, at least one byte
+per code unit in either stored form of decision 5; the sweep that frees the compiled code
+credits it back with the code, never earlier. A text that does not fit what is left of the
+budget ends the run with `Terminated(MemoryBudget)`, as any other allocation. The text is kept
+whatever HostHasSourceTextAvailable answers: `Function.prototype.toString` of an ECMAScript
+function returns the part of it its [[SourceText]] covers ("Return
+CodePointsToString(func.[[SourceText]])", `sec-function.prototype.tostring`) when the host's
+hook answers true, and a String with the syntax of a NativeFunction when it answers false
+(`HOST-120`, `sec-hosthassourcetextavailable`), as for a built-in or a bound function. What a
+test reads: `heap_bytes()` after `parse_script` of a source of n code units is at least n more
+than before it; it stays at least n more while a function made from that script is reachable,
+also after the host released the script; and `collect()` after the host released the script
+and no function made from it is reachable gives at least n bytes back.
+
 **Cost.** The arenas cost a bounds check and a generation compare on every access, and plain maps
 cost a search per property access where shapes would cost an offset. How much slower this is than
 an engine with unsafe code is not measured; no number is given.
@@ -540,8 +569,9 @@ generator is build tooling and never ships; the tables it writes do.
 **Settled in `docs/design/host-interface.md` (2026-11-21), which holds wherever it and this
 section differ.** This section is the first description; the first ESS model of it came back
 with nine places where it is unclear or silent, and that document answers them from the text of
-ECMA-262 and HTML, as 19 decisions and 135 numbered requirements (`HOST-<n>`). The ten places
-where it departs from this document:
+ECMA-262 and HTML, as 19 decisions and numbered requirements (`HOST-<n>`): 165 on 2026-11-21,
+the count `task host-requirements-check` prints (corrected that day from 135, the count when
+the document was written). The eleven places where it departs from this document:
 
 1. Each entry point has a result type of its own instead of one `Outcome`; misuse answers
    `Err(HostError)`, never a panic.
@@ -697,8 +727,9 @@ first.
   `negative` case asks for: the runner reads the kind of the error from its message
   (`swell_syntax::message_kind`), and a run that a refusal or the nesting limit ends, in a
   harness file or in the case, fails whatever the case's `negative` says (decided in wave 5 of
-  slice 1). A refusal the script catches (through `eval`, `Function`, `$262.evalScript`, or a
-  regular expression literal evaluated before slice 5) does not end the run, so the runner also
+  slice 1). A refusal the script catches (through `eval`, `Function`, `$262.evalScript`, a
+  regular expression literal evaluated before slice 5, or a `String` method given a code unit
+  outside ASCII before slice 5, section 12) does not end the run, so the runner also
   reads the agent's count of refusals (`Agent::refusals`, `host-interface.md` decision 13)
   after each run, every run having an agent of its own, and fails every run in which the count
   moved, whatever the case's `negative` and outcome say.
@@ -937,10 +968,32 @@ from `swell-unicode`. The rule:
   the input with a defined outcome instead of guessing: before slice 5, an identifier character
   outside ASCII is a `SyntaxError`, a regular expression
   literal is lexed to its end and evaluating it throws a `SyntaxError`, and the `String` methods
-  that need Unicode tables (`normalize`, case mapping outside ASCII) are slice 5's, with their
-  cases moved there by rule lines when slice 3 measures them. White space is not among these
-  gaps: `story:syntax-es5-and-strict` accepts every `Zs` code point in slice 1 with the table of
-  `story:num-and-unicode-early-parts`.
+  that need the Unicode tables of slice 5 answer what they can and refuse the rest, as follows
+  (decided on 2026-11-21 for slice 3). The four case methods `toLowerCase`, `toUpperCase`,
+  `toLocaleLowerCase` and `toLocaleUpperCase` (`sec-string.prototype.tolowercase`,
+  `sec-string.prototype.touppercase`, `sec-string.prototype.tolocalelowercase`,
+  `sec-string.prototype.tolocaleuppercase`) and `localeCompare`
+  (`sec-string.prototype.localecompare`) exist in slice 3 for a String whose code units are all
+  below 0x80, and refuse any other String until slice 5. For such a String each answers as the
+  standard does: among the code points below 0x80 the case mappings of the Unicode Character
+  Database map the 26 letters and nothing else, the two locale methods answer as `toLowerCase`
+  and `toUpperCase` (no host locale; ECMA-402 is out, section 1), and two Strings of such code
+  units are canonically equivalent only when they are equal, so `localeCompare` orders them by
+  their code units and returns -1, +0 or 1. `localeCompare` refuses when the this value or
+  `that`, each converted to a String, has a code unit of 0x80 or above. A refusal comes after
+  the steps the clause gives before the mapping or the comparison (RequireObjectCoercible, then
+  ToString of the this value and, for `localeCompare`, of `that`), so an error those steps
+  throw is thrown instead of it; it throws a `SyntaxError` of the method's realm whose message
+  is `case mapping outside ASCII is not supported before slice 5` (the four case methods) or
+  `comparison outside ASCII is not supported before slice 5` (`localeCompare`), which
+  `swell_syntax::message_kind` reads as a refusal of slice 5, and the agent counts it like a
+  refused parse, caught or not (`host-interface.md`, decision 13). `normalize`
+  (`sec-string.prototype.normalize`) does not exist before slice 5: `String.prototype` has no
+  property `normalize`. Slice 5 brings the tables and removes both refusals; from then the five
+  methods refuse no input. The cases of slice 3 these methods cannot pass (a String outside
+  ASCII in the case or a harness file it includes) move to slice 5 by rule lines when slice 3
+  measures them. White space is not among these gaps: `story:syntax-es5-and-strict` accepts
+  every `Zs` code point in slice 1 with the table of `story:num-and-unicode-early-parts`.
 - A slice may also deliver a feature of its own without a part that needs a later slice (added
   on 2026-11-21 for slice 2). The part is absent, never a stand-in with a wrong answer, and it
   is recorded where the gate reads it: the section's omission list in
@@ -955,15 +1008,21 @@ from `swell-unicode`. The rule:
   symbol-iterator-property section-12-slice-6`.
 - The builtins the harness files call are built in slice 1 as far as `assert.js`, `sta.js` and
   the 31 cases need them; slice 3 completes each builtin. A method that exists is correct for
-  every argument, or it does not exist yet.
+  every argument, or it does not exist yet, or it takes the third form stated for the five
+  `String` methods above (added on 2026-11-21 for slice 3): it exists, answers a stated set of
+  inputs, and refuses every other input with a counted refusal naming the slice that completes
+  it. The third form is allowed only where the answer for every input of that set is the
+  standard's and every other input ends in the counted refusal, never in a guessed answer, and
+  only for a method this section names with its set; any other method has the first two forms
+  only.
 - A refusal is a `SyntaxError`, but not the one a `negative: parse` case names: the runner
   reads the kind of a parse error from its message (`swell_syntax::message_kind`), and a run
   that a refusal or the nesting limit ends, in a harness file or in the case, fails whatever the
   case's `negative` says. It prints the number of such runs as `test262-refused <runs>`, so the
   share of the checkout a later slice's parser still declines stays visible (53,564 of 85,556
   runs at slice 1). Before this rule, 3,011 negative parse cases of slices 2 to 18 were counted
-  passed on a refusal. A refusal the script catches (through `eval` or `Function`, or of a
-  regular expression literal) is counted by the agent (`Agent::refusals`, `host-interface.md`
+  passed on a refusal. A refusal the script catches (through `eval` or `Function`, of a
+  regular expression literal, or of a `String` method of the third form) is counted by the agent (`Agent::refusals`, `host-interface.md`
   decision 13), and the runner fails every run in which that count moved (decision 11).
 
 **For surf.** A script that touches no DOM and uses only ES5 can run after slice 4, and with
