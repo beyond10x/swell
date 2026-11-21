@@ -34,6 +34,10 @@ dependencies = [
 [[package]]
 name = "swell-test262"
 version = "0.0.0"
+dependencies = [
+ "swell",
+ "swell-syntax",
+]
 
 [[package]]
 name = "swell-unicode"
