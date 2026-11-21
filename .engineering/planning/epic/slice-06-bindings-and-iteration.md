@@ -6,7 +6,7 @@ status: draft
 title: 'Slice 6, bindings-and-iteration: let, destructuring, iterators'
 summary: 'let, const, destructuring, spread, arrows, templates, Symbol, iterators and for-of: 3,701 cases and 7,130 runs.'
 relations:
-- depends_on: epic:slice-05-regexp
+- depends_on: epic:slice-03-builtins-core
 revision: 1
 ---
 ## Context
