@@ -11,8 +11,8 @@ use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
+use crate::object::ObjectKind;
 use crate::object::property::{Descriptor, Key};
-use crate::object::{KindTag, ObjectKind};
 use crate::value::{ObjectRef, Value};
 
 /// An order on keys for the visited set of EnumerateObjectProperties: the handles' fields.
@@ -110,13 +110,6 @@ impl<H: Host> Agent<H> {
     }
 
     /// HasOwnProperty (`#sec-hasownproperty`).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Object.prototype.hasOwnProperty: story:harness-builtins"
-        )
-    )]
     pub(crate) fn has_own_property(&mut self, object: ObjectRef, key: Key) -> Completion<bool> {
         Ok(self.get_own_property(object, key)?.is_some())
     }
@@ -149,50 +142,95 @@ impl<H: Host> Agent<H> {
     }
 
     /// LengthOfArrayLike (`#sec-lengthofarraylike`).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Function.prototype.apply: story:harness-builtins")
-    )]
     pub(crate) fn length_of_array_like(&mut self, object: ObjectRef) -> Completion<f64> {
         let key = self.name_key("length")?;
         let length = self.get(object, key)?;
         self.to_length(length)
     }
 
-    /// GetFunctionRealm (`#sec-getfunctionrealm`): a built-in function's [[Realm]], else the
-    /// current realm. Bound functions and proxies come with their stories.
-    pub(crate) fn get_function_realm(&mut self, object: ObjectRef) -> Completion<Handle> {
-        if let ObjectKind::BuiltinFunction(function) = &self.engine_object(object)?.kind
-            && let Some(realm) = function.realm
-        {
-            return Ok(realm);
+    /// The [[BoundTargetFunction]] of `object` when it is a bound function exotic object.
+    fn bound_target(&mut self, object: ObjectRef) -> Completion<Option<ObjectRef>> {
+        let target = match &self.engine_object(object)?.kind {
+            ObjectKind::BoundFunction(bound) => Some(bound.target),
+            _ => None,
+        };
+        match target {
+            Some(Some(target)) => Ok(Some(target)),
+            // Only the collector's fixture has no target; reached here it is a broken invariant.
+            Some(None) => Err(self.fault()),
+            None => Ok(None),
         }
-        // Step 1: an ECMAScript function object's [[Realm]].
-        if let ObjectKind::EcmascriptFunction(function) = &self.engine_object(object)?.kind
-            && let Some(realm) = function.realm
-        {
-            return Ok(realm);
-        }
-        self.current_realm()
     }
 
-    /// OrdinaryHasInstance (`#sec-ordinaryhasinstance`). A step per object of the chain.
+    /// GetFunctionRealm (`#sec-getfunctionrealm`): step 1, the [[Realm]] of a built-in or an
+    /// ECMAScript function object; step 2, for a bound function exotic object its target's
+    /// ("Return ? GetFunctionRealm(boundTargetFunc)"), as a loop with a step per bound function,
+    /// since a chain of bound functions is as long as a script makes it; step 4, the current
+    /// realm. Proxies (step 3) come with their story.
+    pub(crate) fn get_function_realm(&mut self, object: ObjectRef) -> Completion<Handle> {
+        let mut function = object;
+        loop {
+            // 1. If obj has a [[Realm]] internal slot, return obj.[[Realm]].
+            let realm = match &self.engine_object(function)?.kind {
+                ObjectKind::BuiltinFunction(builtin) => builtin.realm,
+                ObjectKind::EcmascriptFunction(function) => function.realm,
+                _ => None,
+            };
+            if let Some(realm) = realm {
+                return Ok(realm);
+            }
+            match self.bound_target(function)? {
+                Some(target) => {
+                    self.charge_steps(1)?;
+                    function = target;
+                }
+                None => return self.current_realm(),
+            }
+        }
+    }
+
+    /// OrdinaryHasInstance (`#sec-ordinaryhasinstance`). Step 2 for a bound function, "Return ?
+    /// InstanceofOperator(O, BC)", runs InstanceofOperator's steps (`#sec-instanceofoperator`)
+    /// on the target here and, when they reach OrdinaryHasInstance again, goes round the loop:
+    /// a step per bound function, no Rust recursion. A step per object of the prototype chain.
     pub(crate) fn ordinary_has_instance(
         &mut self,
         constructor: Value,
         value: Value,
     ) -> Completion<bool> {
-        if !self.is_callable(constructor)? {
-            return Ok(false);
-        }
-        let Value::Object(constructor) = constructor else {
-            return Ok(false);
+        let mut constructor = constructor;
+        let constructor = loop {
+            // 1. If IsCallable(C) is false, return false.
+            if !self.is_callable(constructor)? {
+                return Ok(false);
+            }
+            let Value::Object(object) = constructor else {
+                return Ok(false);
+            };
+            // 2. If C has a [[BoundTargetFunction]] internal slot: InstanceofOperator(O, BC).
+            let Some(target) = self.bound_target(object)? else {
+                break object;
+            };
+            self.charge_steps(1)?;
+            let target = Value::Object(target);
+            // InstanceofOperator, steps 2 and 3: BC is an Object; its @@hasInstance method.
+            let handler = match self.well_known() {
+                Some(symbols) => self.get_method(target, Key::Symbol(symbols.has_instance))?,
+                None => None,
+            };
+            if let Some(handler) = handler {
+                let result = self.call_value(handler, target, &[value])?;
+                return self.to_boolean(result);
+            }
+            // Steps 4 and 5: not callable throws; else OrdinaryHasInstance(BC, O).
+            if !self.is_callable(target)? {
+                return Err(self.throw_error(
+                    ErrorKind::TypeError,
+                    "the right-hand side of instanceof is not callable",
+                ));
+            }
+            constructor = target;
         };
-        if self.kind_of(constructor)? == KindTag::BoundFunction {
-            // Step 2 needs [[BoundTargetFunction]], which comes with story:harness-builtins;
-            // no bound function exists before it.
-            return Err(self.fault());
-        }
         let Value::Object(mut object) = value else {
             return Ok(false);
         };
@@ -295,8 +333,9 @@ mod tests {
     }
 
     /// InstanceofOperator (`#sec-instanceofoperator`) with OrdinaryHasInstance
-    /// (`#sec-ordinaryhasinstance`): no @@hasInstance method exists in this part, so the
-    /// prototype chain of the value is searched for the constructor's "prototype"; a
+    /// (`#sec-ordinaryhasinstance`): the @@hasInstance method of a function is
+    /// `%Function.prototype%[@@hasInstance]`, so the prototype chain of the value is searched
+    /// for the constructor's "prototype"; a
     /// non-object or non-callable right-hand side and a non-object "prototype" throw a
     /// TypeError; a primitive left-hand side is not an instance.
     #[test]
@@ -321,6 +360,11 @@ mod tests {
         let other = agent
             .ordinary_object_create(None, OrdinaryData::Plain)
             .unwrap();
+        // `%Function.prototype%[@@hasInstance]` is called for each instanceof, and a call is a
+        // safe point that may collect: the objects held only by these locals are kept.
+        for object in [f, prototype, middle, instance, other] {
+            agent.keep(Value::Object(object));
+        }
         let f = Value::Object(f);
         assert_eq!(
             agent.instanceof_operator(Value::Object(instance), f),

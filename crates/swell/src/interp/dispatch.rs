@@ -538,7 +538,7 @@ impl<H: Host> Agent<H> {
                 let array = self.peek_value(1)?;
                 let array = self.expect_object(array)?;
                 let value = self.peek_value(0)?;
-                let key = self.index_key(index)?;
+                let key = self.index_key(f64::from(index))?;
                 self.create_data_property_or_throw(array, key, value)?;
                 self.drop_entries(1)?;
                 Ok(Flow::Next)
@@ -771,24 +771,6 @@ impl<H: Host> Agent<H> {
             Some(Entry::Reference(resolvable)) => Ok(*resolvable),
             _ => Err(self.fault()),
         }
-    }
-
-    /// Keep the String a key holds, if any, until [`Agent::release`].
-    fn keep_key(&mut self, key: Key) -> usize {
-        match key {
-            Key::String(string) => self.keep(Value::String(string)),
-            Key::Symbol(symbol) => self.keep(Value::Symbol(symbol)),
-            Key::Index(_) => self.keep(Value::Undefined),
-        }
-    }
-
-    /// The property key of the array index `index` (ToString of the Number, an index below
-    /// 2^32 - 1, or its String otherwise).
-    fn index_key(&mut self, index: u32) -> Completion<Key> {
-        if index == u32::MAX {
-            return self.name_key(&index.to_string());
-        }
-        Ok(Key::Index(index))
     }
 
     /// The object of a property reference's base (GetValue and PutValue, `#sec-getvalue`,

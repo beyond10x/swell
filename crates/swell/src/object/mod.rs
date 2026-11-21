@@ -86,7 +86,6 @@ pub(crate) enum ObjectKind {
     /// A built-in function object (10.3), host functions included.
     BuiltinFunction(BuiltinFunction),
     /// A bound function exotic object (10.4.1).
-    #[cfg_attr(not(test), expect(dead_code, reason = "story:harness-builtins"))]
     BoundFunction(BoundFunction),
     /// An ECMAScript function object (10.2).
     EcmascriptFunction(EcmascriptFunction),

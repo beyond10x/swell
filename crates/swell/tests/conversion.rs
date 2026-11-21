@@ -10,7 +10,7 @@ mod support;
 use support::host::{
     TestHost, agent, data, get, global, is_error_of, key, object, realm, string, text, thrown,
 };
-use swell::{Abrupt, Completion, Cx, HostCall, PreferredType, Value};
+use swell::{Abrupt, Brand, Completion, Cx, HostCall, HostObjectSpec, PreferredType, Value};
 
 /// `#sec-tonumber-applied-to-the-string-type`: StringToNumber trims every `StrWhiteSpaceChar`
 /// (WhiteSpace, `#sec-white-space`, with every code point of General_Category `Zs`, and
@@ -244,8 +244,16 @@ fn to_primitive_calls_valueof_and_tostring_in_hint_order() {
             assert_eq!(cx.to_primitive(s, None).unwrap(), Ok(s));
             assert!(take(cx).is_empty());
 
-            // An object with neither method throws a TypeError.
-            let bare = cx.to_object(Value::Number(3.0)).unwrap().unwrap();
+            // An object with neither method throws a TypeError: one whose [[Prototype]] is null,
+            // since every ordinary object inherits `Object.prototype.toString` (20.1.3.6).
+            let bare = cx
+                .new_host_object(HostObjectSpec {
+                    prototype: None,
+                    brand: Brand(1),
+                    data: None,
+                })
+                .unwrap()
+                .unwrap();
             let error = thrown(cx.to_primitive(Value::Object(bare), None).unwrap());
             assert!(is_error_of(cx, global, error, "TypeError"));
         })

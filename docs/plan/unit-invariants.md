@@ -36,8 +36,10 @@ report and does not work around it.
   scratch directory the brief assigns.
 - The shell runs as `zsh -c … < /dev/null`: no heredoc into a command that reads standard
   input. Write a script with the file-writing tool and run it by path.
-- No Python anywhere: not in the repository, not in a script, a probe or a manual check.
-  Shell, `awk`, `jq` and Rust are fine.
+- No Python in any command: not in the repository, not in a script, a probe or a manual check,
+  and not to ask for its version (`python3 --version` counts; it happened once, in wave 3 of
+  slice 1). The repository must be workable on a machine that has none, and a probe that
+  needs it proves nothing there. Use `sh`, `awk`, `sed`, `grep`, `jq` or Rust.
 - No network, unless the brief names the address (the test262 fetch, the Unicode data). No
   `gh`, no push, no remote.
 - Nothing personal in any file: no person's name (write "the operator"), no home directory

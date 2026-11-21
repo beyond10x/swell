@@ -2,8 +2,10 @@
 //! `#sec-well-known-intrinsic-objects`) that this part has: `%Object.prototype%`,
 //! `%Function.prototype%`, `%ThrowTypeError%`, `%Array.prototype%`, `%String.prototype%`,
 //! `%Boolean.prototype%`, `%Number.prototype%`, `%Error%`, `%Error.prototype%` and the six
-//! NativeErrors with their prototypes. Their methods and the other constructors are
-//! `story:harness-builtins` and later slices. Written by `story:object-model-and-realms`.
+//! NativeErrors with their prototypes, written by `story:object-model-and-realms`; `%Object%`,
+//! `%Array%`, `%String%`, `%Math%` and `%JSON%` with the methods the harness files call, written
+//! by `story:harness-builtins` (each builtin module installs its own, `builtins/`). The other
+//! constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
 //! first need no root until the realm record holds them all.
@@ -15,7 +17,8 @@ use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
 use crate::object::builtin_function::{Behaviour, BuiltinId};
 use crate::object::ordinary::OrdinaryData;
-use crate::object::property::{Property, Slot};
+use crate::object::property::{Key, Property, Slot};
+use crate::realm::WellKnown;
 use crate::value::{ObjectRef, Value};
 
 /// An intrinsic of this part, by its name in Table 6.
@@ -39,6 +42,27 @@ pub(crate) enum Intrinsic {
     Error(ErrorKind),
     /// `%Error.prototype%` and the NativeError prototypes.
     ErrorPrototype(ErrorKind),
+    /// `%Object%` (20.1.1).
+    Object,
+    /// `%Array%` (23.1.1).
+    Array,
+    /// `%String%` (22.1.1).
+    String,
+    /// `%Math%` (21.3).
+    Math,
+    /// `%JSON%` (25.5).
+    Json,
+}
+
+/// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
+/// record holds its intrinsics: the realm, the two prototypes every builtin needs, and the
+/// well-known symbols.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Making {
+    pub(crate) realm: Handle,
+    pub(crate) object_prototype: ObjectRef,
+    pub(crate) function_prototype: ObjectRef,
+    pub(crate) symbols: WellKnown,
 }
 
 /// One Error constructor and its prototype.
@@ -59,6 +83,11 @@ pub(crate) struct Intrinsics {
     throw_type_error: ObjectRef,
     /// In the order of [`ErrorKind::ALL`].
     errors: [ErrorIntrinsics; 7],
+    object: ObjectRef,
+    array: ObjectRef,
+    string: ObjectRef,
+    math: ObjectRef,
+    json: ObjectRef,
 }
 
 impl Intrinsics {
@@ -74,6 +103,11 @@ impl Intrinsics {
             Intrinsic::ThrowTypeError => self.throw_type_error,
             Intrinsic::Error(kind) => self.error(kind).constructor,
             Intrinsic::ErrorPrototype(kind) => self.error(kind).prototype,
+            Intrinsic::Object => self.object,
+            Intrinsic::Array => self.array,
+            Intrinsic::String => self.string,
+            Intrinsic::Math => self.math,
+            Intrinsic::Json => self.json,
         }
     }
 
@@ -100,6 +134,11 @@ impl Intrinsics {
             self.boolean_prototype,
             self.number_prototype,
             self.throw_type_error,
+            self.object,
+            self.array,
+            self.string,
+            self.math,
+            self.json,
         ] {
             mark.object(object);
         }
@@ -121,6 +160,95 @@ impl<H: Host> Agent<H> {
     ) -> Completion<()> {
         let key = self.name_key(name)?;
         self.add_property(object, key, Property::data(value, true, false, true))
+    }
+
+    /// A built-in function named `name` of `length` whose steps are `id`, defined on `object` as
+    /// a method (clause 18: { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true
+    /// }); not a constructor (clause 18: "Built-in function objects that are not identified as
+    /// constructors do not implement [[Construct]]").
+    pub(crate) fn define_builtin_method(
+        &mut self,
+        making: Making,
+        object: ObjectRef,
+        name: &str,
+        length: u32,
+        id: BuiltinId,
+    ) -> Completion<ObjectRef> {
+        let function = self.create_builtin_function(
+            Behaviour::Builtin(id),
+            length,
+            name,
+            making.realm,
+            Some(making.function_prototype),
+            false,
+        )?;
+        self.define_builtin_property(object, name, Value::Object(function))?;
+        Ok(function)
+    }
+
+    /// A built-in function named `name` of `length` whose steps are `id`, for a property the
+    /// caller defines itself (a Symbol-keyed method or an accessor).
+    pub(crate) fn create_builtin(
+        &mut self,
+        making: Making,
+        name: &str,
+        length: u32,
+        id: BuiltinId,
+    ) -> Completion<ObjectRef> {
+        self.create_builtin_function(
+            Behaviour::Builtin(id),
+            length,
+            name,
+            making.realm,
+            Some(making.function_prototype),
+            false,
+        )
+    }
+
+    /// A built-in constructor named `name` of `length` whose steps are `id`, with its
+    /// "prototype" `prototype` ({ [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]:
+    /// false }, as 20.1.2.21, 22.1.2.3 and 23.1.2.5 give it) and the prototype's "constructor"
+    /// (20.1.3.1, 22.1.3.6, 23.1.3.3).
+    pub(crate) fn create_builtin_constructor(
+        &mut self,
+        making: Making,
+        name: &str,
+        length: u32,
+        id: BuiltinId,
+        prototype: ObjectRef,
+    ) -> Completion<ObjectRef> {
+        let constructor = self.create_builtin_function(
+            Behaviour::Builtin(id),
+            length,
+            name,
+            making.realm,
+            Some(making.function_prototype),
+            true,
+        )?;
+        let key = self.name_key("prototype")?;
+        self.add_property(
+            constructor,
+            key,
+            Property::data(Value::Object(prototype), false, false, false),
+        )?;
+        self.define_builtin_property(prototype, "constructor", Value::Object(constructor))?;
+        Ok(constructor)
+    }
+
+    /// The @@toStringTag property of `object`, `tag`, with { [[Writable]]: false,
+    /// [[Enumerable]]: false, [[Configurable]]: true } (21.3.1.9, 25.5.5).
+    pub(crate) fn define_to_string_tag(
+        &mut self,
+        making: Making,
+        object: ObjectRef,
+        tag: &str,
+    ) -> Completion<()> {
+        let tag = self.new_string_str(tag)?;
+        self.add_property(
+            object,
+            Key::Symbol(making.symbols.to_string_tag),
+            Property::data(Value::String(tag), false, false, true),
+        )
     }
 
     /// CreateIntrinsics (`#sec-createintrinsics`) for the intrinsics of this part.
@@ -150,6 +278,22 @@ impl<H: Host> Agent<H> {
         let boolean_prototype = self.create_boolean_prototype(object_prototype)?;
         let number_prototype = self.create_number_prototype(object_prototype)?;
         let errors = self.create_error_intrinsics(realm, object_prototype, function_prototype)?;
+        // Every realm record holds the well-known symbols from its creation (`realm/mod.rs`).
+        let Some(symbols) = self.realm_record(realm)?.symbols else {
+            return Err(self.fault());
+        };
+        let making = Making {
+            realm,
+            object_prototype,
+            function_prototype,
+            symbols,
+        };
+        let object = self.create_object_constructor(making)?;
+        self.install_function_prototype_methods(making)?;
+        let array = self.create_array_constructor(making, array_prototype)?;
+        let string = self.create_string_constructor(making, string_prototype)?;
+        let math = self.create_math_object(making)?;
+        let json = self.create_json_object(making)?;
         let intrinsics = Intrinsics {
             object_prototype,
             function_prototype,
@@ -159,6 +303,11 @@ impl<H: Host> Agent<H> {
             number_prototype,
             throw_type_error,
             errors,
+            object,
+            array,
+            string,
+            math,
+            json,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {
