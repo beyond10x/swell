@@ -167,6 +167,12 @@ impl<H: Host> Agent<H> {
         {
             return Ok(realm);
         }
+        // Step 1: an ECMAScript function object's [[Realm]].
+        if let ObjectKind::EcmascriptFunction(function) = &self.engine_object(object)?.kind
+            && let Some(realm) = function.realm
+        {
+            return Ok(realm);
+        }
         self.current_realm()
     }
 
@@ -208,13 +214,6 @@ impl<H: Host> Agent<H> {
     }
 
     /// InstanceofOperator (`#sec-instanceofoperator`).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "instanceof: story:interpreter-and-script-entry-points"
-        )
-    )]
     pub(crate) fn instanceof_operator(&mut self, value: Value, target: Value) -> Completion<bool> {
         if !matches!(target, Value::Object(_)) {
             return Err(self.throw_error(
@@ -243,13 +242,6 @@ impl<H: Host> Agent<H> {
     /// definition there does it: the enumerable String keys of the object and then of each
     /// prototype, each name once, a name shadowed by a non-enumerable property not visited.
     /// A step per key and per object of the chain.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "for-in: story:interpreter-and-script-entry-points"
-        )
-    )]
     pub(crate) fn enumerate_object_properties(
         &mut self,
         object: ObjectRef,

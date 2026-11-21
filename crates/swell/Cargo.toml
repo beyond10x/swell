@@ -5,7 +5,9 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+swell-compiler = { path = "../compiler" }
 swell-num = { path = "../num" }
+swell-syntax = { path = "../syntax" }
 swell-unicode = { path = "../unicode" }
 
 [features]

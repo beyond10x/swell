@@ -97,13 +97,7 @@ pub struct Realm(pub(crate) Root);
 /// A parsed script (16.1, `#sec-scripts`), held through a root. Made by `parse_script`
 /// (`story:interpreter-and-script-entry-points`).
 #[derive(Debug)]
-pub struct Script(
-    #[expect(
-        dead_code,
-        reason = "scripts: story:interpreter-and-script-entry-points"
-    )]
-    Root,
-);
+pub struct Script(pub(crate) Root);
 
 /// A module (16.2), held through a root. Made by `parse_module` (slice 11).
 #[derive(Debug)]

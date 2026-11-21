@@ -3,23 +3,23 @@ HOST-2 test swell::source_scan::host_2_no_ambient_authority_in_engine_crates
 HOST-3 pending slice 1
 HOST-4 test swell::doc::compile_fail::host_4_hook_cx_cannot_call_construct_or_evaluate_a_script
 HOST-5 test swell::doc::compile_fail::host_5_agent_call_inside_a_host_function
-HOST-6 pending slice 1
-HOST-7 pending slice 1
-HOST-8 pending slice 1
-HOST-9 pending slice 1
+HOST-6 test swell::budgets::host_6_endless_loop_ends_in_step_budget
+HOST-7 test swell::budgets::host_7_next_entry_gets_the_whole_budget
+HOST-8 test swell::budgets::host_8_nested_entry_spends_the_outer_budget
+HOST-9 test swell::budgets::host_9_zero_steps_ends_before_the_first
 HOST-10 pending slice 1
 HOST-11 pending slice 13
 HOST-12 test swell::realms::host_12_create_realm_with_zero_memory_is_memory_budget
-HOST-13 pending slice 1
-HOST-14 pending slice 1
+HOST-13 test swell::budgets::host_13_frame_depth_counts_the_script_context
+HOST-14 test swell::budgets::host_14_zero_frame_depth_throws_range_error
 HOST-15 test swell::calls::host_15_reentry_depth_bounds_cx_call
 HOST-16 pending slice 1
 HOST-17 pending slice 1
-HOST-18 pending slice 1
-HOST-19 pending slice 1
-HOST-20 pending slice 1
+HOST-18 test swell::scripts::host_18_100000_brackets_are_one_parse_error
+HOST-19 test swell::scripts::host_19_zero_parser_nesting_refuses_any_source
+HOST-20 test swell::budgets::host_20_doubling_a_string_past_string_length_throws
 HOST-21 pending slice 3
-HOST-22 pending slice 1
+HOST-22 test swell::budgets::host_22_zero_string_length_throws_on_concatenation
 HOST-23 pending slice 12
 HOST-24 pending slice 12
 HOST-25 pending slice 9
@@ -32,9 +32,9 @@ HOST-31 pending slice 1
 HOST-32 test swell::values::host_32_to_utf16_keeps_lone_surrogates
 HOST-33 test swell::values::host_33_lossy_string_replaces_lone_surrogates
 HOST-34 test swell::values::host_34_new_string_is_utf16_of_the_str
-HOST-35 pending slice 1
-HOST-36 pending slice 1
-HOST-37 pending slice 1
+HOST-35 test swell::scripts::host_35_utf8_and_utf16_sources_agree
+HOST-36 test swell::scripts::host_36_parse_error_has_the_realm_syntax_error_prototype
+HOST-37 test swell::scripts::host_37_throw_and_normal_completion_values
 HOST-38 pending slice 11
 HOST-39 pending slice 11
 HOST-40 pending slice 11
@@ -47,11 +47,11 @@ HOST-46 pending slice 10
 HOST-47 test swell::calls::host_47_call_and_construct_of_the_wrong_kind_throw_type_error
 HOST-48 pending slice 1
 HOST-49 pending slice 1
-HOST-50 pending slice 1
+HOST-50 test swell::scripts::host_50_setup_this_is_script_this
 HOST-51 test swell::lib::realm::tests::host_51_default_global_is_ordinary_with_object_prototype
 HOST-52 test swell::realms::host_52_dropped_realm_returns_heap_bytes
 HOST-53 pending slice 1
-HOST-54 pending slice 1
+HOST-54 test swell::scripts::host_54_var_script_evaluates_twice
 HOST-55 pending slice 11
 HOST-56 pending slice 11
 HOST-57 pending slice 11
@@ -66,10 +66,10 @@ HOST-65 pending slice 11
 HOST-66 pending slice 11
 HOST-67 pending slice 11
 HOST-68 pending slice 11
-HOST-69 pending slice 1
-HOST-70 pending slice 1
+HOST-69 test swell::termination::host_69_finally_does_not_run_after_step_budget
+HOST-70 test swell::termination::host_70_agent_stays_alive_after_each_budget
 HOST-71 pending slice 1
-HOST-72 pending slice 1
+HOST-72 test swell::termination::host_72_a_host_function_cannot_end_a_termination
 HOST-73 pending slice 7
 HOST-74 pending slice 11
 HOST-75 pending slice 11
@@ -87,24 +87,24 @@ HOST-86 pending slice 14
 HOST-87 pending slice 16
 HOST-88 pending slice 14
 HOST-89 pending slice 16
-HOST-90 pending slice 1
-HOST-91 pending slice 1
-HOST-92 pending slice 1
-HOST-93 pending slice 1
+HOST-90 test swell::interrupt::host_90_interrupt_from_another_thread_ends_the_loop
+HOST-91 test swell::interrupt::host_91_interrupted_entry_clears_the_flag
+HOST-92 test swell::interrupt::host_92_interrupt_before_an_entry_ends_it_at_zero_steps
+HOST-93 test swell::interrupt::host_93_clear_before_the_entry_lets_it_run
 HOST-94 test swell::interrupt::host_94_interrupt_handle_moves_into_a_thread
 HOST-95 test swell::interrupt::host_95_interrupt_on_a_faulted_agent_returns
-HOST-96 pending slice 1
+HOST-96 test swell::interrupt::host_96_interrupt_set_in_a_host_function_ends_the_run_after_it
 HOST-97 pending slice 11
 HOST-98 pending slice 11
 HOST-99 pending slice 11
 HOST-100 pending slice 10
 HOST-101 pending slice 10
 HOST-102 pending slice 1
-HOST-103 pending slice 1
-HOST-104 pending slice 1
-HOST-105 pending slice 1
+HOST-103 test swell::calls::host_103_host_function_receives_this_and_arguments
+HOST-104 test swell::calls::host_104_new_target_and_non_constructors
+HOST-105 test swell::calls::host_105_host_throw_reaches_the_script_catch
 HOST-106 test swell::calls::host_106_host_function_name_and_length
-HOST-107 pending slice 1
+HOST-107 test swell::calls::host_107_cx_evaluate_script_returns_its_completion_value
 HOST-108 test swell::host_objects::host_108_host_data_checks_brand_and_type
 HOST-109 test swell::host_objects::host_109_trace_keeps_listed_values
 HOST-110 test swell::host_objects::host_110_trace_of_a_stale_handle_faults_collect
@@ -134,7 +134,7 @@ HOST-133 pending slice 1
 HOST-134 pending slice 16
 HOST-135 pending slice 4
 HOST-136 test swell::doc::compile_fail::host_136_agent_is_not_send
-HOST-137 pending slice 1
+HOST-137 test swell::scripts::host_137_nesting_error_names_parser_nesting_and_10_levels_parse
 HOST-138 pending slice 11
 HOST-139 pending slice 2
 HOST-140 pending slice 2

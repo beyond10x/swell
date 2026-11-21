@@ -89,10 +89,6 @@ pub(crate) enum ObjectKind {
     #[cfg_attr(not(test), expect(dead_code, reason = "story:harness-builtins"))]
     BoundFunction(BoundFunction),
     /// An ECMAScript function object (10.2).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "story:interpreter-and-script-entry-points")
-    )]
     EcmascriptFunction(EcmascriptFunction),
     /// A host object (`docs/design/host-interface.md`, decision 15).
     Host(HostObject),

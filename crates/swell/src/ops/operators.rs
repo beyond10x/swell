@@ -17,13 +17,6 @@ use crate::host::{ErrorKind, Host};
 use crate::value::{StringRef, Value};
 
 /// A binary operator of ApplyStringOrNumericBinaryOperator, ES5's set.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the operators: story:interpreter-and-script-entry-points"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BinaryOperator {
     Add,
@@ -62,38 +55,17 @@ pub(crate) fn number_operation(operator: BinaryOperator, x: f64, y: f64) -> f64 
 }
 
 /// Number::unaryMinus (`#sec-numeric-types-number-unaryMinus`).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the operators: story:interpreter-and-script-entry-points"
-    )
-)]
 pub(crate) fn number_unary_minus(x: f64) -> f64 {
     -x
 }
 
 /// Number::bitwiseNOT (`#sec-numeric-types-number-bitwiseNOT`).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the operators: story:interpreter-and-script-entry-points"
-    )
-)]
 pub(crate) fn number_bitwise_not(x: f64) -> f64 {
     f64::from(!number_to_int32(x))
 }
 
 impl<H: Host> Agent<H> {
     /// ApplyStringOrNumericBinaryOperator (`#sec-applystringornumericbinaryoperator`).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the operators: story:interpreter-and-script-entry-points"
-        )
-    )]
     pub(crate) fn apply_string_or_numeric_binary_operator(
         &mut self,
         left: Value,
@@ -165,13 +137,6 @@ impl<H: Host> Agent<H> {
     }
 
     /// The result of `typeof` (`#sec-typeof-operator-runtime-semantics-evaluation`, Table 41).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the operators: story:interpreter-and-script-entry-points"
-        )
-    )]
     pub(crate) fn type_of(&mut self, value: Value) -> Completion<&'static str> {
         Ok(match value {
             Value::Undefined => "undefined",

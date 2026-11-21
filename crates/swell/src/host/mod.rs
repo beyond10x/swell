@@ -28,7 +28,7 @@ pub use outcome::*;
 use crate::heap::arena::Access;
 use crate::object::property::{Descriptor, Key};
 use crate::object::{ObjectKind, ObjectRecord};
-use crate::value::{ObjectRef, PropertyKey, Realm, RealmRef, Root, StringRef, Value};
+use crate::value::{ObjectRef, PropertyKey, Realm, RealmRef, Root, ScriptRef, StringRef, Value};
 
 /// The kind of an error object (20.5.5, `#sec-native-error-types-used-in-this-standard`, and
 /// `Error`), for `new_error`.
@@ -67,6 +67,14 @@ impl ErrorKind {
             ErrorKind::UriError => "URIError",
         }
     }
+}
+
+/// The source text of a script (decision 8; `#sec-source-text`: "a sequence of Unicode code
+/// points"), as UTF-8, or as UTF-16 code units, lone surrogates included.
+#[derive(Clone, Copy, Debug)]
+pub enum Source<'s> {
+    Utf8(&'s str),
+    Utf16(&'s [u16]),
 }
 
 /// The preferredType of ToPrimitive (`#sec-toprimitive`).
@@ -154,9 +162,7 @@ impl<H: Host> Agent<H> {
         let start = self.scope.len();
         let result = self.in_entry_realm(realm, |agent| f(&mut Cx { agent }));
         self.scope.truncate(start);
-        if self.state == AgentState::Alive {
-            self.termination = None;
-        }
+        self.end_entry();
         Ok(result)
     }
 
@@ -726,6 +732,57 @@ impl<H: Host> Cx<'_, H> {
             agent.property_key_out(key)
         });
         Ok(hand_out_throw(agent, completion))
+    }
+
+    /// ParseScript (`#sec-parse-script`) of `source` in `realm` (decision 8, over scoped
+    /// handles): the script as a `ScriptRef` valid until the outermost entry ends, or the parse
+    /// errors as roots of `SyntaxError` objects of `realm`. It runs no code, spends no step and
+    /// reads no interrupt; a run already terminated answers its termination.
+    pub fn parse_script(
+        &mut self,
+        realm: RealmRef,
+        source: Source<'_>,
+        host_defined: Option<HostDefined>,
+    ) -> Result<Parsed<ScriptRef>, HostError> {
+        let agent = &mut *self.agent;
+        agent.alive()?;
+        agent.heap.realms.get(realm.handle).map_err(host_error)?;
+        if let Err(abrupt) = agent.running() {
+            return Ok(Parsed::Terminated(crate::script::parse_termination(abrupt)));
+        }
+        Ok(
+            match agent.parse_script_in(realm.handle, source, host_defined) {
+                Ok(crate::script::ParseAnswer::Script(handle)) => {
+                    agent.scoped_scripts.push(handle);
+                    Parsed::Parsed(ScriptRef { handle })
+                }
+                Ok(crate::script::ParseAnswer::Errors(errors)) => Parsed::Errors(
+                    errors
+                        .into_iter()
+                        .map(|error| agent.heap.roots.add(error))
+                        .collect(),
+                ),
+                Err(abrupt) => {
+                    let termination = crate::script::parse_termination(abrupt);
+                    agent.terminate(termination);
+                    Parsed::Terminated(termination)
+                }
+            },
+        )
+    }
+
+    /// ScriptEvaluation (`#sec-runtime-semantics-scriptevaluation`) of `script`: its completion
+    /// value. Inside a run it is a re-entry, counted against `reentry_depth`, whose steps the
+    /// outermost entry spends (HTML calls scripts re-entrantly,
+    /// `html:clean-up-after-running-script`).
+    pub fn evaluate_script(&mut self, script: ScriptRef) -> Result<Completion<Value>, HostError> {
+        let agent = &mut *self.agent;
+        agent.alive()?;
+        agent.heap.scripts.get(script.handle).map_err(host_error)?;
+        let completion = agent
+            .begin()
+            .and_then(|()| agent.script_evaluation(script.handle));
+        Ok(agent.hand_out_completion(completion))
     }
 }
 

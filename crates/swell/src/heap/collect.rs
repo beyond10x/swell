@@ -36,21 +36,7 @@ pub(crate) enum Item {
     Symbol(Handle),
     Object(Handle),
     Realm(Handle),
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "environments: story:interpreter-and-script-entry-points"
-        )
-    )]
     Environment(Handle),
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "scripts: story:interpreter-and-script-entry-points"
-        )
-    )]
     Script(Handle),
     /// A BigInt: no arena holds them before slice 12, so no live one exists.
     NoArena,

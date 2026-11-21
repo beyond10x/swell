@@ -1,0 +1,4 @@
+// sec-break-statement: normal 3
+var i = 0;
+while (true) { if (i === 3) break; i++; }
+i;

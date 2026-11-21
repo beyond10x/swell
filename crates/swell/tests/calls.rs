@@ -10,9 +10,10 @@ use support::host::{
     TestHost, agent, agent_with, data, get, global, is_error_of, key, limits, object, realm,
     string, text, thrown,
 };
+use support::script::{Outcome as Shown, define_function, eval_text};
 use swell::{
     Abrupt, AgentState, Brand, Completion, Cx, HostCall, HostError, HostObjectSpec, Outcome,
-    PropertyDescriptor, Termination, Value,
+    Parsed, PropertyDescriptor, Source, Termination, Value,
 };
 
 /// A host function that calls itself through `cx.call`, counting its calls in the host; when
@@ -645,4 +646,139 @@ fn entries_check_their_realm_first() {
     assert!(agent.host().calls.is_empty());
     assert_eq!(agent.heap_bytes().unwrap(), before);
     assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// A host function that records its arguments and whether it got a new target, and answers its
+/// `this`.
+fn receive(cx: &mut Cx<'_, TestHost>, call: HostCall<'_>) -> Completion<Value> {
+    let entry = format!(
+        "args {:?} new_target {:?}",
+        call.args,
+        call.new_target.map(|target| target == call.callee)
+    );
+    cx.host_mut().calls.push(entry);
+    Ok(call.this)
+}
+
+/// HOST-103 (`#sec-built-in-function-objects-call-thisargument-argumentslist`): a host function
+/// called from script as `o.f(1, 2)` receives `this` = `o`, the arguments `[1, 2]` and
+/// `new_target` `None`, and its `Ok(v)` is the call's value.
+#[test]
+fn host_103_host_function_receives_this_and_arguments() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    define_function(&mut agent, &realm, "receive", 2, receive, false);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var o = { f: receive }; o.f(1, 2) === o;"
+        ),
+        Shown::Normal("true".to_string())
+    );
+    assert_eq!(
+        agent.host().calls,
+        ["args [Number(1.0), Number(2.0)] new_target None"]
+    );
+}
+
+/// HOST-104 (`#sec-built-in-function-objects-construct-argumentslist-newtarget`): a host
+/// function made with `constructor: true` and called as `new F()` receives `new_target`
+/// `Some(F)`; one made with `constructor: false` makes `new G()` throw a `TypeError` without
+/// being called.
+#[test]
+fn host_104_new_target_and_non_constructors() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    define_function(&mut agent, &realm, "F", 0, record_call, true);
+    define_function(&mut agent, &realm, "G", 0, record_call, false);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "typeof new F(7);"),
+        Shown::Normal("\"object\"".to_string())
+    );
+    assert_eq!(agent.host().calls.len(), 1);
+    assert!(
+        agent.host().calls[0].contains("args [Number(7.0)] new_target true"),
+        "{:?}",
+        agent.host().calls
+    );
+    assert_eq!(
+        eval_text(&mut agent, &realm, "new G();"),
+        Shown::Throw("TypeError".to_string())
+    );
+    assert_eq!(agent.host().calls.len(), 1, "G was called");
+}
+
+/// A host function that throws its first argument.
+fn throw_it(_cx: &mut Cx<'_, TestHost>, call: HostCall<'_>) -> Completion<Value> {
+    Err(Abrupt::Throw(
+        call.args.first().copied().unwrap_or(Value::Undefined),
+    ))
+}
+
+/// HOST-105 (decision 14): a host function that returns `Err(Abrupt::Throw(v))` makes the
+/// calling script's `catch (e)` receive `e === v`.
+#[test]
+fn host_105_host_throw_reaches_the_script_catch() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    define_function(&mut agent, &realm, "throwIt", 1, throw_it, false);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var o = {}; var same; try { throwIt(o); } catch (e) { same = e === o; } \
+             var s; try { throwIt(\"s\"); } catch (e) { s = e; } same + s;"
+        ),
+        Shown::Normal("\"trues\"".to_string())
+    );
+    assert_eq!(
+        eval_text(&mut agent, &realm, "throwIt(3);"),
+        Shown::Throw("3".to_string())
+    );
+}
+
+thread_local! {
+    /// The realm `evaluate_inner` parses in.
+    static INNER_REALM: std::cell::Cell<Option<swell::RealmRef>> = const { std::cell::Cell::new(None) };
+}
+
+/// A host function that parses and evaluates a second script through `cx` and answers its
+/// completion value.
+fn evaluate_inner(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    let realm = INNER_REALM.with(std::cell::Cell::get).unwrap();
+    let source = "var inner = 41; function made() { return inner + 1; } inner;";
+    let Parsed::Parsed(script) = cx.parse_script(realm, Source::Utf8(source), None).unwrap() else {
+        panic!("the inner script did not parse");
+    };
+    cx.evaluate_script(script).unwrap()
+}
+
+/// HOST-107 (`html:clean-up-after-running-script`): a host function that evaluates a second
+/// parsed script through `cx.evaluate_script` gets that script's completion value, and the
+/// outer script then continues with the bindings the inner one created.
+#[test]
+fn host_107_cx_evaluate_script_returns_its_completion_value() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let realm_ref = agent
+        .with_cx(&realm, |cx| cx.realm_ref(&realm).unwrap())
+        .unwrap();
+    INNER_REALM.with(|cell| cell.set(Some(realm_ref)));
+    define_function(
+        &mut agent,
+        &realm,
+        "evaluateInner",
+        0,
+        evaluate_inner,
+        false,
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var got = evaluateInner(); got + \",\" + inner + \",\" + made();"
+        ),
+        Shown::Normal("\"41,41,42\"".to_string())
+    );
 }

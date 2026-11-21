@@ -27,6 +27,39 @@ pub struct Limits {
     pub bigint_bits: u64,
 }
 
+/// The Rust stack, in bytes, one re-entry into the interpreter may take: the frames from a
+/// builtin's or a host function's call into a function, or from an instruction's call of a
+/// getter, through [[Call]] and the run loop to the next such call (`interp/mod.rs`). Measured
+/// on x86_64 in the test build without incremental compilation and without a compiler cache, as
+/// the forge's gate builds, with the script of `min_stack_bytes_is_enough` (`tests/budgets.rs`):
+/// the smallest thread stack it ends on is 25,512,840 bytes at `reentry_depth` 1,000 and
+/// 5,212,717 at 200, 25,375 bytes per re-entry; this is that plus a fifth, for the frames of
+/// another compiler version.
+const STACK_BYTES_PER_REENTRY: usize = 30 * 1024;
+
+/// The Rust stack, in bytes, an agent takes besides its re-entries and its parser: the host's
+/// entry point and the outermost run loop, and the thread's own start. The measurement above
+/// leaves nothing for it (the parser's stated need covers it with room), so it is a margin.
+const STACK_BYTES_FIXED: usize = 64 * 1024;
+
+impl Limits {
+    /// The Rust stack, in bytes, a thread must have for an agent with these limits (decision 2):
+    /// the parser's need at `parser_nesting` (`swell_syntax::ParseOptions::stack_bytes`), which
+    /// a host function may reach at the deepest re-entry through `Cx::parse_script`, plus
+    /// `reentry_depth + 1` times the stack one re-entry takes (the outermost run and every
+    /// re-entry), plus a fixed part. HOST-17.
+    pub const fn min_stack_bytes(&self) -> usize {
+        let parser = swell_syntax::ParseOptions {
+            max_nesting: self.parser_nesting,
+        }
+        .stack_bytes();
+        let runs = (self.reentry_depth as usize).saturating_add(1);
+        STACK_BYTES_FIXED
+            .saturating_add(parser)
+            .saturating_add(runs.saturating_mul(STACK_BYTES_PER_REENTRY))
+    }
+}
+
 /// The two seeds of an agent (decision 3), and the only randomness the engine has.
 /// `Agent::new` is the only function of the interface that takes them (HOST-146).
 #[derive(Clone, Copy)]

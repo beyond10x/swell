@@ -2,8 +2,10 @@
 //! ECMA-262 9.6, `#sec-agents`): one engine instance with its heap, its host value, its limits
 //! and seeds, its interrupt handle and its state; how it is created, the reads that run no code,
 //! call no hook and spend no step, and the entry points of `story:object-model-and-realms`:
-//! `create_realm`, `global_object`, `realm_host_defined`, `call` and `construct`.
-//! Written by `story:heap-values-and-host-surface` and `story:object-model-and-realms`.
+//! `create_realm`, `global_object`, `realm_host_defined`, `call` and `construct`, and of
+//! `story:interpreter-and-script-entry-points` (decision 8): `parse_script`, `evaluate_script`,
+//! `script_host_defined` and `last_entry_steps`. Written by `story:heap-values-and-host-surface`,
+//! `story:object-model-and-realms` and `story:interpreter-and-script-entry-points`.
 //!
 //! An agent is created, run and dropped on one thread and is not `Send` (decision 1): its roots
 //! share an `Rc`'d release queue. Every entry point takes `&mut self`, so code running inside
@@ -17,7 +19,7 @@
 //! function charges one and counts against `reentry_depth` (`object/builtin_function.rs`).
 //!
 //! Root site of the collector: [`trace_roots`] reports the values handed to host code in the
-//! running `with_cx`, host function and hook scopes.
+//! running `with_cx`, host function and hook scopes, and the scripts handed out as `ScriptRef`s.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -27,15 +29,17 @@ use super::hooks::HostDefined;
 use super::interrupt::InterruptHandle;
 use super::limits::{CreateError, Limits, Seeds};
 use super::outcome::{
-    Abrupt, CollectReport, Completion, HostError, Outcome, Termination, ValueKind,
+    Abrupt, CollectReport, Completion, HostError, Outcome, Parsed, Termination, ValueKind,
 };
-use super::{ErrorKind, GlobalSetup, Host};
+use super::{ErrorKind, GlobalSetup, Host, Source};
 use crate::heap::Heap;
 use crate::heap::arena::Handle;
-use crate::heap::collect::{self, Mark, Stale};
+use crate::heap::collect::{self, Item, Mark, Stale};
+use crate::interp::Interp;
 use crate::object::builtin_function::Activation;
 use crate::realm::WellKnown;
-use crate::value::{Realm, Root, Value};
+use crate::script::{ParseAnswer, parse_termination};
+use crate::value::{Realm, Root, Script, Value};
 
 /// How many agents this process has created; the next agent's key is one more. A key is never
 /// 0, and never used twice in a process.
@@ -88,6 +92,14 @@ pub struct Agent<H: Host> {
     pub(crate) entry_realm: Option<Handle>,
     /// The well-known symbols, held weakly (`realm/mod.rs`).
     pub(crate) symbols: Option<WellKnown>,
+    /// The frame stack and the running loop (`interp/mod.rs`).
+    pub(crate) interp: Interp,
+    /// The script records `Cx::parse_script` handed out as `ScriptRef`s, held until the
+    /// outermost entry ends.
+    pub(crate) scoped_scripts: Vec<Handle>,
+    /// A run ended in `Terminated(MemoryBudget)`: the next safe point collects, so that what
+    /// that run left unreachable does not hold the budget the next entry needs (HOST-70).
+    pub(crate) collect_pending: bool,
 }
 
 impl<H: Host> Agent<H> {
@@ -110,6 +122,9 @@ impl<H: Host> Agent<H> {
             credit: Rc::new(Cell::new(0)),
             entry_realm: None,
             symbols: None,
+            interp: Interp::default(),
+            scoped_scripts: Vec::new(),
+            collect_pending: false,
         })
     }
 
@@ -332,11 +347,92 @@ impl<H: Host> Agent<H> {
         outcome
     }
 
-    /// After an outermost entry: the next one runs afresh unless the agent is faulted.
-    fn end_entry(&mut self) {
+    /// After an outermost entry: the next one runs afresh unless the agent is faulted, and the
+    /// scripts handed out as `ScriptRef`s in it are no longer held.
+    pub(crate) fn end_entry(&mut self) {
+        self.scoped_scripts.clear();
         if self.state == AgentState::Alive {
             self.termination = None;
         }
+    }
+
+    /// ParseScript (`#sec-parse-script`, decision 8) of `source` in `realm`, whose
+    /// [[HostDefined]] is `host_defined`: a `Script`, or the parse errors as `SyntaxError`
+    /// objects of `realm` (`script.rs`). It runs no code, calls no hook, spends no step and
+    /// reads no interrupt; it is an outermost entry that spends none, so `last_entry_steps()`
+    /// then reads 0. Over the memory budget it answers `Terminated(MemoryBudget)`. `realm` is
+    /// checked first. A safe point.
+    pub fn parse_script(
+        &mut self,
+        realm: &Realm,
+        source: Source<'_>,
+        host_defined: Option<HostDefined>,
+    ) -> Result<Parsed<Script>, HostError> {
+        self.alive()?;
+        let realm = self.live_realm(realm)?;
+        self.termination = None;
+        self.steps = 0;
+        if self.safe_point().is_err() {
+            self.fault();
+            return Ok(Parsed::Terminated(Termination::EngineFault));
+        }
+        let answer = self.in_entry_realm(realm, |agent| {
+            agent.parse_script_in(realm, source, host_defined)
+        });
+        let parsed = match answer {
+            Ok(ParseAnswer::Script(script)) => {
+                Parsed::Parsed(Script(self.heap.roots.add_script(script)))
+            }
+            Ok(ParseAnswer::Errors(errors)) => Parsed::Errors(
+                errors
+                    .into_iter()
+                    .map(|error| self.heap.roots.add(error))
+                    .collect(),
+            ),
+            Err(abrupt) => {
+                let termination = parse_termination(abrupt);
+                if termination == Termination::EngineFault {
+                    self.fault();
+                }
+                Parsed::Terminated(termination)
+            }
+        };
+        self.end_entry();
+        Ok(parsed)
+    }
+
+    /// ScriptEvaluation (`#sec-runtime-semantics-scriptevaluation`, decision 8) of `script`, as
+    /// an outermost entry whose current realm is the script's [[Realm]]: its completion value,
+    /// or what it threw, as a root. A script may be evaluated again. A safe point.
+    pub fn evaluate_script(&mut self, script: &Script) -> Result<Outcome<Root>, HostError> {
+        self.alive()?;
+        let handle = self.heap.roots.get_script(&script.0)?;
+        let realm = self
+            .heap
+            .scripts
+            .get(handle)
+            .map_err(|_| HostError::StaleHandle)?
+            .realm
+            .ok_or(HostError::StaleHandle)?;
+        Ok(self.outermost_entry(realm, |agent| agent.script_evaluation(handle)))
+    }
+
+    /// The [[HostDefined]] of `script`: the `Rc` given to `parse_script`.
+    pub fn script_host_defined(&self, script: &Script) -> Result<Option<HostDefined>, HostError> {
+        self.alive()?;
+        let handle = self.heap.roots.get_script(&script.0)?;
+        self.heap
+            .scripts
+            .get(handle)
+            .map_err(|_| HostError::StaleHandle)?;
+        Ok(self.script_record_host_defined(handle))
+    }
+
+    /// The steps the last outermost entry spent, or the running one so far (decision 13). Never
+    /// more than `steps_per_entry`: the step that would pass it is not spent.
+    pub fn last_entry_steps(&self) -> Result<u64, HostError> {
+        self.alive()?;
+        Ok(self.steps)
     }
 
     /// `Err(Faulted)` for a faulted agent.
@@ -371,18 +467,21 @@ impl<H: Host> Agent<H> {
         Ok(())
     }
 
-    /// The one function that charges steps (decision 2): `steps` more to the running outermost
-    /// entry; past `steps_per_entry` the run ends in `Terminated(StepBudget)`, and a set
-    /// interrupt flag ends it in `Terminated(Interrupted)` and is cleared.
+    /// The one function that charges builtins' steps (decision 2), beside the interpreter's own
+    /// step per instruction (`interp/budget.rs`): `steps` more to the running outermost entry. A
+    /// set interrupt flag ends the run in `Terminated(Interrupted)` and is cleared; steps that
+    /// would pass `steps_per_entry` are not spent, and the run ends in
+    /// `Terminated(StepBudget)`, so the counter never reads more than the budget.
     pub(crate) fn charge_steps(&mut self, steps: u64) -> Completion<()> {
-        self.steps = self.steps.saturating_add(steps);
         if self.interrupt.is_set() {
             self.interrupt.clear();
             return Err(self.terminate(Termination::Interrupted));
         }
-        if self.steps > self.limits.steps_per_entry {
+        let spent = self.steps.saturating_add(steps);
+        if spent > self.limits.steps_per_entry {
             return Err(self.terminate(Termination::StepBudget));
         }
+        self.steps = spent;
         Ok(())
     }
 
@@ -390,6 +489,9 @@ impl<H: Host> Agent<H> {
     pub(crate) fn terminate(&mut self, termination: Termination) -> Abrupt {
         if termination == Termination::EngineFault {
             self.state = AgentState::Faulted;
+        }
+        if termination == Termination::MemoryBudget {
+            self.collect_pending = true;
         }
         self.termination = Some(termination);
         Abrupt::Terminated(termination)
@@ -410,11 +512,16 @@ impl<H: Host> Agent<H> {
     }
 
     /// A safe point (decision 4): release the dropped roots, and collect when the bytes
-    /// allocated since the last collection passed the threshold, or always with the feature
-    /// `collect-every-safe-point`.
+    /// allocated since the last collection passed the threshold, when the last run ended in
+    /// `Terminated(MemoryBudget)`, or always with the feature `collect-every-safe-point`.
+    /// Each trigger counts bytes or follows an outcome, never time.
     pub(crate) fn safe_point(&mut self) -> Result<(), Stale> {
         self.heap.roots.drain();
-        if cfg!(feature = "collect-every-safe-point") || self.heap.collection_due() {
+        if cfg!(feature = "collect-every-safe-point")
+            || self.collect_pending
+            || self.heap.collection_due()
+        {
+            self.collect_pending = false;
             self.collect_now()?;
         }
         Ok(())
@@ -437,10 +544,14 @@ impl<H: Host> Agent<H> {
     }
 }
 
-/// Root site of the collector: the values handed to host code in the running scopes.
+/// Root site of the collector: the values handed to host code in the running scopes, and the
+/// scripts handed out as `ScriptRef`s in the running outermost entry.
 pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
     mark.count("host/agent.rs trace_roots");
     for &value in &agent.scope {
         mark.value(value);
+    }
+    for &script in &agent.scoped_scripts {
+        mark.push(Item::Script(script));
     }
 }

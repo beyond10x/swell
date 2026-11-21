@@ -5,10 +5,12 @@
 mod support;
 
 use std::thread;
+use std::time::Duration;
 
+use support::script::{Outcome as Shown, define_function, describe, eval_text, parse};
 use swell::{
-    AgentState, Brand, HostData, HostError, HostObjectSpec, InterruptHandle, ObjectRef, Outcome,
-    Termination, Tracer, Value,
+    AgentState, Brand, Completion, Cx, HostCall, HostData, HostError, HostObjectSpec,
+    InterruptHandle, ObjectRef, Outcome, Termination, Tracer, Value,
 };
 
 fn send_and_sync<T: Send + Sync + 'static>(_: &T) {}
@@ -107,4 +109,128 @@ fn host_95_interrupt_on_a_faulted_agent_returns() {
         agent.with_cx(&realm, |_| ()),
         Err(HostError::Faulted)
     ));
+}
+
+/// HOST-90: `interrupt()` called from another thread while the script `while (true) {}` runs
+/// with a step budget of 2^62 makes `evaluate_script` answer `Terminated(Interrupted)`.
+#[test]
+fn host_90_interrupt_from_another_thread_ends_the_loop() {
+    let mut limits = support::host::limits();
+    limits.steps_per_entry = 1 << 62;
+    let mut agent = support::host::agent_with(limits).unwrap();
+    let realm = support::host::realm(&mut agent);
+    let script = parse(&mut agent, &realm, "while (true) {}");
+    let handle = agent.interrupt_handle();
+    let interrupter = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(50));
+        handle.interrupt();
+    });
+    let outcome = agent.evaluate_script(&script).unwrap();
+    interrupter.join().unwrap();
+    assert!(matches!(
+        outcome,
+        Outcome::Terminated(Termination::Interrupted)
+    ));
+    assert!(agent.last_entry_steps().unwrap() > 0);
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// HOST-91: after an entry answered `Terminated(Interrupted)`, `is_set()` reads false and the
+/// next script `1` answers `Normal(1)`.
+#[test]
+fn host_91_interrupted_entry_clears_the_flag() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    let handle = agent.interrupt_handle();
+    let script = parse(&mut agent, &realm, "while (true) {}");
+    handle.interrupt();
+    assert!(matches!(
+        agent.evaluate_script(&script),
+        Ok(Outcome::Terminated(Termination::Interrupted))
+    ));
+    assert!(!handle.is_set());
+    assert_eq!(
+        eval_text(&mut agent, &realm, "1;"),
+        Shown::Normal("1".to_string())
+    );
+}
+
+/// HOST-92: `interrupt()` called while no entry runs makes the next entry answer
+/// `Terminated(Interrupted)` with `last_entry_steps()` 0.
+#[test]
+fn host_92_interrupt_before_an_entry_ends_it_at_zero_steps() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    let script = parse(&mut agent, &realm, "var ran = 1;");
+    agent.interrupt_handle().interrupt();
+    assert!(matches!(
+        agent.evaluate_script(&script),
+        Ok(Outcome::Terminated(Termination::Interrupted))
+    ));
+    assert_eq!(agent.last_entry_steps(), Ok(0));
+    assert_eq!(
+        eval_text(&mut agent, &realm, "typeof ran;"),
+        Shown::Normal("\"undefined\"".to_string())
+    );
+}
+
+/// HOST-93: `clear()` after `interrupt()` and before the next entry lets that entry run to
+/// `Normal`.
+#[test]
+fn host_93_clear_before_the_entry_lets_it_run() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    let script = parse(&mut agent, &realm, "var i = 0; while (i < 100) i++; i;");
+    let handle = agent.interrupt_handle();
+    handle.interrupt();
+    handle.clear();
+    let outcome = agent.evaluate_script(&script).unwrap();
+    assert_eq!(
+        describe(&mut agent, &realm, outcome),
+        Shown::Normal("100".to_string())
+    );
+}
+
+thread_local! {
+    /// The handle `interrupt_now` sets.
+    static HANDLE: std::cell::Cell<Option<InterruptHandle>> = const { std::cell::Cell::new(None) };
+}
+
+/// A host function that sets its agent's interrupt flag and returns `1`, counting its calls.
+fn interrupt_now(
+    cx: &mut Cx<'_, support::host::TestHost>,
+    _call: HostCall<'_>,
+) -> Completion<Value> {
+    cx.host_mut().count += 1;
+    HANDLE.with(|slot| {
+        if let Some(handle) = slot.take() {
+            handle.interrupt();
+        }
+    });
+    Ok(Value::Number(1.0))
+}
+
+/// HOST-96: an interrupt set while a host function runs ends the run with
+/// `Terminated(Interrupted)` at the first check after the host function returns to the engine:
+/// the statement after the call does not run, and the host function's value is not used.
+#[test]
+fn host_96_interrupt_set_in_a_host_function_ends_the_run_after_it() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    define_function(&mut agent, &realm, "interruptNow", 0, interrupt_now, false);
+    HANDLE.with(|slot| slot.set(Some(agent.interrupt_handle())));
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var after = 0; var got = interruptNow(); after = 1;"
+        ),
+        Shown::Terminated(Termination::Interrupted)
+    );
+    assert_eq!(agent.host().count, 1);
+    assert!(!agent.interrupt_handle().is_set());
+    assert_eq!(
+        eval_text(&mut agent, &realm, "after + \",\" + got;"),
+        Shown::Normal("\"0,undefined\"".to_string())
+    );
 }

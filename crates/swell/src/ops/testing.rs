@@ -24,13 +24,6 @@ impl<H: Host> Agent<H> {
     }
 
     /// IsConstructor (`#sec-isconstructor`).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the new operator: story:interpreter-and-script-entry-points"
-        )
-    )]
     pub(crate) fn is_constructor(&mut self, value: Value) -> Completion<bool> {
         match value {
             Value::Object(object) => self.has_construct(object),
@@ -102,13 +95,6 @@ impl<H: Host> Agent<H> {
 
     /// IsLooselyEqual (`#sec-islooselyequal`), as a loop: each turn converts one side, so it
     /// ends within three turns.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the equality operators: story:interpreter-and-script-entry-points"
-        )
-    )]
     pub(crate) fn is_loosely_equal(&mut self, x: Value, y: Value) -> Completion<bool> {
         let (mut x, mut y) = (x, y);
         loop {
@@ -152,13 +138,6 @@ impl<H: Host> Agent<H> {
     }
 
     /// IsLessThan (`#sec-islessthan`): `None` for undefined (a NaN operand).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the relational operators: story:interpreter-and-script-entry-points"
-        )
-    )]
     pub(crate) fn is_less_than(
         &mut self,
         x: Value,
