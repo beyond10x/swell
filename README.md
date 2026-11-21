@@ -2,8 +2,9 @@
 
 **An ECMAScript (JavaScript) engine written from scratch in Rust.**
 
-swell runs JavaScript. It parses scripts and modules, compiles them to bytecode and interprets
-them. It is written to be embedded by [surf](https://github.com/beyond10x/surf), a browser built
+swell runs JavaScript. It parses a script, compiles it to bytecode and interprets it. Modules
+are the eleventh of its nineteen delivery slices and are not parsed yet. It is written to be
+embedded by [surf](https://github.com/beyond10x/surf), a browser built
 from scratch. It is a project of its own: any program that runs JavaScript it does not trust
 can use it.
 
