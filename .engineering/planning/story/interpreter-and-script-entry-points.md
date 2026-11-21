@@ -28,7 +28,7 @@ scope:
   path: crates/swell/tests/language.rs
 - confidence: cited
   path: crates/swell/tests/support/script.rs
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
@@ -126,6 +126,22 @@ design governs.
   `;`. Automatic semicolon insertion is slice 2's, and `swell-syntax` refuses a source that
   needs it (found by the unit of `story:syntax-es5-and-strict`). The requirement asks for the
   nesting, not for the missing semicolon.
+- `Limits::min_stack_bytes()` (this story) includes the parser's stated need,
+  `swell_syntax::ParseOptions { max_nesting: parser_nesting, .. }.stack_bytes()` (32,768 bytes
+  plus 224 per level; `docs/plan/slice-01-wave-3.md`), plus the stack the re-entries take,
+  which this story measures in a build without incremental compilation and without a compiler
+  cache (frames there are up to 20 % larger than in the pool's default build; a test that
+  passes only with the smaller frames aborted the first run of the gate on the forge). A test
+  of a stack bound runs its subject in a child process on a thread of the stated size, so that
+  an overflow fails one test and does not abort the test binary.
+- The bytecode this story runs is the contract documented in `crates/compiler/src/bytecode.rs`
+  (`story:bytecode-compiler`): the completion value register, initially `undefined`; `Closure`
+  with an environment for a function expression's own name; the `items` and `envs` a handler
+  restores, and that an empty range covers nothing; the tag values of a completion that leaves
+  a `finally` block; `ForInStart` giving an empty enumerator for `null` and `undefined`; a
+  function environment only when `captured` is not empty. `CompileError` has two variants:
+  `TooMany` for a bound of the format and `Tree` for a tree `parse_script` cannot produce; both
+  become a defined answer of the entry point, never a panic.
 - The counts of Acceptance are measured on the base of the wave: with `HOST-160` the list has
   160 lines.
 
