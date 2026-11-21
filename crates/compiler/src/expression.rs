@@ -6,7 +6,8 @@
 //! for a name of the global environment [`Instruction::ResolveGlobal`] makes the Reference Record
 //! first, for a property the base value (and the key expression) are evaluated first; a binding
 //! of a function or a `catch` clause cannot be unresolvable, so it needs no instruction before the
-//! value. A binary operator evaluates its left operand, then its right one, then applies itself
+//! value; a name looked up at run time is resolved first by [`Instruction::ResolveName`]. A
+//! binary operator evaluates its left operand, then its right one, then applies itself
 //! (`#sec-evaluatestringornumericbinaryexpression`); `&&`, `||`, `??`, `?:` and the logical
 //! assignments evaluate an operand only when it decides the result.
 //!
@@ -45,7 +46,7 @@ impl Target {
     /// How many operand stack entries the evaluated reference takes.
     pub(crate) fn reference_items(&self) -> u32 {
         match self {
-            Target::Binding(Binding::Global(_)) | Target::Member { .. } => 1,
+            Target::Binding(Binding::Global(_) | Binding::Dynamic(_)) | Target::Member { .. } => 1,
             Target::Binding(_) => 0,
             Target::Index { .. } => 2,
         }
@@ -130,6 +131,12 @@ impl<'a> Compiler<'a> {
                     span,
                 )]
             }
+            Target::Binding(Binding::Dynamic(name)) => {
+                vec![Task::Emit(
+                    Instruction::ResolveName(self.string(name)?),
+                    span,
+                )]
+            }
             Target::Binding(_) => Vec::new(),
             Target::Member { object, .. } => vec![Task::Expr(*object)],
             Target::Index { object, key } => {
@@ -169,6 +176,7 @@ impl<'a> Compiler<'a> {
                 }
             }
             Binding::Global(name) => Instruction::GetGlobalRef(self.string(name)?),
+            Binding::Dynamic(name) => Instruction::GetNameRef(self.string(name)?),
         })
     }
 
@@ -184,6 +192,7 @@ impl<'a> Compiler<'a> {
                 Instruction::AssignImmutable(self.string(name)?)
             }
             Target::Binding(Binding::Global(name)) => Instruction::PutGlobalRef(self.string(name)?),
+            Target::Binding(Binding::Dynamic(name)) => Instruction::PutNameRef(self.string(name)?),
             Target::Member { name, .. } => Instruction::PutNamed(*name),
             Target::Index { .. } => Instruction::PutIndex,
         })
@@ -205,6 +214,7 @@ impl<'a> Compiler<'a> {
             Expr::Identifier(_) => {
                 let instruction = match self.binding(Site::Expr(id))? {
                     Binding::Global(name) => Instruction::GetGlobal(self.string(&name)?),
+                    Binding::Dynamic(name) => Instruction::GetName(self.string(&name)?),
                     b => self.load(&b)?,
                 };
                 t.push(emit(instruction));
@@ -447,9 +457,9 @@ impl<'a> Compiler<'a> {
                 t.push(emit(Instruction::GetIndex));
             }
             // `#sec-function-calls-runtime-semantics-evaluation`: the function and its this value
-            // (the base of a property reference, otherwise `undefined`: a binding of slice 1 has
-            // no base object), the arguments in order, then EvaluateCall. `?.(...)` tests the
-            // function value, with its this value under it.
+            // (the base of a property reference, the binding object of a `with` statement for a
+            // name looked up by name, otherwise `undefined`), the arguments in order, then
+            // EvaluateCall. `?.(...)` tests the function value, with its this value under it.
             Expr::Call { callee, arguments } | Expr::OptionalCall { callee, arguments } => {
                 self.callee(*callee, span, &mut t)?;
                 if matches!(node.expr, Expr::OptionalCall { .. }) {
@@ -527,6 +537,19 @@ impl<'a> Compiler<'a> {
                 t.push(Task::Expr(*index));
                 t.push(Task::Emit(Instruction::GetIndex, span));
             }
+            // A name looked up by name gives its record's WithBaseObject as this value.
+            Expr::Identifier(_) if chain.is_none() => match self.binding(Site::Expr(callee))? {
+                Binding::Dynamic(name) => {
+                    t.push(Task::Emit(
+                        Instruction::GetNameForCall(self.string(&name)?),
+                        span,
+                    ));
+                }
+                _ => {
+                    t.push(Task::Emit(Instruction::Undefined, span));
+                    t.push(Task::Expr(callee));
+                }
+            },
             _ => {
                 t.push(Task::Emit(Instruction::Undefined, span));
                 t.push(Task::Expr(callee));
@@ -600,6 +623,9 @@ impl<'a> Compiler<'a> {
                     Binding::Global(name) => {
                         t.push(emit(Instruction::DeleteGlobal(self.string(&name)?)));
                     }
+                    Binding::Dynamic(name) => {
+                        t.push(emit(Instruction::DeleteName(self.string(&name)?)));
+                    }
                     _ => t.push(emit(Instruction::False)),
                 },
                 Expr::Member { object, property } => {
@@ -635,9 +661,12 @@ impl<'a> Compiler<'a> {
             }
             // `#sec-typeof-operator-runtime-semantics-evaluation`: an unresolvable reference
             // gives "undefined".
-            UnaryOp::Typeof => match (&operand_node.expr, self.global_name(operand)?) {
-                (Expr::Identifier(_), Some(name)) => {
+            UnaryOp::Typeof => match self.name_binding(operand)? {
+                Some(Binding::Global(name)) => {
                     t.push(emit(Instruction::TypeofGlobal(self.string(&name)?)));
+                }
+                Some(Binding::Dynamic(name)) => {
+                    t.push(emit(Instruction::TypeofName(self.string(&name)?)));
                 }
                 _ => {
                     t.push(Task::Expr(operand));
@@ -664,13 +693,10 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    /// The name, when the expression is an identifier resolved in the global environment.
-    fn global_name(&self, e: ExprId) -> Result<Option<String>, CompileError> {
+    /// The binding of the expression, when it is an identifier.
+    fn name_binding(&self, e: ExprId) -> Result<Option<Binding>, CompileError> {
         match self.ast.expr(e).map(|n| &n.expr) {
-            Some(Expr::Identifier(_)) => match self.binding(Site::Expr(e))? {
-                Binding::Global(name) => Ok(Some(name)),
-                _ => Ok(None),
-            },
+            Some(Expr::Identifier(_)) => Ok(Some(self.binding(Site::Expr(e))?)),
             _ => Ok(None),
         }
     }

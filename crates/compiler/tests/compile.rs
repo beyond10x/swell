@@ -413,6 +413,16 @@ fn deepest_accepted_tree_compiles_on_a_256_kib_stack() {
         }),
         ("optional chain", |n| format!("x = a{}();", "?.b".repeat(n))),
         ("coalesce chain", |n| format!("x = a{};", " ?? a".repeat(n))),
+        ("withs", |n| {
+            format!("{}x = arguments;", "with (o) ".repeat(n))
+        }),
+        ("functions in withs", |n| {
+            format!(
+                "{}x = arguments[0] + a;{}",
+                "function f(a) { with (a) { ".repeat(n),
+                " } }".repeat(n)
+            )
+        }),
         ("logical assignments", |n| {
             format!("{}0;", "a ??= ".repeat(n))
         }),
@@ -455,6 +465,72 @@ fn deepest_accepted_tree_compiles_on_a_256_kib_stack() {
     worker
         .join()
         .unwrap_or_else(|_| panic!("the compile on a 256 KiB stack failed"));
+}
+
+/// The instructions of `f` that read or write a binding, as text, in order.
+fn binding_instructions(code: &Code, f: &FunctionTemplate) -> Vec<String> {
+    f.instructions
+        .iter()
+        .filter_map(|i| match i {
+            Instruction::GetLocal(n) => Some(format!("local {n}")),
+            Instruction::GetEnv { hops, slot } => Some(format!("env {hops} {slot}")),
+            Instruction::GetName(k) => Some(format!("name {}", string(code, *k))),
+            Instruction::GetGlobal(k) => Some(format!("global {}", string(code, *k))),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `docs/design/engine.md`, decision 3, "Names": a reference with a `with` body between it and
+/// its binding is looked up by name, a function nested in the body included; the same binding
+/// read outside the body keeps its slot, now in the named function environment; a catch
+/// parameter declared inside the body and a parameter of a function nested in it keep their
+/// slots; code that no `with` reaches is compiled as before.
+#[test]
+fn with_bodies_look_up_by_name_and_everything_else_keeps_its_slot() {
+    let code = compile(
+        "function outer(o) { var a = 1; \
+           with (o) { a; try { throw 1; } catch (c) { c; } (function inner(p) { return p + a; }); } \
+           return a; } \
+         function plain(q) { var b = q; return b; }",
+    )
+    .unwrap();
+    let outer = function(&code, "outer").unwrap();
+    assert_eq!(
+        binding_instructions(&code, outer),
+        ["env 0 0", "name a", "local 0", "env 0 1"]
+    );
+    let names: Vec<String> = outer.captured.iter().map(|k| string(&code, *k)).collect();
+    assert_eq!(names, ["o", "a"]);
+    assert_eq!(outer.params, [Slot::Env(0)]);
+    let inner = function(&code, "inner").unwrap();
+    assert_eq!(binding_instructions(&code, inner), ["local 0", "name a"]);
+    let plain = function(&code, "plain").unwrap();
+    assert_eq!(binding_instructions(&code, plain), ["local 0", "local 1"]);
+    assert!(plain.captured.is_empty() && plain.arguments.is_none());
+}
+
+/// `#sec-functiondeclarationinstantiation`, steps 15 to 22: an arguments object only for a
+/// function whose own code references `arguments`; mapped in non-strict code, with every
+/// parameter in the function environment; unmapped in strict code, the parameters local.
+#[test]
+fn arguments_objects_are_made_where_the_code_references_them() {
+    let code = compile(
+        "function none(a) { return a; } \
+         function sloppy(a, a, b) { return arguments; } \
+         function strict(a) { \"use strict\"; return arguments; } \
+         function param(arguments) { return arguments; }",
+    )
+    .unwrap();
+    assert_eq!(function(&code, "none").unwrap().arguments, None);
+    assert_eq!(function(&code, "param").unwrap().arguments, None);
+    let sloppy = function(&code, "sloppy").unwrap();
+    let arguments = sloppy.arguments.unwrap();
+    assert!(arguments.mapped);
+    assert_eq!(sloppy.params, [Slot::Env(0), Slot::Env(0), Slot::Env(1)]);
+    let strict = function(&code, "strict").unwrap();
+    assert!(!strict.arguments.unwrap().mapped);
+    assert_eq!(strict.params, [Slot::Local(0)]);
 }
 
 #[test]

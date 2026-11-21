@@ -2,8 +2,8 @@
 //! and the bodies of scripts and functions with their directive prologues
 //! (`#sec-directive-prologues-and-the-use-strict-directive`).
 //!
-//! Every ES5 statement is parsed but `with` in non-strict code, which is refused (slice 2, with
-//! its run time), as are the declarations of later slices: a function declaration inside a
+//! Every ES5 statement is parsed, `with` in non-strict code included (slice 2); refused are the
+//! declarations of later slices: a function declaration inside a
 //! block, `let` and `const` (6), `class` (8), `async function` (10), `import` and `export` (11),
 //! and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
 //! `for (var a = 0 in o)` (18). Labelled statements and labelled `break` and `continue`
@@ -143,7 +143,7 @@ impl<'a> Parser<'a> {
                     if self.strict {
                         return self.fail_here(early::WITH_IN_STRICT);
                     }
-                    return self.refuse("with statement in non-strict code", 2);
+                    Parser::with_statement
                 }
                 Keyword::Switch => Parser::switch_statement,
                 Keyword::Throw => Parser::throw_statement,
@@ -513,6 +513,19 @@ impl<'a> Parser<'a> {
         let test = self.condition()?;
         self.eat(Punct::Semicolon)?;
         Ok(test)
+    }
+
+    /// `with ( Expression ) Statement` (`#sec-with-statement`) in non-strict code; in strict
+    /// code it is the early error of `#sec-with-statement-static-semantics-early-errors`. Its
+    /// `Statement` is no declaration, and no labelled function (IsLabelledFunction).
+    fn with_statement(&mut self) -> R<StmtId> {
+        self.enter()?;
+        let start = self.start();
+        let object = self.condition()?;
+        let body = self.statement(Place::Statement)?;
+        let s = self.make_stmt(Stmt::With { object, body }, start)?;
+        self.leave();
+        Ok(s)
     }
 
     fn while_statement(&mut self) -> R<StmtId> {

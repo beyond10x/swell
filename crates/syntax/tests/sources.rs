@@ -112,9 +112,23 @@ fn quoted(path: &Path, result: &str, word: &str) -> Result<String, String> {
         })
 }
 
+/// Whether a comment line `// sloppy-only` follows the header: the source is valid only as
+/// non-strict code (a `with` statement, `#sec-with-statement-static-semantics-early-errors`).
+fn sloppy_only(text: &str) -> bool {
+    text[hashbang_line(text).len()..]
+        .lines()
+        .skip(1)
+        .take_while(|line| line.starts_with("//"))
+        .any(|line| line.trim() == "// sloppy-only")
+}
+
+/// Every source under `valid/` parses as written and, with a `"use strict";` prologue, as
+/// strict code; a `// sloppy-only` source is instead an early error (not a refusal) in strict
+/// code.
 #[test]
 fn valid_sources_parse_in_both_modes() {
     let files = sources("valid").unwrap();
+    let mut sloppy = 0;
     for (path, text) in &files {
         let (_, result) = header(path, text).unwrap();
         assert_eq!(result, "parses", "{}", path.display());
@@ -127,6 +141,20 @@ fn valid_sources_parse_in_both_modes() {
             Err(errors) => panic!("{} as written: {:?}", path.display(), errors),
         }
         let strict = with_use_strict(text);
+        if sloppy_only(text) {
+            sloppy += 1;
+            let errors = parse(&strict)
+                .err()
+                .unwrap_or_else(|| panic!("{}: parses as strict code", path.display()));
+            assert!(
+                errors
+                    .iter()
+                    .all(|e| message_kind(&e.message) == MessageKind::Grammar),
+                "{}: {errors:?}",
+                path.display()
+            );
+            continue;
+        }
         match parse(&strict) {
             Ok(script) => assert!(
                 script.strict,
@@ -136,7 +164,10 @@ fn valid_sources_parse_in_both_modes() {
             Err(errors) => panic!("{} with \"use strict\": {:?}", path.display(), errors),
         }
     }
-    println!("valid: {} file(s), each parsed in both modes", files.len());
+    println!(
+        "valid: {} file(s), each parsed in both modes but {sloppy} sloppy-only",
+        files.len()
+    );
 }
 
 #[test]
@@ -420,11 +451,12 @@ fn nested(kind: &str, n: usize) -> Option<String> {
         "optional_call" => format!("x = {}0{};", r("f?.("), r(")")),
         "coalesce" => format!("x = a{};", r(" ?? a")),
         "method" => format!("x = {}0{};", r("{m(){ return "), r("; }}")),
+        "with" => format!("{};", r("with (o) ")),
         _ => return None,
     })
 }
 
-const NESTING_KINDS: [&str; 35] = [
+const NESTING_KINDS: [&str; 36] = [
     "array",
     "paren",
     "block",
@@ -460,6 +492,7 @@ const NESTING_KINDS: [&str; 35] = [
     "optional_call",
     "coalesce",
     "method",
+    "with",
 ];
 
 /// Whether `n` nested `kind`s parse at `limit` (`Some(true)`), fail with the nesting error alone
@@ -602,17 +635,56 @@ fn use_strict_with_an_escape_is_not_a_directive() {
         let script = parse(text).unwrap_or_else(|e| panic!("{text:?}: {e:?}"));
         assert!(!script.strict, "{text:?} made the script strict");
     }
-    // The escaped form leaves the code non-strict, so `with` is the non-strict refusal.
-    let errors = parse("\"use\\x20strict\"; with (o) {}").err().unwrap();
-    assert_eq!(
-        messages(&errors),
-        vec!["with statement in non-strict code is not supported before slice 2".to_string()]
-    );
+    // The escaped form leaves the code non-strict, so `with` parses
+    // (`#sec-with-statement-static-semantics-early-errors` holds for strict code only).
+    let script = parse("\"use\\x20strict\"; with (o) {}")
+        .unwrap_or_else(|e| panic!("the escaped directive and with: {e:?}"));
+    assert!(!script.strict);
     let errors = parse("\"use strict\"; with (o) {}").err().unwrap();
     assert_eq!(
         messages(&errors),
         vec!["with statement in strict mode code".to_string()]
     );
+}
+
+/// `#sec-functiondeclarationinstantiation`, steps 15 to 18: a function whose own code references
+/// `arguments` needs the object, unless a parameter or a function it declares is named
+/// `arguments` (a `var` of that name does not stop it); a reference inside a nested function is
+/// that function's own. A body whose own code holds a `with` statement says so.
+#[test]
+fn scope_marks_arguments_objects_and_with_statements() {
+    let script = parse(
+        "function a() { arguments; } function b(arguments) { arguments; } \
+         function c() { function arguments() {} arguments; } \
+         function d() { var arguments; arguments; } \
+         function e() { return function () { return { arguments }; }; } \
+         function g() { with (o) { arguments; } } \
+         with (o) { x; }",
+    )
+    .unwrap();
+    let functions = script.ast.functions();
+    let named = |name: &str| {
+        functions
+            .iter()
+            .find(|f| f.name.as_ref().is_some_and(|n| n.name == name))
+            .unwrap_or_else(|| panic!("no function {name}"))
+    };
+    for (name, needs) in [
+        ("a", true),
+        ("b", false),
+        ("c", false),
+        ("arguments", false),
+        ("d", true),
+        ("e", false),
+        ("g", true),
+    ] {
+        assert_eq!(named(name).scope.arguments_object, needs, "{name}");
+    }
+    let inner = functions.iter().find(|f| f.name.is_none()).unwrap();
+    assert!(inner.scope.arguments_object);
+    assert!(script.scope.contains_with);
+    assert!(named("g").scope.contains_with);
+    assert!(!named("a").scope.contains_with);
 }
 
 #[test]

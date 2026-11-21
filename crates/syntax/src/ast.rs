@@ -348,6 +348,11 @@ pub enum Stmt {
         label: Name,
         body: StmtId,
     },
+    /// `with ( Expression ) Statement` (`#sec-with-statement`), in non-strict code only.
+    With {
+        object: ExprId,
+        body: StmtId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -382,6 +387,14 @@ pub struct Scope {
     /// The `IdentifierReference`s of the body itself (not of nested functions), each name once,
     /// in source order of its first reference.
     pub references: Vec<String>,
+    /// Whether a function needs an arguments object (`#sec-functiondeclarationinstantiation`,
+    /// steps 15 to 18; made only where its code can observe it, `docs/design/engine.md`,
+    /// decision 3): its own code references `arguments`, and neither a parameter nor a function
+    /// it declares is named `arguments`. Always false for the script.
+    pub arguments_object: bool,
+    /// Whether the body's own code (not a nested function's) holds a `with` statement, whose
+    /// body's references are looked up by name (decision 3, "Names").
+    pub contains_with: bool,
 }
 
 /// A `FunctionDeclaration`, `FunctionExpression`, or an accessor or method of an object literal.
@@ -658,6 +671,10 @@ impl Stmt {
                 }
             }
             Stmt::FunctionDeclaration(id) => f(Child::Function(*id)),
+            Stmt::With { object, body } => {
+                f(Child::Expr(*object));
+                f(Child::Stmt(*body));
+            }
         }
     }
 }

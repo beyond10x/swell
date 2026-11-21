@@ -10,13 +10,14 @@
 //! function <i> declaration|expression|getter|setter "<name>" length <n> locals <n>[ strict][ self]
 //!   params local <n>|env <n>, ...         when there are parameters
 //!   captured "<name>" ...                 the function environment's slots, when there are any
+//!   arguments mapped|unmapped local <n>|env <n>   the arguments object a call makes, if any
 //!   ...
 //! ```
 //!
 //! A string constant is written in double quotes, with `"`, `\` and every code unit outside
 //! printable ASCII escaped (`\u{XXXX}`); a Number by `Number::toString`. Instruction and jump
 //! indices have four digits at least. The position `0:0` is the end of a script, which has no
-//! source position.
+//! source position. `PushNamedEnv <t>` is followed by the names of the slots of its table entry.
 
 use std::fmt::Write;
 
@@ -52,6 +53,7 @@ pub fn disassemble(code: &Code) -> String {
     body(
         &mut out,
         code,
+        &code.scopes,
         &code.instructions,
         &code.positions,
         &code.handlers,
@@ -79,14 +81,7 @@ pub fn disassemble(code: &Code) -> String {
         }
         out.push('\n');
         if !f.params.is_empty() {
-            let params: Vec<String> = f
-                .params
-                .iter()
-                .map(|p| match p {
-                    Slot::Local(n) => format!("local {n}"),
-                    Slot::Env(n) => format!("env {n}"),
-                })
-                .collect();
+            let params: Vec<String> = f.params.iter().map(|p| slot(*p)).collect();
             let _ = writeln!(out, "  params {}", params.join(", "));
         }
         if !f.captured.is_empty() {
@@ -97,14 +92,38 @@ pub fn disassemble(code: &Code) -> String {
             }
             out.push('\n');
         }
-        body(&mut out, code, &f.instructions, &f.positions, &f.handlers);
+        if let Some(arguments) = f.arguments {
+            let kind = if arguments.mapped {
+                "mapped"
+            } else {
+                "unmapped"
+            };
+            let _ = writeln!(out, "  arguments {kind} {}", slot(arguments.slot));
+        }
+        body(
+            &mut out,
+            code,
+            &f.scopes,
+            &f.instructions,
+            &f.positions,
+            &f.handlers,
+        );
     }
     out
+}
+
+/// Where a binding lives.
+fn slot(slot: Slot) -> String {
+    match slot {
+        Slot::Local(n) => format!("local {n}"),
+        Slot::Env(n) => format!("env {n}"),
+    }
 }
 
 fn body(
     out: &mut String,
     code: &Code,
+    scopes: &[Vec<u32>],
     instructions: &[Instruction],
     positions: &[Span],
     handlers: &[Handler],
@@ -116,7 +135,7 @@ fn body(
             "  {i:04} {}:{} {}",
             span.line,
             span.column,
-            text(code, instruction)
+            text(code, scopes, instruction)
         );
     }
     for h in handlers {
@@ -164,7 +183,7 @@ fn number(code: &Code, k: u32) -> String {
 }
 
 /// One instruction with its operands.
-fn text(code: &Code, instruction: &Instruction) -> String {
+fn text(code: &Code, scopes: &[Vec<u32>], instruction: &Instruction) -> String {
     use Instruction as I;
     let s = |k: u32| string(code, k);
     match *instruction {
@@ -184,6 +203,13 @@ fn text(code: &Code, instruction: &Instruction) -> String {
         I::PutGlobalRef(k) => format!("PutGlobalRef {}", s(k)),
         I::TypeofGlobal(k) => format!("TypeofGlobal {}", s(k)),
         I::DeleteGlobal(k) => format!("DeleteGlobal {}", s(k)),
+        I::GetName(k) => format!("GetName {}", s(k)),
+        I::ResolveName(k) => format!("ResolveName {}", s(k)),
+        I::GetNameRef(k) => format!("GetNameRef {}", s(k)),
+        I::PutNameRef(k) => format!("PutNameRef {}", s(k)),
+        I::TypeofName(k) => format!("TypeofName {}", s(k)),
+        I::DeleteName(k) => format!("DeleteName {}", s(k)),
+        I::GetNameForCall(k) => format!("GetNameForCall {}", s(k)),
         I::GetNamed(k) => format!("GetNamed {}", s(k)),
         I::PutNamed(k) => format!("PutNamed {}", s(k)),
         I::DeleteNamed(k) => format!("DeleteNamed {}", s(k)),
@@ -203,6 +229,13 @@ fn text(code: &Code, instruction: &Instruction) -> String {
         I::ForInNext(t) => format!("ForInNext {t:04}"),
         I::ThrowSyntaxError(k) => format!("ThrowSyntaxError {}", s(k)),
         I::PushEnv(n) => format!("PushEnv {n}"),
+        I::PushNamedEnv(t) => {
+            let names: Vec<String> = scopes
+                .get(t as usize)
+                .map(|names| names.iter().map(|k| s(*k)).collect())
+                .unwrap_or_default();
+            format!("PushNamedEnv {t} {}", names.join(" "))
+        }
         I::Tag(n) => format!("Tag {n}"),
         I::JumpIfTag { tag, target } => format!("JumpIfTag {tag} {target:04}"),
         other => format!("{other:?}"),

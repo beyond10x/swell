@@ -443,6 +443,8 @@ impl<H: Host> Agent<H> {
             return Ok("Function");
         }
         Ok(match &self.engine_object(object)?.kind {
+            // 6. [[ParameterMap]]: "Arguments".
+            ObjectKind::Arguments(_) => "Arguments",
             ObjectKind::Ordinary(ordinary) => match ordinary.data {
                 // 8. [[ErrorData]]: "Error".
                 OrdinaryData::Error => "Error",

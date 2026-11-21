@@ -2,8 +2,9 @@
 //! by `story:interpreter-and-script-entry-points`.
 //!
 //! The compiler gives a function an environment only when a nested function captures one of its
-//! bindings (`FunctionTemplate::captured` of `swell-compiler`); its other bindings are local slots
-//! of the frame. The record a call makes is then a declarative record of `captured.len()` slots
+//! bindings, a lookup by name from a `with` body may reach them, or a mapped arguments object
+//! reads and writes its parameters (`FunctionTemplate::captured` of `swell-compiler`); its other
+//! bindings are local slots of the frame. The record a call makes is then a declarative record of `captured.len()` slots
 //! whose [[OuterEnv]] is the function's [[Environment]] (NewFunctionEnvironment, steps 2 and 6).
 //!
 //! The fields a Function Environment Record adds, [[ThisValue]], [[ThisBindingStatus]],
@@ -12,6 +13,7 @@
 //! `new.target`, which read them from an outer function's environment, come with slices 6 and 8.
 //! Those slices move them here when a nested function must reach them.
 
+use crate::env::SlotNames;
 use crate::heap::arena::Handle;
 use crate::host::Host;
 use crate::host::agent::Agent;
@@ -20,12 +22,14 @@ use crate::host::outcome::Completion;
 impl<H: Host> Agent<H> {
     /// NewFunctionEnvironment (`#sec-newfunctionenvironment`) of a function whose
     /// [[Environment]] is `outer`, with `slots` captured bindings, each `undefined` until
-    /// FunctionDeclarationInstantiation stores the parameters and the code the functions.
+    /// FunctionDeclarationInstantiation stores the parameters and the code the functions. The
+    /// slots are named by the template's `captured` (`names`), which a lookup by name reads.
     pub(crate) fn new_function_environment(
         &mut self,
         outer: Option<Handle>,
         slots: u32,
+        names: SlotNames,
     ) -> Completion<Handle> {
-        self.new_environment(outer, slots)
+        self.new_environment(outer, slots, Some(names))
     }
 }

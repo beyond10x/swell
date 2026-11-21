@@ -133,3 +133,81 @@ fn script_record_survives_collect() {
         );
     }
 }
+
+/// `object_environment_survives_collect`: an object reachable only through the Object
+/// Environment Record of a `with` statement that a closure inside its body captured is read
+/// after collections. The trace of environment records (`env/mod.rs`): the binding object and
+/// the outer record, and the names of a function environment's slots.
+#[test]
+fn object_environment_survives_collect() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "function make() { var local = 2; \
+               with ({ v: 40 }) { return function () { return v + local; }; } } \
+             var read = make(); typeof read;"
+        ),
+        Outcome::Normal("\"function\"".to_string())
+    );
+    assert!(matches!(
+        eval(
+            &mut agent,
+            &realm,
+            "var g = 0; while (g < 50) { ({ v: g }); g++; }"
+        ),
+        HostOutcome::Normal(_)
+    ));
+    collect(&mut agent);
+    collect(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "read() + read();"),
+        Outcome::Normal("84".to_string())
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// `mapped_arguments_survive_collect`: a mapped arguments object returned from its function
+/// still aliases the parameter, after collections: `alone`'s environment is reachable only
+/// through the object's parameter map, `shared`'s also through a closure that captured the
+/// parameter. The trace of the arguments object (`object/arguments.rs`): the environment of
+/// its parameter map.
+#[test]
+fn mapped_arguments_survive_collect() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "function f(a) { return arguments; } \
+             var get; \
+             function g(a) { get = function () { return a; }; return arguments; } \
+             var alone = f({ n: 1 }); var shared = g({ n: 2 }); typeof alone + typeof shared;"
+        ),
+        Outcome::Normal("\"objectobject\"".to_string())
+    );
+    assert!(matches!(
+        eval(
+            &mut agent,
+            &realm,
+            "var garbage = 0; while (garbage < 50) { ({ n: garbage }); garbage++; }"
+        ),
+        HostOutcome::Normal(_)
+    ));
+    collect(&mut agent);
+    collect(&mut agent);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var before = alone[0].n + shared[0].n; \
+             alone[0] = { n: 10 }; shared[0] = { n: 20 }; \
+             before + alone[0].n + get().n;"
+        ),
+        Outcome::Normal("33".to_string())
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+}

@@ -2,13 +2,15 @@
 //! Filled by `story:interpreter-and-script-entry-points`.
 //!
 //! A record is the slots of [`crate::env::EnvironmentRecord`]: the compiler numbered the
-//! bindings, so HasBinding and the binding's name are answered at compile time, and
+//! bindings, so HasBinding and the binding's name are answered at compile time (but for a
+//! lookup by name, which reads the names a record's slots have, `env/mod.rs`), and
 //! GetBindingValue and SetMutableBinding read and write a slot (`env/mod.rs`). Every binding of
 //! slice 1 is created initialized (a `var`, a parameter, a catch parameter or a function's own
 //! name), so none is ever uninitialized; `let`, `const` and `class` bring uninitialized ones
 //! with slice 6. This file holds NewDeclarativeEnvironment and the one rule the slots do not
 //! carry, the assignment to an immutable binding.
 
+use crate::env::SlotNames;
 use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
@@ -20,12 +22,14 @@ impl<H: Host> Agent<H> {
     /// catch parameter, `#sec-runtime-semantics-catchclauseevaluation`, or CreateImmutableBinding
     /// of a named function expression's name,
     /// `#sec-runtime-semantics-instantiateordinaryfunctionexpression`).
+    /// `names` names the slots when a lookup by name may reach them (`env/mod.rs`).
     pub(crate) fn new_declarative_environment(
         &mut self,
         outer: Option<Handle>,
         slots: u32,
+        names: Option<SlotNames>,
     ) -> Completion<Handle> {
-        self.new_environment(outer, slots)
+        self.new_environment(outer, slots, names)
     }
 
     /// SetMutableBinding of an immutable binding

@@ -34,15 +34,19 @@ pub(crate) struct WellKnown {
     pub(crate) to_primitive: SymbolRef,
     pub(crate) to_string_tag: SymbolRef,
     pub(crate) species: SymbolRef,
+    /// @@unscopables, which HasBinding of the Object Environment Record of a `with` statement
+    /// reads (`#sec-object-environment-records-hasbinding-n`).
+    pub(crate) unscopables: SymbolRef,
 }
 
 impl WellKnown {
-    fn all(&self) -> [SymbolRef; 4] {
+    fn all(&self) -> [SymbolRef; 5] {
         [
             self.has_instance,
             self.to_primitive,
             self.to_string_tag,
             self.species,
+            self.unscopables,
         ]
     }
 }
@@ -209,6 +213,7 @@ impl<H: Host> Agent<H> {
             "Symbol.toPrimitive",
             "Symbol.toStringTag",
             "Symbol.species",
+            "Symbol.unscopables",
         ] {
             let description = self.new_string_str(description)?;
             match self.heap.new_symbol(Some(description)) {
@@ -216,7 +221,14 @@ impl<H: Host> Agent<H> {
                 Err(_) => return Err(self.terminate(Termination::MemoryBudget)),
             }
         }
-        let &[has_instance, to_primitive, to_string_tag, species] = made.as_slice() else {
+        let &[
+            has_instance,
+            to_primitive,
+            to_string_tag,
+            species,
+            unscopables,
+        ] = made.as_slice()
+        else {
             return Err(self.fault());
         };
         let symbols = WellKnown {
@@ -224,6 +236,7 @@ impl<H: Host> Agent<H> {
             to_primitive,
             to_string_tag,
             species,
+            unscopables,
         };
         self.symbols = Some(symbols);
         Ok(symbols)

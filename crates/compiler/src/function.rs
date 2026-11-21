@@ -93,6 +93,8 @@ pub(crate) fn compile_function(
         locals: info.locals,
         captured,
         self_binding: info.self_binding,
+        arguments: info.arguments,
+        scopes: body.scopes,
         instructions: body.instructions,
         positions: body.positions,
         handlers: body.handlers,

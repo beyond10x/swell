@@ -5,8 +5,8 @@
 //! arm; `story:object-model-and-realms` adds [[Extensible]], the properties, the internal methods
 //! and their dispatch arms, and one marking arm per kind beside them.
 //!
-//! Every kind but the Array and String exotic objects uses the ordinary internal methods
-//! (`object/ordinary.rs`); host objects too, until the overrides of slice 9. [[Call]] and
+//! Every kind but the Array, String and arguments exotic objects uses the ordinary internal
+//! methods (`object/ordinary.rs`); host objects too, until the overrides of slice 9. [[Call]] and
 //! [[Construct]] have an arm for each function kind, the bound function and ECMAScript function
 //! arms calling into files their own stories fill.
 //!
@@ -14,6 +14,7 @@
 //! credited when the object is freed: the record keeps what it was charged in [`Grown`], whose
 //! drop queues the bytes for the agent to credit after the sweep.
 
+pub(crate) mod arguments;
 pub(crate) mod array;
 pub(crate) mod bound_function;
 pub(crate) mod builtin_function;
@@ -30,6 +31,7 @@ use crate::host::agent::Agent;
 use crate::host::host_object::HostObject;
 use crate::host::{Abrupt, Completion, Host, Termination};
 use crate::value::{ObjectRef, Value};
+use arguments::ArgumentsObject;
 use array::Array;
 use bound_function::BoundFunction;
 use builtin_function::BuiltinFunction;
@@ -83,6 +85,8 @@ pub(crate) enum ObjectKind {
     Array(Array),
     /// A String exotic object (10.4.3).
     String(StringObject),
+    /// An arguments exotic object (10.4.4), and an unmapped arguments object.
+    Arguments(ArgumentsObject),
     /// A built-in function object (10.3), host functions included.
     BuiltinFunction(BuiltinFunction),
     /// A bound function exotic object (10.4.1).
@@ -100,6 +104,7 @@ pub(crate) enum KindTag {
     ImmutablePrototype,
     Array,
     String,
+    Arguments,
     BuiltinFunction,
     BoundFunction,
     EcmascriptFunction,
@@ -130,6 +135,7 @@ impl ObjectRecord {
             ObjectKind::Ordinary(ordinary) => ordinary.trace(mark),
             ObjectKind::Array(array) => array.trace(mark),
             ObjectKind::String(string) => string.trace(mark),
+            ObjectKind::Arguments(arguments) => arguments.trace(mark),
             ObjectKind::BuiltinFunction(function) => function.trace(mark),
             ObjectKind::BoundFunction(function) => function.trace(mark),
             ObjectKind::EcmascriptFunction(function) => function.trace(mark),
@@ -146,6 +152,7 @@ impl ObjectRecord {
             ObjectKind::Ordinary(_) => KindTag::Ordinary,
             ObjectKind::Array(_) => KindTag::Array,
             ObjectKind::String(_) => KindTag::String,
+            ObjectKind::Arguments(_) => KindTag::Arguments,
             ObjectKind::BuiltinFunction(_) => KindTag::BuiltinFunction,
             ObjectKind::BoundFunction(_) => KindTag::BoundFunction,
             ObjectKind::EcmascriptFunction(_) => KindTag::EcmascriptFunction,
@@ -278,21 +285,22 @@ impl<H: Host> Agent<H> {
         self.ordinary_prevent_extensions(object)
     }
 
-    /// [[GetOwnProperty]]: the String exotic method (10.4.3.1) for String objects, ordinary for
-    /// the others.
+    /// [[GetOwnProperty]]: the String (10.4.3.1) and arguments (10.4.4.1) exotic methods,
+    /// ordinary for the others.
     pub(crate) fn get_own_property(
         &mut self,
         object: ObjectRef,
         key: Key,
     ) -> Completion<Option<Property>> {
-        if self.kind_of(object)? == KindTag::String {
-            return self.string_get_own_property_method(object, key);
+        match self.kind_of(object)? {
+            KindTag::String => self.string_get_own_property_method(object, key),
+            KindTag::Arguments => self.arguments_get_own_property(object, key),
+            _ => self.ordinary_get_own_property(object, key),
         }
-        self.ordinary_get_own_property(object, key)
     }
 
-    /// [[DefineOwnProperty]]: the Array (10.4.2.1) and String (10.4.3.2) exotic methods, ordinary
-    /// for the others.
+    /// [[DefineOwnProperty]]: the Array (10.4.2.1), String (10.4.3.2) and arguments (10.4.4.2)
+    /// exotic methods, ordinary for the others.
     pub(crate) fn define_own_property(
         &mut self,
         object: ObjectRef,
@@ -302,6 +310,7 @@ impl<H: Host> Agent<H> {
         match self.kind_of(object)? {
             KindTag::Array => self.array_define_own_property(object, key, descriptor),
             KindTag::String => self.string_define_own_property(object, key, descriptor),
+            KindTag::Arguments => self.arguments_define_own_property(object, key, descriptor),
             _ => self.ordinary_define_own_property(object, key, descriptor),
         }
     }
@@ -311,7 +320,8 @@ impl<H: Host> Agent<H> {
         self.ordinary_has_property(object, key)
     }
 
-    /// [[Get]].
+    /// [[Get]]: ordinary for every kind; that of an arguments object (10.4.4.3) answers what
+    /// OrdinaryGet does (`object/arguments.rs`).
     pub(crate) fn internal_get(
         &mut self,
         object: ObjectRef,
@@ -321,7 +331,8 @@ impl<H: Host> Agent<H> {
         self.ordinary_get(object, key, receiver)
     }
 
-    /// [[Set]].
+    /// [[Set]]: ordinary for every kind; that of an arguments object (10.4.4.4) does what
+    /// OrdinarySet does (`object/arguments.rs`).
     pub(crate) fn internal_set(
         &mut self,
         object: ObjectRef,
@@ -332,8 +343,11 @@ impl<H: Host> Agent<H> {
         self.ordinary_set(object, key, value, receiver)
     }
 
-    /// [[Delete]].
+    /// [[Delete]]: the arguments exotic method (10.4.4.5), ordinary for the others.
     pub(crate) fn internal_delete(&mut self, object: ObjectRef, key: Key) -> Completion<bool> {
+        if self.kind_of(object)? == KindTag::Arguments {
+            return self.arguments_delete(object, key);
+        }
         self.ordinary_delete(object, key)
     }
 

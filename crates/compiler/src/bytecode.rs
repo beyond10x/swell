@@ -18,9 +18,10 @@
 //!
 //! # Values on the operand stack
 //!
-//! Besides language values the stack holds three kinds of engine entries, each produced and
+//! Besides language values the stack holds four kinds of engine entries, each produced and
 //! consumed by instructions of this set only: the reference of a global name
-//! ([`Instruction::ResolveGlobal`]), the enumerator of a for-in statement
+//! ([`Instruction::ResolveGlobal`]), the reference of a name looked up at run time
+//! ([`Instruction::ResolveName`]), the enumerator of a for-in statement
 //! ([`Instruction::ForInStart`]) and the tag of a completion record ([`Instruction::Tag`]).
 //!
 //! # Completion records
@@ -129,6 +130,35 @@ pub enum Instruction {
     /// is unresolvable, DeleteBinding of the global environment otherwise
     /// (`#sec-delete-operator-runtime-semantics-evaluation`).
     DeleteGlobal(u32),
+
+    // ---- names looked up at run time (decision 3, "Names") -------------------------------------
+    /// `[] -> [v]`: ResolveBinding of `strings[k]` through the Environment Records from the
+    /// LexicalEnvironment outward (`#sec-resolvebinding`, `#sec-getidentifierreference`), then
+    /// GetValue (`#sec-getvalue`): a `ReferenceError` when it is unresolvable. A record whose slots
+    /// have no names binds no name a lookup asks for (the compiler names every record a lookup
+    /// can find a binding in); the lookup charges one step per record it visits.
+    GetName(u32),
+    /// `[] -> [ref]`: ResolveBinding of `strings[k]` as [`Instruction::GetName`] does: a Reference
+    /// Record whose [[Base]] is the record that binds the name, or unresolvable.
+    ResolveName(u32),
+    /// `[ref] -> [ref, v]`: GetValue of the reference: GetBindingValue of its record
+    /// (`#sec-object-environment-records-getbindingvalue-n-s` for an Object Environment Record).
+    GetNameRef(u32),
+    /// `[ref, v] -> [v]`: PutValue (`#sec-putvalue`): to an unresolvable reference a
+    /// `ReferenceError` in strict code and a Set on the global object otherwise, to a resolved
+    /// one SetMutableBinding of its record (an immutable binding: a `TypeError` in strict code).
+    PutNameRef(u32),
+    /// `[] -> [s]`: `typeof` of `strings[k]` looked up by name; `"undefined"` when it is
+    /// unresolvable (`#sec-typeof-operator-runtime-semantics-evaluation`).
+    TypeofName(u32),
+    /// `[] -> [b]`: `delete` of `strings[k]` looked up by name: `true` when it is unresolvable,
+    /// DeleteBinding of its record otherwise (`#sec-delete-operator-runtime-semantics-evaluation`).
+    DeleteName(u32),
+    /// `[] -> [this, f]`: the function of a call whose callee is `strings[k]` looked up by name
+    /// and its this value (`#sec-evaluatecall`): WithBaseObject of the record that binds it, the
+    /// binding object of an Object Environment Record of a `with` statement, otherwise
+    /// `undefined`.
+    GetNameForCall(u32),
 
     // ---- properties -----------------------------------------------------------------------
     /// `[o] -> [v]`: GetValue of the property reference `o.strings[k]`.
@@ -266,6 +296,17 @@ pub enum Instruction {
     /// A new declarative environment of `n` slots, whose outer is the LexicalEnvironment,
     /// becomes the LexicalEnvironment (`#sec-runtime-semantics-catchclauseevaluation`).
     PushEnv(u32),
+    /// A new declarative environment whose slots are named by `scopes[t]` of the running code
+    /// (a [`Code`] or [`FunctionTemplate`] table), one slot per name, whose outer is the
+    /// LexicalEnvironment, becomes the LexicalEnvironment: the environment of a `catch` clause
+    /// that encloses a `with` statement, whose binding a lookup by name can reach.
+    PushNamedEnv(u32),
+    /// `[v] -> []`: the start of a `with` statement
+    /// (`#sec-with-statement-runtime-semantics-evaluation`): ToObject(v), a `TypeError` for
+    /// `undefined` and `null`, then NewObjectEnvironment(obj, true, LexicalEnvironment)
+    /// (`#sec-newobjectenvironment`) becomes the LexicalEnvironment. It counts as an environment
+    /// of [`Instruction::PopEnv`] and of a handler's `envs`, as `PushEnv` does.
+    PushWith,
     /// The outer environment of the LexicalEnvironment becomes the LexicalEnvironment.
     PopEnv,
     /// `[] -> [tag]`: the tag of a completion record.
@@ -320,6 +361,13 @@ impl Instruction {
             | Instruction::PutGlobalRef(_)
             | Instruction::TypeofGlobal(_)
             | Instruction::DeleteGlobal(_)
+            | Instruction::GetName(_)
+            | Instruction::ResolveName(_)
+            | Instruction::GetNameRef(_)
+            | Instruction::PutNameRef(_)
+            | Instruction::TypeofName(_)
+            | Instruction::DeleteName(_)
+            | Instruction::GetNameForCall(_)
             | Instruction::GetNamed(_)
             | Instruction::PutNamed(_)
             | Instruction::GetIndex
@@ -372,6 +420,8 @@ impl Instruction {
             | Instruction::ThrowSyntaxError(_)
             | Instruction::Return
             | Instruction::PushEnv(_)
+            | Instruction::PushNamedEnv(_)
+            | Instruction::PushWith
             | Instruction::PopEnv
             | Instruction::Tag(_)
             | Instruction::EndFinally
@@ -431,12 +481,27 @@ pub enum Slot {
     Env(u32),
 }
 
+/// The arguments object a call of a function makes (`#sec-functiondeclarationinstantiation`,
+/// steps 15 to 22): only for a function whose own code references `arguments` and that has no
+/// parameter and declares no function of that name (`docs/design/engine.md`, decision 3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArgumentsObject {
+    /// CreateMappedArgumentsObject (`#sec-createmappedargumentsobject`) for a non-strict
+    /// function (whose parameter list is simple in this slice): every parameter then has a slot
+    /// of the function environment, which the object's parameter map reads and writes. Otherwise
+    /// CreateUnmappedArgumentsObject (`#sec-createunmappedargumentsobject`).
+    pub mapped: bool,
+    /// The slot of the binding `arguments`, which the call initializes to the object.
+    pub slot: Slot,
+}
+
 /// The template of an ECMAScript function (`#sec-ecmascript-function-objects`): what
 /// OrdinaryFunctionCreate and the call need, and its code.
 ///
 /// A call binds `this` (OrdinaryCallBindThis), makes a frame of `locals` slots and, when
-/// `captured` is not empty, a function environment of `captured.len()` slots whose outer is the
-/// function's [[Environment]]; it stores the arguments in `params` in order (a later parameter of
+/// `captured` is not empty, a function environment of `captured.len()` slots named by `captured`
+/// whose outer is the function's [[Environment]]; it stores the arguments object in its slot
+/// when the template asks for one, and the arguments in `params` in order (a later parameter of
 /// the same name overwrites an earlier one, `#sec-functiondeclarationinstantiation`, step 22), a
 /// missing one as `undefined`, and runs `instructions`, which begin with the instantiation of
 /// the function declarations (step 36).
@@ -453,8 +518,14 @@ pub struct FunctionTemplate {
     /// Where each parameter goes, in order.
     pub params: Vec<Slot>,
     pub locals: u32,
-    /// The names of the slots of the function environment, as `strings` indices.
+    /// The names of the slots of the function environment, as `strings` indices. A lookup by
+    /// name reads them.
     pub captured: Vec<u32>,
+    /// The arguments object a call makes, if any.
+    pub arguments: Option<ArgumentsObject>,
+    /// The names of the slots of each environment [`Instruction::PushNamedEnv`] makes, as
+    /// `strings` indices.
+    pub scopes: Vec<Vec<u32>>,
     /// A named function expression whose own name is referenced: [`Instruction::Closure`] gives
     /// it the environment holding that name.
     pub self_binding: bool,
@@ -478,6 +549,9 @@ pub struct Code {
     pub positions: Vec<Span>,
     pub handlers: Vec<Handler>,
     pub locals: u32,
+    /// The names of the slots of each environment [`Instruction::PushNamedEnv`] makes in the
+    /// script's own code, as `strings` indices.
+    pub scopes: Vec<Vec<u32>>,
     /// String constants as UTF-16 code units, each once.
     pub strings: Vec<Vec<u16>>,
     /// Number constants, each bit pattern once.

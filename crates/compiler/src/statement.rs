@@ -1,8 +1,9 @@
 //! Statements (clause 14, `#sec-ecmascript-language-statements-and-declarations`): block, `var`,
 //! empty, expression, `if`, `do-while`, `while`, `for`, `for-in` with `var` or a left-hand side,
 //! `continue`, `break`, `return`, `switch`, `throw`, `try` with `catch` and `finally`,
-//! `debugger`, and labelled statements with `break` and `continue` to a label. `with` is slice
-//! 2's too, with its run time; the parser refuses it.
+//! `debugger`, labelled statements with `break` and `continue` to a label, and `with` in non-strict
+//! code (its body runs in an Object Environment Record; the names in it are looked up at run
+//! time, `resolve.rs`).
 //!
 //! # Labels
 //!
@@ -286,6 +287,19 @@ impl<'a> Compiler<'a> {
                 t.push(Task::Expr(*e));
                 t.push(Task::Emit(Instruction::Throw, span));
             }
+            // `#sec-with-statement-runtime-semantics-evaluation`: the object environment is an
+            // environment of the frame, so every way out of the body pops it (`PopEnv` on a break,
+            // continue or return through it, a handler's `envs` on a throw); the completion value
+            // is UpdateEmpty(C, undefined).
+            Stmt::With { object, body } => {
+                self.reset_completion(span, &mut t);
+                t.push(Task::Expr(*object));
+                t.push(Task::Emit(Instruction::PushWith, span));
+                t.push(Task::EnvsUp);
+                t.push(Task::Stmt(*body));
+                t.push(Task::Emit(Instruction::PopEnv, span));
+                t.push(Task::EnvsDown);
+            }
             Stmt::Try {
                 block,
                 handler,
@@ -403,7 +417,17 @@ impl<'a> Compiler<'a> {
                             false
                         }
                         Binding::Env { slot, .. } => {
-                            t.push(Task::Emit(Instruction::PushEnv(1), pspan));
+                            // Named when it encloses a `with` body (`resolve.rs`).
+                            let push = if self.resolution.named_catches.contains(&id) {
+                                let name = self.string(&param.name)?;
+                                let index = u32::try_from(self.scopes.len())
+                                    .map_err(|_| crate::CompileError::TooMany("environments"))?;
+                                self.scopes.push(vec![name]);
+                                Instruction::PushNamedEnv(index)
+                            } else {
+                                Instruction::PushEnv(1)
+                            };
+                            t.push(Task::Emit(push, pspan));
                             t.push(Task::Emit(Instruction::SetEnv { hops: 0, slot }, pspan));
                             t.push(Task::EnvsUp);
                             true
