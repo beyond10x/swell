@@ -76,15 +76,17 @@ pub fn limits() -> Limits {
 
 /// The thread stack a test of `Limits::min_stack_bytes` runs its subject on: seven eighths of
 /// what `limits` promise, so that the test also proves an eighth of room. The promise is the
-/// measured need plus a fifth, so the need is about 83 % of it (82.4 % through `toJSON` at
-/// `4c921d3`); a frame that grows by about 6 % per re-entry fails the test while the promise
-/// still holds, in the gate run here before the push, not first on the forge with the promise
+/// measured need plus a fifth, rounded up to a whole KiB: through `toJSON`, the largest need,
+/// 11,100 bytes per re-entry against 14,336 promised (77.4 %), measured on `247333c` with the
+/// bodies of the instructions moved out of the run loop. A frame that grows by 1,560 bytes per
+/// re-entry on that path (14 %) fails the first test (through builtins) while the promise still
+/// holds, in the gate run here before the push, not first on the forge with the promise
 /// broken. An eighth, not the whole fifth: the fifth is for another compiler's frames, and a
 /// test that failed at the measured need would fail on the first byte of growth. This holds
 /// because the build here is the forge's: the repository's `.cargo/config.toml` builds the dev
 /// profile with full debug information whatever a user's own configuration says. A build with
-/// line tables only has frames about 5 % smaller (29,855 against 31,314 bytes per re-entry at
-/// `4c921d3`) and passes where the forge's build fails.
+/// line tables only had frames about 5 % smaller, measured at `4c921d3` (29,855 against 31,314
+/// bytes per re-entry), and passed where the forge's build failed.
 pub fn stack_with_room(limits: Limits) -> usize {
     limits.min_stack_bytes() / 8 * 7
 }

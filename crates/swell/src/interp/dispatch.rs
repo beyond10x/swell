@@ -228,7 +228,10 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// One instruction.
+    /// One instruction. Each arm is a call: an instruction that needs locals of its own runs in
+    /// a function of its own, so that the frame of this loop, which every re-entry puts on the
+    /// thread's stack once more, holds what the dispatch needs and no instruction's locals
+    /// (`Limits::min_stack_bytes`).
     fn execute(&mut self, instruction: Instruction, strict: bool) -> Completion<Flow> {
         use Instruction as I;
         match instruction {
@@ -237,167 +240,32 @@ impl<H: Host> Agent<H> {
             I::Null => self.replace(0, Value::Null),
             I::True => self.replace(0, Value::Boolean(true)),
             I::False => self.replace(0, Value::Boolean(false)),
-            I::Number(index) => {
-                let position = usize::try_from(index).unwrap_or(usize::MAX);
-                let number = self
-                    .top_frame()?
-                    .compiled
-                    .code
-                    .numbers
-                    .get(position)
-                    .copied();
-                match number {
-                    Some(number) => self.replace(0, Value::Number(number)),
-                    None => Err(self.fault()),
-                }
-            }
-            I::String(index) => {
-                let string = self.constant_string(index)?;
-                self.replace(0, Value::String(string))
-            }
-            I::This => {
-                let this = self.top_frame()?.this;
-                self.replace(0, this)
-            }
+            I::Number(index) => self.number_constant(index),
+            I::String(index) => self.string_constant(index),
+            I::This => self.this_value(),
             I::Closure(index) => self.closure(index),
 
             // ---- the operand stack ----
-            I::Pop => {
-                self.pop_entry()?;
-                Ok(Flow::Next)
-            }
-            I::Dup => {
-                let value = self.peek_value(0)?;
-                self.replace(0, value)
-            }
-            I::Dup2 => {
-                let below = self.peek_value(1)?;
-                let top = self.peek_value(0)?;
-                self.push_value(below)?;
-                self.replace(0, top)
-            }
-            I::Bury(count) => {
-                let count = usize::try_from(count).unwrap_or(usize::MAX);
-                let frame = self.top_frame()?;
-                let len = frame.stack.len();
-                match (frame.stack.pop(), len.checked_sub(count.saturating_add(1))) {
-                    (Some(top), Some(at)) => {
-                        frame.stack.insert(at, top);
-                        Ok(Flow::Next)
-                    }
-                    _ => Err(self.fault()),
-                }
-            }
-            I::Nip(count) => {
-                let count = usize::try_from(count).unwrap_or(usize::MAX);
-                let top = self.pop_entry()?;
-                self.drop_entries(count)?;
-                self.push_entry(top)?;
-                Ok(Flow::Next)
-            }
+            I::Pop => self.pop_instruction(),
+            I::Dup => self.dup(),
+            I::Dup2 => self.dup2(),
+            I::Bury(count) => self.bury(count),
+            I::Nip(count) => self.nip(count),
 
             // ---- bindings ----
-            I::GetLocal(slot) => {
-                let position = usize::try_from(slot).unwrap_or(usize::MAX);
-                let value = self.top_frame()?.locals.get(position).copied();
-                match value {
-                    Some(value) => self.replace(0, value),
-                    None => Err(self.fault()),
-                }
-            }
-            I::SetLocal(slot) => {
-                let value = self.peek_value(0)?;
-                let position = usize::try_from(slot).unwrap_or(usize::MAX);
-                let stored = self
-                    .top_frame()?
-                    .locals
-                    .get_mut(position)
-                    .map(|binding| *binding = value);
-                match stored {
-                    Some(()) => Ok(Flow::Next),
-                    None => Err(self.fault()),
-                }
-            }
-            I::GetEnv { hops, slot } => {
-                let env = self.top_frame()?.env;
-                let value = self.get_slot(env, hops, slot)?;
-                self.replace(0, value)
-            }
-            I::SetEnv { hops, slot } => {
-                let value = self.peek_value(0)?;
-                let env = self.top_frame()?.env;
-                self.set_slot(env, hops, slot, value)?;
-                Ok(Flow::Next)
-            }
-            I::AssignImmutable(index) => {
-                let name = self.constant_text(index);
-                self.assign_immutable(strict, &name)?;
-                Ok(Flow::Next)
-            }
-            I::GetGlobal(index) => {
-                let key = self.constant_key(index)?;
-                let realm = self.top_frame()?.realm;
-                if !self.global_has_binding(realm, key)? {
-                    return Err(self.not_defined(index));
-                }
-                let value = self.global_get_binding_value(realm, key, strict)?;
-                self.replace(0, value)
-            }
-            I::ResolveGlobal(index) => {
-                let key = self.constant_key(index)?;
-                let realm = self.top_frame()?.realm;
-                let resolvable = self.global_has_binding(realm, key)?;
-                self.push_entry(Entry::Reference(resolvable))?;
-                Ok(Flow::Next)
-            }
-            I::GetGlobalRef(index) => {
-                if !self.top_reference(0)? {
-                    return Err(self.not_defined(index));
-                }
-                let key = self.constant_key(index)?;
-                let realm = self.top_frame()?.realm;
-                let value = self.global_get_binding_value(realm, key, strict)?;
-                self.replace(0, value)
-            }
-            I::PutGlobalRef(index) => {
-                let value = self.peek_value(0)?;
-                let resolvable = self.top_reference(1)?;
-                let key = self.constant_key(index)?;
-                let realm = self.top_frame()?.realm;
-                if resolvable {
-                    self.global_set_mutable_binding(realm, key, value, strict)?;
-                } else if strict {
-                    return Err(self.not_defined(index));
-                } else {
-                    let global = self.global_binding_object(realm)?;
-                    self.set(global, key, value, false)?;
-                }
-                self.replace(2, value)
-            }
-            I::TypeofGlobal(index) => {
-                let key = self.constant_key(index)?;
-                let realm = self.top_frame()?.realm;
-                let kind = if self.global_has_binding(realm, key)? {
-                    let value = self.global_get_binding_value(realm, key, strict)?;
-                    self.type_of(value)?
-                } else {
-                    "undefined"
-                };
-                let string = self.atom(kind)?;
-                self.replace(0, Value::String(string))
-            }
-            I::DeleteGlobal(index) => {
-                let key = self.constant_key(index)?;
-                let realm = self.top_frame()?.realm;
-                let deleted = if self.global_has_binding(realm, key)? {
-                    self.global_delete_binding(realm, key)?
-                } else {
-                    true
-                };
-                self.replace(0, Value::Boolean(deleted))
-            }
+            I::GetLocal(slot) => self.get_local(slot),
+            I::SetLocal(slot) => self.set_local(slot),
+            I::GetEnv { hops, slot } => self.get_env(hops, slot),
+            I::SetEnv { hops, slot } => self.set_env(hops, slot),
+            I::AssignImmutable(index) => self.assign_immutable_instruction(index, strict),
+            I::GetGlobal(index) => self.get_global(index, strict),
+            I::ResolveGlobal(index) => self.resolve_global(index),
+            I::GetGlobalRef(index) => self.get_global_ref(index, strict),
+            I::PutGlobalRef(index) => self.put_global_ref(index, strict),
+            I::TypeofGlobal(index) => self.typeof_global(index, strict),
+            I::DeleteGlobal(index) => self.delete_global(index),
 
-            // ---- names looked up at run time: each in a function of its own ----
+            // ---- names looked up at run time ----
             I::GetName(index) => self.get_name(index, strict),
             I::ResolveName(index) => self.resolve_name_entry(index),
             I::GetNameRef(index) => self.get_name_ref(index, strict),
@@ -407,226 +275,34 @@ impl<H: Host> Agent<H> {
             I::GetNameForCall(index) => self.get_name_for_call(index, strict),
 
             // ---- properties ----
-            I::GetNamed(index) => {
-                let base = self.peek_value(0)?;
-                let key = self.constant_key(index)?;
-                let value = self.get_value(base, key)?;
-                self.replace(1, value)
-            }
-            I::PutNamed(index) => {
-                let base = self.peek_value(1)?;
-                let value = self.peek_value(0)?;
-                let key = self.constant_key(index)?;
-                self.put_value(base, key, value, strict)?;
-                self.replace(2, value)
-            }
-            I::GetIndex => {
-                let base = self.peek_value(1)?;
-                let key = self.peek_value(0)?;
-                let value = self.get_value_computed(base, key)?;
-                self.replace(2, value)
-            }
-            I::PutIndex => {
-                let base = self.peek_value(2)?;
-                let key = self.peek_value(1)?;
-                let value = self.peek_value(0)?;
-                let object = self.require_object_coercible_and_wrap(base)?;
-                let keep = self.keep(Value::Object(object));
-                let key = self.to_property_key(key);
-                let done = match key {
-                    Ok(key) => {
-                        let held = self.keep_key(key);
-                        let done = self.internal_set(object, key, value, base);
-                        self.release(held);
-                        done
-                    }
-                    Err(abrupt) => Err(abrupt),
-                };
-                self.release(keep);
-                if !done? && strict {
-                    return Err(
-                        self.throw_error(ErrorKind::TypeError, "Cannot assign to the property")
-                    );
-                }
-                self.replace(3, value)
-            }
-            I::PropertyKey => {
-                let base = self.peek_value(1)?;
-                let key = self.peek_value(0)?;
-                if matches!(base, Value::Undefined | Value::Null) {
-                    return Err(self.throw_error(
-                        ErrorKind::TypeError,
-                        "Cannot read properties of undefined or null",
-                    ));
-                }
-                let key = self.to_property_key(key)?;
-                let key = self.key_value(key)?;
-                self.replace(1, key)
-            }
-            I::DeleteNamed(index) => {
-                let base = self.peek_value(0)?;
-                let key = self.constant_key(index)?;
-                let deleted = self.delete_reference(base, key, strict)?;
-                self.replace(1, Value::Boolean(deleted))
-            }
-            I::DeleteIndex => {
-                let base = self.peek_value(1)?;
-                let key = self.peek_value(0)?;
-                let object = self.require_object_coercible_and_wrap(base)?;
-                let keep = self.keep(Value::Object(object));
-                let deleted = match self.to_property_key(key) {
-                    Ok(key) => self.delete_from(object, key, strict),
-                    Err(abrupt) => Err(abrupt),
-                };
-                self.release(keep);
-                self.replace(2, Value::Boolean(deleted?))
-            }
+            I::GetNamed(index) => self.get_named(index),
+            I::PutNamed(index) => self.put_named(index, strict),
+            I::GetIndex => self.get_index(),
+            I::PutIndex => self.put_index(strict),
+            I::PropertyKey => self.property_key(),
+            I::DeleteNamed(index) => self.delete_named(index, strict),
+            I::DeleteIndex => self.delete_index(strict),
 
             // ---- literals ----
-            I::NewObject => {
-                let prototype = self.current_intrinsic(Intrinsic::ObjectPrototype)?;
-                let object = self.ordinary_object_create(Some(prototype), OrdinaryData::Plain)?;
-                self.replace(0, Value::Object(object))
-            }
-            I::NewArray => {
-                let array = self.array_create(0.0, None)?;
-                self.replace(0, Value::Object(array))
-            }
-            I::DefineField(index) => {
-                let object = self.peek_value(1)?;
-                let object = self.expect_object(object)?;
-                let value = self.peek_value(0)?;
-                let key = self.constant_key(index)?;
-                self.create_data_property_or_throw(object, key, value)?;
-                self.drop_entries(1)?;
-                Ok(Flow::Next)
-            }
-            I::DefineGetter(index) | I::DefineSetter(index) => {
-                let object = self.peek_value(1)?;
-                let object = self.expect_object(object)?;
-                let function = self.peek_value(0)?;
-                let function = self.expect_object(function)?;
-                let key = self.constant_key(index)?;
-                self.make_method(function, object)?;
-                let descriptor = if matches!(instruction, I::DefineGetter(_)) {
-                    Descriptor {
-                        get: Some(Some(function)),
-                        enumerable: Some(true),
-                        configurable: Some(true),
-                        ..Descriptor::default()
-                    }
-                } else {
-                    Descriptor {
-                        set: Some(Some(function)),
-                        enumerable: Some(true),
-                        configurable: Some(true),
-                        ..Descriptor::default()
-                    }
-                };
-                self.define_property_or_throw(object, key, descriptor)?;
-                self.drop_entries(1)?;
-                Ok(Flow::Next)
-            }
-            // `#sec-runtime-semantics-definemethod` (MakeMethod; the closure is of kind method, so
-            // it has no [[Construct]]) and `#sec-definemethodproperty` with enumerable true.
-            I::DefineMethod(index) => {
-                let object = self.peek_value(1)?;
-                let object = self.expect_object(object)?;
-                let function = self.peek_value(0)?;
-                let function = self.expect_object(function)?;
-                let key = self.constant_key(index)?;
-                self.make_method(function, object)?;
-                let descriptor = Descriptor {
-                    value: Some(Value::Object(function)),
-                    writable: Some(true),
-                    enumerable: Some(true),
-                    configurable: Some(true),
-                    ..Descriptor::default()
-                };
-                self.define_property_or_throw(object, key, descriptor)?;
-                self.drop_entries(1)?;
-                Ok(Flow::Next)
-            }
-            I::InitProto => {
-                let object = self.peek_value(1)?;
-                let object = self.expect_object(object)?;
-                let value = self.peek_value(0)?;
-                // `object` is the ordinary object the literal made, whose [[SetPrototypeOf]] is
-                // OrdinarySetPrototypeOf; its result is not used ("Perform !").
-                match value {
-                    Value::Object(prototype) => {
-                        self.ordinary_set_prototype_of(object, Some(prototype))?;
-                    }
-                    Value::Null => {
-                        self.ordinary_set_prototype_of(object, None)?;
-                    }
-                    _ => {}
-                }
-                self.drop_entries(1)?;
-                Ok(Flow::Next)
-            }
-            I::DefineIndex(index) => {
-                let array = self.peek_value(1)?;
-                let array = self.expect_object(array)?;
-                let value = self.peek_value(0)?;
-                let key = self.index_key(f64::from(index))?;
-                self.create_data_property_or_throw(array, key, value)?;
-                self.drop_entries(1)?;
-                Ok(Flow::Next)
-            }
-            I::ArrayLength(length) => {
-                let array = self.peek_value(0)?;
-                let array = self.expect_object(array)?;
-                let key = self.name_key("length")?;
-                self.set(array, key, Value::Number(f64::from(length)), true)?;
-                Ok(Flow::Next)
-            }
+            I::NewObject => self.new_object_literal(),
+            I::NewArray => self.new_array_literal(),
+            I::DefineField(index) => self.define_field(index),
+            I::DefineGetter(index) => self.define_accessor(index, true),
+            I::DefineSetter(index) => self.define_accessor(index, false),
+            I::DefineMethod(index) => self.define_method(index),
+            I::InitProto => self.init_proto(),
+            I::DefineIndex(index) => self.define_index(index),
+            I::ArrayLength(length) => self.set_array_length(length),
 
             // ---- operators ----
-            I::Typeof => {
-                let value = self.peek_value(0)?;
-                let kind = self.type_of(value)?;
-                let string = self.atom(kind)?;
-                self.replace(1, Value::String(string))
-            }
-            I::ToNumber => {
-                let value = self.peek_value(0)?;
-                let number = self.to_number(value)?;
-                self.replace(1, Value::Number(number))
-            }
-            I::Negate => {
-                let value = self.peek_value(0)?;
-                let number = self.numeric_number(value)?;
-                self.replace(1, Value::Number(number_unary_minus(number)))
-            }
-            I::BitNot => {
-                let value = self.peek_value(0)?;
-                let number = self.numeric_number(value)?;
-                self.replace(1, Value::Number(number_bitwise_not(number)))
-            }
-            I::Not => {
-                let value = self.peek_value(0)?;
-                let truth = self.to_boolean(value)?;
-                self.replace(1, Value::Boolean(!truth))
-            }
-            I::ToNumeric => {
-                let value = self.peek_value(0)?;
-                let numeric = self.to_numeric(value)?;
-                self.replace(1, numeric)
-            }
-            I::Increment | I::Decrement => {
-                let value = self.peek_value(0)?;
-                let Value::Number(number) = value else {
-                    // ToNumeric ran before: no BigInt exists before slice 12.
-                    return Err(self.fault());
-                };
-                let changed = if matches!(instruction, I::Increment) {
-                    number + 1.0
-                } else {
-                    number - 1.0
-                };
-                self.replace(1, Value::Number(changed))
-            }
+            I::Typeof => self.typeof_value(),
+            I::ToNumber => self.convert_to_number(),
+            I::Negate => self.negate(),
+            I::BitNot => self.bit_not(),
+            I::Not => self.not(),
+            I::ToNumeric => self.convert_to_numeric(),
+            I::Increment => self.increment(true),
+            I::Decrement => self.increment(false),
             I::Mul => self.binary(BinaryOperator::Multiply),
             I::Div => self.binary(BinaryOperator::Divide),
             I::Rem => self.binary(BinaryOperator::Remainder),
@@ -639,49 +315,12 @@ impl<H: Host> Agent<H> {
             I::BitXor => self.binary(BinaryOperator::BitwiseXor),
             I::BitOr => self.binary(BinaryOperator::BitwiseOr),
             I::Lt | I::Gt | I::LtEq | I::GtEq => self.relational(instruction),
-            I::InstanceOf => {
-                let value = self.peek_value(1)?;
-                let target = self.peek_value(0)?;
-                let result = self.instanceof_operator(value, target)?;
-                self.replace(2, Value::Boolean(result))
-            }
-            I::In => {
-                let key = self.peek_value(1)?;
-                let target = self.peek_value(0)?;
-                let Value::Object(object) = target else {
-                    return Err(self.throw_error(
-                        ErrorKind::TypeError,
-                        "the right-hand side of 'in' is not an object",
-                    ));
-                };
-                let key = self.to_property_key(key)?;
-                let held = self.keep_key(key);
-                let found = self.has_property(object, key);
-                self.release(held);
-                self.replace(2, Value::Boolean(found?))
-            }
-            I::Eq | I::NotEq => {
-                let left = self.peek_value(1)?;
-                let right = self.peek_value(0)?;
-                let equal = self.is_loosely_equal(left, right)?;
-                let result = if matches!(instruction, I::Eq) {
-                    equal
-                } else {
-                    !equal
-                };
-                self.replace(2, Value::Boolean(result))
-            }
-            I::StrictEq | I::StrictNotEq => {
-                let left = self.peek_value(1)?;
-                let right = self.peek_value(0)?;
-                let equal = self.is_strictly_equal(left, right)?;
-                let result = if matches!(instruction, I::StrictEq) {
-                    equal
-                } else {
-                    !equal
-                };
-                self.replace(2, Value::Boolean(result))
-            }
+            I::InstanceOf => self.instance_of(),
+            I::In => self.in_instruction(),
+            I::Eq => self.loose_equality(true),
+            I::NotEq => self.loose_equality(false),
+            I::StrictEq => self.strict_equality(true),
+            I::StrictNotEq => self.strict_equality(false),
 
             // ---- calls ----
             I::Call(count) => self.call_instruction(count),
@@ -689,101 +328,642 @@ impl<H: Host> Agent<H> {
 
             // ---- control ----
             I::Jump(target) => self.jump(target),
-            I::JumpIfTrue(target) | I::JumpIfFalse(target) => {
-                let value = self.peek_value(0)?;
-                let truth = self.to_boolean(value)?;
-                self.drop_entries(1)?;
-                if truth == matches!(instruction, I::JumpIfTrue(_)) {
-                    return self.jump(target);
-                }
-                Ok(Flow::Next)
-            }
-            I::LoopJump(target) => {
-                self.check_interrupt()?;
-                self.jump(target)
-            }
-            I::CaseJump(target) => {
-                let discriminant = self.peek_value(1)?;
-                let value = self.peek_value(0)?;
-                if self.is_strictly_equal(discriminant, value)? {
-                    self.drop_entries(2)?;
-                    return self.jump(target);
-                }
-                self.drop_entries(1)?;
-                Ok(Flow::Next)
-            }
+            I::JumpIfTrue(target) => self.jump_if(target, true),
+            I::JumpIfFalse(target) => self.jump_if(target, false),
+            I::LoopJump(target) => self.loop_jump(target),
+            I::CaseJump(target) => self.case_jump(target),
             I::ForInStart => self.for_in_start(),
             I::ForInNext(target) => self.for_in_next(target),
-            I::Throw => {
-                let value = self.pop_value()?;
-                Err(Abrupt::Throw(value))
-            }
-            I::ThrowSyntaxError(index) => {
-                let message = self.constant_text(index);
-                Err(self.throw_error(ErrorKind::SyntaxError, &message))
-            }
-            I::Return => {
-                let value = self.pop_value()?;
-                self.check_interrupt()?;
-                Ok(Flow::Return(value))
-            }
-            I::PushEnv(slots) => {
-                let outer = self.top_frame()?.env;
-                let env = self.new_declarative_environment(outer, slots, None)?;
-                let frame = self.top_frame()?;
-                frame.env = Some(env);
-                frame.pushed_envs = frame.pushed_envs.saturating_add(1);
-                Ok(Flow::Next)
-            }
+            I::Throw => self.throw_instruction(),
+            I::ThrowSyntaxError(index) => self.throw_syntax_error(index),
+            I::Return => self.return_instruction(),
+            I::PushEnv(slots) => self.push_env(slots),
             I::PushNamedEnv(table) => self.push_named_env(table),
             I::PushWith => self.push_with(),
-            I::PopEnv => {
-                let Some(env) = self.top_frame()?.env else {
-                    return Err(self.fault());
-                };
-                let outer = self.outer_environment(env)?;
-                let frame = self.top_frame()?;
-                frame.env = outer;
-                frame.pushed_envs = frame.pushed_envs.saturating_sub(1);
-                Ok(Flow::Next)
-            }
-            I::Tag(tag) => {
-                self.push_entry(Entry::Tag(tag))?;
-                Ok(Flow::Next)
-            }
-            I::JumpIfTag { tag, target } => {
-                let found = match self.top_frame()?.stack.last() {
-                    Some(Entry::Tag(found)) => Some(*found),
-                    _ => None,
-                };
-                match found {
-                    Some(found) if found == tag => {
-                        self.drop_entries(1)?;
-                        self.jump(target)
-                    }
-                    Some(_) => Ok(Flow::Next),
-                    None => Err(self.fault()),
-                }
-            }
-            I::EndFinally => {
-                let tag = self.pop_entry()?;
-                let value = self.pop_value()?;
-                match tag {
-                    Entry::Tag(TAG_NORMAL) => Ok(Flow::Next),
-                    Entry::Tag(TAG_THROW) => Err(Abrupt::Throw(value)),
-                    _ => Err(self.fault()),
-                }
-            }
-            I::LoadCompletion => {
-                let value = self.top_frame()?.completion;
-                self.replace(0, value)
-            }
-            I::StoreCompletion => {
-                let value = self.pop_value()?;
-                self.top_frame()?.completion = value;
-                Ok(Flow::Next)
-            }
+            I::PopEnv => self.pop_env(),
+            I::Tag(tag) => self.tag_instruction(tag),
+            I::JumpIfTag { tag, target } => self.jump_if_tag(tag, target),
+            I::EndFinally => self.end_finally(),
+            I::LoadCompletion => self.load_completion(),
+            I::StoreCompletion => self.store_completion(),
         }
+    }
+
+    // ---- values ----
+
+    /// `Number(k)`.
+    fn number_constant(&mut self, index: u32) -> Completion<Flow> {
+        let position = usize::try_from(index).unwrap_or(usize::MAX);
+        let number = self
+            .top_frame()?
+            .compiled
+            .code
+            .numbers
+            .get(position)
+            .copied();
+        match number {
+            Some(number) => self.replace(0, Value::Number(number)),
+            None => Err(self.fault()),
+        }
+    }
+
+    /// `String(k)`.
+    fn string_constant(&mut self, index: u32) -> Completion<Flow> {
+        let string = self.constant_string(index)?;
+        self.replace(0, Value::String(string))
+    }
+
+    /// `This`.
+    fn this_value(&mut self) -> Completion<Flow> {
+        let this = self.top_frame()?.this;
+        self.replace(0, this)
+    }
+
+    // ---- the operand stack ----
+
+    /// `Pop`.
+    fn pop_instruction(&mut self) -> Completion<Flow> {
+        self.pop_entry()?;
+        Ok(Flow::Next)
+    }
+
+    /// `Dup`.
+    fn dup(&mut self) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        self.replace(0, value)
+    }
+
+    /// `Dup2`.
+    fn dup2(&mut self) -> Completion<Flow> {
+        let below = self.peek_value(1)?;
+        let top = self.peek_value(0)?;
+        self.push_value(below)?;
+        self.replace(0, top)
+    }
+
+    /// `Bury(n)`.
+    fn bury(&mut self, count: u32) -> Completion<Flow> {
+        let count = usize::try_from(count).unwrap_or(usize::MAX);
+        let frame = self.top_frame()?;
+        let len = frame.stack.len();
+        match (frame.stack.pop(), len.checked_sub(count.saturating_add(1))) {
+            (Some(top), Some(at)) => {
+                frame.stack.insert(at, top);
+                Ok(Flow::Next)
+            }
+            _ => Err(self.fault()),
+        }
+    }
+
+    /// `Nip(n)`.
+    fn nip(&mut self, count: u32) -> Completion<Flow> {
+        let count = usize::try_from(count).unwrap_or(usize::MAX);
+        let top = self.pop_entry()?;
+        self.drop_entries(count)?;
+        self.push_entry(top)?;
+        Ok(Flow::Next)
+    }
+
+    // ---- bindings ----
+
+    /// `GetLocal(s)`.
+    fn get_local(&mut self, slot: u32) -> Completion<Flow> {
+        let position = usize::try_from(slot).unwrap_or(usize::MAX);
+        let value = self.top_frame()?.locals.get(position).copied();
+        match value {
+            Some(value) => self.replace(0, value),
+            None => Err(self.fault()),
+        }
+    }
+
+    /// `SetLocal(s)`.
+    fn set_local(&mut self, slot: u32) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let position = usize::try_from(slot).unwrap_or(usize::MAX);
+        let stored = self
+            .top_frame()?
+            .locals
+            .get_mut(position)
+            .map(|binding| *binding = value);
+        match stored {
+            Some(()) => Ok(Flow::Next),
+            None => Err(self.fault()),
+        }
+    }
+
+    /// `GetEnv { hops, slot }`.
+    fn get_env(&mut self, hops: u32, slot: u32) -> Completion<Flow> {
+        let env = self.top_frame()?.env;
+        let value = self.get_slot(env, hops, slot)?;
+        self.replace(0, value)
+    }
+
+    /// `SetEnv { hops, slot }`.
+    fn set_env(&mut self, hops: u32, slot: u32) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let env = self.top_frame()?.env;
+        self.set_slot(env, hops, slot, value)?;
+        Ok(Flow::Next)
+    }
+
+    /// `AssignImmutable(k)`.
+    fn assign_immutable_instruction(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        let name = self.constant_text(index);
+        self.assign_immutable(strict, &name)?;
+        Ok(Flow::Next)
+    }
+
+    /// `GetGlobal(k)`.
+    fn get_global(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        let key = self.constant_key(index)?;
+        let realm = self.top_frame()?.realm;
+        if !self.global_has_binding(realm, key)? {
+            return Err(self.not_defined(index));
+        }
+        let value = self.global_get_binding_value(realm, key, strict)?;
+        self.replace(0, value)
+    }
+
+    /// `ResolveGlobal(k)`.
+    fn resolve_global(&mut self, index: u32) -> Completion<Flow> {
+        let key = self.constant_key(index)?;
+        let realm = self.top_frame()?.realm;
+        let resolvable = self.global_has_binding(realm, key)?;
+        self.push_entry(Entry::Reference(resolvable))?;
+        Ok(Flow::Next)
+    }
+
+    /// `GetGlobalRef(k)`.
+    fn get_global_ref(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        if !self.top_reference(0)? {
+            return Err(self.not_defined(index));
+        }
+        let key = self.constant_key(index)?;
+        let realm = self.top_frame()?.realm;
+        let value = self.global_get_binding_value(realm, key, strict)?;
+        self.replace(0, value)
+    }
+
+    /// `PutGlobalRef(k)`.
+    fn put_global_ref(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let resolvable = self.top_reference(1)?;
+        let key = self.constant_key(index)?;
+        let realm = self.top_frame()?.realm;
+        if resolvable {
+            self.global_set_mutable_binding(realm, key, value, strict)?;
+        } else if strict {
+            return Err(self.not_defined(index));
+        } else {
+            let global = self.global_binding_object(realm)?;
+            self.set(global, key, value, false)?;
+        }
+        self.replace(2, value)
+    }
+
+    /// `TypeofGlobal(k)`.
+    fn typeof_global(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        let key = self.constant_key(index)?;
+        let realm = self.top_frame()?.realm;
+        let kind = if self.global_has_binding(realm, key)? {
+            let value = self.global_get_binding_value(realm, key, strict)?;
+            self.type_of(value)?
+        } else {
+            "undefined"
+        };
+        let string = self.atom(kind)?;
+        self.replace(0, Value::String(string))
+    }
+
+    /// `DeleteGlobal(k)`.
+    fn delete_global(&mut self, index: u32) -> Completion<Flow> {
+        let key = self.constant_key(index)?;
+        let realm = self.top_frame()?.realm;
+        let deleted = if self.global_has_binding(realm, key)? {
+            self.global_delete_binding(realm, key)?
+        } else {
+            true
+        };
+        self.replace(0, Value::Boolean(deleted))
+    }
+
+    // ---- properties ----
+
+    /// `GetNamed(k)`.
+    fn get_named(&mut self, index: u32) -> Completion<Flow> {
+        let base = self.peek_value(0)?;
+        let key = self.constant_key(index)?;
+        let value = self.get_value(base, key)?;
+        self.replace(1, value)
+    }
+
+    /// `PutNamed(k)`.
+    fn put_named(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        let base = self.peek_value(1)?;
+        let value = self.peek_value(0)?;
+        let key = self.constant_key(index)?;
+        self.put_value(base, key, value, strict)?;
+        self.replace(2, value)
+    }
+
+    /// `GetIndex`.
+    fn get_index(&mut self) -> Completion<Flow> {
+        let base = self.peek_value(1)?;
+        let key = self.peek_value(0)?;
+        let value = self.get_value_computed(base, key)?;
+        self.replace(2, value)
+    }
+
+    /// `PutIndex`.
+    fn put_index(&mut self, strict: bool) -> Completion<Flow> {
+        let base = self.peek_value(2)?;
+        let key = self.peek_value(1)?;
+        let value = self.peek_value(0)?;
+        let object = self.require_object_coercible_and_wrap(base)?;
+        let keep = self.keep(Value::Object(object));
+        let key = self.to_property_key(key);
+        let done = match key {
+            Ok(key) => {
+                let held = self.keep_key(key);
+                let done = self.internal_set(object, key, value, base);
+                self.release(held);
+                done
+            }
+            Err(abrupt) => Err(abrupt),
+        };
+        self.release(keep);
+        if !done? && strict {
+            return Err(self.throw_error(ErrorKind::TypeError, "Cannot assign to the property"));
+        }
+        self.replace(3, value)
+    }
+
+    /// `PropertyKey`.
+    fn property_key(&mut self) -> Completion<Flow> {
+        let base = self.peek_value(1)?;
+        let key = self.peek_value(0)?;
+        if matches!(base, Value::Undefined | Value::Null) {
+            return Err(self.throw_error(
+                ErrorKind::TypeError,
+                "Cannot read properties of undefined or null",
+            ));
+        }
+        let key = self.to_property_key(key)?;
+        let key = self.key_value(key)?;
+        self.replace(1, key)
+    }
+
+    /// `DeleteNamed(k)`.
+    fn delete_named(&mut self, index: u32, strict: bool) -> Completion<Flow> {
+        let base = self.peek_value(0)?;
+        let key = self.constant_key(index)?;
+        let deleted = self.delete_reference(base, key, strict)?;
+        self.replace(1, Value::Boolean(deleted))
+    }
+
+    /// `DeleteIndex`.
+    fn delete_index(&mut self, strict: bool) -> Completion<Flow> {
+        let base = self.peek_value(1)?;
+        let key = self.peek_value(0)?;
+        let object = self.require_object_coercible_and_wrap(base)?;
+        let keep = self.keep(Value::Object(object));
+        let deleted = match self.to_property_key(key) {
+            Ok(key) => self.delete_from(object, key, strict),
+            Err(abrupt) => Err(abrupt),
+        };
+        self.release(keep);
+        self.replace(2, Value::Boolean(deleted?))
+    }
+
+    // ---- literals ----
+
+    /// `NewObject`.
+    fn new_object_literal(&mut self) -> Completion<Flow> {
+        let prototype = self.current_intrinsic(Intrinsic::ObjectPrototype)?;
+        let object = self.ordinary_object_create(Some(prototype), OrdinaryData::Plain)?;
+        self.replace(0, Value::Object(object))
+    }
+
+    /// `NewArray`.
+    fn new_array_literal(&mut self) -> Completion<Flow> {
+        let array = self.array_create(0.0, None)?;
+        self.replace(0, Value::Object(array))
+    }
+
+    /// `DefineField(k)`.
+    fn define_field(&mut self, index: u32) -> Completion<Flow> {
+        let object = self.peek_value(1)?;
+        let object = self.expect_object(object)?;
+        let value = self.peek_value(0)?;
+        let key = self.constant_key(index)?;
+        self.create_data_property_or_throw(object, key, value)?;
+        self.drop_entries(1)?;
+        Ok(Flow::Next)
+    }
+
+    /// `DefineGetter(k)` (`getter` true) and `DefineSetter(k)`.
+    fn define_accessor(&mut self, index: u32, getter: bool) -> Completion<Flow> {
+        let object = self.peek_value(1)?;
+        let object = self.expect_object(object)?;
+        let function = self.peek_value(0)?;
+        let function = self.expect_object(function)?;
+        let key = self.constant_key(index)?;
+        self.make_method(function, object)?;
+        let descriptor = if getter {
+            Descriptor {
+                get: Some(Some(function)),
+                enumerable: Some(true),
+                configurable: Some(true),
+                ..Descriptor::default()
+            }
+        } else {
+            Descriptor {
+                set: Some(Some(function)),
+                enumerable: Some(true),
+                configurable: Some(true),
+                ..Descriptor::default()
+            }
+        };
+        self.define_property_or_throw(object, key, descriptor)?;
+        self.drop_entries(1)?;
+        Ok(Flow::Next)
+    }
+
+    /// `DefineMethod(k)`: `#sec-runtime-semantics-definemethod` (MakeMethod; the closure is of
+    /// kind method, so it has no [[Construct]]) and `#sec-definemethodproperty` with enumerable
+    /// true.
+    fn define_method(&mut self, index: u32) -> Completion<Flow> {
+        let object = self.peek_value(1)?;
+        let object = self.expect_object(object)?;
+        let function = self.peek_value(0)?;
+        let function = self.expect_object(function)?;
+        let key = self.constant_key(index)?;
+        self.make_method(function, object)?;
+        let descriptor = Descriptor {
+            value: Some(Value::Object(function)),
+            writable: Some(true),
+            enumerable: Some(true),
+            configurable: Some(true),
+            ..Descriptor::default()
+        };
+        self.define_property_or_throw(object, key, descriptor)?;
+        self.drop_entries(1)?;
+        Ok(Flow::Next)
+    }
+
+    /// `InitProto`.
+    fn init_proto(&mut self) -> Completion<Flow> {
+        let object = self.peek_value(1)?;
+        let object = self.expect_object(object)?;
+        let value = self.peek_value(0)?;
+        // `object` is the ordinary object the literal made, whose [[SetPrototypeOf]] is
+        // OrdinarySetPrototypeOf; its result is not used ("Perform !").
+        match value {
+            Value::Object(prototype) => {
+                self.ordinary_set_prototype_of(object, Some(prototype))?;
+            }
+            Value::Null => {
+                self.ordinary_set_prototype_of(object, None)?;
+            }
+            _ => {}
+        }
+        self.drop_entries(1)?;
+        Ok(Flow::Next)
+    }
+
+    /// `DefineIndex(i)`.
+    fn define_index(&mut self, index: u32) -> Completion<Flow> {
+        let array = self.peek_value(1)?;
+        let array = self.expect_object(array)?;
+        let value = self.peek_value(0)?;
+        let key = self.index_key(f64::from(index))?;
+        self.create_data_property_or_throw(array, key, value)?;
+        self.drop_entries(1)?;
+        Ok(Flow::Next)
+    }
+
+    /// `ArrayLength(n)`.
+    fn set_array_length(&mut self, length: u32) -> Completion<Flow> {
+        let array = self.peek_value(0)?;
+        let array = self.expect_object(array)?;
+        let key = self.name_key("length")?;
+        self.set(array, key, Value::Number(f64::from(length)), true)?;
+        Ok(Flow::Next)
+    }
+
+    // ---- operators ----
+
+    /// `Typeof`.
+    fn typeof_value(&mut self) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let kind = self.type_of(value)?;
+        let string = self.atom(kind)?;
+        self.replace(1, Value::String(string))
+    }
+
+    /// `ToNumber`.
+    fn convert_to_number(&mut self) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let number = self.to_number(value)?;
+        self.replace(1, Value::Number(number))
+    }
+
+    /// `Negate`.
+    fn negate(&mut self) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let number = self.numeric_number(value)?;
+        self.replace(1, Value::Number(number_unary_minus(number)))
+    }
+
+    /// `BitNot`.
+    fn bit_not(&mut self) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let number = self.numeric_number(value)?;
+        self.replace(1, Value::Number(number_bitwise_not(number)))
+    }
+
+    /// `Not`.
+    fn not(&mut self) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let truth = self.to_boolean(value)?;
+        self.replace(1, Value::Boolean(!truth))
+    }
+
+    /// `ToNumeric`.
+    fn convert_to_numeric(&mut self) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let numeric = self.to_numeric(value)?;
+        self.replace(1, numeric)
+    }
+
+    /// `Increment` (`up` true) and `Decrement`.
+    fn increment(&mut self, up: bool) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let Value::Number(number) = value else {
+            // ToNumeric ran before: no BigInt exists before slice 12.
+            return Err(self.fault());
+        };
+        let changed = if up { number + 1.0 } else { number - 1.0 };
+        self.replace(1, Value::Number(changed))
+    }
+
+    /// `InstanceOf`.
+    fn instance_of(&mut self) -> Completion<Flow> {
+        let value = self.peek_value(1)?;
+        let target = self.peek_value(0)?;
+        let result = self.instanceof_operator(value, target)?;
+        self.replace(2, Value::Boolean(result))
+    }
+
+    /// `In`.
+    fn in_instruction(&mut self) -> Completion<Flow> {
+        let key = self.peek_value(1)?;
+        let target = self.peek_value(0)?;
+        let Value::Object(object) = target else {
+            return Err(self.throw_error(
+                ErrorKind::TypeError,
+                "the right-hand side of 'in' is not an object",
+            ));
+        };
+        let key = self.to_property_key(key)?;
+        let held = self.keep_key(key);
+        let found = self.has_property(object, key);
+        self.release(held);
+        self.replace(2, Value::Boolean(found?))
+    }
+
+    /// `Eq` (`equal` true) and `NotEq`.
+    fn loose_equality(&mut self, equal: bool) -> Completion<Flow> {
+        let left = self.peek_value(1)?;
+        let right = self.peek_value(0)?;
+        let result = self.is_loosely_equal(left, right)? == equal;
+        self.replace(2, Value::Boolean(result))
+    }
+
+    /// `StrictEq` (`equal` true) and `StrictNotEq`.
+    fn strict_equality(&mut self, equal: bool) -> Completion<Flow> {
+        let left = self.peek_value(1)?;
+        let right = self.peek_value(0)?;
+        let result = self.is_strictly_equal(left, right)? == equal;
+        self.replace(2, Value::Boolean(result))
+    }
+
+    // ---- control ----
+
+    /// `JumpIfTrue(t)` (`when` true) and `JumpIfFalse(t)`.
+    fn jump_if(&mut self, target: u32, when: bool) -> Completion<Flow> {
+        let value = self.peek_value(0)?;
+        let truth = self.to_boolean(value)?;
+        self.drop_entries(1)?;
+        if truth == when {
+            return self.jump(target);
+        }
+        Ok(Flow::Next)
+    }
+
+    /// `LoopJump(t)`.
+    fn loop_jump(&mut self, target: u32) -> Completion<Flow> {
+        self.check_interrupt()?;
+        self.jump(target)
+    }
+
+    /// `CaseJump(t)`.
+    fn case_jump(&mut self, target: u32) -> Completion<Flow> {
+        let discriminant = self.peek_value(1)?;
+        let value = self.peek_value(0)?;
+        if self.is_strictly_equal(discriminant, value)? {
+            self.drop_entries(2)?;
+            return self.jump(target);
+        }
+        self.drop_entries(1)?;
+        Ok(Flow::Next)
+    }
+
+    /// `Throw`.
+    fn throw_instruction(&mut self) -> Completion<Flow> {
+        let value = self.pop_value()?;
+        Err(Abrupt::Throw(value))
+    }
+
+    /// `ThrowSyntaxError(k)`.
+    fn throw_syntax_error(&mut self, index: u32) -> Completion<Flow> {
+        let message = self.constant_text(index);
+        Err(self.throw_error(ErrorKind::SyntaxError, &message))
+    }
+
+    /// `Return`.
+    fn return_instruction(&mut self) -> Completion<Flow> {
+        let value = self.pop_value()?;
+        self.check_interrupt()?;
+        Ok(Flow::Return(value))
+    }
+
+    /// `PushEnv(n)`.
+    fn push_env(&mut self, slots: u32) -> Completion<Flow> {
+        let outer = self.top_frame()?.env;
+        let env = self.new_declarative_environment(outer, slots, None)?;
+        let frame = self.top_frame()?;
+        frame.env = Some(env);
+        frame.pushed_envs = frame.pushed_envs.saturating_add(1);
+        Ok(Flow::Next)
+    }
+
+    /// `PopEnv`.
+    fn pop_env(&mut self) -> Completion<Flow> {
+        let Some(env) = self.top_frame()?.env else {
+            return Err(self.fault());
+        };
+        let outer = self.outer_environment(env)?;
+        let frame = self.top_frame()?;
+        frame.env = outer;
+        frame.pushed_envs = frame.pushed_envs.saturating_sub(1);
+        Ok(Flow::Next)
+    }
+
+    /// `Tag(t)`.
+    fn tag_instruction(&mut self, tag: u32) -> Completion<Flow> {
+        self.push_entry(Entry::Tag(tag))?;
+        Ok(Flow::Next)
+    }
+
+    /// `JumpIfTag { tag, target }`.
+    fn jump_if_tag(&mut self, tag: u32, target: u32) -> Completion<Flow> {
+        let found = match self.top_frame()?.stack.last() {
+            Some(Entry::Tag(found)) => Some(*found),
+            _ => None,
+        };
+        match found {
+            Some(found) if found == tag => {
+                self.drop_entries(1)?;
+                self.jump(target)
+            }
+            Some(_) => Ok(Flow::Next),
+            None => Err(self.fault()),
+        }
+    }
+
+    /// `EndFinally`.
+    fn end_finally(&mut self) -> Completion<Flow> {
+        let tag = self.pop_entry()?;
+        let value = self.pop_value()?;
+        match tag {
+            Entry::Tag(TAG_NORMAL) => Ok(Flow::Next),
+            Entry::Tag(TAG_THROW) => Err(Abrupt::Throw(value)),
+            _ => Err(self.fault()),
+        }
+    }
+
+    /// `LoadCompletion`.
+    fn load_completion(&mut self) -> Completion<Flow> {
+        let value = self.top_frame()?.completion;
+        self.replace(0, value)
+    }
+
+    /// `StoreCompletion`.
+    fn store_completion(&mut self) -> Completion<Flow> {
+        let value = self.pop_value()?;
+        self.top_frame()?.completion = value;
+        Ok(Flow::Next)
     }
 
     /// The `ReferenceError` of an unresolvable name, String constant `index`.
@@ -1125,7 +1305,8 @@ impl<H: Host> Agent<H> {
 
     /// `Call(n)`: EvaluateCall (`#sec-evaluatecall`). An ECMAScript function gets a frame on this
     /// loop; any other function is called from Rust, and the interrupt is checked when it
-    /// returns.
+    /// returns. The frame of a call on this loop is made in [`Agent::push_call_frame`], so that
+    /// what it takes is not on the stack while a call from Rust runs.
     fn call_instruction(&mut self, count: u32) -> Completion<Flow> {
         let count = usize::try_from(count).unwrap_or(usize::MAX);
         let values = self.peek_values(count.saturating_add(2))?;
@@ -1140,20 +1321,33 @@ impl<H: Host> Agent<H> {
             return Err(self.throw_error(ErrorKind::TypeError, "the object is not a function"));
         }
         if self.is_ecmascript_function(object)? {
-            self.check_frame_depth()?;
-            self.step()?;
-            let frame = self.make_frame(object, this, &args, None)?;
-            self.drop_entries(count.saturating_add(2))?;
-            self.push_frame(frame);
-            self.check_interrupt()?;
-            return Ok(Flow::Next);
+            return self.push_call_frame(object, this, &args, count);
         }
         let result = self.internal_call(object, this, &args)?;
         self.check_interrupt()?;
         self.replace(count.saturating_add(2), result)
     }
 
-    /// `New(n)`: EvaluateNew (`#sec-evaluatenew`).
+    /// The call of the ECMAScript function `function` of `Call(count)` on this loop: its frame
+    /// replaces the `count + 2` entries of the call.
+    fn push_call_frame(
+        &mut self,
+        function: ObjectRef,
+        this: Value,
+        args: &[Value],
+        count: usize,
+    ) -> Completion<Flow> {
+        self.check_frame_depth()?;
+        self.step()?;
+        let frame = self.make_frame(function, this, args, None)?;
+        self.drop_entries(count.saturating_add(2))?;
+        self.push_frame(frame);
+        self.check_interrupt()?;
+        Ok(Flow::Next)
+    }
+
+    /// `New(n)`: EvaluateNew (`#sec-evaluatenew`). The frame of a construction on this loop is
+    /// made in [`Agent::push_construct_frame`], as for `Call(n)`.
     fn new_instruction(&mut self, count: u32) -> Completion<Flow> {
         let count = usize::try_from(count).unwrap_or(usize::MAX);
         let values = self.peek_values(count.saturating_add(1))?;
@@ -1166,26 +1360,38 @@ impl<H: Host> Agent<H> {
         }
         let object = self.expect_object(constructor)?;
         if self.is_ecmascript_function(object)? {
-            self.check_frame_depth()?;
-            let this = self.ordinary_create_from_constructor(
-                object,
-                Intrinsic::ObjectPrototype,
-                OrdinaryData::Plain,
-            )?;
-            let keep = self.keep(Value::Object(this));
-            let frame = self
-                .step()
-                .and_then(|()| self.make_frame(object, Value::Undefined, &args, Some(this)));
-            self.release(keep);
-            let frame = frame?;
-            self.drop_entries(count.saturating_add(1))?;
-            self.push_frame(frame);
-            self.check_interrupt()?;
-            return Ok(Flow::Next);
+            return self.push_construct_frame(object, &args, count);
         }
         let result = self.construct_value(object, &args, None)?;
         self.check_interrupt()?;
         self.replace(count.saturating_add(1), result)
+    }
+
+    /// The construction by the ECMAScript function `constructor` of `New(count)` on this loop:
+    /// its frame, with the new object as its `this`, replaces the `count + 1` entries of the
+    /// call.
+    fn push_construct_frame(
+        &mut self,
+        constructor: ObjectRef,
+        args: &[Value],
+        count: usize,
+    ) -> Completion<Flow> {
+        self.check_frame_depth()?;
+        let this = self.ordinary_create_from_constructor(
+            constructor,
+            Intrinsic::ObjectPrototype,
+            OrdinaryData::Plain,
+        )?;
+        let keep = self.keep(Value::Object(this));
+        let frame = self
+            .step()
+            .and_then(|()| self.make_frame(constructor, Value::Undefined, args, Some(this)));
+        self.release(keep);
+        let frame = frame?;
+        self.drop_entries(count.saturating_add(1))?;
+        self.push_frame(frame);
+        self.check_interrupt()?;
+        Ok(Flow::Next)
     }
 
     /// `ForInStart`: ForIn/OfHeadEvaluation for `enumerate`
