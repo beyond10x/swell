@@ -918,7 +918,12 @@ from `swell-unicode`. The rule:
     functions with slice 3 (`eval` is slice 2's own);
   - `String.prototype.toString` and `valueOf` (`sec-string.prototype.tostring`,
     `sec-string.prototype.valueof`). Slice 3 delivers the rest of `String`, slice 5 the methods
-    item 5 names.
+    item 5 names;
+  - `Array.prototype.toString` (`sec-array.prototype.tostring`), taken on 2026-11-21 when the
+    run lines of slice 2 showed a case of the language core failing on the string conversion
+    of an array (11 cases in 22 runs over slices 2, 3 and 19). It uses `Array.prototype.join`,
+    which slice 1 has, and the realm's `%Object.prototype.toString%`. The rest of `Array` stays
+    with slice 3.
 - Where the early part cannot be complete without a later slice's data or engine, the gap is a
   recorded omission the gate reads (`conformance/test262/sections.txt`), and the engine refuses
   the input with a defined outcome instead of guessing: before slice 5, an identifier character

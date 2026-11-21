@@ -5,7 +5,10 @@
 //! the step budget and `string_length` (`docs/design/host-interface.md`, section 2). No script
 //! runs: the callbacks are host functions. A constructor with its own @@species needs a
 //! well-known symbol, which the host interface does not hand out, so that part of `map` is a
-//! unit test of `builtins/array.rs`. Run also with the feature `collect-every-safe-point`.
+//! unit test of `builtins/array.rs`. `Array.prototype.toString` (`#sec-array.prototype.tostring`),
+//! which slice 2 takes early (`docs/design/engine.md`, section 12, "A part before its slice"), is
+//! tested with scripts, in sloppy and in strict code. Run also with the feature
+//! `collect-every-safe-point`.
 #![cfg(test)]
 
 mod support;
@@ -14,7 +17,25 @@ use support::host::{
     TestHost, agent, agent_with, get, get_object, global, is_error_of, key, limits, object, realm,
     string, text, thrown,
 };
+use support::script::{Outcome, eval_text, run, run_both};
 use swell::{Abrupt, Completion, Cx, HostCall, ObjectRef, Termination, Value};
+
+/// Both modes of `source` answer `expected`, a normal completion as `show` writes it.
+fn both_answer(source: &str, expected: &str) {
+    let (sloppy, strict) = run_both(source);
+    let expected = Outcome::Normal(expected.to_string());
+    assert_eq!(sloppy, expected, "sloppy: {source}");
+    assert_eq!(strict, expected, "strict: {source}");
+}
+
+/// Both modes of `source` throw `name`: the name of an error, or a thrown value as `show`
+/// writes it.
+fn both_throw(source: &str, name: &str) {
+    let (sloppy, strict) = run_both(source);
+    let expected = Outcome::Throw(name.to_string());
+    assert_eq!(sloppy, expected, "sloppy: {source}");
+    assert_eq!(strict, expected, "strict: {source}");
+}
 
 /// `Array(...args)`.
 fn array(cx: &mut Cx<'_, TestHost>, global: ObjectRef, args: &[Value]) -> ObjectRef {
@@ -575,6 +596,304 @@ fn join_past_string_length_throws_range_error() {
                 &[long_separator],
             ));
             assert!(is_error_of(cx, global, error, "RangeError"));
+        })
+        .unwrap();
+}
+
+/// `#sec-array.prototype.tostring`: an Array answers the result of its `join`, so the string
+/// conversion of an Array (ToPrimitive, `#sec-toprimitive`, through OrdinaryToPrimitive) is its
+/// elements joined with ",": `+` with a String (`#sec-applystringornumericbinaryoperator`),
+/// `String` called (`#sec-string-constructor-string-value`), nested Arrays, and ToNumber in
+/// `isNaN` (`#sec-isnan-number`), where `[]` is "" and so +0, and `[1, 2]` is "1,2" and so NaN.
+#[test]
+fn to_string_of_an_array_joins_its_elements() {
+    both_answer("[1, 2, 3].toString();", "\"1,2,3\"");
+    both_answer("[] + \"\";", "\"\"");
+    both_answer("new Array(2, 4, 8, 16, 32) + \"\";", "\"2,4,8,16,32\"");
+    both_answer("String([1, [2, 3]]);", "\"1,2,3\"");
+    both_answer("[1, , null, undefined, \"x\"].toString();", "\"1,,,,x\"");
+    both_answer("isNaN([]);", "false");
+    both_answer("isNaN([1, 2]);", "true");
+    both_answer("[7] * 2;", "14");
+}
+
+/// `#sec-array.prototype.tostring` and clause 18 (`#sec-ecmascript-standard-built-in-objects`):
+/// `Array.prototype.toString` is a function with "length" 0 and "name" "toString", a property
+/// { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true } of
+/// `%Array.prototype%`, and not a constructor (`new` throws a `TypeError`).
+#[test]
+fn to_string_is_a_method_of_array_prototype() {
+    both_answer(
+        "var d = Object.getOwnPropertyDescriptor(Array.prototype, \"toString\"); \
+         var f = Array.prototype.toString; \
+         [typeof f, d.value === f, d.writable, d.enumerable, d.configurable, f.length, f.name, \
+          Object.getPrototypeOf(f) === Function.prototype].join();",
+        "\"function,true,true,false,true,0,toString,true\"",
+    );
+    both_throw("new Array.prototype.toString();", "TypeError");
+    both_throw("new [].toString();", "TypeError");
+}
+
+/// `#sec-array.prototype.tostring`, steps 2 and 4: the method reads "join" from the object and
+/// calls it with the object as `this` and no argument, so an Array whose own `join` is replaced
+/// answers through the replacement, and so does a replaced `Array.prototype.join`.
+#[test]
+fn to_string_calls_the_join_of_the_object() {
+    both_answer(
+        "var a = [1, 2]; a.join = function () { return \"j\" + this.length + arguments.length; }; \
+         a.toString();",
+        "\"j20\"",
+    );
+    both_answer(
+        "Array.prototype.join = function () { return \"replaced\"; }; [1, 2] + \"\";",
+        "\"replaced\"",
+    );
+}
+
+/// `#sec-array.prototype.tostring`, step 3: when "join" is not callable the method calls the
+/// intrinsic `%Object.prototype.toString%` (`#sec-object.prototype.tostring`), not what
+/// `Object.prototype.toString` holds now: an Array with a `join` that is not a function, an
+/// Array after `Array.prototype.join` is deleted, and a plain object, which has no `join`.
+#[test]
+fn to_string_without_a_callable_join_is_object_prototype_to_string() {
+    both_answer(
+        "var a = [1, 2]; a.join = 1; a.toString();",
+        "\"[object Array]\"",
+    );
+    both_answer(
+        "var a = [1, 2]; a.join = {}; a + \"\";",
+        "\"[object Array]\"",
+    );
+    both_answer(
+        "delete Array.prototype.join; [1, 2].toString();",
+        "\"[object Array]\"",
+    );
+    both_answer("Array.prototype.toString.call({});", "\"[object Object]\"");
+    both_answer(
+        "Object.prototype.toString = function () { return \"replaced\"; }; \
+         [Array.prototype.toString.call({}), Array.prototype.toString.call({ join: null })].join();",
+        "\"[object Object],[object Object]\"",
+    );
+    both_answer(
+        "Array.prototype.toString.call(function () {});",
+        "\"[object Function]\"",
+    );
+}
+
+/// `#sec-array.prototype.tostring`: the method is generic (its note). Step 1, ToObject
+/// (`#sec-toobject`): `undefined` and `null` throw a `TypeError`; a primitive is wrapped, and
+/// the wrapper is the `this` of its `join`, in strict code too. A plain object with a callable
+/// `join` answers through it, called on the object.
+#[test]
+fn to_string_is_generic() {
+    both_answer(
+        "var o = { join: function () { return this === o ? \"self\" : \"other\"; } }; \
+         Array.prototype.toString.call(o);",
+        "\"self\"",
+    );
+    both_answer(
+        "var o = { length: 2, 0: \"a\", 1: \"b\", join: Array.prototype.join }; \
+         Array.prototype.toString.call(o);",
+        "\"a,b\"",
+    );
+    both_throw("Array.prototype.toString.call(undefined);", "TypeError");
+    both_throw("Array.prototype.toString.call(null);", "TypeError");
+    both_throw("Array.prototype.toString.call();", "TypeError");
+    both_answer("Array.prototype.toString.call(5);", "\"[object Number]\"");
+    both_answer(
+        "Array.prototype.toString.call(\"ab\");",
+        "\"[object String]\"",
+    );
+    both_answer(
+        "Number.prototype.join = function () { return typeof this + this.valueOf(); }; \
+         Array.prototype.toString.call(5);",
+        "\"object5\"",
+    );
+}
+
+/// `#sec-array.prototype.tostring`, steps 2 and 4 (`?`): an abrupt completion of the Get of
+/// "join" (a getter that throws) and of the call of `join` is passed on, a thrown value that
+/// is not an error included; a throw from step 1 comes before any Get.
+#[test]
+fn to_string_passes_on_abrupt_completions() {
+    both_throw(
+        "var o = {}; \
+         Object.defineProperty(o, \"join\", { get: function () { throw new RangeError(\"g\"); } }); \
+         Array.prototype.toString.call(o);",
+        "RangeError",
+    );
+    both_throw(
+        "var a = [1]; \
+         Object.defineProperty(a, \"join\", { get: function () { throw 7; } }); \
+         a + \"\";",
+        "7",
+    );
+    both_throw(
+        "Array.prototype.toString.call({ join: function () { throw new SyntaxError(\"c\"); } });",
+        "SyntaxError",
+    );
+    both_throw(
+        "var a = [1]; a.join = function () { throw \"x\"; }; String(a);",
+        "\"x\"",
+    );
+}
+
+/// The steps an entry of `source` spends; it must answer `expected`.
+fn steps_of(source: &str, expected: &str) -> u64 {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &realm, source),
+        Outcome::Normal(expected.to_string()),
+        "{source}"
+    );
+    agent.last_entry_steps().unwrap()
+}
+
+/// The budgets (`docs/design/engine.md`, decision 2): `Array.prototype.toString` is charged as
+/// a call, and the `join` or `%Object.prototype.toString%` it calls each as a call of its own,
+/// and its Get of "join" as every Get is, a step for each prototype it goes up to
+/// (`#sec-ordinaryget`). So a script that calls `toString` spends what the same script calling
+/// `join` or `Object.prototype.toString` itself spends, one step more for the call of
+/// `toString`, and one more again when "join" is found on `%Array.prototype%`, not on the
+/// object. The loop of `join` is charged too: the `toString` of an Array of length 2^32 - 1
+/// ends in `Terminated(StepBudget)`, in sloppy and in strict code.
+#[test]
+fn to_string_is_charged_as_its_calls() {
+    // Each pair differs only in the function `f` names: `t`, or what `t` calls.
+    let pair = |setup: &str, expected: &str| {
+        let through = steps_of(&format!("{setup} x.f = t; x.f();"), expected);
+        let direct = steps_of(&format!("{setup} x.f = d; x.f();"), expected);
+        (through, direct)
+    };
+    let t = "var t = Array.prototype.toString;";
+    let (through, direct) = pair(
+        &format!("{t} var d = Array.prototype.join; var x = [1, 2, 3];"),
+        "\"1,2,3\"",
+    );
+    assert_eq!(through, direct + 2, "join found on %Array.prototype%");
+    let (through, direct) = pair(
+        &format!("{t} var d = function () {{ return \"0\"; }}; var x = [1, 2, 3]; x.join = d;"),
+        "\"0\"",
+    );
+    assert_eq!(through, direct + 1, "an own join");
+    let (through, direct) = pair(
+        &format!("{t} var d = Object.prototype.toString; var x = {{ join: 1 }};"),
+        "\"[object Object]\"",
+    );
+    assert_eq!(through, direct + 1, "%Object.prototype.toString%");
+
+    let mut limits = limits();
+    limits.steps_per_entry = 100_000;
+    for prologue in ["", "\"use strict\";\n"] {
+        assert_eq!(
+            run(
+                limits,
+                &format!("{prologue}var a = []; a.length = 4294967295; a.toString();")
+            ),
+            Outcome::Terminated(Termination::StepBudget),
+            "{prologue}"
+        );
+    }
+}
+
+/// The object `toString` works on is held across the Get of "join" and the call (decision 4):
+/// the wrapper ToObject makes of a primitive is referenced by nothing else, and a getter of
+/// "join" and the `join` it answers both make garbage; with `collect-every-safe-point` every
+/// call collects, and `join` still reads the wrapper. An Array whose `join` makes garbage
+/// still joins its elements.
+#[test]
+fn to_string_holds_its_object_across_the_call() {
+    both_answer(
+        "Object.defineProperty(Number.prototype, \"join\", { get: function () { \
+           var g = []; for (var i = 0; i < 50; i++) g.push({ i: i }); \
+           return function () { \
+             var h = []; for (var i = 0; i < 50; i++) h.push([i]); \
+             return typeof this + this.valueOf(); \
+           }; \
+         } }); \
+         Array.prototype.toString.call(5) + Array.prototype.toString.call(6);",
+        "\"object5object6\"",
+    );
+    both_answer(
+        "var a = [1, [2, 3], \"x\"]; \
+         a.join = function () { \
+           var g = []; for (var i = 0; i < 50; i++) g.push({ i: i }); \
+           return Array.prototype.join.call(this, \"-\"); \
+         }; \
+         a.toString();",
+        "\"1-2,3-x\"",
+    );
+}
+
+/// `%Object.prototype.toString%` is an intrinsic of the realm, so the realm holds it (decision
+/// 4): after a script deletes `Object.prototype.toString` nothing else references that
+/// function, and after two collections between entries (and one at every safe point with
+/// `collect-every-safe-point`) the fallback of `Array.prototype.toString` still calls it.
+#[test]
+fn the_intrinsic_survives_collections_when_only_the_realm_holds_it() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "delete Object.prototype.toString; var a = [1, 2]; a.join = null; \
+             typeof Object.prototype.toString;"
+        ),
+        Outcome::Normal("\"undefined\"".to_string())
+    );
+    for _ in 0..2 {
+        assert!(matches!(agent.collect(), Ok(swell::Outcome::Normal(_))));
+    }
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "a.toString() + \" \" + Array.prototype.toString.call({}) + \" \" + String(a);"
+        ),
+        Outcome::Normal("\"[object Array] [object Object] [object Array]\"".to_string())
+    );
+}
+
+/// `#sec-array.prototype.tostring`, step 3, with two realms: each realm's
+/// `Array.prototype.toString` falls back to the intrinsic of its own realm, whatever the
+/// scripts of either realm did to their `Object.prototype.toString` (realm A replaces it, realm
+/// B deletes it), and on an Array of the other realm too.
+#[test]
+fn the_fallback_is_the_intrinsic_in_each_realm() {
+    let mut agent = agent().unwrap();
+    let realm_a = realm(&mut agent);
+    let realm_b = support::host::realm(&mut agent);
+    let global_a = global(&mut agent, &realm_a);
+    let global_b = global(&mut agent, &realm_b);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm_a,
+            "Object.prototype.toString = function () { return \"A\"; }; \
+             var a = [1]; a.join = null; a.toString() + ({}).toString();"
+        ),
+        Outcome::Normal("\"[object Array]A\"".to_string())
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm_b,
+            "delete Object.prototype.toString; var b = [2]; b.join = 0; b + \"\";"
+        ),
+        Outcome::Normal("\"[object Array]\"".to_string())
+    );
+    agent
+        .with_cx(&realm_a, |cx| {
+            let global_a = object(cx, &global_a);
+            let global_b = object(cx, &global_b);
+            let a = get(cx, global_a, "a");
+            let b = get(cx, global_b, "b");
+            for (global, this) in [(global_a, a), (global_a, b), (global_b, a), (global_b, b)] {
+                let result = array_method(cx, global, "toString", this, &[]);
+                assert_eq!(joined(cx, result), "[object Array]");
+            }
         })
         .unwrap();
 }
