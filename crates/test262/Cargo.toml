@@ -4,6 +4,10 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[dependencies]
+swell = { path = "../swell" }
+swell-syntax = { path = "../syntax" }
+
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"

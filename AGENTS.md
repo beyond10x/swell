@@ -334,6 +334,21 @@ session coordinates; this section is its procedure, taken from how surf is run
   lines still sum to 53,801, and the first stretch is done when those 31 pass. Whether the
   `Function` constructor and `arguments` come early in slice 2 is measured and decided at
   slice 2's decomposition (cases per slice that include `propertyHelper.js`).
+- **Slice 2 delivers the global `Function`, constructor included.** Decided on 2026-11-21 by the
+  session that decides for the operator, on this measurement (the design's `slices.awk` over
+  `meta.tsv` of the pinned checkout, block as on `main` that day): 5,242 cases include
+  `propertyHelper.js`, per slice 01: 24 (23 of them move to slice 3 in wave 5 of slice 1), 02:
+  56, 03: 1,162, 04: 304, 05: 66, 06: 237, 07: 65, 08: 991, 09: 201, 10: 659, 11: 3, 12: 18, 13:
+  311, 14: 64, 15: 145, 16: 21, 17: 0, 18: 155, 19: 17, and 743 in the excluded slices. The
+  file needs `arguments` (slice 2) and the global `Function` (four uses), which the design
+  gave to slice 3. The 56 cases stay in slice 2. Conditions on the story: CreateDynamicFunction
+  goes through the same parse entry as `eval`, with the same nesting limit and the same step
+  and memory charges, no second parser path, and a test reaches each limit through
+  `Function(...)`; its acceptance carries the measured count of cases that pass once the
+  helper loads, per slice, from the pinned checkout; the design's line that gives `Function` to
+  slice 3 moves in the same change, the slice counts still summing to 53,801. Refused: moving
+  the 56 cases to slice 3 (slice 3 would open on an unproven helper for 1,162 of its cases),
+  and a `Function` with a prototype only (a part slice 3 replaces).
 - **Batches.** When the build pool or the quota is tight, a wave's units run in two batches
   rather than all at once; a story is never split to gain parallelism.
 - **A case that cannot pass in its slice.** The slice counts say when a case can first pass,

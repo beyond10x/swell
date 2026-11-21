@@ -451,7 +451,8 @@ and a wrong kind have a place; its `Ok` holds what it returns otherwise: `Outcom
 `Parsed<T>` or a read's value on `Agent`, `Completion<T>` on `Cx` and `HookCx`, which gives
 `Result<Completion<T>, HostError>` as `Agent` has `Result<Outcome<T>, HostError>`. A method that
 takes no handle (`new_string`, `new_promise_capability`, `cx.perform_microtask_checkpoint`)
-keeps its type. The handles are checked before the call does anything else, before the sticky
+keeps its type. The handles are checked after the `Faulted` check (decision 6) and before the
+call does anything else, before the sticky
 termination of decision 10 too: a stale handle given while a run is terminated answers
 `Err(StaleHandle)` and the run stays terminated. HOST-30 and HOST-31 cover every such method,
 those of `Cx` and `HookCx` included. The rule is for handles the host passes in as arguments (a
@@ -536,6 +537,14 @@ requirement when their slice is decomposed.
 
 **HOST-48** (swell:D6) After an entry answered `Terminated(EngineFault)`, `state()` reads `Faulted` and every other entry point and read of the agent answers `Err(HostError::Faulted)` without calling a hook. [slice 1]
 
+Inside a scope still on the Rust stack when the agent faults (a host function whose returned
+handle faulted it, HOST-160, say), HOST-48 holds for every scoped method whose type carries
+`HostError`: it answers `Err(HostError::Faulted)` before it checks its handles. A scoped method
+whose type is `Completion<T>` alone (`new_string`, `new_string_utf16`,
+`new_promise_capability`, `cx.perform_microtask_checkpoint`) cannot carry it and answers
+`Err(Abrupt::Terminated(EngineFault))`, as decision 10's sticky termination says; neither kind
+runs code or calls a hook.
+
 ## 7. Realms
 
 **`create_realm` performs InitializeHostDefinedRealm. The host may give a setup closure that
@@ -552,12 +561,16 @@ global object, then Let thisValue be such an object created in a host-defined ma
 uses those customisations for `Window` and `WindowProxy` ("Perform
 InitializeHostDefinedRealm() with the provided customizations for creating the global object
 and the global this binding", `html:creating-a-new-javascript-realm`). The global's prototype
-chain needs the new realm's intrinsics, so the closure runs inside the operation. The draft
-gives a realm no end; a realm is objects and records in the heap, freed like them.
+chain needs the new realm's intrinsics, so the closure runs inside the operation, and it reaches
+the one it needs through `Prototype::ObjectPrototypeOf(realm)` of a `HostObjectSpec` (decision
+15): the closure's `HookCx` reads no property and names no other intrinsic. The draft gives a
+realm no end; a realm is objects and records in the heap, freed like them.
 
 Rejected: a host-made global passed in before the call (its prototype could not come from the
 realm's own intrinsics); an explicit `destroy_realm` (objects of a destroyed realm reachable
-from another realm would dangle, or the call would have to refuse).
+from another realm would dangle, or the call would have to refuse); an accessor for any
+intrinsic of a realm (a door to every intrinsic for one need: an object on `%Object.prototype%`,
+on which the host builds the rest of its chain with its own objects).
 
 ```rust
 pub struct GlobalObjects { pub global: ObjectRef, pub this: Option<ObjectRef> }
@@ -594,7 +607,7 @@ prototype when there is none (the answer would change with when the collector ra
 decision 19 and the collect-at-every-safe-point mode would observe, and the host could not see
 which realm it got).
 
-**HOST-49** (ecma262:sec-initializehostdefinedrealm) The setup closure is called once per `create_realm`, can create an object whose prototype is the new realm's `%Object.prototype%`, and the global it returns has the clause 19 properties the engine defines (with no `this` returned, the script `this.Array === Array` answers `true` in the realm). [slice 1]
+**HOST-49** (ecma262:sec-initializehostdefinedrealm) The setup closure is called once per `create_realm`, can create, by `new_host_object` with `Prototype::ObjectPrototypeOf` of the realm it receives, an object whose prototype is the new realm's `%Object.prototype%`, and the global it returns has the clause 19 properties the engine defines (with that object returned as the global and no `this`, the script `this.Array === Array && Object.getPrototypeOf(this) === Object.prototype` answers `true` in the realm). [slice 1]
 
 **HOST-50** (ecma262:sec-initializehostdefinedrealm) When the setup returns a `this` object, the script `this` in the realm answers that object. [slice 1]
 
@@ -745,7 +758,8 @@ step of the draft meets a state its assertions exclude.
 
 - **Termination is sticky for the run.** Once a run is terminated, every `Cx` call made by
   host code still on the Rust stack answers `Abrupt::Terminated` with the same reason (after
-  the check of its handles, decision 5), and what
+  the check of its handles, decision 5; on a faulted agent a call whose type carries
+  `HostError` answers `Err(Faulted)`, decision 6), and what
   a host function returns is ignored; the outermost entry answers `Terminated`.
 - **Generators and async functions.** A generator that was executing stays `executing`, so a
   later `next` throws: "If state is executing, throw a TypeError exception."
@@ -1123,8 +1137,15 @@ pub struct Overrides<H: Host> {
     pub delete: Option<fn(&mut Cx<'_, H>, ObjectRef, PropertyKey) -> Completion<bool>>,
     pub own_property_keys: Option<fn(&mut Cx<'_, H>, ObjectRef) -> Completion<Vec<PropertyKey>>>,
 }
+/// The [[Prototype]] of a new host object.
+pub enum Prototype {
+    Object(ObjectRef),
+    Null,
+    /// The `%Object.prototype%` of that realm, the one intrinsic a host can name.
+    ObjectPrototypeOf(RealmRef),
+}
 pub struct HostObjectSpec<H: Host> {
-    pub prototype: Option<ObjectRef>,
+    pub prototype: Prototype,
     pub brand: Brand,
     pub data: Option<Box<dyn HostData>>,
     pub overrides: Option<&'static Overrides<H>>,

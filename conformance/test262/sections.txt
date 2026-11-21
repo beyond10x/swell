@@ -73,3 +73,12 @@ omit sec-names-and-keywords identifiers-outside-ascii section-12-part-before-its
 section sec-literals-regular-expression-literals
 path sec-literals-regular-expression-literals test/language/literals/regexp/
 omit sec-literals-regular-expression-literals regexp-literals section-12-part-before-its-slice
+section sec-parse-script
+path sec-parse-script test/language/global-code/
+omit sec-parse-script parser-nesting-limit decision-3
+section sec-ecmascript-function-objects-call-thisargument-argumentslist
+path sec-ecmascript-function-objects-call-thisargument-argumentslist test/language/expressions/call/
+omit sec-ecmascript-function-objects-call-thisargument-argumentslist frame-depth-limit decision-3
+section sec-applystringornumericbinaryoperator
+path sec-applystringornumericbinaryoperator test/language/expressions/addition/
+omit sec-applystringornumericbinaryoperator string-length-limit decision-3
