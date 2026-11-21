@@ -2,6 +2,10 @@
 # Planted defect: a copy of data/unicode/17.0.0 with one byte of ucd/CaseFolding.txt changed.
 # The task unicode-data-check must refuse it with exactly one fault line, the sha256 line of
 # that file. The unchanged copy must pass first, so the refusal comes from the planted defect.
+# The same output from task, cargo and ess on any machine: no colour, and no "::error" line
+# that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
+export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=unicode-data-check-refuses-a-changed-file
 work=.out/gate-tests/$name
 data=data/unicode/17.0.0

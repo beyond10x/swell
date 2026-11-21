@@ -3,6 +3,10 @@
 # HOST-2 [slice 2]. Slice 4 is not delivered, so only the slice line is due.
 # The task host-requirements-check must refuse it with exactly one fault line, the slice line of
 # HOST-2. The valid set must pass first, so the refusal comes from the planted defect.
+# The same output from task, cargo and ess on any machine: no colour, and no "::error" line
+# that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
+export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=host-requirements-refuses-a-pending-line-naming-another-slice
 work=.out/gate-tests/$name
 fail() { echo "$name: FAIL $*"; exit 1; }

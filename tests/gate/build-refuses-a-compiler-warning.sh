@@ -12,6 +12,10 @@
 # Cargo.lock is made for it (cargo generate-lockfile --offline, no dependency to fetch); the
 # build runs with --locked as the task's does, which then checks that the build leaves it as made.
 
+# The same output from task, cargo and ess on any machine: no colour, and no "::error" line
+# that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
+export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=build-refuses-a-compiler-warning
 dir=.out/gate-tests/$name
 fail() { echo "$name: FAIL $*"; exit 1; }

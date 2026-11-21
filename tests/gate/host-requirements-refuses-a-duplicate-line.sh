@@ -3,6 +3,10 @@
 # The task host-requirements-check must refuse it with exactly one fault line, the "listed 2
 # times" line of HOST-2. The valid set must pass first, so the refusal comes from the planted
 # defect.
+# The same output from task, cargo and ess on any machine: no colour, and no "::error" line
+# that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
+export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=host-requirements-refuses-a-duplicate-line
 work=.out/gate-tests/$name
 fail() { echo "$name: FAIL $*"; exit 1; }

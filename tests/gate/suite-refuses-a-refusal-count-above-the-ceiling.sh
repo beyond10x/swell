@@ -6,6 +6,10 @@
 #    under a ceiling of 1.
 # 2. A conformance log whose last line is not `<n> scenarios: <n> passed, 0 failed, 0 error,
 #    0 unsupported`: `task conform-summary` must exit non-zero; the passing line must pass.
+# The same output from task, cargo and ess on any machine: no colour, and no "::error" line
+# that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
+export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=suite-refuses-a-refusal-count-above-the-ceiling
 dir=.out/gate-tests/$name
 rm -rf "$dir"
