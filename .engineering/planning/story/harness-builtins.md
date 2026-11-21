@@ -14,10 +14,18 @@ scope:
 - confidence: cited
   path: crates/swell/src/object/bound_function.rs
 - confidence: cited
+  path: crates/swell/src/object/builtin_function.rs
+- confidence: cited
+  path: crates/swell/src/object/mod.rs
+- confidence: cited
+  path: crates/swell/src/ops/objects.rs
+- confidence: cited
+  path: crates/swell/src/ops/testing.rs
+- confidence: cited
   path: crates/swell/src/realm/global_object.rs
 - confidence: cited
   path: crates/swell/src/realm/intrinsics.rs
-revision: 8
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
@@ -76,6 +84,32 @@ reads the outer `Result` first.
 
 - The current realm (2026-11-21, `docs/design/host-interface.md` decision 7): `with_cx`,
   `Agent::call` and `Agent::construct` take a `&Realm`; this story's tests pass one.
+
+- `Writes:` is extended (2026-11-21, found by this story's unit before it wrote anything: a bound
+  function cannot be created under `-D warnings` while three `expect(dead_code)` marks name
+  this story, and two operations lack their bound-function step):
+  `crates/swell/src/object/mod.rs` (the mark on the bound-function kind, nothing else; the
+  sentence of this story that the file is not edited is withdrawn for that one line),
+  `crates/swell/src/ops/testing.rs` (the mark on `is_array`),
+  `crates/swell/src/ops/objects.rs` (the marks on `has_own_property` and
+  `length_of_array_like`; step 2 of GetFunctionRealm and of OrdinaryHasInstance for a bound
+  function, each as a loop that charges one step per bound function, never by recursion in
+  Rust), and `crates/swell/src/object/builtin_function.rs` (six `BuiltinId` variants, one per
+  builtin module of this story, each module holding its own id enum, so that an engine builtin
+  does not go through the host-function path).
+- The `[[Call]]` and `[[Construct]]` of a bound function gather the bound arguments in a loop
+  over the chain, one step charged per link, and do not recurse in Rust.
+- No public method returns a well-known symbol, and none is added in this slice. The two tests
+  that need one (`has_instance_of_a_bound_function`, and the custom `@@species` part of
+  `map_uses_species_and_skips_holes`) are unit tests inside `builtins/function.rs` and
+  `builtins/array.rs`; the integration test of `map` keeps what the interface reaches (the
+  `%Array%` of another realm, a constructor without `@@species`, a non-constructor that throws
+  a `TypeError`, holes). The gate runs them in both collection modes (`test` and
+  `test-collect`).
+- `story:interpreter-and-script-entry-points` runs at the same time and will change
+  `ops/objects.rs` (GetFunctionRealm for an ECMAScript function, `is_constructor`,
+  `instanceof_operator`) and `object/mod.rs` (its own mark). This story touches only its own
+  hunks there; the unit that lands second takes the other one's in.
 
 ## Change
 
