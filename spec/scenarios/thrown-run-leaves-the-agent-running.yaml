@@ -1,0 +1,91 @@
+# A script that throws and catches nothing answers Throw(value) (decision 5; HOST-37, whose source
+# this is with its semicolon), changes nothing else and leaves the agent Alive: a second script,
+# parsed in the same realm, runs to Normal. `throw 1;` is a statement the slice 1 engine has. The
+# answer is forced (`external:`) on ESS's interpreter; an engine under test reaches it by running
+# the script. Synthesis writes no scenario for EvaluateScript (its script only ParseScript's
+# `parsed` creates, which synthesis does not arrange). Every call is made on the agent that owns
+# the realm and the scripts.
+type: ess-scenario/6
+domain: swell.host
+scenario: thrown-run-leaves-the-agent-running
+summary: A script that throws answers Throw, and the next script on the agent completes.
+
+arrange:
+  - instance: agent
+    entity: swell.host.Agent
+  - instance: realm
+    entity: swell.host.Realm
+  - instance: script
+    entity: swell.host.Script
+  - instance: next
+    entity: swell.host.Script
+
+timeline:
+  - at: 2026-01-06T09:00:00Z
+    command: swell.host.CreateAgent
+    actor: swell.host.Host
+    input:
+      limits:
+        steps_per_entry: 1000000
+        memory_bytes: 67108864
+        frame_depth: 10000
+        reentry_depth: 256
+        parser_nesting: 1000
+        string_length: 1073741824
+        bigint_bits: 1048576
+      hash_key: AAECAwQFBgcICQoLDA0ODw==
+      random_seed: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    outcome: created
+    capture: {instance: agent, event: swell.host.AgentCreated, field: agent_id}
+
+  - at: 2026-01-06T09:00:01Z
+    command: swell.host.CreateRealm
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: created
+    capture: {instance: realm, event: swell.host.RealmCreated, field: realm_id}
+
+  - at: 2026-01-06T09:00:02Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "throw 1;"
+    outcome: parsed
+    capture: {instance: script, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:03Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: script}
+    outcome: threw
+    events:
+      - event: swell.host.ScriptThrew
+        payload:
+          script_id: {$instance: script}
+
+  - at: 2026-01-06T09:00:04Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "1 + 1;"
+    outcome: parsed
+    capture: {instance: next, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:05Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: next}
+    outcome: completed
+    events:
+      - event: swell.host.ScriptCompleted
+        payload:
+          script_id: {$instance: next}

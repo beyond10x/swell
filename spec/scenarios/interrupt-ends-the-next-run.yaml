@@ -1,0 +1,88 @@
+# An interrupt set while no entry runs ends the next entry with Terminated(Interrupted) before it
+# spends a step, and the engine clears the flag when it ends that run, so the run after it
+# completes (host-interface.md decision 12; HOST-92, HOST-91). The script is parsed on the agent
+# that owns the realm, so the run reaches the interrupt check. Synthesis writes no scenario for
+# Interrupt's `set` (its `preserves:` needs a view of the agent) and none for EvaluateScript (its
+# script only ParseScript's `parsed` creates, which synthesis does not arrange). `interrupted` is
+# forced (`external:`): this states the sequence of answers, and an engine under test reaches it
+# only through the Interrupt before it.
+type: ess-scenario/6
+domain: swell.host
+scenario: interrupt-ends-the-next-run
+summary: An interrupt set between runs ends the next run with Terminated(Interrupted), and the run after it completes.
+
+arrange:
+  - instance: agent
+    entity: swell.host.Agent
+  - instance: realm
+    entity: swell.host.Realm
+  - instance: script
+    entity: swell.host.Script
+
+timeline:
+  - at: 2026-01-06T09:00:00Z
+    command: swell.host.CreateAgent
+    actor: swell.host.Host
+    input:
+      limits:
+        steps_per_entry: 1000000
+        memory_bytes: 67108864
+        frame_depth: 10000
+        reentry_depth: 256
+        parser_nesting: 1000
+        string_length: 1073741824
+        bigint_bits: 1048576
+      hash_key: AAECAwQFBgcICQoLDA0ODw==
+      random_seed: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    outcome: created
+    capture: {instance: agent, event: swell.host.AgentCreated, field: agent_id}
+
+  - at: 2026-01-06T09:00:01Z
+    command: swell.host.CreateRealm
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: created
+    capture: {instance: realm, event: swell.host.RealmCreated, field: realm_id}
+
+  - at: 2026-01-06T09:00:02Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "1 + 1;"
+    outcome: parsed
+    capture: {instance: script, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:03Z
+    command: swell.host.Interrupt
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: set
+
+  - at: 2026-01-06T09:00:04Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: script}
+    outcome: interrupted
+    events:
+      - event: swell.host.RunTerminated
+        payload:
+          agent_id: {$instance: agent}
+          reason: Interrupted
+
+  - at: 2026-01-06T09:00:05Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: script}
+    outcome: completed
+    events:
+      - event: swell.host.ScriptCompleted
+        payload:
+          script_id: {$instance: script}

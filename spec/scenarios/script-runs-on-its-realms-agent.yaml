@@ -1,0 +1,107 @@
+# A realm is the agent's its CreateRealm was called on, and a script is parsed and run on that
+# agent: a parse on another agent answers Err(ForeignHandle) and changes nothing (decision 6,
+# HOST-45), the parse on the realm's own agent gives a script, an agent nobody holds answers
+# NotHeld, and the realm's agent runs the script to Normal. Synthesis writes the refusal on its
+# own (`ParseScript/outcome/foreign-realm`) and nothing that parses (it arranges no realm whose
+# agent is the one called, ESS-SYNTH-003 on `parsed`), so this states the accepting path.
+# EvaluateScript with another agent's script is not stated (an UNMAPPED marker at the command).
+type: ess-scenario/6
+domain: swell.host
+scenario: script-runs-on-its-realms-agent
+summary: A script is parsed and run on the agent that owns its realm; another agent's parse is refused with ForeignHandle.
+
+arrange:
+  - instance: agent
+    entity: swell.host.Agent
+  - instance: other
+    entity: swell.host.Agent
+  - instance: realm
+    entity: swell.host.Realm
+  - instance: script
+    entity: swell.host.Script
+
+timeline:
+  - at: 2026-01-06T09:00:00Z
+    command: swell.host.CreateAgent
+    actor: swell.host.Host
+    input:
+      limits:
+        steps_per_entry: 1000000
+        memory_bytes: 67108864
+        frame_depth: 10000
+        reentry_depth: 256
+        parser_nesting: 1000
+        string_length: 1073741824
+        bigint_bits: 1048576
+      hash_key: AAECAwQFBgcICQoLDA0ODw==
+      random_seed: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    outcome: created
+    capture: {instance: agent, event: swell.host.AgentCreated, field: agent_id}
+
+  - at: 2026-01-06T09:00:01Z
+    command: swell.host.CreateAgent
+    actor: swell.host.Host
+    input:
+      limits:
+        steps_per_entry: 1000000
+        memory_bytes: 67108864
+        frame_depth: 10000
+        reentry_depth: 256
+        parser_nesting: 1000
+        string_length: 1073741824
+        bigint_bits: 1048576
+      hash_key: AAECAwQFBgcICQoLDA0ODw==
+      random_seed: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    outcome: created
+    capture: {instance: other, event: swell.host.AgentCreated, field: agent_id}
+
+  - at: 2026-01-06T09:00:02Z
+    command: swell.host.CreateRealm
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: created
+    capture: {instance: realm, event: swell.host.RealmCreated, field: realm_id}
+
+  - at: 2026-01-06T09:00:03Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: other}
+      realm_id: {$instance: realm}
+      source_text: "1 + 1;"
+    outcome: foreign-realm
+    error:
+      name: swell.host.ForeignHandle
+
+  - at: 2026-01-06T09:00:04Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "1 + 1;"
+    outcome: parsed
+    capture: {instance: script, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:05Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: ffffffff-ffff-4fff-bfff-ffffffffffff
+      script_id: {$instance: script}
+    outcome: no-agent
+    error:
+      name: swell.host.NotHeld
+
+  - at: 2026-01-06T09:00:06Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: script}
+    outcome: completed
+    events:
+      - event: swell.host.ScriptCompleted
+        payload:
+          script_id: {$instance: script}
