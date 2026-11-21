@@ -277,6 +277,56 @@ not on the Rust stack.**
   callback, `toString` and `valueOf` during conversion, `JSON.stringify`'s `toJSON`) enters the
   interpreter loop again from Rust. Every such re-entry counts toward the depth bound below.
 
+**Names: a slot fixed at compile time, except where `with` or a non-strict direct `eval` can
+change what a name means.** Added on 2026-11-21 for slice 2. A binding is resolved when the
+code is compiled, as slice 1 does (`crates/compiler/src/resolve.rs`): a local slot of its
+function's frame, a numbered slot of an environment a counted number of records outward, or a
+name of the global environment. Two constructs make the meaning of a name depend on the run:
+
+- A `with` statement evaluates its body in a new Object Environment Record over an object
+  known only at run time (`sec-with-statement`, `sec-with-statement-runtime-semantics-evaluation`),
+  whose bindings are that object's properties, filtered by `@@unscopables`
+  (`sec-object-environment-records`).
+- A direct `eval` in non-strict code adds its `var` and function declarations to the caller's
+  variable environment (`sec-performeval`: varEnv is the running context's
+  VariableEnvironment unless strictEval is true; `sec-evaldeclarationinstantiation`), so a
+  binding can appear in that scope at run time. A direct `eval` is a call whose callee is the
+  IdentifierReference `eval` (`sec-function-calls-runtime-semantics-evaluation`, step 6).
+
+The rule:
+
+1. A reference is looked up by name at run time, through the Environment Records from the
+   innermost outward (`sec-resolvebinding`, `sec-getidentifierreference`), when it is in eval
+   code, or when between the reference and the scope that would bind it at compile time (the
+   global scope when none does) there lies a `with` statement whose body contains the
+   reference, or a function or script scope whose own code is non-strict and contains a
+   direct `eval` call (a call in a nested function does not count for the outer scope). A
+   function nested inside such a body or scope is inside it.
+2. Every other reference keeps its compile-time slot. Strict code has no `with` (an early
+   error, `sec-with-statement-static-semantics-early-errors`), and its direct `eval` adds no
+   binding to the caller (strictEval: varEnv is a new declarative record), so a strict
+   function keeps its slots, also when it calls `eval` itself; a strict function nested in a
+   non-strict scope that has a direct `eval` looks up by name the names that cross that scope,
+   by item 1.
+3. A binding that a lookup by name can reach is findable by name: every binding of every scope
+   that encloses a `with` body or a direct `eval` call (strict or not), up to the global
+   environment, lives in an Environment Record that keeps the names of its slots
+   (`sec-declarative-environment-records`), not in a frame-local slot. References to it under
+   item 2 still use its slot.
+4. A function whose code contains a direct `eval` gets its arguments object whenever
+   FunctionDeclarationInstantiation creates one (`sec-functiondeclarationinstantiation`,
+   steps 15 to 22), whether or not its own code names `arguments`.
+5. Budgets. A lookup by name charges one step per Environment Record it visits, so that a read
+   through n records spends at least n steps more than a slot read (`last_entry_steps()`);
+   the HasProperty and the `@@unscopables` Get of an Object Environment Record are property
+   operations charged and checked as any other, and a getter or `Proxy` trap they reach is a
+   call counted like any call. The names of a record's slots are part of the compiled code and
+   are charged to the memory budget with it; a binding that eval code adds at run time is an
+   allocation charged as any other.
+
+The results are the standard's and test262 holds them; which form a reference takes is held by
+the compiler's source tests, whose disassembly shows a slot or a lookup by name.
+
 **The step budget.** One unit per bytecode instruction, plus units charged by builtins in
 proportion to their work: per element for array, typed array and collection loops, per code unit
 for string operations, per matcher step for regular expressions (decision 7), per limb operation
@@ -292,8 +342,10 @@ non-deterministic).
 **Depth bounds,** each a limit the host sets, each ending in an outcome:
 
 - The parser (nested expressions, statements, functions): a nesting counter in the recursive
-  descent parser. Exceeded, the parse fails: through `eval` or `Function` as a `RangeError`,
-  through the host as a parse failure.
+  descent parser. Exceeded, the parse fails with a `SyntaxError` whose message names
+  `parser_nesting` (`host-interface.md`, decision 2): through the host as `Parsed::Errors`,
+  through `eval` and `Function` as a thrown `SyntaxError` the script can catch (HOST-139 to
+  HOST-141), never as a `RangeError`.
 - Scope analysis and the compile step walk only trees the parser accepted, so the parser's bound
   holds for them.
 - ECMAScript calls: frames on the engine stack, counted. Exceeded: a `RangeError` in the script.
@@ -303,8 +355,10 @@ non-deterministic).
 - `JSON.stringify`, `toString` chains, `Proxy` trap chains: each step that calls script is a
   re-entry, bounded as one.
 - Regular expressions: the matcher is a loop with an explicit backtrack stack, bounded by the
-  step budget; pattern nesting is bounded at parse, reported as a `RangeError` (whether the
-  standard's wording on implementation limits allows this is not checked).
+  step budget. A pattern's own nesting counts against `parser_nesting`, from zero at the start
+  of the pattern, and passing it is the same `SyntaxError` naming `parser_nesting`
+  (`host-interface.md`, decision 2): an early error of the script or module for a literal,
+  thrown by the `RegExp` constructor at run time, never a `RangeError` (HOST-142, HOST-143).
 
 A `RangeError` for depth is what the script sees, and the script can catch it; a script that
 catches it and recurses again ends at the step budget, which it cannot catch.
@@ -637,6 +691,17 @@ first.
 - **`negative`.** `parse`: parsing must fail with the named error and nothing may run;
   `resolution`: module loading or linking must fail with it; `runtime`: evaluation must throw an
   object whose constructor's `name` is the type.
+- **Refusals.** While the engine is delivered slice by slice it refuses a construct of a later
+  slice with a `SyntaxError` whose message names the slice (section 12, "A part before its
+  slice"). A refusal or the parser's nesting limit never counts as the `SyntaxError` a
+  `negative` case asks for: the runner reads the kind of the error from its message
+  (`swell_syntax::message_kind`), and a run that a refusal or the nesting limit ends, in a
+  harness file or in the case, fails whatever the case's `negative` says (decided in wave 5 of
+  slice 1). A refusal the script catches (through `eval`, `Function`, `$262.evalScript`, or a
+  regular expression literal evaluated before slice 5) does not end the run, so the runner also
+  reads the agent's count of refusals (`Agent::refusals`, `host-interface.md` decision 13)
+  after each run, every run having an agent of its own, and fails every run in which the count
+  moved, whatever the case's `negative` and outcome say.
 - **`async`.** After the script, the runner drains the job queue; the case passes when `print`
   received `Test262:AsyncTestComplete` and fails on `Test262:AsyncTestFailure:` or when the queue
   is empty without either. No timer is needed: an engine with no clock cannot wait for anything
@@ -725,12 +790,19 @@ What each slice builds, and the directories it raises most (paths under `test/`,
    makes a strict run of every case), the interpreter, the heap, the builtins `assert.js` and
    `sta.js` call, `$262`, `print`, the runner. `harness` 31.
 2. `language-core`: the rest of the ES5-level language: `eval`, `with`, `arguments`, labels,
-   automatic semicolon insertion. `expressions/compound-assignment` 407,
+   automatic semicolon insertion; the global `Function` with its constructor (CreateDynamicFunction
+   of kind `normal`, through the parse entry of `eval`, decided on 2026-11-21, `AGENTS.md`),
+   its `length` and `prototype`, and `Function.prototype.constructor` (slice 1 built
+   `%Function.prototype%` with `call`, `bind` and `@@hasInstance`); and the parts "A part
+   before its slice" gives it. `expressions/compound-assignment` 407,
    `expressions/assignmenttargettype` 318, `expressions/object` 282, `eval-code` 253.
-3. `builtins-core`: `Object`, `Function`, `Array`, `String`, `Boolean`, `Error`, `JSON`, the
-   global functions. `Object` 3,160, `Array` 2,665, `String` 780, `Function` 417.
-4. `numbers-and-dates`: `swell-num`, `Number`, `Math`, `Date`, `parseInt`, `parseFloat`.
-   `Date` 492, `Number` 313, `Math` 284.
+3. `builtins-core`: `Object`, `Array`, `String`, `Error`, `JSON`, the global functions slice 2
+   does not take, and what remains of `Function`: `Function.prototype.apply` and
+   `Function.prototype.toString` (with HostHasSourceTextAvailable, HOST-120); the generator
+   and async kinds of CreateDynamicFunction come with slices 7 and 10. `Object` 3,160, `Array`
+   2,665, `String` 780, `Function` 417.
+4. `numbers-and-dates`: `swell-num`, what slice 2 does not take of `Number`, `Math`, `Date`,
+   `parseInt`, `parseFloat`. `Date` 492, `Number` 313, `Math` 284.
 5. `regexp`: `swell-regexp`, `swell-unicode`, `RegExp` and the string methods that use it.
    `RegExp` 1,626, `String` 252, `literals` 240.
 6. `bindings-and-iteration`: `let`, `const`, destructuring, spread, arrows, templates,
@@ -777,8 +849,9 @@ insertion and the builtins called):
 - to slice 3, 23: the 14 `propertyhelper-*` cases and the `verifyProperty-` cases
   `configurable-object`, `restore`, `restore-accessor`, `same-value`, `string-prop`, `value` and
   `value-error` (`propertyHelper.js` reads `arguments.length` and calls
-  `Function.prototype.call.bind` on the global `Function`, whose `CreateDynamicFunction` is slice
-  3; `-restore-accessor` also uses a method shorthand), `asyncHelpers-asyncTest-without-async-flag`
+  `Function.prototype.call.bind` on the global `Function`, whose `CreateDynamicFunction` this
+  design gave to slice 3 until slice 2 took it, item 2 above, with which these lines are placed
+  again; `-restore-accessor` also uses a method shorthand), `asyncHelpers-asyncTest-without-async-flag`
   (`Object.hasOwn` and a method shorthand) and `fnGlobalObject` (`Function("return this;")()`);
 - to slice 4, 2: `assertRelativeDateMs` (`Date`) and `nans` (`Number.NaN`, `Math.pow`);
 - to slice 6, 16: `verifyProperty-arguments`, `-noproperty` and `-undefined-desc` (arrow
@@ -811,8 +884,39 @@ from `swell-unicode`. The rule:
   slice section 12 names for it is where it becomes complete.
 - A part taken early is built to the standard for what it covers, never as a stand-in that
   gives a wrong answer: slice 1 gets the keyed hash, decimal literal parsing and
-  `Number::toString` for radix 10 in `swell-num`; slice 4 adds the other radices, `toFixed`,
-  `toExponential`, `toPrecision`, `Math` and `Date`.
+  `Number::toString` for radix 10 in `swell-num`; slice 2 the other radices of
+  `Number::toString` (below); slice 4 adds `toFixed`, `toExponential`, `toPrecision`, reading
+  a string in a radix, `Math` and `Date`.
+- Slice 2 takes these parts early, each complete for what it covers (added on 2026-11-21,
+  measured by slice 2's decomposition on the pinned checkout: 365 cases of slice 2 stop first
+  on `Number` or `Boolean`, 45 on a plain method or a shorthand property; these cases test the
+  language of slice 2 and use the parts as tools):
+  - plain method definitions (`m() {}`, a method named `get` or `set` included) and shorthand
+    properties (`{ a }`) in object literals (`sec-method-definitions`,
+    `sec-object-initializer`). A generator method stays with slice 7, an async or async
+    generator method with slice 10, a computed property name with slice 6, `super` with
+    slice 8;
+  - `Number`: the constructor called and constructed (`sec-number-constructor-number-value`;
+    its BigInt branch cannot be reached before slice 12), its value properties `EPSILON`,
+    `MAX_SAFE_INTEGER`, `MAX_VALUE`, `MIN_SAFE_INTEGER`, `MIN_VALUE`, `NaN`,
+    `NEGATIVE_INFINITY`, `POSITIVE_INFINITY` and its `prototype`
+    (`sec-properties-of-the-number-constructor`), `Number.prototype.constructor`, `valueOf`
+    (`sec-number.prototype.valueof`) and `toString` for every radix 2 to 36
+    (`sec-number.prototype.tostring`, with `Number::toString` of
+    `sec-numeric-types-number-tostring` in every radix, decision 6). Slice 4 delivers the rest:
+    `toFixed`, `toExponential`, `toPrecision`, `toLocaleString`, the functions of the
+    constructor (`isFinite`, `isInteger`, `isNaN`, `isSafeInteger`, `parseFloat`, `parseInt`)
+    and reading a string in a radix;
+  - `Boolean`: the constructor, its `prototype`, `Boolean.prototype.constructor`, `toString`
+    and `valueOf` (`sec-boolean-constructor`, `sec-properties-of-the-boolean-prototype-object`).
+    That is all of `Boolean`: nothing of it is left to slice 3, whose rule
+    `dir test/built-ins/ 3` still counts `test/built-ins/Boolean/`;
+  - `isNaN` and `isFinite` (`sec-isnan-number`, `sec-isfinite-number`). The other functions of
+    the global object stay with their slices: `parseInt` and `parseFloat` with slice 4, the URI
+    functions with slice 3 (`eval` is slice 2's own);
+  - `String.prototype.toString` and `valueOf` (`sec-string.prototype.tostring`,
+    `sec-string.prototype.valueof`). Slice 3 delivers the rest of `String`, slice 5 the methods
+    item 5 names.
 - Where the early part cannot be complete without a later slice's data or engine, the gap is a
   recorded omission the gate reads (`conformance/test262/sections.txt`), and the engine refuses
   the input with a defined outcome instead of guessing: before slice 5, an identifier character
@@ -822,6 +926,18 @@ from `swell-unicode`. The rule:
   cases moved there by rule lines when slice 3 measures them. White space is not among these
   gaps: `story:syntax-es5-and-strict` accepts every `Zs` code point in slice 1 with the table of
   `story:num-and-unicode-early-parts`.
+- A slice may also deliver a feature of its own without a part that needs a later slice (added
+  on 2026-11-21 for slice 2). The part is absent, never a stand-in with a wrong answer, and it
+  is recorded where the gate reads it: the section's omission list in
+  `conformance/test262/sections.txt`, by a line `omit <section anchor> <part>
+  section-12-slice-<n>`, `<n>` being the slice that delivers the part and removes the line.
+  Everything else of the feature is built to the standard. The section stays `incomplete` while
+  the line is there (decision 11). First use: the arguments object of slice 2
+  (`sec-arguments-exotic-objects`) without its `@@iterator` property, which
+  CreateUnmappedArgumentsObject and CreateMappedArgumentsObject define as
+  `%Array.prototype.values%` (`sec-createunmappedargumentsobject`,
+  `sec-createmappedargumentsobject`), a part of slice 6: `omit sec-arguments-exotic-objects
+  symbol-iterator-property section-12-slice-6`.
 - The builtins the harness files call are built in slice 1 as far as `assert.js`, `sta.js` and
   the 31 cases need them; slice 3 completes each builtin. A method that exists is correct for
   every argument, or it does not exist yet.
@@ -831,7 +947,9 @@ from `swell-unicode`. The rule:
   case's `negative` says. It prints the number of such runs as `test262-refused <runs>`, so the
   share of the checkout a later slice's parser still declines stays visible (53,564 of 85,556
   runs at slice 1). Before this rule, 3,011 negative parse cases of slices 2 to 18 were counted
-  passed on a refusal.
+  passed on a refusal. A refusal the script catches (through `eval` or `Function`, or of a
+  regular expression literal) is counted by the agent (`Agent::refusals`, `host-interface.md`
+  decision 13), and the runner fails every run in which that count moved (decision 11).
 
 **For surf.** A script that touches no DOM and uses only ES5 can run after slice 4, and with
 regular expressions after slice 5; most present-day scripts with no DOM (classes, `async`,
@@ -1176,7 +1294,8 @@ does with unsafe code is outside this claim.
   `overflow-checks = true` is set in every profile, and fuzzing counts any panic as a failure.
 - **Denial of service**: an endless loop, deep recursion, exponential regular expressions, huge
   strings, `BigInt`s or arrays. One test per budget and bound, each of which must end in its
-  outcome (`StepBudget`, `MemoryBudget`, `RangeError`, `Interrupted`) and never in a panic, an
+  outcome (`StepBudget`, `MemoryBudget`, `RangeError`, `Interrupted`, and for the parser's
+  nesting a `SyntaxError` naming `parser_nesting`) and never in a panic, an
   abort or a hang: for example `while(1){}`, `(a+)+$` on 10,000 `a`s and a `!`, 100,000 nested
   brackets, `"x".repeat(2**30)`, `2n**(2n**40n)`.
 - **A host object that trusts a value**: a DOM operation acting on a value of the wrong brand,
