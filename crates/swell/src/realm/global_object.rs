@@ -1,8 +1,9 @@
 //! The global object of a realm (ECMA-262 19, `#sec-global-object`): SetDefaultGlobalBindings
 //! (`#sec-setdefaultglobalbindings`) for the properties of clause 19 that this part has, the
-//! value properties of 19.1 and the constructors `Error` and the six NativeErrors of 19.3. The
-//! global object itself is made by InitializeHostDefinedRealm or given by the host's setup
-//! closure (`realm/mod.rs`). Written by `story:object-model-and-realms`.
+//! value properties of 19.1, the constructors `Error` and the six NativeErrors of 19.3
+//! (`story:object-model-and-realms`), and `Array`, `Object`, `String`, `JSON` and `Math` of 19.3
+//! and 19.4 (`story:harness-builtins`). The global object itself is made by
+//! InitializeHostDefinedRealm or given by the host's setup closure (`realm/mod.rs`).
 
 use super::intrinsics::Intrinsic;
 use crate::heap::arena::Handle;
@@ -37,6 +38,25 @@ impl<H: Host> Agent<H> {
                 global,
                 key,
                 Descriptor::data(Value::Object(constructor), true, false, true),
+            )?;
+        }
+        // The constructor properties `Array`, `Object` and `String` (19.3.2, 19.3.25, 19.3.33)
+        // and the other properties `JSON` and `Math` (19.4.2, 19.4.3), written by
+        // `story:harness-builtins`; each { [[Writable]]: true, [[Enumerable]]: false,
+        // [[Configurable]]: true } (clause 18).
+        for (name, which) in [
+            ("Array", Intrinsic::Array),
+            ("Object", Intrinsic::Object),
+            ("String", Intrinsic::String),
+            ("JSON", Intrinsic::Json),
+            ("Math", Intrinsic::Math),
+        ] {
+            let value = self.intrinsic(realm, which)?;
+            let key = self.name_key(name)?;
+            self.define_property_or_throw(
+                global,
+                key,
+                Descriptor::data(Value::Object(value), true, false, true),
             )?;
         }
         Ok(())
