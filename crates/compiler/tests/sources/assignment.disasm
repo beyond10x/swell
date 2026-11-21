@@ -1,0 +1,46 @@
+script locals 0
+  0000 2:1 ResolveGlobal "a"
+  0001 2:5 Number 1
+  0002 2:1 PutGlobalRef "a"
+  0003 2:1 StoreCompletion
+  0004 3:1 ResolveGlobal "a"
+  0005 3:1 GetGlobalRef "a"
+  0006 3:6 Number 2
+  0007 3:1 Add
+  0008 3:1 PutGlobalRef "a"
+  0009 3:1 StoreCompletion
+  0010 4:1 GetGlobal "o"
+  0011 4:7 Number 3
+  0012 4:1 PutNamed "p"
+  0013 4:1 StoreCompletion
+  0014 5:1 GetGlobal "o"
+  0015 5:1 Dup
+  0016 5:1 GetNamed "p"
+  0017 5:8 Number 4
+  0018 5:1 Sub
+  0019 5:1 PutNamed "p"
+  0020 5:1 StoreCompletion
+  0021 6:1 GetGlobal "o"
+  0022 6:3 GetGlobal "k"
+  0023 6:8 Number 5
+  0024 6:1 PutIndex
+  0025 6:1 StoreCompletion
+  0026 7:1 GetGlobal "o"
+  0027 7:3 GetGlobal "k"
+  0028 7:1 PropertyKey
+  0029 7:1 Dup2
+  0030 7:1 GetIndex
+  0031 7:9 Number 6
+  0032 7:1 Mul
+  0033 7:1 PutIndex
+  0034 7:1 StoreCompletion
+  0035 8:1 ResolveGlobal "f"
+  0036 8:5 Closure 0
+  0037 8:1 PutGlobalRef "f"
+  0038 8:1 StoreCompletion
+  0039 0:0 LoadCompletion
+  0040 0:0 Return
+
+function 0 expression "f" length 0 locals 0
+  0000 8:5 Undefined
+  0001 8:5 Return

@@ -1,0 +1,30 @@
+script locals 0
+  var "k"
+  0000 2:1 Undefined
+  0001 2:1 StoreCompletion
+  0002 2:8 GetGlobal "a"
+  0003 2:1 JumpIfFalse 0006
+  0004 2:11 Jump 0006
+  0005 2:1 LoopJump 0002
+  0006 3:1 Undefined
+  0007 3:1 StoreCompletion
+  0008 3:15 GetGlobal "o"
+  0009 3:1 ForInStart
+  0010 3:1 ForInNext 0017
+  0011 3:10 ResolveGlobal "k"
+  0012 3:10 Bury 1
+  0013 3:10 PutGlobalRef "k"
+  0014 3:10 Pop
+  0015 3:20 Jump 0017
+  0016 3:1 LoopJump 0010
+  0017 3:1 Pop
+  0018 4:1 Undefined
+  0019 4:1 StoreCompletion
+  0020 4:9 GetGlobal "b"
+  0021 4:19 Number 1
+  0022 4:14 CaseJump 0025
+  0023 4:1 Pop
+  0024 4:1 Jump 0026
+  0025 4:22 Jump 0026
+  0026 0:0 LoadCompletion
+  0027 0:0 Return

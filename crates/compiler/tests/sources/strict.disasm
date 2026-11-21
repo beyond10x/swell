@@ -1,0 +1,10 @@
+script locals 0 strict
+  declare 0
+  0000 2:1 String "use strict"
+  0001 2:1 StoreCompletion
+  0002 0:0 LoadCompletion
+  0003 0:0 Return
+
+function 0 declaration "f" length 0 locals 0 strict
+  0000 3:1 Undefined
+  0001 3:1 Return

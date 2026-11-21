@@ -1,0 +1,19 @@
+script locals 0
+  0000 2:1 GetGlobal "a"
+  0001 2:6 GetGlobal "b"
+  0002 2:1 Eq
+  0003 2:1 StoreCompletion
+  0004 3:1 GetGlobal "a"
+  0005 3:6 GetGlobal "b"
+  0006 3:1 NotEq
+  0007 3:1 StoreCompletion
+  0008 4:1 GetGlobal "a"
+  0009 4:7 GetGlobal "b"
+  0010 4:1 StrictEq
+  0011 4:1 StoreCompletion
+  0012 5:1 GetGlobal "a"
+  0013 5:7 GetGlobal "b"
+  0014 5:1 StrictNotEq
+  0015 5:1 StoreCompletion
+  0016 0:0 LoadCompletion
+  0017 0:0 Return

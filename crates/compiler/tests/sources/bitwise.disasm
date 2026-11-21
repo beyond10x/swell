@@ -1,0 +1,15 @@
+script locals 0
+  0000 2:1 GetGlobal "a"
+  0001 2:5 GetGlobal "b"
+  0002 2:1 BitAnd
+  0003 2:1 StoreCompletion
+  0004 3:1 GetGlobal "a"
+  0005 3:5 GetGlobal "b"
+  0006 3:1 BitXor
+  0007 3:1 StoreCompletion
+  0008 4:1 GetGlobal "a"
+  0009 4:5 GetGlobal "b"
+  0010 4:1 BitOr
+  0011 4:1 StoreCompletion
+  0012 0:0 LoadCompletion
+  0013 0:0 Return

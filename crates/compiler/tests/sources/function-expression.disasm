@@ -1,0 +1,26 @@
+script locals 0
+  0000 2:2 Closure 0
+  0001 2:1 StoreCompletion
+  0002 6:2 Closure 1
+  0003 6:1 StoreCompletion
+  0004 0:0 LoadCompletion
+  0005 0:0 Return
+
+function 0 expression "fact" length 1 locals 1 self
+  params local 0
+  0000 3:10 Number 0
+  0001 3:3 AssignImmutable "fact"
+  0002 3:3 Pop
+  0003 4:10 Undefined
+  0004 4:10 GetEnv 0 0
+  0005 4:15 GetLocal 0
+  0006 4:10 Call 1
+  0007 4:3 Return
+  0008 2:2 Undefined
+  0009 2:2 Return
+
+function 1 expression "g" length 0 locals 1
+  0000 6:31 GetLocal 0
+  0001 6:24 Return
+  0002 6:2 Undefined
+  0003 6:2 Return

@@ -1,0 +1,38 @@
+script locals 0
+  var "v"
+  0000 2:5 ResolveGlobal "v"
+  0001 2:9 Closure 0
+  0002 2:5 PutGlobalRef "v"
+  0003 2:5 Pop
+  0004 3:1 ResolveGlobal "w"
+  0005 3:6 Closure 1
+  0006 3:1 PutGlobalRef "w"
+  0007 3:1 StoreCompletion
+  0008 4:1 ResolveGlobal "x"
+  0009 4:7 Closure 2
+  0010 4:1 PutGlobalRef "x"
+  0011 4:1 StoreCompletion
+  0012 5:1 ResolveGlobal "y"
+  0013 5:1 GetGlobalRef "y"
+  0014 5:6 Closure 3
+  0015 5:1 Add
+  0016 5:1 PutGlobalRef "y"
+  0017 5:1 StoreCompletion
+  0018 0:0 LoadCompletion
+  0019 0:0 Return
+
+function 0 expression "v" length 0 locals 0
+  0000 2:9 Undefined
+  0001 2:9 Return
+
+function 1 expression "w" length 0 locals 0
+  0000 3:6 Undefined
+  0001 3:6 Return
+
+function 2 expression "" length 0 locals 0
+  0000 4:7 Undefined
+  0001 4:7 Return
+
+function 3 expression "" length 0 locals 0
+  0000 5:6 Undefined
+  0001 5:6 Return

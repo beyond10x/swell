@@ -1,0 +1,19 @@
+script locals 0
+  var "a" "b"
+  declare 0
+  0000 2:8 ResolveGlobal "b"
+  0001 2:12 Number 1
+  0002 2:8 PutGlobalRef "b"
+  0003 2:8 Pop
+  0004 0:0 LoadCompletion
+  0005 0:0 Return
+
+function 0 declaration "f" length 1 locals 3
+  params local 0
+  0000 4:11 GetLocal 0
+  0001 4:7 SetLocal 1
+  0002 4:7 Pop
+  0003 5:10 GetLocal 1
+  0004 5:3 Return
+  0005 3:1 Undefined
+  0006 3:1 Return

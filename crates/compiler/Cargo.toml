@@ -1,0 +1,15 @@
+[package]
+name = "swell-compiler"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+swell-num = { path = "../num" }
+swell-syntax = { path = "../syntax" }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"

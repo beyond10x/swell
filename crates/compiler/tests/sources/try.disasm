@@ -1,0 +1,43 @@
+script locals 2
+  0000 2:1 Undefined
+  0001 2:1 StoreCompletion
+  0002 2:7 GetGlobal "a"
+  0003 2:7 StoreCompletion
+  0004 2:1 Jump 0011
+  0005 2:19 SetLocal 0
+  0006 2:19 Pop
+  0007 2:1 Undefined
+  0008 2:1 StoreCompletion
+  0009 2:24 GetLocal 0
+  0010 2:24 StoreCompletion
+  0011 3:1 Undefined
+  0012 3:1 StoreCompletion
+  0013 3:7 GetGlobal "b"
+  0014 3:7 StoreCompletion
+  0015 3:1 Undefined
+  0016 3:1 Tag 0
+  0017 3:1 LoadCompletion
+  0018 3:22 GetGlobal "c"
+  0019 3:22 StoreCompletion
+  0020 3:1 StoreCompletion
+  0021 3:1 EndFinally
+  0022 4:1 Undefined
+  0023 4:1 StoreCompletion
+  0024 4:7 GetGlobal "d"
+  0025 4:7 StoreCompletion
+  0026 4:1 Jump 0031
+  0027 4:19 SetLocal 1
+  0028 4:19 Pop
+  0029 4:1 Undefined
+  0030 4:1 StoreCompletion
+  0031 4:1 Undefined
+  0032 4:1 Tag 0
+  0033 4:1 LoadCompletion
+  0034 4:1 StoreCompletion
+  0035 4:1 EndFinally
+  0036 0:0 LoadCompletion
+  0037 0:0 Return
+  catch 0002..0005 -> 0005 items 0 envs 0
+  finally 0013..0015 -> 0017 items 0 envs 0
+  catch 0024..0027 -> 0027 items 0 envs 0
+  finally 0024..0031 -> 0033 items 0 envs 0

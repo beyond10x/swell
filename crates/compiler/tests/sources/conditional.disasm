@@ -1,0 +1,9 @@
+script locals 0
+  0000 2:1 GetGlobal "a"
+  0001 2:1 JumpIfFalse 0004
+  0002 2:5 GetGlobal "b"
+  0003 2:1 Jump 0005
+  0004 2:9 GetGlobal "c"
+  0005 2:1 StoreCompletion
+  0006 0:0 LoadCompletion
+  0007 0:0 Return

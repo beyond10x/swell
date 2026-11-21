@@ -1,0 +1,20 @@
+script locals 0
+  0000 2:1 Undefined
+  0001 2:1 GetGlobal "f"
+  0002 2:3 Number 1
+  0003 2:1 Call 1
+  0004 2:1 StoreCompletion
+  0005 3:1 GetGlobal "o"
+  0006 3:1 Dup
+  0007 3:1 GetNamed "m"
+  0008 3:1 Call 0
+  0009 3:1 StoreCompletion
+  0010 4:1 GetGlobal "o"
+  0011 4:1 Dup
+  0012 4:3 GetGlobal "k"
+  0013 4:1 GetIndex
+  0014 4:6 GetGlobal "a"
+  0015 4:1 Call 1
+  0016 4:1 StoreCompletion
+  0017 0:0 LoadCompletion
+  0018 0:0 Return
