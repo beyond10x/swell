@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T14:46:07Z",
+  "actor": "human:operator",
+  "artifact": "story:test262-run-causes",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "the unit's claim run again by the coordinator in the unit's tree before its commit (tests of the workspace, clippy, test-collect or conform-engine where touched, slot task test262, exit 0 each) and its run lines compared with the base run by run (docs/plan/slice-02-wave-1.md)"
+  }
+}

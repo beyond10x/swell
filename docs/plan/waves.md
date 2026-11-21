@@ -94,6 +94,14 @@ run: automatic semicolon insertion 411, `\u` escapes 352, `eval` 305, `Number` 2
 | 3 | `eval-and-function-constructor` | `eval` and `Function` through one entry, the two hooks, the count of refusals; 10 requirements |
 | 4 | `slice-02-conformance-close` | the cases that need a later slice move, each with its evidence in a list the gate checks; every run of the slice passes |
 
+Delivered: [wave 1](slice-02-wave-1.md). After it slice 2 passes 3,468 of its 5,245 cases, the gate
+counts 5,924 cases as passed, and 50,596 of the 85,556 runs end at a refusal. The base run lines
+for the next wave are the run lines of this wave on its branch after its close.
+
+Open, to decide before wave 4 with the run lines: `Array.prototype.toString` is missing (slice
+3), so an array converts through `Object.prototype.toString` and answers `[object Array]`;
+`isNaN([])` is `true`. Count the runs of slice 2 that fail on it and take it early if they do.
+
 In wave 1 the three stories share no file but `conformance/test262/expected.txt`, which the
 coordinator regenerates on the wave branch after the merges. The design changes the stories
 wait for are in the design since wave 6 of slice 1 (`20c1f35`): the parts taken before their
@@ -148,6 +156,12 @@ that slice reads its entries first.
 - Slice 2, at its decomposition: the 23 `propertyhelper-*` cases of `test/harness` move from
   slice 3 to slice 2 with the global `Function` (`AGENTS.md`, "How the work is run").
 - Slice 4: the operator `**` (the parser refuses it today; it needs the deterministic `pow`).
+- The next change of the host interface design: the data of a host function can be written
+  (`new_host_function`) and not read back. `Cx::host_data` reads host objects only, and
+  `HOST-108` covers only those. The runner found it ([slice 2, wave 1](slice-02-wave-1.md)):
+  with the realm index as the data of `$262.evalScript`, every run ended in
+  `Terminated(EngineFault)`; it compares the callee with roots it keeps instead. Decide
+  whether a host function reads its data (and through which method) or the parameter goes.
 - The slice that brings the first allocation-heavy cases (slice 3 at the latest): a run that
   fills its memory budget with `a.push({})` takes 0.5 s for 1 MiB, 1.2 s for 2 MiB and 4.1 s
   for 4 MiB in a debug build, and did not finish 64 MiB in about nine minutes

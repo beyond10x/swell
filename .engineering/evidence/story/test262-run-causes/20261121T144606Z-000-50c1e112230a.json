@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T14:46:06Z",
+  "actor": "human:operator",
+  "artifact": "story:test262-run-causes",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot task check on wave/s2-1-grammar-runner-builtins with the runner's variables and the three units merged, exit 0: 58 test suites: 292 passed; test-collect: 203 passed; conform-engine: 14 passed, 0 failed; host-requirements: 164 requirement(s), 70 test, 94 pending; test262 total 53801 8982 7 44812 5924 38888 0; test262-slice 02 5245 9173 0 0 5245 3468 1777 0; test262-refused 50596; no run that passed on the base fails (3,753 pass newly); gate-selftest: 31 passed, 0 failed (docs/plan/slice-02-wave-1.md)"
+  }
+}

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:number-boolean-and-global-functions-early
 kind: story
-status: active
+status: implemented
 title: Number, Boolean, isNaN, isFinite and the String wrapper methods before their slices, complete for what they cover
 summary: 'Parts taken early under the design rule: the Number and Boolean constructors, the Number value properties, valueOf and toString of the wrappers (Number.prototype.toString in every radix, swell-num), isNaN and isFinite; 512 cases of slice 2 need nothing later.'
 relations:
@@ -48,10 +48,11 @@ scope:
   path: crates/swell/tests/language/number-wrapper-to-string.js
 - confidence: cited
   path: crates/swell/tests/language/string-wrapper-to-primitive.js
-revision: 8
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T14:46:07Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":1,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
@@ -66,6 +67,28 @@ Two ways meet the epic (every run of the slice passes): move those cases to slic
 `crates/swell/src/realm/intrinsics.rs` is written by this story and later by `story:with-arguments-and-dynamic-names` (the `expect(dead_code)` mark of `Intrinsic::ThrowTypeError`) and `story:eval-and-function-constructor`; both depend on this story, which comes first.
 
 Design it builds on, on the branch since merge `63dff4d` (a precondition that holds before wave 1): "A part before its slice" in section 12 names, as parts of slice 2 taken early, the `Number` constructor with its value properties and `Number.prototype.constructor`, `valueOf` and `toString` (with `Number::toString` for every radix of `swell-num`, from slice 4), the `Boolean` constructor with `Boolean.prototype.constructor`, `toString` and `valueOf` (from slice 3), `isNaN` and `isFinite` (from slice 3), and `String.prototype.toString` and `valueOf` (from slice 3).
+
+## Additions in wave 1 of slice 2 (2026-11-21)
+
+Binding; where this section and the text below differ, this section governs.
+
+- **Three fixture cases of the runner's own tests are this story's too.** The fixture
+  `crates/test262/tests/fixtures/tree/test/built-ins/Number/prototype/plain.js` ran
+  `Number.prototype;` and the runner's tests expect it to fail; with `Number` delivered it
+  passes and 11 tests of `swell-test262` fail. A fixture that must fail does not depend on a
+  builtin being absent: its body names an identifier no slice defines. The same change is made
+  now in `Atomics/wait/agent.js` and `Atomics/wait/no-agent.js` of that tree, which would break
+  the same way when `Atomics` is delivered. The expectations of the runner's tests do not
+  change.
+- **No omission line in `conformance/test262/sections.txt`.** The parts of `Number` and
+  `String` that stay out are whole methods of later slices, not a part taken early that is
+  incomplete; the design's omission rule does not apply to them.
+- **`Array.prototype.toString` is not this story's.** An array still converts through
+  `Object.prototype.toString`; the wave plan records it for a decision before wave 4.
+
+Writes, added: `crates/test262/tests/fixtures/tree/test/built-ins/Number/prototype/plain.js`,
+`crates/test262/tests/fixtures/tree/test/built-ins/Atomics/wait/agent.js`,
+`crates/test262/tests/fixtures/tree/test/built-ins/Atomics/wait/no-agent.js`.
 
 ## Change
 

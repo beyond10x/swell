@@ -12,6 +12,18 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- The language of the second delivery slice, first part: automatic semicolon insertion,
+  labelled statements, `??`, `?.`, logical assignment, optional catch binding, trailing commas
+  in argument lists, numeric separators, a hashbang line, plain method definitions and
+  shorthand properties in object literals.
+- `Number` (with `toString` for every radix), `Boolean`, `isNaN` and `isFinite`, and the
+  `toString` and `valueOf` of the String wrapper.
+- The conformance runner writes one line per run with what ended it, and its host has
+  `$262.evalScript`.
+- test262 after these: `test262 total 53801 8982 7 44812 5924 38888 0`, 5,924 of the 44,812
+  cases that run pass (13.2 %; 3,969 in 0.1.0). The second slice passes 3,468 of its 5,245
+  cases. 50,596 of the 85,556 runs end at a refusal of a construct the parser does not have
+  yet (53,564 in 0.1.0).
 - The gate runs the scenarios of the host interface model against the engine itself
   (`conformance/ess`, the task `conform-engine`): `58 scenarios: 14 passed, 0 failed, 0 error,
   44 unsupported`. An unsupported scenario names the later slice or the reason it waits for,

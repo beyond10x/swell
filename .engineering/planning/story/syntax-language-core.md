@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:syntax-language-core
 kind: story
-status: active
+status: implemented
 title: swell-syntax parses the grammar of slice 2 with plain methods and shorthand properties; labels, ??, ?. and logical assignment compile
 summary: Semicolon insertion, labels, ??, ?., logical assignment, optional catch, trailing commas, separators, hashbang, ASCII identifier escapes, plain methods and shorthand properties; ** refused naming slice 4; with and arguments stay refused.
 relations:
@@ -120,10 +120,11 @@ scope:
   path: crates/syntax/tests/sources
 - confidence: cited
   path: crates/syntax/tests/sources.rs
-revision: 9
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T14:46:07Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
@@ -140,6 +141,27 @@ Two refusals stay until their run-time exists, so that no tree reaches the compi
 The refusal of a regular expression literal is not read as one. The compiler emits `ThrowSyntaxError` with `REGEXP_REFUSAL` (`crates/compiler/src/expression.rs:24`, cited): "regular expression literals are not supported before slice 5", while `swell_syntax::message_kind` reads a refusal only in a message `<construct> is not supported before slice <n>` (`crates/syntax/src/error.rs:20`, `REFUSED` = `" is not supported before slice "`, cited), the form the design gives (`docs/design/engine.md`, decision 11 "Refusals", and `host-interface.md`, "A count of refusals"). So the message becomes "regular expression literal is not supported before slice 5", which `message_kind` reads as a refusal of slice 5. Measured on `main` (`6319af2`, the throwaway runner's run lines: `awk -F'\t' '$1 == "test262-run" && $6 ~ /regular expression literals are not supported before slice 5/' count.log`): 1,484 runs of 744 cases end with that message, all counted failed, none passed and none in `test262-refused` (the runner reads the kind of a parse error only, and this error is thrown when the literal is evaluated): 1,480 as `threw SyntaxError: ...` and 4 as `threw Test262Error` whose message quotes it; by slice 02: 58, 03: 14, 05: 1,006, 06: 252, 09: 6, 18: 60, 19: 88 runs. After this story they stay failed and outside `test262-refused`; from wave 3 the agent counts them (`Agent::refusals`) and the runner counts them refused (`story:eval-and-function-constructor`).
 
 Design it builds on, on the branch since merge `63dff4d` (a precondition that holds before wave 1): section 12, "A part before its slice", takes plain method definitions and shorthand properties into slice 2, and decision 11, "Refusals", gives the form of a refusal message. The refusal of `**` naming slice 4 follows the wave plan; the feature line is `story:slice-02-conformance-close`.
+
+## Additions in wave 1 of slice 2 (2026-11-21)
+
+Binding; where this section and the text below differ, this section governs.
+
+- **A test of the conformance target relied on a refusal this story lifts.**
+  `conformance/ess/src/target.rs`, the test
+  `a_construct_the_parser_refuses_until_a_later_slice_is_unsupported_not_parse_failed`, parses
+  `1 + 1` and expects a refusal for semicolon insertion. Its source becomes a construct of a
+  late slice that stays refused as long as possible (not `with`, which wave 2 of this slice
+  delivers): a construct of slice 11 or later, as the parser refuses it today. Only that
+  test's source and what it asserts about the message change; the target does not.
+- **A script that starts with a hashbang cannot carry its expectation on line 1.**
+  `crates/swell/tests/language.rs` reads the expectation from the first line and puts the
+  strict prologue before it. It skips a leading `#!` line when it reads the expectation and
+  inserts the prologue after that line, so that `hashbang-first-line.js` runs in both modes.
+- **The doc comment of `crates/swell/src/object/ecmascript_function.rs`** that says "accessor"
+  where methods now apply is corrected (the comment only).
+
+Writes, added: `conformance/ess/src/target.rs` (the one test), `crates/swell/tests/language.rs`,
+`crates/swell/src/object/ecmascript_function.rs` (the doc comment).
 
 ## Change
 

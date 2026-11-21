@@ -37,9 +37,18 @@ report and does not work around it.
 - The shell runs as `zsh -c … < /dev/null`: no heredoc into a command that reads standard
   input. Write a script with the file-writing tool and run it by path.
 - No Python in any command: not in the repository, not in a script, a probe or a manual check,
-  and not to ask for its version (`python3 --version` counts; it happened once, in wave 3 of
-  slice 1). The repository must be workable on a machine that has none, and a probe that
-  needs it proves nothing there. Use `sh`, `awk`, `sed`, `grep`, `jq` or Rust.
+  and not to ask for its version (`python3 --version` counts; three units did it, in wave 3
+  and wave 5 of slice 1 and in wave 1 of slice 2, each time inside a search for a tool). Do
+  not look for it at all. The repository must be workable on a machine that has none, and a
+  probe that needs it proves nothing there. Use `sh`, `awk`, `sed`, `grep`, `jq` or Rust.
+- Before you write: a unit that lifts a refusal of the parser or delivers a builtin searches
+  the whole tree (`grep -rn` over `crates/`, `conformance/`, `tests/`) for a test or fixture
+  that relies on the absence: a source expected to be refused, a name expected to be
+  undefined. In wave 1 of slice 2 all three units met one outside their `Writes:` line. If
+  it is outside yours, stop and report it with the file and line before you go on; the
+  coordinator extends the story.
+- A wait is a wait on a file or a process (`tail --pid`, a loop with `sleep`), never a loop
+  that prints: one unit wrote 64 MB into the session's tool results that way.
 - No network, unless the brief names the address (the test262 fetch, the Unicode data). No
   `gh`, no push, no remote.
 - Nothing personal in any file: no person's name (write "the operator"), no home directory

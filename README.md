@@ -10,7 +10,7 @@ not trust.
 ## State
 
 swell runs scripts of the ES5 grammar, in both modes, under a step and a memory budget, and its
-gate runs test262: 3,969 of the 44,812 cases it runs pass (8.9 %), measured on 2026-11-21. The
+gate runs test262: 5,924 of the 44,812 cases it runs pass (13.2 %), measured on 2026-11-21. The
 first of nineteen delivery slices is delivered: the test262 harness itself, 31 cases, all
 passing.
 
@@ -28,7 +28,7 @@ passing.
   decision, runs the rest in both modes under budgets, and counts them per directory, per
   delivery slice and per section of ECMA-262 (35). Its 283 lines are compared with a committed
   file on every run. A construct the parser does not have yet is refused, and a refusal never
-  counts as a pass: 53,564 of the 85,556 runs end at such a refusal.
+  counts as a pass: 50,596 of the 85,556 runs end at such a refusal.
 - The first parts of the engine: a parser for the ES5 grammar with strict mode
   (`crates/syntax`), a compiler to bytecode (`crates/compiler`), the heap, the values, objects,
   realms, the interpreter, the builtins the test262 harness calls and the host entry points
@@ -38,8 +38,8 @@ passing.
 Releases are listed in [`CHANGELOG.md`](CHANGELOG.md), each with what works and its limits;
 [`docs/releasing.md`](docs/releasing.md) says how one is cut.
 
-Next: the rest of the ES5 language (`eval`, `with`, `arguments`, labels, semicolon insertion, the
-global `Function`): the second of nineteen slices, 5,245 cases, of which 2,125 pass today.
+Next: the rest of the ES5 language (`with`, `arguments`, `eval`, the global `Function`): the
+second of nineteen slices, 5,245 cases, of which 3,468 pass after the first of its four waves.
 
 ## What swell is
 

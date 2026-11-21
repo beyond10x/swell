@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:test262-run-causes
 kind: story
-status: active
+status: implemented
 title: swell-test262 writes one line per run with its outcome and cause, and gives $262.evalScript; the measure of slice 2
 summary: 'Option --runs: one tab-separated line per run (slice, path, mode, outcome, cause) in TEST262_OUT/runs.tsv; $262.evalScript on Cx::parse_script and Cx::evaluate_script, a refusal inside it failing the run.'
 relations:
@@ -22,10 +22,11 @@ scope:
   path: crates/test262/tests/run.rs
 - confidence: cited
   path: taskfiles/test262.yml
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T13:41:53Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-21T14:46:07Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
