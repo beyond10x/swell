@@ -292,7 +292,7 @@ impl<H: Host> Agent<H> {
         message: &str,
     ) -> Result<Completion<ObjectRef>, HostError> {
         self.alive()?;
-        self.heap.realms.get(realm.handle).map_err(host_error)?;
+        self.host_realm(realm.handle).map_err(host_error)?;
         Ok(self.running().and_then(|()| {
             let error = self.new_error_in(realm.handle, kind, message)?;
             self.hand_out(Value::Object(error));
@@ -516,7 +516,7 @@ impl<H: Host> Cx<'_, H> {
     ) -> Result<Completion<ObjectRef>, HostError> {
         let agent = &mut *self.agent;
         agent.alive()?;
-        agent.heap.realms.get(realm.handle).map_err(host_error)?;
+        agent.host_realm(realm.handle).map_err(host_error)?;
         Ok(agent.running().and_then(|()| {
             let function =
                 agent.create_host_function(realm.handle, name, length, steps, constructor, data)?;
@@ -746,7 +746,7 @@ impl<H: Host> Cx<'_, H> {
     ) -> Result<Parsed<ScriptRef>, HostError> {
         let agent = &mut *self.agent;
         agent.alive()?;
-        agent.heap.realms.get(realm.handle).map_err(host_error)?;
+        agent.host_realm(realm.handle).map_err(host_error)?;
         if let Err(abrupt) = agent.running() {
             return Ok(Parsed::Terminated(crate::script::parse_termination(abrupt)));
         }

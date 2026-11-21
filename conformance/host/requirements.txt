@@ -1,20 +1,20 @@
 HOST-1 test swell::source_scan::host_1_forbid_unsafe_no_outside_package_no_thread_spawn
 HOST-2 test swell::source_scan::host_2_no_ambient_authority_in_engine_crates
-HOST-3 pending slice 1
+HOST-3 test swell::fuzz::host_3_no_entry_point_read_or_hook_panics
 HOST-4 test swell::doc::compile_fail::host_4_hook_cx_cannot_call_construct_or_evaluate_a_script
 HOST-5 test swell::doc::compile_fail::host_5_agent_call_inside_a_host_function
 HOST-6 test swell::budgets::host_6_endless_loop_ends_in_step_budget
 HOST-7 test swell::budgets::host_7_next_entry_gets_the_whole_budget
 HOST-8 test swell::budgets::host_8_nested_entry_spends_the_outer_budget
 HOST-9 test swell::budgets::host_9_zero_steps_ends_before_the_first
-HOST-10 pending slice 1
+HOST-10 test swell::limits_scripts::host_10_endless_allocation_ends_in_memory_budget
 HOST-11 pending slice 13
 HOST-12 test swell::realms::host_12_create_realm_with_zero_memory_is_memory_budget
 HOST-13 test swell::budgets::host_13_frame_depth_counts_the_script_context
 HOST-14 test swell::budgets::host_14_zero_frame_depth_throws_range_error
 HOST-15 test swell::calls::host_15_reentry_depth_bounds_cx_call
-HOST-16 pending slice 1
-HOST-17 pending slice 1
+HOST-16 test swell::limits_scripts::host_16_zero_reentry_depth_refuses_the_map_callback
+HOST-17 test swell::limits_scripts::host_17_deepest_reentry_parses_at_full_nesting
 HOST-18 test swell::scripts::host_18_100000_brackets_are_one_parse_error
 HOST-19 test swell::scripts::host_19_zero_parser_nesting_refuses_any_source
 HOST-20 test swell::budgets::host_20_doubling_a_string_past_string_length_throws
@@ -27,8 +27,8 @@ HOST-26 pending slice 4
 HOST-27 pending slice 4
 HOST-28 test swell::collect::host_28_an_object_held_only_by_a_root_survives_collect
 HOST-29 test swell::collect::host_29_dropping_the_last_root_lowers_heap_bytes
-HOST-30 pending slice 1
-HOST-31 pending slice 1
+HOST-30 test swell::misuse::host_30_*
+HOST-31 test swell::misuse::host_31_handles_of_another_agent
 HOST-32 test swell::values::host_32_to_utf16_keeps_lone_surrogates
 HOST-33 test swell::values::host_33_lossy_string_replaces_lone_surrogates
 HOST-34 test swell::values::host_34_new_string_is_utf16_of_the_str
@@ -42,15 +42,15 @@ HOST-41 pending slice 9
 HOST-42 pending slice 11
 HOST-43 pending slice 11
 HOST-44 pending slice 11
-HOST-45 pending slice 1
+HOST-45 test swell::misuse::host_45_realm_root_and_script_of_another_agent
 HOST-46 pending slice 10
 HOST-47 test swell::calls::host_47_call_and_construct_of_the_wrong_kind_throw_type_error
-HOST-48 pending slice 1
+HOST-48 test swell::misuse::host_48_a_faulted_agent_answers_faulted_everywhere
 HOST-49 pending slice 1
 HOST-50 test swell::scripts::host_50_setup_this_is_script_this
 HOST-51 test swell::lib::realm::tests::host_51_default_global_is_ordinary_with_object_prototype
 HOST-52 test swell::realms::host_52_dropped_realm_returns_heap_bytes
-HOST-53 pending slice 1
+HOST-53 test swell::limits_scripts::host_53_parse_defines_no_global_binding
 HOST-54 test swell::scripts::host_54_var_script_evaluates_twice
 HOST-55 pending slice 11
 HOST-56 pending slice 11
@@ -68,7 +68,7 @@ HOST-67 pending slice 11
 HOST-68 pending slice 11
 HOST-69 test swell::termination::host_69_finally_does_not_run_after_step_budget
 HOST-70 test swell::termination::host_70_agent_stays_alive_after_each_budget
-HOST-71 pending slice 1
+HOST-71 test swell::faults::host_71_injected_fault_at_each_call_faults_the_agent
 HOST-72 test swell::termination::host_72_a_host_function_cannot_end_a_termination
 HOST-73 pending slice 7
 HOST-74 pending slice 11
@@ -99,7 +99,7 @@ HOST-98 pending slice 11
 HOST-99 pending slice 11
 HOST-100 pending slice 10
 HOST-101 pending slice 10
-HOST-102 pending slice 1
+HOST-102 test swell::misuse::host_102_reads_change_nothing_and_call_no_hook
 HOST-103 test swell::calls::host_103_host_function_receives_this_and_arguments
 HOST-104 test swell::calls::host_104_new_target_and_non_constructors
 HOST-105 test swell::calls::host_105_host_throw_reaches_the_script_catch
@@ -126,11 +126,11 @@ HOST-125 pending slice 4
 HOST-126 pending slice 4
 HOST-127 pending slice 4
 HOST-128 pending slice 4
-HOST-129 pending slice 1
+HOST-129 test swell::misuse::host_129_collect_runs_no_code_and_calls_no_hook
 HOST-130 pending slice 16
 HOST-131 pending slice 16
 HOST-132 test swell::collect::host_132_report_matches_heap_bytes
-HOST-133 pending slice 1
+HOST-133 test swell::determinism::host_133_same_calls_same_hooks_same_outcomes
 HOST-134 pending slice 16
 HOST-135 pending slice 4
 HOST-136 test swell::doc::compile_fail::host_136_agent_is_not_send
@@ -157,5 +157,5 @@ HOST-156 pending slice 6
 HOST-157 pending slice 11
 HOST-158 pending slice 11
 HOST-159 pending slice 11
-HOST-160 pending slice 1
+HOST-160 test swell::misuse::host_160_a_handle_returned_by_the_host_faults_the_agent
 HOST-161 test swell::lib::realm::tests::host_161_the_entry_names_the_current_realm

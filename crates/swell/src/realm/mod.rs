@@ -17,7 +17,7 @@ pub(crate) mod global_object;
 pub(crate) mod intrinsics;
 
 use crate::env::global::RealmGlobalEnv;
-use crate::heap::arena::Handle;
+use crate::heap::arena::{Access, Handle};
 use crate::heap::collect::Mark;
 use crate::host::agent::Agent;
 use crate::host::host_object::{Brand, HostData, HostObject, Tracer};
@@ -71,6 +71,11 @@ pub(crate) struct RealmRecord {
     host_defined: Option<HostObject>,
     /// [[GlobalEnv]].
     pub(crate) global_env: RealmGlobalEnv,
+    /// `create_realm` ended without making the realm (the setup closure threw or ended the
+    /// run, or a budget ran out): the record stays until a collection frees it, and the host,
+    /// which may still hold the `RealmRef` its setup closure was handed, is answered as for a
+    /// freed realm ([`Agent::host_realm`]).
+    pub(crate) unmade: bool,
 }
 
 impl RealmRecord {
@@ -83,6 +88,7 @@ impl RealmRecord {
             global_this: None,
             host_defined: None,
             global_env: RealmGlobalEnv {},
+            unmade: false,
         }
     }
 
@@ -260,8 +266,23 @@ impl<H: Host> Agent<H> {
             };
         // "Set the Realm of newContext to realm. ... Push newContext onto the execution context
         // stack": the new realm is the current realm until the realm is made.
-        self.in_entry_realm(realm, |agent| agent.populate_realm(realm, setup))?;
+        let populated = self.in_entry_realm(realm, |agent| agent.populate_realm(realm, setup));
+        if populated.is_err()
+            && let Ok(record) = self.heap.realms.get_mut(realm)
+        {
+            record.unmade = true;
+        }
+        populated?;
         Ok(realm)
+    }
+
+    /// The realm record a host's `RealmRef` names: a realm `create_realm` did not make answers
+    /// `Stale`, as a freed one does (HOST-30).
+    pub(crate) fn host_realm(&self, realm: Handle) -> Result<&RealmRecord, Access> {
+        match self.heap.realms.get(realm) {
+            Ok(record) if record.unmade => Err(Access::Stale),
+            answer => answer,
+        }
     }
 
     /// CreateIntrinsics, the setup closure, SetRealmGlobalObject and SetDefaultGlobalBindings
