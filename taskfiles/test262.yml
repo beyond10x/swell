@@ -19,7 +19,11 @@ tasks:
       (default conformance/test262/features.txt), the sections of TEST262_SECTIONS (default
       conformance/test262/sections.txt) and TEST262_EXPECTED (default
       conformance/test262/expected.txt). Its standard output goes to TEST262_OUT/lines.txt
-      (default .out/test262), its standard error to TEST262_OUT/count.log.
+      (default .out/test262), its standard error to TEST262_OUT/count.log, and its run lines
+      (--runs) to TEST262_OUT/runs.tsv: one line per run, "test262-run", the slice, the path,
+      the mode, the outcome (Passed, Failed or Budget) and what ended the run, separated by
+      tabs; with TEST262_RUN=none the file holds no line. Each run of the task writes the file
+      of its own TEST262_OUT.
       It fails, printing both, when the runner exits non-zero: a feature features.txt does not
       list, features.txt not listing exactly the features test262 declares, an excluded feature
       listed as run, a line of the block or of the sections file it cannot read, a section path
@@ -71,7 +75,8 @@ tasks:
           --features "$TEST262_FEATURES" \
           --sections "$TEST262_SECTIONS" \
           --expected "$TEST262_EXPECTED" \
-          --workers "$TEST262_WORKERS" --run "$TEST262_RUN" > "$lines" 2> "$log" || status=$?
+          --workers "$TEST262_WORKERS" --run "$TEST262_RUN" \
+          --runs "$TEST262_OUT/runs.tsv" > "$lines" 2> "$log" || status=$?
         if [ "$status" -ne 0 ]; then
           cat "$lines" "$log"
           echo "test262: swell-test262 count exited $status"

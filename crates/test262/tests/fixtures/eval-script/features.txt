@@ -1,0 +1,7 @@
+# Fixture feature list, written for the tests of swell-test262: the names ../features.txt lists,
+# so that the eval-script tree is counted with it. No case of this tree names a feature.
+Atomics
+decorators
+generators
+intl-normative-optional
+json-modules
