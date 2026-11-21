@@ -19,6 +19,10 @@ scope:
 - confidence: cited
   path: crates/swell/src/interp
 - confidence: cited
+  path: crates/swell/src/object/mod.rs
+- confidence: cited
+  path: crates/swell/src/ops/objects.rs
+- confidence: cited
   path: crates/swell/src/script.rs
 - confidence: cited
   path: crates/swell/tests
@@ -28,7 +32,7 @@ scope:
   path: crates/swell/tests/language.rs
 - confidence: cited
   path: crates/swell/tests/support/script.rs
-revision: 11
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:49:59Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:coordinator"}
@@ -149,6 +153,15 @@ design governs.
   `Agent::call` and `Agent::construct` take a `&Realm`; this story's tests pass one.
   `evaluate_script` and `Cx::evaluate_script` make the script's realm the current one for the
   run (`ecma262:sec-runtime-semantics-scriptevaluation`).
+
+- `Writes:` is extended (2026-11-21, from what the unit of `story:harness-builtins` found on the
+  same base): in any file under `crates/swell/src/`, an `expect(dead_code)` mark whose reason
+  names this story may be removed once the item is used, and nothing else in that file changes;
+  `crates/swell/src/object/mod.rs` (the mark on the ECMAScript function kind);
+  `crates/swell/src/ops/objects.rs` (GetFunctionRealm reading an ECMAScript function's
+  `[[Realm]]`, `is_constructor`, `instanceof_operator`, and their marks). The other story of
+  the wave changes its own hunks in the same two files; the unit that lands second takes the
+  other one's in.
 
 ## Change
 
