@@ -11,7 +11,9 @@ mod support;
 
 use std::cell::Cell;
 
-use support::host::{TestHost, agent_with, global, is_error_of, limits, object, realm};
+use support::host::{
+    TestHost, agent_with, global, is_error_of, limits, object, realm, stack_with_room,
+};
 use support::script::{Outcome, define_function, eval, eval_text, run};
 use swell::{
     Abrupt, Agent, AgentState, Brand, Completion, Cx, HostCall, HostData, HostObjectSpec, Limits,
@@ -511,12 +513,13 @@ fn reach_every_bound() {
 }
 
 /// HOST-17's bound, held here for the limits of the story (`Limits::min_stack_bytes`, decision
-/// 2): a thread of exactly `min_stack_bytes()` for `frame_depth` 10,000, `reentry_depth` 1,000
-/// and `parser_nesting` 1,000 runs a script that reaches `reentry_depth` through host
-/// functions, and one that reaches it through getters, each parsing 1,000 nested brackets at
-/// the deepest, and ends without a stack overflow.
+/// 2): a thread of seven eighths of `min_stack_bytes()` ([`stack_with_room`]) for
+/// `frame_depth` 10,000, `reentry_depth` 1,000 and `parser_nesting` 1,000 runs a script that
+/// reaches `reentry_depth` through host functions, and one that reaches it through getters,
+/// each parsing 1,000 nested brackets at the deepest, and ends without a stack overflow:
+/// `min_stack_bytes()` is enough, with an eighth of it to spare.
 #[test]
 fn min_stack_bytes_is_enough() {
-    let stack = stack_limits().min_stack_bytes();
+    let stack = stack_with_room(stack_limits());
     on_bounded_stack("min_stack_bytes_is_enough", stack, reach_every_bound).unwrap();
 }

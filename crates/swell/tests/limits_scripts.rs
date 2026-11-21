@@ -13,7 +13,9 @@ mod support;
 
 use std::cell::Cell;
 
-use support::host::{TestHost, agent_with, global, is_error_of, limits, object, realm};
+use support::host::{
+    TestHost, agent_with, global, is_error_of, limits, object, realm, stack_with_room,
+};
 use support::script::{Outcome, define_function, eval, eval_text, parse};
 use swell::{
     Agent, AgentState, Brand, Completion, Cx, GlobalObjects, HookCx, HostCall, HostObjectSpec,
@@ -251,10 +253,11 @@ fn reach_through_host_function() {
 /// HOST-17: on a thread whose stack has `limits.min_stack_bytes()` bytes (`frame_depth`
 /// 10,000, `reentry_depth` 1,000, `parser_nesting` 1,000), a script that reaches
 /// `reentry_depth` re-entries and at the deepest one calls a host function that parses a source
-/// nested `parser_nesting` levels through `cx.parse_script` ends without a stack overflow.
+/// nested `parser_nesting` levels through `cx.parse_script` ends without a stack overflow. The
+/// thread has seven eighths of it ([`stack_with_room`]), which proves the room as well.
 #[test]
 fn host_17_deepest_reentry_parses_at_full_nesting() {
-    let stack = stack_limits(FULL_REENTRY).min_stack_bytes();
+    let stack = stack_with_room(stack_limits(FULL_REENTRY));
     on_bounded_stack(
         "host_17_deepest_reentry_parses_at_full_nesting",
         stack,
@@ -297,15 +300,16 @@ fn reach_through_builtins() {
 
 /// `Limits::min_stack_bytes` through the builtins that call back into script (decision 2;
 /// `crates/swell/src/host/limits.rs` names this test beside its constants): on a thread with
-/// exactly `min_stack_bytes()` for `frame_depth` 10,000, `reentry_depth` 1,000 and
-/// `parser_nesting` 1,000, a script reaches `reentry_depth` re-entries through each of
-/// `Function.prototype.call`, a `map` callback, `toJSON` and a replacer of `JSON.stringify`
-/// (four runs) and parses 1,000 nested brackets at the deepest, without a stack overflow. In
-/// the collect mode the depth is [`BUILTINS_REENTRY`], and the thread has `min_stack_bytes()`
-/// of that depth.
+/// seven eighths of `min_stack_bytes()` ([`stack_with_room`]) for `frame_depth` 10,000,
+/// `reentry_depth` 1,000 and `parser_nesting` 1,000, a script reaches `reentry_depth`
+/// re-entries through each of `Function.prototype.call`, a `map` callback, `toJSON` and a
+/// replacer of `JSON.stringify` (four runs) and parses 1,000 nested brackets at the deepest,
+/// without a stack overflow: `min_stack_bytes()` is enough, with an eighth of it to spare. In
+/// the collect mode the depth is [`BUILTINS_REENTRY`], and the thread has seven eighths of
+/// `min_stack_bytes()` of that depth.
 #[test]
 fn min_stack_bytes_is_enough_through_builtins() {
-    let stack = stack_limits(BUILTINS_REENTRY).min_stack_bytes();
+    let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
     on_bounded_stack(
         "min_stack_bytes_is_enough_through_builtins",
         stack,
