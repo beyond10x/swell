@@ -1,18 +1,18 @@
 HOST-1 test swell::source_scan::host_1_forbid_unsafe_no_outside_package_no_thread_spawn
 HOST-2 test swell::source_scan::host_2_no_ambient_authority_in_engine_crates
 HOST-3 pending slice 1
-HOST-4 pending slice 1
-HOST-5 pending slice 1
+HOST-4 test swell::doc::compile_fail::host_4_hook_cx_cannot_call_construct_or_evaluate_a_script
+HOST-5 test swell::doc::compile_fail::host_5_agent_call_inside_a_host_function
 HOST-6 pending slice 1
 HOST-7 pending slice 1
 HOST-8 pending slice 1
 HOST-9 pending slice 1
 HOST-10 pending slice 1
 HOST-11 pending slice 13
-HOST-12 pending slice 1
+HOST-12 test swell::realms::host_12_create_realm_with_zero_memory_is_memory_budget
 HOST-13 pending slice 1
 HOST-14 pending slice 1
-HOST-15 pending slice 1
+HOST-15 test swell::calls::host_15_reentry_depth_bounds_cx_call
 HOST-16 pending slice 1
 HOST-17 pending slice 1
 HOST-18 pending slice 1
@@ -44,12 +44,12 @@ HOST-43 pending slice 11
 HOST-44 pending slice 11
 HOST-45 pending slice 1
 HOST-46 pending slice 10
-HOST-47 pending slice 1
+HOST-47 test swell::calls::host_47_call_and_construct_of_the_wrong_kind_throw_type_error
 HOST-48 pending slice 1
 HOST-49 pending slice 1
 HOST-50 pending slice 1
-HOST-51 pending slice 1
-HOST-52 pending slice 1
+HOST-51 test swell::lib::realm::tests::host_51_default_global_is_ordinary_with_object_prototype
+HOST-52 test swell::realms::host_52_dropped_realm_returns_heap_bytes
 HOST-53 pending slice 1
 HOST-54 pending slice 1
 HOST-55 pending slice 11
@@ -103,7 +103,7 @@ HOST-102 pending slice 1
 HOST-103 pending slice 1
 HOST-104 pending slice 1
 HOST-105 pending slice 1
-HOST-106 pending slice 1
+HOST-106 test swell::calls::host_106_host_function_name_and_length
 HOST-107 pending slice 1
 HOST-108 test swell::host_objects::host_108_host_data_checks_brand_and_type
 HOST-109 test swell::host_objects::host_109_trace_keeps_listed_values
@@ -121,7 +121,7 @@ HOST-120 pending slice 3
 HOST-121 pending slice 10
 HOST-122 pending slice 13
 HOST-123 pending slice 14
-HOST-124 pending slice 1
+HOST-124 test swell::hooks::host_124_*
 HOST-125 pending slice 4
 HOST-126 pending slice 4
 HOST-127 pending slice 4

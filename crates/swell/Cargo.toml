@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 swell-num = { path = "../num" }
+swell-unicode = { path = "../unicode" }
 
 [features]
 collect-every-safe-point = []

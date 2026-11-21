@@ -74,8 +74,9 @@ fn host_108_host_data_checks_brand_and_type() {
         .with_cx(|cx| {
             let node = cx
                 .new_host_object(spec(NODE, Some(Box::new(Node { id: 7 }))))
+                .unwrap()
                 .unwrap();
-            let bare = cx.new_host_object(spec(NODE, None)).unwrap();
+            let bare = cx.new_host_object(spec(NODE, None)).unwrap().unwrap();
 
             assert_eq!(cx.brand(node), Ok(Some(NODE)));
             assert_eq!(
@@ -102,6 +103,7 @@ fn host_108_host_data_checks_brand_and_type() {
         .with_cx(|cx| {
             cx.new_host_object(spec(NODE, Some(Box::new(Node { id: 1 }))))
                 .unwrap()
+                .unwrap()
         })
         .unwrap();
     other
@@ -122,8 +124,8 @@ fn host_109_trace_keeps_listed_values() {
     let mut agent = support::host::agent().unwrap();
     let (_root, listed, unlisted) = agent
         .with_cx(|cx| {
-            let listed = cx.new_host_object(spec(NODE, None)).unwrap();
-            let unlisted = cx.new_host_object(spec(NODE, None)).unwrap();
+            let listed = cx.new_host_object(spec(NODE, None)).unwrap().unwrap();
+            let unlisted = cx.new_host_object(spec(NODE, None)).unwrap().unwrap();
             let holder = cx
                 .new_host_object(spec(
                     OTHER,
@@ -132,6 +134,7 @@ fn host_109_trace_keeps_listed_values() {
                         _unlisted: Some(unlisted),
                     })),
                 ))
+                .unwrap()
                 .unwrap();
             (cx.root(Value::Object(holder)).unwrap(), listed, unlisted)
         })
@@ -154,7 +157,7 @@ fn host_109_trace_keeps_listed_values() {
 fn host_110_trace_of_a_stale_handle_faults_collect() {
     let mut agent = support::host::agent().unwrap();
     let freed = agent
-        .with_cx(|cx| cx.new_host_object(spec(NODE, None)).unwrap())
+        .with_cx(|cx| cx.new_host_object(spec(NODE, None)).unwrap().unwrap())
         .unwrap();
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert_eq!(
@@ -172,6 +175,7 @@ fn host_110_trace_of_a_stale_handle_faults_collect() {
                         _unlisted: None,
                     })),
                 ))
+                .unwrap()
                 .unwrap();
             cx.root(Value::Object(holder)).unwrap()
         })
@@ -202,6 +206,7 @@ fn host_111_host_data_is_dropped_with_its_object() {
                         drops: drops.clone(),
                     })),
                 ))
+                .unwrap()
                 .unwrap();
             cx.new_host_object(spec(
                 NODE,
@@ -209,6 +214,7 @@ fn host_111_host_data_is_dropped_with_its_object() {
                     drops: drops.clone(),
                 })),
             ))
+            .unwrap()
             .unwrap();
             cx.root(Value::Object(kept)).unwrap()
         })
@@ -244,13 +250,14 @@ fn a_prototype_is_kept_by_its_object() {
     let mut agent = support::host::agent().unwrap();
     let (_root, prototype) = agent
         .with_cx(|cx| {
-            let prototype = cx.new_host_object(spec(OTHER, None)).unwrap();
+            let prototype = cx.new_host_object(spec(OTHER, None)).unwrap().unwrap();
             let object = cx
                 .new_host_object(HostObjectSpec {
                     prototype: Some(prototype),
                     brand: NODE,
                     data: None,
                 })
+                .unwrap()
                 .unwrap();
             (cx.root(Value::Object(object)).unwrap(), prototype)
         })

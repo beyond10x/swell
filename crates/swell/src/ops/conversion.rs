@@ -1,2 +1,392 @@
-//! Type conversion (ECMA-262 7.1, `#sec-type-conversion`). Filled by
-//! `story:object-model-and-realms`.
+//! Type conversion (ECMA-262 7.1, `#sec-type-conversion`): ToPrimitive, OrdinaryToPrimitive,
+//! ToBoolean, ToNumber with StringToNumber, ToNumeric, ToIntegerOrInfinity, ToInt32, ToUint32,
+//! ToString, ToObject, ToPropertyKey, ToLength and CanonicalNumericIndexString, and the property
+//! keys of the engine made from Strings. Written by `story:object-model-and-realms`.
+//!
+//! StringToNumber trims `StrWhiteSpaceChar` (`#sec-tonumber-applied-to-the-string-type`: the
+//! white space of 12.2, with every `Zs` code point from `swell-unicode`, and the line
+//! terminators of 12.3) and parses the rest with `swell-num`; Number::toString is `swell-num`'s.
+//! The trim charges a step per code unit it reads.
+
+use crate::host::agent::Agent;
+use crate::host::outcome::Completion;
+use crate::host::{ErrorKind, Host, PreferredType};
+use crate::object::ordinary::OrdinaryData;
+use crate::object::property::{Key, array_index};
+use crate::realm::intrinsics::Intrinsic;
+use crate::value::{ObjectRef, StringRef, Value};
+
+/// Whether `unit` is a `StrWhiteSpaceChar` (`#sec-tonumber-applied-to-the-string-type`):
+/// `WhiteSpace` (12.2: TAB, VT, FF, ZWNBSP and every `Zs` code point) or `LineTerminator` (12.3:
+/// LF, CR, LS, PS).
+pub(crate) fn is_str_white_space(unit: u16) -> bool {
+    matches!(
+        unit,
+        0x0009 | 0x000B | 0x000C | 0xFEFF | 0x000A | 0x000D | 0x2028 | 0x2029
+    ) || swell_unicode::is_space_separator(u32::from(unit))
+}
+
+/// ToInt32 (`#sec-toint32`) of a Number.
+pub(crate) fn number_to_int32(number: f64) -> i32 {
+    let unsigned = i64::from(number_to_uint32(number));
+    let signed = if unsigned >= 1 << 31 {
+        unsigned - (1 << 32)
+    } else {
+        unsigned
+    };
+    i32::try_from(signed).unwrap_or(0)
+}
+
+/// ToUint32 (`#sec-touint32`) of a Number.
+pub(crate) fn number_to_uint32(number: f64) -> u32 {
+    if !number.is_finite() || number == 0.0 {
+        return 0;
+    }
+    // rem_euclid answers an integer from 0 to 2^32 - 1, which the cast keeps exactly.
+    number.trunc().rem_euclid(4_294_967_296.0) as u32
+}
+
+#[expect(
+    clippy::wrong_self_convention,
+    reason = "the names are ECMA-262's; each operation allocates, charges steps or calls into the agent, so it needs `&mut self`"
+)]
+impl<H: Host> Agent<H> {
+    /// ToPrimitive (`#sec-toprimitive`).
+    pub(crate) fn to_primitive(
+        &mut self,
+        input: Value,
+        preferred: Option<PreferredType>,
+    ) -> Completion<Value> {
+        let Value::Object(object) = input else {
+            return Ok(input);
+        };
+        let exotic = match self.well_known() {
+            Some(symbols) => self.get_method(input, Key::Symbol(symbols.to_primitive))?,
+            None => None,
+        };
+        if let Some(exotic) = exotic {
+            let hint = match preferred {
+                None => "default",
+                Some(PreferredType::String) => "string",
+                Some(PreferredType::Number) => "number",
+            };
+            let hint = self.new_string_str(hint)?;
+            let result = self.call_value(exotic, input, &[Value::String(hint)])?;
+            if matches!(result, Value::Object(_)) {
+                return Err(self.throw_error(
+                    ErrorKind::TypeError,
+                    "Cannot convert object to primitive value",
+                ));
+            }
+            return Ok(result);
+        }
+        self.ordinary_to_primitive(object, preferred.unwrap_or(PreferredType::Number))
+    }
+
+    /// OrdinaryToPrimitive (`#sec-ordinarytoprimitive`).
+    pub(crate) fn ordinary_to_primitive(
+        &mut self,
+        object: ObjectRef,
+        hint: PreferredType,
+    ) -> Completion<Value> {
+        let names = match hint {
+            PreferredType::String => ["toString", "valueOf"],
+            PreferredType::Number => ["valueOf", "toString"],
+        };
+        for name in names {
+            let key = self.name_key(name)?;
+            let method = self.get(object, key)?;
+            if self.is_callable(method)? {
+                let result = self.call_value(method, Value::Object(object), &[])?;
+                if !matches!(result, Value::Object(_)) {
+                    return Ok(result);
+                }
+            }
+        }
+        Err(self.throw_error(
+            ErrorKind::TypeError,
+            "Cannot convert object to primitive value",
+        ))
+    }
+
+    /// ToBoolean (`#sec-toboolean`).
+    pub(crate) fn to_boolean(&mut self, value: Value) -> Completion<bool> {
+        Ok(match value {
+            Value::Undefined | Value::Null => false,
+            Value::Boolean(boolean) => boolean,
+            Value::Number(number) => !(number == 0.0 || number.is_nan()),
+            Value::String(string) => self.string_length(string)? != 0,
+            Value::Symbol(_) | Value::Object(_) => true,
+            Value::BigInt(_) => return Err(self.fault()),
+        })
+    }
+
+    /// ToNumber (`#sec-tonumber`).
+    pub(crate) fn to_number(&mut self, value: Value) -> Completion<f64> {
+        match value {
+            Value::Undefined => Ok(f64::NAN),
+            Value::Null => Ok(0.0),
+            Value::Boolean(boolean) => Ok(if boolean { 1.0 } else { 0.0 }),
+            Value::Number(number) => Ok(number),
+            Value::String(string) => self.string_to_number(string),
+            Value::Symbol(_) => Err(self.throw_error(
+                ErrorKind::TypeError,
+                "Cannot convert a Symbol value to a number",
+            )),
+            Value::BigInt(_) => Err(self.throw_error(
+                ErrorKind::TypeError,
+                "Cannot convert a BigInt value to a number",
+            )),
+            Value::Object(_) => {
+                let primitive = self.to_primitive(value, Some(PreferredType::Number))?;
+                self.to_number(primitive)
+            }
+        }
+    }
+
+    /// StringToNumber (`#sec-stringtonumber`): the `StrWhiteSpace` at either end trimmed, the
+    /// rest parsed by `swell-num`. A step per code unit.
+    pub(crate) fn string_to_number(&mut self, string: StringRef) -> Completion<f64> {
+        let units = self.string_units(string)?;
+        self.charge_steps(u64::try_from(units.len()).unwrap_or(u64::MAX))?;
+        let start = units
+            .iter()
+            .position(|&unit| !is_str_white_space(unit))
+            .unwrap_or(units.len());
+        let end = units
+            .iter()
+            .rposition(|&unit| !is_str_white_space(unit))
+            .map_or(start, |last| last + 1);
+        let trimmed = units.get(start..end).unwrap_or(&[]);
+        Ok(swell_num::literal::string_to_number_trimmed(trimmed))
+    }
+
+    /// ToNumeric (`#sec-tonumeric`). No BigInt exists before slice 12.
+    pub(crate) fn to_numeric(&mut self, value: Value) -> Completion<Value> {
+        let primitive = self.to_primitive(value, Some(PreferredType::Number))?;
+        if let Value::BigInt(_) = primitive {
+            return Ok(primitive);
+        }
+        Ok(Value::Number(self.to_number(primitive)?))
+    }
+
+    /// ToIntegerOrInfinity (`#sec-tointegerorinfinity`).
+    pub(crate) fn to_integer_or_infinity(&mut self, value: Value) -> Completion<f64> {
+        let number = self.to_number(value)?;
+        if number.is_nan() || number == 0.0 {
+            return Ok(0.0);
+        }
+        if number.is_infinite() {
+            return Ok(number);
+        }
+        // Truncation keeps the sign of a value above -1, so -0.5 would give -0: step 4 answers
+        // +0 for it.
+        let integer = number.trunc();
+        Ok(if integer == 0.0 { 0.0 } else { integer })
+    }
+
+    /// ToInt32 (`#sec-toint32`).
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the bitwise operators: story:interpreter-and-script-entry-points"
+        )
+    )]
+    pub(crate) fn to_int32(&mut self, value: Value) -> Completion<i32> {
+        Ok(number_to_int32(self.to_number(value)?))
+    }
+
+    /// ToUint32 (`#sec-touint32`).
+    pub(crate) fn to_uint32(&mut self, value: Value) -> Completion<u32> {
+        Ok(number_to_uint32(self.to_number(value)?))
+    }
+
+    /// ToString (`#sec-tostring`).
+    pub(crate) fn to_string(&mut self, value: Value) -> Completion<StringRef> {
+        match value {
+            Value::Undefined => self.new_string_str("undefined"),
+            Value::Null => self.new_string_str("null"),
+            Value::Boolean(true) => self.new_string_str("true"),
+            Value::Boolean(false) => self.new_string_str("false"),
+            Value::Number(number) => {
+                self.new_string_str(&swell_num::to_string::number_to_string(number))
+            }
+            Value::String(string) => Ok(string),
+            Value::Symbol(_) => Err(self.throw_error(
+                ErrorKind::TypeError,
+                "Cannot convert a Symbol value to a string",
+            )),
+            Value::BigInt(_) => Err(self.fault()),
+            Value::Object(_) => {
+                let primitive = self.to_primitive(value, Some(PreferredType::String))?;
+                self.to_string(primitive)
+            }
+        }
+    }
+
+    /// ToObject (`#sec-toobject`), with the prototypes of the current realm. A Symbol has no
+    /// `%Symbol.prototype%` before slice 6 and no Symbol value reaches code before it, so a
+    /// Symbol here is a broken invariant; likewise a BigInt before slice 12.
+    pub(crate) fn to_object(&mut self, value: Value) -> Completion<ObjectRef> {
+        match value {
+            Value::Undefined | Value::Null => Err(self.throw_error(
+                ErrorKind::TypeError,
+                "Cannot convert undefined or null to object",
+            )),
+            Value::Boolean(boolean) => {
+                let prototype = self.current_intrinsic(Intrinsic::BooleanPrototype)?;
+                self.ordinary_object_create(prototype, OrdinaryData::Boolean(boolean))
+            }
+            Value::Number(number) => {
+                let prototype = self.current_intrinsic(Intrinsic::NumberPrototype)?;
+                self.ordinary_object_create(prototype, OrdinaryData::Number(number))
+            }
+            Value::String(string) => {
+                let Some(prototype) = self.current_intrinsic(Intrinsic::StringPrototype)? else {
+                    return Err(self.fault());
+                };
+                self.string_create(string, prototype)
+            }
+            Value::Symbol(_) | Value::BigInt(_) => Err(self.fault()),
+            Value::Object(object) => Ok(object),
+        }
+    }
+
+    /// ToPropertyKey (`#sec-topropertykey`).
+    pub(crate) fn to_property_key(&mut self, value: Value) -> Completion<Key> {
+        let key = self.to_primitive(value, Some(PreferredType::String))?;
+        if let Value::Symbol(symbol) = key {
+            return Ok(Key::Symbol(symbol));
+        }
+        let string = self.to_string(key)?;
+        self.key_from_string(string)
+    }
+
+    /// The key of the String `string`: its array index, or its atom.
+    pub(crate) fn key_from_string(&mut self, string: StringRef) -> Completion<Key> {
+        let units = self.string_units(string)?;
+        self.key_from_units(&units)
+    }
+
+    /// The key of `units`: its array index, or its atom.
+    fn key_from_units(&mut self, units: &[u16]) -> Completion<Key> {
+        if let Some(index) = array_index(units) {
+            return Ok(Key::Index(index));
+        }
+        match self.heap.intern(units) {
+            Ok(atom) => Ok(Key::String(atom)),
+            Err(_) => Err(self.terminate(crate::host::Termination::MemoryBudget)),
+        }
+    }
+
+    /// The key of the property name `name`.
+    pub(crate) fn name_key(&mut self, name: &str) -> Completion<Key> {
+        let units: Vec<u16> = name.encode_utf16().collect();
+        self.key_from_units(&units)
+    }
+
+    /// The value of a key: a String or a Symbol. An array index is made a String again.
+    pub(crate) fn key_value(&mut self, key: Key) -> Completion<Value> {
+        Ok(match key {
+            Key::Index(index) => Value::String(self.new_string_str(&index.to_string())?),
+            Key::String(string) => Value::String(string),
+            Key::Symbol(symbol) => Value::Symbol(symbol),
+        })
+    }
+
+    /// ToLength (`#sec-tolength`).
+    pub(crate) fn to_length(&mut self, value: Value) -> Completion<f64> {
+        let length = self.to_integer_or_infinity(value)?;
+        if length <= 0.0 {
+            return Ok(0.0);
+        }
+        Ok(length.min(9_007_199_254_740_991.0))
+    }
+
+    /// CanonicalNumericIndexString (`#sec-canonicalnumericindexstring`).
+    #[cfg_attr(not(test), expect(dead_code, reason = "typed arrays: slice 13"))]
+    pub(crate) fn canonical_numeric_index_string(
+        &mut self,
+        string: StringRef,
+    ) -> Completion<Option<f64>> {
+        let units = self.string_units(string)?;
+        if units == [u16::from(b'-'), u16::from(b'0')] {
+            return Ok(Some(-0.0));
+        }
+        let number = self.string_to_number(string)?;
+        let canonical: Vec<u16> = swell_num::to_string::number_to_string(number)
+            .encode_utf16()
+            .collect();
+        Ok((canonical == units).then_some(number))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{number_to_int32, number_to_uint32};
+    use crate::host::hooks::test_host::agent_with_realm;
+    use crate::value::Value;
+
+    /// ToInt32 and ToUint32 (`#sec-toint32`, `#sec-touint32`): truncation modulo 2^32.
+    #[test]
+    fn to_int32_and_to_uint32_wrap_modulo_2_32() {
+        for (number, int32, uint32) in [
+            (0.0, 0, 0),
+            (-0.0, 0, 0),
+            (f64::NAN, 0, 0),
+            (f64::INFINITY, 0, 0),
+            (1.9, 1, 1),
+            (-1.9, -1, 4_294_967_295),
+            (2_147_483_648.0, -2_147_483_648, 2_147_483_648),
+            (4_294_967_296.0, 0, 0),
+            (4_294_967_297.5, 1, 1),
+            (-4_294_967_297.0, -1, 4_294_967_295),
+        ] {
+            assert_eq!(number_to_int32(number), int32, "{number}");
+            assert_eq!(number_to_uint32(number), uint32, "{number}");
+        }
+    }
+
+    /// ToLength, ToIntegerOrInfinity and CanonicalNumericIndexString
+    /// (`#sec-tolength`, `#sec-tointegerorinfinity`, `#sec-canonicalnumericindexstring`).
+    #[test]
+    fn to_length_and_canonical_numeric_index_string() {
+        let (mut agent, _realm) = agent_with_realm();
+        assert_eq!(agent.to_length(Value::Number(-3.0)), Ok(0.0));
+        assert_eq!(agent.to_int32(Value::Number(-1.5)), Ok(-1));
+        assert_eq!(agent.to_length(Value::Number(2.7)), Ok(2.0));
+        assert_eq!(
+            agent.to_length(Value::Number(f64::INFINITY)),
+            Ok(9_007_199_254_740_991.0)
+        );
+        let negative_half = agent.to_integer_or_infinity(Value::Number(-0.5)).unwrap();
+        assert!(negative_half == 0.0 && negative_half.is_sign_positive());
+        for (text, expected) in [
+            ("-0", Some(-0.0)),
+            ("1", Some(1.0)),
+            ("1.5", Some(1.5)),
+            ("-1", Some(-1.0)),
+            ("01", None),
+            ("1.0", None),
+            ("Infinity", Some(f64::INFINITY)),
+            ("NaN", Some(f64::NAN)),
+            ("x", None),
+        ] {
+            let string = agent.new_string_str(text).unwrap();
+            let found = agent.canonical_numeric_index_string(string).unwrap();
+            match (found, expected) {
+                (Some(found), Some(expected)) if expected.is_nan() => assert!(found.is_nan()),
+                (Some(found), Some(expected)) => {
+                    assert!(
+                        found == expected
+                            && found.is_sign_negative() == expected.is_sign_negative(),
+                        "{text}"
+                    )
+                }
+                (None, None) => {}
+                other => panic!("{text}: {other:?}"),
+            }
+        }
+    }
+}

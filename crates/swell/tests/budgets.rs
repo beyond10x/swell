@@ -69,6 +69,7 @@ fn memory_budget_charges_utf16_strings_and_host_data() {
                 brand: Brand(1),
                 data: Some(Box::new(Big { _bytes: [0; 2_048] })),
             })
+            .unwrap()
             .map(|_| ())
         })
         .unwrap();

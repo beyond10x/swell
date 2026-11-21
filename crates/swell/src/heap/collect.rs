@@ -13,8 +13,8 @@
 //!   scopes (`host/agent.rs`), the agent-wide values (`realm/mod.rs`), the slots of running
 //!   builtins (`object/builtin_function.rs`) and the frame stack (`interp/mod.rs`);
 //! - a trace function per kind of record, `fn trace(&self, mark: &mut Mark)`: strings
-//!   (`heap/string.rs`), objects (`object/mod.rs`, which calls the trace of the object's kind in
-//!   `object/*.rs` and `host/host_object.rs`), realm records (`realm/mod.rs`, with the global
+//!   (`heap/string.rs`), symbols (`heap/mod.rs`), objects (`object/mod.rs`, which calls the trace
+//!   of the object's kind in `object/*.rs` and `host/host_object.rs`), realm records (`realm/mod.rs`, with the global
 //!   environment of `env/global.rs`), environment records (`env/mod.rs`) and script records
 //!   (`script.rs`).
 //!
@@ -33,11 +33,8 @@ use crate::value::{ObjectRef, Value};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Item {
     String(Handle),
+    Symbol(Handle),
     Object(Handle),
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "realm records: story:object-model-and-realms")
-    )]
     Realm(Handle),
     #[cfg_attr(
         not(test),
@@ -55,7 +52,7 @@ pub(crate) enum Item {
         )
     )]
     Script(Handle),
-    /// A Symbol or a BigInt: no arena holds them before slices 6 and 12, so no live one exists.
+    /// A BigInt: no arena holds them before slice 12, so no live one exists.
     NoArena,
 }
 
@@ -88,7 +85,8 @@ impl Mark {
             Value::Undefined | Value::Null | Value::Boolean(_) | Value::Number(_) => {}
             Value::String(string) => self.push(Item::String(string.handle)),
             Value::Object(object) => self.push(Item::Object(object.handle)),
-            Value::Symbol(_) | Value::BigInt(_) => self.push(Item::NoArena),
+            Value::Symbol(symbol) => self.push(Item::Symbol(symbol.handle)),
+            Value::BigInt(_) => self.push(Item::NoArena),
         }
     }
 
@@ -123,6 +121,7 @@ pub(crate) struct Stale;
 /// The mark bits of every arena, one per slot.
 pub(crate) struct Marks {
     strings: Vec<bool>,
+    symbols: Vec<bool>,
     objects: Vec<bool>,
     realms: Vec<bool>,
     environments: Vec<bool>,
@@ -133,6 +132,7 @@ impl Marks {
     fn new(heap: &Heap) -> Marks {
         Marks {
             strings: vec![false; heap.strings.slot_count()],
+            symbols: vec![false; heap.symbols.slot_count()],
             objects: vec![false; heap.objects.slot_count()],
             realms: vec![false; heap.realms.slot_count()],
             environments: vec![false; heap.environments.slot_count()],
@@ -143,6 +143,7 @@ impl Marks {
     fn bits(&self, item: Item) -> Option<(&Vec<bool>, Handle)> {
         match item {
             Item::String(handle) => Some((&self.strings, handle)),
+            Item::Symbol(handle) => Some((&self.symbols, handle)),
             Item::Object(handle) => Some((&self.objects, handle)),
             Item::Realm(handle) => Some((&self.realms, handle)),
             Item::Environment(handle) => Some((&self.environments, handle)),
@@ -155,6 +156,7 @@ impl Marks {
     fn set(&mut self, item: Item) -> bool {
         let (bits, handle) = match item {
             Item::String(handle) => (&mut self.strings, handle),
+            Item::Symbol(handle) => (&mut self.symbols, handle),
             Item::Object(handle) => (&mut self.objects, handle),
             Item::Realm(handle) => (&mut self.realms, handle),
             Item::Environment(handle) => (&mut self.environments, handle),
@@ -209,6 +211,12 @@ pub(crate) fn mark_phase<H: Host>(agent: &Agent<H>, mark: &mut Mark) -> Result<M
                     string.trace(mark);
                 }
             }
+            Item::Symbol(handle) => {
+                let symbol = heap.symbols.get(handle).map_err(stale)?;
+                if marks.set(item) {
+                    symbol.trace(mark);
+                }
+            }
             Item::Object(handle) => {
                 let object = heap.objects.get(handle).map_err(stale)?;
                 if marks.set(item) {
@@ -250,6 +258,7 @@ pub(crate) fn collect<H: Host>(agent: &mut Agent<H>) -> Result<CollectReport, St
     let heap = &mut agent.heap;
     let mut credited = heap.objects.sweep(&marks.objects);
     credited = credited.saturating_add(heap.strings.sweep(&marks.strings));
+    credited = credited.saturating_add(heap.symbols.sweep(&marks.symbols));
     credited = credited.saturating_add(heap.realms.sweep(&marks.realms));
     credited = credited.saturating_add(heap.environments.sweep(&marks.environments));
     credited = credited.saturating_add(heap.scripts.sweep(&marks.scripts));
@@ -266,7 +275,9 @@ pub(crate) fn collect<H: Host>(agent: &mut Agent<H>) -> Result<CollectReport, St
 mod tests {
     use super::{Item, Mark, mark_phase};
     use crate::env::EnvironmentRecord;
+    use crate::heap::SymbolRecord;
     use crate::heap::string::HeapString;
+    use crate::host::hooks::test_host::NoHooks;
     use crate::host::host_object::HostObject;
     use crate::object::array::Array;
     use crate::object::bound_function::BoundFunction;
@@ -277,11 +288,8 @@ mod tests {
     use crate::object::{ObjectKind, ObjectRecord};
     use crate::realm::RealmRecord;
     use crate::script::ScriptRecord;
-    use crate::{Agent, Host, Limits, Seeds};
-
-    struct NoHooks;
-
-    impl Host for NoHooks {}
+    use crate::value::StringRef;
+    use crate::{Agent, Limits, Seeds};
 
     /// The root sites, in the order the mark phase calls them.
     const ROOT_SITES: [&str; 5] = [
@@ -294,8 +302,9 @@ mod tests {
 
     /// The trace function of each kind of the layout but the common object record, which is
     /// called once per object.
-    const KIND_SITES: [&str; 12] = [
+    const KIND_SITES: [&str; 13] = [
         "heap/string.rs HeapString::trace",
+        "heap/mod.rs SymbolRecord::trace",
         "host/host_object.rs HostObject::trace",
         "object/ordinary.rs Ordinary::trace",
         "object/array.rs Array::trace",
@@ -333,10 +342,11 @@ mod tests {
 
         let heap = &mut agent.heap;
         let string = heap.strings.allocate(HeapString::for_test(), 0).unwrap();
+        let symbol = heap.symbols.allocate(SymbolRecord::for_test(), 0).unwrap();
         let kinds = [
             ObjectKind::Ordinary(Ordinary::for_test()),
             ObjectKind::Array(Array::for_test()),
-            ObjectKind::String(StringObject::for_test()),
+            ObjectKind::String(StringObject::for_test(StringRef { handle: string })),
             ObjectKind::BuiltinFunction(BuiltinFunction::for_test()),
             ObjectKind::BoundFunction(BoundFunction::for_test()),
             ObjectKind::EcmascriptFunction(EcmascriptFunction::for_test()),
@@ -346,13 +356,7 @@ mod tests {
             .into_iter()
             .map(|kind| {
                 heap.objects
-                    .allocate(
-                        ObjectRecord {
-                            prototype: None,
-                            kind,
-                        },
-                        0,
-                    )
+                    .allocate(ObjectRecord::new(None, kind), 0)
                     .unwrap()
             })
             .collect();
@@ -365,6 +369,7 @@ mod tests {
 
         let mut mark = Mark::new();
         mark.push(Item::String(string));
+        mark.push(Item::Symbol(symbol));
         for &object in &objects {
             mark.push(Item::Object(object));
         }
@@ -394,6 +399,7 @@ mod tests {
         );
 
         assert!(marks.is_marked(Item::String(string)));
+        assert!(marks.is_marked(Item::Symbol(symbol)));
         for &object in &objects {
             assert!(marks.is_marked(Item::Object(object)));
         }

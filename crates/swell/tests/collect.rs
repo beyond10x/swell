@@ -31,8 +31,8 @@ fn host_28_an_object_held_only_by_a_root_survives_collect() {
     let mut agent = support::host::agent().unwrap();
     let (root, kept, dropped) = agent
         .with_cx(|cx| {
-            let kept = cx.new_host_object(spec(None)).unwrap();
-            let dropped = cx.new_host_object(spec(None)).unwrap();
+            let kept = cx.new_host_object(spec(None)).unwrap().unwrap();
+            let dropped = cx.new_host_object(spec(None)).unwrap().unwrap();
             (cx.root(Value::Object(kept)).unwrap(), kept, dropped)
         })
         .unwrap();
@@ -59,6 +59,7 @@ fn host_29_dropping_the_last_root_lowers_heap_bytes() {
         .with_cx(|cx| {
             let object = cx
                 .new_host_object(spec(Some(Box::new(Payload { _bytes: [0; 256] }))))
+                .unwrap()
                 .unwrap();
             cx.root(Value::Object(object)).unwrap()
         })

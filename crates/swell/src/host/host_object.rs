@@ -97,11 +97,9 @@ impl HostObject {
 mod tests {
     use crate::object::ordinary::Ordinary;
     use crate::object::{ObjectKind, ObjectRecord};
-    use crate::{Agent, Brand, Host, HostData, Limits, Seeds, Tracer, Value};
+    use crate::{Agent, Brand, HostData, Limits, Seeds, Tracer, Value};
 
-    struct NoHooks;
-
-    impl Host for NoHooks {}
+    use crate::host::hooks::test_host::NoHooks;
 
     struct Data;
 
@@ -131,10 +129,7 @@ mod tests {
             },
         )
         .unwrap();
-        let record = ObjectRecord {
-            prototype: None,
-            kind: ObjectKind::Ordinary(Ordinary::for_test()),
-        };
+        let record = ObjectRecord::new(None, ObjectKind::Ordinary(Ordinary::for_test()));
         let object = agent.heap.new_object(record, 0).unwrap();
         let _root = agent.heap.roots.add(Value::Object(object));
         agent
