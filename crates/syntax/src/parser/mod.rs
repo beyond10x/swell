@@ -37,8 +37,9 @@ pub(crate) struct Stop;
 
 pub(crate) type R<T> = Result<T, Stop>;
 
-/// What a parse produced: the tree, the statements of the script and whether its directive
-/// prologue holds a Use Strict Directive.
+/// What a parse produced: the tree, the statements of the script and whether its code is strict
+/// (its directive prologue holds a Use Strict Directive, or, for eval code, the caller is
+/// strict).
 pub(crate) struct Parsed {
     pub ast: Ast,
     pub body: Vec<StmtId>,
@@ -70,42 +71,112 @@ pub(crate) struct Parser<'a> {
 
 /// Parses `source` as a `Script` with nesting limit `max`.
 pub(crate) fn parse(source: &[u16], max: u32) -> Result<Parsed, SyntaxError> {
-    let mut parser = Parser {
-        lexer: Lexer::new(source),
-        src: source,
-        tok: Token {
-            kind: TokenKind::Eof,
-            start: 0,
-            end: 0,
-            line: 1,
-            column: 1,
-            newline_before: false,
-            escaped: false,
-        },
-        peeked: None,
-        prev_end: 0,
-        ast: Ast::default(),
-        max,
-        depth: 0,
-        error: None,
-        strict: false,
-        functions: 0,
-        operators: Vec::new(),
-        prefixes: Vec::new(),
-    };
+    parse_eval(source, max, false)
+}
+
+/// Parses `source` as a `Script` with nesting limit `max` for PerformEval (`#sec-performeval`,
+/// step 9, `ParseText(x, Script)`): the code is strict from its start when `strict` (a strict
+/// caller), and from its directive prologue on when that holds a Use Strict Directive.
+/// [`Parsed::strict`] is whether the eval code is strict.
+pub(crate) fn parse_eval(source: &[u16], max: u32, strict: bool) -> Result<Parsed, SyntaxError> {
+    let mut parser = Parser::new(source, max);
+    parser.strict = strict;
     match parser.script() {
-        Ok((body, strict)) => Ok(Parsed {
+        Ok((body, use_strict)) => Ok(Parsed {
             ast: parser.ast,
             body,
-            strict,
+            strict: strict || use_strict,
         }),
-        Err(Stop) => Err(parser
-            .error
-            .unwrap_or_else(|| SyntaxError::new("parse failed", 1, 1))),
+        Err(Stop) => Err(parser.into_error()),
+    }
+}
+
+/// The three parses of CreateDynamicFunction (`#sec-createdynamicfunction`, steps 16 to 20) for
+/// kind `normal`, each with nesting limit `max`: `parameters` alone as
+/// `FormalParameters[~Yield, ~Await]`, the body text (a line feed before and after `body`) alone
+/// as `FunctionBody[~Yield, ~Await]`, then the whole source text
+/// `function anonymous(<parameters>\n) {\n<body>\n}` as a `FunctionExpression`. The answer is
+/// the tree of the last parse as a script of one expression statement, the function
+/// expression, whose own name is taken off: SetFunctionName gives the function the name
+/// "anonymous" (step 35), but the name is not bound inside it.
+pub(crate) fn parse_dynamic_function(
+    parameters: &[u16],
+    body: &[u16],
+    max: u32,
+) -> Result<Parsed, SyntaxError> {
+    const LF: u16 = 0x000A;
+    let mut alone = Parser::new(parameters, max);
+    if alone.formal_parameters_text().is_err() {
+        return Err(alone.into_error());
+    }
+    let mut body_text = Vec::with_capacity(body.len().saturating_add(2));
+    body_text.push(LF);
+    body_text.extend_from_slice(body);
+    body_text.push(LF);
+    let mut alone = Parser::new(&body_text, max);
+    if alone.function_body_text().is_err() {
+        return Err(alone.into_error());
+    }
+    let head: Vec<u16> = "function anonymous(".encode_utf16().collect();
+    let middle: Vec<u16> = "\n) {".encode_utf16().collect();
+    let mut source = Vec::with_capacity(
+        head.len()
+            .saturating_add(parameters.len())
+            .saturating_add(middle.len())
+            .saturating_add(body_text.len())
+            .saturating_add(1),
+    );
+    source.extend_from_slice(&head);
+    source.extend_from_slice(parameters);
+    source.extend_from_slice(&middle);
+    source.extend_from_slice(&body_text);
+    source.push(u16::from(b'}'));
+    let mut whole = Parser::new(&source, max);
+    match whole.dynamic_function_text() {
+        Ok(statement) => Ok(Parsed {
+            ast: whole.ast,
+            body: vec![statement],
+            strict: false,
+        }),
+        Err(Stop) => Err(whole.into_error()),
     }
 }
 
 impl<'a> Parser<'a> {
+    /// A parser at the start of `source`, with nesting limit `max`, outside any function, in
+    /// non-strict code.
+    fn new(source: &'a [u16], max: u32) -> Parser<'a> {
+        Parser {
+            lexer: Lexer::new(source),
+            src: source,
+            tok: Token {
+                kind: TokenKind::Eof,
+                start: 0,
+                end: 0,
+                line: 1,
+                column: 1,
+                newline_before: false,
+                escaped: false,
+            },
+            peeked: None,
+            prev_end: 0,
+            ast: Ast::default(),
+            max,
+            depth: 0,
+            error: None,
+            strict: false,
+            functions: 0,
+            operators: Vec::new(),
+            prefixes: Vec::new(),
+        }
+    }
+
+    /// The error a stopped parse found.
+    fn into_error(self) -> SyntaxError {
+        self.error
+            .unwrap_or_else(|| SyntaxError::new("parse failed", 1, 1))
+    }
+
     /// `Script : ScriptBody?` (`#sec-scripts`).
     fn script(&mut self) -> R<(Vec<StmtId>, bool)> {
         if self.src.is_empty() {
@@ -457,5 +528,26 @@ impl<'a> Parser<'a> {
 
     fn expr_node(&self, id: ExprId) -> Option<&ExprNode> {
         self.ast.expr(id)
+    }
+
+    /// An expression statement holding the function expression `function`, whose depth is
+    /// `depth`, with no depth check: the statement and the expression are the wrapping of a
+    /// dynamic function's tree, not source nesting.
+    #[inline(never)]
+    fn wrap_in_statement(&mut self, function: FunctionId, span: Span, depth: u32) -> StmtId {
+        let expr = ExprId(u32::try_from(self.ast.exprs.len()).unwrap_or(u32::MAX));
+        self.ast.exprs.push(ExprNode {
+            expr: Expr::Function(function),
+            span,
+            depth: depth.saturating_add(1),
+            parenthesized: false,
+        });
+        let stmt = StmtId(u32::try_from(self.ast.stmts.len()).unwrap_or(u32::MAX));
+        self.ast.stmts.push(StmtNode {
+            stmt: Stmt::Expression(expr),
+            span,
+            depth: depth.saturating_add(2),
+        });
+        stmt
     }
 }

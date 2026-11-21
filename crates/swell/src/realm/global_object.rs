@@ -3,7 +3,8 @@
 //! value properties of 19.1, the constructors `Error` and the six NativeErrors of 19.3
 //! (`story:object-model-and-realms`), and `Array`, `Object`, `String`, `JSON` and `Math` of 19.3
 //! and 19.4 (`story:harness-builtins`), and `isFinite`, `isNaN`, `Boolean` and `Number` of 19.2
-//! and 19.3, taken early by slice 2 (`story:number-boolean-and-global-functions-early`). The
+//! and 19.3, taken early by slice 2 (`story:number-boolean-and-global-functions-early`), and
+//! `eval` and `Function` of 19.2 and 19.3 (`story:eval-and-function-constructor`). The
 //! global object itself is made by InitializeHostDefinedRealm or given by the host's setup
 //! closure (`realm/mod.rs`).
 
@@ -46,7 +47,9 @@ impl<H: Host> Agent<H> {
         // and the other properties `JSON` and `Math` (19.4.2, 19.4.3), written by
         // `story:harness-builtins`; the function properties `isFinite` and `isNaN` (19.2.2,
         // 19.2.3) and the constructor properties `Boolean` and `Number` (19.3.8, 19.3.24),
-        // taken early by slice 2 (`story:number-boolean-and-global-functions-early`); each
+        // taken early by slice 2 (`story:number-boolean-and-global-functions-early`); the
+        // function property `eval` (19.2.1) and the constructor property `Function` (19.3.18) of
+        // slice 2 (`story:eval-and-function-constructor`); each
         // { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true } (clause 18).
         for (name, which) in [
             ("Array", Intrinsic::Array),
@@ -58,6 +61,8 @@ impl<H: Host> Agent<H> {
             ("isNaN", Intrinsic::IsNaN),
             ("Boolean", Intrinsic::Boolean),
             ("Number", Intrinsic::Number),
+            ("eval", Intrinsic::Eval),
+            ("Function", Intrinsic::Function),
         ] {
             let value = self.intrinsic(realm, which)?;
             let key = self.name_key(name)?;

@@ -117,7 +117,7 @@ pub(crate) enum ParseAnswer {
 }
 
 /// The bytes a `Vec` of `len` elements of `T` owns.
-fn vec_bytes<T>(len: usize) -> u64 {
+pub(crate) fn vec_bytes<T>(len: usize) -> u64 {
     u64::try_from(len.saturating_mul(size_of::<T>())).unwrap_or(u64::MAX)
 }
 
@@ -132,7 +132,7 @@ fn scopes_bytes(scopes: &[Vec<u32>]) -> u64 {
         })
 }
 
-fn code_bytes(code: &Code) -> u64 {
+pub(crate) fn code_bytes(code: &Code) -> u64 {
     let mut bytes = vec_bytes::<Instruction>(code.instructions.len())
         .saturating_add(vec_bytes::<Span>(code.positions.len()))
         .saturating_add(vec_bytes::<Handler>(code.handlers.len()))
@@ -167,7 +167,7 @@ fn code_bytes(code: &Code) -> u64 {
 
 impl<H: Host> Agent<H> {
     /// The atom of `units` and its property key.
-    fn atom_and_key(&mut self, units: &[u16]) -> Completion<(StringRef, Key)> {
+    pub(crate) fn atom_and_key(&mut self, units: &[u16]) -> Completion<(StringRef, Key)> {
         let atom = match self.heap.intern(units) {
             Ok(atom) => atom,
             Err(_) => return Err(self.terminate(Termination::MemoryBudget)),
@@ -212,32 +212,55 @@ impl<H: Host> Agent<H> {
         };
         let script = match parsed {
             Ok(script) => script,
-            Err(errors) => {
-                let mut objects = Vec::new();
-                for error in errors {
-                    let message = format!("{} ({}:{})", error.message, error.line, error.column);
-                    let object = self.new_error_in(realm, ErrorKind::SyntaxError, &message)?;
-                    objects.push(Value::Object(object));
-                }
-                return Ok(ParseAnswer::Errors(objects));
-            }
+            Err(errors) => return self.syntax_errors(realm, errors).map(ParseAnswer::Errors),
         };
-        let code = match swell_compiler::compile_script(&script) {
+        let code = match self.compiled_code(realm, swell_compiler::compile_script(&script))? {
             Ok(code) => code,
-            Err(error @ CompileError::TooMany(_)) => {
-                let message = error.to_string();
-                let object = self.new_error_in(realm, ErrorKind::SyntaxError, &message)?;
-                return Ok(ParseAnswer::Errors(vec![Value::Object(object)]));
-            }
-            Err(CompileError::Tree(_)) => return Err(self.fault()),
+            Err(error) => return Ok(ParseAnswer::Errors(vec![error])),
         };
         drop(script);
         self.make_script_record(realm, code, host_defined)
             .map(ParseAnswer::Script)
     }
 
+    /// The `SyntaxError` objects of `realm` for the errors of a parse, each message with its
+    /// line and column; each refusal among them is counted ([`Agent::refusals`]). Every parse
+    /// of the engine answers its errors here: `parse_script`, `eval` and `Function`.
+    pub(crate) fn syntax_errors(
+        &mut self,
+        realm: Handle,
+        errors: Vec<swell_syntax::SyntaxError>,
+    ) -> Completion<Vec<Value>> {
+        let mut objects = Vec::new();
+        for error in errors {
+            self.count_refusal(&error.message);
+            let message = format!("{} ({}:{})", error.message, error.line, error.column);
+            let object = self.new_error_in(realm, ErrorKind::SyntaxError, &message)?;
+            objects.push(Value::Object(object));
+        }
+        Ok(objects)
+    }
+
+    /// The answer of the compile step: the code, or for a bound of the bytecode format the
+    /// `SyntaxError` of `realm` naming it; a tree the parser cannot produce faults the agent.
+    pub(crate) fn compiled_code(
+        &mut self,
+        realm: Handle,
+        compiled: Result<Code, CompileError>,
+    ) -> Completion<Result<Code, Value>> {
+        match compiled {
+            Ok(code) => Ok(Ok(code)),
+            Err(error @ CompileError::TooMany(_)) => {
+                let message = error.to_string();
+                let object = self.new_error_in(realm, ErrorKind::SyntaxError, &message)?;
+                Ok(Err(Value::Object(object)))
+            }
+            Err(CompileError::Tree(_)) => Err(self.fault()),
+        }
+    }
+
     /// The Script Record of `code` in `realm`, with its atoms interned.
-    fn make_script_record(
+    pub(crate) fn make_script_record(
         &mut self,
         realm: Handle,
         code: Code,
@@ -289,7 +312,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// The realm and the code of the script record `script`.
-    fn script_parts(&mut self, script: Handle) -> Completion<(Handle, Rc<Compiled>)> {
+    pub(crate) fn script_parts(&mut self, script: Handle) -> Completion<(Handle, Rc<Compiled>)> {
         let parts = match self.heap.scripts.get(script) {
             Ok(ScriptRecord {
                 realm: Some(realm),
@@ -344,6 +367,7 @@ impl<H: Host> Agent<H> {
             stack: Vec::new(),
             locals,
             env: None,
+            var_env: None,
             pushed_envs: 0,
             this,
             function: None,
@@ -413,7 +437,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// The property key of the name of function template `index`.
-    fn name_key_of(&mut self, compiled: &Compiled, index: u32) -> Completion<Key> {
+    pub(crate) fn name_key_of(&mut self, compiled: &Compiled, index: u32) -> Completion<Key> {
         match compiled
             .name_keys
             .get(usize::try_from(index).unwrap_or(usize::MAX))
@@ -424,7 +448,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// The property key of String constant `index`.
-    fn string_key_of(&mut self, compiled: &Compiled, index: u32) -> Completion<Key> {
+    pub(crate) fn string_key_of(&mut self, compiled: &Compiled, index: u32) -> Completion<Key> {
         match compiled
             .keys
             .get(usize::try_from(index).unwrap_or(usize::MAX))

@@ -2,10 +2,14 @@
 //! by `story:interpreter-and-script-entry-points`.
 //!
 //! The compiler gives a function an environment only when a nested function captures one of its
-//! bindings, a lookup by name from a `with` body may reach them, or a mapped arguments object
-//! reads and writes its parameters (`FunctionTemplate::captured` of `swell-compiler`); its other
-//! bindings are local slots of the frame. The record a call makes is then a declarative record of `captured.len()` slots
-//! whose [[OuterEnv]] is the function's [[Environment]] (NewFunctionEnvironment, steps 2 and 6).
+//! bindings, a lookup by name from a `with` body or from eval code may reach them, or a mapped
+//! arguments object reads and writes its parameters (`FunctionTemplate::captured` of
+//! `swell-compiler`); its other bindings are local slots of the frame. The record a call makes is
+//! then a declarative record of `captured.len()` slots whose [[OuterEnv]] is the function's
+//! [[Environment]] (NewFunctionEnvironment, steps 2 and 6). It is the call's
+//! VariableEnvironment too (`interp/frame.rs`), where a direct `eval` of non-strict code adds its
+//! bindings: a function whose code contains one always makes it, its arguments object at least
+//! living there (decision 3, "Names", item 4).
 //!
 //! The fields a Function Environment Record adds, [[ThisValue]], [[ThisBindingStatus]],
 //! [[FunctionObject]] and [[NewTarget]], are held by the function's frame (`interp/frame.rs`):

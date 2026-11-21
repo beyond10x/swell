@@ -76,6 +76,12 @@ omit sec-literals-regular-expression-literals regexp-literals section-12-part-be
 section sec-parse-script
 path sec-parse-script test/language/global-code/
 omit sec-parse-script parser-nesting-limit decision-3
+section sec-performeval
+path sec-performeval test/language/eval-code/
+omit sec-performeval parser-nesting-limit decision-3
+section sec-createdynamicfunction
+path sec-createdynamicfunction test/built-ins/Function/
+omit sec-createdynamicfunction parser-nesting-limit decision-3
 section sec-ecmascript-function-objects-call-thisargument-argumentslist
 path sec-ecmascript-function-objects-call-thisargument-argumentslist test/language/expressions/call/
 omit sec-ecmascript-function-objects-call-thisargument-argumentslist frame-depth-limit decision-3

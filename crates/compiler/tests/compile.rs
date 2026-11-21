@@ -3,15 +3,17 @@
 //! Every file `tests/sources/<name>.js` starts with a comment line `// <anchor>: <what it shows>`
 //! naming the ECMA-262 clause it compiles, and has its expected disassembly beside it in
 //! `<name>.disasm`. A directory with no `.js` file, or a `.js` file without its `.disasm`, fails
-//! the test (`AGENTS.md`, "A check that finds nothing to read fails").
+//! the test (`AGENTS.md`, "A check that finds nothing to read fails"). A file whose name starts
+//! with `eval-code-` is compiled as the eval code of a non-strict caller (`parse_eval`, then
+//! `compile_eval`); every other file as a script.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use swell_compiler::bytecode::{Code, FunctionTemplate, HandlerKind, Instruction, Slot};
-use swell_compiler::compile_script;
 use swell_compiler::disasm::disassemble;
-use swell_syntax::{ParseOptions, Script, parse_script};
+use swell_compiler::{compile_eval, compile_script};
+use swell_syntax::{ParseOptions, Script, parse_eval, parse_script};
 
 /// The host's `parser_nesting` these tests parse with.
 const LIMIT: u32 = 1_000;
@@ -27,6 +29,28 @@ fn parse(text: &str) -> Result<Script, String> {
 
 fn compile(text: &str) -> Result<Code, String> {
     compile_script(&parse(text)?).map_err(|error| format!("{text:?} does not compile: {error}"))
+}
+
+/// `text` as the eval code of a non-strict caller: `parse_eval`, then `compile_eval`.
+fn compile_eval_code(text: &str) -> Result<Code, String> {
+    let script = parse_eval(&units(text), false, ParseOptions { max_nesting: LIMIT })
+        .map_err(|errors| format!("{text:?} does not parse as eval code: {errors:?}"))?;
+    compile_eval(&script).map_err(|error| format!("{text:?} does not compile: {error}"))
+}
+
+/// A source file compiled as its name says: `eval-code-*.js` as eval code, every other file as
+/// a script.
+fn compile_source(source: &Source) -> Result<Code, String> {
+    let eval_code = source
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("eval-code-"));
+    if eval_code {
+        compile_eval_code(&source.text)
+    } else {
+        compile(&source.text)
+    }
 }
 
 /// A source file: its path, its text and the text of its `.disasm`.
@@ -106,7 +130,7 @@ fn disassembly_matches_for_each_source() {
     let sources = sources().unwrap();
     let mut failures = Vec::new();
     for source in &sources {
-        let actual = disassemble(&compile(&source.text).unwrap());
+        let actual = disassemble(&compile_source(source).unwrap());
         if actual != source.expected {
             failures.push(format!(
                 "{}: the disassembly differs\n--- expected\n{}--- actual\n{}",
@@ -147,7 +171,7 @@ fn every_backward_jump_is_a_loop_jump() {
     let mut loop_jumps = 0;
     let mut jumps = 0;
     for source in &sources {
-        let code = compile(&source.text).unwrap();
+        let code = compile_source(source).unwrap();
         for (name, instructions) in bodies(&code) {
             for (index, instruction) in instructions.iter().enumerate() {
                 let Some(target) = instruction.target() else {
@@ -330,8 +354,8 @@ fn finally_runs_for_return_break_and_continue() {
 fn compile_is_deterministic() {
     let sources = sources().unwrap();
     for source in &sources {
-        let first = compile(&source.text).unwrap();
-        let second = compile(&source.text).unwrap();
+        let first = compile_source(source).unwrap();
+        let second = compile_source(source).unwrap();
         assert_eq!(first, second, "{}", source.path.display());
         assert_eq!(disassemble(&first), disassemble(&second));
     }
@@ -553,4 +577,90 @@ fn regexp_literal_compiles_to_its_syntax_error_throw() {
         let s = string(&code, k);
         assert!(!s.contains("a(b)c") && s != "gi", "{s:?}");
     }
+}
+
+/// How many direct-eval calls `instructions` hold.
+fn direct_eval_calls(instructions: &[Instruction]) -> usize {
+    instructions
+        .iter()
+        .filter(|i| matches!(i, Instruction::CallEval(_)))
+        .count()
+}
+
+/// `docs/design/engine.md`, decision 3, "Names", items 1 to 4 for a direct `eval`: a reference
+/// with a non-strict function scope that contains a direct `eval` between it and its binding
+/// (the global scope when none binds it) is looked up by name, a function nested in that scope
+/// included; a strict function keeps its slots, also when it calls `eval`; every binding of a
+/// scope that encloses a direct `eval` call lives in its named environment; a function with a
+/// direct `eval` makes its arguments object; the call itself is a `CallEval`. Code that no
+/// direct `eval` reaches is compiled as before. Eval code looks up by name every name it does
+/// not bind in a function of its own.
+#[test]
+fn direct_eval_looks_up_by_name_what_eval_code_may_shadow() {
+    let code = compile(
+        "var g = 1; \
+         function f(a) { var b = a; eval(\"b\"); function inner() { return a + b + g; } return b + g; } \
+         function s(a) { \"use strict\"; var b = a; eval(\"b\"); return b + g; } \
+         function outer(c) { eval(\"\"); function strict() { \"use strict\"; return c + g; } return strict; } \
+         function plain(d) { return d + g; }",
+    )
+    .unwrap();
+    let names = |f: &FunctionTemplate| -> Vec<String> {
+        f.captured.iter().map(|k| string(&code, *k)).collect()
+    };
+    let f = function(&code, "f").unwrap();
+    assert_eq!(
+        binding_instructions(&code, f),
+        ["env 0 0", "env 0 2", "name g"]
+    );
+    assert_eq!(names(f), ["a", "arguments", "b", "inner"]);
+    assert_eq!(f.params, [Slot::Env(0)]);
+    assert!(
+        f.arguments
+            .is_some_and(|a| a.mapped && a.slot == Slot::Env(1))
+    );
+    assert_eq!(direct_eval_calls(&f.instructions), 1);
+    let inner = function(&code, "inner").unwrap();
+    assert_eq!(
+        binding_instructions(&code, inner),
+        ["env 0 0", "env 0 2", "name g"]
+    );
+    assert_eq!(direct_eval_calls(&inner.instructions), 0);
+    let s = function(&code, "s").unwrap();
+    assert_eq!(
+        binding_instructions(&code, s),
+        ["env 0 0", "global eval", "env 0 2", "global g"]
+    );
+    assert_eq!(names(s), ["a", "arguments", "b"]);
+    assert!(
+        s.arguments
+            .is_some_and(|a| !a.mapped && a.slot == Slot::Env(1))
+    );
+    assert_eq!(direct_eval_calls(&s.instructions), 1);
+    let strict = function(&code, "strict").unwrap();
+    assert_eq!(binding_instructions(&code, strict), ["env 0 0", "name g"]);
+    assert!(strict.arguments.is_none());
+    let outer = function(&code, "outer").unwrap();
+    assert_eq!(names(outer), ["c", "arguments", "strict"]);
+    let plain = function(&code, "plain").unwrap();
+    assert_eq!(binding_instructions(&code, plain), ["local 0", "global g"]);
+    assert!(plain.captured.is_empty() && plain.arguments.is_none());
+    assert_eq!(direct_eval_calls(&code.instructions), 0);
+
+    let code = compile_eval_code("var x = 1; function h(p) { return p + x; } x;").unwrap();
+    let script: Vec<String> = code
+        .instructions
+        .iter()
+        .filter_map(|i| match i {
+            Instruction::GetName(k) => Some(format!("name {}", string(&code, *k))),
+            Instruction::GetGlobal(k) => Some(format!("global {}", string(&code, *k))),
+            Instruction::GetLocal(n) => Some(format!("local {n}")),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(script, ["name x"]);
+    let h = function(&code, "h").unwrap();
+    assert_eq!(binding_instructions(&code, h), ["local 0", "name x"]);
+    assert_eq!(code.var_names.len(), 1);
+    assert_eq!(code.function_declarations, [0]);
 }

@@ -19,11 +19,14 @@
 //! - `env`: Environment Records (9.1).
 //! - `interp`: the frame stack, the instruction loop, the budgets.
 //! - `script`: Script Records (16.1).
+//! - `dynamic_code`: source text compiled at run time, `eval` and the `Function` constructor
+//!   (19.2.1, 20.2.1).
 //! - `builtins`: one module per clause of the builtins.
 //! - `compile_fail`: the requirements the compiler holds, as `compile_fail` doc tests.
 
 mod builtins;
 mod compile_fail;
+mod dynamic_code;
 mod env;
 mod heap;
 mod host;

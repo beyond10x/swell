@@ -459,16 +459,23 @@ impl<'a> Compiler<'a> {
             // `#sec-function-calls-runtime-semantics-evaluation`: the function and its this value
             // (the base of a property reference, the binding object of a `with` statement for a
             // name looked up by name, otherwise `undefined`), the arguments in order, then
-            // EvaluateCall. `?.(...)` tests the function value, with its this value under it.
+            // EvaluateCall. `?.(...)` tests the function value, with its this value under it. A
+            // call of the name `eval` is a direct eval when it calls `%eval%` (step 6), which
+            // only the run tells: `CallEval`.
             Expr::Call { callee, arguments } | Expr::OptionalCall { callee, arguments } => {
                 self.callee(*callee, span, &mut t)?;
-                if matches!(node.expr, Expr::OptionalCall { .. }) {
+                let optional = matches!(node.expr, Expr::OptionalCall { .. });
+                if optional {
                     t.push(Task::ChainCheck(2, span));
                 }
                 t.extend(arguments.iter().map(|e| Task::Expr(*e)));
                 let n = u32::try_from(arguments.len())
                     .map_err(|_| CompileError::TooMany("arguments"))?;
-                t.push(emit(Instruction::Call(n)));
+                if !optional && self.ast.is_direct_eval_callee(*callee) {
+                    t.push(emit(Instruction::CallEval(n)));
+                } else {
+                    t.push(emit(Instruction::Call(n)));
+                }
             }
             // `#sec-new-operator-runtime-semantics-evaluation`.
             Expr::New { callee, arguments } => {

@@ -11,8 +11,10 @@
 //!   instantiate (the last one of each name, in source order, as GlobalDeclarationInstantiation
 //!   and FunctionDeclarationInstantiation take them from the var scoped declarations), and the
 //!   identifiers its own code references; whether a function needs an arguments object
-//!   (`#sec-functiondeclarationinstantiation`, steps 15 to 18) and whether a body holds a `with`
-//!   statement (`#sec-with-statement`).
+//!   (`#sec-functiondeclarationinstantiation`, steps 15 to 18), whether a body holds a `with`
+//!   statement (`#sec-with-statement`), and whether it holds a direct `eval` call
+//!   (`#sec-function-calls-runtime-semantics-evaluation`, step 6), which also gives a function its
+//!   arguments object (`docs/design/engine.md`, decision 3, "Names", item 4).
 //!
 //! A method is a function scope like any other; a `catch` without a parameter binds nothing, and
 //! a label is no binding: neither changes what a body declares.
@@ -53,6 +55,7 @@ struct Collect {
     references: Vec<String>,
     reference_seen: BTreeSet<String>,
     contains_with: bool,
+    contains_direct_eval: bool,
 }
 
 impl Collect {
@@ -73,9 +76,10 @@ impl Collect {
     fn finish(self, params: Option<&[Name]>) -> Scope {
         // `#sec-functiondeclarationinstantiation`, steps 15 to 18: no arguments object when a
         // parameter or a function declaration of the body is named `arguments`; a `var` of that
-        // name keeps it.
+        // name keeps it. A direct `eval` may reference it in code no analysis sees (decision 3,
+        // "Names", item 4).
         let arguments_object = params.is_some_and(|params| {
-            self.reference_seen.contains("arguments")
+            (self.reference_seen.contains("arguments") || self.contains_direct_eval)
                 && !params.iter().any(|p| p.name == "arguments")
                 && !self
                     .declarations
@@ -97,6 +101,7 @@ impl Collect {
             references: self.references,
             arguments_object,
             contains_with: self.contains_with,
+            contains_direct_eval: self.contains_direct_eval,
         }
     }
 }
@@ -159,9 +164,14 @@ fn walk(ast: &Ast, body: &[StmtId]) -> (Scope, Vec<(FunctionId, Scope)>) {
                 ast.push_children(node, &mut stack, Step::Node);
             }
             Step::Node(node @ Child::Expr(id)) => {
-                // An identifier is a reference of the body being analysed.
-                if let Some(Expr::Identifier(n)) = ast.expr(id).map(|n| &n.expr) {
-                    c.reference(n);
+                // An identifier is a reference of the body being analysed; a direct `eval` call
+                // is the body's own.
+                match ast.expr(id).map(|n| &n.expr) {
+                    Some(Expr::Identifier(n)) => c.reference(n),
+                    Some(Expr::Call { callee, .. }) if ast.is_direct_eval_callee(*callee) => {
+                        c.contains_direct_eval = true;
+                    }
+                    _ => {}
                 }
                 ast.push_children(node, &mut stack, Step::Node);
             }

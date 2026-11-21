@@ -10,8 +10,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use swell_syntax::ast::{Expr, FunctionId, Stmt};
-use swell_syntax::{MessageKind, ParseOptions, Script, SyntaxError, message_kind, parse_script};
+use swell_syntax::ast::{Expr, FunctionId, FunctionKind, Stmt};
+use swell_syntax::{
+    MessageKind, ParseOptions, Script, SyntaxError, message_kind, parse_dynamic_function,
+    parse_eval, parse_script,
+};
 
 const LIMIT: u32 = 1_000;
 
@@ -495,11 +498,32 @@ const NESTING_KINDS: [&str; 36] = [
     "with",
 ];
 
-/// Whether `n` nested `kind`s parse at `limit` (`Some(true)`), fail with the nesting error alone
-/// (`Some(false)`), or fail otherwise (`None`).
-fn admitted(kind: &str, n: usize, limit: u32) -> Option<bool> {
+/// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict
+/// caller, and the body of `parse_dynamic_function` with the parameters `a, b`.
+#[derive(Clone, Copy, Debug)]
+enum Entry {
+    Script,
+    Eval,
+    FunctionBody,
+}
+
+const ENTRIES: [Entry; 3] = [Entry::Script, Entry::Eval, Entry::FunctionBody];
+
+/// `source` parsed through `entry` with nesting limit `limit`.
+fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec<SyntaxError>> {
+    let options = ParseOptions { max_nesting: limit };
+    match entry {
+        Entry::Script => parse_script(source, options),
+        Entry::Eval => parse_eval(source, false, options),
+        Entry::FunctionBody => parse_dynamic_function(&units("a, b"), source, options),
+    }
+}
+
+/// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
+/// nesting error alone (`Some(false)`), or fail otherwise (`None`).
+fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     let text = nested(kind, n)?;
-    match parse_units(&units(&text), limit) {
+    match parse_through(entry, &units(&text), limit) {
         Ok(_) => Some(true),
         Err(e) if e.len() == 1 && e.first()?.message.contains("parser_nesting") => Some(false),
         Err(_) => None,
@@ -507,35 +531,254 @@ fn admitted(kind: &str, n: usize, limit: u32) -> Option<bool> {
 }
 
 /// Every kind of nesting, at the deepest the limit admits and 100,000 deep, parses or fails on
-/// the stack `ParseOptions::stack_bytes` gives, in a child process: the test fails when a frame
-/// of the parser grows past `STACK_BYTES_PER_LEVEL`, or its fixed part past
-/// `STACK_BYTES_FIXED`, and the stack overflows. At 10,000 levels the per-level bound decides; at
-/// 10 the fixed part does.
+/// the stack `ParseOptions::stack_bytes` gives, in a child process, through each parse entry
+/// (`parse_script`, `parse_eval` and the body of `parse_dynamic_function`, whose three parses
+/// each stay within the limit): the test fails when a frame of the parser grows past
+/// `STACK_BYTES_PER_LEVEL`, or its fixed part past `STACK_BYTES_FIXED`, and the stack
+/// overflows. At 10,000 levels the per-level bound decides; at 10 the fixed part does.
 #[test]
 fn every_nesting_kind_fits_the_stack_bound() {
     for limit in [10, 10_000] {
         on_bounded_stack("every_nesting_kind_fits_the_stack_bound", limit, |limit| {
-            for kind in NESTING_KINDS {
-                // The deepest source the limit admits, found by bisection on this stack.
-                let (mut parses, mut refused) = (0, limit as usize + 2);
-                assert_eq!(admitted(kind, refused, limit), Some(false), "{kind}");
-                while refused - parses > 1 {
-                    let mid = (parses + refused) / 2;
-                    match admitted(kind, mid, limit) {
-                        Some(true) => parses = mid,
-                        Some(false) => refused = mid,
-                        None => panic!("{kind} {mid}: an error other than the nesting error"),
+            for entry in ENTRIES {
+                for kind in NESTING_KINDS {
+                    // The deepest source the limit admits, found by bisection on this stack.
+                    let (mut parses, mut refused) = (0, limit as usize + 2);
+                    assert_eq!(
+                        admitted(entry, kind, refused, limit),
+                        Some(false),
+                        "{entry:?} {kind}"
+                    );
+                    while refused - parses > 1 {
+                        let mid = (parses + refused) / 2;
+                        match admitted(entry, kind, mid, limit) {
+                            Some(true) => parses = mid,
+                            Some(false) => refused = mid,
+                            None => panic!(
+                                "{entry:?} {kind} {mid}: an error other than the nesting error"
+                            ),
+                        }
                     }
+                    assert!(
+                        parses > 0 || limit < 20,
+                        "{entry:?} {kind}: nothing parses at {limit}"
+                    );
+                    assert_eq!(
+                        admitted(entry, kind, 100_000, limit),
+                        Some(false),
+                        "{entry:?} {kind}"
+                    );
                 }
-                assert!(
-                    parses > 0 || limit < 20,
-                    "{kind}: nothing parses at {limit}"
-                );
-                assert_eq!(admitted(kind, 100_000, limit), Some(false), "{kind}");
             }
         })
         .unwrap();
     }
+}
+
+/// `#sec-performeval` and `#sec-createdynamicfunction` parse through the same parser and the
+/// same nesting bound as a script: at `max_nesting` 1,000, `0` inside 2,000 nested parentheses
+/// is one error naming `parser_nesting` through `parse_eval`, as the body of
+/// `parse_dynamic_function` and as its parameter text; inside 10 it parses.
+#[test]
+fn eval_and_function_entries_share_the_nesting_bound() {
+    let nested = |n: usize| units(&format!("{}0{}", "(".repeat(n), ")".repeat(n)));
+    let options = ParseOptions { max_nesting: LIMIT };
+    for strict in [false, true] {
+        let errors = parse_eval(&nested(2_000), strict, options).err().unwrap();
+        assert_eq!(
+            messages(&errors),
+            vec!["nesting deeper than parser_nesting (1000)".to_string()],
+            "eval, strict caller {strict}"
+        );
+        assert!(parse_eval(&nested(10), strict, options).is_ok());
+    }
+    let errors = parse_dynamic_function(&[], &nested(2_000), options)
+        .err()
+        .unwrap();
+    assert_eq!(
+        messages(&errors),
+        vec!["nesting deeper than parser_nesting (1000)".to_string()]
+    );
+    assert!(parse_dynamic_function(&[], &nested(10), options).is_ok());
+    // A parameter text of nested parentheses is one error, the grammar's.
+    let errors = parse_dynamic_function(&nested(2_000), &[], options)
+        .err()
+        .unwrap();
+    assert_eq!(errors.len(), 1);
+    // At 0 every non-empty source fails, through either entry; an empty one parses.
+    let zero = ParseOptions { max_nesting: 0 };
+    assert!(parse_eval(&units("0"), false, zero).is_err());
+    assert!(parse_eval(&[], false, zero).is_ok());
+    assert!(parse_dynamic_function(&[], &[], zero).is_err());
+}
+
+/// PerformEval (`#sec-performeval`), steps 9 to 11: the eval code is strict when the caller is
+/// strict or its own directive prologue holds a Use Strict Directive; `with` is an early error
+/// in strict code (`#sec-with-statement-static-semantics-early-errors`), so it parses through
+/// `parse_eval` with a non-strict caller and is a SyntaxError with a strict one.
+#[test]
+fn eval_entry_is_strict_after_a_strict_caller() {
+    let options = ParseOptions { max_nesting: LIMIT };
+    let script = parse_eval(&units("with (o) {}"), false, options).unwrap();
+    assert!(!script.strict);
+    let errors = parse_eval(&units("with (o) {}"), true, options)
+        .err()
+        .unwrap();
+    assert_eq!(
+        messages(&errors),
+        vec!["with statement in strict mode code".to_string()]
+    );
+    let errors = parse_eval(&units("'use strict'; with (o) {}"), false, options)
+        .err()
+        .unwrap();
+    assert_eq!(errors.len(), 1);
+    assert!(parse_eval(&units("1;"), true, options).unwrap().strict);
+    assert!(
+        parse_eval(&units("'use strict'; 1;"), false, options)
+            .unwrap()
+            .strict
+    );
+    // A function of strict eval code is strict; of non-strict eval code it is not.
+    let script = parse_eval(&units("function f() {}"), true, options).unwrap();
+    assert!(script.ast.functions().iter().all(|f| f.strict));
+    let script = parse_eval(&units("function f() {}"), false, options).unwrap();
+    assert!(script.ast.functions().iter().all(|f| !f.strict));
+    // Strict eval code may not declare `eval` or `arguments`
+    // (`#sec-identifiers-static-semantics-early-errors`).
+    assert!(parse_eval(&units("var eval;"), true, options).is_err());
+    assert!(parse_eval(&units("var eval;"), false, options).is_ok());
+}
+
+/// EvalDeclarationInstantiation (`#sec-evaldeclarationinstantiation`) takes VarDeclaredNames
+/// and the function declarations to instantiate from the answer of `parse_eval`: each name once
+/// in source order, a function declaration's name among the var names, and the last declaration
+/// of each function name.
+#[test]
+fn eval_entry_returns_var_names_and_hoisted_functions() {
+    let options = ParseOptions { max_nesting: LIMIT };
+    let source = "var a; function f() { var inner; } var b, a; if (x) { var c; } \
+                  function f() { return 1; } function g() {} for (var d in o) {}";
+    let script = parse_eval(&units(source), false, options).unwrap();
+    assert_eq!(script.scope.var_names, vec!["a", "f", "b", "c", "g", "d"]);
+    assert_eq!(script.scope.functions, vec![FunctionId(1), FunctionId(2)]);
+    assert_eq!(script.ast.functions()[0].scope.var_names, vec!["inner"]);
+    // An empty source is an empty script (PerformEval, step 13: its result is undefined).
+    let script = parse_eval(&[], false, options).unwrap();
+    assert!(script.body.is_empty() && script.scope.var_names.is_empty());
+}
+
+/// CreateDynamicFunction (`#sec-createdynamicfunction`) for kind normal: the parameter text is
+/// parsed alone as FormalParameters, the body text alone as a FunctionBody, then the whole source
+/// text as a FunctionExpression, so a parameter text that closes the list early, or a comment
+/// that spans the two, is a SyntaxError although the whole text would parse.
+#[test]
+fn dynamic_function_entry_parses_parameters_and_body_apart() {
+    let options = ParseOptions { max_nesting: LIMIT };
+    let parsed = |p: &str, b: &str| parse_dynamic_function(&units(p), &units(b), options);
+    let script = parsed("a, b", "return a + b").unwrap();
+    let functions = script.ast.functions();
+    let f = &functions[0];
+    assert_eq!(f.kind, FunctionKind::Expression);
+    assert!(f.name.is_none(), "the name anonymous is not bound inside");
+    let names: Vec<&str> = f.params.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, vec!["a", "b"]);
+    assert!(!f.strict);
+    // The script holds the function expression alone.
+    assert_eq!(script.body.len(), 1);
+    let Some(Stmt::Expression(e)) = script.ast.stmt(script.body[0]).map(|s| &s.stmt) else {
+        panic!("not an expression statement");
+    };
+    assert_eq!(
+        script.ast.expr(*e).map(|n| &n.expr),
+        Some(&Expr::Function(FunctionId(0)))
+    );
+
+    for (p, b) in [
+        ("", ""),
+        ("a,", "return a"),
+        ("a\n,b", "return a + b"),
+        ("/* c */ a", "// c"),
+        ("", "'use strict'; return this"),
+        ("a, a", "return a"),
+        ("", "with (o) {}"),
+    ] {
+        assert!(parsed(p, b).is_ok(), "{p:?} {b:?}: {:?}", parsed(p, b));
+    }
+    assert!(parsed("", "'use strict'").unwrap().ast.functions()[0].strict);
+    for (p, b) in [
+        ("a) {", "}"),
+        ("/*", "*/){"),
+        ("a", "}); (function () {"),
+        ("a, a", "'use strict';"),
+        ("eval", "'use strict';"),
+        ("", "'use strict'; with (o) {}"),
+        ("a b", ""),
+        ("a = 1", ""),
+        ("", "}"),
+        ("", "break;"),
+    ] {
+        assert!(parsed(p, b).is_err(), "{p:?} {b:?} parsed");
+    }
+    let errors = parsed("a = 1", "").err().unwrap();
+    assert_eq!(
+        messages(&errors),
+        vec!["default parameter is not supported before slice 6".to_string()]
+    );
+}
+
+/// `#sec-function-calls-runtime-semantics-evaluation`, step 6: a call whose callee, with its
+/// parentheses removed, is the IdentifierReference `eval` is a direct eval; scope analysis marks
+/// the function (or the script) whose own code holds one, and the function then gets its
+/// arguments object (`docs/design/engine.md`, decision 3, "Names", item 4) unless a parameter or
+/// a function declaration is named `arguments`.
+#[test]
+fn direct_eval_is_recorded_per_function() {
+    let script = parse(
+        "function a() { eval(x); } function b() { (eval)(x); } \
+         function c() { o.eval(x); } function d() { (0, eval)(x); } \
+         function e() { return function () { eval(x); }; } function g() { eval?.(x); } \
+         function h(arguments) { eval(x); } function k() { new eval(x); } \
+         function m() { var eval; eval(x); }",
+    )
+    .unwrap();
+    assert!(!script.scope.contains_direct_eval);
+    let functions = script.ast.functions();
+    let named = |name: &str| {
+        functions
+            .iter()
+            .find(|f| f.name.as_ref().is_some_and(|n| n.name == name))
+            .unwrap_or_else(|| panic!("no function {name}"))
+    };
+    for (name, direct) in [
+        ("a", true),
+        ("b", true),
+        ("c", false),
+        ("d", false),
+        ("e", false),
+        ("g", false),
+        ("h", true),
+        ("k", false),
+        ("m", true),
+    ] {
+        assert_eq!(named(name).scope.contains_direct_eval, direct, "{name}");
+    }
+    let inner = functions.iter().find(|f| f.name.is_none()).unwrap();
+    assert!(inner.scope.contains_direct_eval);
+    assert!(inner.scope.arguments_object);
+    assert!(named("a").scope.arguments_object);
+    assert!(!named("h").scope.arguments_object);
+    assert!(!named("c").scope.arguments_object);
+    assert!(parse("eval('1');").unwrap().scope.contains_direct_eval);
+    assert!(
+        parse_eval(
+            &units("eval('1');"),
+            false,
+            ParseOptions { max_nesting: LIMIT }
+        )
+        .unwrap()
+        .scope
+        .contains_direct_eval
+    );
 }
 
 #[test]

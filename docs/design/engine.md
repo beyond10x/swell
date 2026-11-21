@@ -753,8 +753,8 @@ first pass, not that it will; the runner gives the real numbers.
 | slice | name | cases | runs |
 |---|---|---|---|
 | 1 | `harness` | 31 | 62 |
-| 2 | `language-core` | 5,245 | 9,173 |
-| 3 | `builtins-core` | 7,603 | 15,038 |
+| 2 | `language-core` | 5,267 | 9,217 |
+| 3 | `builtins-core` | 7,581 | 14,994 |
 | 4 | `numbers-and-dates` | 1,198 | 2,396 |
 | 5 | `regexp` | 2,118 | 4,234 |
 | 6 | `bindings-and-iteration` | 3,717 | 7,162 |
@@ -843,16 +843,18 @@ the case or a harness file it includes needs a later slice (a scan of each case 
 includes, comments removed and string contents blanked, for later syntax, automatic semicolon
 insertion and the builtins called):
 
-- to slice 2, 1 case: `asyncHelpers-asyncTest-func-throws-sync` (`asyncHelpers.js` needs
+- to slice 2, 23 cases: `asyncHelpers-asyncTest-func-throws-sync` (`asyncHelpers.js` needs
   automatic semicolon insertion: line 82 ends `res.then(onResFulfilled, onResRejected)` without
-  a semicolon);
-- to slice 3, 23: the 14 `propertyhelper-*` cases and the `verifyProperty-` cases
+  a semicolon); the 14 `propertyhelper-*` cases and the `verifyProperty-` cases
   `configurable-object`, `restore`, `restore-accessor`, `same-value`, `string-prop`, `value` and
   `value-error` (`propertyHelper.js` reads `arguments.length` and calls
-  `Function.prototype.call.bind` on the global `Function`, whose `CreateDynamicFunction` this
-  design gave to slice 3 until slice 2 took it, item 2 above, with which these lines are placed
-  again; `-restore-accessor` also uses a method shorthand), `asyncHelpers-asyncTest-without-async-flag`
-  (`Object.hasOwn` and a method shorthand) and `fnGlobalObject` (`Function("return this;")()`);
+  `Function.prototype.call.bind` on the global `Function`, which slice 2 delivers with its
+  `CreateDynamicFunction`, item 2 above; `-restore-accessor` also uses a method shorthand, which
+  slice 2 parses); and `fnGlobalObject` (`Function("return this;")()`). These 22 were placed in
+  slice 3 while this design gave `Function` to slice 3, and were placed again in slice 2 when
+  slice 2 took it;
+- to slice 3, 1: `asyncHelpers-asyncTest-without-async-flag` (`Object.hasOwn` and `globalThis`
+  of slice 3, besides its method shorthand);
 - to slice 4, 2: `assertRelativeDateMs` (`Date`) and `nans` (`Number.NaN`, `Math.pow`);
 - to slice 6, 16: `verifyProperty-arguments`, `-noproperty` and `-undefined-desc` (arrow
   functions), the `compare-array-` cases `arguments`, `arraylike`, `different-elements`,
@@ -960,29 +962,29 @@ exists or is planned in surf's current 22 waves.
 ```swell-slices
 dir test/harness/ 1
 dir test/harness/asyncHelpers-asyncTest-func-throws-sync.js 2
-dir test/harness/propertyhelper-verifyconfigurable-configurable.js 3
-dir test/harness/propertyhelper-verifyconfigurable-configurable-object.js 3
-dir test/harness/propertyhelper-verifyconfigurable-not-configurable.js 3
-dir test/harness/propertyhelper-verifyenumerable-enumerable.js 3
-dir test/harness/propertyhelper-verifyenumerable-not-enumerable.js 3
-dir test/harness/propertyhelper-verifynotconfigurable-configurable.js 3
-dir test/harness/propertyhelper-verifynotconfigurable-not-configurable.js 3
-dir test/harness/propertyhelper-verifynotenumerable-enumerable.js 3
-dir test/harness/propertyhelper-verifynotenumerable-not-enumerable.js 3
-dir test/harness/propertyhelper-verifynotwritable-not-writable-strict.js 3
-dir test/harness/propertyhelper-verifynotwritable-writable.js 3
-dir test/harness/propertyhelper-verifywritable-array-length.js 3
-dir test/harness/propertyhelper-verifywritable-not-writable.js 3
-dir test/harness/propertyhelper-verifywritable-writable.js 3
-dir test/harness/verifyProperty-configurable-object.js 3
-dir test/harness/verifyProperty-restore.js 3
-dir test/harness/verifyProperty-restore-accessor.js 3
-dir test/harness/verifyProperty-same-value.js 3
-dir test/harness/verifyProperty-string-prop.js 3
-dir test/harness/verifyProperty-value.js 3
-dir test/harness/verifyProperty-value-error.js 3
+dir test/harness/propertyhelper-verifyconfigurable-configurable.js 2
+dir test/harness/propertyhelper-verifyconfigurable-configurable-object.js 2
+dir test/harness/propertyhelper-verifyconfigurable-not-configurable.js 2
+dir test/harness/propertyhelper-verifyenumerable-enumerable.js 2
+dir test/harness/propertyhelper-verifyenumerable-not-enumerable.js 2
+dir test/harness/propertyhelper-verifynotconfigurable-configurable.js 2
+dir test/harness/propertyhelper-verifynotconfigurable-not-configurable.js 2
+dir test/harness/propertyhelper-verifynotenumerable-enumerable.js 2
+dir test/harness/propertyhelper-verifynotenumerable-not-enumerable.js 2
+dir test/harness/propertyhelper-verifynotwritable-not-writable-strict.js 2
+dir test/harness/propertyhelper-verifynotwritable-writable.js 2
+dir test/harness/propertyhelper-verifywritable-array-length.js 2
+dir test/harness/propertyhelper-verifywritable-not-writable.js 2
+dir test/harness/propertyhelper-verifywritable-writable.js 2
+dir test/harness/verifyProperty-configurable-object.js 2
+dir test/harness/verifyProperty-restore.js 2
+dir test/harness/verifyProperty-restore-accessor.js 2
+dir test/harness/verifyProperty-same-value.js 2
+dir test/harness/verifyProperty-string-prop.js 2
+dir test/harness/verifyProperty-value.js 2
+dir test/harness/verifyProperty-value-error.js 2
 dir test/harness/asyncHelpers-asyncTest-without-async-flag.js 3
-dir test/harness/fnGlobalObject.js 3
+dir test/harness/fnGlobalObject.js 2
 dir test/harness/assertRelativeDateMs.js 4
 dir test/harness/nans.js 4
 dir test/harness/verifyProperty-arguments.js 6
@@ -1474,8 +1476,8 @@ Its output on this document:
 
 ```
 01 31 62
-02 5245 9173
-03 7603 15038
+02 5267 9217
+03 7581 14994
 04 1198 2396
 05 2118 4234
 06 3717 7162

@@ -26,6 +26,15 @@
 //! read as a run that wants another realm is read, with the detail `evalScript: refused:
 //! <message>` or `evalScript: nesting: <message>`. A run marked for a refusal is a refused run
 //! ([`Ran::refused`]) and counts in `test262-refused`; one marked for the nesting limit is not.
+//!
+//! A refusal reached through `eval`, `Function`, `$262.evalScript` or at run time (a regular
+//! expression literal) is a `SyntaxError` the case may catch. The engine counts every refusal
+//! it raises (`Agent::refusals`, `docs/design/host-interface.md` section 13), and the runner
+//! reads the count once every script of the run parsed and again when the run ends: a run in
+//! which it moved fails whatever the case and its `negative` answered, with the detail
+//! `counted refusal: <n> refusal(s)`, after the detail of `$262.evalScript` when that marked the
+//! run too, and is a refused run (`Ran::counted_refusals`). A refusal of a script's own parse
+//! ends the run before the first read, with its own cause.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -84,6 +93,10 @@ pub struct Ran {
     /// The kind of the parse error that ended it, of a harness file, of the case or of the
     /// source of a `$262.evalScript` that marked the run.
     pub parse_error: Option<MessageKind>,
+    /// How far the engine's count of refusals (`Agent::refusals`) moved while the run's scripts
+    /// were evaluated: the refusals `eval`, `Function`, `$262.evalScript` or an instruction
+    /// raised, caught or not. More than 0 fails the run.
+    pub counted_refusals: u64,
     /// The run panicked; it is counted failed.
     pub panicked: bool,
     /// The time it took, with the runs made again for `createRealm`.
@@ -98,15 +111,16 @@ impl Ran {
             budget: end.budget,
             detail: end.detail,
             parse_error: end.parse_error,
+            counted_refusals: end.counted_refusals,
             panicked: false,
             elapsed: Duration::ZERO,
         }
     }
 
     /// The run ended in a refusal of the parser, of its own sources or inside
-    /// `$262.evalScript`.
+    /// `$262.evalScript`, or the engine counted a refusal while its scripts ran.
     pub fn refused(&self) -> bool {
-        matches!(self.parse_error, Some(MessageKind::Refusal { .. }))
+        matches!(self.parse_error, Some(MessageKind::Refusal { .. })) || self.counted_refusals > 0
     }
 }
 
@@ -209,6 +223,7 @@ impl<'p> Worker<'p> {
                 budget: None,
                 detail: format!("panicked: {message}"),
                 parse_error: None,
+                counted_refusals: 0,
                 panicked: true,
                 elapsed: Duration::ZERO,
             }
@@ -301,6 +316,7 @@ struct End {
     budget: Option<Termination>,
     detail: String,
     parse_error: Option<MessageKind>,
+    counted_refusals: u64,
 }
 
 impl End {
@@ -311,6 +327,7 @@ impl End {
             budget: None,
             detail: detail.into(),
             parse_error: None,
+            counted_refusals: 0,
         }
     }
 
@@ -320,6 +337,7 @@ impl End {
             budget: None,
             detail: detail.into(),
             parse_error: None,
+            counted_refusals: 0,
         }
     }
 
@@ -332,6 +350,7 @@ impl End {
                 budget: Some(termination),
                 detail,
                 parse_error: None,
+                counted_refusals: 0,
             },
             Termination::Interrupted | Termination::EngineFault => End::failed(detail),
         }
@@ -362,6 +381,23 @@ impl End {
         End {
             parse_error: Some(mark.kind),
             ..End::failed(format!("evalScript: {cause}: {}", mark.message))
+        }
+    }
+
+    /// A run in which the engine's count of refusals moved by `count`: failed, whatever the case
+    /// and its `negative` answered, with the detail `counted refusal: <count> refusal(s)`, after
+    /// the detail of `$262.evalScript` when that marked the run (`marked`) too.
+    fn counted_refusal(end: End, count: u64, marked: bool) -> End {
+        let cause = format!("counted refusal: {count} refusal(s)");
+        let detail = if marked {
+            format!("{}; {cause}", end.detail)
+        } else {
+            cause
+        };
+        End {
+            parse_error: end.parse_error,
+            counted_refusals: count,
+            ..End::failed(detail)
         }
     }
 }
@@ -419,15 +455,32 @@ fn attempt(
         }
     }
     let mut steps = 0u64;
-    let end = run_scripts(&mut agent, &realm, harness, text, negative, &mut steps);
+    let mut before = None;
+    let end = run_scripts(
+        &mut agent,
+        &realm,
+        (harness, text),
+        negative,
+        &mut steps,
+        &mut before,
+    );
     if agent.host().wanted_realm {
         return Attempt::MoreRealms;
     }
     // A refusal or the nesting limit `$262.evalScript` met fails the run, whatever the case and
     // its `negative` answered.
-    let end = match agent.host_mut().eval_script_mark.take() {
-        Some(mark) => End::eval_script_marked(mark),
-        None => end,
+    let (end, marked) = match agent.host_mut().eval_script_mark.take() {
+        Some(mark) => (End::eval_script_marked(mark), true),
+        None => (end, false),
+    };
+    // So does every refusal the engine counted while the scripts ran (decision 11,
+    // "Refusals"; `host-interface.md` section 13): `eval`, `Function`, `$262.evalScript` or a
+    // regular expression literal, caught by the case or not.
+    let counted = before.map_or(0, |before| agent.refusals().saturating_sub(before));
+    let end = if counted > 0 {
+        End::counted_refusal(end, counted, marked)
+    } else {
+        end
     };
     Attempt::Done(Ran::ended(end, steps))
 }
@@ -439,14 +492,16 @@ fn setup_failed(error: SetupError) -> End {
     }
 }
 
-/// Parses every harness file and the case, then evaluates them in order.
+/// Parses every harness file and the case, then evaluates them in order. `before` is the
+/// engine's count of refusals once every script parsed, read before the first one runs; it stays
+/// `None` for a run that evaluates nothing.
 fn run_scripts(
     agent: &mut Agent<RunnerHost>,
     realm: &Realm,
-    harness: &[(String, Rc<str>)],
-    text: &str,
+    (harness, text): (&[(String, Rc<str>)], &str),
     negative: &Negative<'_>,
     steps: &mut u64,
+    before: &mut Option<u64>,
 ) -> End {
     let mut scripts = Vec::with_capacity(harness.len());
     for (name, source) in harness {
@@ -490,6 +545,9 @@ fn run_scripts(
         }
         Negative::Unknown(phase) => return End::failed(format!("unknown negative phase {phase}")),
     }
+    // A refusal of a script's own parse ended the run above with its own cause; from here, a
+    // refusal is one the scripts reached while they ran.
+    *before = Some(agent.refusals());
     for (name, script) in &scripts {
         let evaluated = agent.evaluate_script(script);
         *steps = steps.saturating_add(agent.last_entry_steps().unwrap_or(0));

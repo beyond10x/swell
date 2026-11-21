@@ -600,16 +600,89 @@ fn a_refusal_inside_eval_script_fails_the_run() -> TestResult {
     assert_eq!(runs.len(), 2, "{lines:?}");
     for line in runs {
         assert_eq!(field(line, 5), "Failed", "{line:?}");
-        let detail = field(line, 6);
-        assert!(
-            detail.starts_with("evalScript: refused: ")
-                && detail.contains(" is not supported before slice "),
+        // The refusal moved the engine's count of refusals as well: its detail follows that of
+        // the mark of evalScript.
+        assert_eq!(
+            field(line, 6),
+            "evalScript: refused: let declaration is not supported before slice 6 (1:1); \
+             counted refusal: 1 refusal(s)",
             "{line:?}"
         );
     }
     // The two runs of refusal-fails-the-run.js are counted as refused, and not the two of
     // nesting-fails-the-run.js: the nesting limit is not a refusal.
     assert_eq!(printed.errors("test262-refused"), ["test262-refused 2"]);
+    Ok(())
+}
+
+/// The dynamic-refusal tree counted with `--runs`.
+fn counted_dynamic_refusal(name: &str) -> Result<(Printed, Vec<RunLine>), Box<dyn Error>> {
+    counted_runs("dynamic-refusal", name, &[])
+}
+
+/// Both runs of the case `name` of the dynamic-refusal tree fail on the engine's count of
+/// refusals, which moved by one in each, though the case caught the `SyntaxError`.
+fn assert_counted_refusal(lines: &[RunLine], name: &str) {
+    let path = format!("test/language/dynamic-refusal/{name}");
+    let runs = runs_of(lines, &path);
+    let seen: Vec<(&str, &str, &str)> = runs
+        .iter()
+        .map(|l| (field(l, 4), field(l, 5), field(l, 6)))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            ("non-strict", "Failed", "counted refusal: 1 refusal(s)"),
+            ("strict", "Failed", "counted refusal: 1 refusal(s)"),
+        ],
+        "{path}"
+    );
+}
+
+#[test]
+fn a_refusal_caught_inside_eval_fails_the_run() -> TestResult {
+    let (_, lines) = counted_dynamic_refusal("caught-in-eval")?;
+    assert_counted_refusal(&lines, "caught-in-eval.js");
+    Ok(())
+}
+
+#[test]
+fn a_refusal_caught_inside_function_fails_the_run() -> TestResult {
+    let (_, lines) = counted_dynamic_refusal("caught-in-function")?;
+    assert_counted_refusal(&lines, "caught-in-function.js");
+    Ok(())
+}
+
+#[test]
+fn a_regular_expression_literal_refusal_caught_at_run_time_fails_the_run() -> TestResult {
+    let (_, lines) = counted_dynamic_refusal("regexp-literal-caught")?;
+    assert_counted_refusal(&lines, "regexp-literal-caught.js");
+    Ok(())
+}
+
+#[test]
+fn a_grammar_error_caught_inside_eval_passes() -> TestResult {
+    let (_, lines) = counted_dynamic_refusal("grammar-error-caught")?;
+    let path = "test/language/dynamic-refusal/grammar-error-caught-in-eval.js";
+    let seen: Vec<(&str, &str, &str)> = runs_of(&lines, path)
+        .iter()
+        .map(|l| (field(l, 4), field(l, 5), field(l, 6)))
+        .collect();
+    assert_eq!(
+        seen,
+        [("non-strict", "Passed", ""), ("strict", "Passed", "")],
+        "{path}"
+    );
+    Ok(())
+}
+
+#[test]
+fn counted_refusals_are_counted_refused() -> TestResult {
+    let (printed, _) = counted_dynamic_refusal("refused-count")?;
+    // Four cases: the grammar error passes, the three counted refusals fail.
+    assert_line(&printed, "test262 language/dynamic-refusal 4 0 0 4 1 3 0");
+    // Three cases, two runs each, every run counted refused once.
+    assert_eq!(printed.errors("test262-refused"), ["test262-refused 6"]);
     Ok(())
 }
 

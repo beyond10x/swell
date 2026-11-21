@@ -139,6 +139,70 @@ impl<'a> Parser<'a> {
         Ok(params)
     }
 
+    /// The parameter text of CreateDynamicFunction (`#sec-createdynamicfunction`, step 16) alone,
+    /// the whole source as `FormalParameters[~Yield, ~Await]`: the parameters, a trailing comma
+    /// allowed, to the end of the input. An empty text is the empty list; any other text enters
+    /// the nesting bound once, as a script does.
+    pub(super) fn formal_parameters_text(&mut self) -> R<Vec<Name>> {
+        if self.src.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.enter()?;
+        self.advance()?;
+        let mut params = Vec::new();
+        while !self.at_eof() {
+            params.push(self.parameter()?);
+            if !self.eat(Punct::Comma)? {
+                break;
+            }
+        }
+        if !self.at_eof() {
+            return self.unexpected();
+        }
+        self.leave();
+        Ok(params)
+    }
+
+    /// The body text of CreateDynamicFunction (step 17) alone, the whole source as
+    /// `FunctionBody[~Yield, ~Await]`: the statements of a function body to the end of the input,
+    /// where `return` may stand and a `}` may not.
+    pub(super) fn function_body_text(&mut self) -> R<()> {
+        self.enter()?;
+        self.advance()?;
+        self.functions += 1;
+        self.body(true)?;
+        self.functions -= 1;
+        if !self.at_eof() {
+            return self.unexpected();
+        }
+        self.leave();
+        Ok(())
+    }
+
+    /// The source text of CreateDynamicFunction (step 19) as a `FunctionExpression` and nothing
+    /// after it: the function, its own name taken off (the name "anonymous" is given, not
+    /// bound), then an expression statement holding it, made without a depth check, so that the
+    /// function is admitted exactly when the same expression standing alone would be.
+    pub(super) fn dynamic_function_text(&mut self) -> R<StmtId> {
+        self.enter()?;
+        self.advance()?;
+        let start = self.start();
+        let id = self.function_expression()?;
+        if !self.at_eof() {
+            return self.unexpected();
+        }
+        self.leave();
+        let span = self.finish(start);
+        let depth = match self.ast.functions.get_mut(id.0 as usize) {
+            Some(f) => {
+                f.name = None;
+                f.depth
+            }
+            None => return self.fail_here("parse failed"),
+        };
+        Ok(self.wrap_in_statement(id, span, depth))
+    }
+
     /// One `FormalParameter`, a `BindingIdentifier` without an initializer.
     fn parameter(&mut self) -> R<Name> {
         if self.is(Punct::Ellipsis) {
