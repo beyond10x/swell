@@ -11,7 +11,7 @@ use support::host::{TestHost, agent, agent_with, global, is_error_of, limits, ob
 use support::script::{Outcome, describe, eval, eval_text, messages, parse};
 use swell::{
     Brand, Completion, GlobalObjects, HookCx, HostError, HostObjectSpec, Outcome as HostOutcome,
-    Parsed, RealmRef, Root, Source, Value,
+    Parsed, Prototype, RealmRef, Root, Source, Value,
 };
 
 /// `0` inside `n` nested parentheses, ended by a `;` (automatic semicolon insertion is slice
@@ -215,7 +215,7 @@ fn host_50_setup_this_is_script_this() {
     let mut setup =
         |cx: &mut HookCx<'_, TestHost>, _realm: RealmRef| -> Completion<GlobalObjects> {
             let spec = |brand| HostObjectSpec {
-                prototype: None,
+                prototype: Prototype::Null,
                 brand: Brand(brand),
                 data: None,
             };

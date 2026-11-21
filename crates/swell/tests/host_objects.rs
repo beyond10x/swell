@@ -7,8 +7,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use swell::{
-    AgentState, Brand, HostData, HostError, HostObjectSpec, ObjectRef, Outcome, Termination,
-    Tracer, Value,
+    AgentState, Brand, HostData, HostError, HostObjectSpec, ObjectRef, Outcome, Prototype,
+    Termination, Tracer, Value,
 };
 
 const NODE: Brand = Brand(1);
@@ -59,7 +59,7 @@ impl Drop for Counted {
 
 fn spec(brand: Brand, data: Option<Box<dyn HostData>>) -> HostObjectSpec {
     HostObjectSpec {
-        prototype: None,
+        prototype: Prototype::Null,
         brand,
         data,
     }
@@ -264,7 +264,7 @@ fn a_prototype_is_kept_by_its_object() {
             let prototype = cx.new_host_object(spec(OTHER, None)).unwrap().unwrap();
             let object = cx
                 .new_host_object(HostObjectSpec {
-                    prototype: Some(prototype),
+                    prototype: Prototype::Object(prototype),
                     brand: NODE,
                     data: None,
                 })

@@ -171,8 +171,8 @@ impl<T> Arena<T> {
 mod tests {
     use super::{Access, Arena, Handle};
     use crate::{
-        Abrupt, Agent, AgentState, Brand, HostError, HostObjectSpec, Limits, Seeds, Termination,
-        Value,
+        Abrupt, Agent, AgentState, Brand, HostError, HostObjectSpec, Limits, Prototype, Seeds,
+        Termination, Value,
     };
 
     use crate::host::hooks::test_host::{NoHooks, new_realm};
@@ -225,7 +225,7 @@ mod tests {
             .with_cx(&realm, |cx| {
                 let object = cx
                     .new_host_object(HostObjectSpec {
-                        prototype: None,
+                        prototype: Prototype::Null,
                         brand: Brand(1),
                         data: None,
                     })

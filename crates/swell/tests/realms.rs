@@ -14,7 +14,7 @@ use support::host::{
 };
 use swell::{
     Abrupt, AgentState, Brand, Completion, GlobalObjects, HookCx, HostData, HostError,
-    HostObjectSpec, ObjectRef, Outcome, RealmRef, Termination, Tracer, Value,
+    HostObjectSpec, ObjectRef, Outcome, Prototype, RealmRef, Termination, Tracer, Value,
 };
 
 /// HOST-12: with `memory_bytes` 0, `create_realm` answers `Terminated(MemoryBudget)` and the
@@ -203,7 +203,7 @@ fn the_setup_closure_gives_the_global_object() {
             calls += 1;
             let global = cx
                 .new_host_object(HostObjectSpec {
-                    prototype: None,
+                    prototype: Prototype::Null,
                     brand: Brand(9),
                     data: None,
                 })
@@ -246,7 +246,7 @@ fn a_setup_returning_a_stale_or_foreign_global_faults_the_agent() {
     let foreign = other
         .with_cx(&other_realm, |cx| {
             cx.new_host_object(HostObjectSpec {
-                prototype: None,
+                prototype: Prototype::Null,
                 brand: Brand(1),
                 data: None,
             })
@@ -261,7 +261,7 @@ fn a_setup_returning_a_stale_or_foreign_global_faults_the_agent() {
         let stale = agent
             .with_cx(&realm, |cx| {
                 cx.new_host_object(HostObjectSpec {
-                    prototype: None,
+                    prototype: Prototype::Null,
                     brand: Brand(1),
                     data: None,
                 })
@@ -274,7 +274,7 @@ fn a_setup_returning_a_stale_or_foreign_global_faults_the_agent() {
             |cx: &mut HookCx<'_, TestHost>, _realm: RealmRef| -> Completion<GlobalObjects> {
                 let good = cx
                     .new_host_object(HostObjectSpec {
-                        prototype: None,
+                        prototype: Prototype::Null,
                         brand: Brand(2),
                         data: None,
                     })

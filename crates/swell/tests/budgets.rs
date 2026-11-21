@@ -15,7 +15,7 @@ use support::host::{TestHost, agent_with, global, is_error_of, limits, object, r
 use support::script::{Outcome, define_function, eval, eval_text, run};
 use swell::{
     Abrupt, Agent, AgentState, Brand, Completion, Cx, HostCall, HostData, HostObjectSpec, Limits,
-    Outcome as HostOutcome, Parsed, Realm, RealmRef, Source, Termination, Tracer, Value,
+    Outcome as HostOutcome, Parsed, Prototype, Realm, RealmRef, Source, Termination, Tracer, Value,
 };
 
 /// The bytes an agent with the test limits holds after `create_realm`, which leaves nothing
@@ -91,7 +91,7 @@ fn memory_budget_charges_utf16_strings_and_host_data() {
     let outcome = agent
         .with_cx(&realm, |cx| {
             cx.new_host_object(HostObjectSpec {
-                prototype: None,
+                prototype: Prototype::Null,
                 brand: Brand(1),
                 data: Some(Box::new(Big { _bytes: [0; 2_048] })),
             })

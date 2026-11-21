@@ -21,8 +21,8 @@ use support::host::{limits, seeds};
 use swell::{
     Abrupt, Agent, AgentState, Brand, CompileStrings, Completion, Cx, ErrorKind, GlobalObjects,
     Handled, HookCx, Host, HostCall, HostData, HostError, HostObjectSpec, IsoDateTime, Job,
-    LoadRequest, ModuleRef, ObjectRef, Outcome, Parsed, PropertyDescriptor, PropertyKey, Realm,
-    RealmRef, RejectionOperation, Root, Script, ScriptRef, Source, StringRef, Termination,
+    LoadRequest, ModuleRef, ObjectRef, Outcome, Parsed, PropertyDescriptor, PropertyKey, Prototype,
+    Realm, RealmRef, RejectionOperation, Root, Script, ScriptRef, Source, StringRef, Termination,
     TimeZoneIdentifier, Tracer, Value,
 };
 
@@ -412,7 +412,15 @@ macro_rules! scoped_answers {
         $out.push((
             "new_host_object(prototype)",
             shape($cx.new_host_object(HostObjectSpec {
-                prototype: Some(bad.object),
+                prototype: Prototype::Object(bad.object),
+                brand: Brand(3),
+                data: Some(Box::new(Nothing)),
+            })),
+        ));
+        $out.push((
+            "new_host_object(ObjectPrototypeOf)",
+            shape($cx.new_host_object(HostObjectSpec {
+                prototype: Prototype::ObjectPrototypeOf(bad.realm),
                 brand: Brand(3),
                 data: Some(Box::new(Nothing)),
             })),
@@ -593,7 +601,7 @@ fn misuse_changes_nothing(
             scoped_answers!(cx, bad, answers);
             let global = cx
                 .new_host_object(HostObjectSpec {
-                    prototype: None,
+                    prototype: Prototype::Null,
                     brand: Brand(1),
                     data: None,
                 })
@@ -604,7 +612,7 @@ fn misuse_changes_nothing(
         agent.create_realm(Some(&mut setup), None),
         Ok(Outcome::Normal(_))
     ));
-    assert_eq!(answers.len(), 9);
+    assert_eq!(answers.len(), 10);
     for (name, answer) in &answers {
         assert_eq!(*answer, Err(expected), "HookCx {name}");
     }
@@ -657,8 +665,9 @@ fn host_30_stale_handles_and_released_roots() {
 
 /// HOST-30 for a realm `create_realm` did not make: the setup closure is handed the `RealmRef`
 /// of the realm being made; when the closure throws or ends the run, `create_realm` returns no
-/// `Realm`, and the kept `RealmRef` given later to `parse_script`, `new_host_function` or
-/// `new_error` answers `Err(StaleHandle)` and leaves the agent `Alive`, as for a realm that was
+/// `Realm`, and the kept `RealmRef` given later to `parse_script`, `new_host_function`,
+/// `new_error` or as `Prototype::ObjectPrototypeOf` to `new_host_object` answers
+/// `Err(StaleHandle)` and leaves the agent `Alive`, as for a realm that was
 /// freed. Found by the fuzz test (`swell::fuzz`, seed 0x5eed0212): the script parsed in such a
 /// realm faulted the agent when it ran.
 #[test]
@@ -689,12 +698,17 @@ fn host_30_a_realm_create_realm_did_not_make_is_stale() {
                 let parsed = shape(cx.parse_script(unmade, Source::Utf8("var x = 1; x;"), None));
                 let function = shape(cx.new_host_function(unmade, "f", 0, counted, true, None));
                 let error = shape(cx.new_error(unmade, ErrorKind::TypeError, "e"));
-                [parsed, function, error]
+                let object = shape(cx.new_host_object(HostObjectSpec {
+                    prototype: Prototype::ObjectPrototypeOf(unmade),
+                    brand: Brand(1),
+                    data: None,
+                }));
+                [parsed, function, error, object]
             })
             .unwrap();
         assert_eq!(
             answers,
-            [Err(HostError::StaleHandle); 3],
+            [Err(HostError::StaleHandle); 4],
             "after {created:?}"
         );
         assert_eq!(agent.state(), AgentState::Alive);
@@ -1004,7 +1018,7 @@ fn host_102_reads_change_nothing_and_call_no_hook() {
         .with_cx(&realm, |cx| {
             let object = cx
                 .new_host_object(HostObjectSpec {
-                    prototype: None,
+                    prototype: Prototype::Null,
                     brand: Brand(3),
                     data: Some(Box::new(Nothing)),
                 })
@@ -1075,7 +1089,7 @@ fn host_129_collect_runs_no_code_and_calls_no_hook() {
             assert_eq!(cx.get(&ran), Ok(Value::Number(0.0)));
             let object = cx
                 .new_host_object(HostObjectSpec {
-                    prototype: None,
+                    prototype: Prototype::Null,
                     brand: Brand(4),
                     data: Some(Box::new(Traced(data))),
                 })
@@ -1184,7 +1198,7 @@ fn host_160_a_handle_returned_by_the_host_faults_the_agent() {
                 }
                 _ => {
                     let global = agent.global_object(&realm).unwrap();
-                    let (first, later) = agent
+                    let (first, later, strings) = agent
                         .with_cx(&realm, |cx| {
                             let Value::Object(global) = cx.get(&global).unwrap() else {
                                 panic!("the global");
@@ -1192,21 +1206,41 @@ fn host_160_a_handle_returned_by_the_host_faults_the_agent() {
                             let key = PropertyKey::String(cx.new_string("answer").unwrap());
                             let f = cx.get_property(global, key).unwrap().unwrap();
                             let first = cx.call(f, Value::Undefined, &[]);
-                            (first, cx.to_number(Value::Null))
+                            // Later calls in the scope still on the stack (the text beside
+                            // HOST-48): a method whose type carries `HostError` answers
+                            // `Err(Faulted)` before it checks its handles.
+                            let later = [
+                                ("to_number", shape(cx.to_number(Value::Null))),
+                                ("root", shape(cx.root(Value::Object(global)))),
+                                ("brand", shape(cx.brand(global))),
+                                ("realm_ref", shape(cx.realm_ref(&realm))),
+                                ("get_property", shape(cx.get_property(global, key))),
+                                ("call", shape(cx.call(f, Value::Undefined, &[]))),
+                                (
+                                    "new_host_object",
+                                    shape(cx.new_host_object(HostObjectSpec {
+                                        prototype: Prototype::Null,
+                                        brand: Brand(1),
+                                        data: None,
+                                    })),
+                                ),
+                            ];
+                            // A method whose type is `Completion<T>` alone answers the sticky
+                            // termination (decision 10).
+                            let strings = [
+                                cx.new_string("s").map(|_| ()),
+                                cx.new_string_utf16(&[0x73]).map(|_| ()),
+                            ];
+                            (first, later, strings)
                         })
                         .unwrap();
-                    // A later `Cx` call of the same run: decision 10 has it answer the sticky
-                    // `Terminated(EngineFault)`, decision 6 has a faulted agent answer
-                    // `Err(Faulted)`; the design does not say which comes first for a method
-                    // that takes a handle, and the engine answers the second (a finding of
-                    // `story:host-interface-hardening`). Either is a defined answer.
-                    assert!(
-                        matches!(
-                            later,
-                            Err(HostError::Faulted)
-                                | Ok(Err(Abrupt::Terminated(Termination::EngineFault)))
-                        ),
-                        "{later:?}"
+                    for (name, answer) in later {
+                        assert_eq!(answer, Err(HostError::Faulted), "{name}, case {case}");
+                    }
+                    assert_eq!(
+                        strings,
+                        [Err(Abrupt::Terminated(Termination::EngineFault)); 2],
+                        "new_string and new_string_utf16, case {case}"
                     );
                     first == Ok(Err(Abrupt::Terminated(Termination::EngineFault)))
                 }
@@ -1228,7 +1262,7 @@ fn host_160_a_handle_returned_by_the_host_faults_the_agent() {
                 calls += 1;
                 let good = cx
                     .new_host_object(HostObjectSpec {
-                        prototype: None,
+                        prototype: Prototype::Null,
                         brand: Brand(2),
                         data: None,
                     })

@@ -1,0 +1,42 @@
+version: '3'
+
+tasks:
+  test-faults:
+    desc: Run the fault-injection test of swell with its feature and warnings denied, and print the summed counts.
+    summary: |
+      Run the fault-injection test of swell with its feature and warnings denied, and print the
+      summed counts (HOST-71: the default build ignores that test, since the switch it needs
+      exists only with the feature).
+
+      Runs "cargo test --locked -p swell --features fault-injection --test faults" with
+      RUSTFLAGS="-D warnings", as the task test does. The log is .out/test-faults.log; it is
+      printed when cargo fails. The line printed sums its "test result:" lines as
+      "test-faults: <n> test suites: <p> passed, <f> failed, <i> ignored". It fails when cargo
+      fails (a failing test, a build error, or a crates/swell without the feature
+      fault-injection or without the test faults), when a test fails, when there is no
+      "test result:" line, and when no test passed.
+    env:
+      RUSTFLAGS: -D warnings
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        status=0
+        cargo test --locked -p swell --features fault-injection --test faults > .out/test-faults.log 2>&1 || status=$?
+        if [ "$status" -ne 0 ]; then cat .out/test-faults.log; fi
+        awk -v status="$status" '
+          /^test result: / {
+            suites++
+            for (i = 1; i < NF; i++) {
+              count = $i
+              gsub(/[^0-9]/, "", count)
+              if ($(i + 1) ~ /^passed/) passed += count
+              if ($(i + 1) ~ /^failed/) failed += count
+              if ($(i + 1) ~ /^ignored/) ignored += count
+            }
+          }
+          END {
+            print "test-faults: " suites+0 " test suites: " passed+0 " passed, " failed+0 " failed, " ignored+0 " ignored"
+            if (status != 0 || failed > 0 || suites == 0 || passed == 0) exit 1
+          }
+        ' .out/test-faults.log

@@ -46,7 +46,7 @@ HOST-45 test swell::misuse::host_45_realm_root_and_script_of_another_agent
 HOST-46 pending slice 10
 HOST-47 test swell::calls::host_47_call_and_construct_of_the_wrong_kind_throw_type_error
 HOST-48 test swell::misuse::host_48_a_faulted_agent_answers_faulted_everywhere
-HOST-49 pending slice 1
+HOST-49 test swell::limits_scripts::host_49_setup_closure_and_clause_19_globals
 HOST-50 test swell::scripts::host_50_setup_this_is_script_this
 HOST-51 test swell::lib::realm::tests::host_51_default_global_is_ordinary_with_object_prototype
 HOST-52 test swell::realms::host_52_dropped_realm_returns_heap_bytes

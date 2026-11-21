@@ -9,7 +9,7 @@ mod support;
 use support::host::{TestHost, agent, realm};
 use swell::{
     AgentState, Brand, CompilationType, CompileStrings, Completion, Cx, GlobalObjects, Handled,
-    HookCx, Host, HostCall, HostObjectSpec, IsoDateTime, ObjectRef, Outcome, RealmRef,
+    HookCx, Host, HostCall, HostObjectSpec, IsoDateTime, ObjectRef, Outcome, Prototype, RealmRef,
     RejectionOperation, TimeZoneIdentifier, Value,
 };
 
@@ -22,7 +22,7 @@ fn in_hook<R>(f: impl FnOnce(&mut HookCx<'_, TestHost>, RealmRef, ObjectRef) -> 
     let mut setup = |cx: &mut HookCx<'_, TestHost>, realm: RealmRef| -> Completion<GlobalObjects> {
         let global = cx
             .new_host_object(HostObjectSpec {
-                prototype: None,
+                prototype: Prototype::Null,
                 brand: Brand(1),
                 data: None,
             })

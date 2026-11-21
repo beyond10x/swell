@@ -13,7 +13,7 @@ use support::host::{
 use support::script::{Outcome as Shown, define_function, eval_text};
 use swell::{
     Abrupt, AgentState, Brand, Completion, Cx, HostCall, HostError, HostObjectSpec, Outcome,
-    Parsed, PropertyDescriptor, Source, Termination, Value,
+    Parsed, PropertyDescriptor, Prototype, Source, Termination, Value,
 };
 
 /// A host function that calls itself through `cx.call`, counting its calls in the host; when
@@ -223,7 +223,7 @@ fn record_call(cx: &mut Cx<'_, TestHost>, call: HostCall<'_>) -> Completion<Valu
     if call.new_target.is_some() {
         let object = cx
             .new_host_object(HostObjectSpec {
-                prototype: None,
+                prototype: Prototype::Null,
                 brand: Brand(3),
                 data: None,
             })
@@ -309,7 +309,7 @@ fn a_host_function_returning_a_stale_or_foreign_handle_faults_the_agent() {
             let stale = agent
                 .with_cx(&realm, |cx| {
                     cx.new_host_object(HostObjectSpec {
-                        prototype: None,
+                        prototype: Prototype::Null,
                         brand: Brand(1),
                         data: None,
                     })
@@ -428,7 +428,7 @@ fn cx_methods_check_their_handles_before_the_sticky_termination() {
                 assert_eq!(cx.to_property_key(v), Err(error));
                 assert!(matches!(
                     cx.new_host_object(HostObjectSpec {
-                        prototype: Some(bad),
+                        prototype: Prototype::Object(bad),
                         brand: Brand(1),
                         data: None,
                     }),

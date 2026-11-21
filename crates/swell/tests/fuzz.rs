@@ -6,7 +6,8 @@
 //! arguments: stale, released, foreign and wrong-kind handles among them, and small scripts of
 //! the slice 1 grammar and broken sources, under small and random limits.
 //!
-//! 2,000 sequences from fixed seeds per run. A sequence fails on a panic, on an abort (a stack
+//! 2,000 sequences from fixed seeds per run, 150 with the feature `collect-every-safe-point`
+//! ([`SEQUENCES`]). A sequence fails on a panic, on an abort (a stack
 //! overflow; the sequences run in a child process, which prints each seed before it runs it, so
 //! the parent names the seed the child died in), on a run past its budget (`last_entry_steps()`
 //! over `steps_per_entry` or `heap_bytes()` over `memory_bytes` after an entry), on an answer
@@ -28,12 +29,20 @@ use swell::{
     Abrupt, Agent, AgentState, Brand, CompileStrings, Completion, Cx, ErrorKind, GlobalObjects,
     Handled, HookCx, Host, HostCall, HostData, HostError, HostObjectSpec, IsoDateTime, Job, Limits,
     LoadRequest, ModuleRef, ObjectRef, Outcome, Parsed, PreferredType, PropertyDescriptor,
-    PropertyKey, Realm, RealmRef, RejectionOperation, Root, Script, ScriptRef, Seeds, Source,
-    StringRef, Termination, TimeZoneIdentifier, Tracer, Value,
+    PropertyKey, Prototype, Realm, RealmRef, RejectionOperation, Root, Script, ScriptRef, Seeds,
+    Source, StringRef, Termination, TimeZoneIdentifier, Tracer, Value,
 };
 
-/// The sequences of one run.
-const SEQUENCES: u64 = 2_000;
+/// The sequences of one run: 2,000 in the default mode; with the feature
+/// `collect-every-safe-point`, the first 150 of them. That mode's job is to find a value held
+/// without a root, which any sequence that keeps a value across a safe point shows; a
+/// sequence costs many times more in it (2,000 took 170.9 s there against 24.6 s in the default
+/// mode in one pool job, a factor of 7: 11.7 against 81 sequences per second, measured).
+const SEQUENCES: u64 = if cfg!(feature = "collect-every-safe-point") {
+    150
+} else {
+    2_000
+};
 /// The seed of the first sequence; the others follow it.
 const FIRST_SEED: u64 = 0x5EED_0000;
 /// The calls of one sequence at the top level.
@@ -946,10 +955,24 @@ macro_rules! scoped_op {
                 None => "to_utf16(no string)".to_string(),
             },
             6 => {
-                let prototype = if pool!($cx).rng.chance(60) {
-                    object(&mut pool!($cx))
-                } else {
-                    None
+                // An object, the `%Object.prototype%` of a realm seen (of the other agent, or
+                // one `create_realm` did not make, among them), or null.
+                let (origin, prototype) = match pool!($cx).rng.below(5) {
+                    0..=2 => match object(&mut pool!($cx)) {
+                        Some((origin, p)) => (origin, Prototype::Object(p)),
+                        None => (2, Prototype::Null),
+                    },
+                    3 => {
+                        let count = pool!($cx).realm_refs.len();
+                        if count == 0 {
+                            (2, Prototype::Null)
+                        } else {
+                            let i = pool!($cx).rng.index(count);
+                            let (origin, r) = pool!($cx).realm_refs[i];
+                            (origin, Prototype::ObjectPrototypeOf(r))
+                        }
+                    }
+                    _ => (2, Prototype::Null),
                 };
                 let held: Vec<Value> = (0..pool!($cx).rng.below(3))
                     .map(|_| value(&mut pool!($cx)).1)
@@ -964,13 +987,11 @@ macro_rules! scoped_op {
                     None
                 };
                 let answer = $cx.new_host_object(HostObjectSpec {
-                    prototype: prototype.map(|(_, p)| p),
+                    prototype,
                     brand,
                     data,
                 });
-                if let Some((origin, _)) = prototype
-                    && is_foreign(origin, me)
-                {
+                if is_foreign(origin, me) {
                     foreign_answer("new_host_object", &answer);
                 }
                 if let Ok(Ok(made)) = answer {
@@ -1563,8 +1584,13 @@ fn op_create_realm(world: &mut World, a: usize) -> String {
                     let line = hook_op(cx);
                     pool!(cx).log.push(format!("  setup {line}"));
                 }
+                let prototype = if pool!(cx).rng.chance(70) {
+                    Prototype::ObjectPrototypeOf(realm)
+                } else {
+                    Prototype::Null
+                };
                 let made = cx.new_host_object(HostObjectSpec {
-                    prototype: None,
+                    prototype,
                     brand: Brand(7),
                     data: None,
                 });

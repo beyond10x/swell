@@ -10,7 +10,9 @@ mod support;
 use support::host::{
     TestHost, agent, data, get, global, is_error_of, key, object, realm, string, text, thrown,
 };
-use swell::{Abrupt, Brand, Completion, Cx, HostCall, HostObjectSpec, PreferredType, Value};
+use swell::{
+    Abrupt, Brand, Completion, Cx, HostCall, HostObjectSpec, PreferredType, Prototype, Value,
+};
 
 /// `#sec-tonumber-applied-to-the-string-type`: StringToNumber trims every `StrWhiteSpaceChar`
 /// (WhiteSpace, `#sec-white-space`, with every code point of General_Category `Zs`, and
@@ -248,7 +250,7 @@ fn to_primitive_calls_valueof_and_tostring_in_hint_order() {
             // since every ordinary object inherits `Object.prototype.toString` (20.1.3.6).
             let bare = cx
                 .new_host_object(HostObjectSpec {
-                    prototype: None,
+                    prototype: Prototype::Null,
                     brand: Brand(1),
                     data: None,
                 })

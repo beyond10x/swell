@@ -17,7 +17,8 @@ use support::host::{TestHost, agent_with, global, is_error_of, limits, object, r
 use support::script::{Outcome, define_function, eval, eval_text, parse};
 use swell::{
     Agent, AgentState, Brand, Completion, Cx, GlobalObjects, HookCx, HostCall, HostObjectSpec,
-    Limits, Outcome as HostOutcome, Parsed, Realm, RealmRef, Root, Source, Termination, Value,
+    Limits, Outcome as HostOutcome, Parsed, Prototype, Realm, RealmRef, Root, Source, Termination,
+    Value,
 };
 
 /// The bytes an agent with the test limits holds after `create_realm`.
@@ -49,11 +50,21 @@ fn is_range_error_of(
 
 /// HOST-10: `var a = []; while (true) a.push({});` with `memory_bytes` M and a step budget
 /// large enough answers `Terminated(MemoryBudget)`, and `heap_bytes()` then reads at most M;
-/// the agent stays `Alive` and answers the next script. For three budgets beyond the realm.
+/// the agent stays `Alive` and answers the next script. For three budgets beyond the realm in
+/// the default mode; with the feature `collect-every-safe-point` for the two smaller ones: a
+/// collection at every safe point traces the whole heap, so filling 1 MiB costs time that
+/// grows with the square of the heap (this test took 29.1 s in that mode with it, 0.27 s without
+/// it, measured), and
+/// a budget is reached the same way at any size.
 #[test]
 fn host_10_endless_allocation_ends_in_memory_budget() {
     let base = realm_bytes();
-    for room in [4_096_u64, 65_536, 1 << 20] {
+    let rooms: &[u64] = if cfg!(feature = "collect-every-safe-point") {
+        &[4_096, 65_536]
+    } else {
+        &[4_096, 65_536, 1 << 20]
+    };
+    for &room in rooms {
         let mut limits = limits();
         limits.memory_bytes = base + room;
         limits.steps_per_entry = u64::MAX;
@@ -168,21 +179,25 @@ fn on_bounded_stack(test: &str, stack: usize, body: fn()) -> Result<(), String> 
     ))
 }
 
-/// The limits of the stack tests: `frame_depth` 10,000, `reentry_depth` 1,000 and
+/// The `reentry_depth` of the stack tests: the full depth the gate's limits state.
+const FULL_REENTRY: u32 = 1_000;
+
+/// The limits of the stack tests: `frame_depth` 10,000, `reentry_depth` `reentry_depth` and
 /// `parser_nesting` 1,000, with step and memory budgets no run of them reaches.
-fn stack_limits() -> Limits {
+fn stack_limits(reentry_depth: u32) -> Limits {
     let mut limits = limits();
     limits.frame_depth = 10_000;
-    limits.reentry_depth = 1_000;
+    limits.reentry_depth = reentry_depth;
     limits.parser_nesting = 1_000;
     limits.steps_per_entry = 1 << 40;
     limits.memory_bytes = 1 << 30;
     limits
 }
 
-/// An agent with the stack limits and a realm with `reenter` and `parseDeep`.
-fn stack_agent() -> (Agent<TestHost>, Realm) {
-    let mut agent = agent_with(stack_limits()).unwrap();
+/// An agent with the stack limits of `reentry_depth` and a realm with `reenter` and
+/// `parseDeep`.
+fn stack_agent(reentry_depth: u32) -> (Agent<TestHost>, Realm) {
+    let mut agent = agent_with(stack_limits(reentry_depth)).unwrap();
     let realm = realm(&mut agent);
     remember(&mut agent, &realm);
     define_function(&mut agent, &realm, "reenter", 1, reenter, false);
@@ -206,11 +221,11 @@ fn deepest(through: &str) -> String {
     )
 }
 
-/// Run `deepest(through)` with the stack limits: it throws a `RangeError`, `f` ran
-/// `reentry_depth + 1` times (the first call is the script's own, each other a re-entry), and
-/// `parseDeep` parsed at the deepest.
-fn reach_through(through: &str) {
-    let (mut agent, realm) = stack_agent();
+/// Run `deepest(through)` with the stack limits of `reentry_depth`: it throws a `RangeError`,
+/// `f` ran `reentry_depth + 1` times (the first call is the script's own, each other a
+/// re-entry), and `parseDeep` parsed at the deepest.
+fn reach_through(through: &str, reentry_depth: u32) {
+    let (mut agent, realm) = stack_agent(reentry_depth);
     let outcome = eval(&mut agent, &realm, &deepest(through));
     assert!(
         is_range_error_of(&mut agent, &realm, outcome),
@@ -218,7 +233,7 @@ fn reach_through(through: &str) {
     );
     assert_eq!(
         eval_text(&mut agent, &realm, "n;"),
-        Outcome::Normal("1001".to_string()),
+        Outcome::Normal((reentry_depth + 1).to_string()),
         "through {through}"
     );
     assert_eq!(
@@ -230,7 +245,7 @@ fn reach_through(through: &str) {
 
 /// The body of HOST-17: through a host function that calls back with `cx.call`.
 fn reach_through_host_function() {
-    reach_through("reenter(f)");
+    reach_through("reenter(f)", FULL_REENTRY);
 }
 
 /// HOST-17: on a thread whose stack has `limits.min_stack_bytes()` bytes (`frame_depth`
@@ -239,7 +254,7 @@ fn reach_through_host_function() {
 /// nested `parser_nesting` levels through `cx.parse_script` ends without a stack overflow.
 #[test]
 fn host_17_deepest_reentry_parses_at_full_nesting() {
-    let stack = stack_limits().min_stack_bytes();
+    let stack = stack_limits(FULL_REENTRY).min_stack_bytes();
     on_bounded_stack(
         "host_17_deepest_reentry_parses_at_full_nesting",
         stack,
@@ -259,10 +274,24 @@ const THROUGH_BUILTINS: [&str; 4] = [
     "JSON.stringify(0, f)",
 ];
 
+/// The `reentry_depth` of the stack test through builtins: the full depth in the default mode;
+/// with the feature `collect-every-safe-point`, 100, which still re-enters through each of the
+/// four builtins at every level. The stack bound is a property of the default mode's frames
+/// (the collector marks from a worklist, so its own stack does not grow with the depth); what
+/// the collect mode looks for, a value
+/// held without a root, shows at any depth, while a collection at every safe point traces every
+/// activation, so the cost grows with the square of the depth: at 1,000 the test took 99.5 s in
+/// that mode against 0.16 s in the default one, and at 100 it takes 1.4 s (measured).
+const BUILTINS_REENTRY: u32 = if cfg!(feature = "collect-every-safe-point") {
+    100
+} else {
+    FULL_REENTRY
+};
+
 /// The body of the stack test through builtins: the four runs, one agent each.
 fn reach_through_builtins() {
     for through in THROUGH_BUILTINS {
-        reach_through(through);
+        reach_through(through, BUILTINS_REENTRY);
     }
 }
 
@@ -271,10 +300,12 @@ fn reach_through_builtins() {
 /// exactly `min_stack_bytes()` for `frame_depth` 10,000, `reentry_depth` 1,000 and
 /// `parser_nesting` 1,000, a script reaches `reentry_depth` re-entries through each of
 /// `Function.prototype.call`, a `map` callback, `toJSON` and a replacer of `JSON.stringify`
-/// (four runs) and parses 1,000 nested brackets at the deepest, without a stack overflow.
+/// (four runs) and parses 1,000 nested brackets at the deepest, without a stack overflow. In
+/// the collect mode the depth is [`BUILTINS_REENTRY`], and the thread has `min_stack_bytes()`
+/// of that depth.
 #[test]
 fn min_stack_bytes_is_enough_through_builtins() {
-    let stack = stack_limits().min_stack_bytes();
+    let stack = stack_limits(BUILTINS_REENTRY).min_stack_bytes();
     on_bounded_stack(
         "min_stack_bytes_is_enough_through_builtins",
         stack,
@@ -312,26 +343,23 @@ fn each_builtin_reentry_counts_against_reentry_depth() {
 }
 
 /// HOST-49 (`#sec-initializehostdefinedrealm`): the setup closure is called once per
-/// `create_realm`, and the global it returns has the clause 19 properties the engine defines:
-/// with no `this` returned, the script `this.Array === Array` answers `true` in the realm, and
-/// so do the other globals of this slice.
-///
-/// The requirement's middle clause, that the closure "can create an object whose prototype is
-/// the new realm's `%Object.prototype%`", is not tested here: a `HookCx` has no read of an
-/// intrinsic and no property read, and the closure gets only the new realm's `RealmRef`, so no
-/// call of the interface gives it that object (a finding of `story:host-interface-hardening`,
-/// which leaves `HOST-49` pending until the design answers it).
+/// `create_realm`, makes the global by `new_host_object` with `Prototype::ObjectPrototypeOf` of
+/// the realm it receives, so that its prototype is the new realm's `%Object.prototype%`, and
+/// the global it returns has the clause 19 properties the engine defines: with that object
+/// returned as the global and no `this`, the script
+/// `this.Array === Array && Object.getPrototypeOf(this) === Object.prototype` answers `true` in
+/// the realm, and so do the other globals of this slice.
 #[test]
 fn host_49_setup_closure_and_clause_19_globals() {
     let mut agent = support::host::agent().unwrap();
     for round in 1..=3 {
         let mut calls = 0;
         let mut setup =
-            |cx: &mut HookCx<'_, TestHost>, _realm: RealmRef| -> Completion<GlobalObjects> {
+            |cx: &mut HookCx<'_, TestHost>, realm: RealmRef| -> Completion<GlobalObjects> {
                 calls += 1;
                 let global = cx
                     .new_host_object(HostObjectSpec {
-                        prototype: None,
+                        prototype: Prototype::ObjectPrototypeOf(realm),
                         brand: Brand(round),
                         data: None,
                     })
@@ -376,7 +404,11 @@ fn host_49_setup_closure_and_clause_19_globals() {
             );
         }
         assert_eq!(
-            eval_text(&mut agent, &realm, "this.Array === Array;"),
+            eval_text(
+                &mut agent,
+                &realm,
+                "this.Array === Array && Object.getPrototypeOf(this) === Object.prototype;"
+            ),
             Outcome::Normal("true".to_string())
         );
     }
@@ -401,7 +433,7 @@ fn host_53_parse_defines_no_global_binding() {
         |cx: &mut HookCx<'_, TestHost>, _realm: RealmRef| -> Completion<GlobalObjects> {
             let global = cx
                 .new_host_object(HostObjectSpec {
-                    prototype: None,
+                    prototype: Prototype::Null,
                     brand: Brand(5),
                     data: None,
                 })
