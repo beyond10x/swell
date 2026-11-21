@@ -1,0 +1,61 @@
+script locals 1
+  0000 2:1 Number 99
+  0001 2:1 StoreCompletion
+  0002 2:5 Undefined
+  0003 2:5 StoreCompletion
+  0004 2:11 Number 99
+  0005 2:10 Negate
+  0006 2:10 StoreCompletion
+  0007 2:15 Undefined
+  0008 2:15 StoreCompletion
+  0009 2:21 Number 39
+  0010 2:21 StoreCompletion
+  0011 2:15 Undefined
+  0012 2:15 Tag 0
+  0013 2:15 LoadCompletion
+  0014 2:15 Undefined
+  0015 2:15 StoreCompletion
+  0016 2:36 Number 42
+  0017 2:36 StoreCompletion
+  0018 2:40 Pop
+  0019 2:40 Pop
+  0020 2:40 Pop
+  0021 2:40 Jump 0027
+  0022 2:15 StoreCompletion
+  0023 2:15 EndFinally
+  0024 2:58 False
+  0025 2:5 JumpIfFalse 0027
+  0026 2:5 LoopJump 0004
+  0027 3:1 Undefined
+  0028 3:1 StoreCompletion
+  0029 3:6 Undefined
+  0030 3:6 StoreCompletion
+  0031 3:12 Number 39
+  0032 3:12 StoreCompletion
+  0033 3:6 Jump 0041
+  0034 3:24 SetLocal 0
+  0035 3:24 Pop
+  0036 3:6 Undefined
+  0037 3:6 StoreCompletion
+  0038 3:30 Number 1
+  0039 3:29 Negate
+  0040 3:29 StoreCompletion
+  0041 3:6 Undefined
+  0042 3:6 Tag 0
+  0043 3:6 LoadCompletion
+  0044 3:6 Undefined
+  0045 3:6 StoreCompletion
+  0046 3:44 Pop
+  0047 3:44 Pop
+  0048 3:44 Pop
+  0049 3:44 Jump 0052
+  0050 3:6 StoreCompletion
+  0051 3:6 EndFinally
+  0052 3:65 False
+  0053 3:1 JumpIfFalse 0055
+  0054 3:1 LoopJump 0029
+  0055 0:0 LoadCompletion
+  0056 0:0 Return
+  finally 0009..0011 -> 0013 items 0 envs 0
+  catch 0031..0034 -> 0034 items 0 envs 0
+  finally 0031..0041 -> 0043 items 0 envs 0

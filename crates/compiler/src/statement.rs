@@ -21,11 +21,13 @@
 //! there. A statement whose result is `UpdateEmpty(C, undefined)` (`#sec-updateempty`): `if`,
 //! the loops (`V` starts as `undefined`, `#sec-loopcontinues`), `switch` and `try`, first stores
 //! `undefined`, and so does a `catch` block when it is entered. A `finally` block keeps the
-//! register of the completion it was entered with and puts it back when it completes normally
-//! (`#sec-try-statement-runtime-semantics-evaluation`: "If finallyResult is a normal completion,
-//! set finallyResult to blockResult"). The values of the other statements, and the way `break`
-//! and `continue` carry the last value out of a loop, follow from the order the register is
-//! written in. Function code drops the value of an expression statement.
+//! register of the completion it was entered with, then stores `undefined`, and puts the kept
+//! value back when it completes normally (`#sec-try-statement-runtime-semantics-evaluation`: "If
+//! finallyResult is a normal completion, set finallyResult to blockResult"); a `break` or
+//! `continue` out of it leaves its own value or `undefined` (UpdateEmpty(finallyResult,
+//! undefined)). The values of the other statements, and the way `break` and `continue` carry the
+//! last value out of a loop, follow from the order the register is written in. Function code
+//! drops the value of an expression statement.
 
 use swell_syntax::ast::{ForInTarget, ForInit, Span, Stmt, StmtId, VarDeclarator};
 
@@ -467,6 +469,10 @@ impl<'a> Compiler<'a> {
                     t.push(Task::Emit(Instruction::LoadCompletion, span));
                     t.push(Task::ItemsUp);
                 }
+                // A break or continue out of the finally block leaves
+                // UpdateEmpty(finallyResult, undefined): its own value or undefined, not the
+                // value it kept.
+                self.reset_completion(span, t);
                 t.extend(list.iter().map(|s| Task::Stmt(*s)));
                 if self.script {
                     t.push(Task::Emit(Instruction::StoreCompletion, span));

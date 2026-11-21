@@ -4,7 +4,7 @@ script locals 0
   0002 3:1 Undefined
   0003 3:1 StoreCompletion
   0004 3:8 GetGlobal "a"
-  0005 3:1 JumpIfFalse 0025
+  0005 3:1 JumpIfFalse 0027
   0006 3:13 Undefined
   0007 3:13 StoreCompletion
   0008 3:19 Number 2
@@ -15,32 +15,36 @@ script locals 0
   0013 3:13 Undefined
   0014 3:13 Tag 0
   0015 3:13 LoadCompletion
-  0016 3:41 Number 3
-  0017 3:41 StoreCompletion
-  0018 3:13 StoreCompletion
-  0019 3:13 JumpIfTag 3 0022
-  0020 3:13 EndFinally
-  0021 3:13 Jump 0024
-  0022 3:13 Pop
-  0023 3:13 Jump 0025
-  0024 3:1 LoopJump 0004
-  0025 4:1 Undefined
-  0026 4:1 StoreCompletion
-  0027 4:6 Undefined
-  0028 4:6 StoreCompletion
+  0016 3:13 Undefined
+  0017 3:13 StoreCompletion
+  0018 3:41 Number 3
+  0019 3:41 StoreCompletion
+  0020 3:13 StoreCompletion
+  0021 3:13 JumpIfTag 3 0024
+  0022 3:13 EndFinally
+  0023 3:13 Jump 0026
+  0024 3:13 Pop
+  0025 3:13 Jump 0027
+  0026 3:1 LoopJump 0004
+  0027 4:1 Undefined
+  0028 4:1 StoreCompletion
   0029 4:6 Undefined
-  0030 4:6 Tag 0
-  0031 4:6 LoadCompletion
-  0032 4:23 Pop
-  0033 4:23 Pop
-  0034 4:23 Pop
-  0035 4:23 Jump 0041
-  0036 4:6 StoreCompletion
-  0037 4:6 EndFinally
-  0038 4:41 GetGlobal "b"
-  0039 4:1 JumpIfFalse 0041
-  0040 4:1 LoopJump 0027
-  0041 0:0 LoadCompletion
-  0042 0:0 Return
+  0030 4:6 StoreCompletion
+  0031 4:6 Undefined
+  0032 4:6 Tag 0
+  0033 4:6 LoadCompletion
+  0034 4:6 Undefined
+  0035 4:6 StoreCompletion
+  0036 4:23 Pop
+  0037 4:23 Pop
+  0038 4:23 Pop
+  0039 4:23 Jump 0045
+  0040 4:6 StoreCompletion
+  0041 4:6 EndFinally
+  0042 4:41 GetGlobal "b"
+  0043 4:1 JumpIfFalse 0045
+  0044 4:1 LoopJump 0029
+  0045 0:0 LoadCompletion
+  0046 0:0 Return
   finally 0008..0013 -> 0015 items 0 envs 0
-  finally 0029..0029 -> 0031 items 0 envs 0
+  finally 0031..0031 -> 0033 items 0 envs 0

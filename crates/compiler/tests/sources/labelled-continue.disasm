@@ -9,15 +9,17 @@ script locals 0
   0007 2:15 Undefined
   0008 2:15 Tag 0
   0009 2:15 LoadCompletion
-  0010 2:45 GetGlobal "b"
-  0011 2:45 StoreCompletion
-  0012 2:15 StoreCompletion
-  0013 2:15 JumpIfTag 3 0016
-  0014 2:15 EndFinally
-  0015 2:15 Jump 0018
-  0016 2:15 Pop
-  0017 2:15 Jump 0018
-  0018 2:4 LoopJump 0002
-  0019 0:0 LoadCompletion
-  0020 0:0 Return
+  0010 2:15 Undefined
+  0011 2:15 StoreCompletion
+  0012 2:45 GetGlobal "b"
+  0013 2:45 StoreCompletion
+  0014 2:15 StoreCompletion
+  0015 2:15 JumpIfTag 3 0018
+  0016 2:15 EndFinally
+  0017 2:15 Jump 0020
+  0018 2:15 Pop
+  0019 2:15 Jump 0020
+  0020 2:4 LoopJump 0002
+  0021 0:0 LoadCompletion
+  0022 0:0 Return
   finally 0004..0007 -> 0009 items 0 envs 0
