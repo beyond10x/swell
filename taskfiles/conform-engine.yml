@@ -1,0 +1,80 @@
+version: '3'
+
+vars:
+  ESS_SUITE: '{{.ESS_SUITE | default ".out/suite.json"}}'
+  ESS_UNSUPPORTED_MAX: '{{.ESS_UNSUPPORTED_MAX | default 44}}'
+
+tasks:
+  conform-engine:
+    desc: Run the ESS scenarios against the host interface of swell (conformance/ess); a failure, an error, fewer than 14 passed or more than ESS_UNSUPPORTED_MAX unsupported fail it.
+    summary: |
+      Run the scenarios of the ESS model under spec/ against the hand-written host interface of
+      crates/swell, through the conformance target in the workspace of its own, conformance/ess
+      (engine design, decision 10).
+
+      Reads ESS_SUITE (default .out/suite.json), which the task suite of taskfiles/spec.yml
+      writes; it has no deps entry, so that the file runs alone, and a missing suite fails with
+      "conform-engine: <file> missing; run task suite first". First it runs the tests of the
+      crate with RUSTFLAGS="-D warnings" (cargo test --locked --manifest-path
+      conformance/ess/Cargo.toml, ESS_SUITE passed on to them as an absolute path) into
+      .out/conform-engine-test.log, printed when cargo fails, and checks that the planted-defect
+      test a_target_whose_interrupt_does_nothing_fails_a_scenario ran and passed. Then it runs
+      the suite with the binary swell-conformance, writing the ess-conformance-report/2 to
+      .out/conform-engine.json and its output to .out/conform-engine.log, and prints the runner
+      summary line "<n> scenarios: <p> passed, <f> failed, <e> error, <u> unsupported". It
+      fails, naming both numbers, when a scenario failed or errored, when fewer than 14 passed,
+      or when more than ESS_UNSUPPORTED_MAX (default 44) were unsupported; then the lines of
+      the log for the scenarios that did not pass are printed too. The first build fetches the
+      ess crates of conformance/ess/Cargo.lock by their pinned tag.
+    env:
+      RUSTFLAGS: -D warnings
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        suite='{{.ESS_SUITE}}'
+        if [ ! -f "$suite" ]; then
+          echo "conform-engine: $suite missing; run task suite first"
+          exit 1
+        fi
+        case "$suite" in
+          /*) ;;
+          *) suite="$PWD/$suite" ;;
+        esac
+        status=0
+        ESS_SUITE="$suite" cargo test --locked --manifest-path conformance/ess/Cargo.toml > .out/conform-engine-test.log 2>&1 || status=$?
+        if [ "$status" -ne 0 ]; then
+          cat .out/conform-engine-test.log
+          echo "conform-engine: cargo test of conformance/ess failed, exit $status"
+          exit 1
+        fi
+        if ! grep -qx 'test a_target_whose_interrupt_does_nothing_fails_a_scenario \.\.\. ok' .out/conform-engine-test.log; then
+          echo "conform-engine: the planted-defect test a_target_whose_interrupt_does_nothing_fails_a_scenario did not run and pass; see .out/conform-engine-test.log"
+          exit 1
+        fi
+        echo "conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok"
+        status=0
+        cargo run --locked --quiet --manifest-path conformance/ess/Cargo.toml -- "$suite" .out/conform-engine.json > .out/conform-engine.log 2>&1 || status=$?
+        if [ "$status" -ge 2 ]; then
+          cat .out/conform-engine.log
+          echo "conform-engine: swell-conformance could not run the suite, exit $status"
+          exit 1
+        fi
+        last=$(tail -n 1 .out/conform-engine.log)
+        echo "$last"
+        if ! printf '%s\n' "$last" | awk -v max='{{.ESS_UNSUPPORTED_MAX}}' '
+          /^ *[0-9]+ scenarios: [0-9]+ passed, [0-9]+ failed, [0-9]+ error, [0-9]+ unsupported$/ {
+            seen = 1
+            total = $1; passed = $3; failed = $5; errors = $7; unsupported = $9
+            if (failed > 0 || errors > 0) { print "conform-engine: " failed " failed and " errors " error; none may"; bad = 1 }
+            if (passed < 14) { print "conform-engine: " passed " passed, fewer than 14"; bad = 1 }
+            if (unsupported > max) { print "conform-engine: " unsupported " unsupported, more than ESS_UNSUPPORTED_MAX=" max; bad = 1 }
+          }
+          END {
+            if (!seen) print "conform-engine: the last line of .out/conform-engine.log is not the runner summary line"
+            exit (!seen || bad)
+          }
+        '; then
+          grep -E '^  (failed|error|unsupported) ' .out/conform-engine.log || true
+          exit 1
+        fi

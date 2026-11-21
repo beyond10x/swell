@@ -1,0 +1,23 @@
+[package]
+name = "swell-conformance"
+description = "Runs the scenarios of the ESS model under spec/ against the hand-written host interface of swell, in process."
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+swell = { path = "../../crates/swell", features = ["fault-injection"] }
+swell-syntax = { path = "../../crates/syntax" }
+ess-conformance = { git = "https://github.com/beyond10x/ess", tag = "0.96.0" }
+ess-primitives = { git = "https://github.com/beyond10x/ess", tag = "0.96.0" }
+ess-domain = { git = "https://github.com/beyond10x/ess", tag = "0.96.0" }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
