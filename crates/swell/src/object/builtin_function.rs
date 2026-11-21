@@ -48,6 +48,11 @@ pub(crate) enum BuiltinId {
     String(crate::builtins::string::StringBuiltin),
     Math(crate::builtins::math::MathBuiltin),
     Json(crate::builtins::json::JsonBuiltin),
+    /// The builtins slice 2 takes early (`story:number-boolean-and-global-functions-early`),
+    /// each module of `builtins/` with its own ids.
+    Number(crate::builtins::number::NumberBuiltin),
+    Boolean(crate::builtins::boolean::BooleanBuiltin),
+    Global(crate::builtins::global::GlobalBuiltin),
 }
 
 /// What a built-in function does when called.
@@ -313,6 +318,11 @@ impl<H: Host> Agent<H> {
             BuiltinId::String(id) => self.run_string_builtin(id, function, this, args, new_target),
             BuiltinId::Math(id) => self.run_math_builtin(id, function, this, args, new_target),
             BuiltinId::Json(id) => self.run_json_builtin(id, function, this, args, new_target),
+            BuiltinId::Number(id) => self.run_number_builtin(id, function, this, args, new_target),
+            BuiltinId::Boolean(id) => {
+                self.run_boolean_builtin(id, function, this, args, new_target)
+            }
+            BuiltinId::Global(id) => self.run_global_builtin(id, function, this, args, new_target),
         }
     }
 

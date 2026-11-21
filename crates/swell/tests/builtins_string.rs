@@ -201,3 +201,143 @@ fn index_of_positions() {
         })
         .unwrap();
 }
+
+/// A valueOf that answers 7, to show that ToPrimitive of a String object never reaches an
+/// object's own valueOf through `String.prototype.toString`.
+fn seven(_cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    Ok(Value::Number(7.0))
+}
+
+/// `#sec-string.prototype.tostring` and `#sec-string.prototype.valueof` with
+/// `#sec-thisstringvalue`: a String this value is answered as it is, a String object answers
+/// its [[StringData]]; anything else, a Number or Boolean object and an object that only
+/// inherits from `String.prototype` included, throws a TypeError. Both have length 0 and their
+/// names, and are { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }. With
+/// them, ToPrimitive of a String object finds its String (`#sec-ordinarytoprimitive`): a String
+/// object multiplied by "1" is the Number of its String.
+#[test]
+fn string_prototype_to_string_and_value_of_need_a_string() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    agent
+        .with_cx(&realm, |cx| {
+            let global = object(cx, &global_root);
+            let string_constructor = get_object(cx, global, "String");
+            let prototype = get_object(cx, string_constructor, "prototype");
+            let object_constructor = get_object(cx, global, "Object");
+            let get_own = get(cx, object_constructor, "getOwnPropertyDescriptor");
+            let one = string(cx, "1");
+            let wrapped = cx
+                .construct(Value::Object(string_constructor), &[one], None)
+                .unwrap()
+                .unwrap();
+            let Value::Object(wrapped_object) = wrapped else {
+                panic!("{wrapped:?}");
+            };
+            // An ordinary object whose [[Prototype]] is %String.prototype% (`new Object` with a
+            // new target whose "prototype" it is) has no [[StringData]].
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            let new_target = cx
+                .new_host_function(realm_ref, "N", 0, unused, true, None)
+                .unwrap()
+                .unwrap();
+            let prototype_key = key(cx, "prototype");
+            cx.set(new_target, prototype_key, Value::Object(prototype), true)
+                .unwrap()
+                .unwrap();
+            let inheriting = cx
+                .construct(
+                    Value::Object(object_constructor),
+                    &[],
+                    Some(Value::Object(new_target)),
+                )
+                .unwrap()
+                .unwrap();
+            let Value::Object(inheriting) = inheriting else {
+                panic!("{inheriting:?}");
+            };
+            let get_prototype_of = get(cx, object_constructor, "getPrototypeOf");
+            assert_eq!(
+                cx.call(
+                    get_prototype_of,
+                    Value::Undefined,
+                    &[Value::Object(inheriting)]
+                )
+                .unwrap()
+                .unwrap(),
+                Value::Object(prototype)
+            );
+            let number_object = cx.to_object(Value::Number(1.0)).unwrap().unwrap();
+            let boolean_object = cx.to_object(Value::Boolean(true)).unwrap().unwrap();
+            for name in ["toString", "valueOf"] {
+                let method = get(cx, prototype, name);
+                let Value::Object(method_object) = method else {
+                    panic!("String.prototype.{name} is {method:?}");
+                };
+                let answer = cx.call(method, one, &[]).unwrap().unwrap();
+                assert_eq!(answer, one, "{name} of a String");
+                let answer = cx.call(method, wrapped, &[]).unwrap().unwrap();
+                assert_eq!(text(cx, answer), "1", "{name} of a String object");
+                let answer = cx
+                    .call(method, Value::Object(prototype), &[])
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(text(cx, answer), "", "{name} of String.prototype");
+                for this in [
+                    Value::Undefined,
+                    Value::Null,
+                    Value::Number(1.0),
+                    Value::Boolean(false),
+                    Value::Object(number_object),
+                    Value::Object(boolean_object),
+                    Value::Object(inheriting),
+                    Value::Object(string_constructor),
+                ] {
+                    let error = thrown(cx.call(method, this, &[]).unwrap());
+                    assert!(
+                        is_error_of(cx, global, error, "TypeError"),
+                        "{name} of {this:?}"
+                    );
+                }
+                assert_eq!(get(cx, method_object, "length"), Value::Number(0.0));
+                let found = get(cx, method_object, "name");
+                assert_eq!(text(cx, found), name);
+                let name_value = string(cx, name);
+                let descriptor = cx
+                    .call(
+                        get_own,
+                        Value::Undefined,
+                        &[Value::Object(prototype), name_value],
+                    )
+                    .unwrap()
+                    .unwrap();
+                let Value::Object(descriptor) = descriptor else {
+                    panic!("{descriptor:?}");
+                };
+                assert_eq!(get(cx, descriptor, "writable"), Value::Boolean(true));
+                assert_eq!(get(cx, descriptor, "enumerable"), Value::Boolean(false));
+                assert_eq!(get(cx, descriptor, "configurable"), Value::Boolean(true));
+            }
+
+            // ToPrimitive: valueOf of %String.prototype% answers the [[StringData]], so
+            // ToNumber of new String("1") is 1, and ToString of it "1".
+            assert_eq!(cx.to_number(wrapped).unwrap(), Ok(1.0));
+            let as_string = cx.to_string(wrapped).unwrap().unwrap();
+            assert_eq!(text(cx, Value::String(as_string)), "1");
+            // An own valueOf of the object comes first with the hint Number.
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            let own = cx
+                .new_host_function(realm_ref, "valueOf", 0, seven, false, None)
+                .unwrap()
+                .unwrap();
+            let value_of_key = key(cx, "valueOf");
+            cx.set(wrapped_object, value_of_key, Value::Object(own), true)
+                .unwrap()
+                .unwrap();
+            assert_eq!(cx.to_number(wrapped).unwrap(), Ok(7.0));
+            let as_string = cx.to_string(wrapped).unwrap().unwrap();
+            assert_eq!(text(cx, Value::String(as_string)), "1");
+        })
+        .unwrap();
+}

@@ -3,4 +3,5 @@
 description: The longest matching directory prefix gives the slice.
 ---*/
 
-Number.prototype;
+// Not defined by any slice: the case fails whatever the engine implements.
+notDefinedInAnySlice;

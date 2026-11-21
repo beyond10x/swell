@@ -4,8 +4,11 @@
 //! `%Boolean.prototype%`, `%Number.prototype%`, `%Error%`, `%Error.prototype%` and the six
 //! NativeErrors with their prototypes, written by `story:object-model-and-realms`; `%Object%`,
 //! `%Array%`, `%String%`, `%Math%` and `%JSON%` with the methods the harness files call, written
-//! by `story:harness-builtins` (each builtin module installs its own, `builtins/`). The other
-//! constructors and methods are later slices.
+//! by `story:harness-builtins` (each builtin module installs its own, `builtins/`); `%Number%`,
+//! `%Boolean%`, `%isNaN%` and `%isFinite%`, with the "constructor" properties of
+//! `%Number.prototype%` and `%Boolean.prototype%` and their methods, taken early by slice 2
+//! (`story:number-boolean-and-global-functions-early`). The other constructors and methods are
+//! later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
 //! first need no root until the realm record holds them all.
@@ -52,6 +55,14 @@ pub(crate) enum Intrinsic {
     Math,
     /// `%JSON%` (25.5).
     Json,
+    /// `%Number%` (21.1.1), taken early by slice 2.
+    Number,
+    /// `%Boolean%` (20.3.1), taken early by slice 2.
+    Boolean,
+    /// `%isNaN%` (19.2.3), taken early by slice 2.
+    IsNaN,
+    /// `%isFinite%` (19.2.2), taken early by slice 2.
+    IsFinite,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -88,6 +99,10 @@ pub(crate) struct Intrinsics {
     string: ObjectRef,
     math: ObjectRef,
     json: ObjectRef,
+    number: ObjectRef,
+    boolean: ObjectRef,
+    is_nan: ObjectRef,
+    is_finite: ObjectRef,
 }
 
 impl Intrinsics {
@@ -108,6 +123,10 @@ impl Intrinsics {
             Intrinsic::String => self.string,
             Intrinsic::Math => self.math,
             Intrinsic::Json => self.json,
+            Intrinsic::Number => self.number,
+            Intrinsic::Boolean => self.boolean,
+            Intrinsic::IsNaN => self.is_nan,
+            Intrinsic::IsFinite => self.is_finite,
         }
     }
 
@@ -139,6 +158,10 @@ impl Intrinsics {
             self.string,
             self.math,
             self.json,
+            self.number,
+            self.boolean,
+            self.is_nan,
+            self.is_finite,
         ] {
             mark.object(object);
         }
@@ -294,6 +317,9 @@ impl<H: Host> Agent<H> {
         let string = self.create_string_constructor(making, string_prototype)?;
         let math = self.create_math_object(making)?;
         let json = self.create_json_object(making)?;
+        let number = self.create_number_constructor(making, number_prototype)?;
+        let boolean = self.create_boolean_constructor(making, boolean_prototype)?;
+        let (is_finite, is_nan) = self.create_global_functions(making)?;
         let intrinsics = Intrinsics {
             object_prototype,
             function_prototype,
@@ -308,6 +334,10 @@ impl<H: Host> Agent<H> {
             string,
             math,
             json,
+            number,
+            boolean,
+            is_nan,
+            is_finite,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {
