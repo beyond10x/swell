@@ -542,6 +542,180 @@ The mechanism:
    charges a step per element and its allocation (`create_array_from_list`); the records of
    item 2 are charged as any record.
 
+**Function declarations in a block.** Added on 2026-11-22 for slice 6. What a script sees, the
+standard's (BlockDeclarationInstantiation, `sec-blockdeclarationinstantiation`): a function
+declared in a Block or in the CaseBlock of a `switch` is a lexical binding of that scope, not a
+`var` of the function, the script or the eval code. Each entry of the scope makes a new function
+object for it, whose [[Environment]] is the scope's environment, and initializes the binding
+before any statement of the scope runs (in a `switch` after the discriminant, before the first
+clause's test): it can be called above its declaration, each iteration of a loop body gets
+another object, and every clause of a `switch` sees the same one. After the scope the name means
+what it meant around it, a `ReferenceError` when nothing binds it. A name bound twice in one
+Block or CaseBlock, by two functions, or by a function and a `let` or `const`, or by a function
+and a `var` declared in it at any depth, is a `SyntaxError` in strict and in non-strict code
+(`sec-block-static-semantics-early-errors`, `sec-switch-statement-static-semantics-early-errors`).
+The evaluation of the declaration does nothing. A function declared at the top level of a function
+body, a script or eval code stays a `var`-scoped declaration, as in slice 1.
+
+Non-strict code until slice 18: as strict code. Annex B, B.3.2
+(`sec-block-level-function-declarations-web-legacy-compatibility-semantics`), which a web browser
+host implements, gives a block function of non-strict code also a `var` binding of the enclosing
+function, script or eval code, assigned when the declaration is evaluated, and lets one block
+declare a function twice; it comes with slice 18, with B.3.3 (a function declaration as the
+clause of an `if`, `sec-functiondeclarations-in-ifstatement-statement-clauses`), which stays
+refused until then. It is a recorded omission: `conformance/test262/sections.txt` gets the section
+`sec-block-level-function-declarations-web-legacy-compatibility-semantics` with the paths
+`test/annexB/language/function-code/`, `test/annexB/language/global-code/` and
+`test/annexB/language/eval-code/`, and the line `omit
+sec-block-level-function-declarations-web-legacy-compatibility-semantics
+var-binding-of-block-functions section-12-slice-18`, written with the block functions and removed
+by slice 18. Why not now (counted on the pinned checkout from the front matter, with no run):
+test262 holds the main body outside `test/annexB/`, where the 12 cases whose `esid` is a clause of
+B.3.2 or B.3.3 are `onlyStrict` (9) or `noStrict` with strict eval code (3), and expect the answer
+of a host without B.3.2; the 776 cases of those clauses are under `test/annexB/`, counted in slice
+18 (`dir test/annexB/ 18`), 480 of them B.3.3's; and B.3.2 changes FunctionDeclarationInstantiation,
+GlobalDeclarationInstantiation and EvalDeclarationInstantiation
+(`sec-web-compat-functiondeclarationinstantiation`, `sec-web-compat-globaldeclarationinstantiation`,
+`sec-web-compat-evaldeclarationinstantiation`), so it would raise no count of slice 6. Not
+measured: whether a case outside `test/annexB/` that runs non-strict reads a block function after
+its block; the run of the slice shows it.
+
+The mechanism, in the terms of "Lexical bindings":
+
+1. A block function is a binding of its Block's or CaseBlock's scope under item 1 of "Lexical
+   bindings": a local slot, or a slot of the scope's record when a nested function refers to it
+   (the function itself, when it calls itself by name) or a lookup by name can reach it. A scope
+   whose only declarations are functions makes a record by the same rule. At the entry of the
+   scope, once its record (if any) is the LexicalEnvironment and before its first statement, the
+   code makes each function object with the closure instruction, in source order, and initializes
+   its binding (InitializeBinding); its [[Environment]] is that LexicalEnvironment, the scope's
+   record or, when the scope makes none, the one around it.
+2. No access to a block function is checked (item 2 of "Lexical bindings"): no code of the scope
+   runs before every one of them is initialized.
+3. In eval code a function of a Block belongs to that Block's scope, never to the record of
+   PerformEval (item 5 of "Lexical bindings"), whose lexical slots are the eval code's top-level
+   lexical declarations only; a top-level function of eval code stays a `var` declaration of
+   EvalDeclarationInstantiation.
+4. What slice 18 adds, so that nothing here is undone: the `var` binding, made by the three
+   instantiations as a `var` is, and at the position of the declaration in its statement list an
+   instruction that copies the block binding's value to it (the Normative Optional steps of the
+   three, "When the FunctionDeclaration funcDecl is evaluated, perform the following steps in
+   place of the FunctionDeclaration Evaluation algorithm"); the duplicate declarations of
+   non-strict code (the Normative Optional steps of BlockDeclarationInstantiation).
+   The block binding stays as it is, and the position of the declaration emits nothing before
+   slice 18. A test that a block function of non-strict code is not visible after its block
+   changes its answer then.
+5. Budgets. Each function object is the closure instruction's allocation and step; a record is
+   charged by item 6 of "Lexical bindings".
+
+**Iterators held by a builtin.** Added on 2026-11-22 for slice 6. What a script sees, the
+standard's: a builtin that iterates (in slice 6 `Array.from`, `Object.fromEntries` and
+`Object.groupBy`) gets an Iterator Record by GetIterator (`sec-getiterator`,
+`sec-getiteratorfrommethod`), the iterator and its `next` method read once (`sec-iterator-records`),
+and steps it by IteratorStepValue (`sec-iteratorstepvalue`). A throw of `next`, of reading `done`
+or `value`, and the `TypeError` of a result that is no object end the builtin with that throw,
+and the iterator is not closed. An abrupt completion of the builtin's own work between two steps
+(a callback or a conversion that throws, a property it cannot define) closes the iterator first
+(IfAbruptCloseIterator, `sec-ifabruptcloseiterator`; IteratorClose, `sec-iteratorclose`): `return`
+is called when it is not undefined, and the first throw is what the builtin throws, whatever
+`return` throws or answers. Every `next` and `return` is a call that may run any code, so an
+iterator that is never done ends at the step budget, and a `next` that iterates again in itself
+ends at a depth bound. A termination closes nothing: no code runs after it, `return` included.
+
+The mechanism:
+
+1. Rust code holds the record as a value of an engine type, `IteratorRecord` ([[Iterator]],
+   [[NextMethod]], [[Done]]; `crates/swell/src/ops/iteration.rs`), handles only. A builtin keeps
+   [[Iterator]] and [[NextMethod]] on the agent's kept stack (`Agent::keep`,
+   `object/builtin_function.rs`, the form that decision 4's "slots of its own frame on the engine
+   stack" takes in the code) from GetIterator until it returns, on every way out, a throw
+   included (`Agent::release` to its mark), and keeps the same way every value it still needs
+   across a call: the result object of `next` while `done` and `value` are read, the values it
+   collects, the object it builds, its callback. The Rust copies stay valid while kept: the
+   collector moves no record and marks every kept value; `test-collect` fails a builtin that
+   leaves one out.
+2. Every call of `next` and of `return` goes through the agent's call path, as every call from
+   Rust does: it charges the call's step, counts against `reentry_depth` (a builtin or host `next`
+   by its activation, an ECMAScript one as a run loop nested in the builtin's), and an ECMAScript
+   `next` pushes a frame against `frame_depth`. A bound exceeded is the `RangeError` of "Depth
+   bounds" below, a throw of `next`, after which the iterator is not closed. The operations of
+   `ops/iteration.rs` charge no step of their own for the calls they make.
+3. A builtin's loop over an iterator charges one step per iteration through `charge_steps`,
+   beside the step of the call of `next`, and so checks the step budget and the interrupt in the
+   loop itself, whatever `next` is: a builtin `next` such as `%ArrayIteratorPrototype%.next` runs
+   no instruction. The builtin's own work in an iteration charges as this decision says (a
+   callback is a call).
+4. IteratorClose takes the completion: for a throw it calls `return`, if there is one, and answers
+   the throw it was given; for a normal completion it answers a throw of `return`, or the
+   `TypeError` of a result that is no object. It is given `Abrupt::Throw` or a normal completion,
+   never `Abrupt::Terminated`, which passes up untouched; a termination inside `return` ends the
+   run as any termination does.
+
+**The iterator of `for`-`of`, of an array pattern and of a spread.** Added on 2026-11-22 for slice
+6. What a script sees, the standard's: a `for`-`of` gets the iterator of its head's value and runs
+the body for each value, each step calling `next` and reading `done` and `value`
+(`sec-runtime-semantics-forinofheadevaluation`,
+`sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`). It closes
+the iterator (IteratorClose, `sec-iteratorclose`) on every exit before the iterator is done: a
+`break` of the loop, a `break` or `continue` to a statement around it, a `return`, a throw of the
+body or of binding or assigning the value to the head (a pattern included). A `continue` of the
+loop itself does not close it, nor does a throw of `next`, of reading `done` or `value`, a result
+that is no object, or the end of the iteration. On a throw, `return`'s throw or answer is dropped
+for the first throw; on the other exits a throw of `return` replaces the exit (the `break` or
+`return` does not happen), and an answer that is no object is a `TypeError`. An array pattern
+(`sec-runtime-semantics-iteratorbindinginitialization`,
+`sec-runtime-semantics-iteratordestructuringassignmentevaluation`) closes its iterator when it ends
+before the iterator is done (`[a] = it` closes it, `[a, ...r] = it` never does) and when a target,
+a default or a nested pattern throws, not after a throw of `next`, `done` or `value`. A spread
+(`sec-runtime-semantics-arrayaccumulation`, `sec-runtime-semantics-argumentlistevaluation`) runs
+its iterator to the end and never closes it. A termination closes nothing.
+
+The mechanism:
+
+1. The record lives on the operand stack of the frame, as the enumerator of a `for`-`in` does: the
+   head's GetIterator pushes an engine entry of its own (`interp/frame.rs`, `Entry`, beside
+   `Entry::Enumerator`, inline or boxed as the enumerator is, whichever keeps `Entry` at its size)
+   holding [[Iterator]], [[NextMethod]] and [[Done]], below the values of the head and the body,
+   until the loop's exit pops it. `Frame::trace` marks the iterator and the next method; the
+   entry is charged as the stack's growth is. Rejected: a local slot. The stack is cut back on
+   every exit by the jumps' pops and a handler's `items`, as for the enumerator, and slice 7
+   saves the operand stack with a suspended frame, so a `for`-`of` around a `yield` keeps its
+   record with no other change.
+2. The step instruction calls `next` through the operations of `ops/iteration.rs`, a call by
+   item 2 of "Iterators held by a builtin" (a re-entry), and reads `done` and `value` as any Get of
+   an instruction; a throw of any of them, and a result whose `done` is true, set the entry's
+   [[Done]] to true. Each iteration charges the steps of its instructions and its `LoopJump`.
+   Rejected for now: calling `next` by the call instruction, which spares a re-entry per step but
+   splits each step into several instructions; a re-entry here nests no deeper than the `next` it
+   calls, and a measurement decides.
+3. IteratorClose is compiled as a `try` with a `finally` block is
+   (`crates/compiler/src/statement.rs`, `try_statement`; `lib.rs`, `Control::Finally`,
+   `exit_jump_to`, `exit_return`, `finally_dispatch`), with a control entry of its own kind
+   pushed inside the loop's. A handler of kind `Finally` in the frame's handler table covers the
+   code from the first step to the end of the body, the head's binding and pattern included, and
+   its `items` keep the iterator entry; a `break` or `continue` that leaves through it and a
+   `return` are emitted as for a `finally`: the pops down to its `items`, the tag of the exit, a
+   jump to its entry. It differs from a `Control::Finally` in one point: a `continue` whose
+   target is this loop does not pass it, a `break` of this loop does. Its entry, outside the
+   handler's range, is one instruction, `[i, v, tag] -> [i, v, tag]`: when the entry's [[Done]]
+   is false it sets it and runs IteratorClose (item 4 of "Iterators held by a builtin") with a
+   throw completion of `v` for `TAG_THROW` and a normal one for every other tag; then the code
+   `finally_dispatch` emits goes on with the exit, and `EndFinally` throws `v` again. A throw of
+   `return` on a `break`, `continue` or `return` comes from that instruction, outside the range,
+   and goes to the handlers around the loop. No new handler kind is needed.
+4. A termination enters no handler (`bytecode.rs`, `Handler`) and runs no exit code, so
+   IteratorClose is not called.
+5. An array pattern holds its record in the same entry and closes it by the same handler and
+   instruction, over the code of the pattern (its targets' references, its steps, defaults and
+   nested patterns). A pattern has no `break`, `continue` or `return` in it, so only a throw and
+   its normal end close it: at its end it runs the instruction with a normal completion, which
+   closes when [[Done]] is false; a rest element leaves [[Done]] true. A nested pattern has an
+   entry and a handler of its own, inner first in the table, so a throw closes the inner iterator,
+   then the outer one. A spread is one instruction that runs its iteration in Rust as a builtin
+   does (item 1 of "Iterators held by a builtin", the kept stack), appending each value and
+   charging one step per element beside the call of `next`; nothing runs between its steps but
+   `next`, so it needs no entry and no handler.
+
 **The step budget.** One unit per bytecode instruction, plus units charged by builtins in
 proportion to their work: per element for array, typed array and collection loops, per code unit
 for string operations, per matcher step for regular expressions (decision 7), per limb operation
@@ -607,11 +781,12 @@ source, which is ambient authority, and a fixed key lets a hostile script choose
 
 **Collector.** Precise, stop-the-world mark and sweep over the arenas. Roots: the frame stack and
 its operand stacks, the job queue, the realms and their intrinsics, the module map, the kept-objects
-list of 9.10, and the host's root table. A builtin that can call script keeps every value it still
-needs in slots of its own frame on the engine stack, which the collector scans; a Rust local
-holding a handle across a call into script is a bug, found by a test mode that collects at every
-safe point and by the generation check. Collections run only at safe points (instruction
-boundaries and the re-entry points), when the bytes allocated since the last collection pass a
+list of 9.10, the GlobalSymbolRegistry ("Symbols" below), and the host's root table. A builtin
+that can call script keeps every value it still needs in slots of its own frame on the engine
+stack, which the collector scans; a Rust local holding a handle across a call into script is a
+bug, found by a test mode that collects at every safe point and by the generation check.
+Collections run only at safe points (instruction boundaries and the re-entry points), when the
+bytes allocated since the last collection pass a
 threshold that grows with the live size, and when the host asks. They never run inside an
 allocation. Triggers count bytes, never time, so for the same inputs and budgets the same objects
 are collected at the same points, and `WeakRef` and `FinalizationRegistry` results are
@@ -651,6 +826,94 @@ test reads: `heap_bytes()` after `parse_script` of a source of n code units is a
 than before it; it stays at least n more while a function made from that script is reachable,
 also after the host released the script; and `collect()` after the host released the script
 and no function made from it is reachable gives at least n bytes back.
+
+**Symbols.** Added on 2026-11-22 for slice 6. What a script sees, the standard's
+(`sec-symbol-objects`): `Symbol(d)` makes a new Symbol at each call, whose [[Description]] is
+ToString(d), or undefined when `d` is undefined (`sec-symbol-description`); `new Symbol()` throws a
+`TypeError`. `Symbol.for(k)` answers the Symbol of the GlobalSymbolRegistry whose key is
+ToString(k), made and added the first time, and `Symbol.keyFor(s)` answers that key, or undefined
+for a Symbol `Symbol.for` did not make (`sec-symbol.for`, `sec-symbol.keyfor`, `sec-keyforsymbol`).
+The registry is the agent's, the append-only [[GlobalSymbolRegistry]] of its Agent Record
+(`sec-agents`, `sec-globalsymbolregistry-records`): every realm of the agent gets the same Symbol
+for a key. The well-known symbols (`sec-well-known-symbols`) are agent values as well
+(`realm/mod.rs`), twelve in slice 6 (`Symbol.asyncIterator` comes with slice 10), and none of them
+is in the registry. A Symbol is never converted to a String or a Number implicitly: ToString and
+ToNumber of it throw a `TypeError` (`sec-tostring`, `sec-tonumber`), and so do `"" + s`,
+`` `${s}` ``, `+s`, `s < 1` and every builtin that passes it to them or to an operation built on
+them (ToIntegerOrInfinity, ToLength, ToNumeric). ToPropertyKey takes it as it is, a property key;
+`String(s)`, `s.toString()` and `s.description` answer without a throw (SymbolDescriptiveString,
+`sec-symboldescriptivestring`; `sec-string-constructor-string-value`). ToObject of a Symbol makes a
+Symbol object, an ordinary object whose [[SymbolData]] is the Symbol
+(`sec-properties-of-symbol-instances`), whose prototype is `%Symbol.prototype%` of the current
+realm.
+
+The mechanism:
+
+1. A Symbol is a record of the `symbols` arena (`heap/mod.rs`, `SymbolRecord`) whose
+   [[Description]] is a String handle or none; two Symbols are the same exactly when their
+   handles are.
+2. The GlobalSymbolRegistry is a part of the heap, beside the atom table: a keyed map
+   (`heap/map.rs`, `KeyedMap`, with the heap's hasher, keyed by `hash_key` alone, HOST-145) from
+   the code units of a key to its Symbol, whose [[Description]] is the key's String. The record of
+   a registered Symbol says that it is registered, so `Symbol.keyFor` answers its description with
+   no second map. The registry is a root of the collector, traced at a root site of the layout of
+   `heap/collect.rs`: every registered Symbol, and its key with it, lives as long as the agent, and
+   no entry is ever removed.
+3. Charges. `Symbol.for` of a new key charges the Symbol's record, the map's copy of the key's
+   units and the growth of the map's table (`KeyedMap::table_bytes_for`, before it grows); the
+   key's String is charged as any String. No sweep credits them, since none frees them. A script
+   that registers a Symbol for a new key in a loop (`for (let i = 0; ; i++) Symbol.for(String(i))`)
+   therefore ends in `Terminated(MemoryBudget)`, which it cannot catch, where the same loop over
+   `Symbol(String(i))` keeps nothing past a collection; the story of the `Symbol` builtin tests
+   both under one memory budget. Steps: the call's, and one per code unit of the key hashed and
+   compared, as any string operation.
+4. A Symbol object keeps its Symbol in `OrdinaryData` (`object/ordinary.rs`), as the Boolean and
+   Number objects keep theirs, traced with the object; thisSymbolValue (`sec-thissymbolvalue`)
+   reads it.
+5. The conversions of `ops/conversion.rs` are the one place a Symbol meets ToString or ToNumber:
+   a builtin converts an argument through them, never by formatting a value in Rust, so a Symbol
+   argument gives the `TypeError` wherever the clause converts it.
+
+**Template objects.** Added on 2026-11-22 for slice 6. What a script sees, the standard's
+(GetTemplateObject, `sec-gettemplateobject`; `sec-tagged-templates-runtime-semantics-evaluation`):
+a tagged template passes its tag a template object, an Array of the cooked strings (undefined for
+a part with a NotEscapeSequence) whose `raw` property is an Array of the raw strings; each element
+is not writable and not configurable, `raw` is not writable, not enumerable and not configurable,
+and both Arrays are frozen. There is one object per site, the TemplateLiteral of the source (its
+Parse Node), per realm: every evaluation of a site gives the same object, from every function
+object made from its code (closures made in a loop included); two sites with the same text give
+two objects, and so does one source parsed twice (two scripts, `eval` of one String twice).
+
+The mechanism:
+
+1. The key of a site is its compiled code and the site's index in it: the compiler numbers the
+   tagged templates of a `Code` (a script, eval code or a dynamic function, with all its function
+   templates) and keeps a site table of each site's cooked and raw strings as String constants
+   (`swell-compiler`, `bytecode.rs`); the instruction that pushes a template object names its
+   index.
+2. The realm's [[TemplateMap]] is kept with the code: the script record that holds the compiled
+   code (`script.rs`, `ScriptRecord`; eval code and dynamic functions have records of their own,
+   `dynamic_code.rs`) has an entry per site of its code, empty until the site's first evaluation
+   makes the two Arrays, traced by `ScriptRecord::trace`; the instruction finds it through the
+   frame's script. That is the realm's map divided by code: a script record has one [[Realm]], and
+   every frame that runs its code runs in that realm, since its own code runs in its [[Realm]]
+   (ScriptEvaluation, PerformEval and CreateDynamicFunction make a record in the realm they run
+   in) and every function object made from it gets the realm of the frame that makes it (the
+   current Realm Record of OrdinaryFunctionCreate). Rejected: a map on the realm record keyed by
+   code and index, which keeps the template objects of every eval code the realm ever ran for as
+   long as the realm lives.
+3. The entries are freed with the code: by the sweep that frees the script record, once the host
+   no longer holds it, no frame runs its code and no function object made from it is reachable
+   ("Source text." above). It is safe: every evaluation of a site runs in a frame of its code, so
+   after that no evaluation can ask for an entry again, and an object no evaluation can ask for
+   and nothing else references is not live (`sec-liveness`). A template object the tag kept is an
+   ordinary object, alive while it is referenced, its `raw` with it.
+4. Charges. The site table and its strings are part of the compiled code, charged with it when
+   its record is made, and so is the entry per site of the record. The two Arrays and their
+   elements are charged as any Array when the site's first evaluation makes them, and credited by
+   the sweep that frees them; a later evaluation allocates nothing. Steps: the instruction's, and
+   at the first evaluation one per element it defines in the two Arrays (an array loop, decision
+   3).
 
 **Cost.** The arenas cost a bounds check and a generation compare on every access, and plain maps
 cost a search per property access where shapes would cost an offset. How much slower this is than
