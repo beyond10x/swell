@@ -9,6 +9,7 @@
 //!   catch|finally <start>..<end> -> <target> items <n> envs <n>
 //!
 //! function <i> <kind> "<name>" length <n> locals <n>[ strict][ self][ eval-environment]
+//!         [ binds-parameters][ parameter-environment]
 //!   params local <n>|env <n>, ...         when there are parameters
 //!   captured "<name>" ...                 the function environment's slots, when there are any
 //!   arguments mapped|unmapped local <n>|env <n>   the arguments object a call makes, if any
@@ -20,8 +21,8 @@
 //! A string constant is written in double quotes, with `"`, `\` and every code unit outside
 //! printable ASCII escaped (`\u{XXXX}`); a Number by `Number::toString`. Instruction and jump
 //! indices have four digits at least. The position `0:0` is the end of a script, which has no
-//! source position. `PushNamedEnv <t>` and `PushLexicalEnv <t>` are followed by the names of the
-//! slots of their table entry, a `const` one after `const`.
+//! source position. `PushNamedEnv <t>`, `PushLexicalEnv <t>` and `PushVarEnv <t>` are followed by
+//! the names of the slots of their table entry, a `const` one after `const`.
 
 use std::fmt::Write;
 
@@ -97,6 +98,12 @@ pub fn disassemble(code: &Code) -> String {
         }
         if f.eval_environment {
             out.push_str(" eval-environment");
+        }
+        if f.binds_parameters {
+            out.push_str(" binds-parameters");
+        }
+        if f.parameter_environment {
+            out.push_str(" parameter-environment");
         }
         out.push('\n');
         if !f.params.is_empty() {
@@ -279,6 +286,10 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::AssignConstEnv { hops, slot } => format!("AssignConstEnv {hops} {slot}"),
         I::InitGlobal(k) => format!("InitGlobal {}", s(k)),
         I::ToString => "ToString".to_string(),
+        I::Argument(n) => format!("Argument {n}"),
+        I::JumpIfNotUndefined(t) => format!("JumpIfNotUndefined {t:04}"),
+        I::RestArguments(n) => format!("RestArguments {n}"),
+        I::PushVarEnv(t) => format!("PushVarEnv {t} {}", names(t)),
         other => format!("{other:?}"),
     }
 }

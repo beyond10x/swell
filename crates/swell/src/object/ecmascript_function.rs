@@ -254,7 +254,9 @@ impl<H: Host> Agent<H> {
         };
         let locals = template.locals;
         let captured = u32::try_from(template.captured.len()).unwrap_or(u32::MAX);
-        let environment = captured > 0 || template.eval_environment;
+        let binds = template.binds_parameters;
+        let parameter_environment = template.parameter_environment;
+        let environment = captured > 0 || template.eval_environment || parameter_environment;
         let params = template.params.clone();
         let arguments = template.arguments;
 
@@ -265,18 +267,33 @@ impl<H: Host> Agent<H> {
             (None, Some(this)) => this,
             (None, None) => self.ordinary_call_bind_this(&callee, this_argument)?,
         };
-        let env = if environment {
+        let (env, var_env) = if environment {
+            // Steps 19 and 20: the parameters' environment of non-strict code whose
+            // initializers call `eval` directly lies inside a record of its own, the
+            // VariableEnvironment until the code pushes the body's (`PushVarEnv`).
+            let outer = if parameter_environment {
+                Some(self.new_declarative_environment(callee.environment, 0, None)?)
+            } else {
+                callee.environment
+            };
             let names = SlotNames {
                 script: callee.script,
                 compiled: Rc::clone(&callee.compiled),
                 table: NameTable::Function(callee.template),
             };
-            Some(self.new_function_environment(callee.environment, captured, names)?)
+            let env = Some(self.new_function_environment(outer, captured, names)?);
+            (env, if parameter_environment { outer } else { env })
         } else {
-            callee.environment
+            (callee.environment, callee.environment)
         };
 
-        let count = usize::try_from(locals).unwrap_or(usize::MAX);
+        // A list that is not simple keeps the arguments in the slots after the frame's own,
+        // charged with the frame and traced with its locals, for the code that binds the
+        // parameters (`binds_parameters`).
+        let kept = if binds { args.len() } else { 0 };
+        let count = usize::try_from(locals)
+            .unwrap_or(usize::MAX)
+            .saturating_add(kept);
         let local_bytes =
             u64::try_from(count.saturating_mul(size_of::<Value>())).unwrap_or(u64::MAX);
         let charged = frame_bytes().saturating_add(local_bytes);
@@ -288,23 +305,24 @@ impl<H: Host> Agent<H> {
             self.heap.accounting.credit(charged);
             return Err(self.terminate(Termination::MemoryBudget));
         }
-        slots.resize(count, SlotValue::Value(Value::Undefined));
+        slots.resize(
+            count.saturating_sub(kept),
+            SlotValue::Value(Value::Undefined),
+        );
+        if binds {
+            slots.extend(args.iter().map(|&value| SlotValue::Value(value)));
+        }
 
-        // FunctionDeclarationInstantiation, step 22: each argument in its parameter's slot.
-        for (position, slot) in params.iter().enumerate() {
-            let value = args.get(position).copied().unwrap_or(Value::Undefined);
-            let stored = match *slot {
-                Slot::Local(n) => usize::try_from(n)
-                    .ok()
-                    .and_then(|n| slots.get_mut(n))
-                    .map(|binding| *binding = SlotValue::Value(value))
-                    .is_some(),
-                Slot::Env(n) => self.set_slot(env, 0, n, value).is_ok(),
-            };
-            if !stored {
-                self.heap.accounting.credit(charged);
-                return Err(self.fault());
-            }
+        // FunctionDeclarationInstantiation, step 22: each argument in its parameter's slot; for
+        // a list that is not simple each parameter uninitialized until its code binds it.
+        let stored = if binds {
+            self.uninitialize_parameters(&params, env, &mut slots)
+        } else {
+            self.bind_parameters(&params, args, env, &mut slots)
+        };
+        if !stored {
+            self.heap.accounting.credit(charged);
+            return Err(self.fault());
         }
 
         // Steps 15 to 22: the arguments object, once the parameters hold their values.
@@ -333,7 +351,7 @@ impl<H: Host> Agent<H> {
             stack: Vec::new(),
             locals: slots,
             env,
-            var_env: env,
+            var_env,
             pushed_envs: 0,
             this,
             function: Some(function),
@@ -344,6 +362,60 @@ impl<H: Host> Agent<H> {
             constructed,
             charged,
         })
+    }
+
+    /// FunctionDeclarationInstantiation, step 22, of a simple list: each of `args` in its
+    /// parameter's slot of `params`, a local of `locals` or a slot of the function environment
+    /// `env`, a missing one `undefined`; whether every slot was there.
+    #[inline(never)]
+    fn bind_parameters(
+        &mut self,
+        params: &[Slot],
+        args: &[Value],
+        env: Option<Handle>,
+        locals: &mut [SlotValue],
+    ) -> bool {
+        for (position, slot) in params.iter().enumerate() {
+            let value = args.get(position).copied().unwrap_or(Value::Undefined);
+            let stored = match *slot {
+                Slot::Local(n) => usize::try_from(n)
+                    .ok()
+                    .and_then(|n| locals.get_mut(n))
+                    .map(|binding| *binding = SlotValue::Value(value))
+                    .is_some(),
+                Slot::Env(n) => self.set_slot(env, 0, n, value).is_ok(),
+            };
+            if !stored {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Steps 21 and 26 of a list that is not simple: each parameter's slot of `params`, a
+    /// local of `locals` or a slot of the function environment `env`, uninitialized until the
+    /// code binds it in order; whether every slot was there.
+    #[inline(never)]
+    fn uninitialize_parameters(
+        &mut self,
+        params: &[Slot],
+        env: Option<Handle>,
+        locals: &mut [SlotValue],
+    ) -> bool {
+        for slot in params {
+            let cleared = match *slot {
+                Slot::Local(n) => usize::try_from(n).ok().and_then(|n| locals.get_mut(n)),
+                Slot::Env(n) => env.and_then(|handle| {
+                    let record = self.heap.environments.get_mut(handle).ok()?;
+                    record.slots.get_mut(usize::try_from(n).ok()?)
+                }),
+            }
+            .map(|binding| *binding = SlotValue::Uninitialized);
+            if cleared.is_none() {
+                return false;
+            }
+        }
+        true
     }
 
     /// FunctionDeclarationInstantiation, steps 15 to 22: the arguments object of a call of

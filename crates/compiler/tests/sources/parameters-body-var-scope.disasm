@@ -1,0 +1,35 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 3 binds-parameters
+  params env 0, local 0
+  captured "a"
+  0000 2:12 Argument 3
+  0001 2:12 SetEnv 0 0
+  0002 2:12 Pop
+  0003 2:15 Argument 4
+  0004 2:15 JumpIfNotUndefined 0006
+  0005 2:19 Closure 1
+  0006 2:15 SetLocal 0
+  0007 2:15 Pop
+  0008 2:1 GetEnv 0 0
+  0009 2:1 SetLocal 1
+  0010 2:1 Pop
+  0011 2:69 Undefined
+  0012 2:69 GetLocal 0
+  0013 2:69 Call 0
+  0014 2:75 GetLocal 1
+  0015 2:69 Add
+  0016 2:79 GetLocal 2
+  0017 2:69 Add
+  0018 2:62 Return
+  0019 2:1 Undefined
+  0020 2:1 Return
+
+function 1 expression "b" length 0 locals 0
+  0000 2:40 GetEnvChecked 0 0
+  0001 2:33 Return
+  0002 2:19 Undefined
+  0003 2:19 Return

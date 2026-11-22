@@ -57,6 +57,15 @@
 //! access checks the binding's state ([`Binding::Lexical`]) unless it is in the code of the same
 //! function after the end of the declaration, in a block, a function body or eval code.
 //!
+//! A function whose parameter list is not simple (`docs/design/engine.md`, decision 3, "A
+//! parameter list that is not simple"; `#sec-functiondeclarationinstantiation`) binds its
+//! parameters in order in the scope of its parameters, where the initializers are resolved: an
+//! access before the end of a parameter, its initializer included, or from another function is
+//! checked, as a `let` binding's is. When a parameter has an initializer, the body's `var` names
+//! are a scope of their own inside it (step 28), a `var` of a parameter's name or of `arguments`
+//! starting with its value ([`Site::BodyVar`]), and the arguments object of such a list is
+//! unmapped (step 22).
+//!
 //! A record whose slots have no names is passed by a lookup: no lookup can find its name there,
 //! since a name a record between the reference and the `with` binds would have resolved the
 //! reference at compile time. The parameters of a function that makes a mapped arguments object
@@ -139,6 +148,11 @@ pub(crate) enum Site {
     /// The binding `arguments` of a function that needs an arguments object, from the top of
     /// the function.
     Arguments(FunctionId),
+    /// The binding of the `n`th of the `var` names of a function whose parameters have an
+    /// initializer, in the `var` scope of its body, when a parameter or `arguments` has the same
+    /// name: it starts with that binding's value (`#sec-functiondeclarationinstantiation`, step
+    /// 28.f.i.4).
+    BodyVar(FunctionId, u32),
 }
 
 /// Where a name resolves to, from one site.
@@ -184,6 +198,10 @@ pub(crate) struct FunctionInfo {
     pub arguments: Option<ArgumentsObject>,
     /// The name NamedEvaluation or an accessor gives an anonymous function.
     pub given_name: Option<Vec<u16>>,
+    /// Of a function whose parameters have an initializer, when the code makes a record for the
+    /// `var` scope of its body: the names of its slots, in slot order (empty when only the
+    /// bindings a direct `eval` adds will live there).
+    pub var_env: Option<Vec<String>>,
 }
 
 pub(crate) struct Resolution {
@@ -205,7 +223,13 @@ pub(crate) struct Resolution {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
+    /// The parameters, `arguments` and, when no parameter has an initializer, the `var` names
+    /// of a function. The parameters of a list that is not simple are bound in order, each
+    /// uninitialized until its turn (`#sec-functiondeclarationinstantiation`, steps 21 and 26).
     Function,
+    /// The `var` names of the body of a function whose parameters have an initializer, inside
+    /// the scope of its parameters (`#sec-functiondeclarationinstantiation`, step 28).
+    Vars,
     Catch,
     SelfName,
     /// The body of a `with` statement: no binding, an Object Environment Record at run time.
@@ -262,6 +286,8 @@ enum Walk {
     Stmt(StmtId),
     Expr(ExprId),
     Function(FunctionId),
+    /// Enters the body of a function, after the initializers of its parameters.
+    Body(FunctionId),
     Catch(StmtId),
     /// Enters the body of the `with` statement.
     With,
@@ -421,7 +447,8 @@ impl<'a, 'm> Resolver<'a, 'm> {
             Walk::Function(id) => self
                 .ast
                 .function(id)
-                .map_or(0, |f| f.body.len().saturating_add(f.params.len())),
+                .map_or(0, |f| f.initializers.len().saturating_add(f.params.len())),
+            Walk::Body(id) => self.ast.function(id).map_or(0, |f| f.body.len()),
             _ => 0,
         };
         self.m.grow_by(
@@ -721,6 +748,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
             Walk::Stmt(id) => self.stmt(id),
             Walk::Expr(id) => self.expr(id),
             Walk::Function(id) => self.function(id),
+            Walk::Body(id) => self.function_body(id),
             Walk::Catch(id) => self.catch(id),
             Walk::With => {
                 let owner = self.scopes.get(self.current).and_then(|s| s.owner);
@@ -1083,7 +1111,11 @@ impl<'a, 'm> Resolver<'a, 'm> {
     }
 
     /// Enters a function: the scope of its own name (a named function expression), then the
-    /// scope of its parameters and `var` declarations.
+    /// scope of its parameters, `arguments` and, when no parameter has an initializer, its `var`
+    /// declarations; the initializers of the parameters are walked in that scope, each
+    /// anonymous function among them named by its parameter (NamedEvaluation,
+    /// `#sec-runtime-semantics-iteratorbindinginitialization`), then the body
+    /// ([`Resolver::function_body`]).
     fn function(&mut self, id: FunctionId) -> Result<(), CompileError> {
         let f = self
             .ast
@@ -1100,23 +1132,71 @@ impl<'a, 'm> Resolver<'a, 'm> {
         }
         let scope = self.new_scope(Kind::Function, Some(id));
         self.m.insert_entry(&mut self.function_scopes, id, scope)?;
+        let simple = f.is_simple();
         for (i, p) in f.params.iter().enumerate() {
-            self.declare(scope, &p.name);
+            // A parameter of a list that is not simple is initialized in order: an access
+            // before the end of its own parameter, its initializer included, is checked.
+            let lexical = (!simple).then(|| LexicalData {
+                constant: false,
+                end: f
+                    .initializer(i)
+                    .and_then(|e| self.ast.expr(e))
+                    .map_or(p.span.end, |n| n.span.end),
+            });
+            self.declare_as(scope, &p.name, lexical);
             let n = u32::try_from(i).map_err(|_| CompileError::TooMany("parameters"))?;
             self.occur(Site::Param(id, n), &p.name);
         }
         // `#sec-functiondeclarationinstantiation`, steps 22 and 27: the binding `arguments` after
-        // the parameters, before the `var` names (a `var arguments` is the same binding).
+        // the parameters, before the `var` names (a `var arguments` is the same binding when no
+        // parameter has an initializer).
         if f.scope.arguments_object {
             self.declare(scope, "arguments");
             self.occur(Site::Arguments(id), "arguments");
         }
-        for name in &f.scope.var_names {
-            self.declare(scope, name);
+        if !f.has_parameter_expressions() {
+            for name in &f.scope.var_names {
+                self.declare(scope, name);
+            }
+        }
+        self.work.push(Walk::Leave);
+        self.work.push(Walk::Body(id));
+        for (i, p) in f.params.iter().enumerate().rev() {
+            let Some(e) = f.initializer(i) else { continue };
+            if let Some(g) = self.anonymous_function(e) {
+                let name = self.m.utf16(&p.name)?;
+                self.give_name(g, name)?;
+            }
+            self.work.push(Walk::Expr(e));
+        }
+        Ok(())
+    }
+
+    /// Enters the body of function `id`, in the scope of its parameters: when a parameter has
+    /// an initializer, a scope of its own for its `var` names first
+    /// (`#sec-functiondeclarationinstantiation`, step 28), each name a parameter or `arguments`
+    /// also binds starting with its value ([`Site::BodyVar`]); then the scope of the top level
+    /// of the body.
+    fn function_body(&mut self, id: FunctionId) -> Result<(), CompileError> {
+        let f = self
+            .ast
+            .function(id)
+            .ok_or_else(|| malformed("a function index"))?;
+        if f.has_parameter_expressions() {
+            let scope = self.new_scope(Kind::Vars, Some(id));
+            for (j, name) in f.scope.var_names.iter().enumerate() {
+                self.declare(scope, name);
+                let copied = f.params.iter().any(|p| p.name == *name)
+                    || (f.scope.arguments_object && name == "arguments");
+                if copied && !self.declares_function(f, name) {
+                    let n = u32::try_from(j).map_err(|_| CompileError::TooMany("var names"))?;
+                    self.occur(Site::BodyVar(id, n), name);
+                }
+            }
+            self.work.push(Walk::Leave);
         }
         // Steps 30 to 35: the top level of the body is a scope of its own inside the function's,
         // in which the functions it declares are made.
-        self.work.push(Walk::Leave);
         self.enter_lexical(ScopeKey::Body(id));
         self.work.push(Walk::LeaveLexical(ScopeKey::Body(id)));
         for d in &f.scope.functions {
@@ -1129,6 +1209,17 @@ impl<'a, 'm> Resolver<'a, 'm> {
         }
         self.push_list(&f.body);
         Ok(())
+    }
+
+    /// Whether the body of `f` declares a function named `name`, whose instantiation sets the
+    /// binding (step 28.f.i.3: such a `var` starts as `undefined`).
+    fn declares_function(&self, f: &swell_syntax::ast::Function, name: &str) -> bool {
+        f.scope.functions.iter().any(|d| {
+            self.ast
+                .function(*d)
+                .and_then(|x| x.name.as_ref())
+                .is_some_and(|n| n.name == name)
+        })
     }
 
     /// The binding `name` resolves to from `scope`, if any.
@@ -1174,8 +1265,10 @@ impl<'a, 'm> Resolver<'a, 'm> {
     /// Decision 3, item 3: every scope that encloses a `with` body or a direct `eval` call
     /// (strict or not), up to the global scope, keeps the names of its slots, and each of its
     /// bindings lives in its environment; the scope of the call itself is one of them. The
-    /// parameters of a function that makes a mapped arguments object live in its function
-    /// environment (`#sec-createmappedargumentsobject`: the map reads and writes their bindings).
+    /// parameters of a function that makes a mapped arguments object (a non-strict function
+    /// whose parameter list is simple, `#sec-functiondeclarationinstantiation`, step 22) live in
+    /// its function environment (`#sec-createmappedargumentsobject`: the map reads and writes
+    /// their bindings).
     fn mark_named(&mut self) -> Result<(), CompileError> {
         let m = self.m;
         let mut named = BTreeSet::new();
@@ -1214,7 +1307,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
             let mapped = self
                 .ast
                 .function(*id)
-                .is_some_and(|f| f.scope.arguments_object && !f.strict);
+                .is_some_and(|f| f.scope.arguments_object && !f.strict && f.is_simple());
             if !mapped {
                 continue;
             }
@@ -1278,10 +1371,11 @@ impl<'a, 'm> Resolver<'a, 'm> {
 
     /// Whether bindings may appear in `scope` at run time, so a reference crossing it is looked
     /// up by name: the script or a function whose own code is non-strict and contains a direct
-    /// `eval` call (`#sec-performeval`, varEnv; `#sec-evaldeclarationinstantiation`), and the top
+    /// `eval` call (`#sec-performeval`, varEnv; `#sec-evaldeclarationinstantiation`), the scope of
+    /// its parameters and that of its body's `var` names alike, and the top
     /// of eval code, whose names lie in the environments of the code that called `eval`.
     fn adds_bindings(&self, scope: &ScopeData) -> bool {
-        if scope.kind != Kind::Function {
+        if !matches!(scope.kind, Kind::Function | Kind::Vars) {
             return false;
         }
         match scope.owner {
@@ -1307,7 +1401,10 @@ impl<'a, 'm> Resolver<'a, 'm> {
         place: LexicalPlace,
         checked_locals: &mut BTreeSet<usize>,
     ) -> Result<Option<Binding>, CompileError> {
-        if matches!(site, Site::VarDecl(..) | Site::ForInVar(_)) {
+        if matches!(
+            site,
+            Site::VarDecl(..) | Site::ForInVar(_) | Site::Param(..)
+        ) {
             return Ok(None);
         }
         let binding = self.bindings.get(b).ok_or_else(|| malformed("a binding"))?;
@@ -1320,7 +1417,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
             Site::Expr(e) => self.ast.expr(e).map_or(0, |n| n.span.start),
             _ => 0,
         };
-        let follows = matches!(home.kind, Kind::Lexical { straight: true })
+        let follows = matches!(home.kind, Kind::Lexical { straight: true } | Kind::Function)
             && home.owner == from.owner
             && at >= data.end;
         let checked = !follows;
@@ -1545,6 +1642,23 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .get(&id)
             .and_then(|s| self.scopes.get(*s))
             .is_some_and(|s| s.env_slots > 0);
+        // The record of the body's `var` scope: when a binding of it lives in one, or when a
+        // direct `eval` of non-strict code may add bindings to it.
+        if let Some(s) = self
+            .scopes
+            .iter()
+            .find(|s| s.owner == Some(id) && s.kind == Kind::Vars)
+            && (s.env_slots > 0 || self.adds_bindings(s))
+        {
+            // `allocate` numbers the slots in the order of the scope's bindings.
+            let mut names = m.with_capacity(s.env_slots as usize)?;
+            for b in s.order.iter().filter_map(|b| self.bindings.get(*b)) {
+                if let Place::Env(_) = b.place {
+                    names.push(m.string(&b.name)?);
+                }
+            }
+            info.var_env = Some(names);
+        }
         if f.scope.arguments_object {
             let slot = match sites.get(&Site::Arguments(id)) {
                 Some(Binding::Local(s)) => Slot::Local(*s),
@@ -1552,7 +1666,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 _ => return Err(malformed("an arguments binding with no slot")),
             };
             info.arguments = Some(ArgumentsObject {
-                mapped: !f.strict,
+                mapped: !f.strict && f.is_simple(),
                 slot,
             });
         }

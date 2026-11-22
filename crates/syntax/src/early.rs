@@ -15,7 +15,11 @@
 //!   parentheses or not, in strict mode code;
 //! - `#sec-parameter-lists-static-semantics-early-errors` through
 //!   `#sec-function-definitions-static-semantics-early-errors`: duplicate parameters of a strict
-//!   function, and the function's own name and parameters checked with its own strictness;
+//!   function or of a parameter list that is not simple, and the function's own name, its
+//!   parameters and their initializers checked with its own strictness. A Use Strict Directive
+//!   in the body of a function whose parameter list is not simple (for every kind of function,
+//!   the arrows and methods included) is reported by the parser as it closes the function,
+//!   where it knows the directive;
 //! - `#sec-numeric-literals-early-errors` and `#sec-string-literals-early-errors`: legacy octal
 //!   literals, `NonOctalDecimalIntegerLiteral`s, legacy octal escapes and `\8` and `\9` in strict
 //!   mode code;
@@ -35,9 +39,7 @@
 //! - `#sec-arrow-function-definitions-static-semantics-early-errors`: the
 //!   `ArrowFormalParameters` of an arrow function hold no name twice, in any code; a parameter
 //!   that the body declares lexically, and `eval` and `arguments` as parameters in strict code,
-//!   are checked as for every function. The rule for a Use Strict Directive in the body of an
-//!   arrow whose parameter list is not simple waits for the first such list
-//!   (`story:default-and-rest-parameters`);
+//!   are checked as for every function;
 //! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`: the
 //!   flags of IsValidRegularExpressionLiteral. Its pattern is not parsed before slice 5 (a
 //!   recorded omission of `sec-literals-regular-expression-literals`);
@@ -789,6 +791,16 @@ impl<'a, 'm> Checker<'a, 'm> {
             } else if f.kind == FunctionKind::Arrow {
                 self.error(
                     format!("duplicate parameter name {} in an arrow function", p.name),
+                    p.span,
+                );
+            } else if !f.is_simple() {
+                // `#sec-function-definitions-static-semantics-early-errors`: a list that is not
+                // simple binds each name once, in any code.
+                self.error(
+                    format!(
+                        "duplicate parameter name {} in a parameter list that is not simple",
+                        p.name
+                    ),
                     p.span,
                 );
             } else if self.strict {

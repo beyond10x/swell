@@ -375,6 +375,13 @@ impl<H: Host> Agent<H> {
                 self.assign_const_env(hops, slot).map(|()| Flow::Next)
             }
             I::InitGlobal(index) => self.init_global(index).map(|()| Flow::Next),
+            // ---- parameters of a list that is not simple (`interp/parameters.rs`) ----
+            I::Argument(slot) => self.argument(slot).map(|()| Flow::Next),
+            I::JumpIfNotUndefined(target) => {
+                self.jump_if_not_undefined(target).map(|()| Flow::Next)
+            }
+            I::RestArguments(slot) => self.rest_arguments(slot).map(|()| Flow::Next),
+            I::PushVarEnv(table) => self.push_var_env(table).map(|()| Flow::Next),
             // ---- templates (`interp/template.rs`) ----
             I::ToString => self.substitution_to_string(),
         }

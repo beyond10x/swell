@@ -39,7 +39,7 @@ use swell_syntax::ParseOptions;
 
 use crate::builtins::object::argument;
 use crate::builtins::string::StringBuilder;
-use crate::env::{Bound, NameTable, SlotKind, SlotNames};
+use crate::env::{Bound, NameTable, RecordNames, SlotKind, SlotNames};
 use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
@@ -603,13 +603,27 @@ impl<H: Host> Agent<H> {
                     break;
                 };
                 self.step()?;
-                let (outer, with) = {
+                let (outer, with, parameters) = {
                     let record = self.environment(env)?;
-                    (record.outer, record.binding_object.is_some())
+                    let parameters = matches!(
+                        &record.names,
+                        Some(RecordNames::Slots(SlotNames {
+                            table: NameTable::Function(_),
+                            ..
+                        }))
+                    );
+                    (record.outer, record.binding_object.is_some(), parameters)
                 };
                 if !with {
                     match self.bound(env, name)? {
                         Some(Bound::Slot(_, SlotKind::Let | SlotKind::Const) | Bound::Added(_)) => {
+                            return Err(self.already_declared(name));
+                        }
+                        // The environment of the parameters of a function whose parameters
+                        // have an initializer, between the eval code of one of them and the
+                        // record its `var` names go to (`#sec-functiondeclarationinstantiation`,
+                        // step 20): any binding of it conflicts.
+                        Some(Bound::Slot(_, SlotKind::Mutable)) if parameters => {
                             return Err(self.already_declared(name));
                         }
                         Some(Bound::Slot(_, SlotKind::Mutable | SlotKind::SelfName)) | None => {}
