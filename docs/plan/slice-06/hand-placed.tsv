@@ -1,0 +1,16 @@
+test/built-ins/ArrayIteratorPrototype/Symbol.toStringTag/property-descriptor.js	iterators	the later name Iterator is in a string ("Array Iterator", "String Iterator")
+test/built-ins/ArrayIteratorPrototype/Symbol.toStringTag/value-direct.js	iterators	the later name Iterator is in a string ("Array Iterator", "String Iterator")
+test/built-ins/ArrayIteratorPrototype/Symbol.toStringTag/value-from-to-string.js	iterators	the later name Iterator is in a string ("Array Iterator", "String Iterator")
+test/built-ins/Array/prototype/concat/create-proto-from-ctor-realm-array.js	symbol-hooks	the later name is the local OArray, the Array of another realm
+test/built-ins/Array/prototype/filter/create-proto-from-ctor-realm-array.js	symbol-hooks	the later name is the local OArray, the Array of another realm
+test/built-ins/Array/prototype/map/create-proto-from-ctor-realm-array.js	symbol-hooks	the later name is the local OArray, the Array of another realm
+test/built-ins/Array/prototype/slice/create-proto-from-ctor-realm-array.js	symbol-hooks	the later name is the local OArray, the Array of another realm
+test/built-ins/Array/prototype/splice/create-proto-from-ctor-realm-array.js	symbol-hooks	the later name is the local OArray, the Array of another realm
+test/built-ins/StringIteratorPrototype/Symbol.toStringTag.js	iterators	the later name Iterator is in a string ("Array Iterator", "String Iterator")
+test/language/statements/for-of/body-put-error.js	for-of	the later name Iterator is in a string
+test/language/statements/for-of/iterator-close-via-break.js	for-of	the later name Iterator is in a string
+test/language/statements/for-of/iterator-close-via-continue.js	for-of	the later name Iterator is in a string
+test/language/statements/for-of/iterator-close-via-return.js	for-of	the later name Iterator is in a string
+test/language/statements/for-of/iterator-close-via-throw.js	for-of	the later name Iterator is in a string
+test/language/statements/for-of/iterator-next-error.js	for-of	the later name Iterator is in a string
+test/language/statements/for-of/iterator-next-result-value-attr-error.js	for-of	the later name Iterator is in a string

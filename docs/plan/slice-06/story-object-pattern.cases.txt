@@ -121,6 +121,9 @@ test/language/expressions/assignment/dstr/obj-id-init-assignment-null.js
 test/language/expressions/assignment/dstr/obj-id-init-assignment-truthy.js
 test/language/expressions/assignment/dstr/obj-id-init-assignment-undef.js
 test/language/expressions/assignment/dstr/obj-id-init-evaluation.js
+test/language/expressions/assignment/dstr/obj-id-init-fn-name-arrow.js
+test/language/expressions/assignment/dstr/obj-id-init-fn-name-cover.js
+test/language/expressions/assignment/dstr/obj-id-init-fn-name-fn.js
 test/language/expressions/assignment/dstr/obj-id-init-in.js
 test/language/expressions/assignment/dstr/obj-id-init-let.js
 test/language/expressions/assignment/dstr/obj-id-init-order.js
@@ -137,6 +140,7 @@ test/language/expressions/assignment/dstr/obj-prop-elem-init-assignment-null.js
 test/language/expressions/assignment/dstr/obj-prop-elem-init-assignment-truthy.js
 test/language/expressions/assignment/dstr/obj-prop-elem-init-assignment-undef.js
 test/language/expressions/assignment/dstr/obj-prop-elem-init-evaluation.js
+test/language/expressions/assignment/dstr/obj-prop-elem-init-fn-name-arrow.js
 test/language/expressions/assignment/dstr/obj-prop-elem-init-let.js
 test/language/expressions/assignment/dstr/obj-prop-elem-target-memberexpr-optchain-prop-ref-init.js
 test/language/expressions/assignment/dstr/obj-prop-identifier-resolution-first.js

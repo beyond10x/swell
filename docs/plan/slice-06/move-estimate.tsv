@@ -1,12 +1,7 @@
 test/built-ins/Array/from/items-is-arraybuffer.js	13	ArrayBuffer
-test/built-ins/ArrayIteratorPrototype/Symbol.toStringTag/property-descriptor.js	13	Uint8Array (harness)
-test/built-ins/ArrayIteratorPrototype/Symbol.toStringTag/value-direct.js	none	
-test/built-ins/ArrayIteratorPrototype/Symbol.toStringTag/value-from-to-string.js	none	
 test/built-ins/Array/prototype/concat/Array.prototype.concat_large-typed-array.js	13	Uint8Array
 test/built-ins/Array/prototype/concat/Array.prototype.concat_small-typed-array.js	13	Uint8Array
 test/built-ins/Array/prototype/concat/Array.prototype.concat_spreadable-reg-exp.js	5	= /abc/;
-test/built-ins/Array/prototype/concat/create-proto-from-ctor-realm-array.js	none	
-test/built-ins/Array/prototype/filter/create-proto-from-ctor-realm-array.js	none	
 test/built-ins/Array/prototype/flatMap/array-like-objects-poisoned-length.js	9	Map (token of later-parts.tsv)
 test/built-ins/Array/prototype/flatMap/non-callable-argument-throws.js	9	Map (token of later-parts.tsv)
 test/built-ins/Array/prototype/flatMap/target-array-non-extensible.js	9	 Set 
@@ -17,11 +12,8 @@ test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species-bad-throws
 test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species-custom-ctor.js	9	 Set 
 test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species-custom-ctor-poisoned-throws.js	9	 Set 
 test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species.js	9	 Set 
-test/built-ins/Array/prototype/map/create-proto-from-ctor-realm-array.js	none	
 test/built-ins/Array/prototype/methods-called-as-functions.js	9	Map (token of later-parts.tsv)
-test/built-ins/Array/prototype/slice/create-proto-from-ctor-realm-array.js	none	
 test/built-ins/Array/prototype/sort/comparefn-nonfunction-call-throws.js	5	(/a/g)
-test/built-ins/Array/prototype/splice/create-proto-from-ctor-realm-array.js	none	
 test/built-ins/Array/prototype/splice/create-species-length-exceeding-integer-limit.js	9	 Set(
 test/built-ins/Array/prototype/Symbol.unscopables/value.js	13	Uint8Array (harness)
 test/built-ins/Date/prototype/getDate/this-value-non-object.js	4	Date
@@ -92,7 +84,7 @@ test/built-ins/Number/prototype/toFixed/toFixed-tonumber-throws-typeerror-symbol
 test/built-ins/Number/prototype/toPrecision/precision-cannot-be-coerced-to-a-number-in-range.js	4	.toPrecision (token of later-parts.tsv)
 test/built-ins/Number/prototype/toPrecision/return-abrupt-tointeger-precision-symbol.js	4	.toPrecision (token of later-parts.tsv)
 test/built-ins/Object/keys/proxy-keys.js	9	 Proxy(
-test/built-ins/Object/prototype/toString/symbol-tag-non-str-builtin.js	none	
+test/built-ins/Object/prototype/toString/symbol-tag-non-str-builtin.js	4	Math
 test/built-ins/Object/prototype/toString/symbol-tag-override-instances.js	5	= /./;
 test/built-ins/RegExp/call_with_non_regexp_same_constructor.js	5	RegExp
 test/built-ins/RegExp/call_with_regexp_match_falsy.js	5	RegExp
@@ -351,7 +343,6 @@ test/built-ins/RegExp/Symbol.species/length.js	5	RegExp
 test/built-ins/RegExp/Symbol.species/return-value.js	5	RegExp
 test/built-ins/RegExp/Symbol.species/symbol-species.js	5	RegExp
 test/built-ins/RegExp/Symbol.species/symbol-species-name.js	5	RegExp
-test/built-ins/StringIteratorPrototype/Symbol.toStringTag.js	13	Uint8Array (harness)
 test/built-ins/String/prototype/endsWith/return-abrupt-from-searchstring-regexp-test.js	5	RegExp
 test/built-ins/String/prototype/includes/return-abrupt-from-searchstring-regexp-test.js	5	RegExp
 test/built-ins/String/prototype/matchAll/cstm-matchall-on-bigint-primitive.js	12	BigInt
@@ -492,18 +483,18 @@ test/language/computed-property-names/to-name-side-effects/class.js	8	 class C
 test/language/computed-property-names/to-name-side-effects/numbers-class.js	8	 class C
 test/language/destructuring/binding/syntax/destructuring-array-parameters-function-arguments-length.js	10	(async 
 test/language/destructuring/binding/syntax/destructuring-object-parameters-function-arguments-length.js	10	(async 
-test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	none	
-test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments.js	none	
-test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	none	
-test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments.js	none	
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	none	
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments.js	none	
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	none	
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js	none	
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	none	
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments.js	none	
-test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	none	
-test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	none	
+test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	7	a generator method (*)
 test/language/expressions/arrow-function/dstr/ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
 test/language/expressions/arrow-function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
 test/language/expressions/arrow-function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js	8	 class {
@@ -614,7 +605,6 @@ test/language/statements/for-in/dstr/obj-prop-elem-target-yield-ident-invalid.js
 test/language/statements/for-in/dstr/obj-prop-nested-array-yield-ident-invalid.js	7	yield
 test/language/statements/for-in/dstr/obj-prop-nested-obj-yield-ident-invalid.js	7	yield
 test/language/statements/for-of/body-dstr-assign-error.js	9	 Set 
-test/language/statements/for-of/body-put-error.js	none	
 test/language/statements/for-of/decl-cls.js	8	 class C
 test/language/statements/for-of/dstr/array-elem-init-yield-ident-invalid.js	7	yield
 test/language/statements/for-of/dstr/array-elem-init-yield-ident-valid.js	7	yield
@@ -652,13 +642,7 @@ test/language/statements/for-of/head-lhs-async-dot.js	10	`async`
 test/language/statements/for-of/head-lhs-async-escaped.js	10	`async`
 test/language/statements/for-of/head-lhs-async-invalid.js	10	`async`
 test/language/statements/for-of/head-lhs-async-parens.js	10	`async`
-test/language/statements/for-of/iterator-close-via-break.js	none	
-test/language/statements/for-of/iterator-close-via-continue.js	none	
-test/language/statements/for-of/iterator-close-via-return.js	none	
-test/language/statements/for-of/iterator-close-via-throw.js	none	
-test/language/statements/for-of/iterator-next-error.js	none	
 test/language/statements/for-of/iterator-next-result-type.js	9	 Proxy(
-test/language/statements/for-of/iterator-next-result-value-attr-error.js	none	
 test/language/statements/function/dstr/ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
 test/language/statements/function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
 test/language/statements/function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js	8	 class {

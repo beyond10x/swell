@@ -186,6 +186,34 @@ Not measured: the inline and linked scripts of the 101 test files themselves (th
 the repository at that commit was cut off at 61,341 entries), and which paths of the harness
 run. Objects of the DOM and of the host are surf's side.
 
+## Slice 6, `bindings-and-iteration`
+
+`epic:slice-06-bindings-and-iteration`, next after slice 3 by the order above. Decomposed on
+2026-11-22 into fifteen stories in two parts (accepted, `active`), each part read once by the
+four plan critics (`review-result:slice-06-*`: 15 findings on the first five stories, 13 on
+the other ten, all applied; a story without a blocker finding is accepted after one
+revision). Measured on `main` (`6a43e18`): 4,204 cases and 7,952 runs, 94 cases pass. The
+lists the stories read are under [`slice-06/`](slice-06/); about 657 cases need a later
+slice and move at the close (`move-estimate.tsv`).
+
+| order | stories | starts after | lifts of the consumer's 191 constructs |
+|---|---|---|---|
+| 1 | `let-const-and-block-scopes`, `template-literals` (side by side, seven shared files) | `function-apply-and-source-text` of slice 3, which writes the same parser and compiler files | `const` 75, `let` 23; template literals 22 |
+| 2 | `arrow-functions` | 1 | arrow functions 41 |
+| 3 | `default-and-rest-parameters` | 2 | default parameters 9, rest 2 |
+| 4 | `object-destructuring` | 3 | 3 of the 6 patterns |
+| 5 | `computed-names-and-object-spread` | 4 | none |
+| 6 | `block-function-declarations`, `symbol-constructor-and-well-known-symbols` | 5; the Symbol story also after slice 3's close | none |
+| 7 | `iterator-protocol-and-array-string-iterators` | the Symbol story | none |
+| 8 | `for-of-statement`, `symbol-values-in-core-builtins` | 7 and `block-function-declarations` | `for`-`of` 10 of 12 |
+| 9 | `array-destructuring-and-spread`, `array-from-and-object-from-entries` | 8 | the last 2 `for`-`of` heads, array patterns 3, spread 1: both scripts parse with no refusal of slice 6 |
+| 10 | `tagged-templates` | 9 | none |
+| 11 | `slice-06-conformance-close` | 10 and slice 3's close | none |
+
+The chain is long because the stories write the same files of the parser and the compiler;
+each edge says which. The design text they build on is in decisions 3 and 4 (`0458ebd`,
+`aec8a36`).
+
 ## What later slices take over
 
 Findings of delivered waves that belong to a slice not yet decomposed. The decomposition of

@@ -6,6 +6,9 @@ test/harness/compare-array-falsy-arguments.js
 test/harness/compare-array-same-elements-different-order.js
 test/harness/compare-array-samevalue.js
 test/harness/compare-array-sparse.js
+test/harness/verifyProperty-arguments.js
+test/harness/verifyProperty-noproperty.js
+test/harness/verifyProperty-undefined-desc.js
 test/language/arguments-object/mapped/enumerable-configurable-accessor-descriptor.js
 test/language/arguments-object/mapped/nonconfigurable-descriptors-define-failure.js
 test/language/expressions/arrow-function/ArrowFunction_restricted-properties.js
@@ -22,6 +25,7 @@ test/language/expressions/arrow-function/forbidden-ext/b1/arrow-function-forbidd
 test/language/expressions/arrow-function/lexical-arguments.js
 test/language/expressions/arrow-function/lexical-bindings-overriden-by-formal-parameters-non-strict.js
 test/language/expressions/arrow-function/low-precedence-expression-body-no-parens.js
+test/language/expressions/arrow-function/name.js
 test/language/expressions/arrow-function/non-strict.js
 test/language/expressions/arrow-function/object-literal-return-requires-body-parens.js
 test/language/expressions/arrow-function/params-duplicate.js
@@ -58,6 +62,7 @@ test/language/expressions/arrow-function/syntax/variations.js
 test/language/expressions/arrow-function/throw-new.js
 test/language/expressions/assignment/assignment-operator-calls-putvalue-lref--rval--1.js
 test/language/expressions/assignment/assignment-operator-calls-putvalue-lref--rval-.js
+test/language/expressions/assignment/fn-name-arrow.js
 test/language/expressions/assignmenttargettype/direct-arrowfunction-0.js
 test/language/expressions/assignmenttargettype/direct-arrowfunction-2.js
 test/language/expressions/assignmenttargettype/direct-arrowfunction-3.js
@@ -119,3 +124,6 @@ test/language/statementList/block-with-statment-expr-arrow-function-boolean-lite
 test/language/statementList/fn-arrow-function-assignment-expr.js
 test/language/statementList/fn-arrow-function-functionbody.js
 test/language/statementList/fn-expr-arrow-function-boolean-literal.js
+test/language/statements/const/fn-name-arrow.js
+test/language/statements/let/fn-name-arrow.js
+test/language/statements/variable/fn-name-arrow.js

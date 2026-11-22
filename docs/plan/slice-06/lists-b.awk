@@ -4,6 +4,9 @@
 # output is that of scan.awk run with a copy of meta.tsv whose includes leave out propertyHelper.js:
 # awk 'BEGIN { FS = OFS = "\t" } { gsub(/(^|,)propertyHelper\.js/, "", $6); sub(/^,/, "", $6); print }' meta.tsv
 # (its later tokens Uint8Array, BigInt and Set are a typeof-guarded branch, a bigint case and checkSet).
+# Placed by hand after the run, in hand-placed.tsv (path, list, reason): 16 cases the scan marked as of a later
+# slice only for a later name in a string or a local ("Array Iterator", OArray). The keys, values and entries
+# of Object are not iterators: Object.keys( and the like are taken out before the test for ITER.
 # Output: path, story key (a story, "later" for a part of a later slice, "close" when no story
 # holds the needs), needs, detail. The keys of the first five stories are those of lists.awk.
 function slurp(f,   s, save) { save = RS; RS = "^$"; s = ""; if ((getline s < f) <= 0) s = ""; close(f); RS = save; return s }

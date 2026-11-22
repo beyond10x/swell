@@ -1,7 +1,7 @@
-test/built-ins/Array/from/Array.from_arity.js
 test/built-ins/Array/from/Array.from-descriptor.js
-test/built-ins/Array/from/Array.from_forwards-length-for-array-likes.js
 test/built-ins/Array/from/Array.from-name.js
+test/built-ins/Array/from/Array.from_arity.js
+test/built-ins/Array/from/Array.from_forwards-length-for-array-likes.js
 test/built-ins/Array/from/array-like-has-length-but-no-indexes-with-values.js
 test/built-ins/Array/from/calling-from-valid-1-noStrict.js
 test/built-ins/Array/from/calling-from-valid-1-onlyStrict.js
@@ -34,8 +34,8 @@ test/built-ins/Array/from/source-array-boundary.js
 test/built-ins/Array/from/source-object-constructor.js
 test/built-ins/Array/from/source-object-iterator-1.js
 test/built-ins/Array/from/source-object-iterator-2.js
-test/built-ins/Array/from/source-object-length.js
 test/built-ins/Array/from/source-object-length-set-elem-prop-non-writable.js
+test/built-ins/Array/from/source-object-length.js
 test/built-ins/Array/from/source-object-missing.js
 test/built-ins/Array/from/source-object-without.js
 test/built-ins/Array/from/this-null.js

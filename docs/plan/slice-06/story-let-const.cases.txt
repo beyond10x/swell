@@ -111,6 +111,8 @@ test/language/statements/block/scope-lex-close.js
 test/language/statements/block/scope-lex-open.js
 test/language/statements/const/block-local-use-before-initialization-in-declaration-statement.js
 test/language/statements/const/block-local-use-before-initialization-in-prior-statement.js
+test/language/statements/const/fn-name-cover.js
+test/language/statements/const/fn-name-fn.js
 test/language/statements/const/function-local-closure-get-before-initialization.js
 test/language/statements/const/function-local-use-before-initialization-in-declaration-statement.js
 test/language/statements/const/function-local-use-before-initialization-in-prior-statement.js
@@ -204,6 +206,8 @@ test/language/statements/labeled/let-block-with-newline.js
 test/language/statements/labeled/let-identifier-with-newline.js
 test/language/statements/let/block-local-use-before-initialization-in-declaration-statement.js
 test/language/statements/let/block-local-use-before-initialization-in-prior-statement.js
+test/language/statements/let/fn-name-cover.js
+test/language/statements/let/fn-name-fn.js
 test/language/statements/let/function-local-closure-get-before-initialization.js
 test/language/statements/let/function-local-closure-set-before-initialization.js
 test/language/statements/let/function-local-use-before-initialization-in-declaration-statement.js
