@@ -719,14 +719,38 @@ The mechanism:
 **The step budget.** One unit per bytecode instruction, plus units charged by builtins in
 proportion to their work: per element for array, typed array and collection loops, per code unit
 for string operations, per matcher step for regular expressions (decision 7), per limb operation
-for `BigInt`, per node for `JSON.parse`. The counter is decremented where the unit is spent and
+for `BigInt`, per node for `JSON.parse`, per code unit of eval code before its parse, and per
+pass of a sort of n property keys, n before the pass. Eval code: PerformEval charges one step per
+code unit of the eval String before it copies it; CreateDynamicFunction charges one per code
+unit it copies into its source text and nothing more; `parse_script` charges none. The counter
+is decremented where the unit is spent and
 checked at every backward jump, every call and return, every re-entry, and inside every builtin
 loop. At zero the run ends with the outcome `Terminated(StepBudget)`: no `catch` or `finally`
 block runs, and the host gets the outcome as a value (decision 9). The host's interrupt
-(decision 9) is checked at the same places. Why there: a loop cannot run without passing a
+(decision 9) is checked at the same places, and a parse reads it at its start and at least once
+per 4,096 code units it reads and per 4,096 nodes its later passes and the compile step visit
+(`host-interface.md`, section 12). Why there: a loop cannot run without passing a
 backward jump or a builtin loop check, so the check placement bounds the work between checks.
 Rejected: a wall-clock limit inside the engine (the engine has no clock, and time would make runs
 non-deterministic).
+
+Steps are charged before the work they count, as storage is ("Memory budget", decision 4). A
+list of property keys: each [[OwnPropertyKeys]] charges the steps it takes, a step per key it
+will answer (a String object's code units and an Array's dense elements counted from their
+lengths, not by a walk), and the list's bytes to the memory budget, before the list exists; the
+code that holds the list credits its bytes when it drops it. A list whose index keys were added
+in ascending order is not sorted; one whose index keys were added out of order is sorted by a
+bottom-up merge sort over a second buffer charged with the list, with n steps charged before
+each pass, so the step budget and the interrupt are read every n comparisons. An instruction
+that loops is held to the same rule: the key list the `for`-`in` enumerator holds is made by
+EnumerateObjectProperties, which charges a step per object of the prototype chain and each
+object's [[OwnPropertyKeys]] as above before it collects that object's keys, and charges the
+bytes of the list and of its set of visited keys before each grows. The set of visited keys is
+credited when EnumerateObjectProperties returns, on every way out of the call; the enumerator
+holds the charge of the list alone and credits it when the loop ends, on every way out of it, a
+throw and a termination included. For later slices: a frame that is suspended (a generator, an
+async function) keeps the charges it holds and credits them when it runs to its end or when the
+collector frees it.
 
 **Depth bounds,** each a limit the host sets, each ending in an outcome:
 
@@ -786,9 +810,16 @@ that can call script keeps every value it still needs in slots of its own frame 
 stack, which the collector scans; a Rust local holding a handle across a call into script is a
 bug, found by a test mode that collects at every safe point and by the generation check.
 Collections run only at safe points (instruction boundaries and the re-entry points), when the
-bytes allocated since the last collection pass a
-threshold that grows with the live size, and when the host asks. They never run inside an
-allocation. Triggers count bytes, never time, so for the same inputs and budgets the same objects
+bytes charged since the last collection pass a
+threshold, the live reading ("Memory budget") after the last collection, and when the host
+asks. The threshold follows the live reading and not the charged one, which keeps the arenas'
+capacity, so that garbage is collected before the charged reading reaches `memory_bytes`. They
+never run inside an allocation. The collector's workspace, a mark word per slot and a worklist
+of at most one entry per slot, lives with the arenas and is charged with their capacity, so a
+collection allocates nothing and one that starts at the memory limit finishes. An allocation
+that would pass `memory_bytes` collects nothing first: it ends the run, also when a collection
+could free bytes, so a budget holds the live size, the garbage of one threshold and the arenas'
+spare capacity. Triggers count bytes, never time, so for the same inputs and budgets the same objects
 are collected at the same points, and `WeakRef` and `FinalizationRegistry` results are
 deterministic. Weak references are cleared after marking (9.9); finalization callbacks become
 cleanup jobs through `HostEnqueueFinalizationRegistryCleanupJob`.
@@ -798,12 +829,49 @@ generation into it, released explicitly or when its owner drops it. Values the h
 its own objects (decision 9) are traced, not rooted.
 
 **Memory budget.** Every allocation and every growth goes through one accounting function that
-charges the bytes (the slot's fixed size plus string units, property and element capacity,
-`BigInt` limbs, bytecode, and the parser's tree while it exists); a sweep credits them back.
-Growth of large buffers uses `Vec::try_reserve`, so a refusal by the allocator becomes an outcome
+charges the bytes before the growth: an arena's slots by capacity when it grows, with the
+collector's workspace for them ("Collector"); the atom table's buckets (`heap/string.rs`,
+`Atoms`) by capacity when the table grows; string units, property and element capacity and
+`BigInt` limbs; and the frontend's, the source's copy, the parser's tree, the compile step's
+scratch and the bytecode, each by capacity as it grows. A sweep credits what a freed record
+owns, and what an atom entry it drops owns; an arena's capacity and the atom table's stay
+charged while the agent lives, since neither shrinks and a freed slot or bucket is used again. A temporary structure (the frontend's tree and scratch, a list
+of property keys, the key list of a `for`-`in` enumerator) is credited when it drops, and the
+code's charge passes to its script record when the record is made. A growth charged by capacity
+sets the capacity itself, by the engine's own doubling with `try_reserve_exact`, so a charge
+does not depend on the growth policy of the standard library. Growth of large buffers uses
+`Vec::try_reserve`, so a refusal by the allocator becomes an outcome
 instead of an abort. Over the budget: `new ArrayBuffer` and the typed array constructors throw a
 `RangeError`, as `CreateByteDataBlock` allows; any other allocation ends the run with
 `Terminated(MemoryBudget)`.
+
+The rule, for every slice: storage is charged before it is allocated, and work before it is
+done. A structure's bytes are charged to the memory budget before the structure exists or
+grows, and a loop's steps are charged to the step budget before the work they count, at least
+once per bounded amount of it ("The step budget", decision 3). A check after the work is not a
+bound: work measured only once it is done has already run, however large, when the check
+refuses it. The code that holds a charged structure credits it when it drops it, on every way
+out. The entries the host's own calls add, to the root table and to the list of values handed
+to a scope (`host-interface.md`, section 4), are the host's, bounded by its calls, and are not
+charged; the records they name are charged as any record.
+
+The frontend charges through one ledger: a trait of `swell-syntax` with three operations,
+charge, credit and poll, which `swell-compiler` takes too and which `swell` implements once,
+over the agent's accounting and its interrupt flag; there is no second budget. The lexer, the
+parser, the early errors, the scope analysis and the compile step charge every growth through
+it before it is made. A refused charge stops the step: everything charged in it is credited,
+no `SyntaxError` object is made, and the entry ends in `Terminated(MemoryBudget)` (from
+`parse_script` as `Parsed::Terminated(MemoryBudget)`). Poll reads the interrupt flag as the
+step budget's checks do. The ledger lives in the parser's state, never in a recursive frame.
+
+Two readings. `heap_bytes()` reads what the accounting has charged, the number `memory_bytes`
+bounds: the arenas' capacity with the collector's workspace, the atom table's capacity, what the
+records own, and what a running step holds charged. `live_bytes()` reads what the records the
+heap holds own, the fixed size of each one's slot included, and what the atom table's entries
+own; it leaves out free slots and the table's empty buckets. After a collection these are the
+live records. It is at most
+`heap_bytes()`, it falls by everything a sweep frees, and the collection threshold follows it
+("Collector").
 
 **Source text.** Added on 2026-11-21 for slice 3. The source text of a script, of eval code
 and of a dynamic function stays alive as long as a function made from it, and is charged to
@@ -812,9 +880,10 @@ source given to ParseScript, the String PerformEval parsed, and for CreateDynami
 whole text of its last parse, `function anonymous(` P `\n) {\n` body `\n}`
 (`sec-createdynamicfunction`). It is kept with the compiled code made from it, which lives
 while the host holds the script, while that code runs, and while a function object made from
-it is reachable (its [[ScriptOrModule]], "Collector" above). The charge is taken with the
-compiled code's, when the parse and compile step that made the code ends, at least one byte
-per code unit in either stored form of decision 5; the sweep that frees the compiled code
+it is reachable (its [[ScriptOrModule]], "Collector" above). The copy is charged before it is
+made, at the start of the parse, at least one byte per code unit in either stored form of
+decision 5, and its charge passes with the compiled code's to the script record when the
+parse and compile step that made the code ends; the sweep that frees the compiled code
 credits it back with the code, never earlier. A text that does not fit what is left of the
 budget ends the run with `Terminated(MemoryBudget)`, as any other allocation. The text is kept
 whatever HostHasSourceTextAvailable answers: `Function.prototype.toString` of an ECMAScript
@@ -908,8 +977,8 @@ The mechanism:
    after that no evaluation can ask for an entry again, and an object no evaluation can ask for
    and nothing else references is not live (`sec-liveness`). A template object the tag kept is an
    ordinary object, alive while it is referenced, its `raw` with it.
-4. Charges. The site table and its strings are part of the compiled code, charged with it when
-   its record is made, and so is the entry per site of the record. The two Arrays and their
+4. Charges. The site table and its strings are part of the compiled code, charged with it
+   ("Memory budget"), and the entry per site of the record is charged when the record is made. The two Arrays and their
    elements are charged as any Array when the site's first evaluation makes them, and credited by
    the sweep that frees them; a later evaluation allocates nothing. Steps: the instruction's, and
    at the first evaluation one per element it defines in the two Arrays (an array loop, decision
@@ -1040,9 +1109,9 @@ generator is build tooling and never ships; the tables it writes do.
 **Settled in `docs/design/host-interface.md` (2026-11-21), which holds wherever it and this
 section differ.** This section is the first description; the first ESS model of it came back
 with nine places where it is unclear or silent, and that document answers them from the text of
-ECMA-262 and HTML, as 19 decisions and numbered requirements (`HOST-<n>`): 165 on 2026-11-21,
-the count `task host-requirements-check` prints (corrected that day from 135, the count when
-the document was written). The eleven places where it departs from this document:
+ECMA-262 and HTML, as 19 decisions and numbered requirements (`HOST-<n>`): 165 on 2026-11-21
+(corrected that day from 135, the count when the document was written), and 171 on 2026-11-22
+with the six of resource accounting, the count `task host-requirements-check` prints. The eleven places where it departs from this document:
 
 1. Each entry point has a result type of its own instead of one `Outcome`; misuse answers
    `Err(HostError)`, never a panic.
@@ -1090,7 +1159,7 @@ answers every call with `EngineFault`; the host discards it.
 
 **Interrupting.** `Agent::interrupt_handle()` gives a `Send` handle holding an
 `Arc<AtomicBool>`; setting it from any host thread ends the run at the next check (decision 3)
-with `Terminated(Interrupted)`. This is how surf can stop a page's script without a budget.
+or at the next read of a parse (`host-interface.md`, section 12) with `Terminated(Interrupted)`. This is how surf can stop a page's script without a budget.
 
 **Host hooks,** a Rust trait with ECMA-262's default behaviour where the draft gives one. The
 draft's hooks: `HostCallJobCallback`, `HostEnqueueFinalizationRegistryCleanupJob`,

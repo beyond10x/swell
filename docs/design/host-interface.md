@@ -151,7 +151,7 @@ impl<H: Host> Agent<H> {
 | limit | unit | what it counts | reaching it ends in | at 0 |
 |---|---|---|---|---|
 | `steps_per_entry` | steps (decision 3 of `engine.md`: one per bytecode instruction, plus builtin charges) | steps of one outermost entry, with every nested entry and every job of one checkpoint | `Terminated(StepBudget)` | an entry that would spend a step ends before spending it |
-| `memory_bytes` | bytes charged by the accounting of `engine.md` decision 4 | the agent's heap over its life; a sweep credits | `Terminated(MemoryBudget)`; `RangeError` from the `ArrayBuffer`, `SharedArrayBuffer` and typed array constructors | `create_realm` ends in `Terminated(MemoryBudget)` |
+| `memory_bytes` | bytes charged by the accounting of `engine.md` decision 4 | the agent's heap over its life, read by `heap_bytes()`; a sweep credits what freed records own, and an arena's capacity stays charged | `Terminated(MemoryBudget)`; `RangeError` from the `ArrayBuffer`, `SharedArrayBuffer` and typed array constructors | `create_realm` ends in `Terminated(MemoryBudget)` |
 | `frame_depth` | execution contexts | ECMAScript execution contexts on the engine's frame stack | a `RangeError` thrown where the context would be pushed | every entry that pushes a context answers `Throw(RangeError)` |
 | `reentry_depth` | entries | calls from Rust into code (an ECMAScript function, a script or a host function) made while code runs, by a builtin or by host code, nested beyond the outermost entry | a `RangeError` thrown at the call that would re-enter | no callback runs from a builtin or host function |
 | `parser_nesting` | levels | nesting levels of the recursive-descent parser | a `SyntaxError` whose message names `parser_nesting` (below) | every non-empty source fails to parse |
@@ -166,6 +166,19 @@ function. `string_length` is a String's length as 6.1.4 measures it: "up to a ma
 of 2^53 - 1 elements" (`ecma262:sec-ecmascript-language-types-string-type`); a value above
 2^53 - 1 acts as 2^53 - 1. A String from source text or from the host is bounded by the memory
 budget, not by `string_length`.
+
+**Two readings of the heap.** Added on 2026-11-22 for resource accounting. `heap_bytes()`
+(decision 13) reads what the memory budget has charged: the arenas' capacity with the
+collector's workspace and the atom table's capacity, which stay charged while the agent lives,
+what the records own, and what a running step holds charged (`engine.md` decision 4, "Memory
+budget"). `memory_bytes` bounds this reading: an allocation that would take it past
+`memory_bytes` is refused. `live_bytes()` reads what the records the heap holds own, each one's
+slot included, and what the atom table's entries own, leaving out free slots and empty buckets;
+after a collection these are the live records, so it falls by everything a sweep frees, while `heap_bytes()` falls only
+by what the freed records owned. `live_bytes()` is at most `heap_bytes()`. `heap_bytes()` keeps
+its name for the charged reading because the requirements and tests that set or check a budget
+read it (HOST-10, and the tests that size `memory_bytes` from it); only HOST-29 and HOST-52,
+which read what a collection gives back, move to `live_bytes()`.
 
 The draft words no allowance for these outcomes: `grep -i 'implementation limit'` over
 `ecma262.txt` finds nothing. The depth, string and BigInt `RangeError`s and the parse failure
@@ -232,6 +245,10 @@ limit off; `AGENTS.md`: "Each limit ends in an outcome the host reads"); a wall-
 **HOST-11** (ecma262:sec-createbytedatablock) `new ArrayBuffer(n)` with n larger than what is left of the memory budget throws a `RangeError` the script can catch, and the agent stays `Alive`. [slice 13]
 
 **HOST-12** (swell:D2) With `memory_bytes` 0, `create_realm` answers `Terminated(MemoryBudget)` and the agent stays `Alive`. [slice 1]
+
+**HOST-169** (swell:D2) With `memory_bytes` enough for a flat source's copy and its script record but not for its tree, `parse_script` of that source answers `Parsed::Terminated(MemoryBudget)`, and `heap_bytes()` then reads what it read before the call. [slice 6]
+
+**HOST-171** (swell:D2) At the return of every entry point and of `collect`, `live_bytes()` reads at most `heap_bytes()` and `heap_bytes()` at most `memory_bytes`; with `memory_bytes` M, after the script `(function () { var a = []; while (true) a.push({}); })()` answers `Terminated(MemoryBudget)`, two `collect`s lower `live_bytes()` by more than they lower `heap_bytes()`, and then, with k chosen from the readings so that `live_bytes()` + 2 × k ≤ M < `heap_bytes()` + k and `string_length` at least k, the script `"x".repeat(k).length` answers `Terminated(MemoryBudget)`. [slice 6]
 
 **HOST-13** (swell:D2) With `frame_depth` D, the script `var n = 0; function f() { n++; f(); } f();` answers `Throw` of a `RangeError` of its realm, the script `n` then answers `Normal(D - 1)`, that script's own context being the first, and the script `try { f(); } catch (e) {}` answers `Normal`. [slice 1]
 
@@ -326,7 +343,8 @@ object (decision 15) that draws on the host's own randomness; it is not an engin
 **Values are a `Copy` enum over typed handles (decision 4 of `engine.md`); every handle carries
 its agent's key, an index and a generation. A value handed to host code is valid for the
 scope it was handed in (a host function call, a hook, a `with_cx` closure); to keep it longer
-the host makes a `Root`. Realms, scripts and modules are held through roots. Strings cross in
+the host makes a `Root`. A value read from a root with `get` is handed out to the running scope
+like any other. Realms, scripts and modules are held through roots. Strings cross in
 two conversions, exact UTF-16 and lossy to a Rust `String`; source text crosses as UTF-8 or
 UTF-16.**
 
@@ -372,7 +390,7 @@ impl<H: Host> Agent<H> {
 }
 impl<'a, H: Host> Cx<'a, H> {   // the same methods on HookCx
     pub fn root(&mut self, value: Value) -> Result<Root, HostError>;
-    pub fn get(&self, root: &Root) -> Result<Value, HostError>;
+    pub fn get(&mut self, root: &Root) -> Result<Value, HostError>;
     pub fn realm_ref(&self, realm: &Realm) -> Result<RealmRef, HostError>;
     pub fn new_string(&mut self, text: &str) -> Completion<StringRef>;
     pub fn new_string_utf16(&mut self, units: &[u16]) -> Completion<StringRef>;
@@ -387,11 +405,22 @@ A `Root` dropped by the host is pushed on a release queue the agent drains at it
 point, so dropping needs no access to the agent. `Root`, and with it `Agent`, is therefore not
 `Send` (decision 1).
 
+`get` takes `&mut self` because it records the value it reads in the running scope, as
+`new_string` records the String it makes. A host that reads a value with `get`, drops the only
+root of it and calls back into the engine in the same scope (a safe point drains the release
+queue and may collect) still holds a valid value until the scope ends. Changed on 2026-11-22
+from `&self`, a breaking change of the interface. Handing a value out to a scope charges
+nothing to either budget and changes neither `heap_bytes()` nor `live_bytes()`: the scope's list
+is the agent's storage for the host's own calls, as the root table is, it grows by one entry per
+value handed out and ends with the scope.
+
 **HOST-28** (swell:D4) An object held only by a `Root` survives `collect`, and the root then reads the same object. [slice 1]
 
-**HOST-29** (swell:D4) After the host drops the last `Root` of an object that nothing else reaches, the second `collect` after the drop reports a lower `heap_bytes()` than before the drop. [slice 1]
+**HOST-29** (swell:D4) After the host drops the last `Root` of an object that nothing else reaches, the second `collect` after the drop reports a lower `live_bytes()` than before the drop. [slice 1]
 
 **HOST-30** (swell:D4) A handle whose object was freed, or a released root, given to any entry point or read answers `Err(HostError::StaleHandle)`, changes nothing and leaves the agent `Alive`. [slice 1]
+
+**HOST-170** (swell:D4) A host function that reads an object with `cx.get` from the only root that holds it, drops that root, calls through `cx.call` a function whose allocation starts a collection, and returns the object, answers `Normal` with that object, and the agent stays `Alive`. [slice 6]
 
 **HOST-31** (swell:D4) A handle or root of another agent given to any entry point or read answers `Err(HostError::ForeignHandle)` and changes nothing. [slice 1]
 
@@ -634,7 +663,7 @@ which realm it got).
 
 **HOST-51** (ecma262:sec-initializehostdefinedrealm) Without a setup closure, the realm's global object is an ordinary object whose prototype is the realm's `%Object.prototype%`. [slice 1]
 
-**HOST-52** (swell:D7) After the host drops every root of a realm and of objects of that realm, and no other realm reaches them, the second `collect` returns `heap_bytes()` to the value read before `create_realm`. [slice 1]
+**HOST-52** (swell:D7) After the host drops every root of a realm and of objects of that realm, and no other realm reaches them, the second `collect` returns `live_bytes()` to the value read before `create_realm`. [slice 1]
 
 **HOST-161** (swell:D7) With realm A created and then realm B, `cx.to_object(Value::Boolean(true))` in `with_cx` of A answers an object whose prototype is A's `%Boolean.prototype%`, and `agent.call` with A of the Number 1 answers `Throw` of a `TypeError` whose prototype is A's `%TypeError.prototype%`; both hold after the host dropped every root of B and with the collector run at every safe point. [slice 1]
 
@@ -943,8 +972,10 @@ running the job when the queue is otherwise empty (`engine.md` decision 11).
 ## 12. Interrupting
 
 **`InterruptHandle::interrupt` is a store into an `Arc<AtomicBool>` and answers nothing. The
-engine reads the flag at the places it checks the step budget, and at the start of every
-outermost entry. The engine clears the flag when it ends a run with `Terminated(Interrupted)`;
+engine reads the flag at the places it checks the step budget, at the start of every
+outermost entry, at the start of every parse (`parse_script`, `cx.parse_script`, `eval`, the
+`Function` constructor), and at least once per 4,096 code units a parse reads and per 4,096
+nodes its later passes and the compile step visit. The engine clears the flag when it ends a run with `Terminated(Interrupted)`;
 a flag set while nothing runs ends the next entry before it spends a step. `clear` withdraws
 an interrupt not yet used.** This answers finding 7.
 
@@ -953,7 +984,14 @@ Clearing at use and not at entry is what makes the handle race-free: a watchdog 
 sets the flag just before an entry begins would otherwise see its interrupt lost. "The agent
 answers every call with EngineFault" (decision 9) is about calls on the agent; the handle is
 not one, so setting it on a faulted agent is a store nobody reads, as is setting it after the
-agent was dropped.
+agent was dropped. A parse runs no instruction, so without reads of its own it would run to its
+end after an interrupt, for a source of any size the memory budget admits; reading at its start
+and every 4,096 units of its work bounds the delay by a constant amount of work. A parse ended
+by the flag answers `Parsed::Terminated(Interrupted)` from `parse_script` and `cx.parse_script`
+(inside a host function the run then ends as HOST-96 says) and ends the run in
+`Terminated(Interrupted)` from `eval` and `Function`; everything it charged is credited, no
+`SyntaxError` object is made and `refusals()` does not move. For `eval` and `Function` the read
+at the start comes after HostEnsureCanCompileStrings has answered.
 
 Rejected: clearing the flag at the start of every entry; an interrupt that faults the agent.
 
@@ -984,6 +1022,12 @@ impl<H: Host> Agent<H> {
 
 **HOST-96** (swell:D12) An interrupt set while a host function runs ends the run with `Terminated(Interrupted)` at the first check after the host function returns to the engine. [slice 1]
 
+**HOST-166** (swell:D12) `interrupt()` called while no entry runs makes the next `parse_script` answer `Parsed::Terminated(Interrupted)`; `is_set()` then reads false, and `refusals()` and `heap_bytes()` read what they read before the call. [slice 6]
+
+**HOST-167** (swell:D12) A host function that calls `interrupt()` and then `cx.parse_script` gets `Parsed::Terminated(Interrupted)`, and the outermost entry answers `Terminated(Interrupted)`. [slice 6]
+
+**HOST-168** (swell:D12) A `host_ensure_can_compile_strings` that calls `interrupt()` and answers `Ok(())` makes the script `try { eval(r); } catch (e) {}` end in `Terminated(Interrupted)` with `refusals()` unchanged, and the same for `Function(r)`. [slice 6]
+
 ## 13. The read surface
 
 **The host can read the agent's state, a module's [[Status]] and whether it was cut by a
@@ -1000,7 +1044,7 @@ handled a Promise<T> promise, set promise.[[Promise]].[[PromiseIsHandled]] to tr
 (`webidl:mark-a-promise-as-handled`). A module's [[Status]] is a field of the draft's record
 (`ecma262:sec-cyclic-module-records`), and the conformance target needs it to check the
 model's lifecycle (`host-interface-model.md`). The budget requirements of decision 2 can only
-be tested with `last_entry_steps` and `heap_bytes`.
+be tested with `last_entry_steps`, `heap_bytes` and `live_bytes` (the two readings of decision 2).
 
 Rejected: no read surface (decision 9); reads through script (a global the host would add to
 every realm).
@@ -1021,6 +1065,7 @@ impl<H: Host> Agent<H> {   // module_status and promise reads also on Cx and Hoo
     pub fn mark_promise_as_handled(&mut self, promise: &Root) -> Result<(), HostError>;
     pub fn last_entry_steps(&self) -> Result<u64, HostError>;
     pub fn heap_bytes(&self) -> Result<u64, HostError>;
+    pub fn live_bytes(&self) -> Result<u64, HostError>;
     pub fn pending_microtasks(&self) -> Result<usize, HostError>;
     pub fn refusals(&self) -> u64;
 }
@@ -1076,7 +1121,7 @@ holds these.
 
 **HOST-101** (webidl:mark-a-promise-as-handled) After `mark_promise_as_handled` of a rejected promise with no handler, `promise_is_handled` reads true, and a handler added to it later causes no `host_promise_rejection_tracker` call with `Handle`. [slice 10]
 
-**HOST-102** (swell:D13) A read changes no value `last_entry_steps()` and `heap_bytes()` report, and calls no hook. [slice 1]
+**HOST-102** (swell:D13) A read changes no value `last_entry_steps()`, `heap_bytes()` and `live_bytes()` report, and calls no hook. [slice 1]
 
 **HOST-164** (swell:D13) `refusals()` reads 0 on a new agent; with `r` a source the engine refuses (its error's `message` read by `swell_syntax::message_kind` as a refusal), it reads 1 more after `parse_script` of `r`, 1 more after the script `try { eval(r); } catch (e) {}` answers `Normal`, and 1 more after the script `try { Function(r); } catch (e) {}` answers `Normal`, and while a regular expression literal is refused, 1 more after the script `try { /a/; } catch (e) {}` answers `Normal`; it reads the same after `parse_script` of a grammar error and of `0` inside 2,000 nested parentheses with `parser_nesting` 1,000; it is read, as a `u64`, after the agent faulted; and once the engine refuses no construct, it reads 0 after each of those scripts. [slice 2]
 
