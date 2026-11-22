@@ -1,0 +1,68 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 5
+  params local 0
+  0000 2:36 GetLocal 0
+  0001 2:21 Dup
+  0002 2:21 GetIterator
+  0003 2:22 PatternStep 0
+  0004 2:22 SetLocal 1
+  0005 2:22 Pop
+  0006 2:21 PatternSkip
+  0007 2:27 PatternStep 0
+  0008 2:27 JumpIfNotUndefined 0010
+  0009 2:31 Number 1
+  0010 2:27 SetLocal 2
+  0011 2:27 Pop
+  0012 2:21 Undefined
+  0013 2:21 Tag 0
+  0014 2:21 IteratorClose
+  0015 2:21 Bury 2
+  0016 2:21 Bury 2
+  0017 2:21 Pop
+  0018 2:21 EndFinally
+  0019 2:21 Pop
+  0020 2:57 GetLocal 0
+  0021 2:43 Dup
+  0022 2:43 GetIterator
+  0023 2:44 PatternStep 0
+  0024 2:44 Dup
+  0025 2:44 GetIterator
+  0026 2:45 PatternStep 0
+  0027 2:45 SetLocal 3
+  0028 2:45 Pop
+  0029 2:44 Undefined
+  0030 2:44 Tag 0
+  0031 2:44 IteratorClose
+  0032 2:44 Bury 2
+  0033 2:44 Bury 2
+  0034 2:44 Pop
+  0035 2:44 EndFinally
+  0036 2:44 Pop
+  0037 2:49 PatternRest 0
+  0038 2:52 SetLocal 4
+  0039 2:49 Pop
+  0040 2:43 Undefined
+  0041 2:43 Tag 0
+  0042 2:43 IteratorClose
+  0043 2:43 Bury 2
+  0044 2:43 Bury 2
+  0045 2:43 Pop
+  0046 2:43 EndFinally
+  0047 2:43 Pop
+  0048 2:67 GetLocal 1
+  0049 2:71 GetLocal 2
+  0050 2:67 Add
+  0051 2:75 GetLocal 3
+  0052 2:67 Add
+  0053 2:79 GetLocal 4
+  0054 2:67 Add
+  0055 2:60 Return
+  0056 2:1 Undefined
+  0057 2:1 Return
+  pattern 0003..0012 -> 0014 items 0 envs 0
+  pattern 0026..0029 -> 0031 items 0 envs 0
+  pattern 0023..0040 -> 0042 items 0 envs 0

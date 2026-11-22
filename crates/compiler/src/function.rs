@@ -40,7 +40,7 @@ use swell_syntax::Script;
 use swell_syntax::ast::{Ast, BindingTarget, ExprId, Function, FunctionId, Span};
 use swell_syntax::ledger::Meter;
 
-use crate::bytecode::{FunctionTemplate, Instruction, SlotName};
+use crate::bytecode::{FunctionTemplate, Handler, Instruction, SlotName};
 use crate::resolve::{Binding, FunctionInfo, Resolution, Site};
 use crate::{Body, Chain, CompileError, Compiler, Constants, Task, malformed};
 
@@ -278,6 +278,21 @@ fn expression_value(c: &mut Compiler<'_, '_>, e: ExprId) -> Result<(), CompileEr
             )?,
             Task::ChainCheck(depth, span) => c.chain_check(depth, span)?,
             Task::ChainClose(span) => c.chain_close(span)?,
+            Task::Handler {
+                kind,
+                start,
+                end,
+                target,
+                items,
+                envs,
+            } => c.handler(Handler {
+                kind,
+                start,
+                end,
+                target,
+                items,
+                envs,
+            })?,
             _ => return Err(malformed("a task no expression expands to")),
         }
     }

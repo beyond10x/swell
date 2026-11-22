@@ -1,0 +1,36 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 2 locals 2
+  params local 0, local 1
+  0000 2:55 GetLocal 0
+  0001 2:27 Dup
+  0002 2:27 GetIterator
+  0003 2:28 GetLocal 1
+  0004 2:28 PatternStep 1
+  0005 2:28 PutNamed "a"
+  0006 2:28 Pop
+  0007 2:33 PatternStep 0
+  0008 2:33 RequireObjectCoercible
+  0009 2:38 GetLocal 1
+  0010 2:35 PatternGet 1 "b"
+  0011 2:35 PutNamed "b"
+  0012 2:35 Pop
+  0013 2:33 Pop
+  0014 2:48 GetLocal 1
+  0015 2:45 PatternRest 1
+  0016 2:45 PutNamed "c"
+  0017 2:45 Pop
+  0018 2:27 Undefined
+  0019 2:27 Tag 0
+  0020 2:27 IteratorClose
+  0021 2:27 Bury 2
+  0022 2:27 Bury 2
+  0023 2:27 Pop
+  0024 2:27 EndFinally
+  0025 2:20 Return
+  0026 2:1 Undefined
+  0027 2:1 Return
+  pattern 0003..0018 -> 0020 items 0 envs 0

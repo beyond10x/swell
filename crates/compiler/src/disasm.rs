@@ -168,6 +168,7 @@ fn body(
         let kind = match h.kind {
             HandlerKind::Catch => "catch",
             HandlerKind::Finally => "finally",
+            HandlerKind::Pattern => "pattern",
         };
         let _ = writeln!(
             out,
@@ -294,6 +295,9 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::PatternGet { depth, name } => format!("PatternGet {depth} {}", s(name)),
         I::PatternGetKey { depth, kept } => format!("PatternGetKey {depth} {kept}"),
         I::ObjectRest { depth, kept } => format!("ObjectRest {depth} {kept}"),
+        I::ArrayGrow(n) => format!("ArrayGrow {n}"),
+        I::PatternStep(n) => format!("PatternStep {n}"),
+        I::PatternRest(n) => format!("PatternRest {n}"),
         other => format!("{other:?}"),
     }
 }

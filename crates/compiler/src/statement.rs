@@ -692,7 +692,12 @@ impl<'a, 'm> Compiler<'a, 'm> {
             ForInTarget::Expression(e) => self
                 .ast
                 .expr(*e)
-                .filter(|n| matches!(n.expr, Expr::ObjectPattern { .. }))
+                .filter(|n| {
+                    matches!(
+                        n.expr,
+                        Expr::ObjectPattern { .. } | Expr::ArrayPattern { .. }
+                    )
+                })
                 .map(|_| *e),
         };
         if let Some(pattern) = pattern {

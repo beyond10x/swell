@@ -2,12 +2,11 @@
 //! `#sec-arrow-function-definitions`) and the accessors and plain methods of object literals
 //! (`#sec-method-definitions`).
 //!
-//! The parameters are a list of `BindingIdentifier`s and ObjectBindingPatterns
+//! The parameters are a list of `BindingIdentifier`s and binding patterns
 //! (`#sec-destructuring-binding-patterns`), each with an optional `Initializer`, the last
-//! possibly a `FunctionRestParameter` of a `BindingIdentifier`, with a trailing comma allowed
-//! after a parameter that is no rest parameter (`#sec-parameter-lists`); an array pattern and a
-//! pattern after `...` are refused (slice 6, a later story), as are generators (7) and `async`
-//! arrows (10). A
+//! possibly a `FunctionRestParameter` of either, with a trailing comma allowed after a
+//! parameter that is no rest parameter (`#sec-parameter-lists`); generators (7) and `async`
+//! arrows (10) are refused. A
 //! function's code is strict mode code when the code around it is or when its body starts with
 //! a Use Strict Directive (`#sec-strict-mode-code`); the parser tracks that while it reads the
 //! body, and the early errors that depend on it are checked afterwards (`src/early.rs`).
@@ -266,13 +265,13 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.wrap_in_statement(id, span, depth)
     }
 
-    /// One `FormalParameter` of function `id`, a `BindingIdentifier` with an optional
-    /// `Initializer`, or a `FunctionRestParameter`, `... BindingIdentifier`; whether it was the
-    /// rest parameter. A pattern keeps the refusal of its story (`binding_identifier`).
+    /// One `FormalParameter` of function `id`, a `BindingIdentifier` or a `BindingPattern` with
+    /// an optional `Initializer`, or a `FunctionRestParameter`, `... BindingIdentifier` or
+    /// `... BindingPattern`; whether it was the rest parameter.
     fn parameter(&mut self, id: FunctionId) -> R<bool> {
         let rest = self.eat(Punct::Ellipsis)?;
         // A pattern is read here, so that the frame on the stack while it is read holds ids.
-        let pattern = if rest { None } else { self.pattern_literal()? };
+        let pattern = self.pattern_literal()?;
         self.parameter_head(id, rest, pattern)?;
         if !rest && self.is(Punct::Eq) {
             self.parameter_initializer(id)?;
@@ -283,7 +282,6 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// The pattern `pattern` read, or the `BindingIdentifier` at the current token, of a
     /// parameter of function `id` (after `...` when `rest`), appended to its `params` (and a
     /// `None` to its `initializers` when they are kept), the growth of each list charged first.
-    /// A rest parameter that is a pattern keeps the refusal of its story.
     #[inline(never)]
     fn parameter_head(&mut self, id: FunctionId, rest: bool, pattern: Option<ExprId>) -> R<()> {
         let name = self.binding_target(pattern, PatternKind::Initialize)?;
@@ -380,11 +378,11 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// identifier not in parentheses), or the parenthesized expression, in one pair of
     /// parentheses ([`Parser::parenthesized`]), read again as `ArrowFormalParameters`
     /// (`#sec-arrow-function-definitions-static-semantics-early-errors`, the cover's
-    /// refinement): an identifier, an object literal read again as an ObjectBindingPattern, or
-    /// an assignment with `=` to either (a parameter with its initializer), or a comma
+    /// refinement): an identifier, an object or array literal read again as a binding pattern,
+    /// or an assignment with `=` to either (a parameter with its initializer), or a comma
     /// expression of those, none in parentheses of its own, the last one possibly the rest
-    /// element the cover read ([`Parser::cover_rest`]); or the empty list of `()`. An array
-    /// literal is a pattern, refused; `async` before parentheses is an async arrow, refused.
+    /// element the cover read ([`Parser::cover_rest`]); or the empty list of `()`. `async`
+    /// before parentheses is an async arrow, refused.
     /// The names move from the expression's nodes into the list; with no initializer and no
     /// pattern the nodes of the first reading are dropped and what they own credited, otherwise
     /// they stay in the arena, unreferenced but by the initializers' and the patterns' own, and
@@ -393,21 +391,21 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// the growth of each list is charged first.
     #[inline(never)]
     fn arrow_parameters(&mut self, left: ExprId, start: Span) -> R<ArrowParameters> {
-        let (parenthesized, elements) = match self.expr_node(left) {
+        let elements = match self.expr_node(left) {
             Some(n) => match &n.expr {
-                Expr::Identifier(_) => (n.parenthesized, Some(1)),
+                Expr::Identifier(_) => Some(1),
                 Expr::Assign {
                     op: AssignOp::Assign,
                     ..
-                } if n.parenthesized => (true, Some(1)),
-                Expr::Sequence(list) if n.parenthesized => (true, Some(list.len())),
-                Expr::Object(_) if n.parenthesized => (true, Some(1)),
-                _ => (n.parenthesized, None),
+                } if n.parenthesized => Some(1),
+                Expr::Sequence(list) if n.parenthesized => Some(list.len()),
+                Expr::Object(_) | Expr::Array(_) | Expr::Spread(_) if n.parenthesized => Some(1),
+                _ => None,
             },
             None => return self.unexpected(),
         };
         let Some(elements) = elements else {
-            return self.arrow_refusal(left, parenthesized, start);
+            return self.arrow_refusal(left, start);
         };
         let mut mark = left;
         let mut defaults = false;
@@ -421,7 +419,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                 (self.element(n), !n.parenthesized)
             });
             if element == Element::Other || !(bare || e == left) {
-                return self.arrow_refusal(e, bare, start);
+                return self.arrow_refusal(e, start);
             }
             defaults |= matches!(element, Element::Default | Element::PatternDefault);
             patterns |= matches!(element, Element::Pattern | Element::PatternDefault);
@@ -435,6 +433,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             let e = self.arrow_element(left, i);
             let (target, value) = match self.expr_node(e).map(|n| &n.expr) {
                 Some(Expr::Assign { target, value, .. }) => (*target, Some(*value)),
+                Some(Expr::Spread(pattern)) => (*pattern, None),
                 _ => (e, None),
             };
             let span = self.expr_span(target);
@@ -443,7 +442,12 @@ impl<'a, 'm> Parser<'a, 'm> {
                     let name = std::mem::take(name);
                     params.push(BindingTarget::Identifier(Name { name, span }));
                 }
-                Some(Expr::Object(_) | Expr::ObjectPattern { .. }) => {
+                Some(
+                    Expr::Object(_)
+                    | Expr::ObjectPattern { .. }
+                    | Expr::Array(_)
+                    | Expr::ArrayPattern { .. },
+                ) => {
                     let pattern = self
                         .reread_as_pattern(target, PatternKind::Initialize)
                         .and_then(|()| self.bound_names(target));
@@ -477,7 +481,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     fn element(&self, n: &ExprNode) -> Element {
         match &n.expr {
             Expr::Identifier(_) => Element::Name,
-            Expr::Object(_) => Element::Pattern,
+            // A spread is the cover's rest element of a pattern ([`Parser::cover_rest`]).
+            Expr::Object(_) | Expr::Array(_) | Expr::Spread(_) => Element::Pattern,
             Expr::Assign {
                 op: AssignOp::Assign,
                 target,
@@ -486,7 +491,13 @@ impl<'a, 'm> Parser<'a, 'm> {
                 Some(t) if !t.parenthesized && matches!(t.expr, Expr::Identifier(_)) => {
                     Element::Default
                 }
-                Some(t) if !t.parenthesized && matches!(t.expr, Expr::ObjectPattern { .. }) => {
+                Some(t)
+                    if !t.parenthesized
+                        && matches!(
+                            t.expr,
+                            Expr::ObjectPattern { .. } | Expr::ArrayPattern { .. }
+                        ) =>
+                {
                     Element::PatternDefault
                 }
                 _ => Element::Other,
@@ -496,12 +507,13 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// Whether the element `e` is the rest element the cover read: the identifier whose span
-    /// starts at the `...` before it ([`Parser::cover_rest`]); no identifier's own text starts
-    /// with a `.`.
+    /// starts at the `...` before it, or the spread of a pattern ([`Parser::cover_rest`]); no
+    /// identifier's own text starts with a `.`.
     fn is_cover_rest(&self, e: ExprId) -> bool {
         self.expr_node(e).is_some_and(|n| {
-            matches!(n.expr, Expr::Identifier(_))
-                && self.src.get(n.span.start as usize) == Some(&u16::from(b'.'))
+            matches!(n.expr, Expr::Spread(_))
+                || matches!(n.expr, Expr::Identifier(_))
+                    && self.src.get(n.span.start as usize) == Some(&u16::from(b'.'))
         })
     }
 
@@ -515,19 +527,14 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// The error of the element `e` of an operand before `=>` that is no `ArrowParameters`:
-    /// the refusal a later story lifts (`destructuring pattern` for an element that stands as a parameter, `plain`: the cover's own expression or an operand of
-    /// its comma expression in no parentheses of its own; `async function` for a call of
-    /// `async`), or the `=>` unexpected.
+    /// the refusal a later story lifts (`async function` for a call of `async`), or the `=>`
+    /// unexpected.
     #[inline(never)]
-    fn arrow_refusal<T>(&mut self, e: ExprId, plain: bool, start: Span) -> R<T> {
+    fn arrow_refusal<T>(&mut self, e: ExprId, start: Span) -> R<T> {
         let Some(node) = self.expr_node(e) else {
             return self.unexpected();
         };
-        let at = node.span;
         match &node.expr {
-            Expr::Object(_) | Expr::Array(_) if plain => {
-                self.refuse_at("destructuring pattern", 6, at)
-            }
             Expr::Call { callee, .. }
                 if !node.parenthesized
                     && self.expr_node(*callee).is_some_and(|c| {

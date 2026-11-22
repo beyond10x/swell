@@ -128,14 +128,19 @@ impl<H: Host> Agent<H> {
 
     /// Continue at `handler` of the running frame with the thrown `value`: the operand stack and
     /// the environments as they were at the try statement, then the exception (a `catch`
-    /// block) or the throw completion record (a `finally` block). A `catch` block ends the
-    /// throw's site record; a `finally` block keeps it, since its end throws the value again.
+    /// block) or the throw completion record (a `finally` block, and the close of an array
+    /// pattern, whose stack is cut above its record, `interp/array_patterns.rs`). A `catch`
+    /// block ends the throw's site record; the others keep it, since their end throws the
+    /// value again.
     fn enter_handler(
         &mut self,
         handler: swell_compiler::bytecode::Handler,
         value: Value,
     ) -> Completion<()> {
-        let items = usize::try_from(handler.items).unwrap_or(usize::MAX);
+        let mut items = usize::try_from(handler.items).unwrap_or(usize::MAX);
+        if handler.kind == HandlerKind::Pattern {
+            items = self.pattern_handler_items(items)?;
+        }
         self.truncate_stack(items)?;
         let (mut env, mut pushed) = {
             let frame = self.top_frame()?;
@@ -155,10 +160,10 @@ impl<H: Host> Agent<H> {
         let realm = frame.realm;
         self.set_realm_slot(Some(realm));
         self.push_value(value)?;
-        if handler.kind == HandlerKind::Finally {
-            self.push_entry(Entry::Tag(TAG_THROW))?;
-        } else {
+        if handler.kind == HandlerKind::Catch {
             self.end_throw_site();
+        } else {
+            self.push_entry(Entry::Tag(TAG_THROW))?;
         }
         Ok(())
     }
@@ -216,7 +221,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// Replace the top `count` entries with `value`.
-    fn replace(&mut self, count: usize, value: Value) -> Completion<Flow> {
+    pub(super) fn replace(&mut self, count: usize, value: Value) -> Completion<Flow> {
         self.drop_entries(count)?;
         self.push_value(value)?;
         Ok(Flow::Next)
@@ -305,6 +310,13 @@ impl<H: Host> Agent<H> {
             I::DefineComputedMethod => self.define_computed_function(false, true),
             I::SetFunctionName => self.set_function_name_instruction(),
             I::CopyDataProperties => self.copy_data_properties_instruction(),
+            // ---- spread elements (`interp/spread.rs`) ----
+            I::SpreadArray => self.spread_array(),
+            I::ArrayAppend => self.array_append(),
+            I::ArrayGrow(count) => self.array_grow(count),
+            I::CallSpread => self.call_spread(),
+            I::CallEvalSpread => self.call_eval_spread(strict),
+            I::NewSpread => self.new_spread(),
 
             // ---- operators ----
             I::Typeof => self.typeof_value(),
@@ -401,6 +413,10 @@ impl<H: Host> Agent<H> {
             I::PatternGet { depth, name } => self.pattern_get(depth, name).map(|()| Flow::Next),
             I::PatternGetKey { depth, kept } => self.pattern_get_key(depth, kept),
             I::ObjectRest { depth, kept } => self.object_rest(depth, kept),
+            // ---- array patterns (`interp/array_patterns.rs`) ----
+            I::PatternStep(depth) => self.pattern_step(depth),
+            I::PatternSkip => self.pattern_skip(),
+            I::PatternRest(depth) => self.pattern_rest(depth),
             // ---- templates (`interp/template.rs`) ----
             I::ToString => self.substitution_to_string(),
         }
@@ -1416,7 +1432,7 @@ impl<H: Host> Agent<H> {
 
     /// The call of the ECMAScript function `function` of `Call(count)` on this loop: its frame
     /// replaces the `count + 2` entries of the call.
-    fn push_call_frame(
+    pub(super) fn push_call_frame(
         &mut self,
         function: ObjectRef,
         this: Value,
@@ -1456,7 +1472,7 @@ impl<H: Host> Agent<H> {
     /// The construction by the ECMAScript function `constructor` of `New(count)` on this loop:
     /// its frame, with the new object as its `this`, replaces the `count + 1` entries of the
     /// call.
-    fn push_construct_frame(
+    pub(super) fn push_construct_frame(
         &mut self,
         constructor: ObjectRef,
         args: &[Value],
