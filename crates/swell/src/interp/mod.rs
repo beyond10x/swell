@@ -36,6 +36,7 @@ pub(crate) mod dispatch;
 pub(crate) mod frame;
 mod lexical;
 mod parameters;
+mod patterns;
 mod template;
 
 use frame::{Entry, Frame, entry_bytes};

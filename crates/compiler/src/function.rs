@@ -37,7 +37,7 @@
 //!   the eval code adds its `var` names to.
 
 use swell_syntax::Script;
-use swell_syntax::ast::{Ast, ExprId, FunctionId, Span};
+use swell_syntax::ast::{Ast, BindingTarget, ExprId, Function, FunctionId, Span};
 use swell_syntax::ledger::Meter;
 
 use crate::bytecode::{FunctionTemplate, Instruction, SlotName};
@@ -153,7 +153,7 @@ fn bind_parameters(
             .locals
             .checked_add(n)
             .ok_or(CompileError::TooMany("local slots"))?;
-        let span = p.span;
+        let span = p.span();
         if f.rest && i == last {
             c.emit(Instruction::RestArguments(at), span)?;
         } else {
@@ -164,6 +164,13 @@ fn bind_parameters(
                 expression_value(c, e)?;
                 c.bind(given)?;
             }
+        }
+        // A pattern destructures the value into the names it binds (BindingInitialization,
+        // `#sec-runtime-semantics-bindinginitialization`).
+        if let Some(pattern) = p.pattern() {
+            expression_value(c, pattern)?;
+            c.emit(Instruction::Pop, span)?;
+            continue;
         }
         let store = match c.binding(Site::Param(id, n))? {
             Binding::Local(slot) => Instruction::SetLocal(slot),
@@ -198,13 +205,7 @@ fn bind_parameters(
         let Some(target) = resolution.sites.get(&Site::BodyVar(id, n)) else {
             continue;
         };
-        let source = match f.params.iter().rposition(|p| p.name == *name) {
-            Some(k) => {
-                let k = u32::try_from(k).map_err(|_| CompileError::TooMany("parameters"))?;
-                Site::Param(id, k)
-            }
-            None => Site::Arguments(id),
-        };
+        let source = parameter_site(f, id, name)?.unwrap_or(Site::Arguments(id));
         let load = match c.binding(source)? {
             Binding::Local(slot) => Instruction::GetLocal(slot),
             Binding::Env { hops, slot } => Instruction::GetEnv {
@@ -226,6 +227,26 @@ fn bind_parameters(
         c.emit(Instruction::Pop, f.span)?;
     }
     Ok(())
+}
+
+/// The site of the last parameter of `f`, function `id`, that binds `name`: the parameter, or
+/// the name in its pattern; `None` when none does.
+fn parameter_site(f: &Function, id: FunctionId, name: &str) -> Result<Option<Site>, CompileError> {
+    for (k, p) in f.params.iter().enumerate().rev() {
+        match p {
+            BindingTarget::Identifier(n) if n.name == name => {
+                let k = u32::try_from(k).map_err(|_| CompileError::TooMany("parameters"))?;
+                return Ok(Some(Site::Param(id, k)));
+            }
+            BindingTarget::Identifier(_) => {}
+            BindingTarget::Pattern(pattern) => {
+                if let Some(b) = pattern.names.iter().rev().find(|b| b.name.name == name) {
+                    return Ok(Some(Site::Bound(b.pattern, b.property)));
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// The value of the expression `e` onto the operand stack: its tasks run as

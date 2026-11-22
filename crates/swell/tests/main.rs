@@ -42,6 +42,7 @@ mod lexical_declarations;
 mod limits_scripts;
 mod misuse;
 mod names;
+mod object_patterns;
 mod objects;
 mod parameters;
 mod property_index;

@@ -424,6 +424,21 @@ pub enum Instruction {
     /// `const` declaration of a script.
     InitGlobal(u32),
 
+    // ---- object patterns ------------------------------------------------------------------
+    /// `[v] -> [v]`: RequireObjectCoercible (`#sec-requireobjectcoercible`) of the value an
+    /// object pattern destructures, a `TypeError` for `undefined` and `null`
+    /// (`#sec-runtime-semantics-bindinginitialization`,
+    /// `#sec-runtime-semantics-destructuringassignmentevaluation`).
+    RequireObjectCoercible,
+    /// `[v, r1..rn] -> [v, r1..rn, x]` with `depth` n: `x` is GetV(`v`, `strings[name]`)
+    /// (`#sec-getv`), the read of one property of an object pattern, after the reference of its
+    /// target (`#sec-runtime-semantics-keyedbindinginitialization`,
+    /// `#sec-runtime-semantics-keyeddestructuringassignmentevaluation`).
+    PatternGet {
+        depth: u32,
+        name: u32,
+    },
+
     // ---- templates ------------------------------------------------------------------------
     /// `[v] -> [s]`: ToString (`#sec-tostring`) of a substitution of a template literal
     /// (`#sec-template-literals-runtime-semantics-evaluation`): an object gives ToPrimitive with
@@ -548,6 +563,7 @@ impl Instruction {
             Instruction::Argument(_)
             | Instruction::RestArguments(_)
             | Instruction::PushVarEnv(_) => None,
+            Instruction::RequireObjectCoercible | Instruction::PatternGet { .. } => None,
             Instruction::JumpIfNotUndefined(t) => Some(t),
         }
     }
@@ -705,7 +721,9 @@ pub struct FunctionTemplate {
     /// an initializer or the rest parameter.
     pub length: u32,
     pub strict: bool,
-    /// Where each parameter goes, in order.
+    /// Where each parameter goes, in order; for a parameter that is a pattern, where each name it
+    /// binds goes, in source order (a list with a pattern is not simple: the call sets them
+    /// uninitialized, [`FunctionTemplate::binds_parameters`]).
     pub params: Vec<Slot>,
     /// Whether the code binds the parameters, from the arguments the call keeps: a list that is
     /// not simple (`#sec-static-semantics-issimpleparameterlist`).

@@ -508,6 +508,8 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "arrow" => ("x = ", "() => ", "0", "", ";"),
         "arrow_block" => ("x = ", "() => { return ", "0", "; }", ";"),
         "default_parameter" => ("x = ", "function (a = ", "0", ") {}", ";"),
+        "object_pattern" => ("var ", "{a:", "a", "}", " = o;"),
+        "object_assignment_pattern" => ("(", "{a:", "a", "}", " = o);"),
         _ => return None,
     };
     let mut source = units(before);
@@ -518,7 +520,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 40] = [
+const NESTING_KINDS: [&str; 42] = [
     "array",
     "paren",
     "block",
@@ -559,6 +561,8 @@ const NESTING_KINDS: [&str; 40] = [
     "arrow",
     "arrow_block",
     "default_parameter",
+    "object_pattern",
+    "object_assignment_pattern",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict
@@ -869,7 +873,7 @@ fn dynamic_function_entry_parses_parameters_and_body_apart() {
     let f = &functions[0];
     assert_eq!(f.kind, FunctionKind::Expression);
     assert!(f.name.is_none(), "the name anonymous is not bound inside");
-    let names: Vec<&str> = f.params.iter().map(|p| p.name.as_str()).collect();
+    let names: Vec<&str> = f.parameter_names().map(|p| p.name.as_str()).collect();
     assert_eq!(names, vec!["a", "b"]);
     assert!(!f.strict);
     // The script holds the function expression alone.

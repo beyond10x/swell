@@ -33,7 +33,13 @@
 //!   label inside a statement with the same label (ContainsDuplicateLabels), none crossing a
 //!   function; in strict mode code a label is no reserved word either;
 //! - `#sec-object-initializer-static-semantics-early-errors`: `__proto__` twice as a
-//!   `PropertyName : AssignmentExpression`;
+//!   `PropertyName : AssignmentExpression`, and a `CoverInitializedName` in an object literal
+//!   that no pattern reads again;
+//! - `#sec-destructuring-assignment-static-semantics-early-errors` and
+//!   `#sec-destructuring-binding-patterns`: each target of an ObjectAssignmentPattern that is no
+//!   nested pattern is a simple assignment target; the names a binding pattern binds are
+//!   checked as those of its declaration, a parameter list or a `catch` parameter, and a pattern
+//!   in a declaration has an initializer outside a for-in head;
 //! - `#sec-method-definitions-static-semantics-early-errors`: the `UniqueFormalParameters` of a
 //!   method, in any code;
 //! - `#sec-arrow-function-definitions-static-semantics-early-errors`: the
@@ -53,7 +59,8 @@
 //!   `#sec-block-static-semantics-early-errors`, `#sec-switch-statement-static-semantics-early-errors`,
 //!   `#sec-for-statement-static-semantics-early-errors`,
 //!   `#sec-for-in-and-for-of-statements-static-semantics-early-errors`); those of a function body
-//!   no parameter name, those of a `catch` block not its parameter
+//!   no parameter name, those of a `catch` block not its parameter, and a `catch` parameter that
+//!   is a pattern binds no name twice and none a `var` of its block binds
 //!   (`#sec-try-statement-static-semantics-early-errors`).
 //!
 //! The lexical names in scope are a stack of frames, each made as the walk enters the statement
@@ -70,12 +77,17 @@
 use std::collections::BTreeSet;
 
 use crate::ast::{
-    Ast, Child, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind, Name,
-    NumberForm, NumberLiteral, PropertyKey, PropertyValue, RegExpLiteral, Span, Stmt, StmtId,
-    StringLiteral, SwitchCase, UnaryOp, VarDeclarator,
+    Ast, BindingTarget, Child, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId,
+    FunctionKind, Name, NumberForm, NumberLiteral, PatternKind, PatternTarget, PropertyKey,
+    PropertyValue, RegExpLiteral, Span, Stmt, StmtId, StringLiteral, SwitchCase, UnaryOp,
+    VarDeclarator,
 };
 use crate::error::SyntaxError;
 use crate::ledger::{HeapBytes, Meter, map_entry_bytes};
+
+/// The message of a `CoverInitializedName` (`a = 1` in an object literal) in a literal that is
+/// not read again as a pattern (`#sec-object-initializer-static-semantics-early-errors`).
+pub(crate) const COVER_INITIALIZED_NAME: &str = "invalid shorthand property initializer";
 
 /// The message of a `with` statement in strict mode code.
 pub(crate) const WITH_IN_STRICT: &str = "with statement in strict mode code";
@@ -153,8 +165,8 @@ enum Names<'a> {
     Cases(&'a [SwitchCase]),
     /// The declarators of a `for` head.
     Declarators(&'a [VarDeclarator]),
-    /// The binding of a for-in head.
-    One(&'a Name),
+    /// The binding of a for-in head, or the names of a `catch` parameter that is a pattern.
+    One(&'a BindingTarget),
 }
 
 /// One piece of the walk's pending work.
@@ -207,7 +219,12 @@ struct Checker<'a, 'm> {
 impl<'a, 'm> Checker<'a, 'm> {
     /// A frame of the lexical names `names`, in source order: a name twice is an error, and so
     /// is one of `others` (the parameters or the catch parameter, named by `what`).
-    fn frame(&mut self, names: Names<'a>, others: &[Name], what: &str) -> BTreeSet<String> {
+    fn frame(
+        &mut self,
+        names: Names<'a>,
+        others: &[BindingTarget],
+        what: &str,
+    ) -> BTreeSet<String> {
         let mut frame = BTreeSet::new();
         match names {
             Names::List(list) => {
@@ -224,10 +241,16 @@ impl<'a, 'm> Checker<'a, 'm> {
             }
             Names::Declarators(declarators) => {
                 for d in declarators {
-                    self.frame_name(&mut frame, &d.name, others, what);
+                    for name in d.target.names() {
+                        self.frame_name(&mut frame, name, others, what);
+                    }
                 }
             }
-            Names::One(name) => self.frame_name(&mut frame, name, others, what),
+            Names::One(target) => {
+                for name in target.names() {
+                    self.frame_name(&mut frame, name, others, what);
+                }
+            }
         }
         frame
     }
@@ -238,7 +261,7 @@ impl<'a, 'm> Checker<'a, 'm> {
         &mut self,
         frame: &mut BTreeSet<String>,
         s: StmtId,
-        others: &[Name],
+        others: &[BindingTarget],
         what: &str,
     ) {
         let ast = self.ast;
@@ -249,13 +272,25 @@ impl<'a, 'm> Checker<'a, 'm> {
             return;
         }
         for d in declarators {
-            self.frame_name(frame, &d.name, others, what);
+            for name in d.target.names() {
+                self.frame_name(frame, name, others, what);
+            }
         }
     }
 
     /// The lexical name `n` into `frame`: its entry and a copy of the name charged first.
-    fn frame_name(&mut self, frame: &mut BTreeSet<String>, n: &Name, others: &[Name], what: &str) {
-        if others.iter().any(|o| o.name == n.name) {
+    fn frame_name(
+        &mut self,
+        frame: &mut BTreeSet<String>,
+        n: &Name,
+        others: &[BindingTarget],
+        what: &str,
+    ) {
+        if others
+            .iter()
+            .flat_map(BindingTarget::names)
+            .any(|o| o.name == n.name)
+        {
             self.error(
                 format!("lexical declaration of {} conflicts with {what}", n.name),
                 n.span,
@@ -348,9 +383,9 @@ impl<'a, 'm> Checker<'a, 'm> {
                 ..
             } if kind.is_lexical() => Names::Declarators(declarators),
             Stmt::ForIn {
-                target: ForInTarget::Var(kind, name),
+                target: ForInTarget::Var(kind, target),
                 ..
-            } if kind.is_lexical() => Names::One(name),
+            } if kind.is_lexical() => Names::One(target),
             Stmt::Try {
                 block,
                 handler,
@@ -362,9 +397,24 @@ impl<'a, 'm> Checker<'a, 'm> {
                     self.push_list(stack, list, frame);
                 }
                 if let Some(h) = handler {
-                    let param: &[Name] = h.param.as_slice();
+                    // `#sec-try-statement-static-semantics-early-errors`: the names of a pattern
+                    // are a frame of their own around the block, which no `var` of the block may
+                    // bind (Annex B allows that only for a `BindingIdentifier`,
+                    // `#sec-variablestatements-in-catch-blocks`), and which holds no name twice.
+                    let pattern = h.param.as_ref().filter(|p| p.pattern().is_some());
+                    if pattern.is_some() {
+                        self.push_step(stack, Step::PopLexical);
+                    }
+                    let param: &[BindingTarget] = h.param.as_slice();
                     let frame = self.frame(Names::List(&h.body), param, "the catch parameter");
                     self.push_list(stack, &h.body, frame);
+                    if let Some(target) = pattern {
+                        if let Some(e) = target.pattern() {
+                            self.push_step(stack, Step::Node(Child::Expr(e)));
+                        }
+                        let frame = self.frame(Names::One(target), &[], "");
+                        self.push_step(stack, Step::Enter(frame));
+                    }
                 }
                 if self.m.grow_by(stack, block.len().saturating_add(1)).is_ok() {
                     stack.push(Step::PopLexical);
@@ -611,15 +661,43 @@ impl<'a, 'm> Checker<'a, 'm> {
                 ..
             } => {
                 for d in declarators {
-                    self.declared(*kind, &d.name);
-                    if *kind == DeclKind::Const && d.init.is_none() {
-                        self.error("missing initializer in a const declaration", d.name.span);
+                    for name in d.target.names() {
+                        self.declared(*kind, name);
+                    }
+                    if d.init.is_some() {
+                        continue;
+                    }
+                    // `#sec-destructuring-binding-patterns`: a `BindingPattern` in a
+                    // declaration has an `Initializer` (the grammar of `LexicalBinding` and
+                    // `VariableDeclaration`), but in the head of a for-in.
+                    if d.target.pattern().is_some() {
+                        self.error(
+                            "missing initializer in a destructuring declaration",
+                            d.target.span(),
+                        );
+                    } else if *kind == DeclKind::Const {
+                        self.error(
+                            "missing initializer in a const declaration",
+                            d.target.span(),
+                        );
                     }
                 }
             }
             Stmt::ForIn { target, .. } => match target {
-                ForInTarget::Var(kind, name) => self.declared(*kind, name),
-                ForInTarget::Expression(e) => self.target(*e),
+                ForInTarget::Var(kind, target) => {
+                    for name in target.names() {
+                        self.declared(*kind, name);
+                    }
+                }
+                // An ObjectAssignmentPattern is checked as the expression it is.
+                ForInTarget::Expression(e) => {
+                    if !matches!(
+                        self.ast.expr(*e).map(|n| &n.expr),
+                        Some(Expr::ObjectPattern { .. })
+                    ) {
+                        self.target(*e);
+                    }
+                }
             },
             // A function declaration reaches the walk only at the top level of a body, where it
             // is var scoped.
@@ -659,8 +737,8 @@ impl<'a, 'm> Checker<'a, 'm> {
             Stmt::Try {
                 handler: Some(h), ..
             } => {
-                if let Some(param) = &h.param {
-                    self.binding(param);
+                for name in h.param.iter().flat_map(BindingTarget::names) {
+                    self.binding(name);
                 }
             }
             _ => {}
@@ -739,6 +817,27 @@ impl<'a, 'm> Checker<'a, 'm> {
                             self.error("duplicate __proto__ property in an object literal", p.span);
                         }
                     }
+                    // `PropertyDefinition : CoverInitializedName` in a literal that no pattern
+                    // reads again.
+                    if matches!(p.value, PropertyValue::CoverInitialized(..)) {
+                        self.error(COVER_INITIALIZED_NAME, p.span);
+                    }
+                }
+            }
+            // `#sec-destructuring-assignment-static-semantics-early-errors`: each target of an
+            // assignment pattern that is no nested pattern is a simple assignment target (a
+            // binding pattern's names are checked with its declaration).
+            Expr::ObjectPattern { properties, kind } => {
+                for p in properties {
+                    self.property_key(&p.key, p.span);
+                    if let (PatternKind::Assignment, PatternTarget::Expr(t)) = (kind, &p.target)
+                        && !matches!(
+                            self.ast.expr(*t).map(|n| &n.expr),
+                            Some(Expr::ObjectPattern { .. })
+                        )
+                    {
+                        self.target(*t);
+                    }
                 }
             }
             Expr::Unary {
@@ -758,7 +857,15 @@ impl<'a, 'm> Checker<'a, 'm> {
                 }
             }
             Expr::Update { operand, .. } => self.target(*operand),
-            Expr::Assign { target, .. } => self.target(*target),
+            // A pattern's targets are checked with the pattern.
+            Expr::Assign { target, .. }
+                if !matches!(
+                    self.ast.expr(*target).map(|n| &n.expr),
+                    Some(Expr::ObjectPattern { .. })
+                ) =>
+            {
+                self.target(*target);
+            }
             _ => {}
         }
     }
@@ -774,7 +881,7 @@ impl<'a, 'm> Checker<'a, 'm> {
         // The names seen, each entry charged when it is inserted and all credited at the end.
         let entry = map_entry_bytes::<&str, ()>();
         let mut seen = BTreeSet::new();
-        for p in &f.params {
+        for p in f.parameter_names() {
             self.binding(p);
             if !seen.contains(p.name.as_str()) {
                 if self.m.charge(entry).is_err() {

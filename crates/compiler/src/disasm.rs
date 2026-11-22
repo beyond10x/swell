@@ -290,6 +290,7 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::JumpIfNotUndefined(t) => format!("JumpIfNotUndefined {t:04}"),
         I::RestArguments(n) => format!("RestArguments {n}"),
         I::PushVarEnv(t) => format!("PushVarEnv {t} {}", names(t)),
+        I::PatternGet { depth, name } => format!("PatternGet {depth} {}", s(name)),
         other => format!("{other:?}"),
     }
 }

@@ -10,9 +10,10 @@
 //! `let [` is an error (the lookahead of ExpressionStatement, `#sec-expression-statement`).
 //! Refused are the declarations of later slices: a function declaration inside a block (6),
 //! `class` (8), `async function` (10), `import` and `export` (11), and the Annex B forms
-//! `if (x) function f() {}`, `L: function f() {}` and `for (var a = 0 in o)` (18); a binding
-//! pattern after `let` or `const` and `for (let x of ...)` keep the refusals of their own parts
-//! (6). Labelled statements and labelled `break` and `continue`
+//! `if (x) function f() {}`, `L: function f() {}` and `for (var a = 0 in o)` (18); an array
+//! pattern and `for (let x of ...)` keep the refusals of their own parts (6). An object binding
+//! pattern (`#sec-destructuring-binding-patterns`) stands where a declarator, a for-in head or a
+//! `catch` clause binds a name. Labelled statements and labelled `break` and `continue`
 //! (`#sec-labelled-statements`), a `catch` without a parameter (`#sec-try-statement`) and
 //! automatic semicolon insertion (`#sec-rules-of-automatic-semicolon-insertion`) are slice 2's.
 //!
@@ -22,8 +23,8 @@
 
 use super::{Parser, R};
 use crate::ast::{
-    CatchClause, DeclKind, Expr, ExprId, ForInTarget, ForInit, Name, Span, Stmt, StmtId,
-    SwitchCase, VarDeclarator,
+    BindingTarget, CatchClause, DeclKind, Expr, ExprId, ForInTarget, ForInit, Name, PatternKind,
+    Span, Stmt, StmtId, SwitchCase, VarDeclarator,
 };
 use crate::early;
 use crate::scope;
@@ -67,6 +68,15 @@ fn starts_binding(kind: &TokenKind) -> bool {
         kind,
         TokenKind::Name(_) | TokenKind::Punct(Punct::LBracket) | TokenKind::Punct(Punct::LBrace)
     )
+}
+
+/// How a pattern of a declaration of `kind` binds its names.
+fn pattern_kind(kind: DeclKind) -> PatternKind {
+    if kind.is_lexical() {
+        PatternKind::Initialize
+    } else {
+        PatternKind::Var
+    }
 }
 
 impl<'a, 'm> Parser<'a, 'm> {
@@ -403,7 +413,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// A `BindingIdentifier` or a `LabelIdentifier`; a name written with an escape may not spell a
-    /// reserved word. A binding pattern is refused (slice 6).
+    /// reserved word. A binding pattern where no object pattern is read (an array pattern, a
+    /// pattern after `...`) is refused (slice 6).
     #[inline(never)]
     pub(super) fn binding_identifier(&mut self) -> R<Name> {
         self.check_escaped_keyword()?;
@@ -487,19 +498,63 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
     }
 
-    /// The `BindingIdentifier` of a declarator, appended to the declarators of `id`.
-    #[inline(never)]
+    /// The `BindingIdentifier` or `BindingPattern` of a declarator, appended to the declarators
+    /// of `id`. Its frame stays on the stack while a pattern is read, so it holds only ids.
     fn declarator_name(&mut self, id: StmtId) -> R<()> {
-        let name = self.binding_identifier()?;
+        let pattern = self.pattern_literal()?;
+        self.push_declarator(id, pattern)
+    }
+
+    /// The object literal a binding pattern at the current `{` covers, read; `None` at any
+    /// other token.
+    pub(super) fn pattern_literal(&mut self) -> R<Option<ExprId>> {
+        if self.is(Punct::LBrace) {
+            return Ok(Some(self.object()?));
+        }
+        Ok(None)
+    }
+
+    /// The declarator of the binding `pattern` read, or of the `BindingIdentifier` at the
+    /// current token, appended to the declarators of `id`.
+    #[inline(never)]
+    fn push_declarator(&mut self, id: StmtId, pattern: Option<ExprId>) -> R<()> {
+        let kind = match self.ast.stmt(id).map(|n| &n.stmt) {
+            Some(
+                Stmt::Var(kind, _)
+                | Stmt::For {
+                    init: Some(ForInit::Var(kind, _)),
+                    ..
+                },
+            ) => *kind,
+            _ => DeclKind::Var,
+        };
+        let target = self.binding_target(pattern, pattern_kind(kind))?;
         let m = self.m;
         let pushed = match self.declarators(id) {
-            Some(list) => m.push(list, VarDeclarator { name, init: None }),
+            Some(list) => m.push(list, VarDeclarator { target, init: None }),
             None => {
-                m.release(name);
+                m.release(target);
                 Ok(())
             }
         };
         self.charged(pushed)
+    }
+
+    /// The `BindingIdentifier` at the current token, or the ObjectBindingPattern
+    /// (`#sec-destructuring-binding-patterns`) whose object literal `pattern` was read
+    /// ([`Parser::pattern_literal`]), read again with its names bound as `kind` says
+    /// ([`Parser::reread_as_pattern`]). An array pattern keeps the refusal of its story.
+    #[inline(never)]
+    pub(super) fn binding_target(
+        &mut self,
+        pattern: Option<ExprId>,
+        kind: PatternKind,
+    ) -> R<BindingTarget> {
+        let Some(e) = pattern else {
+            return Ok(BindingTarget::Identifier(self.binding_identifier()?));
+        };
+        self.reread_as_pattern(e, kind)?;
+        Ok(BindingTarget::Pattern(self.bound_names(e)?))
     }
 
     #[inline(never)]
@@ -725,19 +780,20 @@ impl<'a, 'm> Parser<'a, 'm> {
                 // The emptied list goes; its capacity is credited.
                 self.m.release(declarators);
                 if d.init.is_some() {
-                    // Annex B allows an initializer only for a `var` in non-strict code
-                    // (`#sec-initializers-in-forin-statement-heads`).
-                    if self.strict || kind.is_lexical() {
+                    // Annex B allows an initializer only for a `var` of a name in non-strict
+                    // code (`#sec-initializers-in-forin-statement-heads`).
+                    let pattern = d.target.pattern().is_some();
+                    self.m.release(d);
+                    if self.strict || kind.is_lexical() || pattern {
                         return self.fail_at("initializer in a for-in head", start);
                     }
                     return self.refuse_at("initializer in a for-in head", 18, start);
                 }
-                ForInTarget::Var(kind, d.name)
+                ForInTarget::Var(kind, d.target)
             }
             Some(ForInit::Expression(e)) => {
                 if self.is_literal_pattern(e) {
-                    let at = self.expr_span(e);
-                    return self.refuse_at("destructuring pattern", 6, at);
+                    self.assignment_pattern(e)?;
                 }
                 ForInTarget::Expression(e)
             }
@@ -968,19 +1024,38 @@ impl<'a, 'm> Parser<'a, 'm> {
     #[inline(never)]
     fn catch_parameter(&mut self, id: StmtId) -> R<()> {
         self.advance()?;
-        let param = if self.is(Punct::LBrace) {
-            None
-        } else {
-            self.expect(Punct::LParen)?;
-            let param = self.binding_identifier()?;
-            self.expect(Punct::RParen)?;
-            Some(param)
-        };
-        if let Some(Stmt::Try { handler, .. }) = self.stmt_mut(id) {
-            *handler = Some(CatchClause {
-                param,
-                body: Vec::new(),
-            });
+        if self.is(Punct::LBrace) {
+            return self.set_catch(id, None);
+        }
+        self.expect(Punct::LParen)?;
+        // The frame stays on the stack while a pattern is read, so it holds only ids.
+        let pattern = self.pattern_literal()?;
+        self.catch_binding(id, pattern)
+    }
+
+    /// The `CatchParameter` of the `catch` clause of the try statement `id`: the pattern read,
+    /// or the `BindingIdentifier` at the current token; then its `)`.
+    #[inline(never)]
+    fn catch_binding(&mut self, id: StmtId, pattern: Option<ExprId>) -> R<()> {
+        let param = self.binding_target(pattern, PatternKind::Initialize)?;
+        if let Err(stop) = self.expect(Punct::RParen) {
+            self.m.release(param);
+            return Err(stop);
+        }
+        self.set_catch(id, Some(param))
+    }
+
+    /// The `catch` clause of the try statement `id`, with the parameter `param`.
+    #[inline(never)]
+    fn set_catch(&mut self, id: StmtId, param: Option<BindingTarget>) -> R<()> {
+        match self.stmt_mut(id) {
+            Some(Stmt::Try { handler, .. }) => {
+                *handler = Some(CatchClause {
+                    param,
+                    body: Vec::new(),
+                });
+            }
+            _ => self.m.release(param),
         }
         Ok(())
     }

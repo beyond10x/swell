@@ -1,7 +1,8 @@
 //! Slot and environment assignment (`#sec-environment-records`), from the scope analysis of
 //! `swell-syntax`.
 //!
-//! The bindings the compiler knows are the parameters, the binding `arguments` of a function
+//! The bindings the compiler knows are the parameters (each name a parameter pattern binds, a
+//! site of the pattern, [`Site::Bound`]), the binding `arguments` of a function
 //! that needs an arguments object and the `VarDeclaredNames` of a function
 //! (`#sec-functiondeclarationinstantiation`), the
 //! parameter of a `catch` clause (`#sec-runtime-semantics-catchclauseevaluation`) and the own
@@ -81,8 +82,8 @@ use swell_num::literal::numeric_literal;
 use swell_num::to_string::number_to_string;
 use swell_syntax::Script;
 use swell_syntax::ast::{
-    Ast, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind, LexicalName,
-    PropertyKey, PropertyValue, Stmt, StmtId,
+    Ast, BindingTarget, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind,
+    LexicalName, PatternTarget, PropertyKey, PropertyValue, Stmt, StmtId,
 };
 use swell_syntax::ledger::{HeapBytes, Meter, Stop, map_entry_bytes};
 
@@ -107,6 +108,9 @@ pub(crate) enum ScopeKey {
     Try(StmtId),
     /// The catch block, inside the scope of the `catch` parameter.
     Catch(StmtId),
+    /// The names a `catch` parameter that is a pattern binds, uninitialized until the pattern
+    /// initializes them (`#sec-runtime-semantics-catchclauseevaluation`, steps 2 to 4).
+    CatchParameter(StmtId),
     /// The finally block.
     Finally(StmtId),
     /// The top level of a function body, inside the function's scope.
@@ -141,6 +145,9 @@ pub(crate) enum Site {
     ForInVar(StmtId),
     /// The `n`th parameter of a function, from inside it.
     Param(FunctionId, u32),
+    /// The `BindingIdentifier` of property `n` of the binding pattern node: the binding it
+    /// initializes, or for a `var` pattern the binding it resolves before the property is read.
+    Bound(ExprId, u32),
     /// The binding a function declaration initializes, from the top of the enclosing function.
     Declaration(FunctionId),
     /// The parameter of the `catch` clause of a try statement, from inside the clause.
@@ -662,18 +669,24 @@ impl<'a, 'm> Resolver<'a, 'm> {
                     init: Some(ForInit::Var(kind, declarators)),
                     ..
                 }) if kind.is_lexical() => (
-                    head(id, *kind, declarators.iter().map(|d| &d.name).collect()),
+                    head(
+                        id,
+                        *kind,
+                        declarators.iter().flat_map(|d| d.target.names()).collect(),
+                    ),
                     false,
                 ),
                 _ => (Vec::new(), false),
             },
             ScopeKey::Tdz(id) | ScopeKey::Iteration(id) => match stmt(id) {
                 Some(Stmt::ForIn {
-                    target: ForInTarget::Var(kind, name),
+                    target: ForInTarget::Var(kind, target),
                     ..
-                }) if kind.is_lexical() => (head(id, *kind, vec![name]), false),
+                }) if kind.is_lexical() => (head(id, *kind, target.names().collect()), false),
                 _ => (Vec::new(), false),
             },
+            // Entered by `Resolver::catch`, with the end of the pattern as each name's end.
+            ScopeKey::CatchParameter(_) => (Vec::new(), true),
             ScopeKey::Try(id) | ScopeKey::Catch(id) | ScopeKey::Finally(id) => {
                 let list = match (key, stmt(id)) {
                     (ScopeKey::Try(_), Some(Stmt::Try { block, .. })) => Some(block.as_slice()),
@@ -703,7 +716,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
     }
 
     /// Enters the lexical scope of `key` when it declares a name: a for-in iteration's binding
-    /// is initialized by the key (`Site::ForInVar`).
+    /// is initialized by the key (`Site::ForInVar`), or by the pattern of the head.
     fn enter_lexical(&mut self, key: ScopeKey) {
         let (names, straight) = self.lexical_names(key);
         if names.is_empty() {
@@ -728,9 +741,24 @@ impl<'a, 'm> Resolver<'a, 'm> {
             s.key = Some(key);
         }
         self.declare_lexical(scope, names);
-        if let (ScopeKey::Iteration(id), Some(n)) = (key, names.first()) {
+        if let ScopeKey::Iteration(id) = key
+            && let Some(n) = names.first()
+            && self.for_in_identifier(id)
+        {
             self.occur(Site::ForInVar(id), &n.name.name);
         }
+    }
+
+    /// Whether the head of the for-in statement `id` declares a `BindingIdentifier`, not a
+    /// pattern.
+    fn for_in_identifier(&self, id: StmtId) -> bool {
+        matches!(
+            self.ast.stmt(id).map(|n| &n.stmt),
+            Some(Stmt::ForIn {
+                target: ForInTarget::Var(_, BindingTarget::Identifier(_)),
+                ..
+            })
+        )
     }
 
     /// The site `site` of `name` in the current scope; its copy of the name and the growth of
@@ -822,19 +850,29 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 if head {
                     self.enter_lexical(ScopeKey::Head(id));
                 }
-                // Room for every child pushed below, charged first.
-                let mut children = self.m.with_capacity(declarators.len().saturating_add(4))?;
+                // Room for every child pushed below, charged first: an initializer and a
+                // pattern per declarator, and four more.
+                let mut children = self
+                    .m
+                    .with_capacity(declarators.len().saturating_mul(2).saturating_add(4))?;
                 for (i, d) in declarators.iter().enumerate() {
                     let n = u32::try_from(i).map_err(|_| CompileError::TooMany("declarators"))?;
-                    self.occur(Site::VarDecl(id, n), &d.name.name);
+                    let name = d.target.identifier();
+                    if let Some(name) = name {
+                        self.occur(Site::VarDecl(id, n), &name.name);
+                    }
                     if let Some(init) = d.init {
-                        if let Some(f) = self.anonymous_function(init) {
-                            let name = self.m.utf16(&d.name.name)?;
+                        if let Some(name) = name
+                            && let Some(f) = self.anonymous_function(init)
+                        {
+                            let name = self.m.utf16(&name.name)?;
                             self.m.charge(map_entry_bytes::<FunctionId, Vec<u16>>())?;
                             self.given_names.insert(f, name);
                         }
                         children.push(Walk::Expr(init));
                     }
+                    // A pattern's names are bound after the initializer is evaluated.
+                    children.extend(d.target.pattern().map(Walk::Expr));
                 }
                 if let Stmt::For {
                     test, update, body, ..
@@ -890,12 +928,14 @@ impl<'a, 'm> Resolver<'a, 'm> {
             // iteration in a scope of its own (`#sec-runtime-semantics-forinofheadevaluation`,
             // `#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`).
             Stmt::ForIn {
-                target: ForInTarget::Var(kind, _),
+                target: ForInTarget::Var(kind, target),
                 object,
                 body,
             } if kind.is_lexical() => {
                 self.work.push(Walk::LeaveLexical(ScopeKey::Iteration(id)));
                 self.work.push(Walk::Stmt(*body));
+                // A pattern binds the iteration's names, inside its scope.
+                self.work.extend(target.pattern().map(Walk::Expr));
                 self.work.push(Walk::Lexical(ScopeKey::Iteration(id)));
                 self.work.push(Walk::LeaveLexical(ScopeKey::Tdz(id)));
                 self.work.push(Walk::Expr(*object));
@@ -909,7 +949,12 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 self.work.push(Walk::Stmt(*body));
                 self.work.push(Walk::Expr(*object));
                 match target {
-                    ForInTarget::Var(_, name) => self.occur(Site::ForInVar(id), &name.name),
+                    ForInTarget::Var(_, BindingTarget::Identifier(name)) => {
+                        self.occur(Site::ForInVar(id), &name.name)
+                    }
+                    ForInTarget::Var(_, BindingTarget::Pattern(p)) => {
+                        self.work.push(Walk::Expr(p.pattern))
+                    }
                     ForInTarget::Expression(e) => self.work.push(Walk::Expr(*e)),
                 }
             }
@@ -937,13 +982,22 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 // A `catch` without a parameter makes no scope
                 // (`#sec-runtime-semantics-catchclauseevaluation`, `Catch : catch Block`); its
                 // block is a scope inside the parameter's.
+                // A pattern is a scope of its names, uninitialized until the pattern binds them.
                 if let Some(h) = handler {
-                    if h.param.is_some() {
-                        self.work.push(Walk::Leave);
-                        self.push_lexical_list(ScopeKey::Catch(id), &h.body);
-                        self.work.push(Walk::Catch(id));
-                    } else {
-                        self.push_lexical_list(ScopeKey::Catch(id), &h.body);
+                    match &h.param {
+                        Some(BindingTarget::Identifier(_)) => {
+                            self.work.push(Walk::Leave);
+                            self.push_lexical_list(ScopeKey::Catch(id), &h.body);
+                            self.work.push(Walk::Catch(id));
+                        }
+                        Some(BindingTarget::Pattern(p)) => {
+                            self.work
+                                .push(Walk::LeaveLexical(ScopeKey::CatchParameter(id)));
+                            self.push_lexical_list(ScopeKey::Catch(id), &h.body);
+                            self.work.push(Walk::Expr(p.pattern));
+                            self.work.push(Walk::Catch(id));
+                        }
+                        None => self.push_lexical_list(ScopeKey::Catch(id), &h.body),
                     }
                 }
                 self.push_lexical_list(ScopeKey::Try(id), block);
@@ -973,12 +1027,32 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .as_ref()
             .ok_or_else(|| malformed("a catch clause without a parameter"))?;
         let owner = self.scopes.get(self.current).and_then(|s| s.owner);
-        let scope = self.new_scope(Kind::Catch, owner);
+        let p = match param {
+            BindingTarget::Identifier(name) => {
+                let scope = self.new_scope(Kind::Catch, owner);
+                if let Some(s) = self.scopes.get_mut(scope) {
+                    s.catch = Some(id);
+                }
+                self.declare(scope, &name.name);
+                self.occur(Site::CatchParam(id), &name.name);
+                return Ok(());
+            }
+            BindingTarget::Pattern(p) => p,
+        };
+        // A pattern's names are a scope of `let`-like bindings: an access in the pattern itself
+        // is checked, one in the block after it is not.
+        let key = ScopeKey::CatchParameter(id);
+        let scope = self.new_scope(Kind::Lexical { straight: true }, owner);
         if let Some(s) = self.scopes.get_mut(scope) {
-            s.catch = Some(id);
+            s.key = Some(key);
         }
-        self.declare(scope, &param.name);
-        self.occur(Site::CatchParam(id), &param.name);
+        let data = LexicalData {
+            constant: false,
+            end: p.span.end,
+        };
+        for b in &p.names {
+            self.declare_as(scope, &b.name.name, Some(data));
+        }
         Ok(())
     }
 
@@ -1036,7 +1110,45 @@ impl<'a, 'm> Resolver<'a, 'm> {
                             children.push(Walk::Function(f));
                         }
                         PropertyValue::Shorthand(e) => children.push(Walk::Expr(e)),
+                        // The parser rereads such a literal as a pattern, or refuses it.
+                        PropertyValue::CoverInitialized(..) => {
+                            return Err(malformed("a CoverInitializedName in an object literal"));
+                        }
                     }
+                }
+            }
+            // `#sec-runtime-semantics-keyedbindinginitialization` and
+            // `#sec-runtime-semantics-keyeddestructuringassignmentevaluation`: each name a
+            // binding pattern binds is a site; a default gives an anonymous function the name of
+            // a `BindingIdentifier` or of an identifier target that is not parenthesized
+            // (NamedEvaluation).
+            Expr::ObjectPattern { properties, .. } => {
+                for (i, p) in properties.iter().enumerate() {
+                    let n = u32::try_from(i).map_err(|_| CompileError::TooMany("properties"))?;
+                    let name = match &p.target {
+                        PatternTarget::Binding(name) => {
+                            self.occur(Site::Bound(id, n), &name.name);
+                            Some(name.name.as_str())
+                        }
+                        PatternTarget::Expr(e) => {
+                            children.push(Walk::Expr(*e));
+                            match self.ast.expr(*e) {
+                                Some(t) if !t.parenthesized => match &t.expr {
+                                    Expr::Identifier(name) => Some(name.as_str()),
+                                    _ => None,
+                                },
+                                _ => None,
+                            }
+                        }
+                    };
+                    let Some(default) = p.default else { continue };
+                    if let Some(name) = name
+                        && let Some(f) = self.anonymous_function(default)
+                    {
+                        let name = self.m.utf16(name)?;
+                        self.give_name(f, name)?;
+                    }
+                    children.push(Walk::Expr(default));
                 }
             }
             Expr::Function(f) => children.push(Walk::Function(*f)),
@@ -1141,11 +1253,16 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 end: f
                     .initializer(i)
                     .and_then(|e| self.ast.expr(e))
-                    .map_or(p.span.end, |n| n.span.end),
+                    .map_or(p.span().end, |n| n.span.end),
             });
-            self.declare_as(scope, &p.name, lexical);
-            let n = u32::try_from(i).map_err(|_| CompileError::TooMany("parameters"))?;
-            self.occur(Site::Param(id, n), &p.name);
+            // The names of a pattern are sites of the pattern itself (`Site::Bound`).
+            for name in p.names() {
+                self.declare_as(scope, &name.name, lexical);
+            }
+            if let Some(name) = p.identifier() {
+                let n = u32::try_from(i).map_err(|_| CompileError::TooMany("parameters"))?;
+                self.occur(Site::Param(id, n), &name.name);
+            }
         }
         // `#sec-functiondeclarationinstantiation`, steps 22 and 27: the binding `arguments` after
         // the parameters, before the `var` names (a `var arguments` is the same binding when no
@@ -1161,10 +1278,14 @@ impl<'a, 'm> Resolver<'a, 'm> {
         }
         self.work.push(Walk::Leave);
         self.work.push(Walk::Body(id));
+        // Each parameter's initializer, then its pattern, in order.
         for (i, p) in f.params.iter().enumerate().rev() {
+            self.work.extend(p.pattern().map(Walk::Expr));
             let Some(e) = f.initializer(i) else { continue };
-            if let Some(g) = self.anonymous_function(e) {
-                let name = self.m.utf16(&p.name)?;
+            if let Some(name) = p.identifier()
+                && let Some(g) = self.anonymous_function(e)
+            {
+                let name = self.m.utf16(&name.name)?;
                 self.give_name(g, name)?;
             }
             self.work.push(Walk::Expr(e));
@@ -1186,7 +1307,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
             let scope = self.new_scope(Kind::Vars, Some(id));
             for (j, name) in f.scope.var_names.iter().enumerate() {
                 self.declare(scope, name);
-                let copied = f.params.iter().any(|p| p.name == *name)
+                let copied = f.parameter_names().any(|p| p.name == *name)
                     || (f.scope.arguments_object && name == "arguments");
                 if copied && !self.declares_function(f, name) {
                     let n = u32::try_from(j).map_err(|_| CompileError::TooMany("var names"))?;
@@ -1314,7 +1435,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
             let (Some(f), Some(s)) = (self.ast.function(*id), self.scopes.get(*scope)) else {
                 return Err(malformed("a function scope"));
             };
-            for p in &f.params {
+            for p in f.parameter_names() {
                 if let Some(b) = s.names.get(&p.name) {
                     m.push(&mut marks, *b)?;
                 }
@@ -1403,7 +1524,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
     ) -> Result<Option<Binding>, CompileError> {
         if matches!(
             site,
-            Site::VarDecl(..) | Site::ForInVar(_) | Site::Param(..)
+            Site::VarDecl(..) | Site::ForInVar(_) | Site::Param(..) | Site::Bound(..)
         ) {
             return Ok(None);
         }
@@ -1436,12 +1557,14 @@ impl<'a, 'm> Resolver<'a, 'm> {
     }
 
     /// What the entry of each lexical scope does: the names of its record's slots and the local
-    /// slots it sets uninitialized; an iteration of a for-in initializes its binding at once.
+    /// slots it sets uninitialized; an iteration of a for-in initializes its binding at once,
+    /// unless a pattern binds its names one after another.
     fn lexical_scopes(&self) -> Result<BTreeMap<ScopeKey, LexicalScope>, CompileError> {
         let m = self.m;
         let mut scopes = BTreeMap::new();
         for s in &self.scopes {
             let Some(key) = s.key else { continue };
+            let at_once = matches!(key, ScopeKey::Iteration(id) if self.for_in_identifier(id));
             let mut scope = LexicalScope::default();
             for &b in &s.order {
                 let Some(binding) = self.bindings.get(b) else {
@@ -1453,10 +1576,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
                         let name = m.string(&binding.name)?;
                         m.push(&mut scope.env, (name, constant))?;
                     }
-                    Place::Local(n)
-                        if self.checked_locals.contains(&b)
-                            && !matches!(key, ScopeKey::Iteration(_)) =>
-                    {
+                    Place::Local(n) if self.checked_locals.contains(&b) && !at_once => {
                         m.push(&mut scope.uninitialize, n)?;
                     }
                     _ => {}
@@ -1607,15 +1727,26 @@ impl<'a, 'm> Resolver<'a, 'm> {
         let Some(f) = self.ast.function(id) else {
             return Ok(info);
         };
-        info.params = m.with_capacity(f.params.len())?;
-        for i in 0..f.params.len() {
+        // A parameter's slot, or of a pattern the slot of each name it binds, in order.
+        info.params = m.with_capacity(f.parameter_names().count())?;
+        for (i, p) in f.params.iter().enumerate() {
             let n = u32::try_from(i).map_err(|_| CompileError::TooMany("parameters"))?;
-            let slot = match sites.get(&Site::Param(id, n)) {
-                Some(Binding::Local(s)) => Slot::Local(*s),
-                Some(Binding::Env { slot, .. }) => Slot::Env(*slot),
-                _ => return Err(malformed("a parameter with no slot")),
+            let names = match p {
+                BindingTarget::Identifier(_) => &[][..],
+                BindingTarget::Pattern(pattern) => pattern.names.as_slice(),
             };
-            info.params.push(slot);
+            let one = p.identifier().map(|_| Site::Param(id, n));
+            let sites_of_p = one
+                .into_iter()
+                .chain(names.iter().map(|b| Site::Bound(b.pattern, b.property)));
+            for site in sites_of_p {
+                let slot = match sites.get(&site) {
+                    Some(Binding::Local(s)) => Slot::Local(*s),
+                    Some(Binding::Env { slot, .. }) => Slot::Env(*slot),
+                    _ => return Err(malformed("a parameter with no slot")),
+                };
+                info.params.push(slot);
+            }
         }
         for s in &self.scopes {
             if s.owner == Some(id) && s.kind == Kind::Function {

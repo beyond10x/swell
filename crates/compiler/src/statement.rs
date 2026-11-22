@@ -3,7 +3,9 @@
 //! `continue`, `break`, `return`, `switch`, `throw`, `try` with `catch` and `finally`,
 //! `debugger`, labelled statements with `break` and `continue` to a label, and `with` in non-strict
 //! code (its body runs in an Object Environment Record; the names in it are looked up at run
-//! time, `resolve.rs`).
+//! time, `resolve.rs`). A declarator, a for-in head or a `catch` parameter that is an object
+//! pattern destructures its value through the pattern node (`expression.rs`); a `catch`
+//! pattern's names are a scope of their own ([`ScopeKey::CatchParameter`]).
 //!
 //! # Labels
 //!
@@ -42,7 +44,8 @@
 //! ([`Instruction::CopyEnv`], `#sec-forbodyevaluation`).
 
 use swell_syntax::ast::{
-    DeclKind, ExprId, ForInTarget, ForInit, FunctionId, Span, Stmt, StmtId, VarDeclarator,
+    BindingTarget, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, Span, Stmt, StmtId,
+    VarDeclarator,
 };
 
 use crate::bytecode::{HandlerKind, Instruction, SlotName, TAG_NORMAL};
@@ -259,11 +262,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
             // (`#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`),
             // the enumerator on the operand stack for the whole loop.
             Stmt::ForIn {
-                target: ForInTarget::Var(kind, name),
+                target: ForInTarget::Var(kind, target),
                 object,
                 body,
             } if kind.is_lexical() => {
-                self.lexical_for_in(id, span, name.span, *object, *body, labels, &mut t)?;
+                self.lexical_for_in(id, span, target, *object, *body, labels, &mut t)?;
             }
             Stmt::ForIn {
                 target,
@@ -277,24 +280,39 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 t.push(Task::ItemsUp)?;
                 t.push(Task::Bind(top))?;
                 t.push(Task::Emit(Instruction::ForInNext(exit), span))?;
-                // The key is on top; each iteration evaluates the target's reference, then puts.
-                let (target, target_span) = match target {
-                    ForInTarget::Var(_, name) => (
-                        Target::Binding(self.binding(Site::ForInVar(id))?),
-                        name.span,
-                    ),
-                    ForInTarget::Expression(e) => {
-                        let span = self.ast.expr(*e).map(|n| n.span).unwrap_or(span);
-                        (self.target(*e)?, span)
-                    }
+                // The key is on top; each iteration evaluates the target's reference, then puts,
+                // or destructures the key with the pattern of the head.
+                let pattern = match target {
+                    ForInTarget::Var(_, target) => target.pattern(),
+                    ForInTarget::Expression(e) => self
+                        .ast
+                        .expr(*e)
+                        .filter(|n| matches!(n.expr, Expr::ObjectPattern { .. }))
+                        .map(|_| *e),
                 };
-                let r = target.reference_items();
-                t.append(self.reference(&target, false, target_span)?)?;
-                for _ in 0..r {
-                    t.push(Task::Emit(Instruction::Bury(r), target_span))?;
+                if let Some(pattern) = pattern {
+                    let pspan = self.ast.expr(pattern).map(|n| n.span).unwrap_or(span);
+                    t.push(Task::Expr(pattern))?;
+                    t.push(Task::Emit(Instruction::Pop, pspan))?;
+                } else {
+                    let (target, target_span) = match target {
+                        ForInTarget::Var(_, name) => (
+                            Target::Binding(self.binding(Site::ForInVar(id))?),
+                            name.span(),
+                        ),
+                        ForInTarget::Expression(e) => {
+                            let span = self.ast.expr(*e).map(|n| n.span).unwrap_or(span);
+                            (self.target(*e)?, span)
+                        }
+                    };
+                    let r = target.reference_items();
+                    t.append(self.reference(&target, false, target_span)?)?;
+                    for _ in 0..r {
+                        t.push(Task::Emit(Instruction::Bury(r), target_span))?;
+                    }
+                    t.push(Task::Emit(self.put(&target)?, target_span))?;
+                    t.push(Task::Emit(Instruction::Pop, target_span))?;
                 }
-                t.push(Task::Emit(self.put(&target)?, target_span))?;
-                t.push(Task::Emit(Instruction::Pop, target_span))?;
                 t.push(self.enter_loop(
                     exit,
                     top,
@@ -443,9 +461,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
     ) -> Result<(), CompileError> {
         for (i, d) in declarators.iter().enumerate() {
             let Some(init) = d.init else { continue };
+            // A pattern: the value, destructured (`#sec-runtime-semantics-bindinginitialization`).
+            if let Some(pattern) = d.target.pattern() {
+                t.push(Task::Expr(init))?;
+                t.push(Task::Expr(pattern))?;
+                t.push(Task::Emit(Instruction::Pop, d.target.span()))?;
+                continue;
+            }
             let n = u32::try_from(i).map_err(|_| crate::CompileError::TooMany("declarators"))?;
             let target = Target::Binding(self.binding(Site::VarDecl(id, n))?);
-            let span = d.name.span;
+            let span = d.target.span();
             t.append(self.reference(&target, false, span)?)?;
             t.push(Task::Expr(init))?;
             t.push(Task::Emit(self.put(&target)?, span))?;
@@ -520,7 +545,18 @@ impl<'a, 'm> Compiler<'a, 'm> {
     ) -> Result<(), CompileError> {
         for (i, d) in declarators.iter().enumerate() {
             let n = u32::try_from(i).map_err(|_| CompileError::TooMany("declarators"))?;
-            let span = d.name.span;
+            let span = d.target.span();
+            // A pattern, which always has an initializer: the value, destructured; the pattern
+            // initializes each name it binds.
+            if let Some(pattern) = d.target.pattern() {
+                let init = d
+                    .init
+                    .ok_or_else(|| malformed("a pattern declaration without an initializer"))?;
+                t.push(Task::Expr(init))?;
+                t.push(Task::Expr(pattern))?;
+                t.push(Task::Emit(Instruction::Pop, span))?;
+                continue;
+            }
             let store = match self.binding(Site::VarDecl(id, n))? {
                 Binding::Local(n) => Instruction::SetLocal(n),
                 Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
@@ -542,14 +578,15 @@ impl<'a, 'm> Compiler<'a, 'm> {
     /// A for-in with `let` or `const` (`#sec-runtime-semantics-forinofheadevaluation`, step 2,
     /// and `#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`,
     /// step 6.i): the expression in the scope of the head's names, uninitialized; each iteration
-    /// in a scope of its own, whose binding the key initializes. A `continue` leaves the
-    /// iteration's scope as a `break` does.
+    /// in a scope of its own, whose binding the key initializes, or whose names the pattern of
+    /// the head initializes from the key. A `continue` leaves the iteration's scope as a `break`
+    /// does.
     #[allow(clippy::too_many_arguments)]
     fn lexical_for_in(
         &mut self,
         id: StmtId,
         span: Span,
-        name_span: Span,
+        target: &BindingTarget,
         object: ExprId,
         body: StmtId,
         labels: Vec<String>,
@@ -565,12 +602,18 @@ impl<'a, 'm> Compiler<'a, 'm> {
         t.push(Task::Bind(top))?;
         t.push(Task::Emit(Instruction::ForInNext(exit), span))?;
         let iteration = self.enter_scope(ScopeKey::Iteration(id), span, t)?;
-        let store = match self.binding(Site::ForInVar(id))? {
-            Binding::Local(n) => Instruction::SetLocal(n),
-            Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
-            _ => return Err(malformed("a for-in binding")),
-        };
-        t.push(Task::Emit(store, name_span))?;
+        let name_span = target.span();
+        match target.pattern() {
+            Some(pattern) => t.push(Task::Expr(pattern))?,
+            None => {
+                let store = match self.binding(Site::ForInVar(id))? {
+                    Binding::Local(n) => Instruction::SetLocal(n),
+                    Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
+                    _ => return Err(malformed("a for-in binding")),
+                };
+                t.push(Task::Emit(store, name_span))?;
+            }
+        }
         t.push(Task::Emit(Instruction::Pop, name_span))?;
         t.push(Task::PushControl(Control::Loop {
             exit,
@@ -635,8 +678,17 @@ impl<'a, 'm> Compiler<'a, 'm> {
             // The exception is on top: it initializes the parameter, in an environment of its
             // own when a function inside the clause uses it. A `catch` without a parameter
             // drops it and makes no environment (`Catch : catch Block`).
+            // A pattern: the scope of its names, uninitialized, then the exception destructured
+            // into them (`#sec-runtime-semantics-catchclauseevaluation`, steps 2 to 5).
+            let mut names = false;
             let env = match &h.param {
-                Some(param) => {
+                Some(BindingTarget::Pattern(p)) => {
+                    names = self.enter_scope(ScopeKey::CatchParameter(id), p.span, t)?;
+                    t.push(Task::Expr(p.pattern))?;
+                    t.push(Task::Emit(Instruction::Pop, p.span))?;
+                    false
+                }
+                Some(BindingTarget::Identifier(param)) => {
                     let pspan = param.span;
                     let env = match self.binding(Site::CatchParam(id))? {
                         Binding::Local(n) => {
@@ -676,6 +728,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
             let record = self.enter_scope(ScopeKey::Catch(id), span, t)?;
             t.extend(h.body.iter().map(|s| Task::Stmt(*s)))?;
             leave_scope(record, span, t)?;
+            leave_scope(names, span, t)?;
             if env {
                 t.push(Task::Emit(Instruction::PopEnv, span))?;
                 t.push(Task::EnvsDown)?;
