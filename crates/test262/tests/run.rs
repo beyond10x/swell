@@ -329,8 +329,8 @@ fn counted_refused() -> Result<Printed, Box<dyn Error>> {
 #[test]
 fn a_refused_negative_parse_case_is_counted_failed() -> TestResult {
     let printed = counted_refused()?;
-    // negative.js expects a SyntaxError at parse and gets one, but it is the refusal of an arrow
-    // function: it fails. positive.js (refused, no negative) and include.js (a refused include)
+    // negative.js expects a SyntaxError at parse and gets one, but it is the refusal of `<!--`:
+    // it fails. positive.js (refused, no negative) and include.js (a refused include)
     // fail as well.
     assert_line(&printed, "test262 language/refused 3 0 0 3 0 3 0");
     // A SyntaxError of the nesting limit is not the error a case names either.

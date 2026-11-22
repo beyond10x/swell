@@ -20,7 +20,8 @@
 use swell_num::literal::numeric_literal;
 use swell_syntax::REGEXP_REFUSAL;
 use swell_syntax::ast::{
-    AssignOp, BinaryOp, Expr, ExprId, LogicalOp, PropertyValue, Span, UnaryOp, UpdateOp,
+    AssignOp, BinaryOp, Expr, ExprId, FunctionKind, LogicalOp, PropertyValue, Span, UnaryOp,
+    UpdateOp,
 };
 
 use crate::bytecode::Instruction;
@@ -356,8 +357,21 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     }
                 }
             }
-            // `#sec-function-definitions-runtime-semantics-evaluation`.
-            Expr::Function(f) => t.push(emit(Instruction::Closure(f.0)))?,
+            // `#sec-function-definitions-runtime-semantics-evaluation`; an arrow function,
+            // `#sec-arrow-function-definitions-runtime-semantics-evaluation`, keeps the `this` of
+            // the code that makes it.
+            Expr::Function(f) => {
+                let arrow = self
+                    .ast
+                    .function(*f)
+                    .is_some_and(|x| x.kind == FunctionKind::Arrow);
+                let make = if arrow {
+                    Instruction::ArrowClosure(f.0)
+                } else {
+                    Instruction::Closure(f.0)
+                };
+                t.push(emit(make))?;
+            }
             Expr::Unary { op, operand } => self.unary(*op, *operand, span, &mut t)?,
             Expr::Update {
                 op,

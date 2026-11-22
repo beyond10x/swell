@@ -8,12 +8,14 @@
 //!   <index> <line>:<column> <instruction> <operands>
 //!   catch|finally <start>..<end> -> <target> items <n> envs <n>
 //!
-//! function <i> declaration|expression|getter|setter "<name>" length <n> locals <n>[ strict][ self]
+//! function <i> <kind> "<name>" length <n> locals <n>[ strict][ self][ eval-environment]
 //!   params local <n>|env <n>, ...         when there are parameters
 //!   captured "<name>" ...                 the function environment's slots, when there are any
 //!   arguments mapped|unmapped local <n>|env <n>   the arguments object a call makes, if any
 //!   ...
 //! ```
+//!
+//! A function's `<kind>` is `declaration`, `expression`, `getter`, `setter`, `method` or `arrow`.
 //!
 //! A string constant is written in double quotes, with `"`, `\` and every code unit outside
 //! printable ASCII escaped (`\u{XXXX}`); a Number by `Number::toString`. Instruction and jump
@@ -78,6 +80,7 @@ pub fn disassemble(code: &Code) -> String {
             FunctionKind::Getter => "getter",
             FunctionKind::Setter => "setter",
             FunctionKind::Method => "method",
+            FunctionKind::Arrow => "arrow",
         };
         let _ = write!(
             out,
@@ -91,6 +94,9 @@ pub fn disassemble(code: &Code) -> String {
         }
         if f.self_binding {
             out.push_str(" self");
+        }
+        if f.eval_environment {
+            out.push_str(" eval-environment");
         }
         out.push('\n');
         if !f.params.is_empty() {
@@ -219,6 +225,7 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::Number(k) => format!("Number {}", number(code, k)),
         I::String(k) => format!("String {}", s(k)),
         I::Closure(f) => format!("Closure {f}"),
+        I::ArrowClosure(f) => format!("ArrowClosure {f}"),
         I::Bury(n) => format!("Bury {n}"),
         I::Nip(n) => format!("Nip {n}"),
         I::GetLocal(n) => format!("GetLocal {n}"),

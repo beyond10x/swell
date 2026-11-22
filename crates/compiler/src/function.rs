@@ -24,6 +24,11 @@
 //! - A template carries the span the parser gave its function, the function's source text
 //!   ([`FunctionTemplate::source_text`]), for `Function.prototype.toString`
 //!   (`#sec-function.prototype.tostring`).
+//! - An arrow function (`#sec-arrow-function-definitions`) is made by
+//!   [`Instruction::ArrowClosure`], which keeps the `this` of the code that runs it. An arrow
+//!   function whose own non-strict code calls `eval` directly and that binds no name still gets
+//!   a function environment ([`FunctionTemplate::eval_environment`]), the VariableEnvironment
+//!   the eval code adds its `var` names to.
 
 use swell_syntax::Script;
 use swell_syntax::ast::{Ast, FunctionId, Span};
@@ -101,6 +106,7 @@ pub(crate) fn compile_function(
         locals: info.locals,
         captured,
         self_binding: info.self_binding,
+        eval_environment: !f.strict && f.scope.contains_direct_eval && info.captured.is_empty(),
         arguments: info.arguments,
         scopes: body.scopes,
         instructions: body.instructions,

@@ -32,6 +32,12 @@
 //!   `PropertyName : AssignmentExpression`;
 //! - `#sec-method-definitions-static-semantics-early-errors`: the `UniqueFormalParameters` of a
 //!   method, in any code;
+//! - `#sec-arrow-function-definitions-static-semantics-early-errors`: the
+//!   `ArrowFormalParameters` of an arrow function hold no name twice, in any code; a parameter
+//!   that the body declares lexically, and `eval` and `arguments` as parameters in strict code,
+//!   are checked as for every function. The rule for a Use Strict Directive in the body of an
+//!   arrow whose parameter list is not simple waits for the first such list
+//!   (`story:default-and-rest-parameters`);
 //! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`: the
 //!   flags of IsValidRegularExpressionLiteral. Its pattern is not parsed before slice 5 (a
 //!   recorded omission of `sec-literals-regular-expression-literals`);
@@ -778,6 +784,11 @@ impl<'a, 'm> Checker<'a, 'm> {
             if f.kind == FunctionKind::Method {
                 self.error(
                     format!("duplicate parameter name {} in a method", p.name),
+                    p.span,
+                );
+            } else if f.kind == FunctionKind::Arrow {
+                self.error(
+                    format!("duplicate parameter name {} in an arrow function", p.name),
                     p.span,
                 );
             } else if self.strict {

@@ -3,5 +3,5 @@
 description: A case whose source the parser refuses fails.
 ---*/
 
-var f = a => a;
-assert.sameValue(f(1), 1);
+var f = 1; <!-- an HTML-like comment
+assert.sameValue(f, 1);

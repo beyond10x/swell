@@ -71,7 +71,8 @@ pub enum Instruction {
     /// `[] -> [s]`: the String constant `strings[k]`.
     String(u32),
     /// `[] -> [this]`: ResolveThisBinding (`#sec-resolvethisbinding`); a function's `this` is
-    /// bound by OrdinaryCallBindThis (`#sec-ordinarycallbindthis`).
+    /// bound by OrdinaryCallBindThis (`#sec-ordinarycallbindthis`); an arrow function's is the
+    /// value its [`Instruction::ArrowClosure`] kept.
     This,
     /// `[] -> [f]`: a function object made from `functions[k]` with the LexicalEnvironment as
     /// its environment: InstantiateOrdinaryFunctionObject for a declaration
@@ -82,6 +83,15 @@ pub enum Instruction {
     /// [`FunctionTemplate::self_binding`], its environment is a new declarative environment of one
     /// immutable binding, slot 0, holding the function itself.
     Closure(u32),
+    /// `[] -> [f]`: InstantiateArrowFunctionExpression
+    /// (`#sec-runtime-semantics-instantiatearrowfunctionexpression`) of the arrow function
+    /// `functions[k]`, with the LexicalEnvironment as its environment: [[ThisMode]] lexical, no
+    /// [[Construct]], no `prototype`. The function object keeps the `this` value of the frame
+    /// that runs this instruction, and a call of it puts that value in its own frame's `this`
+    /// in place of OrdinaryCallBindThis (`docs/design/engine.md`, decision 3, "`this` and
+    /// `arguments` in an arrow function", item 1); so [`Instruction::This`] in the arrow's code,
+    /// in an arrow in it and in eval code in it reads that value.
+    ArrowClosure(u32),
 
     // ---- the operand stack ------------------------------------------------------------------
     /// `[a] -> []`.
@@ -420,6 +430,7 @@ impl Instruction {
             | Instruction::String(_)
             | Instruction::This
             | Instruction::Closure(_)
+            | Instruction::ArrowClosure(_)
             | Instruction::Pop
             | Instruction::Dup
             | Instruction::Dup2
@@ -640,9 +651,11 @@ pub struct ArgumentsObject {
 /// The template of an ECMAScript function (`#sec-ecmascript-function-objects`): what
 /// OrdinaryFunctionCreate and the call need, and its code.
 ///
-/// A call binds `this` (OrdinaryCallBindThis), makes a frame of `locals` slots and, when
-/// `captured` is not empty, a function environment of `captured.len()` slots named by `captured`
-/// whose outer is the function's [[Environment]]; it stores the arguments object in its slot
+/// A call binds `this` (OrdinaryCallBindThis; an arrow function takes the `this` its
+/// [`Instruction::ArrowClosure`] kept instead), makes a frame of `locals` slots and, when
+/// `captured` is not empty or `eval_environment` is set, a function environment of
+/// `captured.len()` slots named by `captured` whose outer is the function's [[Environment]];
+/// it stores the arguments object in its slot
 /// when the template asks for one, and the arguments in `params` in order (a later parameter of
 /// the same name overwrites an earlier one, `#sec-functiondeclarationinstantiation`, step 22), a
 /// missing one as `undefined`, and runs `instructions`, which begin with the instantiation of
@@ -671,6 +684,13 @@ pub struct FunctionTemplate {
     /// A named function expression whose own name is referenced: [`Instruction::Closure`] gives
     /// it the environment holding that name.
     pub self_binding: bool,
+    /// Whether a call makes a function environment though `captured` is empty: an arrow
+    /// function whose own non-strict code holds a direct `eval` call and that binds no name.
+    /// The eval code adds its `var` and function names to the VariableEnvironment of its
+    /// caller (`#sec-evaldeclarationinstantiation`), which must be the arrow's own and not the
+    /// environment around it. Every other function with such a call has a binding (its
+    /// arguments object at least), so `captured` is not empty and the flag is false.
+    pub eval_environment: bool,
     pub instructions: Vec<Instruction>,
     /// The source position of each instruction.
     pub positions: Vec<Span>,

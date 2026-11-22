@@ -247,6 +247,7 @@ impl<H: Host> Agent<H> {
             I::String(index) => self.string_constant(index),
             I::This => self.this_value(),
             I::Closure(index) => self.closure(index),
+            I::ArrowClosure(index) => self.arrow_closure(index),
 
             // ---- the operand stack ----
             I::Pop => self.pop_instruction(),

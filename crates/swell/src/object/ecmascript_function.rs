@@ -7,7 +7,8 @@
 //! arguments object (`object/arguments.rs`). `story:object-model-and-realms` wrote the dispatch
 //! arms of `object/mod.rs`; `story:interpreter-and-script-entry-points` the rest;
 //! `story:with-arguments-and-dynamic-names` the arguments object and the names of the
-//! environments a call and a named function expression make.
+//! environments a call and a named function expression make; `story:arrow-functions` the `this`
+//! an arrow function keeps and the environment of an arrow function that calls `eval`.
 //!
 //! A function's code is a template of its script's compiled code (`swell-compiler`'s
 //! `FunctionTemplate`), whose constants the script record holds: the function reports its
@@ -65,13 +66,18 @@ pub(crate) struct EcmascriptFunction {
     /// Whether it has a [[Construct]] (MakeConstructor): a function declaration or expression,
     /// not an accessor or a method.
     pub(crate) constructor: bool,
-    /// [[Strict]]; [[ThisMode]] is strict exactly when it is.
+    /// [[Strict]]; [[ThisMode]] is strict exactly when it is, but for an arrow function.
     pub(crate) strict: bool,
+    /// Of an arrow function, whose [[ThisMode]] is lexical: the `this` of the code that made it,
+    /// which a call puts in its frame in place of OrdinaryCallBindThis (`docs/design/engine.md`,
+    /// decision 3, "`this` and `arguments` in an arrow function", item 1). `None` for every
+    /// other function.
+    pub(crate) lexical_this: Option<Value>,
 }
 
 impl EcmascriptFunction {
     /// Kind site of the collector: [[Environment]], [[Realm]], [[ScriptOrModule]] (which holds
-    /// the code's constants) and [[HomeObject]].
+    /// the code's constants), [[HomeObject]] and the `this` an arrow function keeps.
     pub(crate) fn trace(&self, mark: &mut Mark) {
         mark.count("object/ecmascript_function.rs EcmascriptFunction::trace");
         if let Some(environment) = self.environment {
@@ -85,6 +91,9 @@ impl EcmascriptFunction {
         }
         if let Some(home) = self.home_object {
             mark.object(home);
+        }
+        if let Some(this) = self.lexical_this {
+            mark.value(this);
         }
     }
 
@@ -110,6 +119,7 @@ impl EcmascriptFunction {
             template: 0,
             constructor: false,
             strict: false,
+            lexical_this: None,
         }
     }
 }
@@ -122,6 +132,7 @@ struct Callee {
     compiled: Rc<Compiled>,
     template: u32,
     strict: bool,
+    lexical_this: Option<Value>,
 }
 
 /// [[Call]] (`#sec-ecmascript-function-objects-call-thisargument-argumentslist`) from Rust: a
@@ -180,6 +191,7 @@ impl<H: Host> Agent<H> {
                     compiled: Rc::clone(compiled),
                     template: f.template,
                     strict: f.strict,
+                    lexical_this: f.lexical_this,
                 }),
                 _ => None,
             },
@@ -242,14 +254,18 @@ impl<H: Host> Agent<H> {
         };
         let locals = template.locals;
         let captured = u32::try_from(template.captured.len()).unwrap_or(u32::MAX);
+        let environment = captured > 0 || template.eval_environment;
         let params = template.params.clone();
         let arguments = template.arguments;
 
-        let this = match constructed {
-            Some(object) => Value::Object(object),
-            None => self.ordinary_call_bind_this(&callee, this_argument)?,
+        // An arrow function has no [[Construct]] and binds no `this` (OrdinaryCallBindThis,
+        // step 2): its frame takes the value the function kept.
+        let this = match (constructed, callee.lexical_this) {
+            (Some(object), _) => Value::Object(object),
+            (None, Some(this)) => this,
+            (None, None) => self.ordinary_call_bind_this(&callee, this_argument)?,
         };
-        let env = if captured > 0 {
+        let env = if environment {
             let names = SlotNames {
                 script: callee.script,
                 compiled: Rc::clone(&callee.compiled),
@@ -390,9 +406,10 @@ impl<H: Host> Agent<H> {
     /// of template `index` of `compiled`, in the environment `env`: OrdinaryFunctionCreate with
     /// `%Function.prototype%` of `realm` (`#sec-ordinaryfunctioncreate`: SetFunctionLength,
     /// `#sec-setfunctionlength`), SetFunctionName (`#sec-setfunctionname`), and MakeConstructor
-    /// (`#sec-makeconstructor`) but for an accessor or a method, which have no [[Construct]]. A
-    /// named function expression that refers to
-    /// its own name gets an environment of one immutable binding holding it.
+    /// (`#sec-makeconstructor`) but for an accessor, a method or an arrow function, which have no
+    /// [[Construct]] (an arrow function's `this` is set by [`Agent::keep_lexical_this`] after).
+    /// A named function expression that refers to its own name gets an environment of one
+    /// immutable binding holding it.
     pub(crate) fn instantiate_function(
         &mut self,
         compiled: &Rc<Compiled>,
@@ -439,6 +456,7 @@ impl<H: Host> Agent<H> {
                 template: index,
                 constructor,
                 strict,
+                lexical_this: None,
             }),
         )?;
         if self_binding {
@@ -482,6 +500,18 @@ impl<H: Host> Agent<H> {
         match &mut self.engine_object_mut(function)?.kind {
             ObjectKind::EcmascriptFunction(f) => {
                 f.home_object = Some(home);
+                Ok(())
+            }
+            _ => Err(self.fault()),
+        }
+    }
+
+    /// The `this` the arrow function `function` keeps (`#sec-runtime-semantics-instantiatearrowfunctionexpression`,
+    /// [[ThisMode]] lexical): the value of the frame that made it. Allocates nothing.
+    pub(crate) fn keep_lexical_this(&mut self, function: ObjectRef, this: Value) -> Completion<()> {
+        match &mut self.engine_object_mut(function)?.kind {
+            ObjectKind::EcmascriptFunction(f) => {
+                f.lexical_this = Some(this);
                 Ok(())
             }
             _ => Err(self.fault()),
