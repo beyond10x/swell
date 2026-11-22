@@ -423,6 +423,102 @@ fn memory_budget_ends_the_keys_of_a_long_string() {
     }
 }
 
+/// The global `s`, a String of 1,000,000 code units, defined through the host interface.
+fn global_long_string(agent: &mut Agent<TestHost>, realm: &Realm) {
+    let global_root = global(agent, realm);
+    agent
+        .with_cx(realm, |cx| {
+            let global = object(cx, &global_root);
+            let long = Value::String(cx.new_string(&"a".repeat(1_000_000)).unwrap());
+            let s = key(cx, "s");
+            cx.set(global, s, long, true).unwrap().unwrap();
+        })
+        .unwrap();
+}
+
+/// `docs/design/engine.md`, "The step budget" and "Memory budget": EnumerateObjectProperties
+/// asks [[OwnPropertyKeys]] of the String object, which charges the list of its 1,000,001 keys
+/// (`size_of::<Key>()` bytes each) before it builds it. With 1 MiB left beyond the String,
+/// `for (var k in new String(s)) break;` ends in `Terminated(MemoryBudget)` at that list:
+/// nothing the walk over the keys would make is charged (the heap holds less than 64 KiB more
+/// than before the script when the run ends), and the agent answers the next script.
+#[test]
+fn for_in_over_a_long_string_object_is_charged_before_its_keys_exist() {
+    let mut limits = limits();
+    limits.steps_per_entry = 10_000_000;
+    let mut measure = agent_with(limits).unwrap();
+    let measured = realm(&mut measure);
+    global_long_string(&mut measure, &measured);
+    let base = measure.heap_bytes().unwrap();
+    limits.memory_bytes = base + (1 << 20);
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    global_long_string(&mut agent, &realm);
+    let before = agent.heap_bytes().unwrap();
+    assert_eq!(
+        eval_text(&mut agent, &realm, "for (var k in new String(s)) break; 1"),
+        Outcome::Terminated(Termination::MemoryBudget)
+    );
+    let held = agent.heap_bytes().unwrap().saturating_sub(before);
+    assert!(held < 64 * 1024, "{held} bytes held when the run ended");
+    assert_eq!(
+        eval_text(&mut agent, &realm, "1"),
+        Outcome::Normal("1".to_string())
+    );
+}
+
+/// The steps and the heap after `Object.keys` of an object of 5,000 index keys added in the
+/// order i × 3,001 mod 5,000 (a permutation: 3,001 is prime to 5,000), made through the host
+/// interface.
+fn steps_and_bytes_of_unordered_keys() -> (u64, u64) {
+    const N: u32 = 5_000;
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    agent
+        .with_cx(&realm, |cx| {
+            let global = object(cx, &global_root);
+            let constructor = get(cx, global, "Object");
+            let Value::Object(big) = cx
+                .call(constructor, Value::Undefined, &[])
+                .unwrap()
+                .unwrap()
+            else {
+                panic!("Object() answered no object");
+            };
+            let big_key = key(cx, "big");
+            cx.set(global, big_key, Value::Object(big), true)
+                .unwrap()
+                .unwrap();
+            for i in 0..N {
+                let index = key(cx, &(i * 3_001 % N).to_string());
+                cx.set(big, index, Value::Number(f64::from(i)), true)
+                    .unwrap()
+                    .unwrap();
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        eval_text(&mut agent, &realm, "Object.keys(big).length;"),
+        Outcome::Normal("5000".to_string())
+    );
+    (
+        agent.last_entry_steps().unwrap(),
+        agent.heap_bytes().unwrap(),
+    )
+}
+
+/// Determinism (`docs/design/engine.md`, "The step budget"): the same enumeration of keys
+/// added out of order, sorted pass by pass, spends the same steps and leaves the same heap in
+/// two agents.
+#[test]
+fn the_same_enumeration_twice_spends_the_same_steps() {
+    assert_eq!(
+        steps_and_bytes_of_unordered_keys(),
+        steps_and_bytes_of_unordered_keys()
+    );
+}
+
 /// `Object.assign` calls a getter of a source (Get) and a setter of the target (Set) from Rust:
 /// each is a re-entry. `f` recurses through each until the re-entry limit throws a
 /// `RangeError`, on seven eighths of `min_stack_bytes()` of that depth, without a stack

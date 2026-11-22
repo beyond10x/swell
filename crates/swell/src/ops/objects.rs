@@ -8,6 +8,10 @@
 //! interpreter), SetIntegrityLevel (`#sec-setintegritylevel`), TestIntegrityLevel
 //! (`#sec-testintegritylevel`), Invoke (`#sec-invoke`) and EnumerableOwnProperties
 //! (`#sec-enumerableownproperties`, from `builtins/json.rs`).
+//!
+//! Each list of keys these operations hold is charged to the memory budget before it exists
+//! and credited when it drops, on every way out, and the room it takes on the kept stack is
+//! charged and given back (`story:own-keys-charged-before-the-list-exists`).
 
 use std::collections::BTreeSet;
 
@@ -15,8 +19,9 @@ use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Completion, Termination};
 use crate::host::{ErrorKind, Host};
-use crate::object::ObjectKind;
+use crate::object::builtin_function::KeptRoom;
 use crate::object::property::{Descriptor, Key, Property, Slot};
+use crate::object::{KeyList, ObjectKind};
 use crate::value::{ObjectRef, Value};
 
 /// The level of SetIntegrityLevel and TestIntegrityLevel.
@@ -185,29 +190,46 @@ impl<H: Host> Agent<H> {
         self.call_value(function, value, args)
     }
 
-    /// The bytes of a list of `count` keys, as the integrity levels charge it.
-    fn key_list_bytes(count: usize) -> u64 {
-        u64::try_from(count.saturating_mul(size_of::<Key>())).unwrap_or(u64::MAX)
-    }
-
-    /// The own keys of `object` by [[OwnPropertyKeys]], charged to the memory budget and kept
-    /// on the kept stack until the caller credits `bytes` and releases `mark`: answers the
-    /// keys, the bytes charged and the mark.
-    fn held_own_keys(&mut self, object: ObjectRef) -> Completion<(Vec<Key>, u64, usize)> {
-        let keys = self.own_property_keys(object)?;
-        let bytes = Self::key_list_bytes(keys.len());
-        if self.heap.accounting.charge(bytes).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
+    /// The own keys of `object` by [[OwnPropertyKeys]], which charged them, kept on the kept
+    /// stack in room charged to `room`: the caller credits the list when it drops it and ends
+    /// the room. On an abrupt completion the list is credited here.
+    pub(crate) fn held_own_keys(
+        &mut self,
+        object: ObjectRef,
+        room: &mut KeptRoom,
+    ) -> Completion<KeyList> {
+        let list = self.own_property_keys(object)?;
+        if let Err(abrupt) = self.reserve_kept(room, list.len()) {
+            self.drop_key_list(list);
+            return Err(abrupt);
         }
-        let mark = self.kept.len();
-        if self.kept.try_reserve(keys.len()).is_err() {
-            self.heap.accounting.credit(bytes);
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        for &key in &keys {
+        for &key in list.iter() {
             self.keep_key(key);
         }
-        Ok((keys, bytes, mark))
+        Ok(list)
+    }
+
+    /// Run `steps` over the own keys of `object`, held as [`Agent::held_own_keys`] holds them;
+    /// whatever `steps` answers, the list is credited, what was kept is released and the kept
+    /// stack is given back its room. The integrity levels and
+    /// `Object.getOwnPropertyDescriptors` hold their keys this way; no code runs in their steps.
+    pub(crate) fn with_held_own_keys<T>(
+        &mut self,
+        object: ObjectRef,
+        steps: impl FnOnce(&mut Self, &[Key]) -> Completion<T>,
+    ) -> Completion<T> {
+        let mark = self.kept.len();
+        let mut room = self.kept_room();
+        let answer = match self.held_own_keys(object, &mut room) {
+            Ok(list) => {
+                let answer = steps(self, &list);
+                self.drop_key_list(list);
+                answer
+            }
+            Err(abrupt) => Err(abrupt),
+        };
+        self.end_kept_room(mark, &room);
+        answer
     }
 
     /// SetIntegrityLevel ( O, level ) (`#sec-setintegritylevel`), for every object the base has
@@ -223,11 +245,9 @@ impl<H: Host> Agent<H> {
             return Ok(false);
         }
         // 3. Let keys be ? O.[[OwnPropertyKeys]]().
-        let (keys, bytes, mark) = self.held_own_keys(object)?;
-        let done = self.set_integrity_level_keys(object, level, &keys);
-        self.release(mark);
-        self.heap.accounting.credit(bytes);
-        done?;
+        self.with_held_own_keys(object, |agent, keys| {
+            agent.set_integrity_level_keys(object, level, keys)
+        })?;
         // 6. Return true.
         Ok(true)
     }
@@ -286,11 +306,9 @@ impl<H: Host> Agent<H> {
             return Ok(false);
         }
         // 4. Let keys be ? O.[[OwnPropertyKeys]]().
-        let (keys, bytes, mark) = self.held_own_keys(object)?;
-        let answer = self.test_integrity_level_keys(object, level, &keys);
-        self.release(mark);
-        self.heap.accounting.credit(bytes);
-        answer
+        self.with_held_own_keys(object, |agent, keys| {
+            agent.test_integrity_level_keys(object, level, keys)
+        })
     }
 
     /// Steps 5 and 6 of TestIntegrityLevel, over `keys`.
@@ -326,18 +344,52 @@ impl<H: Host> Agent<H> {
     /// EnumerableOwnProperties ( O, kind ) (`#sec-enumerableownproperties`) of kind key, the
     /// keys as the property keys they are (a String key, an array index as `Key::Index`): the
     /// String keys of `object` whose own property is enumerable, in the order of
-    /// [[OwnPropertyKeys]]. A step per key; each key answered is kept on the kept stack, which
-    /// the caller releases to the mark it took before the call. No code runs.
-    pub(crate) fn enumerable_own_keys(&mut self, object: ObjectRef) -> Completion<Vec<Key>> {
+    /// [[OwnPropertyKeys]]. A step per key; each key answered is kept on the kept stack, in room
+    /// charged to `room`, which the caller ends with the mark it took before the call. The list
+    /// answered is charged before it is reserved; the caller credits it or takes its charge
+    /// over. The list of own keys is credited when it drops, on every way out. No code runs.
+    pub(crate) fn enumerable_own_keys(
+        &mut self,
+        object: ObjectRef,
+        room: &mut KeptRoom,
+    ) -> Completion<KeyList> {
         // 1. Let ownKeys be ? O.[[OwnPropertyKeys]]().
         let own_keys = self.own_property_keys(object)?;
-        // 2. Let results be a new empty List.
-        let mut keys = Vec::new();
-        if keys.try_reserve(own_keys.len()).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
+        let answer = self.enumerable_keys_of(object, &own_keys, room);
+        self.drop_key_list(own_keys);
+        answer
+    }
+
+    /// Steps 2 and 3 of EnumerableOwnProperties of kind key over `own_keys`.
+    fn enumerable_keys_of(
+        &mut self,
+        object: ObjectRef,
+        own_keys: &[Key],
+        room: &mut KeptRoom,
+    ) -> Completion<KeyList> {
+        // 2. Let results be a new empty List: room for every key, charged first.
+        let mut keys = self.new_key_list(own_keys.len())?;
+        match self.push_enumerable_keys(object, own_keys, room, &mut keys.keys) {
+            Ok(()) => Ok(keys),
+            Err(abrupt) => {
+                self.drop_key_list(keys);
+                Err(abrupt)
+            }
         }
+    }
+
+    /// Step 3 of EnumerableOwnProperties of kind key: the enumerable String keys of
+    /// `own_keys` pushed to `keys`, which has room for all, and kept in room charged to `room`.
+    fn push_enumerable_keys(
+        &mut self,
+        object: ObjectRef,
+        own_keys: &[Key],
+        room: &mut KeptRoom,
+        keys: &mut Vec<Key>,
+    ) -> Completion<()> {
+        self.reserve_kept(room, own_keys.len())?;
         // 3. For each element key of ownKeys: a. If key is a String.
-        for key in own_keys {
+        for &key in own_keys {
             self.charge_steps(1)?;
             if matches!(key, Key::Symbol(_)) {
                 continue;
@@ -352,7 +404,7 @@ impl<H: Host> Agent<H> {
                 keys.push(key);
             }
         }
-        Ok(keys)
+        Ok(())
     }
 
     /// EnumerableOwnProperties ( O, kind ) (`#sec-enumerableownproperties`) as the List of
@@ -360,28 +412,71 @@ impl<H: Host> Agent<H> {
     /// values, of kind key+value an Array of each key and value. Each key is read again by
     /// [[GetOwnProperty]] when its turn comes, so a property that a getter of an earlier one
     /// deleted is skipped. A step per key; the own keys and the results are kept on the kept
-    /// stack across each Get, and stay kept until the caller releases to the mark it took
-    /// before the call.
+    /// stack across each Get, in room charged to `room`, and stay kept until the caller ends
+    /// the room with the mark it took before the call. The list of own keys is credited when it
+    /// drops, on every way out; the results are charged before they are reserved and answered
+    /// with the bytes they were charged, which the caller credits when it drops them.
     pub(crate) fn enumerable_own_properties(
         &mut self,
         object: ObjectRef,
         kind: PropertyKind,
-    ) -> Completion<Vec<Value>> {
+        room: &mut KeptRoom,
+    ) -> Completion<(Vec<Value>, u64)> {
         // 1. Let ownKeys be ? O.[[OwnPropertyKeys]](). Kept: a getter may collect an atom.
         let own_keys = self.own_property_keys(object)?;
-        if self.kept.try_reserve(own_keys.len()).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        for &key in &own_keys {
-            self.keep_key(key);
-        }
         // 2. Let results be a new empty List.
         let mut results = Vec::new();
-        if results.try_reserve(own_keys.len()).is_err() {
+        let answer = match self.hold_enumerable_results(&own_keys, room, &mut results) {
+            Ok(bytes) => {
+                match self.push_enumerable_properties(object, kind, &own_keys, &mut results) {
+                    Ok(()) => Ok((results, bytes)),
+                    Err(abrupt) => {
+                        self.heap.accounting.credit(bytes);
+                        Err(abrupt)
+                    }
+                }
+            }
+            Err(abrupt) => Err(abrupt),
+        };
+        self.drop_key_list(own_keys);
+        answer
+    }
+
+    /// Before the loop of EnumerableOwnProperties: room on the kept stack for `own_keys` and
+    /// the results, charged to `room`, the keys kept, and room in `results` for every key,
+    /// charged first: answers the bytes `results` was charged. Over the budget nothing of
+    /// `results` stays charged.
+    fn hold_enumerable_results(
+        &mut self,
+        own_keys: &[Key],
+        room: &mut KeptRoom,
+        results: &mut Vec<Value>,
+    ) -> Completion<u64> {
+        self.reserve_kept(room, own_keys.len().saturating_mul(2))?;
+        for &key in own_keys {
+            self.keep_key(key);
+        }
+        let bytes =
+            u64::try_from(own_keys.len().saturating_mul(size_of::<Value>())).unwrap_or(u64::MAX);
+        self.charge_bytes(bytes)?;
+        if results.try_reserve_exact(own_keys.len()).is_err() {
+            self.heap.accounting.credit(bytes);
             return Err(self.terminate(Termination::MemoryBudget));
         }
+        Ok(bytes)
+    }
+
+    /// Step 3 of EnumerableOwnProperties: the result of each enumerable String key of
+    /// `own_keys` pushed to `results`, which has room for all, and kept.
+    fn push_enumerable_properties(
+        &mut self,
+        object: ObjectRef,
+        kind: PropertyKind,
+        own_keys: &[Key],
+        results: &mut Vec<Value>,
+    ) -> Completion<()> {
         // 3. For each element key of ownKeys: a. If key is a String.
-        for key in own_keys {
+        for &key in own_keys {
             self.charge_steps(1)?;
             if matches!(key, Key::Symbol(_)) {
                 continue;
@@ -415,7 +510,7 @@ impl<H: Host> Agent<H> {
             self.keep(result);
             results.push(result);
         }
-        Ok(results)
+        Ok(())
     }
 
     /// LengthOfArrayLike (`#sec-lengthofarraylike`).
@@ -556,7 +651,8 @@ impl<H: Host> Agent<H> {
     /// EnumerateObjectProperties (`#sec-enumerate-object-properties`), as the informative
     /// definition there does it: the enumerable String keys of the object and then of each
     /// prototype, each name once, a name shadowed by a non-enumerable property not visited.
-    /// A step per key and per object of the chain.
+    /// A step per object of the chain and the steps of each [[OwnPropertyKeys]]; each list of
+    /// own keys is credited once it is consumed, before the next object's is asked for.
     pub(crate) fn enumerate_object_properties(
         &mut self,
         object: ObjectRef,
@@ -566,20 +662,36 @@ impl<H: Host> Agent<H> {
         let mut current = Some(object);
         while let Some(o) = current {
             self.charge_steps(1)?;
-            for key in self.own_property_keys(o)? {
-                if let Key::Symbol(_) = key {
-                    continue;
-                }
-                let Some(property) = self.get_own_property(o, key)? else {
-                    continue;
-                };
-                if visited.insert(key_order(key)) && property.enumerable {
-                    found.push(key);
-                }
-            }
+            let own_keys = self.own_property_keys(o)?;
+            let walked = self.enumerate_own_keys(o, &own_keys, &mut visited, &mut found);
+            self.drop_key_list(own_keys);
+            walked?;
             current = self.get_prototype_of(o)?;
         }
         Ok(found)
+    }
+
+    /// The keys of one object of EnumerateObjectProperties: each String key of `own_keys` not
+    /// visited yet is visited, and found when its property is enumerable.
+    fn enumerate_own_keys(
+        &mut self,
+        object: ObjectRef,
+        own_keys: &[Key],
+        visited: &mut BTreeSet<(u8, u32, u32, u32)>,
+        found: &mut Vec<Key>,
+    ) -> Completion<()> {
+        for &key in own_keys {
+            if let Key::Symbol(_) = key {
+                continue;
+            }
+            let Some(property) = self.get_own_property(object, key)? else {
+                continue;
+            };
+            if visited.insert(key_order(key)) && property.enumerable {
+                found.push(key);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -587,7 +699,9 @@ impl<H: Host> Agent<H> {
 mod tests {
     use super::{IntegrityLevel, PropertyKind};
     use crate::host::agent::Agent;
-    use crate::host::hooks::test_host::{NoHooks, agent_with_realm, enter};
+    use crate::host::hooks::test_host::{
+        NoHooks, agent_with_realm, agent_with_realm_and, enter, limits,
+    };
     use crate::host::outcome::{Abrupt, Completion, Outcome, Termination};
     use crate::host::{Cx, ErrorKind, Host, HostCall, Parsed, Source};
     use crate::object::ordinary::OrdinaryData;
@@ -805,7 +919,7 @@ mod tests {
 
     /// The own properties of `object`, in the order of its keys.
     fn own_properties(agent: &mut Agent<NoHooks>, object: ObjectRef) -> Vec<(Key, Property)> {
-        let keys = agent.own_property_keys(object).unwrap();
+        let keys = agent.own_property_keys(object).unwrap().keys;
         keys.into_iter()
             .map(|key| (key, agent.get_own_property(object, key).unwrap().unwrap()))
             .collect()
@@ -1216,17 +1330,22 @@ mod tests {
             .unwrap();
 
         let mark = agent.kept.len();
+        let mut room = agent.kept_room();
         assert_eq!(
-            agent.enumerable_own_keys(object),
+            agent
+                .enumerable_own_keys(object, &mut room)
+                .map(|list| list.keys),
             Ok(vec![Key::Index(1), a, c, d])
         );
-        let keys = agent
-            .enumerable_own_properties(object, PropertyKind::Key)
+        let (keys, _) = agent
+            .enumerable_own_properties(object, PropertyKind::Key, &mut room)
             .unwrap();
         let keys: Vec<String> = keys.into_iter().map(|key| text(&mut agent, key)).collect();
         assert_eq!(keys, ["1", "a", "c", "d"]);
         assert_eq!(
-            agent.enumerable_own_properties(object, PropertyKind::Value),
+            agent
+                .enumerable_own_properties(object, PropertyKind::Value, &mut room)
+                .map(|(values, _)| values),
             Ok(vec![
                 Value::Number(0.5),
                 Value::Number(1.0),
@@ -1234,8 +1353,8 @@ mod tests {
                 Value::Number(4.0)
             ])
         );
-        let entries = agent
-            .enumerable_own_properties(object, PropertyKind::KeyValue)
+        let (entries, _) = agent
+            .enumerable_own_properties(object, PropertyKind::KeyValue, &mut room)
             .unwrap();
         let entries: Vec<(String, Value)> = entries
             .into_iter()
@@ -1250,14 +1369,17 @@ mod tests {
                 ("d".to_string(), Value::Number(4.0)),
             ]
         );
-        agent.release(mark);
+        agent.end_kept_room(mark, &room);
 
         let prototype = agent.current_intrinsic(Intrinsic::StringPrototype).unwrap();
         let ab = agent.new_string_str("ab").unwrap();
         let string = agent.string_create(ab, prototype).unwrap();
         agent.keep(Value::Object(string));
+        let mut room = agent.kept_room();
         assert_eq!(
-            agent.enumerable_own_keys(string),
+            agent
+                .enumerable_own_keys(string, &mut room)
+                .map(|list| list.keys),
             Ok(vec![Key::Index(0), Key::Index(1)])
         );
     }
@@ -1309,7 +1431,10 @@ mod tests {
                     .unwrap();
             }
             let mark = agent.kept.len();
-            let results = agent.enumerable_own_properties(object, kind).unwrap();
+            let mut room = agent.kept_room();
+            let (results, _) = agent
+                .enumerable_own_properties(object, kind, &mut room)
+                .unwrap();
             match kind {
                 PropertyKind::Value => {
                     assert_eq!(results, [Value::Number(1.0), Value::Number(3.0)]);
@@ -1328,7 +1453,7 @@ mod tests {
                     );
                 }
             }
-            agent.release(mark);
+            agent.end_kept_room(mark, &room);
             let b = agent.name_key("b").unwrap();
             assert_eq!(agent.has_own_property(object, b), Ok(false));
         }
@@ -1363,5 +1488,194 @@ mod tests {
         let thrown = agent.create_data_property_or_throw(object, b, Value::Number(2.0));
         assert!(is_type_error(&mut agent, thrown));
         assert_eq!(agent.has_own_property(object, b), Ok(false));
+    }
+
+    /// An agent in an entry of a realm, with a budget of 256 MiB and no step limit to reach.
+    fn roomy_agent() -> (Agent<NoHooks>, Realm) {
+        let mut limits = limits();
+        limits.memory_bytes = 1 << 28;
+        limits.steps_per_entry = u64::MAX;
+        let (mut agent, realm) = agent_with_realm_and(limits);
+        enter(&mut agent, &realm);
+        (agent, realm)
+    }
+
+    /// The lane `slow` sets `SWELL_FULL_COUNTS=1` for the full counts of a test.
+    fn full_counts() -> bool {
+        std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    }
+
+    /// The keys of the object of [`assert_key_list_credited`] and how many times it runs its
+    /// call. In the lane `slow` (`SWELL_FULL_COUNTS=1`) the story's 10,000 keys and 10 calls;
+    /// in the gate 1,000 keys and 3 calls. At 1,000 the list's 16,000 bytes stand above the
+    /// largest rise the uncharged lists showed at 10,000 keys (1,106 bytes for `JSON.stringify`,
+    /// 752 for `Object.keys`, measured): below 10,000 bytes, so no byte of it is per key, and
+    /// at 1,000 keys the assertion fails on uncharged lists as at the full count; 3 calls are the first, the second and one
+    /// more for the second to equal. With the collector run at every safe point, where each
+    /// safe point walks the whole heap, 100 keys in both (1,600 bytes against the same rises).
+    fn credited_counts() -> (u32, usize) {
+        let calls = if full_counts() { 10 } else { 3 };
+        let keys = if cfg!(feature = "collect-every-safe-point") {
+            100
+        } else if full_counts() {
+            10_000
+        } else {
+            1_000
+        };
+        (keys, calls)
+    }
+
+    /// `docs/design/engine.md`, "Memory budget": a list of property keys is charged while it is
+    /// held and credited when it drops. `call`, over an object of `N` keys
+    /// ([`credited_counts`]), takes the high-water mark of the bytes charged above
+    /// `heap_bytes()` before it by at least the bytes of the list, `N` × `size_of::<Key>()`;
+    /// after a collection `heap_bytes()` reads the same after the second and the last call.
+    /// The keys of `o` are not enumerable, so that what a call makes of the enumerable ones (an
+    /// Array, Strings) does not hide its list; `e` has the same keys enumerable, and `t` is its
+    /// JSON text.
+    fn assert_key_list_credited(call: &str) {
+        let (n, calls) = credited_counts();
+        let (mut agent, realm) = roomy_agent();
+        let o = script_object(&mut agent, &realm, "var o = {}; o");
+        let e = script_object(&mut agent, &realm, "var e = {}; e");
+        for i in 0..n {
+            let key = agent.name_key(&format!("k{i}")).unwrap();
+            let value = Value::Number(f64::from(i));
+            assert_eq!(
+                agent.define_own_property(o, key, Descriptor::data(value, true, false, true)),
+                Ok(true)
+            );
+            assert_eq!(agent.create_data_property(e, key, value), Ok(true));
+        }
+        script_object(&mut agent, &realm, "var t = JSON.stringify(e); [t]");
+        let list = u64::from(n) * size_of::<Key>() as u64;
+        let Ok(Parsed::Parsed(script)) = agent.parse_script(&realm, Source::Utf8(call), None)
+        else {
+            panic!("{call} did not parse");
+        };
+        let mut short = Vec::new();
+        let mut after = Vec::new();
+        for round in 1..=calls {
+            assert!(agent.collect().is_ok());
+            let before = agent.heap_bytes().unwrap();
+            agent.heap.accounting.reset_high_water();
+            let outcome = agent.evaluate_script(&script);
+            assert!(
+                matches!(outcome, Ok(Outcome::Normal(_))),
+                "{call}: {outcome:?}"
+            );
+            drop(outcome);
+            let rise = agent.heap.accounting.high_water().saturating_sub(before);
+            if rise < list {
+                short.push(format!("call {round}: {rise} < {list}"));
+            }
+            assert!(agent.collect().is_ok());
+            after.push(agent.heap_bytes().unwrap());
+        }
+        assert!(
+            short.is_empty(),
+            "{call}: size_of::<Key>() = {}; the high-water mark rose by less than the list: \
+             {short:#?}",
+            size_of::<Key>()
+        );
+        assert_eq!(
+            after[1],
+            after[calls - 1],
+            "{call}: heap_bytes() after each call {after:?}"
+        );
+    }
+
+    /// One test per call of [`assert_key_list_credited`], so that each stays well inside the
+    /// 60 s a test may run.
+    mod every_key_list_is_credited_when_it_drops {
+        use super::assert_key_list_credited;
+
+        #[test]
+        fn keys() {
+            assert_key_list_credited("Object.keys(o);");
+        }
+
+        #[test]
+        fn values() {
+            assert_key_list_credited("Object.values(o);");
+        }
+
+        #[test]
+        fn entries() {
+            assert_key_list_credited("Object.entries(o);");
+        }
+
+        #[test]
+        fn get_own_property_names() {
+            assert_key_list_credited("Object.getOwnPropertyNames(o);");
+        }
+
+        #[test]
+        fn assign() {
+            assert_key_list_credited("Object.assign({}, o);");
+        }
+
+        #[test]
+        fn get_own_property_descriptors() {
+            assert_key_list_credited("Object.getOwnPropertyDescriptors(o);");
+        }
+
+        #[test]
+        fn define_properties() {
+            assert_key_list_credited("Object.defineProperties({}, o);");
+        }
+
+        #[test]
+        fn freeze() {
+            assert_key_list_credited("Object.freeze(o);");
+        }
+
+        /// An extensible object is not frozen before its keys are read, so `o` stops being
+        /// extensible first.
+        #[test]
+        fn is_frozen() {
+            assert_key_list_credited("Object.preventExtensions(o); Object.isFrozen(o);");
+        }
+
+        #[test]
+        fn json_stringify() {
+            assert_key_list_credited("JSON.stringify(o);");
+        }
+
+        #[test]
+        fn json_parse_with_a_reviver() {
+            assert_key_list_credited("JSON.parse(t, function (k, v) { return v; });");
+        }
+
+        #[test]
+        fn for_in() {
+            assert_key_list_credited("for (var k in o) {}");
+        }
+    }
+
+    /// `docs/design/engine.md`, "Memory budget": the room a list of keys takes on the kept
+    /// stack is given back when the list drops. `Object.keys(new String(s))` of a String of
+    /// 100,000 code units in the lane `slow` (`SWELL_FULL_COUNTS=1`), 10,000 in the gate,
+    /// leaves the kept stack with the capacity it had before the call. Without the room given
+    /// back the capacity after the call is at least the String's length (100,005 against 4 at
+    /// 100,000, measured), so 10,000 fails the same way.
+    #[test]
+    fn the_kept_stack_returns_to_its_capacity_after_a_key_list() {
+        let length = if full_counts() { 100_000 } else { 10_000 };
+        let (mut agent, realm) = roomy_agent();
+        let keys = script_object(&mut agent, &realm, "Object.keys");
+        let prototype = agent.current_intrinsic(Intrinsic::StringPrototype).unwrap();
+        let data = agent.new_string_str(&"a".repeat(length)).unwrap();
+        agent.keep(Value::String(data));
+        let string = agent.string_create(data, prototype).unwrap();
+        agent.keep(Value::Object(string));
+        let capacity = agent.kept.capacity();
+        let answer = agent.call_value(
+            Value::Object(keys),
+            Value::Undefined,
+            &[Value::Object(string)],
+        );
+        assert!(matches!(answer, Ok(Value::Object(_))), "{answer:?}");
+        assert_eq!(agent.kept.capacity(), capacity);
     }
 }

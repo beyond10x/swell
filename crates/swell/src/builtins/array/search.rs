@@ -1044,7 +1044,10 @@ mod tests {
             .iter()
             .map(|name| agent.name_key(name).unwrap())
             .collect();
-        assert_eq!(agent.own_property_keys(list), Ok(keys.clone()));
+        assert_eq!(
+            agent.own_property_keys(list).map(|own| own.keys),
+            Ok(keys.clone())
+        );
         for key in keys {
             assert_eq!(
                 agent.get_own_property(list, key),
