@@ -383,6 +383,16 @@ session coordinates; this section is its procedure, taken from how surf is run
   A forge run over 120 s is a budget defect: it gets a story and is fixed before the next
   feature, and nothing else of the batch is published until then. Any other red line holds
   the commit as before.
+- **A merged wave branch is compiled before a unit is based on it.** On 2026-11-22 the twelfth
+  unit of slice 3 was merged on its own report into a branch that had moved since its base:
+  the merge applied without a conflict and the crate did not compile, because two units had
+  each defined `Agent::to_clamped_index`. The unit that closes the slice was opened on that
+  commit, waited for its first full run in the pool and stopped at the compile error. So: after the merge of a unit whose base
+  is not the head of the wave branch, `cargo check --locked --workspace --all-targets` runs
+  on the merged commit in the check tree (one pool job, in the background), and no unit is
+  opened on the branch and nothing is reported as merged and working before it exits 0. The
+  combined test run of the merged branch stays what it was: a later check of several units
+  at once.
 - **Quota is shared with surf's session.** Prefer fewer, longer units to many short ones, and
   keep every unit resumable (a brief file, a worktree, a report form): a sub-agent cut off by a
   rate limit is resumed with its context on the same model, never restarted.
