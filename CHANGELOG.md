@@ -45,7 +45,10 @@ pass. Every number below is from the gate on the wave branch of slice 3
   `const` and block scopes with the temporal dead zone and a fresh record per iteration of a
   `for (let ...)` loop. A tagged template is refused by name until its story. Arrow functions
   with an expression body or a block body: `this` and `arguments` are those of the code that
-  made the arrow, and an arrow has no [[Construct]] and no `prototype`.
+  made the arrow, and an arrow has no [[Construct]] and no `prototype`. Default parameters and
+  rest parameters, in functions, arrows and the `Function` constructor: a default is evaluated
+  only for `undefined`, and a parameter read or written before its initializer has run throws
+  a `ReferenceError` that names it.
 
 ### Changed
 
@@ -95,6 +98,9 @@ pass. Every number below is from the gate on the wave branch of slice 3
     per code unit past 32. `JSON.parse` and `JSON.rawJSON` charge the step per code unit of
     their text before they copy it: a text parsed to its end costs what it did, and one that
     fails early has paid for its whole text.
+  - A bound function's arguments, the argument list of a bound call and the arguments a
+    builtin call records are charged to the memory budget before they are copied and stay
+    charged while they are held.
   - The atom table grows charged first, also when deleted buckets would make it grow.
   - The compile step charges what a node's expansion holds as it is made: the script `1`
     needs 2,228 bytes of room for its parse and compile.
