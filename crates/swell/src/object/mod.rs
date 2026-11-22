@@ -264,10 +264,6 @@ impl<H: Host> Agent<H> {
 
     /// [[SetPrototypeOf]]: SetImmutablePrototype for `%Object.prototype%` (10.4.7.1,
     /// `#sec-immutable-prototype-exotic-objects-setprototypeof-v`), ordinary for the others.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Object.setPrototypeOf: story:harness-builtins")
-    )]
     pub(crate) fn set_prototype_of(
         &mut self,
         object: ObjectRef,
