@@ -26,6 +26,8 @@ pub struct TestHost {
     /// The host's map from a node number to the handle it keeps for that node, with no root: a
     /// weak reference (HOST-178).
     pub kept: Vec<Option<ObjectRef>>,
+    /// The charges of the host's own bytes a test's host functions keep.
+    pub charges: Vec<swell::HostBytes>,
 }
 
 impl Host for TestHost {

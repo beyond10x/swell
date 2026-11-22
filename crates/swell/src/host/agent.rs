@@ -30,6 +30,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::hooks::HostDefined;
+use super::host_bytes::HostBytes;
 use super::interrupt::InterruptHandle;
 use super::limits::{CreateError, Limits, Seeds};
 use super::outcome::{
@@ -91,6 +92,9 @@ pub struct Agent<H: Host> {
     pub(crate) steps: u64,
     /// The bytes of property maps freed by the last sweep, to credit (`object/mod.rs`).
     pub(crate) credit: Rc<Cell<u64>>,
+    /// The bytes of the host's charges whose `HostBytes` were dropped, to credit after the
+    /// next sweep or before the next charge of host bytes (`host_bytes.rs`).
+    pub(crate) host_credit: Rc<Cell<u64>>,
     /// The realm the running entry names (decision 7), the current realm while no builtin runs
     /// (`realm/mod.rs`); `None` between entries.
     pub(crate) entry_realm: Option<Handle>,
@@ -159,6 +163,7 @@ impl<H: Host> Agent<H> {
             kept: Vec::new(),
             steps: 0,
             credit: Rc::new(Cell::new(0)),
+            host_credit: Rc::new(Cell::new(0)),
             entry_realm: None,
             symbols: None,
             interp: Interp::default(),
@@ -244,6 +249,22 @@ impl<H: Host> Agent<H> {
                 Ok(Outcome::Terminated(Termination::EngineFault))
             }
         }
+    }
+
+    /// Give back the bytes of `charge` at once and answer them (section 14, "The host's own work
+    /// and bytes"): the handle is emptied before it drops, so its drop adds nothing and the
+    /// bytes are credited once. It needs no realm and no scope, runs no code, calls no hook and
+    /// spends no step. A handle of another agent answers `Err(ForeignHandle)` and credits
+    /// nothing here; dropped in the call, it gives its bytes back to its own agent.
+    pub fn credit_host_bytes(&mut self, charge: HostBytes) -> Result<u64, HostError> {
+        self.alive()?;
+        if charge.key != self.heap.key {
+            return Err(HostError::ForeignHandle);
+        }
+        let mut charge = charge;
+        let bytes = std::mem::take(&mut charge.bytes);
+        self.heap.accounting.credit(bytes);
+        Ok(bytes)
     }
 
     /// The agent's interrupt handle; every call answers a clone sharing one flag (decision 12).
@@ -605,12 +626,15 @@ impl<H: Host> Agent<H> {
         self.terminate(Termination::EngineFault)
     }
 
-    /// A collection, with the bytes of the property maps it freed credited, and then the
-    /// collection threshold set from the live reading.
+    /// A collection, with the bytes of the property maps it freed credited and the host's
+    /// charges whose `HostBytes` were dropped (in the sweep, with the host data that held them,
+    /// or before by the host), and then the collection threshold set from the live reading.
+    /// Both credits read a `Cell`: the collection allocates nothing for them.
     fn collect_now(&mut self) -> Result<CollectReport, Stale> {
         let mut report = collect::collect(self)?;
         let freed = self.credit.replace(0);
         self.heap.accounting.credit(freed);
+        self.credit_dropped_host_bytes();
         self.heap.collected();
         report.heap_bytes_after = self.heap.bytes();
         Ok(report)

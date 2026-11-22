@@ -172,9 +172,9 @@ HOST-171 test swell::collect::host_171_live_bytes_reads_the_records_and_heap_byt
 HOST-172 pending slice 6
 HOST-173 pending slice 6
 HOST-174 pending slice 6
-HOST-175 pending slice 6
-HOST-176 pending slice 6
-HOST-177 pending slice 6
+HOST-175 test swell::budgets::host_175_host_bytes_without_end_end_in_memory_budget
+HOST-176 test swell::budgets::host_176_a_host_charge_gives_back_what_it_charged
+HOST-177 test swell::budgets::host_177_host_steps_end_in_step_budget
 HOST-178 test swell::host_objects::host_178_a_kept_handle_is_weak
 HOST-179 pending slice 6
 HOST-180 test swell::calls::host_180_an_interface_object_has_its_parent_as_prototype

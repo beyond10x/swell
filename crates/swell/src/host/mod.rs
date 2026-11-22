@@ -13,6 +13,7 @@
 
 pub(crate) mod agent;
 pub(crate) mod hooks;
+pub(crate) mod host_bytes;
 pub(crate) mod host_object;
 pub(crate) mod interrupt;
 pub(crate) mod limits;
@@ -20,6 +21,7 @@ pub(crate) mod outcome;
 
 pub use agent::*;
 pub use hooks::*;
+pub use host_bytes::*;
 pub use host_object::*;
 pub use interrupt::*;
 pub use limits::*;
@@ -515,6 +517,26 @@ macro_rules! scoped_methods {
             ) -> Result<Completion<ObjectRef>, HostError> {
                 self.agent.scoped_new_error(realm, kind, message)
             }
+
+            /// Charge `bytes` the host holds for the agent to its memory budget; the answer
+            /// holds the charge, which goes back to the budget when the answer is dropped
+            /// (section 14, "The host's own work and bytes"). Over the budget nothing is
+            /// charged and the run ends in `Terminated(MemoryBudget)`. Not a safe point.
+            pub fn charge_host_bytes(&mut self, bytes: u64) -> Completion<HostBytes> {
+                self.agent.scoped_charge_host_bytes(bytes)
+            }
+
+            /// Change the bytes `charge` holds to `bytes`: growing charges the difference
+            /// first, shrinking gives it back at once. Growing past the budget charges nothing,
+            /// leaves `charge` as it was and ends the run in `Terminated(MemoryBudget)`; a
+            /// handle of another agent answers `Err(ForeignHandle)`.
+            pub fn resize_host_bytes(
+                &mut self,
+                charge: &mut HostBytes,
+                bytes: u64,
+            ) -> Result<Completion<()>, HostError> {
+                self.agent.scoped_resize_host_bytes(charge, bytes)
+            }
         }
     };
 }
@@ -586,6 +608,17 @@ impl<H: Host> Cx<'_, H> {
             .begin()
             .and_then(|()| agent.set_prototype_of(object, prototype));
         Ok(hand_out_throw(agent, completion))
+    }
+
+    /// Charge `steps` of the host's own work to the running outermost entry (section 14, "The
+    /// host's own work and bytes"): inside a host function the outermost entry's, inside
+    /// `with_cx` that of the last call that began one (decision 2). It reads the interrupt flag
+    /// first; steps past `steps_per_entry` are not spent and end the run in
+    /// `Terminated(StepBudget)`, as a builtin's charge does.
+    pub fn charge_steps(&mut self, steps: u64) -> Completion<()> {
+        let agent = &mut *self.agent;
+        agent.running()?;
+        agent.charge_steps(steps)
     }
 
     /// Call (`#sec-call`): a value that is not callable throws a `TypeError`. A re-entry when

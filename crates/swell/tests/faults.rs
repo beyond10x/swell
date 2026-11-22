@@ -26,10 +26,20 @@ mod injected {
     };
 
     /// Every entry point and read of slice 1 but `state()`, on a faulted agent: each answers
-    /// `Err(HostError::Faulted)`, a `with_cx` closure and a setup closure do not run.
-    fn answers_faulted_everywhere(agent: &mut Agent<TestHost>, realm: &Realm) {
+    /// `Err(HostError::Faulted)`, a `with_cx` closure and a setup closure do not run, and
+    /// `credit_host_bytes` of `charge`, made before the fault, answers `Err(HostError::Faulted)`
+    /// while the handle, dropped in the call, gives its bytes to its own queue without a panic.
+    fn answers_faulted_everywhere(
+        agent: &mut Agent<TestHost>,
+        realm: &Realm,
+        charge: swell::HostBytes,
+    ) {
         let ran = Rc::new(Cell::new(false));
         assert_eq!(agent.state(), AgentState::Faulted);
+        assert!(matches!(
+            agent.credit_host_bytes(charge),
+            Err(HostError::Faulted)
+        ));
         assert!(matches!(agent.collect(), Err(HostError::Faulted)));
         assert!(matches!(agent.heap_bytes(), Err(HostError::Faulted)));
         assert!(matches!(agent.live_bytes(), Err(HostError::Faulted)));
@@ -80,6 +90,10 @@ mod injected {
         ] {
             let mut agent = agent().unwrap();
             let realm = realm(&mut agent);
+            let charge = agent
+                .with_cx(&realm, |cx| cx.charge_host_bytes(8))
+                .unwrap()
+                .unwrap();
             let script = parse(&mut agent, &realm, "var kept = 1;");
             agent.inject_fault(point);
             // The calls that are not the switch's are not touched by it.
@@ -113,7 +127,7 @@ mod injected {
                 ),
             };
             assert!(faulted, "{point:?} did not answer Terminated(EngineFault)");
-            answers_faulted_everywhere(&mut agent, &realm);
+            answers_faulted_everywhere(&mut agent, &realm, charge);
             assert!(matches!(
                 agent.evaluate_script(&script),
                 Err(HostError::Faulted)
