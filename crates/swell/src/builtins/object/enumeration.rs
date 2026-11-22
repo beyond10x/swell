@@ -16,7 +16,9 @@
 //! keys, and `hasOwn` takes a key and answers a Boolean.
 //!
 //! Every loop runs for the script and charges a step per key; a list of keys or of results is
-//! charged to the memory budget while it is held and credited when it is dropped. What a
+//! charged to the memory budget before it exists and credited when it is dropped, and the room
+//! it takes on the kept stack is given back (`story:own-keys-charged-before-the-list-exists`,
+//! `Agent::with_held_own_keys` and `Agent::held_own_keys` of `ops/objects.rs`). What a
 //! builtin holds across a step that may run code (a getter, a setter, a toString) is on the
 //! kept stack: the object ToObject made, the keys (their atoms are held weakly), the target
 //! and the results (`builtins/object/mod.rs`).
@@ -25,7 +27,7 @@ use crate::builtins::object::argument;
 use crate::builtins::{Method, SymbolData};
 use crate::host::Host;
 use crate::host::agent::Agent;
-use crate::host::outcome::{Completion, Termination};
+use crate::host::outcome::Completion;
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::Key;
 use crate::ops::objects::PropertyKind;
@@ -72,11 +74,6 @@ pub(crate) fn prototype_symbol_data<H: Host>() -> [SymbolData<H>; 0] {
     []
 }
 
-/// The bytes of a list of `count` items of `T`, as a held list is charged.
-fn list_bytes<T>(count: usize) -> u64 {
-    u64::try_from(count.saturating_mul(size_of::<T>())).unwrap_or(u64::MAX)
-}
-
 impl<H: Host> Agent<H> {
     /// The steps of the builtins of this group; not inlined, so that the frame of
     /// `run_object_builtin` does not grow with its arms.
@@ -111,48 +108,31 @@ impl<H: Host> Agent<H> {
         result
     }
 
-    /// Charge `bytes` of a held list to the memory budget.
-    fn charge_list(&mut self, bytes: u64) -> Completion<()> {
-        if self.heap.accounting.charge(bytes).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        Ok(())
-    }
-
-    /// The own keys of `object` by [[OwnPropertyKeys]] (a step per key), charged to the memory
-    /// budget and kept: answers the keys and the bytes the caller credits when it drops them.
-    fn held_keys(&mut self, object: ObjectRef) -> Completion<(Vec<Key>, u64)> {
-        let keys = self.own_property_keys(object)?;
-        let bytes = list_bytes::<Key>(keys.len());
-        self.charge_list(bytes)?;
-        if self.kept.try_reserve(keys.len()).is_err() {
-            self.heap.accounting.credit(bytes);
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        for &key in &keys {
-            self.keep_key(key);
-        }
-        Ok((keys, bytes))
-    }
-
     /// `Object.keys ( obj )` (`#sec-object.keys`), `Object.values ( obj )`
     /// (`#sec-object.values`) and `Object.entries ( obj )` (`#sec-object.entries`), by `kind`,
     /// the three steps of each clause: ToObject, EnumerableOwnProperties of the kind, then
     /// CreateArrayFromList. EnumerableOwnProperties charges a step per key and keeps the keys
-    /// and the results; the list is charged to the memory budget until the array is made,
-    /// which CreateArrayFromList charges a step per element.
+    /// and the results; the list it answers stays charged to the memory budget until the array
+    /// is made, which CreateArrayFromList charges a step per element. Whatever the completion,
+    /// the kept stack is given back the room it had before.
     fn object_enumerable_own(&mut self, value: Value, kind: PropertyKind) -> Completion<Value> {
+        let mark = self.kept.len();
+        let mut room = self.kept_room();
         // 1. Let coerced be ? ToObject(obj): new for a primitive, so kept across each Get.
         let coerced = self.to_object(value)?;
         self.keep(Value::Object(coerced));
         // 2. Let list be ? EnumerableOwnProperties(coerced, kind).
-        let list = self.enumerable_own_properties(coerced, kind)?;
-        let bytes = list_bytes::<Value>(list.len());
-        self.charge_list(bytes)?;
-        // 3. Return CreateArrayFromList(list).
-        let array = self.create_array_from_list(&list);
-        self.heap.accounting.credit(bytes);
-        Ok(Value::Object(array?))
+        let answer = match self.enumerable_own_properties(coerced, kind, &mut room) {
+            Ok((list, bytes)) => {
+                // 3. Return CreateArrayFromList(list).
+                let array = self.create_array_from_list(&list);
+                self.heap.accounting.credit(bytes);
+                array.map(Value::Object)
+            }
+            Err(abrupt) => Err(abrupt),
+        };
+        self.end_kept_room(mark, &room);
+        answer
     }
 
     /// `Object.assign ( target, ...sources )` (`#sec-object.assign`).
@@ -183,10 +163,19 @@ impl<H: Host> Agent<H> {
         // i. Let from be ! ToObject(nextSource).
         let from = self.to_object(source)?;
         self.keep(Value::Object(from));
-        // ii. Let keys be ? from.[[OwnPropertyKeys]]().
-        let (keys, bytes) = self.held_keys(from)?;
-        let copied = self.assign_keys(to, from, &keys);
-        self.heap.accounting.credit(bytes);
+        // ii. Let keys be ? from.[[OwnPropertyKeys]](): charged, and kept in room given back
+        // when the copy ends.
+        let mark = self.kept.len();
+        let mut room = self.kept_room();
+        let copied = match self.held_own_keys(from, &mut room) {
+            Ok(keys) => {
+                let copied = self.assign_keys(to, from, &keys);
+                self.drop_key_list(keys);
+                copied
+            }
+            Err(abrupt) => Err(abrupt),
+        };
+        self.end_kept_room(mark, &room);
         copied
     }
 
@@ -219,11 +208,11 @@ impl<H: Host> Agent<H> {
         // 1. Let coerced be ? ToObject(obj).
         let coerced = self.to_object(value)?;
         self.keep(Value::Object(coerced));
-        // 2. Let ownKeys be ? coerced.[[OwnPropertyKeys]]().
-        let (own_keys, bytes) = self.held_keys(coerced)?;
-        let descriptors = self.descriptors_of(coerced, &own_keys);
-        self.heap.accounting.credit(bytes);
-        descriptors
+        // 2. Let ownKeys be ? coerced.[[OwnPropertyKeys]](): charged and kept while the
+        // descriptors are made.
+        self.with_held_own_keys(coerced, |agent, own_keys| {
+            agent.descriptors_of(coerced, own_keys)
+        })
     }
 
     /// Steps 3 to 5 of `Object.getOwnPropertyDescriptors`.

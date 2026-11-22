@@ -31,6 +31,7 @@ use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host, Termination};
 use crate::object::ObjectKind;
+use crate::object::builtin_function::KeptRoom;
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Key, array_index};
 use crate::ops::objects::IntegrityLevel;
@@ -148,8 +149,12 @@ struct Walker<'p> {
     records: &'p [Record],
     frames: Vec<Walk>,
     pending: Option<Enter>,
-    /// The bytes charged for the open frames, credited when they close.
+    /// The bytes charged for the open frames and their lists of keys, credited when they
+    /// close.
     charged: u64,
+    /// The room the kept stack had when the walk began, and the growth charged for the keys
+    /// the frames keep, given back when the walk ends.
+    room: KeptRoom,
 }
 
 /// The value ParseJSON made and the index of its record.
@@ -232,6 +237,7 @@ impl<H: Host> Agent<H> {
         // 8. Let snapshot be CreateJSONParseRecord(parseResult.[[ParseNode]], rootName,
         // unfiltered): the record the parse made of the whole text.
         // 9. Return ? InternalizeJSONProperty(root, rootName, reviver, snapshot).
+        let walk_mark = self.kept.len();
         let mut walker = Walker {
             reviver,
             text: &units,
@@ -243,9 +249,11 @@ impl<H: Host> Agent<H> {
                 record: Some(parsed.record),
             }),
             charged: 0,
+            room: self.kept_room(),
         };
         let result = self.json_internalize(&mut walker);
         *charged = charged.saturating_add(walker.charged);
+        self.end_kept_room(walk_mark, &walker.room);
         result
     }
 
@@ -943,28 +951,29 @@ impl<H: Host> Agent<H> {
         record: Option<usize>,
         mark: usize,
     ) -> Completion<()> {
-        let members = if self.is_array(Value::Object(object))? {
+        let (members, list_bytes) = if self.is_array(Value::Object(object))? {
             let length = self.length_of_array_like(object)?;
-            Members::Array { length, next: 0.0 }
+            (Members::Array { length, next: 0.0 }, 0)
         } else {
-            let keys = self.enumerable_own_keys(object)?;
-            Members::Object {
-                keys,
-                next: 0,
-                hint: 0,
-            }
+            // Charged before it exists, each key kept in room charged to the walk; the frame
+            // takes the list's charge over.
+            let list = self.enumerable_own_keys(object, &mut walker.room)?;
+            walker.charged = walker.charged.saturating_add(list.bytes);
+            (
+                Members::Object {
+                    keys: list.keys,
+                    next: 0,
+                    hint: 0,
+                },
+                list.bytes,
+            )
         };
-        let key_count = match &members {
-            Members::Object { keys, .. } => keys.len(),
-            Members::Array { .. } => 0,
-        };
-        let charged = bytes_of::<Walk>(1)
-            .saturating_add(bytes_of::<Key>(key_count))
-            .saturating_add(bytes_of::<Value>(key_count.saturating_add(2)));
-        if self.heap.accounting.charge(charged).is_err() {
+        let frame = bytes_of::<Walk>(1).saturating_add(bytes_of::<Value>(2));
+        if self.heap.accounting.charge(frame).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
-        walker.charged = walker.charged.saturating_add(charged);
+        walker.charged = walker.charged.saturating_add(frame);
+        let charged = frame.saturating_add(list_bytes);
         if walker.frames.try_reserve(1).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }

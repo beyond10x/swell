@@ -28,7 +28,7 @@ use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host, Termination};
 use crate::object::ObjectKind;
-use crate::object::builtin_function::BuiltinId;
+use crate::object::builtin_function::{BuiltinId, KeptRoom};
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::Key;
 use crate::realm::intrinsics::{Intrinsic, Making};
@@ -97,8 +97,12 @@ struct State {
     on_stack: BTreeSet<(u32, u32, u32)>,
     frames: Vec<Frame>,
     out: StringBuilder,
-    /// The bytes charged for the frames and the property list, credited when they go.
+    /// The bytes charged for the frames, their lists of keys and the property list, credited
+    /// when they go.
     charged: u64,
+    /// The room the kept stack had when the call began, and the growth charged for the keys
+    /// the frames keep, given back when the call ends.
+    room: KeptRoom,
 }
 
 /// What SerializeJSONProperty of a value gives, before anything is written: undefined, a
@@ -165,10 +169,11 @@ impl<H: Host> Agent<H> {
                     frames: Vec::new(),
                     out: StringBuilder::new(),
                     charged: 0,
+                    room: self.kept_room(),
                 };
                 let result = self.json_stringify(&mut state, args);
                 self.heap.accounting.credit(state.charged);
-                self.release(mark);
+                self.end_kept_room(mark, &state.room);
                 result
             }
             JsonBuiltin::IsRawJson => self.json_is_raw_json(args),
@@ -526,38 +531,31 @@ impl<H: Host> Agent<H> {
         self.keep(Value::Object(object));
         // 3, 4. Let stepBack be state.[[Indent]]; append state.[[Gap]] to state.[[Indent]].
         let step_back = state.indent.len();
-        let members = if self.is_array(Value::Object(object))? {
+        let (members, list_bytes) = if self.is_array(Value::Object(object))? {
             // SerializeJSONArray, 6. Let len be ? LengthOfArrayLike(value).
             let length = self.length_of_array_like(object)?;
-            Members::Array { length, next: 0.0 }
+            (Members::Array { length, next: 0.0 }, 0)
         } else if state.property_list.is_some() {
             // SerializeJSONObject, 5. Let K be state.[[PropertyList]].
-            Members::Object {
-                keys: None,
-                next: 0,
-            }
+            let keys = None;
+            (Members::Object { keys, next: 0 }, 0)
         } else {
             // SerializeJSONObject, 6. Let K be ? EnumerableOwnProperties(value, key)
-            // (`ops/objects.rs`): each key kept until the frame's mark is released.
-            let keys = self.enumerable_own_keys(object)?;
-            Members::Object {
-                keys: Some(keys),
-                next: 0,
-            }
-        };
-        let key_count = match &members {
-            Members::Object {
-                keys: Some(keys), ..
-            } => keys.len(),
-            _ => 0,
+            // (`ops/objects.rs`): charged before it exists, each key kept in room charged to
+            // the call until the frame's mark is released. The frame takes the list's charge
+            // over.
+            let list = self.enumerable_own_keys(object, &mut state.room)?;
+            state.charged = state.charged.saturating_add(list.bytes);
+            let keys = Some(list.keys);
+            (Members::Object { keys, next: 0 }, list.bytes)
         };
         let bytes = size_of::<Frame>()
-            .saturating_add(key_count.saturating_mul(size_of::<Key>() + size_of::<Value>()))
             .saturating_add(size_of::<Value>())
             .saturating_add(size_of::<(u32, u32, u32)>() * 4)
             .saturating_add(state.gap.len() * 2);
-        let charged = u64::try_from(bytes).unwrap_or(u64::MAX);
-        self.json_charge(state, charged)?;
+        let frame_bytes = u64::try_from(bytes).unwrap_or(u64::MAX);
+        self.json_charge(state, frame_bytes)?;
+        let charged = frame_bytes.saturating_add(list_bytes);
         if state.frames.try_reserve(1).is_err()
             || state.indent.try_reserve(state.gap.len()).is_err()
         {

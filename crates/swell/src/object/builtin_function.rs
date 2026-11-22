@@ -7,7 +7,10 @@
 //! `object/mod.rs`: it charges a step, counts against `reentry_depth`, pushes an activation that
 //! holds the callee, `this`, the arguments and `new_target`, and is a safe point (decision 4) once
 //! the activation holds them. A builtin that keeps a value across a call into code puts it on the
-//! agent's kept stack ([`Agent::keep`]), never only in a Rust local.
+//! agent's kept stack ([`Agent::keep`]), never only in a Rust local. A holder that reserves room
+//! on the kept stack for many values (a sort's list, a list of keys) charges the growth before
+//! it is made and, when it ends, gives the stack back the room it had and credits the growth
+//! ([`KeptRoom`]).
 //!
 //! A host function's `Ok` and `Abrupt::Throw` values are checked before the engine uses them
 //! (decision 6): a stale handle, a handle of another agent, or a constructor answer that is not
@@ -26,7 +29,7 @@ use crate::heap::collect::{Item, Mark};
 use crate::host::agent::Agent;
 use crate::host::host_object::{Brand, HostData, HostObject};
 use crate::host::outcome::{Abrupt, Completion};
-use crate::host::{Cx, ErrorKind, Host, HostCall, HostFn};
+use crate::host::{Cx, ErrorKind, Host, HostCall, HostFn, Termination};
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, StringRef, Value};
 
@@ -119,6 +122,15 @@ impl HostData for FunctionData {
     }
 }
 
+/// The room a holder made on the kept stack (a sort's list, a list of keys and what is kept
+/// with it): the capacity the stack had before ([`Agent::kept_room`]) and the bytes its growth
+/// was charged to the memory budget ([`Agent::reserve_kept`]), which
+/// [`Agent::end_kept_room`] gives back and credits.
+pub(crate) struct KeptRoom {
+    pub(crate) capacity: usize,
+    pub(crate) charged: u64,
+}
+
 /// The execution context of a running builtin (9.4): what the collector keeps while it runs.
 pub(crate) struct Activation {
     pub(crate) callee: ObjectRef,
@@ -168,6 +180,50 @@ impl<H: Host> Agent<H> {
     /// Drop what was kept since `mark`.
     pub(crate) fn release(&mut self, mark: usize) {
         self.kept.truncate(mark);
+    }
+
+    /// The room of the kept stack now, before a holder reserves more on it.
+    pub(crate) fn kept_room(&self) -> KeptRoom {
+        KeptRoom {
+            capacity: self.kept.capacity(),
+            charged: 0,
+        }
+    }
+
+    /// Room on the kept stack for `more` values beyond its length: when it has none, its
+    /// capacity grows to twice what it was, at least 16 and at least what is needed, charged
+    /// to the memory budget before it is made and added to `room`; over the budget the run
+    /// ends in `Terminated(MemoryBudget)`.
+    pub(crate) fn reserve_kept(&mut self, room: &mut KeptRoom, more: usize) -> Completion<()> {
+        let needed = self.kept.len().saturating_add(more);
+        let capacity = self.kept.capacity();
+        if needed <= capacity {
+            return Ok(());
+        }
+        let wanted = capacity.saturating_mul(2).max(16).max(needed);
+        let slots = u64::try_from(wanted - capacity).unwrap_or(u64::MAX);
+        let slot = u64::try_from(size_of::<Value>()).unwrap_or(u64::MAX);
+        let bytes = slots.saturating_mul(slot);
+        if self.heap.accounting.charge(bytes).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        let length = self.kept.len();
+        if self.kept.try_reserve_exact(wanted - length).is_err() {
+            self.heap.accounting.credit(bytes);
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        room.charged = room.charged.saturating_add(bytes);
+        Ok(())
+    }
+
+    /// The end of a holder of the kept stack, whatever its completion: what was kept since
+    /// `mark` is released, the kept stack is given back the room it had when `room` was taken,
+    /// and what its growth was charged is credited.
+    pub(crate) fn end_kept_room(&mut self, mark: usize, room: &KeptRoom) {
+        self.release(mark);
+        let capacity = room.capacity.max(self.kept.len());
+        self.kept.shrink_to(capacity);
+        self.heap.accounting.credit(room.charged);
     }
 
     /// CreateBuiltinFunction (`#sec-createbuiltinfunction`) with SetFunctionLength
