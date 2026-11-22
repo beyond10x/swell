@@ -18,10 +18,14 @@
 //! - LexicallyDeclaredNames and LexicallyScopedDeclarations
 //!   (`#sec-static-semantics-lexicallydeclarednames`,
 //!   `#sec-static-semantics-lexicallyscopeddeclarations`) of the top level of the script and of
-//!   each function body ([`Scope::lexical`]), and of any statement list, a block's or the clauses
-//!   of a `case` block ([`Ast::lexical_names`]): the `let` and `const` declarations standing in
-//!   the list itself. A function declaration in a block is refused before a later story of slice
-//!   6, and one at the top level of a body is var scoped (TopLevelLexicallyScopedDeclarations).
+//!   each function body ([`Scope::lexical`]): the `let` and `const` declarations standing in the
+//!   list itself, a function declaration there being var scoped
+//!   (TopLevelLexicallyScopedDeclarations); and of a block's statement list or the clauses of a
+//!   `case` block ([`Ast::lexical_names`]): its `let` and `const` declarations and its function
+//!   declarations, which are no VarScopedDeclarations of the function or the script
+//!   (`#sec-block-static-semantics-lexicallyscopeddeclarations`,
+//!   `#sec-block-static-semantics-varscopeddeclarations`). The walk below therefore takes a
+//!   function's name as a `var` and a declaration to instantiate only at the top level of a body.
 //!
 //! The initializers of a function's parameters, and the patterns among its parameters with their
 //! defaults, are the function's own code, walked before its body: their references and direct
@@ -51,10 +55,13 @@ use crate::ast::{
 };
 
 impl Ast {
-    /// The names the `let` and `const` declarations of the statement list `list` bind, in
-    /// source order: the BoundNames of its LexicallyScopedDeclarations
-    /// (`#sec-block-static-semantics-lexicallyscopeddeclarations`), for a block, the clauses of
-    /// a `case` block taken together or the top level of a body.
+    /// The names the declarations of the statement list `list` of a block, of the clauses of a
+    /// `case` block taken together, or of a `try`, `catch` or `finally` block bind, in source
+    /// order: the BoundNames of its LexicallyScopedDeclarations
+    /// (`#sec-block-static-semantics-lexicallyscopeddeclarations`), its `let` and `const`
+    /// declarations and its function declarations, each of those with the declaration
+    /// statement and not `constant`. Not for the top level of a body, where a function
+    /// declaration is var scoped (TopLevelLexicallyScopedDeclarations, [`Scope::lexical`]).
     pub fn lexical_names(&self, list: &[StmtId]) -> Vec<LexicalName> {
         let mut names = Vec::new();
         for &s in list {
@@ -64,9 +71,21 @@ impl Ast {
     }
 }
 
-/// The names the statement `s` binds when it is a `let` or `const` declaration.
+/// The names the statement `s` binds when it is a `let` or `const` declaration or a function
+/// declaration standing in a block.
 fn push_lexical(ast: &Ast, s: StmtId, names: &mut Vec<LexicalName>) {
-    let Some(Stmt::Var(kind, declarators)) = ast.stmt(s).map(|n| &n.stmt) else {
+    let declaration = ast.stmt(s).map(|n| &n.stmt);
+    if let Some(Stmt::FunctionDeclaration(f)) = declaration {
+        if let Some(name) = ast.function(*f).and_then(|x| x.name.as_ref()) {
+            names.push(LexicalName {
+                name: name.clone(),
+                constant: false,
+                declaration: s,
+            });
+        }
+        return;
+    }
+    let Some(Stmt::Var(kind, declarators)) = declaration else {
         return;
     };
     if !kind.is_lexical() {

@@ -444,8 +444,9 @@ pub enum ForInTarget {
     Expression(ExprId),
 }
 
-/// A name a `let` or `const` declaration binds (the BoundNames of a `LexicalDeclaration`), with
-/// the statement that declares it.
+/// A name a `let` or `const` declaration binds (the BoundNames of a `LexicalDeclaration`), or a
+/// function declaration in a block or a `case` block ([`Ast::lexical_names`]), with the
+/// statement that declares it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LexicalName {
     pub name: Name,
@@ -570,8 +571,8 @@ pub struct Scope {
     /// The names the `let` and `const` declarations at the top level of the body bind, in
     /// source order: the BoundNames of its LexicallyScopedDeclarations
     /// (`#sec-static-semantics-lexicallyscopeddeclarations`; a function declaration at the top
-    /// level of a body is var scoped, and one in a block is refused before slice 6's later
-    /// story).
+    /// level of a body is var scoped, and one in a block is a lexical name of that block,
+    /// [`Ast::lexical_names`]).
     pub lexical: Vec<LexicalName>,
     /// The `IdentifierReference`s of the body itself (not of nested functions), each name once,
     /// in source order of its first reference.

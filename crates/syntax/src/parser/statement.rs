@@ -8,9 +8,14 @@
 //! `let` is an identifier where no declaration can stand: before a token that cannot start a
 //! binding, and in the place of a Statement (the body of `if`, a loop, `with` or a label), where
 //! `let [` is an error (the lookahead of ExpressionStatement, `#sec-expression-statement`).
-//! Refused are the declarations of later slices: a function declaration inside a block (6),
-//! `class` (8), `async function` (10), `import` and `export` (11), and the Annex B forms
-//! `if (x) function f() {}`, `L: function f() {}` and `for (var a = 0 in o)` (18); an array
+//! A function declaration stands at the top of a body, where it is var scoped, and in a block, a
+//! `case` clause and a `try`, `catch` or `finally` block, where it is lexically scoped to that
+//! statement list (`#sec-block`, `#sec-switch-statement`), in strict and non-strict code.
+//! Refused are the declarations of later slices: `class` (8), `async function` (10), `import`
+//! and `export` (11), and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
+//! `for (var a = 0 in o)` (18); the `var` binding and the duplicate declarations Annex B gives
+//! a function declaration in a block of non-strict code (B.3.2) wait for slice 18 too, so that
+//! such code parses and answers as strict code does until then; an array
 //! pattern and `for (let x of ...)` keep the refusals of their own parts (6). An object binding
 //! pattern (`#sec-destructuring-binding-patterns`) stands where a declarator, a for-in head or a
 //! `catch` clause binds a name. Labelled statements and labelled `break` and `continue`
@@ -38,7 +43,7 @@ pub(super) enum Place {
     Body,
     /// A `StatementList` inside a block, a `case` clause or a `try`, `catch` or `finally` block,
     /// where a `let` or `const` declaration stands and a function declaration is lexically
-    /// scoped (refused before a later story of slice 6).
+    /// scoped (`#sec-block-static-semantics-lexicallyscopeddeclarations`).
     Block,
     /// The `Statement` of an `if` clause, where Annex B allows a function declaration in
     /// non-strict code (`#sec-functiondeclarations-in-ifstatement-statement-clauses`).
@@ -180,10 +185,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                 Keyword::Try => Parser::try_statement,
                 Keyword::Debugger => Parser::debugger_statement,
                 Keyword::Function => match place {
-                    Place::Body => Parser::function_declaration_statement,
-                    Place::Block => {
-                        return self.refuse("function declaration inside a block", 6);
-                    }
+                    Place::Body | Place::Block => Parser::function_declaration_statement,
                     Place::IfClause if !self.strict => {
                         return self.refuse("function declaration as an if clause", 18);
                     }

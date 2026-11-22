@@ -13,7 +13,9 @@
 //! arguments object of a function (`docs/design/engine.md`, decision 3, "Names"), the direct
 //! `eval` call and eval code ([`compile_eval`]), whose names are looked up as the same rule
 //! says. Slice 6 adds the `let` and `const` declarations, with the scopes, the uninitialized
-//! state and the per-iteration bindings of decision 3, "Lexical bindings". A regular
+//! state and the per-iteration bindings of decision 3, "Lexical bindings", and the function
+//! declarations of a block, which are bindings of the block, made at its entry, in a script,
+//! a function and eval code alike (decision 3, "Function declarations in a block"). A regular
 //! expression literal compiles to the `SyntaxError` the design gives
 //! it before slice 5 ([`swell_syntax::REGEXP_REFUSAL`]). Slots and environments are assigned by
 //! `resolve.rs`; `disasm.rs` writes a [`Code`] as text.

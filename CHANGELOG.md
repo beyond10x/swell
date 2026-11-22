@@ -34,7 +34,7 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Changed
 
-- The ESS pins moved from 0.96.0 to 0.97.3 (`spec/ess-inputs.yaml`, the conformance workspace,
+- The ESS pins moved from 0.96.0 to 0.97.4 (`spec/ess-inputs.yaml`, the conformance workspace,
   the forge's workflow). The suite is byte-identical: 58 scenarios, 41 refusals, 58 passing on
   the interpreter and 14 against the engine, as before.
 - The gate now fails when a public item of the host interface or a `HOST-<n>` requirement

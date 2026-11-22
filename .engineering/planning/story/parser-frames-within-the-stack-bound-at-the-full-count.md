@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:parser-frames-within-the-stack-bound-at-the-full-count
 kind: story
-status: active
+status: implemented
 title: Every nesting kind of the parser fits the stack bound at the full count, and the gate's check fails wherever the full count does
 summary: Nested arrow functions took 229.3 bytes a parser level against the stated 224, and the stack overflowed at parser_nesting 10,000; the gate's check at 2,500 passed on it. The arrow body's frame drops to 224 bytes (181.3 a level), and the gate's check at 2,500 runs on a quarter of the stack of 10,000 levels.
 relations:
 - decomposes: epic:slice-06-bindings-and-iteration
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T18:18:03Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T18:18:03Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T19:34:19Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 A repair of the lane `slow` (step `slow-tests`, red on `main` at `3cec594`). Comes before every
 feature. No host requirement changes; no constant a host reads changes.
