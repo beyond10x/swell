@@ -35,10 +35,6 @@ use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, Value};
 
 /// An Iterator Record (`#sec-iterator-records`, Table 13) of the sync kind.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "IteratorRecord: story:for-of-statement")
-)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct IteratorRecord {
     /// [[Iterator]]: an object that conforms to the iterator interface.
@@ -52,10 +48,6 @@ pub(crate) struct IteratorRecord {
 impl<H: Host> Agent<H> {
     /// GetIteratorFromMethod ( obj, method ) (`#sec-getiteratorfrommethod`). The caller holds
     /// `object` and `method` across the call; the record answered is not kept.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "GetIteratorFromMethod: story:for-of-statement")
-    )]
     pub(crate) fn get_iterator_from_method(
         &mut self,
         object: Value,
@@ -91,10 +83,6 @@ impl<H: Host> Agent<H> {
 
     /// GetIterator ( obj, sync ) (`#sec-getiterator`). The caller holds `object` across the
     /// call; the record answered is not kept.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "GetIterator: story:for-of-statement")
-    )]
     pub(crate) fn get_iterator(&mut self, object: Value) -> Completion<IteratorRecord> {
         let Some(symbols) = self.well_known() else {
             return Err(self.fault());
@@ -178,10 +166,6 @@ impl<H: Host> Agent<H> {
     /// IteratorStepValue ( iteratorRecord ) (`#sec-iteratorstepvalue`): `None` for done. The
     /// caller keeps the record's [[Iterator]] and [[NextMethod]]; the result is kept while
     /// "value" is read.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "IteratorStepValue: story:for-of-statement")
-    )]
     pub(crate) fn iterator_step_value(
         &mut self,
         record: &mut IteratorRecord,
@@ -207,10 +191,6 @@ impl<H: Host> Agent<H> {
     /// normal or a throw completion; a termination is answered as it is, and `return` is not
     /// called (`docs/design/engine.md`, decision 3, item 4). The caller keeps the record's
     /// [[Iterator]]; the value of `completion` is kept while `return` is read and called.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "IteratorClose: story:for-of-statement")
-    )]
     pub(crate) fn iterator_close(
         &mut self,
         record: &IteratorRecord,

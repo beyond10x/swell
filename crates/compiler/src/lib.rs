@@ -343,8 +343,9 @@ pub(crate) enum Control {
         items: u32,
         envs: u32,
     },
-    /// The try block and catch block of a try statement with a `finally` block, entered at
-    /// `entry` with a completion record on top of `items` entries.
+    /// The try block and catch block of a try statement with a `finally` block, or the step and
+    /// the body of a for-of with its IteratorClose (`statement.rs`, "The iterator of a
+    /// for-of"), entered at `entry` with a completion record on top of `items` entries.
     Finally {
         entry: Label,
         items: u32,
@@ -353,6 +354,9 @@ pub(crate) enum Control {
         /// The `break` and `continue` exits through it, tag [`TAG_FIRST_JUMP`] onward: the kind
         /// and the index of the target in the control stack.
         jumps: Vec<(JumpKind, usize)>,
+        /// It closes the iterator of the for-of loop right under it in the control stack: a
+        /// `continue` of that loop goes on to its next step past it (`#sec-loopcontinues`).
+        closes: bool,
     },
 }
 
@@ -916,7 +920,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
     }
 
     /// A `break` or `continue` to the control entry `target`, from the current position: through
-    /// the innermost `finally` block between, or straight to the loop or switch.
+    /// the innermost `finally` block between, or straight to the loop or switch. A `continue`
+    /// of a for-of passes its own IteratorClose by.
     fn exit_jump_to(
         &mut self,
         kind: JumpKind,
@@ -935,9 +940,13 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 items,
                 envs,
                 jumps,
+                closes,
                 ..
             } = c
             {
+                if *closes && kind == JumpKind::Continue && i == target.saturating_add(1) {
+                    continue;
+                }
                 let index = match jumps.iter().position(|j| *j == (kind, target)) {
                     Some(index) => index,
                     None => {

@@ -1,0 +1,45 @@
+script locals 3
+  var "f"
+  0000 2:1 Undefined
+  0001 2:1 StoreCompletion
+  0002 2:1 Uninitialize 0
+  0003 2:15 NewArray
+  0004 2:16 GetLocalChecked 0 "x"
+  0005 2:15 DefineIndex 0
+  0006 2:15 GetIterator
+  0007 2:1 IteratorStep 0015
+  0008 2:10 SetLocal 1
+  0009 2:10 Pop
+  0010 2:22 GetLocalChecked 1 "x"
+  0011 2:22 StoreCompletion
+  0012 2:1 LoopJump 0007
+  0013 2:1 IteratorClose
+  0014 2:1 EndFinally
+  0015 2:1 Pop
+  0016 4:1 Undefined
+  0017 4:1 StoreCompletion
+  0018 4:17 GetGlobal "a"
+  0019 4:17 GetIterator
+  0020 4:1 IteratorStep 0032
+  0021 4:1 PushLexicalEnv 0 const "y"
+  0022 4:12 SetEnv 0 0
+  0023 4:12 Pop
+  0024 4:22 ResolveGlobal "f"
+  0025 4:26 Closure 0
+  0026 4:22 PutGlobalRef "f"
+  0027 4:22 StoreCompletion
+  0028 4:1 PopEnv
+  0029 4:1 LoopJump 0020
+  0030 4:1 IteratorClose
+  0031 4:1 EndFinally
+  0032 4:1 Pop
+  0033 0:0 LoadCompletion
+  0034 0:0 Return
+  finally 0007..0013 -> 0013 items 1 envs 0
+  finally 0020..0030 -> 0030 items 1 envs 0
+
+function 0 expression "f" length 0 locals 0
+  0000 4:47 GetEnvChecked 0 0
+  0001 4:40 Return
+  0002 4:26 Undefined
+  0003 4:26 Return

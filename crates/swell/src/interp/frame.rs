@@ -11,9 +11,9 @@
 //! value, the function, the realm, the script, and for a script the completion value register.
 //!
 //! What a frame takes beyond its fixed part (its locals and its operand stack as it grows) is
-//! charged to the memory budget and credited when the frame is popped; so is the key list a
-//! `for`-`in` enumerator on its operand stack holds, which is credited earlier when the
-//! enumerator leaves the stack.
+//! charged to the memory budget and credited when the frame is popped; so are the key list a
+//! `for`-`in` enumerator on its operand stack holds and the box of a `for`-`of` Iterator
+//! Record there, each credited earlier when its entry leaves the stack.
 
 use std::rc::Rc;
 
@@ -23,10 +23,11 @@ use crate::env::NameReference;
 use crate::heap::arena::Handle;
 use crate::heap::collect::{Item, Mark};
 use crate::object::property::Key;
+use crate::ops::iteration::IteratorRecord;
 use crate::script::Compiled;
 use crate::value::{ObjectRef, Value};
 
-/// An entry of the operand stack: a language value, or one of the four engine entries of the
+/// An entry of the operand stack: a language value, or one of the five engine entries of the
 /// bytecode (`swell_compiler::bytecode`, "Values on the operand stack").
 pub(crate) enum Entry {
     Value(Value),
@@ -42,6 +43,9 @@ pub(crate) enum Entry {
     ObjectReference(ObjectRef),
     /// The enumerator of a for-in statement (`ForInStart`).
     Enumerator(Box<Enumerator>),
+    /// The Iterator Record of a for-of statement (`GetIterator`), boxed so the entry stays as
+    /// large as it was (`interp/for_of.rs`).
+    Iterator(Box<IteratorRecord>),
     /// The tag of a completion record (`Tag`).
     Tag(u32),
 }
@@ -64,7 +68,7 @@ impl Entry {
             Entry::Reference(true) => Some(NameReference::Global),
             Entry::DeclarativeReference(env) => Some(NameReference::Declarative(env)),
             Entry::ObjectReference(object) => Some(NameReference::Object(object)),
-            Entry::Value(_) | Entry::Enumerator(_) | Entry::Tag(_) => None,
+            Entry::Value(_) | Entry::Enumerator(_) | Entry::Iterator(_) | Entry::Tag(_) => None,
         }
     }
 }
@@ -144,8 +148,8 @@ pub(crate) struct Frame {
     pub(crate) completion: Value,
     /// For a [[Construct]], the `this` object the call answers when its code returns no object.
     pub(crate) constructed: Option<ObjectRef>,
-    /// The bytes charged for the frame and the key lists of the enumerators on its operand
-    /// stack, credited when it is popped.
+    /// The bytes charged for the frame, the key lists of the enumerators and the Iterator
+    /// Records on its operand stack, credited when it is popped.
     pub(crate) charged: u64,
 }
 
@@ -200,6 +204,10 @@ impl Frame {
                     for key in &enumerator.keys {
                         key.trace(mark);
                     }
+                }
+                Entry::Iterator(record) => {
+                    mark.object(record.iterator);
+                    mark.value(record.next_method);
                 }
                 Entry::DeclarativeReference(env) => mark.push(Item::Environment(*env)),
                 Entry::ObjectReference(object) => mark.object(*object),

@@ -271,6 +271,7 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::LoopJump(t) => format!("LoopJump {t:04}"),
         I::CaseJump(t) => format!("CaseJump {t:04}"),
         I::ForInNext(t) => format!("ForInNext {t:04}"),
+        I::IteratorStep(t) => format!("IteratorStep {t:04}"),
         I::ThrowSyntaxError(k) => format!("ThrowSyntaxError {}", s(k)),
         I::PushEnv(n) => format!("PushEnv {n}"),
         I::PushNamedEnv(t) => format!("PushNamedEnv {t} {}", names(t)),

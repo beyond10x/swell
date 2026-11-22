@@ -4,7 +4,8 @@
 //!
 //! Every ES5 statement is parsed, `with` in non-strict code included (slice 2), and the `let` and
 //! `const` declarations of slice 6 (`#sec-let-and-const-declarations`) in a script, a function
-//! body, a block, a `case` clause and the head of a `for` or a `for`-`in`. In non-strict code
+//! body, a block, a `case` clause and the head of a `for`, a `for`-`in` or a `for`-`of`
+//! (`#sec-for-in-and-for-of-statements`, whose `for await` waits for slice 10). In non-strict code
 //! `let` is an identifier where no declaration can stand: before a token that cannot start a
 //! binding, and in the place of a Statement (the body of `if`, a loop, `with` or a label), where
 //! `let [` is an error (the lookahead of ExpressionStatement, `#sec-expression-statement`).
@@ -15,10 +16,10 @@
 //! and `export` (11), and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
 //! `for (var a = 0 in o)` (18); the `var` binding and the duplicate declarations Annex B gives
 //! a function declaration in a block of non-strict code (B.3.2) wait for slice 18 too, so that
-//! such code parses and answers as strict code does until then; an array
-//! pattern and `for (let x of ...)` keep the refusals of their own parts (6). An object binding
-//! pattern (`#sec-destructuring-binding-patterns`) stands where a declarator, a for-in head or a
-//! `catch` clause binds a name. Labelled statements and labelled `break` and `continue`
+//! such code parses and answers as strict code does until then; an array pattern keeps the
+//! refusal of its own part (6). An object binding pattern
+//! (`#sec-destructuring-binding-patterns`) stands where a declarator, a for-in or for-of head or
+//! a `catch` clause binds a name. Labelled statements and labelled `break` and `continue`
 //! (`#sec-labelled-statements`), a `catch` without a parameter (`#sec-try-statement`) and
 //! automatic semicolon insertion (`#sec-rules-of-automatic-semicolon-insertion`) are slice 2's.
 //!
@@ -28,8 +29,8 @@
 
 use super::{Parser, R};
 use crate::ast::{
-    BindingTarget, CatchClause, DeclKind, Expr, ExprId, ForInTarget, ForInit, Name, PatternKind,
-    Span, Stmt, StmtId, SwitchCase, VarDeclarator,
+    BindingTarget, CatchClause, DeclKind, Expr, ExprId, ForInTarget, ForInit, IterationKind, Name,
+    PatternKind, Span, Stmt, StmtId, SwitchCase, VarDeclarator,
 };
 use crate::early;
 use crate::scope;
@@ -652,8 +653,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(s)
     }
 
-    /// `for (;;)` and `for-in` (`#sec-for-statement`, `#sec-for-in-and-for-of-statements`);
-    /// the head declares with `var`, `let` or `const`; `for-of` and `for await` are refused.
+    /// `for (;;)`, `for-in` and `for-of` (`#sec-for-statement`,
+    /// `#sec-for-in-and-for-of-statements`); the head declares with `var`, `let` or `const`;
+    /// `for await` is refused.
     fn for_statement(&mut self) -> R<StmtId> {
         self.enter()?;
         let start = self.start();
@@ -665,8 +667,11 @@ impl<'a, 'm> Parser<'a, 'm> {
         });
         self.for_head(id)?;
         if self.is_keyword(Keyword::In) {
-            self.for_in_head(id, start)?;
-            self.for_in_rest(id)?;
+            self.for_in_head(id, start, IterationKind::Enumerate)?;
+            self.for_in_rest(id, IterationKind::Enumerate)?;
+        } else if self.is_name("of") && self.has_for_init(id) {
+            self.for_in_head(id, start, IterationKind::Iterate)?;
+            self.for_in_rest(id, IterationKind::Iterate)?;
         } else {
             self.for_rest(id)?;
         }
@@ -675,7 +680,10 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(id)
     }
 
-    /// `for (` and what stands before the first `;` or `in`, recorded as the `init` of `id`.
+    /// `for (` and what stands before the first `;`, `in` or `of`, recorded as the `init` of
+    /// `id`. The target of a for-of may not start with the token `let`
+    /// (`for ( [lookahead ∉ { let, async of }] LeftHandSideExpression of ...`); `async of` stays
+    /// refused with `async` (slice 10).
     fn for_head(&mut self, id: StmtId) -> R<()> {
         self.enter()?;
         self.advance()?;
@@ -689,11 +697,13 @@ impl<'a, 'm> Parser<'a, 'm> {
             self.set_for_init(id, ForInit::Var(kind, Vec::new()));
             self.var_declarations(id, true)?;
         } else if !self.is(Punct::Semicolon) {
+            let let_first = self.is_name("let");
             let e = self.expression(true)?;
             self.set_for_init(id, ForInit::Expression(e));
-        }
-        if self.is_name("of") && self.has_for_init(id) {
-            return self.refuse("for-of statement", 6);
+            if let_first && self.is_name("of") {
+                let at = self.expr_span(e);
+                return self.fail_at("let may not start the target of a for-of statement", at);
+            }
         }
         self.leave();
         Ok(())
@@ -767,9 +777,11 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(Some(self.expression(false)?))
     }
 
-    /// Turns the `for` statement `id`, whose head is followed by `in`, into a for-in statement:
-    /// one declarator without an initializer, or an expression that is no literal pattern.
-    fn for_in_head(&mut self, id: StmtId, start: Span) -> R<()> {
+    /// Turns the `for` statement `id`, whose head is followed by `in` or `of`, into a for-in or
+    /// a for-of statement: one declarator without an initializer, or an expression that is no
+    /// literal pattern. A for-of head has no initializer, in any code
+    /// (`#sec-for-in-and-for-of-statements`; Annex B's is a for-in's).
+    fn for_in_head(&mut self, id: StmtId, start: Span, iteration: IterationKind) -> R<()> {
         let init = match self.stmt_mut(id) {
             Some(Stmt::For { init, .. }) => init.take(),
             _ => None,
@@ -786,6 +798,9 @@ impl<'a, 'm> Parser<'a, 'm> {
                     // code (`#sec-initializers-in-forin-statement-heads`).
                     let pattern = d.target.pattern().is_some();
                     self.m.release(d);
+                    if iteration == IterationKind::Iterate {
+                        return self.fail_at("initializer in a for-of head", start);
+                    }
                     if self.strict || kind.is_lexical() || pattern {
                         return self.fail_at("initializer in a for-in head", start);
                     }
@@ -806,16 +821,21 @@ impl<'a, 'm> Parser<'a, 'm> {
                 target,
                 object: ExprId(u32::MAX),
                 body: StmtId(u32::MAX),
+                iteration,
             };
         }
         Ok(())
     }
 
-    /// The rest of `for ( target in Expression ) Statement` from `in`.
-    fn for_in_rest(&mut self, id: StmtId) -> R<()> {
+    /// The rest of `for ( target in Expression ) Statement` from `in`, or of
+    /// `for ( target of AssignmentExpression ) Statement` from `of`.
+    fn for_in_rest(&mut self, id: StmtId, iteration: IterationKind) -> R<()> {
         self.enter()?;
         self.advance()?;
-        let object = self.expression(false)?;
+        let object = match iteration {
+            IterationKind::Enumerate => self.expression(false)?,
+            IterationKind::Iterate => self.assignment(false)?,
+        };
         self.set_loop_part(id, LoopPart::Object(object));
         self.expect(Punct::RParen)?;
         let body = self.statement(Place::Statement)?;
