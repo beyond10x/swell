@@ -129,6 +129,9 @@ Every number below comes from the gate, `task check`, on the released commit.
   `HostIntrinsic::ErrorPrototype`) and `WellKnownSymbol` (new, with
   `WellKnownSymbol::ToStringTag`, `WellKnownSymbol::Unscopables`): the host names these
   intrinsics and symbols from a closed list (`HOST-183`, `HOST-184`).
+- `HostIntrinsic::ArrayPrototypeValues`, `HostIntrinsic::ArrayPrototypeEntries`,
+  `HostIntrinsic::ArrayPrototypeKeys`, `HostIntrinsic::ArrayPrototypeForEach` and
+  `WellKnownSymbol::Iterator` (new): what Web IDL gives an iterable interface (`HOST-185`).
 - A host function charges the box of its data and of its steps, and four constants state
   what a host that generates bindings can count on (`HOST-186`, `HOST-187`), each the
   measured rise plus an eighth: `HOST_FUNCTION_LIVE_BYTES` (576, a host function with a name
