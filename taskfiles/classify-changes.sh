@@ -1,6 +1,8 @@
 #!/bin/sh
-# Classify the files a change touches as planning-only or code (story local-gate-equals-forge,
-# point 3; the organization's rule "Planning-only pull requests skip the tests").
+# Classify the files a change touches as planning-only, site-only or code (story
+# local-gate-equals-forge, point 3; the organization's rule "Planning-only pull requests skip
+# the tests": a change of a built docs site runs the docs check and skips the build and the
+# tests of the code).
 #
 #   sh taskfiles/classify-changes.sh [-C <repository>] [-l <path list>] <base> [<head>]
 #   sh taskfiles/classify-changes.sh [-l <path list>] -f <file of paths, one per line>
@@ -13,14 +15,19 @@
 #
 # Prints one line and exits 0:
 #   classify-changes: planning-only: <n> changed file(s), each a planning or prose file
+#   classify-changes: site-only: <n> changed file(s), <m> of them of the site, the rest planning or prose
 #   classify-changes: code: <n> changed file(s), <k> of them code, the first <path>
 #   classify-changes: code: no base revision (a first push); every file counts as code
 #   classify-changes: code: the base <base> cannot be read; every file counts as code
 #   classify-changes: code: the base <base> has no <list>; every file counts as code
 #   classify-changes: code: no changed file
-# and, when a changed file is one of a built site, "classify-changes: site: <m> changed
-# file(s) of a built site". An empty base or one of zeros is a first push. When GITHUB_OUTPUT
-# names a file, appends kind=<planning-only|code>, count=<n> and site=<true|false> to it.
+# A file is code when a code line matches it or no line does, of the site when a site line
+# matches it and no code line, and planning or prose when only prose lines match it. site-only
+# is a change with no code file and at least one of the site; a code change that also holds a
+# file of the site adds "classify-changes: site: <m> changed file(s) of a built site". An
+# empty base or one of zeros is a first push. When GITHUB_OUTPUT names a file, appends
+# kind=<planning-only|site-only|code>, count=<n> and site=<true|false> (true when a changed
+# file matches a site line) to it.
 # Exits 2, naming the line, when the path list holds a line it cannot read, and on a wrong
 # call.
 set -u
@@ -48,7 +55,7 @@ count=0
 site=0
 out() {
   echo "classify-changes: $kind: $1"
-  if [ "$site" -gt 0 ]; then echo "classify-changes: site: $site changed file(s) of a built site"; fi
+  if [ "$kind" = code ] && [ "$site" -gt 0 ]; then echo "classify-changes: site: $site changed file(s) of a built site"; fi
   if [ -n "${GITHUB_OUTPUT:-}" ]; then
     if [ "$site" -gt 0 ]; then s=true; else s=false; fi
     printf 'kind=%s\ncount=%s\nsite=%s\n' "$kind" "$count" "$s" >> "$GITHUB_OUTPUT"
@@ -120,15 +127,16 @@ while IFS= read -r path; do
         case $class in
           prose) prose=1 ;;
           code) code=1 ;;
-          site) code=1; built=1 ;;
+          site) built=1 ;;
         esac
         ;;
     esac
   done <<EOF
 $patterns
 EOF
+  # code wins over site, site over prose; a path no line matches is code.
   site=$((site + built))
-  if [ "$code" -eq 1 ] || [ "$prose" -eq 0 ]; then
+  if [ "$code" -eq 1 ] || { [ "$built" -eq 0 ] && [ "$prose" -eq 0 ]; }; then
     codes=$((codes + 1))
     [ -n "$first" ] || first=$path
   fi
@@ -137,6 +145,10 @@ $changed
 EOF
 
 if [ "$count" -eq 0 ]; then out "no changed file"; fi
+if [ "$codes" -eq 0 ] && [ "$site" -gt 0 ]; then
+  kind=site-only
+  out "$count changed file(s), $site of them of the site, the rest planning or prose"
+fi
 if [ "$codes" -eq 0 ]; then
   kind=planning-only
   out "$count changed file(s), each a planning or prose file"

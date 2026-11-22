@@ -8,8 +8,8 @@
 #      and count table), with site=false;
 #   2. a change of docs/design/host-interface.md alone is code (host-requirements-check reads
 #      its requirements);
-#   3. a change of a Markdown page under website/ alone is code of the built site: kind=code
-#      and site=true, for a docs-site workflow to read.
+#      with site=false.
+# (A page under website/ alone is site-only: classify-changes-finds-site-only-in-a-site-page.)
 # No commit is made: the revisions are trees.
 # Run from the repository root: sh tests/gate/classify-changes-finds-code-in-the-design.sh
 # The same output from task, cargo and ess on any machine: no colour, and no "::error" line
@@ -55,6 +55,5 @@ classify() {
 
 classify design docs/design/engine.md false
 classify host docs/design/host-interface.md false
-classify site website/docs/index.md true
 
 echo "$name: ok"
