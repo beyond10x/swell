@@ -353,6 +353,15 @@ impl<H: Host> Agent<H> {
             _ => return Err(self.fault()),
         };
         self.enter_function()?;
+        // The activation's copy of the arguments lives while the builtin runs: charged before
+        // it is made and credited after the activation is popped.
+        let bytes = u64::try_from(size_of_val(args)).unwrap_or(u64::MAX);
+        self.charge_bytes(bytes)?;
+        #[cfg(test)]
+        ACTIVATION_ARGUMENTS_COPIED.with(|copied| {
+            let count = u64::try_from(args.len()).unwrap_or(u64::MAX);
+            copied.set(copied.get().saturating_add(count));
+        });
         self.activations.push(Activation {
             callee: function,
             this,
@@ -370,6 +379,7 @@ impl<H: Host> Agent<H> {
             }
         };
         self.activations.pop();
+        self.heap.accounting.credit(bytes);
         // A normal answer after a throw recorded inside the builtin or host function: it caught
         // that throw (decision 13).
         if result.is_ok() && self.throw_sites != sites {
@@ -464,5 +474,123 @@ impl<H: Host> Agent<H> {
             }
             Err(Abrupt::Terminated(termination)) => Err(self.terminate(termination)),
         }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The argument values the activations of builtin calls copied, in the counting build of the
+    /// tests; a test resets it before it reads it.
+    pub(crate) static ACTIVATION_ARGUMENTS_COPIED: std::cell::Cell<u64> =
+        const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ACTIVATION_ARGUMENTS_COPIED;
+    use crate::host::agent::Agent;
+    use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, enter, limits};
+    use crate::host::outcome::Abrupt;
+    use crate::realm::intrinsics::Intrinsic;
+    use crate::value::Value;
+    use crate::{Realm, Termination};
+
+    /// An agent with no step budget to speak of and a memory budget of what its realm holds
+    /// plus 256 MiB, with its realm entered.
+    fn roomy() -> (Agent<NoHooks>, Realm, u64) {
+        let mut limits = limits();
+        limits.steps_per_entry = u64::MAX;
+        limits.memory_bytes = 1 << 30;
+        let (mut agent, realm) = agent_with_realm_and(limits);
+        let roomy_limit = agent.heap.bytes() + (1 << 28);
+        agent.heap.accounting.set_limit(roomy_limit);
+        enter(&mut agent, &realm);
+        (agent, realm, roomy_limit)
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (storage is charged before it is allocated and
+    /// credited where its holder drops it), and the execution context of a built-in function's
+    /// [[Call]] (BuiltinCallOrConstruct, `#sec-builtincallorconstruct`, step 8, the push of
+    /// calleeContext):
+    /// `Function.prototype` called with 100,000 Numbers under a budget of the reading after a
+    /// collection plus half of their bytes ends in `Terminated(MemoryBudget)` before the
+    /// arguments are copied into an activation, with no activation pushed. With the budget
+    /// raised the call answers `undefined` and copies each argument once, and after a
+    /// collection the reading is the one before.
+    #[test]
+    fn the_arguments_of_a_builtin_call_are_charged_before_they_are_recorded() {
+        const N: u32 = 100_000;
+        let (mut agent, realm, roomy_limit) = roomy();
+        let realm_handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let prototype = agent
+            .intrinsic(realm_handle, Intrinsic::FunctionPrototype)
+            .unwrap();
+        assert!(agent.collect().is_ok());
+        let before = agent.heap_bytes().unwrap();
+        let arguments: Vec<Value> = (0..N).map(|i| Value::Number(f64::from(i))).collect();
+        let bytes = u64::from(N) * size_of::<Value>() as u64;
+        agent.heap.accounting.set_limit(before + bytes / 2);
+        ACTIVATION_ARGUMENTS_COPIED.with(|copied| copied.set(0));
+        let depth = agent.activations.len();
+        let answer = agent.builtin_call(prototype, Value::Undefined, &arguments, None);
+        assert!(
+            matches!(answer, Err(Abrupt::Terminated(Termination::MemoryBudget))),
+            "{answer:?}"
+        );
+        assert_eq!(
+            ACTIVATION_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            0,
+            "arguments copied before the memory budget ended the run"
+        );
+        assert_eq!(agent.activations.len(), depth, "an activation was pushed");
+        agent.termination = None;
+        agent.heap.accounting.set_limit(roomy_limit);
+        let answer = agent.builtin_call(prototype, Value::Undefined, &arguments, None);
+        assert!(matches!(answer, Ok(Value::Undefined)), "{answer:?}");
+        assert_eq!(
+            ACTIVATION_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            u64::from(N)
+        );
+        assert!(agent.collect().is_ok());
+        assert_eq!(agent.heap_bytes().unwrap(), before, "after the call");
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" and "Collector" (a credit does not lower the
+    /// bytes counted since the last collection, so a transient charge brings a collection
+    /// forward): 12,500 calls of `Math.max` with eight arguments each, 100,000 arguments in all,
+    /// under a roomy budget run at most one more collection per `MIN_TRIGGER_BYTES` of the
+    /// arguments the calls charge than the collections counted on the base of the change, which
+    /// charged nothing per call. Not with the feature `collect-every-safe-point`, where every
+    /// safe point collects.
+    #[cfg(not(feature = "collect-every-safe-point"))]
+    #[test]
+    fn a_loop_of_builtin_calls_collects_within_its_bound() {
+        use crate::heap::{COLLECTIONS, MIN_TRIGGER_BYTES};
+        use crate::{Outcome, Parsed, Source};
+        const ARGUMENTS: u64 = 100_000;
+        const ON_THE_BASE: u64 = 0;
+        const SOURCE: &str = "for (var i = 0; i < 12500; i++) Math.max(i, i, i, i, i, i, i, i); i";
+        let (mut agent, realm, _) = roomy();
+        let Ok(Parsed::Parsed(script)) = agent.parse_script(&realm, Source::Utf8(SOURCE), None)
+        else {
+            panic!("{SOURCE} did not parse");
+        };
+        COLLECTIONS.with(|collections| collections.set(0));
+        let outcome = agent.evaluate_script(&script);
+        let Ok(Outcome::Normal(answer)) = outcome else {
+            panic!("{outcome:?}");
+        };
+        let answer = agent.heap.roots.get(&answer);
+        assert!(
+            matches!(answer, Ok(Value::Number(n)) if n == 12_500.0),
+            "{answer:?}"
+        );
+        let collections = COLLECTIONS.with(std::cell::Cell::get);
+        let charged = ARGUMENTS * size_of::<Value>() as u64;
+        let bound = ON_THE_BASE + charged.div_ceil(MIN_TRIGGER_BYTES);
+        assert!(
+            collections <= bound,
+            "{collections} collections, at most {bound}"
+        );
     }
 }

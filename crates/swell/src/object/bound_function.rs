@@ -29,7 +29,8 @@ pub(crate) struct BoundFunction {
     pub(crate) target: Option<ObjectRef>,
     /// [[BoundThis]].
     pub(crate) this: Value,
-    /// [[BoundArguments]]. Its bytes are charged with the object (`heap/mod.rs`, owned bytes).
+    /// [[BoundArguments]]. Its bytes are the object's owned bytes (`heap/mod.rs`), charged
+    /// before they are copied.
     pub(crate) arguments: Vec<Value>,
     /// Whether BoundFunctionCreate gave it a [[Construct]]: IsConstructor of the target.
     constructor: bool,
@@ -72,7 +73,8 @@ impl BoundFunction {
 
 /// BoundFunctionCreate (`#sec-boundfunctioncreate`): a bound function exotic object whose
 /// [[Prototype]] is the target's, with a [[Construct]] when the target is a constructor. The
-/// bound arguments are charged to the memory budget with the object.
+/// bound arguments are charged to the memory budget before they are copied, and the object owns
+/// them.
 pub(crate) fn bound_function_create<H: Host>(
     agent: &mut Agent<H>,
     target: ObjectRef,
@@ -83,12 +85,21 @@ pub(crate) fn bound_function_create<H: Host>(
     let prototype = agent.get_prototype_of(target)?;
     // 6. If IsConstructor(targetFunc) is true, set obj.[[Construct]].
     let constructor = agent.has_construct(target)?;
+    // The bound arguments are charged before they are copied; the record owns them once it is
+    // stored, and the sweep that frees it credits them.
     let owned = u64::try_from(size_of_val(arguments)).unwrap_or(u64::MAX);
+    agent.charge_bytes(owned)?;
     let mut kept = Vec::new();
     if kept.try_reserve_exact(arguments.len()).is_err() {
+        agent.heap.accounting.credit(owned);
         return Err(agent.terminate(Termination::MemoryBudget));
     }
     kept.extend_from_slice(arguments);
+    #[cfg(test)]
+    KEPT_COPIED.with(|copied| {
+        let count = u64::try_from(arguments.len()).unwrap_or(u64::MAX);
+        copied.set(copied.get().saturating_add(count));
+    });
     let record = ObjectRecord::new(
         prototype,
         ObjectKind::BoundFunction(BoundFunction {
@@ -98,9 +109,12 @@ pub(crate) fn bound_function_create<H: Host>(
             constructor,
         }),
     );
-    match agent.heap.new_object(record, owned) {
+    match agent.heap.new_object_charged(record, owned) {
         Ok(object) => Ok(object),
-        Err(_) => Err(agent.terminate(Termination::MemoryBudget)),
+        Err(_) => {
+            agent.heap.accounting.credit(owned);
+            Err(agent.terminate(Termination::MemoryBudget))
+        }
     }
 }
 
@@ -172,23 +186,35 @@ fn is_bound<H: Host>(agent: &mut Agent<H>, object: ObjectRef) -> Completion<bool
     ))
 }
 
-/// The walk of a chain from the bound function `function`: the innermost target, the
-/// innermost bound `this`, the arguments "the list-concatenation of boundArgs and argList" of
-/// every link, innermost first, and, for [[Construct]], the new target after each link's step
-/// "If SameValue(F, newTarget) is true, set newTarget to target". A step per link and per bound
-/// argument, the count read from the link's record and charged before anything is copied; no
-/// safe point is passed, so the values need no root until the call.
+/// What the innermost target of a chain is asked for: [[Call]], or [[Construct]] with the new
+/// target, which each link's step "If SameValue(F, newTarget) is true, set newTarget to target"
+/// may replace.
+#[derive(Clone, Copy)]
+enum Invocation {
+    Call,
+    Construct(Option<ObjectRef>),
+}
+
+/// The walk of a chain from the bound function `function` and the call of its innermost
+/// target: the innermost bound `this`, the arguments "the list-concatenation of boundArgs and
+/// argList" of every link, innermost first, and, for [[Construct]], the new target after each
+/// link's step. A step per link and per bound argument, the count read from the link's record
+/// and charged before anything is copied; no safe point is passed, so the values need no root
+/// until the call.
 ///
-/// The chain is walked twice and each link's arguments are read in place: the first walk
-/// charges the steps and counts the arguments, the gathered list is asked of the memory budget
-/// and reserved, and the second walk copies each link's arguments into it, from its end, so
-/// that the innermost link's come first. No copy of a link's arguments is made beside it.
+/// The chain is walked twice and each link's arguments are read in place: the first walk, here,
+/// charges the steps and counts the arguments, the gathered list's bytes are charged to the
+/// memory budget, and [`call_gathered`] reserves it, copies each link's arguments into it in a
+/// second walk, from its end, so that the innermost link's come first, and calls the target.
+/// No copy of a link's arguments is made beside it. The list's bytes stay charged while the
+/// target runs and are credited when [`call_gathered`] returns, on every way out; a refused
+/// charge credits nothing.
 fn walk<H: Host>(
     agent: &mut Agent<H>,
     function: ObjectRef,
     args: &[Value],
-    mut new_target: Option<ObjectRef>,
-) -> Completion<(ObjectRef, Value, Vec<Value>, Option<ObjectRef>)> {
+    mut invocation: Invocation,
+) -> Completion<Value> {
     let mut count = args.len();
     let mut current = function;
     let (target, this) = loop {
@@ -196,19 +222,37 @@ fn walk<H: Host>(
         agent.charge_steps(bound.saturating_add(1))?;
         let (target, this) = link(agent, current)?;
         count = count.saturating_add(usize::try_from(bound).unwrap_or(usize::MAX));
-        if new_target == Some(current) {
-            new_target = Some(target);
+        if let Invocation::Construct(new_target) = &mut invocation
+            && *new_target == Some(current)
+        {
+            *new_target = Some(target);
         }
         if !is_bound(agent, target)? {
             break (target, this);
         }
         current = target;
     };
-    // The gathered list lives until the call returns: the memory budget is asked before it is
-    // made.
+    // The gathered list lives until the call returns: its bytes are charged before it is made
+    // and credited here, once, whatever the completion of the rest.
     let bytes = u64::try_from(count.saturating_mul(size_of::<Value>())).unwrap_or(u64::MAX);
+    agent.charge_bytes(bytes)?;
+    let answer = call_gathered(agent, function, args, (target, this), count, invocation);
+    agent.heap.accounting.credit(bytes);
+    answer
+}
+
+/// The rest of [`walk`]: the gathered list of `count` values reserved, `args` and each link's
+/// arguments copied into it, and the call of the innermost `target` with it.
+fn call_gathered<H: Host>(
+    agent: &mut Agent<H>,
+    function: ObjectRef,
+    args: &[Value],
+    (target, this): (ObjectRef, Value),
+    count: usize,
+    invocation: Invocation,
+) -> Completion<Value> {
     let mut gathered = Vec::new();
-    if agent.heap.accounting.check(bytes).is_err() || gathered.try_reserve_exact(count).is_err() {
+    if gathered.try_reserve_exact(count).is_err() {
         return Err(agent.terminate(Termination::MemoryBudget));
     }
     gathered.resize(count, Value::Undefined);
@@ -231,7 +275,17 @@ fn walk<H: Host>(
     if end != 0 {
         return Err(agent.fault());
     }
-    Ok((target, this, gathered, new_target))
+    match invocation {
+        Invocation::Call => {
+            #[cfg(test)]
+            GATHERED_READING.with(|reading| reading.set(agent.heap.accounting.used()));
+            agent.internal_call(target, this, &gathered)
+        }
+        Invocation::Construct(Some(new_target)) => {
+            agent.internal_construct(target, &gathered, new_target)
+        }
+        Invocation::Construct(None) => Err(agent.fault()),
+    }
 }
 
 /// [[Call]] (`#sec-bound-function-exotic-objects-call-thisargument-argumentslist`): "Return ?
@@ -242,8 +296,7 @@ pub(crate) fn call<H: Host>(
     _this: Value,
     args: &[Value],
 ) -> Completion<Value> {
-    let (target, this, args, _) = walk(agent, function, args, None)?;
-    agent.internal_call(target, this, &args)
+    walk(agent, function, args, Invocation::Call)
 }
 
 /// [[Construct]] (`#sec-bound-function-exotic-objects-construct-argumentslist-newtarget`):
@@ -256,11 +309,12 @@ pub(crate) fn construct<H: Host>(
     args: &[Value],
     new_target: ObjectRef,
 ) -> Completion<Value> {
-    let (target, _, args, new_target) = walk(agent, function, args, Some(new_target))?;
-    let Some(new_target) = new_target else {
-        return Err(agent.fault());
-    };
-    agent.internal_construct(target, &args, new_target)
+    walk(
+        agent,
+        function,
+        args,
+        Invocation::Construct(Some(new_target)),
+    )
 }
 
 #[cfg(test)]
@@ -268,16 +322,137 @@ thread_local! {
     /// The bound arguments the walks copied from their links, in the counting build of the
     /// tests; a test resets it before it reads it.
     static ARGUMENTS_CLONED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// The values `bound_function_create` copied into a bound function's [[BoundArguments]], in
+    /// the counting build of the tests; a test resets it before it reads it.
+    static KEPT_COPIED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// `accounting.used()` read just before [`call_gathered`] calls `internal_call`, in the
+    /// counting build of the tests; a test resets it before it reads it.
+    static GATHERED_READING: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ARGUMENTS_CLONED;
+    use super::{
+        ARGUMENTS_CLONED, GATHERED_READING, Invocation, KEPT_COPIED, bound_function_create, call,
+        walk,
+    };
     use crate::host::agent::Agent;
     use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, enter, limits};
+    use crate::host::outcome::Abrupt;
     use crate::object::property::Key;
+    use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Root, Value};
     use crate::{Outcome, Realm, Termination};
+
+    /// The bytes of `n` values in a list.
+    fn list_bytes(n: u32) -> u64 {
+        u64::from(n) * size_of::<Value>() as u64
+    }
+
+    /// The bound function of `root`.
+    fn object(agent: &Agent<NoHooks>, root: &Root) -> ObjectRef {
+        match agent.heap.roots.get(root) {
+            Ok(Value::Object(object)) => object,
+            other => panic!("the bound function: {other:?}"),
+        }
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (storage is charged before it is allocated),
+    /// and BoundFunctionCreate (`#sec-boundfunctioncreate`), step 9 (obj.[[BoundArguments]]):
+    /// called directly to bind `Function.prototype` with 100,000 Numbers under a budget of the
+    /// reading after a collection plus half of their bytes, it ends in
+    /// `Terminated(MemoryBudget)` before a value is copied into the bound function's list. With
+    /// the budget raised it answers a bound function that holds each of them, and after a
+    /// collection the reading is the one before. A bound function made and dropped before the
+    /// reading leaves a free slot in the arena for the one made after it.
+    #[test]
+    fn bound_arguments_are_charged_before_they_are_kept() {
+        const N: u32 = 100_000;
+        let mut limits = limits();
+        limits.memory_bytes = 1 << 30;
+        let (mut agent, realm) = agent_with_realm_and(limits);
+        let roomy_limit = agent.heap.bytes() + (1 << 28);
+        agent.heap.accounting.set_limit(roomy_limit);
+        enter(&mut agent, &realm);
+        let realm_handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let target = agent
+            .intrinsic(realm_handle, Intrinsic::FunctionPrototype)
+            .unwrap();
+        assert!(bound_function_create(&mut agent, target, Value::Undefined, &[]).is_ok());
+        assert!(agent.collect().is_ok());
+        let before = agent.heap_bytes().unwrap();
+        let arguments: Vec<Value> = (0..N).map(|i| Value::Number(f64::from(i))).collect();
+        agent.heap.accounting.set_limit(before + list_bytes(N) / 2);
+        KEPT_COPIED.with(|copied| copied.set(0));
+        let answer = bound_function_create(&mut agent, target, Value::Undefined, &arguments);
+        assert!(
+            matches!(answer, Err(Abrupt::Terminated(Termination::MemoryBudget))),
+            "{answer:?}"
+        );
+        assert_eq!(
+            KEPT_COPIED.with(std::cell::Cell::get),
+            0,
+            "bound arguments copied before the memory budget ended the run"
+        );
+        agent.termination = None;
+        agent.heap.accounting.set_limit(roomy_limit);
+        let answer = bound_function_create(&mut agent, target, Value::Undefined, &arguments);
+        assert!(answer.is_ok(), "{answer:?}");
+        assert_eq!(KEPT_COPIED.with(std::cell::Cell::get), u64::from(N));
+        assert!(agent.collect().is_ok());
+        assert_eq!(
+            agent.heap_bytes().unwrap(),
+            before,
+            "after the bound function"
+        );
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (storage is charged before it is allocated and
+    /// credited where its holder drops it), and [[Call]] of a bound function: the function of
+    /// [`bound_with`] with 100,000 bound arguments, called under a roomy budget after a
+    /// collection. While the target runs, the charged reading holds the gathered list's bytes on
+    /// top of the reading before the call; after the call it is the reading before.
+    #[test]
+    fn the_gathered_list_is_charged_while_the_call_runs() {
+        const N: u32 = 100_000;
+        let (mut agent, realm, bound, _) = bound_with(N);
+        let bound = object(&agent, &bound);
+        assert!(agent.collect().is_ok());
+        enter(&mut agent, &realm);
+        agent.steps = 0;
+        let before = agent.heap.accounting.used();
+        GATHERED_READING.with(|reading| reading.set(0));
+        let answer = call(&mut agent, bound, Value::Undefined, &[]);
+        assert!(matches!(answer, Ok(Value::Undefined)), "{answer:?}");
+        let reading = GATHERED_READING.with(std::cell::Cell::get);
+        assert!(
+            reading >= before + list_bytes(N),
+            "{reading} while the target runs, {before} before the call"
+        );
+        assert_eq!(agent.heap.accounting.used(), before, "after the call");
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (a charged structure is credited on every way
+    /// out), and [[Construct]] of a bound function: [`walk`] entered for a construction with no
+    /// new target, a broken invariant that only this test reaches, gathers the 100,000 bound
+    /// arguments of the function of [`bound_with`] and ends in `Terminated(EngineFault)`; the
+    /// charged reading is the one before.
+    #[test]
+    fn a_construction_that_faults_credits_the_gathered_list() {
+        const N: u32 = 100_000;
+        let (mut agent, realm, bound, _) = bound_with(N);
+        let bound = object(&agent, &bound);
+        assert!(agent.collect().is_ok());
+        enter(&mut agent, &realm);
+        agent.steps = 0;
+        let before = agent.heap.accounting.used();
+        let answer = walk(&mut agent, bound, &[], Invocation::Construct(None));
+        assert!(
+            matches!(answer, Err(Abrupt::Terminated(Termination::EngineFault))),
+            "{answer:?}"
+        );
+        assert_eq!(agent.heap.accounting.used(), before, "after the fault");
+    }
 
     /// An agent with a budget of what its realm holds plus 256 MiB, `Function.prototype` bound
     /// with `n` arguments through `Function.prototype.bind.apply`, and a root of `undefined`.

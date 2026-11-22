@@ -180,14 +180,9 @@ impl HeapString {
         }
     }
 
-    /// Whether the record holds exactly `units`, compared in place.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the in-place comparisons of the String builtins: story:string-builtins-charge-before-they-copy"
-        )
-    )]
+    /// Whether the record holds exactly `units`, compared in place: for the tests of this file;
+    /// the engine compares two records with [`HeapString::equals_string`].
+    #[cfg(test)]
     pub(crate) fn equals(&self, units: &[u16]) -> bool {
         self.units().equals(CodeUnits::Utf16(units))
     }

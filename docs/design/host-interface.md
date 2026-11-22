@@ -1820,7 +1820,7 @@ table in `host-interface-model.md` gives each marker's first words.
 - `host.yaml:846`: HOST-157
 - `host.yaml:862`: HOST-38
 - `host.yaml:865`: HOST-43
-- `host.yaml:867`: HOST-70, HOST-74, HOST-188 to HOST-190
+- `host.yaml:932`: HOST-70, HOST-74, HOST-188 to HOST-190
 - `host.yaml:882`: HOST-48
 - `host.yaml:898`: HOST-43
 - `host.yaml:969`: ESS limit
