@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:builtin-group-modules
 kind: story
-status: active
+status: implemented
 title: The builtins of Array, Object and String in group modules of their own, the operations and stack-test helpers the next wave shares; no result changes
 summary: 'A restructuring before the wave of ten: one file per group of builtins, with no line of mod.rs left to write; SetIntegrityLevel, TestIntegrityLevel, Invoke, EnumerableOwnProperties, CreateDataPropertyOrThrow, CodePointAt and UTF16EncodeCodePoint delivered with their tests; the first steps of the String methods opened, @@isConcatSpreadable and @@match made, the helpers of the stack tests in tests/support; every run line stays as it is.'
 relations:
@@ -56,10 +56,11 @@ scope:
   path: crates/swell/tests/support/mod.rs
 - confidence: cited
   path: crates/swell/tests/support/stack.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:43Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:44Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:09:51Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

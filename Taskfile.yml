@@ -79,6 +79,14 @@ tasks:
       not in them, and inside the job cargo and task run directly. The full test262 run is not a step of the
       gate: it is the lane slow (task slow), and test262-check compares the digest of its
       sources in its place.
+
+      The build phase comes before the clock: build, then build-tests, which builds every
+      binary the test steps run with each step's own flags, features, profile and manifest
+      (the organization's rule "Tests stay fast": an expensive product is made once, in a
+      setup step before the tests). A test step whose cargo log has a Compiling line fails,
+      naming the build task that builds what it compiled (task compile-check). The doc tests
+      are the exception: rustdoc compiles them when it runs them, so test-doc's seconds hold
+      that compilation.
     cmds:
       - task: gate-vars
       - task: python-check
@@ -96,6 +104,7 @@ tasks:
       - task: site-data-check
       - task: build
       - task: test-binaries-check
+      - task: build-tests
       - task: clippy
       - task: gate-time-start
       - task: test
@@ -451,6 +460,42 @@ tasks:
       - cargo build --workspace --all-targets --locked > .out/build.log 2>&1 || { cat .out/build.log; exit 1; }
       - tail -n 1 .out/build.log
 
+  build-tests:
+    desc: The gate's build phase after build. Build, without running them, every binary the timed test steps run, with each step's flags, features, profile and manifest.
+    summary: |
+      The gate's build phase after build, before gate-time-start: build, without running them,
+      every binary the timed test steps run, each with the flags, features, profile and
+      manifest of its step (RUSTFLAGS="-D warnings" for all of them), so that each step finds
+      its binaries fresh and compiles nothing inside the clock (the organization's rule "Tests
+      stay fast").
+        - the step test: "cargo nextest run --no-run --workspace --locked --profile default"
+          into .out/build-tests.log; it prints "build-tests: <cargo's Finished line>". The
+          workspace's libraries it builds are the ones test-doc's doc tests link;
+        - the step test-collect, and test-doc's doc tests of that mode: task build-collect
+          (taskfiles/collect-mode.yml);
+        - the step test-faults: task build-faults (taskfiles/fault-injection.yml);
+        - the step conform-engine, its test run and its cargo run: task build-conform-engine
+          (taskfiles/conform-engine.yml).
+      The doc tests themselves are not built here: rustdoc compiles each when it runs it, and
+      cargo refuses --no-run with --doc. test262-check and test262-moves-check build nothing.
+      A cargo that fails prints its log and fails the task. The steps hold to it: nextest-report,
+      test-doc and the cargo run of conform-engine fail when their log has a Compiling line,
+      naming the build task (task compile-check).
+    env:
+      RUSTFLAGS: -D warnings
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        status=0
+        cargo nextest run --no-run --workspace --locked --profile default > .out/build-tests.log 2>&1 || status=$?
+        if [ "$status" -ne 0 ]; then cat .out/build-tests.log; echo "build-tests: cargo nextest run --no-run failed, exit $status"; exit 1; fi
+        esc=$(printf '\033')
+        LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" .out/build-tests.log | awk '/^ *Finished / { sub(/^ */, ""); line = $0 } END { print "build-tests: " line }'
+      - task: build-collect
+      - task: build-faults
+      - task: build-conform-engine
+
   clippy:
     desc: Run clippy over every crate and target of the workspace; a warning or a denied lint fails it.
     silent: true
@@ -470,7 +515,8 @@ tasks:
       holds it). The log is .out/test.log. The line printed is "<b> test binaries: <p> passed,
       <f> failed, <i> ignored" (the task nextest-report), then ten lines "gate-slowest test
       <seconds> <binary> <test>". It fails when a test fails or nextest does, and when no test
-      ran.
+      ran; and when its log has a cargo Compiling line, naming build-tests, which builds its
+      binaries before the clock (task compile-check).
     env:
       RUSTFLAGS: -D warnings
     silent: true
@@ -481,7 +527,7 @@ tasks:
         cargo nextest run --workspace --locked --profile default > .out/test.log 2>&1 || status=$?
         echo "$status" > .out/test.status
       - task: nextest-report
-        vars: {STEP: test, PREFIX: '', LOG: .out/test.log, STATUS: .out/test.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}
+        vars: {STEP: test, PREFIX: '', LOG: .out/test.log, STATUS: .out/test.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1', BUILT_BY: build-tests}
 
   test-doc:
     desc: Run the doc tests of the workspace, and those of swell with the collector run at every safe point, with warnings denied, and print the summed counts.
@@ -495,7 +541,12 @@ tasks:
       .out/test-doc-collect.log; a log is printed when its cargo fails. The lines printed sum the
       "test result:" lines of each as "test-doc: <n> test suites: <p> passed, <f> failed, <i>
       ignored" and "test-doc collect-every-safe-point: <n> test suites: ...". It fails when
-      cargo fails, a test fails, or a run prints no "test result:" line.
+      cargo fails, a test fails, or a run prints no "test result:" line. The libraries the doc
+      tests link are built before the clock, by build-tests and build-collect; each log fails
+      the step when it has a cargo Compiling line, naming that task (task compile-check). The
+      doc tests themselves rustdoc compiles as it runs them, inside the step: they print no
+      Compiling line, and no build task can make them ahead (cargo refuses --no-run with
+      --doc).
     env:
       RUSTFLAGS: -D warnings
     silent: true
@@ -530,6 +581,10 @@ tasks:
           ' "$log" || bad=1
         done
         exit "$bad"
+      - task: compile-check
+        vars: {STEP: test-doc, LOG: .out/test-doc.log, BUILT_BY: build-tests}
+      - task: compile-check
+        vars: {STEP: test-doc collect-every-safe-point, LOG: .out/test-doc-collect.log, BUILT_BY: build-collect}
 
   gate-selftest:
     desc: Run every planted-defect script of tests/gate/ in the environment of the forge's runner and fail when one does not refuse its defect or writes colour.

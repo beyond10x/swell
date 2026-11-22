@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:global-this-uri-functions-and-is-error
 kind: story
-status: active
+status: implemented
 title: globalThis, the four URI functions and Error.isError; the test of HOST-155
 summary: The global functions slice 3 has, the global this value as a property, and Error.isError; Encode and Decode charged per code unit; 125 failing cases name nothing else and pass.
 relations:
@@ -33,10 +33,11 @@ scope:
   path: crates/swell/tests/language/builtin-uri-malformed-throws.js
 - confidence: cited
   path: crates/swell/tests/language/builtin-uri-round-trip.js
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:45Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:45Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:10:00Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

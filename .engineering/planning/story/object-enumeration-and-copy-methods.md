@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:object-enumeration-and-copy-methods
 kind: story
-status: active
+status: implemented
 title: 'Object: keys, values, entries, assign, hasOwn, getOwnPropertyDescriptors, getOwnPropertySymbols'
 summary: Seven builtins of Object that list or copy own properties, each loop charged per key; 126 failing cases name nothing else and pass; fromEntries and groupBy wait for the iterators of slice 6.
 relations:
@@ -22,10 +22,11 @@ scope:
   path: crates/swell/tests/language/builtin-object-has-own.js
 - confidence: cited
   path: crates/swell/tests/language/builtin-object-keys-values-entries.js
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:44Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:44Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:09:59Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

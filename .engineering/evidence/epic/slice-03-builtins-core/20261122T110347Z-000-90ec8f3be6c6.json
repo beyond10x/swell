@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-22T11:03:47Z",
+  "actor": "human:operator",
+  "artifact": "epic:slice-03-builtins-core",
+  "kind": "epic",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on the tree of a6cf201, exit 0: test262-slice 03 7011 13829 0 0 7011 7010 1 0",
+    "reference": "docs/plan/slice-03-gate-and-site.md"
+  }
+}
