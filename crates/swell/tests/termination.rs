@@ -202,47 +202,166 @@ fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
     assert_eq!(agent.state(), AgentState::Alive);
 }
 
-/// HOST-70 after a loop that keeps every object it makes: `var a = []; while (true)
-/// a.push({});` ends in `Terminated(MemoryBudget)` with 1,000 bytes of room, and the script `1`
-/// then answers `Normal(1)`. The budget is found by a first run with the realm's bytes plus
-/// 64 KiB: the second run's budget is what the heap read at the first run's termination plus
-/// 1,000, so the second run is refused the same growth (more than 1,000 bytes) at the same
-/// point. Measured on `7a7bf0a`: the first run ends with 2,183 bytes of room, and the
-/// collection at the start of the next entry frees what the loop's frame held, so `1` has 3,549
-/// bytes there; its parse and compile step peaks at 3,438 bytes above the heap (the tree 881
-/// bytes, and in the compile step the bound of one node's expansion, 2,240 bytes, where the
-/// expansion takes 224), so it passes by 111 bytes there and fails with 1,000 bytes of room.
-#[test]
-#[ignore = "with 1,000 bytes of room after a loop that keeps its objects ended in the memory budget, the script 1 ends in the memory budget: its parse and compile step peaks at 3,438 bytes"]
-fn host_70_one_runs_after_a_loop_that_keeps_its_objects_ended_in_memory_budget() {
+/// The room HOST-190 states for the script `1`: 3 KiB. Measured once the compile step charged
+/// what a node's expansion holds as it is made, in both modes: `1` needs 2,228 bytes of room
+/// above `heap_bytes()` to answer and `1 + 1` needs 2,322 (3,440 and 3,895 before, when the
+/// step charged a bound of 2,240 bytes for one node's expansion that takes 224).
+const ROOM_FOR_ONE: u64 = 3 * 1024;
+
+/// What the host of [`after_a_fill`] holds charged during the fill and gives back after it.
+const HELD_DURING_FILL: u64 = 16 * 1024;
+
+/// An agent after `var a = []; while (true) a.push({});`, a loop that keeps every object it
+/// makes, ended in `Terminated(MemoryBudget)`, and a `collect()`: `memory_bytes` is the realm's
+/// bytes, 64 KiB and [`HELD_DURING_FILL`], which the host charged (`charge_host_bytes`) before
+/// the loop. Before the loop the host kept a root of the String `"kept"`. The agent, its realm,
+/// the host's charge, the root and `memory_bytes`.
+fn after_a_fill() -> (
+    swell::Agent<TestHost>,
+    swell::Realm,
+    swell::HostBytes,
+    swell::Root,
+    u64,
+) {
     let realm_bytes = {
         let mut agent = support::host::agent().unwrap();
         let _realm = realm(&mut agent);
         agent.heap_bytes().unwrap()
     };
-    let fill = "var a = []; while (true) a.push({});";
-    let run = |memory_bytes: u64| {
-        let mut limits = limits();
-        limits.memory_bytes = memory_bytes;
-        let mut agent = agent_with(limits).unwrap();
-        let realm = realm(&mut agent);
-        assert_eq!(
-            eval_text(&mut agent, &realm, fill),
-            Outcome::Terminated(Termination::MemoryBudget)
-        );
-        let at_end = agent.heap_bytes().unwrap();
-        (agent, realm, at_end)
+    let mut limits = limits();
+    limits.memory_bytes = realm_bytes + 64 * 1024 + HELD_DURING_FILL;
+    let budget = limits.memory_bytes;
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    let swell::Outcome::Normal(kept) = support::script::eval(&mut agent, &realm, "'kept'") else {
+        panic!("'kept' did not answer");
     };
-    let first_budget = realm_bytes + 64 * 1024;
-    let (_, _, at_end) = run(first_budget);
-    let room = first_budget - at_end;
-    assert!(room > 1_000, "room {room}");
-    let (mut agent, realm, again) = run(at_end + 1_000);
-    assert_eq!(again, at_end, "the second run ends where the first did");
+    let held = agent
+        .with_cx(&realm, |cx| cx.charge_host_bytes(HELD_DURING_FILL))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        eval_text(&mut agent, &realm, "var a = []; while (true) a.push({});"),
+        Outcome::Terminated(Termination::MemoryBudget)
+    );
+    assert!(agent.heap_bytes().unwrap() <= budget);
+    assert!(matches!(agent.collect(), Ok(swell::Outcome::Normal(_))));
+    (agent, realm, held, kept, budget)
+}
+
+/// The host charges what is free of `budget` past `room`, so that `memory_bytes - heap_bytes()`
+/// reads exactly `room`; the charge.
+fn leave_room(
+    agent: &mut swell::Agent<TestHost>,
+    realm: &swell::Realm,
+    budget: u64,
+    room: u64,
+) -> swell::HostBytes {
+    let free = budget - agent.heap_bytes().unwrap();
+    let charge = agent
+        .with_cx(realm, |cx| cx.charge_host_bytes(free - room))
+        .unwrap()
+        .unwrap();
+    assert_eq!(budget - agent.heap_bytes().unwrap(), room, "the room left");
+    charge
+}
+
+/// HOST-188: after the fill of [`after_a_fill`] ended in `Terminated(MemoryBudget)` and the host
+/// charged all the room left, so that `memory_bytes - heap_bytes()` reads 0, the calls that take
+/// no memory answer: `state()` reads `Alive`, `collect()` answers `Normal`, the root the host
+/// kept reads `"kept"`, the script `1` answers `Terminated(MemoryBudget)` (HOST-189), and
+/// dropping the root, `credit_host_bytes` of both charges and dropping the agent end without a
+/// fault or a panic.
+#[test]
+fn host_188_calls_that_take_no_memory_answer_with_a_room_of_0() {
+    let (mut agent, realm, held, kept, budget) = after_a_fill();
+    let free = budget - agent.heap_bytes().unwrap();
+    let rest = leave_room(&mut agent, &realm, budget, 0);
     assert_eq!(agent.state(), AgentState::Alive);
+    assert!(matches!(agent.collect(), Ok(swell::Outcome::Normal(_))));
+    assert_eq!(
+        budget - agent.heap_bytes().unwrap(),
+        0,
+        "the room after collect"
+    );
+    let read = agent
+        .with_cx(&realm, |cx| {
+            let value = cx.get(&kept).unwrap();
+            support::script::show(cx, value)
+        })
+        .unwrap();
+    assert_eq!(read, "\"kept\"");
     assert_eq!(
         eval_text(&mut agent, &realm, "1;"),
-        Outcome::Normal("1".to_string())
+        Outcome::Terminated(Termination::MemoryBudget)
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+    drop(kept);
+    assert_eq!(agent.credit_host_bytes(rest).unwrap(), free);
+    assert_eq!(agent.credit_host_bytes(held).unwrap(), HELD_DURING_FILL);
+    assert_eq!(agent.state(), AgentState::Alive);
+    drop(agent);
+}
+
+/// The script `1` in `realm`, parsed and evaluated: what it answered and the steps it spent,
+/// read before the answer is described (a description that converts a value begins an entry).
+fn one(agent: &mut swell::Agent<TestHost>, realm: &swell::Realm) -> (Outcome, u64) {
+    let outcome = support::script::eval(agent, realm, "1;");
+    let steps = agent.last_entry_steps().unwrap();
+    (support::script::describe(agent, realm, outcome), steps)
+}
+
+/// HOST-189 and HOST-190 after a loop that keeps every object it makes ended in
+/// `Terminated(MemoryBudget)` ([`after_a_fill`]): with 1,000 bytes of room, read as
+/// `memory_bytes - heap_bytes()` with no trial entry, the script `1` answers
+/// `Terminated(MemoryBudget)` twice in a row with the same `heap_bytes()` after each, and
+/// `parse_script` of it answers `Parsed::Terminated(MemoryBudget)` with that reading; `state()`
+/// reads `Alive` after each and `collect()` answers `Normal`. After the host gave back what it
+/// charged during the fill and the room it took (`credit_host_bytes`), the room is at least
+/// those 16 KiB whatever the loop's last refused growth left; with the room set to
+/// [`ROOM_FOR_ONE`], `1` answers `Normal(1)` with the steps it spends in an agent that never
+/// ended in the memory budget and has the same room.
+#[test]
+fn host_189_190_one_runs_after_a_memory_budget_termination_once_the_host_made_room() {
+    let (mut agent, realm, held, _kept, budget) = after_a_fill();
+    let small = leave_room(&mut agent, &realm, budget, 1_000);
+    let mut after = Vec::new();
+    for _ in 0..2 {
+        assert_eq!(
+            eval_text(&mut agent, &realm, "1;"),
+            Outcome::Terminated(Termination::MemoryBudget)
+        );
+        assert_eq!(agent.state(), AgentState::Alive);
+        after.push(agent.heap_bytes().unwrap());
+    }
+    assert_eq!(after[0], after[1], "heap_bytes() after each");
+    assert!(matches!(
+        agent
+            .parse_script(&realm, swell::Source::Utf8("1;"), None)
+            .unwrap(),
+        swell::Parsed::Terminated(Termination::MemoryBudget)
+    ));
+    assert_eq!(agent.heap_bytes().unwrap(), after[0]);
+    assert_eq!(agent.state(), AgentState::Alive);
+    assert!(matches!(agent.collect(), Ok(swell::Outcome::Normal(_))));
+
+    agent.credit_host_bytes(small).unwrap();
+    agent.credit_host_bytes(held).unwrap();
+    let room = budget - agent.heap_bytes().unwrap();
+    assert!(room >= HELD_DURING_FILL, "room {room}");
+    let _rest = leave_room(&mut agent, &realm, budget, ROOM_FOR_ONE);
+    let (answer, steps) = one(&mut agent, &realm);
+    assert_eq!(answer, Outcome::Normal("1".to_string()));
+    assert!(steps > 0);
+
+    let fresh_budget = limits().memory_bytes;
+    let mut fresh = agent_with(limits()).unwrap();
+    let fresh_realm = support::host::realm(&mut fresh);
+    assert!(fresh.collect().is_ok());
+    let _fresh_rest = leave_room(&mut fresh, &fresh_realm, fresh_budget, ROOM_FOR_ONE);
+    assert_eq!(one(&mut fresh, &fresh_realm), (answer, steps));
+    println!(
+        "after the fill: room {room} bytes once the host gave its charges back; 1 spent {steps} steps"
     );
 }
 

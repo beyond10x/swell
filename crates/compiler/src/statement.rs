@@ -48,7 +48,7 @@ use swell_syntax::ast::{
 use crate::bytecode::{HandlerKind, Instruction, SlotName, TAG_NORMAL};
 use crate::expression::Target;
 use crate::resolve::{Binding, ScopeKey, Site};
-use crate::{CompileError, Compiler, Constants, Control, JumpKind, Task, malformed};
+use crate::{CompileError, Compiler, Constants, Control, JumpKind, List, Task, Tasks, malformed};
 use swell_syntax::ledger::Meter;
 
 /// The names of a record's slots, `let` or `const` ones.
@@ -67,11 +67,12 @@ pub(crate) fn slot_names(
 
 /// The exit of a lexical scope entered by [`Compiler::enter_scope`]: the record it made, if any,
 /// is popped.
-fn leave_scope(record: bool, span: Span, t: &mut Vec<Task>) {
+fn leave_scope(record: bool, span: Span, t: &mut Tasks<'_, '_>) -> Result<(), CompileError> {
     if record {
-        t.push(Task::Emit(Instruction::PopEnv, span));
-        t.push(Task::EnvsDown);
+        t.push(Task::Emit(Instruction::PopEnv, span))?;
+        t.push(Task::EnvsDown)?;
     }
+    Ok(())
 }
 
 impl<'a, 'm> Compiler<'a, 'm> {
@@ -80,13 +81,13 @@ impl<'a, 'm> Compiler<'a, 'm> {
         &mut self,
         id: StmtId,
         mut labels: Vec<String>,
-    ) -> Result<Vec<Task>, CompileError> {
+    ) -> Result<Tasks<'a, 'm>, CompileError> {
         let node = self
             .ast
             .stmt(id)
             .ok_or_else(|| malformed("a statement index"))?;
         let span = node.span;
-        let mut t = Vec::new();
+        let mut t = Tasks::new(self.m);
         match &node.stmt {
             // `#sec-labelled-statements-runtime-semantics-labelledevaluation`: the labels of a run
             // of labelled statements go to the statement they label.
@@ -109,7 +110,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     )
                 );
                 if is_loop {
-                    t.push(Task::LabelledLoop(item, labels));
+                    t.push(Task::LabelledLoop(item, labels))?;
                 } else {
                     let exit = self.label();
                     t.push(Task::PushControl(Control::Label {
@@ -117,17 +118,17 @@ impl<'a, 'm> Compiler<'a, 'm> {
                         exit,
                         items: self.items,
                         envs: self.envs,
-                    }));
-                    t.push(Task::Stmt(item));
-                    t.push(Task::PopControl(None));
-                    t.push(Task::Bind(exit));
+                    }))?;
+                    t.push(Task::Stmt(item))?;
+                    t.push(Task::PopControl(None))?;
+                    t.push(Task::Bind(exit))?;
                 }
             }
             // `#sec-block-runtime-semantics-evaluation`, with BlockDeclarationInstantiation.
             Stmt::Block(list) => {
                 let record = self.enter_scope(ScopeKey::Block(id), span, &mut t)?;
-                t.extend(list.iter().map(|s| Task::Stmt(*s)));
-                leave_scope(record, span, &mut t);
+                t.extend(list.iter().map(|s| Task::Stmt(*s)))?;
+                leave_scope(record, span, &mut t)?;
             }
             // `#sec-let-and-const-declarations-runtime-semantics-evaluation`.
             Stmt::Var(kind, declarators) if kind.is_lexical() => {
@@ -143,8 +144,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
             Stmt::Empty | Stmt::Debugger | Stmt::FunctionDeclaration(_) => {}
             // `#sec-expression-statement-runtime-semantics-evaluation`.
             Stmt::Expression(e) => {
-                t.push(Task::Expr(*e));
-                t.push(Task::Emit(self.statement_value(), span));
+                t.push(Task::Expr(*e))?;
+                t.push(Task::Emit(self.statement_value(), span))?;
             }
             // `#sec-if-statement-runtime-semantics-evaluation`.
             Stmt::If {
@@ -152,48 +153,48 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 consequent,
                 alternate,
             } => {
-                self.reset_completion(span, &mut t);
+                self.reset_completion(span, &mut t)?;
                 let otherwise = self.label();
-                t.push(Task::Expr(*test));
-                t.push(Task::Emit(Instruction::JumpIfFalse(otherwise), span));
-                t.push(Task::Stmt(*consequent));
+                t.push(Task::Expr(*test))?;
+                t.push(Task::Emit(Instruction::JumpIfFalse(otherwise), span))?;
+                t.push(Task::Stmt(*consequent))?;
                 match alternate {
                     Some(alternate) => {
                         let end = self.label();
-                        t.push(Task::Goto(end, span));
-                        t.push(Task::Bind(otherwise));
-                        t.push(Task::Stmt(*alternate));
-                        t.push(Task::Bind(end));
+                        t.push(Task::Goto(end, span))?;
+                        t.push(Task::Bind(otherwise))?;
+                        t.push(Task::Stmt(*alternate))?;
+                        t.push(Task::Bind(end))?;
                     }
-                    None => t.push(Task::Bind(otherwise)),
+                    None => t.push(Task::Bind(otherwise))?,
                 }
             }
             // `#sec-do-while-statement-runtime-semantics-labelledevaluation`.
             Stmt::DoWhile { body, test } => {
-                self.reset_completion(span, &mut t);
+                self.reset_completion(span, &mut t)?;
                 let (top, next, exit) = (self.label(), self.label(), self.label());
-                t.push(Task::Bind(top));
-                t.push(self.enter_loop(exit, next, self.items, std::mem::take(&mut labels)));
-                t.push(Task::Stmt(*body));
-                t.push(Task::PopControl(None));
-                t.push(Task::Bind(next));
-                t.push(Task::Expr(*test));
-                t.push(Task::Emit(Instruction::JumpIfFalse(exit), span));
-                t.push(Task::Goto(top, span));
-                t.push(Task::Bind(exit));
+                t.push(Task::Bind(top))?;
+                t.push(self.enter_loop(exit, next, self.items, std::mem::take(&mut labels)))?;
+                t.push(Task::Stmt(*body))?;
+                t.push(Task::PopControl(None))?;
+                t.push(Task::Bind(next))?;
+                t.push(Task::Expr(*test))?;
+                t.push(Task::Emit(Instruction::JumpIfFalse(exit), span))?;
+                t.push(Task::Goto(top, span))?;
+                t.push(Task::Bind(exit))?;
             }
             // `#sec-while-statement-runtime-semantics-labelledevaluation`.
             Stmt::While { test, body } => {
-                self.reset_completion(span, &mut t);
+                self.reset_completion(span, &mut t)?;
                 let (top, exit) = (self.label(), self.label());
-                t.push(Task::Bind(top));
-                t.push(Task::Expr(*test));
-                t.push(Task::Emit(Instruction::JumpIfFalse(exit), span));
-                t.push(self.enter_loop(exit, top, self.items, std::mem::take(&mut labels)));
-                t.push(Task::Stmt(*body));
-                t.push(Task::PopControl(None));
-                t.push(Task::Goto(top, span));
-                t.push(Task::Bind(exit));
+                t.push(Task::Bind(top))?;
+                t.push(Task::Expr(*test))?;
+                t.push(Task::Emit(Instruction::JumpIfFalse(exit), span))?;
+                t.push(self.enter_loop(exit, top, self.items, std::mem::take(&mut labels)))?;
+                t.push(Task::Stmt(*body))?;
+                t.push(Task::PopControl(None))?;
+                t.push(Task::Goto(top, span))?;
+                t.push(Task::Bind(exit))?;
             }
             // `#sec-for-statement-runtime-semantics-labelledevaluation`, ForBodyEvaluation; a head
             // with `let` or `const` is a scope around the loop
@@ -205,7 +206,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 update,
                 body,
             } => {
-                self.reset_completion(span, &mut t);
+                self.reset_completion(span, &mut t)?;
                 let mut record = false;
                 let mut copy = false;
                 match init {
@@ -218,19 +219,19 @@ impl<'a, 'm> Compiler<'a, 'm> {
                         self.declarators(id, declarators, &mut t)?;
                     }
                     Some(ForInit::Expression(e)) => {
-                        t.push(Task::Expr(*e));
-                        t.push(Task::Emit(Instruction::Pop, span));
+                        t.push(Task::Expr(*e))?;
+                        t.push(Task::Emit(Instruction::Pop, span))?;
                     }
                     None => {}
                 }
                 if copy {
-                    t.push(Task::Emit(Instruction::CopyEnv, span));
+                    t.push(Task::Emit(Instruction::CopyEnv, span))?;
                 }
                 let (top, next, exit) = (self.label(), self.label(), self.label());
-                t.push(Task::Bind(top));
+                t.push(Task::Bind(top))?;
                 if let Some(test) = test {
-                    t.push(Task::Expr(*test));
-                    t.push(Task::Emit(Instruction::JumpIfFalse(exit), span));
+                    t.push(Task::Expr(*test))?;
+                    t.push(Task::Emit(Instruction::JumpIfFalse(exit), span))?;
                 }
                 t.push(Task::PushControl(Control::Loop {
                     exit,
@@ -238,20 +239,20 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     items: self.items,
                     envs: self.envs.saturating_add(u32::from(record)),
                     labels: std::mem::take(&mut labels),
-                }));
-                t.push(Task::Stmt(*body));
-                t.push(Task::PopControl(None));
-                t.push(Task::Bind(next));
+                }))?;
+                t.push(Task::Stmt(*body))?;
+                t.push(Task::PopControl(None))?;
+                t.push(Task::Bind(next))?;
                 if copy {
-                    t.push(Task::Emit(Instruction::CopyEnv, span));
+                    t.push(Task::Emit(Instruction::CopyEnv, span))?;
                 }
                 if let Some(update) = update {
-                    t.push(Task::Expr(*update));
-                    t.push(Task::Emit(Instruction::Pop, span));
+                    t.push(Task::Expr(*update))?;
+                    t.push(Task::Emit(Instruction::Pop, span))?;
                 }
-                t.push(Task::Goto(top, span));
-                t.push(Task::Bind(exit));
-                leave_scope(record, span, &mut t);
+                t.push(Task::Goto(top, span))?;
+                t.push(Task::Bind(exit))?;
+                leave_scope(record, span, &mut t)?;
             }
             // `#sec-for-in-and-for-of-statements-runtime-semantics-labelledevaluation`:
             // ForIn/OfHeadEvaluation, then ForIn/OfBodyEvaluation
@@ -269,13 +270,13 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 object,
                 body,
             } => {
-                self.reset_completion(span, &mut t);
+                self.reset_completion(span, &mut t)?;
                 let (top, exit) = (self.label(), self.label());
-                t.push(Task::Expr(*object));
-                t.push(Task::Emit(Instruction::ForInStart, span));
-                t.push(Task::ItemsUp);
-                t.push(Task::Bind(top));
-                t.push(Task::Emit(Instruction::ForInNext(exit), span));
+                t.push(Task::Expr(*object))?;
+                t.push(Task::Emit(Instruction::ForInStart, span))?;
+                t.push(Task::ItemsUp)?;
+                t.push(Task::Bind(top))?;
+                t.push(Task::Emit(Instruction::ForInNext(exit), span))?;
                 // The key is on top; each iteration evaluates the target's reference, then puts.
                 let (target, target_span) = match target {
                     ForInTarget::Var(_, name) => (
@@ -288,24 +289,24 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     }
                 };
                 let r = target.reference_items();
-                t.extend(self.reference(&target, false, target_span)?);
+                t.append(self.reference(&target, false, target_span)?)?;
                 for _ in 0..r {
-                    t.push(Task::Emit(Instruction::Bury(r), target_span));
+                    t.push(Task::Emit(Instruction::Bury(r), target_span))?;
                 }
-                t.push(Task::Emit(self.put(&target)?, target_span));
-                t.push(Task::Emit(Instruction::Pop, target_span));
+                t.push(Task::Emit(self.put(&target)?, target_span))?;
+                t.push(Task::Emit(Instruction::Pop, target_span))?;
                 t.push(self.enter_loop(
                     exit,
                     top,
                     self.items.saturating_add(1),
                     std::mem::take(&mut labels),
-                ));
-                t.push(Task::Stmt(*body));
-                t.push(Task::PopControl(None));
-                t.push(Task::Goto(top, span));
-                t.push(Task::Bind(exit));
-                t.push(Task::Emit(Instruction::Pop, span));
-                t.push(Task::ItemsDown);
+                ))?;
+                t.push(Task::Stmt(*body))?;
+                t.push(Task::PopControl(None))?;
+                t.push(Task::Goto(top, span))?;
+                t.push(Task::Bind(exit))?;
+                t.push(Task::Emit(Instruction::Pop, span))?;
+                t.push(Task::ItemsDown)?;
             }
             // `#sec-continue-statement-runtime-semantics-evaluation`.
             Stmt::Continue(label) => {
@@ -313,7 +314,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     Some(l) => Some(self.m.string(&l.name)?),
                     None => None,
                 };
-                t.push(Task::Jump(JumpKind::Continue, label, span));
+                t.push(Task::Jump(JumpKind::Continue, label, span))?;
             }
             // `#sec-break-statement-runtime-semantics-evaluation`.
             Stmt::Break(label) => {
@@ -321,15 +322,15 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     Some(l) => Some(self.m.string(&l.name)?),
                     None => None,
                 };
-                t.push(Task::Jump(JumpKind::Break, label, span));
+                t.push(Task::Jump(JumpKind::Break, label, span))?;
             }
             // `#sec-return-statement-runtime-semantics-evaluation`.
             Stmt::Return(e) => {
                 match e {
-                    Some(e) => t.push(Task::Expr(*e)),
-                    None => t.push(Task::Emit(Instruction::Undefined, span)),
+                    Some(e) => t.push(Task::Expr(*e))?,
+                    None => t.push(Task::Emit(Instruction::Undefined, span))?,
                 }
-                t.push(Task::Return(span));
+                t.push(Task::Return(span))?;
             }
             // `#sec-switch-statement-runtime-semantics-evaluation` and CaseBlockEvaluation
             // (`#sec-runtime-semantics-caseblockevaluation`): the tests of the clauses before
@@ -339,54 +340,54 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 discriminant,
                 cases,
             } => {
-                self.reset_completion(span, &mut t);
+                self.reset_completion(span, &mut t)?;
                 let exit = self.label();
-                let mut labels = self.m.with_capacity(cases.len())?;
-                labels.extend(cases.iter().map(|_| self.label()));
-                t.push(Task::Expr(*discriminant));
+                let mut labels = List::new(self.m);
+                labels.extend(cases.iter().map(|_| self.label()))?;
+                t.push(Task::Expr(*discriminant))?;
                 let record = self.enter_scope(ScopeKey::Case(id), span, &mut t)?;
                 let mut default = None;
-                for (case, label) in cases.iter().zip(&labels) {
+                for (case, label) in cases.iter().zip(labels.as_slice()) {
                     match case.test {
                         Some(test) => {
-                            t.push(Task::Expr(test));
-                            t.push(Task::Emit(Instruction::CaseJump(*label), case.span));
+                            t.push(Task::Expr(test))?;
+                            t.push(Task::Emit(Instruction::CaseJump(*label), case.span))?;
                         }
                         None => default = Some(*label),
                     }
                 }
-                t.push(Task::Emit(Instruction::Pop, span));
-                t.push(Task::Goto(default.unwrap_or(exit), span));
+                t.push(Task::Emit(Instruction::Pop, span))?;
+                t.push(Task::Goto(default.unwrap_or(exit), span))?;
                 t.push(Task::PushControl(Control::Switch {
                     exit,
                     items: self.items,
                     envs: self.envs.saturating_add(u32::from(record)),
-                }));
-                for (case, label) in cases.iter().zip(&labels) {
-                    t.push(Task::Bind(*label));
-                    t.extend(case.body.iter().map(|s| Task::Stmt(*s)));
+                }))?;
+                for (case, label) in cases.iter().zip(labels.as_slice()) {
+                    t.push(Task::Bind(*label))?;
+                    t.extend(case.body.iter().map(|s| Task::Stmt(*s)))?;
                 }
-                t.push(Task::PopControl(None));
-                t.push(Task::Bind(exit));
-                leave_scope(record, span, &mut t);
+                t.push(Task::PopControl(None))?;
+                t.push(Task::Bind(exit))?;
+                leave_scope(record, span, &mut t)?;
             }
             // `#sec-throw-statement-runtime-semantics-evaluation`.
             Stmt::Throw(e) => {
-                t.push(Task::Expr(*e));
-                t.push(Task::Emit(Instruction::Throw, span));
+                t.push(Task::Expr(*e))?;
+                t.push(Task::Emit(Instruction::Throw, span))?;
             }
             // `#sec-with-statement-runtime-semantics-evaluation`: the object environment is an
             // environment of the frame, so every way out of the body pops it (`PopEnv` on a break,
             // continue or return through it, a handler's `envs` on a throw); the completion value
             // is UpdateEmpty(C, undefined).
             Stmt::With { object, body } => {
-                self.reset_completion(span, &mut t);
-                t.push(Task::Expr(*object));
-                t.push(Task::Emit(Instruction::PushWith, span));
-                t.push(Task::EnvsUp);
-                t.push(Task::Stmt(*body));
-                t.push(Task::Emit(Instruction::PopEnv, span));
-                t.push(Task::EnvsDown);
+                self.reset_completion(span, &mut t)?;
+                t.push(Task::Expr(*object))?;
+                t.push(Task::Emit(Instruction::PushWith, span))?;
+                t.push(Task::EnvsUp)?;
+                t.push(Task::Stmt(*body))?;
+                t.push(Task::Emit(Instruction::PopEnv, span))?;
+                t.push(Task::EnvsDown)?;
             }
             Stmt::Try {
                 block,
@@ -414,11 +415,12 @@ impl<'a, 'm> Compiler<'a, 'm> {
     }
 
     /// In script code: the completion value register becomes `undefined`.
-    fn reset_completion(&self, span: Span, t: &mut Vec<Task>) {
+    fn reset_completion(&self, span: Span, t: &mut Tasks<'_, '_>) -> Result<(), CompileError> {
         if self.script {
-            t.push(Task::Emit(Instruction::Undefined, span));
-            t.push(Task::Emit(Instruction::StoreCompletion, span));
+            t.push(Task::Emit(Instruction::Undefined, span))?;
+            t.push(Task::Emit(Instruction::StoreCompletion, span))?;
         }
+        Ok(())
     }
 
     fn enter_loop(&self, exit: u32, next: u32, items: u32, labels: Vec<String>) -> Task {
@@ -437,17 +439,17 @@ impl<'a, 'm> Compiler<'a, 'm> {
         &mut self,
         id: StmtId,
         declarators: &[VarDeclarator],
-        t: &mut Vec<Task>,
+        t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
         for (i, d) in declarators.iter().enumerate() {
             let Some(init) = d.init else { continue };
             let n = u32::try_from(i).map_err(|_| crate::CompileError::TooMany("declarators"))?;
             let target = Target::Binding(self.binding(Site::VarDecl(id, n))?);
             let span = d.name.span;
-            t.extend(self.reference(&target, false, span)?);
-            t.push(Task::Expr(init));
-            t.push(Task::Emit(self.put(&target)?, span));
-            t.push(Task::Emit(Instruction::Pop, span));
+            t.append(self.reference(&target, false, span)?)?;
+            t.push(Task::Expr(init))?;
+            t.push(Task::Emit(self.put(&target)?, span))?;
+            t.push(Task::Emit(Instruction::Pop, span))?;
         }
         Ok(())
     }
@@ -460,7 +462,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
         &mut self,
         key: ScopeKey,
         span: Span,
-        t: &mut Vec<Task>,
+        t: &mut Tasks<'_, '_>,
     ) -> Result<bool, CompileError> {
         let Some(scope) = self.resolution.lexical_scopes.get(&key) else {
             return Ok(false);
@@ -468,11 +470,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
         let record = !scope.env.is_empty();
         if record {
             let index = self.lexical_table(&scope.env)?;
-            t.push(Task::Emit(Instruction::PushLexicalEnv(index), span));
-            t.push(Task::EnvsUp);
+            t.push(Task::Emit(Instruction::PushLexicalEnv(index), span))?;
+            t.push(Task::EnvsUp)?;
         }
         for &n in &scope.uninitialize {
-            t.push(Task::Emit(Instruction::Uninitialize(n), span));
+            t.push(Task::Emit(Instruction::Uninitialize(n), span))?;
         }
         Ok(record)
     }
@@ -485,11 +487,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
         id: FunctionId,
         span: Span,
     ) -> Result<(), CompileError> {
-        let mut t = Vec::new();
+        let mut t = Tasks::new(self.m);
         if self.enter_scope(ScopeKey::Body(id), span, &mut t)? {
             self.envs = self.envs.saturating_add(1);
         }
-        for task in t {
+        for task in t.drain() {
             if let Task::Emit(instruction, span) = task {
                 self.emit(instruction, span)?;
             }
@@ -514,7 +516,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
         &mut self,
         id: StmtId,
         declarators: &[VarDeclarator],
-        t: &mut Vec<Task>,
+        t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
         for (i, d) in declarators.iter().enumerate() {
             let n = u32::try_from(i).map_err(|_| CompileError::TooMany("declarators"))?;
@@ -528,11 +530,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 _ => return Err(malformed("a lexical declaration's binding")),
             };
             match d.init {
-                Some(init) => t.push(Task::Expr(init)),
-                None => t.push(Task::Emit(Instruction::Undefined, span)),
+                Some(init) => t.push(Task::Expr(init))?,
+                None => t.push(Task::Emit(Instruction::Undefined, span))?,
             }
-            t.push(Task::Emit(store, span));
-            t.push(Task::Emit(Instruction::Pop, span));
+            t.push(Task::Emit(store, span))?;
+            t.push(Task::Emit(Instruction::Pop, span))?;
         }
         Ok(())
     }
@@ -551,39 +553,39 @@ impl<'a, 'm> Compiler<'a, 'm> {
         object: ExprId,
         body: StmtId,
         labels: Vec<String>,
-        t: &mut Vec<Task>,
+        t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
-        self.reset_completion(span, t);
+        self.reset_completion(span, t)?;
         let (top, exit) = (self.label(), self.label());
         let tdz = self.enter_scope(ScopeKey::Tdz(id), span, t)?;
-        t.push(Task::Expr(object));
-        leave_scope(tdz, span, t);
-        t.push(Task::Emit(Instruction::ForInStart, span));
-        t.push(Task::ItemsUp);
-        t.push(Task::Bind(top));
-        t.push(Task::Emit(Instruction::ForInNext(exit), span));
+        t.push(Task::Expr(object))?;
+        leave_scope(tdz, span, t)?;
+        t.push(Task::Emit(Instruction::ForInStart, span))?;
+        t.push(Task::ItemsUp)?;
+        t.push(Task::Bind(top))?;
+        t.push(Task::Emit(Instruction::ForInNext(exit), span))?;
         let iteration = self.enter_scope(ScopeKey::Iteration(id), span, t)?;
         let store = match self.binding(Site::ForInVar(id))? {
             Binding::Local(n) => Instruction::SetLocal(n),
             Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
             _ => return Err(malformed("a for-in binding")),
         };
-        t.push(Task::Emit(store, name_span));
-        t.push(Task::Emit(Instruction::Pop, name_span));
+        t.push(Task::Emit(store, name_span))?;
+        t.push(Task::Emit(Instruction::Pop, name_span))?;
         t.push(Task::PushControl(Control::Loop {
             exit,
             next: top,
             items: self.items.saturating_add(1),
             envs: self.envs,
             labels,
-        }));
-        t.push(Task::Stmt(body));
-        t.push(Task::PopControl(None));
-        leave_scope(iteration, span, t);
-        t.push(Task::Goto(top, span));
-        t.push(Task::Bind(exit));
-        t.push(Task::Emit(Instruction::Pop, span));
-        t.push(Task::ItemsDown);
+        }))?;
+        t.push(Task::Stmt(body))?;
+        t.push(Task::PopControl(None))?;
+        leave_scope(iteration, span, t)?;
+        t.push(Task::Goto(top, span))?;
+        t.push(Task::Bind(exit))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        t.push(Task::ItemsDown)?;
         Ok(())
     }
 
@@ -598,16 +600,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
         block: &[StmtId],
         catch: bool,
         finalizer: Option<&[StmtId]>,
-        t: &mut Vec<Task>,
+        t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
-        self.reset_completion(span, t);
+        self.reset_completion(span, t)?;
         let (items, envs) = (self.items, self.envs);
         let start = self.label();
         let block_end = self.label();
         let normal = self.label();
         let entry = self.label();
         let key = self.finally_key();
-        t.push(Task::Bind(start));
+        t.push(Task::Bind(start))?;
         if finalizer.is_some() {
             t.push(Task::PushControl(Control::Finally {
                 entry,
@@ -615,11 +617,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 envs,
                 returns: false,
                 jumps: Vec::new(),
-            }));
+            }))?;
         }
         let record = self.enter_scope(ScopeKey::Try(id), span, t)?;
-        t.extend(block.iter().map(|s| Task::Stmt(*s)));
-        leave_scope(record, span, t);
+        t.extend(block.iter().map(|s| Task::Stmt(*s)))?;
+        leave_scope(record, span, t)?;
         let catch_end = if catch {
             let Some(Stmt::Try {
                 handler: Some(h), ..
@@ -628,8 +630,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 return Err(malformed("a catch clause"));
             };
             let catch_end = self.label();
-            t.push(Task::Goto(normal, span));
-            t.push(Task::Bind(block_end));
+            t.push(Task::Goto(normal, span))?;
+            t.push(Task::Bind(block_end))?;
             // The exception is on top: it initializes the parameter, in an environment of its
             // own when a function inside the clause uses it. A `catch` without a parameter
             // drops it and makes no environment (`Catch : catch Block`).
@@ -638,7 +640,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     let pspan = param.span;
                     let env = match self.binding(Site::CatchParam(id))? {
                         Binding::Local(n) => {
-                            t.push(Task::Emit(Instruction::SetLocal(n), pspan));
+                            t.push(Task::Emit(Instruction::SetLocal(n), pspan))?;
                             false
                         }
                         Binding::Env { slot, .. } => {
@@ -655,62 +657,62 @@ impl<'a, 'm> Compiler<'a, 'm> {
                             } else {
                                 Instruction::PushEnv(1)
                             };
-                            t.push(Task::Emit(push, pspan));
-                            t.push(Task::Emit(Instruction::SetEnv { hops: 0, slot }, pspan));
-                            t.push(Task::EnvsUp);
+                            t.push(Task::Emit(push, pspan))?;
+                            t.push(Task::Emit(Instruction::SetEnv { hops: 0, slot }, pspan))?;
+                            t.push(Task::EnvsUp)?;
                             true
                         }
                         _ => return Err(malformed("a catch parameter")),
                     };
-                    t.push(Task::Emit(Instruction::Pop, pspan));
+                    t.push(Task::Emit(Instruction::Pop, pspan))?;
                     env
                 }
                 None => {
-                    t.push(Task::Emit(Instruction::Pop, span));
+                    t.push(Task::Emit(Instruction::Pop, span))?;
                     false
                 }
             };
-            self.reset_completion(span, t);
+            self.reset_completion(span, t)?;
             let record = self.enter_scope(ScopeKey::Catch(id), span, t)?;
-            t.extend(h.body.iter().map(|s| Task::Stmt(*s)));
-            leave_scope(record, span, t);
+            t.extend(h.body.iter().map(|s| Task::Stmt(*s)))?;
+            leave_scope(record, span, t)?;
             if env {
-                t.push(Task::Emit(Instruction::PopEnv, span));
-                t.push(Task::EnvsDown);
+                t.push(Task::Emit(Instruction::PopEnv, span))?;
+                t.push(Task::EnvsDown)?;
             }
-            t.push(Task::Bind(catch_end));
+            t.push(Task::Bind(catch_end))?;
             catch_end
         } else {
-            t.push(Task::Bind(block_end));
+            t.push(Task::Bind(block_end))?;
             block_end
         };
         match finalizer {
             Some(list) => {
-                t.push(Task::PopControl(Some(key)));
-                t.push(Task::Bind(normal));
-                t.push(Task::Emit(Instruction::Undefined, span));
-                t.push(Task::Emit(Instruction::Tag(TAG_NORMAL), span));
-                t.push(Task::Bind(entry));
-                t.push(Task::ItemsUp);
-                t.push(Task::ItemsUp);
+                t.push(Task::PopControl(Some(key)))?;
+                t.push(Task::Bind(normal))?;
+                t.push(Task::Emit(Instruction::Undefined, span))?;
+                t.push(Task::Emit(Instruction::Tag(TAG_NORMAL), span))?;
+                t.push(Task::Bind(entry))?;
+                t.push(Task::ItemsUp)?;
+                t.push(Task::ItemsUp)?;
                 if self.script {
-                    t.push(Task::Emit(Instruction::LoadCompletion, span));
-                    t.push(Task::ItemsUp);
+                    t.push(Task::Emit(Instruction::LoadCompletion, span))?;
+                    t.push(Task::ItemsUp)?;
                 }
                 // A break or continue out of the finally block leaves
                 // UpdateEmpty(finallyResult, undefined): its own value or undefined, not the
                 // value it kept.
-                self.reset_completion(span, t);
+                self.reset_completion(span, t)?;
                 let record = self.enter_scope(ScopeKey::Finally(id), span, t)?;
-                t.extend(list.iter().map(|s| Task::Stmt(*s)));
-                leave_scope(record, span, t);
+                t.extend(list.iter().map(|s| Task::Stmt(*s)))?;
+                leave_scope(record, span, t)?;
                 if self.script {
-                    t.push(Task::Emit(Instruction::StoreCompletion, span));
-                    t.push(Task::ItemsDown);
+                    t.push(Task::Emit(Instruction::StoreCompletion, span))?;
+                    t.push(Task::ItemsDown)?;
                 }
-                t.push(Task::FinallyDispatch(key, span));
+                t.push(Task::FinallyDispatch(key, span))?;
             }
-            None => t.push(Task::Bind(normal)),
+            None => t.push(Task::Bind(normal))?,
         }
         if catch {
             t.push(Task::Handler {
@@ -720,7 +722,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 target: block_end,
                 items,
                 envs,
-            });
+            })?;
         }
         if finalizer.is_some() {
             t.push(Task::Handler {
@@ -730,7 +732,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 target: entry,
                 items,
                 envs,
-            });
+            })?;
         }
         Ok(())
     }

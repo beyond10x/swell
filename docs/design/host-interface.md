@@ -910,9 +910,28 @@ that it is undone); faulting the agent on every termination (surf could not stop
 and keep the page); resetting cut modules to `linked` (their code would run a second time,
 which the draft never does).
 
+**After `MemoryBudget`, "the agent stays usable" means four things and no more.** Added on
+2026-11-22. `state()` reads `Alive`, and every call that takes no memory answers: reading the
+outcomes and the values the host holds, dropping roots, `collect()`, `credit_host_bytes` and
+dropping the agent (HOST-188). An entry whose parse and script record the room does not cover
+ends in `Terminated(MemoryBudget)` again, the same way on every run from the same state
+(HOST-189). The host reads the state without a trial entry: `heap_bytes()` is what is charged
+(HOST-171) and `memory_bytes` is the limit it gave. Once the host made room, by dropping roots
+and collecting or by giving back bytes it charged, an entry the room covers runs as in an agent
+that never ended in the memory budget: the termination leaves no state behind (HOST-190). The
+room a run leaves when it ends in the memory budget has no lower bound, since the run ends at
+the first growth refused whatever was left below it; so a host makes room before the next
+entry and does not count on what the run left.
+
 **HOST-69** (html:killing-scripts) The script `var f; try { while (true) {} } finally { f = 1; }` ends in `Terminated(StepBudget)` and the script `f` then answers `Normal(undefined)`. [slice 1]
 
-**HOST-70** (swell:D10) After `Terminated(StepBudget)`, `Terminated(MemoryBudget)` or `Terminated(Interrupted)`, `state()` reads `Alive` and a following script `1` answers `Normal(1)`. [slice 1]
+**HOST-70** (swell:D10) After `Terminated(StepBudget)` or `Terminated(Interrupted)`, `state()` reads `Alive` and a following script `1` answers `Normal(1)`; after `Terminated(MemoryBudget)` `state()` reads `Alive` and the next entry runs as HOST-188 to HOST-190 state. [slice 1]
+
+**HOST-188** (swell:D10) After an entry answered `Terminated(MemoryBudget)` and the host charged with `charge_host_bytes` all the room `memory_bytes` − `heap_bytes()` left, the calls that take no memory answer: `state()` reads `Alive`, `collect()` answers `Normal` with the room still 0, a root the host kept from before the entry reads its value in `with_cx`, and dropping that root, `Agent::credit_host_bytes` and dropping the agent end with no fault and no panic. [slice 6]
+
+**HOST-189** (swell:D10) After an entry answered `Terminated(MemoryBudget)`, an entry whose parse and script record the room `memory_bytes` − `heap_bytes()` does not cover ends in `Terminated(MemoryBudget)`, from `parse_script` as `Parsed::Terminated(MemoryBudget)`, with `state()` still `Alive` and the same answer and `heap_bytes()` each time it is made from the same state: with 1,000 bytes of room the script `1` answers `Terminated(MemoryBudget)` twice in a row with the same `heap_bytes()` after each, and `parse_script` of `1` then answers `Parsed::Terminated(MemoryBudget)` with that reading. [slice 6]
+
+**HOST-190** (swell:D10) After an entry answered `Terminated(MemoryBudget)` and the host made room (dropped roots and called `collect()`, or gave bytes back with `Agent::credit_host_bytes`), with the room read as `memory_bytes` − `heap_bytes()` and no trial entry, the script `1` answers `Normal(1)` when the room is at least 3,072 bytes, spending the `last_entry_steps()` it spends in an agent that never ended in the memory budget and has the same room. [slice 6]
 
 **HOST-71** (swell:D10) A broken engine invariant found inside `parse_script`, `create_realm` or `collect` makes that call answer `Terminated(EngineFault)` and `state()` then read `Faulted`, which a test build with fault injection at each of those calls shows. [slice 1]
 
@@ -1799,7 +1818,7 @@ table in `host-interface-model.md` gives each marker's first words.
 - `host.yaml:846`: HOST-157
 - `host.yaml:862`: HOST-38
 - `host.yaml:865`: HOST-43
-- `host.yaml:867`: HOST-70, HOST-74
+- `host.yaml:867`: HOST-70, HOST-74, HOST-188 to HOST-190
 - `host.yaml:882`: HOST-48
 - `host.yaml:898`: HOST-43
 - `host.yaml:969`: ESS limit
