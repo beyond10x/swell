@@ -34,13 +34,6 @@ pub(crate) enum IntegrityLevel {
 }
 
 /// The kind of EnumerableOwnProperties.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Object.keys, Object.values, Object.entries: story:object-enumeration-and-copy-methods"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PropertyKind {
     Key,
@@ -397,13 +390,6 @@ impl<H: Host> Agent<H> {
     /// deleted is skipped. A step per key; the own keys and the results are kept on the kept
     /// stack across each Get, and stay kept until the caller releases to the mark it took
     /// before the call.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Object.keys, Object.values, Object.entries: story:object-enumeration-and-copy-methods"
-        )
-    )]
     pub(crate) fn enumerable_own_properties(
         &mut self,
         object: ObjectRef,
