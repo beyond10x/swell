@@ -81,7 +81,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   an ESS model under `spec/` before its code (decision 10). Do not restate language semantics in
   ESS. Names follow the standard's terms; a builtin's module and comments cite its clause.
 - The host interface has two specifications, and both come before its code. ESS states about
-  half of it: the model (`spec/`, ess 0.97.3) validates and its 58 scenarios, 8 of them authored,
+  half of it: the model (`spec/`, ess 0.97.4) validates and its 58 scenarios, 8 of them authored,
   pass on the interpreter, with 41 refusals and 51 `UNMAPPED:` markers
   (`docs/design/host-interface-model.md`). What ESS cannot state (engine values in outcomes,
   hooks that answer the engine, `call` and `construct`, host objects and roots, re-entrancy,
@@ -198,6 +198,15 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   `site-data-check`, a step of `check`, fails when it differs from its regeneration. A commit
   that changes `expected.txt`, `slices-delivered.txt`, `requirements.txt`, `moves.tsv`, a
   crate version or section 12 of the design regenerates it (`slot --local task site-data`).
+- A test stays under 1.5 CPU seconds alone in the gate's default mode and under 2 s with a
+  collection at every safe point, and under 5 s at its full count (`SWELL_FULL_COUNTS=1`) in
+  either mode, measured with its test binary run directly with `--exact <name>
+  --test-threads 1` under the shell's `time` (user plus system). The bound is in CPU seconds
+  because the machine's load multiplies wall time: on 2026-11-22, at a load of 110 to 166 on
+  18 cores, tests of 4 to 18 CPU seconds were killed at 60 s
+  (`story:heavy-tests-far-from-the-kill`). Two tests are over it and stay so:
+  `determinism::host_133_same_calls_same_hooks_same_outcomes` (3.9 to 4.3 s in collect mode,
+  three runs of its corpus) and `language` part 3 (2.2 to 2.5 s in collect mode).
 - A new language script stays under 0.5 CPU seconds per run, and a new test under 2 s alone,
   with a collection at every safe point. Measured with
   `SWELL_SCRIPT_TIMES=1 cargo nextest run --locked -p swell --features

@@ -46,9 +46,19 @@ impl Host for LedgerHost {
     }
 }
 
-/// `function unused() {`, 20,000 lines `x = 1;`, then `}`.
+/// The lines of the flat source: 5,000, as the gate's flat source of `src/script.rs`. The
+/// budget of [`eval_and_function_of_a_flat_source_end_in_memory_budget`] is the reading before
+/// the call plus R, what a successful call keeps, plus 4 KiB. R grows with the lines (836,363
+/// bytes at 5,000, 3,339,227 at 20,000, measured on 2026-11-22), and so does the tree the
+/// compile step holds above it, while the room stays 4 KiB: at 5,000 lines the call still ends
+/// in `Terminated(MemoryBudget)`, and a tree that was not charged would let it end normally.
+/// With 20,000 the test took 1.03 CPU seconds alone, and in the gate it was terminated at 60 s
+/// once at a load of 110 to 166 on 18 cores.
+const FLAT_LINES: usize = 5_000;
+
+/// `function unused() {`, [`FLAT_LINES`] lines `x = 1;`, then `}`.
 fn flat_source() -> String {
-    format!("function unused() {{\n{}}}", "x = 1;\n".repeat(20_000))
+    format!("function unused() {{\n{}}}", "x = 1;\n".repeat(FLAT_LINES))
 }
 
 /// An agent with [`LedgerHost`] and `limits`, and a realm.
@@ -100,7 +110,7 @@ fn ended(outcome: Outcome<swell::Root>) -> String {
 /// `call` parsed and a collection run: the agent, the script and `heap_bytes()` then.
 fn prepared(limits: Limits, call: &str) -> (Agent<LedgerHost>, Script, u64) {
     let source = flat_source();
-    let body = "x = 1;\n".repeat(20_000);
+    let body = "x = 1;\n".repeat(FLAT_LINES);
     let (mut agent, realm) = agent(limits);
     define(&mut agent, &realm, &[("src", &source), ("body", &body)]);
     let script = parsed(&mut agent, &realm, call);

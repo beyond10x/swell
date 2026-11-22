@@ -14,7 +14,9 @@
 //! `%Symbol%` and `%Symbol.prototype%` (20.4, `#sec-symbol-objects`), written by
 //! `story:symbol-constructor-and-well-known-symbols`; `%Iterator.prototype%`,
 //! `%ArrayIteratorPrototype%`, `%StringIteratorPrototype%` and `%Array.prototype.values%`,
-//! written by `story:iterator-protocol-and-array-string-iterators`.
+//! written by `story:iterator-protocol-and-array-string-iterators`; `%Array.prototype.entries%`,
+//! `%Array.prototype.keys%` and `%Array.prototype.forEach%`, which the host names
+//! (`story:the-host-names-the-iteration-intrinsics-of-web-idl`).
 //! The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
@@ -98,6 +100,15 @@ pub(crate) enum Intrinsic {
     /// `%Array.prototype.values%` (23.1.3.38): the `[%Symbol.iterator%]` of an arguments
     /// object (`#sec-createunmappedargumentsobject`, `#sec-createmappedargumentsobject`).
     ArrayPrototypeValues,
+    /// `%Array.prototype.entries%` (23.1.3.5, `#sec-array.prototype.entries`),
+    /// `%Array.prototype.keys%` (23.1.3.19, `#sec-array.prototype.keys`) and
+    /// `%Array.prototype.forEach%` (23.1.3.15, `#sec-array.prototype.foreach`): what Web IDL
+    /// gives an interface with an indexed property getter and a value iterator
+    /// (`webidl:define-the-iteration-methods`), named by the host
+    /// (`story:the-host-names-the-iteration-intrinsics-of-web-idl`).
+    ArrayPrototypeEntries,
+    ArrayPrototypeKeys,
+    ArrayPrototypeForEach,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -146,6 +157,9 @@ pub(crate) struct Intrinsics {
     symbol_prototype: ObjectRef,
     iterator_prototypes: crate::builtins::iterator::IteratorPrototypes,
     array_prototype_values: ObjectRef,
+    array_prototype_entries: ObjectRef,
+    array_prototype_keys: ObjectRef,
+    array_prototype_for_each: ObjectRef,
 }
 
 impl Intrinsics {
@@ -183,6 +197,9 @@ impl Intrinsics {
             Intrinsic::ArrayIteratorPrototype => self.iterator_prototypes.array_iterator,
             Intrinsic::StringIteratorPrototype => self.iterator_prototypes.string_iterator,
             Intrinsic::ArrayPrototypeValues => self.array_prototype_values,
+            Intrinsic::ArrayPrototypeEntries => self.array_prototype_entries,
+            Intrinsic::ArrayPrototypeKeys => self.array_prototype_keys,
+            Intrinsic::ArrayPrototypeForEach => self.array_prototype_for_each,
         }
     }
 
@@ -231,6 +248,9 @@ impl Intrinsics {
             self.iterator_prototypes.array_iterator,
             self.iterator_prototypes.string_iterator,
             self.array_prototype_values,
+            self.array_prototype_entries,
+            self.array_prototype_keys,
+            self.array_prototype_for_each,
         ] {
             mark.object(object);
         }
@@ -402,12 +422,14 @@ impl<H: Host> Agent<H> {
         let uri = self.create_uri_functions(making)?;
         let (symbol, symbol_prototype) = self.create_symbol_constructor(making)?;
         let iterator_prototypes = self.create_iterator_prototypes(making)?;
-        // %Array.prototype.values% (23.1.3.38): the method `create_array_constructor` has
-        // defined on %Array.prototype%, read before any code runs.
-        let values_key = self.name_key("values")?;
-        let Value::Object(array_prototype_values) = self.get(array_prototype, values_key)? else {
-            return Err(self.fault());
-        };
+        // %Array.prototype.values% (23.1.3.38), %Array.prototype.entries% (23.1.3.5),
+        // %Array.prototype.keys% (23.1.3.19) and %Array.prototype.forEach% (23.1.3.15): the
+        // methods `create_array_constructor` has defined on %Array.prototype%, read before any
+        // code runs.
+        let array_prototype_values = self.array_prototype_method(array_prototype, "values")?;
+        let array_prototype_entries = self.array_prototype_method(array_prototype, "entries")?;
+        let array_prototype_keys = self.array_prototype_method(array_prototype, "keys")?;
+        let array_prototype_for_each = self.array_prototype_method(array_prototype, "forEach")?;
         let intrinsics = Intrinsics {
             object_prototype,
             function_prototype,
@@ -434,6 +456,9 @@ impl<H: Host> Agent<H> {
             symbol_prototype,
             iterator_prototypes,
             array_prototype_values,
+            array_prototype_entries,
+            array_prototype_keys,
+            array_prototype_for_each,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {
@@ -442,6 +467,20 @@ impl<H: Host> Agent<H> {
             }
             Err(_) => Err(self.fault()),
         }
+    }
+
+    /// The method `name` that `create_array_constructor` has defined on `array_prototype`,
+    /// read while CreateIntrinsics runs; anything but an object there is a broken invariant.
+    fn array_prototype_method(
+        &mut self,
+        array_prototype: ObjectRef,
+        name: &str,
+    ) -> Completion<ObjectRef> {
+        let key = self.name_key(name)?;
+        let Value::Object(method) = self.get(array_prototype, key)? else {
+            return Err(self.fault());
+        };
+        Ok(method)
     }
 
     /// `%ThrowTypeError%` (`#sec-%throwtypeerror%`): "length" and "name" are { [[Writable]]:

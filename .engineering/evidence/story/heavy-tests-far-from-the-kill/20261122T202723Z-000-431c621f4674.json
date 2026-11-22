@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-22T20:27:23Z",
+  "actor": "human:operator",
+  "artifact": "story:heavy-tests-far-from-the-kill",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot --timeout 30m task slow-tests, on 13d345c",
+    "reference": "CHANGELOG.md"
+  }
+}

@@ -221,16 +221,17 @@ const DEPTH: usize = if cfg!(feature = "collect-every-safe-point") {
 /// [`reviver_depth`] gives it: 40,000 in the default mode, 200 with the feature
 /// `collect-every-safe-point`.
 ///
-/// The full nesting, [`DEPTH`], is what the lane `slow` runs (`SWELL_FULL_COUNTS=1`): in the
-/// default mode the two runs took 16.7 s together, and in the collect mode, where every call of
-/// the reviver collects, the test was terminated at 60 s (measured at a load of 100 to 110 on
-/// 17 cores, cargo-nextest). The gate's nesting still reaches what the test is for. In the
-/// default mode the walk runs on a thread of seven eighths of `min_stack_bytes()` of the test
-/// limits, 3,505,824 bytes: a walk with a Rust call per level of 88 bytes or more would overflow
-/// it before level 40,000, and a debug frame of a function that holds a value, its key and its
-/// index takes more; 40,000 arrays still pass the memory budget of 1 MiB. In the collect mode
-/// every call of the reviver collects while the arrays of all 200 levels and the records of the
-/// walk are held by the walk alone, which shows a value held without a root at any depth.
+/// The full nesting, [`DEPTH`] (half of it in the collect mode, [`reviver_depth`]), is what
+/// the lane `slow` runs (`SWELL_FULL_COUNTS=1`): in the default mode the two runs took 16.7 s
+/// together, and in the collect mode, where every call of the reviver collects, the test was
+/// terminated at 60 s (measured at a load of 100 to 110 on 17 cores, cargo-nextest). The
+/// gate's nesting still reaches what the test is for. In the default mode the walk runs on
+/// [`nesting_stack`], the stack of the full nesting scaled by 40,000 / 100,000, so a walk that
+/// overflows at the full nesting overflows at the gate's; it ran on the whole stack before,
+/// where only a Rust call per level of 88 bytes or more would have overflowed before level
+/// 40,000. 40,000 arrays still pass the memory budget of 1 MiB. In the collect mode every call
+/// of the reviver collects while the arrays of all 200 levels and the records of the walk are
+/// held by the walk alone, which shows a value held without a root at any depth.
 const GATE_REVIVER_DEPTH: usize = if cfg!(feature = "collect-every-safe-point") {
     200
 } else {
@@ -238,12 +239,41 @@ const GATE_REVIVER_DEPTH: usize = if cfg!(feature = "collect-every-safe-point") 
 };
 
 /// The nesting of the reviver tests: [`DEPTH`] under `SWELL_FULL_COUNTS=1` (the lane `slow`),
-/// [`GATE_REVIVER_DEPTH`] in the gate.
+/// [`GATE_REVIVER_DEPTH`] in the gate. With the feature `collect-every-safe-point` the lane
+/// nests 1,000, half of [`DEPTH`]: every call of the reviver collects while the walk holds
+/// every level, so the cost grows with the square of the nesting (at 2,000 the result test
+/// took 7.3 CPU seconds alone, measured on 2026-11-22), and a value held without a root shows
+/// at any depth.
 fn reviver_depth() -> usize {
     if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
-        DEPTH
+        if cfg!(feature = "collect-every-safe-point") {
+            DEPTH / 2
+        } else {
+            DEPTH
+        }
     } else {
         GATE_REVIVER_DEPTH
+    }
+}
+
+/// The stack a parse or a reviver walk nested `depth` levels runs on: seven eighths of
+/// `min_stack_bytes()` of the test limits (3,505,824 bytes) at [`DEPTH`], scaled by `depth` /
+/// [`DEPTH`] in the default mode, as `deep_stack` of `crates/syntax/tests/sources.rs` scales
+/// its stack. With a fixed part of f bytes and p bytes a level, the run at 100,000 levels
+/// overflows its stack S when f + 100,000 p > S, and then the gate's run at 40,000 has
+/// f + 40,000 p ≥ 0.4 (f + 100,000 p) > 0.4 S: it overflows whenever the one at the full
+/// nesting does, whatever f is. The other way it is stricter by 0.6 f, which leaves 1,402,329
+/// bytes for the fixed part. The collect mode nests [`DEPTH`] or less on the whole stack: it
+/// shows that a value held across a collection is rooted, and the default mode shows the stack
+/// bound.
+fn nesting_stack(depth: usize) -> usize {
+    let full = stack_with_room(limits());
+    if cfg!(feature = "collect-every-safe-point") {
+        full
+    } else {
+        let scaled = u64::try_from(full).unwrap() * u64::try_from(depth).unwrap()
+            / u64::try_from(DEPTH).unwrap();
+        usize::try_from(scaled).unwrap()
     }
 }
 
@@ -350,9 +380,28 @@ fn setup_charge(depth: usize) -> u64 {
 /// 400,000 ends it before the first level. A setup that charges more moves the budget with it.
 const PARSE_ROOM: u64 = 1 << 20;
 
+/// The nesting of the parse that must end in a result in
+/// [`parse_of_100000_nested_brackets_ends_in_a_result_or_the_memory_budget`]: [`DEPTH`] in the
+/// lane `slow` (`SWELL_FULL_COUNTS=1`) and with the feature `collect-every-safe-point`; 40,000
+/// in the default mode's gate, as [`GATE_REVIVER_DEPTH`] nests, on the stack of the full
+/// nesting scaled to it ([`nesting_stack`]), so a parse that overflows at 100,000 overflows at
+/// 40,000 too. At 100,000 the test took 1.60 CPU seconds alone in the default mode (measured on
+/// 2026-11-22), most of it the parse and the walk of every level after it. The parse under
+/// the memory budget keeps [`DEPTH`] in every run: it ends at level 877 ([`PARSE_ROOM`]).
+fn result_depth() -> usize {
+    if cfg!(feature = "collect-every-safe-point")
+        || std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        DEPTH
+    } else {
+        40_000
+    }
+}
+
 /// The epic's acceptance 6 (`docs/design/engine.md`, decision 3, "Depth bounds"): a text of
-/// 100,000 nested brackets ([`DEPTH`] in collect mode), on a thread of seven eighths of
-/// `min_stack_bytes()`, ends in a result under the test limits, every level an Array, and in
+/// 100,000 nested brackets ([`DEPTH`] in collect mode, [`result_depth`] in the default mode's
+/// gate), on a thread of seven eighths of `min_stack_bytes()` ([`nesting_stack`] of the
+/// nesting), ends in a result under the test limits, every level an Array, and in
 /// `Terminated(MemoryBudget)` under a memory budget that the setup fits with 1 MiB to spare
 /// ([`setup_charge`] plus [`PARSE_ROOM`]) and the parse does not (or a result, in collect mode,
 /// where the nesting is smaller), never in a Rust stack overflow.
@@ -360,9 +409,9 @@ const PARSE_ROOM: u64 = 1 << 20;
 fn parse_of_100000_nested_brackets_ends_in_a_result_or_the_memory_budget() {
     on_bounded_stack(
         test_path!("parse_of_100000_nested_brackets_ends_in_a_result_or_the_memory_budget"),
-        stack_with_room(limits()),
+        nesting_stack(result_depth()),
         || {
-            assert_eq!(parse_nested(limits(), DEPTH, None), Ok(()));
+            assert_eq!(parse_nested(limits(), result_depth(), None), Ok(()));
             let mut small = limits();
             small.memory_bytes = setup_charge(DEPTH) + PARSE_ROOM;
             let outcome = parse_nested(small, DEPTH, None);
@@ -591,16 +640,16 @@ fn roomy_limits() -> Limits {
 }
 
 /// The reviver on 100,000 nested arrays ([`reviver_depth`] levels), a script function called
-/// once per array, on a thread of seven eighths of `min_stack_bytes()`: the walk is a loop on
-/// a stack of its own, so with steps and memory enough ([`roomy_limits`]) it ends in a result,
-/// each level an Array, never in a Rust stack overflow. The run under a memory budget of 1 MiB
-/// is the test after it, in a process of its own, so that each fits under the 60 s of
-/// cargo-nextest at the full nesting of the collect mode.
+/// once per array, on a thread of seven eighths of `min_stack_bytes()` ([`nesting_stack`]):
+/// the walk is a loop on a stack of its own, so with steps and memory enough
+/// ([`roomy_limits`]) it ends in a result, each level an Array, never in a Rust stack overflow.
+/// The run under a memory budget of 1 MiB is the test after it, in a process of its own, so
+/// that each fits under the 60 s of cargo-nextest at the full nesting of the collect mode.
 #[test]
 fn reviver_on_100000_nested_arrays_ends_in_a_result_or_a_budget() {
     on_bounded_stack(
         test_path!("reviver_on_100000_nested_arrays_ends_in_a_result_or_a_budget"),
-        stack_with_room(limits()),
+        nesting_stack(reviver_depth()),
         || {
             assert_eq!(
                 parse_nested(roomy_limits(), reviver_depth(), IDENTITY_REVIVER),
@@ -618,7 +667,7 @@ fn reviver_on_100000_nested_arrays_ends_in_a_result_or_a_budget() {
 fn reviver_on_100000_nested_arrays_under_1_mib_ends_in_the_memory_budget() {
     on_bounded_stack(
         test_path!("reviver_on_100000_nested_arrays_under_1_mib_ends_in_the_memory_budget"),
-        stack_with_room(limits()),
+        nesting_stack(reviver_depth()),
         || {
             let mut small = roomy_limits();
             small.memory_bytes = 1 << 20;

@@ -34,9 +34,14 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Changed
 
-- The ESS pins moved from 0.96.0 to 0.97.3 (`spec/ess-inputs.yaml`, the conformance workspace,
+- The ESS pins moved from 0.96.0 to 0.97.4 (`spec/ess-inputs.yaml`, the conformance workspace,
   the forge's workflow). The suite is byte-identical: 58 scenarios, 41 refusals, 58 passing on
   the interpreter and 14 against the engine, as before.
+- The heaviest tests are lighter, so that none is near the 60 s limit of a test when the
+  machine is loaded: no test of the gate takes over 1.5 CPU seconds alone in the default mode,
+  and none of the lane `slow` over 5 at its full count. The fuzz test of the host interface
+  runs 1,000 sequences at its full count (2,000 before); the gate's count is unchanged. Only
+  test code changed.
 - The gate now fails when a public item of the host interface or a `HOST-<n>` requirement
   changed since the last release and the changelog does not name it under Host interface, in
   the name form of `docs/releasing.md`.
@@ -124,6 +129,9 @@ Every number below comes from the gate, `task check`, on the released commit.
   `HostIntrinsic::ErrorPrototype`) and `WellKnownSymbol` (new, with
   `WellKnownSymbol::ToStringTag`, `WellKnownSymbol::Unscopables`): the host names these
   intrinsics and symbols from a closed list (`HOST-183`, `HOST-184`).
+- `HostIntrinsic::ArrayPrototypeValues`, `HostIntrinsic::ArrayPrototypeEntries`,
+  `HostIntrinsic::ArrayPrototypeKeys`, `HostIntrinsic::ArrayPrototypeForEach` and
+  `WellKnownSymbol::Iterator` (new): what Web IDL gives an iterable interface (`HOST-185`).
 - A host function charges the box of its data and of its steps, and four constants state
   what a host that generates bindings can count on (`HOST-186`, `HOST-187`), each the
   measured rise plus an eighth: `HOST_FUNCTION_LIVE_BYTES` (576, a host function with a name
