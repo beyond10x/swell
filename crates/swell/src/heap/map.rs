@@ -93,7 +93,32 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
     /// bucket and a group of 16 control bytes more, with a power of two of buckets at most
     /// seven eighths full (four buckets below 4 entries, eight below 8).
     pub(crate) fn table_bytes_for(capacity: usize) -> u64 {
-        let buckets = if capacity == 0 {
+        Self::bytes_of_buckets(Self::buckets_for(capacity))
+    }
+
+    /// The entries the table [`KeyedMap::table_bytes_for`] charges for `capacity` holds before
+    /// `std`'s map grows it: seven eighths of its buckets, or its buckets less one below 8.
+    pub(crate) fn full_capacity_for(capacity: usize) -> usize {
+        let buckets = Self::buckets_for(capacity);
+        if buckets < 8 {
+            buckets.saturating_sub(1)
+        } else {
+            buckets / 8 * 7
+        }
+    }
+
+    /// The entries the map takes before its next insertion rehashes its table: `std`'s
+    /// `capacity` less the entries, where a bucket a removal marked as deleted counts against
+    /// the room until the table is rehashed. At 0 the next insertion rehashes the table, in
+    /// place while its entries and the new one fill at most half of what it holds, else into a
+    /// table of twice the buckets.
+    pub(crate) fn spare(&self) -> usize {
+        self.map.capacity().saturating_sub(self.map.len())
+    }
+
+    /// The buckets of the table of a map with room for `capacity` entries.
+    fn buckets_for(capacity: usize) -> usize {
+        if capacity == 0 {
             0
         } else if capacity < 4 {
             4
@@ -101,8 +126,7 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
             8
         } else {
             (capacity.saturating_mul(8) / 7).next_power_of_two()
-        };
-        Self::bytes_of_buckets(buckets)
+        }
     }
 
     /// The bytes of the table the map has now, by the same layout: its room answers its

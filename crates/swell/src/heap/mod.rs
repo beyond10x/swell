@@ -126,6 +126,24 @@ impl Heap {
         .fold(0u64, |sum, bytes| sum.saturating_add(*bytes))
     }
 
+    /// The counting build: the capacity charge, the bytes that stay charged while the agent
+    /// lives: the six arenas' capacity, each slot with its workspace ([`Arena::capacity_bytes`]),
+    /// and the atom table's room ([`Atoms::room_charge`]).
+    #[cfg(test)]
+    pub(crate) fn capacity_charge(&self) -> u64 {
+        [
+            self.strings.capacity_bytes(),
+            self.symbols.capacity_bytes(),
+            self.objects.capacity_bytes(),
+            self.realms.capacity_bytes(),
+            self.environments.capacity_bytes(),
+            self.scripts.capacity_bytes(),
+            self.atoms.room_charge(),
+        ]
+        .iter()
+        .fold(0u64, |sum, bytes| sum.saturating_add(*bytes))
+    }
+
     /// The counting build: the slots of the six arenas, live or free.
     #[cfg(test)]
     pub(crate) fn slot_total(&self) -> usize {

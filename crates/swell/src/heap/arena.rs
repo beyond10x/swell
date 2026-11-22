@@ -368,6 +368,15 @@ impl<T> Arena<T> {
             .saturating_sub(live.saturating_mul(record_slot_bytes::<T>()))
     }
 
+    /// The counting build: the bytes the arena's capacity was charged, each slot with its
+    /// workspace.
+    #[cfg(test)]
+    pub(crate) fn capacity_bytes(&self) -> u64 {
+        u64::try_from(self.capacity)
+            .unwrap_or(u64::MAX)
+            .saturating_mul(slot_bytes::<T>())
+    }
+
     /// Take the collector's workspace out of the arena for a mark phase; moves it, allocates
     /// nothing.
     pub(crate) fn take_workspace(&mut self) -> Workspace {

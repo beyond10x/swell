@@ -103,7 +103,11 @@ fn host_70_agent_stays_alive_after_each_budget() {
 /// reads the objects the fill made, and a second script that makes ten objects and an Array
 /// answers `Normal(10)`: its records take the slots the fill's records left free, at what they
 /// own, and the collection credited the elements of the fill's `a` and its frame. The test prints
-/// `n`, the room `memory_bytes - heap_bytes()` and `live_bytes()` after the collection.
+/// `n`, the room `memory_bytes - heap_bytes()` and `live_bytes()` after the collection. In the
+/// gate with the collector at every safe point, where each safe point walks the whole heap, the
+/// budget is the realm's bytes plus 16 KiB: the fill still ends in `Terminated(MemoryBudget)`,
+/// after fewer objects, and the second script runs as at 64 KiB; the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`) gives 64 KiB there too.
 #[test]
 fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
     let realm_bytes = {
@@ -111,8 +115,9 @@ fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
         let _realm = realm(&mut agent);
         agent.heap_bytes().unwrap()
     };
+    let kib = if in_the_collect_gate() { 16 } else { 64 };
     let mut limits = limits();
-    limits.memory_bytes = realm_bytes + 64 * 1024;
+    limits.memory_bytes = realm_bytes + kib * 1024;
     let budget = limits.memory_bytes;
     let mut agent = agent_with(limits).unwrap();
     let realm = realm(&mut agent);
@@ -144,6 +149,13 @@ fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
         Outcome::Normal("10".to_string())
     );
     assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// Whether this run is the gate's with the collector at every safe point: the feature
+/// `collect-every-safe-point`, without `SWELL_FULL_COUNTS=1` (which the lane `slow` sets).
+fn in_the_collect_gate() -> bool {
+    cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
 }
 
 /// A host function that calls its argument, catches the termination it answers and returns

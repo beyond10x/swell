@@ -572,27 +572,39 @@ mod tests {
         assert_eq!(roots.len(), made.div_ceil(2));
     }
 
+    /// The lane `slow` sets `SWELL_FULL_COUNTS=1` for the full counts of a test.
+    fn full_counts() -> bool {
+        std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    }
+
     /// The collection threshold follows the live reading, taken after every credit of the
-    /// collection. 262,144 ordinary object records stored straight into the heap and kept by
-    /// nothing leave, after two collections, their slots charged with the objects arena's
-    /// capacity: the charged reading U is more than max(L, 1 MiB) + 8 MiB above the live
-    /// reading L. With the budget M = U + max(L, 1 MiB) + 8 MiB, a script that makes 64 MiB
-    /// of garbage Strings, at most two of them live at once, answers `Normal(1)`: a safe point
-    /// collects once max(L, 1 MiB) bytes were charged since the last collection, well inside
-    /// the room M - U. A threshold of the charged reading, max(U, 1 MiB), is larger than that
-    /// room and could only fire after the budget refused a charge. Each garbage String of
-    /// 2^19 units is a 1,024-unit String repeated 512 times: `"x".repeat(1 << 19)` makes the
-    /// same String by 2^19 appends of one unit, and 128 of those ran past the 60 s a test is
-    /// given. With the feature `collect-every-safe-point` every safe point collects, so there
-    /// the test passes whichever reading the threshold takes, and the loop runs 4 times: each
-    /// collection sweeps the 262,144 slots.
+    /// collection. Ordinary object records stored straight into the heap and kept by nothing
+    /// leave, after two collections, their slots charged with the objects arena's capacity:
+    /// the charged reading U is more than max(L, 1 MiB) + 8 MiB above the live reading L. With
+    /// the budget M = U + max(L, 1 MiB) + 8 MiB, a script that makes garbage Strings of 2^19
+    /// units, at most two of them live at once, past the room M - U answers `Normal(1)`: a
+    /// safe point collects once max(L, 1 MiB) bytes were charged since the last collection,
+    /// well inside that room. A threshold of the charged reading, max(U, 1 MiB), is larger
+    /// than the room and could only fire after the budget refused a charge. Each garbage
+    /// String is a 1,024-unit String repeated 512 times: `"x".repeat(1 << 19)` makes the same
+    /// String by 2^19 appends of one unit, and 128 of those ran past the 60 s a test is given.
+    ///
+    /// The lane `slow` (`SWELL_FULL_COUNTS=1`) stores the story's 262,144 records and makes
+    /// 128 Strings, 64 MiB. The gate stores 65,536, whose slots charge more than the room, and
+    /// makes as many Strings as fill the room M - U and two more: past the room's end is the
+    /// first collection the live reading makes and the charged one would put after the
+    /// budget's refusal. With the feature `collect-every-safe-point` every safe point collects,
+    /// so there the test passes whichever reading the threshold takes; the loop runs 4 times
+    /// in the lane `slow` and twice in the gate, each collection sweeping every slot.
     #[test]
     fn the_collection_threshold_follows_the_live_reading() {
+        let full = full_counts();
         let mut limits = test_host::limits();
         limits.memory_bytes = 1 << 30;
         limits.steps_per_entry = u64::MAX;
         let (mut agent, realm) = test_host::agent_with_realm_and(limits);
-        for _ in 0..262_144 {
+        let records = if full { 262_144 } else { 65_536 };
+        for _ in 0..records {
             agent.heap.new_object(ordinary(), 0).unwrap();
         }
         assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
@@ -605,10 +617,11 @@ mod tests {
             charged > room,
             "heap_bytes {charged}, live_bytes {live}: the empty slots are not charged"
         );
-        let rounds = if cfg!(feature = "collect-every-safe-point") {
-            4
-        } else {
-            128
+        let rounds = match (cfg!(feature = "collect-every-safe-point"), full) {
+            (true, true) => 4,
+            (true, false) => 2,
+            (false, true) => 128,
+            (false, false) => room.div_ceil(1 << 19) + 2,
         };
         let source = format!(
             "var s = \"x\".repeat(1 << 10); \
