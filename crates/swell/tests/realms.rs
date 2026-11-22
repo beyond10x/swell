@@ -207,6 +207,7 @@ fn the_setup_closure_gives_the_global_object() {
                     prototype: Prototype::Null,
                     brand: Brand(9),
                     data: None,
+                    error_kind: None,
                 })
                 .unwrap()?;
             made = Some(global);
@@ -250,6 +251,7 @@ fn a_setup_returning_a_stale_or_foreign_global_faults_the_agent() {
                 prototype: Prototype::Null,
                 brand: Brand(1),
                 data: None,
+                error_kind: None,
             })
             .unwrap()
             .unwrap()
@@ -265,6 +267,7 @@ fn a_setup_returning_a_stale_or_foreign_global_faults_the_agent() {
                     prototype: Prototype::Null,
                     brand: Brand(1),
                     data: None,
+                    error_kind: None,
                 })
                 .unwrap()
                 .unwrap()
@@ -278,6 +281,7 @@ fn a_setup_returning_a_stale_or_foreign_global_faults_the_agent() {
                         prototype: Prototype::Null,
                         brand: Brand(2),
                         data: None,
+                        error_kind: None,
                     })
                     .unwrap()?;
                 match case {

@@ -25,6 +25,7 @@ fn in_hook<R>(f: impl FnOnce(&mut HookCx<'_, TestHost>, RealmRef, ObjectRef) -> 
                 prototype: Prototype::Null,
                 brand: Brand(1),
                 data: None,
+                error_kind: None,
             })
             .unwrap()?;
         if let Some(f) = f.take() {

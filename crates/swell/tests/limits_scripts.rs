@@ -228,6 +228,7 @@ fn host_49_setup_closure_and_clause_19_globals() {
                         prototype: Prototype::ObjectPrototypeOf(realm),
                         brand: Brand(round),
                         data: None,
+                        error_kind: None,
                     })
                     .unwrap()?;
                 Ok(GlobalObjects { global, this: None })
@@ -305,6 +306,7 @@ fn host_53_parse_defines_no_global_binding() {
                     prototype: Prototype::Null,
                     brand: Brand(5),
                     data: None,
+                    error_kind: None,
                 })
                 .unwrap()?;
             Ok(GlobalObjects { global, this: None })

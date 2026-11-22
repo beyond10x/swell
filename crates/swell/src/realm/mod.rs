@@ -285,6 +285,7 @@ impl<H: Host> Agent<H> {
             host_defined: host_defined.map(|value| HostObject {
                 brand: Brand(0),
                 data: Some(Box::new(RealmHostDefined(value))),
+                error_kind: None,
             }),
             ..RealmRecord::new()
         };

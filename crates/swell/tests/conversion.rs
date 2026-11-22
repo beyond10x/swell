@@ -259,6 +259,7 @@ fn to_primitive_calls_valueof_and_tostring_in_hint_order() {
                     prototype: Prototype::Null,
                     brand: Brand(1),
                     data: None,
+                    error_kind: None,
                 })
                 .unwrap()
                 .unwrap();

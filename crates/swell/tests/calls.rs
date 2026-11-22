@@ -226,6 +226,7 @@ fn record_call(cx: &mut Cx<'_, TestHost>, call: HostCall<'_>) -> Completion<Valu
                 prototype: Prototype::Null,
                 brand: Brand(3),
                 data: None,
+                error_kind: None,
             })
             .unwrap()?;
         Ok(Value::Object(object))
@@ -312,6 +313,7 @@ fn a_host_function_returning_a_stale_or_foreign_handle_faults_the_agent() {
                         prototype: Prototype::Null,
                         brand: Brand(1),
                         data: None,
+                        error_kind: None,
                     })
                     .unwrap()
                     .unwrap()
@@ -434,6 +436,7 @@ fn cx_methods_check_their_handles_before_the_sticky_termination() {
                         prototype: Prototype::Object(bad),
                         brand: Brand(1),
                         data: None,
+                        error_kind: None,
                     }),
                     Err(e) if e == error
                 ));
@@ -824,6 +827,7 @@ fn host_180_an_interface_object_has_its_parent_as_prototype() {
                 prototype: Prototype::Null,
                 brand: Brand(1),
                 data: None,
+                error_kind: None,
             })
             .unwrap()
             .unwrap()
@@ -911,6 +915,7 @@ fn set_prototype_of_follows_the_internal_method() {
                     prototype: Prototype::Null,
                     brand: Brand(2),
                     data: None,
+                    error_kind: None,
                 })
                 .unwrap()
                 .unwrap();
@@ -969,6 +974,7 @@ fn set_prototype_of_follows_the_internal_method() {
                         prototype,
                         brand: Brand(brand),
                         data: None,
+                        error_kind: None,
                     })
                     .unwrap()
                     .unwrap();
@@ -980,6 +986,7 @@ fn set_prototype_of_follows_the_internal_method() {
                     prototype: Prototype::Null,
                     brand: Brand(9),
                     data: None,
+                    error_kind: None,
                 })
                 .unwrap()
                 .unwrap();

@@ -67,6 +67,7 @@ fn spec(brand: Brand, data: Option<Box<dyn HostData>>) -> HostObjectSpec {
         prototype: Prototype::Null,
         brand,
         data,
+        error_kind: None,
     }
 }
 
@@ -272,6 +273,7 @@ fn a_prototype_is_kept_by_its_object() {
                     prototype: Prototype::Object(prototype),
                     brand: NODE,
                     data: None,
+                    error_kind: None,
                 })
                 .unwrap()
                 .unwrap();
@@ -492,6 +494,7 @@ fn on(prototype: Prototype, brand: Brand) -> HostObjectSpec {
         prototype,
         brand,
         data: None,
+        error_kind: None,
     }
 }
 

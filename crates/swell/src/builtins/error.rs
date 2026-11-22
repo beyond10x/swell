@@ -95,14 +95,15 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// An error object with the [[Prototype]] `prototype` and an own "message" `message`, as
-    /// `new Error(message)` makes one.
+    /// An error object of `kind` with the [[Prototype]] `prototype` and an own "message"
+    /// `message`, as `new kind(message)` makes one: its [[ErrorData]] records `kind`.
     pub(crate) fn create_error(
         &mut self,
+        kind: ErrorKind,
         prototype: ObjectRef,
         message: &str,
     ) -> Completion<ObjectRef> {
-        let error = self.ordinary_object_create(Some(prototype), OrdinaryData::Error)?;
+        let error = self.ordinary_object_create(Some(prototype), OrdinaryData::Error(kind))?;
         let message = self.new_string_str(message)?;
         let key = self.name_key("message")?;
         self.add_property(
@@ -118,7 +119,7 @@ impl<H: Host> Agent<H> {
     pub(crate) fn throw_error(&mut self, kind: ErrorKind, message: &str) -> Abrupt {
         let made = self
             .current_intrinsic(Intrinsic::ErrorPrototype(kind))
-            .and_then(|prototype| self.create_error(prototype, message));
+            .and_then(|prototype| self.create_error(kind, prototype, message));
         match made {
             Ok(error) => Abrupt::Throw(Value::Object(error)),
             Err(abrupt) => abrupt,
@@ -136,10 +137,12 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Value> {
         // 1. If NewTarget is undefined, let newTarget be the active function object.
         let new_target = new_target.unwrap_or(function);
+        // 2. The [[ErrorData]] slot records the kind of the constructor called, whatever
+        // prototype newTarget gives.
         let error = self.ordinary_create_from_constructor(
             new_target,
             Intrinsic::ErrorPrototype(kind),
-            OrdinaryData::Error,
+            OrdinaryData::Error(kind),
         )?;
         let keep = self.keep(Value::Object(error));
         let done = self.error_constructor_steps(error, args);
@@ -183,17 +186,15 @@ impl<H: Host> Agent<H> {
     }
 
     /// `Error.isError ( arg )` (`#sec-error.iserror`). [[ErrorData]] is the data of an ordinary
-    /// object of any realm, so an error of another realm answers true as well.
+    /// object of any realm, so an error of another realm answers true as well, or of a host
+    /// object made with an `error_kind` (`docs/design/host-interface.md`, decision 15).
     pub(crate) fn error_is_error(&mut self, args: &[Value]) -> Completion<Value> {
         // 1. If arg is not an Object, return false.
         let Value::Object(object) = argument(args, 0) else {
             return Ok(Value::Boolean(false));
         };
         // 2. If arg does not have an [[ErrorData]] internal slot, return false. 3. Return true.
-        let has_error_data = matches!(
-            &self.engine_object(object)?.kind,
-            ObjectKind::Ordinary(ordinary) if matches!(ordinary.data, OrdinaryData::Error)
-        );
+        let has_error_data = error_data(&self.engine_object(object)?.kind).is_some();
         Ok(Value::Boolean(has_error_data))
     }
 
@@ -255,6 +256,20 @@ impl<H: Host> Agent<H> {
         message: &str,
     ) -> Completion<ObjectRef> {
         let prototype = self.intrinsic(realm, Intrinsic::ErrorPrototype(kind))?;
-        self.create_error(prototype, message)
+        self.create_error(kind, prototype, message)
+    }
+}
+
+/// The kind the [[ErrorData]] slot of an object of `kind` records, or `None` when it has no such
+/// slot: an ordinary object an Error or NativeError constructor made, or a host object made
+/// with an `error_kind` (`docs/design/host-interface.md`, decision 15).
+pub(crate) fn error_data(kind: &ObjectKind) -> Option<ErrorKind> {
+    match kind {
+        ObjectKind::Ordinary(ordinary) => match ordinary.data {
+            OrdinaryData::Error(kind) => Some(kind),
+            _ => None,
+        },
+        ObjectKind::Host(host) => host.error_kind,
+        _ => None,
     }
 }

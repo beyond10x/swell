@@ -498,6 +498,7 @@ mod tests {
                         prototype: Prototype::Null,
                         brand: Brand(1),
                         data: None,
+                        error_kind: None,
                     })
                     .unwrap()
                     .unwrap();
