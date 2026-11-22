@@ -104,7 +104,23 @@ pub(crate) fn bound_function_create<H: Host>(
     }
 }
 
-/// One link of a chain: its target, its bound `this`, and its bound arguments.
+/// The number of bound arguments of the link `function`, read from its record without a copy.
+fn bound_count<H: Host>(agent: &mut Agent<H>, function: ObjectRef) -> Completion<u64> {
+    let count = match &agent.engine_object(function)?.kind {
+        ObjectKind::BoundFunction(BoundFunction {
+            target: Some(_),
+            arguments,
+            ..
+        }) => Some(arguments.len()),
+        _ => None,
+    };
+    match count {
+        Some(count) => Ok(u64::try_from(count).unwrap_or(u64::MAX)),
+        None => Err(agent.fault()),
+    }
+}
+
+/// One link of a chain: its target, its bound `this`, and a copy of its bound arguments.
 fn link<H: Host>(
     agent: &mut Agent<H>,
     function: ObjectRef,
@@ -115,7 +131,14 @@ fn link<H: Host>(
             this,
             arguments,
             ..
-        }) => Some((*target, *this, arguments.clone())),
+        }) => {
+            #[cfg(test)]
+            ARGUMENTS_CLONED.with(|cloned| {
+                let count = u64::try_from(arguments.len()).unwrap_or(u64::MAX);
+                cloned.set(cloned.get().saturating_add(count));
+            });
+            Some((*target, *this, arguments.clone()))
+        }
         _ => None,
     };
     found.ok_or_else(|| agent.fault())
@@ -133,7 +156,8 @@ fn is_bound<H: Host>(agent: &mut Agent<H>, object: ObjectRef) -> Completion<bool
 /// innermost bound `this`, the arguments "the list-concatenation of boundArgs and argList" of
 /// every link, innermost first, and, for [[Construct]], the new target after each link's step
 /// "If SameValue(F, newTarget) is true, set newTarget to target". A step per link and per bound
-/// argument; no safe point is passed, so the values need no root until the call.
+/// argument, the count read from the link's record and charged before its arguments are
+/// copied; no safe point is passed, so the values need no root until the call.
 fn walk<H: Host>(
     agent: &mut Agent<H>,
     function: ObjectRef,
@@ -143,9 +167,9 @@ fn walk<H: Host>(
     let mut segments: Vec<Vec<Value>> = Vec::new();
     let mut current = function;
     let (target, this) = loop {
-        let (target, this, arguments) = link(agent, current)?;
-        let count = u64::try_from(arguments.len()).unwrap_or(u64::MAX);
+        let count = bound_count(agent, current)?;
         agent.charge_steps(count.saturating_add(1))?;
+        let (target, this, arguments) = link(agent, current)?;
         segments.push(arguments);
         if new_target == Some(current) {
             new_target = Some(target);
@@ -199,4 +223,85 @@ pub(crate) fn construct<H: Host>(
         return Err(agent.fault());
     };
     agent.internal_construct(target, &args, new_target)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The bound arguments the walks copied from their links, in the counting build of the
+    /// tests; a test resets it before it reads it.
+    static ARGUMENTS_CLONED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ARGUMENTS_CLONED;
+    use crate::host::agent::Agent;
+    use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, enter, limits};
+    use crate::object::property::Key;
+    use crate::value::{ObjectRef, Value};
+    use crate::{Outcome, Termination};
+
+    /// `docs/design/engine.md`, "Memory budget" (work is charged before it is done), and
+    /// [[Call]] of a bound function (`#sec-bound-function-exotic-objects-call-thisargument-argumentslist`):
+    /// a function bound with 100,000 arguments through `Function.prototype.bind.apply`, called
+    /// with 10 steps for its entry. The call ends in `Terminated(StepBudget)` before a bound
+    /// argument is copied, since the link's arguments are charged first.
+    #[test]
+    fn bound_arguments_are_charged_before_they_are_copied() {
+        const N: u32 = 100_000;
+        let mut limits = limits();
+        limits.memory_bytes = 1 << 30;
+        let (mut agent, realm) = agent_with_realm_and(limits);
+        let held = agent.heap.bytes();
+        agent.heap.accounting.set_limit(held + (1 << 28));
+        enter(&mut agent, &realm);
+        // The arguments of apply: the bound `this`, then N bound arguments.
+        let list = agent.array_create(0.0, None).unwrap();
+        for i in 0..=N {
+            assert_eq!(
+                agent.create_data_property(list, Key::Index(i), Value::Number(f64::from(i))),
+                Ok(true)
+            );
+        }
+        let global = agent.global_object(&realm).unwrap();
+        let Ok(Value::Object(global)) = agent.heap.roots.get(&global) else {
+            panic!("the global object");
+        };
+        fn property(agent: &mut Agent<NoHooks>, object: ObjectRef, name: &str) -> ObjectRef {
+            let key = agent.name_key(name).unwrap();
+            match agent.get(object, key) {
+                Ok(Value::Object(found)) => found,
+                other => panic!("{name}: {other:?}"),
+            }
+        }
+        let function = property(&mut agent, global, "Function");
+        let prototype = property(&mut agent, function, "prototype");
+        let bind = property(&mut agent, prototype, "bind");
+        let apply = property(&mut agent, prototype, "apply");
+        let [prototype, bind, apply, list, undefined] = [
+            Value::Object(prototype),
+            Value::Object(bind),
+            Value::Object(apply),
+            Value::Object(list),
+            Value::Undefined,
+        ]
+        .map(|value| agent.heap.roots.add(value));
+        // Function.prototype.bind.apply(Function.prototype, list)
+        let bound = match agent.call(&realm, &apply, &bind, &[&prototype, &list]) {
+            Ok(Outcome::Normal(bound)) => bound,
+            other => panic!("bind.apply answered {other:?}"),
+        };
+        agent.limits.steps_per_entry = 10;
+        ARGUMENTS_CLONED.with(|cloned| cloned.set(0));
+        let answer = agent.call(&realm, &bound, &undefined, &[]);
+        assert!(
+            matches!(answer, Ok(Outcome::Terminated(Termination::StepBudget))),
+            "{answer:?}"
+        );
+        assert_eq!(
+            ARGUMENTS_CLONED.with(std::cell::Cell::get),
+            0,
+            "bound arguments copied before the step budget ended the run"
+        );
+    }
 }

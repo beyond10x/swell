@@ -587,6 +587,14 @@ impl<H: Host> Agent<H> {
     /// (decision 3, "Names", item 5); over the budget the run ends in
     /// `Terminated(MemoryBudget)`.
     pub(crate) fn add_binding(&mut self, env: Handle, key: Key, value: Value) -> Completion<()> {
+        // A compaction of the list charges a step per entry it visits, before it runs.
+        let compaction = match self.heap.environments.get(env) {
+            Ok(record) => record.added.bindings.compaction_visits(),
+            Err(_) => return Err(self.fault()),
+        };
+        if compaction > 0 {
+            self.charge_steps(compaction)?;
+        }
         let queue = Rc::clone(&self.credit);
         let hasher = self.heap.hasher;
         let mut room = Room::default();
@@ -608,9 +616,6 @@ impl<H: Host> Agent<H> {
         };
         if made.is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
-        }
-        if room.visited > 0 {
-            self.charge_steps(room.visited)?;
         }
         let pushed = match self.heap.environments.get_mut(env) {
             Ok(record) => record.added.bindings.push(key, value),
@@ -800,7 +805,7 @@ impl<H: Host> Agent<H> {
 #[cfg(test)]
 mod tests {
     use super::{EnvironmentRecord, GlobalBindings, NameReference, RecordNames, SlotNames};
-    use crate::host::hooks::test_host::{agent_with_realm, enter};
+    use crate::host::hooks::test_host::{agent_with_realm, agent_with_realm_and, enter, limits};
     use crate::host::outcome::{Abrupt, Termination};
     use crate::object::property::{Key, SMALL};
     use crate::value::Value;
@@ -881,6 +886,53 @@ mod tests {
         assert_eq!(
             agent.declarative_has_binding(small, Key::Index(99)),
             Ok(false)
+        );
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (work is charged before it is done), and
+    /// CreateMutableBinding of a declarative record
+    /// (`#sec-declarative-environment-records-createmutablebinding-n-d`): a record whose added
+    /// bindings fill their list at 65,536 entries, 32,768 of them deleted, and one step left.
+    /// `add_binding` ends in `Terminated(StepBudget)` before the compaction runs: the list keeps
+    /// its bindings, and the last keeps its position.
+    #[test]
+    fn an_added_binding_charges_its_compaction_before_it_runs() {
+        const N: u32 = 65_536;
+        let mut limits = limits();
+        limits.steps_per_entry = u64::MAX;
+        limits.memory_bytes = 1 << 30;
+        let (mut agent, realm) = agent_with_realm_and(limits);
+        let held = agent.heap.bytes();
+        agent.heap.accounting.set_limit(held + (1 << 28));
+        enter(&mut agent, &realm);
+        let realm_handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let env = agent.new_environment(None, 0, None).unwrap();
+        let reference = NameReference::Declarative(env);
+        for i in 0..N {
+            assert_eq!(agent.add_binding(env, Key::Index(i), number(i)), Ok(()));
+        }
+        for i in (0..N).step_by(2) {
+            assert_eq!(
+                agent.delete_name(reference, realm_handle, Key::Index(i)),
+                Ok(true)
+            );
+        }
+        let last = Key::Index(N - 1);
+        let state = |agent: &mut crate::host::agent::Agent<_>| {
+            let added = &agent.environment(env).unwrap().added;
+            (added.bindings.len(), added.find(last))
+        };
+        assert_eq!(state(&mut agent), (32_768, Some(65_535)));
+        agent.steps = 0;
+        agent.limits.steps_per_entry = 1;
+        assert_eq!(
+            agent.add_binding(env, Key::Index(N), Value::Null),
+            Err(Abrupt::Terminated(Termination::StepBudget))
+        );
+        assert_eq!(
+            state(&mut agent),
+            (32_768, Some(65_535)),
+            "the list was compacted"
         );
     }
 }

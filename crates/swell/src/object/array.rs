@@ -481,16 +481,24 @@ impl<H: Host> Agent<H> {
     /// list, so the stop is the highest non-configurable index of the list at `new_length` or
     /// above, and everything above it goes. A step per element the loop deletes and for the one
     /// that stops it, as the loop of the clause makes, per hole of the dense part it passes,
-    /// and, for a list above the small size, per entry of the list the search visits.
+    /// and, for a list above the small size, per entry of the list the search visits. The last
+    /// is the list's length, charged before the search; the others depend on the stop the
+    /// search finds and are charged after it, before anything is deleted. A list of at most
+    /// [`SMALL`] entries is searched first and charged once.
     fn truncate_elements(&mut self, array: ObjectRef, new_length: u32) -> Completion<Option<u32>> {
+        let list_entries = self.engine_object(array)?.properties.len();
+        if list_entries > SMALL {
+            self.charge_steps(u64::try_from(list_entries).unwrap_or(u64::MAX))?;
+        }
         let record = self.engine_object(array)?;
         let ObjectKind::Array(storage) = &record.kind else {
             return Err(self.fault());
         };
-        let list_entries = record.properties.len();
         let mut stop: Option<u32> = None;
         let mut listed: Vec<u32> = Vec::new();
         for (key, property) in record.properties.iter() {
+            #[cfg(test)]
+            TRUNCATION_VISITS.with(|visits| visits.set(visits.get().saturating_add(1)));
             if let Key::Index(index) = *key
                 && index >= new_length
             {
@@ -504,12 +512,9 @@ impl<H: Host> Agent<H> {
         let floor_position = usize::try_from(floor).unwrap_or(usize::MAX);
         let dense_visited = storage.elements.len().saturating_sub(floor_position);
         listed.retain(|&index| index >= floor);
-        let mut steps = u64::try_from(dense_visited.saturating_add(listed.len()))
+        let steps = u64::try_from(dense_visited.saturating_add(listed.len()))
             .unwrap_or(u64::MAX)
             .saturating_add(u64::from(stop.is_some()));
-        if list_entries > SMALL {
-            steps = steps.saturating_add(u64::try_from(list_entries).unwrap_or(u64::MAX));
-        }
         self.charge_steps(steps)?;
         let elements = &mut self.dense_mut(array)?.elements;
         if elements.len() > floor_position {
@@ -524,12 +529,23 @@ impl<H: Host> Agent<H> {
 }
 
 #[cfg(test)]
+thread_local! {
+    /// The entries of the list the walk of `truncate_elements` visited, in the counting build of
+    /// the tests; a test resets it before it reads it.
+    static TRUNCATION_VISITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 mod tests {
+    use super::TRUNCATION_VISITS;
     use crate::host::agent::Agent;
-    use crate::host::hooks::test_host::{NoHooks, agent_with_realm, enter};
+    use crate::host::hooks::test_host::{
+        NoHooks, agent_with_realm, agent_with_realm_and, enter, limits,
+    };
     use crate::host::outcome::{Abrupt, Termination};
-    use crate::object::property::{Descriptor, Key, Property};
+    use crate::object::property::{Descriptor, Key, Property, SMALL};
     use crate::value::{ObjectRef, Value};
+    use crate::{Outcome, Parsed, Realm, Source};
 
     fn number(i: u32) -> Value {
         Value::Number(f64::from(i))
@@ -813,5 +829,201 @@ mod tests {
         assert_eq!(agent.get(array, length), Ok(Value::Number(2.0)));
         // An index below the length can still be written.
         assert_eq!(agent.set(array, Key::Index(0), Value::Null, true), Ok(true));
+    }
+
+    /// An agent with a realm and no step limit to reach, and a memory budget of what the realm
+    /// holds plus 256 MiB.
+    fn roomy() -> (Agent<NoHooks>, Realm) {
+        let mut limits = limits();
+        limits.steps_per_entry = u64::MAX;
+        limits.memory_bytes = 1 << 30;
+        let (mut agent, realm) = agent_with_realm_and(limits);
+        let held = agent.heap.bytes();
+        agent.heap.accounting.set_limit(held + (1 << 28));
+        (agent, realm)
+    }
+
+    fn length_descriptor(value: u32) -> Descriptor {
+        Descriptor {
+            value: Some(number(value)),
+            ..Descriptor::default()
+        }
+    }
+
+    /// The entries the walks of `truncate_elements` visited since the count was reset.
+    fn truncation_visits() -> u64 {
+        TRUNCATION_VISITS.with(std::cell::Cell::get)
+    }
+
+    /// An Array with the dense elements 0 to 2 and `keys` index keys in its list from 2,000 up,
+    /// beyond the holes a write may open; with `fixed` the lowest of them is non-configurable.
+    fn listed_array(agent: &mut Agent<NoHooks>, keys: u32, fixed: bool) -> ObjectRef {
+        let array = agent.array_create(0.0, None).unwrap();
+        for i in 0..3 {
+            assert_eq!(
+                agent.create_data_property(array, Key::Index(i), number(i)),
+                Ok(true)
+            );
+        }
+        for i in 0..keys {
+            assert_eq!(
+                agent.create_data_property(array, Key::Index(2_000 + i), number(i)),
+                Ok(true)
+            );
+        }
+        if fixed {
+            let fixed = Descriptor {
+                configurable: Some(false),
+                ..Descriptor::default()
+            };
+            assert_eq!(
+                agent.define_own_property(array, Key::Index(2_000), fixed),
+                Ok(true)
+            );
+        }
+        let listed = agent.engine_object(array).unwrap().properties.len();
+        assert_eq!(listed, keys as usize + 1, "the index keys and \"length\"");
+        array
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (work is charged before it is done), and
+    /// ArraySetLength (`#sec-arraysetlength`), step 17: an Array with 100,000 index keys in its
+    /// list above its dense part and 10 steps left. `a.length = 0` ends in
+    /// `Terminated(StepBudget)` before the walk of the list visits an entry, since the list's
+    /// length is charged first.
+    #[test]
+    fn setting_a_length_charges_before_the_walk() {
+        const N: u32 = 100_000;
+        let (mut agent, realm) = roomy();
+        enter(&mut agent, &realm);
+        let array = listed_array(&mut agent, N, false);
+        let length = agent.name_key("length").unwrap();
+        agent.steps = 0;
+        agent.limits.steps_per_entry = 10;
+        TRUNCATION_VISITS.with(|visits| visits.set(0));
+        assert_eq!(
+            agent.define_own_property(array, length, length_descriptor(0)),
+            Err(Abrupt::Terminated(Termination::StepBudget))
+        );
+        assert_eq!(
+            truncation_visits(),
+            0,
+            "entries the walk visited before the step budget ended the run"
+        );
+    }
+
+    /// A guard of ArraySetLength's steps (`#sec-arraysetlength`) on both sides of the small
+    /// size: Arrays with 0, 1, 7, 8 and 9 index keys in their list (with `"length"`, lists of
+    /// 1, 2, 8, 9 and 10 entries), with and without a non-configurable index at the lowest of
+    /// them. The steps of `a.length = 1`, its answer and the entries the walk visited are those
+    /// recorded on the base of the change that charges the list's length before the walk.
+    #[test]
+    fn truncating_a_small_list_charges_as_today() {
+        assert_eq!(SMALL, 8);
+        // (index keys, one non-configurable, steps, answer, entries visited)
+        const RECORDED: [(u32, bool, u64, bool, u64); 9] = [
+            (0, false, 2, true, 1),
+            (1, false, 3, true, 2),
+            (1, true, 1, false, 2),
+            (7, false, 9, true, 8),
+            (7, true, 7, false, 8),
+            (8, false, 19, true, 9),
+            (8, true, 17, false, 9),
+            (9, false, 21, true, 10),
+            (9, true, 19, false, 10),
+        ];
+        let (mut agent, realm) = roomy();
+        enter(&mut agent, &realm);
+        let length = agent.name_key("length").unwrap();
+        let mut seen = Vec::new();
+        for &(keys, fixed, ..) in &RECORDED {
+            let array = listed_array(&mut agent, keys, fixed);
+            TRUNCATION_VISITS.with(|visits| visits.set(0));
+            let before = agent.steps;
+            let answer = agent
+                .define_own_property(array, length, length_descriptor(1))
+                .unwrap();
+            seen.push((
+                keys,
+                fixed,
+                agent.steps - before,
+                answer,
+                truncation_visits(),
+            ));
+        }
+        assert_eq!(seen, RECORDED.to_vec());
+    }
+
+    /// Evaluate `source` in `realm`, which must complete normally, and answer the steps its
+    /// entry spent.
+    fn entry_steps(agent: &mut Agent<NoHooks>, realm: &Realm, source: &str) -> u64 {
+        let Ok(Parsed::Parsed(script)) = agent.parse_script(realm, Source::Utf8(source), None)
+        else {
+            panic!("{source} did not parse");
+        };
+        let outcome = agent.evaluate_script(&script);
+        assert!(
+            matches!(outcome, Ok(Outcome::Normal(_))),
+            "{source}: {outcome:?}"
+        );
+        agent.last_entry_steps().unwrap()
+    }
+
+    /// A guard of the step totals of the three operations that charge before their work: the
+    /// steps of each entry below, after a setup entry that builds Arrays with 0, 8, 9 and 1,000
+    /// index keys in their list, an object whose list compacts at its next addition, a function
+    /// whose eval code adds bindings until their list compacts, and bound functions of 0, 1 and
+    /// 1,000 bound arguments per link through chains of 1 and 3 links. The totals are those
+    /// recorded on the base of the change; `o.x = 1` compacts the list (16 entries visited) and
+    /// `o.y = 1`, the same instructions, does not.
+    #[test]
+    fn step_totals_are_unchanged() {
+        const SETUP: &str = "var a0 = [0, 1, 2]; \
+            var a8 = [0, 1, 2]; a8.length = 1036; a8.fill(7, 1028); \
+            var a9 = [0, 1, 2]; a9.length = 1037; a9.fill(7, 1028); \
+            var a1000 = [0, 1, 2]; a1000.length = 2028; a1000.fill(7, 1028); \
+            var o = {}; \
+            for (var i = 0; i < 16; i++) o['k' + i] = i; \
+            for (i = 0; i < 16; i += 2) delete o['k' + i]; \
+            function f() { \
+              eval('var b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15'); \
+              for (var i = 0; i < 16; i += 2) eval('delete b' + i); \
+              eval('var x = 1'); \
+              return x; \
+            } \
+            function t() { return arguments.length; } \
+            var bind = Function.prototype.bind; \
+            var b0x1 = t.bind(null), b1x1 = t.bind(null, 1); \
+            var b1000x1 = bind.apply(t, new Array(1001)); \
+            var b0x3 = b0x1.bind(null).bind(null), b1x3 = b1x1.bind(null, 1).bind(null, 1); \
+            var b1000x3 = bind.apply(bind.apply(b1000x1, new Array(1001)), new Array(1001)); \
+            0";
+        const RECORDED: [(&str, u64); 13] = [
+            ("a0.length = 1", 9),
+            ("a8.length = 1", 26),
+            ("a9.length = 1", 28),
+            ("a1000.length = 1", 2_010),
+            ("o.x = 1", 24),
+            ("o.y = 1", 8),
+            ("f()", 341),
+            ("b0x1()", 12),
+            ("b1x1()", 14),
+            ("b1000x1()", 2_012),
+            ("b0x3()", 14),
+            ("b1x3()", 20),
+            ("b1000x3()", 6_014),
+        ];
+        let (mut agent, realm) = roomy();
+        entry_steps(&mut agent, &realm, SETUP);
+        let seen: Vec<(&str, u64)> = RECORDED
+            .iter()
+            .map(|&(source, _)| (source, entry_steps(&mut agent, &realm, source)))
+            .collect();
+        assert_eq!(seen, RECORDED.to_vec());
+        let steps = |source: &str| seen.iter().find(|(s, _)| *s == source).map(|(_, n)| *n);
+        assert_eq!(
+            steps("o.x = 1").zip(steps("o.y = 1")).map(|(x, y)| x - y),
+            Some(16)
+        );
     }
 }
