@@ -25,6 +25,7 @@ use crate::builtins::{Method, SymbolData};
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{ErrorKind, Host};
+use crate::object::builtin_function::KeptRoom;
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Descriptor, Key};
 use crate::ops::objects::IntegrityLevel;
@@ -92,23 +93,24 @@ pub(crate) fn prototype_symbol_data<H: Host>() -> [SymbolData<H>; 0] {
 /// then the descriptor's [[Value]], [[Get]] and [[Set]].
 const KEPT_PER_DESCRIPTOR: usize = 4;
 
-/// The bytes ObjectDefineProperties charges for `count` keys: the list of keys, the list of
-/// descriptors read and the room on the kept stack for a key and its values.
+/// The bytes ObjectDefineProperties charges for `count` keys beyond the list of keys, which
+/// [[OwnPropertyKeys]] charged as every list of keys is ([`crate::object::key_list_bytes`]), and the room on
+/// the kept stack ([`Agent::reserve_kept`]): the list of descriptors read.
 fn define_properties_bytes(count: usize) -> u64 {
-    let per_key = size_of::<Key>()
-        .saturating_add(size_of::<(Key, Descriptor)>())
-        .saturating_add(size_of::<Value>().saturating_mul(KEPT_PER_DESCRIPTOR + 1));
+    let per_key = size_of::<(Key, Descriptor)>();
     u64::try_from(count.saturating_mul(per_key)).unwrap_or(u64::MAX)
 }
 
 /// What ObjectDefineProperties holds while its loop runs: ToObject of the properties argument,
-/// its own keys, the bytes charged for its lists and the mark of the kept stack below the
-/// object and the keys.
+/// its own keys, the bytes charged for its lists (the list of keys, taken over from
+/// [[OwnPropertyKeys]], and that of the descriptors), the mark of the kept stack below the
+/// object and the keys, and the room its growth for them took.
 struct HeldKeys {
     properties: ObjectRef,
     keys: Vec<Key>,
     bytes: u64,
     mark: usize,
+    room: KeptRoom,
 }
 
 /// `Some` of the object `value` is, `None` for null, and `Err(())` for any other value: the
@@ -229,46 +231,51 @@ impl<H: Host> Agent<H> {
 
     /// Steps 1 and 2 of ObjectDefineProperties: ToObject of `properties` and its own keys,
     /// both kept, since the object may be new and a getter may delete a key from it while its
-    /// atom is still to be defined. The list of keys, the list of descriptors the loop reads
-    /// and the room on the kept stack for each key and its values are charged to the memory
-    /// budget until [`Agent::release_define_properties_keys`].
+    /// atom is still to be defined. The list of keys ([[OwnPropertyKeys]] charged it), the list
+    /// of descriptors the loop reads and the room on the kept stack for each key and its values
+    /// are charged to the memory budget until [`Agent::release_define_properties_keys`].
     fn hold_define_properties_keys(&mut self, properties: Value) -> Completion<HeldKeys> {
         // 1. Set properties to ? ToObject(properties).
         let properties = self.to_object(properties)?;
+        let room = self.kept_room();
         let mark = self.keep(Value::Object(properties));
-        // 2. Let keys be ? properties.[[OwnPropertyKeys]](): a step per key; no code runs.
-        let keys = match self.own_property_keys(properties) {
-            Ok(keys) => keys,
+        // 2. Let keys be ? properties.[[OwnPropertyKeys]](): a step per key, the list charged
+        // before it exists; no code runs.
+        let list = match self.own_property_keys(properties) {
+            Ok(list) => list,
             Err(abrupt) => {
-                self.release(mark);
+                self.end_kept_room(mark, &room);
                 return Err(abrupt);
             }
         };
-        let bytes = define_properties_bytes(keys.len());
-        if self.heap.accounting.charge(bytes).is_err() {
-            self.release(mark);
+        let mut held = HeldKeys {
+            properties,
+            bytes: list.bytes,
+            keys: list.keys,
+            mark,
+            room,
+        };
+        let descriptors = define_properties_bytes(held.keys.len());
+        if self.heap.accounting.charge(descriptors).is_err() {
+            self.release_define_properties_keys(&held);
             return Err(self.terminate(Termination::MemoryBudget));
         }
-        let room = keys.len().saturating_mul(KEPT_PER_DESCRIPTOR + 1);
-        if self.kept.try_reserve(room).is_err() {
-            self.heap.accounting.credit(bytes);
-            self.release(mark);
-            return Err(self.terminate(Termination::MemoryBudget));
+        held.bytes = held.bytes.saturating_add(descriptors);
+        let slots = held.keys.len().saturating_mul(KEPT_PER_DESCRIPTOR + 1);
+        if let Err(abrupt) = self.reserve_kept(&mut held.room, slots) {
+            self.release_define_properties_keys(&held);
+            return Err(abrupt);
         }
-        for &key in &keys {
+        for &key in &held.keys {
             self.keep_key(key);
         }
-        Ok(HeldKeys {
-            properties,
-            keys,
-            bytes,
-            mark,
-        })
+        Ok(held)
     }
 
-    /// Release what [`Agent::hold_define_properties_keys`] kept and credit what it charged.
+    /// Release what [`Agent::hold_define_properties_keys`] kept, give the kept stack back the
+    /// room it had and credit what it charged.
     fn release_define_properties_keys(&mut self, held: &HeldKeys) {
-        self.release(held.mark);
+        self.end_kept_room(held.mark, &held.room);
         self.heap.accounting.credit(held.bytes);
     }
 

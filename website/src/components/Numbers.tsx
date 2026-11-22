@@ -1,6 +1,6 @@
 import type {ReactNode} from 'react';
 import CodeBlock from '@theme/CodeBlock';
-import {at, count, deliverySlices, slice, status} from '../data/status';
+import {at, count, deliveredWithException, deliverySlices, harnessException, passWords, slice, status} from '../data/status';
 
 /**
  * The pages' numbers, each read from data/status.json (written by `task site-data`). A page
@@ -24,6 +24,24 @@ export function S({n, f}: {n: number; f: 'cases' | 'runs' | 'run' | 'passed' | '
 /** Whether a delivery slice is delivered, in words and a glyph. */
 export function Delivered({n}: {n: number}): ReactNode {
   return slice(n).delivered ? <><span aria-hidden="true">● </span>delivered</> : <><span aria-hidden="true">○ </span>not yet</>;
+}
+
+/**
+ * One sentence per delivered slice with a failed case: its count, and why the case does not pass,
+ * from data/status.ts's harnessException. Nothing when every delivered slice passes every case.
+ */
+export function HarnessException(): ReactNode {
+  if (!deliveredWithException.length) return null;
+  return (
+    <>
+      {deliveredWithException.map((s) => (
+        <p key={s.slice} className="sw-exception">
+          Slice {Number(s.slice)}, <code>{s.name}</code>: {passWords(s)}; the {s.failed === 1 ? 'case that does not pass' : `${count(s.failed)} cases that do not pass`}{' '}
+          {s.failed === 1 ? harnessException.text : harnessException.plural} (<a href={harnessException.href}>{harnessException.link}</a>).
+        </p>
+      ))}
+    </>
+  );
 }
 
 /** Host requirements still pending for a slice, or 0. */

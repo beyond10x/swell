@@ -13,10 +13,13 @@ report and does not work around it.
   minutes and held 54 jobs of other sessions behind it. Nothing is measured alone on this
   machine: measure in an ordinary job and report CPU seconds and the load beside wall seconds.
 - A job in the pool that runs longer than 10 minutes is killed (a rule of the organization
-  since 2026-11-22; the wait in the queue does not count; the kill shows as `cancelled`). A
-  job that needs longer names its time with a leading `timeout`, at most one hour:
-  `slot timeout 1800 task test262`. A killed job is not started again unchanged: split it,
-  shorten it, or name its time. A script that builds and tests nothing stays off the pool.
+  since 2026-11-22; the wait in the queue does not count; the daemon ends it). A job that
+  needs longer names its time, at most one hour: `slot --timeout 30m task test262`, or
+  `SLOT_TIMEOUT=30m cargo nextest run ...` for a cargo call the shim wraps. A wrapped
+  `timeout` extends nothing since slot 0.22.0: `slot timeout 1800 ...` ends at 10 minutes
+  with exit 124, so where a story still writes that form, run `slot --timeout 30m ...`. A
+  job ended at its limit is not started again unchanged: split it, shorten it, or name its
+  time. A script that builds and tests nothing stays off the pool.
 - No third-party crate, as a dependency or a development dependency. A `Cargo.toml` holds path
   dependencies on crates of this repository and nothing else. The one exception is a separate
   workspace of tooling that the brief names.

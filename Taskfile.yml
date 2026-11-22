@@ -43,6 +43,14 @@ includes:
     taskfile: taskfiles/nextest.yml
     flatten: true
     optional: true
+  forge:
+    taskfile: taskfiles/forge.yml
+    flatten: true
+    optional: true
+  site:
+    taskfile: taskfiles/site.yml
+    flatten: true
+    optional: true
 
 tasks:
   check:
@@ -64,6 +72,7 @@ tasks:
       - task: python-check
       - task: forbid-unsafe-check
       - task: lock-check
+      - task: forge-check
       - task: nextest-check
       - task: test262-fetch
       - task: unicode-data-check
@@ -71,6 +80,7 @@ tasks:
       - task: validate
       - task: conform
       - task: host-requirements-check
+      - task: site-data-check
       - task: build
       - task: clippy
       - task: gate-time-start
@@ -129,7 +139,8 @@ tasks:
       than its subject runs a part of it in the gate and the whole when SWELL_FULL_COUNTS is 1
       (story gate-test-steps-within-budget, point 3; each such test says how its gate count
       reaches what the full count does). This task finds those test binaries itself, every
-      crates/<crate>/tests/<name>.rs that reads SWELL_FULL_COUNTS, and runs them through
+      crates/<crate>/tests/<name>.rs that reads SWELL_FULL_COUNTS, and the library's test binary
+      of swell when a file under crates/swell/src reads it, and runs them through
       cargo-nextest with SWELL_FULL_COUNTS=1, then those of swell again with the feature
       collect-every-safe-point, so that a test that takes the variable up runs here with nothing
       to edit. Prints "slow-tests: <b> test binaries: <p> passed, <f> failed, <i> ignored" and
@@ -150,6 +161,7 @@ tasks:
           all="$all${all:+ | }binary_id($pkg::$stem)"
           if [ "$pkg" = swell ]; then swell="$swell${swell:+ | }binary_id($pkg::$stem)"; fi
         done
+        if grep -rqs SWELL_FULL_COUNTS crates/swell/src; then all="$all${all:+ | }binary_id(swell)"; swell="$swell${swell:+ | }binary_id(swell)"; fi
         if [ -z "$all" ]; then echo "slow-tests: no test reads SWELL_FULL_COUNTS"; exit 1; fi
         echo "$all" > .out/slow-tests.filter
         echo "$swell" > .out/slow-tests-collect.filter
@@ -272,8 +284,9 @@ tasks:
       exported GATE_ROOT, TEST262_CACHE, SPEC_REFUSALS_MAX and the like changes what a check
       reads. The gate's variables carry a prefix so that this does not happen by accident; this
       task prints each of them that has a value from the command line, the environment or a
-      task file's own defaults, as "gate: variables in effect: NAME=value ...". The SPEC_ ones
-      always show, with their defaults; any other name on the line was set by the caller. It never
+      task file's own defaults, as "gate: variables in effect: NAME=value ...". The SPEC_ ones and
+      the SITE_DATA_ ones (taskfiles/site.yml, included flat) always show, with their defaults;
+      any other name on the line was set by the caller. It never
       fails. A new gate variable is added to GATE_VARIABLES in the change that adds it.
     vars:
       GATE_VARIABLES: >-
@@ -286,6 +299,8 @@ tasks:
         TEST262_DESIGN TEST262_FEATURES TEST262_SECTIONS TEST262_EXPECTED TEST262_DIGEST TEST262_OUT TEST262_WORKERS TEST262_RUN
         TEST262_MOVES TEST262_LATER_PARTS
         GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_SELFTEST_DIR GATE_SELFTEST_JOBS
+        GATE_RUNNER_ENV
+        SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES
     silent: true
     cmds:
       - |

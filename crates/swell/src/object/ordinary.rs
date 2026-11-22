@@ -10,8 +10,8 @@
 //! object it passes (decision 2): no proxy exists before slice 9, so every [[Get]],
 //! [[HasProperty]] and [[Set]] of the chain is the ordinary one.
 
-use super::ObjectKind;
 use super::property::{Descriptor, Key, Property, Slot};
+use super::{KeyList, ObjectKind};
 use crate::heap::collect::Mark;
 use crate::host::Host;
 use crate::host::agent::Agent;
@@ -382,13 +382,14 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// OrdinaryOwnPropertyKeys (`#sec-ordinaryownpropertykeys`): a step per key, and a step per
-    /// comparison when the indices were not added ascending and are sorted.
-    pub(crate) fn ordinary_own_property_keys(&mut self, object: ObjectRef) -> Completion<Vec<Key>> {
-        let (keys, comparisons) = self.engine_object(object)?.properties.keys();
-        let steps = u64::try_from(keys.len()).unwrap_or(u64::MAX);
-        self.charge_steps(steps.saturating_add(comparisons))?;
-        Ok(keys)
+    /// OrdinaryOwnPropertyKeys (`#sec-ordinaryownpropertykeys`): a step per key, counted from
+    /// the length of the property list before anything is allocated, then the list's bytes
+    /// before it is reserved; index keys not added ascending are sorted, n steps before each
+    /// pass (`object/mod.rs`).
+    pub(crate) fn ordinary_own_property_keys(&mut self, object: ObjectRef) -> Completion<KeyList> {
+        let count = self.engine_object(object)?.properties.len();
+        self.charge_steps(u64::try_from(count).unwrap_or(u64::MAX))?;
+        self.own_key_list(count, |agent, keys| agent.push_own_keys(object, 0, keys))
     }
 
     /// OrdinaryObjectCreate (`#sec-ordinaryobjectcreate`) of an ordinary object with `data`.
@@ -479,7 +480,7 @@ mod tests {
                 })
                 .collect()
         };
-        let own = agent.own_property_keys(object).unwrap();
+        let own = agent.own_property_keys(object).unwrap().keys;
         assert_eq!(
             names(&mut agent, own),
             ["0", "1", "b", "a", "4294967295", "-1", "#"]

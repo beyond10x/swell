@@ -1342,17 +1342,17 @@ first pass, not that it will; the runner gives the real numbers.
 |---|---|---|---|
 | 1 | `harness` | 31 | 62 |
 | 2 | `language-core` | 4,259 | 7,543 |
-| 3 | `builtins-core` | 7,635 | 15,074 |
-| 4 | `numbers-and-dates` | 1,323 | 2,606 |
-| 5 | `regexp` | 2,254 | 4,503 |
-| 6 | `bindings-and-iteration` | 4,204 | 7,952 |
-| 7 | `generators` | 1,473 | 2,817 |
-| 8 | `classes` | 6,273 | 12,453 |
-| 9 | `collections-proxy-reflect` | 1,752 | 3,475 |
-| 10 | `promises-and-async` | 6,647 | 12,979 |
+| 3 | `builtins-core` | 7,011 | 13,829 |
+| 4 | `numbers-and-dates` | 1,516 | 2,992 |
+| 5 | `regexp` | 2,394 | 4,783 |
+| 6 | `bindings-and-iteration` | 4,436 | 8,413 |
+| 7 | `generators` | 1,476 | 2,823 |
+| 8 | `classes` | 6,292 | 12,491 |
+| 9 | `collections-proxy-reflect` | 1,768 | 3,507 |
+| 10 | `promises-and-async` | 6,651 | 12,987 |
 | 11 | `modules` | 1,281 | 1,833 |
-| 12 | `bigint` | 317 | 634 |
-| 13 | `binary-data` | 3,044 | 6,044 |
+| 12 | `bigint` | 320 | 640 |
+| 13 | `binary-data` | 3,058 | 6,072 |
 | 14 | `shared-memory` | 598 | 1,192 |
 | 15 | `iterator-helpers-and-resources` | 1,094 | 2,170 |
 | 16 | `weak-references` | 82 | 164 |
@@ -1380,6 +1380,15 @@ over this block and the inventory's `meta.tsv`, counting slice `02`): `02 4259 7
 moved case goes to a slice from 3 to 11, so slices 1 to 19 still hold 44,931 cases and
 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
 
+Slice 3 had 7,635 cases and 15,074 runs by its rules (`dir test/built-ins/ 3`, the lines of
+slice 2's close that gave it 78 cases, and `feature exponentiation 4`, which took 24). 7,011
+cases and 13,829 runs are what slice 3 counts: 624 cases that need a later slice move by the
+lines of the paragraph "Slice 3's cases that need a later slice". Measured on 2026-11-22 with
+the same check (`awk -f slices.awk` over this block and the inventory's `meta.tsv`, counting
+slice `03`): `03 7011 13829`, the slice line of `slot task test262` on the code of the slice.
+Every moved case goes to a slice from 4 to 13, so slices 1 to 19 still hold 44,931 cases and
+85,794 runs and the 22 lines still sum to 53,801 and 103,360.
+
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
 1. `harness`: lexer, parser and compile step for the ES5 grammar with strict mode (the runner
@@ -1396,13 +1405,19 @@ What each slice builds, and the directories it raises most (paths under `test/`,
    does not take, and what remains of `Function`: `Function.prototype.apply` and
    `Function.prototype.toString` (with HostHasSourceTextAvailable, HOST-120); the generator
    and async kinds of CreateDynamicFunction come with slices 7 and 10. `Object` 3,160, `Array`
-   2,665, `String` 780, `Function` 417.
+   2,665, `String` 780, `Function` 417. It leaves to slice 6 `Array.from`, `Object.fromEntries`,
+   `Object.groupBy` and the Array iterator methods `keys`, `values` and `entries`, which need
+   iterators, and to slice 5 case mapping and comparison outside ASCII and `normalize`, which
+   need the Unicode tables ("A part before its slice").
 4. `numbers-and-dates`: `swell-num`, what slice 2 does not take of `Number`, `Math`, `Date`,
    `parseInt`, `parseFloat`. `Date` 492, `Number` 313, `Math` 284.
-5. `regexp`: `swell-regexp`, `swell-unicode`, `RegExp` and the string methods that use it.
-   `RegExp` 1,626, `String` 252, `literals` 240.
+5. `regexp`: `swell-regexp`, `swell-unicode`, `RegExp` and the string methods that use it;
+   from slice 3, case mapping (`toLowerCase`, `toUpperCase`, `toLocaleLowerCase`,
+   `toLocaleUpperCase`) and `localeCompare` outside ASCII, and `normalize`. `RegExp` 1,626,
+   `String` 252, `literals` 240.
 6. `bindings-and-iteration`: `let`, `const`, destructuring, spread, arrows, templates,
-   `Symbol`, iterators, `for-of`. `statements/for-of` 584, `expressions/assignment` 335,
+   `Symbol`, iterators, `for-of`; from slice 3, `Array.from`, `Object.fromEntries`,
+   `Object.groupBy` and the Array iterator methods `keys`, `values` and `entries`. `statements/for-of` 584, `expressions/assignment` 335,
    `expressions/arrow-function` 310.
 7. `generators`: frames saved in objects. `expressions/object` 303, `expressions/generators`
    288, `statements/generators` 266.
@@ -1636,6 +1651,79 @@ changes from 2 to 3. The groups, by target slice and kind (lines of the list):
 
 The counts sum to the 1,032 lines of the list. None of these cases passed on `main` before the
 move, and none fails first on a part of slice 2 (the story's acceptance, run on its base).
+
+**Slice 3's cases that need a later slice.** Measured at the close of slice 3 (2026-11-22,
+`story:slice-03-conformance-close`), with the run lines of the runner on the code of the slice
+(`slot task test262`): 616 of the 7,635 cases of slice 3 fail. 615 of them fail on a part of a
+later slice and move; the one left, `test/built-ins/String/prop-desc.js`, fails on no part of
+a later slice and stays in slice 3, counted failed. It calls `verifyProperty(this, "String",
+...)`. In the pinned `harness/propertyHelper.js`, line 171 (`delete obj[name];` in
+`isConfigurable`) removes the global `String`; line 182 then calls
+`_isCanonicalNumericIndexString(name)`, whose line 156 (`return String(n) === value;`) reads
+the global `String` that is gone, and the run ends in a `ReferenceError`. The harness keeps
+`Array.isArray` and `Math.max` as captured primordials, not `String`. So the case fails in the
+pinned harness before the engine's answer is judged; that it fails in another engine as well is
+inferred from the harness source, and no other engine was run. A delivered slice passes every
+one of its cases, with this one exception, ruled on 2026-11-22 by the session that decides for
+the operator: slice 3 is delivered with 7,010 of its 7,011 cases. The case is measured again at
+the next move of the test262 pin, and the exception is removed when it passes; a second case of
+this kind reopens the question of a rule line for a defect of the harness. With the 615 move the 9
+cases of the seven directories below that pass, 624 in all, each a line of
+`conformance/test262/moves.tsv` with `from` 3, kind `part` and a token of
+`conformance/test262/later-parts.tsv` as its evidence, held by `test262-moves-check`. The
+block gains 552 lines `dir <path> <slice>`: 11 for a directory whose cases of slice 3 all move
+to one slice and 541 for a single file. Seven of the 11 are the directories whose method this
+section gives to a later slice, moved whole as ruled on 2026-11-21 by the session that decides
+for the operator: `test/built-ins/Array/from/`, `Array/prototype/keys/`, `values/`,
+`entries/`, `Object/fromEntries/` and `Object/groupBy/` to slice 6 (iterators) and
+`String/prototype/normalize/` to slice 5 (the Unicode tables), 79 cases; one case of
+`Array/from/`, `items-is-arraybuffer`, has its own line to slice 13. The 9 of the 79 that pass
+(`Array/from/items-is-null-throws`, `mapfn-is-not-callable-typeerror` and
+`source-object-length-set-elem-prop-err`, `Array/prototype/entries/return-abrupt-from-this`,
+`keys/return-abrupt-from-this`, `values/this-val-non-obj-coercible`,
+`Object/groupBy/invalid-callback`, `String/prototype/normalize/this-is-null-throws` and
+`this-is-undefined-throws`) pass only because calling the missing method throws the
+`TypeError` they expect. Each has as its evidence a token of its own, the call it expects the
+`TypeError` from, whose item in `later-parts.tsv` ends in `; passed at the move`, and the
+expected file counts the 9 as passed in slices 5 and 6, so that a regression of one of them
+fails the gate there. The other four directories are `Object/getOwnPropertySymbols/` (2 cases;
+the method is not built before slice 6, where `Symbol` is) and the one-case directories
+`Function/prototype/arguments/`, `caller/` and `caller-arguments/` (`const`). One case passed
+at the start of the slice and ends on a counted refusal now:
+`test/built-ins/Function/prototype/apply/this-not-callable.js`, which evaluates the regular
+expression literal `/re/` once `Function.prototype.apply` exists; it moves to slice 5 with that
+literal as its evidence. The groups, by target slice (lines of the list, kind `part`):
+
+- to slice 4, 193: `Date` 137; a member of `Math` other than `max` 44 (`Math.pow` 15, the
+  constants read through `Object.getOwnPropertyDescriptor(Math, ...)` 8, `Math.PI` 4, the
+  other functions 17); `parseInt` 7 and `parseFloat` 1; the `Number.prototype` methods
+  `toFixed`, `toExponential`, `toPrecision` and `toLocaleString` 4;
+- to slice 5, 140: `RegExp` 98; a regular expression literal 13 (`/./` 7, `/re/` 3, `(/x/)` 2,
+  `/a/g` 1); `normalize` 11 (the directory, 2 of them marked); case mapping outside ASCII 12
+  (the special casings, the final sigma and the supplementary plane of `toLowerCase`,
+  `toUpperCase`, `toLocaleLowerCase` and `toLocaleUpperCase`) and comparison outside ASCII 2
+  (`localeCompare/15.5.4.9_3` and `15.5.4.9_CE`), which the methods refuse until slice 5;
+  `match`, `replace`, `search` and `split` 4;
+- to slice 6, 232: later syntax 144 (arrow functions 67, `const` 36, 7 of them only in
+  `nativeFunctionMatcher.js`, `let` 32, templates 7, a
+  computed property name 1, a default parameter 1); `Array.from` 25 (3 marked); the Array
+  iterator methods 18 (3 marked); `Object.groupBy` 13 (1 marked); `Object.fromEntries` 11;
+  `Symbol` 18; `Object.getOwnPropertySymbols` 3 (its directory and
+  `JSON/rawJSON/returns-expected-object`);
+- to slice 7, 3: generator functions;
+- to slice 8, 19: `class` 18; a private name 1 (`Function/S15.3_A2_T2`, `var #x` in the body
+  given to `Function`, refused naming slice 8);
+- to slice 9, 16: `Proxy` 8, `Reflect` 4, `Map`, `Set`, `WeakMap` and `WeakSet` 1 each;
+- to slice 10, 4: async functions 3, `Promise` 1;
+- to slice 12, 3: `BigInt` 2, a BigInt literal 1;
+- to slice 13, 14: `ArrayBuffer` and the typed arrays.
+
+The counts sum to the 624 lines this change adds to the list. Outside the seven directories,
+every moved case fails on the code of the slice, and the one that passed at the start of the
+slice ends on a counted refusal (the story's acceptance). Seven passing cases of later slices
+stopped passing during the slice and are not moved, since they are in their slice already:
+five of slice 6 that call a `String` method with `Symbol()` and two of slice 18 that compare
+`trimLeft` with `trimStart` and `trimRight` with `trimEnd`.
 
 ```swell-slices
 dir test/harness/ 1
@@ -2625,6 +2713,558 @@ dir test/language/white-space/mongolian-vowel-separator-eval.js 5
 dir test/language/white-space/mongolian-vowel-separator.js 5
 dir test/language/ 2
 dir test/built-ins/ 3
+dir test/built-ins/Array/from/ 6
+dir test/built-ins/Array/from/items-is-arraybuffer.js 13
+dir test/built-ins/Array/isArray/15.4.3.2-1-10.js 5
+dir test/built-ins/Array/isArray/15.4.3.2-1-9.js 4
+dir test/built-ins/Array/of/return-a-new-array-object.js 4
+dir test/built-ins/Array/prototype/at/index-argument-tointeger.js 6
+dir test/built-ins/Array/prototype/at/index-non-numeric-argument-tointeger-invalid.js 6
+dir test/built-ins/Array/prototype/at/index-non-numeric-argument-tointeger.js 6
+dir test/built-ins/Array/prototype/at/return-abrupt-from-this.js 6
+dir test/built-ins/Array/prototype/at/returns-item-relative-index.js 6
+dir test/built-ins/Array/prototype/at/returns-item.js 6
+dir test/built-ins/Array/prototype/at/returns-undefined-for-holes-in-sparse-arrays.js 6
+dir test/built-ins/Array/prototype/at/returns-undefined-for-out-of-range-index.js 6
+dir test/built-ins/Array/prototype/concat/Array.prototype.concat_non-array.js 8
+dir test/built-ins/Array/prototype/entries/ 6
+dir test/built-ins/Array/prototype/every/15.4.4.16-1-11.js 4
+dir test/built-ins/Array/prototype/every/15.4.4.16-1-12.js 5
+dir test/built-ins/Array/prototype/every/15.4.4.16-2-18.js 4
+dir test/built-ins/Array/prototype/every/15.4.4.16-5-15.js 4
+dir test/built-ins/Array/prototype/every/15.4.4.16-5-16.js 5
+dir test/built-ins/Array/prototype/every/15.4.4.16-7-c-iii-21.js 4
+dir test/built-ins/Array/prototype/every/15.4.4.16-7-c-iii-22.js 5
+dir test/built-ins/Array/prototype/every/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/filter/15.4.4.20-1-11.js 4
+dir test/built-ins/Array/prototype/filter/15.4.4.20-1-12.js 5
+dir test/built-ins/Array/prototype/filter/15.4.4.20-5-15.js 4
+dir test/built-ins/Array/prototype/filter/15.4.4.20-5-16.js 5
+dir test/built-ins/Array/prototype/filter/15.4.4.20-9-c-iii-22.js 4
+dir test/built-ins/Array/prototype/filter/15.4.4.20-9-c-iii-23.js 5
+dir test/built-ins/Array/prototype/filter/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/find/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/find/predicate-is-not-callable-throws.js 5
+dir test/built-ins/Array/prototype/findIndex/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/findIndex/predicate-is-not-callable-throws.js 5
+dir test/built-ins/Array/prototype/findLast/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/findLast/predicate-is-not-callable-throws.js 5
+dir test/built-ins/Array/prototype/findLastIndex/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/findLastIndex/predicate-is-not-callable-throws.js 5
+dir test/built-ins/Array/prototype/flat/proxy-access-count.js 9
+dir test/built-ins/Array/prototype/flat/symbol-object-create-null-depth-throws.js 6
+dir test/built-ins/Array/prototype/flatMap/array-like-objects.js 6
+dir test/built-ins/Array/prototype/flatMap/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/flatMap/mapperfunction-throws.js 6
+dir test/built-ins/Array/prototype/flatMap/proxy-access-count.js 9
+dir test/built-ins/Array/prototype/forEach/15.4.4.18-1-11.js 4
+dir test/built-ins/Array/prototype/forEach/15.4.4.18-1-12.js 5
+dir test/built-ins/Array/prototype/forEach/15.4.4.18-5-15.js 4
+dir test/built-ins/Array/prototype/forEach/15.4.4.18-5-16.js 5
+dir test/built-ins/Array/prototype/forEach/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/indexOf/15.4.4.14-1-11.js 4
+dir test/built-ins/Array/prototype/indexOf/15.4.4.14-1-12.js 5
+dir test/built-ins/Array/prototype/indexOf/15.4.4.14-3-7.js 4
+dir test/built-ins/Array/prototype/indexOf/15.4.4.14-5-12.js 4
+dir test/built-ins/Array/prototype/indexOf/15.4.4.14-5-16.js 4
+dir test/built-ins/Array/prototype/join/S15.4.4.5_A2_T4.js 6
+dir test/built-ins/Array/prototype/keys/ 6
+dir test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-1-11.js 4
+dir test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-1-12.js 5
+dir test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-3-7.js 4
+dir test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-5-12.js 4
+dir test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-5-16.js 4
+dir test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-5-21.js 5
+dir test/built-ins/Array/prototype/map/15.4.4.19-1-11.js 4
+dir test/built-ins/Array/prototype/map/15.4.4.19-1-12.js 5
+dir test/built-ins/Array/prototype/map/15.4.4.19-2-18.js 4
+dir test/built-ins/Array/prototype/map/15.4.4.19-5-15.js 4
+dir test/built-ins/Array/prototype/map/15.4.4.19-5-16.js 5
+dir test/built-ins/Array/prototype/map/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/map/create-non-array-invalid-len.js 4
+dir test/built-ins/Array/prototype/pop/throws-with-string-receiver.js 6
+dir test/built-ins/Array/prototype/push/throws-with-string-receiver.js 6
+dir test/built-ins/Array/prototype/reduce/15.4.4.21-1-11.js 4
+dir test/built-ins/Array/prototype/reduce/15.4.4.21-1-12.js 5
+dir test/built-ins/Array/prototype/reduce/15.4.4.21-9-c-ii-31.js 4
+dir test/built-ins/Array/prototype/reduce/15.4.4.21-9-c-ii-32.js 5
+dir test/built-ins/Array/prototype/reduce/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/reduceRight/15.4.4.22-1-11.js 4
+dir test/built-ins/Array/prototype/reduceRight/15.4.4.22-1-12.js 5
+dir test/built-ins/Array/prototype/reduceRight/15.4.4.22-9-c-ii-31.js 4
+dir test/built-ins/Array/prototype/reduceRight/15.4.4.22-9-c-ii-32.js 5
+dir test/built-ins/Array/prototype/reduceRight/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/reverse/array-has-one-entry.js 6
+dir test/built-ins/Array/prototype/shift/throws-when-this-value-length-is-writable-false.js 6
+dir test/built-ins/Array/prototype/slice/S15.4.4.10_A3_T1.js 6
+dir test/built-ins/Array/prototype/slice/S15.4.4.10_A3_T2.js 6
+dir test/built-ins/Array/prototype/slice/create-non-array-invalid-len.js 4
+dir test/built-ins/Array/prototype/some/15.4.4.17-1-11.js 4
+dir test/built-ins/Array/prototype/some/15.4.4.17-1-12.js 5
+dir test/built-ins/Array/prototype/some/15.4.4.17-2-18.js 4
+dir test/built-ins/Array/prototype/some/15.4.4.17-5-15.js 4
+dir test/built-ins/Array/prototype/some/15.4.4.17-5-16.js 5
+dir test/built-ins/Array/prototype/some/15.4.4.17-7-c-iii-21.js 4
+dir test/built-ins/Array/prototype/some/15.4.4.17-7-c-iii-22.js 5
+dir test/built-ins/Array/prototype/some/call-with-boolean.js 6
+dir test/built-ins/Array/prototype/sort/S15.4.4.11_A5_T1.js 6
+dir test/built-ins/Array/prototype/sort/precise-comparefn-throws.js 6
+dir test/built-ins/Array/prototype/sort/precise-getter-appends-elements.js 6
+dir test/built-ins/Array/prototype/sort/precise-getter-decreases-length.js 6
+dir test/built-ins/Array/prototype/sort/precise-getter-deletes-predecessor.js 6
+dir test/built-ins/Array/prototype/sort/precise-getter-deletes-successor.js 6
+dir test/built-ins/Array/prototype/sort/precise-getter-increases-length.js 6
+dir test/built-ins/Array/prototype/sort/precise-getter-pops-elements.js 6
+dir test/built-ins/Array/prototype/sort/precise-getter-sets-predecessor.js 6
+dir test/built-ins/Array/prototype/sort/precise-getter-sets-successor.js 6
+dir test/built-ins/Array/prototype/sort/precise-prototype-accessors.js 6
+dir test/built-ins/Array/prototype/sort/precise-prototype-element.js 6
+dir test/built-ins/Array/prototype/sort/precise-setter-appends-elements.js 6
+dir test/built-ins/Array/prototype/sort/precise-setter-decreases-length.js 6
+dir test/built-ins/Array/prototype/sort/precise-setter-deletes-predecessor.js 6
+dir test/built-ins/Array/prototype/sort/precise-setter-deletes-successor.js 6
+dir test/built-ins/Array/prototype/sort/precise-setter-increases-length.js 6
+dir test/built-ins/Array/prototype/sort/precise-setter-pops-elements.js 6
+dir test/built-ins/Array/prototype/sort/precise-setter-sets-predecessor.js 6
+dir test/built-ins/Array/prototype/sort/precise-setter-sets-successor.js 6
+dir test/built-ins/Array/prototype/sort/stability-11-elements.js 6
+dir test/built-ins/Array/prototype/sort/stability-2048-elements.js 6
+dir test/built-ins/Array/prototype/sort/stability-5-elements.js 6
+dir test/built-ins/Array/prototype/sort/stability-513-elements.js 6
+dir test/built-ins/Array/prototype/splice/create-non-array-invalid-len.js 4
+dir test/built-ins/Array/prototype/toLocaleString/invoke-element-tolocalestring.js 6
+dir test/built-ins/Array/prototype/toReversed/ignores-species.js 6
+dir test/built-ins/Array/prototype/toReversed/length-tolength.js 6
+dir test/built-ins/Array/prototype/toReversed/this-value-nullish.js 6
+dir test/built-ins/Array/prototype/toSorted/comparefn-called-after-get-elements.js 6
+dir test/built-ins/Array/prototype/toSorted/comparefn-not-a-function.js 12
+dir test/built-ins/Array/prototype/toSorted/comparefn-stop-after-error.js 6
+dir test/built-ins/Array/prototype/toSorted/ignores-species.js 6
+dir test/built-ins/Array/prototype/toSorted/length-tolength.js 6
+dir test/built-ins/Array/prototype/toSorted/this-value-nullish.js 6
+dir test/built-ins/Array/prototype/toSpliced/ignores-species.js 6
+dir test/built-ins/Array/prototype/toSpliced/length-tolength.js 6
+dir test/built-ins/Array/prototype/toSpliced/start-and-deleteCount-missing.js 6
+dir test/built-ins/Array/prototype/toSpliced/start-and-deleteCount-undefineds.js 6
+dir test/built-ins/Array/prototype/toSpliced/this-value-nullish.js 6
+dir test/built-ins/Array/prototype/toString/S15.4.4.2_A1_T4.js 6
+dir test/built-ins/Array/prototype/unshift/throws-with-string-receiver.js 6
+dir test/built-ins/Array/prototype/values/ 6
+dir test/built-ins/Array/prototype/with/ignores-species.js 6
+dir test/built-ins/Array/prototype/with/length-tolength.js 6
+dir test/built-ins/Array/prototype/with/this-value-boolean.js 6
+dir test/built-ins/Array/prototype/with/this-value-nullish.js 6
+dir test/built-ins/Boolean/S9.2_A6_T1.js 4
+dir test/built-ins/Boolean/prototype/S15.6.3.1_A3.js 6
+dir test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T1.js 6
+dir test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T2.js 6
+dir test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T3.js 6
+dir test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T4.js 6
+dir test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T5.js 6
+dir test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T1.js 6
+dir test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T2.js 6
+dir test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T3.js 6
+dir test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T4.js 6
+dir test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T5.js 6
+dir test/built-ins/Error/cause_abrupt.js 9
+dir test/built-ins/Error/isError/non-error-objects-other-realm.js 5
+dir test/built-ins/Error/isError/non-error-objects.js 5
+dir test/built-ins/Error/prototype/S15.11.4_A3.js 6
+dir test/built-ins/Error/prototype/S15.11.4_A4.js 6
+dir test/built-ins/Error/prototype/toString/invalid-receiver.js 6
+dir test/built-ins/Function/S15.3_A2_T2.js 8
+dir test/built-ins/Function/prototype/apply/argarray-not-object-realm.js 6
+dir test/built-ins/Function/prototype/apply/argarray-not-object.js 6
+dir test/built-ins/Function/prototype/apply/this-not-callable-realm.js 5
+dir test/built-ins/Function/prototype/apply/this-not-callable.js 5
+dir test/built-ins/Function/prototype/arguments/ 6
+dir test/built-ins/Function/prototype/bind/15.3.4.5-2-9.js 4
+dir test/built-ins/Function/prototype/bind/S15.3.4.5_A16.js 5
+dir test/built-ins/Function/prototype/bind/S15.3.4.5_A5.js 4
+dir test/built-ins/Function/prototype/call/S15.3.4.4_A16.js 5
+dir test/built-ins/Function/prototype/caller-arguments/ 6
+dir test/built-ins/Function/prototype/caller/ 6
+dir test/built-ins/Function/prototype/toString/Function.js 6
+dir test/built-ins/Function/prototype/toString/arrow-function.js 6
+dir test/built-ins/Function/prototype/toString/bound-function.js 6
+dir test/built-ins/Function/prototype/toString/class-declaration-complex-heritage.js 8
+dir test/built-ins/Function/prototype/toString/class-declaration-explicit-ctor.js 8
+dir test/built-ins/Function/prototype/toString/class-declaration-implicit-ctor.js 8
+dir test/built-ins/Function/prototype/toString/class-expression-explicit-ctor.js 8
+dir test/built-ins/Function/prototype/toString/class-expression-implicit-ctor.js 8
+dir test/built-ins/Function/prototype/toString/function-declaration-non-simple-parameter-list.js 6
+dir test/built-ins/Function/prototype/toString/function-declaration.js 6
+dir test/built-ins/Function/prototype/toString/function-expression.js 6
+dir test/built-ins/Function/prototype/toString/generator-function-declaration.js 7
+dir test/built-ins/Function/prototype/toString/generator-function-expression.js 7
+dir test/built-ins/Function/prototype/toString/generator-method.js 6
+dir test/built-ins/Function/prototype/toString/getter-class-expression-static.js 8
+dir test/built-ins/Function/prototype/toString/getter-class-expression.js 8
+dir test/built-ins/Function/prototype/toString/getter-class-statement-static.js 8
+dir test/built-ins/Function/prototype/toString/getter-class-statement.js 8
+dir test/built-ins/Function/prototype/toString/getter-object.js 6
+dir test/built-ins/Function/prototype/toString/line-terminator-normalisation-CR-LF.js 6
+dir test/built-ins/Function/prototype/toString/line-terminator-normalisation-CR.js 6
+dir test/built-ins/Function/prototype/toString/line-terminator-normalisation-LF.js 6
+dir test/built-ins/Function/prototype/toString/method-class-expression-static.js 8
+dir test/built-ins/Function/prototype/toString/method-class-expression.js 8
+dir test/built-ins/Function/prototype/toString/method-class-statement-static.js 8
+dir test/built-ins/Function/prototype/toString/method-class-statement.js 8
+dir test/built-ins/Function/prototype/toString/method-computed-property-name.js 6
+dir test/built-ins/Function/prototype/toString/method-object.js 6
+dir test/built-ins/Function/prototype/toString/setter-class-expression-static.js 8
+dir test/built-ins/Function/prototype/toString/setter-class-expression.js 8
+dir test/built-ins/Function/prototype/toString/setter-class-statement-static.js 8
+dir test/built-ins/Function/prototype/toString/setter-class-statement.js 8
+dir test/built-ins/Function/prototype/toString/setter-object.js 6
+dir test/built-ins/Function/prototype/toString/symbol-named-builtins.js 6
+dir test/built-ins/Function/prototype/toString/unicode.js 6
+dir test/built-ins/JSON/isRawJSON/basic.js 6
+dir test/built-ins/JSON/parse/reviver-call-args-after-forward-modification.js 6
+dir test/built-ins/JSON/parse/reviver-context-source-array-literal.js 6
+dir test/built-ins/JSON/parse/reviver-context-source-object-literal.js 6
+dir test/built-ins/JSON/parse/reviver-context-source-primitive-literal.js 6
+dir test/built-ins/JSON/parse/reviver-forward-modifies-object.js 6
+dir test/built-ins/JSON/rawJSON/illegal-empty-and-start-end-chars.js 6
+dir test/built-ins/JSON/rawJSON/invalid-JSON-text.js 6
+dir test/built-ins/JSON/rawJSON/returns-expected-object.js 6
+dir test/built-ins/JSON/stringify/value-string-escape-ascii.js 6
+dir test/built-ins/JSON/stringify/value-tojson-not-function.js 5
+dir test/built-ins/Object/S15.2.2.1_A2_T5.js 4
+dir test/built-ins/Object/assign/assignment-to-readonly-property-of-target-must-throw-a-typeerror-exception.js 6
+dir test/built-ins/Object/assign/strings-and-symbol-order.js 6
+dir test/built-ins/Object/assign/target-is-sealed-existing-accessor-property.js 6
+dir test/built-ins/Object/assign/target-is-sealed-existing-data-property.js 6
+dir test/built-ins/Object/create/15.2.3.5-4-11.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-118.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-119.js 5
+dir test/built-ins/Object/create/15.2.3.5-4-12.js 5
+dir test/built-ins/Object/create/15.2.3.5-4-143.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-144.js 5
+dir test/built-ins/Object/create/15.2.3.5-4-171.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-172.js 5
+dir test/built-ins/Object/create/15.2.3.5-4-197.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-198.js 5
+dir test/built-ins/Object/create/15.2.3.5-4-222.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-223.js 5
+dir test/built-ins/Object/create/15.2.3.5-4-249.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-250.js 5
+dir test/built-ins/Object/create/15.2.3.5-4-285.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-286.js 5
+dir test/built-ins/Object/create/15.2.3.5-4-297.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-34.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-35.js 5
+dir test/built-ins/Object/create/15.2.3.5-4-65.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-66.js 5
+dir test/built-ins/Object/create/15.2.3.5-4-90.js 4
+dir test/built-ins/Object/create/15.2.3.5-4-91.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-2-12.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-2-13.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-a-13.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-a-14.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-103.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-104.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-131.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-132.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-157.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-158.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-182.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-183.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-210.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-211.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-245.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-246.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-25.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-26.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-50.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-51.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-78.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-5-b-79.js 5
+dir test/built-ins/Object/defineProperties/15.2.3.7-6-a-18.js 4
+dir test/built-ins/Object/defineProperties/15.2.3.7-6-a-19.js 5
+dir test/built-ins/Object/defineProperties/property-description-must-be-an-object-not-false.js 6
+dir test/built-ins/Object/defineProperties/property-description-must-be-an-object-not-null.js 6
+dir test/built-ins/Object/defineProperties/property-description-must-be-an-object-not-number.js 6
+dir test/built-ins/Object/defineProperties/property-description-must-be-an-object-not-string.js 6
+dir test/built-ins/Object/defineProperties/property-description-must-be-an-object-not-true.js 6
+dir test/built-ins/Object/defineProperties/property-description-must-be-an-object-not-undefined.js 6
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-117.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-118.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-145-1.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-145.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-146-1.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-146.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-171-1.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-171.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-172-1.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-172.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-196.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-197.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-224-1.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-224.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-225-1.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-225.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-254-1.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-254.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-255-1.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-255.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-39-1.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-39.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-40-1.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-40.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-64.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-65.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-92-1.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-92.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-93-1.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-3-93.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-39.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-392.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-393.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-40.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-408.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-409.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-413.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-415.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-584.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-585.js 5
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-589.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-591.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-622.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-623.js 4
+dir test/built-ins/Object/defineProperty/15.2.3.6-4-624.js 4
+dir test/built-ins/Object/defineProperty/property-description-must-be-an-object-not-false.js 6
+dir test/built-ins/Object/defineProperty/property-description-must-be-an-object-not-null.js 6
+dir test/built-ins/Object/defineProperty/property-description-must-be-an-object-not-number.js 6
+dir test/built-ins/Object/defineProperty/property-description-must-be-an-object-not-string.js 6
+dir test/built-ins/Object/defineProperty/property-description-must-be-an-object-not-true.js 6
+dir test/built-ins/Object/defineProperty/property-description-must-be-an-object-not-undefined.js 6
+dir test/built-ins/Object/defineProperty/redefine-length-with-various-values-and-configurable-true.js 6
+dir test/built-ins/Object/entries/order-after-define-property.js 6
+dir test/built-ins/Object/entries/primitive-numbers.js 4
+dir test/built-ins/Object/freeze/15.2.3.9-2-d-6.js 4
+dir test/built-ins/Object/freeze/15.2.3.9-2-d-7.js 5
+dir test/built-ins/Object/freeze/throws-when-false.js 9
+dir test/built-ins/Object/fromEntries/ 6
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-100.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-101.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-102.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-103.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-104.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-105.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-107.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-108.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-109.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-110.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-111.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-112.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-113.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-114.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-115.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-116.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-117.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-118.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-120.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-121.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-122.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-123.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-124.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-125.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-126.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-127.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-128.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-129.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-130.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-131.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-132.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-133.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-134.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-135.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-136.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-138.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-139.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-140.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-141.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-142.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-143.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-144.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-145.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-146.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-147.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-148.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-149.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-150.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-151.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-152.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-153.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-154.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-156.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-157.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-158.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-159.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-160.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-161.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-162.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-163.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-165.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-166.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-167.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-202.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-203.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-204.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-205.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-206.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-207.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-208.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-209.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-210.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-211.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-212.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-213.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-214.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-215.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-5.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-6.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-68.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-69.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-70.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-72.js 5
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-90.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-91.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-92.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-93.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-96.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-97.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-98.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-99.js 4
+dir test/built-ins/Object/getOwnPropertyDescriptors/primitive-numbers.js 4
+dir test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-1.js 5
+dir test/built-ins/Object/getOwnPropertySymbols/ 6
+dir test/built-ins/Object/getPrototypeOf/15.2.3.2-2-10.js 5
+dir test/built-ins/Object/getPrototypeOf/15.2.3.2-2-25.js 4
+dir test/built-ins/Object/getPrototypeOf/15.2.3.2-2-26.js 5
+dir test/built-ins/Object/getPrototypeOf/15.2.3.2-2-9.js 4
+dir test/built-ins/Object/groupBy/ 6
+dir test/built-ins/Object/internals/DefineOwnProperty/consistent-value-function-arguments.js 9
+dir test/built-ins/Object/internals/DefineOwnProperty/consistent-value-function-caller.js 9
+dir test/built-ins/Object/internals/DefineOwnProperty/consistent-value-regexp-dollar1.js 9
+dir test/built-ins/Object/internals/DefineOwnProperty/consistent-writable-regexp-dollar1.js 9
+dir test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reassign.js 6
+dir test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reconfigure.js 6
+dir test/built-ins/Object/isExtensible/15.2.3.13-2-10.js 5
+dir test/built-ins/Object/isExtensible/15.2.3.13-2-19.js 4
+dir test/built-ins/Object/isExtensible/15.2.3.13-2-20.js 5
+dir test/built-ins/Object/isExtensible/15.2.3.13-2-9.js 4
+dir test/built-ins/Object/isFrozen/15.2.3.12-3-15.js 4
+dir test/built-ins/Object/isFrozen/15.2.3.12-3-16.js 4
+dir test/built-ins/Object/isFrozen/15.2.3.12-3-17.js 5
+dir test/built-ins/Object/isFrozen/15.2.3.12-3-18.js 5
+dir test/built-ins/Object/isSealed/15.2.3.11-4-15.js 4
+dir test/built-ins/Object/isSealed/15.2.3.11-4-16.js 4
+dir test/built-ins/Object/isSealed/15.2.3.11-4-17.js 5
+dir test/built-ins/Object/isSealed/15.2.3.11-4-18.js 5
+dir test/built-ins/Object/keys/15.2.3.14-6-5.js 4
+dir test/built-ins/Object/preventExtensions/15.2.3.10-3-18.js 4
+dir test/built-ins/Object/preventExtensions/15.2.3.10-3-19.js 5
+dir test/built-ins/Object/preventExtensions/15.2.3.10-3-8.js 4
+dir test/built-ins/Object/preventExtensions/15.2.3.10-3-9.js 5
+dir test/built-ins/Object/preventExtensions/throws-when-false.js 9
+dir test/built-ins/Object/prototype/toString/Object.prototype.toString.call-date.js 4
+dir test/built-ins/Object/prototype/toString/Object.prototype.toString.call-regexp.js 5
+dir test/built-ins/Object/prototype/valueOf/S15.2.4.4_A15.js 6
+dir test/built-ins/Object/seal/object-seal-o-is-a-date-object.js 4
+dir test/built-ins/Object/seal/object-seal-o-is-a-reg-exp-object.js 5
+dir test/built-ins/Object/seal/object-seal-p-is-own-property-of-a-date-object-that-uses-object-s-get-own-property.js 4
+dir test/built-ins/Object/seal/object-seal-p-is-own-property-of-a-reg-exp-object-that-uses-object-s-get-own-property.js 5
+dir test/built-ins/Object/seal/seal-arraybuffer.js 13
+dir test/built-ins/Object/seal/seal-arrowfunction.js 6
+dir test/built-ins/Object/seal/seal-asyncarrowfunction.js 10
+dir test/built-ins/Object/seal/seal-asyncfunction.js 10
+dir test/built-ins/Object/seal/seal-asyncgeneratorfunction.js 10
+dir test/built-ins/Object/seal/seal-bigint64array.js 13
+dir test/built-ins/Object/seal/seal-biguint64array.js 13
+dir test/built-ins/Object/seal/seal-dataview.js 13
+dir test/built-ins/Object/seal/seal-date.js 4
+dir test/built-ins/Object/seal/seal-float32array.js 13
+dir test/built-ins/Object/seal/seal-float64array.js 13
+dir test/built-ins/Object/seal/seal-generatorfunction.js 7
+dir test/built-ins/Object/seal/seal-int16array.js 13
+dir test/built-ins/Object/seal/seal-int32array.js 13
+dir test/built-ins/Object/seal/seal-int8array.js 13
+dir test/built-ins/Object/seal/seal-map.js 9
+dir test/built-ins/Object/seal/seal-promise.js 10
+dir test/built-ins/Object/seal/seal-proxy.js 9
+dir test/built-ins/Object/seal/seal-regexp.js 5
+dir test/built-ins/Object/seal/seal-set.js 9
+dir test/built-ins/Object/seal/seal-symbol.js 6
+dir test/built-ins/Object/seal/seal-uint16array.js 13
+dir test/built-ins/Object/seal/seal-uint32array.js 13
+dir test/built-ins/Object/seal/seal-uint8array.js 13
+dir test/built-ins/Object/seal/seal-uint8clampedarray.js 13
+dir test/built-ins/Object/seal/seal-weakmap.js 9
+dir test/built-ins/Object/seal/seal-weakset.js 9
+dir test/built-ins/Object/seal/throws-when-false.js 9
+dir test/built-ins/Object/values/order-after-define-property.js 9
+dir test/built-ins/Object/values/primitive-numbers.js 4
+dir test/built-ins/String/15.5.5.5.2-3-5.js 4
+dir test/built-ins/String/15.5.5.5.2-3-8.js 4
+dir test/built-ins/String/prototype/at/index-argument-tointeger.js 6
+dir test/built-ins/String/prototype/at/index-non-numeric-argument-tointeger-invalid.js 6
+dir test/built-ins/String/prototype/at/index-non-numeric-argument-tointeger.js 6
+dir test/built-ins/String/prototype/at/return-abrupt-from-this.js 6
+dir test/built-ins/String/prototype/at/returns-code-unit.js 6
+dir test/built-ins/String/prototype/at/returns-item-relative-index.js 6
+dir test/built-ins/String/prototype/at/returns-item.js 6
+dir test/built-ins/String/prototype/at/returns-undefined-for-out-of-range-index.js 6
+dir test/built-ins/String/prototype/endsWith/searchstring-is-regexp-throws.js 5
+dir test/built-ins/String/prototype/includes/searchstring-is-regexp-throws.js 5
+dir test/built-ins/String/prototype/isWellFormed/to-string-primitive.js 12
+dir test/built-ins/String/prototype/localeCompare/15.5.4.9_3.js 5
+dir test/built-ins/String/prototype/localeCompare/15.5.4.9_CE.js 5
+dir test/built-ins/String/prototype/normalize/ 5
+dir test/built-ins/String/prototype/startsWith/searchstring-is-regexp-throws.js 5
+dir test/built-ins/String/prototype/substring/S15.5.4.15_A3_T9.js 4
+dir test/built-ins/String/prototype/toLocaleLowerCase/Final_Sigma_U180E.js 5
+dir test/built-ins/String/prototype/toLocaleLowerCase/S15.5.4.17_A1_T14.js 5
+dir test/built-ins/String/prototype/toLocaleLowerCase/special_casing.js 5
+dir test/built-ins/String/prototype/toLocaleLowerCase/special_casing_conditional.js 5
+dir test/built-ins/String/prototype/toLocaleLowerCase/supplementary_plane.js 5
+dir test/built-ins/String/prototype/toLocaleUpperCase/S15.5.4.19_A1_T14.js 5
+dir test/built-ins/String/prototype/toLocaleUpperCase/special_casing.js 5
+dir test/built-ins/String/prototype/toLocaleUpperCase/supplementary_plane.js 5
+dir test/built-ins/String/prototype/toLowerCase/Final_Sigma_U180E.js 5
+dir test/built-ins/String/prototype/toLowerCase/S15.5.4.16_A1_T14.js 5
+dir test/built-ins/String/prototype/toLowerCase/special_casing.js 5
+dir test/built-ins/String/prototype/toLowerCase/special_casing_conditional.js 5
+dir test/built-ins/String/prototype/toLowerCase/supplementary_plane.js 5
+dir test/built-ins/String/prototype/toString/non-generic-realm.js 6
+dir test/built-ins/String/prototype/toString/non-generic.js 6
+dir test/built-ins/String/prototype/toUpperCase/S15.5.4.18_A1_T14.js 5
+dir test/built-ins/String/prototype/toUpperCase/special_casing.js 5
+dir test/built-ins/String/prototype/toUpperCase/supplementary_plane.js 5
+dir test/built-ins/String/prototype/toWellFormed/to-string-primitive.js 12
+dir test/built-ins/String/prototype/trim/15.5.4.20-2-49.js 5
+dir test/built-ins/String/prototype/trimEnd/this-value-symbol-typeerror.js 6
+dir test/built-ins/String/prototype/trimStart/this-value-symbol-typeerror.js 6
+dir test/built-ins/String/prototype/valueOf/non-generic-realm.js 6
+dir test/built-ins/String/prototype/valueOf/non-generic.js 6
+dir test/built-ins/String/raw/return-the-string-value-from-template.js 6
+dir test/built-ins/String/raw/special-characters.js 6
+dir test/built-ins/String/raw/template-substitutions-are-appended-on-same-index.js 6
+dir test/built-ins/String/raw/zero-literal-segments.js 6
+dir test/built-ins/ThrowTypeError/unique-per-realm-non-simple.js 6
+dir test/built-ins/global/S10.2.3_A1.1_T2.js 4
+dir test/built-ins/global/S10.2.3_A1.1_T3.js 5
+dir test/built-ins/global/S10.2.3_A1.2_T2.js 4
+dir test/built-ins/global/S10.2.3_A1.2_T3.js 5
+dir test/built-ins/global/S10.2.3_A1.3_T2.js 4
+dir test/built-ins/global/S10.2.3_A1.3_T3.js 5
+dir test/built-ins/global/global-object.js 5
+dir test/built-ins/isFinite/S15.1.2.5_A2.7.js 6
+dir test/built-ins/isFinite/return-true-for-valid-finite-numbers.js 4
+dir test/built-ins/isNaN/S15.1.2.4_A2.7.js 6
+dir test/built-ins/isNaN/return-false-not-nan-numbers.js 4
+dir test/built-ins/isNaN/return-true-nan.js 4
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
@@ -3089,17 +3729,17 @@ Its output on this document:
 ```
 01 31 62
 02 4259 7543
-03 7635 15074
-04 1323 2606
-05 2254 4503
-06 4204 7952
-07 1473 2817
-08 6273 12453
-09 1752 3475
-10 6647 12979
+03 7011 13829
+04 1516 2992
+05 2394 4783
+06 4436 8413
+07 1476 2823
+08 6292 12491
+09 1768 3507
+10 6651 12987
 11 1281 1833
-12 317 634
-13 3044 6044
+12 320 640
+13 3058 6072
 14 598 1192
 15 1094 2170
 16 82 164

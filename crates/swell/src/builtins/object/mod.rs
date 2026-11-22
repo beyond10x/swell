@@ -24,11 +24,11 @@ pub(crate) mod integrity;
 
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
-use crate::host::{ErrorKind, Host};
-use crate::object::ObjectKind;
+use crate::host::{ErrorKind, Host, Termination};
 use crate::object::builtin_function::BuiltinId;
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Descriptor, Key, Property, Slot};
+use crate::object::{KeyList, ObjectKind};
 use crate::realm::intrinsics::{Intrinsic, Making};
 use crate::value::{ObjectRef, Value};
 
@@ -366,26 +366,57 @@ impl<H: Host> Agent<H> {
     /// of GetOwnPropertyKeys(O, string).
     fn object_get_own_property_names(&mut self, args: &[Value]) -> Completion<Value> {
         let keys = self.get_own_property_keys(argument(args, 0), false)?;
-        let mut names = Vec::with_capacity(keys.len());
-        for key in keys {
-            names.push(self.key_value(key)?);
+        let names = self.array_of_names(&keys);
+        self.drop_key_list(keys);
+        names
+    }
+
+    /// CreateArrayFromList of the Strings of `keys`: the list of the Strings is charged to the
+    /// memory budget before it is reserved and credited when the array is made.
+    fn array_of_names(&mut self, keys: &[Key]) -> Completion<Value> {
+        let bytes =
+            u64::try_from(keys.len().saturating_mul(size_of::<Value>())).unwrap_or(u64::MAX);
+        self.charge_bytes(bytes)?;
+        let mut names = Vec::new();
+        if names.try_reserve_exact(keys.len()).is_err() {
+            self.heap.accounting.credit(bytes);
+            return Err(self.terminate(Termination::MemoryBudget));
         }
-        Ok(Value::Object(self.create_array_from_list(&names)?))
+        let mut made = Ok(());
+        for &key in keys {
+            match self.key_value(key) {
+                Ok(name) => names.push(name),
+                Err(abrupt) => {
+                    made = Err(abrupt);
+                    break;
+                }
+            }
+        }
+        let array = made.and_then(|()| self.create_array_from_list(&names));
+        self.heap.accounting.credit(bytes);
+        Ok(Value::Object(array?))
     }
 
     /// GetOwnPropertyKeys (`#sec-getownpropertykeys`): the String keys of ToObject(O), or its
-    /// Symbol keys when `symbols`. [[OwnPropertyKeys]] charges a step per key.
+    /// Symbol keys when `symbols`. [[OwnPropertyKeys]] charges a step per key and its list;
+    /// the list answered is charged before it is reserved, and the caller credits it when it
+    /// drops it. The list of own keys is credited here.
     pub(crate) fn get_own_property_keys(
         &mut self,
         value: Value,
         symbols: bool,
-    ) -> Completion<Vec<Key>> {
+    ) -> Completion<KeyList> {
         let object = self.to_object(value)?;
-        let keys = self.own_property_keys(object)?;
-        Ok(keys
-            .into_iter()
-            .filter(|key| matches!(key, Key::Symbol(_)) == symbols)
-            .collect())
+        let own_keys = self.own_property_keys(object)?;
+        let wanted = |key: &Key| matches!(key, Key::Symbol(_)) == symbols;
+        let count = own_keys.iter().filter(|key| wanted(key)).count();
+        let answer = self.new_key_list(count).map(|mut list| {
+            list.keys
+                .extend(own_keys.iter().copied().filter(|key| wanted(key)));
+            list
+        });
+        self.drop_key_list(own_keys);
+        answer
     }
 
     /// CreateArrayFromList (`#sec-createarrayfromlist`): an Array of the current realm. A step

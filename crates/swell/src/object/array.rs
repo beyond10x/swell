@@ -20,9 +20,9 @@
 //! budget before it is made and credited when the Array is freed (`Grown`, `object/mod.rs`); a
 //! walk over it (the keys, a truncation) charges a step per position it visits, holes included.
 
-use super::ObjectKind;
 use super::ordinary::applied_property;
 use super::property::{Descriptor, Key, Property, SMALL, Slot};
+use super::{KeyList, ListedIndices, ObjectKind};
 use crate::heap::collect::Mark;
 use crate::host::ErrorKind;
 use crate::host::agent::Agent;
@@ -34,6 +34,32 @@ use crate::value::{ObjectRef, Value};
 /// The holes a write may open past the end of the dense part: an index further beyond it lives
 /// in the list, so that `a[4294967294] = 1` allocates no storage for the indices below it.
 pub(crate) const MAX_HOLES: usize = 1024;
+
+/// Push to `keys` the indices of the dense `elements` that hold an element and the index keys
+/// `listed` answers ascending, merged ascending.
+fn merge_indices(
+    elements: &[Option<Value>],
+    listed: impl Iterator<Item = u32>,
+    keys: &mut Vec<Key>,
+) {
+    let mut sparse = listed.peekable();
+    for (position, slot) in elements.iter().enumerate() {
+        if slot.is_none() {
+            continue;
+        }
+        let Ok(index) = u32::try_from(position) else {
+            break;
+        };
+        while let Some(&other) = sparse.peek()
+            && other < index
+        {
+            keys.push(Key::Index(other));
+            sparse.next();
+        }
+        keys.push(Key::Index(index));
+    }
+    keys.extend(sparse.map(Key::Index));
+}
 
 /// The slots of an Array: its dense elements.
 pub(crate) struct Array {
@@ -346,40 +372,55 @@ impl<H: Host> Agent<H> {
 
     /// [[OwnPropertyKeys]] of an Array: OrdinaryOwnPropertyKeys
     /// (`#sec-ordinaryownpropertykeys`) over both storages, the dense indices and those of the
-    /// list merged ascending. A step per key, per hole the walk passes and per comparison of a
-    /// sort of the list's indices.
-    pub(crate) fn array_own_property_keys(&mut self, array: ObjectRef) -> Completion<Vec<Key>> {
+    /// list merged ascending. A step per position of the dense storage, holes included, and
+    /// per key of the list, counted from their lengths before anything is allocated; then the
+    /// list's bytes, a key per element and per key of the list, before it is reserved. Index
+    /// keys of the list not added ascending are sorted, n steps before each pass
+    /// (`object/mod.rs`).
+    pub(crate) fn array_own_property_keys(&mut self, array: ObjectRef) -> Completion<KeyList> {
         let record = self.engine_object(array)?;
         let ObjectKind::Array(storage) = &record.kind else {
             return Err(self.fault());
         };
-        let (listed, comparisons) = record.properties.keys();
-        let holes = storage
-            .elements
-            .iter()
-            .filter(|slot| slot.is_none())
-            .count();
-        let mut keys = Vec::new();
-        let mut sparse = listed.iter().copied().peekable();
-        for (position, slot) in storage.elements.iter().enumerate() {
-            if slot.is_none() {
-                continue;
+        let (positions, listed) = (storage.elements.len(), record.properties.len());
+        self.charge_steps(u64::try_from(positions.saturating_add(listed)).unwrap_or(u64::MAX))?;
+        let elements = self.dense(array)?.elements.iter().flatten().count();
+        self.own_key_list(elements.saturating_add(listed), |agent, keys| {
+            agent.push_array_keys(array, keys)
+        })
+    }
+
+    /// Push to `keys`, which has room for them, the keys of `array` in the order of
+    /// OrdinaryOwnPropertyKeys: the dense indices and the index keys of the list merged
+    /// ascending, then the list's String keys and Symbol keys in creation order.
+    fn push_array_keys(&mut self, array: ObjectRef, keys: &mut Vec<Key>) -> Completion<()> {
+        let listed = self.listed_indices(array)?;
+        let record = match self.engine_object(array) {
+            Ok(record) => record,
+            Err(abrupt) => {
+                self.heap.accounting.credit(listed.bytes());
+                return Err(abrupt);
             }
-            let Ok(index) = u32::try_from(position) else {
-                break;
-            };
-            while let Some(&Key::Index(other)) = sparse.peek()
-                && other < index
-            {
-                keys.push(Key::Index(other));
-                sparse.next();
+        };
+        let pushed = if let ObjectKind::Array(storage) = &record.kind {
+            match &listed {
+                ListedIndices::InPlace => {
+                    merge_indices(&storage.elements, record.properties.listed_indices(), keys);
+                }
+                ListedIndices::Sorted { indices, .. } => {
+                    merge_indices(&storage.elements, indices.iter().copied(), keys);
+                }
             }
-            keys.push(Key::Index(index));
+            keys.extend(record.properties.names());
+            true
+        } else {
+            false
+        };
+        self.heap.accounting.credit(listed.bytes());
+        if !pushed {
+            return Err(self.fault());
         }
-        keys.extend(sparse);
-        let steps = u64::try_from(keys.len().saturating_add(holes)).unwrap_or(u64::MAX);
-        self.charge_steps(steps.saturating_add(comparisons))?;
-        Ok(keys)
+        Ok(())
     }
 
     /// ArraySetLength (`#sec-arraysetlength`).
@@ -514,6 +555,7 @@ mod tests {
         let mut seen: Vec<(Key, Option<Property>)> = agent
             .own_property_keys(array)
             .unwrap()
+            .keys
             .into_iter()
             .map(|key| (key, agent.get_own_property(array, key).unwrap()))
             .collect();

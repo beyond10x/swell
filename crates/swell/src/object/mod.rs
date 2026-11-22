@@ -16,6 +16,16 @@
 //! it was charged in [`Grown`], whose drop queues the bytes for the agent to credit after the
 //! sweep. `story:property-index-and-dense-elements` added the map, the dense elements and the
 //! Array arms of [[GetOwnProperty]], [[Delete]] and [[OwnPropertyKeys]].
+//!
+//! A list of property keys is charged before it exists and credited when it drops
+//! (`docs/design/engine.md`, "The step budget" and "Memory budget";
+//! `story:own-keys-charged-before-the-list-exists`): each [[OwnPropertyKeys]] charges a step per
+//! key it will answer, counted from lengths it holds, then the list's bytes ([`key_list_bytes`])
+//! before it reserves the list, and answers a [`KeyList`], the keys with the bytes they were
+//! charged. The code that holds the list credits them when it drops it
+//! ([`Agent::drop_key_list`]) or takes them over into a charge of its own. Index keys added out
+//! of order are sorted by a bottom-up merge sort over a second buffer charged with the list, n
+//! steps charged before each pass ([`Agent::listed_indices`]).
 
 pub(crate) mod arguments;
 pub(crate) mod array;
@@ -40,8 +50,73 @@ use bound_function::BoundFunction;
 use builtin_function::BuiltinFunction;
 use ecmascript_function::EcmascriptFunction;
 use ordinary::Ordinary;
-use property::{Descriptor, Key, Properties, Property, Room};
+use property::{Descriptor, Key, Properties, Property, Room, sort_indices};
 use string::StringObject;
+
+/// The bytes of a list of `count` property keys: what every list of keys is charged.
+pub(crate) fn key_list_bytes(count: usize) -> u64 {
+    u64::try_from(count.saturating_mul(size_of::<Key>())).unwrap_or(u64::MAX)
+}
+
+/// A list of property keys with the bytes it was charged to the memory budget: what
+/// [[OwnPropertyKeys]] answers, and the lists made from its answer. The code that holds it
+/// credits the bytes when it drops it ([`Agent::drop_key_list`]), or takes them over into a
+/// charge of its own.
+pub(crate) struct KeyList {
+    pub(crate) keys: Vec<Key>,
+    pub(crate) bytes: u64,
+}
+
+impl std::ops::Deref for KeyList {
+    type Target = [Key];
+
+    fn deref(&self) -> &[Key] {
+        &self.keys
+    }
+}
+
+/// The index keys of an object's property list in ascending order: read in place from the list
+/// (added ascending), or sorted into a buffer charged `bytes` (with the merge's second buffer).
+enum ListedIndices {
+    InPlace,
+    Sorted { indices: Vec<u32>, bytes: u64 },
+}
+
+impl ListedIndices {
+    /// The bytes still charged for the buffers.
+    fn bytes(&self) -> u64 {
+        match self {
+            ListedIndices::InPlace => 0,
+            ListedIndices::Sorted { bytes, .. } => *bytes,
+        }
+    }
+}
+
+/// Push to `keys` the index keys of `properties` from `from` on, ascending, read through
+/// `listed`, then its String keys and its Symbol keys in creation order.
+fn push_listed_keys(
+    properties: &Properties,
+    listed: &ListedIndices,
+    from: u32,
+    keys: &mut Vec<Key>,
+) {
+    match listed {
+        ListedIndices::InPlace => keys.extend(
+            properties
+                .listed_indices()
+                .filter(|&index| index >= from)
+                .map(Key::Index),
+        ),
+        ListedIndices::Sorted { indices, .. } => keys.extend(
+            indices
+                .iter()
+                .copied()
+                .filter(|&index| index >= from)
+                .map(Key::Index),
+        ),
+    }
+    keys.extend(properties.names());
+}
 
 /// The bytes an object's property map was charged as it grew, credited when the record is
 /// dropped: the drop adds them to the agent's queue, which the agent credits after a sweep.
@@ -358,13 +433,138 @@ impl<H: Host> Agent<H> {
     }
 
     /// [[OwnPropertyKeys]]: the String exotic method (10.4.3.3) for String objects,
-    /// OrdinaryOwnPropertyKeys over both storages of an Array, ordinary for the others.
-    pub(crate) fn own_property_keys(&mut self, object: ObjectRef) -> Completion<Vec<Key>> {
+    /// OrdinaryOwnPropertyKeys over both storages of an Array, ordinary for the others. Each
+    /// charges its steps and then the list's bytes before the list exists, and answers the
+    /// keys with the bytes they were charged, which the caller credits when it drops them.
+    pub(crate) fn own_property_keys(&mut self, object: ObjectRef) -> Completion<KeyList> {
         match self.kind_of(object)? {
             KindTag::String => self.string_own_property_keys(object),
             KindTag::Array => self.array_own_property_keys(object),
             _ => self.ordinary_own_property_keys(object),
         }
+    }
+
+    /// Charge `bytes` to the memory budget; over it the run ends in
+    /// `Terminated(MemoryBudget)` and nothing is charged.
+    pub(crate) fn charge_bytes(&mut self, bytes: u64) -> Completion<()> {
+        if self.heap.accounting.charge(bytes).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        Ok(())
+    }
+
+    /// An empty list with room for `count` keys: its bytes are charged before the room is
+    /// reserved; over the budget the run ends in `Terminated(MemoryBudget)` and nothing stays
+    /// charged.
+    pub(crate) fn new_key_list(&mut self, count: usize) -> Completion<KeyList> {
+        let bytes = key_list_bytes(count);
+        self.charge_bytes(bytes)?;
+        let mut keys = Vec::new();
+        if keys.try_reserve_exact(count).is_err() {
+            self.heap.accounting.credit(bytes);
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        Ok(KeyList { keys, bytes })
+    }
+
+    /// Credit what `list` was charged; the list drops.
+    pub(crate) fn drop_key_list(&mut self, list: KeyList) {
+        self.heap.accounting.credit(list.bytes);
+    }
+
+    /// The list of `count` keys an [[OwnPropertyKeys]] answers, after its steps: made by
+    /// [`Agent::new_key_list`], then filled by `fill`; when `fill` ends abruptly the list is
+    /// credited and dropped.
+    fn own_key_list(
+        &mut self,
+        count: usize,
+        fill: impl FnOnce(&mut Self, &mut Vec<Key>) -> Completion<()>,
+    ) -> Completion<KeyList> {
+        let mut list = self.new_key_list(count)?;
+        #[cfg(test)]
+        self.heap.accounting.note_key_list(count);
+        match fill(self, &mut list.keys) {
+            Ok(()) => Ok(list),
+            Err(abrupt) => {
+                self.drop_key_list(list);
+                Err(abrupt)
+            }
+        }
+    }
+
+    /// The index keys of `object`'s property list in ascending order. Read in place when they
+    /// are ascending in the list: added ascending (`KeyedList` records it; no walk), or found
+    /// so by a walk the caller's step per key covers. Otherwise the n index keys are sorted
+    /// (`docs/design/engine.md`, "The step budget"): a buffer of them and the
+    /// merge's second buffer, n `u32` each, are charged before they are reserved, and the
+    /// bottom-up merge sort charges n steps before each pass, at most n comparisons, so the
+    /// step budget and the interrupt are read every n comparisons. The second buffer is credited
+    /// when the sort ends; the answer holds the charge of the first.
+    fn listed_indices(&mut self, object: ObjectRef) -> Completion<ListedIndices> {
+        let Some(count) = self
+            .engine_object(object)?
+            .properties
+            .unsorted_index_count()
+        else {
+            return Ok(ListedIndices::InPlace);
+        };
+        let half = u64::try_from(count.saturating_mul(size_of::<u32>())).unwrap_or(u64::MAX);
+        let bytes = half.saturating_mul(2);
+        self.charge_bytes(bytes)?;
+        let mut indices: Vec<u32> = Vec::new();
+        let mut buffer: Vec<u32> = Vec::new();
+        if indices.try_reserve_exact(count).is_err() || buffer.try_reserve_exact(count).is_err() {
+            self.heap.accounting.credit(bytes);
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        match self.engine_object(object) {
+            Ok(record) => indices.extend(record.properties.listed_indices().take(count)),
+            Err(abrupt) => {
+                self.heap.accounting.credit(bytes);
+                return Err(abrupt);
+            }
+        }
+        buffer.resize(indices.len(), 0);
+        let mut compared = 0;
+        let sorted = sort_indices(&mut indices, &mut buffer, &mut compared, |steps| {
+            self.charge_steps(steps)
+        });
+        #[cfg(test)]
+        if let Ok(record) = self.heap.objects.get(object.handle) {
+            record.properties.count_compared(compared);
+        }
+        drop(buffer);
+        if let Err(abrupt) = sorted {
+            self.heap.accounting.credit(bytes);
+            return Err(abrupt);
+        }
+        self.heap.accounting.credit(bytes.saturating_sub(half));
+        Ok(ListedIndices::Sorted {
+            indices,
+            bytes: half,
+        })
+    }
+
+    /// Push to `keys` the keys of `object`'s property list in the order of
+    /// OrdinaryOwnPropertyKeys (`#sec-ordinaryownpropertykeys`), its index keys from `from` on:
+    /// the index keys ascending ([`Agent::listed_indices`]), then the String keys, then the
+    /// Symbol keys, each in creation order. `keys` has room for all of them.
+    fn push_own_keys(
+        &mut self,
+        object: ObjectRef,
+        from: u32,
+        keys: &mut Vec<Key>,
+    ) -> Completion<()> {
+        let listed = self.listed_indices(object)?;
+        let pushed = match self.engine_object(object) {
+            Ok(record) => {
+                push_listed_keys(&record.properties, &listed, from, keys);
+                Ok(())
+            }
+            Err(abrupt) => Err(abrupt),
+        };
+        self.heap.accounting.credit(listed.bytes());
+        pushed
     }
 
     /// [[Call]] of a function object. The caller has checked IsCallable.

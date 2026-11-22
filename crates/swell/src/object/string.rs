@@ -3,8 +3,8 @@
 //! ordinary ones, and the reads of a String's code units the engine uses. Written by
 //! `story:object-model-and-realms`.
 
-use super::ObjectKind;
 use super::property::{Descriptor, Key, Property};
+use super::{KeyList, ObjectKind};
 use crate::heap::collect::Mark;
 use crate::heap::string::HeapString;
 use crate::host::agent::Agent;
@@ -178,26 +178,79 @@ impl<H: Host> Agent<H> {
     }
 
     /// [[OwnPropertyKeys]] of a String object
-    /// (`#sec-string-exotic-objects-ownpropertykeys`): a step per key, and a step per comparison
-    /// of a sort of the indices of the list (`object/property.rs`).
-    pub(crate) fn string_own_property_keys(&mut self, object: ObjectRef) -> Completion<Vec<Key>> {
+    /// (`#sec-string-exotic-objects-ownpropertykeys`): a step per key, counted from the
+    /// String's length and the length of the property list before anything is allocated (the
+    /// list holds no index below the length, which [[DefineOwnProperty]] answers from the
+    /// String), then the list's bytes before it is reserved; index keys of the list not added
+    /// ascending are sorted, n steps before each pass (`object/mod.rs`).
+    pub(crate) fn string_own_property_keys(&mut self, object: ObjectRef) -> Completion<KeyList> {
         let data = self.string_data(object)?;
         let length = self.string_length(data)?;
-        let (own, comparisons) = self.engine_object(object)?.properties.keys();
-        if comparisons > 0 {
-            self.charge_steps(comparisons)?;
-        }
-        let mut keys = Vec::new();
-        keys.extend(
-            (0..length)
-                .filter_map(|index| u32::try_from(index).ok())
-                .map(Key::Index),
-        );
-        keys.extend(own.into_iter().filter(|key| match key {
-            Key::Index(index) => usize::try_from(*index).is_ok_and(|index| index >= length),
-            _ => true,
-        }));
-        self.charge_steps(u64::try_from(keys.len()).unwrap_or(u64::MAX))?;
-        Ok(keys)
+        let listed = self.engine_object(object)?.properties.len();
+        let count = length.saturating_add(listed);
+        self.charge_steps(u64::try_from(count).unwrap_or(u64::MAX))?;
+        // 5. For each integer i such that 0 ≤ i < length, in ascending order, append
+        // ! ToString(𝔽(i)); 6 to 8, the keys of the list, its array indices from length on.
+        let from = u32::try_from(length).unwrap_or(u32::MAX);
+        self.own_key_list(count, |agent, keys| {
+            keys.extend((0..from).map(Key::Index));
+            agent.push_own_keys(object, from, keys)
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Realm;
+    use crate::host::agent::Agent;
+    use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, enter, limits};
+    use crate::host::outcome::{Abrupt, Termination};
+    use crate::realm::intrinsics::Intrinsic;
+    use crate::value::{ObjectRef, Value};
+
+    /// The code units of the long String.
+    const UNITS: usize = 1_000_000;
+
+    /// An agent with a budget of 256 MiB and a String object of [`UNITS`] Latin-1 code units,
+    /// both kept.
+    fn long_string_object() -> (Agent<NoHooks>, Realm, ObjectRef) {
+        let mut limits = limits();
+        limits.memory_bytes = 1 << 28;
+        let (mut agent, realm) = agent_with_realm_and(limits);
+        enter(&mut agent, &realm);
+        let prototype = agent.current_intrinsic(Intrinsic::StringPrototype).unwrap();
+        let data = agent.new_string_str(&"a".repeat(UNITS)).unwrap();
+        agent.keep(Value::String(data));
+        let object = agent.string_create(data, prototype).unwrap();
+        agent.keep(Value::Object(object));
+        (agent, realm, object)
+    }
+
+    /// `docs/design/engine.md`, "The step budget": [[OwnPropertyKeys]] of a String object
+    /// (`#sec-string-exotic-objects-ownpropertykeys`) charges a step per key it will answer,
+    /// counted from the String's length, before the list exists. With 1,000 steps left the run
+    /// ends in `Terminated(StepBudget)` and no list was allocated.
+    #[test]
+    fn own_keys_of_a_long_string_end_at_the_step_budget_before_the_list_exists() {
+        let (mut agent, _realm, object) = long_string_object();
+        agent.limits.steps_per_entry = agent.steps + 1_000;
+        let answer = agent.own_property_keys(object).map(|keys| keys.len());
+        assert_eq!(answer, Err(Abrupt::Terminated(Termination::StepBudget)));
+        assert_eq!(agent.heap.accounting.largest_key_list(), 0);
+    }
+
+    /// "Memory budget": the list of a String object's keys, `size_of::<Key>()` bytes per code
+    /// unit, is charged before it is allocated. With 1 MiB left and steps enough for every key,
+    /// the run ends in `Terminated(MemoryBudget)` and nothing stays charged.
+    #[test]
+    fn own_keys_of_a_long_string_are_charged_before_they_are_built() {
+        let (mut agent, _realm, object) = long_string_object();
+        agent.limits.steps_per_entry = 10_000_000;
+        agent.steps = 0;
+        let used = agent.heap.bytes();
+        agent.heap.accounting.set_limit(used + (1 << 20));
+        let answer = agent.own_property_keys(object).map(|keys| keys.len());
+        assert_eq!(answer, Err(Abrupt::Terminated(Termination::MemoryBudget)));
+        assert_eq!(agent.heap.bytes(), used);
     }
 }

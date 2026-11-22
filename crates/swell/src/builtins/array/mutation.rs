@@ -28,8 +28,9 @@ use crate::builtins::object::argument;
 use crate::builtins::string::units_of;
 use crate::builtins::{Method, SymbolData};
 use crate::host::agent::Agent;
-use crate::host::outcome::{Completion, Termination};
+use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
+use crate::object::builtin_function::KeptRoom;
 use crate::value::{ObjectRef, Value};
 
 use super::MAX_SAFE_LENGTH;
@@ -84,13 +85,12 @@ pub(crate) fn prototype_symbol_data<H: Host>() -> [SymbolData<H>; 0] {
 type Steps<H> = fn(&mut Agent<H>, ObjectRef, &[Value]) -> Completion<Value>;
 
 /// The list of a sort on the kept stack: `count` values from `base`, and above them, while the
-/// merge runs, a buffer of as many. `charged` bytes of growth of the kept stack were charged to
-/// the memory budget; `capacity` is the room the kept stack had before.
+/// merge runs, a buffer of as many. `room` holds the room the kept stack had before and the
+/// bytes its growth was charged to the memory budget.
 struct SortList {
     base: usize,
     count: usize,
-    charged: u64,
-    capacity: usize,
+    room: KeptRoom,
 }
 
 /// Which indices SortIndexedProperties reads (`#sec-sortindexedproperties`).
@@ -512,7 +512,9 @@ impl<H: Host> Agent<H> {
         if done.is_ok() {
             done = self.write_sorted(object, length, &list);
         }
-        self.end_sort_list(&list);
+        // The end, whatever its completion: the list and its buffer are released, the kept
+        // stack is given back the room it had and its growth is credited.
+        self.end_kept_room(list.base, &list.room);
         done?;
         // 11. Return O.
         Ok(Value::Object(object))
@@ -563,7 +565,9 @@ impl<H: Host> Agent<H> {
         if done.is_ok() {
             done = self.fill_sorted(array, &list);
         }
-        self.end_sort_list(&list);
+        // The end, whatever its completion: the list and its buffer are released, the kept
+        // stack is given back the room it had and its growth is credited.
+        self.end_kept_room(list.base, &list.room);
         done?;
         // 9. Return A.
         Ok(Value::Object(array))
@@ -588,44 +592,8 @@ impl<H: Host> Agent<H> {
         SortList {
             base: self.kept.len(),
             count: 0,
-            charged: 0,
-            capacity: self.kept.capacity(),
+            room: self.kept_room(),
         }
-    }
-
-    /// The end of a sort, whatever its completion: the list and its buffer are released, the
-    /// kept stack is given back the room it had, and what its growth was charged is credited.
-    fn end_sort_list(&mut self, list: &SortList) {
-        self.release(list.base);
-        let room = list.capacity.max(self.kept.len());
-        self.kept.shrink_to(room);
-        self.heap.accounting.credit(list.charged);
-    }
-
-    /// Room on the kept stack for `more` values beyond its length: when it has none, its
-    /// capacity grows to twice what it was, at least 16 and at least what is needed, charged
-    /// to the memory budget before it is made; over the budget the run ends in
-    /// `Terminated(MemoryBudget)`.
-    fn reserve_kept(&mut self, list: &mut SortList, more: usize) -> Completion<()> {
-        let needed = self.kept.len().saturating_add(more);
-        let capacity = self.kept.capacity();
-        if needed <= capacity {
-            return Ok(());
-        }
-        let wanted = capacity.saturating_mul(2).max(16).max(needed);
-        let slots = u64::try_from(wanted - capacity).unwrap_or(u64::MAX);
-        let slot = u64::try_from(size_of::<Value>()).unwrap_or(u64::MAX);
-        let bytes = slots.saturating_mul(slot);
-        if self.heap.accounting.charge(bytes).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        let length = self.kept.len();
-        if self.kept.try_reserve_exact(wanted - length).is_err() {
-            self.heap.accounting.credit(bytes);
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        list.charged = list.charged.saturating_add(bytes);
-        Ok(())
     }
 
     /// The value at `position` of the kept stack; a position past its end is an engine bug.
@@ -671,7 +639,7 @@ impl<H: Host> Agent<H> {
                 let value = self.get(object, key)?;
                 // Nothing runs between the Get and the push. Every call between keeps and
                 // releases above the list, so the list stays one run of the kept stack.
-                self.reserve_kept(list, 1)?;
+                self.reserve_kept(&mut list.room, 1)?;
                 self.kept.push(value);
                 list.count = list.count.saturating_add(1);
             }
@@ -682,7 +650,7 @@ impl<H: Host> Agent<H> {
 
     /// The buffer of the merge: a copy of the list above it, charged as the kept stack grows.
     fn copy_sort_buffer(&mut self, list: &mut SortList) -> Completion<()> {
-        self.reserve_kept(list, list.count)?;
+        self.reserve_kept(&mut list.room, list.count)?;
         for position in 0..list.count {
             let value = self.kept_at(list.base.saturating_add(position))?;
             self.kept.push(value);

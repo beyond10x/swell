@@ -1,0 +1,282 @@
+version: '3'
+
+set: [pipefail]
+
+vars:
+  RUNNER_FORM: CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0
+
+tasks:
+  forge-check:
+    desc: Fail when the gate's compiler or check-runner's variables differ from what the forge's runner has; runs toolchain-check and runner-env-check.
+    summary: |
+      The local gate equals the forge (the organization's rule of that name; story
+      local-gate-equals-forge). Runs toolchain-check, then runner-env-check; each prints its
+      line, and the first that fails stops it. Reads no build output and builds nothing.
+    silent: true
+    cmds:
+      - task: toolchain-check
+      - task: runner-env-check
+
+  toolchain-check:
+    desc: Fail when a workflow names a compiler version, or when rustc in the gate is not the channel rust-toolchain.toml pins.
+    summary: |
+      Fail when a workflow names a compiler version, or when rustc in the gate is not the
+      channel rust-toolchain.toml pins (story local-gate-equals-forge, point 1). The compiler
+      is pinned in one place, GATE_ROOT/rust-toolchain.toml (GATE_ROOT default .); rustup
+      reads it in the root and in every directory under it, conformance/ess included, and a
+      workflow reads the channel from it in a step of its own.
+
+      Its channel must be a version, <major>.<minor>.<patch>. Every
+      GATE_ROOT/.github/workflows/*.yml and *.yaml is read outside its comment lines: a
+      toolchain input whose value is not an expression of the workflow (a dollar sign and two
+      braces, as steps.toolchain.outputs.channel is written there), dtolnay/rust-toolchain
+      taken by anything but a commit hash of 40 hex digits, a RUSTUP_TOOLCHAIN variable, a
+      "rustup toolchain install", "rustup install", "rustup default" or "rustup override set",
+      and "cargo +<toolchain>" are each named as "toolchain-check: <file>:<line>: names a
+      compiler (<line>)". Then "${RUSTC:-rustc} --version" runs in the repository root, as
+      cargo runs it in the gate; another version than the channel fails with "toolchain-check:
+      rustc in the gate is <version>, <file> pins <channel>". A missing file fails too. It
+      prints "toolchain-check: rustc <version>, the channel <file> pins; <n> workflow file(s),
+      none names a compiler".
+    vars:
+      GATE_ROOT: '{{.GATE_ROOT | default "."}}'
+    env:
+      GATE_ROOT: '{{.GATE_ROOT}}'
+    silent: true
+    cmds:
+      - |
+        if [ "$GATE_ROOT" = . ]; then prefix=; else prefix=$GATE_ROOT/; fi
+        file=${prefix}rust-toolchain.toml
+        [ -f "$file" ] || { echo "toolchain-check: $file is missing; it pins the compiler"; exit 1; }
+        channel=$(awk -F '"' '/^[ \t]*channel[ \t]*=/ { print $2; exit }' "$file")
+        printf '%s\n' "$channel" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' ||
+          { echo "toolchain-check: $file pins the channel \"$channel\", not a version <major>.<minor>.<patch>"; exit 1; }
+        workflows=0
+        named=0
+        for wf in "${prefix}.github/workflows"/*.yml "${prefix}.github/workflows"/*.yaml; do
+          [ -f "$wf" ] || continue
+          workflows=$((workflows + 1))
+          lines=$(awk -v file="$wf" '
+            /^[ \t]*#/ { next }
+            {
+              text = $0
+              sub(/^[ \t]+/, "", text)
+              sub(/[ \t]+#.*$/, "", text)
+              bad = 0
+              if (text ~ /^(- )?toolchain:/) {
+                value = text
+                sub(/^(- )?toolchain:[ \t]*/, "", value)
+                if (value !~ /^\$[{][{]/) bad = 1
+              }
+              if (text ~ /dtolnay\/rust-toolchain@/) {
+                ref = text
+                sub(/^.*dtolnay\/rust-toolchain@/, "", ref)
+                sub(/[ \t].*$/, "", ref)
+                if (length(ref) != 40 || ref !~ /^[0-9a-f]+$/) bad = 1
+              }
+              if (text ~ /RUSTUP_TOOLCHAIN/) bad = 1
+              if (text ~ /rustup[ \t]+(toolchain[ \t]+install|install|default|override[ \t]+set)([ \t]|$)/) bad = 1
+              if (text ~ /cargo[ \t]+\+/) bad = 1
+              if (bad) print "toolchain-check: " file ":" NR ": names a compiler (" text ")"
+            }
+          ' "$wf")
+          if [ -n "$lines" ]; then
+            printf '%s\n' "$lines"
+            named=$((named + 1))
+          fi
+        done
+        [ "$workflows" -gt 0 ] || { echo "toolchain-check: no workflow under ${prefix}.github/workflows"; exit 1; }
+        if [ "$named" -gt 0 ]; then
+          echo "toolchain-check: $named of $workflows workflow file(s) name a compiler; a workflow reads the channel from $file"
+          exit 1
+        fi
+        version=$(${RUSTC:-rustc} --version 2>&1) || { echo "toolchain-check: ${RUSTC:-rustc} --version failed: $version"; exit 1; }
+        version=$(printf '%s\n' "$version" | awk 'NR == 1 { print $2 }')
+        if [ "$version" != "$channel" ]; then
+          echo "toolchain-check: rustc in the gate is $version, $file pins $channel"
+          exit 1
+        fi
+        echo "toolchain-check: rustc $version, the channel $file pins; $workflows workflow file(s), none names a compiler"
+
+  runner-env-check:
+    desc: Fail when check-runner does not set every variable the forge's runner has for task check, or sets one it does not have.
+    summary: |
+      Fail when check-runner does not set every variable the forge's runner has for task
+      check, or sets one it does not have (story local-gate-equals-forge, point 2).
+
+      check-runner sets GATE_RUNNER_ENV (default the RUNNER_FORM of taskfiles/forge.yml:
+      CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0), NAME=value
+      words separated by blanks. The runner sets CI=true and GITHUB_ACTIONS=true for every
+      step; the workflow GATE_ROOT/.github/workflows/check.yml (GATE_ROOT default .) sets the
+      rest for the step that runs task check: its env at the top, the env of the job of that
+      step, and the step's own env, a later one winning as on the forge. The workflow is read
+      as written in this repository, two blanks per level; a step runs task check when its
+      run line is exactly "task check". Each variable the workflow sets that check-runner
+      does not is named as "runner-env-check: <file>:<line>: the workflow sets NAME=value for
+      task check, check-runner does not (GATE_RUNNER_ENV)", one with another value as
+      "...: the workflow sets NAME=value, check-runner sets NAME=other", and one that
+      check-runner sets and neither the workflow nor the runner does as "runner-env-check:
+      check-runner sets NAME=value, which neither <file> nor the runner sets for task check"
+      (an empty RUSTC_WRAPPER among them: the forge has no wrapper, and the local gate keeps
+      the host's compile cache, the organization's rule "One compile cache"). A workflow
+      without a step that runs task check fails too. It prints "runner-env-check:
+      check-runner sets <GATE_RUNNER_ENV>: CI and GITHUB_ACTIONS as the runner sets them, and
+      the <n> variable(s) <file> sets for task check".
+    vars:
+      GATE_ROOT: '{{.GATE_ROOT | default "."}}'
+      GATE_RUNNER_ENV: '{{.GATE_RUNNER_ENV | default .RUNNER_FORM}}'
+    env:
+      GATE_ROOT: '{{.GATE_ROOT}}'
+      GATE_RUNNER_ENV: '{{.GATE_RUNNER_ENV}}'
+    silent: true
+    cmds:
+      - |
+        if [ "$GATE_ROOT" = . ]; then wf=.github/workflows/check.yml; else wf=$GATE_ROOT/.github/workflows/check.yml; fi
+        [ -f "$wf" ] || { echo "runner-env-check: $wf is missing"; exit 1; }
+        awk -v file="$wf" -v task_env="$GATE_RUNNER_ENV" '
+          function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+          function unquote(s) {
+            s = trim(s)
+            if (s ~ /^".*"$/ || s ~ /^\047.*\047$/) s = substr(s, 2, length(s) - 2)
+            return s
+          }
+          function depth(s) { match(s, /^ */); return RLENGTH }
+          # set(scope, name, value, line)
+          function set(scope, name, value, line) {
+            if (!((scope, name) in val)) { names[scope] = names[scope] " " name }
+            val[scope, name] = value
+            at[scope, name] = line
+          }
+          /^[ \t]*#/ || /^[ \t]*$/ { next }
+          {
+            d = depth($0)
+            text = trim($0)
+            if (envdepth >= 0 && d <= envdepth) envdepth = -1
+            if (envdepth >= 0) {
+              if (text ~ /^[A-Za-z_][A-Za-z0-9_]*:/) {
+                name = text
+                sub(/:.*$/, "", name)
+                value = text
+                sub(/^[A-Za-z_][A-Za-z0-9_]*:[ \t]*/, "", value)
+                set(scope, name, unquote(value), NR)
+              }
+              next
+            }
+            if (d == 0) { injobs = (text == "jobs:"); if (text == "env:") { scope = "top"; envdepth = 0 }; next }
+            if (!injobs) next
+            if (d == 2) { job = text; sub(/:.*$/, "", job); next }
+            if (d == 4 && text == "env:") { scope = "job " job; envdepth = 4; next }
+            if (d == 6 && text ~ /^- /) { step++; stepjob[step] = job; text = trim(substr(text, 3)); d = 8 }
+            if (d == 8 && text == "env:") { scope = "step " step; envdepth = 8; next }
+            if (d == 8 && text ~ /^run:/) {
+              run = text
+              sub(/^run:[ \t]*/, "", run)
+              if (unquote(run) == "task check") gate[step] = 1
+            }
+          }
+          BEGIN { envdepth = -1 }
+          END {
+            for (s in gate) gates++
+            if (!gates) { print "runner-env-check: " file ": no step runs task check"; exit 1 }
+            # What the runner has for each step that runs task check: top, job, step, later wins.
+            for (s in gate) {
+              split("top|job " stepjob[s] "|step " s, scopes, "|")
+              for (k = 1; k <= 3; k++) {
+                n = split(names[scopes[k]], list, " ")
+                for (i = 1; i <= n; i++) {
+                  wv[list[i]] = val[scopes[k], list[i]]
+                  wl[list[i]] = at[scopes[k], list[i]]
+                }
+              }
+            }
+            own["CI"] = "true"
+            own["GITHUB_ACTIONS"] = "true"
+            n = split(task_env, words, /[ \t]+/)
+            for (i = 1; i <= n; i++) {
+              if (words[i] == "") continue
+              if (words[i] !~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+                print "runner-env-check: GATE_RUNNER_ENV holds \"" words[i] "\", not NAME=value"
+                bad++
+                continue
+              }
+              name = words[i]
+              sub(/=.*$/, "", name)
+              value = substr(words[i], length(name) + 2)
+              tv[name] = value
+              shown = shown (shown == "" ? "" : " ") words[i]
+            }
+            for (name in own) {
+              if (!(name in tv)) { print "runner-env-check: the runner sets " name "=" own[name] " for every step, check-runner does not (GATE_RUNNER_ENV)"; bad++ }
+              else if (tv[name] != own[name] && !(name in wv)) { print "runner-env-check: the runner sets " name "=" own[name] ", check-runner sets " name "=" tv[name]; bad++ }
+            }
+            for (name in wv) {
+              count++
+              if (!(name in tv)) { print "runner-env-check: " file ":" wl[name] ": the workflow sets " name "=" wv[name] " for task check, check-runner does not (GATE_RUNNER_ENV)"; bad++ }
+              else if (tv[name] != wv[name]) { print "runner-env-check: " file ":" wl[name] ": the workflow sets " name "=" wv[name] ", check-runner sets " name "=" tv[name]; bad++ }
+            }
+            for (name in tv) {
+              if (!(name in wv) && !(name in own)) { print "runner-env-check: check-runner sets " name "=" tv[name] ", which neither " file " nor the runner sets for task check"; bad++ }
+            }
+            if (bad) exit 1
+            print "runner-env-check: check-runner sets " shown ": CI and GITHUB_ACTIONS as the runner sets them, and the " count+0 " variable(s) " file " sets for task check"
+          }
+        ' "$wf"
+
+  check-runner:
+    desc: Run task check as the forge's runner runs it, with the variables its workflow sets (GATE_RUNNER_ENV); "task check-runner -- --dry" prints the steps instead.
+    summary: |
+      Run task check as the forge's runner runs it (the organization's rule "The local gate
+      equals the forge"; story local-gate-equals-forge, point 2). The one command before main
+      moves: slot task check-runner.
+
+      First runner-env-check, which compares GATE_RUNNER_ENV with what the runner has for the
+      step that runs task check in .github/workflows/check.yml; then "env <GATE_RUNNER_ENV>
+      task check" in a task process of its own, since a variable of a task's env does not
+      reach the tasks it calls; go-task prints that command line before it runs it. "task
+      check-runner -- --dry" runs runner-env-check and then the same with --dry --verbose:
+      go-task prints each step of check in order ("task: "<step>" started") with its
+      commands, in that environment, and runs none of them. Any other word after -- fails.
+
+      Every difference between the forge's runner and a developer's shell that the repository
+      knows, and where it is written:
+        - the compiler: rust-toolchain.toml, for the root and conformance/ess alike
+          (toolchain-check fails on another rustc, and on a workflow that names a version);
+        - the debug information of the dev profile: .cargo/config.toml sets debug = true, as
+          the forge builds; a cargo config file wins over the manifest, and the repository's
+          wins over a developer's own in the cargo home, so the setting stays in the
+          repository's config file (the stack tests' frames depend on it, AGENTS.md "Commands
+          and the gate");
+        - the environment: CI, GITHUB_ACTIONS, CARGO_TERM_COLOR, CARGO_INCREMENTAL, here
+          (GATE_RUNNER_ENV; runner-env-check holds it equal to the workflow). Variables a
+          developer's shell has beyond them (a GATE_ variable, NO_COLOR) are not cleared; the
+          gate's first line, gate-vars, names the gate variables in effect;
+        - the compile wrapper: the runner has none; check-runner keeps the host's compile
+          cache (the organization's rule "One compile cache"), so this one is not reproduced;
+        - the thread stack of the stack tests: crates/swell/tests/support/host.rs runs a stack
+          test on seven eighths of Limits::min_stack_bytes() (stack_with_room), so that a frame
+          that grows fails here first;
+        - the files that exist only in a local tree: .cache/ (test262 and the ECMA-262 draft,
+          fetched by the gate on the forge), .out/ and target/, all ignored by git. A test
+          that lists a directory reads every file in it, tracked or not:
+          crates/compiler/tests/compile.rs (tests/sources), crates/syntax/tests/sources.rs,
+          crates/swell/tests/language.rs (tests/language), crates/swell/tests/source_scan.rs
+          (the src/ of every crate) and crates/test262/tests/expected.rs (its fixtures); an
+          untracked file there is read here and absent on the forge. Run the gate in a clean
+          checkout to rule it out;
+        - the tools: go-task, cargo-nextest and ess at the versions .github/workflows/check.yml
+          installs; a developer's shell has its own;
+        - the operating system image and the number of cores of the runner, which no task
+          reproduces.
+    vars:
+      GATE_RUNNER_ENV: '{{.GATE_RUNNER_ENV | default .RUNNER_FORM}}'
+      DRY: '{{if eq .CLI_ARGS "--dry"}}--dry --verbose {{end}}'
+    cmds:
+      - cmd: |
+          case {{shellQuote .CLI_ARGS}} in
+            '' | --dry) ;;
+            *) echo "check-runner: the one word after -- is --dry, not {{shellQuote .CLI_ARGS}}"; exit 1 ;;
+          esac
+        silent: true
+      - task: runner-env-check
+        vars: {GATE_RUNNER_ENV: '{{.GATE_RUNNER_ENV}}'}
+      - env {{range splitList " " .GATE_RUNNER_ENV}}{{if .}}{{shellQuote .}} {{end}}{{end}}{{shellQuote .TASK_EXE}} {{.DRY}}check
