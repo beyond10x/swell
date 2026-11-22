@@ -228,6 +228,7 @@ fn agent_with_long_key(limits: Limits) -> (Agent<TestHost>, Realm) {
                     prototype: Prototype::ObjectPrototypeOf(realm_ref),
                     brand: Brand(1),
                     data: None,
+                    error_kind: None,
                 })
                 .unwrap()
                 .unwrap();

@@ -28,7 +28,8 @@ pub use limits::*;
 pub use outcome::*;
 
 use crate::heap::arena::Access;
-use crate::object::property::{Descriptor, Key};
+use crate::heap::string::CodeUnits;
+use crate::object::property::{Descriptor, Key, Property, Slot};
 use crate::object::{ObjectKind, ObjectRecord};
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, PropertyKey, Realm, RealmRef, Root, ScriptRef, StringRef, Value};
@@ -251,6 +252,7 @@ impl<H: Host> Agent<H> {
                 ObjectKind::Host(HostObject {
                     brand: spec.brand,
                     data: spec.data,
+                    error_kind: spec.error_kind,
                 }),
             );
             match self.heap.new_object(record, owned) {
@@ -261,6 +263,46 @@ impl<H: Host> Agent<H> {
                 Err(_) => Err(self.terminate(Termination::MemoryBudget)),
             }
         }))
+    }
+
+    /// `error_summary` (decision 13): the kind the [[ErrorData]] slot of `value` records and its
+    /// own "message" when that is a data property holding a String, read from the record and
+    /// its property list alone: no [[Get]], no code, no hook, no step, nothing made in the heap.
+    /// `None` for a value that is not an object with [[ErrorData]].
+    fn scoped_error_summary(&self, value: Value) -> Result<Option<ErrorSummary>, HostError> {
+        self.alive()?;
+        self.heap.check_value(value).map_err(host_error)?;
+        let Value::Object(object) = value else {
+            return Ok(None);
+        };
+        let record = self.heap.objects.get(object.handle).map_err(host_error)?;
+        let Some(kind) = crate::builtins::error::error_data(&record.kind) else {
+            return Ok(None);
+        };
+        // The key is the atom of "message", looked up without making it: with no atom, no
+        // object has an own "message".
+        let own = self
+            .heap
+            .atom_of(CodeUnits::Latin1(b"message"))
+            .and_then(|atom| record.properties.get(Key::String(atom)));
+        let message = match own {
+            Some(Property {
+                slot:
+                    Slot::Data {
+                        value: Value::String(string),
+                        ..
+                    },
+                ..
+            }) => Some(
+                self.heap
+                    .strings
+                    .get(string.handle)
+                    .map_err(host_error)?
+                    .to_utf16(),
+            ),
+            _ => None,
+        };
+        Ok(Some(ErrorSummary { kind, message }))
     }
 
     fn scoped_brand(&self, object: ObjectRef) -> Result<Option<Brand>, HostError> {
@@ -476,6 +518,16 @@ macro_rules! scoped_methods {
                 spec: HostObjectSpec,
             ) -> Result<Completion<ObjectRef>, HostError> {
                 self.agent.scoped_new_host_object(spec)
+            }
+
+            /// Whether `value` is an object with [[ErrorData]], with the kind the constructor
+            /// that made it recorded (or the host's `HostObjectSpec::error_kind`) and its own
+            /// "message" when that is a data property holding a String, its code units exact
+            /// (decision 13). `None` for any other value. A read: no code, no hook, no step, no
+            /// allocation in the heap; never its prototype or `name`. A stale handle answers
+            /// `Err(StaleHandle)`.
+            pub fn error_summary(&self, value: Value) -> Result<Option<ErrorSummary>, HostError> {
+                self.agent.scoped_error_summary(value)
             }
 
             /// The brand of `object`, or `None` when it is not a host object.

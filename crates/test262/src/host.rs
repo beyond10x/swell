@@ -171,6 +171,7 @@ fn install(
         prototype: Prototype::Object(object_prototype),
         brand: BRAND_262,
         data: None,
+        error_kind: None,
     })? {
         Ok(dollar) => dollar,
         Err(abrupt) => return Ok(Err(abrupt)),

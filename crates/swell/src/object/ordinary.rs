@@ -29,8 +29,9 @@ pub(crate) enum OrdinaryData {
     Boolean(bool),
     /// [[NumberData]].
     Number(f64),
-    /// [[ErrorData]].
-    Error,
+    /// [[ErrorData]], with the kind of the constructor that made the object (decision 13 of
+    /// `docs/design/host-interface.md`, `error_summary`).
+    Error(crate::host::ErrorKind),
     /// [[IsRawJSON]], of the objects `JSON.rawJSON` makes (`#sec-json.rawjson`, written by
     /// `story:json-parse-and-raw-json`): a slot with no value, which holds no handle.
     RawJson,

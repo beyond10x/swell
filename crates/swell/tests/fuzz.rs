@@ -1005,6 +1005,7 @@ macro_rules! scoped_op {
                     prototype,
                     brand,
                     data,
+                    error_kind: None,
                 });
                 if is_foreign(origin, me) {
                     foreign_answer("new_host_object", &answer);
@@ -1608,6 +1609,7 @@ fn op_create_realm(world: &mut World, a: usize) -> String {
                     prototype,
                     brand: Brand(7),
                     data: None,
+                    error_kind: None,
                 });
                 let made = match made {
                     Ok(made) => made?,

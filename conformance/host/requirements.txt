@@ -176,7 +176,7 @@ HOST-175 test swell::budgets::host_175_host_bytes_without_end_end_in_memory_budg
 HOST-176 test swell::budgets::host_176_a_host_charge_gives_back_what_it_charged
 HOST-177 test swell::budgets::host_177_host_steps_end_in_step_budget
 HOST-178 test swell::host_objects::host_178_a_kept_handle_is_weak
-HOST-179 pending slice 6
+HOST-179 test swell::errors::host_179_an_error_is_read_without_running_code
 HOST-180 test swell::calls::host_180_an_interface_object_has_its_parent_as_prototype
 HOST-181 test swell::conversion::host_181_comparing_long_strings_is_charged
 HOST-182 test swell::property_index::host_182_a_long_key_is_charged_before_it_is_interned

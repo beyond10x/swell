@@ -518,9 +518,12 @@ impl<H: Host> Agent<H> {
         Ok(match &self.engine_object(object)?.kind {
             // 6. [[ParameterMap]]: "Arguments".
             ObjectKind::Arguments(_) => "Arguments",
+            // 8. [[ErrorData]] of a host object made with an `error_kind`
+            // (`docs/design/host-interface.md`, decision 15): "Error".
+            ObjectKind::Host(host) if host.error_kind.is_some() => "Error",
             ObjectKind::Ordinary(ordinary) => match ordinary.data {
                 // 8. [[ErrorData]]: "Error".
-                OrdinaryData::Error => "Error",
+                OrdinaryData::Error(_) => "Error",
                 // 9. [[BooleanData]]: "Boolean".
                 OrdinaryData::Boolean(_) => "Boolean",
                 // 10. [[NumberData]]: "Number".

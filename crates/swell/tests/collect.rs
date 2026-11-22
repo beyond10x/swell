@@ -21,6 +21,7 @@ fn spec(data: Option<Box<dyn HostData>>) -> HostObjectSpec {
         prototype: Prototype::Null,
         brand: BRAND,
         data,
+        error_kind: None,
     }
 }
 

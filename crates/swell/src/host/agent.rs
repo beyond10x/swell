@@ -36,8 +36,8 @@ use super::host_bytes::HostBytes;
 use super::interrupt::InterruptHandle;
 use super::limits::{CreateError, Limits, Seeds};
 use super::outcome::{
-    Abrupt, CollectReport, Completion, ErrorSite, HostError, Outcome, Parsed, Termination,
-    ValueKind,
+    Abrupt, CollectReport, Completion, ErrorSite, ErrorSummary, HostError, Outcome, Parsed,
+    Termination, ValueKind,
 };
 use super::{ErrorKind, GlobalSetup, Host, Source};
 use crate::heap::Heap;
@@ -653,6 +653,17 @@ impl<H: Host> Agent<H> {
             .get(handle)
             .map_err(|_| HostError::StaleHandle)?;
         Ok(self.script_record_host_defined(handle))
+    }
+
+    /// Whether the value `value` holds is an object with [[ErrorData]], with the kind the
+    /// constructor that made it recorded (or the host's `HostObjectSpec::error_kind`) and its
+    /// own "message" when that is a data property holding a String, its code units exact
+    /// (decision 13). `None` for any other value. A read: no code, no hook, no step, no
+    /// allocation in the heap, so `heap_bytes()` and `live_bytes()` read the same after it.
+    pub fn error_summary(&self, value: &Root) -> Result<Option<ErrorSummary>, HostError> {
+        self.alive()?;
+        let value = self.heap.roots.get(value)?;
+        self.scoped_error_summary(value)
     }
 
     /// The steps the last outermost entry spent, or the running one so far (decision 13). Never

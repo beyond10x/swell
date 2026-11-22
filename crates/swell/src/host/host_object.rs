@@ -111,12 +111,19 @@ pub struct HostObjectSpec {
     pub prototype: Prototype,
     pub brand: Brand,
     pub data: Option<Box<dyn HostData>>,
+    /// `Some(kind)` gives the object an [[ErrorData]] slot of that kind, as Web IDL gives a
+    /// `DOMException` (`webidl:js-DOMException-specialness`): `Error.isError` answers true for
+    /// it, `Object.prototype.toString` gives it the builtin tag "Error", and `error_summary`
+    /// reads the kind (decisions 13 and 15).
+    pub error_kind: Option<ErrorKind>,
 }
 
 /// The kind part of a host object's record.
 pub(crate) struct HostObject {
     pub(crate) brand: Brand,
     pub(crate) data: Option<Box<dyn HostData>>,
+    /// The kind of its [[ErrorData]] slot, when it has one.
+    pub(crate) error_kind: Option<ErrorKind>,
 }
 
 impl HostObject {
@@ -152,6 +159,7 @@ impl HostObject {
         HostObject {
             brand: Brand(0),
             data: None,
+            error_kind: None,
         }
     }
 }

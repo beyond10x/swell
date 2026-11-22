@@ -4,6 +4,7 @@
 //! `story:heap-values-and-host-surface`.
 
 use super::hooks::HostDefined;
+use crate::host::ErrorKind;
 use crate::value::{Root, Value};
 
 /// Why a run ended without a completion (decision 2 and decision 10).
@@ -110,6 +111,16 @@ impl std::fmt::Debug for ErrorSite {
             .field("host_defined", &self.host_defined.is_some())
             .finish()
     }
+}
+
+/// What `error_summary` reads of an object with [[ErrorData]] (decision 13), without running
+/// code: the kind the constructor that made it recorded, or the host's
+/// `HostObjectSpec::error_kind`, never its prototype or `name`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ErrorSummary {
+    pub kind: ErrorKind,
+    /// The own "message" property's value when it is a data property holding a String.
+    pub message: Option<Vec<u16>>,
 }
 
 /// What a collection did (decision 18): the bytes `heap_bytes()` read before it and after it.

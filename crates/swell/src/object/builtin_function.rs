@@ -284,6 +284,7 @@ impl<H: Host> Agent<H> {
         let data = data.map(|data| HostObject {
             brand: Brand(0),
             data: Some(Box::new(FunctionData(data))),
+            error_kind: None,
         });
         self.create_builtin_function(
             Behaviour::Host {
