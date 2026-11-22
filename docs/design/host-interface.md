@@ -150,8 +150,8 @@ impl<H: Host> Agent<H> {
 
 | limit | unit | what it counts | reaching it ends in | at 0 |
 |---|---|---|---|---|
-| `steps_per_entry` | steps (decision 3 of `engine.md`: one per bytecode instruction, plus builtin charges) | steps of one outermost entry, with every nested entry and every job of one checkpoint | `Terminated(StepBudget)` | an entry that would spend a step ends before spending it |
-| `memory_bytes` | bytes charged by the accounting of `engine.md` decision 4 | the agent's heap over its life, read by `heap_bytes()`; a sweep credits what freed records own, and an arena's capacity stays charged | `Terminated(MemoryBudget)`; `RangeError` from the `ArrayBuffer`, `SharedArrayBuffer` and typed array constructors | `create_realm` ends in `Terminated(MemoryBudget)` |
+| `steps_per_entry` | steps (decision 3 of `engine.md`: one per bytecode instruction, plus builtin charges and what a host function charges with `cx.charge_steps`, decision 14) | steps of one outermost entry, with every nested entry and every job of one checkpoint | `Terminated(StepBudget)` | an entry that would spend a step ends before spending it |
+| `memory_bytes` | bytes charged by the accounting of `engine.md` decision 4 | the agent's heap over its life, and the bytes the host charged with `charge_host_bytes` while it holds their `HostBytes` (decision 14), read by `heap_bytes()`; a sweep credits what freed records own, and an arena's capacity stays charged | `Terminated(MemoryBudget)`; `RangeError` from the `ArrayBuffer`, `SharedArrayBuffer` and typed array constructors | `create_realm` ends in `Terminated(MemoryBudget)` |
 | `frame_depth` | execution contexts | ECMAScript execution contexts on the engine's frame stack | a `RangeError` thrown where the context would be pushed | every entry that pushes a context answers `Throw(RangeError)` |
 | `reentry_depth` | entries | calls from Rust into code (an ECMAScript function, a script or a host function) made while code runs, by a builtin or by host code, nested beyond the outermost entry | a `RangeError` thrown at the call that would re-enter | no callback runs from a builtin or host function |
 | `parser_nesting` | levels | nesting levels of the recursive-descent parser | a `SyntaxError` whose message names `parser_nesting` (below) | every non-empty source fails to parse |
@@ -167,6 +167,11 @@ of 2^53 - 1 elements" (`ecma262:sec-ecmascript-language-types-string-type`); a v
 2^53 - 1 acts as 2^53 - 1. A String from source text or from the host is bounded by the memory
 budget, not by `string_length`.
 
+A builtin charges steps in proportion to its work and before it (`engine.md` decision 3, "The
+step budget"); added on 2026-11-22: a comparison of two Strings and a String made a property key
+charge a step per code unit past 32 before the units are read, and compare in place (HOST-181,
+HOST-182).
+
 **Two readings of the heap.** Added on 2026-11-22 for resource accounting. `heap_bytes()`
 (decision 13) reads what the memory budget has charged: the arenas' capacity with the
 collector's workspace and the atom table's capacity, which stay charged while the agent lives,
@@ -178,7 +183,11 @@ after a collection these are the live records, so it falls by everything a sweep
 by what the freed records owned. `live_bytes()` is at most `heap_bytes()`. `heap_bytes()` keeps
 its name for the charged reading because the requirements and tests that set or check a budget
 read it (HOST-10, and the tests that size `memory_bytes` from it); only HOST-29 and HOST-52,
-which read what a collection gives back, move to `live_bytes()`.
+which read what a collection gives back, move to `live_bytes()`. Amended on 2026-11-22 for the
+host's own bytes (decision 14): both readings count the bytes the host charged with
+`charge_host_bytes` while it holds their `HostBytes`; a dropped `HostBytes` is credited after
+the next sweep or at the host's next charge, or at once by `Agent::credit_host_bytes`, which
+empties it.
 
 The draft words no allowance for these outcomes: `grep -i 'implementation limit'` over
 `ecma262.txt` finds nothing. The depth, string and BigInt `RangeError`s and the parse failure
@@ -224,6 +233,10 @@ whole source text `function anonymous(<parameters>\n) {\n<body>\n}`
 inside another, so the parser's share is that of one parse, but the path to it (ToString of
 each argument, the source text built, the wrapping function expression of the third parse,
 which counts as a level like any function) is not `eval`'s, and is measured on its own.
+Added on 2026-11-22: it holds in the dev profile with full debug information, in the dev profile
+without it, and in the release profile without it, each shown by the stack tests in the gate (the
+profiles `dev`, `stack-nodebug` and `release`, the last two checked to carry no debug section); a
+host that builds swell with a profile of its own runs the same tests in it.
 
 `CreateError::AgentKeysExhausted`: every handle carries its agent's key (decision 4), a `u32`
 from a process-wide counter; creating more than 2^32 - 1 agents in one process fails.
@@ -249,6 +262,16 @@ limit off; `AGENTS.md`: "Each limit ends in an outcome the host reads"); a wall-
 **HOST-169** (swell:D2) With `memory_bytes` enough for a flat source's copy and its script record but not for its tree, `parse_script` of that source answers `Parsed::Terminated(MemoryBudget)`, and `heap_bytes()` then reads what it read before the call. [slice 6]
 
 **HOST-171** (swell:D2) At the return of every entry point and of `collect`, `live_bytes()` reads at most `heap_bytes()` and `heap_bytes()` at most `memory_bytes`; with `memory_bytes` M, after the script `(function () { var a = []; while (true) a.push({}); })()` answers `Terminated(MemoryBudget)`, two `collect`s lower `live_bytes()` by more than they lower `heap_bytes()`, and then, with k chosen from the readings so that `live_bytes()` + 2 × k ≤ M < `heap_bytes()` + k and `string_length` at least k, the script `"x".repeat(k).length` answers `Terminated(MemoryBudget)`. [slice 6]
+
+**HOST-175** (swell:D2) A host function that charges 64 bytes with `cx.charge_host_bytes` and keeps the answer with a 64-byte buffer in the host on each call, run by the script `while (true) make();` with `memory_bytes` M and a step budget large enough, ends in `Terminated(MemoryBudget)`, and `heap_bytes()` then reads at most M; after the host drops the buffers with their `HostBytes`, the script `1` answers `Normal(1)`. [slice 6]
+
+**HOST-176** (swell:D2) A `HostBytes` gives back exactly what it charged, once: with L0 the `live_bytes()` before a charge of 100, a host object made after the charge with that `HostBytes` in its host data and no root, and H1 the `heap_bytes()` once the object exists, after `collect()` frees the object `live_bytes()` reads exactly L0 and `heap_bytes()` exactly H1 − 100 − `size_of_val` of the object's host data, and a second `collect()` changes neither; `Agent::credit_host_bytes` of a second charge of 100 answers `Ok(100)`, both readings fall by exactly 100 at the call, and a later `collect()` changes neither; `Agent::credit_host_bytes` of a `HostBytes` of another agent answers `Err(HostError::ForeignHandle)` with this agent's readings unchanged, and the other agent's `live_bytes()` falls by its bytes at its next `collect()`. [slice 6]
+
+**HOST-177** (swell:D2) A host function that calls `cx.charge_steps(1_000)` on each call, run by the script `while (true) walk();` with `steps_per_entry` N, ends in `Terminated(StepBudget)` with `last_entry_steps()` at most N; one that calls `cx.charge_steps(N + 1)` ends the entry at its first call with `last_entry_steps()` below N; an interrupt set before the charge ends it in `Terminated(Interrupted)`. [slice 6]
+
+**HOST-181** (swell:D2) With `a` and `b` two Strings of 1,000,000 code units that differ only in the last, defined as globals by the host, the script `a === b` spends at least 999,968 steps more than the script `"x" === "y"`, and with `steps_per_entry` 10,000 it answers `Terminated(StepBudget)`; the same holds for `a < b` (1,000,000 steps), `a == b` and `[a].indexOf(b)`. [slice 6]
+
+**HOST-182** (swell:D2) With a global object `o` and a String `k` of 1,000,000 code units defined by the host, and a `collect()` before the entry, the script `o[k]` spends at least 999,968 steps more than the same script with a key of one code unit, and with `steps_per_entry` 10,000 it answers `Terminated(StepBudget)` with `heap_bytes()` after the entry equal to `heap_bytes()` before it (no atom made). [slice 6]
 
 **HOST-13** (swell:D2) With `frame_depth` D, the script `var n = 0; function f() { n++; f(); } f();` answers `Throw` of a `RangeError` of its realm, the script `n` then answers `Normal(D - 1)`, that script's own context being the first, and the script `try { f(); } catch (e) {}` answers `Normal`. [slice 1]
 
@@ -350,6 +373,14 @@ UTF-16.**
 
 Why: the scope keeps its values in a frame the collector scans (`engine.md` decision 4); a
 handle kept past its scope is found by the generation check, never by reading the wrong object.
+Added on 2026-11-22 (HOST-178): a handle the host keeps past its scope, with no `Root` and
+listed by no `trace`, does not keep its record alive. While the record lives, every call with
+the handle answers as it would inside the scope; once a collection freed it, every call answers
+`Err(StaleHandle)`, never another record, because a generation is never used twice. A host that
+keeps such a handle checks it before it returns it to the engine (HOST-160) and never lists it
+in a `trace` (HOST-110). What keeps an object alive for the host is a `Root` (decision 4), or a
+handle that host data the engine reaches lists in its `trace` from the scope it was handed in
+onward (decision 15); such a handle is strong, not kept in this way.
 The agent key lets the engine answer a handle of another agent (finding 5). The two string
 conversions are Web IDL's: a `DOMString` is any sequence of code units (`webidl:idl-DOMString`)
 and a `USVString` has no lone surrogate (`webidl:idl-USVString`). Source text: ParseScript
@@ -423,6 +454,8 @@ value handed out and ends with the scope.
 **HOST-170** (swell:D4) A host function that reads an object with `cx.get` from the only root that holds it, drops that root, calls through `cx.call` a function whose allocation starts a collection, and returns the object, answers `Normal` with that object, and the agent stays `Alive`. [slice 6]
 
 **HOST-31** (swell:D4) A handle or root of another agent given to any entry point or read answers `Err(HostError::ForeignHandle)` and changes nothing. [slice 1]
+
+**HOST-178** (swell:D4) A host object made in one `with_cx` and kept by the host as an `ObjectRef` with no root, stored by a script in a global, answers its brand in a later `with_cx` and after `collect`; once the script deleted the global and `collect` ran, `brand` of the kept handle answers `Err(HostError::StaleHandle)`, also after 1,000 new host objects were made in the freed slots, and `state()` reads `Alive`. [slice 6]
 
 **HOST-32** (webidl:idl-DOMString) `to_utf16` returns every code unit of a String exactly, lone surrogates included: `new_string_utf16(&[0xD800, 0x61])` read back with `to_utf16` gives `[0xD800, 0x61]`. [slice 1]
 
@@ -611,8 +644,36 @@ InitializeHostDefinedRealm() with the provided customizations for creating the g
 and the global this binding", `html:creating-a-new-javascript-realm`). The global's prototype
 chain needs the new realm's intrinsics, so the closure runs inside the operation, and it reaches
 the one it needs through `Prototype::ObjectPrototypeOf(realm)` of a `HostObjectSpec` (decision
-15): the closure's `HookCx` reads no property and names no other intrinsic. The draft gives a
-realm no end; a realm is objects and records in the heap, freed like them.
+15) or by `intrinsic`: the closure's `HookCx` reads no property and names only the intrinsics
+and symbols of the closed list below. The draft gives a realm no end; a realm is objects and
+records in the heap, freed like them.
+
+**The closed list.** Added on 2026-11-22. The host names the intrinsics and well-known symbols
+of `HostIntrinsic` and `WellKnownSymbol` (decision 15) through `intrinsic(realm, which)` and
+`well_known_symbol(which)` on `Cx` and `HookCx`: a closed list of what Web IDL takes from a realm
+for the interfaces a host defines. An entry is added by a decision of this document with its
+Web IDL clause and a line of the changelog under "Host interface" ("How the gate holds this
+document"); the list grows in no other way. An intrinsic is the realm's original object,
+whatever a script did to the globals since; a well-known symbol is the agent's, the same in
+every realm.
+
+| entry | what Web IDL takes it for | arrives |
+|---|---|---|
+| `HostIntrinsic::FunctionPrototype`, `%Function.prototype%` | the [[Prototype]] of an interface object whose interface has no parent: "Let constructorProto be realm.[[Intrinsics]].[[%Function.prototype%]]." (`webidl:interface-object`) | HOST-183 |
+| `HostIntrinsic::ErrorPrototype`, `%Error.prototype%` | the [[Prototype]] of `DOMException`'s interface prototype object: "Otherwise, if interface is the DOMException interface, then set proto to realm.[[Intrinsics]].[[%Error.prototype%]]." (`webidl:interface-prototype-object`) | HOST-183 |
+| `HostIntrinsic::ObjectPrototype`, `%Object.prototype%` | the [[Prototype]] of any other interface prototype object: "Otherwise, set proto to realm.[[Intrinsics]].[[%Object.prototype%]]." (`webidl:interface-prototype-object`) | HOST-183 |
+| `WellKnownSymbol::ToStringTag`, `%Symbol.toStringTag%` | an object's class string: "If an object has a class string classString, then the object must, at the time it is created, have a property whose name is the %Symbol.toStringTag% symbol" (`webidl:dfn-class-string`) | HOST-184 |
+| `WellKnownSymbol::Unscopables`, `%Symbol.unscopables%` | the object of an interface's `[Unscopable]` members: "Perform ! DefinePropertyOrThrow(interfaceProtoObj, %Symbol.unscopables%, desc)." (`webidl:interface-prototype-object`) | HOST-184 |
+| `WellKnownSymbol::Iterator`, `%Symbol.iterator%` | "Iterable declarations": "If definition has an indexed property getter, then: Perform DefineMethodProperty(target, %Symbol.iterator%, %Array.prototype.values%, false)." (`webidl:define-the-iteration-methods`) | HOST-185, with slice 6's `Symbol` and iterator stories |
+| `HostIntrinsic::ArrayPrototypeValues`, `%Array.prototype.values%` | the same step, and `values` of a value iterator (`webidl:define-the-iteration-methods`) | HOST-185, as above |
+| `HostIntrinsic::ArrayPrototypeEntries`, `%Array.prototype.entries%` | "If definition has a value iterator, then: Perform ! CreateDataPropertyOrThrow(target, "entries", %Array.prototype.entries%)." (`webidl:define-the-iteration-methods`) | HOST-185, as above |
+| `HostIntrinsic::ArrayPrototypeKeys`, `%Array.prototype.keys%` | the same step for "keys" (`webidl:define-the-iteration-methods`) | HOST-185, as above |
+| `HostIntrinsic::ArrayPrototypeForEach`, `%Array.prototype.forEach%` | the same step for "forEach" (`webidl:define-the-iteration-methods`) | HOST-185, as above |
+
+The first five are made by the realm today. The last five come with slice 6: `%Symbol.iterator%`
+with the story of the `Symbol` constructor and the well-known symbols, `%Array.prototype.values%`
+with the story of the iterator protocol, and `entries`, `keys` and `forEach` as intrinsics of the
+realm recorded where their builtins are installed, so that each is the original function.
 
 Rejected: a host-made global passed in before the call (its prototype could not come from the
 realm's own intrinsics); an explicit `destroy_realm` (objects of a destroyed realm reachable
@@ -666,6 +727,12 @@ which realm it got).
 **HOST-52** (swell:D7) After the host drops every root of a realm and of objects of that realm, and no other realm reaches them, the second `collect` returns `live_bytes()` to the value read before `create_realm`. [slice 1]
 
 **HOST-161** (swell:D7) With realm A created and then realm B, `cx.to_object(Value::Boolean(true))` in `with_cx` of A answers an object whose prototype is A's `%Boolean.prototype%`, and `agent.call` with A of the Number 1 answers `Throw` of a `TypeError` whose prototype is A's `%TypeError.prototype%`; both hold after the host dropped every root of B and with the collector run at every safe point. [slice 1]
+
+**HOST-183** (webidl:interface-object) In the setup closure and in `with_cx`, `intrinsic(realm, FunctionPrototype)`, `intrinsic(realm, ErrorPrototype)` and `intrinsic(realm, ObjectPrototype)` answer the objects the script `Function.prototype`, `Error.prototype` and `Object.prototype` read in that realm, also after a script set the globals `Function`, `Error` and `Object` to `null`; a second realm's answers differ from the first's; a stale realm answers `Err(HostError::StaleHandle)`. [slice 6]
+
+**HOST-184** (webidl:interface-prototype-object) A host object whose own `@@toStringTag` data property, defined with `well_known_symbol(ToStringTag)`, is `"Node"` makes the script `Object.prototype.toString.call(n)` answer `"[object Node]"`; one with an own `@@unscopables` object whose `before` is `true` makes `with (n) { before }` read the outer binding; the symbols are the same in two realms of the agent. [slice 6]
+
+**HOST-185** (webidl:define-the-iteration-methods) A host object `list` with indexed own data properties `0` and `1` holding the host objects `a` and `b`, a `length` of 2, and own data properties `@@iterator`, `entries`, `keys`, `values` and `forEach` defined from `well_known_symbol(Iterator)` and the four intrinsics, makes the script `var r = [], it = list[Symbol.iterator](); r.push(it.next().value === a, it.next().value === b, it.next().done); var e = list.entries().next().value; r.push(e[0] === 0 && e[1] === a, list.keys().next().value === 0, list.values().next().value === a); list.forEach(function (n, i) { r.push(n === (i ? b : a)); }); r.join()` answer `"true,true,true,true,true,true,true,true"` (no `for`-`of`, which a later story of slice 6 brings), also after a script replaced `Array.prototype.values`, `entries`, `keys` and `forEach` before the host defined them; `intrinsic(realm, ArrayPrototypeValues)` answers the same object as `Array.prototype[Symbol.iterator]` read before that script. [slice 6]
 
 ## 8. Scripts
 
@@ -1037,6 +1104,51 @@ refusals of a later slice's construct the agent raised. A
 checkpoint and a collection answer a report. Reads run no code, call no hook and spend no
 step.** This answers finding 1.
 
+**Where an entry's error arose.** Added on 2026-11-22. After an outermost entry that answered
+`Parsed::Errors` or `Throw`, `last_entry_error_site` gives the line and column where the first
+error or the throw arose, counted from 1 in UTF-16 code units of the source that holds it,
+whether that source is eval or `Function` code, and the [[HostDefined]] of its script; after any
+other entry it gives none. A throw is recorded where it arose and kept through `finally`
+blocks; a `catch` ends it.
+
+- Defined after every entry that can end in a parse error or an uncaught throw: `parse_script`
+  that answered `Parsed::Errors` gives its first error's site; `evaluate_script`, `call` and
+  `construct` of `Agent` that answered `Throw` give the site of the throw they answered, and
+  `run_job` that answers `Throw` (decision 11) the same once it exists. Every outermost entry clears the
+  record at its start, so after an entry that answered `Normal`, `Terminated`,
+  `Parsed::Parsed` or `Parsed::Terminated`, or after a throw the script caught, the read gives
+  `None`, never the site of an earlier entry.
+- The site of a throw is the instruction where the throw completion arose in the innermost
+  ECMAScript frame: a `throw` statement, of any value, an error or not (a throw of a value that
+  is not an error gives the site of its `throw` statement); or an instruction whose operation
+  threw (a call of a value that is not callable, a property read of `null`, a call of a builtin
+  or a host function that answered `Throw`, sited at the call). The record is kept while the
+  same value unwinds through callers, builtins and `finally` blocks (`try { null.x } finally {}`
+  keeps the site of `null.x`); it ends when a `catch` block is entered, and when a builtin or a
+  host function answers normally after a throw inside it. A throw raised outside any ECMAScript
+  frame (a host function called by `Agent::call`) has no site: `None`.
+- `ErrorSite::dynamic` is true when the position is in eval code or in the source text of a
+  `Function` constructor, `function anonymous(<parameters>\n) {\n<body>\n}`, counted in that
+  text; false in the source given to `parse_script`. `ErrorSite::host_defined` is the
+  [[HostDefined]] of the script record whose code holds the position: the `Rc` given to
+  `parse_script` for that script (a function one script defined and another called names the
+  first), the caller's for a direct eval, `None` for an indirect eval and for `Function` code.
+- The record holds what survives the end of the entry and a collection (the compiled code and a
+  clone of the [[HostDefined]]), so the read answers the same after `collect`. It is a read: no
+  code, no hook, no step, no allocation. A site for `cx.parse_script`, for a throw inside a
+  `with_cx` closure and the frames a throw passed are not recorded.
+
+**An error object, read without running code.** Added on 2026-11-22. `error_summary` reads
+[[ErrorData]] and the own `message` data property: the kind recorded by the constructor that
+made the object, or given by the host in `HostObjectSpec::error_kind`, never its prototype or
+`name`. It answers `None` for a value that is not an object with [[ErrorData]] (a primitive, a
+plain object, a host object made with `error_kind: None`). The message is read from the object's
+own property list with no [[Get]]: an accessor, a value that is not a String, or no own
+`message` gives `message: None`, and an inherited `message` is not read; its code units are
+exact, as a `DOMString`. The kind is the constructor's whatever prototype `new_target` gave the
+object. Like every read it runs no code, calls no hook, spends no step and allocates nothing in
+the heap.
+
 Why: HTML reads a promise's fields when it notifies about rejected promises: "If
 p.[[PromiseIsHandled]] is true, then continue." and "attribute initialized to
 p.[[PromiseResult]]" (`html:notify-about-rejected-promises`), and Web IDL sets one: "To mark as
@@ -1054,6 +1166,20 @@ pub enum AgentState { Alive, Faulted }
 pub enum ModuleStatus { New, Unlinked, Linking, Linked, Evaluating, EvaluatingAsync, Evaluated }
 pub enum PromiseState { Pending, Fulfilled(Root), Rejected(Root) }
 pub struct CollectReport { pub heap_bytes_before: u64, pub heap_bytes_after: u64 }
+pub struct ErrorSite {
+    pub line: u32,
+    pub column: u32,
+    /// The position is in eval code or in the source text of a `Function` constructor,
+    /// counted in that code's own text.
+    pub dynamic: bool,
+    /// The [[HostDefined]] of the script record whose code raised it.
+    pub host_defined: Option<HostDefined>,
+}
+pub struct ErrorSummary {
+    pub kind: ErrorKind,
+    /// The own "message" property's value when it is a data property holding a String.
+    pub message: Option<Vec<u16>>,
+}
 
 impl<H: Host> Agent<H> {   // module_status and promise reads also on Cx and HookCx
     pub fn state(&self) -> AgentState;
@@ -1068,6 +1194,11 @@ impl<H: Host> Agent<H> {   // module_status and promise reads also on Cx and Hoo
     pub fn live_bytes(&self) -> Result<u64, HostError>;
     pub fn pending_microtasks(&self) -> Result<usize, HostError>;
     pub fn refusals(&self) -> u64;
+    pub fn last_entry_error_site(&self) -> Result<Option<ErrorSite>, HostError>;
+    pub fn error_summary(&self, value: &Root) -> Result<Option<ErrorSummary>, HostError>;
+}
+impl<'a, H: Host> Cx<'a, H> {   // also on HookCx
+    pub fn error_summary(&self, value: Value) -> Result<Option<ErrorSummary>, HostError>;
 }
 ```
 
@@ -1127,6 +1258,14 @@ holds these.
 
 **HOST-165** (swell:D13) Before slice 5, on a new agent, the script `try { "é".toLowerCase(); false } catch (e) { e instanceof SyntaxError && e.message === "case mapping outside ASCII is not supported before slice 5" }` answers `Normal(true)` and `refusals()` then reads 1; the same script with `toUpperCase`, `toLocaleLowerCase` and `toLocaleUpperCase` each answers `Normal(true)` and moves the count by 1 more; `try { "a".localeCompare("é"); false } catch (e) { e instanceof SyntaxError && e.message === "comparison outside ASCII is not supported before slice 5" }` and the same with `"é".localeCompare("a")` each answer `Normal(true)` and move it by 1 more; `"AbC".toLowerCase() === "abc" && "AbC".toUpperCase() === "ABC" && "a".localeCompare("b") < 0` answers `Normal(true)`, and `try { String.prototype.toLowerCase.call({ toString: function () { throw 1; } }); } catch (e) { e === 1 }` answers `Normal(true)`, each with the count unchanged; and once slice 5 is delivered, each of these method calls leaves the count unchanged. [slice 3]
 
+**HOST-172** (swell:D13) `parse_script` of the two-line source `var a;\n  var 1;` answers `Parsed::Errors`, and `last_entry_error_site()` then reads `Some` with line 2, the column the error's `message` ends with, `dynamic` false and the `host_defined` given to the parse (the same `Rc`). [slice 6]
+
+**HOST-173** (swell:D13) The script `function f() {\n  null.x;\n}\nf();` answers `Throw` of a `TypeError` and `last_entry_error_site()` reads line 2, column 3; `[1].map(function (x) {\n  throw x;\n});` reads line 2, column 3 (a throw of a value that is not an error is sited at its `throw` statement); `try { throw 1; } catch (e) {\n  throw e;\n}` reads line 2, column 3; `try { null.x } finally {}` reads line 1, column 7; `eval("1;\n  throw 2;")` reads line 2, column 3 with `dynamic` true; `new Function("\n  null.x;")()` reads line 4, column 3 with `dynamic` true and `host_defined` `None`. [slice 6]
+
+**HOST-174** (swell:D13) `last_entry_error_site()` reads `None` after an entry that answered `Normal`, `Terminated(StepBudget)` or `Parsed::Parsed`, after the script `try { throw 1; } catch (e) {} 1`, and after a `Normal` entry that follows a `Throw` entry; reads the same value twice and after a `collect()`; and leaves `last_entry_steps()`, `heap_bytes()` and the count of hook calls as they were. [slice 6]
+
+**HOST-179** (swell:D13) After the script `throw new TypeError("a\uD800")` answered `Throw`, `error_summary` of its root answers kind `TypeError` and message `[0x61, 0xD800]`, also after the script set the error's prototype to `null` and defined an inherited getter `message` on `Object.prototype`; for an error whose own `message` is an accessor whose getter throws it answers `message: None` and runs no code (a counter in the getter stays 0); a host object made with `error_kind: Some(TypeError)` on which the host defined an own data property `message` holding `"m"` answers kind `TypeError` and message `[0x6D]`, `Error.isError` of it answers `true` and `Object.prototype.toString.call` of it `"[object Error]"`; for `throw 1`, a plain object and a host object made with `error_kind: None` and the same own `message` it answers `None`, and `Error.isError` of that host object `false`; and `last_entry_steps()`, `heap_bytes()` and the count of hook calls are unchanged by it. [slice 6]
+
 ## 14. `call`, `construct`, host functions, re-entrancy
 
 **A host function is a built-in function object whose steps are a Rust function with the
@@ -1179,14 +1318,98 @@ impl<'a, H: Host> Cx<'a, H> {   // a method that takes a handle: Result<Completi
     pub fn iterator_close(&mut self, iterator: &IteratorRecord, completion: Completion<Value>) -> Result<Completion<Value>, HostError>;
     pub fn new_promise_capability(&mut self) -> Completion<PromiseCapability>;
     pub fn evaluate_script(&mut self, script: ScriptRef) -> Result<Completion<Value>, HostError>;
+    /// O.[[GetPrototypeOf]]().
+    pub fn get_prototype_of(&mut self, object: ObjectRef) -> Result<Completion<Option<ObjectRef>>, HostError>;
+    /// O.[[SetPrototypeOf]](V): whether it was set (false for a cycle, a non-extensible object
+    /// with another prototype, or %Object.prototype%).
+    pub fn set_prototype_of(&mut self, object: ObjectRef, prototype: Option<ObjectRef>)
+        -> Result<Completion<bool>, HostError>;
+    /// Charge `steps` of the host's own work to the running outermost entry.
+    pub fn charge_steps(&mut self, steps: u64) -> Completion<()>;
 }
+impl<'a, H: Host> Cx<'a, H> {   // also on HookCx
+    /// Charge `bytes` the host holds for the agent to its memory budget; the answer holds the
+    /// charge, which goes back to the budget when the answer is dropped.
+    pub fn charge_host_bytes(&mut self, bytes: u64) -> Completion<HostBytes>;
+    /// Change the bytes `charge` holds to `bytes`: growing charges the difference first,
+    /// shrinking gives it back at once.
+    pub fn resize_host_bytes(&mut self, charge: &mut HostBytes, bytes: u64) -> Result<Completion<()>, HostError>;
+}
+/// Bytes the host charged for the agent. Neither `Clone` nor `Copy`, no public method;
+/// dropping it gives its bytes back.
+pub struct HostBytes { /* the bytes, the agent key, the agent's queue of host credits */ }
 impl<H: Host> Agent<H> {
     pub fn call(&mut self, realm: &Realm, function: &Root, this: &Root, args: &[&Root]) -> Result<Outcome<Root>, HostError>;
     pub fn construct(&mut self, realm: &Realm, function: &Root, args: &[&Root], new_target: Option<&Root>) -> Result<Outcome<Root>, HostError>;
+    /// Give back the bytes of `charge` at once; answers them.
+    pub fn credit_host_bytes(&mut self, charge: HostBytes) -> Result<u64, HostError>;
 }
 // PropertyDescriptor, PreferredType, IteratorKind, IteratorRecord, PromiseCapability: the draft's
 // records of the same names, as plain Rust structs and enums over Value.
 ```
+
+**Prototypes.** Added on 2026-11-22. An interface object whose interface has a parent gets the
+parent's interface object as [[Prototype]] by `set_prototype_of` after `new_host_function`
+("If I inherits from some other interface P, then set constructorProto to the interface object
+of P in realm.", `webidl:interface-object`; without a parent it keeps `%Function.prototype%`);
+`get_prototype_of` serves the binding steps that walk a chain ("Let prototype be
+O.[[GetPrototypeOf]]()", the named property visibility algorithm,
+`webidl:dfn-named-property-visibility`). Both follow the ordinary [[SetPrototypeOf]] and
+[[GetPrototypeOf]] and run no script code for an object without overrides. They act on any
+object the host made or was handed, through a handle it holds in its scope or a root (a stale
+handle answers `Err(HostError::StaleHandle)`, a foreign one `Err(HostError::ForeignHandle)`). A
+cycle, a non-extensible object given another prototype and `%Object.prototype%` given another
+value are refused with `Ok(Ok(false))`, an outcome the host reads. They are on `Cx` only: once a
+host object has an override table (slice 9) they run host code, which `HookCx` cannot.
+
+**The host's own work and bytes.** Added on 2026-11-22. A host function charges the steps of its
+own work with `cx.charge_steps`, as a builtin does, before the work; and the bytes it holds for
+the agent outside the engine's heap with `charge_host_bytes` before it allocates them, keeping
+the answer with them: dropping it gives the bytes back, in a sweep too, with no agent at hand; a
+`HostBytes` kept for good keeps its bytes charged for the agent's life. For bytes whose size
+changes while their holder lives (a text node's data, an attribute list), `resize_host_bytes`
+changes the charge in place: growing charges the difference before the host grows its storage
+and, past the budget, ends the entry as any charge does, the handle keeping its old charge;
+shrinking gives the difference back at once. Replacing the handle by a new one charges both
+until the old one is dropped.
+
+- Both charges go through the one accounting of the memory budget and the one counter of steps:
+  there is no second budget. `charge_steps` reads the interrupt flag first; steps past
+  `steps_per_entry` are not spent and end the run in `Terminated(StepBudget)`, an interrupt in
+  `Terminated(Interrupted)`. `charge_host_bytes` and a growing `resize_host_bytes` that would
+  pass `memory_bytes` charge nothing and end the run in `Terminated(MemoryBudget)`, sticky as
+  decision 10 says, as the engine's own charge does; neither is a safe point, so no collection
+  runs in them. The steps are the running outermost entry's: inside `with_cx` those of the last
+  `Cx` call that began an entry (decision 2), inside a host function the outermost entry's.
+- A dropped `HostBytes` adds its bytes to a queue of the agent it holds, touching nothing else,
+  so it cannot fail, also when its agent faulted or was dropped. The host keeps it with what it
+  charged for: in the host data of the host object that owns the storage, so the sweep that frees
+  the object drops it, or in its own state. The agent credits the queue after each sweep and
+  before each `charge_host_bytes` and growing `resize_host_bytes`, so a charge dropped outside a
+  collection, or inside a host function, gives its room to the next charge.
+- `Agent::credit_host_bytes` takes the handle, credits its bytes at once and empties it, so its
+  drop adds nothing; it needs no realm and no scope (a dropped document). A credit is always the
+  bytes of one charge as resized, given back once, to the agent that charged them: no credit
+  passes what the host charged and nothing wraps. A `HostBytes` of another agent given to
+  `credit_host_bytes` or `resize_host_bytes` answers `Err(HostError::ForeignHandle)` and changes
+  nothing (dropped there, it gives its bytes back to its own agent); a faulted agent answers
+  `Err(HostError::Faulted)`.
+- A charge, a resize, a drop and a credit are inputs the host gives (decision 19).
+
+**What a host function, a host object and a property cost.** Added on 2026-11-22. A host
+function's record is charged before it is made with the boxes of its steps and of its data, and
+the sweep that frees the function credits them. A host function costs at most
+`HOST_FUNCTION_LIVE_BYTES` bytes of `live_bytes()` plus its data, a property definition
+`PROPERTY_LIVE_BYTES`; a realm of 300 host functions and 40 host objects with 600 definitions
+raises `heap_bytes()` by at most `BINDINGS_REALM_HEAP_BYTES`, arena growth included (a host
+object: decision 15). Each is a public constant of `host/limits.rs`; a test compares the values
+written here with the constants. A release that raises a ceiling names it under the changelog's
+Host interface heading. Steps: making a host function or a host object spends no step and leaves
+the counter of the running entry unchanged; defining a property that does not compact spends
+none; `set_prototype_of` spends one per object on the new prototype's chain; a call of a host
+function spends one step at its entry besides the instructions of the call, which is 2 fewer than
+a call of a script function with an empty body, and what the host charges with
+`cx.charge_steps`.
 
 **HOST-103** (ecma262:sec-built-in-function-objects-call-thisargument-argumentslist) A host function called from script as `o.f(1, 2)` receives `this` = `o`, the arguments `[1, 2]` and `new_target` `None`, and its `Ok(v)` is the call's value. [slice 1]
 
@@ -1197,6 +1420,12 @@ impl<H: Host> Agent<H> {
 **HOST-106** (ecma262:sec-createbuiltinfunction) A host function made with name `"print"` and length 1 has the own properties `name` `"print"` and `length` 1 with the attributes CreateBuiltinFunction gives them. [slice 1]
 
 **HOST-107** (html:clean-up-after-running-script) A host function that evaluates a second parsed script through `cx.evaluate_script` gets that script's completion value, and the outer script then continues with the bindings the inner one created. [slice 1]
+
+**HOST-180** (webidl:interface-object) A host function `Node` and a host function `Element`, the second given `Node` as [[Prototype]] by `cx.set_prototype_of` answering `Ok(Ok(true))`, make the script `Object.getPrototypeOf(Element) === Node && Object.getPrototypeOf(Node) === Function.prototype` answer `true`, and `cx.get_prototype_of(Element)` answers `Node`; `set_prototype_of(Node, Some(Element))` then answers `Ok(Ok(false))` (a cycle), on an object made non-extensible another prototype answers `Ok(Ok(false))`, and a stale handle answers `Err(HostError::StaleHandle)`; no call runs script code (a getter on `Function.prototype` counting its calls stays at 0). [slice 6]
+
+**HOST-186** (swell:D14) After a realm's setup, `new_host_function` with a name of at most 32 code units and data of a `T` raises `live_bytes()` by at most `HOST_FUNCTION_LIVE_BYTES` plus `size_of::<T>()`, and by the same amount for each further function of the same name length and type; `new_host_object` with data of a `T` by at most `HOST_OBJECT_LIVE_BYTES` plus `size_of::<T>()`; 300 definitions of new properties on one host object by at most 300 × `PROPERTY_LIVE_BYTES`; once the host drops them and `collect` ran twice, `live_bytes()` reads its value from before them. [slice 6]
+
+**HOST-187** (swell:D14) A realm with 300 host functions and 40 host objects whose properties are defined in `with_cx` raises `heap_bytes()`, from its reading after `create_realm` and before the first `with_cx`, by at most `BINDINGS_REALM_HEAP_BYTES`; with the baseline `last_entry_steps()` read after a `with_cx` whose last call began an entry (a `define_property_or_throw`, which reads 0 after it), a `with_cx` of only `new_host_function` or only `new_host_object` calls leaves `last_entry_steps()` unchanged; `set_prototype_of` with a new prototype whose chain has k objects reads k; three of its host functions, bound after the `heap_bytes()` reading as the global data properties `f0`, `f150` and `f299`, make the scripts `f0()`, `f150()` and `f299()` spend the same `last_entry_steps()`, which is 2 less than that of the script `g()` of a script function `g` with an empty body; once the realm's roots are dropped and `collect` ran twice, `live_bytes()` reads its value from before `create_realm` (the three bindings are properties of the realm's global and go with it), and building the same realm again leaves `heap_bytes()` at most where the first build left it. [slice 6]
 
 ## 15. Host objects: brand, host data, `trace`, overrides
 
@@ -1248,23 +1477,64 @@ pub struct Overrides<H: Host> {
 pub enum Prototype {
     Object(ObjectRef),
     Null,
-    /// The `%Object.prototype%` of that realm, the one intrinsic a host can name.
+    /// The `%Object.prototype%` of that realm, without a call (decision 7).
     ObjectPrototypeOf(RealmRef),
 }
 pub struct HostObjectSpec<H: Host> {
     pub prototype: Prototype,
     pub brand: Brand,
     pub data: Option<Box<dyn HostData>>,
+    /// `Some(kind)` gives the object an [[ErrorData]] slot of that kind.
+    pub error_kind: Option<ErrorKind>,
     pub overrides: Option<&'static Overrides<H>>,
     pub is_html_dda: bool,
+}
+/// The intrinsics a host can name: the closed list of decision 7.
+#[non_exhaustive]
+pub enum HostIntrinsic {
+    ObjectPrototype, FunctionPrototype, ErrorPrototype,
+    // with slice 6's iterator story (HOST-185):
+    ArrayPrototypeValues, ArrayPrototypeEntries, ArrayPrototypeKeys, ArrayPrototypeForEach,
+}
+/// The well-known symbols a host can name: the closed list of decision 7.
+#[non_exhaustive]
+pub enum WellKnownSymbol {
+    ToStringTag, Unscopables,
+    // with slice 6's `Symbol` story (HOST-185):
+    Iterator,
 }
 impl<'a, H: Host> Cx<'a, H> {   // also on HookCx
     pub fn new_host_object(&mut self, spec: HostObjectSpec<H>) -> Result<Completion<ObjectRef>, HostError>;
     pub fn brand(&self, object: ObjectRef) -> Result<Option<Brand>, HostError>;
     pub fn host_data<T: HostData>(&self, object: ObjectRef, brand: Brand) -> Result<Option<&T>, HostError>;
     pub fn host_data_mut<T: HostData>(&mut self, object: ObjectRef, brand: Brand) -> Result<Option<&mut T>, HostError>;
+    /// The intrinsic `which` of `realm`, handed out.
+    pub fn intrinsic(&mut self, realm: RealmRef, which: HostIntrinsic) -> Result<ObjectRef, HostError>;
+    /// The well-known symbol `which` (shared by all realms of the agent), handed out.
+    pub fn well_known_symbol(&mut self, which: WellKnownSymbol) -> Result<SymbolRef, HostError>;
 }
 ```
+
+`intrinsic` and `well_known_symbol` are reads (added on 2026-11-22, decision 7's closed list):
+no code, no hook, no step, no allocation; the value is handed out to the running scope, as every
+value given to host code is, and a realm `create_realm` did not make, or one freed, answers
+`Err(StaleHandle)`.
+
+**A host object with [[ErrorData]].** Added on 2026-11-22. A host object made with an
+`error_kind` has an [[ErrorData]] slot of that kind, as Web IDL gives a `DOMException` ("If
+interface is DOMException, append [[ErrorData]] to slots.", "internally create a new object
+implementing the interface", `webidl:internally-create-a-new-object-implementing-the-interface`;
+"It also has [[ErrorData]] and [[Stack]] slots, like all built-in exceptions.", "DOMException
+custom bindings", `webidl:js-DOMException-specialness`): `Error.isError` answers true for it and
+`Object.prototype.toString` gives it the builtin tag "Error" (an own or inherited
+`@@toStringTag` still wins), and `error_summary` (decision 13) reads its kind. The browser makes
+a `DOMException` with `Some(ErrorKind::Error)`. The field is a breaking change of the interface:
+every `HostObjectSpec` literal names it. The [[Stack]] slot is not made.
+
+**What a host object costs.** Added on 2026-11-22. A host object costs at most
+`HOST_OBJECT_LIVE_BYTES` bytes of `live_bytes()` plus its data, a public constant of
+`host/limits.rs` that a test compares with the value written here; what the data owns behind its
+box is the host's to charge with `charge_host_bytes` (decision 14). Making one spends no step.
 
 **HOST-108** (webidl:is-a-platform-object) `host_data::<T>` with the object's own brand and type returns `Some`, and with another brand, another type, or an object made by script returns `Ok(None)`. [slice 1]
 
@@ -1587,6 +1857,23 @@ table in `host-interface-model.md` gives each marker's first words.
   interface names the `HOST-<n>` it closes, and the change that closes one turns its `pending`
   line into a `test` line.
 - An identifier is never reused. A requirement withdrawn later keeps its number unused.
+- Every change of the host interface is named in the changelog. Added on 2026-11-22. A public
+  item of `crates/swell/src/host/` and `crates/swell/src/value.rs` (a function or method, a
+  type, a variant, a `pub` field, a constant, a method of the `Host` trait or of
+  `scoped_methods!`) or a `HOST-<n>` requirement of this document that changed since the last
+  release, added and removed included, stands in backticks under a heading `### Host interface`
+  of `## [Unreleased]` in `CHANGELOG.md`, in one name form, which `docs/releasing.md` states: a
+  function or method by its bare name (`charge_steps`), with its type before it where two types
+  of the interface have a method of that name (`Agent::host`); a method of `scoped_methods!`,
+  which `Cx` and `HookCx` both have, once, by its bare name (`get`); a variant or a field as
+  `Type::name` (`HostError::StaleHandle`, `ErrorSite::line`); a type, trait, constant or type
+  alias by its name (`HostBytes`); a requirement as `HOST-<n>`. A ceiling of decision 14 raised
+  (the constant's value) and an entry added to decision 7's closed list (a variant) are such
+  changes.
+  The gate holds it from the tree alone: `host-surface-check` compares a scan of the tree with
+  `conformance/host/surface.txt`, the scan at the last release, renewed in the commit of each
+  release, and fails, one line per name, for a changed name the heading does not hold in that
+  form.
 
 ## Not checked
 
