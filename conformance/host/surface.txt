@@ -1,4 +1,4 @@
-# swell 0.3.0
+# swell 0.4.0
 ALL pub const ALL: [ErrorKind; 7] = [ErrorKind::Error, ErrorKind::EvalError, ErrorKind::RangeError, ErrorKind::ReferenceError, ErrorKind::SyntaxError, ErrorKind::TypeError, ErrorKind::UriError]
 Abrupt #[derive(Clone, Copy, Debug, PartialEq)] pub enum Abrupt
 Abrupt::Terminated Terminated(Termination)
@@ -7,6 +7,7 @@ Agent pub struct Agent<H: Host>
 Agent::call pub fn call(&mut self, realm: &Realm, function: &Root, this: &Root, args: &[&Root]) -> Result<Outcome<Root>, HostError>
 Agent::construct pub fn construct(&mut self, realm: &Realm, function: &Root, args: &[&Root], new_target: Option<&Root>) -> Result<Outcome<Root>, HostError>
 Agent::duplicate pub fn duplicate(&mut self, root: &Root) -> Result<Root, HostError>
+Agent::error_summary pub fn error_summary(&self, value: &Root) -> Result<Option<ErrorSummary>, HostError>
 Agent::evaluate_script pub fn evaluate_script(&mut self, script: &Script) -> Result<Outcome<Root>, HostError>
 Agent::host pub fn host(&self) -> &H
 Agent::host_mut pub fn host_mut(&mut self) -> &mut H
@@ -14,6 +15,7 @@ Agent::parse_script pub fn parse_script(&mut self, realm: &Realm, source: Source
 AgentState #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum AgentState
 AgentState::Alive Alive
 AgentState::Faulted Faulted
+BINDINGS_REALM_HEAP_BYTES pub const BINDINGS_REALM_HEAP_BYTES: u64 = 381_696
 BigIntRef #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct BigIntRef
 Brand #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct Brand(pub u32)
 CollectReport #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct CollectReport
@@ -47,6 +49,14 @@ ErrorKind::ReferenceError ReferenceError
 ErrorKind::SyntaxError SyntaxError
 ErrorKind::TypeError TypeError
 ErrorKind::UriError UriError
+ErrorSite #[derive(Clone)] pub struct ErrorSite
+ErrorSite::column pub column: u32
+ErrorSite::dynamic pub dynamic: bool
+ErrorSite::host_defined pub host_defined: Option<HostDefined>
+ErrorSite::line pub line: u32
+ErrorSummary #[derive(Clone, Debug, PartialEq, Eq, Hash)] pub struct ErrorSummary
+ErrorSummary::kind pub kind: ErrorKind
+ErrorSummary::message pub message: Option<Vec<u16>>
 FaultPoint #[cfg(feature = "fault-injection")] #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum FaultPoint
 FaultPoint::Collect Collect
 FaultPoint::CreateRealm CreateRealm
@@ -59,7 +69,7 @@ HOST-1 c5b28d4e9070a67c54e2dab64940805593d911982a4ba636ad74f5e9ae352bfd
 HOST-10 0be76ad391b00d0314fd9d39f73ba73371dbe1b2fb244d9188a88546bf8afbc7
 HOST-100 0dbad5b921aacd4a1432e2967750c7e72bb0c8ee495a1283227d948a30711646
 HOST-101 dfd2b661856d9bdd83f0b5a3548876e740eada5296d27fd45802586e9ed2bd3e
-HOST-102 d2ea3a3bc12eccaddae057cc3f40c5f6f0a4713b055e9ec54bc08317f73043e2
+HOST-102 8a0138b509d958c684d32f641f989a54b72e87da33bb6f0ad303395dc042fd81
 HOST-103 1a355703fa27e029633270c86e46fcab7559632b92719ddd03bc615a45a16608
 HOST-104 a8572d234b33a1e2cb4e25c26ea038d6c8fb542e63823eee2ba5283502122a19
 HOST-105 d780b92ddca8cfe99ae6c341601388c4827d443ff8c98c5f2eb8c92866f56b52
@@ -129,9 +139,34 @@ HOST-162 72a53faf99cf252fff27620dc6817442efad7f1587d1021e858f603977e73c9b
 HOST-163 a130d0d853a47d18905928e5cf457d8cb4ec18fe23dabc1db403ce59ca373bb1
 HOST-164 ef41d46144f435bc1f4c25fa6ba5970603217145e7302022aba9814ff49af87d
 HOST-165 5423eac2445821d8aa1b51ef42957f9afe0f86938ca083aa8b17e23b8fea6ad5
+HOST-166 225727ff7299ee1baf4ac82e0d95d81296e608a0d7934627780f2ab858fe22b4
+HOST-167 db1f4d8d876307fc84e6dd4ebce6eefbfdf43de735ee5ee11fd2f74a30560aab
+HOST-168 334b0ae11a56f14d9f667f189472a3f34fda5fe0d1ea8b459f3e7d12ef2f3d84
+HOST-169 b9b3627f59317d96a761cff5d5b808dace6e0ee1edb68982c9f308bfedfb9963
 HOST-17 47fd86c1e779706869461462ac97734b6f78839d9fb3bb3de7c4e5fa3bd45332
+HOST-170 c0df5bfc78d190335b4ea8e5dfd3ae10729aa90659ae8784d6ca5487519dd80a
+HOST-171 45af47807ffc6b5bbaf61b7e9331e844f657f34c487bf9b1b8206b0e48d59e6e
+HOST-172 cff25c679197719cd9792f46c7754e8497ec290b9003807ea1e93c3a65b21144
+HOST-173 f473c28017064d5d4ca7f7db67aba49fe381176627591d03537c97afe1821c40
+HOST-174 e75a52ca6a4bc57012008bd15547a3176db0bd4283d674f5841af9f6d606c5c3
+HOST-175 3528ee680f685fff615fa264e3faf33eecddbe98b6394bc2bec157615b15e3b7
+HOST-176 6954edbbf7ba1743f9dbe77b655be8b85f96f0730293a3aa3ebb65c0e13e57e6
+HOST-177 a0d3a9953f42d9fe73c161c7bebd4f99594e1f7166df8acc1564a23e76faddef
+HOST-178 6e7db99437d44446b5cb784ed94c5449ec4fc089e36f6bc1fb3c1cfc73e1b485
+HOST-179 7300fc3480d15f58d7287a5d10e3ae5fb5673f5c65db7f0030e7122c1fd19f3f
 HOST-18 43203fe5e774d5fee71bfb2c5f4b5a01ae606baabb64644cc9f522ee04039506
+HOST-180 c03e114f9b16d891f10728f67961cd8ee2a5841372dbdfeed6217f1df1ca8ffd
+HOST-181 7d79fdfd126510d462bac820a4ac26d7724771fd64e20b6873000590155607cf
+HOST-182 840f1b3ca62c4419b524fcdc3d36bedc8198d8487392d5e8286c63e352a52bcc
+HOST-183 ca1098024f8e81ac0c7f4e73f83a04e818b5e817dc71520213469478687ffb2d
+HOST-184 7b28e916004af3420da89743781726dc3ea67d26b49cf1dccc26017e3236b198
+HOST-185 33d6f2db4165429fae43c17482f5243ae031e9832273687c80cc80dee53acd46
+HOST-186 20dc05deb68fd5c9e94bbb55c653e2d3ccf6ee342c7c25a5aee132bc0163d677
+HOST-187 248d14fb155c1281df28cd4a95a74102319bd6da37c87737000797adf97a1bad
+HOST-188 f9494b2565f5f53037a641d41bf1f020f348ba1e76cac1543a4a7b2d42bae09f
+HOST-189 0b22020b8fa65ae62bb8eb567e5e1c49444d16a9432c53743aa35df30e926ed6
 HOST-19 75b6d6a5883befe3c7d7ca6f90331d6319edf12c6bbfd46a05f9b29495b70db3
+HOST-190 695dbff033ee9e1f87e44a6cc4c67b9c0bf7ae35cd5066d10f1a8095ac12f63b
 HOST-2 382b52faa3b8527c2c65e8a028a9206f99ef5ec685434c57157135f64b6a53ed
 HOST-20 991e8f3d2ae0435180893a18f448210e522443bad335bcaf3063881b00e8509e
 HOST-21 8bb3774249df5511733c1b6e6f23638203f67e089c60ef8c485746766c1a609d
@@ -142,7 +177,7 @@ HOST-25 f271a8f7d14fcad2e7fbaf903c134b22c51de87da7bd5ff4a320c3cdd3cc6da5
 HOST-26 825855225a3063ed79c3a41f7a5569f73e862143f9a5ddd773939553b0ef576f
 HOST-27 2dbf912b085f027070fcd84e4158147641859d83e916ee0e667683f172944c65
 HOST-28 eb39f1ff421b105e92845be86c7b2b174e14f3a8a01fd215f96a71dfe237619a
-HOST-29 a2488d8e80a2b90518be83f1a879c0483d6266d4fde628aec237002d43f9c03b
+HOST-29 5849ce92688184b899561c1e79796ea5c89a9542ab54fc9ec19a55d9a8a2e089
 HOST-3 5dba0033f7dff528071a22613c876c700334c5b761244ac5ad3f92e3fd2e5661
 HOST-30 e86010661401c543772f8377fba706badd986605859d99a564df79ff59135310
 HOST-31 52ffce5d4561ffb5b12d67e71dcdc3bd8f38af4e480ac3008d06ffd224082a37
@@ -168,7 +203,7 @@ HOST-49 97438dabc231d6c3156892c6d10cd2369f2f080fdd38919bfe05cfdcaaf9ff31
 HOST-5 a7040574de90beebadbef2ce86f5a99aa06ab99cc1b7460417dffe49a7bce629
 HOST-50 a62aba1a02e641b5ccc9875415207bf18d37d4f23c645edab5fb045fcfce42f7
 HOST-51 a3bbe52bd9744de9baec7897544e817b0f494423eb8d3147060e67b085142bc7
-HOST-52 e4cc706279a4678df63ac66f812030eba15508d4f5f0d8f07eca2e7ea834c519
+HOST-52 835275a877053d69f425112fa2ee0404255d003bfddae6049cbe852677220c25
 HOST-53 a63b802fd09da88485ebaab301db23af9ab4d0db06f24d29d7bf03ea137e2bd2
 HOST-54 1f216ec187d2325036c94029864fc81921fef716a838edde412d196f6c791691
 HOST-55 c18424cf3da2e42435e15a8114084f9d810aa48c875468c9f614c06cb0ee01cc
@@ -188,7 +223,7 @@ HOST-67 31ec0efa75764eedca1f9ccfd2665763332f65ad32a10860f29daeb1d7e1051f
 HOST-68 054fe06775a7ec82f52700d6c87b86c950c2560dac933761f33412ec0a5a4467
 HOST-69 1cb645e3c2cacb377c85814f3c0641e7a5414994eb316d83659a02383ff6cb1c
 HOST-7 41c74662ae9d236906c247d0aafb7cb0ae7c7561d68cc2c835b66c39dcd0f9bd
-HOST-70 2d552399ed155b022e72c368cadb2618cdd9e6e433f4d6e8c4c213d593dde540
+HOST-70 fafd01cc9965fd304f61e52786b4179e3e182cd6494f8cb875f4b2439f4c3c5f
 HOST-71 35b9d5bd56fab25f92b31c7af0e42c56d8f86cd6225c557790b0042d2428b2ef
 HOST-72 2dae6f67af0c4d14d47edca07b4c5d4c256e2e5c697891f479f6b8e0483877e9
 HOST-73 7c4531441a58411e816dbeac54851aee621c0997f29f78567a2965f10b3797a6
@@ -220,11 +255,14 @@ HOST-96 b49f3764f931ef5413c7e2b9bc933763a14f7b757f8bdfb8fd9c061ad78de6de
 HOST-97 a4177cbb2b4b0eea8a0e4faecdd5b4a8bb8625e15a4110de2a98c0fb069b37e6
 HOST-98 31366fc4e433ac1cc02d015cc3edcff0f1015717e7c85c45e2f831f1f7c51e2a
 HOST-99 2b89c83c7866cdd6890393d36616f79b9c3e9d67846a093b042d38f3c5ab47b1
+HOST_FUNCTION_LIVE_BYTES pub const HOST_FUNCTION_LIVE_BYTES: u64 = 576
+HOST_OBJECT_LIVE_BYTES pub const HOST_OBJECT_LIVE_BYTES: u64 = 256
 Handled #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum Handled
 Handled::Handled Handled
 Handled::Unhandled Unhandled
 HookCx pub struct HookCx<'a, H: Host>
 Host pub trait Host: Sized + 'static
+HostBytes pub struct HostBytes
 HostCall #[derive(Clone, Copy, Debug)] pub struct HostCall<'c>
 HostCall::args pub args: &'c [Value]
 HostCall::callee pub callee: ObjectRef
@@ -241,9 +279,14 @@ HostError::ModuleTerminated ModuleTerminated
 HostError::StaleHandle StaleHandle
 HostError::WrongKind WrongKind { expected: ValueKind }
 HostFn pub type HostFn<H> = fn(cx: &mut Cx<'_, H>, call: HostCall<'_>) -> Completion<Value>
+HostIntrinsic #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub enum HostIntrinsic
+HostIntrinsic::ErrorPrototype ErrorPrototype
+HostIntrinsic::FunctionPrototype FunctionPrototype
+HostIntrinsic::ObjectPrototype ObjectPrototype
 HostObjectSpec pub struct HostObjectSpec
 HostObjectSpec::brand pub brand: Brand
 HostObjectSpec::data pub data: Option<Box<dyn HostData>>
+HostObjectSpec::error_kind pub error_kind: Option<ErrorKind>
 HostObjectSpec::prototype pub prototype: Prototype
 ImportAttribute #[derive(Clone, Debug, PartialEq, Eq, Hash)] pub struct ImportAttribute
 ImportAttribute::key pub key: Vec<u16>
@@ -288,6 +331,7 @@ Outcome #[derive(Debug)] pub enum Outcome<T>
 Outcome::Normal Normal(T)
 Outcome::Terminated Terminated(Termination)
 Outcome::Throw Throw(Root)
+PROPERTY_LIVE_BYTES pub const PROPERTY_LIVE_BYTES: u64 = 448
 Parsed #[derive(Debug)] pub enum Parsed<T>
 Parsed::Errors Errors(Vec<Root>)
 Parsed::Parsed Parsed(T)
@@ -354,19 +398,27 @@ ValueKind::Function Function
 ValueKind::Object Object
 ValueKind::Promise Promise
 ValueKind::String String
+WellKnownSymbol #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub enum WellKnownSymbol
+WellKnownSymbol::ToStringTag ToStringTag
+WellKnownSymbol::Unscopables Unscopables
 attributes pub fn attributes(&self) -> &[ImportAttribute]
 available_named_time_zone_identifiers fn available_named_time_zone_identifiers(_cx: &mut HookCx<'_, Self>) -> Vec<TimeZoneIdentifier>
 brand pub fn brand(&self, object: ObjectRef) -> Result<Option<Brand>, HostError>
+charge_host_bytes pub fn charge_host_bytes(&mut self, bytes: u64) -> Completion<HostBytes>
+charge_steps pub fn charge_steps(&mut self, steps: u64) -> Completion<()>
 clear pub fn clear(&self)
 collect pub fn collect(&mut self) -> Result<Outcome<CollectReport>, HostError>
 create_realm pub fn create_realm(&mut self, setup: Option<GlobalSetup<'_, H>>, host_defined: Option<HostDefined>) -> Result<Outcome<Realm>, HostError>
+credit_host_bytes pub fn credit_host_bytes(&mut self, charge: HostBytes) -> Result<u64, HostError>
 define_property_or_throw pub fn define_property_or_throw(&mut self, object: ObjectRef, key: PropertyKey, descriptor: PropertyDescriptor) -> Result<Completion<()>, HostError>
 delete_property_or_throw pub fn delete_property_or_throw(&mut self, object: ObjectRef, key: PropertyKey) -> Result<Completion<()>, HostError>
 duplicate pub fn duplicate(&mut self, root: &Root) -> Result<Root, HostError>
-get pub fn get(&self, root: &Root) -> Result<Value, HostError>
+error_summary pub fn error_summary(&self, value: Value) -> Result<Option<ErrorSummary>, HostError>
+get pub fn get(&mut self, root: &Root) -> Result<Value, HostError>
 get_named_time_zone_epoch_nanoseconds fn get_named_time_zone_epoch_nanoseconds(_cx: &mut HookCx<'_, Self>, _id: &str, local: IsoDateTime) -> Vec<i128>
 get_named_time_zone_offset_nanoseconds fn get_named_time_zone_offset_nanoseconds(_cx: &mut HookCx<'_, Self>, _id: &str, _epoch_ns: i128) -> i128
 get_property pub fn get_property(&mut self, object: ObjectRef, key: PropertyKey) -> Result<Completion<Value>, HostError>
+get_prototype_of pub fn get_prototype_of(&mut self, object: ObjectRef) -> Result<Completion<Option<ObjectRef>>, HostError>
 global_object pub fn global_object(&mut self, realm: &Realm) -> Result<Root, HostError>
 has_property pub fn has_property(&mut self, object: ObjectRef, key: PropertyKey) -> Result<Completion<bool>, HostError>
 heap_bytes pub fn heap_bytes(&self) -> Result<u64, HostError>
@@ -397,10 +449,13 @@ host_system_utc_epoch_nanoseconds fn host_system_utc_epoch_nanoseconds(cx: &mut 
 inject_fault #[cfg(feature = "fault-injection")] pub fn inject_fault(&mut self, point: FaultPoint)
 interrupt pub fn interrupt(&self)
 interrupt_handle pub fn interrupt_handle(&self) -> InterruptHandle
+intrinsic pub fn intrinsic(&mut self, realm: RealmRef, which: HostIntrinsic) -> Result<ObjectRef, HostError>
 is_dynamic pub fn is_dynamic(&self) -> bool
 is_set pub fn is_set(&self) -> bool
 kind pub fn kind(&self) -> JobKind
+last_entry_error_site pub fn last_entry_error_site(&self) -> Result<Option<ErrorSite>, HostError>
 last_entry_steps pub fn last_entry_steps(&self) -> Result<u64, HostError>
+live_bytes pub fn live_bytes(&self) -> Result<u64, HostError>
 min_stack_bytes pub const fn min_stack_bytes(&self) -> usize
 name pub fn name(self) -> &'static str
 new pub fn new(host: H, limits: Limits, seeds: Seeds) -> Result<Agent<H>, CreateError>
@@ -415,9 +470,11 @@ realm_host_defined pub fn realm_host_defined(&self, realm: &Realm) -> Result<Opt
 realm_ref pub fn realm_ref(&self, realm: &Realm) -> Result<RealmRef, HostError>
 referrer pub fn referrer(&self) -> Referrer
 refusals pub fn refusals(&self) -> u64
+resize_host_bytes pub fn resize_host_bytes(&mut self, charge: &mut HostBytes, bytes: u64) -> Result<Completion<()>, HostError>
 root pub fn root(&mut self, value: Value) -> Result<Root, HostError>
 script_host_defined pub fn script_host_defined(&self, script: &Script) -> Result<Option<HostDefined>, HostError>
 set pub fn set(&mut self, object: ObjectRef, key: PropertyKey, value: Value, throw: bool) -> Result<Completion<bool>, HostError>
+set_prototype_of pub fn set_prototype_of(&mut self, object: ObjectRef, prototype: Option<ObjectRef>) -> Result<Completion<bool>, HostError>
 specifier pub fn specifier(&self) -> &[u16]
 state pub fn state(&self) -> AgentState
 system_time_zone_identifier fn system_time_zone_identifier(_cx: &mut HookCx<'_, Self>) -> String
@@ -431,4 +488,5 @@ to_string pub fn to_string(&mut self, value: Value) -> Result<Completion<StringR
 to_utf16 pub fn to_utf16(&self, string: StringRef) -> Result<Vec<u16>, HostError>
 trace fn trace(&self, tracer: &mut Tracer<'_>)
 value pub fn value(&mut self, value: Value)
+well_known_symbol pub fn well_known_symbol(&mut self, which: WellKnownSymbol) -> Result<crate::value::SymbolRef, HostError>
 with_cx pub fn with_cx<R>(&mut self, realm: &Realm, f: impl FnOnce(&mut Cx<'_, H>) -> R) -> Result<R, HostError>
