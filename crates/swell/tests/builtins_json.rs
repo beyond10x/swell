@@ -544,14 +544,30 @@ const DEPTH: usize = if cfg!(feature = "collect-every-safe-point") {
     100_000
 };
 
+/// The nesting in this run: [`DEPTH`] in the collect mode and in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`); 25,000 in the default mode's gate (100,000 took 16.2 s there at a
+/// load of 100 to 110 on 17 cores, cargo-nextest). 25,000 still shows the stack bound: a Rust
+/// call per level takes at least 16 bytes (a return address and a saved frame pointer), 400,000
+/// bytes for the nesting, more than the [`STACK_BYTES`] (262,144) the walk runs on.
+fn depth() -> usize {
+    if cfg!(feature = "collect-every-safe-point")
+        || std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        DEPTH
+    } else {
+        25_000
+    }
+}
+
 /// JSON.stringify walks nested values on an explicit stack (the story's Change; decision 3,
 /// "Depth bounds"): 100,000 nested arrays, each made by `Array` through `cx.call`, are
-/// stringified on a 256 KiB stack to 100,000 "[" and 100,000 "]" ([`DEPTH`] in collect mode).
+/// stringified on a 256 KiB stack to 100,000 "[" and 100,000 "]" ([`depth`] in this run).
 #[test]
 fn stringify_of_100000_nested_arrays_needs_no_rust_stack() {
     on_small_stack(
         "stringify_of_100000_nested_arrays_needs_no_rust_stack",
         || {
+            let depth = depth();
             let mut limits = limits();
             limits.memory_bytes = 512 * 1024 * 1024;
             let mut agent = agent_with(limits).unwrap();
@@ -561,7 +577,7 @@ fn stringify_of_100000_nested_arrays_needs_no_rust_stack() {
                 .with_cx(&realm, |cx| {
                     let global = object(cx, &global_root);
                     let mut nested = array(cx, global, &[]);
-                    for _ in 1..DEPTH {
+                    for _ in 1..depth {
                         nested = array(cx, global, &[nested]);
                     }
                     match stringify(cx, global, &[nested]).unwrap() {
@@ -570,8 +586,8 @@ fn stringify_of_100000_nested_arrays_needs_no_rust_stack() {
                     }
                 })
                 .unwrap();
-            let mut expected = vec![u16::from(b'['); DEPTH];
-            expected.extend(std::iter::repeat_n(u16::from(b']'), DEPTH));
+            let mut expected = vec![u16::from(b'['); depth];
+            expected.extend(std::iter::repeat_n(u16::from(b']'), depth));
             assert!(units == expected, "{} code units", units.len());
         },
     );

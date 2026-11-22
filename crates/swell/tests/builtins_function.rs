@@ -361,7 +361,22 @@ const LINKS: u32 = if cfg!(feature = "collect-every-safe-point") {
     100_000
 };
 
-/// A chain of 100,000 bound functions ([`LINKS`] in collect mode), each bound to the one before
+/// The links of the chain in this run: [`LINKS`] in the collect mode and in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`); 25,000 in the default mode's gate (100,000 took 19.0 s there at a
+/// load of 100 to 110 on 17 cores, cargo-nextest). 25,000 still shows the stack bound: a Rust
+/// call per link takes at least 16 bytes (a return address and a saved frame pointer), 400,000
+/// bytes for the chain, more than the [`STACK_BYTES`] (262,144) the chain is called on.
+fn links() -> u32 {
+    if cfg!(feature = "collect-every-safe-point")
+        || std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        LINKS
+    } else {
+        25_000
+    }
+}
+
+/// A chain of 100,000 bound functions ([`links`] in this run), each bound to the one before
 /// by `bind` through `cx.call`, is called and constructed on a 256 KiB stack: [[Call]] and
 /// [[Construct]] (10.4.1.1, 10.4.1.2) gather the bound arguments in a loop over the chain, a step per link,
 /// not by a Rust call per link. The target receives the innermost `this` and the arguments
@@ -388,10 +403,11 @@ fn bound_chain_of_100000_links_needs_no_rust_stack() {
                 let first = string(cx, "first");
                 let last = string(cx, "last");
                 let mut chain = Value::Object(target);
-                for link in 0..LINKS {
+                let links = links();
+                for link in 0..links {
                     let args = match link {
                         0 => vec![inner_this, first],
-                        _ if link == LINKS - 1 => vec![outer_this, last],
+                        _ if link == links - 1 => vec![outer_this, last],
                         _ => vec![outer_this],
                     };
                     chain = cx.call(bind_function, chain, &args).unwrap().unwrap();

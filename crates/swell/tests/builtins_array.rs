@@ -804,26 +804,47 @@ fn to_string_is_charged_as_its_calls() {
 /// still joins its elements.
 #[test]
 fn to_string_holds_its_object_across_the_call() {
+    let n = garbage_objects();
     both_answer(
-        "Object.defineProperty(Number.prototype, \"join\", { get: function () { \
-           var g = []; for (var i = 0; i < 50; i++) g.push({ i: i }); \
-           return function () { \
-             var h = []; for (var i = 0; i < 50; i++) h.push([i]); \
-             return typeof this + this.valueOf(); \
-           }; \
-         } }); \
-         Array.prototype.toString.call(5) + Array.prototype.toString.call(6);",
+        &format!(
+            "Object.defineProperty(Number.prototype, \"join\", {{ get: function () {{ \
+               var g = []; for (var i = 0; i < {n}; i++) g.push({{ i: i }}); \
+               return function () {{ \
+                 var h = []; for (var i = 0; i < {n}; i++) h.push([i]); \
+                 return typeof this + this.valueOf(); \
+               }}; \
+             }} }}); \
+             Array.prototype.toString.call(5) + Array.prototype.toString.call(6);"
+        ),
         "\"object5object6\"",
     );
     both_answer(
-        "var a = [1, [2, 3], \"x\"]; \
-         a.join = function () { \
-           var g = []; for (var i = 0; i < 50; i++) g.push({ i: i }); \
-           return Array.prototype.join.call(this, \"-\"); \
-         }; \
-         a.toString();",
+        &format!(
+            "var a = [1, [2, 3], \"x\"]; \
+             a.join = function () {{ \
+               var g = []; for (var i = 0; i < {n}; i++) g.push({{ i: i }}); \
+               return Array.prototype.join.call(this, \"-\"); \
+             }}; \
+             a.toString();"
+        ),
         "\"1-2,3-x\"",
     );
+}
+
+/// The objects each garbage loop of [`to_string_holds_its_object_across_the_call`] makes: 50,
+/// the full count, in the default mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`); 5 in the
+/// gate with the feature `collect-every-safe-point`, where every safe point collects (with 50
+/// the test took 19.9 s there at a load of 100 to 110 on 17 cores, cargo-nextest). Five objects
+/// a loop are still garbage made between the Get of "join" and the call, and between the call
+/// and the read of the wrapper, with a collection at every one of their safe points.
+fn garbage_objects() -> u32 {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        5
+    } else {
+        50
+    }
 }
 
 /// `%Object.prototype.toString%` is an intrinsic of the realm, so the realm holds it (decision
