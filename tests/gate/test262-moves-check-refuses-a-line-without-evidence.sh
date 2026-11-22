@@ -80,14 +80,14 @@ grep -qF ": $first: " "$dir/planted-to-2.out" ||
   fail "task test262-moves-check did not name $first ($dir/planted-to-2.out)"
 
 # A line whose <to> is below its <from> moves a case into a delivered slice from a later one.
-# The planted line is the first one whose <to> is 3 or more: its <from> is raised to <to> + 1,
-# so its <to>, its kind, its evidence and the slice the block gives the case stay as they are
-# and the order of the two slices is the one thing wrong with it.
-below=$(awk -F'\t' '$3 + 0 >= 3 { print NR; exit }' "$moves")
-[ -n "$below" ] || fail "no line of $moves with a <to> of 3 or more"
-below_path=$(awk -F'\t' -v n="$below" 'NR == n { print $1 }' "$moves")
-awk -F'\t' -v OFS='\t' -v n="$below" 'NR == n { $2 = $3 + 1 } { print }' "$moves" > "$dir/planted-to-below-from.tsv"
-cmp -s "$moves" "$dir/planted-to-below-from.tsv" && fail "the planted <to> below <from> copy equals $moves"
+# The planted line is the first of the unchanged lines whose <to> is 3 or more: its <from> is
+# raised to <to> + 1, so its <to>, its kind, its evidence and the slice the block gives the case
+# stay as they are and the order of the two slices is the one thing wrong with it.
+below=$(awk -F'\t' '$3 + 0 >= 3 { print NR; exit }' "$dir/moves.tsv")
+[ -n "$below" ] || fail "no line of $dir/moves.tsv with a <to> of 3 or more"
+below_path=$(awk -F'\t' -v n="$below" 'NR == n { print $1 }' "$dir/moves.tsv")
+awk -F'\t' -v OFS='\t' -v n="$below" 'NR == n { $2 = $3 + 1 } { print }' "$dir/moves.tsv" > "$dir/planted-to-below-from.tsv"
+cmp -s "$dir/moves.tsv" "$dir/planted-to-below-from.tsv" && fail "the planted <to> below <from> copy equals the unchanged lines"
 if task -d . test262-moves-check TEST262_CACHE="$cache" TEST262_DESIGN="$design" TEST262_MOVES="$dir/planted-to-below-from.tsv" > "$dir/planted-to-below-from.out" 2>&1; then
   fail "task test262-moves-check exited 0 with a line whose <to> is below its <from>, $below_path ($dir/planted-to-below-from.out)"
 fi

@@ -367,6 +367,8 @@ tasks:
       digest is the SHA-256 of that file, written as "test262-sources <sha256>" to
       TEST262_OUT/sources.digest. It fails when git cannot list the files, when there is none,
       when a file named by a variable is missing, and when the design has no swell-slices block.
+      Like every task of this file it reads its variables as template values, so that a value
+      given on the command line wins over an exported one (the task test262 says why).
     silent: true
     vars:
       GATE_ROOT: '{{.GATE_ROOT | default "."}}'
@@ -374,15 +376,14 @@ tasks:
       TEST262_FEATURES: '{{.TEST262_FEATURES | default "conformance/test262/features.txt"}}'
       TEST262_SECTIONS: '{{.TEST262_SECTIONS | default "conformance/test262/sections.txt"}}'
       TEST262_OUT: '{{.TEST262_OUT | default ".out/test262"}}'
-    env:
-      GATE_ROOT: '{{.GATE_ROOT}}'
-      TEST262_DESIGN: '{{.TEST262_DESIGN}}'
-      TEST262_FEATURES: '{{.TEST262_FEATURES}}'
-      TEST262_SECTIONS: '{{.TEST262_SECTIONS}}'
-      TEST262_OUT: '{{.TEST262_OUT}}'
     cmds:
-      - mkdir -p "$TEST262_OUT"
       - |
+        GATE_ROOT={{shellQuote .GATE_ROOT}}
+        TEST262_DESIGN={{shellQuote .TEST262_DESIGN}}
+        TEST262_FEATURES={{shellQuote .TEST262_FEATURES}}
+        TEST262_SECTIONS={{shellQuote .TEST262_SECTIONS}}
+        TEST262_OUT={{shellQuote .TEST262_OUT}}
+        mkdir -p "$TEST262_OUT"
         out="$TEST262_OUT/sources.txt"
         paths=":(glob)crates/*/src/** :(glob)crates/*/Cargo.toml Cargo.toml Cargo.lock .cargo/config.toml rust-toolchain rust-toolchain.toml taskfiles/test262.yml conformance/test262/PIN conformance/test262/moves.tsv conformance/test262/later-parts.tsv"
         # shellcheck disable=SC2086
@@ -457,14 +458,13 @@ tasks:
       TEST262_EXPECTED: '{{.TEST262_EXPECTED | default "conformance/test262/expected.txt"}}'
       TEST262_DIGEST: '{{.TEST262_DIGEST | default "conformance/test262/expected.digest"}}'
       TEST262_OUT: '{{.TEST262_OUT | default ".out/test262"}}'
-    env:
-      TEST262_DESIGN: '{{.TEST262_DESIGN}}'
-      TEST262_EXPECTED: '{{.TEST262_EXPECTED}}'
-      TEST262_DIGEST: '{{.TEST262_DIGEST}}'
-      TEST262_OUT: '{{.TEST262_OUT}}'
     cmds:
       - task: test262-sources
       - |
+        TEST262_DESIGN={{shellQuote .TEST262_DESIGN}}
+        TEST262_EXPECTED={{shellQuote .TEST262_EXPECTED}}
+        TEST262_DIGEST={{shellQuote .TEST262_DIGEST}}
+        TEST262_OUT={{shellQuote .TEST262_OUT}}
         lines="$TEST262_EXPECTED"
         for f in "$lines" "$TEST262_DIGEST"; do
           [ -f "$f" ] || { echo "test262-check: no file $f"; exit 1; }
@@ -543,20 +543,17 @@ tasks:
       TEST262_OUT: '{{.TEST262_OUT | default ".out/test262"}}'
       TEST262_WORKERS: '{{.TEST262_WORKERS | default "4"}}'
       TEST262_RUN: '{{.TEST262_RUN | default "all"}}'
-    env:
-      TEST262_COMMIT: '{{.TEST262_COMMIT}}'
-      TEST262_CACHE: '{{.TEST262_CACHE}}'
-      TEST262_DESIGN: '{{.TEST262_DESIGN}}'
-      TEST262_FEATURES: '{{.TEST262_FEATURES}}'
-      TEST262_SECTIONS: '{{.TEST262_SECTIONS}}'
-      TEST262_EXPECTED: '{{.TEST262_EXPECTED}}'
-      TEST262_DIGEST: '{{.TEST262_DIGEST}}'
-      TEST262_OUT: '{{.TEST262_OUT}}'
-      TEST262_WORKERS: '{{.TEST262_WORKERS}}'
-      TEST262_RUN: '{{.TEST262_RUN}}'
     cmds:
-      - mkdir -p "$TEST262_OUT"
       - |
+        TEST262_COMMIT={{shellQuote .TEST262_COMMIT}}
+        TEST262_CACHE={{shellQuote .TEST262_CACHE}}
+        TEST262_DESIGN={{shellQuote .TEST262_DESIGN}}
+        TEST262_FEATURES={{shellQuote .TEST262_FEATURES}}
+        TEST262_SECTIONS={{shellQuote .TEST262_SECTIONS}}
+        TEST262_OUT={{shellQuote .TEST262_OUT}}
+        TEST262_WORKERS={{shellQuote .TEST262_WORKERS}}
+        TEST262_RUN={{shellQuote .TEST262_RUN}}
+        mkdir -p "$TEST262_OUT"
         lines="$TEST262_OUT/lines.txt"
         log="$TEST262_OUT/count.log"
         status=0
@@ -578,6 +575,9 @@ tasks:
         fi
       - task: test262-sources
       - |
+        TEST262_EXPECTED={{shellQuote .TEST262_EXPECTED}}
+        TEST262_DIGEST={{shellQuote .TEST262_DIGEST}}
+        TEST262_OUT={{shellQuote .TEST262_OUT}}
         cp "$TEST262_OUT/lines.txt" "$TEST262_EXPECTED"
         cat "$TEST262_OUT/sources.digest" "$TEST262_OUT/refused.txt" > "$TEST262_DIGEST"
         echo "test262-expected: $(awk 'END { print NR }' "$TEST262_EXPECTED") lines written to $TEST262_EXPECTED, the digest $(awk '{ print $2; exit }' "$TEST262_DIGEST") to $TEST262_DIGEST"
@@ -599,15 +599,14 @@ tasks:
       TEST262_DIGEST: '{{.TEST262_DIGEST | default "conformance/test262/expected.digest"}}'
       TEST262_OUT: '{{.TEST262_OUT | default ".out/test262"}}'
       TEST262_RUN: '{{.TEST262_RUN | default "all"}}'
-    env:
-      TEST262_EXPECTED: '{{.TEST262_EXPECTED}}'
-      TEST262_DIGEST: '{{.TEST262_DIGEST}}'
-      TEST262_OUT: '{{.TEST262_OUT}}'
-      TEST262_RUN: '{{.TEST262_RUN}}'
     cmds:
       - task: test262
       - task: test262-sources
       - |
+        TEST262_EXPECTED={{shellQuote .TEST262_EXPECTED}}
+        TEST262_DIGEST={{shellQuote .TEST262_DIGEST}}
+        TEST262_OUT={{shellQuote .TEST262_OUT}}
+        TEST262_RUN={{shellQuote .TEST262_RUN}}
         [ -f "$TEST262_DIGEST" ] || { echo "slow-test262: no file $TEST262_DIGEST"; exit 1; }
         if ! cmp "$TEST262_OUT/lines.txt" "$TEST262_EXPECTED"; then
           echo "slow-test262: $TEST262_OUT/lines.txt differs from $TEST262_EXPECTED in its bytes"

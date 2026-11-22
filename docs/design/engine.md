@@ -1570,8 +1570,18 @@ move, and none fails first on a part of slice 2 (the story's acceptance, run on 
 `story:slice-03-conformance-close`), with the run lines of the runner on the code of the slice
 (`slot task test262`): 616 of the 7,635 cases of slice 3 fail. 615 of them fail on a part of a
 later slice and move; the one left, `test/built-ins/String/prop-desc.js`, fails on no part of
-a later slice and stays in slice 3, counted failed (its `verifyProperty(this, "String", ...)`
-deletes the global `String`, and `propertyHelper.js` then calls `String`). With them move the 9
+a later slice and stays in slice 3, counted failed. It calls `verifyProperty(this, "String",
+...)`. In the pinned `harness/propertyHelper.js`, line 171 (`delete obj[name];` in
+`isConfigurable`) removes the global `String`; line 182 then calls
+`_isCanonicalNumericIndexString(name)`, whose line 156 (`return String(n) === value;`) reads
+the global `String` that is gone, and the run ends in a `ReferenceError`. The harness keeps
+`Array.isArray` and `Math.max` as captured primordials, not `String`. So the case fails in the
+pinned harness before the engine's answer is judged; that it fails in another engine as well is
+inferred from the harness source, and no other engine was run. A delivered slice passes every
+one of its cases, with this one exception, ruled on 2026-11-22 by the session that decides for
+the operator: slice 3 is delivered with 7,010 of its 7,011 cases. The case is measured again at
+the next move of the test262 pin, and the exception is removed when it passes; a second case of
+this kind reopens the question of a rule line for a defect of the harness. With the 615 move the 9
 cases of the seven directories below that pass, 624 in all, each a line of
 `conformance/test262/moves.tsv` with `from` 3, kind `part` and a token of
 `conformance/test262/later-parts.tsv` as its evidence, held by `test262-moves-check`. The
