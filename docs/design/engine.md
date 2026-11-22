@@ -621,6 +621,9 @@ is called when it is not undefined, and the first throw is what the builtin thro
 `return` throws or answers. Every `next` and `return` is a call that may run any code, so an
 iterator that is never done ends at the step budget, and a `next` that iterates again in itself
 ends at a depth bound. A termination closes nothing: no code runs after it, `return` included.
+A termination leaves what a builtin had changed until then, with one exception:
+ArraySetLength puts the old length back when a termination ends its deletions, so that an
+Array's `length` is never below an index key it still has (`object/array.rs`).
 
 The mechanism:
 
