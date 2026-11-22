@@ -8,6 +8,16 @@
 //! the host it is `Err(HostError::StaleHandle)` or `Err(HostError::ForeignHandle)`. A slot whose
 //! generation reaches `u32::MAX` is retired, so a generation is never used twice.
 //!
+//! An arena does not move a record: the record stays in its slot from `allocate` until it is
+//! freed, and the collector frees records in place. With the generation never used twice, a
+//! handle the host keeps past its scope, with no `Root` and listed by no `trace`, is a weak
+//! reference (HOST-178, `host-interface.md`, decision 4): it reads its record while the record
+//! lives and answers `Err(HostError::StaleHandle)` once a collection freed it, never another
+//! record, also after the slot holds a new one. The tests
+//! `a_kept_handle_reads_stale_after_its_slot_is_reused` and
+//! `the_kept_handle_check_catches_a_reused_generation` hold it, the second on an arena whose
+//! test switch leaves the generation as it was.
+//!
 //! An arena is charged by capacity (`engine.md`, "Memory budget"): it grows by its own doubling,
 //! at least [`MIN_SLOTS`] slots, with `try_reserve_exact`, and before it grows `store`
 //! (`heap/mod.rs`) charges each new slot with its workspace ([`slot_bytes`]): an entry of the
@@ -163,6 +173,10 @@ pub(crate) struct Arena<T> {
     /// The counting build: pushes onto the free list past its capacity.
     #[cfg(test)]
     pub(crate) growths: u64,
+    /// The test switch: freeing a record leaves its slot's generation as it was, the defect a
+    /// kept handle must never meet (HOST-178).
+    #[cfg(test)]
+    keeps_generation: bool,
 }
 
 impl<T> Arena<T> {
@@ -179,6 +193,8 @@ impl<T> Arena<T> {
             owned: 0,
             #[cfg(test)]
             growths: 0,
+            #[cfg(test)]
+            keeps_generation: false,
         }
     }
 
@@ -329,6 +345,8 @@ impl<T> Arena<T> {
             .ok()
             .and_then(|i| self.slots.get_mut(i))?;
         let value = slot.value.take()?;
+        #[cfg(test)]
+        let kept_generation = slot.generation;
         let bytes = std::mem::take(&mut slot.bytes);
         self.live = self.live.saturating_sub(1);
         #[cfg(test)]
@@ -347,6 +365,10 @@ impl<T> Arena<T> {
             if generation < u32::MAX && room {
                 self.free.push(index);
             }
+        }
+        #[cfg(test)]
+        if self.keeps_generation {
+            slot.generation = kept_generation;
         }
         drop(value);
         Some(bytes)
@@ -560,5 +582,68 @@ mod tests {
             check(&agent, round, 10_000);
         }
         assert!(high <= limits.memory_bytes, "high-water mark {high}");
+    }
+
+    /// The records each test of a kept handle stores in a round.
+    const KEPT: u32 = 1_000;
+
+    /// Whether `handle`, kept past the life of its record, reads as stale in `arena`: the check
+    /// a kept handle must pass (HOST-178), never another record.
+    fn a_kept_handle_reads_stale<T>(arena: &Arena<T>, handle: Handle) -> bool {
+        matches!(arena.get(handle), Err(Access::Stale))
+    }
+
+    /// The steps of both tests of a kept handle: store [`KEPT`] records and keep their handles,
+    /// free every one, then store [`KEPT`] other records, each into a freed slot. Answers the
+    /// kept handles.
+    fn kept_handles_of_reused_slots(arena: &mut Arena<u32>) -> Vec<Handle> {
+        let kept: Vec<Handle> = (0..KEPT)
+            .map(|value| arena.allocate(value, 0).unwrap())
+            .collect();
+        for &handle in &kept {
+            assert_eq!(arena.free(handle), Some(0));
+        }
+        for value in KEPT..2 * KEPT {
+            arena.allocate(value, 0).unwrap();
+        }
+        assert_eq!(
+            arena.slot_count(),
+            kept.len(),
+            "every record of the second round took a freed slot"
+        );
+        kept
+    }
+
+    /// HOST-178, in the arena (a guard): a handle kept after its record was freed reads as
+    /// stale, also after every freed slot holds another record.
+    #[test]
+    fn a_kept_handle_reads_stale_after_its_slot_is_reused() {
+        let mut arena = Arena::new(3);
+        let kept = kept_handles_of_reused_slots(&mut arena);
+        for handle in kept {
+            assert!(
+                a_kept_handle_reads_stale(&arena, handle),
+                "the kept handle {handle:?} reads {:?}",
+                arena.get(handle)
+            );
+        }
+    }
+
+    /// The check of [`a_kept_handle_reads_stale_after_its_slot_is_reused`] fails on the defect
+    /// it guards against: with the switch `keeps_generation`, freeing a record leaves its slot's
+    /// generation as it was, and each kept handle reads the record stored after it in its slot.
+    #[test]
+    fn the_kept_handle_check_catches_a_reused_generation() {
+        let mut arena = Arena::new(3);
+        arena.keeps_generation = true;
+        let kept = kept_handles_of_reused_slots(&mut arena);
+        for handle in kept {
+            assert!(!a_kept_handle_reads_stale(&arena, handle));
+            let read = arena.get(handle).copied().unwrap();
+            assert!(
+                read >= KEPT,
+                "the kept handle {handle:?} reads {read}, a record of the second round"
+            );
+        }
     }
 }
