@@ -1,0 +1,35 @@
+script locals 1
+  var "i"
+  0000 2:1 Undefined
+  0001 2:1 StoreCompletion
+  0002 2:10 ResolveGlobal "i"
+  0003 2:14 Number 0
+  0004 2:10 PutGlobalRef "i"
+  0005 2:10 Pop
+  0006 2:17 GetGlobal "i"
+  0007 2:21 Number 2
+  0008 2:17 Lt
+  0009 2:1 JumpIfFalse 0027
+  0010 2:36 Closure 0
+  0011 2:36 SetLocal 0
+  0012 2:36 Pop
+  0013 2:31 Undefined
+  0014 2:31 GetLocal 0
+  0015 2:31 Call 0
+  0016 2:31 StoreCompletion
+  0017 2:24 ResolveGlobal "i"
+  0018 2:24 GetGlobalRef "i"
+  0019 2:24 ToNumeric
+  0020 2:24 Dup
+  0021 2:24 Bury 2
+  0022 2:24 Increment
+  0023 2:24 PutGlobalRef "i"
+  0024 2:24 Pop
+  0025 2:1 Pop
+  0026 2:1 LoopJump 0006
+  0027 0:0 LoadCompletion
+  0028 0:0 Return
+
+function 0 declaration "f" length 0 locals 0
+  0000 2:36 Undefined
+  0001 2:36 Return
