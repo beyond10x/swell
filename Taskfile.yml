@@ -139,7 +139,8 @@ tasks:
       than its subject runs a part of it in the gate and the whole when SWELL_FULL_COUNTS is 1
       (story gate-test-steps-within-budget, point 3; each such test says how its gate count
       reaches what the full count does). This task finds those test binaries itself, every
-      crates/<crate>/tests/<name>.rs that reads SWELL_FULL_COUNTS, and runs them through
+      crates/<crate>/tests/<name>.rs that reads SWELL_FULL_COUNTS, and the library's test binary
+      of swell when a file under crates/swell/src reads it, and runs them through
       cargo-nextest with SWELL_FULL_COUNTS=1, then those of swell again with the feature
       collect-every-safe-point, so that a test that takes the variable up runs here with nothing
       to edit. Prints "slow-tests: <b> test binaries: <p> passed, <f> failed, <i> ignored" and
@@ -160,6 +161,7 @@ tasks:
           all="$all${all:+ | }binary_id($pkg::$stem)"
           if [ "$pkg" = swell ]; then swell="$swell${swell:+ | }binary_id($pkg::$stem)"; fi
         done
+        if grep -rqs SWELL_FULL_COUNTS crates/swell/src; then all="$all${all:+ | }binary_id(swell)"; swell="$swell${swell:+ | }binary_id(swell)"; fi
         if [ -z "$all" ]; then echo "slow-tests: no test reads SWELL_FULL_COUNTS"; exit 1; fi
         echo "$all" > .out/slow-tests.filter
         echo "$swell" > .out/slow-tests-collect.filter
