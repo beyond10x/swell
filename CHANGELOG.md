@@ -131,6 +131,15 @@ pass. Every number below is from the gate on the wave branch of slice 3
   `HostIntrinsic::ErrorPrototype`) and `WellKnownSymbol` (new, with
   `WellKnownSymbol::ToStringTag`, `WellKnownSymbol::Unscopables`): the host names these
   intrinsics and symbols from a closed list (`HOST-183`, `HOST-184`).
+- `last_entry_error_site` (new, on `Agent`): after an entry that answered `Parsed::Errors` or
+  `Throw`, where the error arose; after any other entry `None` (`HOST-172`, `HOST-173`,
+  `HOST-174`).
+- `ErrorSite` (new): what that read answers. `ErrorSite::line` and `ErrorSite::column` are the
+  position of the first parse error or of the throwing instruction, counted from 1, a column
+  in UTF-16 code units; `ErrorSite::dynamic` is true when the position is in eval code or in
+  the source text of a `Function` constructor; `ErrorSite::host_defined` is the
+  [[HostDefined]] of the script whose code raised it, `None` for `Function` code and indirect
+  eval.
 - A handle the host keeps without a root is a stated weak reference (`HOST-178`): it reads
   its object while the object lives and answers `StaleHandle` after a collection freed it,
   also after its slot holds a new object. No code changed for it; it is tested now.
