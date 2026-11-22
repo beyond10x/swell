@@ -12,6 +12,48 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- More of the sixth delivery slice. The `Symbol` builtin: the constructor, `Symbol.for` and
+  `Symbol.keyFor`, `Symbol.prototype`, twelve well-known symbols and
+  `Object.getOwnPropertySymbols`. Computed property names, object spread and object rest. The
+  iterator protocol with the Array and String iterators: `Array.prototype.entries`, `keys`
+  and `values`, `@@iterator` of an Array, a String and an arguments object. Function
+  declarations in blocks and in `switch` cases, without the web-compatibility semantics of
+  Annex B.3.2. The `for`-`of` statement, which calls the iterator's `return` once on `break`,
+  on a `continue` to an outer loop, on `return` and on a throw from the body. `Array.from`,
+  `Object.fromEntries` and `Object.groupBy`. Array patterns, spread in arrays and calls, and
+  tagged templates are refused by name until their stories.
+- test262 after these: `test262 total 53801 8982 7 44812 14998 29813 1`, 14,998 of the 44,812
+  cases that run pass (33.4 %; 13,575 in 0.4.0). The sixth slice passes 2,528 of its 4,436
+  cases (`test262-slice 06 4436 8413 0 0 4436 2528 1908 0`; 1,364 in 0.4.0).
+- The host interface: 190 numbered requirements, 109 of them with a test
+  (`host-requirements: 190 requirement(s), 190 line(s): 109 test, 81 pending`; 108 in 0.4.0).
+
+### Changed
+
+- The heaviest tests are lighter, so that none is near the 60 s limit of a test when the
+  machine is loaded: no test of the gate takes over 1.5 CPU seconds alone in the default mode,
+  and none of the lane `slow` over 5 at its full count. The fuzz test of the host interface
+  runs 1,000 sequences at its full count (2,000 before); the gate's count is unchanged. Only
+  test code changed.
+- One case of slice 18 that passed in 0.4.0 no longer passes:
+  `test/annexB/built-ins/Array/from/iterator-method-emulates-undefined.js`. It passed only on
+  the error of the missing `Array.from`; the method exists now, and the case needs
+  `$262.IsHTMLDDA`, which slice 18 brings.
+
+### Host interface
+
+- `HostIntrinsic::ArrayPrototypeValues`, `HostIntrinsic::ArrayPrototypeEntries`,
+  `HostIntrinsic::ArrayPrototypeKeys`, `HostIntrinsic::ArrayPrototypeForEach` and
+  `WellKnownSymbol::Iterator` (new): what Web IDL gives an iterable interface (`HOST-185`).
+
+## [0.4.0] - 2026-11-22
+
+Storage is charged before it is allocated and work before it is done, the host interface gains
+what an embedder that generates bindings needs, and the first five parts of the sixth
+delivery slice run.
+
+### Added
+
 - The first parts of the sixth delivery slice: template literals without a tag, and `let`,
   `const` and block scopes with the temporal dead zone and a fresh record per iteration of a
   `for (let ...)` loop. A tagged template is refused by name until its story. Arrow functions
@@ -37,11 +79,6 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The ESS pins moved from 0.96.0 to 0.97.4 (`spec/ess-inputs.yaml`, the conformance workspace,
   the forge's workflow). The suite is byte-identical: 58 scenarios, 41 refusals, 58 passing on
   the interpreter and 14 against the engine, as before.
-- The heaviest tests are lighter, so that none is near the 60 s limit of a test when the
-  machine is loaded: no test of the gate takes over 1.5 CPU seconds alone in the default mode,
-  and none of the lane `slow` over 5 at its full count. The fuzz test of the host interface
-  runs 1,000 sequences at its full count (2,000 before); the gate's count is unchanged. Only
-  test code changed.
 - The gate now fails when a public item of the host interface or a `HOST-<n>` requirement
   changed since the last release and the changelog does not name it under Host interface, in
   the name form of `docs/releasing.md`.
@@ -98,13 +135,15 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Host interface
 
+- Four entries below break a host written for 0.3.0, each marked "Breaking": `get`,
+  `HostObjectSpec::error_kind`, the reading of `heap_bytes`, and `HOST-70`.
 - Breaking: `get` takes `&mut self`. The value read is handed to the running scope and stays
   valid until the scope ends, also when the host drops the root and calls back into the
   engine. A caller that read through a shared `&Cx` or `&HookCx` takes `&mut` instead
   (`HOST-170`).
 - `live_bytes` (new, on `Agent`): what the live records hold, slots included. It falls by
   everything a sweep frees and sets the collection threshold (`HOST-171`).
-- `heap_bytes` keeps its signature and changes its reading, with `memory_bytes`: an arena's
+- Breaking: `heap_bytes` keeps its signature and changes its reading, with `memory_bytes`: an arena's
   slots are counted by capacity, charged when the arena grows and kept while the agent lives,
   together with the collector's workspace and the atom table's buckets. A collection lowers
   `heap_bytes` only by what the freed records owned. Before, a slot was charged with each
@@ -129,9 +168,6 @@ Every number below comes from the gate, `task check`, on the released commit.
   `HostIntrinsic::ErrorPrototype`) and `WellKnownSymbol` (new, with
   `WellKnownSymbol::ToStringTag`, `WellKnownSymbol::Unscopables`): the host names these
   intrinsics and symbols from a closed list (`HOST-183`, `HOST-184`).
-- `HostIntrinsic::ArrayPrototypeValues`, `HostIntrinsic::ArrayPrototypeEntries`,
-  `HostIntrinsic::ArrayPrototypeKeys`, `HostIntrinsic::ArrayPrototypeForEach` and
-  `WellKnownSymbol::Iterator` (new): what Web IDL gives an iterable interface (`HOST-185`).
 - A host function charges the box of its data and of its steps, and four constants state
   what a host that generates bindings can count on (`HOST-186`, `HOST-187`), each the
   measured rise plus an eighth: `HOST_FUNCTION_LIVE_BYTES` (576, a host function with a name
@@ -156,7 +192,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   the source text of a `Function` constructor; `ErrorSite::host_defined` is the
   [[HostDefined]] of the script whose code raised it, `None` for `Function` code and indirect
   eval.
-- After `Terminated(MemoryBudget)` the agent stays `Alive`, and the next entry runs when the
+- Breaking: after `Terminated(MemoryBudget)` the agent stays `Alive`, and the next entry runs when the
   free room, `memory_bytes` less `heap_bytes()`, covers it; it ends in
   `Terminated(MemoryBudget)` again when it does not, so a host makes room first: it drops
   roots and calls `collect`, or gives bytes back with `credit_host_bytes`. `HOST-70` said
@@ -169,6 +205,43 @@ Every number below comes from the gate, `task check`, on the released commit.
   also after its slot holds a new object. No code changed for it; it is tested now.
 - `HOST-166`, `HOST-167`, `HOST-168`, `HOST-169`, `HOST-170`, `HOST-171`, `HOST-172`, `HOST-173`, `HOST-174`, `HOST-175`, `HOST-176`, `HOST-177`, `HOST-178`, `HOST-179`, `HOST-180`, `HOST-181`, `HOST-182`, `HOST-183`, `HOST-184`, `HOST-185`, `HOST-186`, `HOST-187`, `HOST-188`, `HOST-189`, `HOST-190`: new requirements.
 - `HOST-29`, `HOST-52`, `HOST-70`, `HOST-102`: changed requirements.
+
+### Limits of this release
+
+- Not in the language yet: regular expression literals, identifiers outside ASCII, and of
+  what came after ES5 everything but template literals without a tag, `let` and `const`,
+  arrow functions, default and rest parameters and object destructuring. Array patterns,
+  spread, `for`-`of`, computed property names, classes, generators, promises and modules are
+  refused with a `SyntaxError` that names the delivery slice that brings them.
+  [`docs/design/engine.md`](docs/design/engine.md), section 12, lists the nineteen delivery
+  slices and what each brings.
+- The builtins end at the core library. `Symbol`, `Map`, `Set`, `Promise`, `Reflect`, `Proxy`,
+  `Date`, `RegExp`, `parseInt`, `parseFloat` and all of `Math` but `max` do not exist. A
+  String method that needs the Unicode tables of a later slice refuses a code unit outside
+  ASCII (`HOST-165`).
+- test262: 13,575 of the 44,812 cases the gate's digest stands for pass, 30.2 %. The line
+  reads `test262 total 53801 8982 7 44812 13575 31236 1`: 53,801 cases exist, 8,982 are
+  excluded by recorded decision, 7 do not apply, 44,812 run, 13,575 pass, 31,236 fail, one
+  ends at the memory budget. The first two delivery slices pass all their cases in all their
+  runs, the third all but one, and the sixth 1,364 of 4,436
+  (`test262-slice 01 31 62 0 0 31 31 0 0`, `test262-slice 02 4259 7543 0 0 4259 4259 0 0`,
+  `test262-slice 03 7011 13829 0 0 7011 7010 1 0`,
+  `test262-slice 06 4436 8413 0 0 4436 1364 3072 0`). A refusal never counts as a pass, also
+  when the script catches it.
+- The host interface: 108 of its 190 numbered requirements
+  ([`docs/design/host-interface.md`](docs/design/host-interface.md)) are held by a test in
+  this commit; none is pending for the first three slices. 14 of the 58 scenarios of the
+  interface's model pass on the engine, and the other 44 name what they wait for. The
+  interface will change before 1.0.
+- The engine's own tests: `15 test binaries: 858 passed, 0 failed, 1 ignored`, the tests of
+  the engine crate in the mode that collects garbage at every safe point
+  (`test-collect: 2 test binaries: 684 passed, 0 failed, 1 ignored`), and the test of an
+  injected engine fault (`test-faults: 1 test binaries: 1 passed, 0 failed, 524 ignored`; the
+  524 are the tests that step's filter leaves out).
+- No binary, no command line, and the crates are not on a package registry. To use the
+  library, depend on the repository at the tag:
+  `swell = { git = "https://github.com/beyond10x/swell", tag = "0.4.0" }`.
+- Measured on x86_64 Linux with rustc 1.99.1 only.
 
 ## [0.3.0] - 2026-11-22
 
@@ -428,7 +501,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.3.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.4.0...HEAD
+[0.4.0]: https://github.com/beyond10x/swell/releases/tag/0.4.0
 [0.3.0]: https://github.com/beyond10x/swell/releases/tag/0.3.0
 [0.2.0]: https://github.com/beyond10x/swell/releases/tag/0.2.0
 [0.1.0]: https://github.com/beyond10x/swell/releases/tag/0.1.0
