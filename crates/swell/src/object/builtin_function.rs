@@ -271,7 +271,13 @@ impl<H: Host> Agent<H> {
         Ok(function)
     }
 
-    /// A host function (decision 14): CreateBuiltinFunction with the host's steps and data.
+    /// A host function (decision 14): CreateBuiltinFunction with the host's steps and data. The
+    /// boxes of its steps and of its data (the box of `FunctionData` and what the host's box
+    /// holds) are charged to the memory budget before the engine boxes anything; over the budget
+    /// the run ends in `Terminated(MemoryBudget)`. The function records them in [`Grown`], so
+    /// the sweep that frees it credits them; when no function is made they are credited at once.
+    ///
+    /// [`Grown`]: super::Grown
     pub(crate) fn create_host_function(
         &mut self,
         realm: Handle,
@@ -281,12 +287,20 @@ impl<H: Host> Agent<H> {
         constructor: bool,
         data: Option<Box<dyn HostData>>,
     ) -> Completion<ObjectRef> {
+        let data_bytes = data.as_deref().map_or(0, |data| {
+            size_of::<FunctionData>().saturating_add(size_of_val(data))
+        });
+        let bytes =
+            u64::try_from(size_of::<HostFn<H>>().saturating_add(data_bytes)).unwrap_or(u64::MAX);
+        if self.heap.accounting.charge(bytes).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
         let data = data.map(|data| HostObject {
             brand: Brand(0),
             data: Some(Box::new(FunctionData(data))),
             error_kind: None,
         });
-        self.create_builtin_function(
+        let made = self.create_builtin_function(
             Behaviour::Host {
                 steps: Box::new(steps),
                 data,
@@ -296,7 +310,15 @@ impl<H: Host> Agent<H> {
             realm,
             None,
             constructor,
-        )
+        );
+        let recorded = made.and_then(|function| {
+            self.record_grown(function, bytes)?;
+            Ok(function)
+        });
+        if recorded.is_err() {
+            self.heap.accounting.credit(bytes);
+        }
+        recorded
     }
 
     /// The bookkeeping of every call into a function (decision 2): the sticky termination, a
