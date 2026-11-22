@@ -7,8 +7,7 @@
 //! SortIndexedProperties (`#sec-sortindexedproperties`) and CompareArrayElements
 //! (`#sec-comparearrayelements`), `splice` (`#sec-array.prototype.splice`), `toSorted`
 //! (`#sec-array.prototype.tosorted`) and `unshift` (`#sec-array.prototype.unshift`).
-//! ToClampedIndex (`#sec-toclampedindex`) with ToAbsoluteIndex (`#sec-toabsoluteindex`) is a
-//! private helper of this file.
+//! ToClampedIndex (`#sec-toclampedindex`) is the one of `ops/conversion.rs`.
 //!
 //! Every loop over indices charges a step per index (decision 2), so a length of 2^32 - 1 or
 //! 2^53 - 1 ends in `Terminated(StepBudget)`. What a method holds across a Get, a Set, a
@@ -145,24 +144,6 @@ impl<H: Host> Agent<H> {
         let answer = steps(self, object, args);
         self.release(mark);
         answer
-    }
-
-    /// ToClampedIndex ( value, length ) (`#sec-toclampedindex`) with ToAbsoluteIndex
-    /// (`#sec-toabsoluteindex`). Private to this group until the String access story's helper
-    /// in `ops/conversion.rs` lands.
-    #[expect(
-        clippy::wrong_self_convention,
-        reason = "the name is ECMA-262's; the operation calls into the agent, so it needs `&mut self`"
-    )]
-    fn to_clamped_index(&mut self, value: Value, length: f64) -> Completion<f64> {
-        // ToAbsoluteIndex: 1. Let int be ? ToIntegerOrInfinity(value). 2. If int is finite and
-        // int < 0, set int to length + int.
-        let mut index = self.to_integer_or_infinity(value)?;
-        if index.is_finite() && index < 0.0 {
-            index += length;
-        }
-        // 2. Return the result of clamping index between 0 and length.
-        Ok(index.max(0.0).min(length))
     }
 
     /// "Perform ? Set(O, "length", 𝔽(length), true)."
