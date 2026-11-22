@@ -1526,3 +1526,202 @@ fn the_design_quotes_the_ceilings_of_the_engine() {
         );
     }
 }
+
+/// The four intrinsics of HOST-185 (`webidl:define-the-iteration-methods`), each with the name
+/// a script reads it by on `Array.prototype`.
+const ITERATION_INTRINSICS: [(HostIntrinsic, &str); 4] = [
+    (HostIntrinsic::ArrayPrototypeValues, "values"),
+    (HostIntrinsic::ArrayPrototypeEntries, "entries"),
+    (HostIntrinsic::ArrayPrototypeKeys, "keys"),
+    (HostIntrinsic::ArrayPrototypeForEach, "forEach"),
+];
+
+/// The script of HOST-185, run with the globals `list`, `a` and `b`.
+const NODE_LIST_SCRIPT: &str = "var r = [], it = list[Symbol.iterator](); \
+     r.push(it.next().value === a, it.next().value === b, it.next().done); \
+     var e = list.entries().next().value; \
+     r.push(e[0] === 0 && e[1] === a, list.keys().next().value === 0, \
+     list.values().next().value === a); \
+     list.forEach(function (n, i) { r.push(n === (i ? b : a)); }); r.join()";
+
+/// Make the host objects `a` and `b` and the host object `list` of HOST-185 in `realm`, and bind
+/// the three as the globals of those names. `list` has the own data properties `0` and `1`
+/// holding `a` and `b` and a `length` of 2, `@@iterator` as Web IDL's DefineMethodProperty
+/// defines it ({ [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }), and
+/// `entries`, `keys`, `values` and `forEach` as its CreateDataPropertyOrThrow does (all three
+/// true), each from `well_known_symbol(Iterator)` and the intrinsics the host names.
+fn define_node_list(agent: &mut Agent<TestHost>, realm: &Realm, global: &Root) {
+    agent
+        .with_cx(realm, |cx| {
+            let realm_ref = cx.realm_ref(realm).unwrap();
+            let on_object_prototype = |brand| on(Prototype::ObjectPrototypeOf(realm_ref), brand);
+            let a = cx
+                .new_host_object(on_object_prototype(NODE))
+                .unwrap()
+                .unwrap();
+            let b = cx
+                .new_host_object(on_object_prototype(NODE))
+                .unwrap()
+                .unwrap();
+            let list = cx
+                .new_host_object(on_object_prototype(OTHER))
+                .unwrap()
+                .unwrap();
+            for (index, node) in [a, b].into_iter().enumerate() {
+                let key = support::host::key(cx, &index.to_string());
+                let descriptor = support::host::data(Value::Object(node), false, true, true);
+                cx.define_property_or_throw(list, key, descriptor)
+                    .unwrap()
+                    .unwrap();
+            }
+            let length = support::host::key(cx, "length");
+            let descriptor = support::host::data(Value::Number(2.0), false, false, true);
+            cx.define_property_or_throw(list, length, descriptor)
+                .unwrap()
+                .unwrap();
+            let iterator = cx.well_known_symbol(WellKnownSymbol::Iterator).unwrap();
+            let values = cx
+                .intrinsic(realm_ref, HostIntrinsic::ArrayPrototypeValues)
+                .unwrap();
+            define(
+                cx,
+                list,
+                PropertyKey::Symbol(iterator),
+                Value::Object(values),
+            );
+            for (which, name) in [
+                (HostIntrinsic::ArrayPrototypeEntries, "entries"),
+                (HostIntrinsic::ArrayPrototypeKeys, "keys"),
+                (HostIntrinsic::ArrayPrototypeValues, "values"),
+                (HostIntrinsic::ArrayPrototypeForEach, "forEach"),
+            ] {
+                let method = cx.intrinsic(realm_ref, which).unwrap();
+                let key = support::host::key(cx, name);
+                let descriptor = support::host::data(Value::Object(method), true, true, true);
+                cx.define_property_or_throw(list, key, descriptor)
+                    .unwrap()
+                    .unwrap();
+            }
+            let global = support::host::object(cx, global);
+            for (name, object) in [("a", a), ("b", b), ("list", list)] {
+                bind(cx, global, name, Value::Object(object));
+            }
+        })
+        .unwrap();
+}
+
+/// HOST-185 (`webidl:define-the-iteration-methods`): a host object `list` with indexed own data
+/// properties `0` and `1` holding the host objects `a` and `b`, a `length` of 2, and own data
+/// properties `@@iterator`, `entries`, `keys`, `values` and `forEach` defined from
+/// `well_known_symbol(Iterator)` and the four intrinsics makes the script of HOST-185 answer
+/// `"true,true,true,true,true,true,true,true"`, also after a script replaced
+/// `Array.prototype.values`, `entries`, `keys`, `forEach` and `[Symbol.iterator]` before the host
+/// defined them; `intrinsic(realm, ArrayPrototypeValues)` answers the same object as
+/// `Array.prototype[Symbol.iterator]` read before that script.
+#[test]
+fn host_185_a_node_list_iterates_with_the_array_methods() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    let global = support::host::global(&mut agent, &realm);
+    let original = agent
+        .with_cx(&realm, |cx| {
+            let read = evaluate(cx, &realm, "Array.prototype[Symbol.iterator]");
+            cx.root(read).unwrap()
+        })
+        .unwrap();
+    let answer = Shown::Normal("\"true,true,true,true,true,true,true,true\"".to_string());
+
+    define_node_list(&mut agent, &realm, &global);
+    assert_eq!(
+        eval_text(&mut agent, &realm, NODE_LIST_SCRIPT),
+        answer,
+        "with the original methods on Array.prototype"
+    );
+
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "function replaced() { return \"replaced\"; } \
+             Array.prototype.values = Array.prototype.entries = Array.prototype.keys = \
+             Array.prototype.forEach = Array.prototype[Symbol.iterator] = replaced; \
+             [].values() + [].entries() + [].keys() + [].forEach() + [][Symbol.iterator]()"
+        ),
+        Shown::Normal("\"replacedreplacedreplacedreplacedreplaced\"".to_string())
+    );
+    define_node_list(&mut agent, &realm, &global);
+    assert_eq!(
+        eval_text(&mut agent, &realm, NODE_LIST_SCRIPT),
+        answer,
+        "after a script replaced the methods on Array.prototype"
+    );
+
+    agent
+        .with_cx(&realm, |cx| {
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            let named = cx
+                .intrinsic(realm_ref, HostIntrinsic::ArrayPrototypeValues)
+                .unwrap();
+            assert_eq!(Value::Object(named), cx.get(&original).unwrap());
+        })
+        .unwrap();
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// The four intrinsics of HOST-185 are the realm's originals: in a fresh realm each answers the
+/// function the script reads from `Array.prototype` by its name (and `ArrayPrototypeValues` also
+/// the one at `[Symbol.iterator]`), and once a script deleted all five properties and `collect`
+/// ran twice, with no root the host holds, each still answers that function, live, with its
+/// `name`.
+#[test]
+fn the_iteration_intrinsics_are_the_originals() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    let originals = agent
+        .with_cx(&realm, |cx| {
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            let mut originals = Vec::new();
+            for (which, name) in ITERATION_INTRINSICS {
+                let read = evaluate(cx, &realm, &format!("Array.prototype.{name}"));
+                let named = cx.intrinsic(realm_ref, which).unwrap();
+                assert_eq!(
+                    Value::Object(named),
+                    read,
+                    "{which:?} is Array.prototype.{name}"
+                );
+                originals.push(named);
+            }
+            let iterator = evaluate(cx, &realm, "Array.prototype[Symbol.iterator]");
+            assert_eq!(Value::Object(originals[0]), iterator, "@@iterator");
+            originals
+        })
+        .unwrap();
+
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "delete Array.prototype.values && delete Array.prototype.entries && \
+             delete Array.prototype.keys && delete Array.prototype.forEach && \
+             delete Array.prototype[Symbol.iterator] && \
+             [].values === undefined && [].entries === undefined && [].keys === undefined && \
+             [].forEach === undefined && [][Symbol.iterator] === undefined"
+        ),
+        Shown::Normal("true".to_string())
+    );
+    assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+    assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+
+    agent
+        .with_cx(&realm, |cx| {
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            for ((which, name), original) in ITERATION_INTRINSICS.into_iter().zip(originals) {
+                let named = cx.intrinsic(realm_ref, which).unwrap();
+                assert_eq!(named, original, "{which:?} after the script deleted {name}");
+                let shown = support::host::get(cx, named, "name");
+                assert_eq!(support::host::text(cx, shown), name, "{which:?} is live");
+            }
+        })
+        .unwrap();
+    assert_eq!(agent.state(), AgentState::Alive);
+}
