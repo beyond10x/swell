@@ -32,6 +32,7 @@ mod injected {
         assert_eq!(agent.state(), AgentState::Faulted);
         assert!(matches!(agent.collect(), Err(HostError::Faulted)));
         assert!(matches!(agent.heap_bytes(), Err(HostError::Faulted)));
+        assert!(matches!(agent.live_bytes(), Err(HostError::Faulted)));
         assert!(matches!(agent.last_entry_steps(), Err(HostError::Faulted)));
         assert!(matches!(
             agent.parse_script(realm, Source::Utf8("1;"), None),

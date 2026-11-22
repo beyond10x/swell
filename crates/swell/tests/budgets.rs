@@ -105,8 +105,9 @@ fn memory_budget_charges_utf16_strings_and_host_data() {
     assert_eq!(agent.state(), AgentState::Alive);
 }
 
-/// With no room beyond the realm every allocation ends the run, nothing more is charged, and
-/// the agent stays usable. (`memory_bytes` 0 refuses the realm itself: HOST-12.)
+/// With no room beyond the realm every allocation that charges a byte ends the run, nothing
+/// more is charged, and the agent stays usable. (`memory_bytes` 0 refuses the realm itself:
+/// HOST-12.)
 #[test]
 fn memory_budget_of_zero_refuses_every_allocation() {
     let mut limits = support::host::limits();
@@ -114,7 +115,7 @@ fn memory_budget_of_zero_refuses_every_allocation() {
     let mut agent = support::host::agent_with(limits).unwrap();
     let realm = support::host::realm(&mut agent);
     let outcome = agent
-        .with_cx(&realm, |cx| cx.new_string("").map(|_| ()))
+        .with_cx(&realm, |cx| cx.new_string("x").map(|_| ()))
         .unwrap();
     assert_eq!(outcome, Err(Abrupt::Terminated(Termination::MemoryBudget)));
     assert_eq!(agent.heap_bytes().unwrap(), realm_bytes());

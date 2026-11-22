@@ -168,4 +168,4 @@ HOST-167 pending slice 6
 HOST-168 pending slice 6
 HOST-169 pending slice 6
 HOST-170 pending slice 6
-HOST-171 pending slice 6
+HOST-171 test swell::collect::host_171_live_bytes_reads_the_records_and_heap_bytes_the_budget

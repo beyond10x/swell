@@ -96,6 +96,56 @@ fn host_70_agent_stays_alive_after_each_budget() {
     assert_eq!(eval_text(&mut agent, &realm, "1;"), one);
 }
 
+/// An agent that ended in `Terminated(MemoryBudget)` runs again after a collection: with
+/// `memory_bytes` the realm's bytes plus 64 KiB, as HOST-70 sizes it, the fill below ends by
+/// memory (each iteration adds an element to `a`, whose capacity is charged as it doubles, so the
+/// room lasts far fewer iterations than the million steps); `collect()` answers `Normal`, `n`
+/// reads the objects the fill made, and a second script that makes ten objects and an Array
+/// answers `Normal(10)`: its records take the slots the fill's records left free, at what they
+/// own, and the collection credited the elements of the fill's `a` and its frame. The test prints
+/// `n`, the room `memory_bytes - heap_bytes()` and `live_bytes()` after the collection.
+#[test]
+fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
+    let realm_bytes = {
+        let mut agent = support::host::agent().unwrap();
+        let _realm = realm(&mut agent);
+        agent.heap_bytes().unwrap()
+    };
+    let mut limits = limits();
+    limits.memory_bytes = realm_bytes + 64 * 1024;
+    let budget = limits.memory_bytes;
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var n = 0; function fill() { var a = []; while (true) { a.push({}); n++; } } fill();"
+        ),
+        Outcome::Terminated(Termination::MemoryBudget)
+    );
+    assert!(matches!(agent.collect(), Ok(swell::Outcome::Normal(_))));
+    let room = budget - agent.heap_bytes().unwrap();
+    let live = agent.live_bytes().unwrap();
+    let Outcome::Normal(made) = eval_text(&mut agent, &realm, "n;") else {
+        panic!("n did not answer");
+    };
+    println!(
+        "objects the fill made: {made}; after the collection: room {room} bytes, \
+         live_bytes {live}"
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "(function () { var a = []; for (var i = 0; i < 10; i++) a.push({}); return a.length; })()"
+        ),
+        Outcome::Normal("10".to_string())
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
 /// A host function that calls its argument, catches the termination it answers and returns
 /// `undefined`, counting its calls.
 fn catcher(cx: &mut Cx<'_, TestHost>, call: HostCall<'_>) -> Completion<Value> {

@@ -23,7 +23,7 @@ use crate::realm::RealmRecord;
 use crate::script::ScriptRecord;
 use crate::value::{ObjectRef, StringRef, SymbolRef, Value};
 use accounting::{Accounting, OverBudget};
-use arena::{Access, Arena, Handle, slot_bytes};
+use arena::{Access, Arena, Handle};
 use collect::Mark;
 use roots::RootTable;
 use string::{Atoms, HeapString};
@@ -53,9 +53,11 @@ impl SymbolRecord {
 }
 
 /// The bytes allocated since the last collection that start one at the next safe point, when the
-/// heap is smaller than this. Above it, the threshold is the live size after the last collection,
-/// so a heap that grows is collected after it has doubled (`engine.md`, decision 4: "a threshold
-/// that grows with the live size"). Triggers count bytes, never time.
+/// live reading is smaller than this. Above it, the threshold is the live reading after the last
+/// collection ([`Heap::live_bytes`]), so a heap that grows is collected after it has doubled
+/// (`engine.md`, decision 4: "a threshold that grows with the live size"), and garbage is
+/// collected before the charged reading, which keeps the arenas' capacity, reaches the budget.
+/// Triggers count bytes, never time.
 const MIN_TRIGGER_BYTES: u64 = 1 << 20;
 
 /// The heap of one agent.
@@ -76,6 +78,13 @@ pub(crate) struct Heap {
     pub(crate) hasher: SipBuildHasher,
     /// The bytes allocated since the last collection at which a safe point collects.
     pub(crate) trigger_bytes: u64,
+    /// The counting build: the vectors the last collection made and its pushes past a
+    /// vector's capacity.
+    #[cfg(test)]
+    pub(crate) collect_allocations: u64,
+    /// The counting build: the most entries the last collection's worklists held at once.
+    #[cfg(test)]
+    pub(crate) collect_peak_work: usize,
 }
 
 impl Heap {
@@ -95,12 +104,82 @@ impl Heap {
             atoms: Atoms::new(hash_key),
             hasher: SipBuildHasher::new(hash_key),
             trigger_bytes: MIN_TRIGGER_BYTES,
+            #[cfg(test)]
+            collect_allocations: 0,
+            #[cfg(test)]
+            collect_peak_work: 0,
         }
     }
 
-    /// The bytes the heap is charged now (`heap_bytes()`).
+    /// The counting build: the floor of the six arenas ([`Arena::ledger_floor`]).
+    #[cfg(test)]
+    pub(crate) fn ledger_floor(&self) -> u64 {
+        [
+            self.strings.ledger_floor(),
+            self.symbols.ledger_floor(),
+            self.objects.ledger_floor(),
+            self.realms.ledger_floor(),
+            self.environments.ledger_floor(),
+            self.scripts.ledger_floor(),
+        ]
+        .iter()
+        .fold(0u64, |sum, bytes| sum.saturating_add(*bytes))
+    }
+
+    /// The counting build: the slots of the six arenas, live or free.
+    #[cfg(test)]
+    pub(crate) fn slot_total(&self) -> usize {
+        self.strings.slot_count()
+            + self.symbols.slot_count()
+            + self.objects.slot_count()
+            + self.realms.slot_count()
+            + self.environments.slot_count()
+            + self.scripts.slot_count()
+    }
+
+    /// The counting build: the pushes past capacity onto the six free lists so far.
+    #[cfg(test)]
+    pub(crate) fn free_list_growths(&self) -> u64 {
+        self.strings.growths
+            + self.symbols.growths
+            + self.objects.growths
+            + self.realms.growths
+            + self.environments.growths
+            + self.scripts.growths
+    }
+
+    /// The bytes the heap is charged now (`heap_bytes()`, the reading `memory_bytes` bounds).
     pub(crate) fn bytes(&self) -> u64 {
         self.accounting.used()
+    }
+
+    /// The live reading (`live_bytes()`): the charged reading less the room, the slots of
+    /// every arena that hold no record with the workspace of every slot, and the atom table's
+    /// buckets that hold no entry. Between entries that is what the live records own with
+    /// their slots, property maps included, and what the atom table's entries own.
+    pub(crate) fn live_bytes(&self) -> u64 {
+        let room = [
+            self.strings.room_bytes(),
+            self.symbols.room_bytes(),
+            self.objects.room_bytes(),
+            self.realms.room_bytes(),
+            self.environments.room_bytes(),
+            self.scripts.room_bytes(),
+            self.atoms.room_bytes(),
+        ]
+        .iter()
+        .fold(0u64, |sum, bytes| sum.saturating_add(*bytes));
+        self.accounting.used().saturating_sub(room)
+    }
+
+    /// Clear the mark words of every arena, after a mark phase that found a stale handle.
+    pub(crate) fn clear_marks(&mut self) {
+        self.strings.clear_marks();
+        self.symbols.clear_marks();
+        self.objects.clear_marks();
+        self.realms.clear_marks();
+        self.environments.clear_marks();
+        self.scripts.clear_marks();
     }
 
     /// Whether a safe point should collect: the bytes allocated since the last collection
@@ -109,10 +188,11 @@ impl Heap {
         self.accounting.since_collection() >= self.trigger_bytes
     }
 
-    /// After a collection: count again from zero, against a threshold of the live size.
+    /// After a collection and every credit it made: count again from zero, against a threshold
+    /// of the live reading, which counts neither what was freed nor the arenas' room.
     pub(crate) fn collected(&mut self) {
         self.accounting.collected();
-        self.trigger_bytes = self.accounting.used().max(MIN_TRIGGER_BYTES);
+        self.trigger_bytes = self.live_bytes().max(MIN_TRIGGER_BYTES);
     }
 
     /// Store an object record that owns `owned_bytes` beside its slot.
@@ -171,8 +251,10 @@ impl Heap {
     }
 }
 
-/// Charge the slot and `owned_bytes` to the budget, then store `value` in `arena`. Over the
-/// budget, or when the arena cannot grow, nothing is charged or stored. This and
+/// Charge `owned_bytes` to the budget, and the growth of `arena` when it has no room (each new
+/// slot with its workspace, `arena::slot_bytes`), then store `value` in `arena`. Over the
+/// budget, or when the arena cannot grow, nothing is charged or stored. A record in a freed
+/// slot or a slot of the arena's capacity is charged what it owns only. This and
 /// [`Accounting::charge`] are the only way into an arena.
 pub(crate) fn store<T>(
     accounting: &mut Accounting,
@@ -180,9 +262,9 @@ pub(crate) fn store<T>(
     value: T,
     owned_bytes: u64,
 ) -> Result<Handle, OverBudget> {
-    let bytes = slot_bytes::<T>().saturating_add(owned_bytes);
+    let bytes = arena.growth_bytes().saturating_add(owned_bytes);
     accounting.charge(bytes)?;
-    match arena.allocate(value, bytes) {
+    match arena.allocate(value, owned_bytes) {
         Ok(handle) => Ok(handle),
         Err(_) => {
             accounting.credit(bytes);
