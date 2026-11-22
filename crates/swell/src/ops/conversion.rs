@@ -238,22 +238,37 @@ impl<H: Host> Agent<H> {
         Ok(integer_to_uint16(int))
     }
 
-    /// ToAbsoluteIndex (`#sec-toabsoluteindex`): an integer, +∞ or -∞.
-    pub(crate) fn to_absolute_index(&mut self, value: Value, length: usize) -> Completion<f64> {
+    /// ToAbsoluteIndex (`#sec-toabsoluteindex`): an integer, +∞ or -∞. `length` is a Number: an
+    /// array-like's length goes up to 2^53 - 1, which a `usize` does not hold on every target.
+    pub(crate) fn to_absolute_index(&mut self, value: Value, length: f64) -> Completion<f64> {
         // 1. Let int be ? ToIntegerOrInfinity(value).
         let int = self.to_integer_or_infinity(value)?;
         // 2. If int is finite and int < 0, set int to length + int. 3. Return int.
         Ok(if int.is_finite() && int < 0.0 {
-            length as f64 + int
+            length + int
         } else {
             int
         })
     }
 
-    /// ToClampedIndex (`#sec-toclampedindex`).
-    pub(crate) fn to_clamped_index(&mut self, value: Value, length: usize) -> Completion<usize> {
+    /// ToClampedIndex (`#sec-toclampedindex`), for the length of an array-like: an integer from
+    /// 0 to `length`.
+    pub(crate) fn to_clamped_index(&mut self, value: Value, length: f64) -> Completion<f64> {
         // 1. Let index be ? ToAbsoluteIndex(value, length).
         let index = self.to_absolute_index(value, length)?;
+        // 2. Return the result of clamping index between 0 and length.
+        Ok(index.clamp(0.0, length))
+    }
+
+    /// ToClampedIndex (`#sec-toclampedindex`) for a String's length, as a `usize`: a thin wrapper
+    /// over the Number form, because String methods index units and Array methods compare Numbers.
+    pub(crate) fn to_clamped_string_index(
+        &mut self,
+        value: Value,
+        length: usize,
+    ) -> Completion<usize> {
+        // 1. Let index be ? ToAbsoluteIndex(value, length). A String's length is below 2^53.
+        let index = self.to_absolute_index(value, length as f64)?;
         // 2. Return the result of clamping index between 0 and length.
         Ok(clamp_index(index, length))
     }
@@ -434,12 +449,12 @@ mod tests {
             (f64::NEG_INFINITY, f64::NEG_INFINITY, 0),
         ] {
             assert_eq!(
-                agent.to_absolute_index(Value::Number(number), 5),
+                agent.to_absolute_index(Value::Number(number), 5.0),
                 Ok(absolute),
                 "{number}"
             );
             assert_eq!(
-                agent.to_clamped_index(Value::Number(number), 5),
+                agent.to_clamped_string_index(Value::Number(number), 5),
                 Ok(clamped),
                 "{number}"
             );

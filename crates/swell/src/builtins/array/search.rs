@@ -20,10 +20,8 @@
 //! the element it invokes; the arguments are held by its activation (decision 4). The key of an
 //! index above 2^32 - 2 is an atom, made again after any code ran.
 //!
-//! ToAbsoluteIndex (`#sec-toabsoluteindex`) and ToClampedIndex (`#sec-toclampedindex`) are kept
-//! private here, over the integer ToIntegerOrInfinity answers ([`absolute_index`],
-//! [`clamped_index`]); `story:string-access-and-search-methods` adds them to
-//! `ops/conversion.rs` in the same wave, and the two are joined after both land.
+//! ToAbsoluteIndex (`#sec-toabsoluteindex`) and ToClampedIndex (`#sec-toclampedindex`) are the
+//! ones of `ops/conversion.rs`.
 
 use crate::builtins::array::MAX_SAFE_LENGTH;
 use crate::builtins::object::argument;
@@ -132,23 +130,6 @@ fn unscopable_list<H: Host>(agent: &mut Agent<H>, _making: Making) -> Completion
     Ok(Value::Object(list))
 }
 
-/// ToAbsoluteIndex (`#sec-toabsoluteindex`) of a value whose ToIntegerOrInfinity is
-/// `integer`: a finite negative integer counts from `length`.
-fn absolute_index(integer: f64, length: f64) -> f64 {
-    // 2. If int is finite and int < 0, set int to length + int.
-    if integer.is_finite() && integer < 0.0 {
-        length + integer
-    } else {
-        integer
-    }
-}
-
-/// ToClampedIndex (`#sec-toclampedindex`) of a value whose ToIntegerOrInfinity is `integer`:
-/// its ToAbsoluteIndex clamped between 0 and `length`.
-fn clamped_index(integer: f64, length: f64) -> f64 {
-    absolute_index(integer, length).clamp(0.0, length)
-}
-
 impl<H: Host> Agent<H> {
     /// The steps of the builtins of this group; not inlined, so that the frame of
     /// `run_array_builtin` does not grow with its arms, and each builtin is a function of its
@@ -246,8 +227,7 @@ impl<H: Host> Agent<H> {
         // 2. Let length be ? LengthOfArrayLike(obj).
         let length = self.length_of_array_like(object)?;
         // 3. Let k be ? ToAbsoluteIndex(index, length).
-        let integer = self.to_integer_or_infinity(argument(args, 0))?;
-        let index = absolute_index(integer, length);
+        let index = self.to_absolute_index(argument(args, 0), length)?;
         // 4. If k < 0 or k ≥ length, return undefined.
         if index < 0.0 || index >= length {
             return Ok(Value::Undefined);
@@ -372,8 +352,7 @@ impl<H: Host> Agent<H> {
             return Ok(Value::Boolean(false));
         }
         // 4. Let k be ? ToClampedIndex(fromIndex, length).
-        let integer = self.to_integer_or_infinity(argument(args, 1))?;
-        let mut index = clamped_index(integer, length);
+        let mut index = self.to_clamped_index(argument(args, 1), length)?;
         // 5. Repeat, while k < length.
         while index < length {
             self.charge_steps(1)?;
@@ -407,8 +386,7 @@ impl<H: Host> Agent<H> {
             return Ok(Value::Number(-1.0));
         }
         // 4. Let k be ? ToClampedIndex(fromIndex, length).
-        let integer = self.to_integer_or_infinity(argument(args, 1))?;
-        let mut index = clamped_index(integer, length);
+        let mut index = self.to_clamped_index(argument(args, 1), length)?;
         // 5. Repeat, while k < length.
         while index < length {
             self.charge_steps(1)?;
@@ -465,8 +443,7 @@ impl<H: Host> Agent<H> {
         // min(? ToAbsoluteIndex(fromIndex, length), length - 1). An undefined fromIndex is present.
         let mut index = match args.get(1) {
             Some(&from) => {
-                let integer = self.to_integer_or_infinity(from)?;
-                absolute_index(integer, length).min(length - 1.0)
+                self.to_absolute_index(from, length)?.min(length - 1.0)
             }
             None => length - 1.0,
         };
@@ -494,14 +471,12 @@ impl<H: Host> Agent<H> {
         // 2. Let length be ? LengthOfArrayLike(obj).
         let length = self.length_of_array_like(object)?;
         // 3. Let k be ? ToClampedIndex(start, length).
-        let integer = self.to_integer_or_infinity(argument(args, 0))?;
-        let mut index = clamped_index(integer, length);
+        let mut index = self.to_clamped_index(argument(args, 0), length)?;
         // 4. If end is undefined, let final be length; else ? ToClampedIndex(end, length).
         let end = match argument(args, 1) {
             Value::Undefined => length,
             end => {
-                let integer = self.to_integer_or_infinity(end)?;
-                clamped_index(integer, length)
+                self.to_clamped_index(end, length)?
             }
         };
         // 5. Let count be max(final - k, 0).
@@ -647,8 +622,7 @@ impl<H: Host> Agent<H> {
         // 2. Let length be ? LengthOfArrayLike(obj).
         let length = self.length_of_array_like(object)?;
         // 3. Let actualStart be ? ToClampedIndex(start, length).
-        let integer = self.to_integer_or_infinity(argument(args, 0))?;
-        let start = clamped_index(integer, length);
+        let start = self.to_clamped_index(argument(args, 0), length)?;
         // 4. Let insertCount be the number of elements in items.
         let items = args.get(2..).unwrap_or_default();
         let insert = items.len() as f64;
@@ -719,8 +693,7 @@ impl<H: Host> Agent<H> {
         // 2. Let length be ? LengthOfArrayLike(obj).
         let length = self.length_of_array_like(object)?;
         // 3. Let actualIndex be ? ToAbsoluteIndex(index, length).
-        let integer = self.to_integer_or_infinity(argument(args, 0))?;
-        let replaced = absolute_index(integer, length);
+        let replaced = self.to_absolute_index(argument(args, 0), length)?;
         // 4. If actualIndex < 0 or actualIndex ≥ length, throw a RangeError exception.
         if replaced < 0.0 || replaced >= length {
             return Err(self.throw_error(
