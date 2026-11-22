@@ -1,7 +1,8 @@
 //! Ordinary objects (ECMA-262 10.1, `#sec-ordinary-object-internal-methods-and-internal-slots`):
 //! every ordinary internal method, ValidateAndApplyPropertyDescriptor, OrdinaryObjectCreate and
 //! OrdinaryCreateFromConstructor, with the slots of the ordinary objects of this part: the
-//! Boolean and Number objects ([[BooleanData]], [[NumberData]]), the Error objects
+//! Boolean and Number objects ([[BooleanData]], [[NumberData]]), the Symbol objects
+//! ([[SymbolData]], `story:symbol-constructor-and-well-known-symbols`), the Error objects
 //! ([[ErrorData]]), the raw JSON objects ([[IsRawJSON]], `story:json-parse-and-raw-json`) and
 //! `%Object.prototype%`, an immutable prototype exotic object (10.4.7) whose other methods are
 //! ordinary. Written by `story:object-model-and-realms`.
@@ -17,7 +18,7 @@ use crate::host::Host;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::realm::intrinsics::Intrinsic;
-use crate::value::{ObjectRef, Value};
+use crate::value::{ObjectRef, SymbolRef, Value};
 
 /// What an ordinary object holds beyond the common record.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,6 +36,10 @@ pub(crate) enum OrdinaryData {
     /// [[IsRawJSON]], of the objects `JSON.rawJSON` makes (`#sec-json.rawjson`, written by
     /// `story:json-parse-and-raw-json`): a slot with no value, which holds no handle.
     RawJson,
+    /// [[SymbolData]] of a Symbol object (`#sec-properties-of-symbol-instances`), which ToObject
+    /// of a Symbol makes (`#sec-toobject`): the object keeps its Symbol alive
+    /// (`story:symbol-constructor-and-well-known-symbols`).
+    Symbol(SymbolRef),
 }
 
 /// The slots of an ordinary object beyond the common record.
@@ -48,9 +53,12 @@ impl Ordinary {
         Ordinary { data }
     }
 
-    /// Kind site of the collector: the slots of this part hold no handle.
+    /// Kind site of the collector: [[SymbolData]]; the other slots hold no handle.
     pub(crate) fn trace(&self, mark: &mut Mark) {
         mark.count("object/ordinary.rs Ordinary::trace");
+        if let OrdinaryData::Symbol(symbol) = self.data {
+            mark.value(Value::Symbol(symbol));
+        }
     }
 
     /// Whether this is `%Object.prototype%`.
