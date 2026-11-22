@@ -11,7 +11,9 @@
 //! value, the function, the realm, the script, and for a script the completion value register.
 //!
 //! What a frame takes beyond its fixed part (its locals and its operand stack as it grows) is
-//! charged to the memory budget and credited when the frame is popped.
+//! charged to the memory budget and credited when the frame is popped; so is the key list a
+//! `for`-`in` enumerator on its operand stack holds, which is credited earlier when the
+//! enumerator leaves the stack.
 
 use std::rc::Rc;
 
@@ -89,11 +91,15 @@ impl SlotValue {
 
 /// The state of a for-in statement's enumeration: the object and its keys as
 /// EnumerateObjectProperties (`#sec-enumerate-object-properties`) gave them, and the next one.
-/// `object` is `None` for the empty enumerator of `undefined` and `null`.
+/// `object` is `None` for the empty enumerator of `undefined` and `null`. `bytes` is what the
+/// list of keys was charged (0 for the empty enumerator): it is part of the frame's `charged`
+/// while the enumerator is on the operand stack, and credited when it leaves it
+/// (`Agent::truncate_stack`) or with the frame.
 pub(crate) struct Enumerator {
     pub(crate) object: Option<ObjectRef>,
     pub(crate) keys: Vec<Key>,
     pub(crate) next: usize,
+    pub(crate) bytes: u64,
 }
 
 /// One ECMAScript code execution context.
@@ -133,7 +139,8 @@ pub(crate) struct Frame {
     pub(crate) completion: Value,
     /// For a [[Construct]], the `this` object the call answers when its code returns no object.
     pub(crate) constructed: Option<ObjectRef>,
-    /// The bytes charged for the frame, credited when it is popped.
+    /// The bytes charged for the frame and the key lists of the enumerators on its operand
+    /// stack, credited when it is popped.
     pub(crate) charged: u64,
 }
 

@@ -133,12 +133,9 @@ impl<H: Host> Agent<H> {
         value: Value,
     ) -> Completion<()> {
         let items = usize::try_from(handler.items).unwrap_or(usize::MAX);
+        self.truncate_stack(items)?;
         let (mut env, mut pushed) = {
             let frame = self.top_frame()?;
-            if frame.stack.len() < items {
-                return Err(self.fault());
-            }
-            frame.stack.truncate(items);
             (frame.env, frame.pushed_envs)
         };
         while pushed > handler.envs {
@@ -409,9 +406,10 @@ impl<H: Host> Agent<H> {
 
     // ---- the operand stack ----
 
-    /// `Pop`.
+    /// `Pop`: the entry leaves through [`Agent::truncate_stack`], so an enumerator credits its
+    /// key list.
     fn pop_instruction(&mut self) -> Completion<Flow> {
-        self.pop_entry()?;
+        self.drop_entries(1)?;
         Ok(Flow::Next)
     }
 
@@ -1451,7 +1449,10 @@ impl<H: Host> Agent<H> {
     }
 
     /// `ForInStart`: ForIn/OfHeadEvaluation for `enumerate`
-    /// (`#sec-runtime-semantics-forinofheadevaluation`).
+    /// (`#sec-runtime-semantics-forinofheadevaluation`). The charge of the key list
+    /// EnumerateObjectProperties answers joins the frame's `charged` before the enumerator is
+    /// pushed, so on every way out after the list exists the frame holds it, and
+    /// [`Agent::truncate_stack`] credits it when the enumerator leaves the operand stack.
     fn for_in_start(&mut self) -> Completion<Flow> {
         let value = self.peek_value(0)?;
         let enumerator = match value {
@@ -1459,15 +1460,25 @@ impl<H: Host> Agent<H> {
                 object: None,
                 keys: Vec::new(),
                 next: 0,
+                bytes: 0,
             },
             _ => {
                 let object = self.to_object(value)?;
                 let keep = self.keep(Value::Object(object));
-                let keys = self.enumerate_object_properties(object);
+                let list = self.enumerate_object_properties(object);
                 self.release(keep);
+                let list = list?;
+                match self.interp.frames.last_mut() {
+                    Some(frame) => frame.charged = frame.charged.saturating_add(list.bytes),
+                    None => {
+                        self.drop_key_list(list);
+                        return Err(self.fault());
+                    }
+                }
                 Enumerator {
                     object: Some(object),
-                    keys: keys?,
+                    bytes: list.bytes,
+                    keys: list.keys,
                     next: 0,
                 }
             }
