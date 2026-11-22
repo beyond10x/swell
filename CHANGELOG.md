@@ -22,6 +22,15 @@ Every number below comes from the gate, `task check`, on the released commit.
   valid until the scope ends, also when the host drops the root and calls back into the
   engine. A caller that read through a shared `&Cx` or `&HookCx` takes `&mut` instead
   (`HOST-170`).
+- `live_bytes` (new, on `Agent`): what the live records hold, slots included. It falls by
+  everything a sweep frees and sets the collection threshold (`HOST-171`).
+- `heap_bytes` keeps its signature and changes its reading, with `memory_bytes`: an arena's
+  slots are counted by capacity, charged when the arena grows and kept while the agent lives,
+  together with the collector's workspace and the atom table's buckets. A collection lowers
+  `heap_bytes` only by what the freed records owned. Before, a slot was charged with each
+  record and credited by the sweep that freed it, and the collector's workspace was not
+  charged. A String with no code units that lands in a spare slot is no longer refused by a
+  budget with no room left.
 - `get_prototype_of`, `set_prototype_of`: new methods of `Cx`, the [[GetPrototypeOf]] and
   [[SetPrototypeOf]] of an object, so an interface object takes its parent's interface object
   as [[Prototype]] (`HOST-180`).
