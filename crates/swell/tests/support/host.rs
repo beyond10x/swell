@@ -23,6 +23,8 @@ pub struct TestHost {
     pub now: i128,
     /// A counter host functions of the tests may use.
     pub count: u32,
+    /// The charges of the host's own bytes a test's host functions keep.
+    pub charges: Vec<swell::HostBytes>,
 }
 
 impl Host for TestHost {

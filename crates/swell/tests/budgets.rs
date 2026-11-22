@@ -3,21 +3,24 @@
 //! `reentry_depth`, `string_length` and the Rust stack `Limits::min_stack_bytes` promises.
 //!
 //! Every entry names a realm (decision 7), so each agent here holds one, and its budget is the
-//! bytes the realm takes plus the room the test gives. Run also with the feature
-//! `collect-every-safe-point`.
+//! bytes the realm takes plus the room the test gives. The host's own charges, bytes with
+//! `charge_host_bytes` and `resize_host_bytes` and steps with `charge_steps` (section 14, "The
+//! host's own work and bytes"; HOST-175 to HOST-177), go to the same budgets. Run also with the
+//! feature `collect-every-safe-point`.
 #![cfg(test)]
 
 mod support;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use support::host::{
     TestHost, agent_with, global, is_error_of, limits, object, realm, stack_with_room,
 };
-use support::script::{Outcome, define_function, eval, eval_text, run};
+use support::script::{Outcome, define_function, eval, eval_text, parse, run};
 use swell::{
-    Abrupt, Agent, AgentState, Brand, Completion, Cx, HostCall, HostData, HostObjectSpec, Limits,
-    Outcome as HostOutcome, Parsed, Prototype, Realm, RealmRef, Source, Termination, Tracer, Value,
+    Abrupt, Agent, AgentState, Brand, Completion, Cx, GlobalObjects, HookCx, HostBytes, HostCall,
+    HostData, HostError, HostObjectSpec, Limits, Outcome as HostOutcome, Parsed, Prototype, Realm,
+    RealmRef, Script, Source, Termination, Tracer, Value,
 };
 
 /// The bytes an agent with the test limits holds after `create_realm`, which leaves nothing
@@ -560,4 +563,440 @@ fn reach_every_bound() {
 fn min_stack_bytes_is_enough() {
     let stack = stack_with_room(stack_limits());
     on_bounded_stack("min_stack_bytes_is_enough", stack, reach_every_bound).unwrap();
+}
+
+/// The room beyond the realm that the tests of the host's own bytes give an agent.
+const HOST_ROOM: u64 = 64 * 1024;
+
+/// HOST-175's room beyond the realm: [`HOST_ROOM`], or an eighth of it in the gate with the
+/// collector at every safe point ([`in_the_collect_gate`]), where every step of the loop
+/// collects. With 64 KiB the loop calls `make` about 990 times at about 8 steps a call; an
+/// eighth still leaves room for about 90 calls after the host function and the script.
+fn host_175_room() -> u64 {
+    if in_the_collect_gate() {
+        HOST_ROOM / 8
+    } else {
+        HOST_ROOM
+    }
+}
+
+/// The two readings of the heap, `heap_bytes()` and `live_bytes()`.
+fn readings(agent: &Agent<TestHost>) -> (u64, u64) {
+    (agent.heap_bytes().unwrap(), agent.live_bytes().unwrap())
+}
+
+/// An agent with the test limits and `memory_bytes` `budget`, its realm, and after a collection
+/// the room the budget leaves.
+fn agent_with_budget(budget: u64) -> (Agent<TestHost>, Realm, u64) {
+    let mut limits = limits();
+    limits.memory_bytes = budget;
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    agent.collect().unwrap();
+    let room = budget - agent.heap_bytes().unwrap();
+    (agent, realm, room)
+}
+
+thread_local! {
+    /// The 64-byte buffers the host function `make` keeps, each beside its `HostBytes` in
+    /// `TestHost::charges`.
+    static BUFFERS: RefCell<Vec<[u8; 64]>> = const { RefCell::new(Vec::new()) };
+}
+
+/// HOST-175's host function: it charges 64 bytes and keeps the answer with a 64-byte buffer.
+fn make(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    let charge = cx.charge_host_bytes(64)?;
+    BUFFERS.with(|buffers| buffers.borrow_mut().push([0; 64]));
+    cx.host_mut().charges.push(charge);
+    Ok(Value::Undefined)
+}
+
+/// HOST-175: a host function that charges 64 bytes with `cx.charge_host_bytes` and keeps the
+/// answer with a 64-byte buffer in the host on each call, run by the script
+/// `while (true) make();` with `memory_bytes` M, the bytes after the realm and 64 KiB, ends in
+/// `Terminated(MemoryBudget)`, and `heap_bytes()` then reads at most M; after the host drops the
+/// buffers with their `HostBytes`, the script `1` answers `Normal(1)`.
+#[test]
+fn host_175_host_bytes_without_end_end_in_memory_budget() {
+    let budget = realm_bytes() + host_175_room();
+    let (mut agent, realm, _) = agent_with_budget(budget);
+    define_function(&mut agent, &realm, "make", 0, make, false);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "while (true) make();"),
+        Outcome::Terminated(Termination::MemoryBudget)
+    );
+    let kept = agent.host().charges.len();
+    assert!(kept > 0, "make kept no charge");
+    assert_eq!(BUFFERS.with(|buffers| buffers.borrow().len()), kept);
+    assert!(agent.heap_bytes().unwrap() <= budget);
+
+    agent.host_mut().charges.clear();
+    BUFFERS.with(|buffers| buffers.borrow_mut().clear());
+    assert_eq!(
+        eval_text(&mut agent, &realm, "1;"),
+        Outcome::Normal("1".to_string())
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// Host data that holds a charge of the host and nothing else.
+struct HeldCharge {
+    _charge: HostBytes,
+}
+
+impl HostData for HeldCharge {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+/// HOST-176: a `HostBytes` gives back exactly what it charged, once. A charge of 100 kept in the
+/// host data of a host object with no root: after `collect()` frees the object, `live_bytes()`
+/// reads what it read before the charge and `heap_bytes()` falls by the 100 bytes and the size
+/// of the host data, and a second `collect()` changes neither. `Agent::credit_host_bytes` of a
+/// second charge answers its 100 bytes, both readings fall by them at the call, and a later
+/// `collect()` changes neither. A `HostBytes` of another agent answers
+/// `Err(HostError::ForeignHandle)` and changes nothing here; the other agent's `live_bytes()`
+/// falls by its bytes at its next `collect()`.
+#[test]
+fn host_176_a_host_charge_gives_back_what_it_charged() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = realm(&mut agent);
+    agent.collect().unwrap();
+    let (_, live_before) = readings(&agent);
+    agent
+        .with_cx(&realm, |cx| {
+            let charge = cx.charge_host_bytes(100).unwrap();
+            cx.new_host_object(HostObjectSpec {
+                prototype: Prototype::Null,
+                brand: Brand(1),
+                data: Some(Box::new(HeldCharge { _charge: charge })),
+            })
+            .unwrap()
+            .unwrap();
+        })
+        .unwrap();
+    let (heap_made, live_made) = readings(&agent);
+    assert!(live_made > live_before + 100, "{live_made} {live_before}");
+    let data = u64::try_from(size_of::<HeldCharge>()).unwrap();
+    let freed = (heap_made - 100 - data, live_before);
+    agent.collect().unwrap();
+    assert_eq!(readings(&agent), freed);
+    agent.collect().unwrap();
+    assert_eq!(readings(&agent), freed);
+
+    let second = agent
+        .with_cx(&realm, |cx| cx.charge_host_bytes(100))
+        .unwrap()
+        .unwrap();
+    let (heap, live) = readings(&agent);
+    assert_eq!(agent.credit_host_bytes(second), Ok(100));
+    assert_eq!(readings(&agent), (heap - 100, live - 100));
+    agent.collect().unwrap();
+    assert_eq!(readings(&agent), (heap - 100, live - 100));
+
+    let mut other = support::host::agent().unwrap();
+    let other_realm = support::host::realm(&mut other);
+    let foreign = other
+        .with_cx(&other_realm, |cx| cx.charge_host_bytes(100))
+        .unwrap()
+        .unwrap();
+    other.collect().unwrap();
+    let (_, other_live) = readings(&other);
+    let here = readings(&agent);
+    assert_eq!(
+        agent.credit_host_bytes(foreign),
+        Err(HostError::ForeignHandle)
+    );
+    assert_eq!(readings(&agent), here);
+    assert_eq!(readings(&other).1, other_live);
+    other.collect().unwrap();
+    assert_eq!(readings(&other).1, other_live - 100);
+}
+
+/// A dropped charge gives its room to the next charge in the same `with_cx`, with no collection
+/// between: `charge_host_bytes` credits the dropped charges before it charges.
+#[test]
+fn a_dropped_charge_gives_its_room_to_the_next_charge() {
+    let (mut agent, realm, room) = agent_with_budget(realm_bytes() + HOST_ROOM);
+    let answers = agent
+        .with_cx(&realm, |cx| {
+            let first = cx.charge_host_bytes(room).map(drop);
+            let second = cx.charge_host_bytes(room).map(drop);
+            (first, second)
+        })
+        .unwrap();
+    assert_eq!(answers, (Ok(()), Ok(())));
+}
+
+/// The room the test of a charge dropped inside a host function leaves, and what its host
+/// function charges: the room less 4,096 bytes for the call's own.
+const RECHARGE_ROOM: u64 = 1 << 20;
+const RECHARGED: u64 = RECHARGE_ROOM - 4_096;
+
+/// A host function that takes the host's charge out, drops it and charges as much again.
+fn recharge(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    let held = cx.host_mut().charges.pop();
+    assert!(held.is_some(), "the host holds no charge");
+    drop(held);
+    let charge = cx.charge_host_bytes(RECHARGED)?;
+    cx.host_mut().charges.push(charge);
+    Ok(Value::Undefined)
+}
+
+/// An agent with `memory_bytes` `budget`, its realm, the host function `f` ([`recharge`]) and
+/// the script `f()` parsed.
+fn recharge_agent(budget: u64) -> (Agent<TestHost>, Realm, Script) {
+    let mut limits = limits();
+    limits.memory_bytes = budget;
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    define_function(&mut agent, &realm, "f", 0, recharge, false);
+    let script = parse(&mut agent, &realm, "f();");
+    agent.collect().unwrap();
+    (agent, realm, script)
+}
+
+/// A charge the host drops inside a host function gives its room back to the host function's
+/// next charge: with 1 MiB of room and a charge of 1 MiB less 4,096 bytes held, the host
+/// function `f` drops it and charges as much again, and the script `f()` answers `Normal`.
+#[test]
+fn a_charge_dropped_inside_a_host_function_gives_its_room_back() {
+    let (probe, _, _) = recharge_agent(limits().memory_bytes);
+    let made = probe.heap_bytes().unwrap();
+    drop(probe);
+    let (mut agent, realm, script) = recharge_agent(made + RECHARGE_ROOM);
+    assert_eq!(agent.heap_bytes(), Ok(made));
+    let charge = agent
+        .with_cx(&realm, |cx| cx.charge_host_bytes(RECHARGED))
+        .unwrap()
+        .unwrap();
+    agent.host_mut().charges.push(charge);
+    let outcome = agent.evaluate_script(&script).unwrap();
+    assert!(
+        matches!(outcome, HostOutcome::Normal(_)),
+        "f() answered {outcome:?}"
+    );
+    assert_eq!(agent.host().charges.len(), 1);
+}
+
+/// A `HostBytes` dropped after its agent touches only its own queue: no panic.
+#[test]
+fn a_charge_dropped_after_its_agent_is_harmless() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = realm(&mut agent);
+    let charge = agent
+        .with_cx(&realm, |cx| cx.charge_host_bytes(100))
+        .unwrap()
+        .unwrap();
+    agent.host_mut().charges.push(charge);
+    let taken = agent.host_mut().charges.pop().unwrap();
+    drop(agent);
+    drop(taken);
+}
+
+/// `resize_host_bytes` changes a charge in place (decision D3): with room R, a charge of
+/// R / 2 + 1 resized to R / 2 and back answers `Ok(Ok(()))` each, `live_bytes()` following the
+/// size, and the agent goes on; a resize to R + 1 ends in `Terminated(MemoryBudget)` with the
+/// handle's charge and `live_bytes()` unchanged. In a fresh agent a second charge of R / 2 + 1
+/// beside the first, a replacement, ends in `Terminated(MemoryBudget)`. A handle of another agent
+/// answers `Err(HostError::ForeignHandle)` and changes nothing.
+#[test]
+fn a_resized_charge_fits_where_a_replacement_does_not() {
+    let budget = realm_bytes() + HOST_ROOM;
+    let (mut agent, realm, room) = agent_with_budget(budget);
+    let half = room / 2 + 1;
+    let mut charge = agent
+        .with_cx(&realm, |cx| cx.charge_host_bytes(half))
+        .unwrap()
+        .unwrap();
+    let (_, live) = readings(&agent);
+    let shrunk = agent
+        .with_cx(&realm, |cx| cx.resize_host_bytes(&mut charge, half - 1))
+        .unwrap();
+    assert_eq!(shrunk, Ok(Ok(())));
+    assert_eq!(readings(&agent).1, live - 1);
+    let grown = agent
+        .with_cx(&realm, |cx| cx.resize_host_bytes(&mut charge, half))
+        .unwrap();
+    assert_eq!(grown, Ok(Ok(())));
+    assert_eq!(readings(&agent).1, live);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "1;"),
+        Outcome::Normal("1".to_string())
+    );
+
+    // The readings are compared across a `with_cx`, a safe point that may collect: a collection
+    // first frees what the script left.
+    agent.collect().unwrap();
+    let (_, live) = readings(&agent);
+    let past = agent
+        .with_cx(&realm, |cx| {
+            let past = cx.resize_host_bytes(&mut charge, room + 1);
+            let after = cx.new_string("a").map(|_| ());
+            (past, after)
+        })
+        .unwrap();
+    assert_eq!(
+        past,
+        (
+            Ok(Err(Abrupt::Terminated(Termination::MemoryBudget))),
+            Err(Abrupt::Terminated(Termination::MemoryBudget))
+        )
+    );
+    assert_eq!(readings(&agent).1, live);
+
+    let (mut fresh, fresh_realm, fresh_room) = agent_with_budget(budget);
+    assert_eq!(fresh_room, room);
+    let (first, replacement) = fresh
+        .with_cx(&fresh_realm, |cx| {
+            let first = cx.charge_host_bytes(half).unwrap();
+            (first, cx.charge_host_bytes(half).map(drop))
+        })
+        .unwrap();
+    assert_eq!(
+        replacement,
+        Err(Abrupt::Terminated(Termination::MemoryBudget))
+    );
+
+    let mut foreign = first;
+    agent.collect().unwrap();
+    fresh.collect().unwrap();
+    let (here, there) = (readings(&agent), readings(&fresh));
+    let answer = agent
+        .with_cx(&realm, |cx| cx.resize_host_bytes(&mut foreign, 1))
+        .unwrap();
+    assert_eq!(answer, Err(HostError::ForeignHandle));
+    assert_eq!((readings(&agent), readings(&fresh)), (here, there));
+    assert_eq!(fresh.credit_host_bytes(foreign), Ok(half));
+    assert_eq!(agent.credit_host_bytes(charge), Ok(half));
+}
+
+/// The steps of a call of [`walk`].
+const WALK_STEPS: u64 = 1_000;
+
+/// The step budget of HOST-177.
+const HOST_177_STEPS: u64 = 100_000;
+
+/// HOST-177's host function: it charges 1,000 steps of its own work.
+fn walk(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    cx.charge_steps(WALK_STEPS)?;
+    Ok(Value::Undefined)
+}
+
+/// A host function that counts its calls and charges a step more than the budget.
+fn walk_past(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    cx.host_mut().count += 1;
+    cx.charge_steps(HOST_177_STEPS + 1)?;
+    Ok(Value::Undefined)
+}
+
+/// HOST-177: a host function that calls `cx.charge_steps(1_000)` on each call, run by the
+/// script `while (true) walk();` with `steps_per_entry` N, ends in `Terminated(StepBudget)` with
+/// `last_entry_steps()` at most N; one that calls `cx.charge_steps(N + 1)` ends the entry at its
+/// first call with `last_entry_steps()` below N; an interrupt set before the charge ends it in
+/// `Terminated(Interrupted)`.
+#[test]
+fn host_177_host_steps_end_in_step_budget() {
+    let mut agent = agent_with(with_steps(HOST_177_STEPS)).unwrap();
+    let realm = realm(&mut agent);
+    define_function(&mut agent, &realm, "walk", 0, walk, false);
+    define_function(&mut agent, &realm, "walkPast", 0, walk_past, false);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "while (true) walk();"),
+        Outcome::Terminated(Termination::StepBudget)
+    );
+    let spent = agent.last_entry_steps().unwrap();
+    assert!(spent <= HOST_177_STEPS, "{spent}");
+    assert!(spent > HOST_177_STEPS - WALK_STEPS - 100, "{spent}");
+
+    assert_eq!(
+        eval_text(&mut agent, &realm, "while (true) walkPast();"),
+        Outcome::Terminated(Termination::StepBudget)
+    );
+    assert_eq!(agent.host().count, 1);
+    let spent = agent.last_entry_steps().unwrap();
+    assert!(spent < HOST_177_STEPS, "{spent}");
+
+    let handle = agent.interrupt_handle();
+    let answers = agent
+        .with_cx(&realm, |cx| {
+            handle.interrupt();
+            (cx.charge_steps(1), cx.charge_steps(0))
+        })
+        .unwrap();
+    let interrupted = Err(Abrupt::Terminated(Termination::Interrupted));
+    assert_eq!(answers, (interrupted, interrupted));
+    assert!(!handle.is_set());
+    assert_eq!(
+        eval_text(&mut agent, &realm, "1;"),
+        Outcome::Normal("1".to_string())
+    );
+}
+
+/// A realm whose setup closure makes a host object the global object, after it charged
+/// `charge` bytes with the `HookCx`, when given, and kept the `HostBytes` in
+/// `TestHost::charges`.
+fn realm_charging(agent: &mut Agent<TestHost>, charge: Option<u64>) -> HostOutcome<Realm> {
+    let mut setup = |cx: &mut HookCx<'_, TestHost>, realm: RealmRef| -> Completion<GlobalObjects> {
+        if let Some(bytes) = charge {
+            let held = cx.charge_host_bytes(bytes)?;
+            cx.host_mut().charges.push(held);
+        }
+        let global = cx
+            .new_host_object(HostObjectSpec {
+                prototype: Prototype::ObjectPrototypeOf(realm),
+                brand: Brand(1),
+                data: None,
+            })
+            .unwrap()?;
+        Ok(GlobalObjects { global, this: None })
+    };
+    agent.create_realm(Some(&mut setup), None).unwrap()
+}
+
+/// A charge made with the `HookCx` of a setup closure counts as one made with `Cx`: an agent
+/// whose setup charged 1,000 bytes reads 1,000 more in both readings than one whose setup did
+/// not; a charge past `memory_bytes` ends `create_realm` in `Terminated(MemoryBudget)`.
+#[test]
+fn host_charges_from_a_hook_count_as_from_cx() {
+    let mut charged = support::host::agent().unwrap();
+    let mut plain = support::host::agent().unwrap();
+    assert!(matches!(
+        realm_charging(&mut charged, Some(1_000)),
+        HostOutcome::Normal(_)
+    ));
+    assert!(matches!(
+        realm_charging(&mut plain, None),
+        HostOutcome::Normal(_)
+    ));
+    assert_eq!(charged.host().charges.len(), 1);
+    let (heap, live) = readings(&plain);
+    assert_eq!(readings(&charged), (heap + 1_000, live + 1_000));
+
+    let mut refused = support::host::agent().unwrap();
+    assert!(matches!(
+        realm_charging(&mut refused, Some(limits().memory_bytes + 1)),
+        HostOutcome::Terminated(Termination::MemoryBudget)
+    ));
+    assert!(refused.host().charges.is_empty());
+}
+
+/// A charge refused inside `with_cx` is sticky: with 10 bytes of room a charge of 11 answers
+/// `Terminated(MemoryBudget)`, and so does the next call; the next `with_cx` runs afresh.
+#[test]
+fn host_charges_inside_with_cx_are_sticky() {
+    let (mut agent, realm, room) = agent_with_budget(realm_bytes() + 10);
+    assert_eq!(room, 10);
+    let answers = agent
+        .with_cx(&realm, |cx| {
+            let charge = cx.charge_host_bytes(11).map(drop);
+            let string = cx.new_string("a").map(|_| ());
+            (charge, string)
+        })
+        .unwrap();
+    let refused = Err(Abrupt::Terminated(Termination::MemoryBudget));
+    assert_eq!(answers, (refused, refused));
+    let next = agent
+        .with_cx(&realm, |cx| cx.charge_host_bytes(10).map(drop))
+        .unwrap();
+    assert_eq!(next, Ok(()));
 }
