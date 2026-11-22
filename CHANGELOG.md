@@ -34,6 +34,9 @@ Every number below comes from the gate, `task check`, on the released commit.
 - `get_prototype_of`, `set_prototype_of`: new methods of `Cx`, the [[GetPrototypeOf]] and
   [[SetPrototypeOf]] of an object, so an interface object takes its parent's interface object
   as [[Prototype]] (`HOST-180`).
+- A handle the host keeps without a root is a stated weak reference (`HOST-178`): it reads
+  its object while the object lives and answers `StaleHandle` after a collection freed it,
+  also after its slot holds a new object. No code changed for it; it is tested now.
 - `HOST-165`, `HOST-166`, `HOST-167`, `HOST-168`, `HOST-169`, `HOST-170`, `HOST-171`, `HOST-172`, `HOST-173`, `HOST-174`, `HOST-175`, `HOST-176`, `HOST-177`, `HOST-178`, `HOST-179`, `HOST-180`, `HOST-181`, `HOST-182`, `HOST-183`, `HOST-184`, `HOST-185`, `HOST-186`, `HOST-187`: new requirements.
 - `HOST-29`, `HOST-52`, `HOST-102`: changed requirements.
 
