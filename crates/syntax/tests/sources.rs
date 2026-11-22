@@ -507,6 +507,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "template" => ("x = ", "`${", "0", "}`", ";"),
         "arrow" => ("x = ", "() => ", "0", "", ";"),
         "arrow_block" => ("x = ", "() => { return ", "0", "; }", ";"),
+        "default_parameter" => ("x = ", "function (a = ", "0", ") {}", ";"),
         _ => return None,
     };
     let mut source = units(before);
@@ -517,7 +518,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 39] = [
+const NESTING_KINDS: [&str; 40] = [
     "array",
     "paren",
     "block",
@@ -557,6 +558,7 @@ const NESTING_KINDS: [&str; 39] = [
     "template",
     "arrow",
     "arrow_block",
+    "default_parameter",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict
@@ -888,6 +890,7 @@ fn dynamic_function_entry_parses_parameters_and_body_apart() {
         ("", "'use strict'; return this"),
         ("a, a", "return a"),
         ("", "with (o) {}"),
+        ("a = 1", "return a"),
     ] {
         assert!(parsed(p, b).is_ok(), "{p:?} {b:?}: {:?}", parsed(p, b));
     }
@@ -900,16 +903,16 @@ fn dynamic_function_entry_parses_parameters_and_body_apart() {
         ("eval", "'use strict';"),
         ("", "'use strict'; with (o) {}"),
         ("a b", ""),
-        ("a = 1", ""),
+        ("a <!-- x", ""),
         ("", "}"),
         ("", "break;"),
     ] {
         assert!(parsed(p, b).is_err(), "{p:?} {b:?} parsed");
     }
-    let errors = parsed("a = 1", "").err().unwrap();
+    let errors = parsed("a <!-- x", "").err().unwrap();
     assert_eq!(
         messages(&errors),
-        vec!["default parameter is not supported before slice 6".to_string()]
+        vec!["HTML-like comment is not supported before slice 18".to_string()]
     );
 }
 

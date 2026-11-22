@@ -239,22 +239,23 @@ fn an_arrow_with_ten_thousand_parameters_is_charged_as_it_is_read() {
 }
 
 /// The parameters an arrow takes before later stories keep the refusals the parameters of a
-/// function have (`default parameter`, `rest parameter`, `destructuring pattern`), and an `async`
-/// arrow keeps the refusal of slice 10. A `...` after a comma stays the unexpected token it is
-/// on the base of the story, on which negative cases of test262 pass.
+/// function have (`destructuring pattern`), and an `async` arrow keeps the refusal of slice 10.
+/// Defaults and a rest element parse since `story:default-and-rest-parameters`.
 #[test]
-fn an_arrow_parameter_list_of_a_later_story_keeps_its_refusal() {
+fn arrow_defaults_and_rest_run_and_patterns_and_async_keep_their_refusal() {
+    for source in [
+        "var f = (a = 1) => a;",
+        "var f = (a, b = 1) => a;",
+        "var f = (...a) => a;",
+        "var f = (a, ...b) => a;",
+    ] {
+        assert_eq!(
+            run(limits(), source),
+            Outcome::Normal("undefined".into()),
+            "{source}"
+        );
+    }
     for (source, refused) in [
-        (
-            "var f = (a = 1) => a;",
-            "default parameter is not supported",
-        ),
-        (
-            "var f = (a, b = 1) => a;",
-            "default parameter is not supported",
-        ),
-        ("var f = (...a) => a;", "rest parameter is not supported"),
-        ("var f = (a, ...b) => a;", "unexpected token ..."),
         (
             "var f = ({ a }) => a;",
             "destructuring pattern is not supported",

@@ -1419,11 +1419,13 @@ until the old one is dropped.
 **What a host function, a host object and a property cost.** Added on 2026-11-22. A host
 function's record is charged before it is made with the boxes of its steps and of its data, and
 the sweep that frees the function credits them. A host function costs at most
-`HOST_FUNCTION_LIVE_BYTES` bytes of `live_bytes()` plus its data, a property definition
-`PROPERTY_LIVE_BYTES`; a realm of 300 host functions and 40 host objects with 600 definitions
-raises `heap_bytes()` by at most `BINDINGS_REALM_HEAP_BYTES`, arena growth included (a host
-object: decision 15). Each is a public constant of `host/limits.rs`; a test compares the values
-written here with the constants. A release that raises a ceiling names it under the changelog's
+`HOST_FUNCTION_LIVE_BYTES` = 576 bytes of `live_bytes()` plus its data, a property definition
+`PROPERTY_LIVE_BYTES` = 448; a realm of 300 host functions and 40 host objects with 600
+definitions raises `heap_bytes()` by at most `BINDINGS_REALM_HEAP_BYTES` = 381,696, arena growth
+included (a host object: decision 15). Each is a public constant of `host/limits.rs`; a test
+compares the values written here with the constants. Each value is the rise the test
+`tests/host_objects.rs` measures plus an eighth, rounded up to a multiple of 64, as the
+constants' doc comments say. A release that raises a ceiling names it under the changelog's
 Host interface heading. Steps: making a host function or a host object spends no step and leaves
 the counter of the running entry unchanged; defining a property that does not compact spends
 none; `set_prototype_of` spends one per object on the new prototype's chain; a call of a host
@@ -1445,7 +1447,7 @@ a call of a script function with an empty body, and what the host charges with
 
 **HOST-186** (swell:D14) After a realm's setup, `new_host_function` with a name of at most 32 code units and data of a `T` raises `live_bytes()` by at most `HOST_FUNCTION_LIVE_BYTES` plus `size_of::<T>()`, and by the same amount for each further function of the same name length and type; `new_host_object` with data of a `T` by at most `HOST_OBJECT_LIVE_BYTES` plus `size_of::<T>()`; 300 definitions of new properties on one host object by at most 300 × `PROPERTY_LIVE_BYTES`; once the host drops them and `collect` ran twice, `live_bytes()` reads its value from before them. [slice 6]
 
-**HOST-187** (swell:D14) A realm with 300 host functions and 40 host objects whose properties are defined in `with_cx` raises `heap_bytes()`, from its reading after `create_realm` and before the first `with_cx`, by at most `BINDINGS_REALM_HEAP_BYTES`; with the baseline `last_entry_steps()` read after a `with_cx` whose last call began an entry (a `define_property_or_throw`, which reads 0 after it), a `with_cx` of only `new_host_function` or only `new_host_object` calls leaves `last_entry_steps()` unchanged; `set_prototype_of` with a new prototype whose chain has k objects reads k; three of its host functions, bound after the `heap_bytes()` reading as the global data properties `f0`, `f150` and `f299`, make the scripts `f0()`, `f150()` and `f299()` spend the same `last_entry_steps()`, which is 2 less than that of the script `g()` of a script function `g` with an empty body; once the realm's roots are dropped and `collect` ran twice, `live_bytes()` reads its value from before `create_realm` (the three bindings are properties of the realm's global and go with it), and building the same realm again leaves `heap_bytes()` at most where the first build left it. [slice 6]
+**HOST-187** (swell:D14) A realm with 300 host functions and 40 host objects whose properties are defined in `with_cx` raises `heap_bytes()`, from its reading after `create_realm` and before the first `with_cx`, by at most `BINDINGS_REALM_HEAP_BYTES`; with the baseline `last_entry_steps()` read after a `with_cx` whose last call began an entry (a `define_property_or_throw`, which reads 0 after it), a `with_cx` of only `new_host_function` or only `new_host_object` calls leaves `last_entry_steps()` unchanged; `set_prototype_of` with a new prototype whose chain has k objects reads k; three of its host functions, bound after the `heap_bytes()` reading as the global data properties `f0`, `f150` and `f299`, make the scripts `f0()`, `f150()` and `f299()` spend the same `last_entry_steps()`, which is 2 less than that of the script `g()` of a script function `g` with an empty body; once the realm's roots are dropped and `collect` ran twice, `live_bytes()` reads its value from before `create_realm` (the three bindings are properties of the realm's global and go with it), and building the same realm again, with the same bindings and the same scripts as the first build, leaves `heap_bytes()` after its scripts at most where the first build's scripts left it. [slice 6]
 
 ## 15. Host objects: brand, host data, `trace`, overrides
 
@@ -1552,7 +1554,7 @@ a `DOMException` with `Some(ErrorKind::Error)`. The field is a breaking change o
 every `HostObjectSpec` literal names it. The [[Stack]] slot is not made.
 
 **What a host object costs.** Added on 2026-11-22. A host object costs at most
-`HOST_OBJECT_LIVE_BYTES` bytes of `live_bytes()` plus its data, a public constant of
+`HOST_OBJECT_LIVE_BYTES` = 256 bytes of `live_bytes()` plus its data, a public constant of
 `host/limits.rs` that a test compares with the value written here; what the data owns behind its
 box is the host's to charge with `charge_host_bytes` (decision 14). Making one spends no step.
 
@@ -1818,7 +1820,7 @@ table in `host-interface-model.md` gives each marker's first words.
 - `host.yaml:846`: HOST-157
 - `host.yaml:862`: HOST-38
 - `host.yaml:865`: HOST-43
-- `host.yaml:867`: HOST-70, HOST-74, HOST-188 to HOST-190
+- `host.yaml:932`: HOST-70, HOST-74, HOST-188 to HOST-190
 - `host.yaml:882`: HOST-48
 - `host.yaml:898`: HOST-43
 - `host.yaml:969`: ESS limit

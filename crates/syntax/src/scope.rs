@@ -23,6 +23,10 @@
 //!   the list itself. A function declaration in a block is refused before a later story of slice
 //!   6, and one at the top level of a body is var scoped (TopLevelLexicallyScopedDeclarations).
 //!
+//! The initializers of a function's parameters are the function's own code, walked before its
+//! body: their references and direct `eval` calls count for the function, and whether they hold
+//! a direct `eval` call is kept apart ([`Scope::parameters_contain_direct_eval`]).
+//!
 //! An arrow function is a function scope with no `arguments` of its own: its references to
 //! `arguments`, where it binds no such name itself, and its direct `eval` calls count for the
 //! nearest enclosing function that is not an arrow, which then gets its arguments object
@@ -40,8 +44,8 @@ use std::collections::BTreeSet;
 use crate::ledger::{HeapBytes, Meter, Stop, map_entry_bytes};
 
 use crate::ast::{
-    Ast, Child, DeclKind, Expr, ForInTarget, ForInit, FunctionId, FunctionKind, LexicalName, Name,
-    Scope, Stmt, StmtId,
+    Ast, Child, DeclKind, Expr, ForInTarget, ForInit, Function, FunctionId, FunctionKind,
+    LexicalName, Name, Scope, Stmt, StmtId,
 };
 
 impl Ast {
@@ -117,6 +121,9 @@ struct Collect {
     reference_seen: BTreeSet<String>,
     contains_with: bool,
     contains_direct_eval: bool,
+    /// Whether the initializers of the function's parameters, walked before its body, hold a
+    /// direct `eval` call.
+    parameters_contain_direct_eval: bool,
     /// Whether an arrow function in the body, at any depth of arrows, references `arguments`
     /// with no arrow between binding it, or holds a direct `eval` call: the `arguments` of this
     /// body is then that arrow's too ("`this` and `arguments` in an arrow function", item 2).
@@ -184,27 +191,28 @@ impl Collect {
             || self.contains_direct_eval
     }
 
-    /// The scope of the body whose walk ends; `params` are the parameters of a function, `None`
-    /// for the script; `arrow` whether the function is an arrow function, which has no
-    /// arguments object (`#sec-functiondeclarationinstantiation`, step 16). The scratch is
-    /// credited.
-    fn finish(self, params: Option<&[Name]>, arrow: bool, m: &Meter<'_>) -> Scope {
+    /// The scope of the body whose walk ends; `function` is the function, `None` for the
+    /// script; an arrow function has no arguments object
+    /// (`#sec-functiondeclarationinstantiation`, step 16). The scratch is credited.
+    fn finish(self, function: Option<&Function>, m: &Meter<'_>) -> Scope {
         // `#sec-functiondeclarationinstantiation`, steps 15 to 18: no arguments object when a
-        // parameter, a function declaration or a lexical declaration of the body is named
-        // `arguments`; a `var` of that name keeps it. A direct `eval` may reference it in code
-        // no analysis sees (decision 3, "Names", item 4), and an arrow in the body may use it.
-        let arguments_object = !arrow
-            && params.is_some_and(|params| {
-                (self.reference_seen.contains("arguments")
+        // parameter is named `arguments`, or, in a list with no initializer, a function
+        // declaration or a lexical declaration of the body; a `var` of that name keeps it. A
+        // direct `eval` may reference it in code no analysis sees (decision 3, "Names", item
+        // 4), and an arrow in the body may use it.
+        let arguments_object = function.is_some_and(|f| {
+            f.kind != FunctionKind::Arrow
+                && (self.reference_seen.contains("arguments")
                     || self.contains_direct_eval
                     || self.inner_arguments)
-                    && !params.iter().any(|p| p.name == "arguments")
-                    && !self
+                && !f.params.iter().any(|p| p.name == "arguments")
+                && (f.has_parameter_expressions()
+                    || (!self
                         .declarations
                         .iter()
                         .any(|(name, _)| name == "arguments")
-                    && !self.lexical.iter().any(|l| l.name.name == "arguments")
-            });
+                        && !self.lexical.iter().any(|l| l.name.name == "arguments")))
+        });
         // The last declaration of each name, in source order; each entry of the names taken is
         // charged when it is inserted and all are credited after.
         let entry = map_entry_bytes::<&str, ()>();
@@ -235,6 +243,7 @@ impl Collect {
             arguments_object,
             contains_with: self.contains_with,
             contains_direct_eval: self.contains_direct_eval,
+            parameters_contain_direct_eval: self.parameters_contain_direct_eval,
         }
     }
 }
@@ -246,6 +255,8 @@ enum Step {
     /// `const` declaration lexically scoped to the body.
     TopLevel(StmtId),
     Node(Child),
+    /// The end of the initializers of a function's parameters, before its body.
+    Parameters,
     /// The end of a function's body: its names become its scope.
     End(FunctionId),
 }
@@ -315,7 +326,7 @@ fn walk(ast: &Ast, body: &[StmtId], m: &Meter<'_>) -> (Scope, Vec<(FunctionId, S
     }
     m.release(stack);
     m.release(open);
-    (script.finish(None, false, m), scopes)
+    (script.finish(None, m), scopes)
 }
 
 /// One step of [`walk`].
@@ -340,6 +351,7 @@ fn walk_step(
             }
             push_lexical_charged(m, ast, s, &mut c.lexical);
         }
+        Step::Parameters => c.parameters_contain_direct_eval = c.contains_direct_eval,
         Step::End(id) => {
             if let Some(done) = open.pop() {
                 let f = ast.function(id);
@@ -350,19 +362,25 @@ fn walk_step(
                 if arrow && done.arguments_of_outer_function(params) {
                     open.last_mut().unwrap_or(script).inner_arguments = true;
                 }
-                let scope = done.finish(Some(params), arrow, m);
+                let scope = done.finish(f, m);
                 m.push(scopes, (id, scope))?;
             }
         }
         Step::Node(Child::Function(id)) => {
             m.visit()?;
-            // A function is analysed on its own.
+            // A function is analysed on its own: the initializers of its parameters, then its
+            // body.
             let Some(f) = ast.function(id) else {
                 return Ok(());
             };
             m.push(open, Collect::default())?;
             m.push(stack, Step::End(id))?;
             push_body(m, stack, &f.body)?;
+            m.grow_by(stack, f.initializers.len().saturating_add(1))?;
+            stack.push(Step::Parameters);
+            for e in f.initializers.iter().rev().flatten() {
+                stack.push(Step::Node(Child::Expr(*e)));
+            }
         }
         Step::Node(node @ Child::Stmt(id)) => {
             m.visit()?;

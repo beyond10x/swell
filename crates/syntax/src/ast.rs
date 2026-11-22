@@ -26,7 +26,8 @@ pub struct ExprId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StmtId(pub u32);
 
-/// A function of the script, numbered in the order its first token appears.
+/// A function of the script, numbered in the order its first token appears; an arrow function
+/// at its `=>`, after the functions in the initializers of its parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FunctionId(pub u32);
 
@@ -455,9 +456,9 @@ pub struct Scope {
     /// decision 3): its own code references `arguments` or holds a direct `eval` call (decision
     /// 3, "Names", item 4), or an arrow function in it does, at any depth of arrows, where no
     /// arrow between binds the name `arguments` itself ("`this` and `arguments` in an arrow
-    /// function", item 2); and neither a parameter nor a function it declares is named
-    /// `arguments`. Always false for the script and for an arrow function, which never has
-    /// one (step 16).
+    /// function", item 2); and no parameter is named `arguments`, nor, when no parameter has an
+    /// initializer, a function or a lexical declaration of the body (steps 17 and 18). Always
+    /// false for the script and for an arrow function, which never has one (step 16).
     pub arguments_object: bool,
     /// Whether the body's own code (not a nested function's) holds a `with` statement, whose
     /// body's references are looked up by name (decision 3, "Names").
@@ -465,7 +466,12 @@ pub struct Scope {
     /// Whether the body's own code (not a nested function's) holds a direct `eval` call: a call
     /// whose callee, its parentheses removed, is the IdentifierReference `eval`
     /// (`#sec-function-calls-runtime-semantics-evaluation`, step 6), not an optional call.
+    /// The initializers of a function's parameters are its own code.
     pub contains_direct_eval: bool,
+    /// Whether the initializers of a function's parameters hold a direct `eval` call
+    /// themselves (not in a nested function): in non-strict code its `var` names go to a
+    /// record outside the parameters' (`#sec-functiondeclarationinstantiation`, step 20).
+    pub parameters_contain_direct_eval: bool,
 }
 
 /// A `FunctionDeclaration`, `FunctionExpression`, an accessor or method of an object literal, or
@@ -474,7 +480,14 @@ pub struct Scope {
 pub struct Function {
     pub kind: FunctionKind,
     pub name: Option<Name>,
+    /// The BoundNames of the FormalParameters, one per parameter in order, the rest parameter
+    /// last (`#sec-function-definitions`).
     pub params: Vec<Name>,
+    /// The Initializer of each parameter, beside its name in `params`: empty when no parameter
+    /// has one, else as long as `params`, `None` for a parameter without one.
+    pub initializers: Vec<Option<ExprId>>,
+    /// Whether the last of `params` is a FunctionRestParameter.
+    pub rest: bool,
     pub body: Vec<StmtId>,
     /// Whether the function's code is strict mode code (`#sec-strict-mode-code`): it is
     /// contained in strict code or its body starts with a Use Strict Directive.
@@ -483,6 +496,39 @@ pub struct Function {
     pub span: Span,
     /// The longest path from this function to a leaf, counted in nodes.
     pub depth: u32,
+}
+
+impl Function {
+    /// IsSimpleParameterList (`#sec-static-semantics-issimpleparameterlist`): no initializer
+    /// and no rest parameter (a pattern is refused before its story).
+    pub fn is_simple(&self) -> bool {
+        self.initializers.is_empty() && !self.rest
+    }
+
+    /// ContainsExpression of the FormalParameters
+    /// (`#sec-static-semantics-containsexpression`): a parameter has an initializer.
+    pub fn has_parameter_expressions(&self) -> bool {
+        !self.initializers.is_empty()
+    }
+
+    /// The Initializer of parameter `i`, if it has one.
+    pub fn initializer(&self, i: usize) -> Option<ExprId> {
+        self.initializers.get(i).copied().flatten()
+    }
+
+    /// ExpectedArgumentCount (`#sec-static-semantics-expectedargumentcount`): the parameters
+    /// before the first one with an initializer or the rest parameter.
+    pub fn expected_argument_count(&self) -> usize {
+        let plain = if self.rest {
+            self.params.len().saturating_sub(1)
+        } else {
+            self.params.len()
+        };
+        self.initializers
+            .iter()
+            .position(Option::is_some)
+            .map_or(plain, |first| first.min(plain))
+    }
 }
 
 /// The arenas of a tree.
@@ -568,7 +614,13 @@ impl Ast {
                 }
             }
             Child::Function(id) => {
-                count = self.function(id).map_or(0, |f| f.body.len());
+                count = self.function(id).map_or(0, |f| {
+                    f.initializers
+                        .iter()
+                        .flatten()
+                        .count()
+                        .saturating_add(f.body.len())
+                });
             }
         }
         m.grow_by(stack, count)?;
@@ -599,6 +651,9 @@ impl Ast {
             }
             Child::Function(id) => {
                 if let Some(f) = self.function(id) {
+                    for e in f.initializers.iter().flatten() {
+                        stack.push(step(Child::Expr(*e)));
+                    }
                     for s in &f.body {
                         stack.push(step(Child::Stmt(*s)));
                     }
@@ -816,6 +871,7 @@ impl HeapBytes for Function {
         self.name
             .heap_bytes()
             .saturating_add(self.params.heap_bytes())
+            .saturating_add(self.initializers.heap_bytes())
             .saturating_add(self.body.heap_bytes())
             .saturating_add(self.scope.heap_bytes())
     }

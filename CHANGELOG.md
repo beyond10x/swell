@@ -43,7 +43,12 @@ pass. Every number below is from the gate on the wave branch of slice 3
   unit outside ASCII with a counted refusal.
 - The first parts of the sixth delivery slice: template literals without a tag, and `let`,
   `const` and block scopes with the temporal dead zone and a fresh record per iteration of a
-  `for (let ...)` loop. A tagged template is refused by name until its story.
+  `for (let ...)` loop. A tagged template is refused by name until its story. Arrow functions
+  with an expression body or a block body: `this` and `arguments` are those of the code that
+  made the arrow, and an arrow has no [[Construct]] and no `prototype`. Default parameters and
+  rest parameters, in functions, arrows and the `Function` constructor: a default is evaluated
+  only for `undefined`, and a parameter read or written before its initializer has run throws
+  a `ReferenceError` that names it.
 
 ### Changed
 
@@ -63,6 +68,9 @@ pass. Every number below is from the gate on the wave branch of slice 3
   a regular expression literal), five of slice 6 (String cases that call a method with a
   Symbol) and two of slice 18 (`trimLeft/reference-trimStart.js`,
   `trimRight/reference-trimEnd.js`). `docs/plan/slice-03-wave-2.md` names them.
+- The ESS pins moved from 0.96.0 to 0.97.3 (`spec/ess-inputs.yaml`, the conformance workspace,
+  the forge's workflow). The suite is byte-identical: 58 scenarios, 41 refusals, 58 passing on
+  the interpreter and 14 against the engine, as before.
 - The gate now fails when a public item of the host interface or a `HOST-<n>` requirement
   changed since the last release and the changelog does not name it under Host interface, in
   the name form of `docs/releasing.md`.
@@ -90,9 +98,14 @@ pass. Every number below is from the gate on the wave branch of slice 3
     per code unit past 32. `JSON.parse` and `JSON.rawJSON` charge the step per code unit of
     their text before they copy it: a text parsed to its end costs what it did, and one that
     fails early has paid for its whole text.
+  - A bound function's arguments, the argument list of a bound call and the arguments a
+    builtin call records are charged to the memory budget before they are copied and stay
+    charged while they are held.
   - The atom table grows charged first, also when deleted buckets would make it grow.
   - The compile step charges what a node's expansion holds as it is made: the script `1`
     needs 2,228 bytes of room for its parse and compile.
+- A termination that ends the deletions of an Array length write leaves the Array's old
+  length, so its length is never below an index it still has.
 - A pending interrupt ends `parse_script` before the source is copied: it answers
   `Parsed::Terminated(Interrupted)` and consumes the flag (`HOST-166`, `HOST-167`).
 - The dev and test builds carry no debug information, and the gate step
@@ -133,6 +146,14 @@ pass. Every number below is from the gate on the wave branch of slice 3
   `HostIntrinsic::ErrorPrototype`) and `WellKnownSymbol` (new, with
   `WellKnownSymbol::ToStringTag`, `WellKnownSymbol::Unscopables`): the host names these
   intrinsics and symbols from a closed list (`HOST-183`, `HOST-184`).
+- A host function charges the box of its data and of its steps, and four constants state
+  what a host that generates bindings can count on (`HOST-186`, `HOST-187`), each the
+  measured rise plus an eighth: `HOST_FUNCTION_LIVE_BYTES` (576, a host function with a name
+  of at most 32 code units, its data apart), `HOST_OBJECT_LIVE_BYTES` (256, a host object,
+  its data apart), `PROPERTY_LIVE_BYTES` (448, one definition of a new property, averaged
+  over 300 on one object) and `BINDINGS_REALM_HEAP_BYTES` (381,696, a realm of 300 host
+  functions and 40 host objects with 600 definitions, arena growth included). A release
+  that raises one names it here.
 - Breaking: `HostObjectSpec::error_kind` (new field; a literal adds `error_kind: None`) gives
   a host object an [[ErrorData]] slot, as Web IDL gives a `DOMException`: `Error.isError`
   answers true for it (`HOST-179`).

@@ -58,7 +58,14 @@ impl SymbolRecord {
 /// (`engine.md`, decision 4: "a threshold that grows with the live size"), and garbage is
 /// collected before the charged reading, which keeps the arenas' capacity, reaches the budget.
 /// Triggers count bytes, never time.
-const MIN_TRIGGER_BYTES: u64 = 1 << 20;
+pub(crate) const MIN_TRIGGER_BYTES: u64 = 1 << 20;
+
+#[cfg(test)]
+thread_local! {
+    /// The collections run, counted in [`Heap::collected`], in the counting build of the tests;
+    /// a test resets it before it reads it.
+    pub(crate) static COLLECTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
 
 /// The heap of one agent.
 pub(crate) struct Heap {
@@ -209,6 +216,8 @@ impl Heap {
     /// After a collection and every credit it made: count again from zero, against a threshold
     /// of the live reading, which counts neither what was freed nor the arenas' room.
     pub(crate) fn collected(&mut self) {
+        #[cfg(test)]
+        COLLECTIONS.with(|collections| collections.set(collections.get().saturating_add(1)));
         self.accounting.collected();
         self.trigger_bytes = self.live_bytes().max(MIN_TRIGGER_BYTES);
     }
@@ -220,6 +229,18 @@ impl Heap {
         owned_bytes: u64,
     ) -> Result<ObjectRef, OverBudget> {
         let handle = store(&mut self.accounting, &mut self.objects, record, owned_bytes)?;
+        Ok(ObjectRef { handle })
+    }
+
+    /// [`Heap::new_object`] of a record whose `owned_bytes` the caller charged already
+    /// ([`store_charged`]): over the budget, or when the arena cannot grow, nothing is stored
+    /// and the caller credits them; stored, the sweep that frees the record credits them.
+    pub(crate) fn new_object_charged(
+        &mut self,
+        record: ObjectRecord,
+        owned_bytes: u64,
+    ) -> Result<ObjectRef, OverBudget> {
+        let handle = store_charged(&mut self.accounting, &mut self.objects, record, owned_bytes)?;
         Ok(ObjectRef { handle })
     }
 
@@ -273,7 +294,7 @@ impl Heap {
 /// slot with its workspace, `arena::slot_bytes`), then store `value` in `arena`. Over the
 /// budget, or when the arena cannot grow, nothing is charged or stored. A record in a freed
 /// slot or a slot of the arena's capacity is charged what it owns only. This and
-/// [`Accounting::charge`] are the only way into an arena.
+/// [`store_charged`], for a value whose owned bytes are charged already, are the only way into an arena.
 pub(crate) fn store<T>(
     accounting: &mut Accounting,
     arena: &mut Arena<T>,

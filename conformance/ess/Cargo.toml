@@ -12,9 +12,9 @@ resolver = "3"
 [dependencies]
 swell = { path = "../../crates/swell", features = ["fault-injection"] }
 swell-syntax = { path = "../../crates/syntax" }
-ess-conformance = { git = "https://github.com/beyond10x/ess", tag = "0.96.0" }
-ess-primitives = { git = "https://github.com/beyond10x/ess", tag = "0.96.0" }
-ess-domain = { git = "https://github.com/beyond10x/ess", tag = "0.96.0" }
+ess-conformance = { git = "https://github.com/beyond10x/ess", tag = "0.97.3" }
+ess-primitives = { git = "https://github.com/beyond10x/ess", tag = "0.97.3" }
+ess-domain = { git = "https://github.com/beyond10x/ess", tag = "0.97.3" }
 
 [lints.clippy]
 unwrap_used = "deny"

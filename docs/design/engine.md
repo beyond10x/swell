@@ -621,6 +621,9 @@ is called when it is not undefined, and the first throw is what the builtin thro
 `return` throws or answers. Every `next` and `return` is a call that may run any code, so an
 iterator that is never done ends at the step budget, and a `next` that iterates again in itself
 ends at a depth bound. A termination closes nothing: no code runs after it, `return` included.
+A termination leaves what a builtin had changed until then, with one exception:
+ArraySetLength puts the old length back when a termination ends its deletions, so that an
+Array's `length` is never below an index key it still has (`object/array.rs`).
 
 The mechanism:
 
@@ -1259,7 +1262,7 @@ that takes time is one command that starts it and one per way it ends:
 The model is held by a conformance runner over a thin adapter to the hand-written Rust interface,
 as surf's `conformance/` is, in a Cargo workspace of its own (the one place a third-party crate
 is allowed, because `ess-conformance` brings some). The engine's code is not generated from ESS:
-the host interface is an in-process library interface, and what ESS 0.96.0 generates is
+the host interface is an in-process library interface, and what ESS 0.97.3 generates is
 components with ports (surf `AGENTS.md`, "Layout"), not a library interface. Not checked: how well
 ESS states an in-process library interface; the first slice finds out.
 

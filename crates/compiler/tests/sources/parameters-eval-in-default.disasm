@@ -1,0 +1,26 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 0 locals 1 binds-parameters parameter-environment
+  params env 0, env 1
+  captured "a" "b" "arguments"
+  arguments unmapped env 2
+  0000 2:12 Argument 1
+  0001 2:12 JumpIfNotUndefined 0005
+  0002 2:16 GetNameForCall "eval"
+  0003 2:21 String "var x = 1"
+  0004 2:16 CallEval 1
+  0005 2:12 SetEnv 0 0
+  0006 2:12 Pop
+  0007 2:35 Argument 2
+  0008 2:35 JumpIfNotUndefined 0010
+  0009 2:39 GetName "x"
+  0010 2:35 SetEnv 0 1
+  0011 2:35 Pop
+  0012 2:1 PushVarEnv 0 
+  0013 2:58 GetName "b"
+  0014 2:51 Return
+  0015 2:1 Undefined
+  0016 2:1 Return

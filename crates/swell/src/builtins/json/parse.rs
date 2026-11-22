@@ -10,9 +10,10 @@
 //! nesting of any depth takes no Rust stack, and each open entry is charged to the memory
 //! budget while it is open. The value is made as the text is read, as the evaluation of the
 //! text as a Script would make it (13.2.5.6 in its JSON form: a duplicate key keeps the last
-//! value, `__proto__` is an own data property). A step is charged per code unit read and per
-//! value made (decision 2, "per node for `JSON.parse`"). Every String the parse makes, a key
-//! included, is bounded by `string_length`.
+//! value, `__proto__` is an own data property). A step is charged per code unit of the text
+//! before the text is copied, and per value made, in batches of `STEP_CHUNK` (decision 2, "per
+//! node for `JSON.parse`"). Every String the parse makes, a key included, is bounded by
+//! `string_length`.
 //!
 //! The parse node of ParseJSON is not kept: with a reviver, the parse makes the JSON Parse
 //! Records CreateJSONParseRecord would make from it as it goes, the record of a primitive value
@@ -38,7 +39,7 @@ use crate::ops::objects::IntegrityLevel;
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, StringRef, Value};
 
-/// The code units read between two charges of the step budget.
+/// The values made between two charges of the step budget.
 const STEP_CHUNK: u64 = 4_096;
 
 /// A JSON Parse Record (`#sec-json-parse-record`): [[Value]], the source text of [[ParseNode]]

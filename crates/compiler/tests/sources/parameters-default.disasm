@@ -1,0 +1,19 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 2 binds-parameters
+  params local 0, local 1
+  0000 2:12 Argument 2
+  0001 2:12 SetLocal 0
+  0002 2:12 Pop
+  0003 2:15 Argument 3
+  0004 2:15 JumpIfNotUndefined 0006
+  0005 2:19 GetLocal 0
+  0006 2:15 SetLocal 1
+  0007 2:15 Pop
+  0008 2:31 GetLocal 1
+  0009 2:24 Return
+  0010 2:1 Undefined
+  0011 2:1 Return

@@ -344,6 +344,26 @@ pub enum Instruction {
     /// `[v] -> []`: stores into the completion value register of a script.
     StoreCompletion,
 
+    // ---- parameters of a list that is not simple ----------------------------------------
+    /// `[] -> [v]`: the argument the call kept at local slot `n`
+    /// ([`FunctionTemplate::binds_parameters`]), `undefined` when the call passed none there
+    /// (IteratorBindingInitialization of a `FormalParameter` with the list iterator of the
+    /// arguments, `#sec-runtime-semantics-iteratorbindinginitialization`).
+    Argument(u32),
+    /// `[v] -> [v]` and a jump to `t`, after this one, when `v` is not `undefined`; otherwise
+    /// `[v] -> []`: the test before the `Initializer` of a parameter.
+    JumpIfNotUndefined(u32),
+    /// `[] -> [a]`: a rest parameter, CreateArrayFromList (`#sec-createarrayfromlist`) of the
+    /// arguments the call kept from local slot `n` on, a step per element and the Array charged
+    /// to the memory budget.
+    RestArguments(u32),
+    /// A new declarative environment whose slots are named by `scopes[t]`, whose outer is the
+    /// LexicalEnvironment, becomes the LexicalEnvironment and the VariableEnvironment: the
+    /// record of the `var` names of the body of a function whose parameters have an
+    /// initializer (`#sec-functiondeclarationinstantiation`, step 28), where a direct `eval` of
+    /// the body adds its `var` names. It counts as an environment of a handler's `envs`.
+    PushVarEnv(u32),
+
     // ---- lexical bindings (`let` and `const`) --------------------------------------------------
     /// Local slot `n` becomes uninitialized: the entry of the scope of a `let` or `const`
     /// binding that some access checks (`#sec-blockdeclarationinstantiation`).
@@ -525,6 +545,10 @@ impl Instruction {
             | Instruction::AssignConstEnv { .. }
             | Instruction::InitGlobal(_) => None,
             Instruction::ToString => None,
+            Instruction::Argument(_)
+            | Instruction::RestArguments(_)
+            | Instruction::PushVarEnv(_) => None,
+            Instruction::JumpIfNotUndefined(t) => Some(t),
         }
     }
 
@@ -538,6 +562,7 @@ impl Instruction {
             Instruction::CaseJump(_) => Instruction::CaseJump(t),
             Instruction::ForInNext(_) => Instruction::ForInNext(t),
             Instruction::JumpIfTag { tag, .. } => Instruction::JumpIfTag { tag, target: t },
+            Instruction::JumpIfNotUndefined(_) => Instruction::JumpIfNotUndefined(t),
             other => other,
         }
     }
@@ -640,8 +665,9 @@ pub enum Slot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ArgumentsObject {
     /// CreateMappedArgumentsObject (`#sec-createmappedargumentsobject`) for a non-strict
-    /// function (whose parameter list is simple in this slice): every parameter then has a slot
-    /// of the function environment, which the object's parameter map reads and writes. Otherwise
+    /// function whose parameter list is simple: every parameter then has a slot of the function
+    /// environment, which the object's parameter map reads and writes. Otherwise, in strict code
+    /// or for a list that is not simple (`#sec-functiondeclarationinstantiation`, step 22),
     /// CreateUnmappedArgumentsObject (`#sec-createunmappedargumentsobject`).
     pub mapped: bool,
     /// The slot of the binding `arguments`, which the call initializes to the object.
@@ -660,6 +686,13 @@ pub struct ArgumentsObject {
 /// the same name overwrites an earlier one, `#sec-functiondeclarationinstantiation`, step 22), a
 /// missing one as `undefined`, and runs `instructions`, which begin with the instantiation of
 /// the function declarations (step 36).
+///
+/// For a parameter list that is not simple (`binds_parameters`) the call stores no argument:
+/// each slot of `params` starts uninitialized, the call keeps its arguments in the frame, in
+/// the local slots after `locals`, and `instructions` begin with the binding of each parameter
+/// in order ([`Instruction::Argument`], [`Instruction::RestArguments`]), then, when a parameter
+/// has an initializer, the record of the body's `var` names ([`Instruction::PushVarEnv`]),
+/// then the function declarations.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunctionTemplate {
     pub kind: FunctionKind,
@@ -667,11 +700,21 @@ pub struct FunctionTemplate {
     /// anonymous function (`#sec-runtime-semantics-namedevaluation`), `get <key>` or
     /// `set <key>` for an accessor, or empty.
     pub name: Vec<u16>,
-    /// The `length` property: the number of parameters (ExpectedArgumentCount).
+    /// The `length` property: ExpectedArgumentCount
+    /// (`#sec-static-semantics-expectedargumentcount`), the parameters before the first one with
+    /// an initializer or the rest parameter.
     pub length: u32,
     pub strict: bool,
     /// Where each parameter goes, in order.
     pub params: Vec<Slot>,
+    /// Whether the code binds the parameters, from the arguments the call keeps: a list that is
+    /// not simple (`#sec-static-semantics-issimpleparameterlist`).
+    pub binds_parameters: bool,
+    /// Whether the function environment's outer is a record of its own, empty, which is the
+    /// VariableEnvironment while the parameters are bound: non-strict code with an initializer
+    /// that calls `eval` directly, whose `var` names go there, outside the parameters'
+    /// environment (`#sec-functiondeclarationinstantiation`, steps 19 and 20).
+    pub parameter_environment: bool,
     pub locals: u32,
     /// The names of the slots of the function environment, as `strings` indices. A lookup by
     /// name reads them.
