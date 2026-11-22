@@ -41,6 +41,9 @@ pass. Every number below is from the gate on the wave branch of slice 3
   (`host-requirements: 165 requirement(s), 165 line(s): 84 test, 81 pending`; 164 and 80 in
   0.2.0). `HOST-165`: a String method that needs the tables of a later slice refuses a code
   unit outside ASCII with a counted refusal.
+- The first parts of the sixth delivery slice: template literals without a tag, and `let`,
+  `const` and block scopes with the temporal dead zone and a fresh record per iteration of a
+  `for (let ...)` loop. A tagged template is refused by name until its story.
 
 ### Changed
 
@@ -63,6 +66,37 @@ pass. Every number below is from the gate on the wave branch of slice 3
 - The gate now fails when a public item of the host interface or a `HOST-<n>` requirement
   changed since the last release and the changelog does not name it under Host interface, in
   the name form of `docs/releasing.md`.
+- Storage is charged before it is allocated and work before it is done
+  (`docs/design/engine.md`, "Memory budget" and "The step budget"). What that changed:
+  - The parser's tree, the scope analysis, the compile step's scratch and the code are charged
+    to `memory_bytes` before they grow and credited when they drop, and the code's charge
+    passes to its script record. Every parse reads the interrupt at least once per 4,096 code
+    units or nodes; `eval` and `Function` read it before their copy of the source, and `eval`
+    charges a step per code unit of its source.
+  - The key list of an object is charged, steps and bytes, before the list is built, and
+    credited when its holder drops it. Index keys added out of order are sorted in charged
+    passes; a list whose index keys are in order costs the steps it did.
+  - The key list a `for`-`in` loop holds is charged to `memory_bytes` before it grows and
+    while the loop runs, and credited when the loop ends, by `break`, `return`, a throw or a
+    termination included.
+  - Setting an array's length, compacting a property or binding list, and calling a bound
+    function charge their steps before the work; the totals are as before. The list of keys
+    that a shorter length deletes is charged before it is made, and the arguments of a bound
+    function are not copied before the gathered list fits the budget.
+  - Comparing two Strings, and using a String of more than 32 code units as a property key,
+    charge a step per code unit past 32 before the work; shorter ones cost what they did.
+  - Builtins no longer copy a whole String they do not use and charge a String's steps before
+    they copy it. `JSON.stringify` compares the Strings of a replacer list in place, a step
+    per code unit past 32. `JSON.parse` and `JSON.rawJSON` charge the step per code unit of
+    their text before they copy it: a text parsed to its end costs what it did, and one that
+    fails early has paid for its whole text.
+  - The atom table grows charged first, also when deleted buckets would make it grow.
+- A pending interrupt ends `parse_script` before the source is copied: it answers
+  `Parsed::Terminated(Interrupted)` and consumes the flag (`HOST-166`, `HOST-167`).
+- The dev and test builds carry no debug information, and the gate step
+  `test-binaries-check` fails when a test executable has a `.debug_` section. The stack
+  requirements are also tested in the release profile and in a profile without debug
+  information, in the lane `slow`.
 
 ### Host interface
 
