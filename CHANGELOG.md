@@ -44,6 +44,11 @@ Every number below comes from the gate, `task check`, on the released commit.
   (`HOST-176`).
 - `charge_steps` (new, on `Cx`): charges the steps of a host function's own work to the
   running entry (`HOST-177`).
+- `intrinsic` and `well_known_symbol` (new, on `Cx` and `HookCx`), `HostIntrinsic` (new, with
+  `HostIntrinsic::ObjectPrototype`, `HostIntrinsic::FunctionPrototype`,
+  `HostIntrinsic::ErrorPrototype`) and `WellKnownSymbol` (new, with
+  `WellKnownSymbol::ToStringTag`, `WellKnownSymbol::Unscopables`): the host names these
+  intrinsics and symbols from a closed list (`HOST-183`, `HOST-184`).
 - A handle the host keeps without a root is a stated weak reference (`HOST-178`): it reads
   its object while the object lives and answers `StaleHandle` after a collection freed it,
   also after its slot holds a new object. No code changed for it; it is tested now.
