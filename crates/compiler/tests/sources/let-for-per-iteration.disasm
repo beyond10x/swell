@@ -1,0 +1,40 @@
+script locals 0
+  var "fs"
+  0000 2:5 ResolveGlobal "fs"
+  0001 2:10 NewArray
+  0002 2:5 PutGlobalRef "fs"
+  0003 2:5 Pop
+  0004 3:1 Undefined
+  0005 3:1 StoreCompletion
+  0006 3:1 PushLexicalEnv 0 "i"
+  0007 3:14 Number 0
+  0008 3:10 SetEnv 0 0
+  0009 3:10 Pop
+  0010 3:1 CopyEnv
+  0011 3:17 GetEnvChecked 0 0
+  0012 3:21 Number 2
+  0013 3:17 Lt
+  0014 3:1 JumpIfFalse 0029
+  0015 3:31 GetGlobal "fs"
+  0016 3:34 GetEnvChecked 0 0
+  0017 3:39 Closure 0
+  0018 3:31 PutIndex
+  0019 3:31 StoreCompletion
+  0020 3:1 CopyEnv
+  0021 3:24 GetEnvChecked 0 0
+  0022 3:24 ToNumeric
+  0023 3:24 Dup
+  0024 3:24 Increment
+  0025 3:24 SetEnvChecked 0 0
+  0026 3:24 Pop
+  0027 3:1 Pop
+  0028 3:1 LoopJump 0011
+  0029 3:1 PopEnv
+  0030 0:0 LoadCompletion
+  0031 0:0 Return
+
+function 0 expression "" length 0 locals 0
+  0000 3:60 GetEnvChecked 0 0
+  0001 3:53 Return
+  0002 3:39 Undefined
+  0003 3:39 Return

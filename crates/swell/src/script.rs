@@ -37,7 +37,7 @@
 use std::rc::Rc;
 
 use swell_compiler::CompileError;
-use swell_compiler::bytecode::{Code, Handler, Instruction};
+use swell_compiler::bytecode::{Code, Handler, Instruction, LexicalName, SlotName};
 use swell_syntax::ParseOptions;
 use swell_syntax::ast::Span;
 
@@ -47,7 +47,7 @@ use crate::host::agent::Agent;
 use crate::host::host_object::{Brand, HostData, HostObject, Tracer};
 use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{ErrorKind, Host, HostDefined, Source};
-use crate::interp::frame::{Frame, frame_bytes};
+use crate::interp::frame::{Frame, SlotValue, frame_bytes};
 use crate::object::property::{Key, array_index};
 use crate::value::{StringRef, Value};
 
@@ -144,13 +144,13 @@ pub(crate) struct SourceCopy {
     pub(crate) charged: u64,
 }
 
-/// The bytes of the names tables of the environments `PushNamedEnv` makes (decision 3, "Names":
-/// they are charged with the compiled code).
-fn scopes_bytes(scopes: &[Vec<u32>]) -> u64 {
+/// The bytes of the names tables of the environments `PushNamedEnv` and `PushLexicalEnv` make
+/// (decision 3, "Names": they are charged with the compiled code).
+fn scopes_bytes(scopes: &[Vec<SlotName>]) -> u64 {
     scopes
         .iter()
-        .fold(vec_bytes::<Vec<u32>>(scopes.len()), |bytes, names| {
-            bytes.saturating_add(vec_bytes::<u32>(names.len()))
+        .fold(vec_bytes::<Vec<SlotName>>(scopes.len()), |bytes, names| {
+            bytes.saturating_add(vec_bytes::<SlotName>(names.len()))
         })
 }
 
@@ -165,6 +165,7 @@ pub(crate) fn code_bytes(code: &Code, source_units: usize) -> u64 {
         .saturating_add(vec_bytes::<f64>(code.numbers.len()))
         .saturating_add(vec_bytes::<u32>(code.var_names.len()))
         .saturating_add(vec_bytes::<u32>(code.function_declarations.len()))
+        .saturating_add(vec_bytes::<LexicalName>(code.lexical.len()))
         .saturating_add(scopes_bytes(&code.scopes));
     for string in &code.strings {
         bytes = bytes
@@ -429,7 +430,7 @@ impl<H: Host> Agent<H> {
         self.step()?;
         let this = self.global_this_binding(realm)?;
         let count = usize::try_from(compiled.code.locals).unwrap_or(usize::MAX);
-        let charged = frame_bytes().saturating_add(vec_bytes::<Value>(count));
+        let charged = frame_bytes().saturating_add(vec_bytes::<SlotValue>(count));
         if self.heap.accounting.charge(charged).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -438,7 +439,7 @@ impl<H: Host> Agent<H> {
             self.heap.accounting.credit(charged);
             return Err(self.terminate(Termination::MemoryBudget));
         }
-        locals.resize(count, Value::Undefined);
+        locals.resize(count, SlotValue::Value(Value::Undefined));
         let strict = compiled.code.strict;
         let frame = Frame {
             compiled: Rc::clone(&compiled),
@@ -463,10 +464,12 @@ impl<H: Host> Agent<H> {
         })
     }
 
-    /// GlobalDeclarationInstantiation (`#sec-globaldeclarationinstantiation`) of a script of
-    /// slice 1, which has no lexical declaration (steps 3 and 4 have nothing to check, step 15
-    /// nothing to create), with the compiler's `function_declarations` as functionsToInitialize
-    /// and `var_names` as declaredVarNames. A step per declaration and per check.
+    /// GlobalDeclarationInstantiation (`#sec-globaldeclarationinstantiation`) of a script, with
+    /// the compiler's `lexical` as its LexicallyDeclaredNames (`let` and `const`),
+    /// `function_declarations` as functionsToInitialize and `var_names` as declaredVarNames. A
+    /// step per declaration and per check (decision 3, "Lexical bindings", item 6). Steps 3 and
+    /// 4 throw before anything is bound, so a script whose names clash with an earlier one's
+    /// leaves the global environment as it was.
     fn global_declaration_instantiation(
         &mut self,
         compiled: &Rc<Compiled>,
@@ -474,6 +477,33 @@ impl<H: Host> Agent<H> {
         realm: Handle,
     ) -> Completion<()> {
         let code = &compiled.code;
+        // Step 3: no lexical name may be bound by an earlier script's lexical declaration, nor
+        // be an own non-configurable property of the global object (a `var` or function of an
+        // earlier script, or one such as `undefined`).
+        for lexical in &code.lexical {
+            self.step()?;
+            let name = self.string_key_of(compiled, lexical.name)?;
+            if self.has_lexical_declaration(realm, name)?
+                || self.has_restricted_global_property(realm, name)?
+            {
+                return Err(self.already_declared(name));
+            }
+        }
+        // Step 4: no `var` or function name may be bound by a lexical declaration.
+        for &function in &code.function_declarations {
+            self.step()?;
+            let name = self.name_key_of(compiled, function)?;
+            if self.has_lexical_declaration(realm, name)? {
+                return Err(self.already_declared(name));
+            }
+        }
+        for &variable in &code.var_names {
+            self.step()?;
+            let name = self.string_key_of(compiled, variable)?;
+            if self.has_lexical_declaration(realm, name)? {
+                return Err(self.already_declared(name));
+            }
+        }
         // Step 8: the functions, in reverse List order.
         for &function in code.function_declarations.iter().rev() {
             self.step()?;
@@ -496,6 +526,12 @@ impl<H: Host> Agent<H> {
                 ));
             }
         }
+        // Step 15: the lexical bindings, uninitialized until their declarations run.
+        for lexical in &code.lexical {
+            self.step()?;
+            let name = self.string_key_of(compiled, lexical.name)?;
+            self.create_global_lexical(realm, name, lexical.constant)?;
+        }
         // Step 17.
         for &function in &code.function_declarations {
             self.step()?;
@@ -514,6 +550,15 @@ impl<H: Host> Agent<H> {
             self.create_global_var_binding(realm, name, false)?;
         }
         Ok(())
+    }
+
+    /// The `SyntaxError` of GlobalDeclarationInstantiation, steps 3 and 4, and of
+    /// EvalDeclarationInstantiation, step 3: `name` is already declared where it would be
+    /// declared again.
+    pub(crate) fn already_declared(&mut self, name: Key) -> Abrupt {
+        let text = self.key_text(name);
+        let message = format!("{text} has already been declared");
+        self.throw_error(ErrorKind::SyntaxError, &message)
     }
 
     /// The property key of the name of function template `index`.

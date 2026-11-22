@@ -14,7 +14,7 @@
 
 use swell_compiler::bytecode::{HandlerKind, Instruction, TAG_NORMAL, TAG_THROW};
 
-use super::frame::{Entry, Enumerator};
+use super::frame::{Entry, Enumerator, SlotValue};
 use crate::env::{NameReference, NameTable, SlotNames};
 use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
@@ -349,6 +349,29 @@ impl<H: Host> Agent<H> {
             I::LoadCompletion => self.load_completion(),
             I::StoreCompletion => self.store_completion(),
 
+            // ---- lexical bindings (`interp/lexical.rs`) ----
+            I::Uninitialize(slot) => self.uninitialize(slot).map(|()| Flow::Next),
+            I::PushLexicalEnv(table) => self.push_lexical_env(table).map(|()| Flow::Next),
+            I::CopyEnv => self.copy_env().map(|()| Flow::Next),
+            I::GetLocalChecked { slot, name } => {
+                self.get_local_checked(slot, name).map(|()| Flow::Next)
+            }
+            I::SetLocalChecked { slot, name } => {
+                self.set_local_checked(slot, name).map(|()| Flow::Next)
+            }
+            I::GetEnvChecked { hops, slot } => {
+                self.get_env_checked(hops, slot).map(|()| Flow::Next)
+            }
+            I::SetEnvChecked { hops, slot } => {
+                self.set_env_checked(hops, slot).map(|()| Flow::Next)
+            }
+            I::AssignConstLocal { slot, name } => {
+                self.assign_const_local(slot, name).map(|()| Flow::Next)
+            }
+            I::AssignConstEnv { hops, slot } => {
+                self.assign_const_env(hops, slot).map(|()| Flow::Next)
+            }
+            I::InitGlobal(index) => self.init_global(index).map(|()| Flow::Next),
             // ---- templates (`interp/template.rs`) ----
             I::ToString => self.substitution_to_string(),
         }
@@ -431,13 +454,14 @@ impl<H: Host> Agent<H> {
 
     // ---- bindings ----
 
-    /// `GetLocal(s)`.
+    /// `GetLocal(s)`: an uninitialized slot is one the compiler did not check, a broken
+    /// invariant.
     fn get_local(&mut self, slot: u32) -> Completion<Flow> {
         let position = usize::try_from(slot).unwrap_or(usize::MAX);
         let value = self.top_frame()?.locals.get(position).copied();
         match value {
-            Some(value) => self.replace(0, value),
-            None => Err(self.fault()),
+            Some(SlotValue::Value(value)) => self.replace(0, value),
+            Some(SlotValue::Uninitialized) | None => Err(self.fault()),
         }
     }
 
@@ -449,7 +473,7 @@ impl<H: Host> Agent<H> {
             .top_frame()?
             .locals
             .get_mut(position)
-            .map(|binding| *binding = value);
+            .map(|binding| *binding = SlotValue::Value(value));
         match stored {
             Some(()) => Ok(Flow::Next),
             None => Err(self.fault()),

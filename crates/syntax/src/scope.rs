@@ -15,6 +15,13 @@
 //!   statement (`#sec-with-statement`), and whether it holds a direct `eval` call
 //!   (`#sec-function-calls-runtime-semantics-evaluation`, step 6), which also gives a function its
 //!   arguments object (`docs/design/engine.md`, decision 3, "Names", item 4).
+//! - LexicallyDeclaredNames and LexicallyScopedDeclarations
+//!   (`#sec-static-semantics-lexicallydeclarednames`,
+//!   `#sec-static-semantics-lexicallyscopeddeclarations`) of the top level of the script and of
+//!   each function body ([`Scope::lexical`]), and of any statement list, a block's or the clauses
+//!   of a `case` block ([`Ast::lexical_names`]): the `let` and `const` declarations standing in
+//!   the list itself. A function declaration in a block is refused before a later story of slice
+//!   6, and one at the top level of a body is var scoped (TopLevelLexicallyScopedDeclarations).
 //!
 //! A method is a function scope like any other; a `catch` without a parameter binds nothing, and
 //! a label is no binding: neither changes what a body declares.
@@ -24,7 +31,41 @@
 
 use std::collections::BTreeSet;
 
-use crate::ast::{Ast, Child, Expr, ForInTarget, ForInit, FunctionId, Name, Scope, Stmt, StmtId};
+use crate::ast::{
+    Ast, Child, DeclKind, Expr, ForInTarget, ForInit, FunctionId, LexicalName, Name, Scope, Stmt,
+    StmtId,
+};
+
+impl Ast {
+    /// The names the `let` and `const` declarations of the statement list `list` bind, in
+    /// source order: the BoundNames of its LexicallyScopedDeclarations
+    /// (`#sec-block-static-semantics-lexicallyscopeddeclarations`), for a block, the clauses of
+    /// a `case` block taken together or the top level of a body.
+    pub fn lexical_names(&self, list: &[StmtId]) -> Vec<LexicalName> {
+        let mut names = Vec::new();
+        for &s in list {
+            push_lexical(self, s, &mut names);
+        }
+        names
+    }
+}
+
+/// The names the statement `s` binds when it is a `let` or `const` declaration.
+fn push_lexical(ast: &Ast, s: StmtId, names: &mut Vec<LexicalName>) {
+    let Some(Stmt::Var(kind, declarators)) = ast.stmt(s).map(|n| &n.stmt) else {
+        return;
+    };
+    if !kind.is_lexical() {
+        return;
+    }
+    for d in declarators {
+        names.push(LexicalName {
+            name: d.name.clone(),
+            constant: *kind == DeclKind::Const,
+            declaration: s,
+        });
+    }
+}
 
 /// Whether `raw`, the source text of a string literal in a directive prologue, is a Use Strict
 /// Directive.
@@ -52,6 +93,7 @@ struct Collect {
     var_names: Vec<String>,
     var_seen: BTreeSet<String>,
     declarations: Vec<(String, FunctionId)>,
+    lexical: Vec<LexicalName>,
     references: Vec<String>,
     reference_seen: BTreeSet<String>,
     contains_with: bool,
@@ -75,9 +117,9 @@ impl Collect {
     /// for the script.
     fn finish(self, params: Option<&[Name]>) -> Scope {
         // `#sec-functiondeclarationinstantiation`, steps 15 to 18: no arguments object when a
-        // parameter or a function declaration of the body is named `arguments`; a `var` of that
-        // name keeps it. A direct `eval` may reference it in code no analysis sees (decision 3,
-        // "Names", item 4).
+        // parameter, a function declaration or a lexical declaration of the body is named
+        // `arguments`; a `var` of that name keeps it. A direct `eval` may reference it in code
+        // no analysis sees (decision 3, "Names", item 4).
         let arguments_object = params.is_some_and(|params| {
             (self.reference_seen.contains("arguments") || self.contains_direct_eval)
                 && !params.iter().any(|p| p.name == "arguments")
@@ -85,6 +127,7 @@ impl Collect {
                     .declarations
                     .iter()
                     .any(|(name, _)| name == "arguments")
+                && !self.lexical.iter().any(|l| l.name.name == "arguments")
         });
         // The last declaration of each name, in source order.
         let mut taken = BTreeSet::new();
@@ -98,6 +141,7 @@ impl Collect {
         Scope {
             var_names: self.var_names,
             functions,
+            lexical: self.lexical,
             references: self.references,
             arguments_object,
             contains_with: self.contains_with,
@@ -109,7 +153,8 @@ impl Collect {
 /// One piece of the walk's pending work.
 enum Step {
     /// A statement at the top level of a script or function body, before it is walked: a
-    /// function declaration there is var scoped (`TopLevelVarDeclaredNames`).
+    /// function declaration there is var scoped (`TopLevelVarDeclaredNames`), a `let` or
+    /// `const` declaration lexically scoped to the body.
     TopLevel(StmtId),
     Node(Child),
     /// The end of a function's body: its names become its scope.
@@ -143,6 +188,7 @@ fn walk(ast: &Ast, body: &[StmtId]) -> (Scope, Vec<(FunctionId, Scope)>) {
                     c.var(&name.name);
                     c.declarations.push((name.name.clone(), *f));
                 }
+                push_lexical(ast, s, &mut c.lexical);
             }
             Step::End(id) => {
                 if let Some(done) = open.pop() {
@@ -181,13 +227,14 @@ fn walk(ast: &Ast, body: &[StmtId]) -> (Scope, Vec<(FunctionId, Scope)>) {
 }
 
 /// The `var` names the statement `id` declares itself (`VarDeclaredNames` of a variable
-/// statement, a `for` with `var` and a for-in with `var`).
+/// statement, a `for` with `var` and a for-in with `var`; a `let` or `const` declaration has
+/// none).
 fn collect_stmt(ast: &Ast, id: StmtId, c: &mut Collect) {
     match ast.stmt(id).map(|n| &n.stmt) {
         Some(
-            Stmt::Var(declarators)
+            Stmt::Var(DeclKind::Var, declarators)
             | Stmt::For {
-                init: Some(ForInit::Var(declarators)),
+                init: Some(ForInit::Var(DeclKind::Var, declarators)),
                 ..
             },
         ) => {
@@ -196,7 +243,7 @@ fn collect_stmt(ast: &Ast, id: StmtId, c: &mut Collect) {
             }
         }
         Some(Stmt::ForIn {
-            target: ForInTarget::Var(name),
+            target: ForInTarget::Var(DeclKind::Var, name),
             ..
         }) => c.var(&name.name),
         Some(Stmt::With { .. }) => c.contains_with = true,

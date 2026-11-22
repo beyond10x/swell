@@ -1,0 +1,18 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 0 locals 1
+  0000 2:1 Uninitialize 0
+  0001 3:7 Number 0
+  0002 3:3 AssignConstLocal 0 "c"
+  0003 3:3 Pop
+  0004 4:13 Number 1
+  0005 4:9 SetLocal 0
+  0006 4:9 Pop
+  0007 5:7 Number 2
+  0008 5:3 AssignConstLocal 0 "c"
+  0009 5:3 Pop
+  0010 2:1 Undefined
+  0011 2:1 Return

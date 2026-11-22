@@ -101,7 +101,7 @@ impl RealmRecord {
             global: None,
             global_this: None,
             host_defined: None,
-            global_env: RealmGlobalEnv {},
+            global_env: RealmGlobalEnv::new(),
             unmade: false,
         }
     }
@@ -314,8 +314,8 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// CreateIntrinsics, the setup closure, SetRealmGlobalObject and SetDefaultGlobalBindings
-    /// of the realm record `realm`.
+    /// CreateIntrinsics, the setup closure, SetRealmGlobalObject (with the global environment's
+    /// [[DeclarativeRecord]]) and SetDefaultGlobalBindings of the realm record `realm`.
     fn populate_realm(
         &mut self,
         realm: Handle,
@@ -361,6 +361,9 @@ impl<H: Host> Agent<H> {
             record.global = Some(global);
             record.global_this = Some(this.unwrap_or(global));
         }
+        // NewGlobalEnvironment (`#sec-newglobalenvironment`), step 2: the [[DeclarativeRecord]],
+        // made once the realm record holds the global object (`env/global.rs`).
+        self.make_global_declarative_record(realm)?;
         self.set_default_global_bindings(realm)
     }
 }

@@ -4,6 +4,7 @@
 //! script locals <n>[ strict]
 //!   var "<name>" ...                     the declaredVarNames, when there are any
 //!   declare <function> ...               the functionsToInitialize, when there are any
+//!   lexical let|const "<name>"[ local <n>|env <n>] ...   the top level's lexical names
 //!   <index> <line>:<column> <instruction> <operands>
 //!   catch|finally <start>..<end> -> <target> items <n> envs <n>
 //!
@@ -17,14 +18,15 @@
 //! A string constant is written in double quotes, with `"`, `\` and every code unit outside
 //! printable ASCII escaped (`\u{XXXX}`); a Number by `Number::toString`. Instruction and jump
 //! indices have four digits at least. The position `0:0` is the end of a script, which has no
-//! source position. `PushNamedEnv <t>` is followed by the names of the slots of its table entry.
+//! source position. `PushNamedEnv <t>` and `PushLexicalEnv <t>` are followed by the names of the
+//! slots of their table entry, a `const` one after `const`.
 
 use std::fmt::Write;
 
 use swell_num::to_string::number_to_string;
 use swell_syntax::ast::{FunctionKind, Span};
 
-use crate::bytecode::{Code, Handler, HandlerKind, Instruction, Slot};
+use crate::bytecode::{Code, Handler, HandlerKind, Instruction, Slot, SlotName};
 
 /// The text form of `code`.
 pub fn disassemble(code: &Code) -> String {
@@ -47,6 +49,17 @@ pub fn disassemble(code: &Code) -> String {
         out.push_str("  declare");
         for f in &code.function_declarations {
             let _ = write!(out, " {f}");
+        }
+        out.push('\n');
+    }
+    if !code.lexical.is_empty() {
+        out.push_str("  lexical");
+        for l in &code.lexical {
+            let kind = if l.constant { "const" } else { "let" };
+            let _ = write!(out, " {kind} {}", string(code, l.name));
+            if let Some(at) = l.slot {
+                let _ = write!(out, " {}", slot(at));
+            }
         }
         out.push('\n');
     }
@@ -123,7 +136,7 @@ fn slot(slot: Slot) -> String {
 fn body(
     out: &mut String,
     code: &Code,
-    scopes: &[Vec<u32>],
+    scopes: &[Vec<SlotName>],
     instructions: &[Instruction],
     positions: &[Span],
     handlers: &[Handler],
@@ -183,9 +196,25 @@ fn number(code: &Code, k: u32) -> String {
 }
 
 /// One instruction with its operands.
-fn text(code: &Code, scopes: &[Vec<u32>], instruction: &Instruction) -> String {
+fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> String {
     use Instruction as I;
     let s = |k: u32| string(code, k);
+    // The names of the slots of a table entry, `const` ones marked.
+    let names = |t: u32| -> String {
+        let names: Vec<String> = scopes
+            .get(t as usize)
+            .map(|names| {
+                names
+                    .iter()
+                    .map(|n| {
+                        let mark = if n.is_constant() { "const " } else { "" };
+                        format!("{mark}{}", s(n.name()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.join(" ")
+    };
     match *instruction {
         I::Number(k) => format!("Number {}", number(code, k)),
         I::String(k) => format!("String {}", s(k)),
@@ -230,15 +259,18 @@ fn text(code: &Code, scopes: &[Vec<u32>], instruction: &Instruction) -> String {
         I::ForInNext(t) => format!("ForInNext {t:04}"),
         I::ThrowSyntaxError(k) => format!("ThrowSyntaxError {}", s(k)),
         I::PushEnv(n) => format!("PushEnv {n}"),
-        I::PushNamedEnv(t) => {
-            let names: Vec<String> = scopes
-                .get(t as usize)
-                .map(|names| names.iter().map(|k| s(*k)).collect())
-                .unwrap_or_default();
-            format!("PushNamedEnv {t} {}", names.join(" "))
-        }
+        I::PushNamedEnv(t) => format!("PushNamedEnv {t} {}", names(t)),
         I::Tag(n) => format!("Tag {n}"),
         I::JumpIfTag { tag, target } => format!("JumpIfTag {tag} {target:04}"),
+        I::Uninitialize(n) => format!("Uninitialize {n}"),
+        I::PushLexicalEnv(t) => format!("PushLexicalEnv {t} {}", names(t)),
+        I::GetLocalChecked { slot, name } => format!("GetLocalChecked {slot} {}", s(name)),
+        I::SetLocalChecked { slot, name } => format!("SetLocalChecked {slot} {}", s(name)),
+        I::GetEnvChecked { hops, slot } => format!("GetEnvChecked {hops} {slot}"),
+        I::SetEnvChecked { hops, slot } => format!("SetEnvChecked {hops} {slot}"),
+        I::AssignConstLocal { slot, name } => format!("AssignConstLocal {slot} {}", s(name)),
+        I::AssignConstEnv { hops, slot } => format!("AssignConstEnv {hops} {slot}"),
+        I::InitGlobal(k) => format!("InitGlobal {}", s(k)),
         I::ToString => "ToString".to_string(),
         other => format!("{other:?}"),
     }
