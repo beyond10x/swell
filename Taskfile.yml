@@ -80,6 +80,7 @@ tasks:
       - task: validate
       - task: conform
       - task: host-requirements-check
+      - task: site-data-check
       - task: build
       - task: clippy
       - task: gate-time-start
