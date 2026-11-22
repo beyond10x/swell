@@ -1,0 +1,27 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "g" length 1 locals 2
+  params local 0
+  0000 3:11 GetLocal 0
+  0001 7:7 Closure 1
+  0002 7:7 SetLocal 1
+  0003 7:7 Pop
+  0004 4:10 Number 0
+  0005 4:5 CaseJump 0010
+  0006 6:10 Number 1
+  0007 6:5 CaseJump 0014
+  0008 3:3 Pop
+  0009 3:3 Jump 0014
+  0010 5:7 Undefined
+  0011 5:7 GetLocal 1
+  0012 5:7 Call 0
+  0013 5:7 Pop
+  0014 2:1 Undefined
+  0015 2:1 Return
+
+function 1 declaration "f" length 0 locals 0
+  0000 7:7 Undefined
+  0001 7:7 Return

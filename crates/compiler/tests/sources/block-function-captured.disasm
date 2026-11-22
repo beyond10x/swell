@@ -1,0 +1,18 @@
+script locals 0
+  0000 2:1 PushLexicalEnv 0 "f"
+  0001 2:3 Closure 0
+  0002 2:3 SetEnv 0 0
+  0003 2:3 Pop
+  0004 2:30 Undefined
+  0005 2:30 GetEnv 0 0
+  0006 2:30 Call 0
+  0007 2:30 StoreCompletion
+  0008 2:1 PopEnv
+  0009 0:0 LoadCompletion
+  0010 0:0 Return
+
+function 0 declaration "f" length 0 locals 0
+  0000 2:25 GetEnv 0 0
+  0001 2:18 Return
+  0002 2:3 Undefined
+  0003 2:3 Return

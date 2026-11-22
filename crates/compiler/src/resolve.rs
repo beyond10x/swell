@@ -58,6 +58,13 @@
 //! access checks the binding's state ([`Binding::Lexical`]) unless it is in the code of the same
 //! function after the end of the declaration, in a block, a function body or eval code.
 //!
+//! A function declaration in a block, a `case` block or a `try`, `catch` or `finally` block is
+//! a binding of that scope (`docs/design/engine.md`, decision 3, "Function declarations in a
+//! block"), never a `var` of the function, the script or the eval code: a local slot, or a slot
+//! of the scope's record when a nested function (the function itself, calling itself by name)
+//! refers to it or a lookup by name can reach it. The code makes its function object at the
+//! entry of the scope ([`Site::Declaration`]), before any access, so no access checks it.
+//!
 //! A function whose parameter list is not simple (`docs/design/engine.md`, decision 3, "A
 //! parameter list that is not simple"; `#sec-functiondeclarationinstantiation`) binds its
 //! parameters in order in the scope of its parameters, where the initializers are resolved: an
@@ -148,7 +155,8 @@ pub(crate) enum Site {
     /// The `BindingIdentifier` of property `n` of the binding pattern node: the binding it
     /// initializes, or for a `var` pattern the binding it resolves before the property is read.
     Bound(ExprId, u32),
-    /// The binding a function declaration initializes, from the top of the enclosing function.
+    /// The binding a function declaration initializes, from the top of the enclosing function,
+    /// or for one of a block or a `case` block from the entry of that scope.
     Declaration(FunctionId),
     /// The parameter of the `catch` clause of a try statement, from inside the clause.
     CatchParam(StmtId),
@@ -327,6 +335,9 @@ struct Resolver<'a, 'm> {
     self_scopes: BTreeMap<FunctionId, usize>,
     /// The scope of the parameters and `var` declarations of each function.
     function_scopes: BTreeMap<FunctionId, usize>,
+    /// The scope of the `var` names of the body of each function whose parameters have an
+    /// initializer (`Kind::Vars`).
+    vars_scopes: BTreeMap<FunctionId, usize>,
     /// The scope of each direct `eval` call.
     eval_calls: Vec<usize>,
     /// Whether the tree is eval code: a name it does not bind is looked up by name.
@@ -370,6 +381,7 @@ pub(crate) fn resolve(
         given_names: BTreeMap::new(),
         self_scopes: BTreeMap::new(),
         function_scopes: BTreeMap::new(),
+        vars_scopes: BTreeMap::new(),
         eval_calls: Vec::new(),
         eval_code,
         script_adds_bindings: !script.strict && script.scope.contains_direct_eval,
@@ -523,6 +535,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .self_scopes
             .len()
             .saturating_add(self.function_scopes.len())
+            .saturating_add(self.vars_scopes.len())
             .saturating_mul(map_entry_bytes::<FunctionId, usize>());
         let checked = self
             .bindings
@@ -620,13 +633,19 @@ impl<'a, 'm> Resolver<'a, 'm> {
     }
 
     /// Declares the `let` and `const` names `names` in `scope`, each ending with its
-    /// declaration statement.
+    /// declaration statement. A function declaration among them (of a block or a `case` block)
+    /// is a binding no access checks, initialized at the entry of the scope through its site
+    /// [`Site::Declaration`], sited in `scope`, the current scope (decision 3, "Function
+    /// declarations in a block", items 1 and 2).
     fn declare_lexical(&mut self, scope: usize, names: &[LexicalName]) {
         for n in names {
-            let end = self
-                .ast
-                .stmt(n.declaration)
-                .map_or(u32::MAX, |s| s.span.end);
+            let declaration = self.ast.stmt(n.declaration);
+            if let Some(Stmt::FunctionDeclaration(f)) = declaration.map(|s| &s.stmt) {
+                self.declare_as(scope, &n.name.name, None);
+                self.occur(Site::Declaration(*f), &n.name.name);
+                continue;
+            }
+            let end = declaration.map_or(u32::MAX, |s| s.span.end);
             let data = LexicalData {
                 constant: n.constant,
                 end,
@@ -1316,6 +1335,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .ok_or_else(|| malformed("a function index"))?;
         if f.has_parameter_expressions() {
             let scope = self.new_scope(Kind::Vars, Some(id));
+            self.m.insert_entry(&mut self.vars_scopes, id, scope)?;
             for (j, name) in f.scope.var_names.iter().enumerate() {
                 self.declare(scope, name);
                 let copied = f.parameter_names().any(|p| p.name == *name)
@@ -1759,25 +1779,30 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 info.params.push(slot);
             }
         }
-        for s in &self.scopes {
-            if s.owner == Some(id) && s.kind == Kind::Function {
-                let mut captured: Vec<(u32, String)> = Vec::new();
-                for b in s.order.iter().filter_map(|b| self.bindings.get(*b)) {
-                    if let Place::Env(slot) = b.place {
-                        let name = m.string(&b.name)?;
-                        m.push(&mut captured, (slot, name))?;
-                    }
+        // The function's own scopes are found through their maps, not by a walk over every
+        // scope of the tree: a walk per function made the step quadratic in the number of
+        // functions.
+        if let Some(s) = self
+            .function_scopes
+            .get(&id)
+            .and_then(|s| self.scopes.get(*s))
+        {
+            let mut captured: Vec<(u32, String)> = Vec::new();
+            for b in s.order.iter().filter_map(|b| self.bindings.get(*b)) {
+                if let Place::Env(slot) = b.place {
+                    let name = m.string(&b.name)?;
+                    m.push(&mut captured, (slot, name))?;
                 }
-                // The sort's scratch is at most the list itself.
-                let scratch = captured.len().saturating_mul(size_of::<(u32, String)>());
-                m.charge(scratch)?;
-                captured.sort();
-                m.credit(scratch);
-                let mut names = m.with_capacity(captured.len())?;
-                names.extend(captured.drain(..).map(|(_, n)| n));
-                m.release(captured);
-                m.release(std::mem::replace(&mut info.captured, names));
             }
+            // The sort's scratch is at most the list itself.
+            let scratch = captured.len().saturating_mul(size_of::<(u32, String)>());
+            m.charge(scratch)?;
+            captured.sort();
+            m.credit(scratch);
+            let mut names = m.with_capacity(captured.len())?;
+            names.extend(captured.drain(..).map(|(_, n)| n));
+            m.release(captured);
+            m.release(std::mem::replace(&mut info.captured, names));
         }
         info.self_binding = self
             .self_scopes
@@ -1786,10 +1811,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .is_some_and(|s| s.env_slots > 0);
         // The record of the body's `var` scope: when a binding of it lives in one, or when a
         // direct `eval` of non-strict code may add bindings to it.
-        if let Some(s) = self
-            .scopes
-            .iter()
-            .find(|s| s.owner == Some(id) && s.kind == Kind::Vars)
+        if let Some(s) = self.vars_scopes.get(&id).and_then(|s| self.scopes.get(*s))
             && (s.env_slots > 0 || self.adds_bindings(s))
         {
             // `allocate` numbers the slots in the order of the scope's bindings.
