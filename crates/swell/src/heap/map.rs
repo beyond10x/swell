@@ -2,7 +2,8 @@
 //! `docs/design/host-interface.md`, decision 3, HOST-145): `std`'s `HashMap` with the SipHash of
 //! `swell-num` keyed by `Seeds::hash_key` and by nothing else, never `std`'s default hasher,
 //! which reads the operating system's random source. The key decides only which keys collide;
-//! no order the script can observe comes from a map's iteration. The atom table and the index
+//! no order the script can observe comes from a map's iteration. The atom table, the
+//! GlobalSymbolRegistry (`heap/mod.rs`, `SymbolRegistry`) and the index
 //! maps of property lists and of the bindings eval code adds (`object/property.rs`) are such
 //! maps; the latter take the heap's hasher (`Heap::hasher`) and charge their table by
 //! [`KeyedMap::table_bytes_for`] before it is made.
@@ -58,6 +59,13 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
     /// The number of entries.
     pub(crate) fn len(&self) -> usize {
         self.map.len()
+    }
+
+    /// The values, in no order a script can observe: for a tracer, which reports each one and
+    /// whose result does not depend on the order (the GlobalSymbolRegistry, `heap/mod.rs`).
+    /// Allocates nothing.
+    pub(crate) fn values(&self) -> impl Iterator<Item = &V> {
+        self.map.values()
     }
 
     /// An empty map whose hasher is `hasher`, the one the heap keeps (`Heap::hasher`, keyed by

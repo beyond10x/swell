@@ -297,9 +297,10 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// ToObject (`#sec-toobject`), with the prototypes of the current realm. A Symbol has no
-    /// `%Symbol.prototype%` before slice 6 and no Symbol value reaches code before it, so a
-    /// Symbol here is a broken invariant; likewise a BigInt before slice 12.
+    /// ToObject (`#sec-toobject`), with the prototypes of the current realm. A Symbol makes a
+    /// Symbol object whose [[SymbolData]] is the Symbol (`#sec-properties-of-symbol-instances`,
+    /// `story:symbol-constructor-and-well-known-symbols`). No BigInt exists before slice 12, so
+    /// one here is a broken invariant.
     pub(crate) fn to_object(&mut self, value: Value) -> Completion<ObjectRef> {
         match value {
             Value::Undefined | Value::Null => Err(self.throw_error(
@@ -318,7 +319,12 @@ impl<H: Host> Agent<H> {
                 let prototype = self.current_intrinsic(Intrinsic::StringPrototype)?;
                 self.string_create(string, prototype)
             }
-            Value::Symbol(_) | Value::BigInt(_) => Err(self.fault()),
+            // "Return a new Symbol object whose [[SymbolData]] internal slot is set to argument."
+            Value::Symbol(symbol) => {
+                let prototype = self.current_intrinsic(Intrinsic::SymbolPrototype)?;
+                self.ordinary_object_create(Some(prototype), OrdinaryData::Symbol(symbol))
+            }
+            Value::BigInt(_) => Err(self.fault()),
             Value::Object(object) => Ok(object),
         }
     }

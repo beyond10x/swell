@@ -7,11 +7,11 @@
 //! `values` and `entries` call EnumerableOwnProperties (`#sec-enumerableownproperties`) of
 //! `ops/objects.rs`. The group defines nothing on `%Object.prototype%`.
 //!
-//! `Object.getOwnPropertySymbols` (`#sec-object.getownpropertysymbols`) is not here before
-//! slice 6: its answers are Symbol values, and before `%Symbol.prototype%` a Symbol value a
-//! script holds would fault the agent at its first ToObject (`docs/design/engine.md`, section
-//! 12, "A part before its slice": a builtin that exists is correct for every argument). None of
-//! the six hands a Symbol value to a script: `assign` and `getOwnPropertyDescriptors` copy and
+//! `Object.getOwnPropertySymbols` (`#sec-object.getownpropertysymbols`) is not in this group:
+//! it came with `%Symbol.prototype%` in slice 6 and sits beside `getOwnPropertyNames` in
+//! `builtins/object/mod.rs` (`story:symbol-constructor-and-well-known-symbols`); before it a
+//! Symbol value a script held would have faulted the agent at its first ToObject
+//! (`docs/design/engine.md`, section 12, "A part before its slice"). None of the six hands a Symbol value to a script: `assign` and `getOwnPropertyDescriptors` copy and
 //! describe a Symbol-keyed property under its key, `keys`, `values` and `entries` skip Symbol
 //! keys, and `hasOwn` takes a key and answers a Boolean.
 //!

@@ -1,7 +1,9 @@
 //! Object objects (ECMA-262 20.1, `#sec-object-objects`): the `Object` constructor
 //! (`#sec-object-value`), `Object.defineProperty` (`#sec-object.defineproperty`),
 //! `Object.getOwnPropertyDescriptor` (`#sec-object.getownpropertydescriptor`),
-//! `Object.getOwnPropertyNames` (`#sec-object.getownpropertynames`), `Object.getPrototypeOf`
+//! `Object.getOwnPropertyNames` (`#sec-object.getownpropertynames`),
+//! `Object.getOwnPropertySymbols` (`#sec-object.getownpropertysymbols`, written by
+//! `story:symbol-constructor-and-well-known-symbols`), `Object.getPrototypeOf`
 //! (`#sec-object.getprototypeof`), and `Object.prototype.constructor`
 //! (`#sec-object.prototype.constructor`), `.hasOwnProperty`
 //! (`#sec-object.prototype.hasownproperty`), `.propertyIsEnumerable`
@@ -43,6 +45,8 @@ pub(crate) enum ObjectBuiltin {
     GetOwnPropertyDescriptor,
     /// `Object.getOwnPropertyNames ( O )` (20.1.2.10).
     GetOwnPropertyNames,
+    /// `Object.getOwnPropertySymbols ( O )` (20.1.2.11).
+    GetOwnPropertySymbols,
     /// `Object.getPrototypeOf ( O )` (20.1.2.12).
     GetPrototypeOf,
     /// `Object.prototype.hasOwnProperty ( V )` (20.1.3.2).
@@ -81,6 +85,11 @@ impl<H: Host> Agent<H> {
                 ObjectBuiltin::GetOwnPropertyDescriptor,
             ),
             ("getOwnPropertyNames", 1, ObjectBuiltin::GetOwnPropertyNames),
+            (
+                "getOwnPropertySymbols",
+                1,
+                ObjectBuiltin::GetOwnPropertySymbols,
+            ),
             ("getPrototypeOf", 1, ObjectBuiltin::GetPrototypeOf),
         ] {
             self.define_builtin_method(making, constructor, name, length, BuiltinId::Object(id))?;
@@ -146,6 +155,7 @@ impl<H: Host> Agent<H> {
                 self.object_get_own_property_descriptor(args)
             }
             ObjectBuiltin::GetOwnPropertyNames => self.object_get_own_property_names(args),
+            ObjectBuiltin::GetOwnPropertySymbols => self.object_get_own_property_symbols(args),
             ObjectBuiltin::GetPrototypeOf => self.object_get_prototype_of(args),
             ObjectBuiltin::HasOwnProperty => self.object_has_own_property(this, args),
             ObjectBuiltin::PropertyIsEnumerable => self.object_property_is_enumerable(this, args),
@@ -371,8 +381,19 @@ impl<H: Host> Agent<H> {
         names
     }
 
-    /// CreateArrayFromList of the Strings of `keys`: the list of the Strings is charged to the
-    /// memory budget before it is reserved and credited when the array is made.
+    /// `Object.getOwnPropertySymbols ( O )` (`#sec-object.getownpropertysymbols`):
+    /// CreateArrayFromList of GetOwnPropertyKeys(O, symbol), through the same charged path as
+    /// `getOwnPropertyNames` (`story:symbol-constructor-and-well-known-symbols`).
+    fn object_get_own_property_symbols(&mut self, args: &[Value]) -> Completion<Value> {
+        let keys = self.get_own_property_keys(argument(args, 0), true)?;
+        let symbols = self.array_of_names(&keys);
+        self.drop_key_list(keys);
+        symbols
+    }
+
+    /// CreateArrayFromList of the values of `keys` (Strings, or Symbols for
+    /// `getOwnPropertySymbols`): the list of the values is charged to the memory budget before
+    /// it is reserved and credited when the array is made.
     fn array_of_names(&mut self, keys: &[Key]) -> Completion<Value> {
         let bytes =
             u64::try_from(keys.len().saturating_mul(size_of::<Value>())).unwrap_or(u64::MAX);
@@ -590,6 +611,7 @@ mod tests {
                 "defineProperty",
                 "getOwnPropertyDescriptor",
                 "getOwnPropertyNames",
+                "getOwnPropertySymbols",
                 "getPrototypeOf",
             ],
             &constructor_groups,

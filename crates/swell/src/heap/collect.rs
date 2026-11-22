@@ -9,9 +9,11 @@
 //! order:
 //!
 //! - a root site per module that owns roots, `fn trace_roots(agent, mark: &mut Mark)`: the root
-//!   table (`heap/roots.rs`), the handles of the running `with_cx`, host function and hook
-//!   scopes (`host/agent.rs`), the agent-wide values (`realm/mod.rs`), the slots of running
-//!   builtins (`object/builtin_function.rs`) and the frame stack (`interp/mod.rs`);
+//!   table (`heap/roots.rs`), the GlobalSymbolRegistry (`heap/mod.rs`, `trace_registry`,
+//!   written by `story:symbol-constructor-and-well-known-symbols`), the handles of the running
+//!   `with_cx`, host function and hook scopes (`host/agent.rs`), the agent-wide values
+//!   (`realm/mod.rs`), the slots of running builtins (`object/builtin_function.rs`) and the
+//!   frame stack (`interp/mod.rs`);
 //! - a trace function per kind of record, `fn trace(&self, mark: &mut Mark)`: strings
 //!   (`heap/string.rs`), symbols (`heap/mod.rs`), objects (`object/mod.rs`, which calls the trace
 //!   of the object's kind in `object/*.rs` and `host/host_object.rs`), realm records (`realm/mod.rs`, with the global
@@ -233,6 +235,7 @@ pub(crate) struct Stale;
 /// empty, each record read, checked and traced once by the trace function of its kind.
 pub(crate) fn mark_phase<H: Host>(agent: &Agent<H>, mark: &mut Mark) -> Result<(), Stale> {
     super::roots::trace_roots(agent, mark);
+    super::trace_registry(agent, mark);
     crate::host::agent::trace_roots(agent, mark);
     crate::realm::trace_roots(agent, mark);
     crate::object::builtin_function::trace_roots(agent, mark);
@@ -322,8 +325,9 @@ mod tests {
     use crate::{Agent, AgentState, Limits, Outcome, Parsed, Seeds, Source, Termination};
 
     /// The root sites, in the order the mark phase calls them.
-    const ROOT_SITES: [&str; 5] = [
+    const ROOT_SITES: [&str; 6] = [
         "heap/roots.rs trace_roots",
+        "heap/mod.rs trace_registry",
         "host/agent.rs trace_roots",
         "realm/mod.rs trace_roots",
         "object/builtin_function.rs trace_roots",

@@ -5,8 +5,9 @@
 //! `Object.keys` (`#sec-object.keys`) and `Object.values` (`#sec-object.values`), with
 //! EnumerableOwnProperties (`#sec-enumerableownproperties`), the step and memory budgets, the
 //! re-entry limit through the getters and setters `Object.assign` calls, and the invariant that
-//! no builtin of slice 3 hands a Symbol value to a script (`Object.getOwnPropertySymbols` waits
-//! for slice 6). `story:object-enumeration-and-copy-methods`.
+//! no builtin of slice 3 hands a Symbol value to a script (the twelve well-known symbols on
+//! `Symbol` and `Object.getOwnPropertySymbols` are slice 6's,
+//! `story:symbol-constructor-and-well-known-symbols`). `story:object-enumeration-and-copy-methods`.
 //!
 //! No script calls a builtin another story of the wave delivers: a result array is compared
 //! element by element or through `join`, a target that refuses a Set has a property that is not
@@ -554,15 +555,19 @@ const ASSIGN_REENTRY: u32 = if cfg!(feature = "collect-every-safe-point") {
     FULL_REENTRY
 };
 
-/// No builtin of the realm hands a Symbol value to a script before slice 6 (design, section 12,
-/// "A part before its slice"): a walk from the global object over every own String-keyed data
+/// The only Symbol values a builtin of the realm hands to a script through a String-keyed data
+/// property are the twelve well-known symbols of slice 6 on `Symbol`
+/// (`#sec-properties-of-the-symbol-constructor`,
+/// `story:symbol-constructor-and-well-known-symbols`; before it, none: design, section 12, "A
+/// part before its slice"): a walk from the global object over every own String-keyed data
 /// property, and the prototype, of each object it reaches, calling no getter and no method of
-/// the objects it walks, finds no Symbol value. The walk reads what a script reads, through the host interface:
-/// `Object.getOwnPropertyNames`, `Object.getOwnPropertyDescriptors` and `Object.getPrototypeOf`
-/// of each object once, then the "value" of each data descriptor; it runs no script, so that
-/// with the feature `collect-every-safe-point` it pays a collection per call of those three,
-/// not one per instruction of a walk in script (26.6 s in that mode, measured). A
-/// Symbol-keyed property is out of the walk's reach, as it is out of a script's.
+/// the objects it walks, finds a Symbol value at exactly those twelve places. The walk reads
+/// what a script reads, through the host interface: `Object.getOwnPropertyNames`,
+/// `Object.getOwnPropertyDescriptors` and `Object.getPrototypeOf` of each object once, then the
+/// "value" of each data descriptor; it runs no script, so that with the feature
+/// `collect-every-safe-point` it pays a collection per call of those three, not one per
+/// instruction of a walk in script (26.6 s in that mode, measured). A Symbol-keyed property is
+/// out of the walk's reach; a script reaches one through `Object.getOwnPropertySymbols`.
 #[test]
 fn no_builtin_hands_a_symbol_value_to_a_script() {
     let mut agent = agent().unwrap();
@@ -621,35 +626,54 @@ fn no_builtin_hands_a_symbol_value_to_a_script() {
             (seen.len(), found)
         })
         .unwrap();
-    assert!(found.is_empty(), "Symbol values at {found:?}");
+    let mut found = found;
+    found.sort();
+    let mut expected: Vec<String> = [
+        "hasInstance",
+        "isConcatSpreadable",
+        "iterator",
+        "match",
+        "matchAll",
+        "replace",
+        "search",
+        "species",
+        "split",
+        "toPrimitive",
+        "toStringTag",
+        "unscopables",
+    ]
+    .iter()
+    .map(|name| format!("global.Symbol.{name}"))
+    .collect();
+    expected.sort();
+    assert_eq!(found, expected, "Symbol values");
     assert!(walked > 50, "only {walked} objects walked");
-    // Slice 6's Symbol story delivers `Object.getOwnPropertySymbols` and removes this line.
-    both_answer("typeof Object.getOwnPropertySymbols;", "\"undefined\"");
 }
 
 /// No script faults the agent through a Symbol value (design, section 12, "A part before its
-/// slice"): the only Symbol-keyed properties of the realm are `Array[@@species]` and
-/// `JSON[@@toStringTag]`, and a script that asks `Object.getOwnPropertySymbols` for the first
-/// and hands it to ToObject (`Object(s)`, `Object.keys(s)`, `Object.hasOwn(s, "x")`) throws a
-/// `TypeError`, since the method is not there before slice 6, and the agent stays alive. With
-/// the method each of the three ended in `Terminated(EngineFault)` and a faulted agent
-/// (ToObject of a Symbol, `ops/conversion.rs`), measured before it was removed.
+/// slice"): a script that asks `Object.getOwnPropertySymbols` for the first Symbol key of
+/// `Array` (`@@species`) and hands it to ToObject (`Object(s)`, `Object.keys(s)`,
+/// `Object.hasOwn(s, "x")`) gets a Symbol object (`#sec-toobject`, slice 6,
+/// `story:symbol-constructor-and-well-known-symbols`) and its answers, and the agent stays
+/// alive. Before slice 6 the method was left out: with it, each of the three ended in
+/// `Terminated(EngineFault)` and a faulted agent (ToObject of a Symbol, `ops/conversion.rs`),
+/// measured before it was removed.
 #[test]
 fn no_script_faults_the_agent_through_a_symbol() {
     let mut found = Vec::new();
-    for call in ["Object(s);", "Object.keys(s);", "Object.hasOwn(s, \"x\");"] {
+    for call in [
+        "[typeof Object(s), Object(s).valueOf() === s].join();",
+        "[Object.keys(s).length].join();",
+        "[Object.hasOwn(s, \"x\")].join();",
+    ] {
         let mut agent = agent().unwrap();
         let realm = realm(&mut agent);
-        let source = format!("var s = Object.getOwnPropertySymbols(Array)[0];\n{call}");
-        found.push((call, eval_text(&mut agent, &realm, &source), agent.state()));
+        let source = format!(
+            "var s = Object.getOwnPropertySymbols(Array)[0];\n\
+             if (s !== Symbol.species) throw new Error(\"not @@species\");\n{call}"
+        );
+        found.push((eval_text(&mut agent, &realm, &source), agent.state()));
     }
-    let throw = || (Outcome::Throw("TypeError".to_string()), AgentState::Alive);
-    assert_eq!(
-        found,
-        [
-            ("Object(s);", throw().0, throw().1),
-            ("Object.keys(s);", throw().0, throw().1),
-            ("Object.hasOwn(s, \"x\");", throw().0, throw().1),
-        ]
-    );
+    let normal = |text: &str| (Outcome::Normal(format!("\"{text}\"")), AgentState::Alive);
+    assert_eq!(found, [normal("object,true"), normal("0"), normal("false")]);
 }

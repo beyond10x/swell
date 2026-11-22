@@ -10,7 +10,9 @@
 //! (`story:number-boolean-and-global-functions-early`); `%eval%` and `%Function%` with
 //! `Function.prototype.constructor`, written by `story:eval-and-function-constructor`;
 //! `%decodeURI%`, `%decodeURIComponent%`, `%encodeURI%` and `%encodeURIComponent%` (19.2.6,
-//! `#sec-uri-handling-functions`), written by `story:global-this-uri-functions-and-is-error`.
+//! `#sec-uri-handling-functions`), written by `story:global-this-uri-functions-and-is-error`;
+//! `%Symbol%` and `%Symbol.prototype%` (20.4, `#sec-symbol-objects`), written by
+//! `story:symbol-constructor-and-well-known-symbols`.
 //! The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
@@ -76,6 +78,10 @@ pub(crate) enum Intrinsic {
     EncodeUri,
     /// `%encodeURIComponent%` (19.2.6.4, `#sec-encodeuricomponent-uricomponent`).
     EncodeUriComponent,
+    /// `%Symbol%` (20.4.1), `story:symbol-constructor-and-well-known-symbols`.
+    Symbol,
+    /// `%Symbol.prototype%` (20.4.3).
+    SymbolPrototype,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -120,6 +126,8 @@ pub(crate) struct Intrinsics {
     function: ObjectRef,
     object_prototype_to_string: ObjectRef,
     uri: crate::builtins::global::UriFunctions,
+    symbol: ObjectRef,
+    symbol_prototype: ObjectRef,
 }
 
 impl Intrinsics {
@@ -151,6 +159,8 @@ impl Intrinsics {
             Intrinsic::DecodeUriComponent => self.uri.decode_uri_component,
             Intrinsic::EncodeUri => self.uri.encode_uri,
             Intrinsic::EncodeUriComponent => self.uri.encode_uri_component,
+            Intrinsic::Symbol => self.symbol,
+            Intrinsic::SymbolPrototype => self.symbol_prototype,
         }
     }
 
@@ -193,6 +203,8 @@ impl Intrinsics {
             self.uri.decode_uri_component,
             self.uri.encode_uri,
             self.uri.encode_uri_component,
+            self.symbol,
+            self.symbol_prototype,
         ] {
             mark.object(object);
         }
@@ -362,6 +374,7 @@ impl<H: Host> Agent<H> {
         let eval = self.create_eval_function(making)?;
         let function = self.create_function_constructor(making)?;
         let uri = self.create_uri_functions(making)?;
+        let (symbol, symbol_prototype) = self.create_symbol_constructor(making)?;
         let intrinsics = Intrinsics {
             object_prototype,
             function_prototype,
@@ -384,6 +397,8 @@ impl<H: Host> Agent<H> {
             function,
             object_prototype_to_string,
             uri,
+            symbol,
+            symbol_prototype,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {

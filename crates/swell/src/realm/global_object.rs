@@ -7,7 +7,9 @@
 //! `eval` and `Function` of 19.2 and 19.3 (`story:eval-and-function-constructor`), and the
 //! value property `globalThis` (`#sec-globalthis`) and the four URI functions of 19.2.6
 //! (`#sec-uri-handling-functions`), defined after all of those
-//! (`story:global-this-uri-functions-and-is-error`). The global object itself is made by
+//! (`story:global-this-uri-functions-and-is-error`), and `Symbol` of 19.3
+//! (`#sec-constructor-properties-of-the-global-object-symbol`,
+//! `story:symbol-constructor-and-well-known-symbols`). The global object itself is made by
 //! InitializeHostDefinedRealm or given by the host's setup closure (`realm/mod.rs`).
 
 use super::intrinsics::Intrinsic;
@@ -51,7 +53,8 @@ impl<H: Host> Agent<H> {
         // 19.2.3) and the constructor properties `Boolean` and `Number` (19.3.8, 19.3.24),
         // taken early by slice 2 (`story:number-boolean-and-global-functions-early`); the
         // function property `eval` (19.2.1) and the constructor property `Function` (19.3.18) of
-        // slice 2 (`story:eval-and-function-constructor`); each
+        // slice 2 (`story:eval-and-function-constructor`); the constructor property `Symbol`
+        // (19.3.35) of slice 6 (`story:symbol-constructor-and-well-known-symbols`); each
         // { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true } (clause 18).
         for (name, which) in [
             ("Array", Intrinsic::Array),
@@ -65,6 +68,7 @@ impl<H: Host> Agent<H> {
             ("Number", Intrinsic::Number),
             ("eval", Intrinsic::Eval),
             ("Function", Intrinsic::Function),
+            ("Symbol", Intrinsic::Symbol),
         ] {
             let value = self.intrinsic(realm, which)?;
             let key = self.name_key(name)?;

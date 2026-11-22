@@ -5,7 +5,9 @@
 //! (`docs/design/engine.md`, section 12, "A part before its slice";
 //! `story:number-boolean-and-global-functions-early`): the `Number` constructor with its value
 //! properties, `valueOf` and `toString` in `number`, all of `Boolean` in `boolean`, `isNaN` and
-//! `isFinite` in `global`, and `String.prototype.toString` and `valueOf` in `string`. Later
+//! `isFinite` in `global`, and `String.prototype.toString` and `valueOf` in `string`. Slice 6
+//! adds `symbol` (`story:symbol-constructor-and-well-known-symbols`), whose constructor and
+//! prototype CreateIntrinsics makes (`realm/intrinsics.rs`). Later
 //! slices add their files here.
 //!
 //! `array`, `object` and `string` are directories (`story:builtin-group-modules`): `mod.rs`
@@ -33,6 +35,7 @@ pub(crate) mod math;
 pub(crate) mod number;
 pub(crate) mod object;
 pub(crate) mod string;
+pub(crate) mod symbol;
 
 use crate::host::Host;
 use crate::host::agent::Agent;

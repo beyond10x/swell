@@ -58,6 +58,8 @@ pub(crate) enum BuiltinId {
     Number(crate::builtins::number::NumberBuiltin),
     Boolean(crate::builtins::boolean::BooleanBuiltin),
     Global(crate::builtins::global::GlobalBuiltin),
+    /// The builtins of `Symbol` (`story:symbol-constructor-and-well-known-symbols`).
+    Symbol(crate::builtins::symbol::SymbolBuiltin),
 }
 
 /// What a built-in function does when called.
@@ -421,6 +423,7 @@ impl<H: Host> Agent<H> {
                 self.run_boolean_builtin(id, function, this, args, new_target)
             }
             BuiltinId::Global(id) => self.run_global_builtin(id, function, this, args, new_target),
+            BuiltinId::Symbol(id) => self.run_symbol_builtin(id, function, this, args, new_target),
         }
     }
 
