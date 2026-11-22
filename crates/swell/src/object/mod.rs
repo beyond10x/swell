@@ -157,7 +157,8 @@ pub(crate) struct ObjectRecord {
 
 /// What kind of object a record is, with the slots of that kind.
 pub(crate) enum ObjectKind {
-    /// An ordinary object (10.1), and the Boolean, Number, Symbol and Error objects.
+    /// An ordinary object (10.1), and the Boolean, Number, Symbol and Error objects and the
+    /// Array and String Iterators, each with its slots in [`ordinary::OrdinaryData`].
     Ordinary(Ordinary),
     /// An Array exotic object (10.4.2).
     Array(Array),

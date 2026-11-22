@@ -12,7 +12,9 @@
 //! `%decodeURI%`, `%decodeURIComponent%`, `%encodeURI%` and `%encodeURIComponent%` (19.2.6,
 //! `#sec-uri-handling-functions`), written by `story:global-this-uri-functions-and-is-error`;
 //! `%Symbol%` and `%Symbol.prototype%` (20.4, `#sec-symbol-objects`), written by
-//! `story:symbol-constructor-and-well-known-symbols`.
+//! `story:symbol-constructor-and-well-known-symbols`; `%Iterator.prototype%`,
+//! `%ArrayIteratorPrototype%`, `%StringIteratorPrototype%` and `%Array.prototype.values%`,
+//! written by `story:iterator-protocol-and-array-string-iterators`.
 //! The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
@@ -82,6 +84,20 @@ pub(crate) enum Intrinsic {
     Symbol,
     /// `%Symbol.prototype%` (20.4.3).
     SymbolPrototype,
+    /// `%Iterator.prototype%` (27.1.3.3), `story:iterator-protocol-and-array-string-iterators`.
+    /// The realm holds it; no operation of slice 6 asks for it by name.
+    #[expect(
+        dead_code,
+        reason = "%Iterator.prototype% by name: story:the-host-names-the-iteration-intrinsics-of-web-idl"
+    )]
+    IteratorPrototype,
+    /// `%ArrayIteratorPrototype%` (23.1.5.2).
+    ArrayIteratorPrototype,
+    /// `%StringIteratorPrototype%` (22.1.5.1).
+    StringIteratorPrototype,
+    /// `%Array.prototype.values%` (23.1.3.38): the `[%Symbol.iterator%]` of an arguments
+    /// object (`#sec-createunmappedargumentsobject`, `#sec-createmappedargumentsobject`).
+    ArrayPrototypeValues,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -128,6 +144,8 @@ pub(crate) struct Intrinsics {
     uri: crate::builtins::global::UriFunctions,
     symbol: ObjectRef,
     symbol_prototype: ObjectRef,
+    iterator_prototypes: crate::builtins::iterator::IteratorPrototypes,
+    array_prototype_values: ObjectRef,
 }
 
 impl Intrinsics {
@@ -161,6 +179,10 @@ impl Intrinsics {
             Intrinsic::EncodeUriComponent => self.uri.encode_uri_component,
             Intrinsic::Symbol => self.symbol,
             Intrinsic::SymbolPrototype => self.symbol_prototype,
+            Intrinsic::IteratorPrototype => self.iterator_prototypes.iterator,
+            Intrinsic::ArrayIteratorPrototype => self.iterator_prototypes.array_iterator,
+            Intrinsic::StringIteratorPrototype => self.iterator_prototypes.string_iterator,
+            Intrinsic::ArrayPrototypeValues => self.array_prototype_values,
         }
     }
 
@@ -205,6 +227,10 @@ impl Intrinsics {
             self.uri.encode_uri_component,
             self.symbol,
             self.symbol_prototype,
+            self.iterator_prototypes.iterator,
+            self.iterator_prototypes.array_iterator,
+            self.iterator_prototypes.string_iterator,
+            self.array_prototype_values,
         ] {
             mark.object(object);
         }
@@ -375,6 +401,13 @@ impl<H: Host> Agent<H> {
         let function = self.create_function_constructor(making)?;
         let uri = self.create_uri_functions(making)?;
         let (symbol, symbol_prototype) = self.create_symbol_constructor(making)?;
+        let iterator_prototypes = self.create_iterator_prototypes(making)?;
+        // %Array.prototype.values% (23.1.3.38): the method `create_array_constructor` has
+        // defined on %Array.prototype%, read before any code runs.
+        let values_key = self.name_key("values")?;
+        let Value::Object(array_prototype_values) = self.get(array_prototype, values_key)? else {
+            return Err(self.fault());
+        };
         let intrinsics = Intrinsics {
             object_prototype,
             function_prototype,
@@ -399,6 +432,8 @@ impl<H: Host> Agent<H> {
             uri,
             symbol,
             symbol_prototype,
+            iterator_prototypes,
+            array_prototype_values,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {

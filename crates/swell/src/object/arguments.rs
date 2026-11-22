@@ -18,7 +18,8 @@
 //! [[GetOwnProperty]], answers the binding's value as map.[[Get]] does, and OrdinarySet with the
 //! object as the receiver ends in [[DefineOwnProperty]] with a [[Value]], which writes the
 //! binding as map.[[Set]] does; with another receiver the map is not written either way.
-//! @@iterator, which both kinds define, comes with the iterators of slice 6.
+//! Both kinds define an own @@iterator, `%Array.prototype.values%` of the function's realm
+//! (`story:iterator-protocol-and-array-string-iterators`).
 //!
 //! The map's slots are charged to the memory budget with the object and credited when the
 //! collector frees it.
@@ -127,9 +128,23 @@ impl<H: Host> Agent<H> {
                 Property::data(value, true, true, true),
             )?;
         }
-        let callee_key = self.name_key("callee")?;
         if mapping.is_some() {
             self.add_property(object, length_key, length)?;
+        }
+        // Both kinds: ! DefinePropertyOrThrow(obj, %Symbol.iterator%, PropertyDescriptor {
+        // [[Value]]: %Array.prototype.values%, [[Writable]]: true, [[Enumerable]]: false,
+        // [[Configurable]]: true }), before "callee".
+        let Some(symbols) = self.well_known() else {
+            return Err(self.fault());
+        };
+        let values = self.intrinsic(realm, Intrinsic::ArrayPrototypeValues)?;
+        self.add_property(
+            object,
+            Key::Symbol(symbols.iterator),
+            Property::data(Value::Object(values), true, false, true),
+        )?;
+        let callee_key = self.name_key("callee")?;
+        if mapping.is_some() {
             self.add_property(
                 object,
                 callee_key,

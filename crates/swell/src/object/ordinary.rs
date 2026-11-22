@@ -3,9 +3,10 @@
 //! OrdinaryCreateFromConstructor, with the slots of the ordinary objects of this part: the
 //! Boolean and Number objects ([[BooleanData]], [[NumberData]]), the Symbol objects
 //! ([[SymbolData]], `story:symbol-constructor-and-well-known-symbols`), the Error objects
-//! ([[ErrorData]]), the raw JSON objects ([[IsRawJSON]], `story:json-parse-and-raw-json`) and
-//! `%Object.prototype%`, an immutable prototype exotic object (10.4.7) whose other methods are
-//! ordinary. Written by `story:object-model-and-realms`.
+//! ([[ErrorData]]), the raw JSON objects ([[IsRawJSON]], `story:json-parse-and-raw-json`), the
+//! Array Iterators and String Iterators (`story:iterator-protocol-and-array-string-iterators`,
+//! `builtins/iterator.rs`) and `%Object.prototype%`, an immutable prototype exotic object
+//! (10.4.7) whose other methods are ordinary. Written by `story:object-model-and-realms`.
 //!
 //! A walk up the prototype chain is a loop, never a Rust recursion, and charges one step per
 //! object it passes (decision 2): no proxy exists before slice 9, so every [[Get]],
@@ -18,7 +19,7 @@ use crate::host::Host;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::realm::intrinsics::Intrinsic;
-use crate::value::{ObjectRef, SymbolRef, Value};
+use crate::value::{ObjectRef, StringRef, SymbolRef, Value};
 
 /// What an ordinary object holds beyond the common record.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,6 +41,21 @@ pub(crate) enum OrdinaryData {
     /// of a Symbol makes (`#sec-toobject`): the object keeps its Symbol alive
     /// (`story:symbol-constructor-and-well-known-symbols`).
     Symbol(SymbolRef),
+    /// The slots of an Array Iterator (`#sec-properties-of-array-iterator-instances`, Table 70):
+    /// [[IteratedArrayLike]], which the iterator keeps alive until it is set to undefined,
+    /// [[ArrayLikeNextIndex]] and [[ArrayLikeIterationKind]].
+    ArrayIterator {
+        iterated: Option<ObjectRef>,
+        next_index: f64,
+        kind: crate::builtins::iterator::ArrayIterationKind,
+    },
+    /// The state of a String Iterator (`#sec-string.prototype-%symbol.iterator%`, the String
+    /// and the position its closure captures): the String, which the iterator keeps alive until
+    /// it is done, and the position of the next code unit.
+    StringIterator {
+        iterated: Option<StringRef>,
+        position: usize,
+    },
 }
 
 /// The slots of an ordinary object beyond the common record.
@@ -53,11 +69,21 @@ impl Ordinary {
         Ordinary { data }
     }
 
-    /// Kind site of the collector: [[SymbolData]]; the other slots hold no handle.
+    /// Kind site of the collector: [[SymbolData]], and what an Array Iterator and a String
+    /// Iterator iterate; the other slots hold no handle.
     pub(crate) fn trace(&self, mark: &mut Mark) {
         mark.count("object/ordinary.rs Ordinary::trace");
-        if let OrdinaryData::Symbol(symbol) = self.data {
-            mark.value(Value::Symbol(symbol));
+        match self.data {
+            OrdinaryData::Symbol(symbol) => mark.value(Value::Symbol(symbol)),
+            OrdinaryData::ArrayIterator {
+                iterated: Some(array),
+                ..
+            } => mark.object(array),
+            OrdinaryData::StringIterator {
+                iterated: Some(string),
+                ..
+            } => mark.value(Value::String(string)),
+            _ => {}
         }
     }
 

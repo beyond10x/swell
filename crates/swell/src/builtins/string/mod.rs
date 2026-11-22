@@ -3,7 +3,10 @@
 //! (`#sec-string.prototype.constructor`) and `String.prototype.indexOf`
 //! (`#sec-string.prototype.indexof`) with StringIndexOf (`#sec-stringindexof`), and the
 //! builder of the Strings the builtins make at run time from other values. Written by
-//! `story:harness-builtins`. Slice 2 takes `String.prototype.toString`
+//! `story:harness-builtins`. `String.prototype[@@iterator]`
+//! (`#sec-string.prototype-%symbol.iterator%`) is
+//! `story:iterator-protocol-and-array-string-iterators`, its steps in `builtins/iterator.rs`.
+//! Slice 2 takes `String.prototype.toString`
 //! (`#sec-string.prototype.tostring`) and `String.prototype.valueOf`
 //! (`#sec-string.prototype.valueof`) with ThisStringValue (`#sec-thisstringvalue`) early
 //! (`docs/design/engine.md`, section 12, "A part before its slice";
@@ -47,6 +50,9 @@ pub(crate) enum StringBuiltin {
     ToString,
     /// `String.prototype.valueOf ( )` (22.1.3.35).
     ValueOf,
+    /// `String.prototype [ %Symbol.iterator% ] ( )` (22.1.3.36)
+    /// (`story:iterator-protocol-and-array-string-iterators`, `builtins/iterator.rs`).
+    Iterator,
     /// A builtin of the group `access.rs`.
     Access(access::AccessBuiltin),
     /// A builtin of the group `transform.rs`.
@@ -284,6 +290,19 @@ impl<H: Host> Agent<H> {
                 BuiltinId::String(id),
             )?;
         }
+        // 22.1.3.36: named "[Symbol.iterator]", { [[Writable]]: true, [[Enumerable]]: false,
+        // [[Configurable]]: true } (clause 18).
+        let iterator = self.create_builtin(
+            making,
+            "[Symbol.iterator]",
+            0,
+            BuiltinId::String(StringBuiltin::Iterator),
+        )?;
+        self.add_property(
+            string_prototype,
+            crate::object::property::Key::Symbol(making.symbols.iterator),
+            crate::object::property::Property::data(Value::Object(iterator), true, false, true),
+        )?;
         for (object, on_prototype) in [(constructor, false), (string_prototype, true)] {
             self.define_group_methods(
                 making,
@@ -335,6 +354,7 @@ impl<H: Host> Agent<H> {
             StringBuiltin::ValueOf => self
                 .this_string_value(this, "String.prototype.valueOf")
                 .map(Value::String),
+            StringBuiltin::Iterator => self.string_iterator_of(this),
             StringBuiltin::Access(id) => {
                 self.run_string_access_builtin(id, function, this, args, new_target)
             }
