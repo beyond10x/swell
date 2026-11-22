@@ -55,6 +55,12 @@ deciding session's, from a checkout of the repository:
    put an empty `## [Unreleased]` above it, and set the two link lines at the end. Every number
    in the section is copied from the gate's output on this commit (step 3). A number that
    cannot be copied from that output is not written.
+   The section keeps its `### Host interface` heading, with `- None.` when the host interface
+   did not change. After step 1, `slot --local task host-surface-snapshot` writes the scan of
+   the host interface into `conformance/host/surface.txt`, headed `# swell <version>`; the
+   file is committed with steps 1 and 2. The notes' `**Breaking**` part (step 4) lists every
+   removed or changed name of that heading. The names have the form of "The host interface
+   in the changelog" below.
 3. **Gate.** One commit by the bot holds steps 1 and 2. Run the gate on it as the forge's
    runner does and compare its lines with the changelog section:
 
@@ -111,6 +117,29 @@ deciding session's, from a checkout of the repository:
 
 A tag is never moved and a release is never rewritten: a defect found after step 6 is fixed on
 `main` and released as the next patch version.
+
+## The host interface in the changelog
+
+Every change of the host interface since the last release is named under `### Host interface`
+of `## [Unreleased]` in `CHANGELOG.md`; `task host-surface-check`, a step of `check`, fails
+until it is, one line per name. The host interface is every public item of
+`crates/swell/src/value.rs` and `crates/swell/src/host/*.rs` and every `**HOST-<n>**` line of
+`docs/design/host-interface.md`. `conformance/host/surface.txt` holds it as it was at the last
+release; `task host-surface-scan` prints it for the tree. An item changes when it is added or
+removed or its signature or its attributes `derive`, `cfg`, `non_exhaustive` or `repr` change;
+a requirement changes when its line does. A doc comment, a private item and a body change
+nothing. A rename is a removal and an addition, and both names are written.
+
+Each name stands in backticks, in this form and no other; another form of the same item is not
+found:
+
+- a function or method: its bare name (`charge_steps`); where two types of the interface have
+  a method of that name, with its type before it (`Agent::host`);
+- a method of `scoped_methods!`, which `Cx` and `HookCx` both have: once, by its bare name
+  (`host`, `get`);
+- a variant or a field: `Type::name` (`HostError::StaleHandle`, `ErrorSite::line`);
+- a type, trait, constant or type alias: its name (`HostBytes`);
+- a requirement: `HOST-<n>`.
 
 ## When swell ships a binary
 

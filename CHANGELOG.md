@@ -10,6 +10,18 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Changed
+
+- The gate now fails when a public item of the host interface or a `HOST-<n>` requirement
+  changed since the last release and the changelog does not name it under Host interface, in
+  the name form of `docs/releasing.md`.
+
+### Host interface
+
+- `get_prototype_of`, `set_prototype_of`: new methods of `Cx`, the prototype of an object.
+- `HOST-165`, `HOST-166`, `HOST-167`, `HOST-168`, `HOST-169`, `HOST-170`, `HOST-171`, `HOST-172`, `HOST-173`, `HOST-174`, `HOST-175`, `HOST-176`, `HOST-177`, `HOST-178`, `HOST-179`, `HOST-180`, `HOST-181`, `HOST-182`, `HOST-183`, `HOST-184`, `HOST-185`, `HOST-186`, `HOST-187`: new requirements.
+- `HOST-29`, `HOST-52`, `HOST-102`: changed requirements.
+
 ## [0.2.0] - 2026-11-21
 
 The second release. swell now runs the whole ES5 level of the language: a script may leave out
