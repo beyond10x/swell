@@ -146,6 +146,7 @@ test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-67.js	array-search,str
 test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-71.js	array-search,string-access	threw TypeError: Cannot use a property of undefined
 test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-90.js	array-search,object-integrity	threw TypeError: Cannot use a property of undefined
 test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-1.js	?	threw Test262Error: result1[expResult[p1]] !== true
+test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-2.js	array-search,object-enumeration,object-integrity	threw Test262Error: create
 test/built-ins/Object/hasOwn/hasown_inherited_exists.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
 test/built-ins/Object/hasOwn/hasown_inherited_getter_and_setter_configurable_enumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
 test/built-ins/Object/hasOwn/hasown_inherited_getter_and_setter_configurable_nonenumerable.js	object-enumeration,object-integrity	threw TypeError: the value is not a function
