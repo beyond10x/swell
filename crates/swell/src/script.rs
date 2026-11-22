@@ -17,9 +17,20 @@
 //! The record owns the compiled code and the atoms of its String constants, of their property
 //! keys and of its functions' names; the code and the record are charged to the memory budget
 //! when it is made, the atoms as they are interned, and the sweep that frees the record credits
-//! them. The source's UTF-16 copy is charged while the parse runs; the parser's tree is not,
-//! since `swell-syntax` allocates it with no access to the budget (its size is bounded by the
-//! source's).
+//! them. The source's UTF-16 copy is charged from the start of the parse; the parser's tree is
+//! not, since `swell-syntax` allocates it with no access to the budget (its size is bounded by
+//! the source's).
+//!
+//! Source text (`docs/design/engine.md`, decision 4, "Source text."): the copy the parse read is
+//! kept with the compiled code ([`Compiled::source`]) and its charge becomes part of the
+//! record's ([`code_bytes`]) when the parse and compile step ends, two bytes per code unit; the
+//! sweep that frees the record credits it with the code, never earlier. The record lives while
+//! the host holds the script, while its code runs and while a function made from it is
+//! reachable (each reports its [[ScriptOrModule]]), so the text does too, and
+//! `Function.prototype.toString` reads a function's [[SourceText]] out of it
+//! (`builtins/function.rs`). A parse or compile step that makes no code credits the copy
+//! ([`Agent::credit_source_copy`]). Eval code and the `Function` constructor keep theirs the same
+//! way (`dynamic_code.rs`).
 //!
 //! Kind site of the collector: [`ScriptRecord::trace`] (the realm and the constants' atoms).
 
@@ -40,9 +51,13 @@ use crate::interp::frame::{Frame, frame_bytes};
 use crate::object::property::{Key, array_index};
 use crate::value::{StringRef, Value};
 
-/// A script's compiled code and the atoms of its constants.
+/// A script's compiled code, the source it was compiled from and the atoms of its constants.
 pub(crate) struct Compiled {
     pub(crate) code: Code,
+    /// The code units the parse read: the source of a script, the String of eval code, the
+    /// whole text of the last parse of CreateDynamicFunction (decision 4, "Source text.").
+    /// Each template's `source_text` is a span of it.
+    pub(crate) source: Vec<u16>,
     /// The atom of each String constant, by index.
     pub(crate) strings: Vec<StringRef>,
     /// The property key of each String constant: its array index or its atom.
@@ -121,7 +136,14 @@ pub(crate) fn vec_bytes<T>(len: usize) -> u64 {
     u64::try_from(len.saturating_mul(size_of::<T>())).unwrap_or(u64::MAX)
 }
 
-/// The bytes the compiled code owns, charged with its record.
+/// The code units of a source copied for its parse, and the bytes charged for them: kept with
+/// the code made from them ([`Agent::make_script_record`]), or credited
+/// ([`Agent::credit_source_copy`]) when the step makes no code.
+pub(crate) struct SourceCopy {
+    pub(crate) units: Vec<u16>,
+    pub(crate) charged: u64,
+}
+
 /// The bytes of the names tables of the environments `PushNamedEnv` makes (decision 3, "Names":
 /// they are charged with the compiled code).
 fn scopes_bytes(scopes: &[Vec<u32>]) -> u64 {
@@ -132,8 +154,12 @@ fn scopes_bytes(scopes: &[Vec<u32>]) -> u64 {
         })
 }
 
-pub(crate) fn code_bytes(code: &Code) -> u64 {
-    let mut bytes = vec_bytes::<Instruction>(code.instructions.len())
+/// The bytes the compiled code owns, charged with its record: the code, its constants and
+/// templates, and the `source_units` code units of the source kept with it (decision 4, "Source
+/// text.").
+pub(crate) fn code_bytes(code: &Code, source_units: usize) -> u64 {
+    let mut bytes = vec_bytes::<u16>(source_units)
+        .saturating_add(vec_bytes::<Instruction>(code.instructions.len()))
         .saturating_add(vec_bytes::<Span>(code.positions.len()))
         .saturating_add(vec_bytes::<Handler>(code.handlers.len()))
         .saturating_add(vec_bytes::<f64>(code.numbers.len()))
@@ -190,37 +216,80 @@ impl<H: Host> Agent<H> {
         let options = ParseOptions {
             max_nesting: self.limits.parser_nesting,
         };
-        let parsed = match source {
-            Source::Utf16(units) => swell_syntax::parse_script(units, options),
+        let copy = match source {
+            Source::Utf16(units) => {
+                self.source_copy(units.len(), |copy| copy.extend_from_slice(units))?
+            }
             Source::Utf8(text) => {
                 let length = text.encode_utf16().count();
-                let charged = vec_bytes::<u16>(length);
-                if self.heap.accounting.charge(charged).is_err() {
-                    return Err(self.terminate(Termination::MemoryBudget));
-                }
-                let mut units = Vec::new();
-                if units.try_reserve_exact(length).is_err() {
-                    self.heap.accounting.credit(charged);
-                    return Err(self.terminate(Termination::MemoryBudget));
-                }
-                units.extend(text.encode_utf16());
-                let parsed = swell_syntax::parse_script(&units, options);
-                drop(units);
-                self.heap.accounting.credit(charged);
-                parsed
+                self.source_copy(length, |copy| copy.extend(text.encode_utf16()))?
             }
         };
-        let script = match parsed {
+        let script = match swell_syntax::parse_script(&copy.units, options) {
             Ok(script) => script,
-            Err(errors) => return self.syntax_errors(realm, errors).map(ParseAnswer::Errors),
+            Err(errors) => {
+                self.credit_source_copy(copy);
+                return self.syntax_errors(realm, errors).map(ParseAnswer::Errors);
+            }
         };
-        let code = match self.compiled_code(realm, swell_compiler::compile_script(&script))? {
-            Ok(code) => code,
+        let compiled = swell_compiler::compile_script(&script);
+        drop(script);
+        let (code, copy) = match self.compiled_with_source(realm, compiled, copy)? {
+            Ok(made) => made,
             Err(error) => return Ok(ParseAnswer::Errors(vec![error])),
         };
-        drop(script);
-        self.make_script_record(realm, code, host_defined)
+        self.make_script_record(realm, code, copy, host_defined)
             .map(ParseAnswer::Script)
+    }
+
+    /// A copy of the `length` code units `fill` appends, charged to the memory budget first
+    /// (decision 4, "Source text."): over the budget, or when the allocator refuses, the run ends
+    /// in `Terminated(MemoryBudget)` and nothing stays charged.
+    pub(crate) fn source_copy(
+        &mut self,
+        length: usize,
+        fill: impl FnOnce(&mut Vec<u16>),
+    ) -> Completion<SourceCopy> {
+        let charged = vec_bytes::<u16>(length);
+        if self.heap.accounting.charge(charged).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        let mut units = Vec::new();
+        if units.try_reserve_exact(length).is_err() {
+            self.heap.accounting.credit(charged);
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        fill(&mut units);
+        Ok(SourceCopy { units, charged })
+    }
+
+    /// The end of a parse or compile step that made no code: the copy of its source is dropped
+    /// and its bytes credited.
+    pub(crate) fn credit_source_copy(&mut self, copy: SourceCopy) {
+        let SourceCopy { units, charged } = copy;
+        drop(units);
+        self.heap.accounting.credit(charged);
+    }
+
+    /// [`Agent::compiled_code`] of the compile step of the source whose copy is `copy`: the code
+    /// with the copy; on any other answer the copy is credited.
+    pub(crate) fn compiled_with_source(
+        &mut self,
+        realm: Handle,
+        compiled: Result<Code, CompileError>,
+        copy: SourceCopy,
+    ) -> Completion<Result<(Code, SourceCopy), Value>> {
+        match self.compiled_code(realm, compiled) {
+            Ok(Ok(code)) => Ok(Ok((code, copy))),
+            Ok(Err(error)) => {
+                self.credit_source_copy(copy);
+                Ok(Err(error))
+            }
+            Err(abrupt) => {
+                self.credit_source_copy(copy);
+                Err(abrupt)
+            }
+        }
     }
 
     /// The `SyntaxError` objects of `realm` for the errors of a parse, each message with its
@@ -259,14 +328,24 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// The Script Record of `code` in `realm`, with its atoms interned.
+    /// The Script Record of `code` in `realm`, with its atoms interned and the source `copy` it
+    /// was compiled from kept with it: the copy's charge becomes part of the record's, which the
+    /// sweep that frees the record credits (decision 4, "Source text.").
     pub(crate) fn make_script_record(
         &mut self,
         realm: Handle,
         code: Code,
+        copy: SourceCopy,
         host_defined: Option<HostDefined>,
     ) -> Completion<Handle> {
-        let owned = code_bytes(&code);
+        // The copy is charged again below with the code, as a part of the record; no safe point
+        // comes between, and on every way out after this the copy is dropped uncharged.
+        let SourceCopy {
+            units: source,
+            charged,
+        } = copy;
+        self.heap.accounting.credit(charged);
+        let owned = code_bytes(&code, source.len());
         if self.heap.accounting.check(owned).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -290,6 +369,7 @@ impl<H: Host> Agent<H> {
             realm: Some(realm),
             compiled: Some(Rc::new(Compiled {
                 code,
+                source,
                 strings,
                 keys,
                 names,
