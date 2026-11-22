@@ -20,13 +20,6 @@ use crate::object::property::{Descriptor, Key, Property, Slot};
 use crate::value::{ObjectRef, Value};
 
 /// The level of SetIntegrityLevel and TestIntegrityLevel.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Object.seal, Object.freeze, Object.isSealed, Object.isFrozen, JSON.rawJSON: story:object-integrity-and-prototype-methods, story:json-parse-and-raw-json"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum IntegrityLevel {
     Sealed,
@@ -290,13 +283,6 @@ impl<H: Host> Agent<H> {
     /// TestIntegrityLevel ( O, level ) (`#sec-testintegritylevel`), for every object the base
     /// has: a step per key, the list of keys charged to the memory budget and kept while it
     /// runs.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Object.isSealed, Object.isFrozen: story:object-integrity-and-prototype-methods"
-        )
-    )]
     pub(crate) fn test_integrity_level(
         &mut self,
         object: ObjectRef,
