@@ -1,5 +1,5 @@
 #!/bin/sh
-# Planted defect of the check that a stack test binary of the profiles release and stack-nodebug
+# Planted defect of the check that a stack test binary of the profile release (and every test binary)
 # carries no debug information (taskfiles/no-debug-sections.sh, called by the task
 # test-stack-profiles of taskfiles/stack-profiles.yml; story
 # stack-requirements-hold-in-the-release-profile, points 4 and 5). Nothing is built: the script

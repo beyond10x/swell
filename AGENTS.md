@@ -184,12 +184,14 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   `site-data-check`, a step of `check`, fails when it differs from its regeneration. A commit
   that changes `expected.txt`, `slices-delivered.txt`, `requirements.txt`, `moves.tsv`, a
   crate version or section 12 of the design regenerates it (`slot --local task site-data`).
-- The repository's `.cargo/config.toml` sets the dev profile's debug
-  information as the forge builds it, whatever a user's own cargo configuration says: in a
-  debug build with line tables only the frames are about 5 % smaller, and a stack test passed
-  here and aborted there twice (wave 3 of slice 1, wave 1 of slice 2; measured in the second:
-  29,855 against 31,314 bytes per re-entry, and no difference from incremental compilation).
-  Do not override that setting, and measure a stack bound only in such a build. With `CI` and
+- The repository's `.cargo/config.toml` builds the dev and test profiles without debug
+  information (`debug = false`, `strip = "debuginfo"`), on the forge and here alike;
+  `test-binaries-check` shows it with `readelf -S` on every test executable. A stack bound is
+  measured in the profile `stack-debug` (dev with full debug information, the largest frames,
+  an embedder's default). A build with line tables only had frames about 5 % smaller, and a
+  stack test passed here and aborted on the forge twice (wave 3 of slice 1, wave 1 of slice 2;
+  measured in the second: 29,855 against 31,314 bytes per re-entry, and no difference from
+  incremental compilation): do not override that setting. With `CI` and
   `GITHUB_ACTIONS` set go-task colours its failure line and adds an `::error` line (14 planted
   scripts failed there); a planted script clears those variables in its first lines, as the
   others do. A test of a stack bound runs its subject in a child process, and a test that

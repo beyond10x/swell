@@ -3,6 +3,10 @@ version: '3'
 set: [pipefail]
 
 includes:
+  test-binaries:
+    taskfile: taskfiles/test-binaries.yml
+    flatten: true
+    optional: true
   test262-fetch:
     taskfile: taskfiles/test262-fetch.yml
     flatten: true
@@ -91,6 +95,7 @@ tasks:
       - task: host-surface-check
       - task: site-data-check
       - task: build
+      - task: test-binaries-check
       - task: clippy
       - task: gate-time-start
       - task: test
@@ -128,8 +133,8 @@ tasks:
       conformance/test262/expected.txt, and the digest of its sources checked against
       conformance/test262/expected.digest; slow-tests, the tests with a gate count at their
       full counts; and build-stack-profiles with test-stack-profiles, the stack tests in the
-      release profile and in the dev profile without debug information (the gate runs them in
-      the dev profile with debug information, whose frames are the largest of the three). The
+      release profile and in stack-debug, the dev profile with full debug information (the
+      gate runs them in the dev profile without it). The
       workflow .github/workflows/slow.yml runs it on a push to main and on a
       pull request that changes a source of the digest, the expected file or the digest file.
       Prints "slow-time <part> <seconds>" after each part.
@@ -316,7 +321,7 @@ tasks:
         TEST262_DESIGN TEST262_FEATURES TEST262_SECTIONS TEST262_EXPECTED TEST262_DIGEST TEST262_OUT TEST262_WORKERS TEST262_RUN
         TEST262_MOVES TEST262_LATER_PARTS
         GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_SELFTEST_DIR GATE_SELFTEST_JOBS
-        GATE_RUNNER_ENV
+        GATE_RUNNER_ENV GATE_TEST_BUILD_JSON
         SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES
     silent: true
     cmds:

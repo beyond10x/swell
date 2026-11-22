@@ -234,8 +234,9 @@ inside another, so the parser's share is that of one parse, but the path to it (
 each argument, the source text built, the wrapping function expression of the third parse,
 which counts as a level like any function) is not `eval`'s, and is measured on its own.
 Added on 2026-11-22: it holds in the dev profile with full debug information, in the dev profile
-without it, and in the release profile without it, each shown by the stack tests in the gate (the
-profiles `dev`, `stack-nodebug` and `release`, the last two checked to carry no debug section); a
+without it, and in the release profile without it, each shown by the stack tests (the
+profiles `dev` in the gate, `stack-debug` and `release` in the lane `slow`; `dev` and `release` are
+checked to carry no debug section, `stack-debug` to carry it); a
 host that builds swell with a profile of its own runs the same tests in it.
 
 `CreateError::AgentKeysExhausted`: every handle carries its agent's key (decision 4), a `u32`
