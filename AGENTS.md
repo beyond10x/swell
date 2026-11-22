@@ -81,7 +81,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   an ESS model under `spec/` before its code (decision 10). Do not restate language semantics in
   ESS. Names follow the standard's terms; a builtin's module and comments cite its clause.
 - The host interface has two specifications, and both come before its code. ESS states about
-  half of it: the model (`spec/`, ess 0.97.3) validates and its 58 scenarios, 8 of them authored,
+  half of it: the model (`spec/`, ess 0.97.4) validates and its 58 scenarios, 8 of them authored,
   pass on the interpreter, with 41 refusals and 51 `UNMAPPED:` markers
   (`docs/design/host-interface-model.md`). What ESS cannot state (engine values in outcomes,
   hooks that answer the engine, `call` and `construct`, host objects and roots, re-entrancy,
