@@ -3,10 +3,12 @@
 # the section sec-proxy-objects complete while its cases fail (the engine passes none). The
 # runner judges it incomplete, so `task test262` must exit non-zero and print the planted line
 # with - and the printed one with +. The unchanged copy passes first.
-# The defect is on the counting side, so every run of the task counts the real pinned checkout
+# The defect is on the counting side, so every run of the task counts a small checkout of its own
 # with TEST262_RUN=none (no case is run; every run case is counted failed, so the section is
 # incomplete in this mode as it is with the cases run), and the expected file is that mode's,
 # made here from the task's own lines.
+# The checkout is made by tests/gate/fixtures/test262-checkout.sh (a case under each path of
+# sections.txt, one naming generators), with a copy of the design whose slice lines are its own.
 # Run from the repository root: sh tests/gate/test262-refuses-a-section-marked-complete-with-a-failing-case.sh
 # The same output from task, cargo and ess on any machine: no colour, and no "::error" line
 # that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
@@ -24,13 +26,10 @@ fail() {
 }
 
 export TEST262_RUN=none
-: > "$dir/empty.txt"
-if task -d . test262 TEST262_EXPECTED="$dir/empty.txt" TEST262_OUT="$dir/mode" > "$dir/mode.out" 2>&1; then
-  fail "task test262 exited 0 against an empty expected file ($dir/mode.out)"
-fi
-grep -q '^test262 total ' "$dir/mode/lines.txt" || fail "task test262 printed no total line ($dir/mode.out)"
-cp "$dir/mode/lines.txt" "$dir/expected.txt" || fail "cannot copy $dir/mode/lines.txt"
-task -d . test262 TEST262_EXPECTED="$dir/expected.txt" TEST262_OUT="$dir/base" > "$dir/base.out" 2>&1 ||
+. tests/gate/fixtures/test262-checkout.sh
+test262_checkout "$dir"
+cp "$dir/checkout-lines.txt" "$dir/expected.txt" || fail "cannot copy $dir/checkout-lines.txt"
+task -d . test262 $checkout_vars TEST262_DESIGN="$checkout_design" TEST262_EXPECTED="$dir/expected.txt" TEST262_OUT="$dir/base" > "$dir/base.out" 2>&1 ||
   fail "task test262 on the unchanged expected file exited non-zero ($dir/base.out)"
 grep -qF "lines equal $dir/expected.txt" "$dir/base.out" ||
   fail "task test262 on the unchanged expected file printed no \"lines equal\" line ($dir/base.out)"
@@ -42,7 +41,7 @@ awk -v line="$line" -v planted="$planted" '$0 == line { $0 = planted } { print }
   "$dir/expected.txt" > "$dir/planted-expected.txt"
 cmp -s "$dir/expected.txt" "$dir/planted-expected.txt" && fail "the planted expected file equals expected.txt"
 
-if task -d . test262 TEST262_EXPECTED="$dir/planted-expected.txt" TEST262_OUT="$dir/planted" \
+if task -d . test262 $checkout_vars TEST262_DESIGN="$checkout_design" TEST262_EXPECTED="$dir/planted-expected.txt" TEST262_OUT="$dir/planted" \
   > "$dir/planted.out" 2>&1; then
   fail "task test262 exited 0 with $anchor marked complete ($dir/planted.out)"
 fi

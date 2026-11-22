@@ -324,6 +324,25 @@ fn host_22_zero_string_length_throws_on_concatenation() {
     assert!(is_range_error_of(&mut agent, &realm, outcome));
 }
 
+/// `full` steps of a step budget, or a tenth of them in the gate with the collector at every
+/// safe point, where every step collects; the lane `slow` (`SWELL_FULL_COUNTS=1`) runs `full`
+/// there too. The scripts given such a budget loop or recurse without end, so every budget
+/// ends them in the same way.
+fn steps_in_the_collect_gate(full: u64) -> u64 {
+    if in_the_collect_gate() {
+        full / 10
+    } else {
+        full
+    }
+}
+
+/// Whether this run is the gate's with the collector at every safe point: the feature
+/// `collect-every-safe-point`, without `SWELL_FULL_COUNTS=1` (which the lane `slow` sets).
+fn in_the_collect_gate() -> bool {
+    cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+}
+
 /// The epic, item 7 (`engine.md`, decision 3): a function that calls itself without end throws
 /// a `RangeError` at `frame_depth`; a script that catches it and recurses again ends in
 /// `Terminated(StepBudget)`, which it cannot catch.
@@ -331,7 +350,7 @@ fn host_22_zero_string_length_throws_on_concatenation() {
 fn catching_the_depth_error_and_recursing_again_ends_in_step_budget() {
     let mut limits = limits();
     limits.frame_depth = 20;
-    limits.steps_per_entry = 100_000;
+    limits.steps_per_entry = steps_in_the_collect_gate(100_000);
     assert_eq!(
         run(
             limits,
@@ -465,12 +484,25 @@ fn on_bounded_stack(test: &str, stack: usize, body: fn()) -> Result<(), String> 
     ))
 }
 
-/// The limits of the stack test: `frame_depth` 10,000, `reentry_depth` 1,000 and
+/// The `reentry_depth` of the stack test: the full depth, 1,000, in the default mode and in the
+/// lane `slow`; in the gate with the collector at every safe point ([`in_the_collect_gate`]),
+/// 100. The stack bound is a property of the default mode's frames (the collector marks from a
+/// worklist, so its own stack does not grow with the depth). What the collect mode looks for, a
+/// value held without a root, shows at any depth: at 100 every safe point of the deepest levels
+/// still collects while 100 re-entries, each with its Rust frame and its activation, are live.
+/// A collection traces every activation, so the cost grows with the square of the depth: at
+/// 1,000 the test took 30.4 s in that mode (21.2 CPU s) against 0.10 s in the default one
+/// (measured).
+fn stack_reentry() -> u32 {
+    if in_the_collect_gate() { 100 } else { 1_000 }
+}
+
+/// The limits of the stack test: `frame_depth` 10,000, `reentry_depth` [`stack_reentry`] and
 /// `parser_nesting` 1,000, with step and memory budgets no run of it reaches.
 fn stack_limits() -> Limits {
     let mut limits = limits();
     limits.frame_depth = 10_000;
-    limits.reentry_depth = 1_000;
+    limits.reentry_depth = stack_reentry();
     limits.parser_nesting = 1_000;
     limits.steps_per_entry = 1 << 40;
     limits.memory_bytes = 1 << 30;
@@ -497,13 +529,13 @@ fn reach_every_bound() {
     assert!(is_range_error_of(&mut agent, &realm, outcome));
     assert_eq!(
         eval_text(&mut agent, &realm, "n;"),
-        Outcome::Normal("1000".to_string())
+        Outcome::Normal(stack_reentry().to_string())
     );
     let outcome = eval(&mut agent, &realm, THROUGH_GETTER);
     assert!(is_range_error_of(&mut agent, &realm, outcome));
     assert_eq!(
         eval_text(&mut agent, &realm, "g;"),
-        Outcome::Normal("1000".to_string())
+        Outcome::Normal(stack_reentry().to_string())
     );
     assert_eq!(
         agent.host().count,
@@ -517,7 +549,9 @@ fn reach_every_bound() {
 /// `frame_depth` 10,000, `reentry_depth` 1,000 and `parser_nesting` 1,000 runs a script that
 /// reaches `reentry_depth` through host functions, and one that reaches it through getters,
 /// each parsing 1,000 nested brackets at the deepest, and ends without a stack overflow:
-/// `min_stack_bytes()` is enough, with an eighth of it to spare.
+/// `min_stack_bytes()` is enough, with an eighth of it to spare. In the gate's collect mode the
+/// depth is [`stack_reentry`], and the thread has seven eighths of `min_stack_bytes()` of that
+/// depth.
 #[test]
 fn min_stack_bytes_is_enough() {
     let stack = stack_with_room(stack_limits());

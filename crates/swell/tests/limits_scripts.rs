@@ -245,19 +245,37 @@ fn reach_through(through: &str, reentry_depth: u32) {
     );
 }
 
+/// The `reentry_depth` of HOST-17: the full depth in the default mode and in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`); in the gate with the feature `collect-every-safe-point`, 100, as for
+/// [`BUILTINS_REENTRY`] and for the same reason. At 100 every safe point of the deepest levels
+/// still collects while 100 re-entries are live, and the deepest still parses at full nesting;
+/// at 1,000 the test took 15.7 s in that mode (13.7 CPU s) against 0.11 s in the default one
+/// (measured).
+fn host_17_reentry() -> u32 {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        100
+    } else {
+        FULL_REENTRY
+    }
+}
+
 /// The body of HOST-17: through a host function that calls back with `cx.call`.
 fn reach_through_host_function() {
-    reach_through("reenter(f)", FULL_REENTRY);
+    reach_through("reenter(f)", host_17_reentry());
 }
 
 /// HOST-17: on a thread whose stack has `limits.min_stack_bytes()` bytes (`frame_depth`
 /// 10,000, `reentry_depth` 1,000, `parser_nesting` 1,000), a script that reaches
 /// `reentry_depth` re-entries and at the deepest one calls a host function that parses a source
 /// nested `parser_nesting` levels through `cx.parse_script` ends without a stack overflow. The
-/// thread has seven eighths of it ([`stack_with_room`]), which proves the room as well.
+/// thread has seven eighths of it ([`stack_with_room`]), which proves the room as well. In the
+/// gate's collect mode the depth is [`host_17_reentry`], and the thread has seven eighths of
+/// `min_stack_bytes()` of that depth.
 #[test]
 fn host_17_deepest_reentry_parses_at_full_nesting() {
-    let stack = stack_with_room(stack_limits(FULL_REENTRY));
+    let stack = stack_with_room(stack_limits(host_17_reentry()));
     on_bounded_stack(
         "host_17_deepest_reentry_parses_at_full_nesting",
         stack,
