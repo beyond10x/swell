@@ -120,28 +120,48 @@ fn bound_count<H: Host>(agent: &mut Agent<H>, function: ObjectRef) -> Completion
     }
 }
 
-/// One link of a chain: its target, its bound `this`, and a copy of its bound arguments.
-fn link<H: Host>(
-    agent: &mut Agent<H>,
-    function: ObjectRef,
-) -> Completion<(ObjectRef, Value, Vec<Value>)> {
+/// One link of a chain: its target and its bound `this`, read from its record without a copy.
+fn link<H: Host>(agent: &mut Agent<H>, function: ObjectRef) -> Completion<(ObjectRef, Value)> {
     let found = match &agent.engine_object(function)?.kind {
         ObjectKind::BoundFunction(BoundFunction {
             target: Some(target),
             this,
+            ..
+        }) => Some((*target, *this)),
+        _ => None,
+    };
+    found.ok_or_else(|| agent.fault())
+}
+
+/// The bound arguments of the link `function` copied into `gathered` so that they end at
+/// position `end`: answers the link's target and the position they start at. A link whose
+/// arguments do not fit before `end` is a broken invariant that faults the agent.
+fn copy_link_arguments<H: Host>(
+    agent: &mut Agent<H>,
+    function: ObjectRef,
+    gathered: &mut [Value],
+    end: usize,
+) -> Completion<(ObjectRef, usize)> {
+    let copied = match &agent.engine_object(function)?.kind {
+        ObjectKind::BoundFunction(BoundFunction {
+            target: Some(target),
             arguments,
             ..
-        }) => {
+        }) => end.checked_sub(arguments.len()).and_then(|start| {
+            let into = gathered.get_mut(start..end)?;
             #[cfg(test)]
             ARGUMENTS_CLONED.with(|cloned| {
                 let count = u64::try_from(arguments.len()).unwrap_or(u64::MAX);
                 cloned.set(cloned.get().saturating_add(count));
             });
-            Some((*target, *this, arguments.clone()))
-        }
+            for (slot, &argument) in into.iter_mut().zip(arguments) {
+                *slot = argument;
+            }
+            Some((*target, start))
+        }),
         _ => None,
     };
-    found.ok_or_else(|| agent.fault())
+    copied.ok_or_else(|| agent.fault())
 }
 
 /// Whether `object` is a bound function exotic object.
@@ -156,21 +176,26 @@ fn is_bound<H: Host>(agent: &mut Agent<H>, object: ObjectRef) -> Completion<bool
 /// innermost bound `this`, the arguments "the list-concatenation of boundArgs and argList" of
 /// every link, innermost first, and, for [[Construct]], the new target after each link's step
 /// "If SameValue(F, newTarget) is true, set newTarget to target". A step per link and per bound
-/// argument, the count read from the link's record and charged before its arguments are
-/// copied; no safe point is passed, so the values need no root until the call.
+/// argument, the count read from the link's record and charged before anything is copied; no
+/// safe point is passed, so the values need no root until the call.
+///
+/// The chain is walked twice and each link's arguments are read in place: the first walk
+/// charges the steps and counts the arguments, the gathered list is asked of the memory budget
+/// and reserved, and the second walk copies each link's arguments into it, from its end, so
+/// that the innermost link's come first. No copy of a link's arguments is made beside it.
 fn walk<H: Host>(
     agent: &mut Agent<H>,
     function: ObjectRef,
     args: &[Value],
     mut new_target: Option<ObjectRef>,
 ) -> Completion<(ObjectRef, Value, Vec<Value>, Option<ObjectRef>)> {
-    let mut segments: Vec<Vec<Value>> = Vec::new();
+    let mut count = args.len();
     let mut current = function;
     let (target, this) = loop {
-        let count = bound_count(agent, current)?;
-        agent.charge_steps(count.saturating_add(1))?;
-        let (target, this, arguments) = link(agent, current)?;
-        segments.push(arguments);
+        let bound = bound_count(agent, current)?;
+        agent.charge_steps(bound.saturating_add(1))?;
+        let (target, this) = link(agent, current)?;
+        count = count.saturating_add(usize::try_from(bound).unwrap_or(usize::MAX));
         if new_target == Some(current) {
             new_target = Some(target);
         }
@@ -181,18 +206,31 @@ fn walk<H: Host>(
     };
     // The gathered list lives until the call returns: the memory budget is asked before it is
     // made.
-    let count = segments.iter().fold(args.len(), |count, segment| {
-        count.saturating_add(segment.len())
-    });
     let bytes = u64::try_from(count.saturating_mul(size_of::<Value>())).unwrap_or(u64::MAX);
     let mut gathered = Vec::new();
     if agent.heap.accounting.check(bytes).is_err() || gathered.try_reserve_exact(count).is_err() {
         return Err(agent.terminate(Termination::MemoryBudget));
     }
-    for segment in segments.iter().rev() {
-        gathered.extend_from_slice(segment);
+    gathered.resize(count, Value::Undefined);
+    let mut end = count.saturating_sub(args.len());
+    let Some(tail) = gathered.get_mut(end..) else {
+        return Err(agent.fault());
+    };
+    for (slot, &argument) in tail.iter_mut().zip(args) {
+        *slot = argument;
     }
-    gathered.extend_from_slice(args);
+    let mut current = function;
+    loop {
+        let (next, start) = copy_link_arguments(agent, current, &mut gathered, end)?;
+        end = start;
+        if next == target {
+            break;
+        }
+        current = next;
+    }
+    if end != 0 {
+        return Err(agent.fault());
+    }
     Ok((target, this, gathered, new_target))
 }
 
@@ -238,26 +276,21 @@ mod tests {
     use crate::host::agent::Agent;
     use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, enter, limits};
     use crate::object::property::Key;
-    use crate::value::{ObjectRef, Value};
-    use crate::{Outcome, Termination};
+    use crate::value::{ObjectRef, Root, Value};
+    use crate::{Outcome, Realm, Termination};
 
-    /// `docs/design/engine.md`, "Memory budget" (work is charged before it is done), and
-    /// [[Call]] of a bound function (`#sec-bound-function-exotic-objects-call-thisargument-argumentslist`):
-    /// a function bound with 100,000 arguments through `Function.prototype.bind.apply`, called
-    /// with 10 steps for its entry. The call ends in `Terminated(StepBudget)` before a bound
-    /// argument is copied, since the link's arguments are charged first.
-    #[test]
-    fn bound_arguments_are_charged_before_they_are_copied() {
-        const N: u32 = 100_000;
+    /// An agent with a budget of what its realm holds plus 256 MiB, `Function.prototype` bound
+    /// with `n` arguments through `Function.prototype.bind.apply`, and a root of `undefined`.
+    fn bound_with(n: u32) -> (Agent<NoHooks>, Realm, Root, Root) {
         let mut limits = limits();
         limits.memory_bytes = 1 << 30;
         let (mut agent, realm) = agent_with_realm_and(limits);
         let held = agent.heap.bytes();
         agent.heap.accounting.set_limit(held + (1 << 28));
         enter(&mut agent, &realm);
-        // The arguments of apply: the bound `this`, then N bound arguments.
+        // The arguments of apply: the bound `this`, then n bound arguments.
         let list = agent.array_create(0.0, None).unwrap();
-        for i in 0..=N {
+        for i in 0..=n {
             assert_eq!(
                 agent.create_data_property(list, Key::Index(i), Value::Number(f64::from(i))),
                 Ok(true)
@@ -291,6 +324,17 @@ mod tests {
             Ok(Outcome::Normal(bound)) => bound,
             other => panic!("bind.apply answered {other:?}"),
         };
+        (agent, realm, bound, undefined)
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (work is charged before it is done), and
+    /// [[Call]] of a bound function (`#sec-bound-function-exotic-objects-call-thisargument-argumentslist`):
+    /// a function bound with 100,000 arguments through `Function.prototype.bind.apply`, called
+    /// with 10 steps for its entry. The call ends in `Terminated(StepBudget)` before a bound
+    /// argument is copied, since the link's arguments are charged first.
+    #[test]
+    fn bound_arguments_are_charged_before_they_are_copied() {
+        let (mut agent, realm, bound, undefined) = bound_with(100_000);
         agent.limits.steps_per_entry = 10;
         ARGUMENTS_CLONED.with(|cloned| cloned.set(0));
         let answer = agent.call(&realm, &bound, &undefined, &[]);
@@ -303,5 +347,40 @@ mod tests {
             0,
             "bound arguments copied before the step budget ended the run"
         );
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (storage is charged before it is allocated),
+    /// and [[Call]] of a bound function: the function of [`bound_with`] with 100,000 bound
+    /// arguments, called under a budget of the reading after the setup plus half of the
+    /// arguments' bytes. The call ends in `Terminated(MemoryBudget)` before a bound argument is
+    /// copied; the next call answers normally and copies each bound argument once, and after a
+    /// collection the reading is the one before.
+    #[test]
+    fn bound_arguments_are_not_copied_past_the_memory_budget() {
+        const N: u32 = 100_000;
+        let (mut agent, realm, bound, undefined) = bound_with(N);
+        let arguments = u64::from(N) * size_of::<Value>() as u64;
+        let roomy_limit = agent.heap.bytes() + (1 << 28);
+        assert!(agent.collect().is_ok());
+        let before = agent.heap_bytes().unwrap();
+        agent.heap.accounting.set_limit(before + arguments / 2);
+        ARGUMENTS_CLONED.with(|cloned| cloned.set(0));
+        let answer = agent.call(&realm, &bound, &undefined, &[]);
+        assert!(
+            matches!(answer, Ok(Outcome::Terminated(Termination::MemoryBudget))),
+            "{answer:?}"
+        );
+        assert_eq!(
+            ARGUMENTS_CLONED.with(std::cell::Cell::get),
+            0,
+            "bound arguments copied before the memory budget ended the run"
+        );
+        agent.heap.accounting.set_limit(roomy_limit);
+        let answer = agent.call(&realm, &bound, &undefined, &[]);
+        assert!(matches!(answer, Ok(Outcome::Normal(_))), "{answer:?}");
+        drop(answer);
+        assert_eq!(ARGUMENTS_CLONED.with(std::cell::Cell::get), u64::from(N));
+        assert!(agent.collect().is_ok());
+        assert_eq!(agent.heap_bytes().unwrap(), before, "after the next call");
     }
 }
