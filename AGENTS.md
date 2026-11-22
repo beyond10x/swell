@@ -133,6 +133,9 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   SHA-256 sums. The generated tables are committed and checked against a regeneration.
 - `conformance/test262/`: `features.txt` (every feature, `run` or `exclude`), `sections.txt`
   (ECMA-262 sections, their test262 paths and omissions), `expected.txt` (the gate's counts).
+- `website/`: the documentation site (`docs/` its pages, `src/` its landing page and
+  components, `data/status.json` its numbers, written by `task site-data`). `docs/img/`: the
+  logo's lockup for `README.md`.
 - test262 is never vendored: it is fetched by commit into `.cache/test262/<commit>/` and checked
   against its tree hash and a SHA-256 of `git ls-tree -r` (decision 11).
 
@@ -274,8 +277,19 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   `.github/workflows/check.yml` (runs `task check` on a push to `main` and on a pull request;
   it installs the Rust toolchain, go-task and `ess` by pinned release assets, and the gate
   fetches test262 by its pin) and `shared-gates.yml` (the organization's shared source gates,
-  as surf has it). No `b10x.docs.yaml`, no documentation site workflow, and no release
-  workflow while a release holds no binary.
+  as surf has it). No release workflow while a release holds no binary.
+- **The documentation site** is `website/` (Docusaurus on the organization's docs-system),
+  to be served at https://beyond10x.github.io/swell/. It types no number: `task site-data`
+  writes `website/data/status.json` from the committed files of the gate, and
+  `task site-data-check` fails when that file differs from what they give, so a change of
+  `conformance/test262/expected.txt`, `conformance/slices-delivered.txt`,
+  `conformance/host/requirements.txt`, `conformance/test262/moves.tsv`, the design's slice
+  table, the workspace version or `Cargo.lock` is committed together with a new
+  `status.json`. The logo is `website/static/img/logo.svg` (and `logo-dark.svg`), the lockup
+  for the head of `README.md` is `docs/img/swell-logo.svg` (and `-dark.svg`): hand-written
+  SVG. The two workflows that build and publish the site, and the Pages setting, are added
+  by the session that decides for the operator; until its first run has ended with success
+  the address above serves nothing.
 - **A release** is an annotated tag by the bot, named as the workspace version, on a green
   commit of `main`, and a GitHub Release whose notes are a short summary (a lead sentence,
   `**Breaking**`, `**Changed**` with at most five bullets, at most 900 characters) that ends
