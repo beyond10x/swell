@@ -123,7 +123,7 @@ pub fn global(agent: &mut Agent<TestHost>, realm: &Realm) -> Root {
 }
 
 /// The object a root holds.
-pub fn object(cx: &Cx<'_, TestHost>, root: &Root) -> ObjectRef {
+pub fn object(cx: &mut Cx<'_, TestHost>, root: &Root) -> ObjectRef {
     match cx.get(root).unwrap() {
         Value::Object(object) => object,
         other => panic!("the root holds {other:?}"),

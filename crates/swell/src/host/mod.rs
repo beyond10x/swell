@@ -173,9 +173,16 @@ impl<H: Host> Agent<H> {
         Ok(self.heap.roots.add(value))
     }
 
-    fn scoped_get(&self, root: &Root) -> Result<Value, HostError> {
+    fn scoped_get(&mut self, root: &Root) -> Result<Value, HostError> {
         self.alive()?;
-        self.heap.roots.get(root)
+        let value = self.heap.roots.get(root)?;
+        // A value that names a record is handed out to the running scope, as a new String is,
+        // so that it outlives a drop of `root` until the scope ends (HOST-170). The collector
+        // reports no primitive, so none is recorded.
+        if let Value::String(_) | Value::Symbol(_) | Value::Object(_) = value {
+            self.hand_out(value);
+        }
+        Ok(value)
     }
 
     fn scoped_new_string(&mut self, text: &str) -> Completion<StringRef> {
@@ -429,8 +436,9 @@ macro_rules! scoped_methods {
                 self.agent.scoped_root(value)
             }
 
-            /// The value `root` holds.
-            pub fn get(&self, root: &Root) -> Result<Value, HostError> {
+            /// The value `root` holds, handed out to the running scope: valid until the scope
+            /// ends, also when `root` is dropped before.
+            pub fn get(&mut self, root: &Root) -> Result<Value, HostError> {
                 self.agent.scoped_get(root)
             }
 

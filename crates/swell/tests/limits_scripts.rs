@@ -220,7 +220,10 @@ fn host_49_setup_closure_and_clause_19_globals() {
         assert_eq!(calls, 1, "the setup closure ran once in round {round}");
         let global_root = global(&mut agent, &realm);
         let brand = agent
-            .with_cx(&realm, |cx| cx.brand(object(cx, &global_root)))
+            .with_cx(&realm, |cx| {
+                let global = object(cx, &global_root);
+                cx.brand(global)
+            })
             .unwrap();
         assert_eq!(brand, Ok(Some(Brand(round))), "the global is the closure's");
         for name in [
