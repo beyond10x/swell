@@ -412,52 +412,68 @@ fn nesting_of_100000_brackets_is_one_error() {
     assert!(ParseOptions { max_nesting: LIMIT }.stack_bytes() <= 256 * 1024);
 }
 
-/// A source of `n` nested `kind`s; each kind drives another recursion of the parser, or, for the
-/// chains, a tree as deep as the limit that the parser builds by a loop.
-fn nested(kind: &str, n: usize) -> Option<String> {
-    let r = |s: &str| s.repeat(n);
-    Some(match kind {
-        "array" => format!("{}{};", r("["), r("]")),
-        "paren" => format!("{}0{};", r("("), r(")")),
-        "block" => format!("{}{}", r("{"), r("}")),
-        "object" => format!("x = {}0{};", r("{a:"), r("}")),
-        "arguments" => format!("{}0{};", r("f("), r(")")),
-        "index" => format!("{}0{};", r("a["), r("]")),
-        "new" => format!("{}X;", r("new ")),
-        "not" => format!("x = {}a;", r("!")),
-        "typeof" => format!("{}a;", r("typeof ")),
-        "assign" => format!("{}0;", r("a = ")),
-        "conditional" => format!("{}c;", r("a ? b : ")),
-        "conditional_middle" => format!("{}b{};", r("a ? "), r(" : c")),
-        "sum_chain" => format!("x = a{};", r("+a")),
-        "member_chain" => format!("x = a{};", r(".b")),
-        "call_chain" => format!("f{};", r("()")),
-        "function_declaration" => format!("{}{}", r("function f(){"), r("}")),
-        "function_expression" => format!("x = {}0{};", r("function(){ return "), r("; }")),
-        "getter" => format!("x = {}0{};", r("{get a(){ return "), r("; }}")),
-        "if" => format!("{};", r("if (a) ")),
-        "else" => format!("{};", r("if (a) ; else ")),
-        "while" => format!("{};", r("while (a) ")),
-        "for" => format!("{};", r("for (;;) ")),
-        "for_in" => format!("{};", r("for (x in o) ")),
-        "do_while" => format!("{};{}", r("do "), r(" while (a);")),
-        "try" => format!("{}{}", r("try {"), r("} finally {}")),
-        "catch" => format!("{}{}", r("try {} catch (e) {"), r("}")),
-        "switch" => format!("{}{}", r("switch (a) { case 0: "), r("}")),
-        "string_inside" => format!("x = {}\"a\\u{{1F600}}\\x41\\101\"{};", r("("), r(")")),
-        "regexp_inside" => format!("x = {}/a[/]b\\//gi{};", r("("), r(")")),
+/// The code units of a source of `n` nested `kind`s; each kind drives another recursion of the
+/// parser, or, for the chains, a tree as deep as the limit that the parser builds by a loop.
+///
+/// The source is `before`, `n` times `open`, `middle`, `n` times `close` and `after`, put
+/// together from the code units of each piece, which `[u16]::repeat` copies `n` times. A source
+/// 100,000 deep is up to 2 MB, and encoding all of it as UTF-16 in the unoptimised test build
+/// cost more than its parse, which stops at the limit: the child of
+/// `every_nesting_kind_fits_the_stack_bound` at limit 10, which does little besides the
+/// 100,000-deep check of its seven combinations, took 0.35 s of processor time that way and takes
+/// 0.00 s this way; the child at 2,500 took 0.59 s and takes 0.21 s.
+fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
+    if kind == "labelled" {
         // Each label of a chain has a name of its own: a label inside the same label is an
         // early error.
-        "labelled" => format!("{};", (0..n).map(|i| format!("l{i}: ")).collect::<String>()),
-        "optional_chain" => format!("x = a{};", r("?.b")),
-        "optional_index" => format!("x = {}0{};", r("a?.["), r("]")),
-        "optional_call" => format!("x = {}0{};", r("f?.("), r(")")),
-        "coalesce" => format!("x = a{};", r(" ?? a")),
-        "method" => format!("x = {}0{};", r("{m(){ return "), r("; }}")),
-        "with" => format!("{};", r("with (o) ")),
-        "template" => format!("x = {}0{};", r("`${"), r("}`")),
+        let labels: String = (0..n).map(|i| format!("l{i}: ")).collect();
+        return Some(units(&format!("{labels};")));
+    }
+    let (before, open, middle, close, after) = match kind {
+        "array" => ("", "[", "", "]", ";"),
+        "paren" => ("", "(", "0", ")", ";"),
+        "block" => ("", "{", "", "}", ""),
+        "object" => ("x = ", "{a:", "0", "}", ";"),
+        "arguments" => ("", "f(", "0", ")", ";"),
+        "index" => ("", "a[", "0", "]", ";"),
+        "new" => ("", "new ", "X;", "", ""),
+        "not" => ("x = ", "!", "a;", "", ""),
+        "typeof" => ("", "typeof ", "a;", "", ""),
+        "assign" => ("", "a = ", "0;", "", ""),
+        "conditional" => ("", "a ? b : ", "c;", "", ""),
+        "conditional_middle" => ("", "a ? ", "b", " : c", ";"),
+        "sum_chain" => ("x = a", "+a", ";", "", ""),
+        "member_chain" => ("x = a", ".b", ";", "", ""),
+        "call_chain" => ("f", "()", ";", "", ""),
+        "function_declaration" => ("", "function f(){", "", "}", ""),
+        "function_expression" => ("x = ", "function(){ return ", "0", "; }", ";"),
+        "getter" => ("x = ", "{get a(){ return ", "0", "; }}", ";"),
+        "if" => ("", "if (a) ", ";", "", ""),
+        "else" => ("", "if (a) ; else ", ";", "", ""),
+        "while" => ("", "while (a) ", ";", "", ""),
+        "for" => ("", "for (;;) ", ";", "", ""),
+        "for_in" => ("", "for (x in o) ", ";", "", ""),
+        "do_while" => ("", "do ", ";", " while (a);", ""),
+        "try" => ("", "try {", "", "} finally {}", ""),
+        "catch" => ("", "try {} catch (e) {", "", "}", ""),
+        "switch" => ("", "switch (a) { case 0: ", "", "}", ""),
+        "string_inside" => ("x = ", "(", "\"a\\u{1F600}\\x41\\101\"", ")", ";"),
+        "regexp_inside" => ("x = ", "(", "/a[/]b\\//gi", ")", ";"),
+        "optional_chain" => ("x = a", "?.b", ";", "", ""),
+        "optional_index" => ("x = ", "a?.[", "0", "]", ";"),
+        "optional_call" => ("x = ", "f?.(", "0", ")", ";"),
+        "coalesce" => ("x = a", " ?? a", ";", "", ""),
+        "method" => ("x = ", "{m(){ return ", "0", "; }}", ";"),
+        "with" => ("", "with (o) ", ";", "", ""),
+        "template" => ("x = ", "`${", "0", "}`", ";"),
         _ => return None,
-    })
+    };
+    let mut source = units(before);
+    source.extend_from_slice(&units(open).repeat(n));
+    source.extend_from_slice(&units(middle));
+    source.extend_from_slice(&units(close).repeat(n));
+    source.extend_from_slice(&units(after));
+    Some(source)
 }
 
 const NESTING_KINDS: [&str; 37] = [
@@ -524,8 +540,8 @@ fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec
 /// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
 /// nesting error alone (`Some(false)`), or fail otherwise (`None`).
 fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
-    let text = nested(kind, n)?;
-    match parse_through(entry, &units(&text), limit) {
+    let source = nested(kind, n)?;
+    match parse_through(entry, &source, limit) {
         Ok(_) => Some(true),
         Err(e) if e.len() == 1 && e.first()?.message.contains("parser_nesting") => Some(false),
         Err(_) => None,
@@ -597,10 +613,31 @@ fn fits_the_stack_bound(entry: Entry, kind: &str, limit: u32) {
     );
 }
 
+/// The deep limit of the check of the stack bound, at which the per-level part of
+/// `ParseOptions::stack_bytes` decides: 10,000 at the full count (the lane `slow`,
+/// `SWELL_FULL_COUNTS=1`), 2,500 in the gate. The gate's limit still finds a frame past the bound:
+/// a level's frames grow in steps of 16 bytes (the x86_64 call alignment), so the first growth past
+/// `STACK_BYTES_PER_LEVEL` (224) is 240 bytes a level. The deepest source the limit admits
+/// reaches more than 2,400 of its levels (one nesting takes at most 14, for a getter or a method:
+/// 177 of them at 2,500, 713 at 10,000), and 16 bytes more on each of 2,400 levels is 38,400
+/// bytes, more than all of `STACK_BYTES_FIXED` (32,768) even if the fixed part used none of it;
+/// so that source overflows the stack and the test fails, as at 10,000. The search's cost grows with the limit, and faster for labels, whose
+/// early errors look each label up among those around it: at 10,000 a part took 1.4 to 4.5 s of
+/// processor time and 13.9 to 44.6 s in the gate at a load of 117 to 149 on 17 cores; at 2,500,
+/// 0.18 to 0.60 s of processor time.
+fn deep_limit() -> u32 {
+    if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
+        10_000
+    } else {
+        2_500
+    }
+}
+
 /// The tests of the stack bound, one per part, and the list of their parts,
 /// [`STACK_BOUND_PARTS`], whose length is the number of parts. Each test checks the
-/// combinations of its part ([`stack_bound_part`]) at the limits 10 and 10,000, each limit in a
-/// child process on the stack `ParseOptions::stack_bytes` gives for it.
+/// combinations of its part ([`stack_bound_part`]) at the limits 10 and [`deep_limit`], each
+/// limit in a child process on the stack `ParseOptions::stack_bytes` gives for it (the child
+/// inherits `SWELL_FULL_COUNTS`, so it runs the limit its parent asks for).
 macro_rules! stack_bound_parts {
     ($($name:ident = $part:literal),* $(,)?) => {
         /// The parts of the check of the stack bound, one test each ([`stack_bound_part`]).
@@ -608,7 +645,7 @@ macro_rules! stack_bound_parts {
         $(
             #[test]
             fn $name() {
-                for limit in [10, 10_000] {
+                for limit in [10, deep_limit()] {
                     on_bounded_stack(stringify!($name), limit, |limit| {
                         for (entry, kind) in stack_bound_part($part) {
                             fits_the_stack_bound(entry, kind, limit);
@@ -626,7 +663,8 @@ macro_rules! stack_bound_parts {
 // (`parse_script`, `parse_eval` and the body of `parse_dynamic_function`, whose three parses
 // each stay within the limit): a test fails when a frame of the parser grows past
 // `STACK_BYTES_PER_LEVEL`, or its fixed part past `STACK_BYTES_FIXED`, and the stack
-// overflows. At 10,000 levels the per-level bound decides; at 10 the fixed part does.
+// overflows. At the deep limit (`deep_limit`: 2,500 levels in the gate, 10,000 at the full
+// count) the per-level bound decides; at 10 the fixed part does.
 // The combinations of entry and kind are split over `every_nesting_kind_fits_the_stack_bound`,
 // the first part, and `every_nesting_kind_fits_the_stack_bound_part_<n>`, so that under
 // cargo-nextest each part runs in a process of its own and no part takes long; the parts

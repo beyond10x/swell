@@ -149,7 +149,10 @@ tasks:
       "gate-slowest <STEP> <seconds> <binary> <test>". It fails when cargo nextest failed, a
       test failed, there is no Summary line, or fewer than MIN_PASSED (default 0) passed; then
       LOG is printed first, and the ten slowest follow it when the run got to its Summary line
-      (a test terminated at 60 s is then among them).
+      (a test terminated at 60 s is then among them). It reads LOG with its escape sequences
+      removed (LOG.plain), so a coloured log (CARGO_TERM_COLOR=always, as the runner sets it)
+      counts as a plain one; LOG itself is printed as it is. A log with no "Starting" line naming
+      at least one binary is not counted: the task says what it could not read and fails.
     silent: true
     vars:
       MIN_PASSED: '{{.MIN_PASSED | default "0"}}'
@@ -158,8 +161,11 @@ tasks:
         status=$(cat '{{.STATUS}}' 2>/dev/null || echo 1)
         log='{{.LOG}}'
         junit='{{.JUNIT}}'
-        if ! LC_ALL=C awk -v status="$status" -v prefix='{{.PREFIX}}' -v min='{{.MIN_PASSED}}' '
+        esc=$(printf '\033')
+        LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" "$log" > "$log.plain" 2>/dev/null || : > "$log.plain"
+        if ! LC_ALL=C awk -v status="$status" -v prefix='{{.PREFIX}}' -v min='{{.MIN_PASSED}}' -v file="$log" '
           /^ *Starting [0-9]+ tests? across [0-9]+ binar/ {
+            started = 1
             for (i = 1; i <= NF; i++) {
               if ($i == "across") binaries = $(i + 1)
               if ($i ~ /^skipped/ && i > 2) { n = $(i - 2); gsub(/[^0-9]/, "", n); startskipped = n + 0 }
@@ -175,12 +181,17 @@ tasks:
             }
           }
           END {
+            if (!started || binaries == 0) {
+              printf "%sread no \"Starting <n> tests across <b> binaries\" line with a binary in %s (%d line(s), escape sequences removed): nothing to count\n", prefix, file, NR
+              exit 1
+            }
             if (!summary) skipped = startskipped
             failed = run - passed
             printf "%s%d test binaries: %d passed, %d failed, %d ignored\n", prefix, binaries, passed, failed, skipped
+            if (!summary) printf "%sread no \"Summary [\" line in %s: the run did not end\n", prefix, file
             exit (status != 0 || !summary || failed > 0 || passed < min)
           }
-        ' "$log" > "$log.summary"; then
+        ' "$log.plain" > "$log.summary"; then
           cat "$log"
           cat "$log.summary"
           ok=0
@@ -188,7 +199,7 @@ tasks:
           cat "$log.summary"
           ok=1
         fi
-        if ! grep -q '^ *Summary \[' "$log"; then exit 1; fi
+        if ! grep -q '^ *Summary \[' "$log.plain"; then exit 1; fi
         [ -f "$junit" ] || { echo "{{.STEP}}: no JUnit file $junit; .config/nextest.toml writes it"; exit 1; }
         LC_ALL=C awk -v step='{{.STEP}}' '
           {
