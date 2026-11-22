@@ -1,0 +1,433 @@
+# swell 0.2.0
+ALL pub const ALL: [ErrorKind; 7] = [ErrorKind::Error, ErrorKind::EvalError, ErrorKind::RangeError, ErrorKind::ReferenceError, ErrorKind::SyntaxError, ErrorKind::TypeError, ErrorKind::UriError]
+Abrupt #[derive(Clone, Copy, Debug, PartialEq)] pub enum Abrupt
+Abrupt::Terminated Terminated(Termination)
+Abrupt::Throw Throw(Value)
+Agent pub struct Agent<H: Host>
+Agent::call pub fn call(&mut self, realm: &Realm, function: &Root, this: &Root, args: &[&Root]) -> Result<Outcome<Root>, HostError>
+Agent::construct pub fn construct(&mut self, realm: &Realm, function: &Root, args: &[&Root], new_target: Option<&Root>) -> Result<Outcome<Root>, HostError>
+Agent::duplicate pub fn duplicate(&mut self, root: &Root) -> Result<Root, HostError>
+Agent::evaluate_script pub fn evaluate_script(&mut self, script: &Script) -> Result<Outcome<Root>, HostError>
+Agent::host pub fn host(&self) -> &H
+Agent::host_mut pub fn host_mut(&mut self) -> &mut H
+Agent::parse_script pub fn parse_script(&mut self, realm: &Realm, source: Source<'_>, host_defined: Option<HostDefined>) -> Result<Parsed<Script>, HostError>
+AgentState #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum AgentState
+AgentState::Alive Alive
+AgentState::Faulted Faulted
+BigIntRef #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct BigIntRef
+Brand #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct Brand(pub u32)
+CollectReport #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct CollectReport
+CollectReport::heap_bytes_after pub heap_bytes_after: u64
+CollectReport::heap_bytes_before pub heap_bytes_before: u64
+CompilationType #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum CompilationType
+CompilationType::DirectEval DirectEval
+CompilationType::Function Function
+CompilationType::IndirectEval IndirectEval
+CompileStrings #[derive(Clone, Copy, Debug)] pub struct CompileStrings<'r>
+CompileStrings::body_arg pub body_arg: Value
+CompileStrings::body_string pub body_string: StringRef
+CompileStrings::callee_realm pub callee_realm: RealmRef
+CompileStrings::code_string pub code_string: StringRef
+CompileStrings::compilation_type pub compilation_type: CompilationType
+CompileStrings::param_args pub param_args: &'r [Value]
+CompileStrings::param_strings pub param_strings: &'r [StringRef]
+Completion pub type Completion<T> = Result<T, Abrupt>
+CreateError #[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum CreateError
+CreateError::AgentKeysExhausted AgentKeysExhausted
+Cx pub struct Cx<'a, H: Host>
+Cx::call pub fn call(&mut self, function: Value, this: Value, args: &[Value]) -> Result<Completion<Value>, HostError>
+Cx::construct pub fn construct(&mut self, function: Value, args: &[Value], new_target: Option<Value>) -> Result<Completion<Value>, HostError>
+Cx::evaluate_script pub fn evaluate_script(&mut self, script: ScriptRef) -> Result<Completion<Value>, HostError>
+Cx::parse_script pub fn parse_script(&mut self, realm: RealmRef, source: Source<'_>, host_defined: Option<HostDefined>) -> Result<Parsed<ScriptRef>, HostError>
+ErrorKind #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum ErrorKind
+ErrorKind::Error Error
+ErrorKind::EvalError EvalError
+ErrorKind::RangeError RangeError
+ErrorKind::ReferenceError ReferenceError
+ErrorKind::SyntaxError SyntaxError
+ErrorKind::TypeError TypeError
+ErrorKind::UriError UriError
+FaultPoint #[cfg(feature = "fault-injection")] #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum FaultPoint
+FaultPoint::Collect Collect
+FaultPoint::CreateRealm CreateRealm
+FaultPoint::ParseScript ParseScript
+GlobalObjects #[derive(Clone, Copy, Debug, PartialEq, Eq)] pub struct GlobalObjects
+GlobalObjects::global pub global: ObjectRef
+GlobalObjects::this pub this: Option<ObjectRef>
+GlobalSetup pub type GlobalSetup<'g, H> = &'g mut dyn FnMut(&mut HookCx<'_, H>, RealmRef) -> Completion<GlobalObjects>
+HOST-1 c5b28d4e9070a67c54e2dab64940805593d911982a4ba636ad74f5e9ae352bfd
+HOST-10 0be76ad391b00d0314fd9d39f73ba73371dbe1b2fb244d9188a88546bf8afbc7
+HOST-100 0dbad5b921aacd4a1432e2967750c7e72bb0c8ee495a1283227d948a30711646
+HOST-101 dfd2b661856d9bdd83f0b5a3548876e740eada5296d27fd45802586e9ed2bd3e
+HOST-102 d2ea3a3bc12eccaddae057cc3f40c5f6f0a4713b055e9ec54bc08317f73043e2
+HOST-103 1a355703fa27e029633270c86e46fcab7559632b92719ddd03bc615a45a16608
+HOST-104 a8572d234b33a1e2cb4e25c26ea038d6c8fb542e63823eee2ba5283502122a19
+HOST-105 d780b92ddca8cfe99ae6c341601388c4827d443ff8c98c5f2eb8c92866f56b52
+HOST-106 b3ec2302a0f224f0c87641b2bbff34fdafecb8cebf144a17628184fcaff05de7
+HOST-107 c611cee26764bdf18d018d768a395555aedcbf4eea21065daec64e3d13685cad
+HOST-108 82c93746bad9548ca632f25ea0c29ca61d343001216cfabaf28eb77169ea253f
+HOST-109 0404a4cf57dcd53ccc303e61e487412c90d06c05c55e58d9e58ac621c81f4622
+HOST-11 e83552da6d0889abf94180ba4e7cd0f7bd11bd46e4578fa8d8294fac51bdc716
+HOST-110 2a225d06ad4c1262d5f94d6d36c80e6d5136daded58569a26c7fccf61a5042df
+HOST-111 c1f7f9444e56d728ac7fbe8d709ccd8b2b858ee09a98779128709b8114761c77
+HOST-112 0dedd0c20fd85c59b662e1cb2f7b7e5815cb54768e425bf168fd93de300e06dc
+HOST-113 10fd6421f0066eebbc2f60bf9edf81696b01e3e89a22806e3f209c0904af5b5a
+HOST-114 25a3f34207168e62e1273f2ae5ac8fe107ad56b9268e74b073e1caefaf116ea8
+HOST-115 b45ab23091d17a59f2eae9c28dac6d7a435b53cf643a847f267b54a98adf2700
+HOST-116 0291de4297423226671d2077f601bff040c36ab5f6adc3bf15c9e3971becee1b
+HOST-117 0e3d0d7427e49fde8f785cb9fe14e0d16ce72286d71f75d0dddb647a7b2b4224
+HOST-118 325760a511d53abca621f6de78c5bce78bd0a393c93895ca4fbc8d3f4e7753d8
+HOST-119 c145088bdeff67e483cfc6e47a3c49e98bd228d6ed80c648ee941bfce7cdac67
+HOST-12 08255fd85e9262ce69a3db2a908ef6a1ab4a7cb2bf1df9631e2135fb1f8ec79f
+HOST-120 7ccffd8110c3892f969f2bc6babcb68592b17bb68cc393d25156357cabc2d143
+HOST-121 4b0176e97f11fde4b7a7b42b5c78a13123c4b42124dcfbb45c5eda431b1dc9a3
+HOST-122 6b7032d5f218a722e294cbe6e9783ad62a83ffa9ab54655a4d8980d6913aa3bf
+HOST-123 77622dc2818586fdc3c2f16b6fcbaa4b2c1825692ab64be58ef768109df52e0b
+HOST-124 74b32fc9801b8b763c14a70e07d5dd8849dde3587dd5187980ca4ce50476cff8
+HOST-125 e90625cab5879b6e7149483abdf83748ca90ad092cd1ab557a818bfa8b22f8df
+HOST-126 88a3bbe70b1e59163bdfff7f2cef7a9192e17e909bfe5edffaa151cacc9b9853
+HOST-127 df5e8f52f3809aba135b49bbe7ddaee9ca69fc252ed061ebe91599d7988a959b
+HOST-128 ddf0191415b6daec52b0b6191535c4f532c334f6c485dcf39a6caf45ee029bc5
+HOST-129 f7650745d6223e45e595b7c84d3a07f43b84792980718b4b468a8b9ed82b41d6
+HOST-13 5a30537492382fbd994b7b65e3cbd315f20e36f0f5de74acfe0387dba453c915
+HOST-130 a43c6053aee5d182996edfdfdf68c5ce4748d3082f06fce00069846d7e61534e
+HOST-131 f13ebc7ed450333f158eadcc8a17fe9f2632b6fb7d5903c15599b164cbc561e2
+HOST-132 245664b59ca7476ea5ef107cc6b24b2e917a1f9f421d54d65dc6bf77ca32407e
+HOST-133 1fd8b31e2982f46832d342b42f0fea098b78c78453333471a0470eb511b22f82
+HOST-134 e1720a6a964a8c637765e8117fdf72d2e6f54ea46f55765212d8285445946ca8
+HOST-135 e83e24e665d5ada4242ce8d97bc8a6ba3a75c47c59d8229c0e85716b65b8548d
+HOST-136 76f2e3bd01e95b1e3ba4451cb166dcff44a49c3bb641e35c65b741487b8b50a5
+HOST-137 129333f676bfcd7628a42b2bd61edbb3d297d9b5223a76890fde91d9cd954e96
+HOST-138 3736d0563e15830b7292b7b5f7d78876431e73e0088b567275a38dfecad3b30d
+HOST-139 c852861ba7074fbb87c5d96368b1e812d1b63f89a17ed417b2353f01fc5f204a
+HOST-14 82d76d69186dd9ffe105c95bec88d509fcea659ae151776ce1a4412960f8621f
+HOST-140 dd5f9c72816a5a77f4d795a99d5ba006de2a5b063c11ec8d6ac04aa72940c199
+HOST-141 cb4c15bf831a67b51046d382f5b06891287bea06e4fb3294bd1dd5d582dfbf68
+HOST-142 ac0e8a222f44484a27c5db8750054433944fc19a6a74cd96fcc9963b78292ed6
+HOST-143 3d65c9a85fcbe4f28f2149b3fabf8fd024920e3bfbe96ba9ee7ec7c80fd34bec
+HOST-144 97b872f1ea3159f49b2dcd93d72ad807540a4a32b00db360a519aa046c3286a6
+HOST-145 dace082e912cc4c6ccb40092f2a59e99d46761830d7f43baa39f13ef8cd7a362
+HOST-146 9e1229721bd211b36209d54fb197f86e08382eed7e43ced65cf8c1600fbb6fd3
+HOST-147 3222eafbe13bedfa28476985286aac670976abdf06453d85ca2fdd696811ad1a
+HOST-148 8500fc124d011430dba2f6031158112bf85eeffe6535775ca1d42739e12c0059
+HOST-149 9139cd43f2a224e933c1ab7ac486068c93d158e51f348f6915f280620e2d8072
+HOST-15 c545f8953c2a22da96a64e1f818f2afbf2f25fdc280c34cf3c8b20298524507a
+HOST-150 45f19c4db03cbf94aab823f51c771ebf34d67fd170c6a81b49b5d41f4c51f7b7
+HOST-151 12ac946f65ba12778f394ef3f686c7f2bf24c9b7e16ed725d2301024ed75ff35
+HOST-152 5806b3017452c166e2ee5af01f1c40132d36545220af41980304dab083300e4c
+HOST-153 2502b11008cde0445f6cd2b18e25bb0a2b0d7eb6721103589ea93797a0071acc
+HOST-154 d46b8733679be0078ebd1ef7673a4691e76664754050e47cd2e75df33848146a
+HOST-155 31beddcdef0f4b6b514c456ff63ef37e8436620f92fba9f517021b3c67607ca6
+HOST-156 d0228a41190aec4b1d041b67f706d3cc7c3e816a69ad9ffb77b36013ef318cb1
+HOST-157 9ab410701a6343326673b8f23c4eeb04ad175a25f52c64439f448bc10ef66879
+HOST-158 454ee659d160fb68377cfa720ff3b5fdb58522846b53c8e36c17bb8f6f0d3d0c
+HOST-159 16f3b07642615f5186365947cfcf3b57d071f84bc6e302439c9b4f8b9bed54ea
+HOST-16 de4fce536be85edf332dcb56e733ddc14808c1ba50c3d2bf3d697cf9b48f9062
+HOST-160 5ab5f5eff0514a1f75a63d1e0d744e65be006c0052e45e4286dd3701b1afa1a3
+HOST-161 6824e0ad86372b34117895215f36d3f6e80a2e85c07474c13740940fdd05cc8b
+HOST-162 72a53faf99cf252fff27620dc6817442efad7f1587d1021e858f603977e73c9b
+HOST-163 a130d0d853a47d18905928e5cf457d8cb4ec18fe23dabc1db403ce59ca373bb1
+HOST-164 ef41d46144f435bc1f4c25fa6ba5970603217145e7302022aba9814ff49af87d
+HOST-17 47fd86c1e779706869461462ac97734b6f78839d9fb3bb3de7c4e5fa3bd45332
+HOST-18 43203fe5e774d5fee71bfb2c5f4b5a01ae606baabb64644cc9f522ee04039506
+HOST-19 75b6d6a5883befe3c7d7ca6f90331d6319edf12c6bbfd46a05f9b29495b70db3
+HOST-2 382b52faa3b8527c2c65e8a028a9206f99ef5ec685434c57157135f64b6a53ed
+HOST-20 991e8f3d2ae0435180893a18f448210e522443bad335bcaf3063881b00e8509e
+HOST-21 8bb3774249df5511733c1b6e6f23638203f67e089c60ef8c485746766c1a609d
+HOST-22 95197a02ba327c26e76877386b398cabf467c74cb48872b6188b1fbacde03626
+HOST-23 37462ae323b6b890cd622433f01a0ceb7dc99df1b82c87f1c95eba223f44e19b
+HOST-24 0314f239198d2a75fd223009fa147b68b2448e28bdf3ab93ce1e67cae519bbc7
+HOST-25 f271a8f7d14fcad2e7fbaf903c134b22c51de87da7bd5ff4a320c3cdd3cc6da5
+HOST-26 825855225a3063ed79c3a41f7a5569f73e862143f9a5ddd773939553b0ef576f
+HOST-27 2dbf912b085f027070fcd84e4158147641859d83e916ee0e667683f172944c65
+HOST-28 eb39f1ff421b105e92845be86c7b2b174e14f3a8a01fd215f96a71dfe237619a
+HOST-29 a2488d8e80a2b90518be83f1a879c0483d6266d4fde628aec237002d43f9c03b
+HOST-3 5dba0033f7dff528071a22613c876c700334c5b761244ac5ad3f92e3fd2e5661
+HOST-30 e86010661401c543772f8377fba706badd986605859d99a564df79ff59135310
+HOST-31 52ffce5d4561ffb5b12d67e71dcdc3bd8f38af4e480ac3008d06ffd224082a37
+HOST-32 80970fd719de0de77a5dd28d74beb2240a035d70af3d6e5af3e90d60ea83b63c
+HOST-33 633a6ad3908f5d97700349b2342abca0f8416fb33b48bb90ffa279ffe9b846d0
+HOST-34 a960d7739fe1ec66bd5a13feb7124f4e2d616bcb93128c8e999f8c26c45c0567
+HOST-35 8108964a679a214d66b997f064d60817c63b69e00812641edb3dbc3bab8059fd
+HOST-36 5e54aae2280454ef7bc2fd6e0c91c6468c904c9d8d71e4988ae7f6047361918b
+HOST-37 e5b60c264feb3701bcaf22158a8365dc72214331ef5ec1f42c7ebaaaaef0e8dd
+HOST-38 687043d4124fa193a3c036f8e6c5f9c74efbd4a677c0d099f8257f6234fe2100
+HOST-39 cf5b5994bd28781d0bad1b31684ff8ed43d5fa8b5c28f08d7f3da755aa955332
+HOST-4 4fb441788f465c5b6082397e54d4a12b30129ace63e7b55f40c1f5dc4ef36513
+HOST-40 d1b312b7f752c6192c66ac768f06a0fdba025e851d89a3e51fe8e15b13fe24c9
+HOST-41 494ba17d7ca16415238b21a31eb8b94b19c42b845d96aaa41eef06a1ac604ce6
+HOST-42 2d14d1ad674138ad4023232c707b4cc673ea3bf96a62882ac0e5b6403d89d86d
+HOST-43 32df2bd7bf72a1ea99e5b5257111d606c8d5d8c250adde2bf736b89f6603b2b2
+HOST-44 cad42ad638e6281a0919470a328045b718230bbbd8b29dfd46044a531a8c9f46
+HOST-45 8574482e18fd57387cf93f5f1eb0db9dc2a2b5f215495daa377359f811294d25
+HOST-46 34fc2c88b33ca6d2748ce077cc7cc50039ae0ea503f3824211433a4b2d600847
+HOST-47 cf33f40f4d93b726b5a1810df61fa465d0f758b644d6d6fbadf76adf67909dfa
+HOST-48 3226e49f2a21af596e104ee2a94fe76f051de802eb0632f55b8355331426d720
+HOST-49 97438dabc231d6c3156892c6d10cd2369f2f080fdd38919bfe05cfdcaaf9ff31
+HOST-5 a7040574de90beebadbef2ce86f5a99aa06ab99cc1b7460417dffe49a7bce629
+HOST-50 a62aba1a02e641b5ccc9875415207bf18d37d4f23c645edab5fb045fcfce42f7
+HOST-51 a3bbe52bd9744de9baec7897544e817b0f494423eb8d3147060e67b085142bc7
+HOST-52 e4cc706279a4678df63ac66f812030eba15508d4f5f0d8f07eca2e7ea834c519
+HOST-53 a63b802fd09da88485ebaab301db23af9ab4d0db06f24d29d7bf03ea137e2bd2
+HOST-54 1f216ec187d2325036c94029864fc81921fef716a838edde412d196f6c791691
+HOST-55 c18424cf3da2e42435e15a8114084f9d810aa48c875468c9f614c06cb0ee01cc
+HOST-56 27a04d2038c81dce09f7fc811260aa657e0064561a8f3e0f20bb5035232633c2
+HOST-57 f90b9ca399d1060796f5004c82320dcc2650cb2d31d4c20fd7ceff3d4646c5d7
+HOST-58 f77d5d540c62cbcb06fdbf6319b94b78b051c278dbeb6b0395fcfaed18a5fe62
+HOST-59 3eba21951bc2fe6dccfe78afb068bb04390573fed3006404c478e5441cb27791
+HOST-6 71450cf06fb2b47a8ce8beabb1f9e211c87f553d52e3deeda26dca06a63f1e6c
+HOST-60 90b67005dcbca7dc906687af77864f49dcdb2f73f28c6521a9c3dab1388e5893
+HOST-61 6bbff844640de90aa4fbfd11e72677180a45484af8d671022e2fa0329ae0c561
+HOST-62 2418c1d73e1385a0d141ee6109fdbf34c777babfb51e3968d313dc89e6225e80
+HOST-63 6bd05bf15e776a0031018cb7b81c38e5e780f49e7840742deff9f9471baa45ea
+HOST-64 23f96b263f5cda5a51424d98ac98947a27d20d617e1686b166941ffdbee37ce9
+HOST-65 ebf1e9d2445d49a209eb8612eec84a41fc79a7f8e085b70fff693445ee6dc382
+HOST-66 539eddb68f42a1b09c138f1b36c7b59826539dd096013c6e1b15ab304a8e6715
+HOST-67 31ec0efa75764eedca1f9ccfd2665763332f65ad32a10860f29daeb1d7e1051f
+HOST-68 054fe06775a7ec82f52700d6c87b86c950c2560dac933761f33412ec0a5a4467
+HOST-69 1cb645e3c2cacb377c85814f3c0641e7a5414994eb316d83659a02383ff6cb1c
+HOST-7 41c74662ae9d236906c247d0aafb7cb0ae7c7561d68cc2c835b66c39dcd0f9bd
+HOST-70 2d552399ed155b022e72c368cadb2618cdd9e6e433f4d6e8c4c213d593dde540
+HOST-71 35b9d5bd56fab25f92b31c7af0e42c56d8f86cd6225c557790b0042d2428b2ef
+HOST-72 2dae6f67af0c4d14d47edca07b4c5d4c256e2e5c697891f479f6b8e0483877e9
+HOST-73 7c4531441a58411e816dbeac54851aee621c0997f29f78567a2965f10b3797a6
+HOST-74 1112fcbcd28bf5ce4b5c11250e54098f59b0fa2ee3cd722c62164d85cdedfce3
+HOST-75 b90b846a5c22f54efee04bac1d255788e7e43cbb5b84d731d424d289c120f0c1
+HOST-76 634920f45724b45a6fd415716a6d806acf4902cf357a654f03ee94a4d06b2c02
+HOST-77 9700db1a14627e3c00c8f6a18659b80a7e8715f683d492b22c881edf0925b0dc
+HOST-78 27942faa70e60968eee30a319faac5e9bd875d06ae0c02f744506b4a5512ab5b
+HOST-79 f28fbe152d172e846466f584376e5ecea181a502280e48b60ecc7e6c8b20a2ec
+HOST-8 7c17b3e6df12770cb3b931c87125cc2fb1b02090f598e939b8692231a6e54f9b
+HOST-80 56ca66bc90c7939391c06280b05b4ab2374870973b066f9f8ecd9016c89b471f
+HOST-81 68c0d9f25351afe863d34196df13ec938599759f7bb7ac04cfc34add41fe14c8
+HOST-82 1f67fe14677e61927e4e8f104d534483a1be03b402f5886846c40b892b970e67
+HOST-83 64a45815e5dd26a5433658b96c03d49f55f63395d9fbc8c48714fa2cb8e0a5e5
+HOST-84 db50b5671de3b625353ca0d5d4eb2c1154b1de5b704d9ef731c974baa455f000
+HOST-85 49b2f38318c7b01dc83a0cc4d73e04ba42bb6de62a54fa9e408d09ad3958b9ce
+HOST-86 a7220e2b2d8b883d7667d30642e70f3012e2529da8a9732ee2ebc8bbf7afb069
+HOST-87 6cf13bb927d338dd86b9c51f8940a43911c4b8e7590fe767b5d1c5c41b2a37b2
+HOST-88 205cf54ec5fb7807527ddac2a7fd112ef1ced6be67d5b1b98f9e48f21d45378e
+HOST-89 2d23731342a39df65ae9cbfae37f21d27fac85de4aa7baf2c4ea5df6ce354e87
+HOST-9 7c66f15e16e601bc2b7a48fc4270526f7b543c97c9a0798452b825f8df99548d
+HOST-90 a679b21c4617595124856c41b51ac7413b16008b270bee31c3d7447e5d45051b
+HOST-91 92af3f8bfe8d40c85b7e787645f91e7d3e26ecb90d3b3a2cc27dc581b5ca6126
+HOST-92 d5859ff5bb91f9d7c54d3da97d8ceaa79b216d953106337cb71da5e2591b4f53
+HOST-93 737233fc04ebd457cf7a7f5ef7300ac75dfb4a72d97ece8c2491e420cf0b115d
+HOST-94 6921ba84b7f6f30ec817033349ab64b41e075f3bc0b36462d455bc5277763204
+HOST-95 54a693c3ccac7326fd198f8426608cbd13e94113ab854c6699fcb925b32b26a7
+HOST-96 b49f3764f931ef5413c7e2b9bc933763a14f7b757f8bdfb8fd9c061ad78de6de
+HOST-97 a4177cbb2b4b0eea8a0e4faecdd5b4a8bb8625e15a4110de2a98c0fb069b37e6
+HOST-98 31366fc4e433ac1cc02d015cc3edcff0f1015717e7c85c45e2f831f1f7c51e2a
+HOST-99 2b89c83c7866cdd6890393d36616f79b9c3e9d67846a093b042d38f3c5ab47b1
+Handled #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum Handled
+Handled::Handled Handled
+Handled::Unhandled Unhandled
+HookCx pub struct HookCx<'a, H: Host>
+Host pub trait Host: Sized + 'static
+HostCall #[derive(Clone, Copy, Debug)] pub struct HostCall<'c>
+HostCall::args pub args: &'c [Value]
+HostCall::callee pub callee: ObjectRef
+HostCall::new_target pub new_target: Option<ObjectRef>
+HostCall::this pub this: Value
+HostData pub trait HostData: Any
+HostDefined pub type HostDefined = Rc<dyn HostData>
+HostError #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum HostError
+HostError::EvaluationInProgress EvaluationInProgress
+HostError::Faulted Faulted
+HostError::ForeignHandle ForeignHandle
+HostError::ModuleStatus ModuleStatus { found: ModuleStatus }
+HostError::ModuleTerminated ModuleTerminated
+HostError::StaleHandle StaleHandle
+HostError::WrongKind WrongKind { expected: ValueKind }
+HostFn pub type HostFn<H> = fn(cx: &mut Cx<'_, H>, call: HostCall<'_>) -> Completion<Value>
+HostObjectSpec pub struct HostObjectSpec
+HostObjectSpec::brand pub brand: Brand
+HostObjectSpec::data pub data: Option<Box<dyn HostData>>
+HostObjectSpec::prototype pub prototype: Prototype
+ImportAttribute #[derive(Clone, Debug, PartialEq, Eq, Hash)] pub struct ImportAttribute
+ImportAttribute::key pub key: Vec<u16>
+ImportAttribute::value pub value: Vec<u16>
+InterruptHandle #[derive(Clone, Debug, Default)] pub struct InterruptHandle
+IsoDateTime #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct IsoDateTime
+IsoDateTime::day pub day: u8
+IsoDateTime::hour pub hour: u8
+IsoDateTime::microsecond pub microsecond: u16
+IsoDateTime::millisecond pub millisecond: u16
+IsoDateTime::minute pub minute: u8
+IsoDateTime::month pub month: u8
+IsoDateTime::nanosecond pub nanosecond: u16
+IsoDateTime::second pub second: u8
+IsoDateTime::year pub year: i32
+Job #[derive(Debug)] pub struct Job
+JobKind #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum JobKind
+JobKind::FinalizationRegistryCleanup FinalizationRegistryCleanup
+JobKind::Generic Generic
+JobKind::Timeout Timeout
+Limits #[derive(Clone, Copy, Debug, PartialEq, Eq)] pub struct Limits
+Limits::bigint_bits pub bigint_bits: u64
+Limits::frame_depth pub frame_depth: u32
+Limits::memory_bytes pub memory_bytes: u64
+Limits::parser_nesting pub parser_nesting: u32
+Limits::reentry_depth pub reentry_depth: u32
+Limits::steps_per_entry pub steps_per_entry: u64
+Limits::string_length pub string_length: u64
+LoadRequest pub struct LoadRequest
+Module #[derive(Debug)] pub struct Module(#[expect(dead_code, reason = "modules: slice 11")] Root)
+ModuleRef #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct ModuleRef
+ModuleStatus #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum ModuleStatus
+ModuleStatus::Evaluated Evaluated
+ModuleStatus::Evaluating Evaluating
+ModuleStatus::EvaluatingAsync EvaluatingAsync
+ModuleStatus::Linked Linked
+ModuleStatus::Linking Linking
+ModuleStatus::New New
+ModuleStatus::Unlinked Unlinked
+ObjectRef #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct ObjectRef
+Outcome #[derive(Debug)] pub enum Outcome<T>
+Outcome::Normal Normal(T)
+Outcome::Terminated Terminated(Termination)
+Outcome::Throw Throw(Root)
+Parsed #[derive(Debug)] pub enum Parsed<T>
+Parsed::Errors Errors(Vec<Root>)
+Parsed::Parsed Parsed(T)
+Parsed::Terminated Terminated(Termination)
+PreferredType #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum PreferredType
+PreferredType::Number Number
+PreferredType::String String
+PropertyDescriptor #[derive(Clone, Copy, Debug, Default, PartialEq)] pub struct PropertyDescriptor
+PropertyDescriptor::configurable pub configurable: Option<bool>
+PropertyDescriptor::enumerable pub enumerable: Option<bool>
+PropertyDescriptor::get pub get: Option<Value>
+PropertyDescriptor::set pub set: Option<Value>
+PropertyDescriptor::value pub value: Option<Value>
+PropertyDescriptor::writable pub writable: Option<bool>
+PropertyKey #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum PropertyKey
+PropertyKey::String String(StringRef)
+PropertyKey::Symbol Symbol(SymbolRef)
+Prototype #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum Prototype
+Prototype::Null Null
+Prototype::Object Object(ObjectRef)
+Prototype::ObjectPrototypeOf ObjectPrototypeOf(RealmRef)
+Realm #[derive(Debug)] pub struct Realm(pub(crate) Root)
+RealmRef #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct RealmRef
+Referrer #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum Referrer
+Referrer::Module Module(ModuleRef)
+Referrer::Realm Realm(RealmRef)
+Referrer::Script Script(ScriptRef)
+RejectionOperation #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum RejectionOperation
+RejectionOperation::Handle Handle
+RejectionOperation::Reject Reject
+Root pub struct Root
+SUPPORTED_IMPORT_ATTRIBUTES const SUPPORTED_IMPORT_ATTRIBUTES: &'static [&'static str] = &[]
+Script #[derive(Debug)] pub struct Script(pub(crate) Root)
+ScriptRef #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct ScriptRef
+Seeds #[derive(Clone, Copy)] pub struct Seeds
+Seeds::hash_key pub hash_key: [u8; 16]
+Seeds::random_seed pub random_seed: [u8; 32]
+Source #[derive(Clone, Copy, Debug)] pub enum Source<'s>
+Source::Utf16 Utf16(&'s [u16])
+Source::Utf8 Utf8(&'s str)
+StringRef #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct StringRef
+SymbolRef #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct SymbolRef
+Termination #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum Termination
+Termination::EngineFault EngineFault
+Termination::Interrupted Interrupted
+Termination::MemoryBudget MemoryBudget
+Termination::StepBudget StepBudget
+TimeZoneIdentifier #[derive(Clone, Debug, PartialEq, Eq, Hash)] pub struct TimeZoneIdentifier
+TimeZoneIdentifier::identifier pub identifier: String
+TimeZoneIdentifier::primary pub primary: String
+Tracer pub struct Tracer<'t>
+Value #[derive(Clone, Copy, Debug, PartialEq)] pub enum Value
+Value::BigInt BigInt(BigIntRef)
+Value::Boolean Boolean(bool)
+Value::Null Null
+Value::Number Number(f64)
+Value::Object Object(ObjectRef)
+Value::String String(StringRef)
+Value::Symbol Symbol(SymbolRef)
+Value::Undefined Undefined
+ValueKind #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum ValueKind
+ValueKind::Constructor Constructor
+ValueKind::Function Function
+ValueKind::Object Object
+ValueKind::Promise Promise
+ValueKind::String String
+attributes pub fn attributes(&self) -> &[ImportAttribute]
+available_named_time_zone_identifiers fn available_named_time_zone_identifiers(_cx: &mut HookCx<'_, Self>) -> Vec<TimeZoneIdentifier>
+brand pub fn brand(&self, object: ObjectRef) -> Result<Option<Brand>, HostError>
+clear pub fn clear(&self)
+collect pub fn collect(&mut self) -> Result<Outcome<CollectReport>, HostError>
+create_realm pub fn create_realm(&mut self, setup: Option<GlobalSetup<'_, H>>, host_defined: Option<HostDefined>) -> Result<Outcome<Realm>, HostError>
+define_property_or_throw pub fn define_property_or_throw(&mut self, object: ObjectRef, key: PropertyKey, descriptor: PropertyDescriptor) -> Result<Completion<()>, HostError>
+delete_property_or_throw pub fn delete_property_or_throw(&mut self, object: ObjectRef, key: PropertyKey) -> Result<Completion<()>, HostError>
+duplicate pub fn duplicate(&mut self, root: &Root) -> Result<Root, HostError>
+get pub fn get(&self, root: &Root) -> Result<Value, HostError>
+get_named_time_zone_epoch_nanoseconds fn get_named_time_zone_epoch_nanoseconds(_cx: &mut HookCx<'_, Self>, _id: &str, local: IsoDateTime) -> Vec<i128>
+get_named_time_zone_offset_nanoseconds fn get_named_time_zone_offset_nanoseconds(_cx: &mut HookCx<'_, Self>, _id: &str, _epoch_ns: i128) -> i128
+get_property pub fn get_property(&mut self, object: ObjectRef, key: PropertyKey) -> Result<Completion<Value>, HostError>
+global_object pub fn global_object(&mut self, realm: &Realm) -> Result<Root, HostError>
+has_property pub fn has_property(&mut self, object: ObjectRef, key: PropertyKey) -> Result<Completion<bool>, HostError>
+heap_bytes pub fn heap_bytes(&self) -> Result<u64, HostError>
+host pub fn host(&self) -> &H
+host_call_job_callback fn host_call_job_callback(cx: &mut Cx<'_, Self>, callback: ObjectRef, _host_defined: Option<&HostDefined>, this: Value, args: &[Value]) -> Completion<Value>
+host_clean_up_after_job fn host_clean_up_after_job(_cx: &mut HookCx<'_, Self>, _realm: Option<RealmRef>, _result: Result<(), Value>)
+host_data pub fn host_data<T: HostData>(&self, object: ObjectRef, brand: Brand) -> Result<Option<&T>, HostError>
+host_data_mut pub fn host_data_mut<T: HostData>(&mut self, object: ObjectRef, brand: Brand) -> Result<Option<&mut T>, HostError>
+host_defined pub fn host_defined(&self) -> Option<&HostDefined>
+host_enqueue_finalization_registry_cleanup_job fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Self>, job: Job)
+host_enqueue_generic_job fn host_enqueue_generic_job(cx: &mut HookCx<'_, Self>, job: Job)
+host_enqueue_promise_job fn host_enqueue_promise_job(_cx: &mut HookCx<'_, Self>, _realm: Option<RealmRef>)
+host_enqueue_timeout_job fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Self>, job: Job, milliseconds: f64)
+host_ensure_can_add_private_element fn host_ensure_can_add_private_element(_cx: &mut HookCx<'_, Self>, _obj: ObjectRef) -> Completion<()>
+host_ensure_can_compile_strings fn host_ensure_can_compile_strings(_cx: &mut Cx<'_, Self>, _request: &CompileStrings<'_>) -> Completion<()>
+host_finalize_import_meta fn host_finalize_import_meta(_cx: &mut HookCx<'_, Self>, _import_meta: ObjectRef, _module: ModuleRef)
+host_get_code_for_eval fn host_get_code_for_eval(_cx: &mut HookCx<'_, Self>, _arg: ObjectRef) -> Option<StringRef>
+host_get_import_meta_properties fn host_get_import_meta_properties(_cx: &mut HookCx<'_, Self>, _module: ModuleRef) -> Completion<Vec<(PropertyKey, Value)>>
+host_grow_shared_array_buffer fn host_grow_shared_array_buffer(_cx: &mut HookCx<'_, Self>, _buffer: ObjectRef, _new_byte_length: u64) -> Completion<Handled>
+host_has_source_text_available fn host_has_source_text_available(_cx: &mut HookCx<'_, Self>, _func: ObjectRef) -> bool
+host_load_imported_module fn host_load_imported_module(cx: &mut HookCx<'_, Self>, request: LoadRequest)
+host_make_job_callback fn host_make_job_callback(_cx: &mut HookCx<'_, Self>, _callback: ObjectRef) -> Option<HostDefined>
+host_mut pub fn host_mut(&mut self) -> &mut H
+host_prepare_to_run_job fn host_prepare_to_run_job(_cx: &mut HookCx<'_, Self>, _realm: RealmRef)
+host_promise_rejection_tracker fn host_promise_rejection_tracker(_cx: &mut HookCx<'_, Self>, _promise: ObjectRef, _operation: RejectionOperation)
+host_resize_array_buffer fn host_resize_array_buffer(_cx: &mut HookCx<'_, Self>, _buffer: ObjectRef, _new_byte_length: u64) -> Completion<Handled>
+host_system_utc_epoch_nanoseconds fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Self>, global: ObjectRef) -> i128
+inject_fault #[cfg(feature = "fault-injection")] pub fn inject_fault(&mut self, point: FaultPoint)
+interrupt pub fn interrupt(&self)
+interrupt_handle pub fn interrupt_handle(&self) -> InterruptHandle
+is_dynamic pub fn is_dynamic(&self) -> bool
+is_set pub fn is_set(&self) -> bool
+kind pub fn kind(&self) -> JobKind
+last_entry_steps pub fn last_entry_steps(&self) -> Result<u64, HostError>
+min_stack_bytes pub const fn min_stack_bytes(&self) -> usize
+name pub fn name(self) -> &'static str
+new pub fn new(host: H, limits: Limits, seeds: Seeds) -> Result<Agent<H>, CreateError>
+new_error pub fn new_error(&mut self, realm: RealmRef, kind: ErrorKind, message: &str) -> Result<Completion<ObjectRef>, HostError>
+new_host_function pub fn new_host_function(&mut self, realm: RealmRef, name: &str, length: u32, steps: HostFn<H>, constructor: bool, data: Option<Box<dyn HostData>>) -> Result<Completion<ObjectRef>, HostError>
+new_host_object pub fn new_host_object(&mut self, spec: HostObjectSpec) -> Result<Completion<ObjectRef>, HostError>
+new_string pub fn new_string(&mut self, text: &str) -> Completion<StringRef>
+new_string_utf16 pub fn new_string_utf16(&mut self, units: &[u16]) -> Completion<StringRef>
+object pub fn object(&mut self, object: ObjectRef)
+realm pub fn realm(&self) -> Option<RealmRef>
+realm_host_defined pub fn realm_host_defined(&self, realm: &Realm) -> Result<Option<HostDefined>, HostError>
+realm_ref pub fn realm_ref(&self, realm: &Realm) -> Result<RealmRef, HostError>
+referrer pub fn referrer(&self) -> Referrer
+refusals pub fn refusals(&self) -> u64
+root pub fn root(&mut self, value: Value) -> Result<Root, HostError>
+script_host_defined pub fn script_host_defined(&self, script: &Script) -> Result<Option<HostDefined>, HostError>
+set pub fn set(&mut self, object: ObjectRef, key: PropertyKey, value: Value, throw: bool) -> Result<Completion<bool>, HostError>
+specifier pub fn specifier(&self) -> &[u16]
+state pub fn state(&self) -> AgentState
+system_time_zone_identifier fn system_time_zone_identifier(_cx: &mut HookCx<'_, Self>) -> String
+to_number pub fn to_number(&mut self, value: Value) -> Result<Completion<f64>, HostError>
+to_numeric pub fn to_numeric(&mut self, value: Value) -> Result<Completion<Value>, HostError>
+to_object pub fn to_object(&mut self, value: Value) -> Result<Completion<ObjectRef>, HostError>
+to_primitive pub fn to_primitive(&mut self, value: Value, preferred: Option<PreferredType>) -> Result<Completion<Value>, HostError>
+to_property_key pub fn to_property_key(&mut self, value: Value) -> Result<Completion<PropertyKey>, HostError>
+to_rust_string_lossy pub fn to_rust_string_lossy(&self, string: StringRef) -> Result<String, HostError>
+to_string pub fn to_string(&mut self, value: Value) -> Result<Completion<StringRef>, HostError>
+to_utf16 pub fn to_utf16(&self, string: StringRef) -> Result<Vec<u16>, HostError>
+trace fn trace(&self, tracer: &mut Tracer<'_>)
+value pub fn value(&mut self, value: Value)
+with_cx pub fn with_cx<R>(&mut self, realm: &Realm, f: impl FnOnce(&mut Cx<'_, H>) -> R) -> Result<R, HostError>
