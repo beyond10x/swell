@@ -256,14 +256,32 @@ impl<H: Host> Agent<H> {
 
     /// Drop `count` entries from the top of the operand stack.
     pub(crate) fn drop_entries(&mut self, count: usize) -> Completion<()> {
-        let frame = self.top_frame()?;
-        match frame.stack.len().checked_sub(count) {
-            Some(len) => {
-                frame.stack.truncate(len);
-                Ok(())
-            }
+        let length = self.top_frame()?.stack.len();
+        match length.checked_sub(count) {
+            Some(len) => self.truncate_stack(len),
             None => Err(self.fault()),
         }
+    }
+
+    /// Cut the running frame's operand stack back to its first `len` entries: how `Pop`,
+    /// [`Agent::drop_entries`] and the `items` of a handler drop entries without their frame
+    /// (an entry [`Agent::pop_entry`] takes is one an instruction uses, never an enumerator
+    /// in the bytecode). The key list an enumerator among the removed entries holds
+    /// leaves the frame's `charged` and is credited, so a `for`-`in` loop that ends, normally,
+    /// by a jump out of it or by a throw caught outside it, credits its list at once.
+    pub(crate) fn truncate_stack(&mut self, len: usize) -> Completion<()> {
+        let frame = self.top_frame()?;
+        let Some(removed) = frame.stack.get(len..) else {
+            return Err(self.fault());
+        };
+        let held = removed.iter().fold(0u64, |held, entry| match entry {
+            Entry::Enumerator(enumerator) => held.saturating_add(enumerator.bytes),
+            _ => held,
+        });
+        frame.stack.truncate(len);
+        frame.charged = frame.charged.saturating_sub(held);
+        self.heap.accounting.credit(held);
+        Ok(())
     }
 
     /// The `count` values on top of the operand stack, bottom first, left there.

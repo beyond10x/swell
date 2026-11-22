@@ -12,16 +12,18 @@
 //! Each list of keys these operations hold is charged to the memory budget before it exists
 //! and credited when it drops, on every way out, and the room it takes on the kept stack is
 //! charged and given back (`story:own-keys-charged-before-the-list-exists`).
-
-use std::collections::BTreeSet;
+//! EnumerateObjectProperties charges its list of keys found and its set of keys visited before
+//! each grows, credits the set when it returns, and answers the list with its charge, which
+//! the `for`-`in` enumerator holds (`story:for-in-key-list-charged-while-the-loop-holds-it`).
 
 use crate::heap::arena::Handle;
+use crate::heap::map::KeyedMap;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Completion, Termination};
 use crate::host::{ErrorKind, Host};
 use crate::object::builtin_function::KeptRoom;
 use crate::object::property::{Descriptor, Key, Property, Slot};
-use crate::object::{KeyList, ObjectKind};
+use crate::object::{KeyList, ObjectKind, key_list_bytes};
 use crate::value::{ObjectRef, Value};
 
 /// The level of SetIntegrityLevel and TestIntegrityLevel.
@@ -39,23 +41,10 @@ pub(crate) enum PropertyKind {
     KeyValue,
 }
 
-/// An order on keys for the visited set of EnumerateObjectProperties: the handles' fields.
-fn key_order(key: Key) -> (u8, u32, u32, u32) {
-    match key {
-        Key::Index(index) => (0, index, 0, 0),
-        Key::String(string) => (
-            1,
-            string.handle.key,
-            string.handle.index,
-            string.handle.generation,
-        ),
-        Key::Symbol(symbol) => (
-            2,
-            symbol.handle.key,
-            symbol.handle.index,
-            symbol.handle.generation,
-        ),
-    }
+/// The set of keys EnumerateObjectProperties visited, with the bytes its table was charged.
+struct Visited {
+    keys: KeyedMap<Key, ()>,
+    bytes: u64,
 }
 
 impl<H: Host> Agent<H> {
@@ -652,23 +641,51 @@ impl<H: Host> Agent<H> {
     /// definition there does it: the enumerable String keys of the object and then of each
     /// prototype, each name once, a name shadowed by a non-enumerable property not visited.
     /// A step per object of the chain and the steps of each [[OwnPropertyKeys]]; each list of
-    /// own keys is credited once it is consumed, before the next object's is asked for.
-    pub(crate) fn enumerate_object_properties(
+    /// own keys is credited once it is consumed, before the next object's is asked for; the
+    /// [[GetOwnProperty]] and the visit of each key are covered by that key's step
+    /// (`docs/design/engine.md`, "The step budget"). The list of keys found and the set of
+    /// keys visited are charged by capacity before each grows. The set is credited when the
+    /// call returns, on every way out of it; the list is answered with its charge, which the
+    /// caller holds, and credited here on an abrupt completion.
+    pub(crate) fn enumerate_object_properties(&mut self, object: ObjectRef) -> Completion<KeyList> {
+        let mut found = KeyList {
+            keys: Vec::new(),
+            bytes: 0,
+        };
+        let mut visited = Visited {
+            keys: KeyedMap::with_hasher(self.heap.hasher),
+            bytes: 0,
+        };
+        let walked = self.enumerate_chain(object, &mut found, &mut visited);
+        self.heap.accounting.credit(visited.bytes);
+        match walked {
+            Ok(()) => Ok(found),
+            Err(abrupt) => {
+                self.drop_key_list(found);
+                Err(abrupt)
+            }
+        }
+    }
+
+    /// The objects of EnumerateObjectProperties, `object` and its prototype chain, each with a
+    /// step before its own keys are asked for; each list of own keys is credited once it is
+    /// consumed, on every way out.
+    fn enumerate_chain(
         &mut self,
         object: ObjectRef,
-    ) -> Completion<Vec<Key>> {
-        let mut visited = BTreeSet::new();
-        let mut found = Vec::new();
+        found: &mut KeyList,
+        visited: &mut Visited,
+    ) -> Completion<()> {
         let mut current = Some(object);
         while let Some(o) = current {
             self.charge_steps(1)?;
             let own_keys = self.own_property_keys(o)?;
-            let walked = self.enumerate_own_keys(o, &own_keys, &mut visited, &mut found);
+            let walked = self.enumerate_own_keys(o, &own_keys, visited, found);
             self.drop_key_list(own_keys);
             walked?;
             current = self.get_prototype_of(o)?;
         }
-        Ok(found)
+        Ok(())
     }
 
     /// The keys of one object of EnumerateObjectProperties: each String key of `own_keys` not
@@ -677,8 +694,8 @@ impl<H: Host> Agent<H> {
         &mut self,
         object: ObjectRef,
         own_keys: &[Key],
-        visited: &mut BTreeSet<(u8, u32, u32, u32)>,
-        found: &mut Vec<Key>,
+        visited: &mut Visited,
+        found: &mut KeyList,
     ) -> Completion<()> {
         for &key in own_keys {
             if let Key::Symbol(_) = key {
@@ -687,9 +704,67 @@ impl<H: Host> Agent<H> {
             let Some(property) = self.get_own_property(object, key)? else {
                 continue;
             };
-            if visited.insert(key_order(key)) && property.enumerable {
-                found.push(key);
+            if visited.keys.get(&key).is_some() {
+                continue;
             }
+            self.visit(visited, key)?;
+            if property.enumerable {
+                self.make_room_for_key(found)?;
+                found.keys.push(key);
+            }
+        }
+        Ok(())
+    }
+
+    /// Add `key` to `visited`. A full table grows first: the bytes of the table for one more
+    /// key ([`KeyedMap::table_bytes_for`]) less what the set holds charged are charged before
+    /// the table is made, and the difference to the table the map then has is charged or
+    /// credited. What `visited.bytes` records was charged, also on a refusal; the caller
+    /// credits it.
+    fn visit(&mut self, visited: &mut Visited, key: Key) -> Completion<()> {
+        let wanted = KeyedMap::<Key, ()>::table_bytes_for(visited.keys.len().saturating_add(1));
+        if wanted > visited.keys.table_bytes() {
+            let more = wanted.saturating_sub(visited.bytes);
+            self.charge_bytes(more)?;
+            visited.bytes = visited.bytes.saturating_add(more);
+            if visited.keys.reserve(1).is_err() {
+                return Err(self.terminate(Termination::MemoryBudget));
+            }
+            let table = visited.keys.table_bytes();
+            if table > visited.bytes {
+                // The standard library's map took more than its layout says: charged now.
+                self.charge_bytes(table - visited.bytes)?;
+            } else {
+                self.heap.accounting.credit(visited.bytes - table);
+            }
+            visited.bytes = table;
+        }
+        if visited.keys.insert(key, ()).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        Ok(())
+    }
+
+    /// Room for one more key in `list`: none is made while it has room; otherwise its room
+    /// doubles (at least 4) with `try_reserve_exact`, and the bytes of the new room less what
+    /// the list holds charged are charged before it is made. What `list.bytes` records was
+    /// charged, also on a refusal; the caller credits it.
+    fn make_room_for_key(&mut self, list: &mut KeyList) -> Completion<()> {
+        let length = list.keys.len();
+        let capacity = list.keys.capacity();
+        if length < capacity {
+            return Ok(());
+        }
+        let wanted = capacity.saturating_mul(2).max(4);
+        let more = key_list_bytes(wanted).saturating_sub(list.bytes);
+        self.charge_bytes(more)?;
+        list.bytes = list.bytes.saturating_add(more);
+        if list
+            .keys
+            .try_reserve_exact(wanted.saturating_sub(length))
+            .is_err()
+        {
+            return Err(self.terminate(Termination::MemoryBudget));
         }
         Ok(())
     }
@@ -827,10 +902,9 @@ mod tests {
         agent
             .create_data_property(child, length, Value::Number(2.5))
             .unwrap();
-        assert_eq!(
-            agent.enumerate_object_properties(child),
-            Ok(vec![Key::Index(0), length, a, c])
-        );
+        let list = agent.enumerate_object_properties(child).unwrap();
+        assert_eq!(*list, [Key::Index(0), length, a, c]);
+        agent.drop_key_list(list);
         assert_eq!(agent.has_own_property(child, b), Ok(true));
         assert_eq!(agent.has_own_property(child, a), Ok(false));
         assert_eq!(agent.length_of_array_like(child), Ok(2.0));
@@ -1677,5 +1751,381 @@ mod tests {
         );
         assert!(matches!(answer, Ok(Value::Object(_))), "{answer:?}");
         assert_eq!(agent.kept.capacity(), capacity);
+    }
+
+    /// The host function `bytes`: `heap_bytes()` read inside the running frame, as a Number.
+    fn bytes(cx: &mut Cx<'_, NoHooks>, _call: HostCall<'_>) -> Completion<Value> {
+        Ok(Value::Number(cx.agent.heap.bytes() as f64))
+    }
+
+    /// The global object of `realm`, with the host function `bytes` defined on it.
+    fn global_with_bytes(agent: &mut Agent<NoHooks>, realm: &Realm) -> ObjectRef {
+        let global = script_object(agent, realm, "this");
+        let reading = function(agent, realm, bytes);
+        let key = agent.name_key("bytes").unwrap();
+        assert_eq!(
+            agent.create_data_property(global, key, Value::Object(reading)),
+            Ok(true)
+        );
+        global
+    }
+
+    /// The script `source`, parsed in `realm`.
+    fn parsed(agent: &mut Agent<NoHooks>, realm: &Realm, source: &str) -> crate::value::Script {
+        let Ok(Parsed::Parsed(script)) = agent.parse_script(realm, Source::Utf8(source), None)
+        else {
+            panic!("{source} did not parse");
+        };
+        script
+    }
+
+    /// The Number the global `name` holds.
+    fn global_number(agent: &mut Agent<NoHooks>, global: ObjectRef, name: &str) -> f64 {
+        let key = agent.name_key(name).unwrap();
+        match agent.get(global, key) {
+            Ok(Value::Number(number)) => number,
+            other => panic!("{name} holds {other:?}"),
+        }
+    }
+
+    /// Whether `outcome` is a normal completion with the Number `expected`.
+    fn answers_number(
+        agent: &mut Agent<NoHooks>,
+        outcome: &Result<Outcome<crate::value::Root>, crate::host::HostError>,
+        expected: f64,
+    ) -> bool {
+        let Ok(Outcome::Normal(root)) = outcome else {
+            return false;
+        };
+        matches!(agent.heap.roots.get(root), Ok(Value::Number(number)) if number == expected)
+    }
+
+    /// The global `s` of `n` code units and the scripts of
+    /// [`for_in_enumerators_held_by_a_recursion_end_in_memory_budget`]: `f(60)` and `f(0)`.
+    fn recursion_setup(
+        agent: &mut Agent<NoHooks>,
+        realm: &Realm,
+        n: usize,
+    ) -> (crate::value::Script, crate::value::Script) {
+        let global = script_object(agent, realm, "this");
+        let s = agent.new_string_str(&"a".repeat(n)).unwrap();
+        let key = agent.name_key("s").unwrap();
+        assert_eq!(
+            agent.create_data_property(global, key, Value::String(s)),
+            Ok(true)
+        );
+        let f = "function f(d) { for (var k in new String(s)) { if (d > 0) f(d - 1); break; } }";
+        let deep = parsed(agent, realm, &format!("{f} f(60); 1"));
+        let shallow = parsed(agent, realm, &format!("{f} f(0); 1"));
+        (deep, shallow)
+    }
+
+    /// `docs/design/engine.md`, "The step budget" and "Memory budget": the key list a `for`-`in`
+    /// enumerator holds is charged while the loop runs. A recursion of 61 loops over
+    /// `new String(s)`, `s` of n code units, each loop holding its list while the next runs:
+    /// n = 100,000 in the lane `slow` (`SWELL_FULL_COUNTS=1`), 25,000 in the gate (at 100,000
+    /// the test took 10.6 s, and 18.6 s with the collector at every safe point, measured at a
+    /// load of about 150). One loop (`f(0)`) runs first under 1 GiB, and its high-water rise
+    /// is its peak: the String's own keys (L = n × `size_of::<Key>()`), the n one-unit Strings
+    /// the String's [[GetOwnProperty]] makes (41 bytes each), which the next safe point
+    /// collects, `found` (2^17 entries at 100,000 and 2^15 at 25,000, 1.31 L) and `visited`.
+    /// `memory_bytes` is then the reading after that run and a collection plus the peak plus
+    /// 64 KiB: one loop fits it, and a second loop beside a held list of 1.31 L, far above
+    /// 64 KiB at both counts, passes it, so `f(60)` ends in `Terminated(MemoryBudget)`. The
+    /// next script `1` and `f(0)` again answer `Normal(1)`. At both counts a loop charges more
+    /// than the collector's least trigger (1 MiB) in its Strings and own keys, so the
+    /// collection that frees one loop's Strings runs before the next loop starts.
+    #[test]
+    fn for_in_enumerators_held_by_a_recursion_end_in_memory_budget() {
+        let n = if full_counts() { 100_000 } else { 25_000 };
+        let mut limits = limits();
+        limits.frame_depth = 64;
+        limits.steps_per_entry = 100_000_000;
+        limits.memory_bytes = 1 << 30;
+        let (mut agent, realm) = agent_with_realm_and(limits);
+        enter(&mut agent, &realm);
+        let (deep, shallow) = recursion_setup(&mut agent, &realm, n);
+        let one = parsed(&mut agent, &realm, "1");
+        assert!(agent.collect().is_ok());
+        let before = agent.heap_bytes().unwrap();
+        agent.heap.accounting.reset_high_water();
+        let outcome = agent.evaluate_script(&shallow);
+        assert!(
+            answers_number(&mut agent, &outcome, 1.0),
+            "f(0) under 1 GiB: {outcome:?}"
+        );
+        drop(outcome);
+        let peak = agent.heap.accounting.high_water().saturating_sub(before);
+        assert!(agent.collect().is_ok());
+        let setup = agent.heap_bytes().unwrap();
+        let list = crate::object::key_list_bytes(n);
+        agent.heap.accounting.set_limit(setup + peak + 64 * 1024);
+
+        let outcome = agent.evaluate_script(&deep);
+        assert!(
+            matches!(outcome, Ok(Outcome::Terminated(Termination::MemoryBudget))),
+            "f(60) under the reading {setup} + one loop's peak {peak} + 64 KiB (L = {list}): \
+             {outcome:?}"
+        );
+        drop(outcome);
+        let outcome = agent.evaluate_script(&one);
+        assert!(answers_number(&mut agent, &outcome, 1.0), "1: {outcome:?}");
+        drop(outcome);
+        let outcome = agent.evaluate_script(&shallow);
+        assert!(
+            answers_number(&mut agent, &outcome, 1.0),
+            "f(0): {outcome:?}"
+        );
+    }
+
+    /// The keys of `o`, the runs of each script and `steps_per_entry` of
+    /// [`assert_every_exit_credits`] for a script that `ends` so. In the lane `slow`
+    /// (`SWELL_FULL_COUNTS=1`) 10,000 keys, 10 runs and the test host's 1,000,000 steps; in
+    /// the gate 1,000 keys, 3 runs (the first, the second and one more for the second to
+    /// equal) and 50,000 steps (100,000 took 4.3 s where the step budget ends the loop,
+    /// measured at a load of about 150): `found` then holds 1,024 entries, 16,384 bytes, above
+    /// the 4 KiB `after` may rise. With the collector at every safe point, where every
+    /// instruction collects the whole heap (three runs over 16 keys with 500 steps took 7.2 s
+    /// where the step budget ends the loop, at the same load), 16 keys, 500 steps and 200
+    /// where the step budget ends the loop, and the runs as above: `inside` still rises by the
+    /// list, 256 bytes, while the 4 KiB bound of `after` is held at the counts above.
+    fn exit_counts(ends: Ends) -> (usize, usize, u64) {
+        let runs = if full_counts() { 10 } else { 3 };
+        if cfg!(feature = "collect-every-safe-point") {
+            let steps = if ends == Ends::StepBudget { 200 } else { 500 };
+            (16, runs, steps)
+        } else if full_counts() {
+            (10_000, runs, 1_000_000)
+        } else {
+            (1_000, runs, 50_000)
+        }
+    }
+
+    /// How a script of [`assert_every_exit_credits`] ends.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum Ends {
+        /// Normally, with `after` read after the loop.
+        Normal,
+        /// By a throw no handler catches.
+        Throw,
+        /// By `Terminated(StepBudget)` inside the loop's body.
+        StepBudget,
+    }
+
+    /// `docs/design/engine.md`, "The step budget": the enumerator holds the charge of its key
+    /// list and credits it when the loop ends, on every way out of it. Over a global `o` of
+    /// `N` String keys ([`exit_counts`]) `source` reads `before = bytes()` just before its loop
+    /// and `inside = bytes()` in its body, in the same frame: `inside` is at least
+    /// `before` + `N` × `size_of::<Key>()`. A script that ends normally reads `after = bytes()`
+    /// right after the loop, at most `before` + 4 KiB: the list was credited when the loop
+    /// ended, not when its frame pops. After a collection `heap_bytes()` reads the same after
+    /// the second and the last run.
+    fn assert_every_exit_credits(source: &str, ends: Ends) {
+        let (keys, runs, steps) = exit_counts(ends);
+        let mut limits = limits();
+        limits.steps_per_entry = steps;
+        limits.memory_bytes = 1 << 30;
+        let (mut agent, realm) = agent_with_realm_and(limits);
+        enter(&mut agent, &realm);
+        let global = global_with_bytes(&mut agent, &realm);
+        let o = script_object(&mut agent, &realm, "var o = {}; o");
+        for i in 0..keys {
+            let key = agent.name_key(&format!("k{i}")).unwrap();
+            let value = Value::Number(i as f64);
+            assert_eq!(agent.create_data_property(o, key, value), Ok(true));
+        }
+        let list = crate::object::key_list_bytes(keys) as f64;
+        let script = parsed(&mut agent, &realm, source);
+        let mut held = Vec::new();
+        for round in 1..=runs {
+            assert!(agent.collect().is_ok());
+            let outcome = agent.evaluate_script(&script);
+            let ended = match outcome {
+                Ok(Outcome::Normal(_)) => Some(Ends::Normal),
+                Ok(Outcome::Throw(_)) => Some(Ends::Throw),
+                Ok(Outcome::Terminated(Termination::StepBudget)) => Some(Ends::StepBudget),
+                _ => None,
+            };
+            assert_eq!(ended, Some(ends), "run {round}: {outcome:?}");
+            drop(outcome);
+            enter(&mut agent, &realm);
+            let before = global_number(&mut agent, global, "before");
+            let inside = global_number(&mut agent, global, "inside");
+            assert!(
+                inside >= before + list,
+                "run {round}: inside {inside} < before {before} + the list {list}"
+            );
+            if ends == Ends::Normal {
+                let after = global_number(&mut agent, global, "after");
+                assert!(
+                    after <= before + 4096.0,
+                    "run {round}: after {after} > before {before} + 4 KiB"
+                );
+            }
+            assert!(agent.collect().is_ok());
+            held.push(agent.heap_bytes().unwrap());
+        }
+        assert_eq!(
+            held.get(1),
+            held.last(),
+            "heap_bytes() after each run {held:?}"
+        );
+    }
+
+    /// One test per way out of a `for`-`in` loop for [`assert_every_exit_credits`], and the
+    /// way out of EnumerateObjectProperties itself.
+    mod every_exit_of_a_for_in_credits_its_key_list {
+        use super::{Ends, assert_every_exit_credits};
+
+        #[test]
+        fn normal_end() {
+            assert_every_exit_credits(
+                "var before, inside, after; before = bytes(); \
+                 for (var k in o) { inside = bytes(); } after = bytes();",
+                Ends::Normal,
+            );
+        }
+
+        #[test]
+        fn break_out() {
+            assert_every_exit_credits(
+                "var before, inside, after; before = bytes(); \
+                 for (var k in o) { inside = bytes(); break; } after = bytes();",
+                Ends::Normal,
+            );
+        }
+
+        #[test]
+        fn continue_of_an_outer_labelled_loop() {
+            assert_every_exit_credits(
+                "var before, inside, after; \
+                 outer: for (var j = 0; j < 1; j++) { before = bytes(); \
+                 for (var k in o) { inside = bytes(); continue outer; } } after = bytes();",
+                Ends::Normal,
+            );
+        }
+
+        #[test]
+        fn return_from_a_function() {
+            assert_every_exit_credits(
+                "var before, inside, after; \
+                 function g() { before = bytes(); for (var k in o) { inside = bytes(); return 1; } } \
+                 g(); after = bytes();",
+                Ends::Normal,
+            );
+        }
+
+        #[test]
+        fn throw_caught_outside_the_loop() {
+            assert_every_exit_credits(
+                "var before, inside, after; \
+                 try { before = bytes(); for (var k in o) { inside = bytes(); throw 1; } } \
+                 catch (e) {} after = bytes();",
+                Ends::Normal,
+            );
+        }
+
+        #[test]
+        fn uncaught_throw() {
+            assert_every_exit_credits(
+                "var before, inside, after; before = bytes(); \
+                 for (var k in o) { inside = bytes(); throw 1; }",
+                Ends::Throw,
+            );
+        }
+
+        #[test]
+        fn step_budget_in_the_body() {
+            assert_every_exit_credits(
+                "var before, inside, after; before = bytes(); \
+                 for (var k in o) { inside = bytes(); while (true) {} }",
+                Ends::StepBudget,
+            );
+        }
+
+        /// The keys of `o`, the objects of its prototype chain, `steps_per_entry` and the runs
+        /// of [`step_budget_inside_enumerate_object_properties`]. In the lane `slow`
+        /// (`SWELL_FULL_COUNTS=1`) 10,000 keys, 50,000 objects, 40,000 steps and 10 runs; in
+        /// the gate 3 runs (10 took 6.2 s, measured at a load of about 130), and with the
+        /// collector at every safe point (10 runs took 11.3 s) a tenth of the keys, the chain
+        /// and the steps: still more steps than twice the keys and fewer than the chain.
+        fn chain_counts() -> (u32, usize, u64, usize) {
+            let full = super::full_counts();
+            let runs = if full { 10 } else { 3 };
+            if cfg!(feature = "collect-every-safe-point") && !full {
+                (1_000, 5_000, 4_000, runs)
+            } else {
+                (10_000, 50_000, 40_000, runs)
+            }
+        }
+
+        /// EnumerateObjectProperties ends in `Terminated(StepBudget)` while it walks a
+        /// prototype chain of 50,000 objects with no keys, after `found` and `visited` hold the
+        /// 10,000 keys of `o` ([`chain_counts`]): `steps_per_entry` 40,000 is above the at most
+        /// 20,010 steps of `o`'s keys and below a step per object of the chain. The high-water
+        /// mark of the run rose by at least two lists of `o`'s keys (its own keys and
+        /// `found`); after a collection `heap_bytes()` reads the same after the second and the
+        /// last run, so `found` and `visited` were credited on that way out.
+        #[test]
+        fn step_budget_inside_enumerate_object_properties() {
+            use crate::host::hooks::test_host::{agent_with_realm_and, enter, limits};
+            use crate::host::outcome::{Outcome, Termination};
+            use crate::object::ordinary::OrdinaryData;
+            use crate::value::Value;
+
+            let (keys, chain, steps, runs) = chain_counts();
+            let mut limits = limits();
+            limits.steps_per_entry = steps;
+            limits.memory_bytes = 1 << 30;
+            let (mut agent, realm) = agent_with_realm_and(limits);
+            enter(&mut agent, &realm);
+            let global = super::script_object(&mut agent, &realm, "this");
+            let mut prototype = None;
+            for _ in 0..chain {
+                let object = agent
+                    .ordinary_object_create(prototype, OrdinaryData::Plain)
+                    .unwrap();
+                prototype = Some(object);
+            }
+            let o = agent
+                .ordinary_object_create(prototype, OrdinaryData::Plain)
+                .unwrap();
+            let key = agent.name_key("o").unwrap();
+            assert_eq!(
+                agent.create_data_property(global, key, Value::Object(o)),
+                Ok(true)
+            );
+            for i in 0..keys {
+                let key = agent.name_key(&format!("k{i}")).unwrap();
+                let value = Value::Number(f64::from(i));
+                assert_eq!(agent.create_data_property(o, key, value), Ok(true));
+            }
+            let list = crate::object::key_list_bytes(keys as usize);
+            let script = super::parsed(&mut agent, &realm, "for (var k in o) {}");
+            let mut held = Vec::new();
+            for round in 1..=runs {
+                assert!(agent.collect().is_ok());
+                let before = agent.heap_bytes().unwrap();
+                agent.heap.accounting.reset_high_water();
+                let outcome = agent.evaluate_script(&script);
+                assert!(
+                    matches!(outcome, Ok(Outcome::Terminated(Termination::StepBudget))),
+                    "run {round}: {outcome:?}"
+                );
+                drop(outcome);
+                let rise = agent.heap.accounting.high_water().saturating_sub(before);
+                assert!(
+                    rise >= 2 * list,
+                    "run {round}: the high-water mark rose by {rise} < 2 × {list}"
+                );
+                assert!(agent.collect().is_ok());
+                held.push(agent.heap_bytes().unwrap());
+            }
+            assert_eq!(
+                held.get(1),
+                held.last(),
+                "heap_bytes() after each run {held:?}"
+            );
+        }
     }
 }
