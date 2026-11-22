@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:lane-tests-under-2-5-cpu-seconds
 kind: story
-status: active
+status: implemented
 title: The tests of the lane slow stay under 2.5 CPU seconds at their full counts
 summary: The lane's bound for a test alone at its full count goes from 5 to 2.5 CPU seconds in either collection mode; every test over it gets a smaller full count, the gate's count in the collect mode where the size is not what that mode shows, and the stack checks keep a scaled stack with its derivation.
 relations:
 - decomposes: epic:slice-06-bindings-and-iteration
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T23:03:03Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T23:03:04Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T23:29:49Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 
 # The tests of the lane slow stay under 2.5 CPU seconds at their full counts

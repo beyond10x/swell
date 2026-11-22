@@ -20,11 +20,17 @@ Every number below comes from the gate, `task check`, on the released commit.
   declarations in blocks and in `switch` cases, without the web-compatibility semantics of
   Annex B.3.2. The `for`-`of` statement, which calls the iterator's `return` once on `break`,
   on a `continue` to an outer loop, on `return` and on a throw from the body. `Array.from`,
-  `Object.fromEntries` and `Object.groupBy`. Array patterns, spread in arrays and calls, and
-  tagged templates are refused by name until their stories.
-- test262 after these: `test262 total 53801 8982 7 44812 14998 29813 1`, 14,998 of the 44,812
-  cases that run pass (33.4 %; 13,575 in 0.4.0). The sixth slice passes 2,528 of its 4,436
-  cases (`test262-slice 06 4436 8413 0 0 4436 2528 1908 0`; 1,364 in 0.4.0).
+  `Object.fromEntries` and `Object.groupBy`. Array patterns as bindings and as assignment
+  targets, with elisions, defaults, nesting and a rest element, in declarations, parameters,
+  `catch`, assignments and the heads of `for`, `for`-`in` and `for`-`of`; a pattern closes its
+  iterator when it ends before the iterator does. Spread in array literals and in the
+  arguments of a call, an optional call and `new`. Tagged templates: a site answers the same
+  frozen template object at every evaluation, with its `raw` strings, and the object is
+  freed with the code that holds the site. With these every feature story of the slice is
+  delivered; the cases of the slice that need a later slice are moved at its close.
+- test262 after these: `test262 total 53801 8982 7 44812 16412 28399 1`, 16,412 of the 44,812
+  cases that run pass (36.6 %; 13,575 in 0.4.0). The sixth slice passes 3,907 of its 4,436
+  cases (`test262-slice 06 4436 8413 0 0 4436 3907 529 0`; 1,364 in 0.4.0).
 - The host interface: 190 numbered requirements, 109 of them with a test
   (`host-requirements: 190 requirement(s), 190 line(s): 109 test, 81 pending`; 108 in 0.4.0).
 
@@ -32,9 +38,11 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 - The heaviest tests are lighter, so that none is near the 60 s limit of a test when the
   machine is loaded: no test of the gate takes over 1.5 CPU seconds alone in the default mode,
-  and none of the lane `slow` over 5 at its full count. The fuzz test of the host interface
-  runs 1,000 sequences at its full count (2,000 before); the gate's count is unchanged. Only
-  test code changed.
+  and none of the lane `slow` over 2.5 at its full count, but for one test of determinism
+  that runs its corpus three times. The fuzz test of the host interface runs 400 sequences
+  at its full count (2,000 in 0.4.0); the gate's count is unchanged. The full count of the
+  parser's stack-bound check is 7,500 levels on three quarters of the stack of 10,000
+  levels. Only test code changed.
 - One case of slice 18 that passed in 0.4.0 no longer passes:
   `test/annexB/built-ins/Array/from/iterator-method-emulates-undefined.js`. It passed only on
   the error of the missing `Array.from`; the method exists now, and the case needs

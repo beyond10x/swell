@@ -12,7 +12,7 @@ interpreter and the builtins the test262 harness calls exist. **Slice 1 is deliv
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
 (the other 44 need a later slice and say so). 109 of 190 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate holds the test262 counts: 14,998 of the 44,812 run cases pass (2026-11-22, wave `s6-2` of slice 6; 13,575 in release `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
+gate holds the test262 counts: 16,412 of the 44,812 run cases pass (2026-11-23, wave `s6-2` of slice 6; 13,575 in release `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
 "Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
@@ -199,14 +199,19 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   that changes `expected.txt`, `slices-delivered.txt`, `requirements.txt`, `moves.tsv`, a
   crate version or section 12 of the design regenerates it (`slot --local task site-data`).
 - A test stays under 1.5 CPU seconds alone in the gate's default mode and under 2 s with a
-  collection at every safe point, and under 5 s at its full count (`SWELL_FULL_COUNTS=1`) in
-  either mode, measured with its test binary run directly with `--exact <name>
+  collection at every safe point, and under 2.5 s at its full count (`SWELL_FULL_COUNTS=1`)
+  in either mode, measured with its test binary run directly with `--exact <name>
   --test-threads 1` under the shell's `time` (user plus system). The bound is in CPU seconds
   because the machine's load multiplies wall time: on 2026-11-22, at a load of 110 to 166 on
   18 cores, tests of 4 to 18 CPU seconds were killed at 60 s
-  (`story:heavy-tests-far-from-the-kill`). Two tests are over it and stay so:
-  `determinism::host_133_same_calls_same_hooks_same_outcomes` (3.9 to 4.3 s in collect mode,
-  three runs of its corpus) and `language` part 3 (2.2 to 2.5 s in collect mode).
+  (`story:heavy-tests-far-from-the-kill`), and at a bound of 5 s for the full count
+  `builtins_iterators::each_next_is_charged`, 4.2 CPU seconds, was still killed while the
+  load rose from 37 to 165 (`story:lane-tests-under-2-5-cpu-seconds`). Two tests are over
+  the bound and stay so: `determinism::host_133_same_calls_same_hooks_same_outcomes` (4.2 to
+  4.4 s in collect mode, gate and lane, three runs of its corpus) and `language` part 3 (2.2
+  to 2.5 s in the collect gate). The full count of the parser's stack-bound check is 7,500
+  levels on three quarters of the stack of `parser_nesting` 10,000, and the gate count 2,500
+  on a quarter; the derivation is in `crates/syntax/tests/sources.rs`.
 - A new language script stays under 0.5 CPU seconds per run, and a new test under 2 s alone,
   with a collection at every safe point. Measured with
   `SWELL_SCRIPT_TIMES=1 cargo nextest run --locked -p swell --features
@@ -416,7 +421,10 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   (https://github.com/beyond10x/swell/releases/tag/0.2.0); `0.3.0`, 2026-11-22, tagged on
   `1f21c0a`, `main` with slice 3 and without the open wave, on the operator's order to
   release every green default branch
-  (https://github.com/beyond10x/swell/releases/tag/0.3.0). After a release
+  (https://github.com/beyond10x/swell/releases/tag/0.3.0); `0.4.0`, 2026-11-22, tagged on
+  `20797bf`, `main` with the resource accounting, the host interface of the second batch and
+  the first five stories of slice 6, on the operator's pick "cut 0.4.0 now"
+  (https://github.com/beyond10x/swell/releases/tag/0.4.0). After a release
   `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of

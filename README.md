@@ -17,7 +17,7 @@ can use it.
 ## State
 
 swell runs scripts of the ES5 grammar in both modes, under a step budget and a memory budget.
-Its gate holds the test262 counts: 14,998 of the 44,812 cases that run pass (33.4 %), measured on 2026-11-22.
+Its gate holds the test262 counts: 16,412 of the 44,812 cases that run pass (36.6 %), measured on 2026-11-23.
 The first three of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |
@@ -64,10 +64,11 @@ the pinned test262 harness before the engine's answer is judged;
 [the design, section 12](docs/design/engine.md#12-delivery-order) states it.
 
 In work is slice 6 of nineteen, bindings and iteration. `let` and `const`, template literals
-without a tag, arrow functions, default and rest parameters, object destructuring, computed
-property names, object spread, `Symbol`, the iterator protocol, `for`-`of`, function
-declarations in blocks and `Array.from` run today; array destructuring, spread in arrays and
-calls, and tagged templates are next. Of its 4,436 cases 2,528 pass. The slices are taken in the order the first user, a browser, needs them:
+with and without a tag, arrow functions, default and rest parameters, object and array
+destructuring, computed property names, spread in objects, arrays and calls, `Symbol`, the
+iterator protocol, `for`-`of`, function declarations in blocks and `Array.from` run today;
+what is left is the close of the slice, which moves the cases that need a later slice. Of
+its 4,436 cases 3,907 pass. The slices are taken in the order the first user, a browser, needs them:
 6, 5, 7, 10, 4, 9.
 
 ## What swell is
