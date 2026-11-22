@@ -509,6 +509,18 @@ session coordinates; this section is its procedure, taken from how surf is run
   A forge run over 120 s is a budget defect: it gets a story and is fixed before the next
   feature, and nothing else of the batch is published until then. Any other red line holds
   the commit as before.
+- **The lane `slow` runs here before a hand-over.** On 2026-11-22 the second batch was handed
+  over with a green gate and no local run of the lane; on the forge its step `slow-tests`
+  ended `454 passed, 3 failed`: three parts of `every_nesting_kind_fits_the_stack_bound` of
+  `swell-syntax` overflowed the stack at the full count (`parser_nesting` 10,000) and passed
+  at the gate's count (2,500). The same command failed here in 5 s. So: a unit that changes
+  `crates/syntax/src/` runs `SWELL_FULL_COUNTS=1 cargo nextest run --locked -p swell-syntax
+  --profile default --test main` in its rounds, and a unit that changes a test with a gate
+  count runs that test at its full count in both collection modes; the coordinator runs
+  `slot --timeout 30m task slow-tests` on the wave branch's tip beside the gate and `task slow`
+  whole where the expected file changed, and the hand-over quotes their count lines. A gate
+  count that passes where its full count fails is a defect of the test: it gets a story and
+  is fixed with the fix of what it missed.
 - **A merged wave branch is compiled before a unit is based on it.** On 2026-11-22 the twelfth
   unit of slice 3 was merged on its own report into a branch that had moved since its base:
   the merge applied without a conflict and the crate did not compile, because two units had

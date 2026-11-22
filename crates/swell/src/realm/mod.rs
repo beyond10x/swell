@@ -27,8 +27,10 @@ use crate::object::ordinary::OrdinaryData;
 use crate::value::{ObjectRef, Realm, RealmRef, SymbolRef, Value};
 use intrinsics::{Intrinsic, Intrinsics};
 
-/// The well-known symbols of this part (`#sec-well-known-symbols`, Table 1): seven of its
-/// thirteen; `Symbol` and the others come with slice 6.
+/// The well-known symbols of slice 6 (`#sec-well-known-symbols`, Table 1): twelve, the seven of
+/// slice 1 and the five `story:symbol-constructor-and-well-known-symbols` adds with the `Symbol`
+/// constructor, whose properties they are (`builtins/symbol.rs`). `%Symbol.asyncIterator%`
+/// comes with slice 10.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WellKnown {
     pub(crate) has_instance: SymbolRef,
@@ -44,11 +46,38 @@ pub(crate) struct WellKnown {
     /// @@match, which IsRegExp reads for `includes`, `startsWith` and `endsWith` of
     /// `String.prototype` (`#sec-isregexp`). No script obtains it before `Symbol` (slice 6).
     pub(crate) r#match: SymbolRef,
+    /// @@iterator (`#sec-symbol.iterator`); the iterator protocol that reads it is a later story
+    /// of slice 6.
+    pub(crate) iterator: SymbolRef,
+    /// @@matchAll (`#sec-symbol.matchall`), a hook of `RegExp` (slice 5).
+    pub(crate) match_all: SymbolRef,
+    /// @@replace (`#sec-symbol.replace`), a hook of `RegExp` (slice 5).
+    pub(crate) replace: SymbolRef,
+    /// @@search (`#sec-symbol.search`), a hook of `RegExp` (slice 5).
+    pub(crate) search: SymbolRef,
+    /// @@split (`#sec-symbol.split`), a hook of `RegExp` (slice 5).
+    pub(crate) split: SymbolRef,
 }
+
+/// The [[Description]] of each well-known symbol, in the order of [`WellKnown::all`].
+const DESCRIPTIONS: [&str; 12] = [
+    "Symbol.hasInstance",
+    "Symbol.toPrimitive",
+    "Symbol.toStringTag",
+    "Symbol.species",
+    "Symbol.unscopables",
+    "Symbol.isConcatSpreadable",
+    "Symbol.match",
+    "Symbol.iterator",
+    "Symbol.matchAll",
+    "Symbol.replace",
+    "Symbol.search",
+    "Symbol.split",
+];
 
 impl WellKnown {
     /// Every symbol, in the order they are made; the tracer reads each.
-    fn all(&self) -> [SymbolRef; 7] {
+    fn all(&self) -> [SymbolRef; 12] {
         [
             self.has_instance,
             self.to_primitive,
@@ -57,6 +86,11 @@ impl WellKnown {
             self.unscopables,
             self.is_concat_spreadable,
             self.r#match,
+            self.iterator,
+            self.match_all,
+            self.replace,
+            self.search,
+            self.split,
         ]
     }
 }
@@ -218,15 +252,7 @@ impl<H: Host> Agent<H> {
             return Ok(symbols);
         }
         let mut made = Vec::new();
-        for description in [
-            "Symbol.hasInstance",
-            "Symbol.toPrimitive",
-            "Symbol.toStringTag",
-            "Symbol.species",
-            "Symbol.unscopables",
-            "Symbol.isConcatSpreadable",
-            "Symbol.match",
-        ] {
+        for description in DESCRIPTIONS {
             let description = self.new_string_str(description)?;
             match self.heap.new_symbol(Some(description)) {
                 Ok(symbol) => made.push(symbol),
@@ -241,6 +267,11 @@ impl<H: Host> Agent<H> {
             unscopables,
             is_concat_spreadable,
             r#match,
+            iterator,
+            match_all,
+            replace,
+            search,
+            split,
         ] = made.as_slice()
         else {
             return Err(self.fault());
@@ -253,6 +284,11 @@ impl<H: Host> Agent<H> {
             unscopables,
             is_concat_spreadable,
             r#match,
+            iterator,
+            match_all,
+            replace,
+            search,
+            split,
         };
         self.symbols = Some(symbols);
         Ok(symbols)

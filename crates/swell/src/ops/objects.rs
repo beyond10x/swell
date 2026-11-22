@@ -1686,6 +1686,11 @@ mod tests {
         }
 
         #[test]
+        fn get_own_property_symbols() {
+            assert_key_list_credited("Object.getOwnPropertySymbols(o);");
+        }
+
+        #[test]
         fn assign() {
             assert_key_list_credited("Object.assign({}, o);");
         }
