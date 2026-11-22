@@ -1,8 +1,8 @@
 // sec-try-statement-runtime-semantics-evaluation: normal "ok"
-// A finally block that completes abruptly gives the try statement UpdateEmpty(F, undefined): its
-// own value, or undefined, never the value of the try block or the catch block. Each statement
-// is put into each place, the exit between the halves of the statement, and run through eval
-// once as it is and once with "42; " before the exit.
+// A break or continue out of the try block or the catch block, the finally block completing
+// normally or absent: the try statement gives UpdateEmpty(C, undefined), the value of the block
+// left, or undefined. Each statement is put into each place, the exit between the halves of the
+// statement, and run through eval once as it is and once with "42; " before the exit.
 var bad = [];
 function check(source, expected) {
   var found;
@@ -10,13 +10,7 @@ function check(source, expected) {
   if (found !== expected) bad.push(source + " => " + found);
 }
 var statements = [
-  ["try { 39 } finally { ", " -2 }"],
-  ["try { 39 } catch (e) { -1 } finally { ", " -2 }"],
-  ["try { [].x.x } catch (e) { -1 } finally { ", " -2 }"],
-  ["try { 39; throw 0 } finally { ", " -2 }"],
-  ["try { 39 } finally { if (true) { ", " } -2 }"],
-  ["try { 1 } finally { try { 39 } finally { ", " -2 } }"],
-  ["try { try { 39 } finally { ", " -2 } } finally { 7 }"]
+  ["try { ", " -2 } finally { 7 }"]
 ];
 var places = [
   ["99; do { -99; ", "; -77 } while (false);", "break;"],

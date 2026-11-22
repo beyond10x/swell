@@ -694,29 +694,46 @@ fn define_properties_charges_its_lists_to_the_memory_budget() {
     }
 }
 
+/// The `reentry_depth` of the stack test: [`BUILTINS_REENTRY`], the full depth, in the default
+/// mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`); 25 in the gate with the feature
+/// `collect-every-safe-point`, where every safe point collects and traces every live
+/// activation (at 100 the three runs took 17.6 s there at a load of 100 to 110 on 17 cores,
+/// cargo-nextest). At 25 each script still re-enters through its builtin at every level,
+/// every collection of the deepest levels runs with 25 re-entries live, and the deepest still
+/// parses at full nesting; the stack bound is a property of the default mode's frames.
+fn builtins_reentry() -> u32 {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        25
+    } else {
+        BUILTINS_REENTRY
+    }
+}
+
 /// The body of the stack test: ObjectDefineProperties re-enters `f` through the getter of a
 /// descriptor's "value" (`#sec-topropertydescriptor`, step 7), from `Object.defineProperties` and
 /// from `Object.create`, and `toLocaleString` through the `toString` it invokes, each to the
-/// re-entry limit.
+/// re-entry limit ([`builtins_reentry`]).
 fn reach_through_define_properties_and_to_locale_string() {
     for through in [
         "Object.defineProperties({}, { p: { get value() { return f(); } } })",
         "Object.create(null, { p: { get value() { return f(); } } })",
         "({ toString: f }).toLocaleString()",
     ] {
-        reach_through(through, BUILTINS_REENTRY);
+        reach_through(through, builtins_reentry());
     }
 }
 
 /// `Limits::min_stack_bytes` through `Object.defineProperties`, `Object.create` and
 /// `Object.prototype.toLocaleString` (`AGENTS.md`, "Commands and the gate"): on a thread with
 /// seven eighths of `min_stack_bytes()` for `frame_depth` 10,000, `reentry_depth`
-/// [`BUILTINS_REENTRY`] and `parser_nesting` 1,000, each script re-enters until the
+/// [`builtins_reentry`] and `parser_nesting` 1,000, each script re-enters until the
 /// `RangeError` of the re-entry limit and parses at full nesting at the deepest, without a
 /// stack overflow.
 #[test]
 fn define_properties_getter_reaches_the_reentry_limit_on_the_promised_stack() {
-    let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
+    let stack = stack_with_room(stack_limits(builtins_reentry()));
     on_bounded_stack(
         "define_properties_getter_reaches_the_reentry_limit_on_the_promised_stack",
         stack,

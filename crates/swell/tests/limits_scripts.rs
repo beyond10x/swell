@@ -135,10 +135,28 @@ fn host_17_deepest_reentry_parses_at_full_nesting() {
     .unwrap();
 }
 
+/// The `reentry_depth` of [`min_stack_bytes_is_enough_through_builtins`]: [`BUILTINS_REENTRY`],
+/// the full depth, in the default mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`); 25 in the
+/// gate with the feature `collect-every-safe-point`, where every safe point collects and traces
+/// every live activation (at 100 the four runs took 23.9 s there at a load of 100 to 110 on 17
+/// cores, cargo-nextest). At 25 the script still re-enters through each of the four builtins
+/// at every level, every collection of the deepest levels runs with 25 re-entries live, and the
+/// deepest still parses at full nesting; the stack bound is a property of the default mode's
+/// frames ([`BUILTINS_REENTRY`]).
+fn builtins_reentry() -> u32 {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        25
+    } else {
+        BUILTINS_REENTRY
+    }
+}
+
 /// The body of the stack test through builtins: the four runs, one agent each.
 fn reach_through_builtins() {
     for through in THROUGH_BUILTINS {
-        reach_through(through, BUILTINS_REENTRY);
+        reach_through(through, builtins_reentry());
     }
 }
 
@@ -149,11 +167,11 @@ fn reach_through_builtins() {
 /// re-entries through each of `Function.prototype.call`, a `map` callback, `toJSON` and a
 /// replacer of `JSON.stringify` (four runs) and parses 1,000 nested brackets at the deepest,
 /// without a stack overflow: `min_stack_bytes()` is enough, with an eighth of it to spare. In
-/// the collect mode the depth is [`BUILTINS_REENTRY`], and the thread has seven eighths of
+/// the collect mode the depth is [`builtins_reentry`], and the thread has seven eighths of
 /// `min_stack_bytes()` of that depth.
 #[test]
 fn min_stack_bytes_is_enough_through_builtins() {
-    let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
+    let stack = stack_with_room(stack_limits(builtins_reentry()));
     on_bounded_stack(
         "min_stack_bytes_is_enough_through_builtins",
         stack,

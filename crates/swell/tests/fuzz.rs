@@ -7,7 +7,7 @@
 //! the slice 1 grammar and broken sources, under small and random limits.
 //!
 //! 2,000 sequences from fixed seeds per run, 150 with the feature `collect-every-safe-point`, in
-//! the lane `slow`; the gate runs the first 400 and 40 ([`sequences`]). They are divided among
+//! the lane `slow`; the gate runs the first 160 and 15 ([`sequences`]). They are divided among
 //! eight tests ([`PARTS`]) that cargo-nextest runs side by side. A sequence fails on a panic, on
 //! an abort (a stack
 //! overflow; the sequences run in a child process, which prints each seed before it runs it, so
@@ -42,16 +42,20 @@ use swell::{
 /// mode in one pool job, a factor of 7: 11.7 against 81 sequences per second, measured).
 ///
 /// Those are the full counts, which the lane `slow` runs (`SWELL_FULL_COUNTS=1`). The gate runs
-/// the first 400 and, in the collect mode, the first 40: every choice of the generator is drawn
-/// uniformly among at most 34 kinds, so the 9,600 entry calls of 400 sequences (960 of 40) draw
-/// each kind hundreds of times (dozens), and a kind the full count reaches is not left out.
+/// the first 160 and, in the collect mode, the first 15: every choice of the generator is drawn
+/// uniformly among at most 34 kinds, so the 3,840 entry calls of 160 sequences (360 of 15) draw
+/// each kind about a hundred times (about ten), and a kind the full count reaches is not left
+/// out. With 400 and 40 the parts took 15.1 to 22.6 s each in the default mode, and in the
+/// collect mode the fourth and the fifth 36.3 and 31.8 s (the sequences 15 to 24, the others
+/// 1.0 to 3.6 s a part), at a load of 100 to 110 on 17 cores (cargo-nextest). The first 15 took
+/// 4.7 s together there.
 fn sequences() -> u64 {
     let full = std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1");
     match (cfg!(feature = "collect-every-safe-point"), full) {
         (true, true) => 150,
-        (true, false) => 40,
+        (true, false) => 15,
         (false, true) => 2_000,
-        (false, false) => 400,
+        (false, false) => 160,
     }
 }
 /// The seed of the first sequence; the others follow it.

@@ -48,11 +48,35 @@ fn host_69_finally_does_not_run_after_step_budget() {
     );
 }
 
+/// Whether this run is the gate's with the collector at every safe point: the feature
+/// `collect-every-safe-point`, without `SWELL_FULL_COUNTS=1` (which the lane `slow` sets).
+fn in_the_collect_gate() -> bool {
+    cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+}
+
+/// The step budget and the memory room above the realm of
+/// [`host_70_agent_stays_alive_after_each_budget`]: 10,000 steps and 64 KiB, the full counts,
+/// which the lane `slow` (`SWELL_FULL_COUNTS=1`) runs in both modes; a quarter of each, 2,500
+/// steps and 16 KiB, in the gate with the collector at every safe point, where every step
+/// collects (the test took 29.0 s there with the full counts at a load of 100 to 110 on 17
+/// cores, cargo-nextest). The memory script charges the same bytes per step whatever the
+/// budget, so a quarter of the room is filled in a quarter of the steps, and it still ends in
+/// the memory budget before the step budget, as with the full counts.
+fn host_70_budgets() -> (u64, u64) {
+    if in_the_collect_gate() {
+        (2_500, 16 * 1024)
+    } else {
+        (10_000, 64 * 1024)
+    }
+}
+
 /// HOST-70: after `Terminated(StepBudget)`, `Terminated(MemoryBudget)` and
 /// `Terminated(Interrupted)`, `state()` reads `Alive` and the script `1` answers `Normal(1)`.
 /// The memory budget is the realm's bytes plus 64 KiB, which the memory script fills with
-/// Arrays long before its 10,000 steps; they are held by its function's frame only, so the
-/// collection after the termination frees them for the next script.
+/// Arrays long before its 10,000 steps (a quarter of each in the collect gate,
+/// [`host_70_budgets`]); they are held by its function's frame only, so the collection after
+/// the termination frees them for the next script.
 #[test]
 fn host_70_agent_stays_alive_after_each_budget() {
     let realm_bytes = {
@@ -60,9 +84,10 @@ fn host_70_agent_stays_alive_after_each_budget() {
         let _realm = realm(&mut agent);
         agent.heap_bytes().unwrap()
     };
+    let (steps, room) = host_70_budgets();
     let mut limits = limits();
-    limits.steps_per_entry = 10_000;
-    limits.memory_bytes = realm_bytes + 64 * 1024;
+    limits.steps_per_entry = steps;
+    limits.memory_bytes = realm_bytes + room;
     let mut agent = agent_with(limits).unwrap();
     let realm = realm(&mut agent);
     let one = Outcome::Normal("1".to_string());
@@ -137,14 +162,33 @@ fn host_72_a_host_function_cannot_end_a_termination() {
     );
 }
 
+/// The argument of `fib` in [`same_script_twice_gives_the_same_steps_and_value`] and the value
+/// it answers: `fib(12)`, 144, the full count, which the lane `slow` (`SWELL_FULL_COUNTS=1`)
+/// runs in both modes; `fib(7)`, 13, in the gate with the collector at every safe point, where
+/// every step collects (the test took 43.3 s there with `fib(12)`, 465 calls a run and four
+/// runs, at a load of 100 to 110 on 17 cores, cargo-nextest). `fib(7)` makes 41 calls a run,
+/// each with its frames live across the collections of the calls below it, which is what the
+/// collect mode looks at, and its steps are compared run for run in the same way.
+fn fib_argument_and_value() -> (u32, u32) {
+    if in_the_collect_gate() {
+        (7, 13)
+    } else {
+        (12, 144)
+    }
+}
+
 /// The epic, item 13 (decision 13, non-determinism): the same script run twice, in two fresh
 /// agents and twice in one, answers the same value and spends the same steps.
 #[test]
 fn same_script_twice_gives_the_same_steps_and_value() {
-    let source = "function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); } \
-        var o = { a: 1, b: 2 }; var s = \"\"; for (var k in o) s += k + o[k]; \
-        var caught; try { null.x; } catch (e) { caught = e.name; } \
-        s + fib(12) + caught;";
+    let (n, fib) = fib_argument_and_value();
+    let source = format!(
+        "function fib(n) {{ return n < 2 ? n : fib(n - 1) + fib(n - 2); }} \
+         var o = {{ a: 1, b: 2 }}; var s = \"\"; for (var k in o) s += k + o[k]; \
+         var caught; try {{ null.x; }} catch (e) {{ caught = e.name; }} \
+         s + fib({n}) + caught;"
+    );
+    let source = source.as_str();
     let mut answers = Vec::new();
     for _ in 0..2 {
         let mut agent = agent_with(limits()).unwrap();
@@ -156,7 +200,7 @@ fn same_script_twice_gives_the_same_steps_and_value() {
     }
     assert_eq!(
         answers[0].0,
-        Outcome::Normal("\"a1b2144TypeError\"".to_string())
+        Outcome::Normal(format!("\"a1b2{fib}TypeError\""))
     );
     assert!(answers[0].1 > 0);
     for answer in &answers {

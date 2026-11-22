@@ -296,27 +296,45 @@ const CORPUS: &[&str] = &[
     "var e = new RangeError('r'); print(e.toString(), Object.prototype.toString.call(e), Object.prototype.toString.call([]));",
 ];
 
-/// The limits of the corpus: small enough that the endless scripts reach their budgets fast,
-/// also with the collector run at every safe point (`fib(15)` takes about 27,000 steps).
+/// The limits of the corpus: small enough that the endless scripts reach their budgets fast
+/// (`fib(15)` takes about 27,000 steps). In the default mode they are 40,000 steps per entry,
+/// 256 KiB, a `frame_depth` of 200 and a `string_length` of 4,096, in the gate and in the lane
+/// `slow` (`SWELL_FULL_COUNTS=1`) alike.
 ///
-/// The gate's run with the collector at every safe point has 10,000 steps per entry, where 40,000
-/// took 8.7 s a run on a loaded machine, most of it in the two endless loops and `fib(15)`; the
-/// lane `slow` (`SWELL_FULL_COUNTS=1`) runs 40,000 there too. With 10,000 `fib(15)` ends in the
-/// step budget rather than printing 610, and every outcome the test asserts is still reached:
-/// the endless loops end in the step budget, the others where they end with 40,000.
+/// The full count is these default-mode limits in the default mode and the collect mode's own
+/// limits in the collect mode, in the gate and the lane `slow` alike, because a collection at
+/// every safe point multiplies the work: the 40,000 steps are covered by the default mode, and
+/// the interleaving of two agents under collections by the collect mode at its smaller limits.
+///
+/// With the feature `collect-every-safe-point` the run has 2,000 steps per entry, 156 KiB, a
+/// `frame_depth` of 30 and a `string_length` of 256. With 10,000 steps the test was terminated
+/// at 60 s in that mode, at a load of 100 to 110 on 17 cores (cargo-nextest): this process runs
+/// the corpus twice and every step collects. The transcript of one run in that mode (7,907
+/// steps, `frame_depth` 50) gave the steps and heap bytes the numbers rest on: the realm holds
+/// 103,546 bytes and no script but the one that keeps every object leaves more than 127,679;
+/// `deep()` took 4 steps a frame (202 for 50); the doubling string charges a step per code unit
+/// it makes, so it took 4,208 steps up to 2,048 units and 7,907 ended it in the step budget, not
+/// at `string_length`, while up to 256 units it takes about 600 and the refused doubling 512
+/// more; the loop that keeps its objects charges 25.1 bytes a step (135,709 bytes in 5,405
+/// steps), so from about 123,100 bytes it fills 156 KiB (159,744 bytes) in about 1,460 steps;
+/// the longest script that completes takes 1,792. So every outcome the test asserts is still
+/// reached under 2,000 steps: the endless loops and `fib(15)` end in the step budget, `deep()`
+/// at `frame_depth` (its 30 frames would need more than 1.2 KiB each to fill the budget first),
+/// the doubling string at `string_length`, the loop that keeps its objects in the memory
+/// budget, and the others where they end with 40,000.
 fn corpus_limits() -> Limits {
     let mut limits = limits();
-    limits.steps_per_entry = if cfg!(feature = "collect-every-safe-point")
-        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-    {
-        10_000
-    } else {
-        40_000
-    };
+    limits.steps_per_entry = 40_000;
     limits.memory_bytes = 256 * 1024;
     limits.frame_depth = 200;
     limits.reentry_depth = 20;
     limits.string_length = 1 << 12;
+    if cfg!(feature = "collect-every-safe-point") {
+        limits.steps_per_entry = 2_000;
+        limits.memory_bytes = 156 * 1024;
+        limits.frame_depth = 30;
+        limits.string_length = 1 << 8;
+    }
     limits
 }
 
