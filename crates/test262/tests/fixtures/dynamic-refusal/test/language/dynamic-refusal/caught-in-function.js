@@ -5,4 +5,4 @@ description: >
   case catches, but the engine counted it, so the run fails.
 ---*/
 
-try { Function("let x;"); } catch (e) { if (!(e instanceof SyntaxError)) throw e; }
+try { Function("<!-- x"); } catch (e) { if (!(e instanceof SyntaxError)) throw e; }

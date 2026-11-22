@@ -6,4 +6,4 @@ description: >
   error of the grammar.
 ---*/
 
-assert.throws(SyntaxError, function () { $262.evalScript("let x;"); });
+assert.throws(SyntaxError, function () { $262.evalScript("<!-- x"); });

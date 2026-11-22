@@ -34,7 +34,23 @@
 //!   method, in any code;
 //! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`: the
 //!   flags of IsValidRegularExpressionLiteral. Its pattern is not parsed before slice 5 (a
-//!   recorded omission of `sec-literals-regular-expression-literals`).
+//!   recorded omission of `sec-literals-regular-expression-literals`);
+//! - `#sec-let-and-const-declarations-static-semantics-early-errors`: a `let` or `const`
+//!   declaration binds no name `let` and no name twice, and a `const` one has an initializer
+//!   outside a for-in head;
+//! - the LexicallyDeclaredNames of a script, a function body, a block and a `case` block, and
+//!   the names a `for` or for-in head declares with `let` or `const`, hold no duplicate and no
+//!   name of the VarDeclaredNames around them (`#sec-scripts-static-semantics-early-errors`,
+//!   `#sec-function-definitions-static-semantics-early-errors`,
+//!   `#sec-block-static-semantics-early-errors`, `#sec-switch-statement-static-semantics-early-errors`,
+//!   `#sec-for-statement-static-semantics-early-errors`,
+//!   `#sec-for-in-and-for-of-statements-static-semantics-early-errors`); those of a function body
+//!   no parameter name, those of a `catch` block not its parameter
+//!   (`#sec-try-statement-static-semantics-early-errors`).
+//!
+//! The lexical names in scope are a stack of frames, each made as the walk enters the statement
+//! list (or the head) that declares them; a `var` or a top-level function declaration is checked
+//! against the frames of its own function. The errors are sorted into source order at the end.
 //!
 //! The parser reports the early errors it meets as it reads: a name written with an escape that
 //! spells a reserved word ([`escaped_keyword`], `#sec-identifiers-static-semantics-early-errors`)
@@ -46,9 +62,9 @@
 use std::collections::BTreeSet;
 
 use crate::ast::{
-    Ast, Child, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind, Name, NumberForm,
-    NumberLiteral, PropertyKey, PropertyValue, RegExpLiteral, Span, Stmt, StmtId, StringLiteral,
-    UnaryOp,
+    Ast, Child, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind, Name,
+    NumberForm, NumberLiteral, PropertyKey, PropertyValue, RegExpLiteral, Span, Stmt, StmtId,
+    StringLiteral, UnaryOp,
 };
 use crate::error::SyntaxError;
 
@@ -89,9 +105,31 @@ pub(crate) fn check(ast: &Ast, body: &[StmtId], strict: bool) -> Vec<SyntaxError
         breakables: 0,
         labels: Vec::new(),
         label_base: 0,
+        lexical: Vec::new(),
+        lexical_base: 0,
     };
+    let frame = checker.frame(lexical_of(ast, body), &[], "");
+    checker.lexical.push(frame);
     checker.walk(body);
-    checker.errors
+    let mut errors = checker.errors;
+    errors.sort_by_key(|e| (e.line, e.column));
+    errors
+}
+
+/// The names the `let` and `const` declarations of the statement list `list` bind.
+fn lexical_of(ast: &Ast, list: &[StmtId]) -> Vec<Name> {
+    ast.lexical_names(list)
+        .into_iter()
+        .map(|l| l.name)
+        .collect()
+}
+
+/// Pushes the statements `list` with the frame of lexical names around them, so that popping
+/// gives the frame's entry, the statements in source order and the frame's end.
+fn push_list(stack: &mut Vec<Step>, list: &[StmtId], frame: BTreeSet<String>) {
+    stack.push(Step::PopLexical);
+    stack.extend(list.iter().rev().map(|s| Step::Node(Child::Stmt(*s))));
+    stack.push(Step::Enter(frame));
 }
 
 /// One piece of the walk's pending work.
@@ -103,9 +141,14 @@ enum Step {
         loops: u32,
         breakables: u32,
         label_base: usize,
+        lexical_base: usize,
     },
     /// Drops the label of a labelled statement, once its body is walked.
     PopLabel,
+    /// Enters the lexical names of a `catch` or `finally` block, made as the `try` was entered.
+    Enter(BTreeSet<String>),
+    /// Drops the innermost frame of lexical names, once the statements it covers are walked.
+    PopLexical,
 }
 
 struct Checker<'a> {
@@ -120,9 +163,116 @@ struct Checker<'a> {
     /// statement (through other labels); those from `label_base` on are the current function's.
     labels: Vec<(String, bool)>,
     label_base: usize,
+    /// The frames of lexical names around the current position, innermost last; those from
+    /// `lexical_base` on are the current function's.
+    lexical: Vec<BTreeSet<String>>,
+    lexical_base: usize,
 }
 
 impl<'a> Checker<'a> {
+    /// A frame of the lexical names `names`, in source order: a name twice is an error, and so
+    /// is one of `others` (the parameters or the catch parameter, named by `what`).
+    fn frame(&mut self, names: Vec<Name>, others: &[Name], what: &str) -> BTreeSet<String> {
+        let mut frame = BTreeSet::new();
+        for n in names {
+            if others.iter().any(|o| o.name == n.name) {
+                self.error(
+                    format!("lexical declaration of {} conflicts with {what}", n.name),
+                    n.span,
+                );
+            }
+            if !frame.insert(n.name.clone()) {
+                self.error(
+                    format!("duplicate lexical declaration of {}", n.name),
+                    n.span,
+                );
+            }
+        }
+        frame
+    }
+
+    /// A name a `var` or a top-level function declaration binds: no lexical declaration of the
+    /// current function around it may bind it too.
+    fn var_name(&mut self, name: &Name) {
+        let clash = self
+            .lexical
+            .get(self.lexical_base..)
+            .unwrap_or(&[])
+            .iter()
+            .any(|f| f.contains(&name.name));
+        if clash {
+            self.error(
+                format!(
+                    "lexical declaration of {} conflicts with a var or function declaration",
+                    name.name
+                ),
+                name.span,
+            );
+        }
+    }
+
+    /// A name a declaration of kind `kind` binds.
+    fn declared(&mut self, kind: DeclKind, name: &Name) {
+        if kind.is_lexical() && name.name == "let" {
+            self.error("let is not a valid lexically bound name", name.span);
+            return;
+        }
+        self.binding(name);
+        if kind == DeclKind::Var {
+            self.var_name(name);
+        }
+    }
+
+    /// Enters the lexical names the statement `id` declares for its children: those of a block,
+    /// a `case` block, or a `for` or for-in head. A `try` pushes its children itself, a frame
+    /// around each of its blocks; then this answers true.
+    fn lexical_scope(&mut self, id: StmtId, stack: &mut Vec<Step>) -> bool {
+        let ast = self.ast;
+        let Some(node) = ast.stmt(id) else {
+            return false;
+        };
+        let names = match &node.stmt {
+            Stmt::Block(body) => lexical_of(ast, body),
+            Stmt::Switch { cases, .. } => cases
+                .iter()
+                .flat_map(|c| lexical_of(ast, &c.body))
+                .collect(),
+            Stmt::For {
+                init: Some(ForInit::Var(kind, declarators)),
+                ..
+            } if kind.is_lexical() => declarators.iter().map(|d| d.name.clone()).collect(),
+            Stmt::ForIn {
+                target: ForInTarget::Var(kind, name),
+                ..
+            } if kind.is_lexical() => vec![name.clone()],
+            Stmt::Try {
+                block,
+                handler,
+                finalizer,
+            } => {
+                let block_frame = self.frame(lexical_of(ast, block), &[], "");
+                if let Some(list) = finalizer {
+                    let frame = self.frame(lexical_of(ast, list), &[], "");
+                    push_list(stack, list, frame);
+                }
+                if let Some(h) = handler {
+                    let param: &[Name] = h.param.as_slice();
+                    let frame = self.frame(lexical_of(ast, &h.body), param, "the catch parameter");
+                    push_list(stack, &h.body, frame);
+                }
+                stack.push(Step::PopLexical);
+                stack.extend(block.iter().rev().map(|s| Step::Node(Child::Stmt(*s))));
+                self.lexical.push(block_frame);
+                return true;
+            }
+            _ => return false,
+        };
+        let frame = self.frame(names, &[], "");
+        stack.push(Step::PopLexical);
+        self.lexical.push(frame);
+        false
+    }
+
     fn error(&mut self, message: impl Into<String>, span: Span) {
         self.errors
             .push(SyntaxError::new(message, span.line, span.column));
@@ -249,13 +399,22 @@ impl<'a> Checker<'a> {
                     loops,
                     breakables,
                     label_base,
+                    lexical_base,
                 } => {
                     (self.strict, self.loops, self.breakables) = (strict, loops, breakables);
-                    self.label_base = label_base;
+                    (self.label_base, self.lexical_base) = (label_base, lexical_base);
                     continue;
                 }
                 Step::PopLabel => {
                     self.labels.pop();
+                    continue;
+                }
+                Step::Enter(frame) => {
+                    self.lexical.push(frame);
+                    continue;
+                }
+                Step::PopLexical => {
+                    self.lexical.pop();
                     continue;
                 }
             };
@@ -264,6 +423,7 @@ impl<'a> Checker<'a> {
                 loops: self.loops,
                 breakables: self.breakables,
                 label_base: self.label_base,
+                lexical_base: self.lexical_base,
             };
             match node {
                 Child::Stmt(id) => {
@@ -276,10 +436,13 @@ impl<'a> Checker<'a> {
                     if self.label(id) {
                         stack.push(Step::PopLabel);
                     }
+                    if self.lexical_scope(id, &mut stack) {
+                        continue;
+                    }
                 }
                 Child::Expr(id) => self.check_expr(id),
                 // A function is walked with its own strictness, outside every loop, `switch` and
-                // label.
+                // label, with the lexical names of its body as its only frame.
                 Child::Function(id) => {
                     let Some(f) = self.ast.function(id) else {
                         continue;
@@ -290,6 +453,10 @@ impl<'a> Checker<'a> {
                     self.breakables = 0;
                     self.label_base = self.labels.len();
                     self.check_function(id);
+                    self.lexical_base = self.lexical.len();
+                    let frame = self.frame(lexical_of(self.ast, &f.body), &f.params, "a parameter");
+                    stack.push(Step::PopLexical);
+                    self.lexical.push(frame);
                 }
             }
             self.ast.push_children(node, &mut stack, Step::Node);
@@ -304,19 +471,29 @@ impl<'a> Checker<'a> {
             return (0, 0);
         };
         match &node.stmt {
-            Stmt::Var(declarators)
+            Stmt::Var(kind, declarators)
             | Stmt::For {
-                init: Some(ForInit::Var(declarators)),
+                init: Some(ForInit::Var(kind, declarators)),
                 ..
             } => {
                 for d in declarators {
-                    self.binding(&d.name);
+                    self.declared(*kind, &d.name);
+                    if *kind == DeclKind::Const && d.init.is_none() {
+                        self.error("missing initializer in a const declaration", d.name.span);
+                    }
                 }
             }
             Stmt::ForIn { target, .. } => match target {
-                ForInTarget::Var(name) => self.binding(name),
+                ForInTarget::Var(kind, name) => self.declared(*kind, name),
                 ForInTarget::Expression(e) => self.target(*e),
             },
+            // A function declaration reaches the walk only at the top level of a body, where it
+            // is var scoped.
+            Stmt::FunctionDeclaration(f) => {
+                if let Some(name) = self.ast.function(*f).and_then(|x| x.name.as_ref()) {
+                    self.var_name(name);
+                }
+            }
             Stmt::Continue(None) if self.loops == 0 => {
                 self.error("continue outside of a loop", node.span);
             }

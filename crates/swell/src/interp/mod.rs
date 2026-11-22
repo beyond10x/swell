@@ -33,6 +33,7 @@
 pub(crate) mod budget;
 pub(crate) mod dispatch;
 pub(crate) mod frame;
+mod lexical;
 
 use frame::{Entry, Frame, entry_bytes};
 

@@ -72,6 +72,7 @@ pub(crate) fn compile_function(
     let length = u32::try_from(f.params.len()).map_err(|_| CompileError::TooMany("parameters"))?;
 
     let mut c = Compiler::new(ast, resolution, constants, false);
+    c.enter_function_body(id, f.span)?;
     for d in &f.scope.functions {
         let span = ast.function(*d).map(|x| x.span).unwrap_or(f.span);
         let store = match c.binding(Site::Declaration(*d))? {

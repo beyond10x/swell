@@ -5,4 +5,4 @@ description: >
   the engine counted it, so the run fails.
 ---*/
 
-try { eval("let x;"); } catch (e) { if (!(e instanceof SyntaxError)) throw e; }
+try { eval("<!-- x"); } catch (e) { if (!(e instanceof SyntaxError)) throw e; }

@@ -7,7 +7,7 @@
 //! [`Compiled`] and, for a function, the index of its template), the instruction index, the
 //! operand stack, the local slots, the LexicalEnvironment (`None` for the global environment of
 //! the frame's realm) with the number of environments it made itself (`PushEnv`,
-//! `PushNamedEnv`, `PushWith`), the VariableEnvironment, the `this`
+//! `PushNamedEnv`, `PushLexicalEnv`, `PushWith`), the VariableEnvironment, the `this`
 //! value, the function, the realm, the script, and for a script the completion value register.
 //!
 //! What a frame takes beyond its fixed part (its locals and its operand stack as it grows) is
@@ -67,6 +67,26 @@ impl Entry {
     }
 }
 
+/// What a local slot or a slot of a declarative record holds: a value, or the uninitialized
+/// state of a `let` or `const` binding before its declaration ran (`docs/design/engine.md`,
+/// decision 3, "Lexical bindings", item 2). A type of the engine that no host interface and no
+/// builtin receives; the same size as a [`Value`], so a slot costs what it cost before.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum SlotValue {
+    Value(Value),
+    Uninitialized,
+}
+
+impl SlotValue {
+    /// The value, when the slot holds one.
+    pub(crate) fn value(self) -> Option<Value> {
+        match self {
+            SlotValue::Value(value) => Some(value),
+            SlotValue::Uninitialized => None,
+        }
+    }
+}
+
 /// The state of a for-in statement's enumeration: the object and its keys as
 /// EnumerateObjectProperties (`#sec-enumerate-object-properties`) gave them, and the next one.
 /// `object` is `None` for the empty enumerator of `undefined` and `null`.
@@ -85,7 +105,7 @@ pub(crate) struct Frame {
     /// The index of the next instruction.
     pub(crate) pc: usize,
     pub(crate) stack: Vec<Entry>,
-    pub(crate) locals: Vec<Value>,
+    pub(crate) locals: Vec<SlotValue>,
     /// The LexicalEnvironment: a record of the `environments` arena, or `None` for the global
     /// environment of `realm`.
     pub(crate) env: Option<Handle>,
@@ -174,7 +194,7 @@ impl Frame {
                 Entry::Reference(_) | Entry::Tag(_) => {}
             }
         }
-        for &value in &self.locals {
+        for value in self.locals.iter().filter_map(|slot| slot.value()) {
             mark.value(value);
         }
         if let Some(env) = self.env {
@@ -193,5 +213,19 @@ impl Frame {
         if let Some(object) = self.constructed {
             mark.object(object);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SlotValue;
+    use crate::value::Value;
+
+    /// Decision 3, "Lexical bindings", item 2: the uninitialized state takes no room of its own,
+    /// so a local slot and a record's slot are charged as a `Value` was.
+    #[test]
+    fn a_slot_is_as_large_as_a_value() {
+        assert_eq!(size_of::<SlotValue>(), size_of::<Value>());
+        assert_eq!(size_of::<SlotValue>(), 16);
     }
 }

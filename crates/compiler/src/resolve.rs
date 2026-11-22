@@ -47,6 +47,16 @@
 //! - in eval code ([`crate::compile_eval`]), a reference that the eval code does not bind is looked
 //!   up by name, through the environments of the code that called `eval`.
 //!
+//! The `let` and `const` declarations make scopes of their own (`docs/design/engine.md`, decision
+//! 3, "Lexical bindings"): a block, the case block of a `switch`, the head of a `for`, the
+//! expression of a for-in head and each of its iterations, a `try`, `catch` or `finally` block,
+//! the top level of a function body (inside the function's scope) and the top level of eval
+//! code; each only when it declares a name. A script's own lexical names are names of the global
+//! environment. A binding of such a scope is a local slot or a slot of a record the code makes
+//! at the entry of the scope ([`LexicalScope`]), as the bindings of a `catch` clause are; an
+//! access checks the binding's state ([`Binding::Lexical`]) unless it is in the code of the same
+//! function after the end of the declaration, in a block, a function body or eval code.
+//!
 //! A record whose slots have no names is passed by a lookup: no lookup can find its name there,
 //! since a name a record between the reference and the `with` binds would have resolved the
 //! reference at compile time. The parameters of a function that makes a mapped arguments object
@@ -62,12 +72,53 @@ use swell_num::literal::numeric_literal;
 use swell_num::to_string::number_to_string;
 use swell_syntax::Script;
 use swell_syntax::ast::{
-    Ast, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind, PropertyKey, PropertyValue,
-    Stmt, StmtId,
+    Ast, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind, LexicalName,
+    PropertyKey, PropertyValue, Stmt, StmtId,
 };
 
 use crate::CompileError;
 use crate::bytecode::{ArgumentsObject, Slot};
+
+/// A scope of `let` and `const` bindings, by the node that makes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum ScopeKey {
+    /// The statement list of a block statement.
+    Block(StmtId),
+    /// The case block of a `switch`, entered after the discriminant.
+    Case(StmtId),
+    /// The head of a `for (let ...; ...; ...)` or `for (const ...; ...; ...)`.
+    Head(StmtId),
+    /// The expression of a for-in head with `let` or `const`: the head's names, uninitialized
+    /// (`#sec-runtime-semantics-forinofheadevaluation`, step 2).
+    Tdz(StmtId),
+    /// One iteration of a for-in with `let` or `const`.
+    Iteration(StmtId),
+    /// The try block of a try statement.
+    Try(StmtId),
+    /// The catch block, inside the scope of the `catch` parameter.
+    Catch(StmtId),
+    /// The finally block.
+    Finally(StmtId),
+    /// The top level of a function body, inside the function's scope.
+    Body(FunctionId),
+}
+
+/// What the code does at the entry of a lexical scope.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LexicalScope {
+    /// The names of the slots of the record it makes, in slot order, each with whether it is
+    /// `const`; empty when it makes none.
+    pub env: Vec<(String, bool)>,
+    /// The local slots it sets uninitialized: those an access checks.
+    pub uninitialize: Vec<u32>,
+}
+
+/// Where a `let` or `const` binding lives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LexicalPlace {
+    Local(u32),
+    Env { hops: u32, slot: u32 },
+}
 
 /// A place in the tree where a name is bound or referenced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -108,6 +159,16 @@ pub(crate) enum Binding {
     /// Looked up by name at run time, through the environments from the LexicalEnvironment
     /// outward: a `with` body lies between the reference and the scope that binds it.
     Dynamic(String),
+    /// A `let` or `const` binding named `name`, accessed by an instruction that checks its
+    /// state (`checked`), or a `const` one, which every assignment throws for. A declaration
+    /// initializes its binding through the plain place, and an unchecked access to a `let`
+    /// binding is a [`Binding::Local`] or [`Binding::Env`].
+    Lexical {
+        at: LexicalPlace,
+        name: String,
+        checked: bool,
+        constant: bool,
+    },
 }
 
 /// What the compiler needs of a function beyond its code.
@@ -131,6 +192,14 @@ pub(crate) struct Resolution {
     pub functions: Vec<FunctionInfo>,
     /// The try statements whose `catch` clause has an environment with named slots.
     pub named_catches: BTreeSet<StmtId>,
+    /// The lexical scopes with a record or a checked local slot.
+    pub lexical_scopes: BTreeMap<ScopeKey, LexicalScope>,
+    /// Of eval code: the lexical names of its top level in source order, each with whether it
+    /// is `const` and its slot.
+    pub eval_lexical: Vec<(String, bool, Slot)>,
+    /// Of eval code: the names of the slots of the record its lexical bindings need, in slot
+    /// order, with whether each is `const`; empty when none needs one.
+    pub eval_env: Vec<(String, bool)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -140,6 +209,19 @@ enum Kind {
     SelfName,
     /// The body of a `with` statement: no binding, an Object Environment Record at run time.
     With,
+    /// A scope of `let` and `const` bindings. In a `straight` one (a block, a function body,
+    /// eval code) the code after a declaration in the same function runs after it; in a case
+    /// block, a head or an iteration every access is checked.
+    Lexical {
+        straight: bool,
+    },
+}
+
+/// A `let` or `const` binding: whether it is `const`, and the end of its declaration.
+#[derive(Clone, Copy)]
+struct LexicalData {
+    constant: bool,
+    end: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -162,6 +244,8 @@ struct ScopeData {
     named: bool,
     /// The try statement of a `catch` scope.
     catch: Option<StmtId>,
+    /// The node of a lexical scope; `None` for the top level of eval code and other scopes.
+    key: Option<ScopeKey>,
 }
 
 struct BindingData {
@@ -169,6 +253,7 @@ struct BindingData {
     name: String,
     captured: bool,
     place: Place,
+    lexical: Option<LexicalData>,
 }
 
 enum Walk {
@@ -178,6 +263,11 @@ enum Walk {
     Catch(StmtId),
     /// Enters the body of the `with` statement.
     With,
+    /// Enters the lexical scope of the node, when it declares a name; a [`Walk::Leave`] follows
+    /// its statements only then, which [`Walk::LeaveLexical`] is.
+    Lexical(ScopeKey),
+    /// Leaves the lexical scope of the node, if it was entered.
+    LeaveLexical(ScopeKey),
     Leave,
 }
 
@@ -200,6 +290,8 @@ struct Resolver<'a> {
     /// Whether the script's own code is non-strict and contains a direct `eval` call.
     script_adds_bindings: bool,
     work: Vec<Walk>,
+    /// The `let` and `const` bindings in local slots that an access checks, by binding index.
+    checked_locals: BTreeSet<usize>,
 }
 
 fn malformed(what: &str) -> CompileError {
@@ -219,6 +311,7 @@ pub(crate) fn resolve(script: &Script, eval_code: bool) -> Result<Resolution, Co
             env_slots: 0,
             named: false,
             catch: None,
+            key: None,
         }],
         bindings: Vec::new(),
         current: 0,
@@ -230,6 +323,16 @@ pub(crate) fn resolve(script: &Script, eval_code: bool) -> Result<Resolution, Co
         eval_code,
         script_adds_bindings: !script.strict && script.scope.contains_direct_eval,
         work: Vec::new(),
+        checked_locals: BTreeSet::new(),
+    };
+    // The lexical names of eval code are a scope of its own (`#sec-evaldeclarationinstantiation`,
+    // step 16); a script's are names of the global environment.
+    let eval_top = if eval_code && !script.scope.lexical.is_empty() {
+        let scope = r.new_scope(Kind::Lexical { straight: true }, None);
+        r.declare_lexical(scope, &script.scope.lexical);
+        Some(scope)
+    } else {
+        None
     };
     r.push_list(&script.body);
     while let Some(task) = r.work.pop() {
@@ -239,6 +342,11 @@ pub(crate) fn resolve(script: &Script, eval_code: bool) -> Result<Resolution, Co
     r.mark_named()?;
     let mut frames = r.allocate()?;
     let sites = r.locate()?;
+    let lexical_scopes = r.lexical_scopes();
+    let (eval_lexical, eval_env) = match eval_top {
+        Some(scope) => r.eval_bindings(scope)?,
+        None => (Vec::new(), Vec::new()),
+    };
     let script_locals = frames.remove(&None).unwrap_or(0);
     let mut functions = Vec::with_capacity(script.ast.functions().len());
     for (i, _) in script.ast.functions().iter().enumerate() {
@@ -259,6 +367,9 @@ pub(crate) fn resolve(script: &Script, eval_code: bool) -> Result<Resolution, Co
         script_locals,
         functions,
         named_catches,
+        lexical_scopes,
+        eval_lexical,
+        eval_env,
     })
 }
 
@@ -267,6 +378,13 @@ impl<'a> Resolver<'a> {
         for s in list.iter().rev() {
             self.work.push(Walk::Stmt(*s));
         }
+    }
+
+    /// Pushes the statement list `list` inside the lexical scope of `key`.
+    fn push_lexical_list(&mut self, key: ScopeKey, list: &[StmtId]) {
+        self.work.push(Walk::LeaveLexical(key));
+        self.push_list(list);
+        self.work.push(Walk::Lexical(key));
     }
 
     fn new_scope(&mut self, kind: Kind, owner: Option<FunctionId>) -> usize {
@@ -279,6 +397,7 @@ impl<'a> Resolver<'a> {
             env_slots: 0,
             named: false,
             catch: None,
+            key: None,
         });
         self.current = self.scopes.len() - 1;
         self.current
@@ -286,6 +405,11 @@ impl<'a> Resolver<'a> {
 
     /// Declares `name` in `scope` once.
     fn declare(&mut self, scope: usize, name: &str) {
+        self.declare_as(scope, name, None);
+    }
+
+    /// Declares `name` in `scope` once, a `let` or `const` binding when `lexical` says so.
+    fn declare_as(&mut self, scope: usize, name: &str, lexical: Option<LexicalData>) {
         let index = self.bindings.len();
         let Some(s) = self.scopes.get_mut(scope) else {
             return;
@@ -300,7 +424,116 @@ impl<'a> Resolver<'a> {
             name: name.to_string(),
             captured: false,
             place: Place::Unset,
+            lexical,
         });
+    }
+
+    /// Declares the `let` and `const` names `names` in `scope`, each ending with its
+    /// declaration statement.
+    fn declare_lexical(&mut self, scope: usize, names: &[LexicalName]) {
+        for n in names {
+            let end = self
+                .ast
+                .stmt(n.declaration)
+                .map_or(u32::MAX, |s| s.span.end);
+            let data = LexicalData {
+                constant: n.constant,
+                end,
+            };
+            self.declare_as(scope, &n.name.name, Some(data));
+        }
+    }
+
+    /// The names the lexical scope of `key` declares, and whether it is a straight one.
+    fn lexical_names(&self, key: ScopeKey) -> (Vec<LexicalName>, bool) {
+        let ast = self.ast;
+        let stmt = |id: StmtId| ast.stmt(id).map(|n| &n.stmt);
+        let head = |id: StmtId, kind: DeclKind, names: Vec<&swell_syntax::ast::Name>| {
+            names
+                .into_iter()
+                .map(|name| LexicalName {
+                    name: name.clone(),
+                    constant: kind == DeclKind::Const,
+                    declaration: id,
+                })
+                .collect::<Vec<_>>()
+        };
+        match key {
+            ScopeKey::Block(id) => match stmt(id) {
+                Some(Stmt::Block(list)) => (ast.lexical_names(list), true),
+                _ => (Vec::new(), true),
+            },
+            ScopeKey::Case(id) => match stmt(id) {
+                Some(Stmt::Switch { cases, .. }) => (
+                    cases
+                        .iter()
+                        .flat_map(|c| ast.lexical_names(&c.body))
+                        .collect(),
+                    false,
+                ),
+                _ => (Vec::new(), false),
+            },
+            ScopeKey::Head(id) => match stmt(id) {
+                Some(Stmt::For {
+                    init: Some(ForInit::Var(kind, declarators)),
+                    ..
+                }) if kind.is_lexical() => (
+                    head(id, *kind, declarators.iter().map(|d| &d.name).collect()),
+                    false,
+                ),
+                _ => (Vec::new(), false),
+            },
+            ScopeKey::Tdz(id) | ScopeKey::Iteration(id) => match stmt(id) {
+                Some(Stmt::ForIn {
+                    target: ForInTarget::Var(kind, name),
+                    ..
+                }) if kind.is_lexical() => (head(id, *kind, vec![name]), false),
+                _ => (Vec::new(), false),
+            },
+            ScopeKey::Try(id) | ScopeKey::Catch(id) | ScopeKey::Finally(id) => {
+                let list = match (key, stmt(id)) {
+                    (ScopeKey::Try(_), Some(Stmt::Try { block, .. })) => Some(block.as_slice()),
+                    (
+                        ScopeKey::Catch(_),
+                        Some(Stmt::Try {
+                            handler: Some(h), ..
+                        }),
+                    ) => Some(h.body.as_slice()),
+                    (
+                        ScopeKey::Finally(_),
+                        Some(Stmt::Try {
+                            finalizer: Some(f), ..
+                        }),
+                    ) => Some(f.as_slice()),
+                    _ => None,
+                };
+                (list.map(|l| ast.lexical_names(l)).unwrap_or_default(), true)
+            }
+            ScopeKey::Body(f) => (
+                ast.function(f)
+                    .map(|f| f.scope.lexical.clone())
+                    .unwrap_or_default(),
+                true,
+            ),
+        }
+    }
+
+    /// Enters the lexical scope of `key` when it declares a name: a for-in iteration's binding
+    /// is initialized by the key (`Site::ForInVar`).
+    fn enter_lexical(&mut self, key: ScopeKey) {
+        let (names, straight) = self.lexical_names(key);
+        if names.is_empty() {
+            return;
+        }
+        let owner = self.scopes.get(self.current).and_then(|s| s.owner);
+        let scope = self.new_scope(Kind::Lexical { straight }, owner);
+        if let Some(s) = self.scopes.get_mut(scope) {
+            s.key = Some(key);
+        }
+        self.declare_lexical(scope, &names);
+        if let (ScopeKey::Iteration(id), Some(n)) = (key, names.first()) {
+            self.occur(Site::ForInVar(id), &n.name.name);
+        }
     }
 
     fn occur(&mut self, site: Site, name: &str) {
@@ -317,6 +550,19 @@ impl<'a> Resolver<'a> {
             Walk::With => {
                 let owner = self.scopes.get(self.current).and_then(|s| s.owner);
                 self.new_scope(Kind::With, owner);
+                Ok(())
+            }
+            Walk::Lexical(key) => {
+                self.enter_lexical(key);
+                Ok(())
+            }
+            Walk::LeaveLexical(key) => {
+                let here = self.scopes.get(self.current);
+                if here.and_then(|s| s.key) == Some(key) {
+                    self.current = here
+                        .and_then(|s| s.parent)
+                        .ok_or_else(|| malformed("a lexical scope left twice"))?;
+                }
                 Ok(())
             }
             Walk::Leave => {
@@ -349,12 +595,27 @@ impl<'a> Resolver<'a> {
             .stmt(id)
             .ok_or_else(|| malformed("a statement index"))?;
         match &node.stmt {
-            Stmt::Block(list) => self.push_list(list),
-            Stmt::Var(declarators)
+            Stmt::Block(list) => {
+                self.work.push(Walk::LeaveLexical(ScopeKey::Block(id)));
+                self.push_list(list);
+                self.work.push(Walk::Lexical(ScopeKey::Block(id)));
+            }
+            Stmt::Var(_, declarators)
             | Stmt::For {
-                init: Some(ForInit::Var(declarators)),
+                init: Some(ForInit::Var(_, declarators)),
                 ..
             } => {
+                // The head of a `for` with `let` or `const` is a scope around the whole loop.
+                let head = matches!(
+                    &node.stmt,
+                    Stmt::For {
+                        init: Some(ForInit::Var(kind, _)),
+                        ..
+                    } if kind.is_lexical()
+                );
+                if head {
+                    self.enter_lexical(ScopeKey::Head(id));
+                }
                 let mut children = Vec::new();
                 for (i, d) in declarators.iter().enumerate() {
                     let n = u32::try_from(i).map_err(|_| CompileError::TooMany("declarators"))?;
@@ -374,6 +635,9 @@ impl<'a> Resolver<'a> {
                     children.extend(test.map(Walk::Expr));
                     children.extend(update.map(Walk::Expr));
                     children.push(Walk::Stmt(*body));
+                }
+                if head {
+                    children.push(Walk::LeaveLexical(ScopeKey::Head(id)));
                 }
                 self.work.extend(children.into_iter().rev());
             }
@@ -412,6 +676,21 @@ impl<'a> Resolver<'a> {
                     self.work.push(Walk::Expr(*e));
                 }
             }
+            // With `let` or `const`: the expression in a scope of the head's names, then each
+            // iteration in a scope of its own (`#sec-runtime-semantics-forinofheadevaluation`,
+            // `#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`).
+            Stmt::ForIn {
+                target: ForInTarget::Var(kind, _),
+                object,
+                body,
+            } if kind.is_lexical() => {
+                self.work.push(Walk::LeaveLexical(ScopeKey::Iteration(id)));
+                self.work.push(Walk::Stmt(*body));
+                self.work.push(Walk::Lexical(ScopeKey::Iteration(id)));
+                self.work.push(Walk::LeaveLexical(ScopeKey::Tdz(id)));
+                self.work.push(Walk::Expr(*object));
+                self.work.push(Walk::Lexical(ScopeKey::Tdz(id)));
+            }
             Stmt::ForIn {
                 target,
                 object,
@@ -420,18 +699,21 @@ impl<'a> Resolver<'a> {
                 self.work.push(Walk::Stmt(*body));
                 self.work.push(Walk::Expr(*object));
                 match target {
-                    ForInTarget::Var(name) => self.occur(Site::ForInVar(id), &name.name),
+                    ForInTarget::Var(_, name) => self.occur(Site::ForInVar(id), &name.name),
                     ForInTarget::Expression(e) => self.work.push(Walk::Expr(*e)),
                 }
             }
+            // The case block is a scope entered after the discriminant.
             Stmt::Switch {
                 discriminant,
                 cases,
             } => {
+                self.work.push(Walk::LeaveLexical(ScopeKey::Case(id)));
                 for case in cases.iter().rev() {
                     self.push_list(&case.body);
                     self.work.extend(case.test.map(Walk::Expr));
                 }
+                self.work.push(Walk::Lexical(ScopeKey::Case(id)));
                 self.work.push(Walk::Expr(*discriminant));
             }
             Stmt::Try {
@@ -440,20 +722,21 @@ impl<'a> Resolver<'a> {
                 finalizer,
             } => {
                 if let Some(list) = finalizer {
-                    self.push_list(list);
+                    self.push_lexical_list(ScopeKey::Finally(id), list);
                 }
                 // A `catch` without a parameter makes no scope
-                // (`#sec-runtime-semantics-catchclauseevaluation`, `Catch : catch Block`).
+                // (`#sec-runtime-semantics-catchclauseevaluation`, `Catch : catch Block`); its
+                // block is a scope inside the parameter's.
                 if let Some(h) = handler {
                     if h.param.is_some() {
                         self.work.push(Walk::Leave);
-                        self.push_list(&h.body);
+                        self.push_lexical_list(ScopeKey::Catch(id), &h.body);
                         self.work.push(Walk::Catch(id));
                     } else {
-                        self.push_list(&h.body);
+                        self.push_lexical_list(ScopeKey::Catch(id), &h.body);
                     }
                 }
-                self.push_list(block);
+                self.push_lexical_list(ScopeKey::Try(id), block);
             }
             Stmt::FunctionDeclaration(f) => self.work.push(Walk::Function(*f)),
             // The object is evaluated outside the scope of the body.
@@ -630,6 +913,11 @@ impl<'a> Resolver<'a> {
         for name in &f.scope.var_names {
             self.declare(scope, name);
         }
+        // Steps 30 to 35: the top level of the body is a scope of its own inside the function's,
+        // in which the functions it declares are made.
+        self.work.push(Walk::Leave);
+        self.enter_lexical(ScopeKey::Body(id));
+        self.work.push(Walk::LeaveLexical(ScopeKey::Body(id)));
         for d in &f.scope.functions {
             let name = self
                 .ast
@@ -638,7 +926,6 @@ impl<'a> Resolver<'a> {
                 .ok_or_else(|| malformed("a function declaration without a name"))?;
             self.occur(Site::Declaration(*d), &name.name);
         }
-        self.work.push(Walk::Leave);
         self.push_list(&f.body);
         Ok(())
     }
@@ -789,8 +1076,120 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    /// The binding of a site that resolved to the `let` or `const` binding `b`, at `place` with
+    /// `hops`, from `scope`: a declaration initializes it through its plain place; another
+    /// access is checked unless it follows the declaration in the code of the same function in
+    /// a straight scope (decision 3, "Lexical bindings", item 2). A checked local slot goes into
+    /// `checked_locals`, for the scope's entry to set it uninitialized.
+    fn lexical_site(
+        &self,
+        site: Site,
+        scope: usize,
+        b: usize,
+        data: LexicalData,
+        place: LexicalPlace,
+        checked_locals: &mut BTreeSet<usize>,
+    ) -> Result<Option<Binding>, CompileError> {
+        if matches!(site, Site::VarDecl(..) | Site::ForInVar(_)) {
+            return Ok(None);
+        }
+        let binding = self.bindings.get(b).ok_or_else(|| malformed("a binding"))?;
+        let home = self
+            .scopes
+            .get(binding.scope)
+            .ok_or_else(|| malformed("a scope"))?;
+        let from = self.scopes.get(scope).ok_or_else(|| malformed("a scope"))?;
+        let at = match site {
+            Site::Expr(e) => self.ast.expr(e).map_or(0, |n| n.span.start),
+            _ => 0,
+        };
+        let follows = matches!(home.kind, Kind::Lexical { straight: true })
+            && home.owner == from.owner
+            && at >= data.end;
+        let checked = !follows;
+        if checked && let LexicalPlace::Local(_) = place {
+            checked_locals.insert(b);
+        }
+        if !checked && !data.constant {
+            return Ok(None);
+        }
+        Ok(Some(Binding::Lexical {
+            at: place,
+            name: binding.name.clone(),
+            checked,
+            constant: data.constant,
+        }))
+    }
+
+    /// What the entry of each lexical scope does: the names of its record's slots and the local
+    /// slots it sets uninitialized; an iteration of a for-in initializes its binding at once.
+    fn lexical_scopes(&self) -> BTreeMap<ScopeKey, LexicalScope> {
+        let mut scopes = BTreeMap::new();
+        for s in &self.scopes {
+            let Some(key) = s.key else { continue };
+            let mut scope = LexicalScope::default();
+            for &b in &s.order {
+                let Some(binding) = self.bindings.get(b) else {
+                    continue;
+                };
+                let constant = binding.lexical.is_some_and(|l| l.constant);
+                match binding.place {
+                    Place::Env(_) => scope.env.push((binding.name.clone(), constant)),
+                    Place::Local(n)
+                        if self.checked_locals.contains(&b)
+                            && !matches!(key, ScopeKey::Iteration(_)) =>
+                    {
+                        scope.uninitialize.push(n);
+                    }
+                    _ => {}
+                }
+            }
+            if !scope.env.is_empty() || !scope.uninitialize.is_empty() {
+                scopes.insert(key, scope);
+            }
+        }
+        scopes
+    }
+
+    /// The lexical names of the top level of eval code, the scope `scope`, with their slots, and
+    /// the names of the slots of its record.
+    #[allow(clippy::type_complexity)]
+    fn eval_bindings(
+        &self,
+        scope: usize,
+    ) -> Result<(Vec<(String, bool, Slot)>, Vec<(String, bool)>), CompileError> {
+        let s = self.scopes.get(scope).ok_or_else(|| malformed("a scope"))?;
+        let mut names = Vec::new();
+        let mut env = Vec::new();
+        for &b in &s.order {
+            let binding = self.bindings.get(b).ok_or_else(|| malformed("a binding"))?;
+            let constant = binding.lexical.is_some_and(|l| l.constant);
+            let slot = match binding.place {
+                Place::Local(n) => Slot::Local(n),
+                Place::Env(n) => {
+                    env.push((binding.name.clone(), constant));
+                    Slot::Env(n)
+                }
+                Place::Unset => return Err(malformed("a binding with no place")),
+            };
+            names.push((binding.name.clone(), constant, slot));
+        }
+        Ok((names, env))
+    }
+
     /// The binding of every site.
-    fn locate(&self) -> Result<BTreeMap<Site, Binding>, CompileError> {
+    fn locate(&mut self) -> Result<BTreeMap<Site, Binding>, CompileError> {
+        let mut checked_locals = BTreeSet::new();
+        let sites = self.sites(&mut checked_locals)?;
+        self.checked_locals = checked_locals;
+        Ok(sites)
+    }
+
+    /// The binding of every site; the checked local slots into `checked_locals`.
+    fn sites(
+        &self,
+        checked_locals: &mut BTreeSet<usize>,
+    ) -> Result<BTreeMap<Site, Binding>, CompileError> {
         let mut sites = BTreeMap::new();
         for (site, scope, name) in &self.occurrences {
             let found = self.lookup(*scope, name);
@@ -835,15 +1234,30 @@ impl<'a> Resolver<'a> {
                         .scopes
                         .get(data.scope)
                         .ok_or_else(|| malformed("a scope"))?;
-                    match (data.place, home.kind) {
-                        (Place::Local(n), _) => Binding::Local(n),
-                        (Place::Env(slot), Kind::SelfName) => Binding::Immutable {
+                    let (place, kind, lexical) = (data.place, home.kind, data.lexical);
+                    let at = match place {
+                        Place::Local(n) => Some(LexicalPlace::Local(n)),
+                        Place::Env(slot) => Some(LexicalPlace::Env { hops, slot }),
+                        Place::Unset => None,
+                    };
+                    let checked = match (lexical, at) {
+                        (Some(l), Some(at)) => {
+                            self.lexical_site(*site, *scope, b, l, at, checked_locals)?
+                        }
+                        _ => None,
+                    };
+                    match (checked, place, kind) {
+                        (Some(binding), _, _) => binding,
+                        (None, Place::Local(n), _) => Binding::Local(n),
+                        (None, Place::Env(slot), Kind::SelfName) => Binding::Immutable {
                             hops,
                             slot,
                             name: data.name.clone(),
                         },
-                        (Place::Env(slot), _) => Binding::Env { hops, slot },
-                        (Place::Unset, _) => return Err(malformed("a binding with no place")),
+                        (None, Place::Env(slot), _) => Binding::Env { hops, slot },
+                        (None, Place::Unset, _) => {
+                            return Err(malformed("a binding with no place"));
+                        }
                     }
                 }
             };

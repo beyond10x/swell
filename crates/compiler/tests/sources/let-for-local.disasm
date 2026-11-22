@@ -1,0 +1,23 @@
+script locals 1
+  0000 2:1 Undefined
+  0001 2:1 StoreCompletion
+  0002 2:1 Uninitialize 0
+  0003 2:14 Number 0
+  0004 2:10 SetLocal 0
+  0005 2:10 Pop
+  0006 2:17 GetLocalChecked 0 "i"
+  0007 2:21 Number 2
+  0008 2:17 Lt
+  0009 2:1 JumpIfFalse 0020
+  0010 2:31 GetLocalChecked 0 "i"
+  0011 2:31 StoreCompletion
+  0012 2:24 GetLocalChecked 0 "i"
+  0013 2:24 ToNumeric
+  0014 2:24 Dup
+  0015 2:24 Increment
+  0016 2:24 SetLocalChecked 0 "i"
+  0017 2:24 Pop
+  0018 2:1 Pop
+  0019 2:1 LoopJump 0006
+  0020 0:0 LoadCompletion
+  0021 0:0 Return

@@ -31,15 +31,17 @@
 
 use std::rc::Rc;
 
+use swell_compiler::bytecode::Slot;
 use swell_syntax::ParseOptions;
 
 use crate::builtins::object::argument;
 use crate::builtins::string::StringBuilder;
+use crate::env::{Bound, NameTable, SlotKind, SlotNames};
 use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{CompilationType, CompileStrings, Cx, HookCx, Host};
-use crate::interp::frame::{Frame, frame_bytes};
+use crate::interp::frame::{Frame, SlotValue, frame_bytes};
 use crate::object::builtin_function::Activation;
 use crate::realm::intrinsics::Intrinsic;
 use crate::script::{Compiled, SourceCopy, vec_bytes};
@@ -65,6 +67,11 @@ struct EvalEnvironments {
     lexical: Option<Handle>,
     /// The VariableEnvironment; `None` is the global environment.
     variable: Option<Handle>,
+    /// The LexicalEnvironment of the code that called `eval` (`None` for the global
+    /// environment): where EvalDeclarationInstantiation, step 3, starts its walk.
+    caller: Option<Handle>,
+    /// Whether the eval code is strict.
+    strict: bool,
 }
 
 impl<H: Host> Agent<H> {
@@ -268,7 +275,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Frame> {
         let realm = self.current_realm()?;
         let count = usize::try_from(compiled.code.locals).unwrap_or(usize::MAX);
-        let charged = frame_bytes().saturating_add(vec_bytes::<Value>(count));
+        let charged = frame_bytes().saturating_add(vec_bytes::<SlotValue>(count));
         if self.heap.accounting.charge(charged).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -277,7 +284,16 @@ impl<H: Host> Agent<H> {
             self.heap.accounting.credit(charged);
             return Err(self.terminate(Termination::MemoryBudget));
         }
-        locals.resize(count, Value::Undefined);
+        locals.resize(count, SlotValue::Value(Value::Undefined));
+        // EvalDeclarationInstantiation, step 16: the lexical bindings that live in local slots
+        // start uninitialized.
+        for lexical in &compiled.code.lexical {
+            if let Some(Slot::Local(n)) = lexical.slot
+                && let Some(slot) = usize::try_from(n).ok().and_then(|n| locals.get_mut(n))
+            {
+                *slot = SlotValue::Uninitialized;
+            }
+        }
         Ok(Frame {
             compiled,
             template: None,
@@ -298,26 +314,51 @@ impl<H: Host> Agent<H> {
         })
     }
 
-    /// The environments of PerformEval, steps 16 to 18, from the caller's LexicalEnvironment
-    /// `lexical` and VariableEnvironment `variable`: strict eval code gets a new declarative
-    /// record whose [[OuterEnv]] is `lexical`, its LexicalEnvironment and VariableEnvironment
-    /// both; non-strict eval code runs in the caller's. The new declarative record step 16 makes
-    /// for non-strict code is left out: no binding is ever created in it before the lexical
-    /// declarations of slice 6 (`let`, `const`, `class`), so no code can tell it is there.
+    /// The environments of PerformEval, steps 16 to 18, for the eval code `compiled`, from the
+    /// caller's LexicalEnvironment `lexical` and VariableEnvironment `variable`. The new
+    /// declarative record of step 16 is made only when a binding lives in it (decision 3,
+    /// "Lexical bindings", item 5): with a `let` or `const` binding that lives in a record
+    /// ([`swell_compiler::bytecode::Code::eval_scope`]), a record of those slots, uninitialized,
+    /// whose [[OuterEnv]] is `lexical`; for strict code always, its VariableEnvironment too, where
+    /// its `var` and function bindings are added. Non-strict eval code whose lexical bindings
+    /// live in local slots, or which has none, runs in the caller's environments: no code can
+    /// tell the record is missing.
     fn eval_environments(
         &mut self,
+        compiled: &Rc<Compiled>,
+        script: Handle,
         strict: bool,
-        lexical: Option<Handle>,
-        variable: Option<Handle>,
+        (lexical, variable): (Option<Handle>, Option<Handle>),
     ) -> Completion<EvalEnvironments> {
-        if strict {
-            let own = self.new_declarative_environment(lexical, 0, None)?;
-            return Ok(EvalEnvironments {
-                lexical: Some(own),
-                variable: Some(own),
-            });
-        }
-        Ok(EvalEnvironments { lexical, variable })
+        let own = match compiled.code.eval_scope {
+            Some(index) => {
+                let slots = compiled
+                    .code
+                    .scopes
+                    .get(usize::try_from(index).unwrap_or(usize::MAX))
+                    .map(|names| u32::try_from(names.len()).unwrap_or(u32::MAX));
+                let Some(slots) = slots else {
+                    return Err(self.fault());
+                };
+                let names = SlotNames {
+                    script,
+                    compiled: Rc::clone(compiled),
+                    table: NameTable::Scope {
+                        template: None,
+                        index,
+                    },
+                };
+                Some(self.new_lexical_environment(lexical, slots, names)?)
+            }
+            None if strict => Some(self.new_declarative_environment(lexical, 0, None)?),
+            None => None,
+        };
+        Ok(EvalEnvironments {
+            lexical: own.or(lexical),
+            variable: if strict { own } else { variable },
+            caller: lexical,
+            strict,
+        })
     }
 
     /// The direct `eval` of `CallEval` (`#sec-function-calls-runtime-semantics-evaluation`, step
@@ -367,7 +408,7 @@ impl<H: Host> Agent<H> {
         };
         self.check_frame_depth()?;
         self.step()?;
-        let envs = self.eval_environments(strict, lexical, variable)?;
+        let envs = self.eval_environments(&compiled, script, strict, (lexical, variable))?;
         let frame = self.eval_frame(script, Rc::clone(&compiled), strict, envs, this)?;
         let base = self.interp.frames.len();
         self.push_frame(frame);
@@ -414,7 +455,7 @@ impl<H: Host> Agent<H> {
         self.step()?;
         let realm = self.current_realm()?;
         let this = self.global_this_binding(realm)?;
-        let envs = self.eval_environments(strict, None, None)?;
+        let envs = self.eval_environments(&compiled, script, strict, (None, None))?;
         let frame = self.eval_frame(script, Rc::clone(&compiled), strict, envs, this)?;
         self.run_frame(frame, |agent| {
             agent.eval_declaration_instantiation(&compiled, script, envs)
@@ -426,16 +467,19 @@ impl<H: Host> Agent<H> {
     /// declarations as the compiler took them from `parse_eval` (`swell-compiler`,
     /// `compile_eval`), in the environments `envs`. A step per check and per declaration.
     ///
-    /// - Step 3.a, HasLexicalDeclaration of the global environment, finds nothing: no global
-    ///   lexical declaration exists before slice 6.
-    /// - Steps 3.b to 3.d check the declarative records between the LexicalEnvironment and the
-    ///   VariableEnvironment for a binding of a `var` name. Before slice 6 the only such records
-    ///   are those of `catch` clauses (and of `with` statements, which the step passes over),
-    ///   which the normative optional rule for VariableStatements in Catch Blocks (B.3.4), which
-    ///   a web host supports, lets pass: the step throws nothing, and is not walked.
+    /// - Step 3, for non-strict code only, before anything is bound: on a global
+    ///   VariableEnvironment, a `SyntaxError` when the global environment's [[DeclarativeRecord]]
+    ///   binds a `var` or function name (3.a); then the walk from the caller's LexicalEnvironment
+    ///   out to the VariableEnvironment (3.b to 3.d), passing over the records of `with`
+    ///   statements, a `SyntaxError` when a record binds the name as a `let` or `const` binding
+    ///   (or one eval code added). The binding of a `catch` parameter passes, as the normative
+    ///   optional rule for VariableStatements in Catch Blocks (B.3.4), which a web host
+    ///   supports, has it. A step per name and record.
     /// - The block-level function declarations of B.3.2.3 (step 12) are slice 18.
     /// - Steps 8 and 10 on a global VariableEnvironment: CanDeclareGlobalFunction and
     ///   CanDeclareGlobalVar, a `TypeError` when one answers false.
+    /// - Step 16: the lexical bindings were created uninitialized with the frame
+    ///   (`eval_environments`, `eval_frame`); their declarations initialize them.
     /// - Steps 17 and 18: each function made in the LexicalEnvironment and bound, each `var`
     ///   bound to `undefined` unless bound, the bindings deletable: CreateGlobalFunctionBinding
     ///   and CreateGlobalVarBinding with `true` on a global VariableEnvironment; on a declarative
@@ -449,6 +493,9 @@ impl<H: Host> Agent<H> {
     ) -> Completion<()> {
         let code = &compiled.code;
         let realm = self.current_realm()?;
+        if !envs.strict {
+            self.eval_var_conflicts(compiled, realm, envs)?;
+        }
         if envs.variable.is_none() {
             // Step 8: the functions, in reverse List order.
             for &function in code.function_declarations.iter().rev() {
@@ -504,6 +551,56 @@ impl<H: Host> Agent<H> {
                         self.add_binding(env, name, Value::Undefined)?;
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// EvalDeclarationInstantiation, step 3 (the documentation of
+    /// [`Agent::eval_declaration_instantiation`]): no `var` or function name of non-strict eval
+    /// code may be bound by a lexical declaration it would be hoisted over.
+    fn eval_var_conflicts(
+        &mut self,
+        compiled: &Rc<Compiled>,
+        realm: Handle,
+        envs: EvalEnvironments,
+    ) -> Completion<()> {
+        let code = &compiled.code;
+        let mut names = Vec::new();
+        for &function in &code.function_declarations {
+            names.push(self.name_key_of(compiled, function)?);
+        }
+        for &variable in &code.var_names {
+            names.push(self.string_key_of(compiled, variable)?);
+        }
+        for name in names {
+            // Step 3.a.
+            if envs.variable.is_none() {
+                self.step()?;
+                if self.has_lexical_declaration(realm, name)? {
+                    return Err(self.already_declared(name));
+                }
+            }
+            // Steps 3.b to 3.d.
+            let mut this = envs.caller;
+            while this != envs.variable {
+                let Some(env) = this else {
+                    break;
+                };
+                self.step()?;
+                let (outer, with) = {
+                    let record = self.environment(env)?;
+                    (record.outer, record.binding_object.is_some())
+                };
+                if !with {
+                    match self.bound(env, name)? {
+                        Some(Bound::Slot(_, SlotKind::Let | SlotKind::Const) | Bound::Added(_)) => {
+                            return Err(self.already_declared(name));
+                        }
+                        Some(Bound::Slot(_, SlotKind::Mutable | SlotKind::SelfName)) | None => {}
+                    }
+                }
+                this = outer;
             }
         }
         Ok(())

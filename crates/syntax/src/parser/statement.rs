@@ -2,11 +2,17 @@
 //! and the bodies of scripts and functions with their directive prologues
 //! (`#sec-directive-prologues-and-the-use-strict-directive`).
 //!
-//! Every ES5 statement is parsed, `with` in non-strict code included (slice 2); refused are the
-//! declarations of later slices: a function declaration inside a
-//! block, `let` and `const` (6), `class` (8), `async function` (10), `import` and `export` (11),
-//! and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
-//! `for (var a = 0 in o)` (18). Labelled statements and labelled `break` and `continue`
+//! Every ES5 statement is parsed, `with` in non-strict code included (slice 2), and the `let` and
+//! `const` declarations of slice 6 (`#sec-let-and-const-declarations`) in a script, a function
+//! body, a block, a `case` clause and the head of a `for` or a `for`-`in`. In non-strict code
+//! `let` is an identifier where no declaration can stand: before a token that cannot start a
+//! binding, and in the place of a Statement (the body of `if`, a loop, `with` or a label), where
+//! `let [` is an error (the lookahead of ExpressionStatement, `#sec-expression-statement`).
+//! Refused are the declarations of later slices: a function declaration inside a block (6),
+//! `class` (8), `async function` (10), `import` and `export` (11), and the Annex B forms
+//! `if (x) function f() {}`, `L: function f() {}` and `for (var a = 0 in o)` (18); a binding
+//! pattern after `let` or `const` and `for (let x of ...)` keep the refusals of their own parts
+//! (6). Labelled statements and labelled `break` and `continue`
 //! (`#sec-labelled-statements`), a `catch` without a parameter (`#sec-try-statement`) and
 //! automatic semicolon insertion (`#sec-rules-of-automatic-semicolon-insertion`) are slice 2's.
 //!
@@ -16,8 +22,8 @@
 
 use super::{Parser, R};
 use crate::ast::{
-    CatchClause, Expr, ExprId, ForInTarget, ForInit, Name, Span, Stmt, StmtId, SwitchCase,
-    VarDeclarator,
+    CatchClause, DeclKind, Expr, ExprId, ForInTarget, ForInit, Name, Span, Stmt, StmtId,
+    SwitchCase, VarDeclarator,
 };
 use crate::early;
 use crate::scope;
@@ -30,7 +36,8 @@ pub(super) enum Place {
     /// `HoistableDeclaration` of the body.
     Body,
     /// A `StatementList` inside a block, a `case` clause or a `try`, `catch` or `finally` block,
-    /// where a function declaration is lexically scoped (slice 6).
+    /// where a `let` or `const` declaration stands and a function declaration is lexically
+    /// scoped (refused before a later story of slice 6).
     Block,
     /// The `Statement` of an `if` clause, where Annex B allows a function declaration in
     /// non-strict code (`#sec-functiondeclarations-in-ifstatement-statement-clauses`).
@@ -48,6 +55,19 @@ pub(super) enum Place {
 }
 
 type StmtParser<'a> = fn(&mut Parser<'a>) -> R<StmtId>;
+
+/// The message of a `const` declaration where only a Statement may stand: the body of `if`, a
+/// loop or `with`, or a labelled item (`#sec-ecmascript-language-statements-and-declarations`).
+const LEXICAL_AS_STATEMENT: &str = "lexical declaration where a statement must stand";
+
+/// Whether a token after `let` starts the binding of a LexicalDeclaration: a name or a binding
+/// pattern (`#sec-let-and-const-declarations`).
+fn starts_binding(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Name(_) | TokenKind::Punct(Punct::LBracket) | TokenKind::Punct(Punct::LBrace)
+    )
+}
 
 impl<'a> Parser<'a> {
     /// The statements of a script (`top` true) or a function body, up to the end of the input or
@@ -172,7 +192,10 @@ impl<'a> Parser<'a> {
                     }
                 },
                 Keyword::Class => return self.refuse("class", 8),
-                Keyword::Const => return self.refuse("const declaration", 6),
+                Keyword::Const => match place {
+                    Place::Body | Place::Block => Parser::var_statement,
+                    _ => return self.fail_here(LEXICAL_AS_STATEMENT),
+                },
                 Keyword::Export => return self.refuse("export declaration", 11),
                 Keyword::Import => {
                     let next = self.peek()?.kind.clone();
@@ -196,15 +219,17 @@ impl<'a> Parser<'a> {
                         Place::Body | Place::Block | Place::Labelled => Parser::labelled_statement,
                     });
                 }
-                if is_let
-                    && matches!(
-                        next.kind,
-                        TokenKind::Name(_)
-                            | TokenKind::Punct(Punct::LBracket)
-                            | TokenKind::Punct(Punct::LBrace)
-                    )
-                {
-                    return self.refuse("let declaration", 6);
+                // `let` before a name or a binding pattern starts a LexicalDeclaration where a
+                // declaration may stand, across a line end too; elsewhere it is an identifier, and
+                // an ExpressionStatement may not start with `let [`.
+                if is_let && starts_binding(&next.kind) {
+                    return match place {
+                        Place::Body | Place::Block => Ok(Parser::var_statement),
+                        _ if next.kind == TokenKind::Punct(Punct::LBracket) => {
+                            self.fail_here("let [ may not start an expression statement")
+                        }
+                        _ => Ok(Parser::expression_statement),
+                    };
                 }
                 if is_async
                     && next.kind == TokenKind::Keyword(Keyword::Function)
@@ -394,10 +419,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// A `VariableStatement`, or a `LexicalDeclaration` (`let` or `const`, whose early errors
+    /// are `early.rs`'s).
     fn var_statement(&mut self) -> R<StmtId> {
         self.enter()?;
         let start = self.start();
-        let id = self.reserve_stmt(Stmt::Var(Vec::new()));
+        let id = self.reserve_declaration();
         self.advance()?;
         self.var_declarations(id, false)?;
         self.semicolon()?;
@@ -406,8 +433,27 @@ impl<'a> Parser<'a> {
         Ok(id)
     }
 
-    /// A `VariableDeclarationList`, appended to the declarators of `id` (a `var` statement or a
-    /// `for` whose head is one); `no_in` in the head of a `for`.
+    /// The kind of the declaration whose keyword is the current token: `var`, `const` or `let`.
+    #[inline(never)]
+    fn declaration_kind(&self) -> DeclKind {
+        if self.is_keyword(Keyword::Var) {
+            DeclKind::Var
+        } else if self.is_keyword(Keyword::Const) {
+            DeclKind::Const
+        } else {
+            DeclKind::Let
+        }
+    }
+
+    /// Reserves the node of the declaration whose keyword is the current token.
+    #[inline(never)]
+    fn reserve_declaration(&mut self) -> StmtId {
+        let kind = self.declaration_kind();
+        self.reserve_stmt(Stmt::Var(kind, Vec::new()))
+    }
+
+    /// A `VariableDeclarationList` or a `BindingList`, appended to the declarators of `id` (a
+    /// declaration or a `for` whose head is one); `no_in` in the head of a `for`.
     fn var_declarations(&mut self, id: StmtId, no_in: bool) -> R<()> {
         self.enter()?;
         loop {
@@ -426,9 +472,9 @@ impl<'a> Parser<'a> {
 
     fn declarators(&mut self, id: StmtId) -> Option<&mut Vec<VarDeclarator>> {
         match self.stmt_mut(id) {
-            Some(Stmt::Var(list)) => Some(list),
+            Some(Stmt::Var(_, list)) => Some(list),
             Some(Stmt::For {
-                init: Some(ForInit::Var(list)),
+                init: Some(ForInit::Var(_, list)),
                 ..
             }) => Some(list),
             _ => None,
@@ -539,7 +585,7 @@ impl<'a> Parser<'a> {
     }
 
     /// `for (;;)` and `for-in` (`#sec-for-statement`, `#sec-for-in-and-for-of-statements`);
-    /// `for-of`, `for await` and lexical declarations in the head are refused.
+    /// the head declares with `var`, `let` or `const`; `for-of` and `for await` are refused.
     fn for_statement(&mut self) -> R<StmtId> {
         self.enter()?;
         let start = self.start();
@@ -569,14 +615,14 @@ impl<'a> Parser<'a> {
             return self.refuse("await expression", 10);
         }
         self.expect(Punct::LParen)?;
-        if self.is_keyword(Keyword::Var) {
+        if self.for_head_declares()? {
+            let kind = self.declaration_kind();
             self.advance()?;
-            self.set_for_init(id, None);
+            self.set_for_init(id, ForInit::Var(kind, Vec::new()));
             self.var_declarations(id, true)?;
         } else if !self.is(Punct::Semicolon) {
-            self.for_head_refusals()?;
             let e = self.expression(true)?;
-            self.set_for_init(id, Some(e));
+            self.set_for_init(id, ForInit::Expression(e));
         }
         if self.is_name("of") && self.has_for_init(id) {
             return self.refuse("for-of statement", 6);
@@ -585,14 +631,11 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    /// Sets the `init` of the `for` statement `id`: an expression, or an empty `var` list.
+    /// Sets the `init` of the `for` statement `id`: an expression, or an empty declaration list.
     #[inline(never)]
-    fn set_for_init(&mut self, id: StmtId, e: Option<ExprId>) {
+    fn set_for_init(&mut self, id: StmtId, head: ForInit) {
         if let Some(Stmt::For { init, .. }) = self.stmt_mut(id) {
-            *init = Some(match e {
-                Some(e) => ForInit::Expression(e),
-                None => ForInit::Var(Vec::new()),
-            });
+            *init = Some(head);
         }
     }
 
@@ -603,24 +646,19 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// Refuses `const` and `let` declarations in the head of a `for`.
+    /// Whether the head of a `for` starts with a declaration: `var`, `const`, or `let` before a
+    /// name or a binding pattern (`#sec-for-statement`); a `let` before anything else is an
+    /// identifier.
     #[inline(never)]
-    fn for_head_refusals(&mut self) -> R<()> {
-        if self.is_keyword(Keyword::Const) {
-            return self.refuse("const declaration", 6);
+    fn for_head_declares(&mut self) -> R<bool> {
+        if self.is_keyword(Keyword::Var) || self.is_keyword(Keyword::Const) {
+            return Ok(true);
         }
         if self.is_name("let") {
             let next = self.peek()?;
-            if matches!(
-                next.kind,
-                TokenKind::Name(_)
-                    | TokenKind::Punct(Punct::LBracket)
-                    | TokenKind::Punct(Punct::LBrace)
-            ) {
-                return self.refuse("let declaration", 6);
-            }
+            return Ok(starts_binding(&next.kind));
         }
-        Ok(())
+        Ok(false)
     }
 
     /// Sets a part of the loop `id` once it is parsed.
@@ -669,17 +707,19 @@ impl<'a> Parser<'a> {
             _ => None,
         };
         let target = match init {
-            Some(ForInit::Var(mut declarators)) if declarators.len() == 1 => {
+            Some(ForInit::Var(kind, mut declarators)) if declarators.len() == 1 => {
                 let Some(d) = declarators.pop() else {
                     return self.unexpected();
                 };
                 if d.init.is_some() {
-                    if self.strict {
+                    // Annex B allows an initializer only for a `var` in non-strict code
+                    // (`#sec-initializers-in-forin-statement-heads`).
+                    if self.strict || kind.is_lexical() {
                         return self.fail_at("initializer in a for-in head", start);
                     }
                     return self.refuse_at("initializer in a for-in head", 18, start);
                 }
-                ForInTarget::Var(d.name)
+                ForInTarget::Var(kind, d.name)
             }
             Some(ForInit::Expression(e)) => {
                 if self.is_literal_pattern(e) {

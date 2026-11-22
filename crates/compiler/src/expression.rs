@@ -24,7 +24,7 @@ use swell_syntax::ast::{
 };
 
 use crate::bytecode::Instruction;
-use crate::resolve::{Binding, Site, property_key};
+use crate::resolve::{Binding, LexicalPlace, Site, property_key};
 use crate::{CompileError, Compiler, Short, Task, malformed};
 
 /// The reference an assignment, an update, a `delete` or a for-in head works on.
@@ -177,6 +177,19 @@ impl<'a> Compiler<'a> {
             }
             Binding::Global(name) => Instruction::GetGlobalRef(self.string(name)?),
             Binding::Dynamic(name) => Instruction::GetNameRef(self.string(name)?),
+            Binding::Lexical {
+                at, name, checked, ..
+            } => match (*at, *checked) {
+                (LexicalPlace::Local(slot), true) => Instruction::GetLocalChecked {
+                    slot,
+                    name: self.string(name)?,
+                },
+                (LexicalPlace::Env { hops, slot }, true) => {
+                    Instruction::GetEnvChecked { hops, slot }
+                }
+                (LexicalPlace::Local(slot), false) => Instruction::GetLocal(slot),
+                (LexicalPlace::Env { hops, slot }, false) => Instruction::GetEnv { hops, slot },
+            },
         })
     }
 
@@ -195,6 +208,25 @@ impl<'a> Compiler<'a> {
             Target::Binding(Binding::Dynamic(name)) => Instruction::PutNameRef(self.string(name)?),
             Target::Member { name, .. } => Instruction::PutNamed(*name),
             Target::Index { .. } => Instruction::PutIndex,
+            // A `const` binding throws for every assignment, a `let` one before its declaration.
+            Target::Binding(Binding::Lexical {
+                at, name, constant, ..
+            }) => match (*at, *constant) {
+                (LexicalPlace::Local(slot), true) => Instruction::AssignConstLocal {
+                    slot,
+                    name: self.string(name)?,
+                },
+                (LexicalPlace::Env { hops, slot }, true) => {
+                    Instruction::AssignConstEnv { hops, slot }
+                }
+                (LexicalPlace::Local(slot), false) => Instruction::SetLocalChecked {
+                    slot,
+                    name: self.string(name)?,
+                },
+                (LexicalPlace::Env { hops, slot }, false) => {
+                    Instruction::SetEnvChecked { hops, slot }
+                }
+            },
         })
     }
 

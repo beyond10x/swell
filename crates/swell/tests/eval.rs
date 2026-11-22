@@ -421,24 +421,24 @@ fn fault(_cx: &mut Cx<'_, support::host::TestHost>, _call: HostCall<'_>) -> Comp
 
 /// HOST-164 (section 13, "A count of refusals"): `refusals()` reads 0 on a new agent and one
 /// more for each refusal the engine raises, caught or not, through each entry: `parse_script`
-/// of `let x;`, `eval` and `Function` of it caught by the script, and the regular expression
-/// literal caught at run time. A grammar error and the nesting limit are no refusals. The count
-/// is a `u64` read after the agent faulted too.
+/// of `<!-- x` (an HTML-like comment, slice 18), `eval` and `Function` of it caught by the
+/// script, and the regular expression literal caught at run time. A grammar error and the
+/// nesting limit are no refusals. The count is a `u64` read after the agent faulted too.
 #[test]
 fn host_164_refusals_counts_every_refusal_caught_or_not() {
     let mut agent = agent_with(limits()).unwrap();
     let realm = realm(&mut agent);
     assert_eq!(agent.refusals(), 0);
-    let Outcome::Errors(errors) = eval_text(&mut agent, &realm, "let x;") else {
-        panic!("let x; parsed");
+    let Outcome::Errors(errors) = eval_text(&mut agent, &realm, "<!-- x") else {
+        panic!("<!-- x parsed");
     };
     assert_eq!(errors.len(), 1);
     assert_eq!(agent.refusals(), 1);
     for (source, after) in [
-        ("try { eval(\"let x;\"); } catch (e) {}", 2),
-        ("try { Function(\"let x;\"); } catch (e) {}", 3),
+        ("try { eval(\"<!-- x\"); } catch (e) {}", 2),
+        ("try { Function(\"<!-- x\"); } catch (e) {}", 3),
         ("try { /a/; } catch (e) {}", 4),
-        ("try { (0, eval)(\"let x;\"); } catch (e) {}", 5),
+        ("try { (0, eval)(\"<!-- x\"); } catch (e) {}", 5),
     ] {
         assert_eq!(
             eval_text(&mut agent, &realm, source),
