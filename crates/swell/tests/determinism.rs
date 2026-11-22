@@ -306,22 +306,30 @@ const CORPUS: &[&str] = &[
 /// every safe point multiplies the work: the 40,000 steps are covered by the default mode, and
 /// the interleaving of two agents under collections by the collect mode at its smaller limits.
 ///
-/// With the feature `collect-every-safe-point` the run has 2,000 steps per entry, 156 KiB, a
-/// `frame_depth` of 30 and a `string_length` of 256. With 10,000 steps the test was terminated
+/// With the feature `collect-every-safe-point` the run has 2,000 steps per entry, a
+/// `frame_depth` of 30, a `string_length` of 256, and a memory budget of the realm's charge
+/// ([`realm_charge`]) plus [`COLLECT_ROOM`], 64 KiB. With 10,000 steps the test was terminated
 /// at 60 s in that mode, at a load of 100 to 110 on 17 cores (cargo-nextest): this process runs
-/// the corpus twice and every step collects. The transcript of one run in that mode (7,907
-/// steps, `frame_depth` 50) gave the steps and heap bytes the numbers rest on: the realm holds
-/// 103,546 bytes and no script but the one that keeps every object leaves more than 127,679;
-/// `deep()` took 4 steps a frame (202 for 50); the doubling string charges a step per code unit
-/// it makes, so it took 4,208 steps up to 2,048 units and 7,907 ended it in the step budget, not
-/// at `string_length`, while up to 256 units it takes about 600 and the refused doubling 512
-/// more; the loop that keeps its objects charges 25.1 bytes a step (135,709 bytes in 5,405
-/// steps), so from about 123,100 bytes it fills 156 KiB (159,744 bytes) in about 1,460 steps;
-/// the longest script that completes takes 1,792. So every outcome the test asserts is still
-/// reached under 2,000 steps: the endless loops and `fib(15)` end in the step budget, `deep()`
-/// at `frame_depth` (its 30 frames would need more than 1.2 KiB each to fill the budget first),
-/// the doubling string at `string_length`, the loop that keeps its objects in the memory
-/// budget, and the others where they end with 40,000.
+/// the corpus twice and every step collects. The numbers below were measured in that mode after
+/// the arenas were charged by capacity (an arena's slots are charged when it doubles, from 16,
+/// and stay charged): the realm's charge, `heap_bytes()`, is 172,603 bytes (`live_bytes()`
+/// 105,817), so the budget is 238,139; no script but the one that keeps every object reads
+/// more than 191,951, and each of them ends as it does with 40,000 steps under a budget of the
+/// realm plus 24 KiB (with 20,000 bytes of room the nested `join` ends in the memory budget);
+/// `fib(15)` ends in the step budget; the longest script that completes, the 50 squares, takes
+/// 1,794 steps; `deep()` reaches `frame_depth` in 123 steps; the doubling string reaches
+/// `string_length` in 598. The loop that keeps its objects starts from 189,739 bytes; at step
+/// 1,547, with 90 objects in `h`, an arena doubles and the charge would go from 213,444 to
+/// 265,668 bytes (52,224 more). The budget refuses that doubling: it is 24,695 bytes above the
+/// charge before it and 27,529 below the charge after it. Any budget from 213,444 to 265,667
+/// bytes ends the loop at that step; a smaller one ends it sooner, and a larger one lets the
+/// arena grow, so the loop runs into the step budget and the outcome `MemoryBudget` is lost. A
+/// realm that charges more moves the budget with it; what moves that window against the room is
+/// the arena the loop doubles, its capacity and its slot's size. So every outcome the test
+/// asserts is still reached under 2,000 steps: the endless loops and `fib(15)` end in the step
+/// budget, `deep()` at `frame_depth` (its 30 frames would need more than 1.6 KiB each to fill
+/// the budget first), the doubling string at `string_length`, the loop that keeps its objects
+/// in the memory budget, and the others where they end with 40,000.
 fn corpus_limits() -> Limits {
     let mut limits = limits();
     limits.steps_per_entry = 40_000;
@@ -331,16 +339,36 @@ fn corpus_limits() -> Limits {
     limits.string_length = 1 << 12;
     if cfg!(feature = "collect-every-safe-point") {
         limits.steps_per_entry = 2_000;
-        limits.memory_bytes = 156 * 1024;
         limits.frame_depth = 30;
         limits.string_length = 1 << 8;
+        limits.memory_bytes = realm_charge(limits) + COLLECT_ROOM;
     }
     limits
 }
 
+/// The room of the memory budget above [`realm_charge`] with the feature
+/// `collect-every-safe-point` ([`corpus_limits`]).
+const COLLECT_ROOM: u64 = 64 * 1024;
+
+/// What the heap of a corpus agent is charged once its realm is made and its host functions are
+/// defined: an agent of its own under `corpus` with the memory budget of the test limits. Every
+/// agent of the run, in this process and in each child, measures it in the same way, so all of
+/// them get the same limits; a charge that differed between processes would show as limits and
+/// transcripts that differ.
+fn realm_charge(mut corpus: Limits) -> u64 {
+    corpus.memory_bytes = limits().memory_bytes;
+    let (agent, _realm) = corpus_agent_with(corpus);
+    agent.heap_bytes().unwrap()
+}
+
 /// An agent of the corpus run, its realm, and its host functions defined.
 fn corpus_agent() -> (Agent<Transcript>, Realm) {
-    let mut agent = Agent::new(Transcript::default(), corpus_limits(), seeds()).unwrap();
+    corpus_agent_with(corpus_limits())
+}
+
+/// An agent under `limits`, its realm, and the host functions of the corpus run defined.
+fn corpus_agent_with(limits: Limits) -> (Agent<Transcript>, Realm) {
+    let mut agent = Agent::new(Transcript::default(), limits, seeds()).unwrap();
     let realm = match agent.create_realm(None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
