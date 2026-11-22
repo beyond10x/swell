@@ -40,7 +40,8 @@
 //! ([`Agent::credit_source_copy`]). Eval code and the `Function` constructor keep theirs the same
 //! way (`dynamic_code.rs`).
 //!
-//! Kind site of the collector: [`ScriptRecord::trace`] (the realm and the constants' atoms).
+//! Kind site of the collector: [`ScriptRecord::trace`] (the realm, the constants' atoms and the
+//! template objects).
 
 use std::rc::Rc;
 
@@ -59,7 +60,7 @@ use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{ErrorKind, Host, HostDefined, InterruptHandle, Source};
 use crate::interp::frame::{Frame, SlotValue, frame_bytes};
 use crate::object::property::{Key, array_index};
-use crate::value::{StringRef, Value};
+use crate::value::{ObjectRef, StringRef, Value};
 
 /// A script's compiled code, the source it was compiled from and the atoms of its constants.
 pub(crate) struct Compiled {
@@ -98,11 +99,17 @@ pub(crate) struct ScriptRecord {
     pub(crate) realm: Option<Handle>,
     pub(crate) compiled: Option<Rc<Compiled>>,
     host_defined: Option<HostObject>,
+    /// The realm's [[TemplateMap]] for the code of the record (`#sec-gettemplateobject`;
+    /// `docs/design/engine.md`, decision 4, "Template objects", item 2): the template object of
+    /// each tagged template site of the code by its number, `None` until the site's first
+    /// evaluation (`interp/templates.rs`); charged with the record, freed with it.
+    pub(crate) templates: Vec<Option<ObjectRef>>,
 }
 
 impl ScriptRecord {
     /// Kind site of the collector: [[Realm]], the atoms of the code's constants and of its
-    /// functions' names (the property keys are the same atoms), and [[HostDefined]].
+    /// functions' names (the property keys are the same atoms), [[HostDefined]] and the
+    /// template objects of the sites evaluated.
     pub(crate) fn trace(&self, mark: &mut Mark) {
         mark.count("script.rs ScriptRecord::trace");
         if let Some(realm) = self.realm {
@@ -115,6 +122,9 @@ impl ScriptRecord {
         }
         if let Some(host_defined) = &self.host_defined {
             host_defined.trace(mark);
+        }
+        for &template in self.templates.iter().flatten() {
+            mark.object(template);
         }
     }
 
@@ -132,6 +142,7 @@ impl ScriptRecord {
             realm: None,
             compiled: None,
             host_defined: None,
+            templates: Vec::new(),
         }
     }
 }
@@ -455,7 +466,8 @@ impl<H: Host> Agent<H> {
             code.strings.len(),
             code.functions.len(),
             host_defined.is_some(),
-        );
+        )
+        .saturating_add(vec_bytes::<Option<ObjectRef>>(code.template_sites.len()));
         if self.heap.accounting.charge(own).is_err() {
             drop((code, source));
             self.heap.accounting.credit(taken);
@@ -470,6 +482,12 @@ impl<H: Host> Agent<H> {
                 return Err(abrupt);
             }
         };
+        let Some(mut templates) = exact(code.template_sites.len()) else {
+            drop((code, source));
+            self.heap.accounting.credit(owned);
+            return Err(self.terminate(Termination::MemoryBudget));
+        };
+        templates.resize(code.template_sites.len(), None);
         let record = ScriptRecord {
             realm: Some(realm),
             compiled: Some(Rc::new(Compiled {
@@ -486,6 +504,7 @@ impl<H: Host> Agent<H> {
                 data: Some(Box::new(ScriptHostDefined(value))),
                 error_kind: None,
             }),
+            templates,
         };
         match crate::heap::store_charged(
             &mut self.heap.accounting,

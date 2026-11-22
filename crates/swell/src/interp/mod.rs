@@ -40,6 +40,7 @@ mod object_literal;
 mod parameters;
 mod patterns;
 mod template;
+mod templates;
 
 use frame::{Entry, Frame, entry_bytes};
 

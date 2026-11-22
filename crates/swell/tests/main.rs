@@ -58,6 +58,7 @@ mod realms;
 mod scripts;
 mod source_scan;
 mod support;
+mod tagged_templates;
 mod template_literals;
 mod termination;
 mod tracing;

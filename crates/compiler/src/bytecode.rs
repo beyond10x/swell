@@ -502,6 +502,11 @@ pub enum Instruction {
     /// (`#sec-template-literals-runtime-semantics-evaluation`): an object gives ToPrimitive with
     /// hint string, so its `toString` is asked first.
     ToString,
+    /// `[] -> [t]`: GetTemplateObject (`#sec-gettemplateobject`) of tagged template site `k` of
+    /// the code ([`Code::template_sites`]): the template object the record of the code holds
+    /// for the site, made at its first evaluation, an argument of the tag's call
+    /// (`#sec-tagged-templates-runtime-semantics-evaluation`).
+    TemplateObject(u32),
 }
 
 impl Instruction {
@@ -621,6 +626,7 @@ impl Instruction {
             | Instruction::AssignConstEnv { .. }
             | Instruction::InitGlobal(_) => None,
             Instruction::ToString => None,
+            Instruction::TemplateObject(_) => None,
             Instruction::Argument(_)
             | Instruction::RestArguments(_)
             | Instruction::PushVarEnv(_) => None,
@@ -877,11 +883,24 @@ pub struct Code {
     /// PerformEval makes for its lexical bindings (`#sec-performeval`, steps 17 to 19), when one
     /// of them lives there; `None` otherwise.
     pub eval_scope: Option<u32>,
+    /// The site table: each tagged template of the code, its functions' included, numbered as
+    /// the compile step reaches it ([`Instruction::TemplateObject`] names the number), with its
+    /// template strings (`docs/design/engine.md`, decision 4, "Template objects", item 1).
+    pub template_sites: Vec<TemplateSite>,
     /// The bytes the compile step's ledger charged for the code's vectors, by capacity, and
     /// still holds: the vectors above, the inner ones and those of every template. The owner of
     /// the code takes them over (the engine's script record owns them) or credits them when it
     /// drops the code.
     pub charged: usize,
+}
+
+/// A tagged template site of a [`Code`]: per template string in source order its TV as a
+/// `strings` index, `None` where it is undefined (a NotEscapeSequence), and its TRV as a
+/// `strings` index (`#sec-static-semantics-templatestrings`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TemplateSite {
+    pub cooked: Vec<Option<u32>>,
+    pub raw: Vec<u32>,
 }
 
 /// The bytes of a vector's buffer by its capacity.
@@ -937,6 +956,12 @@ impl Code {
             buffer(&self.var_names),
             buffer(&self.function_declarations),
             buffer(&self.lexical),
+            self.template_sites
+                .iter()
+                .fold(buffer(&self.template_sites), |sum, site| {
+                    sum.saturating_add(buffer(&site.cooked))
+                        .saturating_add(buffer(&site.raw))
+                }),
         ]
         .iter()
         .fold(0usize, |sum, bytes| sum.saturating_add(*bytes))

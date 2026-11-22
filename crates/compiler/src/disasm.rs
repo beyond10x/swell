@@ -5,6 +5,7 @@
 //!   var "<name>" ...                     the declaredVarNames, when there are any
 //!   declare <function> ...               the functionsToInitialize, when there are any
 //!   lexical let|const "<name>"[ local <n>|env <n>] ...   the top level's lexical names
+//!   template <k> "<cooked>"|undefined ... raw "<raw>" ...   each tagged template site
 //!   <index> <line>:<column> <instruction> <operands>
 //!   catch|finally <start>..<end> -> <target> items <n> envs <n>
 //!
@@ -63,6 +64,22 @@ pub fn disassemble(code: &Code) -> String {
             if let Some(at) = l.slot {
                 let _ = write!(out, " {}", slot(at));
             }
+        }
+        out.push('\n');
+    }
+    for (i, site) in code.template_sites.iter().enumerate() {
+        let _ = write!(out, "  template {i}");
+        for k in &site.cooked {
+            match k {
+                Some(k) => {
+                    let _ = write!(out, " {}", string(code, *k));
+                }
+                None => out.push_str(" undefined"),
+            }
+        }
+        out.push_str(" raw");
+        for k in &site.raw {
+            let _ = write!(out, " {}", string(code, *k));
         }
         out.push('\n');
     }
@@ -294,6 +311,7 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::PatternGet { depth, name } => format!("PatternGet {depth} {}", s(name)),
         I::PatternGetKey { depth, kept } => format!("PatternGetKey {depth} {kept}"),
         I::ObjectRest { depth, kept } => format!("ObjectRest {depth} {kept}"),
+        I::TemplateObject(k) => format!("TemplateObject {k}"),
         other => format!("{other:?}"),
     }
 }

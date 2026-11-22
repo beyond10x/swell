@@ -403,6 +403,8 @@ impl<H: Host> Agent<H> {
             I::ObjectRest { depth, kept } => self.object_rest(depth, kept),
             // ---- templates (`interp/template.rs`) ----
             I::ToString => self.substitution_to_string(),
+            // ---- tagged templates (`interp/templates.rs`) ----
+            I::TemplateObject(site) => self.template_object(site),
         }
     }
 
