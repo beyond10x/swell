@@ -1001,8 +1001,12 @@ mod tests {
     /// index keys in their list, an object whose list compacts at its next addition, a function
     /// whose eval code adds bindings until their list compacts, and bound functions of 0, 1 and
     /// 1,000 bound arguments per link through chains of 1 and 3 links. The totals are those
-    /// recorded on the base of the change; `o.x = 1` compacts the list (16 entries visited) and
-    /// `o.y = 1`, the same instructions, does not.
+    /// recorded on the base of the change `c8f39a4`, but for `f()`: since the frontend charges,
+    /// `eval` charges a step per code unit of its source before it parses
+    /// (`dynamic_code.rs`, `parse_eval_code`), so `f()` carries the 156 code units of its ten
+    /// `eval` sources (72, eight times `delete b<i>` with 75 in sum, and 9) on top of its 341
+    /// there. `o.x = 1` compacts the list (16 entries visited) and `o.y = 1`, the same
+    /// instructions, does not.
     #[test]
     fn step_totals_are_unchanged() {
         const SETUP: &str = "var a0 = [0, 1, 2]; \
@@ -1032,7 +1036,7 @@ mod tests {
             ("a1000.length = 1", 2_010),
             ("o.x = 1", 24),
             ("o.y = 1", 8),
-            ("f()", 341),
+            ("f()", 497),
             ("b0x1()", 12),
             ("b1x1()", 14),
             ("b1000x1()", 2_012),
