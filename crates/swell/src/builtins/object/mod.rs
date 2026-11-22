@@ -4,7 +4,9 @@
 //! `Object.getOwnPropertyNames` (`#sec-object.getownpropertynames`),
 //! `Object.getOwnPropertySymbols` (`#sec-object.getownpropertysymbols`, written by
 //! `story:symbol-constructor-and-well-known-symbols`), `Object.getPrototypeOf`
-//! (`#sec-object.getprototypeof`), and `Object.prototype.constructor`
+//! (`#sec-object.getprototypeof`), `Object.fromEntries` (`#sec-object.fromentries`) and
+//! `Object.groupBy` (`#sec-object.groupby`), whose steps are in `from_entries.rs`
+//! (`story:array-from-and-object-from-entries`), and `Object.prototype.constructor`
 //! (`#sec-object.prototype.constructor`), `.hasOwnProperty`
 //! (`#sec-object.prototype.hasownproperty`), `.propertyIsEnumerable`
 //! (`#sec-object.prototype.propertyisenumerable`) and `.toString`
@@ -22,6 +24,7 @@
 //! (decision 4); a key's atom is kept the same way, since atoms are held weakly.
 
 pub(crate) mod enumeration;
+pub(crate) mod from_entries;
 pub(crate) mod integrity;
 
 use crate::host::agent::Agent;
@@ -49,6 +52,10 @@ pub(crate) enum ObjectBuiltin {
     GetOwnPropertySymbols,
     /// `Object.getPrototypeOf ( O )` (20.1.2.12).
     GetPrototypeOf,
+    /// `Object.fromEntries ( iterable )` (20.1.2.7) and `Object.groupBy ( items, callback )`
+    /// (20.1.2.13), their steps in `from_entries.rs` (`story:array-from-and-object-from-entries`).
+    FromEntries,
+    GroupBy,
     /// `Object.prototype.hasOwnProperty ( V )` (20.1.3.2).
     HasOwnProperty,
     /// `Object.prototype.propertyIsEnumerable ( V )` (20.1.3.4).
@@ -91,6 +98,8 @@ impl<H: Host> Agent<H> {
                 ObjectBuiltin::GetOwnPropertySymbols,
             ),
             ("getPrototypeOf", 1, ObjectBuiltin::GetPrototypeOf),
+            ("fromEntries", 1, ObjectBuiltin::FromEntries),
+            ("groupBy", 2, ObjectBuiltin::GroupBy),
         ] {
             self.define_builtin_method(making, constructor, name, length, BuiltinId::Object(id))?;
         }
@@ -157,6 +166,8 @@ impl<H: Host> Agent<H> {
             ObjectBuiltin::GetOwnPropertyNames => self.object_get_own_property_names(args),
             ObjectBuiltin::GetOwnPropertySymbols => self.object_get_own_property_symbols(args),
             ObjectBuiltin::GetPrototypeOf => self.object_get_prototype_of(args),
+            ObjectBuiltin::FromEntries => self.object_from_entries(args),
+            ObjectBuiltin::GroupBy => self.object_group_by(args),
             ObjectBuiltin::HasOwnProperty => self.object_has_own_property(this, args),
             ObjectBuiltin::PropertyIsEnumerable => self.object_property_is_enumerable(this, args),
             ObjectBuiltin::ToString => self.object_to_string(this),
@@ -613,6 +624,8 @@ mod tests {
                 "getOwnPropertyNames",
                 "getOwnPropertySymbols",
                 "getPrototypeOf",
+                "fromEntries",
+                "groupBy",
             ],
             &constructor_groups,
             &[],

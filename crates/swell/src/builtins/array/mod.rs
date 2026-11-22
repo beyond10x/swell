@@ -8,7 +8,8 @@
 //! `[@@iterator]` (`#sec-array.prototype.entries`, `#sec-array.prototype.keys`,
 //! `#sec-array.prototype.values`, `#sec-array.prototype-%symbol.iterator%`) are
 //! `story:iterator-protocol-and-array-string-iterators`, their steps in `builtins/iterator.rs`.
-//! Slice 2 takes `.toString`
+//! `Array.from` (`#sec-array.from`) is `story:array-from-and-object-from-entries`, its steps in
+//! `from.rs`. Slice 2 takes `.toString`
 //! (`#sec-array.prototype.tostring`) early (`docs/design/engine.md`, section 12, "A part before
 //! its slice"); the other members are slice 3, in the group modules beside this file
 //! (`story:builtin-group-modules`): `iteration.rs` (`story:array-iteration-methods`),
@@ -22,6 +23,7 @@
 //! (the object it reads and the array it fills) is kept on the agent's kept stack, which the
 //! root site of `object/builtin_function.rs` reports (decision 4).
 
+pub(crate) mod from;
 pub(crate) mod iteration;
 pub(crate) mod mutation;
 pub(crate) mod search;
@@ -45,6 +47,9 @@ pub(crate) enum ArrayBuiltin {
     Constructor,
     /// `Array.isArray ( arg )` (23.1.2.3).
     IsArray,
+    /// `Array.from ( items [ , mapper [ , thisArg ] ] )` (23.1.2.1), its steps in `from.rs`
+    /// (`story:array-from-and-object-from-entries`).
+    From,
     /// `get Array [ @@species ]` (23.1.2.6).
     Species,
     /// `Array.prototype.join ( separator )` (23.1.3.18).
@@ -76,7 +81,7 @@ pub(crate) const MAX_SAFE_LENGTH: f64 = 9_007_199_254_740_991.0;
 pub(crate) const ARRAY_INDEX_END: f64 = 4_294_967_295.0;
 
 impl<H: Host> Agent<H> {
-    /// `%Array%` (23.1.1) with `isArray`, `[@@species]`, and the methods of
+    /// `%Array%` (23.1.1) with `isArray`, `from`, `[@@species]`, and the methods of
     /// `%Array.prototype%` this part has; then the methods of each group on both, and the
     /// groups' data properties keyed by a well-known symbol on `%Array.prototype%`, the groups
     /// in the order `iteration`, `search`, `mutation`.
@@ -98,6 +103,13 @@ impl<H: Host> Agent<H> {
             "isArray",
             1,
             BuiltinId::Array(ArrayBuiltin::IsArray),
+        )?;
+        self.define_builtin_method(
+            making,
+            constructor,
+            "from",
+            1,
+            BuiltinId::Array(ArrayBuiltin::From),
         )?;
         // 23.1.2.6: an accessor whose set accessor function is undefined; the getter is named
         // "get [Symbol.species]"; the property is { [[Enumerable]]: false, [[Configurable]]:
@@ -198,6 +210,7 @@ impl<H: Host> Agent<H> {
             ArrayBuiltin::Constructor => self.array_constructor(function, args, new_target),
             // "Return ? IsArray(arg)."
             ArrayBuiltin::IsArray => Ok(Value::Boolean(self.is_array(argument(args, 0))?)),
+            ArrayBuiltin::From => self.array_from(this, args),
             // "Return the this value."
             ArrayBuiltin::Species => Ok(this),
             ArrayBuiltin::Join => self.array_join(this, args),
@@ -581,7 +594,7 @@ mod tests {
         check_group_keys(
             &mut agent,
             constructor,
-            &["length", "name", "prototype", "isArray"],
+            &["length", "name", "prototype", "isArray", "from"],
             &constructor_groups,
             &[species],
         );
