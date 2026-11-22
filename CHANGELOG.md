@@ -34,6 +34,16 @@ Every number below comes from the gate, `task check`, on the released commit.
 - `get_prototype_of`, `set_prototype_of`: new methods of `Cx`, the [[GetPrototypeOf]] and
   [[SetPrototypeOf]] of an object, so an interface object takes its parent's interface object
   as [[Prototype]] (`HOST-180`).
+- `charge_host_bytes` (new, on `Cx` and `HookCx`): charges bytes the host holds for the agent
+  to `memory_bytes` and answers a `HostBytes` (`HOST-175`, `HOST-176`).
+- `HostBytes` (new): bytes the host charged for the agent; neither `Clone` nor `Copy`; dropping
+  it gives them back, in a collection or at the next charge.
+- `resize_host_bytes` (new, on `Cx` and `HookCx`): changes that charge in place; growing
+  charges the difference first, shrinking gives it back at once.
+- `credit_host_bytes` (new, on `Agent`): gives one charge back at once and answers its bytes
+  (`HOST-176`).
+- `charge_steps` (new, on `Cx`): charges the steps of a host function's own work to the
+  running entry (`HOST-177`).
 - A handle the host keeps without a root is a stated weak reference (`HOST-178`): it reads
   its object while the object lives and answers `StaleHandle` after a collection freed it,
   also after its slot holds a new object. No code changed for it; it is tested now.
