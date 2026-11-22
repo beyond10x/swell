@@ -18,15 +18,15 @@
     ]
   },
   "test262": {
-    "line": "test262 total 53801 8982 7 44812 14915 29896 1",
+    "line": "test262 total 53801 8982 7 44812 14998 29813 1",
     "exist": 53801,
     "excluded": 8982,
     "not_applicable": 7,
     "run": 44812,
-    "passed": 14915,
-    "failed": 29896,
+    "passed": 14998,
+    "failed": 29813,
     "budget": 1,
-    "passed_percent": "33.2"
+    "passed_percent": "33.4"
   },
   "delivery_slices": 19,
   "delivered": [1, 2, 3],
@@ -117,16 +117,16 @@
       "name": "bindings-and-iteration",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 06 4436 8413 0 0 4436 2452 1984 0",
+      "line": "test262-slice 06 4436 8413 0 0 4436 2528 1908 0",
       "cases": 4436,
       "runs": 8413,
       "excluded": 0,
       "not_applicable": 0,
       "run": 4436,
-      "passed": 2452,
-      "failed": 1984,
+      "passed": 2528,
+      "failed": 1908,
       "budget": 0,
-      "passed_percent": "55.2"
+      "passed_percent": "56.9"
     },
     {
       "slice": "07",
@@ -165,16 +165,16 @@
       "name": "collections-proxy-reflect",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 09 1768 3507 0 0 1768 129 1639 0",
+      "line": "test262-slice 09 1768 3507 0 0 1768 131 1637 0",
       "cases": 1768,
       "runs": 3507,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1768,
-      "passed": 129,
-      "failed": 1639,
+      "passed": 131,
+      "failed": 1637,
       "budget": 0,
-      "passed_percent": "7.2"
+      "passed_percent": "7.4"
     },
     {
       "slice": "10",
@@ -309,32 +309,32 @@
       "name": "annex-b",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 18 1155 1492 0 0 1155 169 986 0",
+      "line": "test262-slice 18 1155 1492 0 0 1155 168 987 0",
       "cases": 1155,
       "runs": 1492,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1155,
-      "passed": 169,
-      "failed": 986,
+      "passed": 168,
+      "failed": 987,
       "budget": 0,
-      "passed_percent": "14.6"
+      "passed_percent": "14.5"
     },
     {
       "slice": "19",
       "name": "staging",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 19 1474 2766 0 0 1474 447 1026 1",
+      "line": "test262-slice 19 1474 2766 0 0 1474 453 1020 1",
       "cases": 1474,
       "runs": 2766,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1474,
-      "passed": 447,
-      "failed": 1026,
+      "passed": 453,
+      "failed": 1020,
       "budget": 1,
-      "passed_percent": "30.3"
+      "passed_percent": "30.7"
     },
     {
       "slice": "20",

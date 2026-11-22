@@ -22,6 +22,11 @@ Every number below comes from the gate, `task check`, on the released commit.
   on a `continue` to an outer loop, on `return` and on a throw from the body. `Array.from`,
   `Object.fromEntries` and `Object.groupBy`. Array patterns, spread in arrays and calls, and
   tagged templates are refused by name until their stories.
+- test262 after these: `test262 total 53801 8982 7 44812 14998 29813 1`, 14,998 of the 44,812
+  cases that run pass (33.4 %; 13,575 in 0.4.0). The sixth slice passes 2,528 of its 4,436
+  cases (`test262-slice 06 4436 8413 0 0 4436 2528 1908 0`; 1,364 in 0.4.0).
+- The host interface: 190 numbered requirements, 109 of them with a test
+  (`host-requirements: 190 requirement(s), 190 line(s): 109 test, 81 pending`; 108 in 0.4.0).
 
 ### Changed
 
