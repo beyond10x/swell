@@ -291,6 +291,8 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::RestArguments(n) => format!("RestArguments {n}"),
         I::PushVarEnv(t) => format!("PushVarEnv {t} {}", names(t)),
         I::PatternGet { depth, name } => format!("PatternGet {depth} {}", s(name)),
+        I::PatternGetKey { depth, kept } => format!("PatternGetKey {depth} {kept}"),
+        I::ObjectRest { depth, kept } => format!("ObjectRest {depth} {kept}"),
         other => format!("{other:?}"),
     }
 }

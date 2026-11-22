@@ -89,6 +89,23 @@ use crate::ledger::{HeapBytes, Meter, map_entry_bytes};
 /// not read again as a pattern (`#sec-object-initializer-static-semantics-early-errors`).
 pub(crate) const COVER_INITIALIZED_NAME: &str = "invalid shorthand property initializer";
 
+/// The message of a rest property `... target` of an object pattern that is not its last
+/// property, or that a comma follows: the grammar of ObjectBindingPattern and
+/// ObjectAssignmentPattern has a rest property only last and without a comma
+/// (`#sec-destructuring-binding-patterns`, `#sec-destructuring-assignment`).
+pub(crate) const REST_PROPERTY_NOT_LAST: &str =
+    "a rest property must be the last property of its pattern";
+
+/// The message of a rest property `... target = value` of an object pattern: a
+/// BindingRestProperty and an AssignmentRestProperty have no Initializer.
+pub(crate) const REST_PROPERTY_INITIALIZER: &str = "a rest property may not have an initializer";
+
+/// The message of a rest property whose target is an object or array literal not in
+/// parentheses: a BindingRestProperty is `... BindingIdentifier`, and an AssignmentRestProperty
+/// whose DestructuringAssignmentTarget is an ArrayLiteral or an ObjectLiteral is a SyntaxError
+/// (`#sec-destructuring-assignment-static-semantics-early-errors`).
+pub(crate) const REST_PROPERTY_PATTERN: &str = "the target of a rest property may not be a pattern";
+
 /// The message of a `with` statement in strict mode code.
 pub(crate) const WITH_IN_STRICT: &str = "with statement in strict mode code";
 
@@ -541,6 +558,7 @@ impl<'a, 'm> Checker<'a, 'm> {
             PropertyKey::Identifier(_) => {}
             PropertyKey::String(s) => self.string(s, span),
             PropertyKey::Number(n) => self.number(n, span),
+            PropertyKey::Computed(_) => {}
         }
     }
 
@@ -548,7 +566,7 @@ impl<'a, 'm> Checker<'a, 'm> {
         match key {
             PropertyKey::Identifier(n) => n == "__proto__",
             PropertyKey::String(s) => s.value.iter().copied().eq("__proto__".encode_utf16()),
-            PropertyKey::Number(_) => false,
+            PropertyKey::Number(_) | PropertyKey::Computed(_) => false,
         }
     }
 
@@ -827,7 +845,9 @@ impl<'a, 'm> Checker<'a, 'm> {
             // `#sec-destructuring-assignment-static-semantics-early-errors`: each target of an
             // assignment pattern that is no nested pattern is a simple assignment target (a
             // binding pattern's names are checked with its declaration).
-            Expr::ObjectPattern { properties, kind } => {
+            Expr::ObjectPattern {
+                properties, kind, ..
+            } => {
                 for p in properties {
                     self.property_key(&p.key, p.span);
                     if let (PatternKind::Assignment, PatternTarget::Expr(t)) = (kind, &p.target)

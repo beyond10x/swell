@@ -388,6 +388,11 @@ const STACK_CHILD: &str = "SWELL_SYNTAX_STACK_CHILD";
 /// the child it fails this test alone, with the child's output.
 fn on_bounded_stack(test: TestPath, limit: u32, body: fn(u32)) -> Result<(), String> {
     let stack = ParseOptions { max_nesting: limit }.stack_bytes();
+    on_stack(test, limit, stack, body)
+}
+
+/// As [`on_bounded_stack`], on a thread of `stack` bytes.
+fn on_stack(test: TestPath, limit: u32, stack: usize, body: fn(u32)) -> Result<(), String> {
     let done = format!("{STACK_CHILD}: {test} at {limit} done");
     if let Some(value) = std::env::var_os(STACK_CHILD) {
         if value.to_str() != Some(limit.to_string().as_str()) {
@@ -510,6 +515,8 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "default_parameter" => ("x = ", "function (a = ", "0", ") {}", ";"),
         "object_pattern" => ("var ", "{a:", "a", "}", " = o;"),
         "object_assignment_pattern" => ("(", "{a:", "a", "}", " = o);"),
+        "computed_key" => ("x = ", "{[", "0", "]: 0}", ";"),
+        "object_spread" => ("x = ", "{...", "0", "}", ";"),
         _ => return None,
     };
     let mut source = units(before);
@@ -520,7 +527,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 42] = [
+const NESTING_KINDS: [&str; 44] = [
     "array",
     "paren",
     "block",
@@ -563,6 +570,8 @@ const NESTING_KINDS: [&str; 42] = [
     "default_parameter",
     "object_pattern",
     "object_assignment_pattern",
+    "computed_key",
+    "object_spread",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict
@@ -597,6 +606,21 @@ fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     }
 }
 
+/// As [`admitted`], for the parser alone: `n` nested `kind`s with an unexpected `)` after them
+/// reach that `)` (`Some(true)`), fail with the nesting error alone (`Some(false)`), or fail
+/// otherwise (`None`). The parse is the one of [`admitted`] up to the end of the source, as deep
+/// and with every node made and its depth checked; it stops at the `)` instead of going on to the
+/// early errors and the scope analysis, which only a source that parses goes through.
+fn admitted_by_the_parser(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
+    let mut source = nested(kind, n)?;
+    source.push(u16::from(b')'));
+    match parse_through(entry, &source, limit) {
+        Err(e) if e.len() == 1 && e.first()?.message.contains("parser_nesting") => Some(false),
+        Err(e) if e.len() == 1 && e.first()?.message == "unexpected token )" => Some(true),
+        _ => None,
+    }
+}
+
 /// Every combination of a parse entry and a kind of nesting, kind by kind in the order of
 /// `NESTING_KINDS`, each through the [`ENTRIES`] in order; so the three entries of one kind,
 /// whose sources cost alike, fall into three parts ([`stack_bound_part`]).
@@ -625,12 +649,12 @@ fn stack_bound_part(part: usize) -> Vec<(Entry, &'static str)> {
 /// stack the test runs on, parses or fails with the nesting error alone, and so does one 100,000
 /// deep ([`every_nesting_kind_fits_the_stack_bound`]).
 ///
-/// The search narrows the depths between the deepest source that parsed and the shallowest that
-/// was refused, as a bisection does, but probes three quarters of the way up, not half: a source
-/// that parses also goes through the early errors, which cost far more than a refused parse, which
-/// stops at the limit (a chain of 5,000 labels: about 0.5 s against 0.03 s, as the early errors
-/// look each label up among those around it). So most probes are refused, and the search finds
-/// the same depth with about half the parses (labels at limit 10,000: 5 parses, not 11).
+/// The search bisects the depths between the deepest source the parser admitted and the
+/// shallowest it refused with [`admitted_by_the_parser`], and only the deepest admitted source
+/// goes through the early errors ([`admitted`]): they cost far more than the parse (a chain of
+/// 5,000 labels: about 0.5 s against 0.03 s, as the early errors look each label up among those
+/// around it), and a search whose every source that parses went through them made about five
+/// such parses for labels at limit 10,000.
 fn fits_the_stack_bound(entry: Entry, kind: &str, limit: u32) {
     let (mut parses, mut refused) = (0, limit as usize + 2);
     assert_eq!(
@@ -639,8 +663,8 @@ fn fits_the_stack_bound(entry: Entry, kind: &str, limit: u32) {
         "{entry:?} {kind}"
     );
     while refused - parses > 1 {
-        let mid = parses + (refused - parses) * 3 / 4;
-        let fits = admitted(entry, kind, mid, limit);
+        let mid = parses + (refused - parses) / 2;
+        let fits = admitted_by_the_parser(entry, kind, mid, limit);
         assert!(
             fits.is_some(),
             "{entry:?} {kind} {mid}: an error other than the nesting error"
@@ -650,6 +674,20 @@ fn fits_the_stack_bound(entry: Entry, kind: &str, limit: u32) {
         } else {
             refused = mid;
         }
+    }
+    // The whole text of a dynamic function holds the body a few levels deeper than the body
+    // alone, whose parse the `)` stops, so through that entry the deepest source that parses
+    // can be a few nestings shallower; a source that is refused costs a parse to the limit.
+    while parses > 0 {
+        let fits = admitted(entry, kind, parses, limit);
+        assert!(
+            fits.is_some(),
+            "{entry:?} {kind} {parses}: an error other than the nesting error"
+        );
+        if fits == Some(true) {
+            break;
+        }
+        parses -= 1;
     }
     assert!(
         parses > 0 || limit < 20,
@@ -664,16 +702,26 @@ fn fits_the_stack_bound(entry: Entry, kind: &str, limit: u32) {
 
 /// The deep limit of the check of the stack bound, at which the per-level part of
 /// `ParseOptions::stack_bytes` decides: 10,000 at the full count (the lane `slow`,
-/// `SWELL_FULL_COUNTS=1`), 2,500 in the gate. The gate's limit still finds a frame past the bound:
-/// a level's frames grow in steps of 16 bytes (the x86_64 call alignment), so the first growth past
-/// `STACK_BYTES_PER_LEVEL` (224) is 240 bytes a level. The deepest source the limit admits
-/// reaches more than 2,400 of its levels (one nesting takes at most 14, for a getter or a method:
-/// 177 of them at 2,500, 713 at 10,000), and 16 bytes more on each of 2,400 levels is 38,400
-/// bytes, more than all of `STACK_BYTES_FIXED` (32,768) even if the fixed part used none of it;
-/// so that source overflows the stack and the test fails, as at 10,000. The search's cost grows with the limit, and faster for labels, whose
-/// early errors look each label up among those around it: at 10,000 a part took 1.4 to 4.5 s of
-/// processor time and 13.9 to 44.6 s in the gate at a load of 117 to 149 on 17 cores; at 2,500,
-/// 0.18 to 0.60 s of processor time.
+/// `SWELL_FULL_COUNTS=1`), 2,500 in the gate, each on the stack [`deep_stack`] gives.
+///
+/// A frame grows in steps of 16 bytes, but one nesting takes several levels (3 for an arrow
+/// function, up to 14 for a getter or a method), so a growth of 16 bytes is 16 / k bytes a level
+/// over `STACK_BYTES_PER_LEVEL`, and the stack overflows only once the levels have used up the
+/// room the fixed part leaves of `STACK_BYTES_FIXED`: 21,564 bytes through `parse_script`, whose
+/// fixed part took 11,204. Nested arrow functions (`b4c46f6`) took 688 bytes for a nesting of 3
+/// levels, 229.3 bytes a level, 5.3 over: 13,300 bytes over at 2,500 levels, within that room,
+/// and the gate's check passed on the stack `stack_bytes` gives; 53,300 at 10,000, where the
+/// stack overflowed from limit 4,094 on (3,464 through the body of `parse_dynamic_function`,
+/// whose fixed part is larger). So the gate's limit alone does not find a frame past the bound.
+///
+/// The bytes a level of the kinds closest to the bound, measured as the smallest stack that holds
+/// the deepest source at limits 2,000 and 10,000: 181.3 (arrows), 164.6 (arrows with a block
+/// body) and 160.0 (conditional expressions) in this build, dev without debug information;
+/// 213.3, 196.6 and 192.0 in the profile `stack-debug`; 149.3 (`for`) at most in the release
+/// profile. At 10,000 the 17 parts took 1.0 to 2.3 s of processor time each, 25.7 to 26.0 s
+/// together (four runs), and in three runs of cargo-nextest up to 6.8, 11.6 and 28.8 s each at
+/// loads of 74 to 101 on 20 cores; at 2,500, 0.24 to 0.60 s each and 6.7 s together (three
+/// runs; 7.6 s with a search whose every source that parsed went through the early errors).
 fn deep_limit() -> u32 {
     if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
         10_000
@@ -682,11 +730,28 @@ fn deep_limit() -> u32 {
     }
 }
 
+/// The stack the child of the check at the deep limit `limit` runs on:
+/// `ParseOptions::stack_bytes` less `STACK_BYTES_FIXED` × (10,000 − `limit`) / 10,000, that is
+/// the stack of the check at 10,000 (2,272,768 bytes) scaled by `limit` / 10,000: at 10,000 the
+/// stated stack, at 2,500 the stated 592,768 bytes less 24,576, a quarter of 2,272,768. With a
+/// fixed part of f bytes and p bytes a level, the check at 10,000 overflows its stack S when
+/// f + 10,000 p > S, and then f + 2,500 p ≥ (f + 10,000 p) / 4 > S / 4: the gate's check
+/// overflows whenever the one at 10,000 does, whatever f is. The other way it is stricter, by
+/// f × 3/4 over 2,500 levels: through `parse_script` (f = 11,204) by 3.4 bytes a level, so it
+/// also fails a kind up to 1.2 bytes a level under the bound; the kinds closest to the bound
+/// stand 42.7 bytes under it.
+fn deep_stack(limit: u32) -> usize {
+    let stated = ParseOptions { max_nesting: limit }.stack_bytes();
+    let short = 10_000_usize.saturating_sub(limit as usize);
+    stated.saturating_sub(swell_syntax::STACK_BYTES_FIXED * short / 10_000)
+}
+
 /// The tests of the stack bound, one per part, and the list of their parts,
 /// [`STACK_BOUND_PARTS`], whose length is the number of parts. Each test checks the
-/// combinations of its part ([`stack_bound_part`]) at the limits 10 and [`deep_limit`], each
-/// limit in a child process on the stack `ParseOptions::stack_bytes` gives for it (the child
-/// inherits `SWELL_FULL_COUNTS`, so it runs the limit its parent asks for).
+/// combinations of its part ([`stack_bound_part`]) at the limit 10, on the stack
+/// `ParseOptions::stack_bytes` gives for it, and at [`deep_limit`], on [`deep_stack`]; each in a
+/// child process (the child inherits `SWELL_FULL_COUNTS`, so it runs the limit its parent asks
+/// for).
 macro_rules! stack_bound_parts {
     ($($name:ident = $part:literal),* $(,)?) => {
         /// The parts of the check of the stack bound, one test each ([`stack_bound_part`]).
@@ -694,9 +759,10 @@ macro_rules! stack_bound_parts {
         $(
             #[test]
             fn $name() {
-                for limit in [10, deep_limit()] {
+                let ten = ParseOptions { max_nesting: 10 }.stack_bytes();
+                for (limit, stack) in [(10, ten), (deep_limit(), deep_stack(deep_limit()))] {
                     let test = test_path!(stringify!($name));
-                    on_bounded_stack(test, limit, |limit| {
+                    on_stack(test, limit, stack, |limit| {
                         for (entry, kind) in stack_bound_part($part) {
                             fits_the_stack_bound(entry, kind, limit);
                         }
@@ -713,8 +779,9 @@ macro_rules! stack_bound_parts {
 // (`parse_script`, `parse_eval` and the body of `parse_dynamic_function`, whose three parses
 // each stay within the limit): a test fails when a frame of the parser grows past
 // `STACK_BYTES_PER_LEVEL`, or its fixed part past `STACK_BYTES_FIXED`, and the stack
-// overflows. At the deep limit (`deep_limit`: 2,500 levels in the gate, 10,000 at the full
-// count) the per-level bound decides; at 10 the fixed part does.
+// overflows. At the deep limit (`deep_limit`: 2,500 levels in the gate, on a quarter of the
+// stack of 10,000, and 10,000 at the full count) the per-level bound decides; at 10 the fixed
+// part does.
 // The combinations of entry and kind are split over `every_nesting_kind_fits_the_stack_bound`,
 // the first part, and `every_nesting_kind_fits_the_stack_bound_part_<n>`, so that under
 // cargo-nextest each part runs in a process of its own and no part takes long; the parts

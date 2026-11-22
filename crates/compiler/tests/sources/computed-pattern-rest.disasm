@@ -1,0 +1,60 @@
+script locals 0
+  var "a" "b" "r" "k" "o"
+  declare 0
+  0000 3:24 GetGlobal "o"
+  0001 3:2 RequireObjectCoercible
+  0002 3:4 String "a"
+  0003 3:4 ResolveGlobal "a"
+  0004 3:4 PatternGetKey 1 0
+  0005 3:4 PutGlobalRef "a"
+  0006 3:4 Pop
+  0007 3:8 GetGlobal "k"
+  0008 3:8 ToPropertyKey
+  0009 3:7 ResolveGlobal "b"
+  0010 3:7 PatternGetKey 1 1
+  0011 3:7 PutGlobalRef "b"
+  0012 3:7 Pop
+  0013 3:15 ResolveGlobal "r"
+  0014 3:15 ObjectRest 1 2
+  0015 3:15 PutGlobalRef "r"
+  0016 3:15 Nip 2
+  0017 3:15 Pop
+  0018 3:1 StoreCompletion
+  0019 0:0 LoadCompletion
+  0020 0:0 Return
+
+function 0 declaration "f" length 1 locals 5
+  params local 0
+  0000 4:40 GetLocal 0
+  0001 4:21 RequireObjectCoercible
+  0002 4:24 GetGlobal "k"
+  0003 4:24 ToPropertyKey
+  0004 4:23 PatternGetKey 0 0
+  0005 4:28 SetLocal 1
+  0006 4:23 Pop
+  0007 4:23 Pop
+  0008 4:31 PatternGet 0 "x"
+  0009 4:34 SetLocal 2
+  0010 4:31 Pop
+  0011 4:21 Pop
+  0012 4:61 GetLocal 0
+  0013 4:47 RequireObjectCoercible
+  0014 4:49 String "e"
+  0015 4:49 PatternGetKey 0 0
+  0016 4:49 SetLocal 3
+  0017 4:49 Pop
+  0018 4:52 ObjectRest 0 1
+  0019 4:55 SetLocal 4
+  0020 4:52 Nip 1
+  0021 4:52 Pop
+  0022 4:47 Pop
+  0023 4:71 GetLocal 1
+  0024 4:75 GetLocal 2
+  0025 4:71 Add
+  0026 4:79 GetLocal 3
+  0027 4:71 Add
+  0028 4:83 GetLocal 4
+  0029 4:71 Add
+  0030 4:64 Return
+  0031 4:1 Undefined
+  0032 4:1 Return

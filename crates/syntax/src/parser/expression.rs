@@ -15,8 +15,9 @@
 //! that stands as an arrow parameter as an ObjectBindingPattern
 //! (`#sec-destructuring-binding-patterns`); a `CoverInitializedName` stands only there.
 //!
-//! Refused, each with its slice: `**` and `**=` (4), spread elements, an array pattern,
-//! computed property names and a tagged template (6), generator methods (7), `class`, `super`, `new.target` (8), `async` functions and
+//! Refused, each with its slice: `**` and `**=` (4), spread elements of arrays and arguments,
+//! an array pattern and a tagged template (6), generator methods (7), `class`, `super`,
+//! `new.target` (8), `async` functions and
 //! `await` (10), `import.meta` and dynamic `import` (11).
 //!
 //! The functions that stay on the Rust stack while the parser recurses (each one an entry of the
@@ -1118,6 +1119,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             self.property(id)?;
             if !self.is(Punct::RBrace) {
                 self.expect(Punct::Comma)?;
+                self.spread_comma(id);
             }
         }
         let id = self.complete_expr(id, start)?;
@@ -1145,12 +1147,69 @@ impl<'a, 'm> Parser<'a, 'm> {
             TokenKind::Keyword(k) => copy_name(m, k.as_str()).map(PropertyKey::Identifier),
             TokenKind::String(s) => copy_string(m, s).map(PropertyKey::String),
             TokenKind::Number(n) => copy_number(m, n).map(PropertyKey::Number),
-            TokenKind::Punct(Punct::LBracket) => return self.refuse("computed property name", 6),
             _ => return self.unexpected(),
         };
         let key = self.charged(key)?;
         self.advance()?;
         Ok(key)
+    }
+
+    /// The key of a property: the ComputedPropertyName `computed` read before, or the
+    /// `PropertyName` at the current token, consumed.
+    fn key_or(&mut self, computed: Option<ExprId>) -> R<PropertyKey> {
+        match computed {
+            Some(e) => Ok(PropertyKey::Computed(e)),
+            None => self.property_key(),
+        }
+    }
+
+    /// A ComputedPropertyName `[ AssignmentExpression ]` at the current token, consumed, or
+    /// `None` at any other token (`#sec-object-initializer`). One entry of the depth counter whose
+    /// frame holds the id alone.
+    fn computed_name(&mut self) -> R<Option<ExprId>> {
+        if !self.is(Punct::LBracket) {
+            return Ok(None);
+        }
+        self.enter()?;
+        self.advance()?;
+        let key = self.assignment(false)?;
+        self.expect(Punct::RBracket)?;
+        self.leave();
+        Ok(Some(key))
+    }
+
+    /// `PropertyDefinition : ... AssignmentExpression` at the `...`, appended to `object`.
+    fn spread_property(&mut self, object: ExprId, start: Span) -> R<()> {
+        self.enter()?;
+        self.advance()?;
+        let value = self.assignment(false)?;
+        self.push_spread(object, value, start)?;
+        self.property_end(object);
+        self.leave();
+        Ok(())
+    }
+
+    /// Appends the spread property of `value` to `object`; its key, empty, takes no memory.
+    #[inline(never)]
+    fn push_spread(&mut self, object: ExprId, value: ExprId, start: Span) -> R<()> {
+        let property = Property {
+            key: PropertyKey::Identifier(String::new()),
+            value: PropertyValue::Spread(value),
+            span: start,
+        };
+        self.push_property(object, property)
+    }
+
+    /// Extends a spread property last in `object` over the `,` read after it (see
+    /// [`PropertyValue::Spread`]).
+    #[inline(never)]
+    fn spread_comma(&mut self, object: ExprId) {
+        let end = self.prev_end;
+        if let Some(p) = self.properties(object).and_then(|l| l.last_mut())
+            && matches!(p.value, PropertyValue::Spread(_))
+        {
+            p.span.end = end;
+        }
     }
 
     /// Append `property` to the object literal `object`, the growth of its list charged first.
@@ -1173,6 +1232,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         let start = self.start();
         match self.accessor_kind()? {
             Some(kind) => self.accessor_rest(object, kind, start)?,
+            None if self.is(Punct::Ellipsis) => self.spread_property(object, start)?,
             None => self.value_property_rest(object, start)?,
         }
         self.leave();
@@ -1180,14 +1240,12 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// Whether the property at the current token is a getter or setter: `get` or `set`, written
-    /// without an escape, followed by a property name. Refuses spread, computed names, generator
-    /// and `async` methods.
+    /// without an escape, followed by a property name or a computed one. Refuses generator and
+    /// `async` methods.
     #[inline(never)]
     fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
         let plain = !self.tok.escaped;
         let word = match &self.tok.kind {
-            TokenKind::Punct(Punct::Ellipsis) => return self.refuse("spread element", 6),
-            TokenKind::Punct(Punct::LBracket) => return self.refuse("computed property name", 6),
             TokenKind::Punct(Punct::Star) => return self.refuse("generator function", 7),
             TokenKind::Name(n) if plain && n == "get" => FunctionKind::Getter,
             TokenKind::Name(n) if plain && n == "set" => FunctionKind::Setter,
@@ -1211,11 +1269,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             *next == TokenKind::Punct(Punct::LBracket),
             Parser::is_property_name(next),
         );
-        if computed {
-            self.advance()?;
-            return self.refuse("computed property name", 6);
-        }
-        if named {
+        if computed || named {
             self.advance()?;
             return Ok(Some(word));
         }
@@ -1241,7 +1295,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// `object`.
     fn accessor_rest(&mut self, object: ExprId, kind: FunctionKind, start: Span) -> R<()> {
         self.enter()?;
-        let id = self.accessor_head(object, kind, start)?;
+        let computed = self.computed_name()?;
+        let id = self.accessor_head(object, kind, start, computed)?;
         self.function_rest(id)?;
         self.property_end(object);
         self.leave();
@@ -1255,8 +1310,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         object: ExprId,
         kind: FunctionKind,
         start: Span,
+        computed: Option<ExprId>,
     ) -> R<crate::ast::FunctionId> {
-        let key = self.property_key()?;
+        let key = self.key_or(computed)?;
         let id = self.begin_function(kind, start, None);
         let value = match kind {
             FunctionKind::Getter => PropertyValue::Get(id),
@@ -1277,7 +1333,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// or a shorthand `IdentifierReference`, appended to `object`.
     fn value_property_rest(&mut self, object: ExprId, start: Span) -> R<()> {
         self.enter()?;
-        match self.value_property_head(object, start)? {
+        let computed = self.computed_name()?;
+        match self.value_property_head(object, start, computed)? {
             Head::Value => {
                 let value = self.assignment(false)?;
                 self.set_property_value(object, value);
@@ -1319,14 +1376,19 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// (`a = 1`), whose initializer comes next: it stands only where the literal is read again
     /// as a pattern, and anywhere else it is an early error (`src/early.rs`).
     #[inline(never)]
-    fn value_property_head(&mut self, object: ExprId, start: Span) -> R<Head> {
+    fn value_property_head(
+        &mut self,
+        object: ExprId,
+        start: Span,
+        computed: Option<ExprId>,
+    ) -> R<Head> {
         let name_token = self.start();
         let escaped = self.tok.escaped;
         let keyword = match &self.tok.kind {
             TokenKind::Keyword(k) => Some(*k),
             _ => None,
         };
-        let key = self.property_key()?;
+        let key = self.key_or(computed)?;
         let (head, value) = if self.eat(Punct::Colon)? {
             (Head::Value, PropertyValue::Init(ExprId(u32::MAX)))
         } else if self.is(Punct::LParen) {
@@ -1431,15 +1493,18 @@ impl<'a, 'm> Parser<'a, 'm> {
     #[inline(never)]
     fn pattern_node(&mut self, node: ExprId, kind: PatternKind, work: &mut Vec<ExprId>) -> R<()> {
         let m = self.m;
+        let mut rest = false;
         let (mut literal, mut read) = match self.expr_mut(node) {
             Some(Expr::Object(list)) => (std::mem::take(list), Vec::new()),
             Some(Expr::ObjectPattern {
                 properties,
                 kind: k,
+                rest: r,
             }) => {
                 if *k == kind {
                     return Ok(());
                 }
+                rest = *r;
                 (Vec::new(), std::mem::take(properties))
             }
             _ => return self.unexpected(),
@@ -1462,6 +1527,17 @@ impl<'a, 'm> Parser<'a, 'm> {
                 PropertyValue::Init(e) => self.split_default(e),
                 PropertyValue::Shorthand(e) => (e, None),
                 PropertyValue::CoverInitialized(e, init) => (e, Some(init)),
+                PropertyValue::Spread(e) => match self.rest_target(e, p.span, literal.is_empty()) {
+                    Ok(()) => {
+                        rest = true;
+                        (e, None)
+                    }
+                    Err(stop) => {
+                        m.release(p);
+                        done = Err(stop);
+                        break;
+                    }
+                },
                 PropertyValue::Get(_) | PropertyValue::Set(_) | PropertyValue::Method(_) => {
                     let span = p.span;
                     m.release(p);
@@ -1505,10 +1581,45 @@ impl<'a, 'm> Parser<'a, 'm> {
             return done;
         }
         match self.expr_mut(node) {
-            Some(expr) => *expr = Expr::ObjectPattern { properties, kind },
+            Some(expr) => {
+                *expr = Expr::ObjectPattern {
+                    properties,
+                    kind,
+                    rest,
+                }
+            }
             None => m.release(properties),
         }
         Ok(())
+    }
+
+    /// The spread property `... e` at `span`, `last` when no property follows it, read again as
+    /// the rest property of a pattern: last and without a comma after it, its target no
+    /// assignment and no object or array literal outside parentheses (the constants
+    /// `REST_PROPERTY_*` of `src/early.rs`); the target itself is checked as any other.
+    #[inline(never)]
+    fn rest_target(&mut self, e: ExprId, span: Span, last: bool) -> R<()> {
+        let comma = span
+            .end
+            .checked_sub(1)
+            .and_then(|at| self.src.get(at as usize))
+            == Some(&u16::from(b','));
+        if !last || comma {
+            return self.fail_at(crate::early::REST_PROPERTY_NOT_LAST, span);
+        }
+        let Some(n) = self.expr_node(e) else {
+            return self.unexpected();
+        };
+        let at = n.span;
+        let message = match n.expr {
+            _ if n.parenthesized => return Ok(()),
+            Expr::Assign { .. } => crate::early::REST_PROPERTY_INITIALIZER,
+            Expr::Object(_) | Expr::ObjectPattern { .. } | Expr::Array(_) => {
+                crate::early::REST_PROPERTY_PATTERN
+            }
+            _ => return Ok(()),
+        };
+        self.fail_at(message, at)
     }
 
     /// The target and the default of the value `e` of `PropertyName : AssignmentExpression`
@@ -1588,7 +1699,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             let Some(p) = properties.get(next) else {
                 continue;
             };
-            expressions |= p.default.is_some();
+            expressions |= p.default.is_some() || matches!(p.key, PropertyKey::Computed(_));
             done = m.grow(&mut work).map(|()| work.push((node, next + 1)));
             if done.is_err() {
                 break;

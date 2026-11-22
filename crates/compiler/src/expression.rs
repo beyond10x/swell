@@ -25,11 +25,11 @@ use swell_num::literal::numeric_literal;
 use swell_syntax::REGEXP_REFUSAL;
 use swell_syntax::ast::{
     AssignOp, BinaryOp, Expr, ExprId, FunctionKind, LogicalOp, PatternKind, PatternProperty,
-    PatternTarget, PropertyValue, Span, UnaryOp, UpdateOp,
+    PatternTarget, Property, PropertyKey, PropertyValue, Span, UnaryOp, UpdateOp,
 };
 
 use crate::bytecode::Instruction;
-use crate::resolve::{Binding, LexicalPlace, Site, property_key};
+use crate::resolve::{Binding, LexicalPlace, Site, anonymous_function, property_key};
 use crate::{CompileError, Compiler, Short, Task, Tasks, malformed};
 
 /// The reference an assignment, an update, a `delete` or a for-in head works on.
@@ -320,6 +320,9 @@ impl<'a, 'm> Compiler<'a, 'm> {
             Expr::Object(properties) => {
                 t.push(emit(Instruction::NewObject))?;
                 for p in properties {
+                    if self.dynamic_property(p, &mut t)? {
+                        continue;
+                    }
                     let key = property_key(&p.key, self.m)?;
                     let proto = !matches!(p.key, swell_syntax::ast::PropertyKey::Number(_))
                         && key.iter().copied().eq("__proto__".encode_utf16());
@@ -362,12 +365,19 @@ impl<'a, 'm> Compiler<'a, 'm> {
                         PropertyValue::CoverInitialized(..) => {
                             return Err(malformed("a CoverInitializedName in an object literal"));
                         }
+                        PropertyValue::Spread(_) => {
+                            return Err(malformed("a spread read as a property"));
+                        }
                     }
                 }
             }
             // An object pattern destructures the value on top, which stays.
-            Expr::ObjectPattern { properties, kind } => {
-                self.object_pattern(id, properties, *kind, span, &mut t)?;
+            Expr::ObjectPattern {
+                properties,
+                kind,
+                rest,
+            } => {
+                self.object_pattern(id, properties, *kind, *rest, span, &mut t)?;
             }
             // `#sec-function-definitions-runtime-semantics-evaluation`; an arrow function,
             // `#sec-arrow-function-definitions-runtime-semantics-evaluation`, keeps the `this` of
@@ -609,23 +619,39 @@ impl<'a, 'm> Compiler<'a, 'm> {
     /// a reference (a `var` name, an assignment target) is evaluated first; then GetV of the
     /// key; the default for `undefined`; then PutValue, the initialization of the binding, or
     /// the nested pattern.
+    ///
+    /// A computed key is evaluated and converted before the reference of its target
+    /// (`#sec-destructuring-binding-patterns-runtime-semantics-propertybindinginitialization`,
+    /// `#sec-runtime-semantics-propertydestructuringassignmentevaluation`) and read with
+    /// [`Instruction::PatternGetKey`]. With a `rest` property, last, every key before it is pushed
+    /// and stays on the stack, the list of its excluded names, until the rest property is
+    /// destructured ([`Instruction::ObjectRest`]); without one, a computed key is dropped after
+    /// its property.
     fn object_pattern(
         &mut self,
         id: ExprId,
         properties: &[PatternProperty],
         kind: PatternKind,
+        rest: bool,
         span: Span,
         t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
         t.push(Task::Emit(Instruction::RequireObjectCoercible, span))?;
+        let mut kept: u32 = 0;
         for (i, p) in properties.iter().enumerate() {
             let n = u32::try_from(i).map_err(|_| CompileError::TooMany("properties"))?;
-            let key = property_key(&p.key, self.m)?;
-            let name = self.string_units(&key);
-            self.m.release(key);
-            let name = name?;
+            if rest && i + 1 == properties.len() {
+                return self.rest_property(id, n, p, kind, kept, t);
+            }
+            let name = self.pattern_key(p, rest, t)?;
             let pspan = p.span;
-            let get = |depth: u32| Task::Emit(Instruction::PatternGet { depth, name }, pspan);
+            let get = |depth: u32| {
+                let read = match name {
+                    Some(name) => Instruction::PatternGet { depth, name },
+                    None => Instruction::PatternGetKey { depth, kept },
+                };
+                Task::Emit(read, pspan)
+            };
             match &p.target {
                 // `var`: ResolveBinding before the value is read, then PutValue.
                 PatternTarget::Binding(leaf) if kind == PatternKind::Var => {
@@ -638,14 +664,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 // InitializeReferencedBinding: the store into the slot, or into the global
                 // environment's [[DeclarativeRecord]] for a name of the script's top level.
                 PatternTarget::Binding(leaf) => {
-                    let store = match self.binding(Site::Bound(id, n))? {
-                        Binding::Local(slot) => Instruction::SetLocal(slot),
-                        Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
-                        Binding::Global(name) | Binding::Dynamic(name) => {
-                            Instruction::InitGlobal(self.string(&name)?)
-                        }
-                        _ => return Err(malformed("a binding of a pattern")),
-                    };
+                    let store = self.bound_store(id, n)?;
                     t.push(get(0))?;
                     self.pattern_default(p.default, pspan, t)?;
                     t.push(Task::Emit(store, leaf.span))?;
@@ -669,8 +688,148 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 }
             }
             t.push(Task::Emit(Instruction::Pop, pspan))?;
+            if name.is_none() {
+                if rest {
+                    kept = kept
+                        .checked_add(1)
+                        .ok_or(CompileError::TooMany("properties"))?;
+                } else {
+                    t.push(Task::Emit(Instruction::Pop, pspan))?;
+                }
+            }
         }
         Ok(())
+    }
+
+    /// The key of the property `p` of an object pattern: the `strings` index of a literal key
+    /// read by [`Instruction::PatternGet`], or `None` when the key is pushed first, a computed
+    /// one evaluated and converted, a literal one as a String when the pattern has a `rest`
+    /// property.
+    fn pattern_key(
+        &mut self,
+        p: &PatternProperty,
+        rest: bool,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<Option<u32>, CompileError> {
+        if let PropertyKey::Computed(e) = p.key {
+            let at = self.ast.expr(e).map_or(p.span, |x| x.span);
+            t.push(Task::Expr(e))?;
+            t.push(Task::Emit(Instruction::ToPropertyKey, at))?;
+            return Ok(None);
+        }
+        let key = property_key(&p.key, self.m)?;
+        let name = self.string_units(&key);
+        self.m.release(key);
+        let name = name?;
+        if rest {
+            t.push(Task::Emit(Instruction::String(name), p.span))?;
+            return Ok(None);
+        }
+        Ok(Some(name))
+    }
+
+    /// The InitializeReferencedBinding of the `n`th property of the binding pattern `id`: the
+    /// store into the slot, or into the global environment's [[DeclarativeRecord]] for a name of
+    /// the script's top level.
+    fn bound_store(&mut self, id: ExprId, n: u32) -> Result<Instruction, CompileError> {
+        Ok(match self.binding(Site::Bound(id, n))? {
+            Binding::Local(slot) => Instruction::SetLocal(slot),
+            Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
+            Binding::Global(name) | Binding::Dynamic(name) => {
+                Instruction::InitGlobal(self.string(&name)?)
+            }
+            _ => return Err(malformed("a binding of a pattern")),
+        })
+    }
+
+    /// The rest property `p`, the `n`th and last of the pattern `id`, with the `kept` keys of the
+    /// properties before it on the stack: the reference of its target, then
+    /// [`Instruction::ObjectRest`], then PutValue or the initialization of the binding
+    /// (`#sec-destructuring-binding-patterns-runtime-semantics-restbindinginitialization`,
+    /// `#sec-runtime-semantics-restdestructuringassignmentevaluation`); then the keys are dropped.
+    fn rest_property(
+        &mut self,
+        id: ExprId,
+        n: u32,
+        p: &PatternProperty,
+        kind: PatternKind,
+        kept: u32,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let pspan = p.span;
+        let rest = |depth: u32| Task::Emit(Instruction::ObjectRest { depth, kept }, pspan);
+        match &p.target {
+            PatternTarget::Binding(leaf) if kind == PatternKind::Var => {
+                let target = Target::Binding(self.binding(Site::Bound(id, n))?);
+                t.append(self.reference(&target, false, leaf.span)?)?;
+                t.push(rest(target.reference_items()))?;
+                t.push(Task::Emit(self.put(&target)?, leaf.span))?;
+            }
+            PatternTarget::Binding(leaf) => {
+                let store = self.bound_store(id, n)?;
+                t.push(rest(0))?;
+                t.push(Task::Emit(store, leaf.span))?;
+            }
+            PatternTarget::Expr(e) => {
+                let target = self.target(*e)?;
+                t.append(self.reference(&target, false, pspan)?)?;
+                t.push(rest(target.reference_items()))?;
+                t.push(Task::Emit(self.put(&target)?, pspan))?;
+            }
+        }
+        if kept > 0 {
+            t.push(Task::Emit(Instruction::Nip(kept), pspan))?;
+        }
+        t.push(Task::Emit(Instruction::Pop, pspan))
+    }
+
+    /// The property `p` of an object literal when its key is computed or it is a spread, `true`
+    /// then: the key evaluated and converted, then the value, a getter, a setter or a method
+    /// defined under it, an anonymous function named after it at run time
+    /// (`#sec-object-initializer-runtime-semantics-propertydefinitionevaluation`,
+    /// `#sec-runtime-semantics-definemethod`); a spread's value copied by CopyDataProperties.
+    fn dynamic_property(
+        &mut self,
+        p: &Property,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<bool, CompileError> {
+        if let PropertyValue::Spread(e) = p.value {
+            let at = self.ast.expr(e).map_or(p.span, |x| x.span);
+            t.push(Task::Expr(e))?;
+            t.push(Task::Emit(Instruction::CopyDataProperties, at))?;
+            return Ok(true);
+        }
+        let PropertyKey::Computed(key) = p.key else {
+            return Ok(false);
+        };
+        let at = self.ast.expr(key).map_or(p.span, |x| x.span);
+        t.push(Task::Expr(key))?;
+        t.push(Task::Emit(Instruction::ToPropertyKey, at))?;
+        match p.value {
+            PropertyValue::Init(e) => {
+                t.push(Task::Expr(e))?;
+                if anonymous_function(self.ast, e).is_some() {
+                    t.push(Task::Emit(Instruction::SetFunctionName, p.span))?;
+                }
+                t.push(Task::Emit(Instruction::DefineComputedField, p.span))?;
+            }
+            PropertyValue::Get(f) | PropertyValue::Set(f) | PropertyValue::Method(f) => {
+                let fspan = self.ast.function(f).map_or(p.span, |x| x.span);
+                t.push(Task::Emit(Instruction::Closure(f.0), fspan))?;
+                let define = match p.value {
+                    PropertyValue::Get(_) => Instruction::DefineComputedGetter,
+                    PropertyValue::Set(_) => Instruction::DefineComputedSetter,
+                    _ => Instruction::DefineComputedMethod,
+                };
+                t.push(Task::Emit(define, p.span))?;
+            }
+            PropertyValue::Shorthand(_)
+            | PropertyValue::CoverInitialized(..)
+            | PropertyValue::Spread(_) => {
+                return Err(malformed("a computed key without a value"));
+            }
+        }
+        Ok(true)
     }
 
     /// The `Initializer` `default` of a property of a pattern, if any, for the value on top:

@@ -35,6 +35,7 @@ pub(crate) mod budget;
 pub(crate) mod dispatch;
 pub(crate) mod frame;
 mod lexical;
+mod object_literal;
 mod parameters;
 mod patterns;
 mod template;

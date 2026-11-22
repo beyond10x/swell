@@ -297,6 +297,14 @@ impl<H: Host> Agent<H> {
             I::InitProto => self.init_proto(),
             I::DefineIndex(index) => self.define_index(index),
             I::ArrayLength(length) => self.set_array_length(length),
+            // ---- computed keys and spreads (`interp/object_literal.rs`) ----
+            I::ToPropertyKey => self.computed_key_instruction(),
+            I::DefineComputedField => self.define_computed_field(),
+            I::DefineComputedGetter => self.define_computed_function(true, false),
+            I::DefineComputedSetter => self.define_computed_function(false, false),
+            I::DefineComputedMethod => self.define_computed_function(false, true),
+            I::SetFunctionName => self.set_function_name_instruction(),
+            I::CopyDataProperties => self.copy_data_properties_instruction(),
 
             // ---- operators ----
             I::Typeof => self.typeof_value(),
@@ -387,6 +395,8 @@ impl<H: Host> Agent<H> {
                 self.require_object_coercible_pattern().map(|()| Flow::Next)
             }
             I::PatternGet { depth, name } => self.pattern_get(depth, name).map(|()| Flow::Next),
+            I::PatternGetKey { depth, kept } => self.pattern_get_key(depth, kept),
+            I::ObjectRest { depth, kept } => self.object_rest(depth, kept),
             // ---- templates (`interp/template.rs`) ----
             I::ToString => self.substitution_to_string(),
         }

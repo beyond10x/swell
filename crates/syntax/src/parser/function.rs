@@ -567,21 +567,23 @@ impl<'a, 'm> Parser<'a, 'm> {
             self.function_close(id, outer, body, use_strict)?;
         } else {
             let e = self.assignment(no_in)?;
-            let body = self.concise_body(e)?;
-            self.function_end(id, outer, body, false)?;
+            self.concise_body(id, outer, e)?;
         }
         self.leave();
         Ok(())
     }
 
-    /// The body of an `ExpressionBody` `e`: one `return` statement of it, with its span.
+    /// The body of the arrow function `id` from its `ExpressionBody` `e`: one `return`
+    /// statement of it, with its span, recorded as [`Parser::function_end`] does. Not inlined,
+    /// so that the list stays out of the frame of [`Parser::arrow_body`], which is on the
+    /// recursion of nested arrows.
     #[inline(never)]
-    fn concise_body(&mut self, e: ExprId) -> R<Vec<StmtId>> {
+    fn concise_body(&mut self, id: FunctionId, outer: bool, e: ExprId) -> R<()> {
         let span = self.expr_span(e);
         let stmt = self.push_stmt(Stmt::Return(Some(e)), span)?;
         let mut body = Vec::new();
         self.push_item(&mut body, stmt)?;
-        Ok(body)
+        self.function_end(id, outer, body, false)
     }
 }
 
