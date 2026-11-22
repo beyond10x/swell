@@ -10,9 +10,9 @@ and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the byteco
 interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
 6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
-(the other 44 need a later slice and say so). 80 of 164 host requirements have a test.
+(the other 44 need a later slice and say so). 84 of 165 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate runs test262: 7,742 of the 44,812 run cases pass. Release `0.1.0` was cut at the close of
+gate holds the test262 counts: 12,120 of the 44,812 run cases pass (2026-11-22). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
 "Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
@@ -20,7 +20,21 @@ and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`:
 global `Function`, the two hooks of the host, `Agent::refusals()`; `docs/plan/slice-02-wave-4.md`:
 the close, `Array.prototype.toString` early, 1,008 cases moved to later slices with evidence
 the gate checks): all 4,259 cases of slice 2 pass in all 7,543 runs, and no host requirement
-is pending for it. Next is slice 3, `builtins-core` (`epic:slice-03-builtins-core`).
+is pending for it. **Slice 3 is delivered**, `builtins-core`, thirteen stories in three waves
+on 2026-11-22 (`docs/plan/slice-03-wave-1.md`: one file per group of builtins, the property
+index and dense elements; `docs/plan/slice-03-wave-2.md`: the ten groups of `Object`,
+`Function`, `Array`, `String`, `JSON`, `globalThis` and the URI functions;
+`docs/plan/slice-03-wave-3.md`: the close, 624 more cases moved to later slices with evidence;
+`docs/plan/slice-03-gate-and-site.md`: the gate's test budget, the forge rules, the
+documentation site and the three gate runs): 7,010 of its 7,011 cases pass
+(`test262-slice 03 7011 13829 0 0 7011 7010 1 0`), and no host requirement is pending for it. The one case that does not pass,
+`test/built-ins/String/prop-desc.js`, fails in the pinned harness before the engine's answer
+is judged; `docs/design/engine.md`, section 12, "Slice 3's cases that need a later slice",
+states it, and every other document points there and carries the count
+(`task:slice-03-harness-case-measured-at-the-next-pin`). Next is slice 6,
+`bindings-and-iteration` (`epic:slice-06-bindings-and-iteration`): the order after slice 3 is
+6, 5, 7, 10, 4, 9, by what the first consumer needs first (`docs/plan/waves.md`, "The order
+after slice 3").
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
@@ -203,6 +217,16 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   measure the bytes per re-entry again as that record does; do not raise the constant unmeasured.
   If a stack test aborts on the forge and passes here (a runner image with another compiler),
   send the deciding session the log lines and do not change the constant before it answers.
+- The gate builds before its clock: `build`, then `build-tests`, which builds every binary the
+  timed test steps run with each step's own flags, features and manifest (`build-collect`,
+  `build-faults`, `build-conform-engine`). A test step whose log has a `Compiling` line fails
+  and names the build task that should have built it (`compile-check`); only the doc tests
+  compile inside `test-doc`, because rustdoc compiles them as it runs them. The test report
+  (`nextest-report`) reads a coloured log, and a log with nothing to count fails.
+- A unit runs the tests of the packages it touches, and a unit that changes what a script
+  evaluates to also runs the tests of `swell-test262` (`docs/plan/unit-invariants.md`). No test
+  takes more than 15 s in the gate at this machine's load: a test whose cost is its count has
+  a gate count and its full count under `SWELL_FULL_COUNTS=1`.
 - `test-collect` runs every test of `crates/swell` with the feature
   `collect-every-safe-point`: a value held across a safe point without a root fails there.
 - A gate task lives in an include file under `taskfiles/` that the root `Taskfile.yml`
@@ -224,36 +248,60 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot task check` on 2026-11-21, after wave 4 of slice 2, with the variables of the runner,
-exit 0:
+`slot --timeout 30m task check-runner` on 2026-11-22, on the wave branch of slice 3 after its
+last unit (the tree of `a6cf201`), exit 0, 122 s in the pool, load 52 before and 39 after on
+17 cores. The planted scripts' single `ok` lines and the slice lines after slice 4 are left out
+(`conformance/test262/expected.txt` has every slice line):
 
 ```
-python-check: no Python file among 1009 file(s)
+python-check: no Python file among 1235 file(s)
 forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
 Cargo.lock: 7 package(s), none from outside this repository
+toolchain-check: rustc 1.99.1, the channel rust-toolchain.toml pins; 3 workflow file(s), none names a compiler
+nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 13 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
 data/unicode/17.0.0: 17 file(s), each with the SHA-256 its SOURCE line gives; 17 required path(s) present
 unicode-tables: 1 table(s) equal the generator output
 swell v1 — 2 file(s), 8 scenario(s), valid
 58 scenario(s) (8 authored), 41 refusal(s), written to .out/suite.json
   58 scenarios: 58 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 164 requirement(s), 164 line(s): 80 test, 84 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 3:3 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
-62 test suites: 341 passed, 0 failed, 1 ignored
-test-collect: 38 test suites: 238 passed, 0 failed, 1 ignored
-test-faults: 1 test suites: 1 passed, 0 failed, 0 ignored
+host-requirements: 165 requirement(s), 165 line(s): 84 test, 81 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
+site-data-check: website/data/status.json equals its regeneration from conformance/test262/expected.txt, conformance/slices-delivered.txt, conformance/host/requirements.txt, conformance/test262/moves.tsv, docs/design/engine.md, Cargo.toml, Cargo.lock and the crate roots under crates
+build-tests: Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
+build-collect: Finished `test` profile [unoptimized + debuginfo] target(s) in 2.09s
+build-faults: Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+build-conform-engine: Finished `test` profile [unoptimized + debuginfo] target(s) in 3.02s
+build-conform-engine: Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+68 test binaries: 667 passed, 0 failed, 1 ignored
+gate-time test 18.8
+test-doc: 7 test suites: 11 passed, 0 failed, 0 ignored
+test-doc collect-every-safe-point: 2 test suites: 11 passed, 0 failed, 0 ignored
+gate-time test-doc 5.0
+test-collect: 49 test binaries: 506 passed, 0 failed, 1 ignored
+gate-time test-collect 27.2
+test-faults: 1 test binaries: 1 passed, 0 failed, 0 ignored
+gate-time test-faults 0.2
+conform-engine: 3 test binaries: 12 passed, 0 failed, 0 ignored
 conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok
   58 scenarios: 14 passed, 0 failed, 0 error, 44 unsupported
-test262-refused 46493
-test262 total 53801 8982 7 44812 7742 37070 0
+gate-time conform-engine 3.6
+test262-refused 46581
+test262 total 53801 8982 7 44812 12120 32692 0
 test262: 221 directory lines sum to the total
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
+test262-slice 03 7011 13829 0 0 7011 7010 1 0
+test262-slice 04 1516 2992 0 0 1516 249 1267 0
 test262: 22 slice lines equal the design
 test262-errors 0
-test262: 286 lines equal conformance/test262/expected.txt
-test262-moves: 1032 case(s) moved, 3:78 4:125 5:136 6:487 7:41 8:85 9:2 10:74 11:4; slices 1 to 19: 44931 85794
-gate-selftest: 32 passed, 0 failed
+test262: 286 lines of conformance/test262/expected.txt; sources digest 02158d3cf750d26db83ea9366c92a7e7785e8fe348a8afc95c24e3c706cbeaff equals conformance/test262/expected.digest
+gate-time test262-check 0.1
+test262-moves: 1656 case(s) moved, 3:78 4:318 5:276 6:719 7:44 8:104 9:18 10:78 11:4 12:3 13:14; slices 1 to 19: 44931 85794
+gate-time test262-moves-check 6.2
+gate-selftest: 51 passed, 0 failed
+gate-time gate-selftest 19.4
+gate-time test-steps 80.5 of 120, cpu 199.2, load 39.15 on 17 cores
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`

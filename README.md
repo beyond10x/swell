@@ -17,33 +17,36 @@ can use it.
 ## State
 
 swell runs scripts of the ES5 grammar in both modes, under a step budget and a memory budget.
-Its gate runs test262: 7,742 of the 44,812 cases it runs pass (17.3 %), measured on 2026-11-21.
-The first two of nineteen delivery slices are delivered, and every case of both passes:
+Its gate holds the test262 counts: 12,120 of the 44,812 cases that run pass (27.0 %), measured on 2026-11-22.
+The first three of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |
 |---|---|---|
-| 1 | the test262 harness itself | 31 |
-| 2 | the ES5-level language with `with`, `arguments`, `eval` and the global `Function` | 4,259 |
+| 1 | the test262 harness itself | 31, every one passes |
+| 2 | the ES5-level language with `with`, `arguments`, `eval` and the global `Function` | 4,259, every one passes |
+| 3 | the core library: `Object`, `Function`, `Array`, `String`, `JSON`, `globalThis`, the URI functions | 7,010 of 7,011 pass |
 
-What exists, measured on 2026-11-21:
+A delivered slice passes the test262 cases it holds, but for an exception the design states.
+
+What exists, measured on 2026-11-22:
 
 - The design, [`docs/design/engine.md`](docs/design/engine.md): what swell targets, how it is
   built, how it is measured, and the order in which it is delivered.
 - The host interface, specified before its code:
-  [`docs/design/host-interface.md`](docs/design/host-interface.md) has 164 numbered
-  requirements, and 80 of them have a test. An ESS model under [`spec/`](spec/) has 58
+  [`docs/design/host-interface.md`](docs/design/host-interface.md) has 165 numbered
+  requirements, and 84 of them have a test. An ESS model under [`spec/`](spec/) has 58
   scenarios. All 58 pass on ESS's interpreter. The gate runs them against the engine too, and
   14 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
-  pinned by checksum, both specifications checked, and 32 planted defects that the gate must
-  refuse. It passes, here and on the forge.
+  pinned by checksum, both specifications checked, and 51 planted defects that the gate must
+  refuse. Its test steps have a budget of 120 seconds and a test is ended at 60.
 - The test262 runner, `swell-test262`. It reads all 53,801 cases, excludes 8,982 by recorded
   decision and runs the rest in both modes under budgets. It counts them per directory, per
   delivery slice and per section of ECMA-262 (41). Its 286 lines are compared
   with a committed file on every run.
 - Refusals. A construct the parser does not have yet is refused, and a refusal never counts
   as a pass, also when the script catches its `SyntaxError`. The engine counts its refusals:
-  46,493 of the 85,556 runs meet one.
+  46,581 of the 85,556 runs meet one.
 - The first parts of the engine:
 
   | part | crate |
@@ -56,8 +59,14 @@ What exists, measured on 2026-11-21:
 Releases are listed in [`CHANGELOG.md`](CHANGELOG.md), each with what works and its limits.
 [`docs/releasing.md`](docs/releasing.md) says how one is cut.
 
-Next is the third of nineteen slices, the core library: `Object`, `Function`, `Array`,
-`String`, `Error`, `JSON`. It has 7,635 cases, of which 2,762 pass today.
+The one case of slice 3 that does not pass, `test/built-ins/String/prop-desc.js`, fails in
+the pinned test262 harness before the engine's answer is judged;
+[the design, section 12](docs/design/engine.md#12-delivery-order) states it.
+
+Next is slice 6 of nineteen, bindings and iteration: `let` and `const`, template literals,
+arrow functions, destructuring, `Symbol`, iterators and `for`-`of`. It has 4,436 cases, of
+which 100 pass today. The slices are taken in the order the first user, a browser, needs them:
+6, 5, 7, 10, 4, 9.
 
 ## What swell is
 

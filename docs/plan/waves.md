@@ -129,6 +129,12 @@ that are estimated to need a later slice (`move-estimate.tsv`).
 | 2 | `object-integrity-and-prototype-methods`, `object-enumeration-and-copy-methods`, `function-apply-and-source-text`, `global-this-uri-functions-and-is-error`, `json-parse-and-raw-json`, `array-iteration-methods`, `array-search-and-copy-methods`, `array-mutation-and-sort-methods`, `string-access-and-search-methods`, `string-transform-and-compare-methods` | the builtins, ten units side by side, each writing its group file and its tests |
 | 3 | `slice-03-conformance-close` | the cases that need a later slice move with their evidence; four requirement lines and four `omit` lines; every run of the slice passes |
 
+**Delivered**, 2026-11-22: [wave 1](slice-03-wave-1.md), [wave 2](slice-03-wave-2.md),
+[wave 3](slice-03-wave-3.md), and beside them the units on the gate and the documentation
+site with the three gate runs of the branch ([the gate and the site](slice-03-gate-and-site.md)).
+7,010 of the slice's 7,011 cases pass; row 3 of the table was the plan, and the design,
+section 12, states the one case that does not pass and why the slice is delivered with it.
+
 `aep plan artifact waves` prints four waves for this set: it puts the two stories of wave 1
 one after the other because both record `crates/swell/src/object/mod.rs`. They run side by
 side by decision: each story names its lines of that file. The ten stories of wave 2 share
