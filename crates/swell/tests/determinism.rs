@@ -588,14 +588,13 @@ fn host_133_same_calls_same_hooks_same_outcomes() {
 }
 
 /// The child processes of HOST-133, each compared with this process (and so with each other):
-/// two in the default mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`), one in the gate
-/// with the feature `collect-every-safe-point`, still two processes against each other. The
+/// two in the default mode, one with the feature `collect-every-safe-point`, in the gate and in
+/// the lane `slow` (`SWELL_FULL_COUNTS=1`) alike, still two processes against each other. The
 /// corpus runs four times with two children, and with them the test took 5.3 CPU seconds in
-/// that mode, run alone, the most of any test there.
+/// that mode, run alone, the most of any test there (5.7 in the lane, against 4.3 with one,
+/// measured on 2026-11-22: 1.4 a run of the corpus, every step of it marking the heap).
 fn host_133_children() -> usize {
-    if cfg!(feature = "collect-every-safe-point")
-        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-    {
+    if cfg!(feature = "collect-every-safe-point") {
         1
     } else {
         2

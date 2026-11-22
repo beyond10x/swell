@@ -330,15 +330,16 @@ fn host_22_zero_string_length_throws_on_concatenation() {
     assert!(is_range_error_of(&mut agent, &realm, outcome));
 }
 
-/// `full` steps of a step budget, or a fiftieth of them in the gate with the collector at every
-/// safe point, where every step collects; the lane `slow` (`SWELL_FULL_COUNTS=1`) runs `full`
-/// there too. The scripts given such a budget loop or recurse without end, so every budget
-/// ends them in the same way. With a tenth, 10,000 of 100,000,
+/// `full` steps of a step budget, or a fiftieth of them with the collector at every safe
+/// point, where every step collects, in the gate and in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`) alike. The scripts given such a budget loop or recurse without end,
+/// so every budget ends them in the same way. With a tenth, 10,000 of 100,000,
 /// [`catching_the_depth_error_and_recursing_again_ends_in_step_budget`] took 22.5 s in that
-/// mode at a load of 100 to 110 on 17 cores (cargo-nextest); its 2,000 steps still reach the
-/// `RangeError` at `frame_depth` 20, which takes a few hundred.
-fn steps_in_the_collect_gate(full: u64) -> u64 {
-    if in_the_collect_gate() {
+/// mode at a load of 100 to 110 on 17 cores (cargo-nextest), and with all 100,000 in the lane
+/// 18.5 CPU seconds alone (2,000: 0.38, measured on 2026-11-22); its 2,000 steps still reach
+/// the `RangeError` at `frame_depth` 20, which takes a few hundred.
+fn steps_in_the_collect_mode(full: u64) -> u64 {
+    if cfg!(feature = "collect-every-safe-point") {
         full / 50
     } else {
         full
@@ -359,7 +360,7 @@ fn in_the_collect_gate() -> bool {
 fn catching_the_depth_error_and_recursing_again_ends_in_step_budget() {
     let mut limits = limits();
     limits.frame_depth = 20;
-    limits.steps_per_entry = steps_in_the_collect_gate(100_000);
+    limits.steps_per_entry = steps_in_the_collect_mode(100_000);
     assert_eq!(
         run(
             limits,
@@ -493,17 +494,21 @@ fn on_bounded_stack(test: TestPath, stack: usize, body: fn()) -> Result<(), Stri
     ))
 }
 
-/// The `reentry_depth` of the stack test: the full depth, 1,000, in the default mode and in the
-/// lane `slow`; in the gate with the collector at every safe point ([`in_the_collect_gate`]),
-/// 100. The stack bound is a property of the default mode's frames (the collector marks from a
-/// worklist, so its own stack does not grow with the depth). What the collect mode looks for, a
-/// value held without a root, shows at any depth: at 100 every safe point of the deepest levels
-/// still collects while 100 re-entries, each with its Rust frame and its activation, are live.
-/// A collection traces every activation, so the cost grows with the square of the depth: at
+/// The `reentry_depth` of the stack test: the full depth, 1,000, in the default mode; with the
+/// collector at every safe point, 100, in the gate and in the lane `slow` alike. The stack
+/// bound is a property of the default mode's frames (the collector marks from a worklist, so
+/// its own stack does not grow with the depth). What the collect mode looks for, a value held
+/// without a root, shows at any depth: at 100 every safe point of the deepest levels still
+/// collects while 100 re-entries, each with its Rust frame and its activation, are live. A
+/// collection traces every activation, so the cost grows with the square of the depth: at
 /// 1,000 the test took 30.4 s in that mode (21.2 CPU s) against 0.10 s in the default one
-/// (measured).
+/// (measured), and 12.2 CPU seconds alone in the lane on 2026-11-22.
 fn stack_reentry() -> u32 {
-    if in_the_collect_gate() { 100 } else { 1_000 }
+    if cfg!(feature = "collect-every-safe-point") {
+        100
+    } else {
+        1_000
+    }
 }
 
 /// The limits of the stack test: `frame_depth` 10,000, `reentry_depth` [`stack_reentry`] and
@@ -558,7 +563,7 @@ fn reach_every_bound() {
 /// `frame_depth` 10,000, `reentry_depth` 1,000 and `parser_nesting` 1,000 runs a script that
 /// reaches `reentry_depth` through host functions, and one that reaches it through getters,
 /// each parsing 1,000 nested brackets at the deepest, and ends without a stack overflow:
-/// `min_stack_bytes()` is enough, with an eighth of it to spare. In the gate's collect mode the
+/// `min_stack_bytes()` is enough, with an eighth of it to spare. In the collect mode the
 /// depth is [`stack_reentry`], and the thread has seven eighths of `min_stack_bytes()` of that
 /// depth.
 #[test]

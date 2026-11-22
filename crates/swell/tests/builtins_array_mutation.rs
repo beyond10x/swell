@@ -304,18 +304,25 @@ fn stable_sort_source(n: u32) -> String {
     )
 }
 
-/// `#sec-sortindexedproperties`: the sort is stable for 11, 513 and 2,048 elements. With the
+/// `#sec-sortindexedproperties`: the sort is stable for 11, 513 and 2,048 elements (128 for
+/// 2,048 in the gate). With the
 /// feature `collect-every-safe-point` every instruction of the comparator collects the whole
 /// heap: with 11 and 513 elements this test took 258 s alone in that mode (1.6 s with 2,048
 /// more in the default one, measured), so that mode sorts 11 and 17 elements. A value held
 /// without a root shows at any size, and 17 still merges a run of one and copies the result
-/// back from the buffer after an odd number of passes, as 2,048 does.
+/// back from the buffer after an odd number of passes, as 2,048 does. The default mode's gate
+/// sorts 128 elements where the lane `slow` (`SWELL_FULL_COUNTS=1`) sorts 2,048: the merge
+/// sort has no size threshold, and 128 takes it through 7 passes, an odd number, so the result
+/// is copied back from the buffer as after the 11 passes of 2,048, while 513 merges a run of one
+/// after 10 (the test took 1.60 CPU seconds alone with 2,048, measured on 2026-11-22).
 #[test]
 fn sort_is_stable_for_11_513_and_2048_elements() {
     let sizes: &[u32] = if cfg!(feature = "collect-every-safe-point") {
         &[11, 17]
-    } else {
+    } else if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
         &[11, 513, 2048]
+    } else {
+        &[11, 513, 128]
     };
     let mut limits = limits();
     limits.steps_per_entry = 10_000_000;
@@ -380,18 +387,18 @@ fn sort_puts_undefined_last_and_holes_after_it() {
 
 /// The elements of the arrays the lying comparators of
 /// [`sort_with_a_comparator_that_throws_or_lies_ends`] sort: 40, the full count, in the default
-/// mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`); 12 in the gate with the feature
-/// `collect-every-safe-point`, where every comparator call collects (with 40 the test took
-/// 22.1 s there at a load of 100 to 110 on 17 cores, cargo-nextest). The sort is a merge sort
-/// bottom up from runs of one, so 12 elements still take it through four passes, with every
-/// lie answered in each.
+/// mode; with the feature `collect-every-safe-point`, where every comparator call collects, 12
+/// in the gate and 20 in the lane `slow` (`SWELL_FULL_COUNTS=1`) (with 40 the test took 22.1 s
+/// there at a load of 100 to 110 on 17 cores, cargo-nextest, and 6.0 CPU seconds alone in the
+/// lane; 12 took 1.8, measured on 2026-11-22). The sort is a merge sort bottom up from runs of
+/// one, so 12 elements still take it through four passes and 20 through five, with every lie
+/// answered in each.
 fn lying_sort_elements() -> u32 {
-    if cfg!(feature = "collect-every-safe-point")
-        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-    {
-        12
-    } else {
-        40
+    let full = std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1");
+    match (cfg!(feature = "collect-every-safe-point"), full) {
+        (true, false) => 12,
+        (true, true) => 20,
+        (false, _) => 40,
     }
 }
 
