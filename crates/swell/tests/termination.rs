@@ -176,13 +176,6 @@ fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
     assert_eq!(agent.state(), AgentState::Alive);
 }
 
-/// Whether this run is the gate's with the collector at every safe point: the feature
-/// `collect-every-safe-point`, without `SWELL_FULL_COUNTS=1` (which the lane `slow` sets).
-fn in_the_collect_gate() -> bool {
-    cfg!(feature = "collect-every-safe-point")
-        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-}
-
 /// A host function that calls its argument, catches the termination it answers and returns
 /// `undefined`, counting its calls.
 fn catcher(cx: &mut Cx<'_, TestHost>, call: HostCall<'_>) -> Completion<Value> {
