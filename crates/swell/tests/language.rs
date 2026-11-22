@@ -128,9 +128,20 @@ fn runs_of(source: &str) -> Result<(Expectation, Runs), String> {
     Ok((expected, modes))
 }
 
+/// The CPU time of the calling thread in seconds, from `/proc/thread-self/schedstat`; 0 where
+/// the file cannot be read.
+fn thread_cpu_seconds() -> f64 {
+    fs::read_to_string("/proc/thread-self/schedstat")
+        .ok()
+        .and_then(|text| text.split_whitespace().next()?.parse::<f64>().ok())
+        .map_or(0.0, |nanoseconds| nanoseconds / 1e9)
+}
+
 /// Every script of `paths` answers its expected outcome in each of its modes; a failure names
-/// the script, the mode and the anchor.
+/// the script, the mode and the anchor. With `SWELL_SCRIPT_TIMES=1` each run prints
+/// `script-time <wall s> <cpu s> <script> <mode>` (seen with `--no-capture`).
 fn answer_their_expected_outcome(paths: &[PathBuf]) {
+    let times = std::env::var("SWELL_SCRIPT_TIMES").is_ok_and(|value| value == "1");
     let mut failures = Vec::new();
     for path in paths {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
@@ -143,7 +154,15 @@ fn answer_their_expected_outcome(paths: &[PathBuf]) {
             }
         };
         for (mode, text) in modes {
+            let (wall, cpu) = (std::time::Instant::now(), thread_cpu_seconds());
             let found = run(support::host::limits(), &text);
+            if times {
+                println!(
+                    "script-time {:.3} {:.3} {name} {mode}",
+                    wall.elapsed().as_secs_f64(),
+                    thread_cpu_seconds() - cpu
+                );
+            }
             if found != expected.outcome {
                 failures.push(format!(
                     "{name} ({mode}, {}): expected {:?}, found {found:?}",
@@ -186,7 +205,11 @@ macro_rules! language_parts {
 // two scripts of the completion value of a `try` statement left by `break` or `continue` are
 // one script per statement (`try-completion-finally-abrupt-*.js`,
 // `try-completion-try-and-catch-abrupt-*.js`), whose names stand next to each other and so
-// land in different parts.
+// land in different parts. Measured again with 240 scripts at a load of 60 on 20 cores, each
+// part run alone: the scripts took 18.7 CPU seconds together in that mode (1.9 in the default
+// one), the costliest 0.5 s a run (a `try-completion-*.js`, 26 `eval` calls), a part 1.1 to
+// 2.4 s; part_12, 2.4 CPU seconds, took 18.5 s of wall time. `SWELL_SCRIPT_TIMES=1` with
+// `--no-capture` prints the wall and CPU seconds of each run.
 language_parts!(
     language_scripts_answer_their_expected_outcome = 0,
     language_scripts_answer_their_expected_outcome_part_2 = 1,

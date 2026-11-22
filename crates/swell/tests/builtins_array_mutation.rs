@@ -520,14 +520,19 @@ fn sort_steps(n: u32) -> u64 {
 
 /// The step budget (decision 2): a sort is charged a step per comparison and per element moved,
 /// and its reads and writes a step per index, so the entry that sorts `n` elements spends at
-/// least `n` steps and at most 8 n log2 n (2,048 elements; 513 with the feature
-/// `collect-every-safe-point`).
+/// least `n` steps and at most 8 n log2 n (2,048 elements; with the feature
+/// `collect-every-safe-point` 513 in the lane `slow`, `SWELL_FULL_COUNTS=1`, and 129 in the
+/// gate: with 513 the test took 2.1 CPU seconds there, run alone, most of it in the loop that
+/// makes the Array, which collects at every instruction. 129 is 2^7 + 1 as 513 is 2^9 + 1, so
+/// the bottom-up merge sort still carries a lone last run through every pass).
 #[test]
 fn sort_charges_a_step_per_comparison() {
-    let n: u32 = if cfg!(feature = "collect-every-safe-point") {
+    let n: u32 = if !cfg!(feature = "collect-every-safe-point") {
+        2048
+    } else if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
         513
     } else {
-        2048
+        129
     };
     let steps = sort_steps(n);
     let n = f64::from(n);

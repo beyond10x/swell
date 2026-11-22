@@ -543,7 +543,7 @@ fn child_transcript(child: std::process::Child) -> String {
 }
 
 /// HOST-133: the corpus run by two agents with equal limits and seeds in one process, and by
-/// two child processes, gives the same transcript of hook calls, host function calls, outcomes,
+/// child processes ([`host_133_children`]), gives the same transcript of hook calls, host function calls, outcomes,
 /// `last_entry_steps()`, `heap_bytes()` and collection reports, byte for byte. The corpus
 /// reaches every outcome: normal, throw, a parse error, and the step and memory budgets, the
 /// frame depth and the string length.
@@ -559,7 +559,9 @@ fn host_133_same_calls_same_hooks_same_outcomes() {
         return;
     }
     let test = test_path!("host_133_same_calls_same_hooks_same_outcomes");
-    let children = [spawn_child(test.clone()), spawn_child(test)];
+    let children: Vec<_> = (0..host_133_children())
+        .map(|_| spawn_child(test.clone()))
+        .collect();
     let (a, b) = two_agents_interleaved();
     assert_eq!(a, b, "two agents in one process");
     let lines: Vec<&str> = a.lines().collect();
@@ -580,7 +582,22 @@ fn host_133_same_calls_same_hooks_same_outcomes() {
             "the corpus reaches {expected:?}:\n{a}"
         );
     }
-    let [first, second] = children.map(child_transcript);
-    assert_eq!(first, second, "two processes");
-    assert_eq!(first, a, "a process and this one");
+    for (child, transcript) in children.into_iter().map(child_transcript).enumerate() {
+        assert_eq!(transcript, a, "child process {child} and this one");
+    }
+}
+
+/// The child processes of HOST-133, each compared with this process (and so with each other):
+/// two in the default mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`), one in the gate
+/// with the feature `collect-every-safe-point`, still two processes against each other. The
+/// corpus runs four times with two children, and with them the test took 5.3 CPU seconds in
+/// that mode, run alone, the most of any test there.
+fn host_133_children() -> usize {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        1
+    } else {
+        2
+    }
 }

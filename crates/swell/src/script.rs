@@ -748,17 +748,33 @@ mod tests {
     const MIB: u64 = 1 << 20;
     const OPTIONS: ParseOptions = ParseOptions { max_nesting: 100 };
 
-    /// `function unused() {`, 20,000 lines `x = 1;`, then `}`.
+    /// The lines of the flat source: the story's 20,000 in the lane `slow`
+    /// (`SWELL_FULL_COUNTS=1`), 5,000 in the gate. Each test of the flat source compares
+    /// readings of the same source with each other (a peak with its floor, a budget below a
+    /// peak), so the outcome each asserts holds at either count, and 5,000 lines are 35,000 code
+    /// units, 8 polls of the parse. With 20,000 the four tests took 6.5 CPU seconds together in
+    /// either collection mode, each run alone, and HOST-169's 3.1 s of them was the slowest
+    /// test of a whole-package run in both modes (21 s at a load of 60 to 95 on 20 cores).
+    fn flat_lines() -> usize {
+        // HOST-2 (source_scan.rs): no run-time environment read in engine sources, tests included.
+        if matches!(option_env!("SWELL_FULL_COUNTS"), Some("1")) {
+            20_000
+        } else {
+            5_000
+        }
+    }
+
+    /// `function unused() {`, [`flat_lines`] lines `x = 1;`, then `}`.
     fn flat_source() -> String {
         let mut text = String::from("function unused() {\n");
-        text.push_str(&"x = 1;\n".repeat(20_000));
+        text.push_str(&"x = 1;\n".repeat(flat_lines()));
         text.push('}');
         text
     }
 
-    /// The body of the `Function` call: the 20,000 lines alone.
+    /// The body of the `Function` call: the [`flat_lines`] lines alone.
     fn flat_body() -> String {
-        "x = 1;\n".repeat(20_000)
+        "x = 1;\n".repeat(flat_lines())
     }
 
     fn units(text: &str) -> Vec<u16> {
@@ -908,7 +924,7 @@ mod tests {
         }
     }
 
-    /// HOST-169: a flat source of 20,000 statements, as UTF-8 and as UTF-16, with a free slot in
+    /// HOST-169: a flat source ([`flat_source`]), as UTF-8 and as UTF-16, with a free slot in
     /// the scripts arena. P is the high-water mark of a successful parse over what the heap
     /// read before, T the tree walk, R what the record owns. Under P the parse succeeds; under
     /// P - T, and under R + 4 KiB, the tree does not fit and the parse ends in

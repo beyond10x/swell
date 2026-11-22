@@ -162,15 +162,17 @@ pub const THROUGH_BUILTINS: [&str; 4] = [
 ];
 
 /// The `reentry_depth` of a stack test through builtins: the full depth in the default mode;
-/// with the feature `collect-every-safe-point`, 100, which still re-enters through each
+/// with the feature `collect-every-safe-point`, 50, which still re-enters through each
 /// builtin at every level. The stack bound is a property of the default mode's frames (the
 /// collector marks from a worklist, so its own stack does not grow with the depth); what the
 /// collect mode looks for, a value held without a root, shows at any depth, while a collection
 /// at every safe point traces every activation, so the cost grows with the square of the
 /// depth: at 1,000 the test through the four builtins of [`THROUGH_BUILTINS`] took 99.5 s in
-/// that mode against 0.16 s in the default one, and at 100 it takes 1.4 s (measured).
+/// that mode against 0.16 s in the default one, and at 100 it took 1.4 s. Measured in that mode,
+/// each test run alone: the 21 tests `*_reach*_the_reentry_limit_on_the_promised_stack` took
+/// 15.8 CPU seconds together at 100 and 7.0 at 50; the slowest, through arrows, 2.2 and 0.8.
 pub const BUILTINS_REENTRY: u32 = if cfg!(feature = "collect-every-safe-point") {
-    100
+    50
 } else {
     FULL_REENTRY
 };
