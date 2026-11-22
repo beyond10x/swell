@@ -1,0 +1,74 @@
+version: '3'
+
+set: [pipefail]
+
+tasks:
+  test-binaries-check:
+    desc: Fail, naming each, when a test executable of the workspace has a section whose name starts with .debug_.
+    summary: |
+      The test builds carry no debug information (the organization's rule "Tests stay fast";
+      story test-builds-carry-no-debug-information). .cargo/config.toml builds the dev profile,
+      and the test profile that inherits it, with debug = false and strip = "debuginfo"; this
+      check shows it on every test executable. A step of check right after build.
+
+      Reads the test executables from GATE_TEST_BUILD_JSON, a file of cargo's JSON messages.
+      When that is not given, it runs "cargo test --locked --workspace --no-run
+      --message-format=json" with RUSTFLAGS -D warnings, the flags of the step build, so that
+      it reuses what build made and builds nothing after it, into .out/test-binaries/build.json
+      (its log .out/test-binaries/build.log, printed when the build fails). A test executable is
+      a message with reason compiler-artifact, .profile.test true and an executable (jq); their
+      list is written beside the file of messages as <file>.executables. It runs
+      taskfiles/no-debug-sections.sh on all of them (readelf -S on each; its lines go to
+      <file>.sections.log), prints the lines
+      of the binaries with debug sections, and names each as "test-binaries-check: <binary> has
+      a .debug_ section". It fails when one has such a section, when the file holds no test
+      executable (a check that reads nothing fails), when it is not cargo's JSON, and when the
+      build fails. When it passes it prints "test-binaries-check: <n> test executables, none
+      with a .debug_ section". The planted script
+      tests/gate/test-binaries-check-refuses-a-test-binary-with-debug-sections.sh holds it.
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    env:
+      RUSTFLAGS: -D warnings
+    vars:
+      GATE_TEST_BUILD_JSON: '{{.GATE_TEST_BUILD_JSON | default ""}}'
+    cmds:
+      - |
+        json={{shellQuote .GATE_TEST_BUILD_JSON}}
+        if [ -z "$json" ]; then
+          mkdir -p .out/test-binaries
+          json=.out/test-binaries/build.json
+          if ! cargo test --locked --workspace --no-run --message-format=json > "$json" 2> .out/test-binaries/build.log; then
+            cat .out/test-binaries/build.log
+            echo "test-binaries-check: the build of the test executables failed"
+            exit 1
+          fi
+        fi
+        [ -f "$json" ] || { echo "test-binaries-check: no file $json of cargo's JSON messages"; exit 1; }
+        list=$json.executables
+        sections=$json.sections.log
+        jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and .executable != null) | .executable' "$json" > "$list.raw" ||
+          { echo "test-binaries-check: $json is not a file of cargo's JSON messages"; exit 1; }
+        LC_ALL=C sort -u "$list.raw" > "$list"
+        n=$(grep -c . "$list" || true)
+        if [ "$n" -eq 0 ]; then
+          echo "test-binaries-check: no test executable among the messages of $json"
+          exit 1
+        fi
+        nl=$(printf '\nx')
+        nl=${nl%x}
+        set -f
+        IFS=$nl
+        status=0
+        # shellcheck disable=SC2046
+        sh taskfiles/no-debug-sections.sh $(cat "$list") > "$sections" 2>&1 || status=$?
+        unset IFS
+        set +f
+        if [ "$status" -ne 0 ]; then
+          grep -v ': 0 debug sections among ' "$sections" || true
+          sed -n 's/^stack-profiles: \(.*\) has debug sections$/test-binaries-check: \1 has a .debug_ section/p' "$sections"
+          bad=$(grep -c ' has debug sections$' "$sections" || true)
+          echo "test-binaries-check: $bad of $n test executables with a .debug_ section, or not read ($sections)"
+          exit 1
+        fi
+        echo "test-binaries-check: $n test executables, none with a .debug_ section"
