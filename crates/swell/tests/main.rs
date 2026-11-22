@@ -43,6 +43,7 @@ mod limits_scripts;
 mod misuse;
 mod names;
 mod objects;
+mod parameters;
 mod property_index;
 mod realms;
 mod scripts;

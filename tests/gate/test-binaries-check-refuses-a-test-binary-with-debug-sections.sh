@@ -7,8 +7,9 @@
 # copies, which the task reads from GATE_TEST_BUILD_JSON in place of a build.
 #   1. The clean copy as the one test executable, the planted copy as an executable that is no
 #      test (.profile.test false) and a library without an executable: the task passes and
-#      counts 1 test executable.
-#   2. The clean copy and the planted copy as test executables: the task fails, names the
+#      counts 1 test executable, 1 integration-test binary in 1 package.
+#   2. The clean copy and the planted copy as test executables, the planted one a library's
+#      unit-test executable so that the package keeps one integration-test binary: the task fails, names the
 #      planted copy ("test-binaries-check: <binary> has a .debug_ section") and not the clean one.
 #   3. No test executable among the messages: the task fails (a check that reads nothing fails).
 # Run from the repository root:
@@ -62,12 +63,12 @@ message() {
 } > "$dir/clean.json" || fail "cannot write $dir/clean.json"
 task --taskfile "$taskfile" test-binaries-check GATE_TEST_BUILD_JSON="$dir/clean.json" > "$dir/clean.out" 2>&1 ||
   fail "test-binaries-check refused a clean test executable ($dir/clean.out)"
-grep -qxF "test-binaries-check: 1 test executables, none with a .debug_ section" "$dir/clean.out" ||
-  fail "test-binaries-check did not count 1 test executable, none with a .debug_ section ($dir/clean.out)"
+grep -qxF "test-binaries-check: 1 test executables, 1 integration-test binaries in 1 packages, none with a .debug_ section" "$dir/clean.out" ||
+  fail "test-binaries-check did not count 1 test executable and 1 integration-test binary in 1 package, none with a .debug_ section ($dir/clean.out)"
 
 {
   message "$clean" true test
-  message "$planted" true test
+  message "$planted" true lib
   printf '{"reason":"build-finished","success":true}\n'
 } > "$dir/planted.json" || fail "cannot write $dir/planted.json"
 if task --taskfile "$taskfile" test-binaries-check GATE_TEST_BUILD_JSON="$dir/planted.json" > "$dir/planted.out" 2>&1; then
