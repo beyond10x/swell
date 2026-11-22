@@ -11,7 +11,7 @@
 //! an array pattern, a spread or rest element or a computed property name.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{agent, realm};
 use support::script::{Outcome, run_both};
@@ -237,17 +237,38 @@ fn charged_as_read(text: &str) {
     assert_eq!(ledger.held, held, "the compile step credited its scratch");
 }
 
-/// The frontend's ledger over an object pattern of 10,000 properties, each with a default, as
-/// a `var` and a `let` declaration, a parameter of a function and of an arrow (read first as
-/// the parenthesized expression it covers) and an assignment pattern (read first as an object
-/// literal): the tree, the names, the defaults and the code are charged as they grow.
+/// The properties of the pattern of [`the_properties_of_a_large_pattern_are_charged_as_they_are_read`]:
+/// 10,000, the full count, in the default mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`);
+/// 1,000 in the gate with the feature `collect-every-safe-point`, whose build is slower (with
+/// 10,000 the test took 5.5 s there at a load of 55 to 67 on 20 cores, cargo-nextest). The test
+/// runs no script, so the feature changes nothing it checks; 1,000 properties still grow every
+/// list of the parse and the compile step past its first capacity many times over.
+fn pattern_properties() -> usize {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        1_000
+    } else {
+        10_000
+    }
+}
+
+/// The frontend's ledger over an object pattern of [`pattern_properties`] properties, each with
+/// a default, as a `var` and a `let` declaration, a parameter of a function and of an arrow
+/// (read first as the parenthesized expression it covers) and an assignment pattern (read first
+/// as an object literal): the tree, the names, the defaults and the code are charged as they
+/// grow.
 #[test]
-fn ten_thousand_properties_of_a_pattern_are_charged_as_they_are_read() {
-    let properties: Vec<String> = (0..10_000).map(|i| format!("p{i} = {i}")).collect();
+fn the_properties_of_a_large_pattern_are_charged_as_they_are_read() {
+    let n = pattern_properties();
+    let properties: Vec<String> = (0..n).map(|i| format!("p{i} = {i}")).collect();
     let pattern = properties.join(", ");
+    let last = n - 1;
     charged_as_read(&format!("var {{ {pattern} }} = {{}};"));
     charged_as_read(&format!("let {{ {pattern} }} = {{}};"));
-    charged_as_read(&format!("function f({{ {pattern} }}) {{ return p9999; }}"));
-    charged_as_read(&format!("var f = ({{ {pattern} }}) => p9999;"));
+    charged_as_read(&format!(
+        "function f({{ {pattern} }}) {{ return p{last}; }}"
+    ));
+    charged_as_read(&format!("var f = ({{ {pattern} }}) => p{last};"));
     charged_as_read(&format!("var p0; ({{ {pattern} }} = {{}});"));
 }

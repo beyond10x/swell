@@ -239,15 +239,17 @@ fn an_arrow_with_ten_thousand_parameters_is_charged_as_it_is_read() {
 }
 
 /// The parameters an arrow takes before later stories keep the refusals the parameters of a
-/// function have (`destructuring pattern`), and an `async` arrow keeps the refusal of slice 10.
-/// Defaults and a rest element parse since `story:default-and-rest-parameters`.
+/// function have (`destructuring pattern` for an array pattern), and an `async` arrow keeps the
+/// refusal of slice 10. Defaults and a rest element parse since
+/// `story:default-and-rest-parameters`, an object pattern since `story:object-destructuring`.
 #[test]
-fn arrow_defaults_and_rest_run_and_patterns_and_async_keep_their_refusal() {
+fn arrow_defaults_rest_and_object_patterns_run_and_array_patterns_and_async_keep_their_refusal() {
     for source in [
         "var f = (a = 1) => a;",
         "var f = (a, b = 1) => a;",
         "var f = (...a) => a;",
         "var f = (a, ...b) => a;",
+        "var f = ({ a }) => a;",
     ] {
         assert_eq!(
             run(limits(), source),
@@ -256,10 +258,6 @@ fn arrow_defaults_and_rest_run_and_patterns_and_async_keep_their_refusal() {
         );
     }
     for (source, refused) in [
-        (
-            "var f = ({ a }) => a;",
-            "destructuring pattern is not supported",
-        ),
         (
             "var f = ([a]) => a;",
             "destructuring pattern is not supported",
