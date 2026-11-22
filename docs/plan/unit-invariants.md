@@ -14,7 +14,7 @@ report and does not work around it.
   machine: measure in an ordinary job and report CPU seconds and the load beside wall seconds.
 - A job in the pool that runs longer than 10 minutes is killed (a rule of the organization
   since 2026-11-22; the wait in the queue does not count; the daemon ends it). A job that
-  needs longer names its time, at most one hour: `slot --timeout 30m task test262`, or
+  needs longer names its time, at most 30 minutes (a longer value counts as 30 minutes; a job that needs more is split): `slot --timeout 30m task test262`, or
   `SLOT_TIMEOUT=30m cargo nextest run ...` for a cargo call the shim wraps. A wrapped
   `timeout` extends nothing since slot 0.22.0: `slot timeout 1800 ...` ends at 10 minutes
   with exit 124, so where a story still writes that form, run `slot --timeout 30m ...`. A

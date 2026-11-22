@@ -152,7 +152,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 - `slot task check` is the one gate. `task --list` names every task; each task's `summary`
   says what it reads and what makes it fail.
 - Before `main` moves, the gate is run on the wave branch once as the forge's runner runs it:
-  `slot --timeout 1h task check-runner` (`taskfiles/forge.yml`). It sets the runner's
+  `slot --timeout 30m task check-runner` (`taskfiles/forge.yml`). It sets the runner's
   variables (`GATE_RUNNER_ENV`: `CI`, `GITHUB_ACTIONS`, `CARGO_TERM_COLOR`, `CARGO_INCREMENTAL=0`)
   and keeps the host's compile cache: `RUSTC_WRAPPER` is never set empty. `forge-check`, a
   step of `check`, fails when rustc is not the channel `rust-toolchain.toml` pins (1.99.1), when
