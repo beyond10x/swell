@@ -524,14 +524,15 @@ fn in_the_collect_gate() -> bool {
         && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
 }
 
-/// The step budget of [`ends_in_step_budget`]: 100,000 steps; 2,000 in the gate with the
-/// collector at every safe point, where every step collects, and 100,000 there too in the lane
-/// `slow` (`SWELL_FULL_COUNTS=1`). With 10,000 the three tests took 17.9 to 25.2 s in that
-/// mode at a load of 100 to 110 on 17 cores (cargo-nextest). The loop in eval code never ends,
-/// and the eval code is compiled in far fewer than 2,000 steps, so every budget ends it the
-/// same way, in `Terminated(StepBudget)`.
+/// The step budget of [`ends_in_step_budget`]: 100,000 steps; 2,000 with the collector at
+/// every safe point, where every step collects, in the gate and in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`) alike. With 10,000 the three tests took 17.9 to 25.2 s in that
+/// mode at a load of 100 to 110 on 17 cores (cargo-nextest), and with the lane's 100,000 17.6
+/// to 18.1 CPU seconds each alone (2,000: 0.37 to 0.39, measured on 2026-11-22). The loop in
+/// eval code never ends, and the eval code is compiled in far fewer than 2,000 steps, so every
+/// budget ends it the same way, in `Terminated(StepBudget)`.
 fn step_budget() -> u64 {
-    if in_the_collect_gate() {
+    if cfg!(feature = "collect-every-safe-point") {
         2_000
     } else {
         100_000

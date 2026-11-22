@@ -56,17 +56,16 @@ fn lookup_by_name_charges_a_step_per_record() {
     );
 }
 
-/// `full` steps of a step budget, or a fiftieth of them in the gate with the collector at every
-/// safe point, where every step collects; the lane `slow` (`SWELL_FULL_COUNTS=1`) runs `full`
-/// there too. The scripts given such a budget loop or recurse without end, so every budget
-/// ends them in the same way. With a tenth, 10,000 of 100,000,
+/// `full` steps of a step budget, or a fiftieth of them with the collector at every safe point,
+/// where every step collects, in the gate and in the lane `slow` (`SWELL_FULL_COUNTS=1`) alike.
+/// The scripts given such a budget loop or recurse without end, so every budget ends them in
+/// the same way. With a tenth, 10,000 of 100,000,
 /// [`step_budget_ends_a_loop_of_lookups_by_name`] took 18.1 s in that mode at a load of 100 to
-/// 110 on 17 cores (cargo-nextest); with 2,000 it still runs the loop for longer than its
-/// budget of 1,000.
-fn steps_in_the_collect_gate(full: u64) -> u64 {
-    if cfg!(feature = "collect-every-safe-point")
-        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-    {
+/// 110 on 17 cores (cargo-nextest), and with all 100,000 in the lane 12.9 CPU seconds alone
+/// (measured on 2026-11-22); with 2,000 it still runs the loop for longer than its budget of
+/// 1,000.
+fn steps_in_the_collect_mode(full: u64) -> u64 {
+    if cfg!(feature = "collect-every-safe-point") {
         full / 50
     } else {
         full
@@ -78,7 +77,7 @@ fn steps_in_the_collect_gate(full: u64) -> u64 {
 /// the budget; so does a single read through more records than the budget has steps.
 #[test]
 fn step_budget_ends_a_loop_of_lookups_by_name() {
-    for steps in [10_u64, 1_000, steps_in_the_collect_gate(100_000)] {
+    for steps in [10_u64, 1_000, steps_in_the_collect_mode(100_000)] {
         let mut limits = limits();
         limits.steps_per_entry = steps;
         let mut agent = agent_with(limits).unwrap();

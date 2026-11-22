@@ -6,7 +6,7 @@
 //! arguments: stale, released, foreign and wrong-kind handles among them, and small scripts of
 //! the slice 1 grammar and broken sources, under small and random limits.
 //!
-//! 2,000 sequences from fixed seeds per run, 150 with the feature `collect-every-safe-point`, in
+//! 1,000 sequences from fixed seeds per run, 50 with the feature `collect-every-safe-point`, in
 //! the lane `slow`; the gate runs the first 160 and 15 ([`sequences`]). They are divided among
 //! eight tests ([`PARTS`]) that cargo-nextest runs side by side. A sequence fails on a panic, on
 //! an abort (a stack
@@ -36,13 +36,22 @@ use swell::{
     Source, StringRef, Termination, TimeZoneIdentifier, Tracer, Value,
 };
 
-/// The sequences of one run: 2,000 in the default mode; with the feature
-/// `collect-every-safe-point`, the first 150 of them. That mode's job is to find a value held
+/// The sequences of one run: 1,000 in the default mode; with the feature
+/// `collect-every-safe-point`, the first 50 of them. That mode's job is to find a value held
 /// without a root, which any sequence that keeps a value across a safe point shows; a
 /// sequence costs many times more in it (2,000 took 170.9 s there against 24.6 s in the default
 /// mode in one pool job, a factor of 7: 11.7 against 81 sequences per second, measured).
 ///
-/// Those are the full counts, which the lane `slow` runs (`SWELL_FULL_COUNTS=1`). The gate runs
+/// Those are the full counts, which the lane `slow` runs (`SWELL_FULL_COUNTS=1`). They were
+/// 2,000 and 150, counts the story (`story:host-interface-hardening`) and the time of one
+/// pool job gave, no defect: a part of 250 sequences took 7.7 to 8.1 CPU seconds alone in the
+/// default mode and 46.6 to 54.9 s in a loaded lane, near the kill. 1,000 sequences, 125 a
+/// part, draw each kind of the generator about 700 times (24,000 entry calls). In the collect
+/// mode two sequences cost most of the 150: the seeds 55 and 58 (from [`FIRST_SEED`]) run
+/// 20,000 steps an entry with a heap of up to 0.5 and 2 MB that every step marks, about 13
+/// and 16 CPU seconds each, so the parts that held them took 14.7 and 16.8 s; the first 50
+/// take 4.2 CPU seconds together, the most in a part 2.6 (seed 23, 2.2 s), all measured
+/// alone on 2026-11-22. The gate runs
 /// the first 160 and, in the collect mode, the first 15: every choice of the generator is drawn
 /// uniformly among at most 34 kinds, so the 3,840 entry calls of 160 sequences (360 of 15) draw
 /// each kind about a hundred times (about ten), and a kind the full count reaches is not left
@@ -53,9 +62,9 @@ use swell::{
 fn sequences() -> u64 {
     let full = std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1");
     match (cfg!(feature = "collect-every-safe-point"), full) {
-        (true, true) => 150,
+        (true, true) => 50,
         (true, false) => 15,
-        (false, true) => 2_000,
+        (false, true) => 1_000,
         (false, false) => 160,
     }
 }
@@ -2140,7 +2149,7 @@ fn part_seeds(part: u64) -> std::ops::Range<u64> {
 }
 
 /// HOST-3: no entry point, read or hook dispatch panics for any argument: the seeded sequences
-/// of [`sequences`] (2,000 in the lane `slow`) of interface calls with arbitrary arguments
+/// of [`sequences`] (1,000 in the lane `slow`) of interface calls with arbitrary arguments
 /// (stale, released, foreign and
 /// wrong-kind handles included), run in a child process, end with no panic, no abort, no run
 /// past its budget, no answer the design excludes, and the same transcript in two runs of each
