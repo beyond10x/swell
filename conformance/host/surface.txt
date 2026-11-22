@@ -1,4 +1,4 @@
-# swell 0.2.0
+# swell 0.3.0
 ALL pub const ALL: [ErrorKind; 7] = [ErrorKind::Error, ErrorKind::EvalError, ErrorKind::RangeError, ErrorKind::ReferenceError, ErrorKind::SyntaxError, ErrorKind::TypeError, ErrorKind::UriError]
 Abrupt #[derive(Clone, Copy, Debug, PartialEq)] pub enum Abrupt
 Abrupt::Terminated Terminated(Termination)
@@ -128,6 +128,7 @@ HOST-161 6824e0ad86372b34117895215f36d3f6e80a2e85c07474c13740940fdd05cc8b
 HOST-162 72a53faf99cf252fff27620dc6817442efad7f1587d1021e858f603977e73c9b
 HOST-163 a130d0d853a47d18905928e5cf457d8cb4ec18fe23dabc1db403ce59ca373bb1
 HOST-164 ef41d46144f435bc1f4c25fa6ba5970603217145e7302022aba9814ff49af87d
+HOST-165 5423eac2445821d8aa1b51ef42957f9afe0f86938ca083aa8b17e23b8fea6ad5
 HOST-17 47fd86c1e779706869461462ac97734b6f78839d9fb3bb3de7c4e5fa3bd45332
 HOST-18 43203fe5e774d5fee71bfb2c5f4b5a01ae606baabb64644cc9f522ee04039506
 HOST-19 75b6d6a5883befe3c7d7ca6f90331d6319edf12c6bbfd46a05f9b29495b70db3

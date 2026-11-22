@@ -388,7 +388,13 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   branch and sends the tip to the session that decides for the operator; that session tags
   and releases. Releases: `0.1.0`, 2026-11-21, tagged on `6319af2`, the close of wave 5
   of slice 1; `0.2.0`, 2026-11-21, tagged on `29f674c`, the commit after the close of slice 2
-  (https://github.com/beyond10x/swell/releases/tag/0.2.0). The push of a tag starts one run of
+  (https://github.com/beyond10x/swell/releases/tag/0.2.0); `0.3.0`, 2026-11-22, tagged on
+  `1f21c0a`, `main` with slice 3 and without the open wave, on the operator's order to
+  release every green default branch
+  (https://github.com/beyond10x/swell/releases/tag/0.3.0). After a release
+  `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
+  released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
+  the open wave move under `## [Unreleased]`. The push of a tag starts one run of
   `shared-gates.yml` (`tags: ['*']`) and none of `check.yml`; the release is created after
   that run ends with success.
 - **Every write on the forge** (an issue, a release, a setting) goes through `b10x-gates api`

@@ -10,38 +10,8 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-11-22
-
-The third delivery slice, the core library, is delivered: 7,010 of its 7,011 test262 cases
-pass.
-
 ### Added
 
-- The core library of the third delivery slice: the integrity, prototype, enumeration and copy
-  methods of `Object`; `Function.prototype.apply` and the source text of a function;
-  `globalThis`, the URI functions and `Error.isError`; `JSON.parse` with a reviver and raw
-  JSON; the iteration, search, copy, mutation and sort methods of `Array`; the access, search,
-  transform and compare methods of `String`. The records of the waves name each builtin
-  (`docs/plan/slice-03-wave-1.md` to `-3.md`).
-- An object with more than 8 properties finds a property through an index map, and an array
-  keeps its elements dense. The scan of a property list that 0.2.0 named among its limits is
-  gone.
-- The third delivery slice is delivered with 7,010 of its 7,011 cases
-  (`test262-slice 03 7011 13829 0 0 7011 7010 1 0`). The one case that does not pass,
-  `test/built-ins/String/prop-desc.js`, fails in the pinned test262 harness before the
-  engine's answer is judged; `docs/design/engine.md`, section 12, states it. 624 more cases
-  that need a later slice moved there with their evidence
-  (`test262-moves: 1656 case(s) moved`).
-- test262 after these: `test262 total 53801 8982 7 44812 12120 32692 0`, 12,120 of the 44,812
-  cases that run pass (27.0 %; 7,742 in 0.2.0). `test262-refused 46581` of the 85,556 runs
-  meet a refusal of a construct the parser does not have.
-- A documentation site under `website/`. It types no number: `task site-data` writes its data
-  from the gate's committed files, and the gate step `site-data-check` fails when the data
-  differs from them.
-- The host interface: 165 numbered requirements, 84 of them with a test
-  (`host-requirements: 165 requirement(s), 165 line(s): 84 test, 81 pending`; 164 and 80 in
-  0.2.0). `HOST-165`: a String method that needs the tables of a later slice refuses a code
-  unit outside ASCII with a counted refusal.
 - The first parts of the sixth delivery slice: template literals without a tag, and `let`,
   `const` and block scopes with the temporal dead zone and a fresh record per iteration of a
   `for (let ...)` loop. A tagged template is refused by name until its story. Arrow functions
@@ -56,22 +26,6 @@ pass.
 
 ### Changed
 
-- The gate runs its tests under cargo-nextest, ends a test at 60 seconds, builds every test
-  binary before its clock and holds its test steps to 120 seconds
-  (`gate-time test-steps 100.7 of 120`). It no longer makes the full test262 run: it compares a
-  digest of the run's sources with a committed one, and the full run is the lane `slow`
-  (`task slow`), which a release waits for.
-- The compiler is pinned in `rust-toolchain.toml` (1.99.1) for the gate and the forge alike,
-  and `task check-runner` runs the gate with the forge runner's variables.
-- On the forge a change of planning or prose files alone skips the build and the tests, and a
-  change of the documentation site alone runs the site's data check.
-- `Object.getOwnPropertySymbols` is counted with the sixth slice, where `Symbol` is.
-- Eight cases of later slices that passed in 0.2.0 no longer pass. Each passed only on the
-  error of a method that was missing; the method exists now, and the case fails on the part
-  of a later slice it needs: one of slice 5 (`Function/prototype/apply/this-not-callable.js`,
-  a regular expression literal), five of slice 6 (String cases that call a method with a
-  Symbol) and two of slice 18 (`trimLeft/reference-trimStart.js`,
-  `trimRight/reference-trimEnd.js`). `docs/plan/slice-03-wave-2.md` names them.
 - The ESS pins moved from 0.96.0 to 0.97.3 (`spec/ess-inputs.yaml`, the conformance workspace,
   the forge's workflow). The suite is byte-identical: 58 scenarios, 41 refusals, 58 passing on
   the interpreter and 14 against the engine, as before.
@@ -190,8 +144,60 @@ pass.
 - A handle the host keeps without a root is a stated weak reference (`HOST-178`): it reads
   its object while the object lives and answers `StaleHandle` after a collection freed it,
   also after its slot holds a new object. No code changed for it; it is tested now.
-- `HOST-165`, `HOST-166`, `HOST-167`, `HOST-168`, `HOST-169`, `HOST-170`, `HOST-171`, `HOST-172`, `HOST-173`, `HOST-174`, `HOST-175`, `HOST-176`, `HOST-177`, `HOST-178`, `HOST-179`, `HOST-180`, `HOST-181`, `HOST-182`, `HOST-183`, `HOST-184`, `HOST-185`, `HOST-186`, `HOST-187`, `HOST-188`, `HOST-189`, `HOST-190`: new requirements.
+- `HOST-166`, `HOST-167`, `HOST-168`, `HOST-169`, `HOST-170`, `HOST-171`, `HOST-172`, `HOST-173`, `HOST-174`, `HOST-175`, `HOST-176`, `HOST-177`, `HOST-178`, `HOST-179`, `HOST-180`, `HOST-181`, `HOST-182`, `HOST-183`, `HOST-184`, `HOST-185`, `HOST-186`, `HOST-187`, `HOST-188`, `HOST-189`, `HOST-190`: new requirements.
 - `HOST-29`, `HOST-52`, `HOST-70`, `HOST-102`: changed requirements.
+
+## [0.3.0] - 2026-11-22
+
+The third delivery slice, the core library, is delivered: 7,010 of its 7,011 test262 cases
+pass.
+
+### Added
+
+- The core library of the third delivery slice: the integrity, prototype, enumeration and copy
+  methods of `Object`; `Function.prototype.apply` and the source text of a function;
+  `globalThis`, the URI functions and `Error.isError`; `JSON.parse` with a reviver and raw
+  JSON; the iteration, search, copy, mutation and sort methods of `Array`; the access, search,
+  transform and compare methods of `String`. The records of the waves name each builtin
+  (`docs/plan/slice-03-wave-1.md` to `-3.md`).
+- An object with more than 8 properties finds a property through an index map, and an array
+  keeps its elements dense. The scan of a property list that 0.2.0 named among its limits is
+  gone.
+- The third delivery slice is delivered with 7,010 of its 7,011 cases
+  (`test262-slice 03 7011 13829 0 0 7011 7010 1 0`). The one case that does not pass,
+  `test/built-ins/String/prop-desc.js`, fails in the pinned test262 harness before the
+  engine's answer is judged; `docs/design/engine.md`, section 12, states it. 624 more cases
+  that need a later slice moved there with their evidence
+  (`test262-moves: 1656 case(s) moved`).
+- test262 after these: `test262 total 53801 8982 7 44812 12120 32692 0`, 12,120 of the 44,812
+  cases that run pass (27.0 %; 7,742 in 0.2.0). `test262-refused 46581` of the 85,556 runs
+  meet a refusal of a construct the parser does not have.
+- A documentation site under `website/`. It types no number: `task site-data` writes its data
+  from the gate's committed files, and the gate step `site-data-check` fails when the data
+  differs from them.
+- The host interface: 165 numbered requirements, 84 of them with a test
+  (`host-requirements: 165 requirement(s), 165 line(s): 84 test, 81 pending`; 164 and 80 in
+  0.2.0). `HOST-165`: a String method that needs the tables of a later slice refuses a code
+  unit outside ASCII with a counted refusal.
+
+### Changed
+
+- The gate runs its tests under cargo-nextest, ends a test at 60 seconds, builds every test
+  binary before its clock and holds its test steps to 120 seconds
+  (`gate-time test-steps 100.7 of 120`). It no longer makes the full test262 run: it compares a
+  digest of the run's sources with a committed one, and the full run is the lane `slow`
+  (`task slow`), which a release waits for.
+- The compiler is pinned in `rust-toolchain.toml` (1.99.1) for the gate and the forge alike,
+  and `task check-runner` runs the gate with the forge runner's variables.
+- On the forge a change of planning or prose files alone skips the build and the tests, and a
+  change of the documentation site alone runs the site's data check.
+- `Object.getOwnPropertySymbols` is counted with the sixth slice, where `Symbol` is.
+- Eight cases of later slices that passed in 0.2.0 no longer pass. Each passed only on the
+  error of a method that was missing; the method exists now, and the case fails on the part
+  of a later slice it needs: one of slice 5 (`Function/prototype/apply/this-not-callable.js`,
+  a regular expression literal), five of slice 6 (String cases that call a method with a
+  Symbol) and two of slice 18 (`trimLeft/reference-trimStart.js`,
+  `trimRight/reference-trimEnd.js`). `docs/plan/slice-03-wave-2.md` names them.
 
 ### Limits of this release
 
