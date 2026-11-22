@@ -10,8 +10,8 @@ tasks:
       in the two profiles whose frames the dev build of the gate does not show: release, and
       stack-nodebug, the dev profile without debug information (.cargo/config.toml sets both, with
       debug = false and strip = "debuginfo", whatever a user's own cargo configuration says).
-      A build step: it runs after build and before clippy, outside the test steps and their
-      budget of 120 s.
+      A step of the lane slow (task slow), before test-stack-profiles: outside the gate and its
+      test budget of 120 s.
 
       Runs, for <profile> release and stack-nodebug, "cargo nextest run --locked -p swell
       --cargo-profile <profile> --test limits_scripts --test eval_stack --no-run", with no
@@ -45,7 +45,8 @@ tasks:
       of tests/eval_stack.rs) in the release profile and in stack-nodebug, the dev profile
       without debug information; the step test runs them in the dev profile with it. Each runs
       its subject in a child process on seven eighths of min_stack_bytes(), so a frame that is
-      larger in one of these profiles fails here. A test step: check prints its gate-time line.
+      larger in one of these profiles fails here. A step of the lane slow, which prints its
+      slow-time line.
 
       Runs, for <profile> release and stack-nodebug, "cargo nextest run --locked -p swell
       --cargo-profile <profile> --profile default --test limits_scripts --test eval_stack -E

@@ -55,6 +55,10 @@ includes:
     taskfile: taskfiles/host-surface.yml
     flatten: true
     optional: true
+  stack-profiles:
+    taskfile: taskfiles/stack-profiles.yml
+    flatten: true
+    optional: true
 
 tasks:
   check:
@@ -119,11 +123,14 @@ tasks:
     desc: The lane slow. The full runs the gate does not make; the forge runs it when a source of the expected file changed.
     summary: |
       The lane slow: the full runs the gate does not make, each compared with the committed file
-      the gate reads in their place, or the full counts of tests the gate runs a part of. Two:
+      the gate reads in their place, or the full counts of tests the gate runs a part of. Three:
       slow-test262, the full test262 run compared byte for byte with
       conformance/test262/expected.txt, and the digest of its sources checked against
-      conformance/test262/expected.digest; and slow-tests, the tests with a gate count at their
-      full counts. The workflow .github/workflows/slow.yml runs it on a push to main and on a
+      conformance/test262/expected.digest; slow-tests, the tests with a gate count at their
+      full counts; and build-stack-profiles with test-stack-profiles, the stack tests in the
+      release profile and in the dev profile without debug information (the gate runs them in
+      the dev profile with debug information, whose frames are the largest of the three). The
+      workflow .github/workflows/slow.yml runs it on a push to main and on a
       pull request that changes a source of the digest, the expected file or the digest file.
       Prints "slow-time <part> <seconds>" after each part.
     silent: true
@@ -136,6 +143,10 @@ tasks:
       - task: slow-tests
       - task: gate-time
         vars: {STEP: slow-tests, LABEL: slow-time}
+      - task: build-stack-profiles
+      - task: test-stack-profiles
+      - task: gate-time
+        vars: {STEP: stack-profiles, LABEL: slow-time}
 
   slow-tests:
     desc: The lane slow's part of the tests. Run, at their full counts (SWELL_FULL_COUNTS=1), the test binaries whose gate count is a part, in both modes of swell.
