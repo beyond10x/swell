@@ -21,6 +21,9 @@
 //!   an accessor's name is `get <key>` or `set <key>`.
 //! - The end of a function's code returns `undefined`; the end of a script returns its
 //!   completion value.
+//! - A template carries the span the parser gave its function, the function's source text
+//!   ([`FunctionTemplate::source_text`]), for `Function.prototype.toString`
+//!   (`#sec-function.prototype.tostring`).
 
 use swell_syntax::Script;
 use swell_syntax::ast::{Ast, FunctionId, Span};
@@ -98,5 +101,6 @@ pub(crate) fn compile_function(
         instructions: body.instructions,
         positions: body.positions,
         handlers: body.handlers,
+        source_text: f.span,
     })
 }
