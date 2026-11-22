@@ -181,7 +181,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 - Task facts, measured in wave 1 (Task 3.54):
   - Task takes a variable from the environment when none is passed on the command line. A
     gate variable therefore carries a prefix (`GATE_`, `TEST262_`, `UNICODE_DATA_`, `SPEC_`,
-    `HOST_REQ_`, `ESS_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
+    `HOST_REQ_`, `ESS_`, `SITE_DATA_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
     ones that have a value as the gate's first line.
   - A variable is written as `'{{.X | default "..."}}'`: in an included file a plain value
     ignores the command line.

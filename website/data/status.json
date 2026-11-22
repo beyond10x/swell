@@ -78,7 +78,7 @@
       "passed": 7010,
       "failed": 1,
       "budget": 0,
-      "passed_percent": "100.0"
+      "passed_percent": "99.9"
     },
     {
       "slice": "04",
@@ -110,7 +110,7 @@
       "passed": 50,
       "failed": 2344,
       "budget": 0,
-      "passed_percent": "2.1"
+      "passed_percent": "2.0"
     },
     {
       "slice": "06",
@@ -126,7 +126,7 @@
       "passed": 100,
       "failed": 4336,
       "budget": 0,
-      "passed_percent": "2.3"
+      "passed_percent": "2.2"
     },
     {
       "slice": "07",
@@ -190,7 +190,7 @@
       "passed": 10,
       "failed": 6641,
       "budget": 0,
-      "passed_percent": "0.2"
+      "passed_percent": "0.1"
     },
     {
       "slice": "11",
@@ -222,7 +222,7 @@
       "passed": 39,
       "failed": 281,
       "budget": 0,
-      "passed_percent": "12.2"
+      "passed_percent": "12.1"
     },
     {
       "slice": "13",
@@ -318,7 +318,7 @@
       "passed": 16,
       "failed": 1139,
       "budget": 0,
-      "passed_percent": "1.4"
+      "passed_percent": "1.3"
     },
     {
       "slice": "19",
@@ -334,7 +334,7 @@
       "passed": 300,
       "failed": 1174,
       "budget": 0,
-      "passed_percent": "20.4"
+      "passed_percent": "20.3"
     },
     {
       "slice": "20",

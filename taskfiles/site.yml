@@ -34,6 +34,11 @@ tasks:
       SITE_DATA_CRATES (src/lib.rs, src/main.rs and src/bin/*.rs, as forbid-unsafe-check reads
       them: how many hold the line #![forbid(unsafe_code)]).
 
+      A percentage of passed cases (passed_percent, of the total and of each slice) is floored to
+      one decimal, so a slice or a total with a failed case never reads 100.0: slice 3, delivered
+      with 7,010 of its 7,011 cases, reads 99.9. A page that says whether every case of a slice
+      passes reads the slice's failed count, not its percentage.
+
       The file holds no date and nothing about the machine: it changes only when an input does.
       Shell and awk only, no Node, no network. Fails, naming it, on a missing or empty input, a
       missing total line, no slice line, a slice without a row in the design's table, or a
@@ -142,6 +147,9 @@ tasks:
           function fail(msg) { print "site-data: " msg > "/dev/stderr"; failed = 1; exit 1 }
           function q(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return "\"" s "\"" }
           function num(s) { return s + 0 }
+          # Passed of run in percent, floored to one decimal: a slice or a total with a failed
+          # case never reads 100.0 (7,010 of 7,011 is 99.9). Integer tenths, so no float rounds.
+          function pct(passed, run,    t) { if (!run) return "0.0"; t = int(1000 * passed / run); return int(t / 10) "." (t % 10) }
           BEGIN {
             expected = ENVIRON["SITE_DATA_EXPECTED"]
             delivered_file = ENVIRON["SITE_DATA_DELIVERED"]
@@ -281,7 +289,7 @@ tasks:
             print "    \"passed\": " total[7] ","
             print "    \"failed\": " total[8] ","
             print "    \"budget\": " total[9] ","
-            print "    \"passed_percent\": " q(total[6] ? sprintf("%.1f", 100 * total[7] / total[6]) : "0.0")
+            print "    \"passed_percent\": " q(pct(total[7], total[6]))
             print "  },"
             print "  \"delivery_slices\": " delivery_count ","
             print "  \"delivered\": [" delivered_list "],"
@@ -305,7 +313,7 @@ tasks:
               print "      \"passed\": " sv[i, 8] ","
               print "      \"failed\": " sv[i, 9] ","
               print "      \"budget\": " sv[i, 10] ","
-              print "      \"passed_percent\": " q(runs_of ? sprintf("%.1f", 100 * sv[i, 8] / runs_of) : "0.0")
+              print "      \"passed_percent\": " q(pct(sv[i, 8], runs_of))
               print "    }" (i < ns ? "," : "")
             }
             print "  ],"
