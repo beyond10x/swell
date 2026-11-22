@@ -173,10 +173,11 @@ impl<H: Host> Agent<H> {
     }
 
     /// StringToNumber (`#sec-stringtonumber`): the `StrWhiteSpace` at either end trimmed, the
-    /// rest parsed by `swell-num`. A step per code unit.
+    /// rest parsed by `swell-num`. A step per code unit, charged before the units are copied.
     pub(crate) fn string_to_number(&mut self, string: StringRef) -> Completion<f64> {
+        let length = self.string_length(string)?;
+        self.charge_steps(u64::try_from(length).unwrap_or(u64::MAX))?;
         let units = self.string_units(string)?;
-        self.charge_steps(u64::try_from(units.len()).unwrap_or(u64::MAX))?;
         let start = units
             .iter()
             .position(|&unit| !is_str_white_space(unit))
@@ -332,10 +333,29 @@ impl<H: Host> Agent<H> {
         self.key_from_string(string)
     }
 
-    /// The key of the String `string`: its array index, or its atom.
+    /// The key of the String `string`: its array index, or its atom. A step per code unit past
+    /// [`FREE_CODE_UNITS`](crate::ops::testing::FREE_CODE_UNITS) is charged before a unit is
+    /// read (`docs/design/engine.md`, "The step budget"); the String is hashed and compared in
+    /// place, and its units are copied only into a new atom.
     pub(crate) fn key_from_string(&mut self, string: StringRef) -> Completion<Key> {
-        let units = self.string_units(string)?;
-        self.key_from_units(&units)
+        let length = self.string_length(string)?;
+        self.charge_code_units(length)?;
+        // An array index has at most 10 code units (`array_index`).
+        let mut short = [0u16; 10];
+        if length <= short.len() {
+            let copied = match self.heap.strings.get(string.handle) {
+                Ok(record) => record.units().copy_to(&mut short),
+                Err(_) => return Err(self.fault()),
+            };
+            if let Some(index) = array_index(short.get(..copied).unwrap_or(&[])) {
+                return Ok(Key::Index(index));
+            }
+        }
+        match self.heap.intern_string(string) {
+            Ok(Ok(atom)) => Ok(Key::String(atom)),
+            Ok(Err(_)) => Err(self.terminate(crate::host::Termination::MemoryBudget)),
+            Err(_) => Err(self.fault()),
+        }
     }
 
     /// The key of `units`: its array index, or its atom.

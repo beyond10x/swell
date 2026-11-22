@@ -46,7 +46,10 @@ impl<H: Host> Agent<H> {
 
     /// The code units of `string`.
     pub(crate) fn string_units(&mut self, string: StringRef) -> Completion<Vec<u16>> {
-        Ok(self.engine_string(string)?.to_utf16())
+        let units = self.engine_string(string)?.to_utf16();
+        #[cfg(test)]
+        copies::note(units.len());
+        Ok(units)
     }
 
     /// The length of `string` in code units.
@@ -196,6 +199,33 @@ impl<H: Host> Agent<H> {
             keys.extend((0..from).map(Key::Index));
             agent.push_own_keys(object, from, keys)
         })
+    }
+}
+
+/// The counting build: the longest copy [`Agent::string_units`] made on this thread since the
+/// last reset, a high-water mark in code units. Each test runs in a process of its own under
+/// cargo-nextest and resets it first; nothing else reads it.
+#[cfg(test)]
+pub(crate) mod copies {
+    use std::cell::Cell;
+
+    thread_local! {
+        static LONGEST: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// Count a copy of `units` code units.
+    pub(crate) fn note(units: usize) {
+        LONGEST.with(|longest| longest.set(longest.get().max(units)));
+    }
+
+    /// The longest copy since the last reset.
+    pub(crate) fn longest() -> usize {
+        LONGEST.with(Cell::get)
+    }
+
+    /// Start counting again from 0.
+    pub(crate) fn reset() {
+        LONGEST.with(|longest| longest.set(0));
     }
 }
 

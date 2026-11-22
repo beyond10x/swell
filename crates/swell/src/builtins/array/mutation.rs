@@ -742,33 +742,62 @@ impl<H: Host> Agent<H> {
     }
 
     /// Steps 5 to 11 of CompareArrayElements: ? ToString(x) and ? ToString(y) compared by their
-    /// code units (IsLessThan, `#sec-islessthan`, step 3), a step per code unit compared, as
-    /// IsLessThan charges.
+    /// code units (IsLessThan, `#sec-islessthan`, step 3): a step per code unit of the shorter,
+    /// as IsLessThan charges, before a unit is read, and a String compared in place.
     fn compare_as_strings(&mut self, x: Value, y: Value) -> Completion<f64> {
+        /// The record of `value` when it is a String the compare reads in place.
+        fn record(
+            heap: &crate::heap::Heap,
+            value: Value,
+        ) -> Option<&crate::heap::string::HeapString> {
+            match value {
+                Value::String(string) => heap.strings.get(string.handle).ok(),
+                _ => None,
+            }
+        }
         let x_units = self.sort_string_units(x)?;
         let y_units = self.sort_string_units(y)?;
-        let compared = u64::try_from(x_units.len().min(y_units.len())).unwrap_or(u64::MAX);
-        self.charge_steps(compared)?;
-        Ok(match x_units.cmp(&y_units) {
-            std::cmp::Ordering::Less => -1.0,
-            std::cmp::Ordering::Greater => 1.0,
-            std::cmp::Ordering::Equal => 0.0,
+        let length = |agent: &mut Self, value: Value, units: Option<&[u16]>| match (units, value) {
+            (Some(units), _) => Ok(units.len()),
+            (None, Value::String(string)) => agent.string_length(string),
+            (None, _) => Err(agent.fault()),
+        };
+        let compared =
+            length(self, x, x_units.as_deref())?.min(length(self, y, y_units.as_deref())?);
+        self.charge_steps(u64::try_from(compared).unwrap_or(u64::MAX))?;
+        let ordering = match (&x_units, &y_units) {
+            (Some(x), Some(y)) => Some(x.cmp(y)),
+            (None, Some(y)) => record(&self.heap, x).map(|x| x.cmp_units(y)),
+            (Some(x), None) => record(&self.heap, y).map(|y| y.cmp_units(x).reverse()),
+            (None, None) => record(&self.heap, x)
+                .zip(record(&self.heap, y))
+                .map(|(x, y)| x.cmp_string(y)),
+        };
+        Ok(match ordering {
+            Some(std::cmp::Ordering::Less) => -1.0,
+            Some(std::cmp::Ordering::Greater) => 1.0,
+            Some(std::cmp::Ordering::Equal) => 0.0,
+            None => return Err(self.fault()),
         })
     }
 
-    /// The code units of ToString(value) (`#sec-tostring`) for CompareArrayElements: those of a
-    /// primitive are made without a String on the heap, which a sort without a comparator
-    /// would otherwise allocate twice per comparison; an object goes through ToString.
-    fn sort_string_units(&mut self, value: Value) -> Completion<Vec<u16>> {
+    /// The code units of ToString(value) (`#sec-tostring`) for CompareArrayElements, or `None`
+    /// for a String, which the compare reads in place: those of another primitive are made
+    /// without a String on the heap, which a sort without a comparator would otherwise
+    /// allocate twice per comparison; an object goes through ToString, and its String is
+    /// copied.
+    fn sort_string_units(&mut self, value: Value) -> Completion<Option<Vec<u16>>> {
         match value {
-            Value::String(string) => self.string_units(string),
-            Value::Number(number) => Ok(units_of(&swell_num::to_string::number_to_string(number))),
-            Value::Boolean(true) => Ok(units_of("true")),
-            Value::Boolean(false) => Ok(units_of("false")),
-            Value::Null => Ok(units_of("null")),
+            Value::String(_) => Ok(None),
+            Value::Number(number) => Ok(Some(units_of(&swell_num::to_string::number_to_string(
+                number,
+            )))),
+            Value::Boolean(true) => Ok(Some(units_of("true"))),
+            Value::Boolean(false) => Ok(Some(units_of("false"))),
+            Value::Null => Ok(Some(units_of("null"))),
             value => {
                 let string = self.to_string(value)?;
-                self.string_units(string)
+                self.string_units(string).map(Some)
             }
         }
     }
@@ -781,6 +810,7 @@ mod tests {
     use crate::host::{Cx, ErrorKind, HostCall};
     use crate::object::ordinary::OrdinaryData;
     use crate::object::property::Key;
+    use crate::object::string::copies;
     use crate::ops::objects::IntegrityLevel;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
@@ -981,5 +1011,41 @@ mod tests {
         ));
         assert_eq!(agent.get(array, length_key), Ok(number(4.0)));
         assert_eq!(agent.get(array, Key::Index(2)), Ok(number(2.0)));
+    }
+
+    /// CompareArrayElements without a comparator (`#sec-comparearrayelements`, steps 5 to 11)
+    /// charges the shorter length before it reads a unit and compares the two Strings in place:
+    /// `[s, t].sort()` with `s` and `t` of 1,000,000 code units that differ in the last, with
+    /// 1,000 steps left, ends in `Terminated(StepBudget)`, and no copy of a String's units was
+    /// made.
+    #[test]
+    fn the_default_sort_compares_in_place() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        let handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let prototype = agent.intrinsic(handle, Intrinsic::ArrayPrototype).unwrap();
+        let mut units = vec![0x61; 1_000_000];
+        let s = Value::String(agent.new_string_value(&units).unwrap());
+        agent.keep(s);
+        *units.last_mut().unwrap() = 0x62;
+        let t = Value::String(agent.new_string_value(&units).unwrap());
+        agent.keep(t);
+        let array = agent.array_create(0.0, None).unwrap();
+        agent.keep(Value::Object(array));
+        agent
+            .create_data_property_or_throw(array, Key::Index(0), t)
+            .unwrap();
+        agent
+            .create_data_property_or_throw(array, Key::Index(1), s)
+            .unwrap();
+        let key = agent.name_key("sort").unwrap();
+        let sort = agent.get(prototype, key).unwrap();
+        copies::reset();
+        agent.limits.steps_per_entry = agent.steps + 1_000;
+        assert_eq!(
+            agent.call_value(sort, Value::Object(array), &[]),
+            Err(Abrupt::Terminated(crate::host::Termination::StepBudget))
+        );
+        assert_eq!(copies::longest(), 0);
     }
 }
