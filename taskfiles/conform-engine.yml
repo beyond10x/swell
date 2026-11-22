@@ -56,7 +56,7 @@ tasks:
           /*) ;;
           *) suite="$PWD/$suite" ;;
         esac
-        if ! grep -qE '^ *PASS \[ *[0-9.]+s\] .*swell-conformance::planted_defect a_target_whose_interrupt_does_nothing_fails_a_scenario$' .out/conform-engine-test.log; then
+        if ! grep -qE '^ *PASS \[ *[0-9.]+s\] .*swell-conformance::planted_defect a_target_whose_interrupt_does_nothing_fails_a_scenario$' .out/conform-engine-test.log.plain; then
           echo "conform-engine: the planted-defect test a_target_whose_interrupt_does_nothing_fails_a_scenario did not run and pass; see .out/conform-engine-test.log"
           exit 1
         fi

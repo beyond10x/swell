@@ -521,9 +521,13 @@ fn an_unknown_rule_kind_fails_the_run() -> TestResult {
         "{}",
         printed.stdout
     );
-    // Without the exclude-slice and exclude-include lines only decorated.js is excluded.
+    // Without the exclude-slice and exclude-include lines only decorated.js is excluded. So
+    // built-ins/String/normative-optional.js runs (slice 03 here, by `dir test/built-ins/ 3`) and
+    // passes since slice 3: it calls "a".localeCompare("b"), which slice 3 added
+    // (story string-transform-and-compare-methods). Every other count of the tree reads
+    // design.md, whose exclude-slice 21 excludes that case.
     assert!(
-        printed.has("test262 total 22 1 1 20 3 17 0"),
+        printed.has("test262 total 22 1 1 20 4 16 0"),
         "{}",
         printed.stdout
     );
