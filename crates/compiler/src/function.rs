@@ -27,19 +27,21 @@
 
 use swell_syntax::Script;
 use swell_syntax::ast::{Ast, FunctionId, Span};
+use swell_syntax::ledger::Meter;
 
 use crate::bytecode::{FunctionTemplate, Instruction};
 use crate::resolve::{Binding, Resolution, Site};
-use crate::{Body, CompileError, Compiler, Constants, Task, malformed};
+use crate::{Body, CompileError, Compiler, Constants, malformed};
 
 /// The code of the script itself.
 pub(crate) fn compile_script_body(
     script: &Script,
     resolution: &Resolution,
     constants: &mut Constants,
+    m: &Meter<'_>,
 ) -> Result<Body, CompileError> {
-    let mut c = Compiler::new(&script.ast, resolution, constants, true);
-    c.run(script.body.iter().map(|s| Task::Stmt(*s)).collect())?;
+    let mut c = Compiler::new(&script.ast, resolution, constants, true, m);
+    c.run(&script.body)?;
     let end = Span::default();
     c.emit(Instruction::LoadCompletion, end)?;
     c.emit(Instruction::Return, end)?;
@@ -52,6 +54,7 @@ pub(crate) fn compile_function(
     id: FunctionId,
     resolution: &Resolution,
     constants: &mut Constants,
+    m: &Meter<'_>,
 ) -> Result<FunctionTemplate, CompileError> {
     let f = ast
         .function(id)
@@ -61,17 +64,18 @@ pub(crate) fn compile_function(
         .get(id.0 as usize)
         .ok_or_else(|| malformed("a function the resolver did not see"))?;
     let name: Vec<u16> = match (&f.name, &info.given_name) {
-        (Some(n), _) => n.name.encode_utf16().collect(),
-        (None, Some(given)) => given.clone(),
+        (Some(n), _) => m.utf16(&n.name)?,
+        (None, Some(given)) => m.copy(given)?,
         (None, None) => Vec::new(),
     };
-    let mut captured = Vec::with_capacity(info.captured.len());
+    let mut captured = m.with_capacity(info.captured.len())?;
     for n in &info.captured {
-        captured.push(constants.string_str(n)?);
+        captured.push(constants.string_str(n, m)?);
     }
     let length = u32::try_from(f.params.len()).map_err(|_| CompileError::TooMany("parameters"))?;
+    let params = m.copy(&info.params)?;
 
-    let mut c = Compiler::new(ast, resolution, constants, false);
+    let mut c = Compiler::new(ast, resolution, constants, false, m);
     c.enter_function_body(id, f.span)?;
     for d in &f.scope.functions {
         let span = ast.function(*d).map(|x| x.span).unwrap_or(f.span);
@@ -84,7 +88,7 @@ pub(crate) fn compile_function(
         c.emit(store, span)?;
         c.emit(Instruction::Pop, span)?;
     }
-    c.run(f.body.iter().map(|s| Task::Stmt(*s)).collect())?;
+    c.run(&f.body)?;
     c.emit(Instruction::Undefined, f.span)?;
     c.emit(Instruction::Return, f.span)?;
     let body = c.finish()?;
@@ -93,7 +97,7 @@ pub(crate) fn compile_function(
         name,
         length,
         strict: f.strict,
-        params: info.params.clone(),
+        params,
         locals: info.locals,
         captured,
         self_binding: info.self_binding,

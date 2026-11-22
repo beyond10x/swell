@@ -725,4 +725,68 @@ pub struct Code {
     /// PerformEval makes for its lexical bindings (`#sec-performeval`, steps 17 to 19), when one
     /// of them lives there; `None` otherwise.
     pub eval_scope: Option<u32>,
+    /// The bytes the compile step's ledger charged for the code's vectors, by capacity, and
+    /// still holds: the vectors above, the inner ones and those of every template. The owner of
+    /// the code takes them over (the engine's script record owns them) or credits them when it
+    /// drops the code.
+    pub charged: usize,
+}
+
+/// The bytes of a vector's buffer by its capacity.
+fn buffer<T>(v: &Vec<T>) -> usize {
+    v.capacity().saturating_mul(size_of::<T>())
+}
+
+/// The bytes of the names tables of `scopes` by capacity.
+fn scopes_bytes(scopes: &Vec<Vec<SlotName>>) -> usize {
+    scopes.iter().fold(buffer(scopes), |sum, names| {
+        sum.saturating_add(buffer(names))
+    })
+}
+
+impl FunctionTemplate {
+    /// The bytes the template's vectors own, by capacity.
+    pub fn capacity_bytes(&self) -> usize {
+        [
+            buffer(&self.name),
+            buffer(&self.params),
+            buffer(&self.captured),
+            scopes_bytes(&self.scopes),
+            buffer(&self.instructions),
+            buffer(&self.positions),
+            buffer(&self.handlers),
+        ]
+        .iter()
+        .fold(0usize, |sum, bytes| sum.saturating_add(*bytes))
+    }
+}
+
+impl Code {
+    /// The bytes the code's vectors own, by capacity: its own, the constants' and every
+    /// template's. What [`Code::charged`] holds for code from a charged entry.
+    pub fn capacity_bytes(&self) -> usize {
+        let strings = self.strings.iter().fold(buffer(&self.strings), |sum, s| {
+            sum.saturating_add(buffer(s))
+        });
+        let functions = self
+            .functions
+            .iter()
+            .fold(buffer(&self.functions), |sum, f| {
+                sum.saturating_add(f.capacity_bytes())
+            });
+        [
+            buffer(&self.instructions),
+            buffer(&self.positions),
+            buffer(&self.handlers),
+            scopes_bytes(&self.scopes),
+            strings,
+            buffer(&self.numbers),
+            functions,
+            buffer(&self.var_names),
+            buffer(&self.function_declarations),
+            buffer(&self.lexical),
+        ]
+        .iter()
+        .fold(0usize, |sum, bytes| sum.saturating_add(*bytes))
+    }
 }

@@ -31,11 +31,21 @@
 //! their children by index, so dropping it does not recurse.
 //!
 //! Modules: [`error`], `token` and `lexer` (clause 12), [`ast`], `parser` (clauses 13 to 15),
-//! `early` (the early errors) and `scope` (directives, strictness, declared and referenced names).
+//! `early` (the early errors), `scope` (directives, strictness, declared and referenced names)
+//! and [`ledger`], the one trait every growth of the frontend is charged through before it is
+//! made (`docs/design/engine.md`, decision 4, "Memory budget"). Each entry has a charged form
+//! ([`parse_script_with`], [`parse_eval_with`], [`parse_dynamic_function_with`]) that takes a
+//! [`Ledger`]; the entries without one are the charged forms with [`Unlimited`]. A charged
+//! entry polls the ledger at least once per [`ledger::POLL_INTERVAL`] code units the lexer
+//! advances and per as many nodes the early errors and the scope analysis visit, and keeps the
+//! ledger in the parser's state, never in a recursive frame. The tree it answers holds what it
+//! was charged ([`Script::charged`]); its owner credits that when it drops the tree. An entry
+//! that answers errors or a stop has credited everything it charged.
 
 pub mod ast;
 mod early;
 pub mod error;
+pub mod ledger;
 mod lexer;
 mod parser;
 mod scope;
@@ -43,8 +53,10 @@ mod token;
 
 pub use ast::Scope;
 pub use error::{MessageKind, REGEXP_REFUSAL, SyntaxError, message_kind};
+pub use ledger::{Ledger, Stop, Unlimited};
 
 use ast::{Ast, StmtId};
+use ledger::{HeapBytes, Meter};
 
 /// The options of a parse.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +102,41 @@ pub struct Script {
     /// The script's var declared names, function declarations to instantiate and references.
     pub scope: Scope,
     pub ast: Ast,
+    /// The bytes the ledger of a charged entry holds for this tree: its arenas, node vectors,
+    /// names and scopes by capacity. The owner of the tree credits them when it drops it; 0 from
+    /// an entry without a ledger.
+    pub charged: usize,
+}
+
+impl Script {
+    /// The bytes the tree owns on the heap, by capacity, summed by a walk of its arenas, their
+    /// nodes' vectors and strings, and the scopes: what a charged entry's ledger holds for it.
+    pub fn capacity_bytes(&self) -> usize {
+        self.body
+            .heap_bytes()
+            .saturating_add(self.scope.heap_bytes())
+            .saturating_add(self.ast.heap_bytes())
+    }
+}
+
+/// Why a charged entry answered no tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Failure {
+    /// Every `SyntaxError` the parse found, at least one.
+    Errors(Vec<SyntaxError>),
+    /// The ledger refused a charge or its poll read the interrupt; no error was made.
+    Stopped(Stop),
+}
+
+impl Failure {
+    /// The errors of an entry without a ledger, which never stops but for a refusal of the
+    /// allocator: that one is answered as a `SyntaxError` too.
+    fn into_errors(self) -> Vec<SyntaxError> {
+        match self {
+            Failure::Errors(errors) => errors,
+            Failure::Stopped(_) => vec![SyntaxError::new("out of memory while parsing", 1, 1)],
+        }
+    }
 }
 
 /// Parses `source`, UTF-16 code units (a UTF-8 source is converted by the caller), as a
@@ -97,8 +144,18 @@ pub struct Script {
 /// refusal stops the parse and is the only error; the early errors of a source that parses are
 /// all reported, in source order.
 pub fn parse_script(source: &[u16], options: ParseOptions) -> Result<Script, Vec<SyntaxError>> {
-    let parsed = parser::parse(source, options.max_nesting).map_err(|e| vec![e])?;
-    analysed(parsed)
+    parse_script_with(source, options, &mut Unlimited).map_err(Failure::into_errors)
+}
+
+/// [`parse_script`] charged to `ledger` (the module's documentation).
+pub fn parse_script_with(
+    source: &[u16],
+    options: ParseOptions,
+    ledger: &mut dyn Ledger,
+) -> Result<Script, Failure> {
+    let meter = Meter::new(ledger);
+    let parsed = parser::parse(source, options.max_nesting, &meter);
+    analysed(parsed, &meter)
 }
 
 /// Parses `source` as the eval code of PerformEval (`#sec-performeval`, steps 9 to 11):
@@ -119,9 +176,19 @@ pub fn parse_eval(
     strict_caller: bool,
     options: ParseOptions,
 ) -> Result<Script, Vec<SyntaxError>> {
-    let parsed =
-        parser::parse_eval(source, options.max_nesting, strict_caller).map_err(|e| vec![e])?;
-    analysed(parsed)
+    parse_eval_with(source, strict_caller, options, &mut Unlimited).map_err(Failure::into_errors)
+}
+
+/// [`parse_eval`] charged to `ledger` (the module's documentation).
+pub fn parse_eval_with(
+    source: &[u16],
+    strict_caller: bool,
+    options: ParseOptions,
+    ledger: &mut dyn Ledger,
+) -> Result<Script, Failure> {
+    let meter = Meter::new(ledger);
+    let parsed = parser::parse_eval(source, options.max_nesting, strict_caller, &meter);
+    analysed(parsed, &meter)
 }
 
 /// Parses the parts of CreateDynamicFunction (`#sec-createdynamicfunction`) for kind `normal`
@@ -145,23 +212,60 @@ pub fn parse_dynamic_function(
     body: &[u16],
     options: ParseOptions,
 ) -> Result<Script, Vec<SyntaxError>> {
-    let parsed = parser::parse_dynamic_function(parameters, body, options.max_nesting)
-        .map_err(|e| vec![e])?;
-    analysed(parsed)
+    parse_dynamic_function_with(parameters, body, options, &mut Unlimited)
+        .map_err(Failure::into_errors)
 }
 
-/// The early errors and the scope analysis of what a parse produced.
-fn analysed(parsed: parser::Parsed) -> Result<Script, Vec<SyntaxError>> {
-    let mut ast = parsed.ast;
-    let errors = early::check(&ast, &parsed.body, parsed.strict);
-    if !errors.is_empty() {
-        return Err(errors);
+/// [`parse_dynamic_function`] charged to `ledger` (the module's documentation).
+pub fn parse_dynamic_function_with(
+    parameters: &[u16],
+    body: &[u16],
+    options: ParseOptions,
+    ledger: &mut dyn Ledger,
+) -> Result<Script, Failure> {
+    let meter = Meter::new(ledger);
+    let parsed = parser::parse_dynamic_function(parameters, body, options.max_nesting, &meter);
+    analysed(parsed, &meter)
+}
+
+/// The early errors and the scope analysis of what a parse produced. A stop of the meter wins
+/// over every other answer; on errors or a stop everything the meter holds is credited.
+fn analysed(
+    parsed: Result<parser::Parsed, SyntaxError>,
+    meter: &Meter<'_>,
+) -> Result<Script, Failure> {
+    let answer = match parsed {
+        Ok(parsed) => analyse_parsed(parsed, meter),
+        Err(error) => Err(Failure::Errors(vec![error])),
+    };
+    let answer = match (answer, meter.stopped()) {
+        (_, Some(stop)) => Err(Failure::Stopped(stop)),
+        (answer, None) => answer,
+    };
+    match answer {
+        Ok(mut script) => {
+            script.charged = meter.held();
+            Ok(script)
+        }
+        Err(failure) => {
+            meter.credit_all();
+            Err(failure)
+        }
     }
-    let scope = scope::analyse(&mut ast, &parsed.body);
+}
+
+fn analyse_parsed(parsed: parser::Parsed, meter: &Meter<'_>) -> Result<Script, Failure> {
+    let mut ast = parsed.ast;
+    let errors = early::check(&ast, &parsed.body, parsed.strict, meter);
+    if !errors.is_empty() {
+        return Err(Failure::Errors(errors));
+    }
+    let scope = scope::analyse(&mut ast, &parsed.body, meter);
     Ok(Script {
         body: parsed.body,
         strict: parsed.strict,
         scope,
         ast,
+        charged: 0,
     })
 }

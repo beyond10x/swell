@@ -93,7 +93,7 @@ fn binary(op: BinaryOp) -> Instruction {
     }
 }
 
-impl<'a> Compiler<'a> {
+impl<'a, 'm> Compiler<'a, 'm> {
     /// The reference an expression in the place of an assignment target denotes
     /// (`#sec-static-semantics-assignmenttargettype`: an identifier or a property access).
     pub(crate) fn target(&mut self, e: ExprId) -> Result<Target, CompileError> {
@@ -260,9 +260,9 @@ impl<'a> Compiler<'a> {
                 let value = numeric_literal(n.text.as_bytes())
                     .ok_or_else(|| malformed("a numeric literal swell-num does not read"))?
                     .value;
-                t.push(emit(Instruction::Number(self.constants.number(value)?)));
+                t.push(emit(Instruction::Number(self.number(value)?)));
             }
-            Expr::String(s) => t.push(emit(Instruction::String(self.constants.string(&s.value)?))),
+            Expr::String(s) => t.push(emit(Instruction::String(self.string_units(&s.value)?))),
             Expr::RegExp(_) => {
                 t.push(emit(Instruction::ThrowSyntaxError(
                     self.string(REGEXP_REFUSAL)?,
@@ -307,10 +307,12 @@ impl<'a> Compiler<'a> {
             Expr::Object(properties) => {
                 t.push(emit(Instruction::NewObject));
                 for p in properties {
-                    let key = property_key(&p.key)?;
+                    let key = property_key(&p.key, self.m)?;
                     let proto = !matches!(p.key, swell_syntax::ast::PropertyKey::Number(_))
                         && key.iter().copied().eq("__proto__".encode_utf16());
-                    let k = self.constants.string(&key)?;
+                    let k = self.string_units(&key);
+                    self.m.release(key);
+                    let k = k?;
                     match p.value {
                         PropertyValue::Init(e) => {
                             t.push(Task::Expr(e));
@@ -541,7 +543,7 @@ impl<'a> Compiler<'a> {
                     }
                     let last = i + 1 == strings.len();
                     if !string.cooked.is_empty() || (last && !started) {
-                        let k = self.constants.string(&string.cooked)?;
+                        let k = self.string_units(&string.cooked)?;
                         t.push(emit(Instruction::String(k)));
                         if started {
                             t.push(emit(Instruction::Add));

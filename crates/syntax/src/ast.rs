@@ -8,6 +8,8 @@
 //! longest path from it to a leaf, and the parser refuses a node deeper than the limit).
 //! Every node records its source position.
 
+use crate::ledger::HeapBytes;
+
 /// The source position of a node or token: code unit offsets `start..end`, and the `line` and
 /// `column` of `start`, both counted from 1 (a column counts UTF-16 code units).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -513,6 +515,54 @@ impl Ast {
         matches!(self.expr(callee).map(|n| &n.expr), Some(Expr::Identifier(name)) if name == "eval")
     }
 
+    /// The number of children of the statement `id`: what a walk pushes for it.
+    pub fn stmt_child_count(&self, id: StmtId) -> usize {
+        let mut count = 0usize;
+        if let Some(n) = self.stmt(id) {
+            n.stmt.children(|_| count += 1);
+        }
+        count
+    }
+
+    /// The number of children of the expression `id`.
+    pub fn expr_child_count(&self, id: ExprId) -> usize {
+        let mut count = 0usize;
+        if let Some(n) = self.expr(id) {
+            n.expr.children(|_| count += 1);
+        }
+        count
+    }
+
+    /// [`Ast::push_children`] onto a stack whose growth is charged to `m` first: the children
+    /// are counted, the room for them made, then they are pushed.
+    pub(crate) fn push_children_charged<S>(
+        &self,
+        of: Child,
+        stack: &mut Vec<S>,
+        step: impl Fn(Child) -> S,
+        m: &crate::ledger::Meter<'_>,
+    ) -> Result<(), crate::ledger::Stop> {
+        let mut count = 0usize;
+        match of {
+            Child::Expr(id) => {
+                if let Some(n) = self.expr(id) {
+                    n.expr.children(|_| count += 1);
+                }
+            }
+            Child::Stmt(id) => {
+                if let Some(n) = self.stmt(id) {
+                    n.stmt.children(|_| count += 1);
+                }
+            }
+            Child::Function(id) => {
+                count = self.function(id).map_or(0, |f| f.body.len());
+            }
+        }
+        m.grow_by(stack, count)?;
+        self.push_children(of, stack, step);
+        Ok(())
+    }
+
     /// Pushes the children of the node `of` onto the work stack of a walk, each made a step by
     /// `step`, so that popping them gives them in source order. A walk that pops one step at a
     /// time keeps its work on the heap: its Rust stack does not grow with the depth of the tree.
@@ -554,6 +604,217 @@ impl Ast {
             Child::Stmt(id) => self.stmt(id).map_or(0, |n| n.depth),
             Child::Function(id) => self.function(id).map_or(0, |f| f.depth),
         }
+    }
+}
+
+// What each part of a tree owns on the heap, by capacity: the walk `Script::capacity_bytes`
+// sums, and what a drop of a part credits.
+
+impl HeapBytes for NumberLiteral {
+    fn heap_bytes(&self) -> usize {
+        self.text.heap_bytes()
+    }
+}
+
+impl HeapBytes for StringLiteral {
+    fn heap_bytes(&self) -> usize {
+        self.value.heap_bytes()
+    }
+}
+
+impl HeapBytes for RegExpLiteral {
+    fn heap_bytes(&self) -> usize {
+        self.body
+            .heap_bytes()
+            .saturating_add(self.flags.heap_bytes())
+    }
+}
+
+impl HeapBytes for TemplateString {
+    fn heap_bytes(&self) -> usize {
+        self.cooked
+            .heap_bytes()
+            .saturating_add(self.raw.heap_bytes())
+    }
+}
+
+impl HeapBytes for Name {
+    fn heap_bytes(&self) -> usize {
+        self.name.heap_bytes()
+    }
+}
+
+impl HeapBytes for PropertyKey {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            PropertyKey::Identifier(name) => name.heap_bytes(),
+            PropertyKey::String(s) => s.heap_bytes(),
+            PropertyKey::Number(n) => n.heap_bytes(),
+        }
+    }
+}
+
+impl HeapBytes for Property {
+    fn heap_bytes(&self) -> usize {
+        self.key.heap_bytes()
+    }
+}
+
+impl HeapBytes for Expr {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            Expr::This
+            | Expr::Null
+            | Expr::Boolean(_)
+            | Expr::Function(_)
+            | Expr::Unary { .. }
+            | Expr::Update { .. }
+            | Expr::Binary { .. }
+            | Expr::Logical { .. }
+            | Expr::Conditional { .. }
+            | Expr::Assign { .. }
+            | Expr::Index { .. }
+            | Expr::OptionalChain(_)
+            | Expr::OptionalIndex { .. } => 0,
+            Expr::Identifier(name) => name.heap_bytes(),
+            Expr::Number(n) => n.heap_bytes(),
+            Expr::String(s) => s.heap_bytes(),
+            Expr::RegExp(r) => r.heap_bytes(),
+            Expr::Array(elements) => elements.heap_bytes(),
+            Expr::Object(properties) => properties.heap_bytes(),
+            Expr::Sequence(list) => list.heap_bytes(),
+            Expr::Member { property, .. } | Expr::OptionalMember { property, .. } => {
+                property.heap_bytes()
+            }
+            Expr::Call { arguments, .. } | Expr::OptionalCall { arguments, .. } => {
+                arguments.heap_bytes()
+            }
+            Expr::New { arguments, .. } => arguments.heap_bytes(),
+            Expr::Template {
+                strings,
+                substitutions,
+            } => strings
+                .heap_bytes()
+                .saturating_add(substitutions.heap_bytes()),
+        }
+    }
+}
+
+impl HeapBytes for ExprNode {
+    fn heap_bytes(&self) -> usize {
+        self.expr.heap_bytes()
+    }
+}
+
+impl HeapBytes for VarDeclarator {
+    fn heap_bytes(&self) -> usize {
+        self.name.heap_bytes()
+    }
+}
+
+impl HeapBytes for ForInit {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            ForInit::Var(_, declarators) => declarators.heap_bytes(),
+            ForInit::Expression(_) => 0,
+        }
+    }
+}
+
+impl HeapBytes for ForInTarget {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            ForInTarget::Var(_, name) => name.heap_bytes(),
+            ForInTarget::Expression(_) => 0,
+        }
+    }
+}
+
+impl HeapBytes for SwitchCase {
+    fn heap_bytes(&self) -> usize {
+        self.body.heap_bytes()
+    }
+}
+
+impl HeapBytes for CatchClause {
+    fn heap_bytes(&self) -> usize {
+        self.param
+            .heap_bytes()
+            .saturating_add(self.body.heap_bytes())
+    }
+}
+
+impl HeapBytes for Stmt {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            Stmt::Empty
+            | Stmt::Expression(_)
+            | Stmt::If { .. }
+            | Stmt::DoWhile { .. }
+            | Stmt::While { .. }
+            | Stmt::Return(_)
+            | Stmt::Throw(_)
+            | Stmt::Debugger
+            | Stmt::FunctionDeclaration(_)
+            | Stmt::With { .. } => 0,
+            Stmt::Block(body) => body.heap_bytes(),
+            Stmt::Var(_, declarators) => declarators.heap_bytes(),
+            Stmt::For { init, .. } => init.heap_bytes(),
+            Stmt::ForIn { target, .. } => target.heap_bytes(),
+            Stmt::Continue(label) | Stmt::Break(label) => label.heap_bytes(),
+            Stmt::Switch { cases, .. } => cases.heap_bytes(),
+            Stmt::Try {
+                block,
+                handler,
+                finalizer,
+            } => block
+                .heap_bytes()
+                .saturating_add(handler.heap_bytes())
+                .saturating_add(finalizer.heap_bytes()),
+            Stmt::Labelled { label, .. } => label.heap_bytes(),
+        }
+    }
+}
+
+impl HeapBytes for StmtNode {
+    fn heap_bytes(&self) -> usize {
+        self.stmt.heap_bytes()
+    }
+}
+
+impl HeapBytes for LexicalName {
+    fn heap_bytes(&self) -> usize {
+        self.name.heap_bytes()
+    }
+}
+
+impl HeapBytes for Scope {
+    fn heap_bytes(&self) -> usize {
+        self.var_names
+            .heap_bytes()
+            .saturating_add(self.functions.heap_bytes())
+            .saturating_add(self.lexical.heap_bytes())
+            .saturating_add(self.references.heap_bytes())
+    }
+}
+
+impl HeapBytes for Function {
+    fn heap_bytes(&self) -> usize {
+        self.name
+            .heap_bytes()
+            .saturating_add(self.params.heap_bytes())
+            .saturating_add(self.body.heap_bytes())
+            .saturating_add(self.scope.heap_bytes())
+    }
+}
+
+impl HeapBytes for Ast {
+    /// The three arenas by capacity and what their nodes own.
+    fn heap_bytes(&self) -> usize {
+        self.exprs
+            .heap_bytes()
+            .saturating_add(self.stmts.heap_bytes())
+            .saturating_add(self.functions.heap_bytes())
     }
 }
 
