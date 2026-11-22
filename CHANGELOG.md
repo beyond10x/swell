@@ -133,6 +133,13 @@ pass. Every number below is from the gate on the wave branch of slice 3
   `HostIntrinsic::ErrorPrototype`) and `WellKnownSymbol` (new, with
   `WellKnownSymbol::ToStringTag`, `WellKnownSymbol::Unscopables`): the host names these
   intrinsics and symbols from a closed list (`HOST-183`, `HOST-184`).
+- Breaking: `HostObjectSpec::error_kind` (new field; a literal adds `error_kind: None`) gives
+  a host object an [[ErrorData]] slot, as Web IDL gives a `DOMException`: `Error.isError`
+  answers true for it (`HOST-179`).
+- `error_summary` (new, on `Cx` and `HookCx`), `Agent::error_summary` (new) and `ErrorSummary`
+  (new), with `ErrorSummary::kind` and `ErrorSummary::message`: the host reads whether a value
+  is an error object, the kind of the constructor that made it and its own `message`, without
+  running code (`HOST-179`).
 - `last_entry_error_site` (new, on `Agent`): after an entry that answered `Parsed::Errors` or
   `Throw`, where the error arose; after any other entry `None` (`HOST-172`, `HOST-173`,
   `HOST-174`).
