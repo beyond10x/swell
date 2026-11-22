@@ -168,7 +168,7 @@ HOST-167 test swell::interrupt::host_167_an_interrupt_set_in_a_host_function_end
 HOST-168 pending slice 6
 HOST-169 pending slice 6
 HOST-170 test swell::collect::host_170_a_value_read_from_a_dropped_root_lives_until_its_scope_ends
-HOST-171 pending slice 6
+HOST-171 test swell::collect::host_171_live_bytes_reads_the_records_and_heap_bytes_the_budget
 HOST-172 pending slice 6
 HOST-173 pending slice 6
 HOST-174 pending slice 6

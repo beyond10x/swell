@@ -132,7 +132,8 @@ impl Heap {
     }
 
     /// The atom of `units`: the String every property key of these code units uses. The first
-    /// call makes it and charges its String and its table entry.
+    /// call makes it and charges its String and its entry's key; when the table has no room,
+    /// the table's growth is charged first and stays charged.
     pub(crate) fn intern(&mut self, units: &[u16]) -> Result<StringRef, OverBudget> {
         if let Some(&(handle, _)) = self.atoms.map.get(units)
             && self
@@ -142,10 +143,18 @@ impl Heap {
         {
             return Ok(StringRef { handle });
         }
-        let entry_bytes = owned_bytes(units.len(), false).saturating_add(
-            u64::try_from(size_of::<(Box<[u16]>, (Handle, u64))>()).unwrap_or(u64::MAX),
-        );
-        self.accounting.charge(entry_bytes)?;
+        let entry_bytes = owned_bytes(units.len(), false);
+        let growth = self.atoms.growth();
+        let growth_bytes = growth.map_or(0, |to| self.atoms.growth_bytes(to));
+        self.accounting
+            .charge(growth_bytes.saturating_add(entry_bytes))?;
+        if let Some(to) = growth
+            && self.atoms.grow(to).is_err()
+        {
+            self.accounting
+                .credit(growth_bytes.saturating_add(entry_bytes));
+            return Err(OverBudget);
+        }
         let made = room(units.len()).and_then(|mut key: Vec<u16>| {
             key.extend_from_slice(units);
             let string = self.new_string_from_units(units)?;
@@ -166,10 +175,22 @@ impl Heap {
     }
 }
 
-/// The atom table: code units to the String that is their atom, with the bytes the entry was
-/// charged.
+/// The fewest entries the atom table grows to.
+const MIN_ATOMS: usize = 16;
+
+/// The map of the atom table.
+type Table = KeyedMap<Box<[u16]>, (Handle, u64)>;
+
+/// The atom table: code units to the String that is their atom, with the bytes the entry's
+/// key owns. The table is charged by capacity, like an arena (`engine.md`, "Memory budget"):
+/// before it grows its room doubles and the table's growth is charged
+/// ([`KeyedMap::table_bytes_for`]); those bytes stay charged while the agent lives. It is not
+/// shrunk on sweep: shrinking a `HashMap` moves it to a new table, an allocation inside a
+/// collection.
 pub(crate) struct Atoms {
-    map: KeyedMap<Box<[u16]>, (Handle, u64)>,
+    map: Table,
+    /// The entries the table was charged room for.
+    room: usize,
 }
 
 impl Atoms {
@@ -177,7 +198,54 @@ impl Atoms {
     pub(crate) fn new(hash_key: &[u8; 16]) -> Atoms {
         Atoms {
             map: KeyedMap::new(hash_key),
+            room: 0,
         }
+    }
+
+    /// The room the table grows to before it takes another entry, or `None` while it has room.
+    fn growth(&self) -> Option<usize> {
+        if self.map.len() < self.room && !self.rehash_grows() {
+            return None;
+        }
+        Some(self.room.saturating_mul(2).max(MIN_ATOMS))
+    }
+
+    /// Whether the next insertion would move the table to a larger one by itself: a sweep
+    /// leaves buckets marked deleted, which `std`'s map counts against its room
+    /// ([`KeyedMap::spare`]), so it can grow before it holds the entries it was charged for.
+    /// With no spare room it rehashes in place, without an allocation, while its entries and
+    /// the new one fill at most half of what the table holds ([`KeyedMap::full_capacity_for`]),
+    /// and otherwise grows, to the table of twice the room, which is then charged first.
+    fn rehash_grows(&self) -> bool {
+        self.map.spare() == 0 && self.map.len() >= Table::full_capacity_for(self.room) / 2
+    }
+
+    /// The bytes of the table with room for `to` entries less those of the table now.
+    fn growth_bytes(&self, to: usize) -> u64 {
+        Table::table_bytes_for(to).saturating_sub(Table::table_bytes_for(self.room))
+    }
+
+    /// The counting build: the bytes the table's room was charged.
+    #[cfg(test)]
+    pub(crate) fn room_charge(&self) -> u64 {
+        Table::table_bytes_for(self.room)
+    }
+
+    /// Reserve room for `to` entries (its bytes charged before, [`Atoms::growth_bytes`]).
+    fn grow(&mut self, to: usize) -> Result<(), OverBudget> {
+        self.map.reserve(to.saturating_sub(self.map.len()))?;
+        self.room = to;
+        Ok(())
+    }
+
+    /// The bytes of the table's buckets that hold no entry, which the live reading leaves out:
+    /// the table charged less a bucket, its entry and its control byte, per entry.
+    pub(crate) fn room_bytes(&self) -> u64 {
+        type Entry = (Box<[u16]>, (Handle, u64));
+        let table = Table::table_bytes_for(self.room);
+        let entry = u64::try_from(size_of::<Entry>().saturating_add(1)).unwrap_or(u64::MAX);
+        let entries = u64::try_from(self.map.len()).unwrap_or(u64::MAX);
+        table.saturating_sub(entries.saturating_mul(entry))
     }
 
     /// The hash the table gives `units`.
@@ -186,7 +254,8 @@ impl Atoms {
         self.map.hash_of(units)
     }
 
-    /// Drop every entry whose String the sweep freed, and answer the bytes they were charged.
+    /// Drop every entry whose String the sweep freed, and answer the bytes their keys owned;
+    /// the table keeps its room. Pushes nothing and allocates nothing.
     pub(crate) fn sweep(&mut self, strings: &Arena<HeapString>) -> u64 {
         let mut credited: u64 = 0;
         self.map.retain(|_, &mut (handle, bytes)| {
@@ -266,11 +335,15 @@ mod tests {
         );
     }
 
+    /// An atom is one String per sequence of code units, and the table holds it weakly: once
+    /// nothing holds it, a collection drops its entry and the live reading reads again what it
+    /// read before the atoms were made. The charged reading keeps the capacity charge: the
+    /// arenas' slots with their workspace and the atom table's room (`Heap::capacity_charge`).
     #[test]
     fn an_atom_is_one_string_per_units_and_is_held_weakly() {
         let mut agent = agent();
         let key: Vec<u16> = "length".encode_utf16().collect();
-        let empty = agent.heap.bytes();
+        let empty = agent.heap.live_bytes();
         let first = agent.heap.intern(&key).unwrap();
         // The root is made before any safe point: an atom held only weakly is gone at the next
         // one, which the feature `collect-every-safe-point` makes every entry.
@@ -282,14 +355,96 @@ mod tests {
         assert_eq!(agent.heap.atoms.len(), 2);
 
         // Held by a root, the atom survives; the other one, which nothing holds, is dropped.
-        // Once nothing holds the first either, the sweep drops its entry and credits
-        // everything it charged.
+        // Once nothing holds the first either, the sweep drops its entry and credits what its
+        // String and its key owned.
         assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
         assert_eq!(agent.heap.atoms.len(), 1);
         assert_eq!(agent.heap.intern(&key).unwrap(), first);
         drop(root);
         assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
         assert_eq!(agent.heap.atoms.len(), 0);
-        assert_eq!(agent.heap.bytes(), empty);
+        assert_eq!(agent.heap.live_bytes(), empty);
+        assert_eq!(agent.heap.bytes(), agent.heap.capacity_charge());
+    }
+
+    /// The atom table never grows past the room it was charged for. A collection that drops
+    /// entries leaves buckets marked deleted, which `std`'s map counts against its room, so
+    /// with fewer entries than the room charged an insertion can find no spare room. Here the
+    /// table is charged room for 32 entries (64 buckets); 28 atoms whose hash starts at bucket
+    /// 0 fill buckets 0 to 27, and their collection leaves 28 deleted buckets; 31 atoms whose
+    /// hash starts at bucket 32 then take the 28 buckets left before the map's room is gone, at
+    /// 28 entries, more than half of the 56 a table of 64 buckets holds. The next insertion
+    /// grows the table, to 128 buckets, and that growth is charged first. After every insertion
+    /// the bytes of the table the map has (`KeyedMap::table_bytes`, which reads a table with
+    /// deleted buckets as smaller) stay within those its room was charged.
+    #[test]
+    fn the_atom_table_never_grows_past_its_charged_room() {
+        let mut agent = agent();
+        let mut next = 0u32;
+        let mut keys = |start: u64, count: usize, agent: &Agent<NoHooks>| {
+            let mut found = Vec::new();
+            while found.len() < count {
+                let key: Vec<u16> = format!("atom {next}").encode_utf16().collect();
+                next += 1;
+                if agent.heap.atoms.hash_of(&key) & 63 == start {
+                    found.push(key);
+                }
+            }
+            found
+        };
+        let first = keys(0, 28, &agent);
+        let second = keys(32, 31, &agent);
+        let check = |agent: &mut Agent<NoHooks>, key: &[u16], step: &str| {
+            agent.heap.intern(key).unwrap();
+            let atoms = &agent.heap.atoms;
+            let table = atoms.map.table_bytes();
+            let charged = atoms.room_charge();
+            assert!(
+                table <= charged,
+                "{step}, {} atoms: the table takes {table} bytes, its room was charged {charged}",
+                atoms.len()
+            );
+        };
+        for key in &first {
+            check(&mut agent, key, "first round");
+        }
+        assert_eq!(agent.heap.atoms.room, 32);
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        assert_eq!(agent.heap.atoms.len(), 0);
+        for key in &second {
+            check(&mut agent, key, "second round");
+        }
+        assert_eq!(agent.heap.atoms.len(), 31);
+        assert!(agent.heap.bytes() >= agent.heap.capacity_charge());
+    }
+
+    /// The atom table is charged by its capacity: after 10,000 atoms are interned, and after a
+    /// collection that frees them all, the accounting holds at least the bytes of the table's
+    /// buckets (`KeyedMap::table_bytes`), which keeps its room.
+    #[test]
+    fn the_atom_table_is_charged_by_its_capacity() {
+        let mut limits = crate::host::hooks::test_host::limits();
+        limits.memory_bytes = 1 << 26;
+        let mut agent = crate::host::hooks::test_host::agent_with(limits);
+        for i in 0..10_000 {
+            let key: Vec<u16> = format!("atom {i}").encode_utf16().collect();
+            agent.heap.intern(&key).unwrap();
+        }
+        assert_eq!(agent.heap.atoms.len(), 10_000);
+        let table = agent.heap.atoms.map.table_bytes();
+        let used = agent.heap.accounting.used();
+        assert!(
+            used >= table,
+            "before the collection: used {used}, table {table}"
+        );
+
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        assert_eq!(agent.heap.atoms.len(), 0);
+        let table = agent.heap.atoms.map.table_bytes();
+        let used = agent.heap.accounting.used();
+        assert!(
+            used >= table,
+            "after the collection: used {used}, table {table}"
+        );
     }
 }

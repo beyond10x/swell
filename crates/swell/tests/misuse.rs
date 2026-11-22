@@ -1001,10 +1001,10 @@ fn reads(agent: &mut Agent<Recorder>, realm: &Realm, script: &Script, root: &Roo
     )
 }
 
-/// HOST-102: a read changes no value `last_entry_steps()` and `heap_bytes()` report, and calls
-/// no hook: after a script spent steps and a collection, every read of `Agent` and the reads of
-/// `Cx` answer the same each time, `heap_bytes()` and `last_entry_steps()` read what they read
-/// before them, and no hook was called.
+/// HOST-102: a read changes no value `last_entry_steps()`, `heap_bytes()` and `live_bytes()`
+/// report, and calls no hook: after a script spent steps and a collection, every read of
+/// `Agent` and the reads of `Cx` answer the same each time, `heap_bytes()`, `live_bytes()` and
+/// `last_entry_steps()` read what they read before them, and no hook was called.
 #[test]
 fn host_102_reads_change_nothing_and_call_no_hook() {
     let mut agent = agent();
@@ -1035,6 +1035,7 @@ fn host_102_reads_change_nothing_and_call_no_hook() {
     assert!(steps > 0);
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     let bytes = agent.heap_bytes().unwrap();
+    let live = agent.live_bytes().unwrap();
 
     let first = reads(&mut agent, &realm, &script, &root);
     for _ in 0..3 {
@@ -1044,10 +1045,12 @@ fn host_102_reads_change_nothing_and_call_no_hook() {
     assert_eq!(agent.last_entry_steps(), Ok(steps));
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert_eq!(agent.heap_bytes(), Ok(bytes));
+    assert_eq!(agent.live_bytes(), Ok(live));
     let _ = agent.interrupt_handle();
     let _ = agent.host();
     assert_eq!(agent.last_entry_steps(), Ok(steps));
     assert_eq!(agent.heap_bytes(), Ok(bytes));
+    assert_eq!(agent.live_bytes(), Ok(live));
     assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
 }
 

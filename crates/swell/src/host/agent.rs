@@ -207,10 +207,23 @@ impl<H: Host> Agent<H> {
         self.state
     }
 
-    /// The bytes the agent's heap is charged now (decision 13).
+    /// The bytes the agent's heap is charged now, the reading `memory_bytes` bounds (decisions 2,
+    /// "Two readings of the heap", and 13): the arenas' capacity with the collector's workspace
+    /// and the atom table's, which stay charged while the agent lives, what the records own, and
+    /// what a running step holds charged.
     pub fn heap_bytes(&self) -> Result<u64, HostError> {
         self.alive()?;
         Ok(self.heap.bytes())
+    }
+
+    /// What the records the heap holds own, each one's slot included, and what the atom table's
+    /// entries own; free slots, the collector's workspace and empty buckets are left out
+    /// (decision 2, "Two readings of the heap"). After a collection these are the live records.
+    /// It is at most `heap_bytes()`, falls by everything a sweep frees, and sets the collection
+    /// threshold.
+    pub fn live_bytes(&self) -> Result<u64, HostError> {
+        self.alive()?;
+        Ok(self.heap.live_bytes())
     }
 
     /// A full collection now (decision 18). It runs no code and calls no hook. A stale handle
@@ -592,11 +605,13 @@ impl<H: Host> Agent<H> {
         self.terminate(Termination::EngineFault)
     }
 
-    /// A collection, with the bytes of the property maps it freed credited.
+    /// A collection, with the bytes of the property maps it freed credited, and then the
+    /// collection threshold set from the live reading.
     fn collect_now(&mut self) -> Result<CollectReport, Stale> {
         let mut report = collect::collect(self)?;
         let freed = self.credit.replace(0);
         self.heap.accounting.credit(freed);
+        self.heap.collected();
         report.heap_bytes_after = self.heap.bytes();
         Ok(report)
     }

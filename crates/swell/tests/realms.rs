@@ -38,13 +38,14 @@ fn host_12_create_realm_with_zero_memory_is_memory_budget() {
 }
 
 /// HOST-52: after the host drops every root of a realm and of objects of that realm, and no
-/// other realm reaches them, the second `collect` returns `heap_bytes()` to the value read
-/// before `create_realm`.
+/// other realm reaches them, the second `collect` returns `live_bytes()` to the value read
+/// before `create_realm`. (`heap_bytes()` keeps the capacity the realm's records grew the
+/// arenas to.)
 #[test]
 fn host_52_dropped_realm_returns_heap_bytes() {
     let mut agent = agent().unwrap();
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
-    let before = agent.heap_bytes().unwrap();
+    let before = agent.live_bytes().unwrap();
 
     let realm = realm(&mut agent);
     let global = global(&mut agent, &realm);
@@ -59,14 +60,14 @@ fn host_52_dropped_realm_returns_heap_bytes() {
         })
         .unwrap();
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
-    assert!(agent.heap_bytes().unwrap() > before);
+    assert!(agent.live_bytes().unwrap() > before);
 
     drop(error);
     drop(global);
     drop(realm);
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
-    assert_eq!(agent.heap_bytes().unwrap(), before);
+    assert_eq!(agent.live_bytes().unwrap(), before);
 }
 
 /// 19.1 (`#sec-value-properties-of-the-global-object`): `Infinity`, `NaN` and `undefined` are
