@@ -121,18 +121,38 @@ fn host_70_agent_stays_alive_after_each_budget() {
     assert_eq!(eval_text(&mut agent, &realm, "1;"), one);
 }
 
+/// The room the host of [`an_agent_that_ended_in_memory_budget_runs_again_after_a_collection`]
+/// holds charged during the fill and gives back after the collection: 16 KiB.
+///
+/// What it rests on, measured on `7a7bf0a` in both modes: since the parse and compile step is
+/// charged to the budget (the copy of the source, the tree, the scope analysis, the compile
+/// step's scratch and the code), the second script needs 11,563 bytes of room above
+/// `heap_bytes()` to answer `Normal(10)` (its parse peaks there: the tree 3,879 bytes, the
+/// compile step's scratch with the bound of one node's expansion, 2,240 bytes; it keeps 2,078
+/// in its record, and its run peaks at 1,632 more), and `n;` before it keeps 645 bytes in its
+/// record: 12,208 bytes, 4,176 below this room. Without it the room after the collection was
+/// what the collection credited, the elements of the fill's `a` and its frame (9,291 bytes in
+/// the default mode, 12,363 at 16 KiB), which depends on where the fill's last doubling
+/// stopped: the second script then ended in `Terminated(MemoryBudget)` in the default mode and
+/// passed by 155 bytes in the collect gate.
+const AFTER_FILL_ROOM: u64 = 16 * 1024;
+
 /// An agent that ended in `Terminated(MemoryBudget)` runs again after a collection: with
-/// `memory_bytes` the realm's bytes plus 64 KiB, as HOST-70 sizes it, the fill below ends by
-/// memory (each iteration adds an element to `a`, whose capacity is charged as it doubles, so the
-/// room lasts far fewer iterations than the million steps); `collect()` answers `Normal`, `n`
-/// reads the objects the fill made, and a second script that makes ten objects and an Array
-/// answers `Normal(10)`: its records take the slots the fill's records left free, at what they
-/// own, and the collection credited the elements of the fill's `a` and its frame. The test prints
-/// `n`, the room `memory_bytes - heap_bytes()` and `live_bytes()` after the collection. In the
-/// gate with the collector at every safe point, where each safe point walks the whole heap, the
-/// budget is the realm's bytes plus 16 KiB: the fill still ends in `Terminated(MemoryBudget)`,
-/// after fewer objects, and the second script runs as at 64 KiB; the lane `slow`
-/// (`SWELL_FULL_COUNTS=1`) gives 64 KiB there too.
+/// `memory_bytes` the realm's bytes plus 64 KiB, as HOST-70 sizes it, plus [`AFTER_FILL_ROOM`],
+/// which the host holds charged (`charge_host_bytes`) before the fill, the fill below ends by
+/// memory with 64 KiB above the realm (each iteration adds an element to `a`, whose capacity is
+/// charged as it doubles, so the room lasts far fewer iterations than the million steps);
+/// `collect()` answers `Normal`, the host gives its charge back (`credit_host_bytes`), `n` reads
+/// the objects the fill made, and a second script that makes ten objects and an Array answers
+/// `Normal(10)`: its records take the slots the fill's records left free, at what they own. The
+/// room for it is bounded from below whatever the fill's doublings did: `heap_bytes()` is at
+/// most `memory_bytes` after the termination (HOST-171), the collection lowers it, and the
+/// credit lowers it by [`AFTER_FILL_ROOM`], so at least that much is free. The test prints `n`,
+/// the room `memory_bytes - heap_bytes()` and `live_bytes()` after the collection and the
+/// credit. In the gate with the collector at every safe point, where each safe point walks the
+/// whole heap, the fill has the realm's bytes plus 16 KiB: it still ends in
+/// `Terminated(MemoryBudget)`, after fewer objects, and the second script runs as at 64 KiB;
+/// the lane `slow` (`SWELL_FULL_COUNTS=1`) gives 64 KiB there too.
 #[test]
 fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
     let realm_bytes = {
@@ -142,10 +162,14 @@ fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
     };
     let kib = if in_the_collect_gate() { 16 } else { 64 };
     let mut limits = limits();
-    limits.memory_bytes = realm_bytes + kib * 1024;
+    limits.memory_bytes = realm_bytes + kib * 1024 + AFTER_FILL_ROOM;
     let budget = limits.memory_bytes;
     let mut agent = agent_with(limits).unwrap();
     let realm = realm(&mut agent);
+    let held = agent
+        .with_cx(&realm, |cx| cx.charge_host_bytes(AFTER_FILL_ROOM))
+        .unwrap()
+        .unwrap();
 
     assert_eq!(
         eval_text(
@@ -156,13 +180,15 @@ fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
         Outcome::Terminated(Termination::MemoryBudget)
     );
     assert!(matches!(agent.collect(), Ok(swell::Outcome::Normal(_))));
+    agent.credit_host_bytes(held).unwrap();
     let room = budget - agent.heap_bytes().unwrap();
+    assert!(room >= AFTER_FILL_ROOM, "room {room}");
     let live = agent.live_bytes().unwrap();
     let Outcome::Normal(made) = eval_text(&mut agent, &realm, "n;") else {
         panic!("n did not answer");
     };
     println!(
-        "objects the fill made: {made}; after the collection: room {room} bytes, \
+        "objects the fill made: {made}; after the collection and the credit: room {room} bytes, \
          live_bytes {live}"
     );
     assert_eq!(
@@ -174,6 +200,50 @@ fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
         Outcome::Normal("10".to_string())
     );
     assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// HOST-70 after a loop that keeps every object it makes: `var a = []; while (true)
+/// a.push({});` ends in `Terminated(MemoryBudget)` with 1,000 bytes of room, and the script `1`
+/// then answers `Normal(1)`. The budget is found by a first run with the realm's bytes plus
+/// 64 KiB: the second run's budget is what the heap read at the first run's termination plus
+/// 1,000, so the second run is refused the same growth (more than 1,000 bytes) at the same
+/// point. Measured on `7a7bf0a`: the first run ends with 2,183 bytes of room, and the
+/// collection at the start of the next entry frees what the loop's frame held, so `1` has 3,549
+/// bytes there; its parse and compile step peaks at 3,438 bytes above the heap (the tree 881
+/// bytes, and in the compile step the bound of one node's expansion, 2,240 bytes, where the
+/// expansion takes 224), so it passes by 111 bytes there and fails with 1,000 bytes of room.
+#[test]
+#[ignore = "with 1,000 bytes of room after a loop that keeps its objects ended in the memory budget, the script 1 ends in the memory budget: its parse and compile step peaks at 3,438 bytes"]
+fn host_70_one_runs_after_a_loop_that_keeps_its_objects_ended_in_memory_budget() {
+    let realm_bytes = {
+        let mut agent = support::host::agent().unwrap();
+        let _realm = realm(&mut agent);
+        agent.heap_bytes().unwrap()
+    };
+    let fill = "var a = []; while (true) a.push({});";
+    let run = |memory_bytes: u64| {
+        let mut limits = limits();
+        limits.memory_bytes = memory_bytes;
+        let mut agent = agent_with(limits).unwrap();
+        let realm = realm(&mut agent);
+        assert_eq!(
+            eval_text(&mut agent, &realm, fill),
+            Outcome::Terminated(Termination::MemoryBudget)
+        );
+        let at_end = agent.heap_bytes().unwrap();
+        (agent, realm, at_end)
+    };
+    let first_budget = realm_bytes + 64 * 1024;
+    let (_, _, at_end) = run(first_budget);
+    let room = first_budget - at_end;
+    assert!(room > 1_000, "room {room}");
+    let (mut agent, realm, again) = run(at_end + 1_000);
+    assert_eq!(again, at_end, "the second run ends where the first did");
+    assert_eq!(agent.state(), AgentState::Alive);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "1;"),
+        Outcome::Normal("1".to_string())
+    );
 }
 
 /// A host function that calls its argument, catches the termination it answers and returns
