@@ -2,13 +2,14 @@
 format: aep.planning-md/3
 id: story:own-keys-charged-before-the-list-exists
 kind: story
-status: active
+status: implemented
 title: '[[OwnPropertyKeys]] charges its steps and the bytes of its list before it builds the list, and a sort of index keys is charged pass by pass'
 summary: The three [[OwnPropertyKeys]] of the engine (String, Array, ordinary) charge the steps they charge today and the list's bytes before the list exists; every holder of a key list credits it when it drops it and gives the kept stack back the room it had; a sort of index keys added out of order charges n steps before each pass of a merge sort.
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T05:10:13Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T05:10:13Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:51Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: nothing; starts on the base at once. Base: `wave/s3-1` with the gate unit
 (`gate-test-steps-within-budget`) and the design text merged. Precondition: the design text of

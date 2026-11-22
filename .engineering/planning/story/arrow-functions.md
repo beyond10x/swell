@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:arrow-functions
 kind: story
-status: active
+status: implemented
 title: 'Arrow functions: the this and arguments of the code around them, no construct, their source text'
 summary: Lifts the 41 arrow functions of surf's harness (two take object patterns and parse after object-destructuring); 121 failing cases of slice 6 on its list.
 relations:
@@ -66,10 +66,11 @@ scope:
   path: crates/test262/tests/fixtures/refused/test/language/refused/positive.js
 - confidence: cited
   path: crates/test262/tests/run.rs
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T23:19:10Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T23:19:10Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:49Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

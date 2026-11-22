@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:string-builtins-charge-before-they-copy
 kind: story
-status: active
+status: implemented
 title: A builtin charges the steps for a String's code units before it copies them, copies no more units than it uses, and the replacer list of JSON.stringify compares in place
 summary: Builtins that copy a whole String their result does not use, or copy before they charge, read only what they use and charge first; the replacer list of JSON.stringify keeps no copies and compares its items with the charged in-place equality; QuoteJSONString reads its String in bounded ranges; the text of JSON.parse is charged before its copy. Step totals stay, except the replacer list's and a JSON text's that fails before its end, which are the stated changes.
 relations:
 - depends_on: story:string-comparison-and-property-keys-charge-per-code-unit
 - depends_on: story:own-keys-charged-before-the-list-exists
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T11:02:18Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T11:02:18Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:52Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: `story:string-comparison-and-property-keys-charge-per-code-unit` (the test-only copy
 count in `crates/swell/src/object/string.rs`, which this story writes after it, and the charged

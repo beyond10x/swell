@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:values-read-from-a-root-live-for-the-scope
 kind: story
-status: active
+status: implemented
 title: A value read from a root with Cx::get is handed out to the running scope, as a new String is
 summary: Cx::get and HookCx::get take &mut self and record the value in the running scope, so it stays valid until the scope ends when the host drops the root and re-enters the engine.
 relations:
 - depends_on: story:interrupt-read-at-every-parse-entry
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T05:10:14Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T05:10:14Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:53Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: `story:interrupt-read-at-every-parse-entry` (both write
 `crates/swell/src/host/mod.rs`). Base: `wave/s3-1` with the gate unit

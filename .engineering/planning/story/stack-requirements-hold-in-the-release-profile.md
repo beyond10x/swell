@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:stack-requirements-hold-in-the-release-profile
 kind: story
-status: active
+status: implemented
 title: The gate runs the stack tests of HOST-17, HOST-152, HOST-163 and the builtins in the release profile and in the dev profile with debug information off
 summary: A build step builds the two stack test binaries in the release profile and in a profile stack-nodebug (dev with debug off); a timed test step runs their four tests in both, and readelf shows no debug section in either. Pass or fail bounds on the bytes per re-entry and the added wall time.
 relations:
 - depends_on: story:gate-test-steps-within-budget
 - depends_on: story:local-gate-equals-forge
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:48:30Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T06:48:30Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:51Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: `story:gate-test-steps-within-budget` (cargo-nextest, `.config/nextest.toml` with a
 test killed at 60 s, the `gate-time` lines and their sum of 120) and `story:local-gate-equals-forge`

@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:bound-functions-and-builtin-calls-charge-before-they-copy
 kind: story
-status: active
+status: implemented
 title: A bound function's arguments, the argument list of a bound call and the arguments a builtin call records are charged before they are copied
 summary: Three copies whose size a script sets are charged to the memory ledger before they are made and credited at one point where their holder drops them; four documentation lines are corrected. No step total changes.
 relations:
 - decomposes: epic:slice-06-bindings-and-iteration
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T13:48:05Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T13:48:05Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:49Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: nothing. It starts beside `story:default-and-rest-parameters`, which writes
 `crates/swell/src/object/ecmascript_function.rs`, `crates/swell/src/interp/frame.rs` and

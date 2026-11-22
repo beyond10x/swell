@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:default-and-rest-parameters
 kind: story
-status: active
+status: implemented
 title: 'Default and rest parameters: FunctionDeclarationInstantiation of a parameter list that is not simple'
 summary: Lifts the 9 default and 2 rest parameters of surf's harness, for functions, methods, accessors and arrows; 114 failing cases of slice 6 on its list.
 relations:
@@ -57,10 +57,11 @@ scope:
   path: crates/syntax/tests/sources/refused/default-parameter.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/rest-parameter.js
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T23:19:10Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T23:19:10Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:50Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

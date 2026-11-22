@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:every-host-interface-change-is-named-in-the-changelog
 kind: story
-status: active
+status: implemented
 title: The gate fails when a public item of the host interface or a HOST requirement changed since the last release and the changelog's unreleased section does not name it in the stated form
 summary: A committed snapshot of the interface at the last release (every public item of crates/swell/src/{host,value} and every HOST line), compared with a scan of the tree by a fast check; each changed item must be named, in one stated name form, under "### Host interface" of [Unreleased]. The release procedure renews the snapshot. Checkable from the tree alone.
 relations:
 - depends_on: story:gate-test-steps-within-budget
 - depends_on: story:local-gate-equals-forge
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:48:29Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T06:48:29Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:50Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: `story:gate-test-steps-within-budget` (the gate's step list and time lines) and
 `story:local-gate-equals-forge` (its file of planning-only paths, to which this story adds a

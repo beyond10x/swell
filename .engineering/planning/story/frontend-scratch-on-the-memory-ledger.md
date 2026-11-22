@@ -2,17 +2,18 @@
 format: aep.planning-md/3
 id: story:frontend-scratch-on-the-memory-ledger
 kind: story
-status: active
+status: implemented
 title: The parser's tree, the compile step's scratch and the code are charged before they grow, and a parse reads the interrupt
 summary: One ledger trait in swell-syntax, implemented over the agent's Accounting and interrupt flag, charges every growth of the frontend before it happens, polls the flag every 4,096 units of work, and hands the code's charge to the script record; eval and Function read the flag before their copy, and eval charges a step per code unit of its source.
 relations:
 - depends_on: story:interrupt-read-at-every-parse-entry
 - depends_on: story:own-keys-charged-before-the-list-exists
 - depends_on: story:arena-capacity-and-collector-workspace-on-the-ledger
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T05:27:42Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T05:27:42Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:50Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: `story:interrupt-read-at-every-parse-entry`, `story:own-keys-charged-before-the-list-exists`
 (the test-only high-water mark of `heap/accounting.rs`),

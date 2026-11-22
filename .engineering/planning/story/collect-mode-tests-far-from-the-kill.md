@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:collect-mode-tests-far-from-the-kill
 kind: story
-status: active
+status: implemented
 title: The tests of swell with a collection at every safe point stay far from the 60 s kill
 summary: At a load of 112 the slowest test of the collect-mode run took 58.5 s of the 60 s a test gets; five heavy tests get gate counts with their full counts in the lane slow, and a rule states what a new script and a new test may cost there.
 relations:
 - decomposes: epic:slice-06-bindings-and-iteration
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T16:57:50Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T16:57:50Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:49Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: nothing. A defect under the organization's rule "Tests stay fast": a test 1.5 s under
 the kill is fixed before the next feature, and raising a timeout, adding shards or waiting

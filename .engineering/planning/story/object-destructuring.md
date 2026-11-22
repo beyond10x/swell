@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:object-destructuring
 kind: story
-status: active
+status: implemented
 title: 'Object destructuring: binding and assignment patterns of objects, CoverInitializedName'
 summary: Lifts the 3 object patterns of surf's harness (its 3 array patterns need iterators, a later story); 443 failing cases of slice 6 on its list.
 relations:
@@ -61,10 +61,11 @@ scope:
   path: crates/syntax/tests/sources/refused/cover-initialized-name.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/destructuring-binding-object.js
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T23:19:10Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T23:19:10Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:51Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

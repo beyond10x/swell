@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:string-comparison-and-property-keys-charge-per-code-unit
 kind: story
-status: active
+status: implemented
 title: Comparing two Strings and turning a String into a property key charge a step per code unit past a small allowance, before the work and without a copy
 summary: string_equals, IsLessThan, the default compare of sort, key_from_string with the atom table, and StringToNumber charge their code units before they read them, compare in place, and keep every step count of a String or key of up to 32 code units as it is. The atom lookup that makes nothing is written here.
 relations:
 - depends_on: story:own-keys-charged-before-the-list-exists
 - depends_on: story:arena-capacity-and-collector-workspace-on-the-ledger
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T10:11:57Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T10:11:57Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:52Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: the budget batch's `story:own-keys-charged-before-the-list-exists` (both change step
 charges that the property-index probes measure, and it writes `builtins/array/mutation.rs`,

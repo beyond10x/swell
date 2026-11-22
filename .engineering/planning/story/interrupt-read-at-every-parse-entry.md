@@ -2,13 +2,14 @@
 format: aep.planning-md/3
 id: story:interrupt-read-at-every-parse-entry
 kind: story
-status: active
+status: implemented
 title: A pending interrupt ends parse_script and cx.parse_script before the source is copied
 summary: Both host parse entries read the interrupt flag before any frontend work, as every other outermost entry does; the flag is consumed there instead of surviving the parse.
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T05:10:12Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T05:10:12Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:50Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: nothing; starts on the base at once. Base: `wave/s3-1` with the gate unit
 (`gate-test-steps-within-budget`) and the design text merged. Precondition: the design sentences

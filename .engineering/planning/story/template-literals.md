@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:template-literals
 kind: story
-status: active
+status: implemented
 title: 'Template literals without a tag: the four template tokens and ToString of each substitution'
 summary: Lifts the 22 template literals of surf's harness; 43 failing cases of slice 6 on its list; a tagged template is refused by its own name until a later story.
 relations:
@@ -53,10 +53,11 @@ scope:
   path: crates/syntax/tests/sources/refused/tagged-template.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/template-literal.js
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T23:19:10Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T23:19:10Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:52Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

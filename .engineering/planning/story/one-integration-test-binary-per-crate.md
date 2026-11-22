@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:one-integration-test-binary-per-crate
 kind: story
-status: active
+status: implemented
 title: Each crate has one integration-test binary, tests/main.rs, generated from the test files where they are now
 summary: autotests = false and one [[test]] main per crate; tests/main.rs is generated from the directory and checked against it; mod support becomes use crate::support; a test that starts its binary again passes a typed full path; the gate names tests with a nextest filter, and the test list keeps today's names, so no line of requirements.txt changes.
 relations:
 - depends_on: story:test-builds-carry-no-debug-information
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T08:02:59Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T08:02:59Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:51Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Order, the same in both stories and the plan: `story:stack-requirements-hold-in-the-release-profile`
 (accepted), then `story:test-builds-carry-no-debug-information`, then this story.

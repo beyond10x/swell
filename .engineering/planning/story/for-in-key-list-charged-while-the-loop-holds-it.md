@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:for-in-key-list-charged-while-the-loop-holds-it
 kind: story
-status: active
+status: implemented
 title: The key list a for-in loop holds is charged before it exists and stays charged until the loop ends, on every way out
 summary: EnumerateObjectProperties charges its list and its set of visited keys by capacity before each grows, credits the set and everything else it charged on every way out of the call, and answers the list with its charge; the for-in enumerator holds that charge in its frame and credits it when the loop ends normally, by break, return, throw or a termination.
 relations:
 - depends_on: story:own-keys-charged-before-the-list-exists
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T05:27:42Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T05:27:42Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:50Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: `story:own-keys-charged-before-the-list-exists` and the merges of
 `let-const-and-block-scopes` and `template-literals`. Base: `wave/s3-1` with the gate unit

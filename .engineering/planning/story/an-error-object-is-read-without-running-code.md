@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:an-error-object-is-read-without-running-code
 kind: story
-status: active
+status: implemented
 title: The host reads whether a value is an error object, its kind and its own message, without running code or calling a hook; a host object can carry [[ErrorData]] as Web IDL gives DOMException
 summary: '[[ErrorData]] records the kind of the constructor that made the object; HostObjectSpec gains an optional error kind that gives a host object the slot; a read on Agent, Cx and HookCx answers that kind and the own "message" data property when it holds a String, from the property list alone.'
 relations:
 - depends_on: story:own-keys-charged-before-the-list-exists
 - depends_on: story:the-host-charges-its-own-bytes-and-steps
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:48:26Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T06:48:26Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:49Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: the budget batch's `story:own-keys-charged-before-the-list-exists` (it writes
 `crates/swell/src/object/ordinary.rs`, `ordinary_own_property_keys`, and

@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-22T17:07:48Z",
+  "actor": "human:operator",
+  "artifact": "story:stack-requirements-hold-in-the-release-profile",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot --timeout 30m task check-runner",
+    "reference": "docs/plan/second-batch.md"
+  }
+}

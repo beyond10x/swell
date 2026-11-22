@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:a-parse-error-and-an-uncaught-throw-name-their-line-and-column
 kind: story
-status: active
+status: implemented
 title: After an entry that answered a parse error or an uncaught throw, the host reads the line and column where it arose
 summary: One read of the agent, last_entry_error_site, gives the position of the first parse error of parse_script and of the instruction where the throw that ended an outermost entry arose, whether it arose in dynamic code, and the [[HostDefined]] of its script; no result type of an entry point changes.
 relations:
@@ -10,10 +10,11 @@ relations:
 - depends_on: story:for-in-key-list-charged-while-the-loop-holds-it
 - depends_on: story:frontend-scratch-on-the-memory-ledger
 - depends_on: story:let-const-and-block-scopes
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:48:28Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T06:48:28Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:49Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: the budget batch's `story:interrupt-read-at-every-parse-entry` (both write
 `Agent::parse_script`, `crates/swell/src/host/agent.rs:443-486`),

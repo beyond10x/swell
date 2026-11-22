@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:test-builds-carry-no-debug-information
 kind: story
-status: active
+status: implemented
 title: The dev and test builds carry no debug information, and the gate shows it with readelf on every test executable after the build
 summary: .cargo/config.toml sets the dev profile's debug to false with strip = "debuginfo"; test-binaries-check, a step of check right after build, runs readelf -S on every test executable and fails on a .debug_ section; the stack tests keep a run with full debug information in a profile stack-debug, which replaces stack-nodebug.
 relations:
 - depends_on: story:stack-requirements-hold-in-the-release-profile
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T08:02:58Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T08:02:59Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:52Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Order, the same in both stories and the plan: `story:stack-requirements-hold-in-the-release-profile`
 (accepted), then this story, then `story:one-integration-test-binary-per-crate`.

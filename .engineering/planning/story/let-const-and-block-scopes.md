@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:let-const-and-block-scopes
 kind: story
-status: active
+status: implemented
 title: 'let and const: block scopes, the temporal dead zone, per-iteration bindings and the global lexical record; the test of HOST-156'
 summary: Lifts const 75 and let 23 of the 191 constructs of slice 6 that surf's harness needs; 269 failing cases of slice 6 on its list; a function declaration in a block stays refused.
 relations:
@@ -80,10 +80,11 @@ scope:
   path: crates/test262/tests/fixtures/eval-script/test/language/eval-script/refusal-fails-the-run.js
 - confidence: cited
   path: crates/test262/tests/run.rs
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T23:19:09Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T23:19:09Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:51Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

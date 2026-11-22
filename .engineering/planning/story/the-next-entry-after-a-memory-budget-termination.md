@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:the-next-entry-after-a-memory-budget-termination
 kind: story
-status: active
+status: implemented
 title: 'The next entry after a run ended in the memory budget: the compile step charges what it holds, and HOST-70 says what the host can rely on'
 summary: The compile step charges one node's expansion ten times what it holds, and HOST-70 promises that the script 1 runs after Terminated(MemoryBudget) whatever room is left. The step charges an expansion as it is made, and HOST-70 states the four things a host relies on after that termination.
 relations:
 - decomposes: epic:slice-06-bindings-and-iteration
 - depends_on: story:frontend-scratch-on-the-memory-ledger
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T11:42:55Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T11:42:55Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:53Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: nothing; everything is in the base, the head of `wave/budget-1` (the frontend's
 charges, `story:frontend-scratch-on-the-memory-ledger`, HOST-168 and HOST-169; the host's bytes,

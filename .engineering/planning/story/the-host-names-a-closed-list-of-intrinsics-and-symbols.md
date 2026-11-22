@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:the-host-names-a-closed-list-of-intrinsics-and-symbols
 kind: story
-status: active
+status: implemented
 title: 'The host reads, from a closed list, the intrinsics and well-known symbols Web IDL names for the DOM: %Object.prototype%, %Function.prototype%, %Error.prototype%, @@toStringTag and @@unscopables'
 summary: Two closed enumerations and two reads on Cx and HookCx over the realm's existing Intrinsics and the agent's WellKnown; the iteration entries Web IDL needs follow in story:the-host-names-the-iteration-intrinsics-of-web-idl.
 relations:
 - depends_on: story:arena-capacity-and-collector-workspace-on-the-ledger
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:48:24Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T06:48:25Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:52Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: the budget batch's `story:arena-capacity-and-collector-workspace-on-the-ledger` (it
 edits the budgets of the `#[cfg(test)]` module of `crates/swell/src/host/host_object.rs`, the

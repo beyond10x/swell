@@ -2,13 +2,14 @@
 format: aep.planning-md/3
 id: story:arena-capacity-and-collector-workspace-on-the-ledger
 kind: story
-status: active
+status: implemented
 title: An arena's slots are charged by capacity while the agent lives, the collector's workspace is part of that charge, and the host reads the live bytes beside the charged ones
 summary: Slots are charged when an arena grows and stay charged; a sweep credits what a freed record owns; a mark word per slot and a worklist of at most one entry per slot live in each arena, so a collection allocates nothing and finishes at the heap limit; live_bytes() reads what the records hold, and the collection threshold follows it.
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T05:27:41Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T05:27:41Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:49Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: nothing; starts on the base at once. Base: `wave/s3-1` with the gate unit
 (`gate-test-steps-within-budget`) and the design text merged. Preconditions: the design text of

@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:the-host-charges-its-own-bytes-and-steps
 kind: story
-status: active
+status: implemented
 title: The host charges bytes it holds for the agent to the memory budget, resizes that charge in place, gives it back by dropping it, and charges steps for its own work
 summary: Cx and HookCx gain charge_host_bytes, which answers a HostBytes the host keeps with what it charged for, and resize_host_bytes, which changes that charge in place; dropping a HostBytes queues the credit the agent applies after the sweep or at the next charge, as the engine's own Grown does, and Agent::credit_host_bytes credits one at once. Cx gains charge_steps over Agent::charge_steps. A host that charges without end ends the run in Terminated(MemoryBudget) or Terminated(StepBudget).
 relations:
 - depends_on: story:arena-capacity-and-collector-workspace-on-the-ledger
 - depends_on: story:values-read-from-a-root-live-for-the-scope
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:48:25Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T06:48:25Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:52Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: the budget batch's `story:arena-capacity-and-collector-workspace-on-the-ledger` (it
 adds `live_bytes()` beside `heap_bytes()`, `crates/swell/src/host/agent.rs:210-214`, and moves

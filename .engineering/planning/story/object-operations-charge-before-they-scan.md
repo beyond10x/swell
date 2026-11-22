@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:object-operations-charge-before-they-scan
 kind: story
-status: active
+status: implemented
 title: Setting an array's length, compacting a property or binding list and calling a bound function charge their steps before the scan or the copy
 summary: Three operations charge in proportion to their work but after it; each charges first the count it can read before the work, from lengths it holds, and the rest after. No step total changes.
 relations:
 - depends_on: story:own-keys-charged-before-the-list-exists
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T10:11:57Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T10:11:58Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:51Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: the budget batch's `story:own-keys-charged-before-the-list-exists`, which writes
 `crates/swell/src/object/property.rs` (`keys`, `sort_indices`, lines 479-523) and

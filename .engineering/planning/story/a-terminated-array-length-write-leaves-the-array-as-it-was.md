@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:a-terminated-array-length-write-leaves-the-array-as-it-was
 kind: story
-status: active
+status: implemented
 title: A termination that ends ArraySetLength before its first deletion leaves the Array's old length
 summary: ArraySetLength writes the new length before its deletions can be terminated; on such a termination it puts the old length back, so that an Array's length is never below an index key it still has. The design states this one exception to "a termination leaves what was changed". No step total changes.
 relations:
 - decomposes: epic:slice-06-bindings-and-iteration
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T13:46:15Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T13:46:16Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:49Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: nothing. No requirement of `host-interface.md`. Consumer: none named. The commit
 `a34ea7c` named this gap in its last paragraph. An Array exotic object keeps every array index

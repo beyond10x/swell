@@ -2,17 +2,18 @@
 format: aep.planning-md/3
 id: story:a-call-charges-what-it-keeps-of-its-arguments-and-parameters
 kind: story
-status: active
+status: implemented
 title: A call charges the parameter map of its arguments object and the arguments it records before it makes them, and copies no parameter list
 summary: The mapped arguments object's map and the activation's copy of a call's arguments are charged to the memory ledger before they are made and credited where their holder drops them; the copy a call makes of its function's parameter list goes. No step total changes.
 relations:
 - decomposes: epic:slice-06-bindings-and-iteration
 - depends_on: story:bound-functions-and-builtin-calls-charge-before-they-copy
 - depends_on: story:default-and-rest-parameters
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T13:48:06Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T13:48:07Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:48Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: `story:bound-functions-and-builtin-calls-charge-before-they-copy` (it adds
 `Heap::new_object_charged` and the test-only hook `COLLECTIONS` this story uses), and the slice-6 story `story:default-and-rest-parameters`, which

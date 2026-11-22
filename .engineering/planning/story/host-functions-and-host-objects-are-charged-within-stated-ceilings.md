@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:host-functions-and-host-objects-are-charged-within-stated-ceilings
 kind: story
-status: active
+status: implemented
 title: Every byte of a host function, a host object and a property definition is charged, each within a ceiling the engine states as a constant and the design quotes, and a realm of 300 host functions and 40 host objects is measured
 summary: The boxes of a host function's steps and data are charged as the record's own bytes before they are made; per-item ceilings on live_bytes() and a realm ceiling on heap_bytes() are public constants the design quotes and a test compares; one test builds a realm the size of the browser's generated bindings and states the steps a host function's call spends.
 relations:
@@ -12,10 +12,11 @@ relations:
 - depends_on: story:the-host-names-a-closed-list-of-intrinsics-and-symbols
 - depends_on: story:the-host-charges-its-own-bytes-and-steps
 - depends_on: story:an-error-object-is-read-without-running-code
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:48:26Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T06:48:27Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:50Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: the budget batch's `story:arena-capacity-and-collector-workspace-on-the-ledger`
 (slots charged by capacity and `live_bytes()`, which the ceilings are stated on) and

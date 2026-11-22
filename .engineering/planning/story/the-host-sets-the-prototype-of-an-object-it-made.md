@@ -2,13 +2,14 @@
 format: aep.planning-md/3
 id: story:the-host-sets-the-prototype-of-an-object-it-made
 kind: story
-status: active
+status: implemented
 title: Cx exposes [[GetPrototypeOf]] and [[SetPrototypeOf]], so the host gives an interface object its parent interface object as [[Prototype]]
 summary: Two operations of decision 14 over the engine's existing internal methods; no signature of new_host_function changes.
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:48:23Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T06:48:23Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:52Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: nothing; starts on the base at once (the base holds the gate unit). It shares
 `crates/swell/src/host/mod.rs` (the `impl Cx` of decision 14, its own lines) and

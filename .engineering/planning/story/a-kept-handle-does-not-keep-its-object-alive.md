@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:a-kept-handle-does-not-keep-its-object-alive
 kind: story
-status: active
+status: implemented
 title: 'A handle the host keeps without a root is a weak reference: it reads its object while the object lives and answers StaleHandle once a collection freed it'
 summary: The generation check of the arenas already makes a kept ObjectRef weak; the design states it as a guarantee of decision 4, a requirement holds it with a test, and a committed arena test shows the check catches a reused generation. No new type.
 relations:
 - depends_on: story:arena-capacity-and-collector-workspace-on-the-ledger
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:48:24Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T06:48:24Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T17:07:48Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: the budget batch's `story:arena-capacity-and-collector-workspace-on-the-ledger`
 (it rewrites `Arena::allocate` and `free_index` in `crates/swell/src/heap/arena.rs`, whose
