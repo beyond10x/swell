@@ -91,6 +91,8 @@ pass. Every number below is from the gate on the wave branch of slice 3
     their text before they copy it: a text parsed to its end costs what it did, and one that
     fails early has paid for its whole text.
   - The atom table grows charged first, also when deleted buckets would make it grow.
+  - The compile step charges what a node's expansion holds as it is made: the script `1`
+    needs 2,228 bytes of room for its parse and compile.
 - A pending interrupt ends `parse_script` before the source is copied: it answers
   `Parsed::Terminated(Interrupted)` and consumes the flag (`HOST-166`, `HOST-167`).
 - The dev and test builds carry no debug information, and the gate step
@@ -140,11 +142,19 @@ pass. Every number below is from the gate on the wave branch of slice 3
   the source text of a `Function` constructor; `ErrorSite::host_defined` is the
   [[HostDefined]] of the script whose code raised it, `None` for `Function` code and indirect
   eval.
+- After `Terminated(MemoryBudget)` the agent stays `Alive`, and the next entry runs when the
+  free room, `memory_bytes` less `heap_bytes()`, covers it; it ends in
+  `Terminated(MemoryBudget)` again when it does not, so a host makes room first: it drops
+  roots and calls `collect`, or gives bytes back with `credit_host_bytes`. `HOST-70` said
+  before that the script `1` runs whatever room is left. `HOST-188`: the calls that take no
+  memory answer with a room of 0. `HOST-189`: an entry the room does not cover ends the same
+  way each time. `HOST-190`: with at least 3,072 bytes of room the script `1` answers
+  `Normal(1)` as in a fresh agent.
 - A handle the host keeps without a root is a stated weak reference (`HOST-178`): it reads
   its object while the object lives and answers `StaleHandle` after a collection freed it,
   also after its slot holds a new object. No code changed for it; it is tested now.
-- `HOST-165`, `HOST-166`, `HOST-167`, `HOST-168`, `HOST-169`, `HOST-170`, `HOST-171`, `HOST-172`, `HOST-173`, `HOST-174`, `HOST-175`, `HOST-176`, `HOST-177`, `HOST-178`, `HOST-179`, `HOST-180`, `HOST-181`, `HOST-182`, `HOST-183`, `HOST-184`, `HOST-185`, `HOST-186`, `HOST-187`: new requirements.
-- `HOST-29`, `HOST-52`, `HOST-102`: changed requirements.
+- `HOST-165`, `HOST-166`, `HOST-167`, `HOST-168`, `HOST-169`, `HOST-170`, `HOST-171`, `HOST-172`, `HOST-173`, `HOST-174`, `HOST-175`, `HOST-176`, `HOST-177`, `HOST-178`, `HOST-179`, `HOST-180`, `HOST-181`, `HOST-182`, `HOST-183`, `HOST-184`, `HOST-185`, `HOST-186`, `HOST-187`, `HOST-188`, `HOST-189`, `HOST-190`: new requirements.
+- `HOST-29`, `HOST-52`, `HOST-70`, `HOST-102`: changed requirements.
 
 ## [0.2.0] - 2026-11-21
 
