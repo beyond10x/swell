@@ -169,9 +169,9 @@ HOST-168 test swell::frontend_ledger::host_168_an_interrupt_set_by_the_compile_s
 HOST-169 test swell::lib::script::tests::host_169_a_flat_source_whose_tree_does_not_fit_ends_in_memory_budget
 HOST-170 test swell::collect::host_170_a_value_read_from_a_dropped_root_lives_until_its_scope_ends
 HOST-171 test swell::collect::host_171_live_bytes_reads_the_records_and_heap_bytes_the_budget
-HOST-172 pending slice 6
-HOST-173 pending slice 6
-HOST-174 pending slice 6
+HOST-172 test swell::scripts::host_172_a_parse_error_names_its_line_and_column
+HOST-173 test swell::scripts::host_173_an_uncaught_throw_names_where_it_arose
+HOST-174 test swell::scripts::host_174_the_error_site_is_a_read
 HOST-175 test swell::budgets::host_175_host_bytes_without_end_end_in_memory_budget
 HOST-176 test swell::budgets::host_176_a_host_charge_gives_back_what_it_charged
 HOST-177 test swell::budgets::host_177_host_steps_end_in_step_budget

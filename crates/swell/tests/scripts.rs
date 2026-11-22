@@ -7,11 +7,14 @@
 
 mod support;
 
+use std::rc::Rc;
 use support::host::{TestHost, agent, agent_with, global, is_error_of, limits, object, realm};
 use support::script::{Outcome, describe, eval, eval_text, messages, parse};
+
 use swell::{
-    Brand, Completion, GlobalObjects, HookCx, HostError, HostObjectSpec, Outcome as HostOutcome,
-    Parsed, Prototype, RealmRef, Root, Source, Value,
+    Brand, Completion, ErrorSite, GlobalObjects, HookCx, HostData, HostDefined, HostError,
+    HostObjectSpec, Outcome as HostOutcome, Parsed, Prototype, RealmRef, Root, Source, Termination,
+    Tracer, Value,
 };
 
 /// `0` inside `n` nested parentheses, ended by a `;` (automatic semicolon insertion is slice
@@ -304,4 +307,289 @@ fn script_host_defined_and_foreign_handles() {
         agent.parse_script(&other_realm, Source::Utf8("1;"), None),
         Err(HostError::ForeignHandle)
     ));
+}
+
+/// The [[HostDefined]] of the tests of the error site: a fresh `Rc` names one script.
+struct Named;
+
+impl HostData for Named {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+fn fresh() -> HostDefined {
+    Rc::new(Named)
+}
+
+/// The `(<line>:<column>)` suffix of a parse error's message.
+fn suffix(message: &str) -> (u32, u32) {
+    let open = message.rfind('(').unwrap();
+    let inner = message[open + 1..].strip_suffix(')').unwrap();
+    let (line, column) = inner.split_once(':').unwrap();
+    (line.parse().unwrap(), column.parse().unwrap())
+}
+
+/// Whether `site` names `host_defined`: the same `Rc`, or none for none.
+fn names(site: &ErrorSite, host_defined: Option<&HostDefined>) -> bool {
+    match (&site.host_defined, host_defined) {
+        (Some(held), Some(given)) => Rc::ptr_eq(held, given),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// What a read answered, to compare two reads: line, column, `dynamic` and the address of the
+/// [[HostDefined]].
+type SiteKey = Option<(u32, u32, bool, Option<*const ()>)>;
+
+fn key_of(site: &Option<ErrorSite>) -> SiteKey {
+    site.as_ref().map(|site| {
+        (
+            site.line,
+            site.column,
+            site.dynamic,
+            site.host_defined
+                .as_ref()
+                .map(|held| Rc::as_ptr(held).cast::<()>()),
+        )
+    })
+}
+
+/// HOST-172 (decision 13): `parse_script` of `var a;\n  var 1;` answers `Parsed::Errors`, and
+/// `last_entry_error_site()` then reads line 2, the column the error's message ends with,
+/// `dynamic` false and the `Rc` given to the parse, from a UTF-8 and from a UTF-16 source.
+#[test]
+fn host_172_a_parse_error_names_its_line_and_column() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let text = "var a;\n  var 1;";
+    let units: Vec<u16> = text.encode_utf16().collect();
+    for source in [Source::Utf8(text), Source::Utf16(&units)] {
+        let host_defined = fresh();
+        let Parsed::Errors(errors) = agent
+            .parse_script(&realm, source, Some(Rc::clone(&host_defined)))
+            .unwrap()
+        else {
+            panic!("`var 1;` parsed");
+        };
+        // The read comes first: every outermost entry, `with_cx` included, clears the record.
+        let site = agent.last_entry_error_site().unwrap();
+        let message = messages(&mut agent, &realm, &errors).remove(0);
+        let site = site.unwrap_or_else(|| panic!("no site for {message:?}"));
+        assert_eq!(site.line, 2, "{message}");
+        assert_eq!((site.line, site.column), suffix(&message), "{message}");
+        assert!(!site.dynamic);
+        assert!(names(&site, Some(&host_defined)));
+    }
+}
+
+/// Parse `source` with a fresh [[HostDefined]], evaluate it, and answer the site of its `Throw`
+/// with that `Rc`. Between the entry and the read every root of the script and of the thrown
+/// value is dropped and `collect()` runs; the read answers the same before and after.
+fn site_of_throw(
+    agent: &mut swell::Agent<TestHost>,
+    realm: &swell::Realm,
+    source: &str,
+) -> (ErrorSite, HostDefined) {
+    let host_defined = fresh();
+    let Parsed::Parsed(script) = agent
+        .parse_script(realm, Source::Utf8(source), Some(Rc::clone(&host_defined)))
+        .unwrap()
+    else {
+        panic!("{source:?} did not parse");
+    };
+    let HostOutcome::Throw(thrown) = agent.evaluate_script(&script).unwrap() else {
+        panic!("{source:?} did not throw");
+    };
+    let before = agent.last_entry_error_site().unwrap();
+    drop((script, thrown));
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    let site = agent.last_entry_error_site().unwrap();
+    assert_eq!(key_of(&before), key_of(&site), "{source:?}");
+    let site = site.unwrap_or_else(|| panic!("no site for {source:?}"));
+    (site, host_defined)
+}
+
+/// HOST-173 (decision 13): an uncaught throw is sited where it arose: in a called function, in
+/// a `map` callback (a throw of a value that is not an error, at its `throw` statement), after a
+/// `catch` that throws again, through a `finally` block, in eval code (`dynamic`) and in
+/// `Function` code (`dynamic`, no [[HostDefined]]); a function defined by one script and called
+/// from another names the first script's `Rc`.
+#[test]
+fn host_173_an_uncaught_throw_names_where_it_arose() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let in_function = "function f() {\n  null.x;\n}\nf();";
+    assert_eq!(
+        eval_text(&mut agent, &realm, in_function),
+        Outcome::Throw("TypeError".to_string())
+    );
+    let cases: [(&str, u32, u32, bool); 6] = [
+        (in_function, 2, 3, false),
+        ("[1].map(function (x) {\n  throw x;\n});", 2, 3, false),
+        ("try { throw 1; } catch (e) {\n  throw e;\n}", 2, 3, false),
+        ("try { null.x } finally {}", 1, 7, false),
+        ("eval(\"1;\\n  throw 2;\");", 2, 3, true),
+        ("throw 1;", 1, 1, false),
+    ];
+    for (source, line, column, dynamic) in cases {
+        let (site, host_defined) = site_of_throw(&mut agent, &realm, source);
+        assert_eq!(
+            (site.line, site.column, site.dynamic),
+            (line, column, dynamic),
+            "{source:?}"
+        );
+        assert!(names(&site, Some(&host_defined)), "{source:?}");
+    }
+    let (site, _) = site_of_throw(&mut agent, &realm, "new Function(\"\\n  null.x;\")();");
+    assert_eq!((site.line, site.column, site.dynamic), (4, 3, true));
+    assert!(names(&site, None));
+
+    let first = fresh();
+    let Parsed::Parsed(definer) = agent
+        .parse_script(
+            &realm,
+            Source::Utf8("function g() {\n  null.y;\n}"),
+            Some(Rc::clone(&first)),
+        )
+        .unwrap()
+    else {
+        panic!("the definer did not parse");
+    };
+    assert!(matches!(
+        agent.evaluate_script(&definer),
+        Ok(HostOutcome::Normal(_))
+    ));
+    drop(definer);
+    let (site, second) = site_of_throw(&mut agent, &realm, "1;\ng();");
+    assert_eq!((site.line, site.column, site.dynamic), (2, 3, false));
+    assert!(names(&site, Some(&first)));
+    assert!(!names(&site, Some(&second)));
+}
+
+/// An entry of `throw 1;` whose site the read gives.
+fn thrown_entry(agent: &mut swell::Agent<TestHost>, realm: &swell::Realm) {
+    assert!(matches!(
+        eval(agent, realm, "throw 1;"),
+        HostOutcome::Throw(_)
+    ));
+    assert!(agent.last_entry_error_site().unwrap().is_some());
+}
+
+/// HOST-174 (decision 13): after a `Throw` entry, the read gives `None` after an entry that
+/// answered `Normal`, `Terminated(StepBudget)` or `Parsed::Parsed`, and after a script that
+/// caught its throw; it reads the same value twice and after `collect()`, and leaves
+/// `last_entry_steps()`, `heap_bytes()` and the hook calls as they were.
+#[test]
+fn host_174_the_error_site_is_a_read() {
+    // A small step budget: `while (true) {}` collects at each of its steps in the mode
+    // `collect-every-safe-point` (100,000 steps took 9.7 s there).
+    let mut limits = limits();
+    limits.steps_per_entry = 2_000;
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    assert!(agent.last_entry_error_site().unwrap().is_none());
+
+    thrown_entry(&mut agent, &realm);
+    assert!(matches!(
+        eval(&mut agent, &realm, "1;"),
+        HostOutcome::Normal(_)
+    ));
+    assert!(agent.last_entry_error_site().unwrap().is_none(), "Normal");
+
+    thrown_entry(&mut agent, &realm);
+    assert!(matches!(
+        eval(&mut agent, &realm, "while (true) {}"),
+        HostOutcome::Terminated(Termination::StepBudget)
+    ));
+    assert!(
+        agent.last_entry_error_site().unwrap().is_none(),
+        "StepBudget"
+    );
+
+    thrown_entry(&mut agent, &realm);
+    let script = parse(&mut agent, &realm, "2;");
+    assert!(agent.last_entry_error_site().unwrap().is_none(), "Parsed");
+    drop(script);
+
+    thrown_entry(&mut agent, &realm);
+    assert!(matches!(
+        eval(&mut agent, &realm, "try { throw 1; } catch (e) {} 1"),
+        HostOutcome::Normal(_)
+    ));
+    assert!(agent.last_entry_error_site().unwrap().is_none(), "caught");
+
+    thrown_entry(&mut agent, &realm);
+    let steps = agent.last_entry_steps().unwrap();
+    let heap = agent.heap_bytes().unwrap();
+    let calls = agent.host().calls.len();
+    let first = key_of(&agent.last_entry_error_site().unwrap());
+    let second = key_of(&agent.last_entry_error_site().unwrap());
+    assert!(first.is_some());
+    assert_eq!(first, second);
+    assert_eq!(agent.last_entry_steps().unwrap(), steps);
+    assert_eq!(agent.heap_bytes().unwrap(), heap);
+    assert_eq!(agent.host().calls.len(), calls);
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    assert_eq!(key_of(&agent.last_entry_error_site().unwrap()), first);
+}
+
+/// The next number of a linear congruential generator over `seed`, below `bound`.
+fn next(seed: &mut u64, bound: u64) -> u64 {
+    *seed = seed
+        .wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1_442_695_040_888_963_407);
+    (*seed >> 33) % bound
+}
+
+/// A guard of HOST-172: 50 sources with one grammar error each, an identifier, a literal or a
+/// keyword placed where the grammar refuses it, at a line and column a generator seeded here
+/// picks; the site equals the `(<line>:<column>)` suffix of the first error's message, and the
+/// position of the token placed.
+#[test]
+fn a_parse_error_site_matches_its_message() {
+    // Each refused statement with the offset of the token the grammar refuses.
+    let refused: [(&str, u64); 7] = [
+        ("var 1;", 4),
+        ("var if;", 4),
+        ("var 'x';", 4),
+        ("a b;", 2),
+        ("1 2;", 2),
+        ("a.b c;", 4),
+        ("x = if;", 4),
+    ];
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let mut seed = 0x5EED_0172_u64;
+    for _ in 0..50 {
+        let lines = next(&mut seed, 6);
+        let indent = next(&mut seed, 9);
+        let refused_len = u64::try_from(refused.len()).unwrap();
+        let (statement, offset) = refused[usize::try_from(next(&mut seed, refused_len)).unwrap()];
+        let mut source = String::new();
+        for line in 0..lines {
+            source.push_str(&format!("var v{line} = {line};\n"));
+        }
+        source.push_str(&" ".repeat(usize::try_from(indent).unwrap()));
+        source.push_str(statement);
+        let Parsed::Errors(errors) = agent
+            .parse_script(&realm, Source::Utf8(&source), None)
+            .unwrap()
+        else {
+            panic!("{source:?} parsed");
+        };
+        let site = agent.last_entry_error_site().unwrap();
+        let message = messages(&mut agent, &realm, &errors).remove(0);
+        let site = site.unwrap_or_else(|| panic!("no site for {source:?}: {message}"));
+        assert_eq!(
+            (site.line, site.column),
+            suffix(&message),
+            "{source:?}: {message}"
+        );
+        let placed = (
+            u32::try_from(lines + 1).unwrap(),
+            u32::try_from(indent + offset + 1).unwrap(),
+        );
+        assert_eq!((site.line, site.column), placed, "{source:?}: {message}");
+        assert!(!site.dynamic && site.host_defined.is_none());
+    }
 }

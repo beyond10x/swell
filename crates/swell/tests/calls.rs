@@ -1018,3 +1018,76 @@ fn set_prototype_of_follows_the_internal_method() {
     drop(rest);
     assert_eq!(agent.state(), AgentState::Alive);
 }
+
+/// A host function that answers a throw of 7.
+fn fail(_cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    Err(Abrupt::Throw(Value::Number(7.0)))
+}
+
+/// A host function that calls its first argument through `cx.call`, which must throw, catches
+/// the throw and answers `undefined`: the host's own catch.
+fn swallow(cx: &mut Cx<'_, TestHost>, call: HostCall<'_>) -> Completion<Value> {
+    let callee = call.args.first().copied().unwrap_or(Value::Undefined);
+    match cx.call(callee, Value::Undefined, &[]).unwrap() {
+        Err(Abrupt::Throw(_)) => Ok(Value::Undefined),
+        other => panic!("the callee did not throw: {other:?}"),
+    }
+}
+
+/// The line and column `last_entry_error_site` reads after the script `source` answered
+/// `Throw`.
+fn thrown_at(
+    agent: &mut swell::Agent<TestHost>,
+    realm: &swell::Realm,
+    source: &str,
+) -> Option<(u32, u32)> {
+    let Parsed::Parsed(script) = agent
+        .parse_script(realm, Source::Utf8(source), None)
+        .unwrap()
+    else {
+        panic!("{source:?} did not parse");
+    };
+    assert!(
+        matches!(agent.evaluate_script(&script), Ok(Outcome::Throw(_))),
+        "{source:?} did not throw"
+    );
+    let site = agent.last_entry_error_site().unwrap()?;
+    assert!(!site.dynamic && site.host_defined.is_none());
+    Some((site.line, site.column))
+}
+
+/// HOST-173 (decision 13), a host function: a throw a host function answers is sited at the
+/// call of it in the innermost ECMAScript frame; a throw the host function caught (`cx.call`
+/// answered it `Abrupt::Throw` and the function answered `Ok`) is no longer the record, so a
+/// later throw of the same value is sited at its own `throw` statement; and `Agent::call` of
+/// the host function itself, with no ECMAScript frame, reads `None`.
+#[test]
+fn a_throw_from_a_host_function_is_sited_at_its_call() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    define_function(&mut agent, &realm, "fail", 0, fail, false);
+    define_function(&mut agent, &realm, "swallow", 1, swallow, false);
+    assert_eq!(thrown_at(&mut agent, &realm, "1;\n  fail();"), Some((2, 3)));
+    assert_eq!(
+        thrown_at(
+            &mut agent,
+            &realm,
+            "function g() { throw 3; }\nswallow(g);\n1;\nthrow 3;"
+        ),
+        Some((4, 1))
+    );
+    let global_root = global(&mut agent, &realm);
+    let (fail_root, undefined) = agent
+        .with_cx(&realm, |cx| {
+            let global = object(cx, &global_root);
+            let fail = get(cx, global, "fail");
+            (cx.root(fail).unwrap(), cx.root(Value::Undefined).unwrap())
+        })
+        .unwrap();
+    assert!(thrown_at(&mut agent, &realm, "throw 1;").is_some());
+    assert!(matches!(
+        agent.call(&realm, &fail_root, &undefined, &[]),
+        Ok(Outcome::Throw(_))
+    ));
+    assert!(agent.last_entry_error_site().unwrap().is_none());
+}

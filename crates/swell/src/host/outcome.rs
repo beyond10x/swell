@@ -3,6 +3,7 @@
 //! result type of its own taken from the draft's return type. Written by
 //! `story:heap-values-and-host-surface`.
 
+use super::hooks::HostDefined;
 use crate::value::{Root, Value};
 
 /// Why a run ended without a completion (decision 2 and decision 10).
@@ -84,6 +85,31 @@ pub enum ModuleStatus {
     Evaluating,
     EvaluatingAsync,
     Evaluated,
+}
+
+/// Where the error an outermost entry answered arose (decision 13): the first error of a parse
+/// that answered `Parsed::Errors`, or the instruction where the throw an entry answered arose.
+/// `line` and `column` count from 1, a column in UTF-16 code units.
+#[derive(Clone)]
+pub struct ErrorSite {
+    pub line: u32,
+    pub column: u32,
+    /// The position is in eval code or in the source text of a `Function` constructor,
+    /// counted in that code's own text.
+    pub dynamic: bool,
+    /// The [[HostDefined]] of the script record whose code raised it.
+    pub host_defined: Option<HostDefined>,
+}
+
+impl std::fmt::Debug for ErrorSite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ErrorSite")
+            .field("line", &self.line)
+            .field("column", &self.column)
+            .field("dynamic", &self.dynamic)
+            .field("host_defined", &self.host_defined.is_some())
+            .finish()
+    }
 }
 
 /// What a collection did (decision 18): the bytes `heap_bytes()` read before it and after it.
