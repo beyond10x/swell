@@ -98,6 +98,9 @@ pass. Every number below is from the gate on the wave branch of slice 3
     per code unit past 32. `JSON.parse` and `JSON.rawJSON` charge the step per code unit of
     their text before they copy it: a text parsed to its end costs what it did, and one that
     fails early has paid for its whole text.
+  - The parameter map of a mapped arguments object and the arguments a call records are
+    charged to the memory budget before they are made; a call no longer copies its
+    function's parameter list.
   - A bound function's arguments, the argument list of a bound call and the arguments a
     builtin call records are charged to the memory budget before they are copied and stay
     charged while they are held.
