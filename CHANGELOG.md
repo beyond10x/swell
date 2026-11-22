@@ -65,6 +65,9 @@ pass. Every number below is from the gate on the wave branch of slice 3
   a regular expression literal), five of slice 6 (String cases that call a method with a
   Symbol) and two of slice 18 (`trimLeft/reference-trimStart.js`,
   `trimRight/reference-trimEnd.js`). `docs/plan/slice-03-wave-2.md` names them.
+- The ESS pins moved from 0.96.0 to 0.97.3 (`spec/ess-inputs.yaml`, the conformance workspace,
+  the forge's workflow). The suite is byte-identical: 58 scenarios, 41 refusals, 58 passing on
+  the interpreter and 14 against the engine, as before.
 - The gate now fails when a public item of the host interface or a `HOST-<n>` requirement
   changed since the last release and the changelog does not name it under Host interface, in
   the name form of `docs/releasing.md`.

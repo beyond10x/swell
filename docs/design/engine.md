@@ -1259,7 +1259,7 @@ that takes time is one command that starts it and one per way it ends:
 The model is held by a conformance runner over a thin adapter to the hand-written Rust interface,
 as surf's `conformance/` is, in a Cargo workspace of its own (the one place a third-party crate
 is allowed, because `ess-conformance` brings some). The engine's code is not generated from ESS:
-the host interface is an in-process library interface, and what ESS 0.96.0 generates is
+the host interface is an in-process library interface, and what ESS 0.97.3 generates is
 components with ports (surf `AGENTS.md`, "Layout"), not a library interface. Not checked: how well
 ESS states an in-process library interface; the first slice finds out.
 

@@ -261,7 +261,7 @@ What changed in `spec/` so that the scenarios can run on the engine, and why.
 The model's scenarios are to run against the hand-written engine through a conformance target
 in a workspace of its own, as `$HOME/beyond10x/surf/conformance/` does: its own `Cargo.toml`
 with `[workspace]`, depending on `ess-conformance`, `ess-primitives` and `ess-domain` at tag
-`0.96.0` and on the system's crates by path, and a type implementing `ConformanceTarget`
+`0.97.3` and on the system's crates by path, and a type implementing `ConformanceTarget`
 (`identity`, `begin_scenario`, `establish_entity`, `end_scenario`, `execute_command`,
 `query_view`, `observe_events`, `observe_invocations`, `configure_external_outcome`,
 `redeliver_event`; `src/target.rs`). surf's target also depends on surf's generated crates;
