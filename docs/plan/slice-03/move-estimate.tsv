@@ -483,6 +483,8 @@ test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-97.js	4	4:Math.x
 test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-98.js	4	4:Math.x
 test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-99.js	4	4:Math.x
 test/built-ins/Object/getOwnPropertyDescriptors/primitive-numbers.js	4	4:Math.x
+test/built-ins/Object/getOwnPropertySymbols/length.js	6	builtin: Object.getOwnPropertySymbols answers Symbol values, which need slice 6
+test/built-ins/Object/getOwnPropertySymbols/name.js	6	builtin: Object.getOwnPropertySymbols answers Symbol values, which need slice 6
 test/built-ins/Object/getPrototypeOf/15.2.3.2-2-10.js	5	5:RegExp
 test/built-ins/Object/getPrototypeOf/15.2.3.2-2-25.js	4	4:Date
 test/built-ins/Object/getPrototypeOf/15.2.3.2-2-26.js	5	5:RegExp
