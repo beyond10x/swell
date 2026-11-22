@@ -146,6 +146,10 @@ pub enum PropertyKey {
     Identifier(String),
     String(StringLiteral),
     Number(NumberLiteral),
+    /// A ComputedPropertyName `[ AssignmentExpression ]` (`#sec-object-initializer`): the
+    /// expression, evaluated and converted by ToPropertyKey (`#sec-topropertykey`) where the
+    /// property is defined or read.
+    Computed(ExprId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -163,6 +167,12 @@ pub enum PropertyValue {
     /// ObjectAssignmentPattern or an ObjectBindingPattern; one left in an object literal is the
     /// early error of `#sec-object-initializer-static-semantics-early-errors`.
     CoverInitialized(ExprId, ExprId),
+    /// `PropertyDefinition : ... AssignmentExpression`, copied by CopyDataProperties
+    /// (`#sec-copydataproperties`). Its key is an empty `Identifier` that nothing reads. Its
+    /// span ends after the `,` that follows it, when one does: read again as the rest property
+    /// of a pattern, which no comma may follow (`#sec-destructuring-assignment`,
+    /// `#sec-destructuring-binding-patterns`), that tells it from the last property.
+    Spread(ExprId),
 }
 
 /// A `PropertyDefinition` of an object literal (`#sec-object-initializer`).
@@ -364,9 +374,13 @@ pub enum Expr {
     /// An ObjectBindingPattern or an ObjectAssignmentPattern (`#sec-destructuring-binding-patterns`,
     /// `#sec-destructuring-assignment`), its properties in source order. It destructures the
     /// value its context gives it; an assignment whose target is one has that value as its own.
+    /// With `rest`, the last of `properties` is the BindingRestProperty or AssignmentRestProperty
+    /// `... target`, whose key is an empty `Identifier` that nothing reads and which has no
+    /// default.
     ObjectPattern {
         properties: Vec<PatternProperty>,
         kind: PatternKind,
+        rest: bool,
     },
 }
 
@@ -847,6 +861,7 @@ impl HeapBytes for PropertyKey {
             PropertyKey::Identifier(name) => name.heap_bytes(),
             PropertyKey::String(s) => s.heap_bytes(),
             PropertyKey::Number(n) => n.heap_bytes(),
+            PropertyKey::Computed(_) => 0,
         }
     }
 }
@@ -1067,8 +1082,13 @@ impl Expr {
             }
             Expr::Object(properties) => {
                 for p in properties {
+                    if let PropertyKey::Computed(key) = p.key {
+                        f(Child::Expr(key));
+                    }
                     match p.value {
-                        PropertyValue::Init(e) | PropertyValue::Shorthand(e) => f(Child::Expr(e)),
+                        PropertyValue::Init(e)
+                        | PropertyValue::Shorthand(e)
+                        | PropertyValue::Spread(e) => f(Child::Expr(e)),
                         PropertyValue::CoverInitialized(name, init) => {
                             f(Child::Expr(name));
                             f(Child::Expr(init));
@@ -1081,6 +1101,9 @@ impl Expr {
             }
             Expr::ObjectPattern { properties, .. } => {
                 for p in properties {
+                    if let PropertyKey::Computed(key) = p.key {
+                        f(Child::Expr(key));
+                    }
                     if let PatternTarget::Expr(e) = p.target {
                         f(Child::Expr(e));
                     }

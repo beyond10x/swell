@@ -222,6 +222,29 @@ pub enum Instruction {
     DefineIndex(u32),
     /// `[a] -> [a]`: Set(a, "length", n, true), for a run of elisions.
     ArrayLength(u32),
+    /// `[v] -> [k]`: ToPropertyKey (`#sec-topropertykey`) of a ComputedPropertyName, at once after
+    /// its expression (`#sec-object-initializer-runtime-semantics-evaluation`,
+    /// ComputedPropertyName): `k` is a String or a Symbol.
+    ToPropertyKey,
+    /// `[o, k, v] -> [o]`: CreateDataPropertyOrThrow(o, k, v) for `[key]: value`
+    /// (`#sec-object-initializer-runtime-semantics-propertydefinitionevaluation`).
+    DefineComputedField,
+    /// `[o, k, f] -> [o]`: SetFunctionName(f, k, "get"), then the getter `f` as property `k`,
+    /// enumerable and configurable (`#sec-runtime-semantics-methoddefinitionevaluation`).
+    DefineComputedGetter,
+    /// `[o, k, f] -> [o]`: SetFunctionName(f, k, "set"), then the setter `f` as property `k`.
+    DefineComputedSetter,
+    /// `[o, k, f] -> [o]`: MakeMethod(f, o), SetFunctionName(f, k), then a data property `k` of
+    /// `o` with value `f`, writable, enumerable and configurable
+    /// (`#sec-runtime-semantics-definemethod`, `#sec-definemethodproperty`).
+    DefineComputedMethod,
+    /// `[k, f] -> [k, f]`: SetFunctionName(f, k) (`#sec-setfunctionname`) of the anonymous
+    /// function definition `f`, the value of `[key]: value` (NamedEvaluation with the key,
+    /// `#sec-object-initializer-runtime-semantics-propertydefinitionevaluation` step 5).
+    SetFunctionName,
+    /// `[o, v] -> [o]`: CopyDataProperties(o, v, an empty list) (`#sec-copydataproperties`) of
+    /// `PropertyDefinition : ... AssignmentExpression`: nothing for `undefined` and `null`.
+    CopyDataProperties,
 
     // ---- operators ------------------------------------------------------------------------
     /// `[v] -> [s]`: `typeof` (`#sec-typeof-operator`).
@@ -438,6 +461,25 @@ pub enum Instruction {
         depth: u32,
         name: u32,
     },
+    /// `[v, k1..kj, k, r1..rn] -> [v, k1..kj, k, r1..rn, x]` with `depth` n and `kept` j: `x` is
+    /// GetV(`v`, `k`), `k` a property key, the read of a property whose key is computed or whose
+    /// pattern has a rest property; the keys stay. The keys of the properties before a rest
+    /// property are its excluded names
+    /// (`#sec-destructuring-binding-patterns-runtime-semantics-propertybindinginitialization`,
+    /// `#sec-runtime-semantics-propertydestructuringassignmentevaluation`).
+    PatternGetKey {
+        depth: u32,
+        kept: u32,
+    },
+    /// `[v, k1..kj, r1..rn] -> [v, k1..kj, r1..rn, rest]` with `depth` n and `kept` j: `rest` is
+    /// a new ordinary object that CopyDataProperties(rest, v, the list k1..kj) filled, the value of
+    /// a rest property `...target` after the reference of its target
+    /// (`#sec-destructuring-binding-patterns-runtime-semantics-restbindinginitialization`,
+    /// `#sec-runtime-semantics-restdestructuringassignmentevaluation`).
+    ObjectRest {
+        depth: u32,
+        kept: u32,
+    },
 
     // ---- templates ------------------------------------------------------------------------
     /// `[v] -> [s]`: ToString (`#sec-tostring`) of a substitution of a template literal
@@ -564,6 +606,15 @@ impl Instruction {
             | Instruction::RestArguments(_)
             | Instruction::PushVarEnv(_) => None,
             Instruction::RequireObjectCoercible | Instruction::PatternGet { .. } => None,
+            Instruction::ToPropertyKey
+            | Instruction::DefineComputedField
+            | Instruction::DefineComputedGetter
+            | Instruction::DefineComputedSetter
+            | Instruction::DefineComputedMethod
+            | Instruction::SetFunctionName
+            | Instruction::CopyDataProperties
+            | Instruction::PatternGetKey { .. }
+            | Instruction::ObjectRest { .. } => None,
             Instruction::JumpIfNotUndefined(t) => Some(t),
         }
     }
