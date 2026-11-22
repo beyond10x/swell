@@ -98,6 +98,8 @@ pass. Every number below is from the gate on the wave branch of slice 3
   - The atom table grows charged first, also when deleted buckets would make it grow.
   - The compile step charges what a node's expansion holds as it is made: the script `1`
     needs 2,228 bytes of room for its parse and compile.
+- A termination that ends the deletions of an Array length write leaves the Array's old
+  length, so its length is never below an index it still has.
 - A pending interrupt ends `parse_script` before the source is copied: it answers
   `Parsed::Terminated(Interrupted)` and consumes the flag (`HOST-166`, `HOST-167`).
 - The dev and test builds carry no debug information, and the gate step
