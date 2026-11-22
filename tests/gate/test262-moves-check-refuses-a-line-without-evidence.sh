@@ -6,7 +6,8 @@
 # each and name the path of the planted line. The unchanged copy passes first.
 # The planted evidence is the first token of later-parts.tsv with the line's target slice that
 # `grep -F` finds nowhere in the case, taken from the first "part" line whose case includes no
-# harness file (so the case file is all the task may read for it).
+# harness file (so the case file is all the task may read for it). A third copy has one line
+# whose <to> is below its <from>, which the task must refuse for that order.
 # Run from the repository root: sh tests/gate/test262-moves-check-refuses-a-line-without-evidence.sh
 # The same output from task, cargo and ess on any machine: no colour, and no "::error" line
 # that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
@@ -72,6 +73,23 @@ if task -d . test262-moves-check TEST262_CACHE="$cache" TEST262_DESIGN="$design"
 fi
 grep -qF ": $first: " "$dir/planted-to-2.out" ||
   fail "task test262-moves-check did not name $first ($dir/planted-to-2.out)"
+
+# A line whose <to> is below its <from> moves a case into a delivered slice from a later one.
+# The planted line is the first one whose <to> is 3 or more: its <from> is raised to <to> + 1,
+# so its <to>, its kind, its evidence and the slice the block gives the case stay as they are
+# and the order of the two slices is the one thing wrong with it.
+below=$(awk -F'\t' '$3 + 0 >= 3 { print NR; exit }' "$moves")
+[ -n "$below" ] || fail "no line of $moves with a <to> of 3 or more"
+below_path=$(awk -F'\t' -v n="$below" 'NR == n { print $1 }' "$moves")
+awk -F'\t' -v OFS='\t' -v n="$below" 'NR == n { $2 = $3 + 1 } { print }' "$moves" > "$dir/planted-to-below-from.tsv"
+cmp -s "$moves" "$dir/planted-to-below-from.tsv" && fail "the planted <to> below <from> copy equals $moves"
+if task -d . test262-moves-check TEST262_CACHE="$cache" TEST262_DESIGN="$design" TEST262_MOVES="$dir/planted-to-below-from.tsv" > "$dir/planted-to-below-from.out" 2>&1; then
+  fail "task test262-moves-check exited 0 with a line whose <to> is below its <from>, $below_path ($dir/planted-to-below-from.out)"
+fi
+grep -qF ": $below_path: to " "$dir/planted-to-below-from.out" ||
+  fail "task test262-moves-check did not name $below_path for its <to> ($dir/planted-to-below-from.out)"
+grep -q ' is not greater than from ' "$dir/planted-to-below-from.out" ||
+  fail "task test262-moves-check did not say the <to> of $below_path is not greater than its <from> ($dir/planted-to-below-from.out)"
 
 # A token that grep -F finds only inside another word and in a comment is no evidence: a planted
 # checkout under $dir holds two cases, one with "let" only in "letter", "delete" and a comment,
