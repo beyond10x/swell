@@ -1,0 +1,124 @@
+version: '3'
+
+set: [pipefail]
+
+tasks:
+  build-stack-profiles:
+    desc: Build the two stack test binaries of swell in the release profile and in the profile stack-nodebug (dev without debug information).
+    summary: |
+      Build the two stack test binaries of swell, tests/limits_scripts.rs and tests/eval_stack.rs,
+      in the two profiles whose frames the dev build of the gate does not show: release, and
+      stack-nodebug, the dev profile without debug information (.cargo/config.toml sets both, with
+      debug = false and strip = "debuginfo", whatever a user's own cargo configuration says).
+      A build step: it runs after build and before clippy, outside the test steps and their
+      budget of 120 s.
+
+      Runs, for <profile> release and stack-nodebug, "cargo nextest run --locked -p swell
+      --cargo-profile <profile> --test limits_scripts --test eval_stack --no-run", with no
+      RUSTFLAGS of its own, so that the release build of swell is the one cargo run --release of
+      taskfiles/test262.yml builds. The log is .out/build-stack-profiles-<profile>.log; it is
+      printed when the build fails. Prints "build-stack-profiles <profile>: <cargo's Finished
+      line>" for each. It fails when a build fails.
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        for profile in release stack-nodebug; do
+          log=.out/build-stack-profiles-$profile.log
+          if ! cargo nextest run --locked -p swell --cargo-profile "$profile" --test limits_scripts --test eval_stack --no-run > "$log" 2>&1; then
+            cat "$log"
+            echo "build-stack-profiles: the build of the stack test binaries in the profile $profile failed"
+            exit 1
+          fi
+          finished=$(grep 'Finished' "$log" | tail -n 1 | sed 's/^ *//')
+          echo "build-stack-profiles $profile: ${finished:-built}"
+        done
+
+  test-stack-profiles:
+    desc: Run the four stack tests of HOST-17, HOST-152, HOST-163 and the builtins in the release profile and in stack-nodebug, and refuse a binary of theirs with debug sections.
+    summary: |
+      Run the four tests that say Limits::min_stack_bytes() is enough (HOST-17
+      host_17_deepest_reentry_parses_at_full_nesting and min_stack_bytes_is_enough_through_builtins
+      of tests/limits_scripts.rs, HOST-152 host_152_deepest_reentry_evals_at_full_nesting and
+      HOST-163 host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting
+      of tests/eval_stack.rs) in the release profile and in stack-nodebug, the dev profile
+      without debug information; the step test runs them in the dev profile with it. Each runs
+      its subject in a child process on seven eighths of min_stack_bytes(), so a frame that is
+      larger in one of these profiles fails here. A test step: check prints its gate-time line.
+
+      Runs, for <profile> release and stack-nodebug, "cargo nextest run --locked -p swell
+      --cargo-profile <profile> --profile default --test limits_scripts --test eval_stack -E
+      <the four tests by name>": every test in a process of its own, terminated at 60 s and
+      counted failed (.config/nextest.toml). The log is .out/test-stack-profiles-<profile>.log;
+      it is printed when the run fails. Prints "test-stack-profiles <profile>: <b> test
+      binaries: <p> passed, <f> failed, <s> skipped" from nextest's own lines (skipped: the other
+      tests of the two binaries), then a line "gate-slowest test-stack-profiles-<profile>
+      <seconds> <binary> <test>" for each test run, slowest first. Then it reads the paths of the
+      two binaries from "cargo nextest list --list-type binaries-only" and runs
+      taskfiles/no-debug-sections.sh on them, which prints a line per binary. It fails when
+      nextest fails, when not exactly 4 tests passed in a profile, when a profile does not have
+      exactly two binaries, and when a binary has a section whose name starts with .debug_
+      ("stack-profiles: <binary> has debug sections").
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    vars:
+      STACK_TESTS: >-
+        test(host_17_deepest_reentry_parses_at_full_nesting)
+        | test(min_stack_bytes_is_enough_through_builtins)
+        | test(host_152_deepest_reentry_evals_at_full_nesting)
+        | test(host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting)
+    cmds:
+      - mkdir -p .out
+      - |
+        for profile in release stack-nodebug; do
+          log=.out/test-stack-profiles-$profile.log
+          status=0
+          cargo nextest run --locked -p swell --cargo-profile "$profile" --profile default --test limits_scripts --test eval_stack -E {{shellQuote .STACK_TESTS}} > "$log" 2>&1 || status=$?
+          if ! LC_ALL=C awk -v status="$status" -v profile="$profile" '
+            /^ *Starting [0-9]+ tests? across [0-9]+ binar/ {
+              for (i = 1; i <= NF; i++) if ($i == "across") binaries = $(i + 1)
+            }
+            /^ *Summary \[/ {
+              summary = 1
+              for (i = 1; i <= NF; i++) {
+                w = $(i + 1); gsub(/[^a-z]/, "", w)
+                if ($i ~ /^run:?$/ && i > 2 && $(i - 2) ~ /^[0-9]+$/) run = $(i - 2)
+                if (w == "passed" && $i ~ /^[0-9]+$/) passed = $i
+                if (w == "skipped" && $i ~ /^[0-9]+$/) skipped = $i
+              }
+            }
+            END {
+              printf "test-stack-profiles %s: %d test binaries: %d passed, %d failed, %d skipped\n", profile, binaries, passed, run - passed, skipped
+              exit (status != 0 || !summary || passed != 4 || run != 4)
+            }
+          ' "$log" > "$log.summary"; then
+            cat "$log"
+            cat "$log.summary"
+            echo "test-stack-profiles: the four stack tests did not all pass in the profile $profile (nextest exit $status; 4 must pass)"
+            exit 1
+          fi
+          cat "$log.summary"
+          LC_ALL=C awk -v profile="$profile" '
+            /^ *PASS \[ *[0-9.]+s\]/ {
+              t = $0; sub(/^ *PASS \[ */, "", t); sub(/s\].*$/, "", t)
+              n = NF; printf "%s %s %s\n", t, $(n - 1), $n
+            }
+          ' "$log" | LC_ALL=C sort -k1,1gr -k2,2 -k3,3 | awk -v profile="$profile" '{ printf "gate-slowest test-stack-profiles-%s %.2f %s %s\n", profile, $1, $2, $3 }'
+          binaries=$(cargo nextest list --locked -p swell --cargo-profile "$profile" --test limits_scripts --test eval_stack --list-type binaries-only --message-format json-pretty 2> "$log.list" | LC_ALL=C awk -F '"' '$2 == "binary-path" { print $4 }') || { cat "$log.list"; echo "test-stack-profiles: cargo nextest list failed in the profile $profile"; exit 1; }
+          count=$(printf '%s\n' "$binaries" | grep -c . || true)
+          if [ "$count" -ne 2 ]; then
+            cat "$log.list"
+            echo "test-stack-profiles: $count stack test binaries listed in the profile $profile, not 2"
+            exit 1
+          fi
+          nl=$(printf '\nx')
+          nl=${nl%x}
+          set -f
+          old_ifs=$IFS
+          IFS=$nl
+          # shellcheck disable=SC2086
+          sh taskfiles/no-debug-sections.sh $binaries || exit 1
+          IFS=$old_ifs
+          set +f
+        done
