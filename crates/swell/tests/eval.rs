@@ -7,7 +7,7 @@
 //! memory budget. Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use std::cell::Cell;
 

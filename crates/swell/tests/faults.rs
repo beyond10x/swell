@@ -6,13 +6,13 @@
 //! No input of the interface reaches a broken invariant on purpose, so the test build has a
 //! switch: with the feature `fault-injection` of `crates/swell/Cargo.toml` (off by default),
 //! `Agent::inject_fault` makes the next call of one of the three find one. The test is listed
-//! in every build and runs with the feature:
-//! `cargo test -p swell --features fault-injection --test faults`. Run also with the feature
-//! `collect-every-safe-point`.
+//! in every build and runs with the feature, as a module of the one test binary:
+//! `cargo nextest run -p swell --features fault-injection --test main -E 'test(/^faults::/)'`.
+//! Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
 #[cfg(feature = "fault-injection")]
-mod support;
+use crate::support;
 
 #[cfg(feature = "fault-injection")]
 mod injected {
@@ -157,7 +157,7 @@ mod injected {
 #[test]
 #[cfg_attr(
     not(feature = "fault-injection"),
-    ignore = "needs the feature fault-injection: cargo test -p swell --features fault-injection --test faults"
+    ignore = "needs the feature fault-injection: cargo nextest run -p swell --features fault-injection --test main -E 'test(/^faults::/)'"
 )]
 fn host_71_injected_fault_at_each_call_faults_the_agent() {
     #[cfg(feature = "fault-injection")]

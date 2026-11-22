@@ -10,11 +10,11 @@
 //! is read element by element: no builtin of another story of the wave is called.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{agent, agent_with, limits, realm, stack_with_room};
 use support::script::{Outcome, define_function, eval_text, nothing, parse, run};
-use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits};
+use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
 use swell::{
     Agent, CollectReport, HookCx, Host, Job, LoadRequest, ObjectRef, Outcome as HostOutcome,
     Parsed, PropertyKey, Realm, Root, Seeds, Source, Termination, Value,
@@ -554,7 +554,7 @@ fn reach_through_apply() {
 fn apply_reaches_the_reentry_limit_on_the_promised_stack() {
     let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
     on_bounded_stack(
-        "apply_reaches_the_reentry_limit_on_the_promised_stack",
+        test_path!("apply_reaches_the_reentry_limit_on_the_promised_stack"),
         stack,
         reach_through_apply,
     )

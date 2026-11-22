@@ -9,12 +9,13 @@
 //! `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{
     TestHost, agent_with, global, is_error_of, limits, object, realm, stack_with_room,
 };
 use support::script::{Outcome, define_function, eval, eval_text};
+use support::stack::{TestPath, test_path};
 use swell::{Completion, Cx, HostCall, Limits, Outcome as HostOutcome, Value};
 
 /// A host function that calls its first argument through `cx.call`: one re-entry.
@@ -35,7 +36,7 @@ const STACK_CHILD: &str = "SWELL_EVAL_STACK_CHILD";
 /// Run `body` on a thread of `stack` bytes in a child process that runs only the test `test`
 /// (the test binary started again). A stack overflow aborts the process, which no test can
 /// catch in its own process; in the child it fails this test alone, with the child's output.
-fn on_bounded_stack(test: &str, stack: usize, body: fn()) -> Result<(), String> {
+fn on_bounded_stack(test: TestPath, stack: usize, body: fn()) -> Result<(), String> {
     let done = format!("{STACK_CHILD}: {test} on {stack} bytes done");
     if std::env::var_os(STACK_CHILD).is_some() {
         std::thread::Builder::new()
@@ -49,7 +50,7 @@ fn on_bounded_stack(test: &str, stack: usize, body: fn()) -> Result<(), String> 
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let out = std::process::Command::new(exe)
-        .args([test, "--exact", "--nocapture", "--test-threads=1"])
+        .args(["--exact", test.as_str(), "--nocapture", "--test-threads=1"])
         .env(STACK_CHILD, "1")
         .output()
         .map_err(|e| e.to_string())?;
@@ -171,7 +172,7 @@ fn eval_at_the_deepest() {
 #[test]
 fn host_152_deepest_reentry_evals_at_full_nesting() {
     on_bounded_stack(
-        "host_152_deepest_reentry_evals_at_full_nesting",
+        test_path!("host_152_deepest_reentry_evals_at_full_nesting"),
         stack_with_room(stack_limits()),
         eval_at_the_deepest,
     )
@@ -199,7 +200,9 @@ fn function_at_the_deepest() {
 #[test]
 fn host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting() {
     on_bounded_stack(
-        "host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting",
+        test_path!(
+            "host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting"
+        ),
         stack_with_room(stack_limits()),
         function_at_the_deepest,
     )

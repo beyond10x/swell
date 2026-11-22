@@ -336,8 +336,14 @@ tasks:
       denied as the gate's build and test steps have them, so that they share their artifacts)
       and runs each target with --list; then lists the doc tests of each package that has a
       library (cargo test --locked -p <package> --doc -- --list). <target> is "lib" for the unit
-      tests of a library, the stem of the file under tests/ for an integration test, the name of
-      the binary with "-" written "_" for the unit tests of a binary, and "doc" for doc tests.
+      tests of a library, the name of the target for an integration test, the name of the
+      binary with "-" written "_" for the unit tests of a binary, and "doc" for doc tests. The
+      one integration-test binary of a crate, main (tests/main.rs, story
+      one-integration-test-binary-per-crate), is written as nothing: its tests are
+      "<package>::<module>::<test>", the module being the stem of the file under tests/, so a
+      test keeps the name it had as a binary of its own (taskfiles/test-main.sh refuses a module
+      named lib, doc or as a binary). In the list of targets the name main is a placeholder,
+      "-", since read collapses an empty field between tabs; awk drops it.
       <test path> is the path the target's --list prints; for a doc test, the item path rustdoc
       prints, without the file and the line. Prints nothing when it passes. Fails when a target
       does not build or does not list its tests, and when no test is found. Its files are
@@ -358,7 +364,7 @@ tasks:
           | select(.reason == "compiler-artifact" and .profile.test and .executable != null)
           | [$names[.package_id],
              (if (.target.kind | index("lib")) then "lib"
-              elif (.target.kind | index("test")) then .target.name
+              elif (.target.kind | index("test")) then (if .target.name == "main" then "-" else .target.name end)
               else (.target.name | gsub("-"; "_")) end),
              .executable]
           | @tsv
@@ -370,7 +376,10 @@ tasks:
         while IFS="$tab" read -r package target executable; do
           "$executable" --list >"$out/list.txt" 2>"$out/list.log" \
             || { cat "$out/list.log"; echo "host-requirements-test-list: $package::$target does not list its tests"; exit 1; }
-          awk -v p="$package::$target::" '/: test$/ { sub(/: test$/, ""); print p $0 }' "$out/list.txt" >>"$out/tests.unsorted"
+          awk -v package="$package" -v target="$target" '
+            BEGIN { p = package "::" (target == "-" ? "" : target "::") }
+            /: test$/ { sub(/: test$/, ""); print p $0 }
+          ' "$out/list.txt" >>"$out/tests.unsorted"
         done <"$out/targets.tsv"
         jq -r '.packages[] | select(any(.targets[]; .kind | index("lib"))) | .name' "$out/metadata.json" >"$out/libraries.txt"
         while read -r package; do

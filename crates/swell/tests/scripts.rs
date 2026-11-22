@@ -5,7 +5,7 @@
 //! `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use std::rc::Rc;
 use support::host::{TestHost, agent, agent_with, global, is_error_of, limits, object, realm};

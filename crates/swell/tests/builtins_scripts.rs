@@ -4,7 +4,7 @@
 //! `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::script::{Outcome, run_both};
 

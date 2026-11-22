@@ -3,7 +3,7 @@
 //! `story:interpreter-and-script-entry-points`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use std::thread;
 use std::time::Duration;

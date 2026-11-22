@@ -3,6 +3,11 @@ name = "swell-test262"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
+autotests = false
+
+[[test]]
+name = "main"
+path = "tests/main.rs"
 
 [dependencies]
 swell = { path = "../swell" }
