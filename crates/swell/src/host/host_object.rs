@@ -11,7 +11,10 @@
 use std::any::Any;
 
 use crate::heap::collect::Mark;
-use crate::value::{ObjectRef, RealmRef, Value};
+use crate::host::ErrorKind;
+use crate::realm::WellKnown;
+use crate::realm::intrinsics::Intrinsic;
+use crate::value::{ObjectRef, RealmRef, SymbolRef, Value};
 
 /// The brand of a host object: which Web IDL interface it implements, in the host's numbering
 /// (`webidl:is-a-platform-object`).
@@ -47,9 +50,59 @@ impl Tracer<'_> {
 pub enum Prototype {
     Object(ObjectRef),
     Null,
-    /// The `%Object.prototype%` of that realm, the one intrinsic a host can name (decision 7:
-    /// the setup closure builds the global's prototype chain from it).
+    /// The `%Object.prototype%` of that realm, without a call (decision 7).
     ObjectPrototypeOf(RealmRef),
+}
+
+/// The intrinsics a host can name (Web IDL's need for its interface objects, prototypes and
+/// exceptions); a closed list, grown only by a decision of the design with a changelog line
+/// (`docs/design/host-interface.md`, decision 7, "The closed list"). Each is the realm's
+/// original object, whatever a script did to the globals since.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum HostIntrinsic {
+    /// `%Object.prototype%`: the [[Prototype]] of an interface prototype object
+    /// (`webidl:interface-prototype-object`).
+    ObjectPrototype,
+    /// `%Function.prototype%`: the [[Prototype]] of an interface object whose interface has no
+    /// parent (`webidl:interface-object`).
+    FunctionPrototype,
+    /// `%Error.prototype%`: the [[Prototype]] of `DOMException`'s interface prototype object
+    /// (`webidl:interface-prototype-object`).
+    ErrorPrototype,
+}
+
+impl HostIntrinsic {
+    /// The realm's intrinsic (`#sec-well-known-intrinsic-objects`, Table 6) this entry names.
+    pub(crate) fn intrinsic(self) -> Intrinsic {
+        match self {
+            HostIntrinsic::ObjectPrototype => Intrinsic::ObjectPrototype,
+            HostIntrinsic::FunctionPrototype => Intrinsic::FunctionPrototype,
+            HostIntrinsic::ErrorPrototype => Intrinsic::ErrorPrototype(ErrorKind::Error),
+        }
+    }
+}
+
+/// The well-known symbols a host can name (`#sec-well-known-symbols`), shared by every realm
+/// of the agent; a closed list, grown as [`HostIntrinsic`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum WellKnownSymbol {
+    /// `%Symbol.toStringTag%`: the key of an object's class string (`webidl:dfn-class-string`).
+    ToStringTag,
+    /// `%Symbol.unscopables%`: the key of the object of an interface's `[Unscopable]` members
+    /// (`webidl:interface-prototype-object`).
+    Unscopables,
+}
+
+impl WellKnownSymbol {
+    /// The symbol of `symbols` this entry names.
+    pub(crate) fn of(self, symbols: &WellKnown) -> SymbolRef {
+        match self {
+            WellKnownSymbol::ToStringTag => symbols.to_string_tag,
+            WellKnownSymbol::Unscopables => symbols.unscopables,
+        }
+    }
 }
 
 /// What `new_host_object` makes.

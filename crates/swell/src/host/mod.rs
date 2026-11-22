@@ -537,6 +537,46 @@ macro_rules! scoped_methods {
             ) -> Result<Completion<()>, HostError> {
                 self.agent.scoped_resize_host_bytes(charge, bytes)
             }
+
+            /// The intrinsic `which` of `realm`, handed out (decision 7, "The closed list"): the
+            /// realm's original object. A read: no code, no hook, no step, no allocation. A
+            /// realm `create_realm` did not make, or one freed, answers `Err(StaleHandle)`.
+            pub fn intrinsic(
+                &mut self,
+                realm: RealmRef,
+                which: HostIntrinsic,
+            ) -> Result<ObjectRef, HostError> {
+                let agent = &mut *self.agent;
+                agent.alive()?;
+                let record = agent.host_realm(realm.handle).map_err(host_error)?;
+                let Some(intrinsics) = &record.intrinsics else {
+                    // A realm the host can name has its intrinsics: a broken invariant.
+                    agent.fault();
+                    return Err(HostError::Faulted);
+                };
+                let object = intrinsics.get(which.intrinsic());
+                agent.hand_out(Value::Object(object));
+                Ok(object)
+            }
+
+            /// The well-known symbol `which` (shared by all realms of the agent), handed out
+            /// (decision 7, "The closed list"). A read, as `intrinsic` is.
+            pub fn well_known_symbol(
+                &mut self,
+                which: WellKnownSymbol,
+            ) -> Result<crate::value::SymbolRef, HostError> {
+                let agent = &mut *self.agent;
+                agent.alive()?;
+                let Some(symbols) = agent.well_known() else {
+                    // A live realm keeps the symbols, and host code runs only while one lives:
+                    // a broken invariant.
+                    agent.fault();
+                    return Err(HostError::Faulted);
+                };
+                let symbol = which.of(&symbols);
+                agent.hand_out(Value::Symbol(symbol));
+                Ok(symbol)
+            }
         }
     };
 }
