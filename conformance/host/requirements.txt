@@ -167,7 +167,7 @@ HOST-166 test swell::interrupt::host_166_a_pending_interrupt_ends_parse_script_b
 HOST-167 test swell::interrupt::host_167_an_interrupt_set_in_a_host_function_ends_its_cx_parse_script
 HOST-168 pending slice 6
 HOST-169 pending slice 6
-HOST-170 pending slice 6
+HOST-170 test swell::collect::host_170_a_value_read_from_a_dropped_root_lives_until_its_scope_ends
 HOST-171 pending slice 6
 HOST-172 pending slice 6
 HOST-173 pending slice 6

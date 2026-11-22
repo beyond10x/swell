@@ -265,7 +265,7 @@ struct Good {
 }
 
 /// The live values of `good`, read in `cx`.
-fn good_values(cx: &Cx<'_, Recorder>, good: &Good) -> (ObjectRef, Value, PropertyKey) {
+fn good_values(cx: &mut Cx<'_, Recorder>, good: &Good) -> (ObjectRef, Value, PropertyKey) {
     let Ok(Value::Object(object)) = cx.get(&good.object) else {
         panic!("the good object");
     };

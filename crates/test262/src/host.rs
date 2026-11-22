@@ -307,11 +307,27 @@ fn eval_script_steps(cx: &mut Cx<'_, RunnerHost>, call: HostCall<'_>) -> Complet
 /// The realm of the `evalScript` function `callee`: the realm the host keeps at the index of
 /// that function. The host data of a host function cannot be read back through `Cx`
 /// (`host_data` reads host objects only), so the function is found among those the host keeps.
-fn realm_of(cx: &Cx<'_, RunnerHost>, callee: ObjectRef) -> Result<Option<RealmRef>, HostError> {
-    let host = cx.host();
-    for (eval_script, realm) in host.eval_scripts.iter().zip(&host.realms) {
+/// `get` takes the context mutably, so the roots are taken out of the host for the reads and
+/// put back before the answer: the reads run no code and reach no hook.
+fn realm_of(cx: &mut Cx<'_, RunnerHost>, callee: ObjectRef) -> Result<Option<RealmRef>, HostError> {
+    let eval_scripts = std::mem::take(&mut cx.host_mut().eval_scripts);
+    let found = index_of(cx, &eval_scripts, callee);
+    cx.host_mut().eval_scripts = eval_scripts;
+    let Some(realm) = found?.and_then(|index| cx.host().realms.get(index).map(Rc::clone)) else {
+        return Ok(None);
+    };
+    cx.realm_ref(&realm).map(Some)
+}
+
+/// The index of the root among `eval_scripts` that holds `callee`.
+fn index_of(
+    cx: &mut Cx<'_, RunnerHost>,
+    eval_scripts: &[Root],
+    callee: ObjectRef,
+) -> Result<Option<usize>, HostError> {
+    for (index, eval_script) in eval_scripts.iter().enumerate() {
         if cx.get(eval_script)? == Value::Object(callee) {
-            return cx.realm_ref(realm).map(Some);
+            return Ok(Some(index));
         }
     }
     Ok(None)

@@ -199,3 +199,24 @@ pub fn host_4_hook_cx_cannot_call_construct_or_evaluate_a_script() {}
 /// ```
 #[cfg(doctest)]
 pub fn host_5_agent_call_inside_a_host_function() {}
+
+/// HOST-170: `get` of `Cx` and `HookCx` takes `&mut self`, since the value it reads is handed
+/// out to the running scope (section 4). A read through a shared `&HookCx` does not compile:
+///
+/// ```compile_fail,E0596
+/// use swell::{Host, HookCx, Root};
+/// fn read<H: Host>(cx: &HookCx<'_, H>, root: &Root) {
+///     let _ = cx.get(root);
+/// }
+/// ```
+///
+/// and the same read through a `&mut HookCx` compiles:
+///
+/// ```
+/// use swell::{Host, HookCx, Root};
+/// fn read<H: Host>(cx: &mut HookCx<'_, H>, root: &Root) {
+///     let _ = cx.get(root);
+/// }
+/// ```
+#[cfg(doctest)]
+pub fn hook_cx_get_takes_mut_self() {}

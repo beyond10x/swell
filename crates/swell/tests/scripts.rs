@@ -238,8 +238,9 @@ fn host_50_setup_this_is_script_this() {
         .with_cx(&realm, |cx| {
             let this = cx.get(&kept).unwrap();
             assert_eq!(cx.get(&found).unwrap(), this);
+            let global_this = object(cx, &found);
             assert_eq!(
-                cx.brand(object(cx, &found)),
+                cx.brand(global_this),
                 Ok(Some(Brand(2))),
                 "the global `this`, not the global object"
             );
