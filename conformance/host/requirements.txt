@@ -180,8 +180,8 @@ HOST-179 pending slice 6
 HOST-180 test swell::calls::host_180_an_interface_object_has_its_parent_as_prototype
 HOST-181 pending slice 6
 HOST-182 pending slice 6
-HOST-183 pending slice 6
-HOST-184 pending slice 6
+HOST-183 test swell::host_objects::host_183_the_host_names_three_intrinsics
+HOST-184 test swell::host_objects::host_184_the_host_names_two_symbols
 HOST-185 pending slice 6
 HOST-186 pending slice 6
 HOST-187 pending slice 6

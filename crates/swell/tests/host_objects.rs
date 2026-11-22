@@ -11,8 +11,9 @@ use std::rc::Rc;
 use support::host::TestHost;
 use support::script::{Outcome as Shown, define_function, eval_text};
 use swell::{
-    Agent, AgentState, Brand, Completion, Cx, HostCall, HostData, HostError, HostObjectSpec,
-    ObjectRef, Outcome, Parsed, PropertyKey, Prototype, Source, Termination, Tracer, Value,
+    Abrupt, Agent, AgentState, Brand, Completion, Cx, GlobalObjects, HookCx, HostCall, HostData,
+    HostError, HostIntrinsic, HostObjectSpec, ObjectRef, Outcome, Parsed, PropertyKey, Prototype,
+    RealmRef, Root, Source, SymbolRef, Termination, Tracer, Value, WellKnownSymbol,
 };
 
 const NODE: Brand = Brand(1);
@@ -460,4 +461,336 @@ fn a_kept_handle_of_a_live_object_is_the_same_object() {
     );
     assert_eq!(agent.host().count, 2, "node(0) replaced the stale handle");
     assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// The three intrinsics of the closed list (`docs/design/host-interface.md`, decision 7), each
+/// with the script that reads it in a realm whose globals are the originals.
+const INTRINSICS: [(HostIntrinsic, &str); 3] = [
+    (HostIntrinsic::FunctionPrototype, "Function.prototype"),
+    (HostIntrinsic::ErrorPrototype, "Error.prototype"),
+    (HostIntrinsic::ObjectPrototype, "Object.prototype"),
+];
+
+/// Set the global property `name` of the global object `global` to `value`.
+fn bind(cx: &mut Cx<'_, TestHost>, global: ObjectRef, name: &str, value: Value) {
+    let key = support::host::key(cx, name);
+    cx.set(global, key, value, true).unwrap().unwrap();
+}
+
+/// Define the own data property `key` of `object` as `value`: writable, configurable, not
+/// enumerable.
+fn define(cx: &mut Cx<'_, TestHost>, object: ObjectRef, key: PropertyKey, value: Value) {
+    let descriptor = support::host::data(value, true, false, true);
+    cx.define_property_or_throw(object, key, descriptor)
+        .unwrap()
+        .unwrap();
+}
+
+/// A host object of `brand` whose prototype is `prototype`, with no data.
+fn on(prototype: Prototype, brand: Brand) -> HostObjectSpec {
+    HostObjectSpec {
+        prototype,
+        brand,
+        data: None,
+    }
+}
+
+/// HOST-183 (`webidl:interface-object`, `webidl:interface-prototype-object`): in the setup
+/// closure and in `with_cx`, `intrinsic(realm, FunctionPrototype)`, `ErrorPrototype` and
+/// `ObjectPrototype` answer the objects the scripts `Function.prototype`, `Error.prototype` and
+/// `Object.prototype` read in that realm, also after a script set the globals `Function`,
+/// `Error` and `Object` to `null`; a second realm's answers differ from the first's; a realm
+/// `create_realm` did not make, and one a collection freed, answer `Err(StaleHandle)`. The
+/// reads are reads: after a `collect`, `heap_bytes()` and `live_bytes()` read the same before
+/// and after a `with_cx` of 3,000 of them, and no hook is called.
+#[test]
+fn host_183_the_host_names_three_intrinsics() {
+    let mut agent = support::host::agent().unwrap();
+    // The setup closure roots the three, and makes the global on the `%Object.prototype%` it
+    // names.
+    let mut in_setup: Vec<Root> = Vec::new();
+    let mut setup = |cx: &mut HookCx<'_, TestHost>, realm: RealmRef| -> Completion<GlobalObjects> {
+        for (which, _) in INTRINSICS {
+            let named = cx.intrinsic(realm, which).unwrap();
+            in_setup.push(cx.root(Value::Object(named)).unwrap());
+        }
+        let object_prototype = cx.intrinsic(realm, HostIntrinsic::ObjectPrototype).unwrap();
+        let global = cx
+            .new_host_object(on(Prototype::Object(object_prototype), OTHER))
+            .unwrap()?;
+        Ok(GlobalObjects { global, this: None })
+    };
+    let Outcome::Normal(realm) = agent.create_realm(Some(&mut setup), None).unwrap() else {
+        panic!("create_realm did not answer Normal");
+    };
+    assert_eq!(in_setup.len(), INTRINSICS.len());
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "Object.getPrototypeOf(this) === Object.prototype"
+        ),
+        Shown::Normal("true".to_string()),
+        "the global is on the named %Object.prototype%"
+    );
+
+    let first = agent
+        .with_cx(&realm, |cx| {
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            let mut first = Vec::new();
+            for ((which, source), from_setup) in INTRINSICS.into_iter().zip(&in_setup) {
+                let read = evaluate(cx, &realm, source);
+                let named = Value::Object(cx.intrinsic(realm_ref, which).unwrap());
+                assert_eq!(named, read, "{which:?} is what {source} reads");
+                assert_eq!(
+                    cx.get(from_setup).unwrap(),
+                    read,
+                    "{which:?} in the setup closure"
+                );
+                first.push(cx.root(read).unwrap());
+            }
+            first
+        })
+        .unwrap();
+
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "Function = null; Error = null; Object = null; \
+             Function === null && Error === null && Object === null"
+        ),
+        Shown::Normal("true".to_string())
+    );
+    agent
+        .with_cx(&realm, |cx| {
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            for ((which, source), first) in INTRINSICS.into_iter().zip(&first) {
+                let named = Value::Object(cx.intrinsic(realm_ref, which).unwrap());
+                assert_eq!(
+                    named,
+                    cx.get(first).unwrap(),
+                    "{which:?} after the script set the global of {source} to null"
+                );
+            }
+        })
+        .unwrap();
+
+    let second = support::host::realm(&mut agent);
+    let second_ref = agent
+        .with_cx(&second, |cx| {
+            let second_ref = cx.realm_ref(&second).unwrap();
+            for ((which, source), first) in INTRINSICS.into_iter().zip(&first) {
+                let named = Value::Object(cx.intrinsic(second_ref, which).unwrap());
+                assert_eq!(named, evaluate(cx, &second, source), "{which:?}");
+                assert_ne!(
+                    named,
+                    cx.get(first).unwrap(),
+                    "{which:?} of the second realm is its own"
+                );
+            }
+            second_ref
+        })
+        .unwrap();
+
+    assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+    let before = (agent.heap_bytes().unwrap(), agent.live_bytes().unwrap());
+    agent
+        .with_cx(&realm, |cx| {
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            for _ in 0..1_000 {
+                for (which, _) in INTRINSICS {
+                    cx.intrinsic(realm_ref, which).unwrap();
+                }
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        (agent.heap_bytes().unwrap(), agent.live_bytes().unwrap()),
+        before,
+        "(heap_bytes, live_bytes) after 3,000 reads"
+    );
+
+    // A realm a collection freed, and one `create_realm` did not make.
+    drop(second);
+    assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+    assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+    let mut unmade = None;
+    let mut throws =
+        |_cx: &mut HookCx<'_, TestHost>, made: RealmRef| -> Completion<GlobalObjects> {
+            unmade = Some(made);
+            Err(Abrupt::Throw(Value::Number(1.0)))
+        };
+    let created = agent.create_realm(Some(&mut throws), None).unwrap();
+    assert!(matches!(created, Outcome::Throw(_)), "{created:?}");
+    let unmade = unmade.unwrap();
+    agent
+        .with_cx(&realm, |cx| {
+            for (which, _) in INTRINSICS {
+                assert_eq!(
+                    cx.intrinsic(second_ref, which),
+                    Err(HostError::StaleHandle),
+                    "{which:?} of a freed realm"
+                );
+                assert_eq!(
+                    cx.intrinsic(unmade, which),
+                    Err(HostError::StaleHandle),
+                    "{which:?} of a realm create_realm did not make"
+                );
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        agent.host().calls,
+        Vec::<String>::new(),
+        "no hook was called"
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// HOST-184 (`webidl:dfn-class-string`, `webidl:interface-prototype-object`): a host object `n`
+/// whose own `@@toStringTag` data property, defined with `well_known_symbol(ToStringTag)`, is
+/// `"Node"` makes the script `Object.prototype.toString.call(n)` answer `"[object Node]"`; with
+/// an own `@@unscopables` object whose `before` is `true`, `with (n) { before }` reads the outer
+/// binding and not `n`'s own `before`, which a host object without it gives. The symbols are
+/// the same in two realms of the agent: those `with_cx` of the first realm and the setup closure
+/// of the second name are equal, and a script of the second realm reads the first realm's `n`
+/// as the first realm's script does.
+#[test]
+fn host_184_the_host_names_two_symbols() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    let global_root = support::host::global(&mut agent, &realm);
+    let (n_root, symbols) = agent
+        .with_cx(&realm, |cx| {
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            let tag = cx.well_known_symbol(WellKnownSymbol::ToStringTag).unwrap();
+            let unscopables = cx.well_known_symbol(WellKnownSymbol::Unscopables).unwrap();
+            let on_object_prototype = || on(Prototype::ObjectPrototypeOf(realm_ref), NODE);
+            let blocked = cx.new_host_object(on_object_prototype()).unwrap().unwrap();
+            let before = support::host::key(cx, "before");
+            define(cx, blocked, before, Value::Boolean(true));
+
+            let n = cx.new_host_object(on_object_prototype()).unwrap().unwrap();
+            let node = support::host::string(cx, "Node");
+            define(cx, n, PropertyKey::Symbol(tag), node);
+            define(
+                cx,
+                n,
+                PropertyKey::Symbol(unscopables),
+                Value::Object(blocked),
+            );
+            let inner = support::host::string(cx, "inner");
+            define(cx, n, before, inner);
+
+            let m = cx.new_host_object(on_object_prototype()).unwrap().unwrap();
+            define(cx, m, before, inner);
+
+            let global = support::host::object(cx, &global_root);
+            bind(cx, global, "n", Value::Object(n));
+            bind(cx, global, "m", Value::Object(m));
+            (cx.root(Value::Object(n)).unwrap(), [tag, unscopables])
+        })
+        .unwrap();
+
+    let shown = |text: &str| Shown::Normal(format!("\"{text}\""));
+    assert_eq!(
+        eval_text(&mut agent, &realm, "Object.prototype.toString.call(n)"),
+        shown("[object Node]")
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var before = \"outer\"; with (n) { before }"
+        ),
+        shown("outer")
+    );
+    assert_eq!(eval_text(&mut agent, &realm, "n.before"), shown("inner"));
+    assert_eq!(
+        eval_text(&mut agent, &realm, "with (m) { before }"),
+        shown("inner"),
+        "without @@unscopables the with statement reads the object's own property"
+    );
+
+    let mut in_setup: Vec<SymbolRef> = Vec::new();
+    let mut setup = |cx: &mut HookCx<'_, TestHost>, realm: RealmRef| -> Completion<GlobalObjects> {
+        in_setup.push(cx.well_known_symbol(WellKnownSymbol::ToStringTag).unwrap());
+        in_setup.push(cx.well_known_symbol(WellKnownSymbol::Unscopables).unwrap());
+        let global = cx
+            .new_host_object(on(Prototype::ObjectPrototypeOf(realm), OTHER))
+            .unwrap()?;
+        Ok(GlobalObjects { global, this: None })
+    };
+    let Outcome::Normal(second) = agent.create_realm(Some(&mut setup), None).unwrap() else {
+        panic!("create_realm did not answer Normal");
+    };
+    assert_eq!(in_setup, symbols, "the setup closure of the second realm");
+
+    let (named, read) = agent
+        .with_cx(&second, |cx| {
+            let named = [
+                cx.well_known_symbol(WellKnownSymbol::ToStringTag).unwrap(),
+                cx.well_known_symbol(WellKnownSymbol::Unscopables).unwrap(),
+            ];
+            let n = support::host::object(cx, &n_root);
+            let probe = evaluate(
+                cx,
+                &second,
+                "(function (n) { var before = \"outer\"; \
+                 with (n) { return Object.prototype.toString.call(n) + \" \" + before; } })",
+            );
+            let answer = cx
+                .call(probe, Value::Undefined, &[Value::Object(n)])
+                .unwrap()
+                .unwrap();
+            (named, support::host::text(cx, answer))
+        })
+        .unwrap();
+    assert_eq!(named, symbols, "with_cx of the second realm");
+    assert_eq!(read, "[object Node] outer", "the second realm's script");
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// A `DOMException` reaches `%Error.prototype%` (`webidl:interface-prototype-object`:
+/// "Otherwise, if interface is the DOMException interface, then set proto to
+/// realm.[[Intrinsics]].[[%Error.prototype%]]."): a host object `e` whose prototype is a host
+/// object whose prototype is `intrinsic(realm, ErrorPrototype)` makes `e instanceof Error`
+/// answer `true`. Whether `e` has [[ErrorData]] is not asserted here.
+#[test]
+fn a_dom_exception_reaches_error_prototype() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    let global_root = support::host::global(&mut agent, &realm);
+    agent
+        .with_cx(&realm, |cx| {
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            let error_prototype = cx
+                .intrinsic(realm_ref, HostIntrinsic::ErrorPrototype)
+                .unwrap();
+            let interface_prototype = cx
+                .new_host_object(on(Prototype::Object(error_prototype), OTHER))
+                .unwrap()
+                .unwrap();
+            let e = cx
+                .new_host_object(on(Prototype::Object(interface_prototype), NODE))
+                .unwrap()
+                .unwrap();
+            let global = support::host::object(cx, &global_root);
+            bind(cx, global, "e", Value::Object(e));
+        })
+        .unwrap();
+    assert_eq!(
+        eval_text(&mut agent, &realm, "e instanceof Error"),
+        Shown::Normal("true".to_string())
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "Object.getPrototypeOf(Object.getPrototypeOf(e)) === Error.prototype \
+             && !(e instanceof TypeError)"
+        ),
+        Shown::Normal("true".to_string())
+    );
 }
