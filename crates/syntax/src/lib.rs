@@ -69,10 +69,11 @@ pub struct ParseOptions {
 
 /// The Rust stack, in bytes, one level of [`ParseOptions::max_nesting`] may take: the bound the
 /// frames of every recursion of the parser hold, in an unoptimised build and an optimised one.
-/// Measured on x86_64 with rustc 1.99.1 without incremental compilation: at most 172 bytes per
-/// level in the debug profile (nested `if`, `switch`, function declarations and conditional
-/// expressions), 115 in the release profile (function declarations). `tests/sources.rs` holds
-/// every kind of nesting to it (`every_nesting_kind_fits_the_stack_bound`).
+/// Measured on x86_64 with rustc 1.99.1 as the smallest stack that holds the deepest source at
+/// limits 2,000 and 10,000: at most 181.3 bytes per level in the dev profile without debug
+/// information, 213.3 with it (profile `stack-debug`; both nested arrow functions) and 149.3 in
+/// the release profile (nested `for`). `tests/sources.rs` holds every kind of nesting to it
+/// (`every_nesting_kind_fits_the_stack_bound`).
 pub const STACK_BYTES_PER_LEVEL: usize = 224;
 
 /// The Rust stack, in bytes, a parse takes besides its levels, the thread's own start included.

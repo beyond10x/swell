@@ -84,6 +84,13 @@ Every number below comes from the gate, `task check`, on the released commit.
   requirements are also tested in the release profile and in a profile without debug
   information, in the lane `slow`.
 
+### Fixed
+
+- Nested arrow functions keep the parser within `ParseOptions::stack_bytes` (229.3 bytes a
+  level, now 181.3; at `parser_nesting` 10,000 the stated stack overflowed), and the gate's
+  check of the stack bound runs on a quarter of the stack of 10,000 levels, so it fails wherever
+  the full count does.
+
 ### Host interface
 
 - Breaking: `get` takes `&mut self`. The value read is handed to the running scope and stays
