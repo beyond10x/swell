@@ -1,0 +1,33 @@
+# The paths of planning and prose files, read by taskfiles/classify-changes.sh. A change whose
+# files are all planning or prose files skips the build and the tests on the forge
+# (.github/workflows/check.yml); any other change runs task check.
+#
+# One line per pattern: "<class> <pattern>". A line that starts with # is a comment; a blank
+# line is skipped. The class is one of
+#   prose  a planning or prose file;
+#   code   a file a gate step, a test or a build reads, even if a prose line matches it too;
+#   site   a file of a built site (website/): code, and the classifier also reports site=true.
+# A pattern is a shell pattern over the path from the repository root, in which * also matches
+# "/" (".engineering/*" is every file under .engineering/). A path that no line matches is
+# code, and a path that matches code or site is code whatever prose line matches it. The
+# forge reads this file from the base of the change, and a change of this file is code.
+#
+# A Markdown file a gate step reads as data gets a code line here, with the task that reads it.
+
+prose .engineering/*
+prose *.md
+
+# test262-check, test262-moves-check, test262-sources (taskfiles/test262.yml) and site-data
+# (taskfiles/site.yml): the swell-slices block and the count table.
+code docs/design/engine.md
+# host-requirements-check (taskfiles/host-requirements.yml): the HOST-<n> requirements.
+code docs/design/host-interface.md
+# Files under these directories are read by tests, builds and gate steps (the fixtures
+# crates/test262/tests/fixtures/*.md are read by the tests of swell-test262).
+code crates/*
+code tests/*
+code conformance/*
+code spec/*
+code data/*
+
+site website/*
