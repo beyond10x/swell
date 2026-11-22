@@ -10,9 +10,10 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-22
+
 The third delivery slice, the core library, is delivered: 7,010 of its 7,011 test262 cases
-pass. Every number below is from the gate on the wave branch of slice 3
-(`docs/plan/slice-03-gate-and-site.md`).
+pass.
 
 ### Added
 
@@ -57,7 +58,7 @@ pass. Every number below is from the gate on the wave branch of slice 3
 
 - The gate runs its tests under cargo-nextest, ends a test at 60 seconds, builds every test
   binary before its clock and holds its test steps to 120 seconds
-  (`gate-time test-steps 80.5 of 120`). It no longer makes the full test262 run: it compares a
+  (`gate-time test-steps 100.7 of 120`). It no longer makes the full test262 run: it compares a
   digest of the run's sources with a committed one, and the full run is the lane `slow`
   (`task slow`), which a release waits for.
 - The compiler is pinned in `rust-toolchain.toml` (1.99.1) for the gate and the forge alike,
@@ -191,6 +192,40 @@ pass. Every number below is from the gate on the wave branch of slice 3
   also after its slot holds a new object. No code changed for it; it is tested now.
 - `HOST-165`, `HOST-166`, `HOST-167`, `HOST-168`, `HOST-169`, `HOST-170`, `HOST-171`, `HOST-172`, `HOST-173`, `HOST-174`, `HOST-175`, `HOST-176`, `HOST-177`, `HOST-178`, `HOST-179`, `HOST-180`, `HOST-181`, `HOST-182`, `HOST-183`, `HOST-184`, `HOST-185`, `HOST-186`, `HOST-187`, `HOST-188`, `HOST-189`, `HOST-190`: new requirements.
 - `HOST-29`, `HOST-52`, `HOST-70`, `HOST-102`: changed requirements.
+
+### Limits of this release
+
+- Not in the language yet: regular expression literals, identifiers outside ASCII, and
+  everything after ES5 (`let` and `const`, arrow functions, classes, generators, promises,
+  modules, and the rest). A script that uses one is refused with a `SyntaxError` that names
+  the delivery slice that brings it.
+  [`docs/design/engine.md`](docs/design/engine.md), section 12, lists the nineteen delivery
+  slices and what each brings.
+- The builtins end at the core library. `Symbol`, `Map`, `Set`, `Promise`, `Reflect`, `Proxy`,
+  `Date`, `RegExp`, `parseInt`, `parseFloat` and all of `Math` but `max` do not exist. A
+  String method that needs the Unicode tables of a later slice refuses a code unit outside
+  ASCII (`HOST-165`).
+- test262: 12,120 of the 44,812 cases the gate's digest stands for pass, 27.0 %. The line
+  reads `test262 total 53801 8982 7 44812 12120 32692 0`: 53,801 cases exist, 8,982 are
+  excluded by recorded decision, 7 do not apply, 44,812 run, 12,120 pass, 32,692 fail, none
+  ends at a budget. The first two delivery slices pass all their cases in all their runs and
+  the third all but one (`test262-slice 01 31 62 0 0 31 31 0 0`,
+  `test262-slice 02 4259 7543 0 0 4259 4259 0 0`,
+  `test262-slice 03 7011 13829 0 0 7011 7010 1 0`). A refusal never counts as a pass, also
+  when the script catches it.
+- The host interface: 84 of its 165 numbered requirements
+  ([`docs/design/host-interface.md`](docs/design/host-interface.md)) are held by a test in
+  this commit; none is pending for the first three slices. 14 of the 58 scenarios of the
+  interface's model pass on the engine, and the other 44 name what they wait for. The
+  interface will change before 1.0.
+- The engine's own tests: `68 test binaries: 667 passed, 0 failed, 1 ignored`, the tests of
+  the engine crate in the mode that collects garbage at every safe point
+  (`test-collect: 49 test binaries: 506 passed, 0 failed, 1 ignored`), and the test of an
+  injected engine fault (`test-faults: 1 test binaries: 1 passed, 0 failed, 0 ignored`).
+- No binary, no command line, and the crates are not on a package registry. To use the
+  library, depend on the repository at the tag:
+  `swell = { git = "https://github.com/beyond10x/swell", tag = "0.3.0" }`.
+- Measured on x86_64 Linux with rustc 1.99.1 only.
 
 ## [0.2.0] - 2026-11-21
 
@@ -364,6 +399,7 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/beyond10x/swell/releases/tag/0.3.0
 [0.2.0]: https://github.com/beyond10x/swell/releases/tag/0.2.0
 [0.1.0]: https://github.com/beyond10x/swell/releases/tag/0.1.0
