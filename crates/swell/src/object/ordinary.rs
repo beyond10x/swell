@@ -2,8 +2,9 @@
 //! every ordinary internal method, ValidateAndApplyPropertyDescriptor, OrdinaryObjectCreate and
 //! OrdinaryCreateFromConstructor, with the slots of the ordinary objects of this part: the
 //! Boolean and Number objects ([[BooleanData]], [[NumberData]]), the Error objects
-//! ([[ErrorData]]) and `%Object.prototype%`, an immutable prototype exotic object (10.4.7) whose
-//! other methods are ordinary. Written by `story:object-model-and-realms`.
+//! ([[ErrorData]]), the raw JSON objects ([[IsRawJSON]], `story:json-parse-and-raw-json`) and
+//! `%Object.prototype%`, an immutable prototype exotic object (10.4.7) whose other methods are
+//! ordinary. Written by `story:object-model-and-realms`.
 //!
 //! A walk up the prototype chain is a loop, never a Rust recursion, and charges one step per
 //! object it passes (decision 2): no proxy exists before slice 9, so every [[Get]],
@@ -30,6 +31,9 @@ pub(crate) enum OrdinaryData {
     Number(f64),
     /// [[ErrorData]].
     Error,
+    /// [[IsRawJSON]], of the objects `JSON.rawJSON` makes (`#sec-json.rawjson`, written by
+    /// `story:json-parse-and-raw-json`): a slot with no value, which holds no handle.
+    RawJson,
 }
 
 /// The slots of an ordinary object beyond the common record.
