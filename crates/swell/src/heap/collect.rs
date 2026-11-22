@@ -574,7 +574,8 @@ mod tests {
 
     /// The lane `slow` sets `SWELL_FULL_COUNTS=1` for the full counts of a test.
     fn full_counts() -> bool {
-        std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+        // HOST-2 (source_scan.rs): no run-time environment read in engine sources, tests included.
+        matches!(option_env!("SWELL_FULL_COUNTS"), Some("1"))
     }
 
     /// The collection threshold follows the live reading, taken after every credit of the

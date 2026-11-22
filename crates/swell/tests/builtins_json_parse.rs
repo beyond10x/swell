@@ -13,7 +13,7 @@
 mod support;
 
 use support::host::{
-    TestHost, agent, agent_with, get, get_object, global, is_error_of, limits, object, realm,
+    TestHost, agent, agent_with, get, get_object, global, is_error_of, key, limits, object, realm,
     stack_with_room, text, thrown,
 };
 use support::script::{Outcome, eval, eval_text, run_both};
@@ -256,15 +256,29 @@ fn nested_text(depth: usize) -> Vec<u16> {
 
 /// Follow the element "0" from `value` down `depth - 1` levels: each an Array of length 1, the
 /// innermost of length 0.
+///
+/// The keys `length` and `0` are made once. A key String made for each read stays live until
+/// the scope ends (HOST-170) and is charged to the budget: at 100,000 levels, after a normal
+/// parse that left `heap_bytes()` at 55,858,499 bytes, 130,783 such Strings were made and the
+/// next one, at level 65,392, ended in `Terminated(MemoryBudget)` at 63,105,353 bytes of the
+/// 64 MiB of the test limits: the strings arena's next doubling did not fit (measured on
+/// `cc41ae6`, with the arenas charged by capacity).
 fn check_nesting(cx: &mut Cx<'_, TestHost>, value: Value, depth: usize) {
     let Value::Object(mut array) = value else {
         panic!("{value:?}");
     };
+    let length = key(cx, "length");
+    let first = key(cx, "0");
     for level in 1..depth {
-        assert_eq!(get(cx, array, "length"), Value::Number(1.0), "{level}");
-        array = get_object(cx, array, "0");
+        let found = cx.get_property(array, length).unwrap();
+        assert_eq!(found, Ok(Value::Number(1.0)), "{level}");
+        array = match cx.get_property(array, first).unwrap() {
+            Ok(Value::Object(next)) => next,
+            other => panic!("{level}: {other:?}"),
+        };
     }
-    assert_eq!(get(cx, array, "length"), Value::Number(0.0));
+    let found = cx.get_property(array, length).unwrap();
+    assert_eq!(found, Ok(Value::Number(0.0)));
 }
 
 /// What a parse of the text nested `depth` levels answers with `limits`, through
@@ -298,10 +312,49 @@ fn parse_nested(limits: Limits, depth: usize, reviver: Option<&str>) -> Result<(
         .unwrap()
 }
 
+/// The charged reading, `heap_bytes()`, of the setup of [`parse_nested`] without a reviver for
+/// `depth` levels: an agent under the test limits, its realm, the text as a String, and
+/// `JSON.parse` read from the global object. Measured in an agent of its own, which makes the
+/// steps of `parse_nested` in its order.
+fn setup_charge(depth: usize) -> u64 {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    let _text = agent
+        .with_cx(&realm, |cx| {
+            let global = object(cx, &global_root);
+            let text = units_value(cx, &nested_text(depth));
+            let json = get_object(cx, global, "JSON");
+            get(cx, json, "parse");
+            cx.root(text).unwrap()
+        })
+        .unwrap();
+    agent.heap_bytes().unwrap()
+}
+
+/// The room of the memory budget above [`setup_charge`] under which the parse of the nested
+/// text must end in `Terminated(MemoryBudget)`: 1 MiB, the budget of the epic's acceptance 6,
+/// given to the parse alone.
+///
+/// Measured on `cc41ae6` in the default mode (100,000 levels): the setup reads 372,099 bytes
+/// (the realm 172,090, the text 200,000 at a byte per code unit, the two keys 9). The parse
+/// first charges a copy of the text, 400,000 bytes, then an Array and an open entry per level;
+/// at the setup the objects arena has 108 of its 256 slots free and doubles at the 109th,
+/// 365th and 877th object made after it (52,224, 104,448 and 208,896 bytes, 204 per slot). Any
+/// room from 885,896 to 1,094,879 bytes ends the parse at the same charge: the array of level
+/// 877, whose doubling of the objects arena does not fit. 1 MiB is 162,680 bytes above the
+/// charge before that doubling and 46,304 below the charge after it; with 46,304 bytes more the
+/// parse ends at the next doubling (417,792 bytes, at the 1,901st object). The outcome rests
+/// on the room only being smaller than the parse: a full parse leaves `heap_bytes()` at
+/// 55,858,499, so every room up to about 55 MB ends in the memory budget, and a room below
+/// 400,000 ends it before the first level. A setup that charges more moves the budget with it.
+const PARSE_ROOM: u64 = 1 << 20;
+
 /// The epic's acceptance 6 (`docs/design/engine.md`, decision 3, "Depth bounds"): a text of
 /// 100,000 nested brackets ([`DEPTH`] in collect mode), on a thread of seven eighths of
 /// `min_stack_bytes()`, ends in a result under the test limits, every level an Array, and in
-/// `Terminated(MemoryBudget)` under a memory budget of 1 MiB (or a result, in collect mode,
+/// `Terminated(MemoryBudget)` under a memory budget that the setup fits with 1 MiB to spare
+/// ([`setup_charge`] plus [`PARSE_ROOM`]) and the parse does not (or a result, in collect mode,
 /// where the nesting is smaller), never in a Rust stack overflow.
 #[test]
 fn parse_of_100000_nested_brackets_ends_in_a_result_or_the_memory_budget() {
@@ -311,7 +364,7 @@ fn parse_of_100000_nested_brackets_ends_in_a_result_or_the_memory_budget() {
         || {
             assert_eq!(parse_nested(limits(), DEPTH, None), Ok(()));
             let mut small = limits();
-            small.memory_bytes = 1 << 20;
+            small.memory_bytes = setup_charge(DEPTH) + PARSE_ROOM;
             let outcome = parse_nested(small, DEPTH, None);
             if cfg!(feature = "collect-every-safe-point") {
                 assert!(
