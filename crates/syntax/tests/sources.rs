@@ -455,11 +455,12 @@ fn nested(kind: &str, n: usize) -> Option<String> {
         "coalesce" => format!("x = a{};", r(" ?? a")),
         "method" => format!("x = {}0{};", r("{m(){ return "), r("; }}")),
         "with" => format!("{};", r("with (o) ")),
+        "template" => format!("x = {}0{};", r("`${"), r("}`")),
         _ => return None,
     })
 }
 
-const NESTING_KINDS: [&str; 36] = [
+const NESTING_KINDS: [&str; 37] = [
     "array",
     "paren",
     "block",
@@ -496,6 +497,7 @@ const NESTING_KINDS: [&str; 36] = [
     "coalesce",
     "method",
     "with",
+    "template",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict

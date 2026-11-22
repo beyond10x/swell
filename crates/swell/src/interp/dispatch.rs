@@ -26,8 +26,9 @@ use crate::ops::operators::{BinaryOperator, number_bitwise_not, number_unary_min
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, StringRef, Value};
 
-/// What an instruction asks of the loop.
-enum Flow {
+/// What an instruction asks of the loop; the other files of the interpreter that hold the work
+/// of an instruction answer it too.
+pub(super) enum Flow {
     /// Go on with the running frame's next instruction (which may be a frame just pushed).
     Next,
     /// The running frame returns this value.
@@ -347,6 +348,9 @@ impl<H: Host> Agent<H> {
             I::EndFinally => self.end_finally(),
             I::LoadCompletion => self.load_completion(),
             I::StoreCompletion => self.store_completion(),
+
+            // ---- templates (`interp/template.rs`) ----
+            I::ToString => self.substitution_to_string(),
         }
     }
 

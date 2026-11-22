@@ -249,6 +249,24 @@ pub enum Expr {
         callee: ExprId,
         arguments: Vec<ExprId>,
     },
+    /// A `TemplateLiteral` without a tag (`#sec-template-literals`): its template strings in
+    /// source order, one more than its substitutions, each `Expression` of a `${ }`.
+    Template {
+        strings: Vec<TemplateString>,
+        substitutions: Vec<ExprId>,
+    },
+}
+
+/// One template string of a `TemplateLiteral` (`#sec-templatestring`), as UTF-16 code units:
+/// its TV (`#sec-static-semantics-tv`), the value a template without a tag concatenates, and its
+/// TRV (`#sec-static-semantics-trv`), the source text between its delimiters with each CR LF
+/// and CR made a LF. A string with a NotEscapeSequence, whose TV is undefined, is an early error
+/// of a template without a tag (`#sec-static-semantics-template-early-errors`) and never in a
+/// tree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TemplateString {
+    pub cooked: Vec<u16>,
+    pub raw: Vec<u16>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -572,6 +590,11 @@ impl Expr {
             Expr::New { callee, arguments } => {
                 f(Child::Expr(*callee));
                 for e in arguments.iter().flatten() {
+                    f(Child::Expr(*e));
+                }
+            }
+            Expr::Template { substitutions, .. } => {
+                for e in substitutions {
                     f(Child::Expr(*e));
                 }
             }

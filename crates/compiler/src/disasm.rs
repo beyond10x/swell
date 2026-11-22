@@ -239,6 +239,7 @@ fn text(code: &Code, scopes: &[Vec<u32>], instruction: &Instruction) -> String {
         }
         I::Tag(n) => format!("Tag {n}"),
         I::JumpIfTag { tag, target } => format!("JumpIfTag {tag} {target:04}"),
+        I::ToString => "ToString".to_string(),
         other => format!("{other:?}"),
     }
 }

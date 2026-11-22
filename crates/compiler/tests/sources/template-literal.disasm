@@ -1,0 +1,20 @@
+script locals 0
+  0000 2:1 String "a"
+  0001 2:1 StoreCompletion
+  0002 3:1 String ""
+  0003 3:1 StoreCompletion
+  0004 4:4 GetGlobal "a"
+  0005 4:1 ToString
+  0006 4:1 StoreCompletion
+  0007 5:1 String "a"
+  0008 5:5 GetGlobal "b"
+  0009 5:1 ToString
+  0010 5:1 Add
+  0011 5:1 String "c"
+  0012 5:1 Add
+  0013 5:10 GetGlobal "d"
+  0014 5:1 ToString
+  0015 5:1 Add
+  0016 5:1 StoreCompletion
+  0017 0:0 LoadCompletion
+  0018 0:0 Return
