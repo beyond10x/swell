@@ -8,8 +8,10 @@
 //! `%Boolean%`, `%isNaN%` and `%isFinite%`, with the "constructor" properties of
 //! `%Number.prototype%` and `%Boolean.prototype%` and their methods, taken early by slice 2
 //! (`story:number-boolean-and-global-functions-early`); `%eval%` and `%Function%` with
-//! `Function.prototype.constructor`, written by `story:eval-and-function-constructor`. The other
-//! constructors and methods are later slices.
+//! `Function.prototype.constructor`, written by `story:eval-and-function-constructor`;
+//! `%decodeURI%`, `%decodeURIComponent%`, `%encodeURI%` and `%encodeURIComponent%` (19.2.6,
+//! `#sec-uri-handling-functions`), written by `story:global-this-uri-functions-and-is-error`.
+//! The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
 //! first need no root until the realm record holds them all.
@@ -66,6 +68,14 @@ pub(crate) enum Intrinsic {
     /// `%Object.prototype.toString%` (20.1.3.6), which `Array.prototype.toString` calls when
     /// its object's "join" is not callable (`#sec-array.prototype.tostring`, step 3).
     ObjectPrototypeToString,
+    /// `%decodeURI%` (19.2.6.1, `#sec-decodeuri-encodeduri`).
+    DecodeUri,
+    /// `%decodeURIComponent%` (19.2.6.2, `#sec-decodeuricomponent-encodeduricomponent`).
+    DecodeUriComponent,
+    /// `%encodeURI%` (19.2.6.3, `#sec-encodeuri-uri`).
+    EncodeUri,
+    /// `%encodeURIComponent%` (19.2.6.4, `#sec-encodeuricomponent-uricomponent`).
+    EncodeUriComponent,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -109,6 +119,7 @@ pub(crate) struct Intrinsics {
     eval: ObjectRef,
     function: ObjectRef,
     object_prototype_to_string: ObjectRef,
+    uri: crate::builtins::global::UriFunctions,
 }
 
 impl Intrinsics {
@@ -136,6 +147,10 @@ impl Intrinsics {
             Intrinsic::Eval => self.eval,
             Intrinsic::Function => self.function,
             Intrinsic::ObjectPrototypeToString => self.object_prototype_to_string,
+            Intrinsic::DecodeUri => self.uri.decode_uri,
+            Intrinsic::DecodeUriComponent => self.uri.decode_uri_component,
+            Intrinsic::EncodeUri => self.uri.encode_uri,
+            Intrinsic::EncodeUriComponent => self.uri.encode_uri_component,
         }
     }
 
@@ -174,6 +189,10 @@ impl Intrinsics {
             self.eval,
             self.function,
             self.object_prototype_to_string,
+            self.uri.decode_uri,
+            self.uri.decode_uri_component,
+            self.uri.encode_uri,
+            self.uri.encode_uri_component,
         ] {
             mark.object(object);
         }
@@ -342,6 +361,7 @@ impl<H: Host> Agent<H> {
         let (is_finite, is_nan) = self.create_global_functions(making)?;
         let eval = self.create_eval_function(making)?;
         let function = self.create_function_constructor(making)?;
+        let uri = self.create_uri_functions(making)?;
         let intrinsics = Intrinsics {
             object_prototype,
             function_prototype,
@@ -363,6 +383,7 @@ impl<H: Host> Agent<H> {
             eval,
             function,
             object_prototype_to_string,
+            uri,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {
