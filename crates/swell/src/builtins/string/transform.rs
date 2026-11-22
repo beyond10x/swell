@@ -1,44 +1,442 @@
-//! The transform and compare methods of `String` and `String.prototype` (ECMA-262 22.1.2 and
-//! 22.1.3, `#sec-properties-of-the-string-constructor`,
+//! The transform and compare methods of `String.prototype` (ECMA-262 22.1.3,
 //! `#sec-properties-of-the-string-prototype-object`), the group of
-//! `story:string-transform-and-compare-methods`. It has no builtin yet: its id type has no
-//! variant, its lists are empty and its run function has no arm
-//! (`story:builtin-group-modules`).
+//! `story:string-transform-and-compare-methods`: `localeCompare`
+//! (`#sec-string.prototype.localecompare`), `padEnd` (`#sec-string.prototype.padend`), `padStart`
+//! (`#sec-string.prototype.padstart`) with StringPaddingBuiltinsImpl
+//! (`#sec-stringpaddingbuiltinsimpl`) and StringPad (`#sec-stringpad`), `repeat`
+//! (`#sec-string.prototype.repeat`), `toLocaleLowerCase` (`#sec-string.prototype.tolocalelowercase`),
+//! `toLocaleUpperCase` (`#sec-string.prototype.tolocaleuppercase`), `toLowerCase`
+//! (`#sec-string.prototype.tolowercase`), `toUpperCase` (`#sec-string.prototype.touppercase`),
+//! `trim` (`#sec-string.prototype.trim`) with TrimString (`#sec-trimstring`), `trimEnd`
+//! (`#sec-string.prototype.trimend`) and `trimStart` (`#sec-string.prototype.trimstart`). The
+//! group defines nothing on `%String%`.
+//!
+//! Without ECMA-402 (`docs/design/engine.md`, section 1) the two locale case methods answer as
+//! `toLowerCase` and `toUpperCase`, and the arguments ECMA-402 gives a meaning (those of the
+//! locale case methods, the second and third of `localeCompare`) are not read.
+//!
+//! Before slice 5, which brings the tables of `swell-unicode`, the four case methods and
+//! `localeCompare` answer a String whose code units are all below 0x80 as the standard does and
+//! refuse any other (`docs/design/engine.md`, section 12, "A part before its slice", the third
+//! form; `docs/design/host-interface.md`, section 13, "A refusal raised by a builtin method"):
+//! below 0x80 the locale-insensitive case mappings of the Unicode Character Database are those of
+//! the 26 letters (52 entries of `UnicodeData.txt`; the entries of `SpecialCasing.txt` below 0x80
+//! are all conditioned on a language), and two Strings of such code units are canonically
+//! equivalent only when they are equal, so their order of code units is the consistent total
+//! order `localeCompare` asks for. The refusal comes after RequireObjectCoercible and ToString
+//! (of the this value and, for `localeCompare`, of `that`), so an error of those steps is thrown
+//! instead; it is a `SyntaxError` of the method's realm (the current realm while a built-in
+//! function runs) with the exact message of the design, and the agent counts it
+//! ([`Agent::refusals`]).
+//!
+//! Limits: a result whose length is known before it is built (`repeat`, the pads) is asked of
+//! `string_length` and of the memory budget as a whole before a unit is copied, so a result above
+//! `string_length` is a `RangeError` at once (`docs/design/host-interface.md`, section 2,
+//! `HOST-21`) and one the memory budget cannot hold ends the run in `Terminated(MemoryBudget)`.
+//! Steps: a step per code unit copied into a result ([`StringBuilder`]); the trims, the case
+//! methods and `localeCompare` also a step per code unit of each String they read, charged
+//! before the read.
 
+use crate::builtins::object::argument;
+use crate::builtins::string::StringBuilder;
 use crate::builtins::{Method, SymbolData};
-use crate::host::Host;
 use crate::host::agent::Agent;
-use crate::host::outcome::Completion;
-use crate::value::{ObjectRef, Value};
+use crate::host::outcome::{Abrupt, Completion};
+use crate::host::{ErrorKind, Host, Termination};
+use crate::ops::conversion::is_str_white_space;
+use crate::value::{ObjectRef, StringRef, Value};
 
 /// The builtins of this group, by their steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TransformBuiltin {}
+pub(crate) enum TransformBuiltin {
+    /// `String.prototype.localeCompare ( that [ , reserved1 [ , reserved2 ] ] )` (22.1.3.12).
+    LocaleCompare,
+    /// `String.prototype.padEnd ( maxLength [ , fillString ] )` (22.1.3.16).
+    PadEnd,
+    /// `String.prototype.padStart ( maxLength [ , fillString ] )` (22.1.3.17).
+    PadStart,
+    /// `String.prototype.repeat ( count )` (22.1.3.18).
+    Repeat,
+    /// `String.prototype.toLocaleLowerCase ( [ reserved1 [ , reserved2 ] ] )` (22.1.3.26).
+    ToLocaleLowerCase,
+    /// `String.prototype.toLocaleUpperCase ( [ reserved1 [ , reserved2 ] ] )` (22.1.3.27).
+    ToLocaleUpperCase,
+    /// `String.prototype.toLowerCase ( )` (22.1.3.28).
+    ToLowerCase,
+    /// `String.prototype.toUpperCase ( )` (22.1.3.30).
+    ToUpperCase,
+    /// `String.prototype.trim ( )` (22.1.3.32).
+    Trim,
+    /// `String.prototype.trimEnd ( )` (22.1.3.33).
+    TrimEnd,
+    /// `String.prototype.trimStart ( )` (22.1.3.34).
+    TrimStart,
+}
 
-/// The methods this group defines on `%String%`, in the order of their clauses.
+/// The methods this group defines on `%String%`, in the order of their clauses: none.
 pub(crate) const CONSTRUCTOR_METHODS: &[Method<TransformBuiltin>] = &[];
 
-/// The methods this group defines on `%String.prototype%`, in the order of their clauses.
-pub(crate) const PROTOTYPE_METHODS: &[Method<TransformBuiltin>] = &[];
+/// The methods this group defines on `%String.prototype%`, in the order of their clauses, each
+/// with the "length" its clause heading gives (the required parameters, clause 18).
+pub(crate) const PROTOTYPE_METHODS: &[Method<TransformBuiltin>] = &[
+    ("localeCompare", 1, TransformBuiltin::LocaleCompare),
+    ("padEnd", 1, TransformBuiltin::PadEnd),
+    ("padStart", 1, TransformBuiltin::PadStart),
+    ("repeat", 1, TransformBuiltin::Repeat),
+    ("toLocaleLowerCase", 0, TransformBuiltin::ToLocaleLowerCase),
+    ("toLocaleUpperCase", 0, TransformBuiltin::ToLocaleUpperCase),
+    ("toLowerCase", 0, TransformBuiltin::ToLowerCase),
+    ("toUpperCase", 0, TransformBuiltin::ToUpperCase),
+    ("trim", 0, TransformBuiltin::Trim),
+    ("trimEnd", 0, TransformBuiltin::TrimEnd),
+    ("trimStart", 0, TransformBuiltin::TrimStart),
+];
 
 /// The data properties keyed by a well-known symbol this group defines on
-/// `%String.prototype%`, after its methods.
+/// `%String.prototype%`, after its methods: none.
 pub(crate) fn prototype_symbol_data<H: Host>() -> [SymbolData<H>; 0] {
     []
 }
 
+/// The message of the refusal of the four case methods before slice 5.
+const CASE_REFUSAL: &str = "case mapping outside ASCII is not supported before slice 5";
+
+/// The message of the refusal of `localeCompare` before slice 5.
+const COMPARE_REFUSAL: &str = "comparison outside ASCII is not supported before slice 5";
+
+/// The placement of StringPad (`#sec-stringpad`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Placement {
+    Start,
+    End,
+}
+
+/// The `where` of TrimString (`#sec-trimstring`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Trim {
+    Start,
+    End,
+    StartEnd,
+}
+
+/// The case a case method maps to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Case {
+    Lower,
+    Upper,
+}
+
+/// A number of code units or steps as a `u64`.
+fn count(units: usize) -> u64 {
+    u64::try_from(units).unwrap_or(u64::MAX)
+}
+
+/// Whether every code unit of `units` is below 0x80: a String the methods of slice 3 that need
+/// the tables of slice 5 answer.
+fn is_ascii(units: &[u16]) -> bool {
+    units.iter().all(|&unit| unit < 0x80)
+}
+
+/// `unit`, below 0x80, mapped to `case`: the locale-insensitive case mapping of the Unicode
+/// Character Database, which below 0x80 maps A to Z (0x41 to 0x5A) and a to z (0x61 to 0x7A),
+/// 0x20 apart, and keeps every other unit.
+fn ascii_case(unit: u16, case: Case) -> u16 {
+    match case {
+        Case::Lower if (0x41..=0x5A).contains(&unit) => unit + 0x20,
+        Case::Upper if (0x61..=0x7A).contains(&unit) => unit - 0x20,
+        _ => unit,
+    }
+}
+
 impl<H: Host> Agent<H> {
     /// The steps of the builtins of this group; not inlined, so that the frame of
-    /// `run_string_builtin` does not grow with its arms.
+    /// `run_string_builtin` does not grow with its arms. Each arm calls a function of its own.
     #[inline(never)]
     pub(crate) fn run_string_transform_builtin(
         &mut self,
         id: TransformBuiltin,
         _function: ObjectRef,
-        _this: Value,
-        _args: &[Value],
+        this: Value,
+        args: &[Value],
         _new_target: Option<ObjectRef>,
     ) -> Completion<Value> {
-        match id {}
+        match id {
+            TransformBuiltin::LocaleCompare => self.string_locale_compare(this, args),
+            TransformBuiltin::PadEnd => {
+                self.string_padding_method(this, args, Placement::End, "String.prototype.padEnd")
+            }
+            TransformBuiltin::PadStart => self.string_padding_method(
+                this,
+                args,
+                Placement::Start,
+                "String.prototype.padStart",
+            ),
+            TransformBuiltin::Repeat => self.string_repeat(this, args),
+            TransformBuiltin::ToLocaleLowerCase => {
+                self.string_case_method(this, Case::Lower, "String.prototype.toLocaleLowerCase")
+            }
+            TransformBuiltin::ToLocaleUpperCase => {
+                self.string_case_method(this, Case::Upper, "String.prototype.toLocaleUpperCase")
+            }
+            TransformBuiltin::ToLowerCase => {
+                self.string_case_method(this, Case::Lower, "String.prototype.toLowerCase")
+            }
+            TransformBuiltin::ToUpperCase => {
+                self.string_case_method(this, Case::Upper, "String.prototype.toUpperCase")
+            }
+            TransformBuiltin::Trim => {
+                self.trim_string(this, Trim::StartEnd, "String.prototype.trim")
+            }
+            TransformBuiltin::TrimEnd => {
+                self.trim_string(this, Trim::End, "String.prototype.trimEnd")
+            }
+            TransformBuiltin::TrimStart => {
+                self.trim_string(this, Trim::Start, "String.prototype.trimStart")
+            }
+        }
+    }
+
+    /// The refusal of a method that needs the tables of slice 5 (`host-interface.md`, section
+    /// 13): counted, then a `SyntaxError` of the current realm, the method's, with `message`.
+    fn refuse_before_slice_5(&mut self, message: &str) -> Abrupt {
+        self.count_refusal(message);
+        self.throw_error(ErrorKind::SyntaxError, message)
+    }
+
+    /// An empty builder for a result of `length` code units, asked of both limits before a unit
+    /// is copied: a length above `string_length` throws a `RangeError`; a String of that
+    /// length that would not fit the memory budget ends the run in `Terminated(MemoryBudget)`,
+    /// as [`Agent::append_units`] would at its first unit past the budget, so the copy never
+    /// starts. `length` is a non-negative integer, possibly +∞.
+    fn result_builder(&mut self, length: f64) -> Completion<StringBuilder> {
+        let limit = self.limits.string_length;
+        // A length above the limit as an f64 is above the limit; the cast saturates and the
+        // comparison in u64 is exact for the rest.
+        let units = length as u64;
+        if length > limit as f64 || units > limit {
+            return Err(self.throw_error(
+                ErrorKind::RangeError,
+                "the string would be longer than string_length",
+            ));
+        }
+        let mut builder = StringBuilder::new();
+        let reserved = usize::try_from(units)
+            .ok()
+            .filter(|_| self.heap.accounting.check(units.saturating_mul(2)).is_ok())
+            .is_some_and(|units| builder.units.try_reserve_exact(units).is_ok());
+        if !reserved {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        Ok(builder)
+    }
+
+    /// `String.prototype.repeat ( count )` (`#sec-string.prototype.repeat`).
+    fn string_repeat(&mut self, this: Value, args: &[Value]) -> Completion<Value> {
+        // 1. Let O be the this value. 2. Perform ? RequireObjectCoercible(O). 3. Let S be ?
+        // ToString(O).
+        let string = self.this_string(this, "String.prototype.repeat")?;
+        // 4. Let n be ? ToIntegerOrInfinity(count). It may run code; S is kept.
+        let keep = self.keep(Value::String(string));
+        let n = self.to_integer_or_infinity(argument(args, 0));
+        self.release(keep);
+        let n = n?;
+        // 5. If n < 0 or n = +∞, throw a RangeError exception.
+        if n < 0.0 || n == f64::INFINITY {
+            return Err(self.throw_error(
+                ErrorKind::RangeError,
+                "the count of String.prototype.repeat is negative or infinite",
+            ));
+        }
+        let units = self.string_units(string)?;
+        // 6. If n = 0, return the empty String. n copies of the empty String are the empty
+        // String, S itself.
+        if units.is_empty() {
+            return Ok(Value::String(string));
+        }
+        // 7. Return the String value that is made from n copies of S appended together. Its
+        // length, n times that of S, is asked of the limits first.
+        let mut builder = self.result_builder(n * units.len() as f64)?;
+        // n is at most the length asked, which the limits admitted.
+        let copies = n as u64;
+        for _ in 0..copies {
+            self.append_units(&mut builder, &units)?;
+        }
+        Ok(Value::String(self.finish_string(builder)?))
+    }
+
+    /// `String.prototype.padEnd` and `padStart` (`#sec-string.prototype.padend`,
+    /// `#sec-string.prototype.padstart`) for `placement`, named `method` in a TypeError.
+    fn string_padding_method(
+        &mut self,
+        this: Value,
+        args: &[Value],
+        placement: Placement,
+        method: &str,
+    ) -> Completion<Value> {
+        // 1. Let O be the this value. 2. Perform ? RequireObjectCoercible(O). 3. Return ?
+        // StringPaddingBuiltinsImpl(O, maxLength, fillString, placement); its step 1, Let S be
+        // ? ToString(O), is done here with step 2.
+        let string = self.this_string(this, method)?;
+        let keep = self.keep(Value::String(string));
+        let padded = self.string_padding_builtins_impl(string, args, placement);
+        self.release(keep);
+        padded.map(Value::String)
+    }
+
+    /// Steps 2 to 7 of StringPaddingBuiltinsImpl (`#sec-stringpaddingbuiltinsimpl`), with S
+    /// kept by the caller.
+    fn string_padding_builtins_impl(
+        &mut self,
+        string: StringRef,
+        args: &[Value],
+        placement: Placement,
+    ) -> Completion<StringRef> {
+        // 2. Let intMaxLength be ℝ(? ToLength(maxLength)).
+        let max_length = self.to_length(argument(args, 0))?;
+        // 3. Let stringLength be the length of S. 4. If intMaxLength ≤ stringLength, return S.
+        let length = self.string_length(string)?;
+        if max_length <= length as f64 {
+            return Ok(string);
+        }
+        // 5. If fillString is undefined, set fillString to the String value consisting solely
+        // of the code unit 0x0020 (SPACE). 6. Else, set fillString to ? ToString(fillString).
+        let filler = match argument(args, 1) {
+            Value::Undefined => vec![0x0020],
+            fill_string => {
+                let fill_string = self.to_string(fill_string)?;
+                self.string_units(fill_string)?
+            }
+        };
+        // 7. Return StringPad(S, intMaxLength, fillString, placement).
+        self.string_pad(string, max_length, &filler, placement)
+    }
+
+    /// StringPad ( string, maxLength, fillString, placement ) (`#sec-stringpad`), with
+    /// `filler` the code units of fillString. The length of the result, maxLength, is asked of
+    /// the limits before a unit is copied.
+    fn string_pad(
+        &mut self,
+        string: StringRef,
+        max_length: f64,
+        filler: &[u16],
+        placement: Placement,
+    ) -> Completion<StringRef> {
+        let units = self.string_units(string)?;
+        // 1. Let stringLength be the length of string. 2. If maxLength ≤ stringLength, return
+        // string. 3. If fillString is the empty String, return string.
+        if max_length <= units.len() as f64 || filler.is_empty() {
+            return Ok(string);
+        }
+        let mut builder = self.result_builder(max_length)?;
+        // 4. Let fillLength be maxLength - stringLength. maxLength was admitted by the limits,
+        // so it is an integer the cast keeps.
+        let mut left = usize::try_from(max_length as u64)
+            .unwrap_or(usize::MAX)
+            .saturating_sub(units.len());
+        // 6. If placement is start, return the string-concatenation of truncatedStringFiller
+        // and string. 7. Return the string-concatenation of string and truncatedStringFiller.
+        if placement == Placement::End {
+            self.append_units(&mut builder, &units)?;
+        }
+        // 5. Let truncatedStringFiller be the String value consisting of repeated
+        // concatenations of fillString truncated to length fillLength.
+        while left > 0 {
+            let take = left.min(filler.len());
+            self.append_units(&mut builder, filler.get(..take).unwrap_or(&[]))?;
+            left -= take;
+        }
+        if placement == Placement::Start {
+            self.append_units(&mut builder, &units)?;
+        }
+        self.finish_string(builder)
+    }
+
+    /// `String.prototype.trim`, `trimEnd` and `trimStart` (`#sec-string.prototype.trim`,
+    /// `#sec-string.prototype.trimend`, `#sec-string.prototype.trimstart`): Return ?
+    /// TrimString(this value, `trim`). `method` names the method in a TypeError.
+    fn trim_string(&mut self, this: Value, trim: Trim, method: &str) -> Completion<Value> {
+        // TrimString (`#sec-trimstring`): 1. Perform ? RequireObjectCoercible(string). 2. Let S
+        // be ? ToString(string).
+        let string = self.this_string(this, method)?;
+        let units = self.string_units(string)?;
+        self.charge_steps(count(units.len()))?;
+        // 3, 4, 5. A copy of S with the leading white space, the trailing white space or both
+        // removed: WhiteSpace and LineTerminator, whose code points are all below 0x10000, so
+        // each is one code unit, and no unit of a surrogate pair is one.
+        let start = if trim == Trim::End {
+            0
+        } else {
+            units
+                .iter()
+                .position(|&unit| !is_str_white_space(unit))
+                .unwrap_or(units.len())
+        };
+        let end = if trim == Trim::Start {
+            units.len()
+        } else {
+            units
+                .iter()
+                .rposition(|&unit| !is_str_white_space(unit))
+                .map_or(start, |last| last + 1)
+        };
+        // A copy with nothing removed is S.
+        if start == 0 && end == units.len() {
+            return Ok(Value::String(string));
+        }
+        let mut builder = StringBuilder::new();
+        self.append_units(&mut builder, units.get(start..end).unwrap_or(&[]))?;
+        // 6. Return T.
+        Ok(Value::String(self.finish_string(builder)?))
+    }
+
+    /// `String.prototype.toLowerCase` and `toUpperCase` (`#sec-string.prototype.tolowercase`,
+    /// `#sec-string.prototype.touppercase`) and the locale methods, which answer the same
+    /// without ECMA-402 (`#sec-string.prototype.tolocalelowercase`,
+    /// `#sec-string.prototype.tolocaleuppercase`), for `case`; `method` names the method in a
+    /// TypeError. A String with a code unit of 0x80 or above is refused before slice 5.
+    fn string_case_method(&mut self, this: Value, case: Case, method: &str) -> Completion<Value> {
+        // 1. Let O be the this value. 2. Perform ? RequireObjectCoercible(O). 3. Let S be ?
+        // ToString(O).
+        let string = self.this_string(this, method)?;
+        let units = self.string_units(string)?;
+        self.charge_steps(count(units.len()))?;
+        if !is_ascii(&units) {
+            return Err(self.refuse_before_slice_5(CASE_REFUSAL));
+        }
+        // 4. Let sText be StringToCodePoints(S): below 0x80 a code unit is its code point. 5.
+        // Let lowerText be toLowercase(sText) (toUppercase for `toUpperCase`), according to the
+        // Unicode Default Case Conversion algorithm. 6. Let L be CodePointsToString(lowerText).
+        let mapped: Vec<u16> = units.iter().map(|&unit| ascii_case(unit, case)).collect();
+        let mut builder = StringBuilder::new();
+        self.append_units(&mut builder, &mapped)?;
+        // 7. Return L.
+        Ok(Value::String(self.finish_string(builder)?))
+    }
+
+    /// `String.prototype.localeCompare ( that [ , reserved1 [ , reserved2 ] ] )`
+    /// (`#sec-string.prototype.localecompare`): -1, +0 or 1 by the order of code units of two
+    /// Strings of code units below 0x80; with any other code unit refused before slice 5.
+    fn string_locale_compare(&mut self, this: Value, args: &[Value]) -> Completion<Value> {
+        // 1. Let O be the this value. 2. Perform ? RequireObjectCoercible(O). 3. Let S be ?
+        // ToString(O).
+        let string = self.this_string(this, "String.prototype.localeCompare")?;
+        // 4. Let thatValue be ? ToString(that). It may run code; S is kept.
+        let keep = self.keep(Value::String(string));
+        let that = self.to_string(argument(args, 0));
+        self.release(keep);
+        let that = that?;
+        let units = self.string_units(string)?;
+        let that_units = self.string_units(that)?;
+        self.charge_steps(count(units.len()).saturating_add(count(that_units.len())))?;
+        if !is_ascii(&units) || !is_ascii(&that_units) {
+            return Err(self.refuse_before_slice_5(COMPARE_REFUSAL));
+        }
+        // Negative when S is ordered before thatValue, positive when after, zero otherwise:
+        // the order of code units, a String before each longer String that starts with it.
+        Ok(Value::Number(match units.cmp(&that_units) {
+            std::cmp::Ordering::Less => -1.0,
+            std::cmp::Ordering::Equal => 0.0,
+            std::cmp::Ordering::Greater => 1.0,
+        }))
     }
 }
