@@ -1275,6 +1275,14 @@ impl<'a, 'm> Resolver<'a, 'm> {
             Expr::Template { substitutions, .. } => {
                 children.extend(substitutions.iter().map(|e| Walk::Expr(*e)));
             }
+            // A tag and the substitutions of a tagged template resolve as a callee and its
+            // arguments do; a tag `eval` is no direct eval (`#sec-function-calls`).
+            Expr::TaggedTemplate {
+                tag, substitutions, ..
+            } => {
+                children.push(Walk::Expr(*tag));
+                children.extend(substitutions.iter().map(|e| Walk::Expr(*e)));
+            }
         }
         let bytes = children.capacity().saturating_mul(size_of::<Walk>());
         self.work.extend(children.into_iter().rev());

@@ -1,0 +1,29 @@
+script locals 0
+  declare 0
+  template 0 "a" "c" raw "a" "c"
+  template 1 undefined raw "\\xg"
+  template 2 "a" "c" raw "a" "c"
+  0000 2:1 Undefined
+  0001 2:1 GetGlobal "tag"
+  0002 2:1 TemplateObject 0
+  0003 2:8 GetGlobal "b"
+  0004 2:1 Call 2
+  0005 2:1 StoreCompletion
+  0006 3:1 GetGlobal "o"
+  0007 3:1 Dup
+  0008 3:1 GetNamed "m"
+  0009 3:1 TemplateObject 1
+  0010 3:1 Call 1
+  0011 3:1 StoreCompletion
+  0012 0:0 LoadCompletion
+  0013 0:0 Return
+
+function 0 declaration "f" length 0 locals 0
+  0000 4:23 Undefined
+  0001 4:23 GetGlobal "tag"
+  0002 4:23 TemplateObject 2
+  0003 4:30 GetGlobal "b"
+  0004 4:23 Call 2
+  0005 4:16 Return
+  0006 4:1 Undefined
+  0007 4:1 Return

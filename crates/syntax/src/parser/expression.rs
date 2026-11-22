@@ -18,7 +18,7 @@
 //! its spread element last as the rest element; a spread element stands in an array literal and
 //! among the arguments of a call or `new` (`#sec-argument-lists`).
 //!
-//! Refused, each with its slice: `**` and `**=` (4), a tagged template (6), generator methods (7), `class`, `super`,
+//! Refused, each with its slice: `**` and `**=` (4), generator methods (7), `class`, `super`,
 //! `new.target` (8), `async` functions and
 //! `await` (10), `import.meta` and dynamic `import` (11).
 //!
@@ -123,6 +123,25 @@ impl HeapBytes for Prefix {
 }
 
 type ExprParser<'a, 'm> = fn(&mut Parser<'a, 'm>) -> R<ExprId>;
+
+/// A copy of the template string of the template token part `p` for a tagged template, charged
+/// to `m`: no cooked string where the part holds a NotEscapeSequence.
+fn copy_tagged(
+    m: &crate::ledger::Meter<'_>,
+    p: &crate::token::TemplatePart,
+) -> Result<crate::ast::TaggedString, Halt> {
+    let cooked = match p.not_escape {
+        Some(_) => None,
+        None => Some(m.copy(&p.string.cooked)?),
+    };
+    match m.copy(&p.string.raw) {
+        Ok(raw) => Ok(crate::ast::TaggedString { cooked, raw }),
+        Err(stop) => {
+            m.release(cooked);
+            Err(stop)
+        }
+    }
+}
 
 impl<'a, 'm> Parser<'a, 'm> {
     // ---- the comma operator and assignment -----------------------------------------------------
@@ -514,17 +533,88 @@ impl<'a, 'm> Parser<'a, 'm> {
         })
     }
 
-    /// A template after a member expression, a call or a link of an optional chain: a tagged
-    /// template (`MemberExpression TemplateLiteral`, `CallExpression TemplateLiteral`,
-    /// `#sec-tagged-templates`) is refused; after an optional chain it is an early error
+    /// A template after a link of an optional chain: an early error
     /// (`#sec-left-hand-side-expressions-static-semantics-early-errors`), whatever is on the
     /// line before it: no semicolon is inserted there.
     #[inline(never)]
-    fn template_after<T>(&mut self, chain: bool) -> R<T> {
+    fn template_after<T>(&mut self) -> R<T> {
+        self.fail_here(TEMPLATE_AFTER_OPTIONAL_CHAIN)
+    }
+
+    /// A template after the member expression or call `tag`: a tagged template
+    /// (`MemberExpression TemplateLiteral`, `CallExpression TemplateLiteral`,
+    /// `#sec-tagged-templates`), its template strings and, after each `TemplateHead` and
+    /// `TemplateMiddle`, an `Expression[+In]` that ends at the `}` the lexer reads again as the
+    /// next template token; after an optional chain (`chain`) the early error of
+    /// [`Parser::template_after`]. Each substitution is one more entry of the depth counter than
+    /// its template, as in a template without a tag. Not inlined, so that the frames of the
+    /// loops that call it stay as they were.
+    #[inline(never)]
+    fn tagged_rest(&mut self, tag: ExprId, start: Span, chain: bool) -> R<ExprId> {
         if chain {
-            return self.fail_here(TEMPLATE_AFTER_OPTIONAL_CHAIN);
+            return self.template_after();
         }
-        self.refuse("tagged template", 6)
+        self.enter()?;
+        let id = self.reserve_tagged(tag);
+        while self.tagged_string(id)? {
+            let e = self.expression(false)?;
+            self.tagged_substitution(id, e)?;
+        }
+        let id = self.complete_expr(id, start)?;
+        self.leave();
+        Ok(id)
+    }
+
+    /// Reserves the node of a tagged template with tag `tag`.
+    #[inline(never)]
+    fn reserve_tagged(&mut self, tag: ExprId) -> ExprId {
+        self.reserve_expr(Expr::TaggedTemplate {
+            tag,
+            strings: Vec::new(),
+            substitutions: Vec::new(),
+        })
+    }
+
+    /// Appends the template string of the current template token to the tagged template `id`
+    /// and consumes the token; whether a substitution follows it. A part with a
+    /// NotEscapeSequence keeps no cooked string: its TV is undefined (`#sec-static-semantics-tv`).
+    #[inline(never)]
+    fn tagged_string(&mut self, id: ExprId) -> R<bool> {
+        let m = self.m;
+        let (string, substitution) = match &self.tok.kind {
+            TokenKind::NoSubstitutionTemplate(p) | TokenKind::TemplateTail(p) => {
+                (copy_tagged(m, p), false)
+            }
+            TokenKind::TemplateHead(p) | TokenKind::TemplateMiddle(p) => (copy_tagged(m, p), true),
+            _ => return self.unexpected(),
+        };
+        let string = self.charged(string)?;
+        let pushed = match self.expr_mut(id) {
+            Some(Expr::TaggedTemplate { strings, .. }) => m.push(strings, string),
+            _ => {
+                m.release(string);
+                Ok(())
+            }
+        };
+        self.charged(pushed)?;
+        self.advance()?;
+        Ok(substitution)
+    }
+
+    /// The substitution `e` of the tagged template `id`, which the `}` at the current token
+    /// ends; the `}` is lexed again as a `TemplateMiddle` or `TemplateTail`.
+    #[inline(never)]
+    fn tagged_substitution(&mut self, id: ExprId, e: ExprId) -> R<()> {
+        if !self.is(Punct::RBrace) {
+            return self.unexpected();
+        }
+        let m = self.m;
+        let pushed = match self.expr_mut(id) {
+            Some(Expr::TaggedTemplate { substitutions, .. }) => m.push(substitutions, e),
+            _ => Ok(()),
+        };
+        self.charged(pushed)?;
+        self.rescan_template()
     }
 
     /// `LeftHandSideExpression`: a member or `new` expression followed by calls and property
@@ -547,7 +637,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                     chain = true;
                     self.optional_rest(e, start)?
                 }
-                Suffix::Template => return self.template_after(chain),
+                Suffix::Template => self.tagged_rest(e, start, chain)?,
             };
         }
         if chain {
@@ -593,7 +683,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             TokenKind::Punct(Punct::LBracket) => Suffix::Index,
             TokenKind::Name(_) | TokenKind::Keyword(_) => Suffix::Dot,
             TokenKind::NoSubstitutionTemplate(_) | TokenKind::TemplateHead(_) => {
-                return self.template_after(true);
+                return self.template_after();
             }
             _ => return self.unexpected(),
         })
@@ -612,7 +702,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             e = match self.suffix(false)? {
                 Suffix::Dot => self.dot_rest(e, start)?,
                 Suffix::Index => self.index_rest(e, start, false)?,
-                Suffix::Template => return self.template_after(false),
+                Suffix::Template => self.tagged_rest(e, start, false)?,
                 Suffix::None | Suffix::Call | Suffix::Optional => break,
             };
         }

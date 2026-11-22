@@ -928,6 +928,9 @@ impl<'a, 'm> Checker<'a, 'm> {
             Expr::Assign { target, .. } if !self.is_pattern(*target) => {
                 self.target(*target);
             }
+            // A NotEscapeSequence of a tagged template is no early error: the rule of
+            // `#sec-static-semantics-template-early-errors` reads a template without a tag only.
+            Expr::TaggedTemplate { .. } => {}
             _ => {}
         }
     }

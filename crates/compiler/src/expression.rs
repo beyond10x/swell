@@ -641,6 +641,27 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     }
                 }
             }
+            // `#sec-tagged-templates-runtime-semantics-evaluation`: the tag and its this value as
+            // for a call (`#sec-evaluatecall`), then ArgumentListEvaluation of the template
+            // (`#sec-template-literals-runtime-semantics-argumentlistevaluation`): the template
+            // object of the site, then the substitutions in order; then the call, never a direct
+            // eval.
+            Expr::TaggedTemplate {
+                tag,
+                strings,
+                substitutions,
+            } => {
+                if strings.len() != substitutions.len().saturating_add(1) {
+                    return Err(malformed("a tagged template"));
+                }
+                self.callee(*tag, span, &mut t)?;
+                let site = self.constants.template_site(strings, self.m)?;
+                t.push(emit(Instruction::TemplateObject(site)))?;
+                t.extend(substitutions.iter().map(|e| Task::Expr(*e)))?;
+                let n =
+                    u32::try_from(strings.len()).map_err(|_| CompileError::TooMany("arguments"))?;
+                t.push(emit(Instruction::Call(n)))?;
+            }
         }
         Ok(t)
     }

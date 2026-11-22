@@ -42,6 +42,7 @@ mod parameters;
 mod patterns;
 mod spread;
 mod template;
+mod templates;
 
 use frame::{Entry, Frame, entry_bytes};
 

@@ -419,6 +419,8 @@ impl<H: Host> Agent<H> {
             I::PatternRest(depth) => self.pattern_rest(depth),
             // ---- templates (`interp/template.rs`) ----
             I::ToString => self.substitution_to_string(),
+            // ---- tagged templates (`interp/templates.rs`) ----
+            I::TemplateObject(site) => self.template_object(site),
         }
     }
 

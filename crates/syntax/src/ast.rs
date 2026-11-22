@@ -411,6 +411,14 @@ pub enum Expr {
     /// from the last element. The parenthesized rest element of an arrow's parameters that is
     /// a pattern, `(...[a]) =>`, is one too, its span starting at the `...`.
     Spread(ExprId),
+    /// A tagged template, `MemberExpression TemplateLiteral` or `CallExpression TemplateLiteral`
+    /// (`#sec-tagged-templates`): the tag, the template strings in source order, one more than
+    /// the substitutions, and the substitutions.
+    TaggedTemplate {
+        tag: ExprId,
+        strings: Vec<TaggedString>,
+        substitutions: Vec<ExprId>,
+    },
 }
 
 /// One template string of a `TemplateLiteral` (`#sec-templatestring`), as UTF-16 code units:
@@ -422,6 +430,16 @@ pub enum Expr {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TemplateString {
     pub cooked: Vec<u16>,
+    pub raw: Vec<u16>,
+}
+
+/// One template string of a tagged template, as UTF-16 code units: its TV, `None` when it holds
+/// a NotEscapeSequence (the TV is then undefined, `#sec-static-semantics-tv`; the early error of
+/// `#sec-static-semantics-template-early-errors` reads a template without a tag only), and its
+/// TRV (`#sec-static-semantics-trv`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TaggedString {
+    pub cooked: Option<Vec<u16>>,
     pub raw: Vec<u16>,
 }
 
@@ -893,6 +911,14 @@ impl HeapBytes for TemplateString {
     }
 }
 
+impl HeapBytes for TaggedString {
+    fn heap_bytes(&self) -> usize {
+        self.cooked
+            .heap_bytes()
+            .saturating_add(self.raw.heap_bytes())
+    }
+}
+
 impl HeapBytes for Name {
     fn heap_bytes(&self) -> usize {
         self.name.heap_bytes()
@@ -993,6 +1019,13 @@ impl HeapBytes for Expr {
                 .saturating_add(substitutions.heap_bytes()),
             Expr::ObjectPattern { properties, .. } => properties.heap_bytes(),
             Expr::ArrayPattern { elements, .. } => elements.heap_bytes(),
+            Expr::TaggedTemplate {
+                strings,
+                substitutions,
+                ..
+            } => strings
+                .heap_bytes()
+                .saturating_add(substitutions.heap_bytes()),
         }
     }
 }
@@ -1220,6 +1253,14 @@ impl Expr {
                 }
             }
             Expr::Template { substitutions, .. } => {
+                for e in substitutions {
+                    f(Child::Expr(*e));
+                }
+            }
+            Expr::TaggedTemplate {
+                tag, substitutions, ..
+            } => {
+                f(Child::Expr(*tag));
                 for e in substitutions {
                     f(Child::Expr(*e));
                 }
