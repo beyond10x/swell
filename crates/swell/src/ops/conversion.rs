@@ -2,6 +2,9 @@
 //! ToBoolean, ToNumber with StringToNumber, ToNumeric, ToIntegerOrInfinity, ToInt32, ToUint32,
 //! ToString, ToObject, ToPropertyKey, ToLength and CanonicalNumericIndexString, and the property
 //! keys of the engine made from Strings. Written by `story:object-model-and-realms`.
+//! `story:string-access-and-search-methods` adds ToUint16 (`#sec-touint16`) with
+//! ToFixedSizeInteger (`#sec-tofixedsizeinteger`), ToAbsoluteIndex (`#sec-toabsoluteindex`) and
+//! ToClampedIndex (`#sec-toclampedindex`).
 //!
 //! StringToNumber trims `StrWhiteSpaceChar` (`#sec-tonumber-applied-to-the-string-type`: the
 //! white space of 12.2, with every `Zs` code point from `swell-unicode`, and the line
@@ -44,6 +47,31 @@ pub(crate) fn number_to_uint32(number: f64) -> u32 {
     }
     // rem_euclid answers an integer from 0 to 2^32 - 1, which the cast keeps exactly.
     number.trunc().rem_euclid(4_294_967_296.0) as u32
+}
+
+/// ToFixedSizeInteger(int, unsigned, 16) (`#sec-tofixedsizeinteger`) of what
+/// ToIntegerOrInfinity answers: step 2 of ToUint16 (`#sec-touint16`).
+pub(crate) fn integer_to_uint16(int: f64) -> u16 {
+    // 1. If int = +∞ or int = -∞, return 0. (NaN is no integer; it is 0 as well.)
+    if !int.is_finite() {
+        return 0;
+    }
+    // 2. Let fixedInt be int modulo 2^16. rem_euclid of an integer answers an integer from 0 to
+    // 2^16 - 1, which the cast keeps exactly. 4. Return fixedInt.
+    int.trunc().rem_euclid(65_536.0) as u16
+}
+
+/// The result of clamping the integer, +∞ or -∞ `int` between 0 and `upper` (5.2.6,
+/// "clamping"), as an index.
+pub(crate) fn clamp_index(int: f64, upper: usize) -> usize {
+    if int <= 0.0 || int.is_nan() {
+        0
+    } else if int >= upper as f64 {
+        upper
+    } else {
+        // 0 < int < upper: an integer that fits.
+        int as usize
+    }
 }
 
 #[expect(
@@ -202,6 +230,34 @@ impl<H: Host> Agent<H> {
         Ok(number_to_uint32(self.to_number(value)?))
     }
 
+    /// ToUint16 (`#sec-touint16`).
+    pub(crate) fn to_uint16(&mut self, value: Value) -> Completion<u16> {
+        // 1. Let int be ? ToIntegerOrInfinity(arg).
+        let int = self.to_integer_or_infinity(value)?;
+        // 2. Return 𝔽(ToFixedSizeInteger(int, unsigned, 16)).
+        Ok(integer_to_uint16(int))
+    }
+
+    /// ToAbsoluteIndex (`#sec-toabsoluteindex`): an integer, +∞ or -∞.
+    pub(crate) fn to_absolute_index(&mut self, value: Value, length: usize) -> Completion<f64> {
+        // 1. Let int be ? ToIntegerOrInfinity(value).
+        let int = self.to_integer_or_infinity(value)?;
+        // 2. If int is finite and int < 0, set int to length + int. 3. Return int.
+        Ok(if int.is_finite() && int < 0.0 {
+            length as f64 + int
+        } else {
+            int
+        })
+    }
+
+    /// ToClampedIndex (`#sec-toclampedindex`).
+    pub(crate) fn to_clamped_index(&mut self, value: Value, length: usize) -> Completion<usize> {
+        // 1. Let index be ? ToAbsoluteIndex(value, length).
+        let index = self.to_absolute_index(value, length)?;
+        // 2. Return the result of clamping index between 0 and length.
+        Ok(clamp_index(index, length))
+    }
+
     /// ToString (`#sec-tostring`).
     pub(crate) fn to_string(&mut self, value: Value) -> Completion<StringRef> {
         match value {
@@ -322,9 +378,75 @@ impl<H: Host> Agent<H> {
 
 #[cfg(test)]
 mod tests {
-    use super::{number_to_int32, number_to_uint32};
+    use super::{clamp_index, number_to_int32, number_to_uint32};
     use crate::host::hooks::test_host::{agent_with_realm, enter};
     use crate::value::Value;
+
+    /// ToUint16 (`#sec-touint16`) with ToFixedSizeInteger (`#sec-tofixedsizeinteger`):
+    /// ToIntegerOrInfinity, then modulo 2^16; NaN and the infinities are 0.
+    #[test]
+    fn to_uint16_wraps_modulo_2_16() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        for (number, uint16) in [
+            (0.0, 0),
+            (-0.0, 0),
+            (f64::NAN, 0),
+            (f64::INFINITY, 0),
+            (f64::NEG_INFINITY, 0),
+            (65.9, 65),
+            (-0.9, 0),
+            (-1.0, 65_535),
+            (-65_535.0, 1),
+            (65_535.0, 65_535),
+            (65_536.0, 0),
+            (65_537.5, 1),
+            (4_294_967_361.0, 65),
+            (-4_294_967_361.0, 65_471),
+            (9_007_199_254_740_993.0, 0),
+        ] {
+            assert_eq!(
+                agent.to_uint16(Value::Number(number)),
+                Ok(uint16),
+                "{number}"
+            );
+        }
+        assert_eq!(agent.to_uint16(Value::Boolean(true)), Ok(1));
+        assert_eq!(agent.to_uint16(Value::Undefined), Ok(0));
+    }
+
+    /// ToAbsoluteIndex and ToClampedIndex (`#sec-toabsoluteindex`, `#sec-toclampedindex`): a
+    /// negative index counts from the length, the infinities stay, and the clamped index lies
+    /// from 0 to the length.
+    #[test]
+    fn to_absolute_index_and_to_clamped_index_count_from_the_end() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        for (number, absolute, clamped) in [
+            (0.0, 0.0, 0),
+            (2.9, 2.0, 2),
+            (-1.0, 4.0, 4),
+            (-5.0, 0.0, 0),
+            (-6.5, -1.0, 0),
+            (7.0, 7.0, 5),
+            (f64::NAN, 0.0, 0),
+            (f64::INFINITY, f64::INFINITY, 5),
+            (f64::NEG_INFINITY, f64::NEG_INFINITY, 0),
+        ] {
+            assert_eq!(
+                agent.to_absolute_index(Value::Number(number), 5),
+                Ok(absolute),
+                "{number}"
+            );
+            assert_eq!(
+                agent.to_clamped_index(Value::Number(number), 5),
+                Ok(clamped),
+                "{number}"
+            );
+        }
+        assert_eq!(clamp_index(3.0, 0), 0);
+        assert_eq!(clamp_index(f64::NAN, 3), 0);
+    }
 
     /// ToInt32 and ToUint32 (`#sec-toint32`, `#sec-touint32`): truncation modulo 2^32.
     #[test]
