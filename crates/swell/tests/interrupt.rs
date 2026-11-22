@@ -1,17 +1,25 @@
 //! The interrupt handle (`docs/design/host-interface.md`, decision 12). The checks that read the
 //! flag during a run are `story:object-model-and-realms` and
 //! `story:interpreter-and-script-entry-points`.
+#![cfg(test)]
 
 mod support;
 
 use std::thread;
 use std::time::Duration;
 
-use support::script::{Outcome as Shown, define_function, describe, eval_text, parse};
-use swell::{
-    AgentState, Brand, Completion, Cx, HostCall, HostData, HostError, HostObjectSpec,
-    InterruptHandle, ObjectRef, Outcome, Prototype, Termination, Tracer, Value,
+use std::cell::{Cell, RefCell};
+
+use support::host::TestHost;
+use support::script::{
+    Outcome as Shown, define_function, describe, eval, eval_text, messages, parse,
 };
+use swell::{
+    Abrupt, Agent, AgentState, Brand, Completion, Cx, HostCall, HostData, HostError,
+    HostObjectSpec, InterruptHandle, ObjectRef, Outcome, Parsed, Prototype, Realm, RealmRef,
+    Source, Termination, Tracer, Value,
+};
+use swell_syntax::{MessageKind, message_kind};
 
 fn send_and_sync<T: Send + Sync + 'static>(_: &T) {}
 
@@ -233,4 +241,183 @@ fn host_96_interrupt_set_in_a_host_function_ends_the_run_after_it() {
         eval_text(&mut agent, &realm, "after + \",\" + got;"),
         Shown::Normal("\"0,undefined\"".to_string())
     );
+}
+
+/// A source the parser refuses (a BigInt literal, "... is not supported before slice <n>"):
+/// a parse of it that runs moves `refusals()` by 1 (HOST-164).
+const REFUSED: &str = "1n;";
+
+/// A parse's answer as text: `Parsed`, `Errors(<n>)` or `Terminated(<termination>)`.
+fn shown<T>(parsed: &Parsed<T>) -> String {
+    match parsed {
+        Parsed::Parsed(_) => "Parsed".to_string(),
+        Parsed::Errors(errors) => format!("Errors({})", errors.len()),
+        Parsed::Terminated(termination) => format!("Terminated({termination:?})"),
+    }
+}
+
+/// `REFUSED` is refused: with no flag set, `parse_script` of it answers one `SyntaxError` whose
+/// message, without the position ` (<line>:<column>)` the engine appends, reads as a refusal
+/// to `swell_syntax::message_kind`, and `refusals()` moves by 1.
+fn assert_refused(agent: &mut Agent<TestHost>, realm: &Realm) {
+    let before = agent.refusals();
+    let Parsed::Errors(errors) = agent
+        .parse_script(realm, Source::Utf8(REFUSED), None)
+        .unwrap()
+    else {
+        panic!("{REFUSED:?} was not refused");
+    };
+    let messages = messages(agent, realm, &errors);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    let (message, position) = messages[0].rsplit_once(" (").unwrap();
+    assert_eq!(position, "1:2)", "{messages:?}");
+    assert!(
+        matches!(message_kind(message), MessageKind::Refusal { .. }),
+        "{messages:?}"
+    );
+    assert_eq!(agent.refusals(), before + 1);
+}
+
+/// HOST-166: `interrupt()` called while no entry runs makes the next `parse_script` answer
+/// `Parsed::Terminated(Interrupted)` before the parse, for a UTF-8 and a UTF-16 source alike:
+/// `is_set()` then reads false, `refusals()` and `heap_bytes()` read what they read before the
+/// call, and `last_entry_steps()` reads 0.
+#[test]
+fn host_166_a_pending_interrupt_ends_parse_script_before_the_parse() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    let handle = agent.interrupt_handle();
+    let units: Vec<u16> = REFUSED.encode_utf16().collect();
+    for source in [Source::Utf8(REFUSED), Source::Utf16(&units)] {
+        // An entry that spends steps first, so that the 0 below is the parse's own; its root is
+        // held until the parse has answered.
+        let ran = eval(&mut agent, &realm, "var i = 0; while (i < 10) i++; i;");
+        assert!(matches!(ran, Outcome::Normal(_)));
+        assert!(agent.last_entry_steps().unwrap() > 0);
+        // A safe point releases the roots dropped so far, and a collection frees what they held,
+        // so that the parse's own safe point finds nothing to free.
+        agent.with_cx(&realm, |_| ()).unwrap();
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        let refusals = agent.refusals();
+        let bytes = agent.heap_bytes().unwrap();
+
+        handle.interrupt();
+        let parsed = agent.parse_script(&realm, source, None).unwrap();
+        assert_eq!(shown(&parsed), "Terminated(Interrupted)");
+        assert!(!handle.is_set());
+        assert_eq!(agent.refusals(), refusals);
+        assert_eq!(agent.heap_bytes(), Ok(bytes));
+        assert_eq!(agent.last_entry_steps(), Ok(0));
+        assert_eq!(agent.state(), AgentState::Alive);
+        drop(ran);
+    }
+    assert_refused(&mut agent, &realm);
+}
+
+/// A flag that `parse_script` consumed does not end the next entry: the parse after it answers
+/// `Parsed`, and the evaluation of that script `Normal(1)`.
+#[test]
+fn a_flag_consumed_by_parse_script_does_not_end_the_next_entry() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    agent.interrupt_handle().interrupt();
+    let parsed = agent
+        .parse_script(&realm, Source::Utf8("1;"), None)
+        .unwrap();
+    assert_eq!(shown(&parsed), "Terminated(Interrupted)");
+    assert!(!agent.interrupt_handle().is_set());
+
+    let parsed = agent
+        .parse_script(&realm, Source::Utf8("1;"), None)
+        .unwrap();
+    let Parsed::Parsed(script) = parsed else {
+        panic!("the second parse answered {}", shown(&parsed));
+    };
+    let outcome = agent.evaluate_script(&script).unwrap();
+    assert_eq!(
+        describe(&mut agent, &realm, outcome),
+        Shown::Normal("1".to_string())
+    );
+}
+
+thread_local! {
+    /// The realm `interrupt_then_parse` parses in.
+    static PARSE_REALM: Cell<Option<RealmRef>> = const { Cell::new(None) };
+    /// What `cx.parse_script` answered `interrupt_then_parse`, as [`shown`] writes it.
+    static PARSE_ANSWER: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// A host function that sets its agent's interrupt flag through the handle the host keeps,
+/// then parses `REFUSED` through `cx.parse_script`, records the answer and returns `1`.
+fn interrupt_then_parse(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    cx.host_mut().count += 1;
+    HANDLE.with(|slot| {
+        if let Some(handle) = slot.take() {
+            handle.interrupt();
+        }
+    });
+    let realm = PARSE_REALM.with(Cell::get).unwrap();
+    let parsed = cx.parse_script(realm, Source::Utf8(REFUSED), None).unwrap();
+    PARSE_ANSWER.with(|cell| cell.replace(Some(shown(&parsed))));
+    Ok(Value::Number(1.0))
+}
+
+/// HOST-167: a host function that calls `interrupt()` and then `cx.parse_script` gets
+/// `Parsed::Terminated(Interrupted)` with `refusals()` unchanged, and the outermost entry answers
+/// `Terminated(Interrupted)`. The same inside `with_cx`: the parse answers
+/// `Parsed::Terminated(Interrupted)`, and the run stays ended until the closure returns.
+#[test]
+fn host_167_an_interrupt_set_in_a_host_function_ends_its_cx_parse_script() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    define_function(&mut agent, &realm, "f", 0, interrupt_then_parse, false);
+    let realm_ref = agent
+        .with_cx(&realm, |cx| cx.realm_ref(&realm).unwrap())
+        .unwrap();
+    PARSE_REALM.with(|cell| cell.set(Some(realm_ref)));
+    HANDLE.with(|slot| slot.set(Some(agent.interrupt_handle())));
+
+    let refusals = agent.refusals();
+    assert_eq!(
+        eval_text(&mut agent, &realm, "f(); 1"),
+        Shown::Terminated(Termination::Interrupted)
+    );
+    assert_eq!(agent.host().count, 1);
+    assert_eq!(
+        PARSE_ANSWER.with(|cell| cell.take()),
+        Some("Terminated(Interrupted)".to_string())
+    );
+    assert_eq!(agent.refusals(), refusals);
+    assert!(!agent.interrupt_handle().is_set());
+
+    // Inside `with_cx`.
+    let handle = agent.interrupt_handle();
+    let (parsed, after) = agent
+        .with_cx(&realm, |cx| {
+            let own = cx.realm_ref(&realm).unwrap();
+            handle.interrupt();
+            let parsed = cx.parse_script(own, Source::Utf8(REFUSED), None).unwrap();
+            let after = cx.new_string("after").map(|_| ());
+            (shown(&parsed), after)
+        })
+        .unwrap();
+    assert_eq!(parsed, "Terminated(Interrupted)");
+    assert_eq!(after, Err(Abrupt::Terminated(Termination::Interrupted)));
+    assert_eq!(agent.refusals(), refusals);
+    assert!(!handle.is_set());
+
+    // The next entry runs afresh, and `REFUSED` is refused when no flag is set.
+    assert_eq!(
+        eval_text(&mut agent, &realm, "1;"),
+        Shown::Normal("1".to_string())
+    );
+    let counted = agent
+        .with_cx(&realm, |cx| {
+            let own = cx.realm_ref(&realm).unwrap();
+            shown(&cx.parse_script(own, Source::Utf8(REFUSED), None).unwrap())
+        })
+        .unwrap();
+    assert_eq!(counted, "Errors(1)");
+    assert_eq!(agent.refusals(), refusals + 1);
+    assert_refused(&mut agent, &realm);
 }
