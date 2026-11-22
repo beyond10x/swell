@@ -221,10 +221,11 @@ const DEPTH: usize = if cfg!(feature = "collect-every-safe-point") {
 /// [`reviver_depth`] gives it: 40,000 in the default mode, 200 with the feature
 /// `collect-every-safe-point`.
 ///
-/// The full nesting, [`DEPTH`] (half of it in the collect mode, [`reviver_depth`]), is what
-/// the lane `slow` runs (`SWELL_FULL_COUNTS=1`): in the default mode the two runs took 16.7 s
-/// together, and in the collect mode, where every call of the reviver collects, the test was
-/// terminated at 60 s (measured at a load of 100 to 110 on 17 cores, cargo-nextest). The
+/// The lane `slow` (`SWELL_FULL_COUNTS=1`) nests 60,000 in the default mode and 1,000, half of
+/// [`DEPTH`], in the collect mode ([`reviver_depth`]). At [`DEPTH`] in the default mode the
+/// two runs took 16.7 s together, and in the collect mode, where every call of the reviver
+/// collects, the test was terminated at 60 s (measured at a load of 100 to 110 on 17 cores,
+/// cargo-nextest). The
 /// gate's nesting still reaches what the test is for. In the default mode the walk runs on
 /// [`nesting_stack`], the stack of the full nesting scaled by 40,000 / 100,000, so a walk that
 /// overflows at the full nesting overflows at the gate's; it ran on the whole stack before,
@@ -238,7 +239,9 @@ const GATE_REVIVER_DEPTH: usize = if cfg!(feature = "collect-every-safe-point") 
     40_000
 };
 
-/// The nesting of the reviver tests: [`DEPTH`] under `SWELL_FULL_COUNTS=1` (the lane `slow`),
+/// The nesting of the reviver tests: 60,000 under `SWELL_FULL_COUNTS=1` (the lane `slow`) in
+/// the default mode, on [`nesting_stack`] of it (at [`DEPTH`] the result test took 3.3 CPU
+/// seconds alone, measured on 2026-11-22, a reviver call per level),
 /// [`GATE_REVIVER_DEPTH`] in the gate. With the feature `collect-every-safe-point` the lane
 /// nests 1,000, half of [`DEPTH`]: every call of the reviver collects while the walk holds
 /// every level, so the cost grows with the square of the nesting (at 2,000 the result test
@@ -249,7 +252,7 @@ fn reviver_depth() -> usize {
         if cfg!(feature = "collect-every-safe-point") {
             DEPTH / 2
         } else {
-            DEPTH
+            60_000
         }
     } else {
         GATE_REVIVER_DEPTH

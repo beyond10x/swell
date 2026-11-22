@@ -748,17 +748,21 @@ mod tests {
     const MIB: u64 = 1 << 20;
     const OPTIONS: ParseOptions = ParseOptions { max_nesting: 100 };
 
-    /// The lines of the flat source: the story's 20,000 in the lane `slow`
-    /// (`SWELL_FULL_COUNTS=1`), 5,000 in the gate. Each test of the flat source compares
-    /// readings of the same source with each other (a peak with its floor, a budget below a
-    /// peak), so the outcome each asserts holds at either count, and 5,000 lines are 35,000 code
-    /// units, 8 polls of the parse. With 20,000 the four tests took 6.5 CPU seconds together in
-    /// either collection mode, each run alone, and HOST-169's 3.1 s of them was the slowest
-    /// test of a whole-package run in both modes (21 s at a load of 60 to 95 on 20 cores).
+    /// The lines of the flat source: 10,000 in the default mode's lane `slow`
+    /// (`SWELL_FULL_COUNTS=1`), 5,000 in the gate and with the feature
+    /// `collect-every-safe-point`. Each test of the flat source compares readings of the same
+    /// source with each other (a peak with its floor, a budget below a peak), so the outcome
+    /// each asserts holds at either count, and 5,000 lines are 35,000 code units, 8 polls of the
+    /// parse. With the story's 20,000 the four tests took 6.5 CPU seconds together in either
+    /// collection mode, each run alone, and HOST-169's 3.1 s of them was the slowest test of a
+    /// whole-package run in both modes (21 s at a load of 60 to 95 on 20 cores; 2.9 and 3.1 CPU
+    /// seconds alone in the lane's two modes, measured on 2026-11-22).
     fn flat_lines() -> usize {
         // HOST-2 (source_scan.rs): no run-time environment read in engine sources, tests included.
-        if matches!(option_env!("SWELL_FULL_COUNTS"), Some("1")) {
-            20_000
+        if matches!(option_env!("SWELL_FULL_COUNTS"), Some("1"))
+            && !cfg!(feature = "collect-every-safe-point")
+        {
+            10_000
         } else {
             5_000
         }

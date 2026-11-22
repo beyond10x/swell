@@ -18,19 +18,19 @@ fn collect(agent: &mut swell::Agent<support::host::TestHost>) {
 
 /// The iterations of a garbage loop: enough to pass the collection threshold (1 MiB) several
 /// times in the default build, and few where every safe point collects. In the default build
-/// the lane `slow` (`SWELL_FULL_COUNTS=1`) runs 25,000 and the gate 6,000;
+/// the lane `slow` (`SWELL_FULL_COUNTS=1`) runs 15,000 and the gate 6,000;
 /// [`garbage_passes_the_threshold_and_the_budget`] checks that this is still enough. An array of
 /// the loop is charged 464 bytes (measured), so 6,000 make 2,784,000 bytes a loop, more than
 /// twice the threshold, and three loops more than the 4 MiB budget; with 20,000
 /// [`operand_stack_and_local_values_survive_collect`] took 22.2 s at a load of 100 to 110 on
-/// 17 cores (cargo-nextest). 25,000 make 11,600,000 bytes a loop, eleven times the threshold;
-/// the 100,000 the lane ran before took 11.5 CPU seconds alone (6,000: 0.68), measured on
-/// 2026-11-22.
+/// 17 cores (cargo-nextest). 15,000 make 6,960,000 bytes a loop, six times the threshold; the
+/// 100,000 the lane ran before took 11.5 CPU seconds alone and 25,000 took 2.8 (6,000: 0.68),
+/// measured on 2026-11-22.
 fn garbage() -> u32 {
     if cfg!(feature = "collect-every-safe-point") {
         20
     } else if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
-        25_000
+        15_000
     } else {
         6_000
     }

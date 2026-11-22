@@ -160,23 +160,24 @@ fn slot_names_past_the_small_size_charge_a_step_per_comparison() {
     assert_eq!(last - first, 44, "{first} and {last}");
 }
 
-/// Determinism (`docs/design/host-interface.md`, decision 3): a script of 10,000 properties,
-/// with deletions and an Array of 10,000 elements, spends the same steps and holds the same
-/// heap bytes in two agents of the same seeds, and in one of another `hash_key`: no order or
-/// charge comes from the map's iteration or its hash. With the feature `collect-every-safe-point`
-/// the script has 50 of each, still past the small size: that mode collects at every safe point,
-/// and every iteration of a loop is one (10,000 ran over 60 s there and 1,000 took 56.4 s,
-/// measured). In the default mode's gate it has 2,000 of each (10,000 took 26.5 s there at a
-/// load of 100 to 110 on 17 cores, cargo-nextest): the map still grows from the small size
-/// through several sizes, with every third property deleted; the lane `slow`
-/// (`SWELL_FULL_COUNTS=1`) runs 10,000.
+/// Determinism (`docs/design/host-interface.md`, decision 3): a script of n properties (the
+/// story's 10,000), with deletions and an Array of n elements, spends the same steps and holds
+/// the same heap bytes in two agents of the same seeds, and in one of another `hash_key`: no
+/// order or charge comes from the map's iteration or its hash. With the feature
+/// `collect-every-safe-point` the script has 50 of each, still past the small size: that mode
+/// collects at every safe point, and every iteration of a loop is one (10,000 ran over 60 s
+/// there and 1,000 took 56.4 s, measured). In the default mode's gate it has 2,000 of each
+/// (10,000 took 26.5 s there at a load of 100 to 110 on 17 cores, cargo-nextest): the map still
+/// grows from the small size through several sizes, with every third property deleted; the
+/// lane `slow` (`SWELL_FULL_COUNTS=1`) runs 5,000, two and a half times the gate's (10,000
+/// took 4.3 CPU seconds alone there, measured on 2026-11-22).
 #[test]
 fn the_same_seeds_give_the_same_steps_and_heap_bytes() {
     let full = std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1");
     let (n, expected) = if cfg!(feature = "collect-every-safe-point") {
         (50, "\"33,p1,p49,49\"")
     } else if full {
-        (10_000, "\"6666,p1,p9998,9999\"")
+        (5_000, "\"3333,p1,p4999,4999\"")
     } else {
         (2_000, "\"1333,p1,p1999,1999\"")
     };

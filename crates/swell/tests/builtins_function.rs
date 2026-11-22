@@ -362,16 +362,18 @@ const LINKS: u32 = if cfg!(feature = "collect-every-safe-point") {
     100_000
 };
 
-/// The links of the chain in this run: [`LINKS`] in the collect mode and in the lane `slow`
-/// (`SWELL_FULL_COUNTS=1`); 25,000 in the default mode's gate (100,000 took 19.0 s there at a
-/// load of 100 to 110 on 17 cores, cargo-nextest). 25,000 still shows the stack bound: a Rust
-/// call per link takes at least 16 bytes (a return address and a saved frame pointer), 400,000
-/// bytes for the chain, more than the [`STACK_BYTES`] (262,144) the chain is called on.
+/// The links of the chain in this run: [`LINKS`] in the collect mode; 50,000 in the default
+/// mode's lane `slow` (`SWELL_FULL_COUNTS=1`; 100,000 took 2.7 CPU seconds alone there,
+/// measured on 2026-11-22), 25,000 in its gate (100,000 took 19.0 s there at a load of 100 to
+/// 110 on 17 cores, cargo-nextest). 25,000 still shows the stack bound: a Rust call per link
+/// takes at least 16 bytes (a return address and a saved frame pointer), 400,000 bytes for the
+/// chain, more than the [`STACK_BYTES`] (262,144) the chain is called on, and 50,000 three
+/// times it.
 fn links() -> u32 {
-    if cfg!(feature = "collect-every-safe-point")
-        || std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-    {
+    if cfg!(feature = "collect-every-safe-point") {
         LINKS
+    } else if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
+        50_000
     } else {
         25_000
     }
