@@ -234,13 +234,6 @@ impl<H: Host> Agent<H> {
     /// SetIntegrityLevel ( O, level ) (`#sec-setintegritylevel`), for every object the base has
     /// (ordinary, Array, String and arguments exotic objects, functions): a step per key, the
     /// list of keys charged to the memory budget and kept while it runs.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Object.seal, Object.freeze, JSON.rawJSON: story:object-integrity-and-prototype-methods, story:json-parse-and-raw-json"
-        )
-    )]
     pub(crate) fn set_integrity_level(
         &mut self,
         object: ObjectRef,
