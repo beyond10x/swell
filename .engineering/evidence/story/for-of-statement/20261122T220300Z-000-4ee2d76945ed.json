@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-22T22:03:00Z",
+  "actor": "human:operator",
+  "artifact": "story:for-of-statement",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "check and the lane slow on the forge, commit a6f22f6",
+    "reference": "https://github.com/beyond10x/swell/actions/runs/45074571595"
+  }
+}

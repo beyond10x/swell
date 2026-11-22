@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:block-function-declarations
 kind: story
-status: active
+status: implemented
 title: 'Function declarations in blocks and switch: BlockDeclarationInstantiation and the block''s function bindings'
 summary: 49 failing cases of slice 6 on its list; BlockDeclarationInstantiation as decision 3 gives it; needs no builtin of slice 3 and starts before slice 3's close.
 relations:
@@ -45,10 +45,11 @@ scope:
   path: crates/syntax/tests/sources/refused/function-declaration-in-block.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/function-declaration-in-switch.js
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T00:38:40Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:38:40Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T22:03:56Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

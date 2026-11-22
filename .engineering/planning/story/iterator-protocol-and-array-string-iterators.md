@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:iterator-protocol-and-array-string-iterators
 kind: story
-status: active
+status: implemented
 title: 'The iterator protocol: operations on iterators, the Array and String iterators, values, keys, entries and @@iterator of arguments'
 summary: 56 failing cases of slice 6 on its list; the operations for-of, patterns, spread and the iterating builtins use come here with their own tests, as decision 3 gives them.
 relations:
@@ -39,10 +39,11 @@ scope:
   path: crates/swell/tests/language/builtin-array-iterator.js
 - confidence: cited
   path: crates/swell/tests/language/builtin-string-iterator.js
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T00:38:41Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:38:41Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T22:03:56Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

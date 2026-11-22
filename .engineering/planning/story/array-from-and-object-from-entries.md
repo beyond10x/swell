@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:array-from-and-object-from-entries
 kind: story
-status: active
+status: implemented
 title: Array.from, Object.fromEntries and Object.groupBy over iterables
 summary: The builtins of the directories slice 3's close moves to slice 6, each loop charged a step per iteration; 77 failing cases on its list.
 relations:
@@ -29,10 +29,11 @@ scope:
   path: crates/swell/tests/language/builtin-object-from-entries.js
 - confidence: cited
   path: crates/swell/tests/language/builtin-object-group-by.js
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T00:38:42Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:38:42Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T22:04:00Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:symbol-values-in-core-builtins
 kind: story
-status: active
+status: implemented
 title: 'Symbol values in the builtins of slice 3: the symbol hooks and the defects their cases show'
 summary: 235 failing cases of slice 6 on its list, most under built-ins/Array, String and Object; fixes the hooks in their group and module files, after the iterators story and before Array.from, which write the same module files.
 relations:
@@ -44,10 +44,11 @@ scope:
   path: crates/swell/tests/builtins_symbol_values.rs
 - confidence: cited
   path: crates/swell/tests/language/builtin-symbol-values.js
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T00:38:41Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:38:41Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T22:03:57Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
