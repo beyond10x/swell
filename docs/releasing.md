@@ -58,8 +58,12 @@ deciding session's, from a checkout of the repository:
 3. **Gate.** One commit by the bot holds steps 1 and 2. Run the gate on it as the forge's
    runner does and compare its lines with the changelog section:
 
-       CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0 \
-         RUSTC_WRAPPER="" slot task check
+       slot --timeout 1h task check-runner
+
+   The gate does not run test262 in full; it compares the digest of the run's sources with
+   `conformance/test262/expected.digest`. The version change is a source: run
+   `slot --timeout 30m task test262-expected` on the commit first, and
+   `slot --local task site-data`, and commit the files they write with steps 1 and 2.
 
 4. **Notes.** Write the notes file, `.out/release-<version>-notes.md`, in the form the
    introduction gives: the lead, `**Breaking**`, `**Changed**`, the link line. Count its
@@ -69,9 +73,13 @@ deciding session's, from a checkout of the repository:
    gate's lines are sent to the deciding session. On its answer `main` is moved to the commit
    (fast-forward).
 5. **Publish.** The deciding session checks and verifies the commit, pushes `main`, and waits
-   for the `check` run on it to be green:
+   for the `check` run and the `slow` run on it to be green. The lane `slow` makes the full
+   test262 run and the full counts of the heavy tests; a release is not tagged on a commit
+   whose `slow` run is red or missing:
 
        $gates gh -- run list --workflow check.yml --branch main --limit 1
+       $gates gh -- run watch <run-id> --exit-status
+       $gates gh -- run list --workflow slow.yml --branch main --limit 1
        $gates gh -- run watch <run-id> --exit-status
 
 6. **Tag.** Scan the notes file, then tag the commit with it as the message and push the tag.
