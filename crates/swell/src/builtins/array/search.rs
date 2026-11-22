@@ -442,9 +442,7 @@ impl<H: Host> Agent<H> {
         // 4. If fromIndex is not present, let k be length - 1; else let k be
         // min(? ToAbsoluteIndex(fromIndex, length), length - 1). An undefined fromIndex is present.
         let mut index = match args.get(1) {
-            Some(&from) => {
-                self.to_absolute_index(from, length)?.min(length - 1.0)
-            }
+            Some(&from) => self.to_absolute_index(from, length)?.min(length - 1.0),
             None => length - 1.0,
         };
         // 5. Repeat, while k ≥ 0.
@@ -475,9 +473,7 @@ impl<H: Host> Agent<H> {
         // 4. If end is undefined, let final be length; else ? ToClampedIndex(end, length).
         let end = match argument(args, 1) {
             Value::Undefined => length,
-            end => {
-                self.to_clamped_index(end, length)?
-            }
+            end => self.to_clamped_index(end, length)?,
         };
         // 5. Let count be max(final - k, 0).
         let count = (end - index).max(0.0);
