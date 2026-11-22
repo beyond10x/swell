@@ -29,13 +29,15 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use swell_compiler::bytecode::Instruction;
+
 use super::hooks::HostDefined;
 use super::host_bytes::HostBytes;
 use super::interrupt::InterruptHandle;
 use super::limits::{CreateError, Limits, Seeds};
 use super::outcome::{
-    Abrupt, CollectReport, Completion, ErrorSummary, HostError, Outcome, Parsed, Termination,
-    ValueKind,
+    Abrupt, CollectReport, Completion, ErrorSite, ErrorSummary, HostError, Outcome, Parsed,
+    Termination, ValueKind,
 };
 use super::{ErrorKind, GlobalSetup, Host, Source};
 use crate::heap::Heap;
@@ -44,7 +46,7 @@ use crate::heap::collect::{self, Item, Mark, Stale};
 use crate::interp::Interp;
 use crate::object::builtin_function::Activation;
 use crate::realm::WellKnown;
-use crate::script::{ParseAnswer, parse_termination};
+use crate::script::{Compiled, ParseAnswer, parse_termination};
 use crate::value::{Realm, Root, Script, Value};
 
 /// How many agents this process has created; the next agent's key is one more. A key is never
@@ -69,6 +71,72 @@ pub enum AgentState {
     Alive,
     /// A run ended in `Terminated(EngineFault)`; the host discards the agent.
     Faulted,
+}
+
+/// Where an error arose, as the agent keeps it past the end of the entry and a collection
+/// (decision 13): what the read turns into an [`ErrorSite`].
+pub(crate) enum SiteRecord {
+    /// The first error of a parse, with the [[HostDefined]] given to it.
+    Parse {
+        line: u32,
+        column: u32,
+        host_defined: Option<HostDefined>,
+    },
+    /// An instruction: the code that holds it, its template (`None` for the script's own code)
+    /// and its index, with a clone of its script record's [[HostDefined]].
+    Code {
+        compiled: Rc<Compiled>,
+        template: Option<u32>,
+        index: usize,
+        host_defined: Option<HostDefined>,
+    },
+}
+
+impl SiteRecord {
+    /// The site: the line and column of an instruction are read from its code's positions.
+    fn site(&self) -> Option<ErrorSite> {
+        match self {
+            SiteRecord::Parse {
+                line,
+                column,
+                host_defined,
+            } => Some(ErrorSite {
+                line: *line,
+                column: *column,
+                dynamic: false,
+                host_defined: host_defined.clone(),
+            }),
+            SiteRecord::Code {
+                compiled,
+                template,
+                index,
+                host_defined,
+            } => {
+                let positions = match template {
+                    None => &compiled.code.positions,
+                    Some(template) => {
+                        let template = usize::try_from(*template).ok()?;
+                        &compiled.code.functions.get(template)?.positions
+                    }
+                };
+                let span = positions.get(*index)?;
+                Some(ErrorSite {
+                    line: span.line,
+                    column: span.column,
+                    dynamic: compiled.dynamic,
+                    host_defined: host_defined.clone(),
+                })
+            }
+        }
+    }
+}
+
+/// Whether two thrown values are the same value by identity: the same record, or the same bits.
+fn same_thrown(a: Value, b: Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.to_bits() == y.to_bits(),
+        _ => a == b,
+    }
 }
 
 /// One engine instance (9.6).
@@ -111,6 +179,19 @@ pub struct Agent<H: Host> {
     pub(crate) collect_pending: bool,
     /// The refusals of a later slice's construct the agent raised ([`Agent::refusals`]).
     pub(crate) refusals: u64,
+    /// The site of the throw that unwinds in the running entry, with the thrown value, which is
+    /// compared by identity and never read (decision 13, [`Agent::record_throw_site`]).
+    pub(crate) throw_site: Option<(Value, SiteRecord)>,
+    /// How many throw sites were recorded, wrapping: a builtin compares it across its run.
+    pub(crate) throw_sites: u64,
+    /// The line and column of the first error `syntax_errors` turned into an object, read by
+    /// `parse_script`.
+    pub(crate) syntax_error_at: Option<(u32, u32)>,
+    /// The site the last outermost entry answered ([`Agent::last_entry_error_site`]).
+    pub(crate) error_site: Option<SiteRecord>,
+    /// Test only: how many site records were written.
+    #[cfg(test)]
+    pub(crate) site_records: u64,
     /// The call the test-only switch makes find a broken invariant next ([`FaultPoint`]).
     #[cfg(feature = "fault-injection")]
     pub(crate) injected: Option<FaultPoint>,
@@ -171,6 +252,12 @@ impl<H: Host> Agent<H> {
             scoped_scripts: Vec::new(),
             collect_pending: false,
             refusals: 0,
+            throw_site: None,
+            throw_sites: 0,
+            syntax_error_at: None,
+            error_site: None,
+            #[cfg(test)]
+            site_records: 0,
             #[cfg(feature = "fault-injection")]
             injected: None,
         })
@@ -294,6 +381,7 @@ impl<H: Host> Agent<H> {
         self.alive()?;
         self.termination = None;
         self.steps = 0;
+        self.clear_error_sites();
         if self.safe_point().is_err() {
             self.fault();
             return Ok(Outcome::Terminated(Termination::EngineFault));
@@ -444,6 +532,7 @@ impl<H: Host> Agent<H> {
         f: impl FnOnce(&mut Self) -> Completion<Value>,
     ) -> Outcome<Root> {
         self.termination = None;
+        self.clear_error_sites();
         if self.safe_point().is_err() {
             self.fault();
             return Outcome::Terminated(Termination::EngineFault);
@@ -451,18 +540,24 @@ impl<H: Host> Agent<H> {
         let start = self.scope.len();
         let completion = self.in_entry_realm(realm, |agent| agent.begin().and_then(|()| f(agent)));
         self.scope.truncate(start);
-        let outcome = match completion {
-            Ok(value) => Outcome::Normal(self.heap.roots.add(value)),
-            Err(Abrupt::Throw(value)) => Outcome::Throw(self.heap.roots.add(value)),
-            Err(Abrupt::Terminated(termination)) => Outcome::Terminated(termination),
+        let (outcome, site) = match completion {
+            Ok(value) => (Outcome::Normal(self.heap.roots.add(value)), None),
+            Err(Abrupt::Throw(value)) => (
+                Outcome::Throw(self.heap.roots.add(value)),
+                self.answered_site(value),
+            ),
+            Err(Abrupt::Terminated(termination)) => (Outcome::Terminated(termination), None),
         };
         self.end_entry();
+        self.error_site = site;
         outcome
     }
 
     /// After an outermost entry: the next one runs afresh unless the agent is faulted, and the
-    /// scripts handed out as `ScriptRef`s in it are no longer held.
+    /// scripts handed out as `ScriptRef`s in it are no longer held. No error site is kept: the
+    /// entries that answer one set it after this (decision 13).
     pub(crate) fn end_entry(&mut self) {
+        self.clear_error_sites();
         self.scoped_scripts.clear();
         if self.state == AgentState::Alive {
             self.termination = None;
@@ -487,6 +582,7 @@ impl<H: Host> Agent<H> {
         let realm = self.live_realm(realm)?;
         self.termination = None;
         self.steps = 0;
+        self.clear_error_sites();
         if self.safe_point().is_err() {
             self.fault();
             return Ok(Parsed::Terminated(Termination::EngineFault));
@@ -495,6 +591,7 @@ impl<H: Host> Agent<H> {
             self.end_entry();
             return Ok(Parsed::Terminated(Termination::Interrupted));
         }
+        let site_host_defined = host_defined.clone();
         let answer = self.in_entry_realm(realm, |agent| {
             agent.parse_script_in(realm, source, host_defined)
         });
@@ -504,16 +601,20 @@ impl<H: Host> Agent<H> {
         } else {
             answer
         };
+        let mut site = None;
         let parsed = match answer {
             Ok(ParseAnswer::Script(script)) => {
                 Parsed::Parsed(Script(self.heap.roots.add_script(script)))
             }
-            Ok(ParseAnswer::Errors(errors)) => Parsed::Errors(
-                errors
-                    .into_iter()
-                    .map(|error| self.heap.roots.add(error))
-                    .collect(),
-            ),
+            Ok(ParseAnswer::Errors(errors)) => {
+                site = self.parse_error_site(site_host_defined);
+                Parsed::Errors(
+                    errors
+                        .into_iter()
+                        .map(|error| self.heap.roots.add(error))
+                        .collect(),
+                )
+            }
             Err(abrupt) => {
                 let termination = parse_termination(abrupt);
                 if termination == Termination::EngineFault {
@@ -523,6 +624,7 @@ impl<H: Host> Agent<H> {
             }
         };
         self.end_entry();
+        self.error_site = site;
         Ok(parsed)
     }
 
@@ -569,6 +671,92 @@ impl<H: Host> Agent<H> {
     pub fn last_entry_steps(&self) -> Result<u64, HostError> {
         self.alive()?;
         Ok(self.steps)
+    }
+
+    /// Where the error the last outermost entry answered arose (decision 13): after
+    /// `parse_script` answered `Parsed::Errors`, the line and column of its first error; after
+    /// `evaluate_script`, `call` or `construct` answered `Throw`, those of the instruction where
+    /// the throw arose in the innermost ECMAScript frame, whether that code is eval or
+    /// `Function` code, and the [[HostDefined]] of its script. After any other entry, and for
+    /// a throw raised outside any ECMAScript frame, `None`. A read: it runs no code, calls no
+    /// hook, spends no step and allocates nothing in the heap; it answers the same after a
+    /// collection.
+    pub fn last_entry_error_site(&self) -> Result<Option<ErrorSite>, HostError> {
+        self.alive()?;
+        Ok(self.error_site.as_ref().and_then(SiteRecord::site))
+    }
+
+    /// The start of an outermost entry: no site is recorded (decision 13).
+    fn clear_error_sites(&mut self) {
+        self.throw_site = None;
+        self.syntax_error_at = None;
+        self.error_site = None;
+    }
+
+    /// Record where the throw of `thrown` arose: the running frame's last instruction, unless
+    /// the same value is unwinding already (through callers, builtins and `finally` blocks); a
+    /// `throw` statement always starts a new record. Called by `unwind`, kept out of the run
+    /// loop's frame.
+    #[inline(never)]
+    pub(crate) fn record_throw_site(&mut self, thrown: Value) {
+        let Some(frame) = self.interp.frames.last() else {
+            return;
+        };
+        let index = frame.pc.saturating_sub(1);
+        let statement = matches!(frame.instructions().get(index), Some(Instruction::Throw));
+        if !statement
+            && let Some((pending, _)) = &self.throw_site
+            && same_thrown(*pending, thrown)
+        {
+            return;
+        }
+        let compiled = Rc::clone(&frame.compiled);
+        let template = frame.template;
+        let script = frame.script;
+        let host_defined = self.script_record_host_defined(script);
+        self.throw_site = Some((
+            thrown,
+            SiteRecord::Code {
+                compiled,
+                template,
+                index,
+                host_defined,
+            },
+        ));
+        self.throw_sites = self.throw_sites.wrapping_add(1);
+        #[cfg(test)]
+        {
+            self.site_records = self.site_records.saturating_add(1);
+        }
+    }
+
+    /// The throw that unwinds was caught: a `catch` block was entered, or a builtin or a host
+    /// function answered normally after it.
+    pub(crate) fn end_throw_site(&mut self) {
+        self.throw_site = None;
+    }
+
+    /// The site of the first error of the parse that just answered errors, with the
+    /// [[HostDefined]] given to it; `None` for an error with no position (a bound of the
+    /// bytecode format, `CompileError::TooMany`).
+    fn parse_error_site(&mut self, host_defined: Option<HostDefined>) -> Option<SiteRecord> {
+        let (line, column) = self.syntax_error_at.take()?;
+        #[cfg(test)]
+        {
+            self.site_records = self.site_records.saturating_add(1);
+        }
+        Some(SiteRecord::Parse {
+            line,
+            column,
+            host_defined,
+        })
+    }
+
+    /// The site of the throw of `thrown` an outermost entry answers: the record, when it is of
+    /// that value.
+    fn answered_site(&mut self, thrown: Value) -> Option<SiteRecord> {
+        let (pending, site) = self.throw_site.take()?;
+        same_thrown(pending, thrown).then_some(site)
     }
 
     /// `Err(Faulted)` for a faulted agent.

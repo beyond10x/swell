@@ -75,6 +75,7 @@ use swell_syntax::ast::{
     Ast, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind, LexicalName,
     PropertyKey, PropertyValue, Stmt, StmtId,
 };
+use swell_syntax::ledger::{HeapBytes, Meter, Stop, map_entry_bytes};
 
 use crate::CompileError;
 use crate::bytecode::{ArgumentsObject, Slot};
@@ -256,6 +257,7 @@ struct BindingData {
     lexical: Option<LexicalData>,
 }
 
+#[derive(Clone, Copy)]
 enum Walk {
     Stmt(StmtId),
     Expr(ExprId),
@@ -271,8 +273,17 @@ enum Walk {
     Leave,
 }
 
-struct Resolver<'a> {
+impl HeapBytes for Walk {
+    fn heap_bytes(&self) -> usize {
+        0
+    }
+}
+
+struct Resolver<'a, 'm> {
     ast: &'a Ast,
+    /// The compile step's ledger: every growth of the resolver's structures is charged to it
+    /// first; the compile step credits them all when it ends.
+    m: &'a Meter<'m>,
     scopes: Vec<ScopeData>,
     bindings: Vec<BindingData>,
     current: usize,
@@ -299,20 +310,27 @@ fn malformed(what: &str) -> CompileError {
 }
 
 /// Resolves every name of `script`; of eval code when `eval_code` is true.
-pub(crate) fn resolve(script: &Script, eval_code: bool) -> Result<Resolution, CompileError> {
+pub(crate) fn resolve(
+    script: &Script,
+    eval_code: bool,
+    m: &Meter<'_>,
+) -> Result<Resolution, CompileError> {
+    let mut scopes = m.with_capacity(1)?;
+    scopes.push(ScopeData {
+        parent: None,
+        kind: Kind::Function,
+        owner: None,
+        names: BTreeMap::new(),
+        order: Vec::new(),
+        env_slots: 0,
+        named: false,
+        catch: None,
+        key: None,
+    });
     let mut r = Resolver {
         ast: &script.ast,
-        scopes: vec![ScopeData {
-            parent: None,
-            kind: Kind::Function,
-            owner: None,
-            names: BTreeMap::new(),
-            order: Vec::new(),
-            env_slots: 0,
-            named: false,
-            catch: None,
-            key: None,
-        }],
+        m,
+        scopes,
         bindings: Vec::new(),
         current: 0,
         occurrences: Vec::new(),
@@ -325,6 +343,22 @@ pub(crate) fn resolve(script: &Script, eval_code: bool) -> Result<Resolution, Co
         work: Vec::new(),
         checked_locals: BTreeSet::new(),
     };
+    let resolution = resolve_with(&mut r, script, eval_code);
+    // The resolver's own structures are dropped with it; on a stop the compile step credits
+    // everything at once.
+    if resolution.is_ok() {
+        m.credit(r.scratch_bytes());
+    }
+    drop(r);
+    resolution
+}
+
+/// The steps of [`resolve`] with the resolver made.
+fn resolve_with(
+    r: &mut Resolver<'_, '_>,
+    script: &Script,
+    eval_code: bool,
+) -> Result<Resolution, CompileError> {
     // The lexical names of eval code are a scope of its own (`#sec-evaldeclarationinstantiation`,
     // step 16); a script's are names of the global environment.
     let eval_top = if eval_code && !script.scope.lexical.is_empty() {
@@ -336,19 +370,24 @@ pub(crate) fn resolve(script: &Script, eval_code: bool) -> Result<Resolution, Co
     };
     r.push_list(&script.body);
     while let Some(task) = r.work.pop() {
+        r.m.visit()?;
+        r.reserve_work(task)?;
+        let reserved = r.work.capacity();
         r.step(task)?;
+        r.settle_work(reserved)?;
+        r.m.check()?;
     }
     r.mark_captured()?;
     r.mark_named()?;
     let mut frames = r.allocate()?;
     let sites = r.locate()?;
-    let lexical_scopes = r.lexical_scopes();
+    let lexical_scopes = r.lexical_scopes()?;
     let (eval_lexical, eval_env) = match eval_top {
         Some(scope) => r.eval_bindings(scope)?,
         None => (Vec::new(), Vec::new()),
     };
     let script_locals = frames.remove(&None).unwrap_or(0);
-    let mut functions = Vec::with_capacity(script.ast.functions().len());
+    let mut functions = r.m.with_capacity(script.ast.functions().len())?;
     for (i, _) in script.ast.functions().iter().enumerate() {
         let id = FunctionId(u32::try_from(i).map_err(|_| CompileError::TooMany("functions"))?);
         let mut info = r.function_info(id, &sites)?;
@@ -356,12 +395,10 @@ pub(crate) fn resolve(script: &Script, eval_code: bool) -> Result<Resolution, Co
         info.given_name = r.given_names.remove(&id);
         functions.push(info);
     }
-    let named_catches = r
-        .scopes
-        .iter()
-        .filter(|s| s.named)
-        .filter_map(|s| s.catch)
-        .collect();
+    let mut named_catches = BTreeSet::new();
+    for catch in r.scopes.iter().filter(|s| s.named).filter_map(|s| s.catch) {
+        r.m.insert(&mut named_catches, catch)?;
+    }
     Ok(Resolution {
         sites,
         script_locals,
@@ -373,8 +410,104 @@ pub(crate) fn resolve(script: &Script, eval_code: bool) -> Result<Resolution, Co
     })
 }
 
-impl<'a> Resolver<'a> {
+impl<'a, 'm> Resolver<'a, 'm> {
+    /// Room on the work stack for what the step `task` pushes, charged before the step: its
+    /// node's children twice over and ten more (a step pushes its children and at most a few
+    /// markers around them).
+    fn reserve_work(&mut self, task: Walk) -> Result<(), Stop> {
+        let children = match task {
+            Walk::Stmt(id) => self.ast.stmt_child_count(id),
+            Walk::Expr(id) => self.ast.expr_child_count(id),
+            Walk::Function(id) => self
+                .ast
+                .function(id)
+                .map_or(0, |f| f.body.len().saturating_add(f.params.len())),
+            _ => 0,
+        };
+        self.m.grow_by(
+            &mut self.work,
+            children.saturating_mul(2).saturating_add(10),
+        )
+    }
+
+    /// Charges what the work stack grew past `reserved`, its capacity before the step, if the
+    /// step pushed more than it reserved (an upper bound: a list pushed by `push_list` charged
+    /// its own growth already).
+    fn settle_work(&mut self, reserved: usize) -> Result<(), Stop> {
+        let now = self.work.capacity();
+        if now > reserved {
+            self.m.charge(
+                now.saturating_sub(reserved)
+                    .saturating_mul(size_of::<Walk>()),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// What the resolver's own structures hold charged, at most: the work stack, the
+    /// occurrences, the bindings and the scopes with their names, the direct `eval` calls, the
+    /// entries of the maps of function scopes and of the names left to give, and the bound
+    /// charged for `checked_locals` (one entry per binding). Each vector was charged by its
+    /// capacity and each name by at least its length.
+    fn scratch_bytes(&self) -> usize {
+        fn capacity<T>(v: &Vec<T>) -> usize {
+            v.capacity().saturating_mul(size_of::<T>())
+        }
+        let occurrences = self
+            .occurrences
+            .iter()
+            .fold(capacity(&self.occurrences), |sum, (_, _, name)| {
+                sum.saturating_add(name.len())
+            });
+        let bindings = self
+            .bindings
+            .iter()
+            .fold(capacity(&self.bindings), |sum, b| {
+                sum.saturating_add(b.name.len())
+            });
+        let scopes = self.scopes.iter().fold(capacity(&self.scopes), |sum, s| {
+            s.names
+                .keys()
+                .fold(sum, |sum, key| sum.saturating_add(key.len()))
+                .saturating_add(
+                    s.names
+                        .len()
+                        .saturating_mul(map_entry_bytes::<String, usize>()),
+                )
+                .saturating_add(capacity(&s.order))
+        });
+        let given = self
+            .given_names
+            .values()
+            .fold(0usize, |sum, name| sum.saturating_add(capacity(name)))
+            .saturating_add(
+                self.given_names
+                    .len()
+                    .saturating_mul(map_entry_bytes::<FunctionId, Vec<u16>>()),
+            );
+        let function_maps = self
+            .self_scopes
+            .len()
+            .saturating_add(self.function_scopes.len())
+            .saturating_mul(map_entry_bytes::<FunctionId, usize>());
+        let checked = self
+            .bindings
+            .len()
+            .saturating_mul(map_entry_bytes::<usize, ()>());
+        capacity(&self.work)
+            .saturating_add(occurrences)
+            .saturating_add(bindings)
+            .saturating_add(scopes)
+            .saturating_add(capacity(&self.eval_calls))
+            .saturating_add(given)
+            .saturating_add(function_maps)
+            .saturating_add(checked)
+    }
+
     fn push_list(&mut self, list: &[StmtId]) {
+        if self.m.grow_by(&mut self.work, list.len()).is_err() {
+            return;
+        }
         for s in list.iter().rev() {
             self.work.push(Walk::Stmt(*s));
         }
@@ -382,12 +515,24 @@ impl<'a> Resolver<'a> {
 
     /// Pushes the statement list `list` inside the lexical scope of `key`.
     fn push_lexical_list(&mut self, key: ScopeKey, list: &[StmtId]) {
+        if self
+            .m
+            .grow_by(&mut self.work, list.len().saturating_add(2))
+            .is_err()
+        {
+            return;
+        }
         self.work.push(Walk::LeaveLexical(key));
         self.push_list(list);
         self.work.push(Walk::Lexical(key));
     }
 
+    /// A new scope inside the current one, made current. When its growth is refused the meter
+    /// has stopped, nothing is pushed, and the step ends at its next check.
     fn new_scope(&mut self, kind: Kind, owner: Option<FunctionId>) -> usize {
+        if self.m.grow(&mut self.scopes).is_err() {
+            return self.current;
+        }
         self.scopes.push(ScopeData {
             parent: Some(self.current),
             kind,
@@ -417,11 +562,23 @@ impl<'a> Resolver<'a> {
         if s.names.contains_key(name) {
             return;
         }
-        s.names.insert(name.to_string(), index);
+        // The entry, the two copies of the name and the growth of the lists, charged first; a
+        // refusal stops the meter and declares nothing.
+        let m = self.m;
+        if m.charge(map_entry_bytes::<String, usize>()).is_err() {
+            return;
+        }
+        let (Ok(key), Ok(copy)) = (m.string(name), m.string(name)) else {
+            return;
+        };
+        if m.grow(&mut s.order).is_err() || m.grow(&mut self.bindings).is_err() {
+            return;
+        }
+        s.names.insert(key, index);
         s.order.push(index);
         self.bindings.push(BindingData {
             scope,
-            name: name.to_string(),
+            name: copy,
             captured: false,
             place: Place::Unset,
             lexical,
@@ -525,20 +682,38 @@ impl<'a> Resolver<'a> {
         if names.is_empty() {
             return;
         }
+        // The list of the scope's names is scratch of this step: charged by what it owns, as
+        // it is made by `Ast::lexical_names`, and credited when the step ends.
+        let owned = names.heap_bytes();
+        if self.m.charge(owned).is_err() {
+            return;
+        }
+        self.enter_lexical_names(key, &names, straight);
+        drop(names);
+        self.m.credit(owned);
+    }
+
+    /// The scope of `key` with the lexical names `names`, entered.
+    fn enter_lexical_names(&mut self, key: ScopeKey, names: &[LexicalName], straight: bool) {
         let owner = self.scopes.get(self.current).and_then(|s| s.owner);
         let scope = self.new_scope(Kind::Lexical { straight }, owner);
         if let Some(s) = self.scopes.get_mut(scope) {
             s.key = Some(key);
         }
-        self.declare_lexical(scope, &names);
+        self.declare_lexical(scope, names);
         if let (ScopeKey::Iteration(id), Some(n)) = (key, names.first()) {
             self.occur(Site::ForInVar(id), &n.name.name);
         }
     }
 
+    /// The site `site` of `name` in the current scope; its copy of the name and the growth of
+    /// the list charged first (a refusal stops the meter and records nothing).
     fn occur(&mut self, site: Site, name: &str) {
-        self.occurrences
-            .push((site, self.current, name.to_string()));
+        let Ok(copy) = self.m.string(name) else {
+            return;
+        };
+        let current = self.current;
+        let _ = self.m.push(&mut self.occurrences, (site, current, copy));
     }
 
     fn step(&mut self, task: Walk) -> Result<(), CompileError> {
@@ -616,14 +791,16 @@ impl<'a> Resolver<'a> {
                 if head {
                     self.enter_lexical(ScopeKey::Head(id));
                 }
-                let mut children = Vec::new();
+                // Room for every child pushed below, charged first.
+                let mut children = self.m.with_capacity(declarators.len().saturating_add(4))?;
                 for (i, d) in declarators.iter().enumerate() {
                     let n = u32::try_from(i).map_err(|_| CompileError::TooMany("declarators"))?;
                     self.occur(Site::VarDecl(id, n), &d.name.name);
                     if let Some(init) = d.init {
                         if let Some(f) = self.anonymous_function(init) {
-                            self.given_names
-                                .insert(f, d.name.name.encode_utf16().collect());
+                            let name = self.m.utf16(&d.name.name)?;
+                            self.m.charge(map_entry_bytes::<FunctionId, Vec<u16>>())?;
+                            self.given_names.insert(f, name);
                         }
                         children.push(Walk::Expr(init));
                     }
@@ -639,7 +816,9 @@ impl<'a> Resolver<'a> {
                 if head {
                     children.push(Walk::LeaveLexical(ScopeKey::Head(id)));
                 }
-                self.work.extend(children.into_iter().rev());
+                self.m.grow_by(&mut self.work, children.len())?;
+                self.work.extend(children.drain(..).rev());
+                self.m.release(children);
             }
             Stmt::Empty | Stmt::Continue(_) | Stmt::Break(_) | Stmt::Debugger => {}
             // A label binds nothing (`#sec-labelled-statements`).
@@ -777,7 +956,9 @@ impl<'a> Resolver<'a> {
             .ast
             .expr(id)
             .ok_or_else(|| malformed("an expression index"))?;
-        let mut children: Vec<Walk> = Vec::new();
+        // Room for the node's children, charged first and credited when they are on the work
+        // stack.
+        let mut children: Vec<Walk> = self.m.with_capacity(self.ast.expr_child_count(id))?;
         match &node.expr {
             Expr::This
             | Expr::Null
@@ -791,13 +972,13 @@ impl<'a> Resolver<'a> {
             }
             Expr::Object(properties) => {
                 for p in properties {
-                    let key = property_key(&p.key)?;
                     match p.value {
                         PropertyValue::Init(e) => {
                             if let Some(f) = self.anonymous_function(e)
                                 && !is_proto(&p.key)
                             {
-                                self.given_names.insert(f, key);
+                                let key = property_key(&p.key, self.m)?;
+                                self.give_name(f, key)?;
                             }
                             children.push(Walk::Expr(e));
                         }
@@ -807,16 +988,20 @@ impl<'a> Resolver<'a> {
                             } else {
                                 "set "
                             };
-                            let mut name: Vec<u16> = prefix.encode_utf16().collect();
-                            name.extend(key);
-                            self.given_names.insert(f, name);
+                            let key = property_key(&p.key, self.m)?;
+                            let mut name = self.m.with_capacity(prefix.len() + key.len())?;
+                            name.extend(prefix.encode_utf16());
+                            name.extend_from_slice(&key);
+                            self.m.release(key);
+                            self.give_name(f, name)?;
                             children.push(Walk::Function(f));
                         }
                         // DefineMethod gives a method its key as name
                         // (`#sec-runtime-semantics-definemethod`, SetFunctionName in
                         // DefineMethodProperty's caller).
                         PropertyValue::Method(f) => {
-                            self.given_names.insert(f, key);
+                            let key = property_key(&p.key, self.m)?;
+                            self.give_name(f, key)?;
                             children.push(Walk::Function(f));
                         }
                         PropertyValue::Shorthand(e) => children.push(Walk::Expr(e)),
@@ -850,7 +1035,8 @@ impl<'a> Resolver<'a> {
                     && let Expr::Identifier(name) = &t.expr
                     && let Some(f) = self.anonymous_function(*value)
                 {
-                    self.given_names.insert(f, name.encode_utf16().collect());
+                    let name = self.m.utf16(name)?;
+                    self.give_name(f, name)?;
                 }
                 children.push(Walk::Expr(*target));
                 children.push(Walk::Expr(*value));
@@ -867,7 +1053,7 @@ impl<'a> Resolver<'a> {
             Expr::Call { callee, arguments } | Expr::OptionalCall { callee, arguments } => {
                 if matches!(node.expr, Expr::Call { .. }) && self.ast.is_direct_eval_callee(*callee)
                 {
-                    self.eval_calls.push(self.current);
+                    self.m.push(&mut self.eval_calls, self.current)?;
                 }
                 children.push(Walk::Expr(*callee));
                 children.extend(arguments.iter().map(|e| Walk::Expr(*e)));
@@ -881,8 +1067,16 @@ impl<'a> Resolver<'a> {
                 children.extend(substitutions.iter().map(|e| Walk::Expr(*e)));
             }
         }
+        let bytes = children.capacity().saturating_mul(size_of::<Walk>());
         self.work.extend(children.into_iter().rev());
+        self.m.credit(bytes);
         Ok(())
+    }
+
+    /// Gives the anonymous function `f` the name `name`, whose units are charged already; the
+    /// entry is charged first.
+    fn give_name(&mut self, f: FunctionId, name: Vec<u16>) -> Result<(), Stop> {
+        self.m.insert_entry(&mut self.given_names, f, name)
     }
 
     /// Enters a function: the scope of its own name (a named function expression), then the
@@ -898,11 +1092,11 @@ impl<'a> Resolver<'a> {
             let owner = self.scopes.get(self.current).and_then(|s| s.owner);
             let scope = self.new_scope(Kind::SelfName, owner);
             self.declare(scope, &name.name);
-            self.self_scopes.insert(id, scope);
+            self.m.insert_entry(&mut self.self_scopes, id, scope)?;
             self.work.push(Walk::Leave);
         }
         let scope = self.new_scope(Kind::Function, Some(id));
-        self.function_scopes.insert(id, scope);
+        self.m.insert_entry(&mut self.function_scopes, id, scope)?;
         for (i, p) in f.params.iter().enumerate() {
             self.declare(scope, &p.name);
             let n = u32::try_from(i).map_err(|_| CompileError::TooMany("parameters"))?;
@@ -963,7 +1157,7 @@ impl<'a> Resolver<'a> {
                 .get(*scope)
                 .ok_or_else(|| malformed("a scope"))?;
             if home.kind == Kind::SelfName || home.owner != from.owner {
-                marks.push(b);
+                self.m.push(&mut marks, b)?;
             }
         }
         for b in marks {
@@ -980,19 +1174,24 @@ impl<'a> Resolver<'a> {
     /// parameters of a function that makes a mapped arguments object live in its function
     /// environment (`#sec-createmappedargumentsobject`: the map reads and writes their bindings).
     fn mark_named(&mut self) -> Result<(), CompileError> {
+        let m = self.m;
         let mut named = BTreeSet::new();
-        let starts: Vec<Option<usize>> = self
-            .scopes
-            .iter()
-            .filter(|s| s.kind == Kind::With)
-            .map(|s| s.parent)
-            .chain(self.eval_calls.iter().map(|c| Some(*c)))
-            .collect();
+        let withs = self.scopes.iter().filter(|s| s.kind == Kind::With).count();
+        let mut starts: Vec<Option<usize>> =
+            m.with_capacity(withs.saturating_add(self.eval_calls.len()))?;
+        starts.extend(
+            self.scopes
+                .iter()
+                .filter(|s| s.kind == Kind::With)
+                .map(|s| s.parent)
+                .chain(self.eval_calls.iter().map(|c| Some(*c))),
+        );
         for start in starts {
             let mut outer = start;
             while let Some(p) = outer {
+                m.visit()?;
                 // Each scope is walked once: what encloses a named scope is named already.
-                if !named.insert(p) {
+                if !m.insert(&mut named, p)? {
                     break;
                 }
                 outer = self.scopes.get(p).and_then(|s| s.parent);
@@ -1005,6 +1204,7 @@ impl<'a> Resolver<'a> {
                 .get_mut(scope)
                 .ok_or_else(|| malformed("a scope"))?;
             s.named = true;
+            m.grow_by(&mut marks, s.order.len())?;
             marks.extend(s.order.iter().copied());
         }
         for (id, scope) in &self.function_scopes {
@@ -1019,7 +1219,9 @@ impl<'a> Resolver<'a> {
                 return Err(malformed("a function scope"));
             };
             for p in &f.params {
-                marks.extend(s.names.get(&p.name).copied());
+                if let Some(b) = s.names.get(&p.name) {
+                    m.push(&mut marks, *b)?;
+                }
             }
         }
         for b in marks {
@@ -1034,12 +1236,20 @@ impl<'a> Resolver<'a> {
     fn allocate(&mut self) -> Result<BTreeMap<Option<FunctionId>, u32>, CompileError> {
         let mut frames: BTreeMap<Option<FunctionId>, u32> = BTreeMap::new();
         for scope in 0..self.scopes.len() {
-            let (order, owner, kind) = match self.scopes.get(scope) {
-                Some(s) => (s.order.clone(), s.owner, s.kind),
-                None => continue,
+            let Some(s) = self.scopes.get(scope) else {
+                continue;
             };
+            let (owner, kind) = (s.owner, s.kind);
+            if kind != Kind::SelfName && !frames.contains_key(&owner) {
+                self.m
+                    .charge(map_entry_bytes::<Option<FunctionId>, u32>())?;
+                frames.insert(owner, 0);
+            }
             let mut env_slots = 0u32;
-            for b in order {
+            for i in 0..s.order.len() {
+                let Some(b) = self.scopes.get(scope).and_then(|s| s.order.get(i).copied()) else {
+                    continue;
+                };
                 let Some(binding) = self.bindings.get_mut(b) else {
                     continue;
                 };
@@ -1127,7 +1337,8 @@ impl<'a> Resolver<'a> {
 
     /// What the entry of each lexical scope does: the names of its record's slots and the local
     /// slots it sets uninitialized; an iteration of a for-in initializes its binding at once.
-    fn lexical_scopes(&self) -> BTreeMap<ScopeKey, LexicalScope> {
+    fn lexical_scopes(&self) -> Result<BTreeMap<ScopeKey, LexicalScope>, CompileError> {
+        let m = self.m;
         let mut scopes = BTreeMap::new();
         for s in &self.scopes {
             let Some(key) = s.key else { continue };
@@ -1138,21 +1349,25 @@ impl<'a> Resolver<'a> {
                 };
                 let constant = binding.lexical.is_some_and(|l| l.constant);
                 match binding.place {
-                    Place::Env(_) => scope.env.push((binding.name.clone(), constant)),
+                    Place::Env(_) => {
+                        let name = m.string(&binding.name)?;
+                        m.push(&mut scope.env, (name, constant))?;
+                    }
                     Place::Local(n)
                         if self.checked_locals.contains(&b)
                             && !matches!(key, ScopeKey::Iteration(_)) =>
                     {
-                        scope.uninitialize.push(n);
+                        m.push(&mut scope.uninitialize, n)?;
                     }
                     _ => {}
                 }
             }
             if !scope.env.is_empty() || !scope.uninitialize.is_empty() {
+                m.charge(map_entry_bytes::<ScopeKey, LexicalScope>())?;
                 scopes.insert(key, scope);
             }
         }
-        scopes
+        Ok(scopes)
     }
 
     /// The lexical names of the top level of eval code, the scope `scope`, with their slots, and
@@ -1162,8 +1377,9 @@ impl<'a> Resolver<'a> {
         &self,
         scope: usize,
     ) -> Result<(Vec<(String, bool, Slot)>, Vec<(String, bool)>), CompileError> {
+        let m = self.m;
         let s = self.scopes.get(scope).ok_or_else(|| malformed("a scope"))?;
-        let mut names = Vec::new();
+        let mut names = m.with_capacity(s.order.len())?;
         let mut env = Vec::new();
         for &b in &s.order {
             let binding = self.bindings.get(b).ok_or_else(|| malformed("a binding"))?;
@@ -1171,18 +1387,25 @@ impl<'a> Resolver<'a> {
             let slot = match binding.place {
                 Place::Local(n) => Slot::Local(n),
                 Place::Env(n) => {
-                    env.push((binding.name.clone(), constant));
+                    let name = m.string(&binding.name)?;
+                    m.push(&mut env, (name, constant))?;
                     Slot::Env(n)
                 }
                 Place::Unset => return Err(malformed("a binding with no place")),
             };
-            names.push((binding.name.clone(), constant, slot));
+            names.push((m.string(&binding.name)?, constant, slot));
         }
         Ok((names, env))
     }
 
     /// The binding of every site.
     fn locate(&mut self) -> Result<BTreeMap<Site, Binding>, CompileError> {
+        // At most one entry per binding, charged first.
+        self.m.charge(
+            self.bindings
+                .len()
+                .saturating_mul(map_entry_bytes::<usize, ()>()),
+        )?;
         let mut checked_locals = BTreeSet::new();
         let sites = self.sites(&mut checked_locals)?;
         self.checked_locals = checked_locals;
@@ -1196,6 +1419,10 @@ impl<'a> Resolver<'a> {
     ) -> Result<BTreeMap<Site, Binding>, CompileError> {
         let mut sites = BTreeMap::new();
         for (site, scope, name) in &self.occurrences {
+            // The entry and the most its binding owns (a copy of the name), charged first.
+            self.m.visit()?;
+            self.m
+                .charge(map_entry_bytes::<Site, Binding>().saturating_add(name.len()))?;
             let found = self.lookup(*scope, name);
             let home = match found {
                 Some(b) => Some(
@@ -1275,10 +1502,12 @@ impl<'a> Resolver<'a> {
         id: FunctionId,
         sites: &BTreeMap<Site, Binding>,
     ) -> Result<FunctionInfo, CompileError> {
+        let m = self.m;
         let mut info = FunctionInfo::default();
         let Some(f) = self.ast.function(id) else {
             return Ok(info);
         };
+        info.params = m.with_capacity(f.params.len())?;
         for i in 0..f.params.len() {
             let n = u32::try_from(i).map_err(|_| CompileError::TooMany("parameters"))?;
             let slot = match sites.get(&Site::Param(id, n)) {
@@ -1290,17 +1519,22 @@ impl<'a> Resolver<'a> {
         }
         for s in &self.scopes {
             if s.owner == Some(id) && s.kind == Kind::Function {
-                let mut captured: Vec<(u32, String)> = s
-                    .order
-                    .iter()
-                    .filter_map(|b| self.bindings.get(*b))
-                    .filter_map(|b| match b.place {
-                        Place::Env(slot) => Some((slot, b.name.clone())),
-                        _ => None,
-                    })
-                    .collect();
+                let mut captured: Vec<(u32, String)> = Vec::new();
+                for b in s.order.iter().filter_map(|b| self.bindings.get(*b)) {
+                    if let Place::Env(slot) = b.place {
+                        let name = m.string(&b.name)?;
+                        m.push(&mut captured, (slot, name))?;
+                    }
+                }
+                // The sort's scratch is at most the list itself.
+                let scratch = captured.len().saturating_mul(size_of::<(u32, String)>());
+                m.charge(scratch)?;
                 captured.sort();
-                info.captured = captured.into_iter().map(|(_, n)| n).collect();
+                m.credit(scratch);
+                let mut names = m.with_capacity(captured.len())?;
+                names.extend(captured.drain(..).map(|(_, n)| n));
+                m.release(captured);
+                m.release(std::mem::replace(&mut info.captured, names));
             }
         }
         info.self_binding = self
@@ -1336,15 +1570,21 @@ fn is_proto(key: &PropertyKey) -> bool {
 /// The property key of a property name, as UTF-16 code units: an identifier's name, a string's
 /// value, or a number's ToString (`#sec-object-initializer-runtime-semantics-evaluation`,
 /// `LiteralPropertyName`).
-pub(crate) fn property_key(key: &PropertyKey) -> Result<Vec<u16>, CompileError> {
+/// The units are charged to `m` before they are allocated.
+pub(crate) fn property_key(key: &PropertyKey, m: &Meter<'_>) -> Result<Vec<u16>, CompileError> {
     Ok(match key {
-        PropertyKey::Identifier(s) => s.encode_utf16().collect(),
-        PropertyKey::String(s) => s.value.clone(),
+        PropertyKey::Identifier(s) => m.utf16(s)?,
+        PropertyKey::String(s) => m.copy(&s.value)?,
         PropertyKey::Number(n) => {
             let value = numeric_literal(n.text.as_bytes())
                 .ok_or_else(|| malformed("a numeric literal swell-num does not read"))?
                 .value;
-            number_to_string(value).encode_utf16().collect()
+            // A Number's ToString has at most 25 characters (`#sec-numeric-types-number-tostring`).
+            m.charge(32)?;
+            let text = number_to_string(value);
+            let units = m.utf16(&text);
+            m.credit(32);
+            units?
         }
     })
 }

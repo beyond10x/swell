@@ -620,3 +620,118 @@ fn stringify_past_string_length_throws_range_error() {
         })
         .unwrap();
 }
+
+/// An item of a replacer list: a String the host makes of the code units, or the String of an
+/// item before.
+enum Item {
+    Units(Vec<u16>),
+    Same(usize),
+}
+
+/// The text `JSON.stringify(holder, list)` answers in `agent`, with `list` an array of the
+/// Strings of `items` (made in an entry before) and `holder` an object whose keys are the
+/// items at `holder_keys`, and the steps of that last entry.
+fn stringify_with_list(
+    agent: &mut swell::Agent<TestHost>,
+    items: &[Item],
+    holder_keys: &[usize],
+) -> (Completion<String>, u64) {
+    let realm = realm(agent);
+    let global_root = global(agent, &realm);
+    let answer = agent
+        .with_cx(&realm, |cx| {
+            let global = object(cx, &global_root);
+            let mut values: Vec<Value> = Vec::new();
+            for item in items {
+                let value = match item {
+                    Item::Units(units) => Value::String(cx.new_string_utf16(units).unwrap()),
+                    Item::Same(index) => values[*index],
+                };
+                values.push(value);
+            }
+            let holder = new_object(cx, global);
+            for &index in holder_keys {
+                let Value::String(name) = values[index] else {
+                    panic!("{index}");
+                };
+                cx.set(
+                    holder,
+                    swell::PropertyKey::String(name),
+                    Value::Number(index as f64),
+                    true,
+                )
+                .unwrap()
+                .unwrap();
+            }
+            let list = array(cx, global, &values);
+            stringify(cx, global, &[Value::Object(holder), list]).map(|value| text(cx, value))
+        })
+        .unwrap();
+    (answer, agent.last_entry_steps().unwrap())
+}
+
+/// `#sec-json.stringify`, step 5.b.iv.7: whether propertyList contains an item is asked of
+/// each item listed, and two Strings of the same length above 32 code units are compared at a
+/// step per code unit past 32 (`docs/design/engine.md`, "The step budget", "per code unit for
+/// string operations"). 200 Strings of 10,000 code units that differ only in their last unit
+/// ask for about 19,900 comparisons of 9,968 steps each; with `steps_per_entry` 10,000,000 the
+/// entry ends at the step budget.
+#[test]
+fn a_replacer_list_of_long_strings_is_charged_per_code_unit() {
+    let mut limits = limits();
+    limits.steps_per_entry = 10_000_000;
+    let mut agent = agent_with(limits).unwrap();
+    let items: Vec<Item> = (0..200_u16)
+        .map(|index| {
+            let mut units = vec![0x61; 10_000];
+            units[9_999] = 0x100 + index;
+            Item::Units(units)
+        })
+        .collect();
+    let (answer, _) = stringify_with_list(&mut agent, &items, &[]);
+    assert_eq!(
+        answer,
+        Err(swell::Abrupt::Terminated(swell::Termination::StepBudget))
+    );
+}
+
+/// The answer and the steps of [`a_replacer_list_of_short_strings_spends_what_it_spends_today`],
+/// recorded on the base of `story:string-builtins-charge-before-they-copy` (`6a89c27`).
+const SHORT_LIST_ANSWER: &str = "{\"a\":0,\"bcdefghi\":7,\"vwxyzabcdefghijklmno\":21,\
+    \"hijklmno\":33,\"xyzabcdefghijklmnopqrstu\":49}";
+const SHORT_LIST_STEPS: u64 = 1_011;
+
+/// A guard of `#sec-json.stringify`, step 5.b.iv.7: items of at most 32 code units are
+/// compared at the one step per comparison they cost before the change. 50 items of 1 to 32
+/// code units, some the same String twice and some equal Strings made apart: the answer and
+/// `last_entry_steps()` equal those recorded on the base.
+#[test]
+fn a_replacer_list_of_short_strings_spends_what_it_spends_today() {
+    let mut agent = agent().unwrap();
+    let mut contents: Vec<Vec<u16>> = Vec::new();
+    let mut items: Vec<Item> = Vec::new();
+    for index in 0..50_usize {
+        let units: Vec<u16> = if index % 4 == 3 {
+            contents[index - 2].clone()
+        } else if index % 6 == 5 {
+            contents[index - 4].clone()
+        } else {
+            let length = 1 + (index * 7) % 32;
+            (0..length)
+                .map(|unit| 0x61 + ((index + unit) % 26) as u16)
+                .collect()
+        };
+        items.push(if index % 4 == 3 {
+            Item::Same(index - 2)
+        } else {
+            Item::Units(units.clone())
+        });
+        contents.push(units);
+    }
+    let (answer, steps) = stringify_with_list(&mut agent, &items, &[0, 7, 21, 33, 49]);
+    let answer = answer.unwrap();
+    assert_eq!(
+        (answer.as_str(), steps),
+        (SHORT_LIST_ANSWER, SHORT_LIST_STEPS)
+    );
+}

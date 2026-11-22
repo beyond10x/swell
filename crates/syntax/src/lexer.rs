@@ -27,6 +27,7 @@
 
 use crate::ast::{NumberForm, NumberLiteral, RegExpLiteral, StringLiteral, TemplateString};
 use crate::error::SyntaxError;
+use crate::ledger::{Meter, POLL_INTERVAL, Stop};
 use crate::token::{Keyword, Punct, TemplatePart, Token, TokenKind};
 
 /// A template token with no closing `` ` `` or `${` before the end of the source.
@@ -100,23 +101,25 @@ fn ascii(c: u8) -> u16 {
     u16::from(c)
 }
 
-/// Appends the UTF-16 encoding of the code point `cp` (at most 0x10FFFF) to `out`.
-fn push_code_point(out: &mut Vec<u16>, cp: u32) {
+/// Appends the UTF-16 encoding of the code point `cp` (at most 0x10FFFF) to `out`, each growth
+/// charged to `m`.
+fn push_code_point(m: &Meter<'_>, out: &mut Vec<u16>, cp: u32) -> Result<(), Stop> {
     if cp < 0x1_0000 {
-        out.push(u16::try_from(cp).unwrap_or(0xFFFD));
+        m.push(out, u16::try_from(cp).unwrap_or(0xFFFD))
     } else {
         let v = cp - 0x1_0000;
-        out.push(u16::try_from(0xD800 + (v >> 10)).unwrap_or(0xFFFD));
-        out.push(u16::try_from(0xDC00 + (v & 0x3FF)).unwrap_or(0xFFFD));
+        m.push(out, u16::try_from(0xD800 + (v >> 10)).unwrap_or(0xFFFD))?;
+        m.push(out, u16::try_from(0xDC00 + (v & 0x3FF)).unwrap_or(0xFFFD))
     }
 }
 
 /// The TRV of template characters (`#sec-static-semantics-trv`): their source text, with each
-/// `<CR><LF>` and each `<CR>` a `<LF>`.
-fn trv(units: &[u16]) -> Vec<u16> {
-    let mut raw = Vec::with_capacity(units.len());
+/// `<CR><LF>` and each `<CR>` a `<LF>`; its capacity, the length of `units`, charged to `m`.
+fn trv(m: &Meter<'_>, units: &[u16]) -> Result<Vec<u16>, Stop> {
+    let mut raw = m.with_capacity(units.len())?;
     let mut rest = units.iter().copied().peekable();
     while let Some(u) = rest.next() {
+        // The TRV is never longer than the source text: no push grows the vector.
         if u == CR {
             if rest.peek() == Some(&LF) {
                 rest.next();
@@ -126,24 +129,49 @@ fn trv(units: &[u16]) -> Vec<u16> {
             raw.push(u);
         }
     }
-    raw
+    Ok(raw)
 }
 
-pub(crate) struct Lexer<'a> {
+pub(crate) struct Lexer<'a, 'm> {
     src: &'a [u16],
-    pos: usize,
+    pub(crate) pos: usize,
     line: u32,
     line_start: usize,
+    /// The ledger the lexer charges what its tokens own to and polls.
+    m: &'a Meter<'m>,
+    /// The position at or past which the lexer polls next: every [`POLL_INTERVAL`] code units it
+    /// advances, from its start.
+    next_poll: usize,
 }
 
-impl<'a> Lexer<'a> {
-    pub(crate) fn new(src: &'a [u16]) -> Lexer<'a> {
+impl<'a, 'm> Lexer<'a, 'm> {
+    pub(crate) fn new(src: &'a [u16], m: &'a Meter<'m>) -> Lexer<'a, 'm> {
         Lexer {
             src,
             pos: 0,
             line: 1,
             line_start: 0,
+            m,
+            next_poll: 0,
         }
+    }
+
+    /// Called on every advance of every loop of the lexer: a poll of the ledger at the first call
+    /// at or past each multiple of [`POLL_INTERVAL`] code units, so that no more than that and
+    /// the few units of one advance pass between two polls.
+    fn tick(&mut self) -> Result<(), SyntaxError> {
+        if self.pos < self.next_poll {
+            return self.m.check().map_err(|_| SyntaxError::stopped());
+        }
+        while self.next_poll <= self.pos {
+            self.next_poll = self.next_poll.saturating_add(POLL_INTERVAL);
+        }
+        self.m.poll().map_err(|_| SyntaxError::stopped())
+    }
+
+    /// A charge's answer as the lexer's: a stop is the error that ends the parse.
+    fn charged<T>(answer: Result<T, Stop>) -> Result<T, SyntaxError> {
+        answer.map_err(|_| SyntaxError::stopped())
     }
 
     fn unit(&self, at: usize) -> Option<u16> {
@@ -192,6 +220,7 @@ impl<'a> Lexer<'a> {
         self.pos += 2;
         let mut newline = false;
         loop {
+            self.tick()?;
             match self.cur() {
                 None => return Err(SyntaxError::new("unterminated comment", line, column)),
                 Some(0x2A) if self.ahead(1) == Some(0x2F) => {
@@ -214,10 +243,12 @@ impl<'a> Lexer<'a> {
             // `HashbangComment :: #! SingleLineCommentChars?`, up to the line terminator.
             while self.cur().is_some_and(|c| !is_line_terminator(c)) {
                 self.pos += 1;
+                self.tick()?;
             }
         }
         let mut newline = false;
         while let Some(c) = self.cur() {
+            self.tick()?;
             if is_line_terminator(c) {
                 newline = true;
                 self.line_terminator();
@@ -226,6 +257,7 @@ impl<'a> Lexer<'a> {
             } else if c == ascii(b'/') && self.ahead(1) == Some(ascii(b'/')) {
                 while self.cur().is_some_and(|c| !is_line_terminator(c)) {
                     self.pos += 1;
+                    self.tick()?;
                 }
             } else if c == ascii(b'/') && self.ahead(1) == Some(ascii(b'*')) {
                 if self.multi_line_comment()? {
@@ -251,7 +283,9 @@ impl<'a> Lexer<'a> {
     /// The next token in the `InputElementDiv` goal: a `/` is a punctuator. The parser asks for a
     /// regular expression literal with [`Lexer::rescan_regexp`].
     pub(crate) fn next_token(&mut self) -> Result<Token, SyntaxError> {
+        self.tick()?;
         let newline_before = self.skip_trivia()?;
+        self.tick()?;
         let start = self.pos;
         let (line, column) = (self.line, self.column());
         let mut escaped = false;
@@ -315,9 +349,11 @@ impl<'a> Lexer<'a> {
         let mut name = String::new();
         let mut escaped = false;
         loop {
+            self.tick()?;
             match self.cur() {
                 Some(c) if is_ascii_id_part(c) => {
-                    name.push(char::from(u8::try_from(c).unwrap_or(b'?')));
+                    let c = char::from(u8::try_from(c).unwrap_or(b'?'));
+                    Lexer::charged(self.m.push_char(&mut name, c))?;
                     self.pos += 1;
                 }
                 Some(0x5C) => {
@@ -348,7 +384,8 @@ impl<'a> Lexer<'a> {
                             column,
                         ));
                     }
-                    name.push(char::from(u8::try_from(cp).unwrap_or(b'?')));
+                    let c = char::from(u8::try_from(cp).unwrap_or(b'?'));
+                    Lexer::charged(self.m.push_char(&mut name, c))?;
                     escaped = true;
                 }
                 Some(c) if c >= 0x80 && !is_white_space(c) && !is_line_terminator(c) => {
@@ -361,7 +398,10 @@ impl<'a> Lexer<'a> {
             return Ok((TokenKind::Name(name), true));
         }
         Ok(match Keyword::from_name(&name) {
-            Some(k) => (TokenKind::Keyword(k), false),
+            Some(k) => {
+                self.m.release(name);
+                (TokenKind::Keyword(k), false)
+            }
             None => (TokenKind::Name(name), false),
         })
     }
@@ -372,6 +412,7 @@ impl<'a> Lexer<'a> {
     fn digits(&mut self, radix: u32) -> Result<usize, SyntaxError> {
         let mut n = 0;
         loop {
+            self.tick()?;
             match self.cur() {
                 Some(c) if digit_of_radix(c, radix) => {
                     self.pos += 1;
@@ -417,6 +458,7 @@ impl<'a> Lexer<'a> {
             while let Some(c) = self.cur().filter(|&c| is_decimal(c)) {
                 octal &= is_octal(c);
                 self.pos += 1;
+                self.tick()?;
             }
             // `LegacyOctalIntegerLiteral` and `NonOctalDecimalIntegerLiteral` take no separator.
             if self.cur() == Some(0x5F) {
@@ -453,13 +495,14 @@ impl<'a> Lexer<'a> {
         {
             return Err(self.error("identifier start immediately after a numeric literal"));
         }
-        let text: String = self
-            .src
-            .get(start..self.pos)
-            .unwrap_or(&[])
-            .iter()
-            .map(|&u| char::from(u8::try_from(u).unwrap_or(b'?')))
-            .collect();
+        let digits = self.src.get(start..self.pos).unwrap_or(&[]);
+        // Every code unit of a numeric literal is ASCII: one byte each.
+        let mut text = Lexer::charged(self.m.string_with_capacity(digits.len()))?;
+        text.extend(
+            digits
+                .iter()
+                .map(|&u| char::from(u8::try_from(u).unwrap_or(b'?'))),
+        );
         Ok(TokenKind::Number(NumberLiteral { text, form }))
     }
 
@@ -496,6 +539,7 @@ impl<'a> Lexer<'a> {
             non_octal_decimal_escape: false,
         };
         loop {
+            self.tick()?;
             let Some(c) = self.cur() else {
                 return Err(SyntaxError::new(
                     "unterminated string literal",
@@ -518,10 +562,10 @@ impl<'a> Lexer<'a> {
                 self.pos += 1;
                 self.escape(&mut literal)?;
             } else if c == LS || c == PS {
-                literal.value.push(c);
+                Lexer::charged(self.m.push(&mut literal.value, c))?;
                 self.line_terminator();
             } else {
-                literal.value.push(c);
+                Lexer::charged(self.m.push(&mut literal.value, c))?;
                 self.pos += 1;
             }
         }
@@ -538,14 +582,14 @@ impl<'a> Lexer<'a> {
         }
         self.pos += 1;
         let value = |u: u8| u16::from(u);
-        match c {
-            0x62 => literal.value.push(value(0x08)),
-            0x66 => literal.value.push(value(0x0C)),
-            0x6E => literal.value.push(value(0x0A)),
-            0x72 => literal.value.push(value(0x0D)),
-            0x74 => literal.value.push(value(0x09)),
-            0x76 => literal.value.push(value(0x0B)),
-            0x30 if !self.cur().is_some_and(is_decimal) => literal.value.push(0),
+        let unit = match c {
+            0x62 => value(0x08),
+            0x66 => value(0x0C),
+            0x6E => value(0x0A),
+            0x72 => value(0x0D),
+            0x74 => value(0x09),
+            0x76 => value(0x0B),
+            0x30 if !self.cur().is_some_and(is_decimal) => 0,
             0x30..=0x37 => {
                 // `LegacyOctalEscapeSequence`: a `ZeroToThree` takes up to two more octal digits,
                 // a `FourToSeven` one; `\0` before 8 or 9 is one too.
@@ -561,11 +605,11 @@ impl<'a> Lexer<'a> {
                         _ => break,
                     }
                 }
-                literal.value.push(v);
+                v
             }
             0x38 | 0x39 => {
                 literal.non_octal_decimal_escape = true;
-                literal.value.push(c);
+                c
             }
             0x78 => {
                 let hi = self.cur().and_then(hex_value);
@@ -573,20 +617,18 @@ impl<'a> Lexer<'a> {
                 match (hi, lo) {
                     (Some(hi), Some(lo)) => {
                         self.pos += 2;
-                        literal
-                            .value
-                            .push(u16::try_from(hi * 16 + lo).unwrap_or(0xFFFD));
+                        u16::try_from(hi * 16 + lo).unwrap_or(0xFFFD)
                     }
                     _ => return Err(self.error("invalid hexadecimal escape sequence")),
                 }
             }
             0x75 => {
                 let cp = self.unicode_escape()?;
-                push_code_point(&mut literal.value, cp);
+                return Lexer::charged(push_code_point(self.m, &mut literal.value, cp));
             }
-            _ => literal.value.push(c),
-        }
-        Ok(())
+            _ => c,
+        };
+        Lexer::charged(self.m.push(&mut literal.value, unit))
     }
 
     /// The `UnicodeEscapeSequence` after `\u`: `Hex4Digits` or `{ CodePoint }`.
@@ -599,6 +641,7 @@ impl<'a> Lexer<'a> {
                 cp = cp.saturating_mul(16).saturating_add(d);
                 n += 1;
                 self.pos += 1;
+                self.tick()?;
             }
             if n == 0 || cp > 0x10_FFFF || self.cur() != Some(ascii(b'}')) {
                 return Err(self.error("invalid Unicode escape sequence"));
@@ -627,6 +670,7 @@ impl<'a> Lexer<'a> {
         let body_start = self.pos;
         let mut in_class = false;
         loop {
+            self.tick()?;
             let Some(c) = self.cur().filter(|&c| !is_line_terminator(c)) else {
                 return Err(SyntaxError::new(
                     "unterminated regular expression literal",
@@ -652,14 +696,11 @@ impl<'a> Lexer<'a> {
                 _ => {}
             }
         }
-        let body = self
-            .src
-            .get(body_start..self.pos - 1)
-            .unwrap_or(&[])
-            .to_vec();
+        let body_end = self.pos - 1;
         let flags_start = self.pos;
         while self.cur().is_some_and(is_ascii_id_part) {
             self.pos += 1;
+            self.tick()?;
         }
         if let Some(c) = self.cur()
             && c >= 0x80
@@ -668,7 +709,20 @@ impl<'a> Lexer<'a> {
         {
             return Err(self.refused("identifier with a code point outside ASCII", 5));
         }
-        let flags = self.src.get(flags_start..self.pos).unwrap_or(&[]).to_vec();
+        let body = Lexer::charged(
+            self.m
+                .copy(self.src.get(body_start..body_end).unwrap_or(&[])),
+        )?;
+        let flags = match self
+            .m
+            .copy(self.src.get(flags_start..self.pos).unwrap_or(&[]))
+        {
+            Ok(flags) => flags,
+            Err(_) => {
+                self.m.release(body);
+                return Err(SyntaxError::stopped());
+            }
+        };
         Ok(Token {
             kind: TokenKind::RegExp(RegExpLiteral { body, flags }),
             start: token.start,
@@ -731,6 +785,7 @@ impl<'a> Lexer<'a> {
         let mut cooked = Vec::new();
         let mut not_escape = None;
         let substitution = loop {
+            self.tick()?;
             let Some(c) = self.cur() else {
                 return Err(SyntaxError::new(UNTERMINATED_TEMPLATE, line, column));
             };
@@ -740,30 +795,31 @@ impl<'a> Lexer<'a> {
                 0x5C => {
                     let at = (self.line, self.column());
                     self.pos += 1;
-                    if !self.template_escape(&mut cooked) && not_escape.is_none() {
+                    if !self.template_escape(&mut cooked)? && not_escape.is_none() {
                         not_escape = Some(at);
                     }
                 }
                 // `LineTerminatorSequence`: the TRV of `<CR>` and of `<CR><LF>` is `<LF>`.
                 c if is_line_terminator(c) => {
-                    cooked.push(if c == CR { LF } else { c });
+                    Lexer::charged(self.m.push(&mut cooked, if c == CR { LF } else { c }))?;
                     self.line_terminator();
                 }
                 _ => {
-                    cooked.push(c);
+                    Lexer::charged(self.m.push(&mut cooked, c))?;
                     self.pos += 1;
                 }
             }
         };
-        let raw = trv(self.src.get(body_start..self.pos).unwrap_or(&[]));
+        let raw = Lexer::charged(trv(
+            self.m,
+            self.src.get(body_start..self.pos).unwrap_or(&[]),
+        ))?;
         self.pos += if substitution { 2 } else { 1 };
-        Ok((
-            Box::new(TemplatePart {
-                string: TemplateString { cooked, raw },
-                not_escape,
-            }),
-            substitution,
-        ))
+        let part = Lexer::charged(self.m.boxed(TemplatePart {
+            string: TemplateString { cooked, raw },
+            not_escape,
+        }))?;
+        Ok((part, substitution))
     }
 
     /// The `TemplateEscapeSequence` or `LineContinuation` after a `\` in a template, its TV
@@ -771,51 +827,55 @@ impl<'a> Lexer<'a> {
     /// `NotEscapeSequence` is never longer than what the characters after the `\` read as
     /// `TemplateCharacter`s, so only the character after the `\` is consumed then: the TRV is
     /// the source text either way.
-    fn template_escape(&mut self, cooked: &mut Vec<u16>) -> bool {
+    fn template_escape(&mut self, cooked: &mut Vec<u16>) -> Result<bool, SyntaxError> {
         let Some(c) = self.cur() else {
             // The end of the source: the caller finds the template unterminated.
-            return true;
+            return Ok(true);
         };
         if is_line_terminator(c) {
             self.line_terminator();
-            return true;
+            return Ok(true);
         }
         self.pos += 1;
-        match c {
-            0x62 => cooked.push(0x08),
-            0x66 => cooked.push(0x0C),
-            0x6E => cooked.push(0x0A),
-            0x72 => cooked.push(0x0D),
-            0x74 => cooked.push(0x09),
-            0x76 => cooked.push(0x0B),
+        let unit = match c {
+            0x62 => 0x08,
+            0x66 => 0x0C,
+            0x6E => 0x0A,
+            0x72 => 0x0D,
+            0x74 => 0x09,
+            0x76 => 0x0B,
             // `0 [lookahead ∉ DecimalDigit]`; before a digit, `0 DecimalDigit` and every other
             // `DecimalDigit` are NotEscapeSequences: no legacy octal escape in a template.
-            0x30 if !self.cur().is_some_and(is_decimal) => cooked.push(0),
-            0x30..=0x39 => return false,
+            0x30 if !self.cur().is_some_and(is_decimal) => 0,
+            0x30..=0x39 => return Ok(false),
             0x78 => match (
                 self.cur().and_then(hex_value),
                 self.ahead(1).and_then(hex_value),
             ) {
                 (Some(hi), Some(lo)) => {
                     self.pos += 2;
-                    cooked.push(u16::try_from(hi * 16 + lo).unwrap_or(0xFFFD));
+                    u16::try_from(hi * 16 + lo).unwrap_or(0xFFFD)
                 }
-                _ => return false,
+                _ => return Ok(false),
             },
-            0x75 => match self.template_unicode_escape() {
-                Some(cp) => push_code_point(cooked, cp),
-                None => return false,
+            0x75 => match self.template_unicode_escape()? {
+                Some(cp) => {
+                    Lexer::charged(push_code_point(self.m, cooked, cp))?;
+                    return Ok(true);
+                }
+                None => return Ok(false),
             },
             // `NonEscapeCharacter` and the `SingleEscapeCharacter`s that stand for themselves.
-            _ => cooked.push(c),
-        }
-        true
+            _ => c,
+        };
+        Lexer::charged(self.m.push(cooked, unit))?;
+        Ok(true)
     }
 
     /// The `UnicodeEscapeSequence` after `\u` in a template, consumed; `None`, with nothing
     /// consumed, where the characters are a `NotEscapeSequence` (no four hexadecimal digits, no
     /// `}`, or a `NotCodePoint`).
-    fn template_unicode_escape(&mut self) -> Option<u32> {
+    fn template_unicode_escape(&mut self) -> Result<Option<u32>, SyntaxError> {
         if self.cur() == Some(ascii(b'{')) {
             let mut at = self.pos + 1;
             let mut cp: u32 = 0;
@@ -824,19 +884,26 @@ impl<'a> Lexer<'a> {
                 cp = cp.saturating_mul(16).saturating_add(d);
                 digits += 1;
                 at += 1;
+                // The digits are read ahead of the position: a poll per 4,096 of them.
+                if digits % POLL_INTERVAL == 0 {
+                    Lexer::charged(self.m.poll())?;
+                }
             }
             if digits == 0 || cp > 0x10_FFFF || self.unit(at) != Some(ascii(b'}')) {
-                return None;
+                return Ok(None);
             }
             self.pos = at + 1;
-            return Some(cp);
+            return Ok(Some(cp));
         }
         let mut cp = 0;
         for i in 0..4 {
-            cp = cp * 16 + self.ahead(i).and_then(hex_value)?;
+            match self.ahead(i).and_then(hex_value) {
+                Some(d) => cp = cp * 16 + d,
+                None => return Ok(None),
+            }
         }
         self.pos += 4;
-        Some(cp)
+        Ok(Some(cp))
     }
 
     /// The longest `Punctuator` at the current position, consumed.

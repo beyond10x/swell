@@ -87,12 +87,14 @@ impl<H: Host> Agent<H> {
 
     /// A throw or a termination in the running frame: the first handler of the frames above
     /// `base` that covers the instruction, or the answer of the run (`Some`). A termination
-    /// enters no handler.
+    /// enters no handler. A throw is first recorded where it arose (decision 13,
+    /// `Agent::record_throw_site`), once per thrown value.
     fn unwind(&mut self, base: usize, abrupt: Abrupt) -> Option<Completion<Value>> {
         let Abrupt::Throw(value) = abrupt else {
             self.drop_frames(base);
             return Some(Err(abrupt));
         };
+        self.record_throw_site(value);
         loop {
             let Some(frame) = self.interp.frames.last() else {
                 return Some(Err(self.fault()));
@@ -126,7 +128,8 @@ impl<H: Host> Agent<H> {
 
     /// Continue at `handler` of the running frame with the thrown `value`: the operand stack and
     /// the environments as they were at the try statement, then the exception (a `catch`
-    /// block) or the throw completion record (a `finally` block).
+    /// block) or the throw completion record (a `finally` block). A `catch` block ends the
+    /// throw's site record; a `finally` block keeps it, since its end throws the value again.
     fn enter_handler(
         &mut self,
         handler: swell_compiler::bytecode::Handler,
@@ -154,6 +157,8 @@ impl<H: Host> Agent<H> {
         self.push_value(value)?;
         if handler.kind == HandlerKind::Finally {
             self.push_entry(Entry::Tag(TAG_THROW))?;
+        } else {
+            self.end_throw_site();
         }
         Ok(())
     }
@@ -1517,5 +1522,53 @@ impl<H: Host> Agent<H> {
             }
             self.charge_steps(1)?;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::host::hooks::test_host::agent_with_realm;
+    use crate::{Outcome, Parsed, Source};
+
+    /// The site records `source`, run as a script in a fresh agent, wrote, and whether it threw.
+    fn records(source: &str) -> (u64, bool) {
+        let (mut agent, realm) = agent_with_realm();
+        let script = match agent.parse_script(&realm, Source::Utf8(source), None) {
+            Ok(Parsed::Parsed(script)) => script,
+            _ => panic!("{source:?} did not parse"),
+        };
+        let threw = match agent.evaluate_script(&script) {
+            Ok(Outcome::Throw(_)) => true,
+            Ok(Outcome::Normal(_)) => false,
+            _ => panic!("{source:?} was terminated"),
+        };
+        (agent.site_records, threw)
+    }
+
+    /// One record per throw that unwinds (decision 13): a throw that unwinds through three
+    /// script frames, a `map` callback and a `finally` block writes one; a throw a `catch` ended
+    /// and a second throw write two, of the same value too, and so do a throw a `finally` block
+    /// discarded and a second `throw` statement of the same value; a run that throws nothing
+    /// writes none.
+    #[test]
+    fn one_site_record_per_throw() {
+        let through = "function a() { [1].map(function () { b(); }); }\n\
+                       function b() { try { c(); } finally {} }\n\
+                       function c() { null.x; }\n\
+                       a();";
+        assert_eq!(records(through), (1, true));
+        assert_eq!(records("try { throw 1 } catch (e) {} throw 2"), (2, true));
+        assert_eq!(records("try { throw 1 } catch (e) {} throw 1"), (2, true));
+        let discarded = "function f() { try { throw 1 } finally { return } }\nf();\nthrow 1";
+        assert_eq!(records(discarded), (2, true));
+        // 10,000 iterations; 100 in the mode `collect-every-safe-point`, which collects at every
+        // instruction (10,000 took 27 s there).
+        let iterations = if cfg!(feature = "collect-every-safe-point") {
+            100
+        } else {
+            10_000
+        };
+        let loop_ = format!("for (var i = 0; i < {iterations}; i++) {{ i * 2; }}");
+        assert_eq!(records(&loop_), (0, false));
     }
 }

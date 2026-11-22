@@ -27,26 +27,43 @@ use swell::{
 /// `collect-every-safe-point` the budget is the realm and 64 KiB, as HOST-10 has it there: a
 /// collection at every safe point traces the whole heap, so that mode's time grows with the
 /// square of the heap whatever the lookup costs (1 MiB ran over 60 s there, measured).
+///
+/// The room `1 + 1` then has is bounded from below in both modes: the host holds 4 KiB charged
+/// (`charge_host_bytes`) during the loop, on top of the budget, and gives them back after it
+/// (`credit_host_bytes`); `heap_bytes()` is at most `memory_bytes` after the termination
+/// (HOST-171), so at least 4 KiB are free, and `1 + 1` needs 2,322 bytes of room above
+/// `heap_bytes()`. Before, the room was what the loop's last refused growth happened to leave:
+/// with a collection at every safe point `1 + 1` had 3,549 bytes there and needed 3,895. The
+/// test took 0.53 s in the default mode and 0.47 s with a collection at every safe point
+/// (cargo-nextest, 2026-11-22).
 #[test]
 fn memory_budget_of_8_mib_ends_a_push_loop() {
+    const HELD: u64 = 4 * 1024;
     let mut limits = limits();
-    limits.memory_bytes = if cfg!(feature = "collect-every-safe-point") {
-        let mut agent = agent_with(support::host::limits()).unwrap();
-        let _realm = realm(&mut agent);
-        assert!(agent.collect().is_ok());
-        agent.heap_bytes().unwrap() + 65_536
-    } else {
-        8 << 20
-    };
+    limits.memory_bytes = HELD
+        + if cfg!(feature = "collect-every-safe-point") {
+            let mut agent = agent_with(support::host::limits()).unwrap();
+            let _realm = realm(&mut agent);
+            assert!(agent.collect().is_ok());
+            agent.heap_bytes().unwrap() + 65_536
+        } else {
+            8 << 20
+        };
     limits.steps_per_entry = u64::MAX;
     let budget = limits.memory_bytes;
     let mut agent = agent_with(limits).unwrap();
     let realm = realm(&mut agent);
+    let held = agent
+        .with_cx(&realm, |cx| cx.charge_host_bytes(HELD))
+        .unwrap()
+        .unwrap();
     assert_eq!(
         eval_text(&mut agent, &realm, "var a = []; while (true) a.push({});"),
         Outcome::Terminated(Termination::MemoryBudget)
     );
     assert!(agent.heap_bytes().unwrap() <= budget);
+    assert_eq!(agent.credit_host_bytes(held).unwrap(), HELD);
+    assert!(budget - agent.heap_bytes().unwrap() >= HELD);
     assert_eq!(
         eval_text(&mut agent, &realm, "1 + 1"),
         Outcome::Normal("2".to_string())

@@ -91,6 +91,13 @@ impl SyntaxError {
         SyntaxError::new(format!("{construct}{REFUSED}{slice}"), line, column)
     }
 
+    /// The error that carries a stop of the ledger out of the lexer and the parser: its message
+    /// is empty, so it allocates nothing, and the entry answers the stop the meter keeps
+    /// (`ledger.rs`), never this error.
+    pub(crate) fn stopped() -> SyntaxError {
+        SyntaxError::new(String::new(), 0, 0)
+    }
+
     /// The error of passing the nesting limit `limit`.
     pub(crate) fn nesting(limit: u32, line: u32, column: u32) -> SyntaxError {
         SyntaxError::new(format!("{NESTING}{limit})"), line, column)

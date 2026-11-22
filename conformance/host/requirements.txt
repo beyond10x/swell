@@ -165,13 +165,13 @@ HOST-164 test swell::eval::host_164_refusals_counts_every_refusal_caught_or_not
 HOST-165 test swell::builtins_string_transform::host_165_case_methods_and_locale_compare_refuse_a_unit_outside_ascii
 HOST-166 test swell::interrupt::host_166_a_pending_interrupt_ends_parse_script_before_the_parse
 HOST-167 test swell::interrupt::host_167_an_interrupt_set_in_a_host_function_ends_its_cx_parse_script
-HOST-168 pending slice 6
-HOST-169 pending slice 6
+HOST-168 test swell::frontend_ledger::host_168_an_interrupt_set_by_the_compile_strings_hook_ends_eval_before_its_parse
+HOST-169 test swell::lib::script::tests::host_169_a_flat_source_whose_tree_does_not_fit_ends_in_memory_budget
 HOST-170 test swell::collect::host_170_a_value_read_from_a_dropped_root_lives_until_its_scope_ends
 HOST-171 test swell::collect::host_171_live_bytes_reads_the_records_and_heap_bytes_the_budget
-HOST-172 pending slice 6
-HOST-173 pending slice 6
-HOST-174 pending slice 6
+HOST-172 test swell::scripts::host_172_a_parse_error_names_its_line_and_column
+HOST-173 test swell::scripts::host_173_an_uncaught_throw_names_where_it_arose
+HOST-174 test swell::scripts::host_174_the_error_site_is_a_read
 HOST-175 test swell::budgets::host_175_host_bytes_without_end_end_in_memory_budget
 HOST-176 test swell::budgets::host_176_a_host_charge_gives_back_what_it_charged
 HOST-177 test swell::budgets::host_177_host_steps_end_in_step_budget
@@ -185,3 +185,6 @@ HOST-184 test swell::host_objects::host_184_the_host_names_two_symbols
 HOST-185 pending slice 6
 HOST-186 pending slice 6
 HOST-187 pending slice 6
+HOST-188 test swell::termination::host_188_calls_that_take_no_memory_answer_with_a_room_of_0
+HOST-189 test swell::termination::host_189_190_one_runs_after_a_memory_budget_termination_once_the_host_made_room
+HOST-190 test swell::termination::host_189_190_one_runs_after_a_memory_budget_termination_once_the_host_made_room

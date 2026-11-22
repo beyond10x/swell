@@ -5,6 +5,7 @@
 //! (`#sec-template-literal-lexical-components`).
 
 use crate::ast::{NumberLiteral, RegExpLiteral, StringLiteral, TemplateString};
+use crate::ledger::HeapBytes;
 
 /// A token with its source position: `start` and `end` are code unit offsets, `line` and
 /// `column` count from 1. `newline_before` says whether a `LineTerminator`, or a
@@ -48,6 +49,26 @@ pub(crate) enum TokenKind {
     TemplateMiddle(Box<TemplatePart>),
     /// `` }...` ``, likewise.
     TemplateTail(Box<TemplatePart>),
+}
+
+impl HeapBytes for TokenKind {
+    /// What the token's payload owns, which the parser credits when it drops the token and
+    /// does not when it moved the payload into the tree.
+    fn heap_bytes(&self) -> usize {
+        match self {
+            TokenKind::Eof | TokenKind::Keyword(_) | TokenKind::Punct(_) => 0,
+            TokenKind::Name(name) => name.heap_bytes(),
+            TokenKind::Number(n) => n.heap_bytes(),
+            TokenKind::String(s) => s.heap_bytes(),
+            TokenKind::RegExp(r) => r.heap_bytes(),
+            TokenKind::NoSubstitutionTemplate(part)
+            | TokenKind::TemplateHead(part)
+            | TokenKind::TemplateMiddle(part)
+            | TokenKind::TemplateTail(part) => {
+                size_of::<TemplatePart>().saturating_add(part.string.heap_bytes())
+            }
+        }
+    }
 }
 
 /// The characters of a template token: its TV and TRV, and where its first NotEscapeSequence

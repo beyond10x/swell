@@ -338,6 +338,7 @@ impl<H: Host> Agent<H> {
             new_target,
             realm,
         });
+        let sites = self.throw_sites;
         let result = if self.safe_point().is_err() {
             Err(self.fault())
         } else {
@@ -347,6 +348,11 @@ impl<H: Host> Agent<H> {
             }
         };
         self.activations.pop();
+        // A normal answer after a throw recorded inside the builtin or host function: it caught
+        // that throw (decision 13).
+        if result.is_ok() && self.throw_sites != sites {
+            self.end_throw_site();
+        }
         result
     }
 

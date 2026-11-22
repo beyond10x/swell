@@ -278,11 +278,17 @@ impl<H: Host> Agent<H> {
         // 2. Let len be ? LengthOfArrayLike(O).
         let length = self.length_of_array_like(object)?;
         // 3, 4. If separator is undefined, let sep be ","; else let sep be ? ToString(separator).
+        // sep is appended only before an element after the first (JoinIndexedProperties, step
+        // a), so with len below 2 its units are not read.
         let separator = match separator {
             Value::Undefined => units_of(","),
             separator => {
                 let separator = self.to_string(separator)?;
-                self.string_units(separator)?
+                if length >= 2.0 {
+                    self.string_units(separator)?
+                } else {
+                    Vec::new()
+                }
             }
         };
         // 5. Return ? JoinIndexedProperties(O, len, sep).
@@ -777,5 +783,18 @@ mod tests {
             agent.call_value(map, Value::Object(source), &[Value::Object(callback)]),
             Err(Abrupt::Throw(_))
         ));
+    }
+
+    /// JoinIndexedProperties (`#sec-joinindexedproperties`) appends sep only before an element
+    /// after the first: `[1].join(f)` with f of 1,000,000 code units answers "1", and no unit
+    /// of f, nor of any other String, was copied.
+    #[test]
+    fn join_of_one_element_copies_no_separator() {
+        use crate::builtins::string::transform::tests::{Answer, FEW_STEPS, with_long};
+        let mut counting = with_long(0x66);
+        assert_eq!(
+            counting.counted(FEW_STEPS, "[1].join(s)"),
+            (Answer::Normal("1".to_string()), 0)
+        );
     }
 }

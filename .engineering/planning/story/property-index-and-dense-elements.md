@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:property-index-and-dense-elements
 kind: story
-status: active
+status: implemented
 title: 'Property lookup through an index map and dense array elements: no scan the step budget does not see'
 summary: The index map and the dense element storage of the design, for objects, arrays and the bindings eval adds; 40,000 pushes take 16 times the time of 10,000 on the base because every lookup scans the list, and at most 8 times after; the six probes are files of the story; no run changes its outcome.
 relations:
@@ -34,10 +34,11 @@ scope:
   path: crates/swell/tests/probes/property-index
 - confidence: cited
   path: crates/swell/tests/property_index.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:44Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:44Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:09:59Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

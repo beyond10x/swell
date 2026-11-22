@@ -228,20 +228,25 @@ impl<H: Host> Agent<H> {
             Value::Undefined => self.new_string_str("")?,
             message => self.to_string(message)?,
         };
-        if self.string_length(name)? == 0 {
+        let name_length = self.string_length(name)?;
+        if name_length == 0 {
             return Ok(Value::String(message));
         }
-        if self.string_length(message)? == 0 {
+        let message_length = self.string_length(message)?;
+        if message_length == 0 {
             return Ok(Value::String(name));
         }
-        let mut units = self.string_units(name)?;
-        units.extend([u16::from(b':'), u16::from(b' ')]);
-        units.extend(self.string_units(message)?);
-        let length = u64::try_from(units.len()).unwrap_or(u64::MAX);
+        // The length of name, ": " and msg is asked of `string_length` and charged before
+        // either part is copied.
+        let length = u64::try_from(name_length.saturating_add(2).saturating_add(message_length))
+            .unwrap_or(u64::MAX);
         if length > self.limits.string_length {
             return Err(self.throw_error(ErrorKind::RangeError, "string_length exceeded"));
         }
         self.charge_steps(length)?;
+        let mut units = self.string_units(name)?;
+        units.extend([u16::from(b':'), u16::from(b' ')]);
+        units.extend(self.string_units(message)?);
         Ok(Value::String(self.new_string_value(&units)?))
     }
 }
@@ -271,5 +276,28 @@ pub(crate) fn error_data(kind: &ObjectKind) -> Option<ErrorKind> {
         },
         ObjectKind::Host(host) => host.error_kind,
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::builtins::string::transform::tests::{Answer, Counting, FEW_STEPS, LONG};
+
+    /// `Error.prototype.toString` (`#sec-error.prototype.tostring`), step 9, builds its result
+    /// from other values, so it is bounded by `string_length` (`docs/design/host-interface.md`,
+    /// section 2): with `string_length` 1,000,000, an Error whose name has 1,000,000 code
+    /// units and whose message is "m" throws a `RangeError` before a unit of either is copied.
+    #[test]
+    fn error_to_string_past_string_length_copies_nothing() {
+        let mut counting = Counting::new(LONG as u64);
+        counting.string("s", &vec![0x61; LONG]);
+        assert_eq!(
+            counting.eval("var e = new Error(\"m\"); e.name = s; 0"),
+            Answer::Normal("Number(0.0)".to_string())
+        );
+        assert_eq!(
+            counting.counted(FEW_STEPS, "e.toString()"),
+            (Answer::Throw("RangeError".to_string()), 0)
+        );
     }
 }

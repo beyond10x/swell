@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:json-parse-and-raw-json
 kind: story
-status: active
+status: implemented
 title: JSON.parse as a loop with an explicit stack, its reviver with the source text, JSON.rawJSON and isRawJSON
 summary: 'Clause 25.5 complete: the parser and the reviver walk on stacks charged to the memory budget, a step per code unit and per node, 100,000 nested brackets end in a result or a budget; the frames of stringify on the re-entry path measured again; 67 failing cases pass.'
 relations:
@@ -26,10 +26,11 @@ scope:
   path: crates/swell/tests/language/builtin-json-parse.js
 - confidence: cited
   path: crates/swell/tests/language/builtin-json-raw-json.js
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:45Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:45Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:10:00Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

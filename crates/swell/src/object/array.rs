@@ -485,17 +485,44 @@ impl<H: Host> Agent<H> {
     /// is the list's length, charged before the search; the others depend on the stop the
     /// search finds and are charged after it, before anything is deleted. A list of at most
     /// [`SMALL`] entries is searched first and charged once.
+    ///
+    /// The index keys the search finds at `new_length` or above are gathered for the deletions
+    /// in a list with room for every entry of the property list, its bytes charged to the
+    /// memory budget before the room is reserved (`docs/design/engine.md`, "Memory budget") and
+    /// credited when it drops, on every way out.
     fn truncate_elements(&mut self, array: ObjectRef, new_length: u32) -> Completion<Option<u32>> {
         let list_entries = self.engine_object(array)?.properties.len();
         if list_entries > SMALL {
             self.charge_steps(u64::try_from(list_entries).unwrap_or(u64::MAX))?;
         }
+        let bytes =
+            u64::try_from(list_entries.saturating_mul(size_of::<u32>())).unwrap_or(u64::MAX);
+        self.charge_bytes(bytes)?;
+        let mut listed: Vec<u32> = Vec::new();
+        if listed.try_reserve_exact(list_entries).is_err() {
+            self.heap.accounting.credit(bytes);
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        let answer = self.truncate_listed(array, new_length, &mut listed);
+        drop(listed);
+        self.heap.accounting.credit(bytes);
+        answer
+    }
+
+    /// The search, the steps and the deletions of [`Agent::truncate_elements`], the index keys
+    /// at `new_length` or above gathered in `listed`, which has room for every entry of the
+    /// property list.
+    fn truncate_listed(
+        &mut self,
+        array: ObjectRef,
+        new_length: u32,
+        listed: &mut Vec<u32>,
+    ) -> Completion<Option<u32>> {
         let record = self.engine_object(array)?;
         let ObjectKind::Array(storage) = &record.kind else {
             return Err(self.fault());
         };
         let mut stop: Option<u32> = None;
-        let mut listed: Vec<u32> = Vec::new();
         for (key, property) in record.properties.iter() {
             #[cfg(test)]
             TRUNCATION_VISITS.with(|visits| visits.set(visits.get().saturating_add(1)));
@@ -521,7 +548,7 @@ impl<H: Host> Agent<H> {
             elements.truncate(floor_position);
         }
         let record = self.engine_object_mut(array)?;
-        for index in listed {
+        for &index in listed.iter() {
             record.properties.remove(Key::Index(index));
         }
         Ok(stop)
@@ -974,8 +1001,12 @@ mod tests {
     /// index keys in their list, an object whose list compacts at its next addition, a function
     /// whose eval code adds bindings until their list compacts, and bound functions of 0, 1 and
     /// 1,000 bound arguments per link through chains of 1 and 3 links. The totals are those
-    /// recorded on the base of the change; `o.x = 1` compacts the list (16 entries visited) and
-    /// `o.y = 1`, the same instructions, does not.
+    /// recorded on the base of the change `c8f39a4`, but for `f()`: since the frontend charges,
+    /// `eval` charges a step per code unit of its source before it parses
+    /// (`dynamic_code.rs`, `parse_eval_code`), so `f()` carries the 156 code units of its ten
+    /// `eval` sources (72, eight times `delete b<i>` with 75 in sum, and 9) on top of its 341
+    /// there. `o.x = 1` compacts the list (16 entries visited) and `o.y = 1`, the same
+    /// instructions, does not.
     #[test]
     fn step_totals_are_unchanged() {
         const SETUP: &str = "var a0 = [0, 1, 2]; \
@@ -1005,7 +1036,7 @@ mod tests {
             ("a1000.length = 1", 2_010),
             ("o.x = 1", 24),
             ("o.y = 1", 8),
-            ("f()", 341),
+            ("f()", 497),
             ("b0x1()", 12),
             ("b1x1()", 14),
             ("b1000x1()", 2_012),
@@ -1025,5 +1056,110 @@ mod tests {
             steps("o.x = 1").zip(steps("o.y = 1")).map(|(x, y)| x - y),
             Some(16)
         );
+    }
+
+    /// `source`, parsed in `realm`.
+    fn parsed(agent: &mut Agent<NoHooks>, realm: &Realm, source: &str) -> crate::value::Script {
+        let Ok(Parsed::Parsed(script)) = agent.parse_script(realm, Source::Utf8(source), None)
+        else {
+            panic!("{source} did not parse");
+        };
+        script
+    }
+
+    /// `script`, evaluated, which must not throw: the Number it answers, `None` for another
+    /// value, or the termination that ended it. `realm` is entered again after it.
+    fn run(
+        agent: &mut Agent<NoHooks>,
+        realm: &Realm,
+        script: &crate::value::Script,
+    ) -> Result<Option<f64>, Termination> {
+        let outcome = match agent.evaluate_script(script) {
+            Ok(Outcome::Normal(root)) => match agent.heap.roots.get(&root) {
+                Ok(Value::Number(number)) => Ok(Some(number)),
+                _ => Ok(None),
+            },
+            Ok(Outcome::Terminated(termination)) => Err(termination),
+            other => panic!("{other:?}"),
+        };
+        enter(agent, realm);
+        outcome
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (storage is charged before it is allocated, and
+    /// a temporary structure is credited when it drops), and ArraySetLength
+    /// (`#sec-arraysetlength`), step 17: the list of the index keys at the new length or above
+    /// that `truncate_elements` gathers for the deletions. `a`, `b` and `c` hold 10,000 index
+    /// keys in their lists (10,001 entries with `"length"`; a list of `u32` for all of them takes
+    /// 40,004 bytes). Under a budget of the reading after the setup plus half of that,
+    /// `a.length = 0` ends in `Terminated(MemoryBudget)` before the walk visits an entry; the
+    /// next script `c.length` answers 12,000, and after a collection the reading is the one
+    /// before. (`a` keeps the length 0 that step 15 wrote before step 17 ended, with its index
+    /// keys.) A step budget that ends `b.length = 0` after the list was charged leaves the
+    /// charged reading where it was; with a roomy budget `c.length = 0` raises the high-water
+    /// mark by at least the list and, done, leaves the reading where it was.
+    #[test]
+    fn the_list_of_deleted_keys_is_charged_before_it_is_made() {
+        const N: u32 = 10_000;
+        let (mut agent, realm) = roomy();
+        enter(&mut agent, &realm);
+        let global = agent.global_object(&realm).unwrap();
+        let Ok(Value::Object(global)) = agent.heap.roots.get(&global) else {
+            panic!("the global object");
+        };
+        let [_, b, c] = ["a", "b", "c"].map(|name| {
+            let array = listed_array(&mut agent, N, false);
+            let key = agent.name_key(name).unwrap();
+            assert_eq!(
+                agent.create_data_property(global, key, Value::Object(array)),
+                Ok(true)
+            );
+            array
+        });
+        let shorten = parsed(&mut agent, &realm, "a.length = 0");
+        let read = parsed(&mut agent, &realm, "c.length");
+        let list = u64::from(N + 1) * size_of::<u32>() as u64;
+        let roomy_limit = agent.heap.bytes() + (1 << 28);
+        assert!(agent.collect().is_ok());
+        let before = agent.heap_bytes().unwrap();
+        agent.heap.accounting.set_limit(before + list / 2);
+        TRUNCATION_VISITS.with(|visits| visits.set(0));
+        assert_eq!(
+            run(&mut agent, &realm, &shorten),
+            Err(Termination::MemoryBudget)
+        );
+        assert_eq!(
+            truncation_visits(),
+            0,
+            "entries the walk visited before the memory budget ended the run"
+        );
+        agent.heap.accounting.set_limit(roomy_limit);
+        assert_eq!(
+            run(&mut agent, &realm, &read),
+            Ok(Some(f64::from(2_000 + N)))
+        );
+        assert!(agent.collect().is_ok());
+        assert_eq!(agent.heap_bytes().unwrap(), before, "after the next script");
+
+        let length = agent.name_key("length").unwrap();
+        let charged = agent.heap.accounting.used();
+        agent.steps = 0;
+        agent.limits.steps_per_entry = u64::from(N) + 100;
+        assert_eq!(
+            agent.define_own_property(b, length, length_descriptor(0)),
+            Err(Abrupt::Terminated(Termination::StepBudget))
+        );
+        assert_eq!(agent.heap.accounting.used(), charged, "after a step budget");
+        agent.steps = 0;
+        agent.limits.steps_per_entry = u64::MAX;
+        agent.termination = None;
+        agent.heap.accounting.reset_high_water();
+        assert_eq!(
+            agent.define_own_property(c, length, length_descriptor(0)),
+            Ok(true)
+        );
+        let rise = agent.heap.accounting.high_water() - charged;
+        assert!(rise >= list, "the high-water mark rose by {rise} < {list}");
+        assert_eq!(agent.heap.accounting.used(), charged, "after a normal end");
     }
 }

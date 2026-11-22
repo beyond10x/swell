@@ -26,9 +26,11 @@ mod function;
 mod statement;
 
 use crate::ast::{
-    Ast, Child, Expr, ExprId, ExprNode, Function, FunctionId, Span, Stmt, StmtId, StmtNode,
+    Ast, Child, Expr, ExprId, ExprNode, Function, FunctionId, NumberLiteral, RegExpLiteral, Span,
+    Stmt, StmtId, StmtNode, StringLiteral, TemplateString,
 };
 use crate::error::SyntaxError;
+use crate::ledger::{HeapBytes, Meter, Stop as Halt};
 use crate::lexer::Lexer;
 use crate::token::{Keyword, Punct, Token, TokenKind};
 
@@ -46,8 +48,11 @@ pub(crate) struct Parsed {
     pub strict: bool,
 }
 
-pub(crate) struct Parser<'a> {
-    lexer: Lexer<'a>,
+pub(crate) struct Parser<'a, 'm> {
+    /// The ledger of the parse, shared with the lexer, the walks after the parser and the
+    /// compile step: in the parser's state, never in a recursive frame.
+    m: &'a Meter<'m>,
+    pub(crate) lexer: Lexer<'a, 'm>,
     src: &'a [u16],
     tok: Token,
     peeked: Option<Token>,
@@ -69,21 +74,27 @@ pub(crate) struct Parser<'a> {
     prefixes: Vec<(expression::Prefix, Span)>,
 }
 
-/// Parses `source` as a `Script` with nesting limit `max`.
-pub(crate) fn parse(source: &[u16], max: u32) -> Result<Parsed, SyntaxError> {
-    parse_eval(source, max, false)
+/// Parses `source` as a `Script` with nesting limit `max`, charged to `m`.
+pub(crate) fn parse(source: &[u16], max: u32, m: &Meter<'_>) -> Result<Parsed, SyntaxError> {
+    parse_eval(source, max, false, m)
 }
 
 /// Parses `source` as a `Script` with nesting limit `max` for PerformEval (`#sec-performeval`,
 /// step 9, `ParseText(x, Script)`): the code is strict from its start when `strict` (a strict
 /// caller), and from its directive prologue on when that holds a Use Strict Directive.
-/// [`Parsed::strict`] is whether the eval code is strict.
-pub(crate) fn parse_eval(source: &[u16], max: u32, strict: bool) -> Result<Parsed, SyntaxError> {
-    let mut parser = Parser::new(source, max);
+/// [`Parsed::strict`] is whether the eval code is strict. Charged to `m`; after a stop of the
+/// meter the answer is an error the caller does not read.
+pub(crate) fn parse_eval(
+    source: &[u16],
+    max: u32,
+    strict: bool,
+    m: &Meter<'_>,
+) -> Result<Parsed, SyntaxError> {
+    let mut parser = Parser::new(source, max, m);
     parser.strict = strict;
     match parser.script() {
         Ok((body, use_strict)) => Ok(Parsed {
-            ast: parser.ast,
+            ast: parser.finish_parse(),
             body,
             strict: strict || use_strict,
         }),
@@ -103,51 +114,129 @@ pub(crate) fn parse_dynamic_function(
     parameters: &[u16],
     body: &[u16],
     max: u32,
+    m: &Meter<'_>,
 ) -> Result<Parsed, SyntaxError> {
     const LF: u16 = 0x000A;
-    let mut alone = Parser::new(parameters, max);
+    const HEAD: &str = "function anonymous(";
+    const MIDDLE: &str = "\n) {";
+    // The first two parses keep nothing: what they charged is credited when each ends.
+    let mark = m.held();
+    let mut alone = Parser::new(parameters, max, m);
     if alone.formal_parameters_text().is_err() {
         return Err(alone.into_error());
     }
-    let mut body_text = Vec::with_capacity(body.len().saturating_add(2));
+    drop(alone);
+    m.credit(m.held().saturating_sub(mark));
+    let unit_bytes = size_of::<u16>();
+    let mut body_text = m
+        .with_capacity::<u16>(body.len().saturating_add(2))
+        .map_err(|_| stopped())?;
     body_text.push(LF);
     body_text.extend_from_slice(body);
     body_text.push(LF);
-    let mut alone = Parser::new(&body_text, max);
+    let text_bytes = body_text.capacity().saturating_mul(unit_bytes);
+    let mark = m.held();
+    let mut alone = Parser::new(&body_text, max, m);
     if alone.function_body_text().is_err() {
         return Err(alone.into_error());
     }
-    let head: Vec<u16> = "function anonymous(".encode_utf16().collect();
-    let middle: Vec<u16> = "\n) {".encode_utf16().collect();
-    let mut source = Vec::with_capacity(
-        head.len()
-            .saturating_add(parameters.len())
-            .saturating_add(middle.len())
-            .saturating_add(body_text.len())
-            .saturating_add(1),
-    );
-    source.extend_from_slice(&head);
+    drop(alone);
+    m.credit(m.held().saturating_sub(mark));
+    let length = HEAD
+        .len()
+        .saturating_add(parameters.len())
+        .saturating_add(MIDDLE.len())
+        .saturating_add(body_text.len())
+        .saturating_add(1);
+    let mut source = m.with_capacity::<u16>(length).map_err(|_| stopped())?;
+    source.extend(HEAD.encode_utf16());
     source.extend_from_slice(parameters);
-    source.extend_from_slice(&middle);
+    source.extend(MIDDLE.encode_utf16());
     source.extend_from_slice(&body_text);
     source.push(u16::from(b'}'));
-    let mut whole = Parser::new(&source, max);
-    match whole.dynamic_function_text() {
-        Ok(statement) => Ok(Parsed {
-            ast: whole.ast,
-            body: vec![statement],
-            strict: false,
-        }),
-        Err(Stop) => Err(whole.into_error()),
+    let source_bytes = source.capacity().saturating_mul(unit_bytes);
+    drop(body_text);
+    m.credit(text_bytes);
+    let answer = {
+        let mut whole = Parser::new(&source, max, m);
+        match whole.dynamic_function_text() {
+            Ok(statement) => match m.with_capacity(1) {
+                Ok(mut body) => {
+                    body.push(statement);
+                    Ok(Parsed {
+                        ast: whole.finish_parse(),
+                        body,
+                        strict: false,
+                    })
+                }
+                Err(_) => Err(stopped()),
+            },
+            Err(Stop) => Err(whole.into_error()),
+        }
+    };
+    drop(source);
+    m.credit(source_bytes);
+    answer
+}
+
+/// The error a parse answers once its meter has stopped; the entry answers the stop instead.
+fn stopped() -> SyntaxError {
+    SyntaxError::stopped()
+}
+
+/// A copy of the name `n` for the tree, charged to `m`.
+fn copy_name(m: &Meter<'_>, n: &str) -> Result<String, Halt> {
+    m.string(n)
+}
+
+/// A copy of the number literal `n` for the tree, charged to `m`.
+fn copy_number(m: &Meter<'_>, n: &NumberLiteral) -> Result<NumberLiteral, Halt> {
+    Ok(NumberLiteral {
+        text: m.string(&n.text)?,
+        form: n.form,
+    })
+}
+
+/// A copy of the string literal `s` for the tree, charged to `m`.
+fn copy_string(m: &Meter<'_>, s: &StringLiteral) -> Result<StringLiteral, Halt> {
+    Ok(StringLiteral {
+        value: m.copy(&s.value)?,
+        legacy_octal_escape: s.legacy_octal_escape,
+        non_octal_decimal_escape: s.non_octal_decimal_escape,
+    })
+}
+
+/// A copy of the regular expression literal `r` for the tree, charged to `m`.
+fn copy_regexp(m: &Meter<'_>, r: &RegExpLiteral) -> Result<RegExpLiteral, Halt> {
+    let body = m.copy(&r.body)?;
+    match m.copy(&r.flags) {
+        Ok(flags) => Ok(RegExpLiteral { body, flags }),
+        Err(stop) => {
+            m.release(body);
+            Err(stop)
+        }
     }
 }
 
-impl<'a> Parser<'a> {
+/// A copy of the template string `t` for the tree, charged to `m`.
+fn copy_template(m: &Meter<'_>, t: &TemplateString) -> Result<TemplateString, Halt> {
+    let cooked = m.copy(&t.cooked)?;
+    match m.copy(&t.raw) {
+        Ok(raw) => Ok(TemplateString { cooked, raw }),
+        Err(stop) => {
+            m.release(cooked);
+            Err(stop)
+        }
+    }
+}
+
+impl<'a, 'm> Parser<'a, 'm> {
     /// A parser at the start of `source`, with nesting limit `max`, outside any function, in
-    /// non-strict code.
-    fn new(source: &'a [u16], max: u32) -> Parser<'a> {
+    /// non-strict code, charged to `m`.
+    pub(crate) fn new(source: &'a [u16], max: u32, m: &'a Meter<'m>) -> Parser<'a, 'm> {
         Parser {
-            lexer: Lexer::new(source),
+            m,
+            lexer: Lexer::new(source, m),
             src: source,
             tok: Token {
                 kind: TokenKind::Eof,
@@ -177,8 +266,22 @@ impl<'a> Parser<'a> {
             .unwrap_or_else(|| SyntaxError::new("parse failed", 1, 1))
     }
 
+    /// The tree of a parse that ended, its scratch credited: the operator stacks and the tokens
+    /// the parser still holds.
+    fn finish_parse(&mut self) -> Ast {
+        let m = self.m;
+        m.release(std::mem::take(&mut self.operators));
+        m.release(std::mem::take(&mut self.prefixes));
+        m.credit(self.tok.kind.heap_bytes());
+        self.tok.kind = TokenKind::Eof;
+        if let Some(peeked) = self.peeked.take() {
+            m.credit(peeked.kind.heap_bytes());
+        }
+        std::mem::take(&mut self.ast)
+    }
+
     /// `Script : ScriptBody?` (`#sec-scripts`).
-    fn script(&mut self) -> R<(Vec<StmtId>, bool)> {
+    pub(crate) fn script(&mut self) -> R<(Vec<StmtId>, bool)> {
         if self.src.is_empty() {
             return Ok((Vec::new(), false));
         }
@@ -277,6 +380,30 @@ impl<'a> Parser<'a> {
 
     // ---- tokens --------------------------------------------------------------------------------
 
+    /// The answer of a charge as the parser's: a stop ends the parse.
+    #[inline(never)]
+    fn charged<T>(&mut self, answer: Result<T, Halt>) -> R<T> {
+        match answer {
+            Ok(value) => Ok(value),
+            Err(_) => self.fail(stopped()),
+        }
+    }
+
+    /// Push `item` onto `list`, the growth of the list charged first.
+    #[inline(never)]
+    fn push_item<T>(&mut self, list: &mut Vec<T>, item: T) -> R<()> {
+        let pushed = self.m.push(list, item);
+        self.charged(pushed)
+    }
+
+    /// Make `next` the current token; what the token it replaces still owns is credited (a
+    /// payload the tree keeps was copied with its own charge).
+    #[inline(never)]
+    fn replace_token(&mut self, next: Token) {
+        let old = std::mem::replace(&mut self.tok, next);
+        self.m.release(old.kind);
+    }
+
     #[inline(never)]
     fn advance(&mut self) -> R<()> {
         self.prev_end = self.tok.end;
@@ -287,7 +414,7 @@ impl<'a> Parser<'a> {
                 Err(e) => return self.fail(e),
             },
         };
-        self.tok = next;
+        self.replace_token(next);
         Ok(())
     }
 
@@ -311,7 +438,7 @@ impl<'a> Parser<'a> {
     fn rescan_regexp(&mut self) -> R<()> {
         match self.lexer.rescan_regexp(&self.tok) {
             Ok(t) => {
-                self.tok = t;
+                self.replace_token(t);
                 Ok(())
             }
             Err(e) => self.fail(e),
@@ -323,10 +450,12 @@ impl<'a> Parser<'a> {
     /// wrong goal.
     #[inline(never)]
     fn rescan_template(&mut self) -> R<()> {
-        self.peeked = None;
+        if let Some(peeked) = self.peeked.take() {
+            self.m.release(peeked.kind);
+        }
         match self.lexer.rescan_template(&self.tok) {
             Ok(t) => {
-                self.tok = t;
+                self.replace_token(t);
                 Ok(())
             }
             Err(e) => self.fail(e),
@@ -445,6 +574,8 @@ impl<'a> Parser<'a> {
         expr.children(|c: Child| deepest = deepest.max(self.ast.depth(c)));
         let depth = deepest.saturating_add(1);
         self.check_depth(depth, span)?;
+        let room = self.m.grow(&mut self.ast.exprs);
+        self.charged(room)?;
         let id = ExprId(u32::try_from(self.ast.exprs.len()).unwrap_or(u32::MAX));
         self.ast.exprs.push(ExprNode {
             expr,
@@ -461,6 +592,8 @@ impl<'a> Parser<'a> {
         stmt.children(|c: Child| deepest = deepest.max(self.ast.depth(c)));
         let depth = deepest.saturating_add(1);
         self.check_depth(depth, span)?;
+        let room = self.m.grow(&mut self.ast.stmts);
+        self.charged(room)?;
         let id = StmtId(u32::try_from(self.ast.stmts.len()).unwrap_or(u32::MAX));
         self.ast.stmts.push(StmtNode { stmt, span, depth });
         Ok(id)
@@ -469,14 +602,20 @@ impl<'a> Parser<'a> {
     /// Pushes `stmt` as a node whose parts are filled in while its children are parsed; its
     /// depth and span are set by [`Parser::complete_stmt`]. A frame that stays on the stack while
     /// the children are parsed then holds only the id.
+    ///
+    /// When the growth of the arena is refused, nothing is pushed and the id names no node: the
+    /// meter has stopped, every later charge is refused, and the parse ends at its next token
+    /// (the lexer checks the meter before each), so the recursive callers keep their frames.
     #[inline(never)]
     fn reserve_stmt(&mut self, stmt: Stmt) -> StmtId {
         let id = StmtId(u32::try_from(self.ast.stmts.len()).unwrap_or(u32::MAX));
-        self.ast.stmts.push(StmtNode {
-            stmt,
-            span: Span::default(),
-            depth: 0,
-        });
+        if self.m.grow(&mut self.ast.stmts).is_ok() {
+            self.ast.stmts.push(StmtNode {
+                stmt,
+                span: Span::default(),
+                depth: 0,
+            });
+        }
         id
     }
 
@@ -506,12 +645,14 @@ impl<'a> Parser<'a> {
     #[inline(never)]
     fn reserve_expr(&mut self, expr: Expr) -> ExprId {
         let id = ExprId(u32::try_from(self.ast.exprs.len()).unwrap_or(u32::MAX));
-        self.ast.exprs.push(ExprNode {
-            expr,
-            span: Span::default(),
-            depth: 0,
-            parenthesized: false,
-        });
+        if self.m.grow(&mut self.ast.exprs).is_ok() {
+            self.ast.exprs.push(ExprNode {
+                expr,
+                span: Span::default(),
+                depth: 0,
+                parenthesized: false,
+            });
+        }
         id
     }
 
@@ -541,7 +682,13 @@ impl<'a> Parser<'a> {
     #[inline(never)]
     fn reserve_function(&mut self, function: Function) -> FunctionId {
         let id = FunctionId(u32::try_from(self.ast.functions.len()).unwrap_or(u32::MAX));
-        self.ast.functions.push(function);
+        // As `reserve_stmt`: a refused growth pushes nothing and the parse ends at its next
+        // token.
+        if self.m.grow(&mut self.ast.functions).is_ok() {
+            self.ast.functions.push(function);
+        } else {
+            self.m.release(function);
+        }
         id
     }
 
@@ -553,7 +700,9 @@ impl<'a> Parser<'a> {
     /// `depth`, with no depth check: the statement and the expression are the wrapping of a
     /// dynamic function's tree, not source nesting.
     #[inline(never)]
-    fn wrap_in_statement(&mut self, function: FunctionId, span: Span, depth: u32) -> StmtId {
+    fn wrap_in_statement(&mut self, function: FunctionId, span: Span, depth: u32) -> R<StmtId> {
+        let room = self.m.grow(&mut self.ast.exprs);
+        self.charged(room)?;
         let expr = ExprId(u32::try_from(self.ast.exprs.len()).unwrap_or(u32::MAX));
         self.ast.exprs.push(ExprNode {
             expr: Expr::Function(function),
@@ -561,12 +710,14 @@ impl<'a> Parser<'a> {
             depth: depth.saturating_add(1),
             parenthesized: false,
         });
+        let room = self.m.grow(&mut self.ast.stmts);
+        self.charged(room)?;
         let stmt = StmtId(u32::try_from(self.ast.stmts.len()).unwrap_or(u32::MAX));
         self.ast.stmts.push(StmtNode {
             stmt: Stmt::Expression(expr),
             span,
             depth: depth.saturating_add(2),
         });
-        stmt
+        Ok(stmt)
     }
 }

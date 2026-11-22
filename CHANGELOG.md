@@ -10,11 +10,95 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+The third delivery slice, the core library, is delivered: 7,010 of its 7,011 test262 cases
+pass. Every number below is from the gate on the wave branch of slice 3
+(`docs/plan/slice-03-gate-and-site.md`).
+
+### Added
+
+- The core library of the third delivery slice: the integrity, prototype, enumeration and copy
+  methods of `Object`; `Function.prototype.apply` and the source text of a function;
+  `globalThis`, the URI functions and `Error.isError`; `JSON.parse` with a reviver and raw
+  JSON; the iteration, search, copy, mutation and sort methods of `Array`; the access, search,
+  transform and compare methods of `String`. The records of the waves name each builtin
+  (`docs/plan/slice-03-wave-1.md` to `-3.md`).
+- An object with more than 8 properties finds a property through an index map, and an array
+  keeps its elements dense. The scan of a property list that 0.2.0 named among its limits is
+  gone.
+- The third delivery slice is delivered with 7,010 of its 7,011 cases
+  (`test262-slice 03 7011 13829 0 0 7011 7010 1 0`). The one case that does not pass,
+  `test/built-ins/String/prop-desc.js`, fails in the pinned test262 harness before the
+  engine's answer is judged; `docs/design/engine.md`, section 12, states it. 624 more cases
+  that need a later slice moved there with their evidence
+  (`test262-moves: 1656 case(s) moved`).
+- test262 after these: `test262 total 53801 8982 7 44812 12120 32692 0`, 12,120 of the 44,812
+  cases that run pass (27.0 %; 7,742 in 0.2.0). `test262-refused 46581` of the 85,556 runs
+  meet a refusal of a construct the parser does not have.
+- A documentation site under `website/`. It types no number: `task site-data` writes its data
+  from the gate's committed files, and the gate step `site-data-check` fails when the data
+  differs from them.
+- The host interface: 165 numbered requirements, 84 of them with a test
+  (`host-requirements: 165 requirement(s), 165 line(s): 84 test, 81 pending`; 164 and 80 in
+  0.2.0). `HOST-165`: a String method that needs the tables of a later slice refuses a code
+  unit outside ASCII with a counted refusal.
+- The first parts of the sixth delivery slice: template literals without a tag, and `let`,
+  `const` and block scopes with the temporal dead zone and a fresh record per iteration of a
+  `for (let ...)` loop. A tagged template is refused by name until its story.
+
 ### Changed
 
+- The gate runs its tests under cargo-nextest, ends a test at 60 seconds, builds every test
+  binary before its clock and holds its test steps to 120 seconds
+  (`gate-time test-steps 80.5 of 120`). It no longer makes the full test262 run: it compares a
+  digest of the run's sources with a committed one, and the full run is the lane `slow`
+  (`task slow`), which a release waits for.
+- The compiler is pinned in `rust-toolchain.toml` (1.99.1) for the gate and the forge alike,
+  and `task check-runner` runs the gate with the forge runner's variables.
+- On the forge a change of planning or prose files alone skips the build and the tests, and a
+  change of the documentation site alone runs the site's data check.
+- `Object.getOwnPropertySymbols` is counted with the sixth slice, where `Symbol` is.
+- Eight cases of later slices that passed in 0.2.0 no longer pass. Each passed only on the
+  error of a method that was missing; the method exists now, and the case fails on the part
+  of a later slice it needs: one of slice 5 (`Function/prototype/apply/this-not-callable.js`,
+  a regular expression literal), five of slice 6 (String cases that call a method with a
+  Symbol) and two of slice 18 (`trimLeft/reference-trimStart.js`,
+  `trimRight/reference-trimEnd.js`). `docs/plan/slice-03-wave-2.md` names them.
 - The gate now fails when a public item of the host interface or a `HOST-<n>` requirement
   changed since the last release and the changelog does not name it under Host interface, in
   the name form of `docs/releasing.md`.
+- Storage is charged before it is allocated and work before it is done
+  (`docs/design/engine.md`, "Memory budget" and "The step budget"). What that changed:
+  - The parser's tree, the scope analysis, the compile step's scratch and the code are charged
+    to `memory_bytes` before they grow and credited when they drop, and the code's charge
+    passes to its script record. Every parse reads the interrupt at least once per 4,096 code
+    units or nodes; `eval` and `Function` read it before their copy of the source, and `eval`
+    charges a step per code unit of its source.
+  - The key list of an object is charged, steps and bytes, before the list is built, and
+    credited when its holder drops it. Index keys added out of order are sorted in charged
+    passes; a list whose index keys are in order costs the steps it did.
+  - The key list a `for`-`in` loop holds is charged to `memory_bytes` before it grows and
+    while the loop runs, and credited when the loop ends, by `break`, `return`, a throw or a
+    termination included.
+  - Setting an array's length, compacting a property or binding list, and calling a bound
+    function charge their steps before the work; the totals are as before. The list of keys
+    that a shorter length deletes is charged before it is made, and the arguments of a bound
+    function are not copied before the gathered list fits the budget.
+  - Comparing two Strings, and using a String of more than 32 code units as a property key,
+    charge a step per code unit past 32 before the work; shorter ones cost what they did.
+  - Builtins no longer copy a whole String they do not use and charge a String's steps before
+    they copy it. `JSON.stringify` compares the Strings of a replacer list in place, a step
+    per code unit past 32. `JSON.parse` and `JSON.rawJSON` charge the step per code unit of
+    their text before they copy it: a text parsed to its end costs what it did, and one that
+    fails early has paid for its whole text.
+  - The atom table grows charged first, also when deleted buckets would make it grow.
+  - The compile step charges what a node's expansion holds as it is made: the script `1`
+    needs 2,228 bytes of room for its parse and compile.
+- A pending interrupt ends `parse_script` before the source is copied: it answers
+  `Parsed::Terminated(Interrupted)` and consumes the flag (`HOST-166`, `HOST-167`).
+- The dev and test builds carry no debug information, and the gate step
+  `test-binaries-check` fails when a test executable has a `.debug_` section. The stack
+  requirements are also tested in the release profile and in a profile without debug
+  information, in the lane `slow`.
 
 ### Host interface
 
@@ -49,11 +133,28 @@ Every number below comes from the gate, `task check`, on the released commit.
   `HostIntrinsic::ErrorPrototype`) and `WellKnownSymbol` (new, with
   `WellKnownSymbol::ToStringTag`, `WellKnownSymbol::Unscopables`): the host names these
   intrinsics and symbols from a closed list (`HOST-183`, `HOST-184`).
+- `last_entry_error_site` (new, on `Agent`): after an entry that answered `Parsed::Errors` or
+  `Throw`, where the error arose; after any other entry `None` (`HOST-172`, `HOST-173`,
+  `HOST-174`).
+- `ErrorSite` (new): what that read answers. `ErrorSite::line` and `ErrorSite::column` are the
+  position of the first parse error or of the throwing instruction, counted from 1, a column
+  in UTF-16 code units; `ErrorSite::dynamic` is true when the position is in eval code or in
+  the source text of a `Function` constructor; `ErrorSite::host_defined` is the
+  [[HostDefined]] of the script whose code raised it, `None` for `Function` code and indirect
+  eval.
+- After `Terminated(MemoryBudget)` the agent stays `Alive`, and the next entry runs when the
+  free room, `memory_bytes` less `heap_bytes()`, covers it; it ends in
+  `Terminated(MemoryBudget)` again when it does not, so a host makes room first: it drops
+  roots and calls `collect`, or gives bytes back with `credit_host_bytes`. `HOST-70` said
+  before that the script `1` runs whatever room is left. `HOST-188`: the calls that take no
+  memory answer with a room of 0. `HOST-189`: an entry the room does not cover ends the same
+  way each time. `HOST-190`: with at least 3,072 bytes of room the script `1` answers
+  `Normal(1)` as in a fresh agent.
 - A handle the host keeps without a root is a stated weak reference (`HOST-178`): it reads
   its object while the object lives and answers `StaleHandle` after a collection freed it,
   also after its slot holds a new object. No code changed for it; it is tested now.
-- `HOST-165`, `HOST-166`, `HOST-167`, `HOST-168`, `HOST-169`, `HOST-170`, `HOST-171`, `HOST-172`, `HOST-173`, `HOST-174`, `HOST-175`, `HOST-176`, `HOST-177`, `HOST-178`, `HOST-179`, `HOST-180`, `HOST-181`, `HOST-182`, `HOST-183`, `HOST-184`, `HOST-185`, `HOST-186`, `HOST-187`: new requirements.
-- `HOST-29`, `HOST-52`, `HOST-102`: changed requirements.
+- `HOST-165`, `HOST-166`, `HOST-167`, `HOST-168`, `HOST-169`, `HOST-170`, `HOST-171`, `HOST-172`, `HOST-173`, `HOST-174`, `HOST-175`, `HOST-176`, `HOST-177`, `HOST-178`, `HOST-179`, `HOST-180`, `HOST-181`, `HOST-182`, `HOST-183`, `HOST-184`, `HOST-185`, `HOST-186`, `HOST-187`, `HOST-188`, `HOST-189`, `HOST-190`: new requirements.
+- `HOST-29`, `HOST-52`, `HOST-70`, `HOST-102`: changed requirements.
 
 ## [0.2.0] - 2026-11-21
 

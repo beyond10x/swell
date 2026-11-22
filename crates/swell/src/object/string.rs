@@ -52,6 +52,36 @@ impl<H: Host> Agent<H> {
         Ok(units)
     }
 
+    /// The code units of `string`, a step per code unit charged before they are copied
+    /// (`docs/design/engine.md`, "The step budget").
+    pub(crate) fn charged_units(&mut self, string: StringRef) -> Completion<Vec<u16>> {
+        let length = self.string_length(string)?;
+        self.charge_steps(u64::try_from(length).unwrap_or(u64::MAX))?;
+        self.string_units(string)
+    }
+
+    /// The code units of `string` from `from` to `to`, with no step: for a caller that charges
+    /// them as it appends them. A range that is not inside the String is a broken invariant.
+    pub(crate) fn string_units_in(
+        &mut self,
+        string: StringRef,
+        from: usize,
+        to: usize,
+    ) -> Completion<Vec<u16>> {
+        let units = match self.engine_string(string)? {
+            HeapString::Latin1(bytes) => bytes
+                .get(from..to)
+                .map(|bytes| bytes.iter().map(|&byte| u16::from(byte)).collect()),
+            HeapString::Utf16(units) => units.get(from..to).map(<[u16]>::to_vec),
+        };
+        let Some(units) = units else {
+            return Err(self.fault());
+        };
+        #[cfg(test)]
+        copies::note(units.len());
+        Ok(units)
+    }
+
     /// The length of `string` in code units.
     pub(crate) fn string_length(&mut self, string: StringRef) -> Completion<usize> {
         Ok(match self.engine_string(string)? {
@@ -202,7 +232,8 @@ impl<H: Host> Agent<H> {
     }
 }
 
-/// The counting build: the longest copy [`Agent::string_units`] made on this thread since the
+/// The counting build: the longest copy [`Agent::string_units`] (or [`Agent::charged_units`],
+/// [`Agent::string_units_in`]) made on this thread since the
 /// last reset, a high-water mark in code units. Each test runs in a process of its own under
 /// cargo-nextest and resets it first; nothing else reads it.
 #[cfg(test)]

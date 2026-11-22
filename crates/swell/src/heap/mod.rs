@@ -290,3 +290,25 @@ pub(crate) fn store<T>(
         }
     }
 }
+
+/// [`store`] of a `value` whose `owned_bytes` are charged already (a script record, whose code
+/// and source copy were charged as they grew): only the growth of `arena` is charged here. Over
+/// the budget, or when the arena cannot grow, nothing more is charged, nothing is stored, and the
+/// caller credits `owned_bytes`; stored, the slot owns them and the sweep that frees it credits
+/// them.
+pub(crate) fn store_charged<T>(
+    accounting: &mut Accounting,
+    arena: &mut Arena<T>,
+    value: T,
+    owned_bytes: u64,
+) -> Result<Handle, OverBudget> {
+    let growth = arena.growth_bytes();
+    accounting.charge(growth)?;
+    match arena.allocate(value, owned_bytes) {
+        Ok(handle) => Ok(handle),
+        Err(_) => {
+            accounting.credit(growth);
+            Err(OverBudget)
+        }
+    }
+}

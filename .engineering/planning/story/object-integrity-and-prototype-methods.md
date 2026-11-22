@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:object-integrity-and-prototype-methods
 kind: story
-status: active
+status: implemented
 title: 'Object: preventExtensions, seal, freeze and their tests, setPrototypeOf, is, create, defineProperties, and isPrototypeOf, toLocaleString, valueOf of the prototype'
 summary: Thirteen builtins of Object, complete for every argument, each loop charged per key; 1,109 failing cases of slice 3 name nothing else and pass.
 relations:
@@ -32,10 +32,11 @@ scope:
   path: crates/swell/tests/language/builtin-object-prototype-value-of.js
 - confidence: cited
   path: crates/swell/tests/language/builtin-object-set-prototype-of.js
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:44Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:44Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:09:59Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

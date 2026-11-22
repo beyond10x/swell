@@ -153,6 +153,10 @@ tasks:
       removed (LOG.plain), so a coloured log (CARGO_TERM_COLOR=always, as the runner sets it)
       counts as a plain one; LOG itself is printed as it is. A log with no "Starting" line naming
       at least one binary is not counted: the task says what it could not read and fails.
+      Last, when BUILT_BY names the build task of the step (the timed steps of check pass it),
+      it fails when LOG has a cargo "Compiling" line: the task compile-check, which prints
+      "<STEP>: compiled <n> crate(s) inside the timed step, which the task <BUILT_BY> builds
+      before gate-time-start: <crates> (<LOG>)".
     silent: true
     vars:
       MIN_PASSED: '{{.MIN_PASSED | default "0"}}'
@@ -218,3 +222,35 @@ tasks:
           }
         ' "$junit" | LC_ALL=C sort -k1,1gr -k2,2 -k3,3 | awk -v step='{{.STEP}}' 'NR <= 10 { printf "gate-slowest %s %.2f %s %s\n", step, $1, $2, $3 }'
         [ "$ok" -eq 1 ]
+      - task: compile-check
+        vars: {STEP: '{{.STEP}}', LOG: '{{.LOG}}', BUILT_BY: '{{.BUILT_BY}}'}
+
+  compile-check:
+    desc: Internal. Fail when the log of a timed test step has a cargo "Compiling" line, naming the step, the number of crates and the build task that builds them.
+    summary: |
+      Internal, called by nextest-report and by the timed steps that run cargo without it
+      (test-doc, the cargo run of conform-engine). The gate builds what its test steps run
+      before gate-time-start (task build-tests), so that a step's seconds are its tests' (the
+      organization's rule "Tests stay fast": an expensive product is made once, in a setup
+      step before the tests). Reads LOG with its escape sequences removed and counts the lines
+      cargo writes as "Compiling <crate> v<version>"; when there is one it fails with
+      "<STEP>: compiled <n> crate(s) inside the timed step, which the task <BUILT_BY> builds
+      before gate-time-start: <crate>, <crate>, ... (<LOG>)", the crates in the order of the
+      log. When BUILT_BY is empty it checks nothing: the steps of the lane slow, which no build
+      phase precedes, call nextest-report without it.
+    silent: true
+    cmds:
+      - |
+        built_by='{{.BUILT_BY}}'
+        [ -n "$built_by" ] || exit 0
+        log='{{.LOG}}'
+        [ -f "$log" ] || { echo "{{.STEP}}: no log $log to check for Compiling lines"; exit 1; }
+        esc=$(printf '\033')
+        LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" "$log" | LC_ALL=C awk -v step='{{.STEP}}' -v task="$built_by" -v file="$log" '
+          /^ *Compiling [^ ]+ v[0-9]/ { n++; names = names (n > 1 ? ", " : "") $2 }
+          END {
+            if (!n) exit 0
+            printf "%s: compiled %d crate(s) inside the timed step, which the task %s builds before gate-time-start: %s (%s)\n", step, n, task, names, file
+            exit 1
+          }
+        '

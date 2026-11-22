@@ -858,7 +858,10 @@ does not depend on the growth policy of the standard library. Growth of large bu
 `Vec::try_reserve`, so a refusal by the allocator becomes an outcome
 instead of an abort. Over the budget: `new ArrayBuffer` and the typed array constructors throw a
 `RangeError`, as `CreateByteDataBlock` allows; any other allocation ends the run with
-`Terminated(MemoryBudget)`.
+`Terminated(MemoryBudget)`. The room such a run leaves, `memory_bytes` less `heap_bytes()`, has no
+lower bound, since the run ends at the first growth refused whatever was left below it, so the
+host makes room (roots dropped and a collection, or its own charges given back) before the next
+entry (`host-interface.md`, decision 10, HOST-188 to HOST-190; added on 2026-11-22).
 
 The rule, for every slice: storage is charged before it is allocated, and work before it is
 done. A structure's bytes are charged to the memory budget before the structure exists or

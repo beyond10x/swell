@@ -17,7 +17,9 @@ tasks:
       "test-collect: <b> test binaries: <p> passed, <f> failed, <i> ignored", then ten lines
       "gate-slowest test-collect <seconds> <binary> <test>". It fails when nextest fails (a
       failing test, a build error, or a crates/swell without the feature
-      collect-every-safe-point), when a test fails, and when no test ran.
+      collect-every-safe-point), when a test fails, and when no test ran. Its binaries are
+      built before the clock by build-collect; it fails when its log has a cargo Compiling
+      line, naming build-collect (task compile-check).
     env:
       RUSTFLAGS: -D warnings
     silent: true
@@ -28,4 +30,28 @@ tasks:
         cargo nextest run --locked -p swell --features collect-every-safe-point --profile default > .out/test-collect.log 2>&1 || status=$?
         echo "$status" > .out/test-collect.status
       - task: nextest-report
-        vars: {STEP: test-collect, PREFIX: 'test-collect: ', LOG: .out/test-collect.log, STATUS: .out/test-collect.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}
+        vars: {STEP: test-collect, PREFIX: 'test-collect: ', LOG: .out/test-collect.log, STATUS: .out/test-collect.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1', BUILT_BY: build-collect}
+
+  build-collect:
+    desc: Build, without running them, the test binaries the step test-collect runs, with its flags and features; part of the gate's build phase.
+    summary: |
+      Build, without running them, the test binaries the step test-collect runs: "cargo nextest
+      run --no-run" with the step's arguments ("--locked -p swell --features
+      collect-every-safe-point --profile default") and RUSTFLAGS="-D warnings", into
+      .out/build-collect.log. The library of swell it builds with the feature is the one the
+      step test-doc's collect-every-safe-point doc tests link. A step of build-tests, before
+      gate-time-start, so that test-collect compiles nothing inside its timed step
+      (nextest-report fails it when its log has a Compiling line). It prints "build-collect:
+      <cargo's Finished line>"; when cargo fails (a build error, or a crates/swell without the
+      feature collect-every-safe-point) it prints the log and fails.
+    env:
+      RUSTFLAGS: -D warnings
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        status=0
+        cargo nextest run --no-run --locked -p swell --features collect-every-safe-point --profile default > .out/build-collect.log 2>&1 || status=$?
+        if [ "$status" -ne 0 ]; then cat .out/build-collect.log; echo "build-collect: cargo nextest run --no-run failed, exit $status"; exit 1; fi
+        esc=$(printf '\033')
+        LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" .out/build-collect.log | awk '/^ *Finished / { sub(/^ */, ""); line = $0 } END { print "build-collect: " line }'

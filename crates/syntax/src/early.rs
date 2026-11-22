@@ -64,9 +64,10 @@ use std::collections::BTreeSet;
 use crate::ast::{
     Ast, Child, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind, Name,
     NumberForm, NumberLiteral, PropertyKey, PropertyValue, RegExpLiteral, Span, Stmt, StmtId,
-    StringLiteral, UnaryOp,
+    StringLiteral, SwitchCase, UnaryOp, VarDeclarator,
 };
 use crate::error::SyntaxError;
+use crate::ledger::{HeapBytes, Meter, map_entry_bytes};
 
 /// The message of a `with` statement in strict mode code.
 pub(crate) const WITH_IN_STRICT: &str = "with statement in strict mode code";
@@ -96,9 +97,16 @@ const STRICT_RESERVED: [&str; 9] = [
 ];
 
 /// The early errors of the script `body` of `ast`, strict when `strict`, in source order.
-pub(crate) fn check(ast: &Ast, body: &[StmtId], strict: bool) -> Vec<SyntaxError> {
+///
+/// Every structure of the walk is charged to `m` before it grows and credited when it is
+/// dropped: the frames of lexical names (an entry each, [`crate::ledger::map_entry_bytes`], and
+/// the bytes of each name), the labels, the stack of pending work and the errors (a message is
+/// charged by its capacity once it is formatted). The walk calls [`Meter::visit`] for every
+/// node and ends at the first stop; the entry then answers the stop.
+pub(crate) fn check(ast: &Ast, body: &[StmtId], strict: bool, m: &Meter<'_>) -> Vec<SyntaxError> {
     let mut checker = Checker {
         ast,
+        m,
         errors: Vec::new(),
         strict,
         loops: 0,
@@ -108,28 +116,37 @@ pub(crate) fn check(ast: &Ast, body: &[StmtId], strict: bool) -> Vec<SyntaxError
         lexical: Vec::new(),
         lexical_base: 0,
     };
-    let frame = checker.frame(lexical_of(ast, body), &[], "");
-    checker.lexical.push(frame);
+    let frame = checker.frame(Names::List(body), &[], "");
+    checker.push_frame(frame);
     checker.walk(body);
-    let mut errors = checker.errors;
-    errors.sort_by_key(|e| (e.line, e.column));
-    errors
+    let Checker {
+        errors: mut found,
+        labels,
+        lexical,
+        ..
+    } = checker;
+    m.release(labels);
+    m.release(lexical);
+    // The stable sort may take a buffer as long as the list: charged for the sort.
+    let scratch = found.len().saturating_mul(size_of::<SyntaxError>());
+    if m.charge(scratch).is_ok() {
+        found.sort_by_key(|e| (e.line, e.column));
+        m.credit(scratch);
+    }
+    found
 }
 
-/// The names the `let` and `const` declarations of the statement list `list` bind.
-fn lexical_of(ast: &Ast, list: &[StmtId]) -> Vec<Name> {
-    ast.lexical_names(list)
-        .into_iter()
-        .map(|l| l.name)
-        .collect()
-}
-
-/// Pushes the statements `list` with the frame of lexical names around them, so that popping
-/// gives the frame's entry, the statements in source order and the frame's end.
-fn push_list(stack: &mut Vec<Step>, list: &[StmtId], frame: BTreeSet<String>) {
-    stack.push(Step::PopLexical);
-    stack.extend(list.iter().rev().map(|s| Step::Node(Child::Stmt(*s))));
-    stack.push(Step::Enter(frame));
+/// Where the names of a frame of lexical names come from.
+#[derive(Clone, Copy)]
+enum Names<'a> {
+    /// The `let` and `const` declarations of a statement list.
+    List(&'a [StmtId]),
+    /// Those of the clauses of a `case` block, taken together.
+    Cases(&'a [SwitchCase]),
+    /// The declarators of a `for` head.
+    Declarators(&'a [VarDeclarator]),
+    /// The binding of a for-in head.
+    One(&'a Name),
 }
 
 /// One piece of the walk's pending work.
@@ -151,8 +168,18 @@ enum Step {
     PopLexical,
 }
 
-struct Checker<'a> {
+impl HeapBytes for Step {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            Step::Enter(frame) => frame.heap_bytes(),
+            _ => 0,
+        }
+    }
+}
+
+struct Checker<'a, 'm> {
     ast: &'a Ast,
+    m: &'a Meter<'m>,
     errors: Vec<SyntaxError>,
     strict: bool,
     /// Loops around the current position inside the current function.
@@ -169,26 +196,100 @@ struct Checker<'a> {
     lexical_base: usize,
 }
 
-impl<'a> Checker<'a> {
+impl<'a, 'm> Checker<'a, 'm> {
     /// A frame of the lexical names `names`, in source order: a name twice is an error, and so
     /// is one of `others` (the parameters or the catch parameter, named by `what`).
-    fn frame(&mut self, names: Vec<Name>, others: &[Name], what: &str) -> BTreeSet<String> {
+    fn frame(&mut self, names: Names<'a>, others: &[Name], what: &str) -> BTreeSet<String> {
         let mut frame = BTreeSet::new();
-        for n in names {
-            if others.iter().any(|o| o.name == n.name) {
-                self.error(
-                    format!("lexical declaration of {} conflicts with {what}", n.name),
-                    n.span,
-                );
+        match names {
+            Names::List(list) => {
+                for &s in list {
+                    self.frame_statement(&mut frame, s, others, what);
+                }
             }
-            if !frame.insert(n.name.clone()) {
-                self.error(
-                    format!("duplicate lexical declaration of {}", n.name),
-                    n.span,
-                );
+            Names::Cases(cases) => {
+                for c in cases {
+                    for &s in &c.body {
+                        self.frame_statement(&mut frame, s, others, what);
+                    }
+                }
             }
+            Names::Declarators(declarators) => {
+                for d in declarators {
+                    self.frame_name(&mut frame, &d.name, others, what);
+                }
+            }
+            Names::One(name) => self.frame_name(&mut frame, name, others, what),
         }
         frame
+    }
+
+    /// The names the statement `s` binds when it is a `let` or `const` declaration, into
+    /// `frame`.
+    fn frame_statement(
+        &mut self,
+        frame: &mut BTreeSet<String>,
+        s: StmtId,
+        others: &[Name],
+        what: &str,
+    ) {
+        let ast = self.ast;
+        let Some(Stmt::Var(kind, declarators)) = ast.stmt(s).map(|n| &n.stmt) else {
+            return;
+        };
+        if !kind.is_lexical() {
+            return;
+        }
+        for d in declarators {
+            self.frame_name(frame, &d.name, others, what);
+        }
+    }
+
+    /// The lexical name `n` into `frame`: its entry and a copy of the name charged first.
+    fn frame_name(&mut self, frame: &mut BTreeSet<String>, n: &Name, others: &[Name], what: &str) {
+        if others.iter().any(|o| o.name == n.name) {
+            self.error(
+                format!("lexical declaration of {} conflicts with {what}", n.name),
+                n.span,
+            );
+        }
+        if frame.contains(&n.name) {
+            self.error(
+                format!("duplicate lexical declaration of {}", n.name),
+                n.span,
+            );
+            return;
+        }
+        if let Ok(key) = self.m.string(&n.name) {
+            // A refusal stops the meter; the walk ends at its next node.
+            let _ = self.m.insert(frame, key);
+        }
+    }
+
+    /// `frame` as the innermost frame of lexical names, the growth of the list charged first.
+    fn push_frame(&mut self, frame: BTreeSet<String>) {
+        let _ = self.m.push(&mut self.lexical, frame);
+    }
+
+    /// `step` onto `stack`, the growth charged first.
+    fn push_step(&self, stack: &mut Vec<Step>, step: Step) {
+        if self.m.grow(stack).is_err() {
+            self.m.release(step);
+            return;
+        }
+        stack.push(step);
+    }
+
+    /// Pushes the statements `list` with the frame of lexical names around them, so that
+    /// popping gives the frame's entry, the statements in source order and the frame's end.
+    fn push_list(&self, stack: &mut Vec<Step>, list: &[StmtId], frame: BTreeSet<String>) {
+        if self.m.grow_by(stack, list.len().saturating_add(2)).is_err() {
+            self.m.release(frame);
+            return;
+        }
+        stack.push(Step::PopLexical);
+        stack.extend(list.iter().rev().map(|s| Step::Node(Child::Stmt(*s))));
+        stack.push(Step::Enter(frame));
     }
 
     /// A name a `var` or a top-level function declaration binds: no lexical declaration of the
@@ -232,50 +333,57 @@ impl<'a> Checker<'a> {
             return false;
         };
         let names = match &node.stmt {
-            Stmt::Block(body) => lexical_of(ast, body),
-            Stmt::Switch { cases, .. } => cases
-                .iter()
-                .flat_map(|c| lexical_of(ast, &c.body))
-                .collect(),
+            Stmt::Block(body) => Names::List(body),
+            Stmt::Switch { cases, .. } => Names::Cases(cases),
             Stmt::For {
                 init: Some(ForInit::Var(kind, declarators)),
                 ..
-            } if kind.is_lexical() => declarators.iter().map(|d| d.name.clone()).collect(),
+            } if kind.is_lexical() => Names::Declarators(declarators),
             Stmt::ForIn {
                 target: ForInTarget::Var(kind, name),
                 ..
-            } if kind.is_lexical() => vec![name.clone()],
+            } if kind.is_lexical() => Names::One(name),
             Stmt::Try {
                 block,
                 handler,
                 finalizer,
             } => {
-                let block_frame = self.frame(lexical_of(ast, block), &[], "");
+                let block_frame = self.frame(Names::List(block), &[], "");
                 if let Some(list) = finalizer {
-                    let frame = self.frame(lexical_of(ast, list), &[], "");
-                    push_list(stack, list, frame);
+                    let frame = self.frame(Names::List(list), &[], "");
+                    self.push_list(stack, list, frame);
                 }
                 if let Some(h) = handler {
                     let param: &[Name] = h.param.as_slice();
-                    let frame = self.frame(lexical_of(ast, &h.body), param, "the catch parameter");
-                    push_list(stack, &h.body, frame);
+                    let frame = self.frame(Names::List(&h.body), param, "the catch parameter");
+                    self.push_list(stack, &h.body, frame);
                 }
-                stack.push(Step::PopLexical);
-                stack.extend(block.iter().rev().map(|s| Step::Node(Child::Stmt(*s))));
-                self.lexical.push(block_frame);
+                if self.m.grow_by(stack, block.len().saturating_add(1)).is_ok() {
+                    stack.push(Step::PopLexical);
+                    stack.extend(block.iter().rev().map(|s| Step::Node(Child::Stmt(*s))));
+                }
+                self.push_frame(block_frame);
                 return true;
             }
             _ => return false,
         };
         let frame = self.frame(names, &[], "");
-        stack.push(Step::PopLexical);
-        self.lexical.push(frame);
+        self.push_step(stack, Step::PopLexical);
+        self.push_frame(frame);
         false
     }
 
+    /// An error at `span`: the growth of the list charged first, and the message by its
+    /// capacity once it is formatted.
     fn error(&mut self, message: impl Into<String>, span: Span) {
-        self.errors
-            .push(SyntaxError::new(message, span.line, span.column));
+        let message = message.into();
+        if self.m.charge(message.capacity()).is_err() {
+            return;
+        }
+        let _ = self.m.push(
+            &mut self.errors,
+            SyntaxError::new(message, span.line, span.column),
+        );
     }
 
     /// A `BindingIdentifier` in code of the current strictness.
@@ -357,11 +465,14 @@ impl<'a> Checker<'a> {
             if !b"dgimsuvy".iter().any(|&c| u16::from(c) == f) || seen.contains(&f) {
                 valid = false;
             }
-            seen.push(f);
+            if self.m.push(&mut seen, f).is_err() {
+                break;
+            }
         }
         if seen.contains(&u16::from(b'u')) && seen.contains(&u16::from(b'v')) {
             valid = false;
         }
+        self.m.release(seen);
         if !valid {
             self.error("invalid regular expression flags", span);
         }
@@ -386,11 +497,11 @@ impl<'a> Checker<'a> {
     /// Walks the statements `body` and everything in them, each node before its children and the
     /// children in source order, so the errors come in source order.
     fn walk(&mut self, body: &[StmtId]) {
-        let mut stack: Vec<Step> = body
-            .iter()
-            .rev()
-            .map(|s| Step::Node(Child::Stmt(*s)))
-            .collect();
+        let m = self.m;
+        let Ok(mut stack) = m.with_capacity::<Step>(body.len()) else {
+            return;
+        };
+        stack.extend(body.iter().rev().map(|s| Step::Node(Child::Stmt(*s))));
         while let Some(step) = stack.pop() {
             let node = match step {
                 Step::Node(node) => node,
@@ -406,18 +517,25 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 Step::PopLabel => {
-                    self.labels.pop();
+                    if let Some(label) = self.labels.pop() {
+                        m.release(label);
+                    }
                     continue;
                 }
                 Step::Enter(frame) => {
-                    self.lexical.push(frame);
+                    self.push_frame(frame);
                     continue;
                 }
                 Step::PopLexical => {
-                    self.lexical.pop();
+                    if let Some(frame) = self.lexical.pop() {
+                        m.release(frame);
+                    }
                     continue;
                 }
             };
+            if m.visit().is_err() {
+                break;
+            }
             let restore = Step::Restore {
                 strict: self.strict,
                 loops: self.loops,
@@ -429,12 +547,12 @@ impl<'a> Checker<'a> {
                 Child::Stmt(id) => {
                     let (loops, breakables) = self.check_stmt(id);
                     if loops + breakables > 0 {
-                        stack.push(restore);
+                        self.push_step(&mut stack, restore);
                         self.loops += loops;
                         self.breakables += breakables;
                     }
                     if self.label(id) {
-                        stack.push(Step::PopLabel);
+                        self.push_step(&mut stack, Step::PopLabel);
                     }
                     if self.lexical_scope(id, &mut stack) {
                         continue;
@@ -444,23 +562,31 @@ impl<'a> Checker<'a> {
                 // A function is walked with its own strictness, outside every loop, `switch` and
                 // label, with the lexical names of its body as its only frame.
                 Child::Function(id) => {
-                    let Some(f) = self.ast.function(id) else {
+                    let ast = self.ast;
+                    let Some(f) = ast.function(id) else {
                         continue;
                     };
-                    stack.push(restore);
+                    self.push_step(&mut stack, restore);
                     self.strict = f.strict;
                     self.loops = 0;
                     self.breakables = 0;
                     self.label_base = self.labels.len();
                     self.check_function(id);
                     self.lexical_base = self.lexical.len();
-                    let frame = self.frame(lexical_of(self.ast, &f.body), &f.params, "a parameter");
-                    stack.push(Step::PopLexical);
-                    self.lexical.push(frame);
+                    let frame = self.frame(Names::List(&f.body), &f.params, "a parameter");
+                    self.push_step(&mut stack, Step::PopLexical);
+                    self.push_frame(frame);
                 }
             }
-            self.ast.push_children(node, &mut stack, Step::Node);
+            if self
+                .ast
+                .push_children_charged(node, &mut stack, Step::Node, m)
+                .is_err()
+            {
+                break;
+            }
         }
+        m.release(stack);
     }
 
     /// The early errors of the statement `id` itself; returns how many loops and how many
@@ -572,7 +698,11 @@ impl<'a> Checker<'a> {
             self.ast.stmt(item).map(|n| &n.stmt),
             Some(Stmt::DoWhile { .. } | Stmt::While { .. } | Stmt::For { .. } | Stmt::ForIn { .. })
         );
-        self.labels.push((label.name.clone(), is_loop));
+        // A refusal stops the meter and the walk ends at its next node; the label is pushed or
+        // nothing is, and true still names the step that pops it.
+        if let Ok(name) = self.m.string(&label.name) {
+            let _ = self.m.push(&mut self.labels, (name, is_loop));
+        }
         true
     }
 
@@ -633,10 +763,16 @@ impl<'a> Checker<'a> {
         if let Some(name) = &f.name {
             self.binding(name);
         }
+        // The names seen, each entry charged when it is inserted and all credited at the end.
+        let entry = map_entry_bytes::<&str, ()>();
         let mut seen = BTreeSet::new();
         for p in &f.params {
             self.binding(p);
-            if seen.insert(p.name.as_str()) {
+            if !seen.contains(p.name.as_str()) {
+                if self.m.charge(entry).is_err() {
+                    break;
+                }
+                seen.insert(p.name.as_str());
                 continue;
             }
             if f.kind == FunctionKind::Method {
@@ -651,5 +787,6 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+        self.m.credit(seen.len().saturating_mul(entry));
     }
 }
