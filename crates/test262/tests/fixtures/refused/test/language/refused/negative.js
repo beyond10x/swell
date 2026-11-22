@@ -10,4 +10,4 @@ negative:
 
 $DONOTEVALUATE();
 
-var f = a => a;
+var f = 1; <!-- an HTML-like comment

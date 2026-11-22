@@ -758,7 +758,10 @@ impl<'a, 'm> Resolver<'a, 'm> {
             Some(Expr::Function(f)) => self
                 .ast
                 .function(*f)
-                .filter(|x| x.name.is_none() && x.kind == FunctionKind::Expression)
+                .filter(|x| {
+                    x.name.is_none()
+                        && matches!(x.kind, FunctionKind::Expression | FunctionKind::Arrow)
+                })
                 .map(|_| *f),
             _ => None,
         }

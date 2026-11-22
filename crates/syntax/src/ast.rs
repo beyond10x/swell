@@ -420,6 +420,15 @@ pub enum FunctionKind {
     /// A plain method of an object literal (`#sec-method-definitions`): no own name binding,
     /// no [[Construct]].
     Method,
+    /// An `ArrowFunction` (`#sec-arrow-function-definitions`): no name, no [[Construct]], no
+    /// `this` and no `arguments` of its own ([[ThisMode]] lexical). Its parameters are the
+    /// `ArrowParameters`, a `BindingIdentifier` or the `CoverParenthesizedExpressionAndArrowParameterList`
+    /// read again as `ArrowFormalParameters`. A `ConciseBody` that is an `ExpressionBody` is
+    /// held as a body of one `return` statement of that expression, whose span is the
+    /// expression's: the value of the call is the expression's value
+    /// (`#sec-arrow-function-definitions-runtime-semantics-evaluatebody`). Its span runs from
+    /// the first token of its parameters to the end of its body.
+    Arrow,
 }
 
 /// What scope analysis found for a function body or the script (`src/scope.rs`).
@@ -444,8 +453,11 @@ pub struct Scope {
     /// Whether a function needs an arguments object (`#sec-functiondeclarationinstantiation`,
     /// steps 15 to 18; made only where its code can observe it, `docs/design/engine.md`,
     /// decision 3): its own code references `arguments` or holds a direct `eval` call (decision
-    /// 3, "Names", item 4), and neither a parameter nor a function it declares is named
-    /// `arguments`. Always false for the script.
+    /// 3, "Names", item 4), or an arrow function in it does, at any depth of arrows, where no
+    /// arrow between binds the name `arguments` itself ("`this` and `arguments` in an arrow
+    /// function", item 2); and neither a parameter nor a function it declares is named
+    /// `arguments`. Always false for the script and for an arrow function, which never has
+    /// one (step 16).
     pub arguments_object: bool,
     /// Whether the body's own code (not a nested function's) holds a `with` statement, whose
     /// body's references are looked up by name (decision 3, "Names").
@@ -456,7 +468,8 @@ pub struct Scope {
     pub contains_direct_eval: bool,
 }
 
-/// A `FunctionDeclaration`, `FunctionExpression`, or an accessor or method of an object literal.
+/// A `FunctionDeclaration`, `FunctionExpression`, an accessor or method of an object literal, or
+/// an `ArrowFunction`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Function {
     pub kind: FunctionKind,

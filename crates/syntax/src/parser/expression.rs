@@ -5,9 +5,14 @@
 //! (`#sec-optional-chains`), the logical assignments (`#sec-assignment-operators`), a trailing
 //! comma in `Arguments` (`#sec-left-hand-side-expressions`), and plain methods and shorthand
 //! properties in object literals (`#sec-object-initializer`, `#sec-method-definitions`). Slice 6
-//! adds template literals without a tag (`#sec-template-literals`).
+//! adds template literals without a tag (`#sec-template-literals`) and arrow functions
+//! (`#sec-arrow-function-definitions`): an `AssignmentExpression` whose operand is followed by
+//! `=>` is an `ArrowFunction` when that operand is a `BindingIdentifier` or a
+//! `CoverParenthesizedExpressionAndArrowParameterList` that reads again as
+//! `ArrowFormalParameters` (`parser/function.rs`); a parenthesized expression takes `()` and a
+//! trailing comma only before `=>`.
 //!
-//! Refused, each with its slice: `**` and `**=` (4), arrow functions, spread elements,
+//! Refused, each with its slice: `**` and `**=` (4), spread elements,
 //! destructuring assignment, computed property names, a `CoverInitializedName` and a tagged
 //! template (6), generator methods (7), `class`, `super`, `new.target` (8), `async` functions and
 //! `await` (10), `import.meta` and dynamic `import` (11).
@@ -52,6 +57,8 @@ enum AssignTail {
     None,
     Conditional,
     Assign(AssignOp),
+    /// `=>`: the operand is the parameters of an arrow function.
+    Arrow,
 }
 
 /// What follows a member or call expression.
@@ -180,18 +187,19 @@ impl<'a, 'm> Parser<'a, 'm> {
             AssignTail::None => left,
             AssignTail::Conditional => self.conditional_rest(left, start, no_in)?,
             AssignTail::Assign(op) => self.assign_rest(op, left, start, no_in)?,
+            AssignTail::Arrow => self.arrow_function(left, start, no_in)?,
         };
         self.leave();
         Ok(e)
     }
 
-    /// What follows the operand `left` of an assignment expression; refuses `=>`, `**=` and a
+    /// What follows the operand `left` of an assignment expression; refuses `**=` and a
     /// destructuring assignment.
     fn assign_tail(&mut self, left: ExprId) -> R<AssignTail> {
         let op = match &self.tok.kind {
             TokenKind::Punct(p) => match p {
                 Punct::Question => return Ok(AssignTail::Conditional),
-                Punct::Arrow => return self.refuse("arrow function", 6),
+                Punct::Arrow => return Ok(AssignTail::Arrow),
                 Punct::Eq => AssignOp::Assign,
                 Punct::PlusEq => AssignOp::Compound(BinaryOp::Add),
                 Punct::MinusEq => AssignOp::Compound(BinaryOp::Sub),
@@ -924,31 +932,98 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(e)
     }
 
-    /// `( Expression )` (`#sec-grouping-operator`). The arrow parameter lists it covers are
-    /// refused.
+    /// `CoverParenthesizedExpressionAndArrowParameterList` (`#sec-grouping-operator`,
+    /// `#sec-arrow-function-definitions`): `( Expression )`, and before `=>` also `()` and a
+    /// trailing comma. The expression is marked parenthesized; an arrow function reads it again
+    /// as its parameters ([`Parser::arrow_function`]). A rest element is refused with the rest
+    /// parameter of slice 6.
     fn parenthesized(&mut self) -> R<ExprId> {
         self.enter()?;
-        self.paren_open()?;
-        let e = self.expression(false)?;
+        let e = match self.paren_open()? {
+            Some(empty) => empty,
+            None => self.paren_list()?,
+        };
         self.expect(Punct::RParen)?;
-        if let Some(node) = self.ast.exprs.get_mut(e.0 as usize) {
-            node.parenthesized = true;
+        self.paren_close(e)?;
+        self.leave();
+        Ok(e)
+    }
+
+    /// The `(` of a parenthesized expression. `()` stands only before `=>`: it answers an empty
+    /// comma expression, the empty parameter list the arrow function reads; `(...` is a rest
+    /// parameter, refused.
+    #[inline(never)]
+    fn paren_open(&mut self) -> R<Option<ExprId>> {
+        let start = self.start();
+        self.advance()?;
+        if self.is(Punct::RParen) {
+            if self.peek()?.kind == TokenKind::Punct(Punct::Arrow) {
+                let empty = self.push_expr(Expr::Sequence(Vec::new()), start)?;
+                return Ok(Some(empty));
+            }
+            return self.unexpected();
+        }
+        if self.is(Punct::Ellipsis) {
+            return self.refuse("rest parameter", 6);
+        }
+        Ok(None)
+    }
+
+    /// The `Expression` inside the parentheses, with a trailing comma allowed before `) =>`.
+    fn paren_list(&mut self) -> R<ExprId> {
+        self.enter()?;
+        let start = self.start();
+        let mut e = self.assignment(false)?;
+        if self.is(Punct::Comma) {
+            e = self.paren_sequence(e, start)?;
         }
         self.leave();
         Ok(e)
     }
 
-    /// The `(` of a parenthesized expression; refuses `()` and `(...` before `=>`.
-    fn paren_open(&mut self) -> R<()> {
-        self.advance()?;
+    /// The comma expression inside parentheses whose first operand is `first`.
+    fn paren_sequence(&mut self, first: ExprId, start: Span) -> R<ExprId> {
+        self.enter()?;
+        let id = self.reserve_sequence(first)?;
+        while self.paren_comma()? {
+            let e = self.assignment(false)?;
+            self.append_expr(id, Some(e))?;
+        }
+        let id = self.complete_expr(id, start)?;
+        self.leave();
+        Ok(id)
+    }
+
+    /// Whether another operand follows inside parentheses: consumes its `,`. A `,` before the
+    /// `)` is a trailing comma, which only `ArrowFormalParameters` take, so `=>` must follow the
+    /// `)`. A `...` after the `,` is an unexpected token until `story:default-and-rest-parameters`
+    /// reads rest parameters: a refusal there would fail the negative cases of test262 that pass
+    /// on that error now.
+    #[inline(never)]
+    fn paren_comma(&mut self) -> R<bool> {
+        if !self.eat(Punct::Comma)? {
+            return Ok(false);
+        }
         if self.is(Punct::RParen) {
             if self.peek()?.kind == TokenKind::Punct(Punct::Arrow) {
-                return self.refuse("arrow function", 6);
+                return Ok(false);
             }
             return self.unexpected();
         }
-        if self.is(Punct::Ellipsis) {
-            return self.refuse("arrow function", 6);
+        Ok(true)
+    }
+
+    /// Marks `e` parenthesized after its `)`. An expression in two pairs of parentheses is no
+    /// `ArrowFormalParameters`: before `=>` it is an error here, so that an arrow function finds
+    /// a parenthesized operand in exactly one pair.
+    #[inline(never)]
+    fn paren_close(&mut self, e: ExprId) -> R<()> {
+        let twice = self.expr_node(e).is_some_and(|n| n.parenthesized);
+        if twice && self.is(Punct::Arrow) {
+            return self.unexpected();
+        }
+        if let Some(node) = self.ast.exprs.get_mut(e.0 as usize) {
+            node.parenthesized = true;
         }
         Ok(())
     }

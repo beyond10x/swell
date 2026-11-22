@@ -23,6 +23,12 @@
 //!   the list itself. A function declaration in a block is refused before a later story of slice
 //!   6, and one at the top level of a body is var scoped (TopLevelLexicallyScopedDeclarations).
 //!
+//! An arrow function is a function scope with no `arguments` of its own: its references to
+//! `arguments`, where it binds no such name itself, and its direct `eval` calls count for the
+//! nearest enclosing function that is not an arrow, which then gets its arguments object
+//! ([`Scope::arguments_object`]; `docs/design/engine.md`, decision 3, "`this` and `arguments` in
+//! an arrow function", item 2).
+//!
 //! A method is a function scope like any other; a `catch` without a parameter binds nothing, and
 //! a label is no binding: neither changes what a body declares.
 //!
@@ -34,8 +40,8 @@ use std::collections::BTreeSet;
 use crate::ledger::{HeapBytes, Meter, Stop, map_entry_bytes};
 
 use crate::ast::{
-    Ast, Child, DeclKind, Expr, ForInTarget, ForInit, FunctionId, LexicalName, Name, Scope, Stmt,
-    StmtId,
+    Ast, Child, DeclKind, Expr, ForInTarget, ForInit, FunctionId, FunctionKind, LexicalName, Name,
+    Scope, Stmt, StmtId,
 };
 
 impl Ast {
@@ -111,6 +117,10 @@ struct Collect {
     reference_seen: BTreeSet<String>,
     contains_with: bool,
     contains_direct_eval: bool,
+    /// Whether an arrow function in the body, at any depth of arrows, references `arguments`
+    /// with no arrow between binding it, or holds a direct `eval` call: the `arguments` of this
+    /// body is then that arrow's too ("`this` and `arguments` in an arrow function", item 2).
+    inner_arguments: bool,
 }
 
 impl HeapBytes for Collect {
@@ -157,22 +167,44 @@ impl Collect {
         add_name(m, &mut self.reference_seen, &mut self.references, name);
     }
 
+    /// Whether the body of the arrow function with parameters `params` uses the `arguments` of
+    /// the code around it: its own code, or an arrow in it, references the name and the arrow
+    /// binds no `arguments` of its own (a parameter, a `var`, a function or a lexical
+    /// declaration), or its own code holds a direct `eval` call, whose eval code may reference
+    /// it (decision 3, "Names", item 4).
+    fn arguments_of_outer_function(&self, params: &[Name]) -> bool {
+        let binds = params.iter().any(|p| p.name == "arguments")
+            || self.var_seen.contains("arguments")
+            || self
+                .declarations
+                .iter()
+                .any(|(name, _)| name == "arguments")
+            || self.lexical.iter().any(|l| l.name.name == "arguments");
+        ((self.reference_seen.contains("arguments") || self.inner_arguments) && !binds)
+            || self.contains_direct_eval
+    }
+
     /// The scope of the body whose walk ends; `params` are the parameters of a function, `None`
-    /// for the script. The scratch is credited.
-    fn finish(self, params: Option<&[Name]>, m: &Meter<'_>) -> Scope {
+    /// for the script; `arrow` whether the function is an arrow function, which has no
+    /// arguments object (`#sec-functiondeclarationinstantiation`, step 16). The scratch is
+    /// credited.
+    fn finish(self, params: Option<&[Name]>, arrow: bool, m: &Meter<'_>) -> Scope {
         // `#sec-functiondeclarationinstantiation`, steps 15 to 18: no arguments object when a
         // parameter, a function declaration or a lexical declaration of the body is named
         // `arguments`; a `var` of that name keeps it. A direct `eval` may reference it in code
-        // no analysis sees (decision 3, "Names", item 4).
-        let arguments_object = params.is_some_and(|params| {
-            (self.reference_seen.contains("arguments") || self.contains_direct_eval)
-                && !params.iter().any(|p| p.name == "arguments")
-                && !self
-                    .declarations
-                    .iter()
-                    .any(|(name, _)| name == "arguments")
-                && !self.lexical.iter().any(|l| l.name.name == "arguments")
-        });
+        // no analysis sees (decision 3, "Names", item 4), and an arrow in the body may use it.
+        let arguments_object = !arrow
+            && params.is_some_and(|params| {
+                (self.reference_seen.contains("arguments")
+                    || self.contains_direct_eval
+                    || self.inner_arguments)
+                    && !params.iter().any(|p| p.name == "arguments")
+                    && !self
+                        .declarations
+                        .iter()
+                        .any(|(name, _)| name == "arguments")
+                    && !self.lexical.iter().any(|l| l.name.name == "arguments")
+            });
         // The last declaration of each name, in source order; each entry of the names taken is
         // charged when it is inserted and all are credited after.
         let entry = map_entry_bytes::<&str, ()>();
@@ -283,7 +315,7 @@ fn walk(ast: &Ast, body: &[StmtId], m: &Meter<'_>) -> (Scope, Vec<(FunctionId, S
     }
     m.release(stack);
     m.release(open);
-    (script.finish(None, m), scopes)
+    (script.finish(None, false, m), scopes)
 }
 
 /// One step of [`walk`].
@@ -310,8 +342,15 @@ fn walk_step(
         }
         Step::End(id) => {
             if let Some(done) = open.pop() {
-                let params = ast.function(id).map(|f| f.params.as_slice()).unwrap_or(&[]);
-                let scope = done.finish(Some(params), m);
+                let f = ast.function(id);
+                let params = f.map(|f| f.params.as_slice()).unwrap_or(&[]);
+                let arrow = f.is_some_and(|f| f.kind == FunctionKind::Arrow);
+                // An arrow has no `arguments` of its own: what its code uses of it counts for
+                // the body around it, up to the nearest function that is not an arrow.
+                if arrow && done.arguments_of_outer_function(params) {
+                    open.last_mut().unwrap_or(script).inner_arguments = true;
+                }
+                let scope = done.finish(Some(params), arrow, m);
                 m.push(scopes, (id, scope))?;
             }
         }

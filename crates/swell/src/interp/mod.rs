@@ -30,6 +30,7 @@
 //! Root site of the collector: [`trace_roots`] (the frame stack: operand stacks, locals,
 //! environments, function and realm of each frame).
 
+mod arrow;
 pub(crate) mod budget;
 pub(crate) mod dispatch;
 pub(crate) mod frame;

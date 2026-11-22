@@ -1,0 +1,17 @@
+script locals 0
+  var "f"
+  0000 2:5 ResolveGlobal "f"
+  0001 2:9 ArrowClosure 0
+  0002 2:5 PutGlobalRef "f"
+  0003 2:5 Pop
+  0004 0:0 LoadCompletion
+  0005 0:0 Return
+
+function 0 arrow "f" length 2 locals 2
+  params local 0, local 1
+  0000 2:19 GetLocal 0
+  0001 2:23 GetLocal 1
+  0002 2:19 Add
+  0003 2:19 Return
+  0004 2:9 Undefined
+  0005 2:9 Return

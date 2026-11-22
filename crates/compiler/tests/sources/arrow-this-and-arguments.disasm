@@ -1,0 +1,25 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 1 strict
+  params local 0
+  captured "arguments"
+  arguments unmapped env 0
+  0000 2:17 String "use strict"
+  0001 2:17 Pop
+  0002 2:38 ArrowClosure 1
+  0003 2:31 Return
+  0004 2:1 Undefined
+  0005 2:1 Return
+
+function 1 arrow "" length 0 locals 0 strict
+  0000 2:44 This
+  0001 2:53 GetEnv 0 0
+  0002 2:63 Number 0
+  0003 2:53 GetIndex
+  0004 2:44 StrictEq
+  0005 2:44 Return
+  0006 2:38 Undefined
+  0007 2:38 Return

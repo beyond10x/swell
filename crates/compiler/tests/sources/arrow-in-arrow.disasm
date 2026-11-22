@@ -1,0 +1,26 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 0
+  params env 0
+  captured "a"
+  0000 2:24 ArrowClosure 1
+  0001 2:17 Return
+  0002 2:1 Undefined
+  0003 2:1 Return
+
+function 1 arrow "" length 0 locals 0
+  0000 2:30 ArrowClosure 2
+  0001 2:30 Return
+  0002 2:24 Undefined
+  0003 2:24 Return
+
+function 2 arrow "" length 0 locals 0
+  0000 2:36 GetEnv 0 0
+  0001 2:40 This
+  0002 2:36 Add
+  0003 2:36 Return
+  0004 2:30 Undefined
+  0005 2:30 Return

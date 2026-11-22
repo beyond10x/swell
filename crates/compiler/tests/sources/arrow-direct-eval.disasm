@@ -1,0 +1,20 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 0 locals 0
+  captured "arguments"
+  arguments mapped env 0
+  0000 2:23 ArrowClosure 1
+  0001 2:16 Return
+  0002 2:1 Undefined
+  0003 2:1 Return
+
+function 1 arrow "" length 0 locals 0 eval-environment
+  0000 2:29 GetNameForCall "eval"
+  0001 2:34 String "var x = arguments"
+  0002 2:29 CallEval 1
+  0003 2:29 Return
+  0004 2:23 Undefined
+  0005 2:23 Return

@@ -1,15 +1,19 @@
-//! Function definitions (15.2, `#sec-function-definitions`) and the accessors and plain methods
-//! of object literals (`#sec-method-definitions`).
+//! Function definitions (15.2, `#sec-function-definitions`), arrow functions (15.3,
+//! `#sec-arrow-function-definitions`) and the accessors and plain methods of object literals
+//! (`#sec-method-definitions`).
 //!
 //! The parameters are a list of `BindingIdentifier`s, with a trailing comma allowed
 //! (`#sec-parameter-lists`); a default value, a rest parameter and a binding pattern are refused
-//! (slice 6), as are generators (7). A
+//! (slice 6), as are generators (7) and `async` arrows (10). A
 //! function's code is strict mode code when the code around it is or when its body starts with
 //! a Use Strict Directive (`#sec-strict-mode-code`); the parser tracks that while it reads the
 //! body, and the early errors that depend on it are checked afterwards (`src/early.rs`).
 
 use super::{Parser, R};
-use crate::ast::{Child, Function, FunctionId, FunctionKind, Name, Scope, Span, StmtId};
+use crate::ast::{
+    AssignOp, Child, Expr, ExprId, Function, FunctionId, FunctionKind, Name, Scope, Span, Stmt,
+    StmtId,
+};
 use crate::token::{Keyword, Punct};
 
 impl<'a, 'm> Parser<'a, 'm> {
@@ -101,6 +105,19 @@ impl<'a, 'm> Parser<'a, 'm> {
     ) -> R<()> {
         self.expect(Punct::RBrace)?;
         self.functions -= 1;
+        self.function_end(id, outer, body, use_strict)
+    }
+
+    /// Records the body of function `id`, which ends at the previous token, with its
+    /// strictness, span and depth; the code after it has the strictness `outer` again.
+    #[inline(never)]
+    fn function_end(
+        &mut self,
+        id: FunctionId,
+        outer: bool,
+        body: Vec<StmtId>,
+        use_strict: bool,
+    ) -> R<()> {
         self.strict = outer;
         let mut deepest = 0;
         for s in &body {
@@ -119,14 +136,19 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(())
     }
 
-    /// `( FormalParameters )`; for a getter `()`, for a setter one `BindingIdentifier`.
+    /// `( FormalParameters )`; for a getter `()`, for a setter one `BindingIdentifier`. An arrow
+    /// function's `ArrowFormalParameters` have the same grammar, but its parser reads them as
+    /// the parenthesized expression they cover ([`Parser::arrow_function`]).
     fn parameters(&mut self, kind: FunctionKind) -> R<Vec<Name>> {
         self.expect(Punct::LParen)?;
         let mut params = Vec::new();
         match kind {
             FunctionKind::Getter => {}
             FunctionKind::Setter => self.push_parameter(&mut params)?,
-            FunctionKind::Declaration | FunctionKind::Expression | FunctionKind::Method => {
+            FunctionKind::Declaration
+            | FunctionKind::Expression
+            | FunctionKind::Method
+            | FunctionKind::Arrow => {
                 while !self.is(Punct::RParen) {
                     self.push_parameter(&mut params)?;
                     if !self.eat(Punct::Comma)? {
@@ -226,4 +248,181 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
         Ok(name)
     }
+
+    // ---- arrow functions -----------------------------------------------------------------------
+
+    /// `ArrowFunction : ArrowParameters [no LineTerminator here] => ConciseBody`
+    /// (`#sec-arrow-function-definitions`) at the current `=>`, after the operand `left` of an
+    /// `AssignmentExpression` that started at `start`: the operand read again as the
+    /// parameters, then the body. The function is numbered here: no function stands in valid
+    /// parameters, so it still comes after every function before its first token.
+    pub(super) fn arrow_function(&mut self, left: ExprId, start: Span, no_in: bool) -> R<ExprId> {
+        self.enter()?;
+        let id = self.arrow_head(left, start)?;
+        self.arrow_body(id, no_in)?;
+        let e = self.make(Expr::Function(id), start)?;
+        self.leave();
+        Ok(e)
+    }
+
+    /// The parameters of the arrow function whose `=>` is the current token, from the operand
+    /// `left`; consumes the `=>` and numbers the function, its span starting at `start`.
+    #[inline(never)]
+    fn arrow_head(&mut self, left: ExprId, start: Span) -> R<FunctionId> {
+        if self.tok.newline_before {
+            return self.fail_here(LINE_TERMINATOR_BEFORE_ARROW);
+        }
+        let params = self.arrow_parameters(left, start)?;
+        self.advance()?;
+        let id = self.begin_function(FunctionKind::Arrow, start, None);
+        match self.ast.functions.get_mut(id.0 as usize) {
+            Some(f) => f.params = params,
+            None => self.m.release(params),
+        }
+        Ok(id)
+    }
+
+    /// `ArrowParameters` from the operand `left` before `=>`: a `BindingIdentifier` (an
+    /// identifier not in parentheses), or the parenthesized expression, in one pair of
+    /// parentheses ([`Parser::parenthesized`]), read again as `ArrowFormalParameters`
+    /// (`#sec-arrow-function-definitions-static-semantics-early-errors`, the cover's
+    /// refinement): an identifier, a comma expression of identifiers not in parentheses, or the
+    /// empty list of `()`. An initializer is a default parameter and an object or array literal
+    /// a pattern, both refused; `async` before parentheses is an async arrow, refused. The
+    /// names move from the expression's nodes into the list, the nodes of the first reading are
+    /// dropped and what they own credited; the list's growth is charged first.
+    #[inline(never)]
+    fn arrow_parameters(&mut self, left: ExprId, start: Span) -> R<Vec<Name>> {
+        let (parenthesized, elements) = match self.expr_node(left) {
+            Some(n) => match &n.expr {
+                Expr::Identifier(_) => (n.parenthesized, Some(1)),
+                Expr::Sequence(list) if n.parenthesized => (true, Some(list.len())),
+                _ => (n.parenthesized, None),
+            },
+            None => return self.unexpected(),
+        };
+        let Some(elements) = elements else {
+            return self.arrow_refusal(left, parenthesized, start);
+        };
+        let mut mark = left;
+        for i in 0..elements {
+            let e = self.arrow_element(left, i);
+            mark = mark.min(e);
+            // `left` itself is in no parentheses or in the one pair of the cover; an operand of
+            // the cover's comma expression is in none.
+            let (identifier, bare) = self.expr_node(e).map_or((false, false), |n| {
+                (matches!(n.expr, Expr::Identifier(_)), !n.parenthesized)
+            });
+            if !identifier || !(bare || e == left) {
+                return self.arrow_refusal(e, bare, start);
+            }
+        }
+        let made = self.m.with_capacity(elements);
+        let mut params = self.charged(made)?;
+        for i in 0..elements {
+            let e = self.arrow_element(left, i);
+            let span = self.expr_span(e);
+            if let Some(Expr::Identifier(name)) = self.expr_mut(e) {
+                let name = std::mem::take(name);
+                params.push(Name { name, span });
+            }
+        }
+        self.drop_cover(mark);
+        Ok(params)
+    }
+
+    /// The `i`th element of the operand `left` read as parameters: `left` itself, or the `i`th
+    /// operand of the comma expression it is.
+    fn arrow_element(&self, left: ExprId, i: usize) -> ExprId {
+        match self.expr_node(left).map(|n| &n.expr) {
+            Some(Expr::Sequence(list)) => list.get(i).copied().unwrap_or(left),
+            _ => left,
+        }
+    }
+
+    /// The error of the element `e` of an operand before `=>` that is no `ArrowParameters`:
+    /// the refusal a later story lifts (`default parameter` and `destructuring pattern` for an
+    /// element that stands as a parameter, `plain`: the cover's own expression or an operand of
+    /// its comma expression in no parentheses of its own; `async function` for a call of
+    /// `async`), or the `=>` unexpected.
+    #[inline(never)]
+    fn arrow_refusal<T>(&mut self, e: ExprId, plain: bool, start: Span) -> R<T> {
+        let Some(node) = self.expr_node(e) else {
+            return self.unexpected();
+        };
+        let at = node.span;
+        match &node.expr {
+            Expr::Assign {
+                op: AssignOp::Assign,
+                target,
+                ..
+            } if plain
+                && self
+                    .expr_node(*target)
+                    .is_some_and(|t| !t.parenthesized && matches!(t.expr, Expr::Identifier(_))) =>
+            {
+                self.refuse_at("default parameter", 6, at)
+            }
+            Expr::Object(_) | Expr::Array(_) if plain => {
+                self.refuse_at("destructuring pattern", 6, at)
+            }
+            Expr::Call { callee, .. }
+                if !node.parenthesized
+                    && self.expr_node(*callee).is_some_and(|c| {
+                        !c.parenthesized && matches!(&c.expr, Expr::Identifier(n) if n == "async")
+                    }) =>
+            {
+                self.refuse_at("async function", 10, start)
+            }
+            _ => self.unexpected(),
+        }
+    }
+
+    /// Drops the nodes from `mark` on, the first reading of an arrow's parameters as an
+    /// expression, which no node refers to any more; what they own is credited, and their
+    /// places in the arena are taken by the nodes that come next.
+    #[inline(never)]
+    fn drop_cover(&mut self, mark: ExprId) {
+        let m = self.m;
+        while self.ast.exprs.len() > mark.0 as usize {
+            if let Some(node) = self.ast.exprs.pop() {
+                m.release(node.expr);
+            }
+        }
+    }
+
+    /// The `ConciseBody` of the arrow function `id` (`#sec-arrow-function-definitions`): a
+    /// `FunctionBody` in braces, whose directive prologue may make the function strict, or an
+    /// `ExpressionBody`, an `AssignmentExpression` with `in` as the context allows, held as one
+    /// `return` statement.
+    fn arrow_body(&mut self, id: FunctionId, no_in: bool) -> R<()> {
+        self.enter()?;
+        let outer = self.strict;
+        if self.is(Punct::LBrace) {
+            self.advance()?;
+            self.functions += 1;
+            let (body, use_strict) = self.body(false)?;
+            self.function_close(id, outer, body, use_strict)?;
+        } else {
+            let e = self.assignment(no_in)?;
+            let body = self.concise_body(e)?;
+            self.function_end(id, outer, body, false)?;
+        }
+        self.leave();
+        Ok(())
+    }
+
+    /// The body of an `ExpressionBody` `e`: one `return` statement of it, with its span.
+    #[inline(never)]
+    fn concise_body(&mut self, e: ExprId) -> R<Vec<StmtId>> {
+        let span = self.expr_span(e);
+        let stmt = self.push_stmt(Stmt::Return(Some(e)), span)?;
+        let mut body = Vec::new();
+        self.push_item(&mut body, stmt)?;
+        Ok(body)
+    }
 }
+
+/// A line terminator between `ArrowParameters` and `=>` (`#sec-arrow-function-definitions`:
+/// `[no LineTerminator here]`).
+const LINE_TERMINATOR_BEFORE_ARROW: &str = "line terminator before =>";
