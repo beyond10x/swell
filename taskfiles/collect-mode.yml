@@ -2,19 +2,22 @@ version: '3'
 
 tasks:
   test-collect:
-    desc: Run every test of swell with the collector run at every safe point and warnings denied, and print the summed counts.
+    desc: Run every test of swell but the doc tests through cargo-nextest with the collector run at every safe point and warnings denied, and print the summed counts and the ten slowest tests.
     summary: |
-      Run every test of swell with the collector run at every safe point and warnings denied,
-      and print the summed counts (engine design, decisions 4 and 13: the mode that finds a
-      missing root).
+      Run every test of swell but the doc tests through cargo-nextest with the collector run at
+      every safe point and warnings denied, and print the summed counts and the ten slowest
+      tests (engine design, decisions 4 and 13: the mode that finds a missing root). The doc
+      tests of this mode run in the step test-doc.
 
-      Runs "cargo test --locked -p swell --features collect-every-safe-point" over all targets
-      of the package (the library, every integration test, the doc tests) with
-      RUSTFLAGS="-D warnings", as the task test does. The log is .out/test-collect.log; it is
-      printed when cargo fails. The line printed sums its "test result:" lines as
-      "test-collect: <n> test suites: <p> passed, <f> failed, <i> ignored". It fails when cargo
-      fails (a failing test, a build error, or a crates/swell without the feature
-      collect-every-safe-point), when a test fails, and when there is no "test result:" line.
+      Runs "cargo nextest run --locked -p swell --features collect-every-safe-point --profile
+      default" over the library and every integration test of the package, with
+      RUSTFLAGS="-D warnings", as the task test does: every test in a process of its own,
+      terminated at 60 s and counted failed (.config/nextest.toml). The log is
+      .out/test-collect.log; it is printed when nextest fails. The line printed is
+      "test-collect: <b> test binaries: <p> passed, <f> failed, <i> ignored", then ten lines
+      "gate-slowest test-collect <seconds> <binary> <test>". It fails when nextest fails (a
+      failing test, a build error, or a crates/swell without the feature
+      collect-every-safe-point), when a test fails, and when no test ran.
     env:
       RUSTFLAGS: -D warnings
     silent: true
@@ -22,21 +25,7 @@ tasks:
       - mkdir -p .out
       - |
         status=0
-        cargo test --locked -p swell --features collect-every-safe-point > .out/test-collect.log 2>&1 || status=$?
-        if [ "$status" -ne 0 ]; then cat .out/test-collect.log; fi
-        awk -v status="$status" '
-          /^test result: / {
-            suites++
-            for (i = 1; i < NF; i++) {
-              count = $i
-              gsub(/[^0-9]/, "", count)
-              if ($(i + 1) ~ /^passed/) passed += count
-              if ($(i + 1) ~ /^failed/) failed += count
-              if ($(i + 1) ~ /^ignored/) ignored += count
-            }
-          }
-          END {
-            print "test-collect: " suites+0 " test suites: " passed+0 " passed, " failed+0 " failed, " ignored+0 " ignored"
-            if (status != 0 || failed > 0 || suites == 0) exit 1
-          }
-        ' .out/test-collect.log
+        cargo nextest run --locked -p swell --features collect-every-safe-point --profile default > .out/test-collect.log 2>&1 || status=$?
+        echo "$status" > .out/test-collect.status
+      - task: nextest-report
+        vars: {STEP: test-collect, PREFIX: 'test-collect: ', LOG: .out/test-collect.log, STATUS: .out/test-collect.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}

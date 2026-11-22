@@ -10,6 +10,10 @@ tasks:
       count every case per directory, slice and ECMA-262 section, and check the lines against the
       design and the expected file.
 
+      The full run is the lane slow (task slow, through slow-test262); the gate runs the fast
+      check test262-check in its place, which reads the committed files and the digest of their
+      sources, and test262-expected is the one run that writes both.
+
       Runs "swell-test262 count" (release build) with TEST262_WORKERS worker threads (default 4)
       and TEST262_RUN (default all; none counts every run case failed without running it, for
       the planted scripts of tests/gate/ that check the counting alone) on
@@ -337,3 +341,286 @@ tasks:
             printf "test262-moves: %d case(s) moved, %s; slices 1 to 19: %d %d\n", moved, line, cases, runs
           }
         ' "$design" "$parts" "$moves"
+
+  test262-sources:
+    desc: Internal. Write the digest of the sources of the expected file to TEST262_OUT/sources.digest and the list it is made of beside it.
+    summary: |
+      Internal, called by test262-digest, test262-check, test262-expected and slow-test262.
+
+      The sources of the expected file are every file that can change a line the runner prints,
+      and no other: the files git lists (tracked, or untracked and not ignored) of GATE_ROOT
+      (default .) under crates/*/src/ and as crates/*/Cargo.toml, then Cargo.toml, Cargo.lock,
+      .cargo/config.toml, rust-toolchain, rust-toolchain.toml, taskfiles/test262.yml (this file,
+      the runner's task file), conformance/test262/PIN, conformance/test262/moves.tsv and
+      conformance/test262/later-parts.tsv. Not covered: the tests of the crates
+      (crates/*/tests/), the gate's own tests (tests/gate/) and the documents beyond the block
+      below, none of which a run line depends on, so a change to a test leaves the committed
+      files current. Then TEST262_FEATURES and TEST262_SECTIONS under the names
+      conformance/test262/features.txt and conformance/test262/sections.txt, and the
+      swell-slices block of TEST262_DESIGN under the name "docs/design/engine.md swell-slices".
+      A file git lists that is deleted from the working tree is listed as "deleted <path>".
+      Each is one line "<sha256>  <name>" of TEST262_OUT/sources.txt, in byte order; the
+      digest is the SHA-256 of that file, written as "test262-sources <sha256>" to
+      TEST262_OUT/sources.digest. It fails when git cannot list the files, when there is none,
+      when a file named by a variable is missing, and when the design has no swell-slices block.
+    silent: true
+    vars:
+      GATE_ROOT: '{{.GATE_ROOT | default "."}}'
+      TEST262_DESIGN: '{{.TEST262_DESIGN | default "docs/design/engine.md"}}'
+      TEST262_FEATURES: '{{.TEST262_FEATURES | default "conformance/test262/features.txt"}}'
+      TEST262_SECTIONS: '{{.TEST262_SECTIONS | default "conformance/test262/sections.txt"}}'
+      TEST262_OUT: '{{.TEST262_OUT | default ".out/test262"}}'
+    env:
+      GATE_ROOT: '{{.GATE_ROOT}}'
+      TEST262_DESIGN: '{{.TEST262_DESIGN}}'
+      TEST262_FEATURES: '{{.TEST262_FEATURES}}'
+      TEST262_SECTIONS: '{{.TEST262_SECTIONS}}'
+      TEST262_OUT: '{{.TEST262_OUT}}'
+    cmds:
+      - mkdir -p "$TEST262_OUT"
+      - |
+        out="$TEST262_OUT/sources.txt"
+        paths=":(glob)crates/*/src/** :(glob)crates/*/Cargo.toml Cargo.toml Cargo.lock .cargo/config.toml rust-toolchain rust-toolchain.toml taskfiles/test262.yml conformance/test262/PIN conformance/test262/moves.tsv conformance/test262/later-parts.tsv"
+        # shellcheck disable=SC2086
+        files=$(git -C "$GATE_ROOT" ls-files --cached --others --exclude-standard -- $paths) ||
+          { echo "test262-sources: git cannot list the files of $GATE_ROOT"; exit 1; }
+        [ -n "$files" ] || { echo "test262-sources: git lists no source of the expected file under $GATE_ROOT"; exit 1; }
+        for f in "$TEST262_FEATURES" "$TEST262_SECTIONS" "$TEST262_DESIGN"; do
+          [ -f "$f" ] || { echo "test262-sources: no file $f"; exit 1; }
+        done
+        block=$(awk '$0 == "```swell-slices" { f = 1; next } f && $0 == "```" { exit } f' "$TEST262_DESIGN")
+        [ -n "$block" ] || { echo "test262-sources: no swell-slices block in $TEST262_DESIGN"; exit 1; }
+        sum() { sha256sum | awk '{ print $1 }'; }
+        printf '%s\n' "$files" | LC_ALL=C sort -u > "$TEST262_OUT/sources.listed"
+        : > "$TEST262_OUT/sources.present"
+        : > "$TEST262_OUT/sources.deleted"
+        while IFS= read -r f; do
+          if [ -f "$GATE_ROOT/$f" ]; then
+            printf '%s\n' "$f" >> "$TEST262_OUT/sources.present"
+          else
+            printf '%s\n' "$f" >> "$TEST262_OUT/sources.deleted"
+          fi
+        done < "$TEST262_OUT/sources.listed"
+        {
+          (cd "$GATE_ROOT" && xargs -r -d '\n' sha256sum --) < "$TEST262_OUT/sources.present" ||
+            { echo "test262-sources: sha256sum failed on the files of $GATE_ROOT" >&2; exit 1; }
+          sed 's/^/deleted /' "$TEST262_OUT/sources.deleted"
+          printf '%s  %s\n' "$(sum < "$TEST262_FEATURES")" conformance/test262/features.txt
+          printf '%s  %s\n' "$(sum < "$TEST262_SECTIONS")" conformance/test262/sections.txt
+          printf '%s\n' "$block" | { printf '%s  %s\n' "$(sum)" "docs/design/engine.md swell-slices"; }
+        } > "$out.unsorted" || exit 1
+        LC_ALL=C sort "$out.unsorted" > "$out"
+        printf 'test262-sources %s\n' "$(sum < "$out")" > "$TEST262_OUT/sources.digest"
+
+  test262-digest:
+    desc: Print the digest of the sources of the expected file, as test262-check computes it, and the number of files it is made of.
+    summary: |
+      Print the digest of the sources of the expected file (the task test262-sources says which
+      files they are), as "test262-sources <sha256>", then "test262-digest: <n> source file(s),
+      listed in TEST262_OUT/sources.txt". It reads no checkout and runs nothing.
+    silent: true
+    vars:
+      TEST262_OUT: '{{.TEST262_OUT | default ".out/test262"}}'
+    cmds:
+      - task: test262-sources
+      - |
+        cat '{{.TEST262_OUT}}/sources.digest'
+        echo "test262-digest: $(awk 'END { print NR }' '{{.TEST262_OUT}}/sources.txt') source file(s), listed in {{.TEST262_OUT}}/sources.txt"
+
+  test262-check:
+    desc: The gate's fast check of test262; compare the digest of the sources of the expected file with the committed one, and print the gate's test262 lines from the committed files.
+    summary: |
+      The gate's check of test262 in the place of the full run, which is the lane slow (task
+      slow-test262). It runs no case and reads no checkout.
+
+      Computes the digest of the sources of TEST262_EXPECTED (default
+      conformance/test262/expected.txt) as the task test262-sources does, and compares it with
+      the test262-sources line of TEST262_DIGEST (default conformance/test262/expected.digest).
+      When they differ it fails with "test262-check: the sources digest <computed> differs
+      from <committed> in <digest file>; ...": a source changed, and the run that writes both
+      files again is task test262-expected. When they are equal it prints, from the committed
+      files, the test262-refused line of the digest file, the total line of the expected file,
+      "test262: <n> directory lines sum to the total", the test262-slice lines, "test262: <n>
+      slice lines equal the design", the test262-errors line, and last "test262: <n> lines of
+      <expected file>; sources digest <sha256> equals <digest file>". It fails, as the task
+      test262 does, when the directory lines do not sum to the total line or there is none,
+      when fields 2 to 4 of the slice lines differ from the block after "Its output on this
+      document:" of TEST262_DESIGN or that block is empty, and when a file is missing or has no
+      test262-refused, test262-sources or test262-errors line.
+    silent: true
+    vars:
+      TEST262_DESIGN: '{{.TEST262_DESIGN | default "docs/design/engine.md"}}'
+      TEST262_EXPECTED: '{{.TEST262_EXPECTED | default "conformance/test262/expected.txt"}}'
+      TEST262_DIGEST: '{{.TEST262_DIGEST | default "conformance/test262/expected.digest"}}'
+      TEST262_OUT: '{{.TEST262_OUT | default ".out/test262"}}'
+    env:
+      TEST262_DESIGN: '{{.TEST262_DESIGN}}'
+      TEST262_EXPECTED: '{{.TEST262_EXPECTED}}'
+      TEST262_DIGEST: '{{.TEST262_DIGEST}}'
+      TEST262_OUT: '{{.TEST262_OUT}}'
+    cmds:
+      - task: test262-sources
+      - |
+        lines="$TEST262_EXPECTED"
+        for f in "$lines" "$TEST262_DIGEST"; do
+          [ -f "$f" ] || { echo "test262-check: no file $f"; exit 1; }
+        done
+        now=$(awk '$1 == "test262-sources" { print $2 }' "$TEST262_OUT/sources.digest")
+        was=$(awk '$1 == "test262-sources" { print $2 }' "$TEST262_DIGEST")
+        [ -n "$was" ] || { echo "test262-check: no test262-sources line in $TEST262_DIGEST"; exit 1; }
+        if [ "$now" != "$was" ]; then
+          echo "test262-check: the sources digest $now differs from $was in $TEST262_DIGEST; a source of $lines changed (listed in $TEST262_OUT/sources.txt): task test262-expected runs test262 and writes both files"
+          exit 1
+        fi
+        refused=$(grep '^test262-refused ' "$TEST262_DIGEST") || { echo "test262-check: no test262-refused line in $TEST262_DIGEST"; exit 1; }
+        echo "$refused"
+        awk -v file="$lines" '
+          $1 == "test262" && $2 == "total" { totals++; total = $0; for (i = 3; i <= 9; i++) t[i] = $i; next }
+          $1 == "test262" {
+            dirs++
+            if (NF != 9) { print "test262: not nine fields: " $0; bad = 1 }
+            for (i = 3; i <= 9; i++) s[i] += $i
+          }
+          END {
+            if (totals != 1) { print "test262: " totals+0 " total line(s) in " file; exit 1 }
+            if (dirs == 0) { print "test262: no directory line in " file; exit 1 }
+            for (i = 3; i <= 9; i++) if (s[i] != t[i]) {
+              print "test262: field " i " of the directory lines sums to " s[i] ", the total line has " t[i]
+              bad = 1
+            }
+            if (bad) exit 1
+            print total
+            print "test262: " dirs " directory lines sum to the total"
+          }
+        ' "$lines"
+        awk '$0 == "Its output on this document:" { f = 1; next } f && $0 == "```" { if (body) exit; body = 1; next } body' "$TEST262_DESIGN" | LC_ALL=C sort > "$TEST262_OUT/design-slices.txt"
+        awk '$1 == "test262-slice" { print $2, $3, $4 }' "$lines" | LC_ALL=C sort > "$TEST262_OUT/committed-slices.txt"
+        n=$(awk 'END { print NR }' "$TEST262_OUT/design-slices.txt")
+        if [ "$n" -eq 0 ]; then
+          echo "test262: no slice line after \"Its output on this document:\" in $TEST262_DESIGN"
+          exit 1
+        fi
+        if ! diff "$TEST262_OUT/design-slices.txt" "$TEST262_OUT/committed-slices.txt" > "$TEST262_OUT/slices.diff"; then
+          echo "test262: the slice lines differ from $TEST262_DESIGN (< design, > $lines):"
+          cat "$TEST262_OUT/slices.diff"
+          exit 1
+        fi
+        awk '$1 == "test262-slice"' "$lines"
+        echo "test262: $n slice lines equal the design"
+        errors=$(grep '^test262-errors ' "$lines") || { echo "test262: no test262-errors line in $lines"; exit 1; }
+        echo "$errors"
+        echo "test262: $(awk 'END { print NR }' "$lines") lines of $lines; sources digest $now equals $TEST262_DIGEST"
+
+  test262-expected:
+    desc: Run test262 as the task test262 does and write the expected file and its digest; the one run that writes them.
+    summary: |
+      Run test262 as the task test262 does, with the same variables, but compare with nothing:
+      write the runner's lines to TEST262_EXPECTED (default conformance/test262/expected.txt)
+      and to TEST262_DIGEST (default conformance/test262/expected.digest) the test262-sources
+      line of the task test262-sources and the runner's test262-refused line (with
+      TEST262_RUN=none, which runs no case, "test262-refused 0"). Nothing else writes either
+      file. A unit of a wave of several units points both variables at files of its own under
+      .out/, so that the committed ones are left to the coordinator. It fails, printing the
+      runner's output, when the runner exits non-zero, and when its lines have no total line or
+      the run printed no test262-refused line. It prints "test262-expected: <n> lines written to
+      <expected file>, the digest <sha256> to <digest file>".
+    deps: [test262-fetch]
+    silent: true
+    vars:
+      PIN_COMMIT:
+        sh: awk '$1 == "commit" {print $2}' conformance/test262/PIN
+      TEST262_COMMIT: '{{.TEST262_COMMIT | default .PIN_COMMIT}}'
+      TEST262_CACHE: '{{.TEST262_CACHE | default ".cache/test262"}}'
+      TEST262_DESIGN: '{{.TEST262_DESIGN | default "docs/design/engine.md"}}'
+      TEST262_FEATURES: '{{.TEST262_FEATURES | default "conformance/test262/features.txt"}}'
+      TEST262_SECTIONS: '{{.TEST262_SECTIONS | default "conformance/test262/sections.txt"}}'
+      TEST262_EXPECTED: '{{.TEST262_EXPECTED | default "conformance/test262/expected.txt"}}'
+      TEST262_DIGEST: '{{.TEST262_DIGEST | default "conformance/test262/expected.digest"}}'
+      TEST262_OUT: '{{.TEST262_OUT | default ".out/test262"}}'
+      TEST262_WORKERS: '{{.TEST262_WORKERS | default "4"}}'
+      TEST262_RUN: '{{.TEST262_RUN | default "all"}}'
+    env:
+      TEST262_COMMIT: '{{.TEST262_COMMIT}}'
+      TEST262_CACHE: '{{.TEST262_CACHE}}'
+      TEST262_DESIGN: '{{.TEST262_DESIGN}}'
+      TEST262_FEATURES: '{{.TEST262_FEATURES}}'
+      TEST262_SECTIONS: '{{.TEST262_SECTIONS}}'
+      TEST262_EXPECTED: '{{.TEST262_EXPECTED}}'
+      TEST262_DIGEST: '{{.TEST262_DIGEST}}'
+      TEST262_OUT: '{{.TEST262_OUT}}'
+      TEST262_WORKERS: '{{.TEST262_WORKERS}}'
+      TEST262_RUN: '{{.TEST262_RUN}}'
+    cmds:
+      - mkdir -p "$TEST262_OUT"
+      - |
+        lines="$TEST262_OUT/lines.txt"
+        log="$TEST262_OUT/count.log"
+        status=0
+        cargo run --locked --release -q -p swell-test262 -- count \
+          --test262 "$TEST262_CACHE/$TEST262_COMMIT" \
+          --design "$TEST262_DESIGN" \
+          --features "$TEST262_FEATURES" \
+          --sections "$TEST262_SECTIONS" \
+          --workers "$TEST262_WORKERS" --run "$TEST262_RUN" \
+          --runs "$TEST262_OUT/runs.tsv" > "$lines" 2> "$log" || status=$?
+        if [ "$status" -ne 0 ]; then
+          cat "$lines" "$log"
+          echo "test262-expected: swell-test262 count exited $status"
+          exit 1
+        fi
+        grep -q '^test262 total ' "$lines" || { echo "test262-expected: no total line in $lines"; exit 1; }
+        if ! grep '^test262-refused ' "$log" > "$TEST262_OUT/refused.txt"; then
+          if [ "$TEST262_RUN" = none ]; then echo "test262-refused 0" > "$TEST262_OUT/refused.txt"; else echo "test262-expected: no test262-refused line in $log"; exit 1; fi
+        fi
+      - task: test262-sources
+      - |
+        cp "$TEST262_OUT/lines.txt" "$TEST262_EXPECTED"
+        cat "$TEST262_OUT/sources.digest" "$TEST262_OUT/refused.txt" > "$TEST262_DIGEST"
+        echo "test262-expected: $(awk 'END { print NR }' "$TEST262_EXPECTED") lines written to $TEST262_EXPECTED, the digest $(awk '{ print $2; exit }' "$TEST262_DIGEST") to $TEST262_DIGEST"
+
+  slow-test262:
+    desc: The test262 part of the lane slow; the full run of the task test262, compared byte for byte with the expected file, and the digest checked.
+    summary: |
+      The test262 part of the lane slow (task slow). Runs the task test262 with the same
+      variables (the full run of every case, compared line by line with TEST262_EXPECTED; it
+      fails as that task does), then compares TEST262_OUT/lines.txt with TEST262_EXPECTED byte
+      for byte, the runner's test262-refused line (with TEST262_RUN=none "test262-refused 0")
+      with that of TEST262_DIGEST, and the digest of the sources (task test262-sources) with
+      the test262-sources line of TEST262_DIGEST; each that differs fails it, naming both. It
+      prints "slow-test262: <n> lines equal <expected file> byte for byte; <refused line> and
+      the sources digest <sha256> equal <digest file>".
+    silent: true
+    vars:
+      TEST262_EXPECTED: '{{.TEST262_EXPECTED | default "conformance/test262/expected.txt"}}'
+      TEST262_DIGEST: '{{.TEST262_DIGEST | default "conformance/test262/expected.digest"}}'
+      TEST262_OUT: '{{.TEST262_OUT | default ".out/test262"}}'
+      TEST262_RUN: '{{.TEST262_RUN | default "all"}}'
+    env:
+      TEST262_EXPECTED: '{{.TEST262_EXPECTED}}'
+      TEST262_DIGEST: '{{.TEST262_DIGEST}}'
+      TEST262_OUT: '{{.TEST262_OUT}}'
+      TEST262_RUN: '{{.TEST262_RUN}}'
+    cmds:
+      - task: test262
+      - task: test262-sources
+      - |
+        [ -f "$TEST262_DIGEST" ] || { echo "slow-test262: no file $TEST262_DIGEST"; exit 1; }
+        if ! cmp "$TEST262_OUT/lines.txt" "$TEST262_EXPECTED"; then
+          echo "slow-test262: $TEST262_OUT/lines.txt differs from $TEST262_EXPECTED in its bytes"
+          exit 1
+        fi
+        ran=$(grep '^test262-refused ' "$TEST262_OUT/count.log") || {
+          if [ "$TEST262_RUN" = none ]; then ran="test262-refused 0"; else echo "slow-test262: no test262-refused line in $TEST262_OUT/count.log"; exit 1; fi
+        }
+        was=$(grep '^test262-refused ' "$TEST262_DIGEST") || { echo "slow-test262: no test262-refused line in $TEST262_DIGEST"; exit 1; }
+        if [ "$ran" != "$was" ]; then
+          echo "slow-test262: the run printed \"$ran\", $TEST262_DIGEST has \"$was\""
+          exit 1
+        fi
+        now=$(awk '$1 == "test262-sources" { print $2 }' "$TEST262_OUT/sources.digest")
+        digest=$(awk '$1 == "test262-sources" { print $2 }' "$TEST262_DIGEST")
+        if [ "$now" != "$digest" ]; then
+          echo "slow-test262: the sources digest $now differs from ${digest:-none} in $TEST262_DIGEST; task test262-expected writes both files"
+          exit 1
+        fi
+        echo "slow-test262: $(awk 'END { print NR }' "$TEST262_EXPECTED") lines equal $TEST262_EXPECTED byte for byte; $ran and the sources digest $now equal $TEST262_DIGEST"
