@@ -39,6 +39,14 @@
 //! collector frees it; the bindings eval code adds are charged as they are made and credited the
 //! same way.
 //!
+//! Slice 6 adds the `let` and `const` bindings (`docs/design/engine.md`, decision 3, "Lexical
+//! bindings"): a slot holds a value or the uninitialized state ([`SlotValue`]); a record of a
+//! block, a head, an iteration, a function body or eval code names its slots, each marked `let`
+//! or `const` ([`SlotKind`]), so a lookup by name throws as a slot access does: a
+//! `ReferenceError` for an uninitialized binding and a `TypeError` for an assignment to a
+//! `const` one. The global environment's [[DeclarativeRecord]] is a record of this arena whose
+//! bindings are kept by name ([`RecordNames::Global`], `env/global.rs`).
+//!
 //! Kind site of the collector: [`EnvironmentRecord::trace`] (the outer record, the slots, the
 //! bindings eval code added, the binding object and the script whose code names the slots).
 
@@ -55,6 +63,7 @@ use crate::heap::collect::{Item, Mark};
 use crate::host::Host;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
+use crate::interp::frame::SlotValue;
 use crate::object::property::{Key, KeyedList, Room, SMALL};
 use crate::script::Compiled;
 use crate::value::{ObjectRef, Value};
@@ -80,11 +89,25 @@ pub(crate) struct SlotNames {
     pub(crate) table: NameTable,
 }
 
+/// What kind of binding a named slot is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SlotKind {
+    /// A `var`, a parameter, `arguments` or a `catch` parameter.
+    Mutable,
+    /// A `let` binding, uninitialized until its declaration ran.
+    Let,
+    /// A `const` binding: immutable and strict (CreateImmutableBinding(N, true)), uninitialized
+    /// until its declaration ran.
+    Const,
+    /// The own name of a named function expression: immutable, not strict.
+    SelfName,
+}
+
 impl SlotNames {
-    /// The slot that binds `key` and whether the binding is mutable, with the steps the scan
-    /// costs: the table is scanned, and each comparison past the first [`SMALL`] is a step (the
-    /// first ones are covered by the step the lookup pays for the record).
-    fn find(&self, key: Key) -> (Option<(u32, bool)>, u64) {
+    /// The slot that binds `key` and its kind, with the steps the scan costs: the table is
+    /// scanned, and each comparison past the first [`SMALL`] is a step (the first ones are
+    /// covered by the step the lookup pays for the record).
+    fn find(&self, key: Key) -> (Option<(u32, SlotKind)>, u64) {
         let mut visited = 0usize;
         let found = self.scan(key, &mut visited);
         let steps = u64::try_from(visited.saturating_sub(SMALL)).unwrap_or(u64::MAX);
@@ -92,33 +115,83 @@ impl SlotNames {
     }
 
     /// The scan of [`SlotNames::find`], counting the names it compares in `visited`.
-    fn scan(&self, key: Key, visited: &mut usize) -> Option<(u32, bool)> {
+    fn scan(&self, key: Key, visited: &mut usize) -> Option<(u32, SlotKind)> {
         let code = &self.compiled.code;
         let template = |t: u32| code.functions.get(usize::try_from(t).ok()?);
-        let (names, mutable): (&[u32], bool) = match self.table {
-            NameTable::Function(t) => (&template(t)?.captured, true),
+        let named = |name: u32| {
+            usize::try_from(name)
+                .ok()
+                .and_then(|name| self.compiled.keys.get(name))
+                == Some(&key)
+        };
+        let (position, kind) = match self.table {
+            NameTable::Function(t) => {
+                let position = template(t)?.captured.iter().position(|&name| {
+                    *visited += 1;
+                    named(name)
+                })?;
+                (position, SlotKind::Mutable)
+            }
             NameTable::Scope { template: t, index } => {
                 let scopes = match t {
                     Some(t) => &template(t)?.scopes,
                     None => &code.scopes,
                 };
-                (scopes.get(usize::try_from(index).ok()?)?, true)
+                let names = scopes.get(usize::try_from(index).ok()?)?;
+                let (position, name) = names.iter().enumerate().find(|(_, name)| {
+                    *visited += 1;
+                    named(name.name())
+                })?;
+                let kind = if name.is_constant() {
+                    SlotKind::Const
+                } else if name.is_lexical() {
+                    SlotKind::Let
+                } else {
+                    SlotKind::Mutable
+                };
+                (position, kind)
             }
             NameTable::SelfName(t) => {
                 let own = self.compiled.name_keys.get(usize::try_from(t).ok()?)?;
                 *visited = 1;
-                return (*own == key).then_some((0, false));
+                return (*own == key).then_some((0, SlotKind::SelfName));
             }
         };
-        let position = names.iter().position(|&name| {
-            *visited += 1;
-            usize::try_from(name)
-                .ok()
-                .and_then(|name| self.compiled.keys.get(name))
-                == Some(&key)
-        })?;
-        Some((u32::try_from(position).ok()?, mutable))
+        Some((u32::try_from(position).ok()?, kind))
     }
+}
+
+/// A binding of the global environment's [[DeclarativeRecord]]: its state and whether it is
+/// `const` (decision 3, "Lexical bindings", item 4).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LexicalBinding {
+    pub(crate) value: SlotValue,
+    pub(crate) constant: bool,
+}
+
+/// The bindings of the global environment's [[DeclarativeRecord]], by name: GlobalDeclarationInstantiation
+/// creates them (step 15), none is ever deleted. Their growth is charged before it is made, and
+/// the drop queues the bytes for the agent to credit, as [`Added`] does.
+#[derive(Default)]
+pub(crate) struct GlobalBindings {
+    pub(crate) bindings: KeyedList<LexicalBinding>,
+    pub(crate) bytes: u64,
+    pub(crate) queue: Option<Rc<Cell<u64>>>,
+}
+
+impl Drop for GlobalBindings {
+    fn drop(&mut self) {
+        if let Some(queue) = &self.queue {
+            queue.set(queue.get().saturating_add(self.bytes));
+        }
+    }
+}
+
+/// How a declarative record names its bindings: the slots, through a table of compiled code;
+/// or, for the global environment's [[DeclarativeRecord]], by name, each with its state.
+pub(crate) enum RecordNames {
+    Slots(SlotNames),
+    Global(Box<GlobalBindings>),
 }
 
 /// The bindings eval code added to a declarative record at run time
@@ -164,8 +237,8 @@ impl Drop for Added {
 /// object, with no slot.
 pub(crate) struct EnvironmentRecord {
     pub(crate) outer: Option<Handle>,
-    pub(crate) slots: Vec<Value>,
-    pub(crate) names: Option<SlotNames>,
+    pub(crate) slots: Vec<SlotValue>,
+    pub(crate) names: Option<RecordNames>,
     /// The bindings eval code added at run time.
     pub(crate) added: Added,
     /// [[BindingObject]] of an Object Environment Record.
@@ -174,9 +247,9 @@ pub(crate) struct EnvironmentRecord {
 
 /// Where a declarative record binds a name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Bound {
-    /// A named slot, and whether it is mutable.
-    Slot(u32, bool),
+pub(crate) enum Bound {
+    /// A named slot, and its kind.
+    Slot(u32, SlotKind),
     /// A binding eval code added, by index.
     Added(usize),
 }
@@ -189,7 +262,7 @@ impl EnvironmentRecord {
         if let Some(outer) = self.outer {
             mark.push(Item::Environment(outer));
         }
-        for &value in &self.slots {
+        for value in self.slots.iter().filter_map(|slot| slot.value()) {
             mark.value(value);
         }
         for (key, value) in self.added.bindings.iter() {
@@ -199,8 +272,25 @@ impl EnvironmentRecord {
         if let Some(object) = self.binding_object {
             mark.object(object);
         }
-        if let Some(names) = &self.names {
-            mark.push(Item::Script(names.script));
+        match &self.names {
+            Some(RecordNames::Slots(names)) => mark.push(Item::Script(names.script)),
+            Some(RecordNames::Global(global)) => {
+                for (key, binding) in global.bindings.iter() {
+                    key.trace(mark);
+                    if let Some(value) = binding.value.value() {
+                        mark.value(value);
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// The names of the record's slots, when a table of compiled code names them.
+    fn slot_names(&self) -> Option<&SlotNames> {
+        match &self.names {
+            Some(RecordNames::Slots(names)) => Some(names),
+            _ => None,
         }
     }
 
@@ -242,8 +332,21 @@ impl<H: Host> Agent<H> {
         slots: u32,
         names: Option<SlotNames>,
     ) -> Completion<Handle> {
+        let initial = SlotValue::Value(Value::Undefined);
+        self.new_environment_of(outer, slots, names.map(RecordNames::Slots), initial)
+    }
+
+    /// A new record of `slots` bindings, each `initial`, whose [[OuterEnv]] is `outer`, named by
+    /// `names`; charged as [`Agent::new_environment`] says.
+    pub(crate) fn new_environment_of(
+        &mut self,
+        outer: Option<Handle>,
+        slots: u32,
+        names: Option<RecordNames>,
+        initial: SlotValue,
+    ) -> Completion<Handle> {
         let count = usize::try_from(slots).unwrap_or(usize::MAX);
-        let owned = u64::try_from(count.saturating_mul(size_of::<Value>())).unwrap_or(u64::MAX);
+        let owned = u64::try_from(count.saturating_mul(size_of::<SlotValue>())).unwrap_or(u64::MAX);
         if self.heap.accounting.check(owned).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -251,7 +354,7 @@ impl<H: Host> Agent<H> {
         if values.try_reserve_exact(count).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
-        values.resize(count, Value::Undefined);
+        values.resize(count, initial);
         self.store_environment(
             EnvironmentRecord {
                 outer,
@@ -323,14 +426,27 @@ impl<H: Host> Agent<H> {
     }
 
     /// GetBindingValue of slot `slot` of the record `hops` outward from `env`
-    /// (`#sec-declarative-environment-records-getbindingvalue-n-s`; no binding of slice 1 is
-    /// ever uninitialized).
+    /// (`#sec-declarative-environment-records-getbindingvalue-n-s`) where the compiler knows the
+    /// binding is initialized: an uninitialized one there is a broken invariant, which faults.
     pub(crate) fn get_slot(
         &mut self,
         env: Option<Handle>,
         hops: u32,
         slot: u32,
     ) -> Completion<Value> {
+        match self.slot_state(env, hops, slot)? {
+            SlotValue::Value(value) => Ok(value),
+            SlotValue::Uninitialized => Err(self.fault()),
+        }
+    }
+
+    /// What slot `slot` of the record `hops` outward from `env` holds.
+    pub(crate) fn slot_state(
+        &mut self,
+        env: Option<Handle>,
+        hops: u32,
+        slot: u32,
+    ) -> Completion<SlotValue> {
         let handle = self.environment_at(env, hops)?;
         let index = usize::try_from(slot).unwrap_or(usize::MAX);
         match self.environment(handle)?.slots.get(index) {
@@ -339,9 +455,33 @@ impl<H: Host> Agent<H> {
         }
     }
 
+    /// The name of slot `slot` of the record `env`, for a message: its records of `let` and
+    /// `const` bindings always name their slots.
+    pub(crate) fn slot_name(&mut self, env: Handle, slot: u32) -> String {
+        let name = self.heap.environments.get(env).ok().and_then(|record| {
+            let names = record.slot_names()?;
+            let code = &names.compiled.code;
+            let NameTable::Scope { template, index } = names.table else {
+                return None;
+            };
+            let scopes = match template {
+                Some(t) => &code.functions.get(usize::try_from(t).ok()?)?.scopes,
+                None => &code.scopes,
+            };
+            let name = scopes
+                .get(usize::try_from(index).ok()?)?
+                .get(usize::try_from(slot).ok()?)?;
+            code.strings.get(usize::try_from(name.name()).ok()?)
+        });
+        name.map(|units| String::from_utf16_lossy(units))
+            .unwrap_or_default()
+    }
+
     /// SetMutableBinding of slot `slot` of the record `hops` outward from `env`
     /// (`#sec-declarative-environment-records-setmutablebinding-n-v-s`, step 4: a mutable
-    /// binding's value changes; the immutable ones are `AssignImmutable`'s).
+    /// binding's value changes; the immutable ones are `AssignImmutable`'s), or the
+    /// InitializeBinding of a `let` or `const` binding by its declaration
+    /// (`#sec-declarative-environment-records-initializebinding-n-v`).
     pub(crate) fn set_slot(
         &mut self,
         env: Option<Handle>,
@@ -357,7 +497,7 @@ impl<H: Host> Agent<H> {
             .get_mut(handle)
             .ok()
             .and_then(|record| record.slots.get_mut(index))
-            .map(|binding| *binding = value);
+            .map(|binding| *binding = SlotValue::Value(value));
         match stored {
             Some(()) => Ok(()),
             None => Err(self.fault()),
@@ -393,8 +533,7 @@ impl<H: Host> Agent<H> {
             let (outer, object, found, steps) = {
                 let record = self.environment(handle)?;
                 let (named, steps) = record
-                    .names
-                    .as_ref()
+                    .slot_names()
                     .map_or((None, 0), |names| names.find(key));
                 (
                     record.outer,
@@ -419,14 +558,13 @@ impl<H: Host> Agent<H> {
 
     /// Where the declarative record `env` binds `key`: a named slot or a binding eval code
     /// added; `None` when it binds no such name (an added binding a `delete` removed).
-    fn bound(&mut self, env: Handle, key: Key) -> Completion<Option<Bound>> {
+    pub(crate) fn bound(&mut self, env: Handle, key: Key) -> Completion<Option<Bound>> {
         let record = self.environment(env)?;
         let (named, steps) = record
-            .names
-            .as_ref()
+            .slot_names()
             .map_or((None, 0), |names| names.find(key));
         let bound = match named {
-            Some((slot, mutable)) => Some(Bound::Slot(slot, mutable)),
+            Some((slot, kind)) => Some(Bound::Slot(slot, kind)),
             None => record.added.find(key).map(Bound::Added),
         };
         if steps > 0 {
@@ -494,8 +632,10 @@ impl<H: Host> Agent<H> {
         value: Value,
     ) -> Completion<()> {
         match self.bound(env, key)? {
-            Some(Bound::Slot(slot, true)) => self.set_slot(Some(env), 0, slot, value),
-            Some(Bound::Slot(_, false)) => Ok(()),
+            Some(Bound::Slot(slot, SlotKind::Mutable | SlotKind::Let)) => {
+                self.set_slot(Some(env), 0, slot, value)
+            }
+            Some(Bound::Slot(_, SlotKind::Const | SlotKind::SelfName)) => Ok(()),
             Some(Bound::Added(index)) => self.set_added(env, index, value),
             None => Err(self.fault()),
         }
@@ -537,8 +677,15 @@ impl<H: Host> Agent<H> {
         match reference {
             NameReference::Unresolvable => Ok(None),
             NameReference::Global => self.global_get_binding_value(realm, key, strict).map(Some),
+            // Step 2 of GetBindingValue: an uninitialized binding is a `ReferenceError`.
             NameReference::Declarative(env) => match self.bound(env, key)? {
-                Some(Bound::Slot(slot, _)) => self.get_slot(Some(env), 0, slot).map(Some),
+                Some(Bound::Slot(slot, _)) => match self.slot_state(Some(env), 0, slot)? {
+                    SlotValue::Value(value) => Ok(Some(value)),
+                    SlotValue::Uninitialized => {
+                        let name = self.key_text(key);
+                        Err(self.not_initialized(&name))
+                    }
+                },
                 Some(Bound::Added(index)) => self.added_value(env, index).map(Some),
                 None => Ok(None),
             },
@@ -567,8 +714,21 @@ impl<H: Host> Agent<H> {
             }
             NameReference::Global => self.global_set_mutable_binding(realm, key, value, strict),
             NameReference::Declarative(env) => match self.bound(env, key)? {
-                Some(Bound::Slot(slot, true)) => self.set_slot(Some(env), 0, slot, value),
-                Some(Bound::Slot(_, false)) => {
+                Some(Bound::Slot(slot, SlotKind::Mutable)) => {
+                    self.set_slot(Some(env), 0, slot, value)
+                }
+                // Steps 3 and 5: an uninitialized binding is a `ReferenceError`, a `const` one a
+                // `TypeError` in any code.
+                Some(Bound::Slot(slot, kind @ (SlotKind::Let | SlotKind::Const))) => {
+                    let state = self.slot_state(Some(env), 0, slot)?;
+                    let name = self.key_text(key);
+                    match (state, kind) {
+                        (SlotValue::Uninitialized, _) => Err(self.not_initialized(&name)),
+                        (_, SlotKind::Const) => self.assign_const(&name),
+                        _ => self.set_slot(Some(env), 0, slot, value),
+                    }
+                }
+                Some(Bound::Slot(_, SlotKind::SelfName)) => {
                     let name = self.key_text(key);
                     self.assign_immutable(strict, &name)
                 }
@@ -623,7 +783,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// The text of the String key `key`, for a message.
-    fn key_text(&mut self, key: Key) -> String {
+    pub(crate) fn key_text(&mut self, key: Key) -> String {
         match key {
             Key::Index(index) => index.to_string(),
             Key::String(string) => self
@@ -639,7 +799,7 @@ impl<H: Host> Agent<H> {
 
 #[cfg(test)]
 mod tests {
-    use super::NameReference;
+    use super::{EnvironmentRecord, GlobalBindings, NameReference, RecordNames, SlotNames};
     use crate::host::hooks::test_host::{agent_with_realm, enter};
     use crate::host::outcome::{Abrupt, Termination};
     use crate::object::property::{Key, SMALL};
@@ -647,6 +807,27 @@ mod tests {
 
     fn number(i: u32) -> Value {
         Value::Number(f64::from(i))
+    }
+
+    /// Decision 3, "Lexical bindings", items 2 and 4: the names of the global
+    /// [[DeclarativeRecord]] take no room in a record beside the slot names it had, so every
+    /// record is charged what it was.
+    #[test]
+    fn the_names_of_a_record_take_the_room_they_took() {
+        println!(
+            "Option<SlotNames> {} bytes, Option<RecordNames> {} bytes, EnvironmentRecord {} bytes, \
+             GlobalBindings {} bytes, RealmGlobalEnv {} bytes, a record's arena slot {} bytes",
+            size_of::<Option<SlotNames>>(),
+            size_of::<Option<RecordNames>>(),
+            size_of::<EnvironmentRecord>(),
+            size_of::<GlobalBindings>(),
+            size_of::<super::global::RealmGlobalEnv>(),
+            crate::heap::arena::slot_bytes::<EnvironmentRecord>()
+        );
+        assert_eq!(
+            size_of::<Option<RecordNames>>(),
+            size_of::<Option<SlotNames>>()
+        );
     }
 
     /// EvalDeclarationInstantiation (`#sec-evaldeclarationinstantiation`, steps 17 and 18) and

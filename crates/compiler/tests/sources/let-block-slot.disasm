@@ -1,0 +1,8 @@
+script locals 1
+  0000 2:11 Number 1
+  0001 2:7 SetLocal 0
+  0002 2:7 Pop
+  0003 2:14 GetLocal 0
+  0004 2:14 StoreCompletion
+  0005 0:0 LoadCompletion
+  0006 0:0 Return

@@ -540,6 +540,46 @@ impl<H: Host> Cx<'_, H> {
         }))
     }
 
+    /// O.[[GetPrototypeOf]]()
+    /// (`#sec-ordinary-object-internal-methods-and-internal-slots-getprototypeof`), the prototype
+    /// handed out. For an object without overrides it runs no code.
+    pub fn get_prototype_of(
+        &mut self,
+        object: ObjectRef,
+    ) -> Result<Completion<Option<ObjectRef>>, HostError> {
+        let agent = &mut *self.agent;
+        agent.alive()?;
+        agent.check_object(object)?;
+        let completion = agent.begin().and_then(|()| agent.get_prototype_of(object));
+        let completion = hand_out_throw(agent, completion);
+        if let Ok(Some(prototype)) = completion {
+            agent.hand_out(Value::Object(prototype));
+        }
+        Ok(completion)
+    }
+
+    /// O.[[SetPrototypeOf]](V) (`#sec-ordinarysetprototypeof`; SetImmutablePrototype,
+    /// `#sec-immutable-prototype-exotic-objects-setprototypeof-v`): whether it was set (false for
+    /// a cycle, a non-extensible object with another prototype, or %Object.prototype%). The walk
+    /// spends one step per object on the new prototype's chain; for an object without overrides
+    /// it runs no code.
+    pub fn set_prototype_of(
+        &mut self,
+        object: ObjectRef,
+        prototype: Option<ObjectRef>,
+    ) -> Result<Completion<bool>, HostError> {
+        let agent = &mut *self.agent;
+        agent.alive()?;
+        agent.check_object(object)?;
+        if let Some(prototype) = prototype {
+            agent.check_object(prototype)?;
+        }
+        let completion = agent
+            .begin()
+            .and_then(|()| agent.set_prototype_of(object, prototype));
+        Ok(hand_out_throw(agent, completion))
+    }
+
     /// Call (`#sec-call`): a value that is not callable throws a `TypeError`. A re-entry when
     /// code runs (decision 14).
     pub fn call(
@@ -751,8 +791,11 @@ impl<H: Host> Cx<'_, H> {
 
     /// ParseScript (`#sec-parse-script`) of `source` in `realm` (decision 8, over scoped
     /// handles): the script as a `ScriptRef` valid until the outermost entry ends, or the parse
-    /// errors as roots of `SyntaxError` objects of `realm`. It runs no code, spends no step and
-    /// reads no interrupt; a run already terminated answers its termination.
+    /// errors as roots of `SyntaxError` objects of `realm`. It runs no code and spends no step; a
+    /// run already terminated answers its termination. It reads the interrupt flag at its start,
+    /// before the source is copied: a set flag is cleared and ends the run in
+    /// `Terminated(Interrupted)`, sticky until the outermost entry ends, and the call answers
+    /// `Parsed::Terminated(Interrupted)`.
     pub fn parse_script(
         &mut self,
         realm: RealmRef,
@@ -762,7 +805,7 @@ impl<H: Host> Cx<'_, H> {
         let agent = &mut *self.agent;
         agent.alive()?;
         agent.host_realm(realm.handle).map_err(host_error)?;
-        if let Err(abrupt) = agent.running() {
+        if let Err(abrupt) = agent.running().and_then(|()| agent.check_interrupt()) {
             return Ok(Parsed::Terminated(crate::script::parse_termination(abrupt)));
         }
         Ok(

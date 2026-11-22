@@ -565,7 +565,8 @@ fn parse_in(
             return Err(TargetError::unsupported(
                 format!("`swell.host.ParseScript` that ends in Terminated({termination:?})"),
                 "the model has no outcome for it: an engine fault while parsing is `UNMAPPED:` \
-                 (HOST-71), and a parse spends no step and reads no interrupt",
+                 (HOST-71), and a parse ended by the interrupt flag at its start (HOST-166) has \
+                 no outcome of ParseScript",
             ));
         }
         Ok(Parsed::Errors(errors)) => errors,

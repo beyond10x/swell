@@ -1,0 +1,14 @@
+script locals 0
+  lexical let "a" const "b"
+  0000 2:9 Number 1
+  0001 2:5 InitGlobal "a"
+  0002 2:5 Pop
+  0003 3:11 GetGlobal "a"
+  0004 3:7 InitGlobal "b"
+  0005 3:7 Pop
+  0006 4:1 ResolveGlobal "a"
+  0007 4:5 GetGlobal "b"
+  0008 4:1 PutGlobalRef "a"
+  0009 4:1 StoreCompletion
+  0010 0:0 LoadCompletion
+  0011 0:0 Return

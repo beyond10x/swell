@@ -12,7 +12,8 @@
 //! object literals, the `with` statement with the names its body looks up at run time, and the
 //! arguments object of a function (`docs/design/engine.md`, decision 3, "Names"), the direct
 //! `eval` call and eval code ([`compile_eval`]), whose names are looked up as the same rule
-//! says. A regular
+//! says. Slice 6 adds the `let` and `const` declarations, with the scopes, the uninitialized
+//! state and the per-iteration bindings of decision 3, "Lexical bindings". A regular
 //! expression literal compiles to the `SyntaxError` the design gives
 //! it before slice 5 ([`swell_syntax::REGEXP_REFUSAL`]). Slots and environments are assigned by
 //! `resolve.rs`; `disasm.rs` writes a [`Code`] as text.
@@ -39,7 +40,9 @@ use std::fmt;
 use swell_syntax::Script;
 use swell_syntax::ast::{Ast, ExprId, Span, StmtId};
 
-use crate::bytecode::{Code, Handler, HandlerKind, Instruction, TAG_FIRST_JUMP, TAG_RETURN};
+use crate::bytecode::{
+    Code, Handler, HandlerKind, Instruction, LexicalName, SlotName, TAG_FIRST_JUMP, TAG_RETURN,
+};
 use crate::resolve::{Binding, Resolution, Site};
 
 /// Why a script did not compile.
@@ -117,18 +120,49 @@ fn compile(script: &Script, eval_code: bool) -> Result<Code, CompileError> {
         }
     }
     let function_declarations = script.scope.functions.iter().map(|f| f.0).collect();
+    // The lexical names of the top level: the global ones of a script, or those of eval code
+    // with their slots and the names of the slots of its record.
+    let mut lexical = Vec::new();
+    if eval_code {
+        for (name, constant, slot) in &resolution.eval_lexical {
+            lexical.push(LexicalName {
+                name: constants.string_str(name)?,
+                constant: *constant,
+                slot: Some(*slot),
+            });
+        }
+    } else {
+        for l in &script.scope.lexical {
+            lexical.push(LexicalName {
+                name: constants.string_str(&l.name.name)?,
+                constant: l.constant,
+                slot: None,
+            });
+        }
+    }
+    let mut scopes = body.scopes;
+    let eval_scope = if resolution.eval_env.is_empty() {
+        None
+    } else {
+        let index =
+            u32::try_from(scopes.len()).map_err(|_| CompileError::TooMany("environments"))?;
+        scopes.push(statement::slot_names(&mut constants, &resolution.eval_env)?);
+        Some(index)
+    };
     Ok(Code {
         strict: script.strict,
         instructions: body.instructions,
         positions: body.positions,
         handlers: body.handlers,
         locals: resolution.script_locals,
-        scopes: body.scopes,
+        scopes,
         strings: constants.strings,
         numbers: constants.numbers,
         functions,
         var_names,
         function_declarations,
+        lexical,
+        eval_scope,
     })
 }
 
@@ -316,8 +350,8 @@ pub(crate) struct Compiler<'a> {
     tasks: Vec<Task>,
     /// The optional chains being compiled, innermost last.
     chains: Vec<Chain>,
-    /// The names of the slots of each environment `PushNamedEnv` makes, as `strings` indices.
-    pub(crate) scopes: Vec<Vec<u32>>,
+    /// The names of the slots of each environment `PushNamedEnv` and `PushLexicalEnv` make.
+    pub(crate) scopes: Vec<Vec<SlotName>>,
 }
 
 /// The finished code of one template.
@@ -325,7 +359,7 @@ pub(crate) struct Body {
     pub instructions: Vec<Instruction>,
     pub positions: Vec<Span>,
     pub handlers: Vec<Handler>,
-    pub scopes: Vec<Vec<u32>>,
+    pub scopes: Vec<Vec<SlotName>>,
 }
 
 pub(crate) fn malformed(what: &str) -> CompileError {

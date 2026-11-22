@@ -151,9 +151,40 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 - `slot task check` is the one gate. `task --list` names every task; each task's `summary`
   says what it reads and what makes it fail.
-- Before `main` moves, the gate is run on the wave branch once more as the forge's runner runs
-  it: `CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0 RUSTC_WRAPPER=""
-  slot task check`. The repository's `.cargo/config.toml` sets the dev profile's debug
+- Before `main` moves, the gate is run on the wave branch once as the forge's runner runs it:
+  `slot --timeout 1h task check-runner` (`taskfiles/forge.yml`). It sets the runner's
+  variables (`GATE_RUNNER_ENV`: `CI`, `GITHUB_ACTIONS`, `CARGO_TERM_COLOR`, `CARGO_INCREMENTAL=0`)
+  and keeps the host's compile cache: `RUSTC_WRAPPER` is never set empty. `forge-check`, a
+  step of `check`, fails when rustc is not the channel `rust-toolchain.toml` pins (1.99.1), when
+  a workflow names a compiler, or when `GATE_RUNNER_ENV` differs from the variables of
+  `.github/workflows/check.yml`. A forge run that goes red after a green local gate is fixed
+  together with the change that makes the local gate catch it.
+- Tests run under cargo-nextest (`.config/nextest.toml`): a test is terminated at 60 s and
+  counts as failed, and each test runs in a process of its own, so a `static` shares nothing
+  between tests. The gate prints `gate-time <step> <seconds>` after each test step and
+  `gate-time test-steps <sum> of 120, cpu <s>, load <l> on <n> cores`; it fails when the sum
+  of wall time is over 120 s. When that line is the only red line and its load is above its
+  core count, see "How the work is run": the forge's run judges.
+- The gate does not run test262 in full. `test262-check` compares a digest of the run's
+  sources (`crates/*/src`, the manifests and the lock file, `.cargo/config.toml`, the
+  toolchain file, `taskfiles/test262.yml`, the files of `conformance/test262/` the run reads)
+  with `conformance/test262/expected.digest`. A change of a source runs the full run
+  (`slot --timeout 30m task test262-expected`), which writes `expected.txt` and the digest;
+  the lane `slow` (`task slow`, `.github/workflows/slow.yml`) makes the full run on the forge
+  and compares bytes. A release waits for a green lane `slow` on its commit.
+- A heavy test has a gate count and a full count: `SWELL_FULL_COUNTS=1` gives the full one,
+  and the lane `slow` (task `slow-tests`) runs every `crates/*/tests/*.rs` that reads the
+  variable at its full count in both collection modes.
+- On the forge a change is classified by `taskfiles/classify-changes.sh` from
+  `.github/planning-paths.txt` (lines `prose`, `site`, `code`; a path no line matches is
+  code): `planning-only` runs `python-check` alone, `site-only` runs `python-check` and
+  `site-data-check`, `code` runs `task check`. The ruleset of the repository is the
+  operator's; a change of the path list is code.
+- `website/data/status.json` is written by `task site-data` from the gate's committed files;
+  `site-data-check`, a step of `check`, fails when it differs from its regeneration. A commit
+  that changes `expected.txt`, `slices-delivered.txt`, `requirements.txt`, `moves.tsv`, a
+  crate version or section 12 of the design regenerates it (`slot --local task site-data`).
+- The repository's `.cargo/config.toml` sets the dev profile's debug
   information as the forge builds it, whatever a user's own cargo configuration says: in a
   debug build with line tables only the frames are about 5 % smaller, and a stack test passed
   here and aborted there twice (wave 3 of slice 1, wave 1 of slice 2; measured in the second:
@@ -181,7 +212,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 - Task facts, measured in wave 1 (Task 3.54):
   - Task takes a variable from the environment when none is passed on the command line. A
     gate variable therefore carries a prefix (`GATE_`, `TEST262_`, `UNICODE_DATA_`, `SPEC_`,
-    `HOST_REQ_`, `ESS_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
+    `HOST_REQ_`, `ESS_`, `SITE_DATA_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
     ones that have a value as the gate's first line.
   - A variable is written as `'{{.X | default "..."}}'`: in an included file a plain value
     ignores the command line.

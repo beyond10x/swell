@@ -19,11 +19,14 @@ path sec-date-objects test/built-ins/Date/
 section sec-string-objects
 path sec-string-objects test/built-ins/String/
 omit sec-string-objects unicode-17.0.0 open-item-C
+omit sec-string-objects string-length-limit decision-3
+omit sec-string-objects case-mapping-and-comparison-outside-ascii section-12-slice-5
 section sec-regexp-regular-expression-objects
 path sec-regexp-regular-expression-objects test/built-ins/RegExp/
 omit sec-regexp-regular-expression-objects unicode-17.0.0 open-item-C
 section sec-array-objects
 path sec-array-objects test/built-ins/Array/
+omit sec-array-objects string-length-limit decision-3
 section sec-typedarray-objects
 path sec-typedarray-objects test/built-ins/TypedArray/
 section sec-uint8array
@@ -47,6 +50,7 @@ path sec-atomics-object test/built-ins/Atomics/
 omit sec-atomics-object concurrent-agents open-item-B
 section sec-json-object
 path sec-json-object test/built-ins/JSON/
+omit sec-json-object string-length-limit decision-3
 section sec-weak-ref-objects
 path sec-weak-ref-objects test/built-ins/WeakRef/
 section sec-finalization-registry-objects

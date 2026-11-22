@@ -17,9 +17,11 @@
 //! order and their positions; when the list is full and at least half of it is empty, the next
 //! addition compacts it in place, one step per entry it visits (an amortized constant per
 //! removal), instead of growing it. The map's iteration order is never read: every order
-//! answered comes from the list. [`Properties::keys`] answers the indices ascending: added
-//! ascending (the usual case) they are read in place, otherwise they are sorted and each
-//! comparison of the sort is answered for the caller to charge as a step.
+//! answered comes from the list. OrdinaryOwnPropertyKeys answers the indices ascending: the
+//! list records whether its index keys were added ascending (the usual case), and then they are
+//! read in place; otherwise [`sort_indices`] sorts them by a bottom-up merge sort whose caller
+//! charges n steps before each pass (`object/mod.rs`,
+//! `story:own-keys-charged-before-the-list-exists`).
 //!
 //! `SMALL` is 8, measured with the release runner on scripts that make 100,000 objects of 8
 //! properties and 50,000 of 16 and read every property once (the report of
@@ -206,9 +208,17 @@ pub(crate) struct KeyedList<V> {
     /// `None` is a position a removal left empty; only an indexed list has one.
     entries: Vec<Option<(Key, V)>>,
     index: Option<Box<Index>>,
+    /// Whether every index key was added above the one added before it: one comparison at
+    /// each addition of an index key; a removal or a compaction keeps it.
+    ascending: bool,
+    /// The index key added last.
+    last_index: Option<u32>,
     /// The entries lookups visited, in the counting build of the tests.
     #[cfg(test)]
     visited: std::cell::Cell<u64>,
+    /// The comparisons sorts of its index keys made, in the counting build of the tests.
+    #[cfg(test)]
+    compared: std::cell::Cell<u64>,
 }
 
 impl<V> Default for KeyedList<V> {
@@ -216,8 +226,12 @@ impl<V> Default for KeyedList<V> {
         KeyedList {
             entries: Vec::new(),
             index: None,
+            ascending: true,
+            last_index: None,
             #[cfg(test)]
             visited: std::cell::Cell::new(0),
+            #[cfg(test)]
+            compared: std::cell::Cell::new(0),
         }
     }
 }
@@ -232,6 +246,18 @@ impl<V> KeyedList<V> {
     #[cfg(test)]
     pub(crate) fn visited(&self) -> u64 {
         self.visited.get()
+    }
+
+    /// The comparisons sorts of the index keys made so far.
+    #[cfg(test)]
+    pub(crate) fn compared(&self) -> u64 {
+        self.compared.get()
+    }
+
+    /// Count `n` comparisons a sort of the index keys made, in the counting build.
+    #[cfg(test)]
+    pub(crate) fn count_compared(&self, n: u64) {
+        self.compared.set(self.compared.get().saturating_add(n));
     }
 
     /// Count `n` entries a lookup visited, in the counting build.
@@ -445,6 +471,12 @@ impl<V> KeyedList<V> {
         if let Some(index) = &mut self.index {
             index.map.insert(key, position)?;
         }
+        if let Key::Index(added) = key {
+            if self.last_index.is_some_and(|last| added < last) {
+                self.ascending = false;
+            }
+            self.last_index = Some(added);
+        }
         self.entries.push(Some((key, value)));
         Ok(())
     }
@@ -474,52 +506,94 @@ fn index_bytes(capacity: usize) -> u64 {
     to_u64(size_of::<Index>()).saturating_add(KeyedMap::<Key, u32>::table_bytes_for(capacity))
 }
 
-/// Sort `indices` ascending and answer the comparisons the sort made: none when they are
-/// ascending already, as indices added in order are.
-pub(crate) fn sort_indices(indices: &mut [u32]) -> u64 {
-    if indices.is_sorted() {
-        return 0;
+/// Sort `indices` ascending by a bottom-up merge sort through `buffer`, as long
+/// (`docs/design/engine.md`, "The step budget"): each pass merges runs of `width` from one
+/// into the other, which then change places, so the sorted indices end in `indices`. Before
+/// each pass `before_pass` is asked with the length, the most comparisons a pass makes; an
+/// error ends the sort. `compared` counts the comparisons made.
+pub(crate) fn sort_indices<E>(
+    indices: &mut Vec<u32>,
+    buffer: &mut Vec<u32>,
+    compared: &mut u64,
+    mut before_pass: impl FnMut(u64) -> Result<(), E>,
+) -> Result<(), E> {
+    let length = indices.len();
+    let mut width: usize = 1;
+    while width < length {
+        before_pass(to_u64(length))?;
+        let run = width.saturating_mul(2);
+        for (pair, out) in indices.chunks(run).zip(buffer.chunks_mut(run)) {
+            let (left, right) = pair.split_at(width.min(pair.len()));
+            merge(left, right, out, compared);
+        }
+        std::mem::swap(indices, buffer);
+        width = run;
     }
-    let mut comparisons: u64 = 0;
-    indices.sort_unstable_by(|a, b| {
-        comparisons = comparisons.saturating_add(1);
-        a.cmp(b)
-    });
-    comparisons
+    Ok(())
+}
+
+/// Merge the ascending runs `left` and `right` into `out`, as long as both, counting each
+/// comparison in `compared`.
+fn merge(left: &[u32], right: &[u32], out: &mut [u32], compared: &mut u64) {
+    let mut left = left.iter().copied().peekable();
+    let mut right = right.iter().copied().peekable();
+    for slot in out {
+        let next = match (left.peek(), right.peek()) {
+            (Some(&a), Some(&b)) => {
+                *compared = compared.saturating_add(1);
+                if b < a { right.next() } else { left.next() }
+            }
+            (Some(_), None) => left.next(),
+            (None, _) => right.next(),
+        };
+        if let Some(value) = next {
+            *slot = value;
+        }
+    }
 }
 
 /// The own properties of an object, in creation order.
 pub(crate) type Properties = KeyedList<Property>;
 
 impl KeyedList<Property> {
-    /// The keys in the order of OrdinaryOwnPropertyKeys (`#sec-ordinaryownpropertykeys`): the
-    /// array indices ascending, then the Strings, then the Symbols, each in creation order;
-    /// with the comparisons the sort of the indices made, which the caller charges as steps.
-    pub(crate) fn keys(&self) -> (Vec<Key>, u64) {
-        let mut indices = self.indices();
-        let comparisons = sort_indices(&mut indices);
-        let mut keys: Vec<Key> = indices.into_iter().map(Key::Index).collect();
-        keys.extend(
-            self.iter()
-                .filter(|(key, _)| matches!(key, Key::String(_)))
-                .map(|(key, _)| *key),
-        );
-        keys.extend(
-            self.iter()
-                .filter(|(key, _)| matches!(key, Key::Symbol(_)))
-                .map(|(key, _)| *key),
-        );
-        (keys, comparisons)
+    /// The array indices of the list, in creation order.
+    pub(crate) fn listed_indices(&self) -> impl Iterator<Item = u32> + '_ {
+        self.iter().filter_map(|(key, _)| match key {
+            Key::Index(index) => Some(*index),
+            _ => None,
+        })
     }
 
-    /// The array indices of the list, in creation order.
-    pub(crate) fn indices(&self) -> Vec<u32> {
-        self.iter()
-            .filter_map(|(key, _)| match key {
-                Key::Index(index) => Some(*index),
-                _ => None,
-            })
-            .collect()
+    /// The keys that are not array indices, in the order of OrdinaryOwnPropertyKeys
+    /// (`#sec-ordinaryownpropertykeys`): the Strings, then the Symbols, each in creation order.
+    pub(crate) fn names(&self) -> impl Iterator<Item = Key> + '_ {
+        let strings = self
+            .iter()
+            .filter(|(key, _)| matches!(key, Key::String(_)))
+            .map(|(key, _)| *key);
+        let symbols = self
+            .iter()
+            .filter(|(key, _)| matches!(key, Key::Symbol(_)))
+            .map(|(key, _)| *key);
+        strings.chain(symbols)
+    }
+
+    /// `None` when the array indices of the list are ascending in creation order, as
+    /// OrdinaryOwnPropertyKeys answers them: added ascending, which the list records, or found
+    /// so by a walk of the list. Otherwise how many there are, for a sort.
+    pub(crate) fn unsorted_index_count(&self) -> Option<usize> {
+        if self.ascending {
+            return None;
+        }
+        let (mut count, mut last, mut sorted) = (0, None, true);
+        for index in self.listed_indices() {
+            if last.is_some_and(|last| index < last) {
+                sorted = false;
+            }
+            last = Some(index);
+            count += 1;
+        }
+        (!sorted).then_some(count)
     }
 
     /// Every key and value the list holds.
@@ -644,7 +718,7 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            agent.own_property_keys(object).unwrap(),
+            agent.own_property_keys(object).unwrap().keys,
             expected(&indices, &strings)
         );
 
@@ -658,7 +732,7 @@ mod tests {
             assert_eq!(agent.internal_delete(object, key), Ok(true));
         }
         assert_eq!(
-            agent.own_property_keys(object).unwrap(),
+            agent.own_property_keys(object).unwrap().keys,
             expected(&indices, &strings)
         );
         for &key in &removed {
@@ -689,7 +763,7 @@ mod tests {
             }
         }
         assert_eq!(
-            agent.own_property_keys(object).unwrap(),
+            agent.own_property_keys(object).unwrap().keys,
             expected(&indices, &strings)
         );
         for &key in &removed {
@@ -763,14 +837,14 @@ mod tests {
         );
         assert_eq!(agent.steps - steps, 16, "the compaction visits 16 entries");
         assert_eq!(agent.heap.bytes(), bytes);
-        let keys = agent.own_property_keys(object).unwrap();
+        let keys = agent.own_property_keys(object).unwrap().keys;
         let expected: Vec<Key> = (1..16u32).step_by(2).chain([99]).map(Key::Index).collect();
         assert_eq!(keys, expected);
     }
 
     /// OrdinaryOwnPropertyKeys (`#sec-ordinaryownpropertykeys`) answers the indices ascending:
     /// added ascending they are read as they are, a step per key; added in another order they
-    /// are sorted, and each comparison of the sort is a step more.
+    /// are sorted, and each pass of the sort charges a step per key more.
     #[test]
     fn a_sort_of_index_keys_charges_its_comparisons() {
         let (mut agent, _realm) = agent();
@@ -786,12 +860,113 @@ mod tests {
         }
         let expected: Vec<Key> = (0..20u32).map(Key::Index).collect();
         let steps = agent.steps;
-        assert_eq!(agent.own_property_keys(ascending).unwrap(), expected);
+        assert_eq!(agent.own_property_keys(ascending).unwrap().keys, expected);
         assert_eq!(agent.steps - steps, 20);
         let steps = agent.steps;
-        assert_eq!(agent.own_property_keys(descending).unwrap(), expected);
+        assert_eq!(agent.own_property_keys(descending).unwrap().keys, expected);
         let sorted = agent.steps - steps;
         assert!(sorted > 20, "the sort was not charged: {sorted} steps");
+    }
+
+    /// `docs/design/engine.md`, "The step budget": a sort of n index keys added
+    /// out of order charges n steps before each pass, so the step budget is read every n
+    /// comparisons. n = 65,536 keys added in the order i × 40,503 mod 65,536 (a permutation,
+    /// 40,503 being odd), with 2n + 10 steps left: the n steps of the keys and one pass fit, a
+    /// second pass does not. At most n comparisons happen before `Terminated(StepBudget)`.
+    #[test]
+    fn index_keys_added_out_of_order_charge_n_steps_before_each_pass() {
+        const N: u32 = 65_536;
+        let (mut agent, _realm) = agent();
+        let object = plain(&mut agent);
+        for i in 0..N {
+            let index = i.wrapping_mul(40_503) % N;
+            assert_eq!(
+                agent.create_data_property(object, Key::Index(index), Value::Null),
+                Ok(true)
+            );
+        }
+        let compared =
+            |agent: &mut Agent<NoHooks>| agent.engine_object(object).unwrap().properties.compared();
+        let before = compared(&mut agent);
+        agent.steps = 0;
+        agent.limits.steps_per_entry = 2 * u64::from(N) + 10;
+        let answer = agent.own_property_keys(object).map(|keys| keys.len());
+        let made = compared(&mut agent) - before;
+        assert_eq!(answer, Err(Abrupt::Terminated(Termination::StepBudget)));
+        assert!(
+            made <= u64::from(N),
+            "{made} comparisons before the step budget ended the run, n = {N}"
+        );
+    }
+
+    /// OrdinaryOwnPropertyKeys (`#sec-ordinaryownpropertykeys`), whatever order the keys were
+    /// added in: 64 fixed permutations of the index keys 0 to 999 (the first ascending, the
+    /// second descending, the others from a generator seeded here), added with String and
+    /// Symbol keys between them, come out as the indices ascending, then the Strings, then the
+    /// Symbols, each in the order they were added.
+    #[test]
+    fn keys_in_any_order_come_out_in_the_order_of_the_clause() {
+        const N: usize = 1_000;
+        let (mut agent, _realm) = agent();
+        let strings: Vec<Key> = (0..10)
+            .map(|i| agent.name_key(&format!("s{i}")).unwrap())
+            .collect();
+        let symbols: Vec<Key> = (0..3)
+            .map(|_| Key::Symbol(agent.heap.new_symbol(None).unwrap()))
+            .collect();
+        // xorshift64, seeded here: the same permutations on every run.
+        let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for permutation in 0..64 {
+            let mut indices: Vec<u32> = (0..N as u32).collect();
+            match permutation {
+                0 => {}
+                1 => indices.reverse(),
+                _ => {
+                    for i in (1..N).rev() {
+                        let j = usize::try_from(next() % (i as u64 + 1)).unwrap();
+                        indices.swap(i, j);
+                    }
+                }
+            }
+            let object = plain(&mut agent);
+            let (mut added_strings, mut added_symbols) = (Vec::new(), Vec::new());
+            for (position, &index) in indices.iter().enumerate() {
+                let mut keys = vec![Key::Index(index)];
+                if position % 100 == 50 {
+                    keys.push(strings[(position / 100 + permutation) % strings.len()]);
+                }
+                if position % 400 == 7 {
+                    keys.push(symbols[position / 400]);
+                }
+                for key in keys {
+                    if agent.get_own_property(object, key).unwrap().is_some() {
+                        continue;
+                    }
+                    assert_eq!(
+                        agent.create_data_property(object, key, Value::Null),
+                        Ok(true)
+                    );
+                    match key {
+                        Key::String(_) => added_strings.push(key),
+                        Key::Symbol(_) => added_symbols.push(key),
+                        Key::Index(_) => {}
+                    }
+                }
+            }
+            let expected: Vec<Key> = (0..N as u32)
+                .map(Key::Index)
+                .chain(added_strings)
+                .chain(added_symbols)
+                .collect();
+            let keys = agent.own_property_keys(object).unwrap().to_vec();
+            assert_eq!(keys, expected, "permutation {permutation}");
+        }
     }
 
     /// `#sec-object-type`: an array index is a canonical integer from 0 to 2^32 - 2.

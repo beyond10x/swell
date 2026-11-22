@@ -4,7 +4,8 @@ import Link from '@docusaurus/Link';
 import {Feature, FeatureGrid, FlowStep, Flow, ProductHero, ProductSection, StatusStrip} from '@beyond10x/docs-system/product';
 import type {ProductStatusItem} from '@beyond10x/docs-system/product-data';
 import EngineFigure from '../components/EngineFigure';
-import {count, deliverySlices, nextSlice, status} from '../data/status';
+import {HarnessException} from '../components/Numbers';
+import {count, deliverySlices, nextSlice, passWords, status} from '../data/status';
 
 /**
  * The landing page: its own page so that the hero's aside is the engine figure and every number
@@ -21,7 +22,7 @@ export default function Home(): ReactNode {
   const items: ProductStatusItem[] = deliverySlices.map((s) => ({
     label: `${Number(s.slice)} · ${s.name}`,
     status: s.delivered ? 'shipped' : 'planned',
-    detail: s.delivered ? `${count(s.cases)} cases, every one passes` : `${count(s.passed)} of ${count(s.cases)} cases pass`,
+    detail: passWords(s),
     href: '/docs/roadmap',
   }));
   return (
@@ -122,7 +123,8 @@ export default function Home(): ReactNode {
             title={<>{count(delivered)} of {count(slices)} delivery slices are delivered.</>}
             lede={
               <>
-                A delivered slice passes every test262 case it holds. The rest are counted already: {count(t.passed)} of the{' '}
+                A delivered slice passes the test262 cases it holds, but for an exception the design states. The rest are
+                counted already: {count(t.passed)} of the{' '}
                 {count(t.run)} cases that run pass today.{nextSlice ? <> Next is slice {Number(nextSlice.slice)}, <code>{nextSlice.name}</code>.</> : null}
               </>
             }
@@ -130,9 +132,10 @@ export default function Home(): ReactNode {
             <StatusStrip
               items={items}
               label="Delivery slices"
-              groupLabels={{shipped: 'Delivered · every case of the slice passes', planned: 'Not delivered yet · counted already'}}
+              groupLabels={{shipped: 'Delivered · each case passes or is an exception the design states', planned: 'Not delivered yet · counted already'}}
               source="conformance/test262/expected.txt and conformance/slices-delivered.txt, through task site-data"
             />
+            <HarnessException />
           </ProductSection>
 
           <ProductSection

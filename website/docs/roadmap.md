@@ -7,7 +7,7 @@ import {Num, S, Delivered, Pending} from '@site/src/components/Numbers';
 
 # Roadmap
 
-swell is delivered in slices, from the [design, section 12](https://github.com/beyond10x/swell/blob/main/docs/design/engine.md#12-delivery-order). A slice ends with the gate green and its test262 cases passing. <Num at="delivered_count" /> of the <Num at="delivery_slices" /> delivery slices are delivered.
+swell is delivered in slices, from the [design, section 12](https://github.com/beyond10x/swell/blob/main/docs/design/engine.md#12-delivery-order). A slice ends with the gate green and its test262 cases passing, but for an exception the design states and the [status](status.md#by-delivery-slice) page names. <Num at="delivered_count" /> of the <Num at="delivery_slices" /> delivery slices are delivered.
 
 A case counts in the first slice after which it can pass, by its directory, its features and its flags. Cases that name no feature are counted by directory, so the counts say when a case can first pass, not that it will.
 

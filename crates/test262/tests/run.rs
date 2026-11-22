@@ -604,7 +604,7 @@ fn a_refusal_inside_eval_script_fails_the_run() -> TestResult {
         // the mark of evalScript.
         assert_eq!(
             field(line, 6),
-            "evalScript: refused: let declaration is not supported before slice 6 (1:1); \
+            "evalScript: refused: HTML-like comment is not supported before slice 18 (1:1); \
              counted refusal: 1 refusal(s)",
             "{line:?}"
         );

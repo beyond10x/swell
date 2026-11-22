@@ -18,7 +18,7 @@ HOST-17 test swell::limits_scripts::host_17_deepest_reentry_parses_at_full_nesti
 HOST-18 test swell::scripts::host_18_100000_brackets_are_one_parse_error
 HOST-19 test swell::scripts::host_19_zero_parser_nesting_refuses_any_source
 HOST-20 test swell::budgets::host_20_doubling_a_string_past_string_length_throws
-HOST-21 pending slice 3
+HOST-21 test swell::builtins_string_transform::host_21_repeat_at_and_past_string_length
 HOST-22 test swell::budgets::host_22_zero_string_length_throws_on_concatenation
 HOST-23 pending slice 12
 HOST-24 pending slice 12
@@ -117,7 +117,7 @@ HOST-116 test swell::eval::host_116_eval_asks_the_host_before_parsing
 HOST-117 test swell::dynamic_function::host_117_function_asks_the_host_with_its_parts
 HOST-118 test swell::eval::host_118_eval_of_an_object_asks_host_get_code_for_eval
 HOST-119 pending slice 8
-HOST-120 pending slice 3
+HOST-120 test swell::builtins_function_source::host_120_no_source_text_gives_a_native_function_string
 HOST-121 pending slice 10
 HOST-122 pending slice 13
 HOST-123 pending slice 14
@@ -152,7 +152,7 @@ HOST-151 pending slice 14
 HOST-152 test swell::eval_stack::host_152_deepest_reentry_evals_at_full_nesting
 HOST-153 pending slice 11
 HOST-154 pending slice 14
-HOST-155 pending slice 3
+HOST-155 test swell::builtins_global_this::host_155_global_this_is_the_setup_this_object
 HOST-156 pending slice 6
 HOST-157 pending slice 11
 HOST-158 pending slice 11
@@ -162,10 +162,26 @@ HOST-161 test swell::lib::realm::tests::host_161_the_entry_names_the_current_rea
 HOST-162 test swell::eval::host_162_a_stale_or_foreign_handle_from_either_hook_faults_the_agent
 HOST-163 test swell::eval_stack::host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting
 HOST-164 test swell::eval::host_164_refusals_counts_every_refusal_caught_or_not
-HOST-165 pending slice 3
-HOST-166 pending slice 6
-HOST-167 pending slice 6
+HOST-165 test swell::builtins_string_transform::host_165_case_methods_and_locale_compare_refuse_a_unit_outside_ascii
+HOST-166 test swell::interrupt::host_166_a_pending_interrupt_ends_parse_script_before_the_parse
+HOST-167 test swell::interrupt::host_167_an_interrupt_set_in_a_host_function_ends_its_cx_parse_script
 HOST-168 pending slice 6
 HOST-169 pending slice 6
 HOST-170 pending slice 6
 HOST-171 test swell::collect::host_171_live_bytes_reads_the_records_and_heap_bytes_the_budget
+HOST-172 pending slice 6
+HOST-173 pending slice 6
+HOST-174 pending slice 6
+HOST-175 pending slice 6
+HOST-176 pending slice 6
+HOST-177 pending slice 6
+HOST-178 pending slice 6
+HOST-179 pending slice 6
+HOST-180 test swell::calls::host_180_an_interface_object_has_its_parent_as_prototype
+HOST-181 pending slice 6
+HOST-182 pending slice 6
+HOST-183 pending slice 6
+HOST-184 pending slice 6
+HOST-185 pending slice 6
+HOST-186 pending slice 6
+HOST-187 pending slice 6

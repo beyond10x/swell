@@ -1,0 +1,19 @@
+script locals 0
+  var "f"
+  0000 2:1 PushLexicalEnv 0 "a"
+  0001 2:11 Number 1
+  0002 2:7 SetEnv 0 0
+  0003 2:7 Pop
+  0004 2:18 ResolveGlobal "f"
+  0005 2:22 Closure 0
+  0006 2:18 PutGlobalRef "f"
+  0007 2:18 Pop
+  0008 2:1 PopEnv
+  0009 0:0 LoadCompletion
+  0010 0:0 Return
+
+function 0 expression "f" length 0 locals 0
+  0000 2:43 GetEnvChecked 0 0
+  0001 2:36 Return
+  0002 2:22 Undefined
+  0003 2:22 Return

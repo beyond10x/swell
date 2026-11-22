@@ -4,10 +4,12 @@
 //! # The machine the instructions run on
 //!
 //! A frame has an instruction index, an operand stack, `locals` slots (each starts as
-//! `undefined`), the running execution context's LexicalEnvironment (an Environment Record,
-//! `#sec-environment-records`), its handler table and, for a script, a completion value register
-//! that starts as `undefined`. The instructions of one template run in that frame; a jump names
-//! the index of an instruction of the same template.
+//! `undefined`; a slot of a `let` or `const` binding is uninitialized from the entry of its
+//! scope to its declaration, [`Instruction::Uninitialize`], as are the slots of the records
+//! [`Instruction::PushLexicalEnv`] makes), the running execution context's LexicalEnvironment
+//! (an Environment Record, `#sec-environment-records`), its handler table and, for a script, a
+//! completion value register that starts as `undefined`. The instructions of one template run
+//! in that frame; a jump names the index of an instruction of the same template.
 //!
 //! # Operands
 //!
@@ -332,6 +334,66 @@ pub enum Instruction {
     /// `[v] -> []`: stores into the completion value register of a script.
     StoreCompletion,
 
+    // ---- lexical bindings (`let` and `const`) --------------------------------------------------
+    /// Local slot `n` becomes uninitialized: the entry of the scope of a `let` or `const`
+    /// binding that some access checks (`#sec-blockdeclarationinstantiation`).
+    Uninitialize(u32),
+    /// A new declarative environment of one uninitialized slot per name of `scopes[t]` of the
+    /// running code, which names its slots, whose outer is the LexicalEnvironment, becomes the
+    /// LexicalEnvironment: BlockDeclarationInstantiation of a block, a case block, a `for` or
+    /// for-in head or a function body whose bindings a closure or a lookup by name reaches. It
+    /// counts as an environment of [`Instruction::PopEnv`] and of a handler's `envs`.
+    PushLexicalEnv(u32),
+    /// CreatePerIterationEnvironment (`#sec-createperiterationenvironment`): a new declarative
+    /// environment with the names of the LexicalEnvironment's slots and a copy of their values,
+    /// whose outer is the LexicalEnvironment's outer, replaces the LexicalEnvironment. One step
+    /// per slot copied.
+    CopyEnv,
+    /// `[] -> [v]`: local slot `slot`, a `ReferenceError` naming `strings[name]` when it is
+    /// uninitialized (`#sec-declarative-environment-records-getbindingvalue-n-s`, step 2).
+    GetLocalChecked {
+        slot: u32,
+        name: u32,
+    },
+    /// `[v] -> [v]`: stores into local slot `slot`, a `ReferenceError` naming `strings[name]`
+    /// when it is uninitialized (`#sec-declarative-environment-records-setmutablebinding-n-v-s`,
+    /// step 3).
+    SetLocalChecked {
+        slot: u32,
+        name: u32,
+    },
+    /// `[] -> [v]`: slot `slot` of the environment `hops` outward, a `ReferenceError` naming the
+    /// slot's name when it is uninitialized.
+    GetEnvChecked {
+        hops: u32,
+        slot: u32,
+    },
+    /// `[v] -> [v]`: stores into slot `slot` of the environment `hops` outward, a
+    /// `ReferenceError` naming the slot's name when it is uninitialized.
+    SetEnvChecked {
+        hops: u32,
+        slot: u32,
+    },
+    /// `[v] -> [v]`: SetMutableBinding of the `const` binding in local slot `slot`, named
+    /// `strings[name]`: a `ReferenceError` when it is uninitialized, otherwise a `TypeError`, in
+    /// any code (`#sec-declarative-environment-records-setmutablebinding-n-v-s`, steps 3 and 5;
+    /// CreateImmutableBinding(N, true)).
+    AssignConstLocal {
+        slot: u32,
+        name: u32,
+    },
+    /// `[v] -> [v]`: the same for the `const` binding in slot `slot` of the environment `hops`
+    /// outward, named by the slot's name.
+    AssignConstEnv {
+        hops: u32,
+        slot: u32,
+    },
+    /// `[v] -> [v]`: InitializeBinding of the lexical binding `strings[k]` of the global
+    /// environment's [[DeclarativeRecord]] (`#sec-declarative-environment-records-initializebinding-n-v`),
+    /// which GlobalDeclarationInstantiation created (step 15): the evaluation of a `let` or
+    /// `const` declaration of a script.
+    InitGlobal(u32),
+
     // ---- templates ------------------------------------------------------------------------
     /// `[v] -> [s]`: ToString (`#sec-tostring`) of a substitution of a template literal
     /// (`#sec-template-literals-runtime-semantics-evaluation`): an object gives ToPrimitive with
@@ -440,7 +502,17 @@ impl Instruction {
             | Instruction::Tag(_)
             | Instruction::EndFinally
             | Instruction::LoadCompletion
-            | Instruction::StoreCompletion => None,
+            | Instruction::StoreCompletion
+            | Instruction::Uninitialize(_)
+            | Instruction::PushLexicalEnv(_)
+            | Instruction::CopyEnv
+            | Instruction::GetLocalChecked { .. }
+            | Instruction::SetLocalChecked { .. }
+            | Instruction::GetEnvChecked { .. }
+            | Instruction::SetEnvChecked { .. }
+            | Instruction::AssignConstLocal { .. }
+            | Instruction::AssignConstEnv { .. }
+            | Instruction::InitGlobal(_) => None,
             Instruction::ToString => None,
         }
     }
@@ -486,6 +558,61 @@ pub struct Handler {
     pub target: u32,
     pub items: u32,
     pub envs: u32,
+}
+
+/// The name of a slot of an environment the code makes ([`Instruction::PushNamedEnv`],
+/// [`Instruction::PushLexicalEnv`], the record of eval code): a `strings` index, and whether the
+/// binding is a `let` or `const` one, and `const`. Four bytes, as the index alone was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SlotName(u32);
+
+impl SlotName {
+    const LEXICAL: u32 = 1 << 31;
+    const CONSTANT: u32 = 1 << 30;
+    const INDEX: u32 = SlotName::CONSTANT - 1;
+
+    /// The slot name of a `var` binding or a `catch` parameter named `strings[name]`; `None`
+    /// when the index needs the bits of the marks.
+    pub fn plain(name: u32) -> Option<SlotName> {
+        (name <= SlotName::INDEX).then_some(SlotName(name))
+    }
+
+    /// The slot name of a `let` binding, or with `constant` a `const` one.
+    pub fn lexical(name: u32, constant: bool) -> Option<SlotName> {
+        let marks = if constant {
+            SlotName::LEXICAL | SlotName::CONSTANT
+        } else {
+            SlotName::LEXICAL
+        };
+        (name <= SlotName::INDEX).then_some(SlotName(name | marks))
+    }
+
+    /// The `strings` index of the name.
+    pub fn name(self) -> u32 {
+        self.0 & SlotName::INDEX
+    }
+
+    /// Whether the binding is a `let` or `const` one.
+    pub fn is_lexical(self) -> bool {
+        self.0 & SlotName::LEXICAL != 0
+    }
+
+    /// Whether the binding is a `const` one: immutable and strict.
+    pub fn is_constant(self) -> bool {
+        self.0 & SlotName::CONSTANT != 0
+    }
+}
+
+/// A `let` or `const` name of the top level of a script or of eval code
+/// ([`Code::lexical`]): its `strings` index, whether it is `const`, and, of eval code, where it
+/// lives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LexicalName {
+    pub name: u32,
+    pub constant: bool,
+    /// `None` for a script, whose lexical names are bindings of the global environment's
+    /// [[DeclarativeRecord]]; for eval code a local slot or a slot of its record.
+    pub slot: Option<Slot>,
 }
 
 /// Where a parameter lives: a local slot of the frame, or a slot of the function environment
@@ -538,9 +665,9 @@ pub struct FunctionTemplate {
     pub captured: Vec<u32>,
     /// The arguments object a call makes, if any.
     pub arguments: Option<ArgumentsObject>,
-    /// The names of the slots of each environment [`Instruction::PushNamedEnv`] makes, as
-    /// `strings` indices.
-    pub scopes: Vec<Vec<u32>>,
+    /// The names of the slots of each environment [`Instruction::PushNamedEnv`] and
+    /// [`Instruction::PushLexicalEnv`] make.
+    pub scopes: Vec<Vec<SlotName>>,
     /// A named function expression whose own name is referenced: [`Instruction::Closure`] gives
     /// it the environment holding that name.
     pub self_binding: bool,
@@ -572,9 +699,10 @@ pub struct Code {
     pub positions: Vec<Span>,
     pub handlers: Vec<Handler>,
     pub locals: u32,
-    /// The names of the slots of each environment [`Instruction::PushNamedEnv`] makes in the
-    /// script's own code, as `strings` indices.
-    pub scopes: Vec<Vec<u32>>,
+    /// The names of the slots of each environment [`Instruction::PushNamedEnv`] and
+    /// [`Instruction::PushLexicalEnv`] make in the script's own code, and of the record of eval
+    /// code ([`Code::eval_scope`]).
+    pub scopes: Vec<Vec<SlotName>>,
     /// String constants as UTF-16 code units, each once.
     pub strings: Vec<Vec<u16>>,
     /// Number constants, each bit pattern once.
@@ -588,4 +716,13 @@ pub struct Code {
     /// The `functionsToInitialize` of GlobalDeclarationInstantiation, step 8: the last function
     /// declaration of each name, in source order, as `functions` indices.
     pub function_declarations: Vec<u32>,
+    /// The LexicallyDeclaredNames of the top level, in source order: for a script the bindings
+    /// GlobalDeclarationInstantiation checks (steps 3 and 4) and creates uninitialized (step 15);
+    /// for eval code those of EvalDeclarationInstantiation (step 16), whose local slots start
+    /// uninitialized.
+    pub lexical: Vec<LexicalName>,
+    /// Of eval code: the `scopes` entry that names the slots of the declarative record
+    /// PerformEval makes for its lexical bindings (`#sec-performeval`, steps 17 to 19), when one
+    /// of them lives there; `None` otherwise.
+    pub eval_scope: Option<u32>,
 }

@@ -7,8 +7,8 @@
 mod support;
 
 use support::host::{
-    TestHost, agent, agent_with, data, get, global, is_error_of, key, limits, object, realm,
-    string, text, thrown,
+    TestHost, agent, agent_with, data, get, get_object, global, is_error_of, key, limits, object,
+    realm, string, text, thrown,
 };
 use support::script::{Outcome as Shown, define_function, eval_text};
 use swell::{
@@ -426,6 +426,9 @@ fn cx_methods_check_their_handles_before_the_sticky_termination() {
                 assert_eq!(cx.to_string(v), Err(error));
                 assert_eq!(cx.to_object(v), Err(error));
                 assert_eq!(cx.to_property_key(v), Err(error));
+                assert_eq!(cx.get_prototype_of(bad), Err(error));
+                assert_eq!(cx.set_prototype_of(bad, None), Err(error));
+                assert_eq!(cx.set_prototype_of(live, Some(bad)), Err(error));
                 assert!(matches!(
                     cx.new_host_object(HostObjectSpec {
                         prototype: Prototype::Object(bad),
@@ -446,6 +449,10 @@ fn cx_methods_check_their_handles_before_the_sticky_termination() {
             // The run stays terminated for the calls whose handles are good.
             assert_eq!(
                 cx.get_property(live, k),
+                Ok(Err(Abrupt::Terminated(Termination::StepBudget)))
+            );
+            assert_eq!(
+                cx.set_prototype_of(live, None),
                 Ok(Err(Abrupt::Terminated(Termination::StepBudget)))
             );
         })
@@ -781,4 +788,233 @@ fn host_107_cx_evaluate_script_returns_its_completion_value() {
         ),
         Shown::Normal("\"41,41,42\"".to_string())
     );
+}
+
+/// HOST-180 (`webidl:interface-object`: "If I inherits from some other interface P, then set
+/// constructorProto to the interface object of P in realm."): a host function `Element` given
+/// the host function `Node` as [[Prototype]] by `cx.set_prototype_of` reads `Node` through
+/// `Object.getPrototypeOf` and `cx.get_prototype_of`, and `Node` keeps `%Function.prototype%`.
+/// The ordinary [[SetPrototypeOf]] (`#sec-ordinarysetprototypeof`) refuses a cycle (step 7.b.i)
+/// and a non-extensible object given another prototype (step 4) with `Ok(Ok(false))`; a stale
+/// handle answers `Err(StaleHandle)`. No call runs script code: getters on
+/// `%Function.prototype%` that count their calls in a script variable stay at 0.
+#[test]
+fn host_180_an_interface_object_has_its_parent_as_prototype() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    define_function(&mut agent, &realm, "Node", 0, plain, true);
+    define_function(&mut agent, &realm, "Element", 0, plain, true);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var count = 0; var sealed = Object.preventExtensions({}); \
+             var names = ['constructor', 'prototype', '__proto__']; \
+             for (var i = 0; i < names.length; i++) { \
+               Object.defineProperty(Function.prototype, names[i], \
+                 { get: function () { count += 1; }, configurable: true }); \
+             } count;"
+        ),
+        Shown::Normal("0".to_string())
+    );
+    let stale = agent
+        .with_cx(&realm, |cx| {
+            cx.new_host_object(HostObjectSpec {
+                prototype: Prototype::Null,
+                brand: Brand(1),
+                data: None,
+            })
+            .unwrap()
+            .unwrap()
+        })
+        .unwrap();
+    assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+
+    let answers = agent
+        .with_cx(&realm, |cx| {
+            let global = object(cx, &global_root);
+            let node = get_object(cx, global, "Node");
+            let element = get_object(cx, global, "Element");
+            let sealed = get_object(cx, global, "sealed");
+            let set = cx.set_prototype_of(element, Some(node));
+            let read = cx.get_prototype_of(element) == Ok(Ok(Some(node)));
+            let cycle = cx.set_prototype_of(node, Some(element));
+            let not_extensible = cx.set_prototype_of(sealed, Some(node));
+            let stale = [
+                cx.set_prototype_of(stale, Some(node)),
+                cx.set_prototype_of(element, Some(stale)),
+                cx.get_prototype_of(stale).map(|_| Ok(true)),
+            ];
+            (set, read, cycle, not_extensible, stale)
+        })
+        .unwrap();
+    assert_eq!(answers.0, Ok(Ok(true)));
+    assert!(answers.1, "get_prototype_of(Element) is not Node");
+    assert_eq!(answers.2, Ok(Ok(false)));
+    assert_eq!(answers.3, Ok(Ok(false)));
+    assert!(
+        answers
+            .4
+            .iter()
+            .all(|answer| *answer == Err(HostError::StaleHandle)),
+        "{:?}",
+        answers.4
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "Object.getPrototypeOf(Element) === Node && \
+             Object.getPrototypeOf(Node) === Function.prototype && \
+             Object.getPrototypeOf(sealed) === Object.prototype;"
+        ),
+        Shown::Normal("true".to_string())
+    );
+    assert_eq!(
+        eval_text(&mut agent, &realm, "count;"),
+        Shown::Normal("0".to_string())
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// [[SetPrototypeOf]] through `cx.set_prototype_of` is the object's internal method: the
+/// ordinary one (`#sec-ordinarysetprototypeof`) answers true for the prototype the object has
+/// (step 2) and false for another on a non-extensible object (step 4);
+/// SetImmutablePrototype of `%Object.prototype%`
+/// (`#sec-immutable-prototype-exotic-objects-setprototypeof-v`) answers false for any value
+/// but its own null. `cx.get_prototype_of` of a host object made with `Prototype::Null` answers
+/// `None`. The walk of step 7 spends one step per object of the new prototype's chain, in the
+/// running entry, and each `with_cx` call begins its entry afresh.
+#[test]
+fn set_prototype_of_follows_the_internal_method() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var fixed = Object.preventExtensions({}); var other = {}; Object.isExtensible(fixed);"
+        ),
+        Shown::Normal("false".to_string())
+    );
+    let answers = agent
+        .with_cx(&realm, |cx| {
+            let global = object(cx, &global_root);
+            let fixed = get_object(cx, global, "fixed");
+            let other = get_object(cx, global, "other");
+            let object_constructor = get_object(cx, global, "Object");
+            let object_prototype = get_object(cx, object_constructor, "prototype");
+            let null_host = cx
+                .new_host_object(HostObjectSpec {
+                    prototype: Prototype::Null,
+                    brand: Brand(2),
+                    data: None,
+                })
+                .unwrap()
+                .unwrap();
+            let fixed_answers = [
+                cx.set_prototype_of(fixed, Some(other)),
+                cx.set_prototype_of(fixed, None),
+                cx.set_prototype_of(fixed, Some(object_prototype)),
+            ];
+            let fixed_kept = cx.get_prototype_of(fixed) == Ok(Ok(Some(object_prototype)));
+            let immutable_answers = [
+                cx.set_prototype_of(object_prototype, Some(other)),
+                cx.set_prototype_of(object_prototype, Some(null_host)),
+                cx.set_prototype_of(object_prototype, None),
+            ];
+            let immutable_kept = cx.get_prototype_of(object_prototype) == Ok(Ok(None));
+            let null_host_read = cx.get_prototype_of(null_host) == Ok(Ok(None));
+            let null_host_set = cx.set_prototype_of(null_host, Some(other));
+            let null_host_moved = cx.get_prototype_of(null_host) == Ok(Ok(Some(other)));
+            (
+                fixed_answers,
+                fixed_kept,
+                immutable_answers,
+                immutable_kept,
+                null_host_read,
+                null_host_set,
+                null_host_moved,
+            )
+        })
+        .unwrap();
+    assert_eq!(answers.0, [Ok(Ok(false)), Ok(Ok(false)), Ok(Ok(true))]);
+    assert!(answers.1, "the non-extensible object's prototype changed");
+    assert_eq!(answers.2, [Ok(Ok(false)), Ok(Ok(false)), Ok(Ok(true))]);
+    assert!(answers.3, "%Object.prototype%'s prototype changed");
+    assert!(
+        answers.4,
+        "a host object made with Prototype::Null has a prototype"
+    );
+    assert_eq!(answers.5, Ok(Ok(true)));
+    assert!(answers.6, "the host object's prototype did not change");
+    assert_eq!(agent.state(), AgentState::Alive);
+
+    // With 2 steps an entry, a new prototype whose chain has 3 objects ends the run before the
+    // prototype is set; one whose chain has 2 objects is set in the next entry.
+    let mut limits = limits();
+    limits.steps_per_entry = 2;
+    let mut agent = agent_with(limits).unwrap();
+    let realm = support::host::realm(&mut agent);
+    // `made[n]` heads a chain of n + 1 objects.
+    let (subject, chain_of_two, chain_of_three, rest) = agent
+        .with_cx(&realm, |cx| {
+            let mut made = Vec::new();
+            let mut prototype = Prototype::Null;
+            for brand in 0..3 {
+                let object = cx
+                    .new_host_object(HostObjectSpec {
+                        prototype,
+                        brand: Brand(brand),
+                        data: None,
+                    })
+                    .unwrap()
+                    .unwrap();
+                made.push(cx.root(Value::Object(object)).unwrap());
+                prototype = Prototype::Object(object);
+            }
+            let subject = cx
+                .new_host_object(HostObjectSpec {
+                    prototype: Prototype::Null,
+                    brand: Brand(9),
+                    data: None,
+                })
+                .unwrap()
+                .unwrap();
+            let subject = cx.root(Value::Object(subject)).unwrap();
+            let chain_of_three = made.remove(2);
+            let chain_of_two = made.remove(1);
+            (subject, chain_of_two, chain_of_three, made)
+        })
+        .unwrap();
+    let too_long = agent
+        .with_cx(&realm, |cx| {
+            let subject = object(cx, &subject);
+            let three = object(cx, &chain_of_three);
+            let answer = cx.set_prototype_of(subject, Some(three));
+            (answer, cx.get_prototype_of(subject))
+        })
+        .unwrap();
+    assert_eq!(
+        too_long.0,
+        Ok(Err(Abrupt::Terminated(Termination::StepBudget)))
+    );
+    assert_eq!(
+        too_long.1,
+        Ok(Err(Abrupt::Terminated(Termination::StepBudget)))
+    );
+    let within = agent
+        .with_cx(&realm, |cx| {
+            let subject = object(cx, &subject);
+            let two = object(cx, &chain_of_two);
+            let answer = cx.set_prototype_of(subject, Some(two));
+            (answer, cx.get_prototype_of(subject) == Ok(Ok(Some(two))))
+        })
+        .unwrap();
+    assert_eq!(within.0, Ok(Ok(true)));
+    assert!(within.1, "the prototype was not set in the next entry");
+    drop(rest);
+    assert_eq!(agent.state(), AgentState::Alive);
 }

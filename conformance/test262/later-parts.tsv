@@ -14,7 +14,6 @@ Object.values	3	builtins-core: Object
 Object.setPrototypeOf	3	builtins-core: Object
 Object.is	3	builtins-core: Object
 Object.hasOwn	3	builtins-core: Object
-Object.fromEntries	3	builtins-core: Object
 Object.getOwnPropertyDescriptors	3	builtins-core: Object
 .isPrototypeOf	3	builtins-core: Object
 .toLocaleString	3	builtins-core: Object
@@ -123,6 +122,8 @@ Math.tanh	4	numbers-and-dates: Math
 Math.trunc	4	numbers-and-dates: Math
 Math.f16round	4	numbers-and-dates: Math
 Math.sumPrecise	4	numbers-and-dates: Math
+getOwnPropertyDescriptor(Math,	4	numbers-and-dates: Math
+Number.prototype.toLocaleString	4	numbers-and-dates: Number
 RegExp	5	regexp: RegExp
 .match	5	regexp: the string methods that use RegExp
 .matchAll	5	regexp: the string methods that use RegExp
@@ -131,6 +132,8 @@ RegExp	5	regexp: RegExp
 .search	5	regexp: the string methods that use RegExp
 .split	5	regexp: the string methods that use RegExp
 .normalize	5	regexp: String methods that need Unicode tables
+String.prototype.normalize.call(null)	5	regexp: String methods that need Unicode tables; the case expects the TypeError of this call; passed at the move
+String.prototype.normalize.call(undefined)	5	regexp: String methods that need Unicode tables; the case expects the TypeError of this call; passed at the move
 var a\u2118	5	identifier with a \u escape outside ASCII is not supported before slice 5
 var a℘	5	identifier with a code point outside ASCII is not supported before slice 5
 var \u2118	5	identifier with a \u escape outside ASCII is not supported before slice 5
@@ -217,6 +220,17 @@ var᠎	5	identifier with a code point outside ASCII is not supported before slic
 var\u180Efoo	5	identifier with a \u escape outside ASCII is not supported before slice 5
 }/1/	5	regular expression literal is not supported before slice 5
 /x/g	5	regular expression literal is not supported before slice 5
+/./	5	regular expression literal is not supported before slice 5
+/re/	5	regular expression literal is not supported before slice 5
+(/x/)	5	regular expression literal is not supported before slice 5
+/a/g	5	regular expression literal is not supported before slice 5
+"\u00DF"	5	regexp: case mapping outside ASCII is not supported before slice 5
+"A\u180E\u03A3"	5	regexp: case mapping outside ASCII is not supported before slice 5
+"\u03A3"	5	regexp: case mapping outside ASCII is not supported before slice 5
+"\uD801\uDC00"	5	regexp: case mapping outside ASCII is not supported before slice 5
+"\uD801\uDC28"	5	regexp: case mapping outside ASCII is not supported before slice 5
+"未定义"	5	regexp: comparison outside ASCII is not supported before slice 5
+"o\u0308"	5	regexp: comparison outside ASCII is not supported before slice 5
 let	6	let declaration is not supported before slice 6
 const	6	const declaration is not supported before slice 6
 =>	6	arrow function is not supported before slice 6
@@ -224,7 +238,21 @@ const	6	const declaration is not supported before slice 6
 `	6	template literal is not supported before slice 6
 Object.getOwnPropertySymbols	6	bindings-and-iteration: Symbol
 Array.from	6	bindings-and-iteration: Array.from, iterators
-String.raw	6	bindings-and-iteration: template literal
+Object.fromEntries	6	bindings-and-iteration: Object.fromEntries, iterators
+Object.groupBy	6	bindings-and-iteration: Object.groupBy, iterators
+Array.prototype.keys	6	bindings-and-iteration: the Array iterator methods
+Array.prototype.values	6	bindings-and-iteration: the Array iterator methods
+Array.prototype.entries	6	bindings-and-iteration: the Array iterator methods
+array.keys()	6	bindings-and-iteration: the Array iterator methods
+array.values()	6	bindings-and-iteration: the Array iterator methods
+array.entries()	6	bindings-and-iteration: the Array iterator methods
+Array.from(null)	6	bindings-and-iteration: Array.from, iterators; the case expects the TypeError of this call; passed at the move
+Array.from([], null)	6	bindings-and-iteration: Array.from, iterators; the case expects the TypeError of this call; passed at the move
+Array.from.call(A1, items)	6	bindings-and-iteration: Array.from, iterators; the case expects the TypeError of this call; passed at the move
+Array.prototype.entries.call(undefined)	6	bindings-and-iteration: the Array iterator methods; the case expects the TypeError of this call; passed at the move
+Array.prototype.keys.call(undefined)	6	bindings-and-iteration: the Array iterator methods; the case expects the TypeError of this call; passed at the move
+Array.prototype.values.call(undefined)	6	bindings-and-iteration: the Array iterator methods; the case expects the TypeError of this call; passed at the move
+Object.groupBy([], null)	6	bindings-and-iteration: Object.groupBy, iterators; the case expects the TypeError of this call; passed at the move
 Symbol	6	bindings-and-iteration: Symbol
 get [	6	computed property name is not supported before slice 6
 [++counter]:	6	computed property name is not supported before slice 6
@@ -270,6 +298,9 @@ catch (e) { function e(){}	6	function declaration inside a block is not supporte
 method(x = yield)	6	default parameter is not supported before slice 6
 [yield]()	6	computed property name is not supported before slice 6
 ['__proto__']:	6	computed property name is not supported before slice 6
+[10000]: 7	6	computed property name is not supported before slice 6
+function nonSimple(a = 0)	6	default parameter is not supported before slice 6
+verifyProperty(Array, "from",	6	bindings-and-iteration: Array.from, iterators
 function*	7	generator function is not supported before slice 7
 function *	7	generator function is not supported before slice 7
 yield	7	generator function is not supported before slice 7
@@ -277,6 +308,7 @@ yield	7	generator function is not supported before slice 7
 class	8	class is not supported before slice 8
 super	8	super is not supported before slice 8
 new.target	8	classes: new.target
+var #x	8	private name is not supported before slice 8
 Map	9	collections-proxy-reflect: Map
 Set	9	collections-proxy-reflect: Set
 WeakMap	9	collections-proxy-reflect: WeakMap
@@ -291,6 +323,7 @@ import.meta	11	import.meta is not supported before slice 11
 import	11	import declaration is not supported before slice 11
 export	11	export declaration is not supported before slice 11
 BigInt	12	bigint: BigInt
+42n	12	BigInt literal is not supported before slice 12
 ArrayBuffer	13	binary-data: ArrayBuffer
 DataView	13	binary-data: DataView
 Int8Array	13	binary-data: typed arrays

@@ -1,0 +1,41 @@
+script locals 3
+  var "f"
+  0000 2:1 Undefined
+  0001 2:1 StoreCompletion
+  0002 2:1 Uninitialize 0
+  0003 2:15 NewObject
+  0004 2:20 GetLocalChecked 0 "k"
+  0005 2:17 DefineField "a"
+  0006 2:1 ForInStart
+  0007 2:1 ForInNext 0013
+  0008 2:10 SetLocal 1
+  0009 2:10 Pop
+  0010 2:27 GetLocalChecked 1 "k"
+  0011 2:27 StoreCompletion
+  0012 2:1 LoopJump 0007
+  0013 2:1 Pop
+  0014 4:1 Undefined
+  0015 4:1 StoreCompletion
+  0016 4:17 NewObject
+  0017 4:22 Number 1
+  0018 4:19 DefineField "a"
+  0019 4:1 ForInStart
+  0020 4:1 ForInNext 0030
+  0021 4:1 PushLexicalEnv 0 const "k"
+  0022 4:12 SetEnv 0 0
+  0023 4:12 Pop
+  0024 4:29 ResolveGlobal "f"
+  0025 4:33 Closure 0
+  0026 4:29 PutGlobalRef "f"
+  0027 4:29 StoreCompletion
+  0028 4:1 PopEnv
+  0029 4:1 LoopJump 0020
+  0030 4:1 Pop
+  0031 0:0 LoadCompletion
+  0032 0:0 Return
+
+function 0 expression "f" length 0 locals 0
+  0000 4:54 GetEnvChecked 0 0
+  0001 4:47 Return
+  0002 4:33 Undefined
+  0003 4:33 Return

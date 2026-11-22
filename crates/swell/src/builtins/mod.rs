@@ -151,7 +151,7 @@ pub(crate) mod group_testing {
         groups: &[GroupMethod],
         symbols: &[Key],
     ) {
-        let keys = agent.own_property_keys(object).unwrap();
+        let keys = agent.own_property_keys(object).unwrap().keys;
         let mut names = Vec::new();
         for &key in &keys {
             if matches!(key, Key::Symbol(_)) {
@@ -270,7 +270,7 @@ mod tests {
         let unscopables = Key::Symbol(symbols.unscopables);
         let spreadable = Key::Symbol(symbols.is_concat_spreadable);
         assert_eq!(
-            agent.own_property_keys(object),
+            agent.own_property_keys(object).map(|list| list.keys),
             Ok(vec![unscopables, spreadable])
         );
         let property = agent

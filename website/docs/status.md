@@ -3,7 +3,7 @@ title: Status
 description: What swell passes today, per delivery slice, from the counts the gate holds.
 ---
 
-import {Num, S, Delivered, SliceBar, PendingTable} from '@site/src/components/Numbers';
+import {Num, S, Delivered, SliceBar, PendingTable, HarnessException} from '@site/src/components/Numbers';
 
 # Status
 
@@ -21,7 +21,7 @@ The gate runs test262 at a pinned commit and compares its counts with `conforman
 
 ## By delivery slice
 
-A case counts in the first delivery slice after which it can pass. That says when a case can first pass, not that it will. A slice is delivered when all its cases pass in all their runs and no host requirement is pending for it.
+A case counts in the first delivery slice after which it can pass. That says when a case can first pass, not that it will. A slice is delivered when its cases pass in all their runs, but for an exception the design states, and no host requirement is pending for it.
 
 <SliceBar />
 
@@ -31,13 +31,15 @@ A case counts in the first delivery slice after which it can pass. That says whe
 | 2 | <code><S n={2} f="name" /></code> | <S n={2} f="cases" /> | <S n={2} f="runs" /> | <S n={2} f="passed" /> | <Delivered n={2} /> |
 | 3 | <code><S n={3} f="name" /></code> | <S n={3} f="cases" /> | <S n={3} f="runs" /> | <S n={3} f="passed" /> | <Delivered n={3} /> |
 
+<HarnessException />
+
 The [roadmap](roadmap.md) has all the slices. Slice 1 is the test262 harness itself. Slice 2 is the rest of the ES5 language: `with`, `arguments`, `eval`, the global `Function`, labels and automatic semicolon insertion.
 
 ## What a pass means
 
 A construct the parser does not have yet is refused with a `SyntaxError` whose message gives the slice that brings it. A refusal does not count as the `SyntaxError` a negative case asks for. A refusal the script catches fails the run too: the runner reads `Agent::refusals()` after each run.
 
-`conformance/test262/moves.tsv` lists <Num at="moves.cases" /> cases that moved to a later slice when slice 2 closed. A line holds the token or feature that needs the later slice, and the gate task `test262-moves-check` refuses a line without it. A case that fails on a part of its own slice is not moved.
+`conformance/test262/moves.tsv` lists <Num at="moves.cases" /> cases that moved to a later slice when slice 2 or slice 3 closed. A line holds the token or feature that needs the later slice, and the gate task `test262-moves-check` refuses a line without it. A case that fails on a part of its own slice is not moved.
 
 ## The host interface
 

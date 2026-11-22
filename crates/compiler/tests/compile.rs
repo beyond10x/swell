@@ -276,6 +276,45 @@ fn uncaptured_bindings_are_slots_and_captured_ones_are_environment() {
     );
 }
 
+/// `docs/design/engine.md`, decision 3, "Lexical bindings", item 1: a `let` of a block that no
+/// closure refers to is a local slot of the frame, which needs no record; one a closure refers
+/// to is a slot of the record the block makes at its entry and leaves at its end
+/// (`#sec-blockdeclarationinstantiation`).
+#[test]
+fn block_bindings_are_local_slots_unless_a_closure_captures_them() {
+    let code = compile(
+        "function f() {\n\
+           { let a = 1; a; }\n\
+           { let b = 2; return function () { return b; }; }\n\
+         }\n",
+    )
+    .unwrap();
+    let f = function(&code, "f").unwrap();
+    // `a` is local 0, written by its declaration and read after it with no check; `b` is not
+    // a local slot, and no binding is the function environment's.
+    assert_eq!(f.locals, 1);
+    assert!(f.captured.is_empty());
+    assert!(f.instructions.contains(&Instruction::SetLocal(0)));
+    assert!(f.instructions.contains(&Instruction::GetLocal(0)));
+    // `b` is slot 0 of the one record `f` makes, that of the second block, initialized there.
+    assert!(
+        f.instructions
+            .contains(&Instruction::SetEnv { hops: 0, slot: 0 })
+    );
+    let text = disassemble(&code);
+    assert_eq!(text.matches("PushLexicalEnv").count(), 1, "{text}");
+    assert!(text.contains("PushLexicalEnv 0 \"b\""), "{text}");
+    // The closure reads it from its environment, the block's record, with the check of a binding
+    // that may be uninitialized (another function's code).
+    let inner = function(&code, "").unwrap();
+    assert_eq!(inner.locals, 0);
+    let inner_text = text
+        .split("function 1 ")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no inner function in {text}"));
+    assert!(inner_text.contains("GetEnvChecked 0 0"), "{text}");
+}
+
 #[test]
 fn finally_runs_for_return_break_and_continue() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources/finally-exits.js");

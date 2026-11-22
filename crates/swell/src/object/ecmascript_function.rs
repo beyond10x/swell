@@ -33,7 +33,7 @@ use crate::heap::collect::{Item, Mark};
 use crate::host::Host;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Completion, Termination};
-use crate::interp::frame::{Frame, frame_bytes};
+use crate::interp::frame::{Frame, SlotValue, frame_bytes};
 use crate::object::ObjectKind;
 use crate::object::arguments::Mapping;
 use crate::object::builtin_function::Activation;
@@ -272,7 +272,7 @@ impl<H: Host> Agent<H> {
             self.heap.accounting.credit(charged);
             return Err(self.terminate(Termination::MemoryBudget));
         }
-        slots.resize(count, Value::Undefined);
+        slots.resize(count, SlotValue::Value(Value::Undefined));
 
         // FunctionDeclarationInstantiation, step 22: each argument in its parameter's slot.
         for (position, slot) in params.iter().enumerate() {
@@ -281,7 +281,7 @@ impl<H: Host> Agent<H> {
                 Slot::Local(n) => usize::try_from(n)
                     .ok()
                     .and_then(|n| slots.get_mut(n))
-                    .map(|binding| *binding = value)
+                    .map(|binding| *binding = SlotValue::Value(value))
                     .is_some(),
                 Slot::Env(n) => self.set_slot(env, 0, n, value).is_ok(),
             };
@@ -341,7 +341,7 @@ impl<H: Host> Agent<H> {
         args: &[Value],
         mapping: (Handle, Option<Mapping<'_>>),
         slot: (Slot, Option<Handle>),
-        locals: &mut [Value],
+        locals: &mut [SlotValue],
     ) -> Completion<()> {
         let (realm, mapping) = mapping;
         let object = self.create_arguments_object(realm, function, args, mapping)?;
@@ -349,7 +349,7 @@ impl<H: Host> Agent<H> {
         match slot {
             (Slot::Local(n), _) => match usize::try_from(n).ok().and_then(|n| locals.get_mut(n)) {
                 Some(binding) => {
-                    *binding = value;
+                    *binding = SlotValue::Value(value);
                     Ok(())
                 }
                 None => Err(self.fault()),

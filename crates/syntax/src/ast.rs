@@ -1,6 +1,6 @@
 //! The syntax tree of a script: the productions of clauses 13 (`#sec-ecmascript-language-expressions`),
 //! 14 (`#sec-ecmascript-language-statements-and-declarations`), 15.2 (`#sec-function-definitions`)
-//! and 15.4 (`#sec-method-definitions`: accessors and plain methods) that slices 1 and 2 parse.
+//! and 15.4 (`#sec-method-definitions`: accessors and plain methods) that slices 1, 2 and 6 parse.
 //!
 //! The tree lives in three arenas, one per kind of node, and a node names its children by index.
 //! So dropping a tree is no recursion at all, and a walk over it recurses once per level, a depth
@@ -279,24 +279,51 @@ pub struct ExprNode {
     pub parenthesized: bool,
 }
 
-/// A `VariableDeclaration`.
+/// A `VariableDeclaration` or a `LexicalBinding`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VarDeclarator {
     pub name: Name,
     pub init: Option<ExprId>,
 }
 
+/// The keyword of a declaration: a `VariableStatement` (`#sec-variable-statement`) or a
+/// `LexicalDeclaration` (`#sec-let-and-const-declarations`), and the same in the head of a `for`
+/// or a `for`-`in`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeclKind {
+    Var,
+    Let,
+    Const,
+}
+
+impl DeclKind {
+    /// Whether the declaration is a `let` or a `const` one.
+    pub fn is_lexical(self) -> bool {
+        self != DeclKind::Var
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ForInit {
-    Var(Vec<VarDeclarator>),
+    Var(DeclKind, Vec<VarDeclarator>),
     Expression(ExprId),
 }
 
 /// The left side of `for (... in ...)`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ForInTarget {
-    Var(Name),
+    Var(DeclKind, Name),
     Expression(ExprId),
+}
+
+/// A name a `let` or `const` declaration binds (the BoundNames of a `LexicalDeclaration`), with
+/// the statement that declares it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LexicalName {
+    pub name: Name,
+    /// Whether the declaration is `const` (IsConstantDeclaration).
+    pub constant: bool,
+    pub declaration: StmtId,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -317,7 +344,8 @@ pub struct CatchClause {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
     Block(Vec<StmtId>),
-    Var(Vec<VarDeclarator>),
+    /// A `VariableStatement` or a `LexicalDeclaration`.
+    Var(DeclKind, Vec<VarDeclarator>),
     Empty,
     Expression(ExprId),
     If {
@@ -402,6 +430,12 @@ pub struct Scope {
     /// FunctionDeclarationInstantiation take them: the last declaration of each name, in source
     /// order.
     pub functions: Vec<FunctionId>,
+    /// The names the `let` and `const` declarations at the top level of the body bind, in
+    /// source order: the BoundNames of its LexicallyScopedDeclarations
+    /// (`#sec-static-semantics-lexicallyscopeddeclarations`; a function declaration at the top
+    /// level of a body is var scoped, and one in a block is refused before slice 6's later
+    /// story).
+    pub lexical: Vec<LexicalName>,
     /// The `IdentifierReference`s of the body itself (not of nested functions), each name once,
     /// in source order of its first reference.
     pub references: Vec<String>,
@@ -612,7 +646,7 @@ impl Stmt {
         };
         match self {
             Stmt::Block(body) => list(body, &mut f),
-            Stmt::Var(declarators) => {
+            Stmt::Var(_, declarators) => {
                 for d in declarators {
                     if let Some(e) = d.init {
                         f(Child::Expr(e));
@@ -648,7 +682,7 @@ impl Stmt {
                 body,
             } => {
                 match init {
-                    Some(ForInit::Var(declarators)) => {
+                    Some(ForInit::Var(_, declarators)) => {
                         for d in declarators {
                             if let Some(e) = d.init {
                                 f(Child::Expr(e));

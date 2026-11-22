@@ -71,6 +71,26 @@ export const deliverySlices: SliceCount[] = status.slices.filter((s) => s.delive
 /** The slice that follows the last delivered one, or undefined. */
 export const nextSlice: SliceCount | undefined = deliverySlices.find((s) => !s.delivered);
 
+/**
+ * What the site says of a delivered slice whose failed count is not 0, and where the design
+ * rules on it (docs/design/engine.md, section 12, paragraph "Slice 3's cases that need a later
+ * slice"). The one place this sentence is written.
+ */
+export const harnessException = {
+  text: 'fails in the pinned test262 harness before the engine’s answer is judged',
+  plural: 'fail in the pinned test262 harness before the engine’s answer is judged',
+  href: 'https://github.com/beyond10x/swell/blob/main/docs/design/engine.md#12-delivery-order',
+  link: 'design, section 12',
+};
+
+/** Delivered slices with a failed case: the slices the exception sentence is shown for. */
+export const deliveredWithException: SliceCount[] = deliverySlices.filter((s) => s.delivered && s.failed > 0);
+
+/** A slice's count in words, as status.json has it: "31 cases, every one passes" or "7,010 of 7,011 cases pass". */
+export function passWords(s: SliceCount): string {
+  return s.failed === 0 && s.passed === s.cases ? `${count(s.cases)} cases, every one passes` : `${count(s.passed)} of ${count(s.cases)} cases pass`;
+}
+
 /** The slice record of a slice number. */
 export function slice(number: number): SliceCount {
   const found = status.slices.find((s) => s.delivery && Number(s.slice) === number);

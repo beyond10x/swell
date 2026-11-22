@@ -28,13 +28,49 @@
 //! undefined)). The values of the other statements, and the way `break` and `continue` carry the
 //! last value out of a loop, follow from the order the register is written in. Function code
 //! drops the value of an expression statement.
+//!
+//! # Lexical scopes
+//!
+//! A scope of `let` and `const` bindings (`resolve.rs`) is entered by [`Compiler::enter_scope`]:
+//! a record of its bindings that live in one ([`Instruction::PushLexicalEnv`]) and its checked
+//! local slots set uninitialized ([`Instruction::Uninitialize`]); it is left by `PopEnv` when it
+//! made a record, and by every `break`, `continue`, `return` and throw through it as a `catch`
+//! clause's record is. A declaration initializes its binding: the store into the slot, or
+//! [`Instruction::InitGlobal`] for a name of the script's top level
+//! (`#sec-let-and-const-declarations-runtime-semantics-evaluation`). A `for (let ...)` whose
+//! head has a record copies it before the first test and before each update
+//! ([`Instruction::CopyEnv`], `#sec-forbodyevaluation`).
 
-use swell_syntax::ast::{ForInTarget, ForInit, Span, Stmt, StmtId, VarDeclarator};
+use swell_syntax::ast::{
+    DeclKind, ExprId, ForInTarget, ForInit, FunctionId, Span, Stmt, StmtId, VarDeclarator,
+};
 
-use crate::bytecode::{HandlerKind, Instruction, TAG_NORMAL};
+use crate::bytecode::{HandlerKind, Instruction, SlotName, TAG_NORMAL};
 use crate::expression::Target;
-use crate::resolve::{Binding, Site};
-use crate::{CompileError, Compiler, Control, JumpKind, Task, malformed};
+use crate::resolve::{Binding, ScopeKey, Site};
+use crate::{CompileError, Compiler, Constants, Control, JumpKind, Task, malformed};
+
+/// The names of a record's slots, `let` or `const` ones.
+pub(crate) fn slot_names(
+    constants: &mut Constants,
+    names: &[(String, bool)],
+) -> Result<Vec<SlotName>, CompileError> {
+    let mut table = Vec::with_capacity(names.len());
+    for (name, constant) in names {
+        let k = constants.string_str(name)?;
+        table.push(SlotName::lexical(k, *constant).ok_or(CompileError::TooMany("strings"))?);
+    }
+    Ok(table)
+}
+
+/// The exit of a lexical scope entered by [`Compiler::enter_scope`]: the record it made, if any,
+/// is popped.
+fn leave_scope(record: bool, span: Span, t: &mut Vec<Task>) {
+    if record {
+        t.push(Task::Emit(Instruction::PopEnv, span));
+        t.push(Task::EnvsDown);
+    }
+}
 
 impl<'a> Compiler<'a> {
     /// The tasks of the statement `id`; a loop gets the label set `labels`.
@@ -84,10 +120,18 @@ impl<'a> Compiler<'a> {
                     t.push(Task::Bind(exit));
                 }
             }
-            // `#sec-block-runtime-semantics-evaluation`.
-            Stmt::Block(list) => t.extend(list.iter().map(|s| Task::Stmt(*s))),
+            // `#sec-block-runtime-semantics-evaluation`, with BlockDeclarationInstantiation.
+            Stmt::Block(list) => {
+                let record = self.enter_scope(ScopeKey::Block(id), span, &mut t)?;
+                t.extend(list.iter().map(|s| Task::Stmt(*s)));
+                leave_scope(record, span, &mut t);
+            }
+            // `#sec-let-and-const-declarations-runtime-semantics-evaluation`.
+            Stmt::Var(kind, declarators) if kind.is_lexical() => {
+                self.lexical_declarators(id, declarators, &mut t)?;
+            }
             // `#sec-variable-statement-runtime-semantics-evaluation`.
-            Stmt::Var(declarators) => self.declarators(id, declarators, &mut t)?,
+            Stmt::Var(_, declarators) => self.declarators(id, declarators, &mut t)?,
             // `#sec-empty-statement-runtime-semantics-evaluation`,
             // `#sec-debugger-statement-runtime-semantics-evaluation` (no debugging facility), and a
             // function declaration, which FunctionDeclarationInstantiation or
@@ -148,7 +192,10 @@ impl<'a> Compiler<'a> {
                 t.push(Task::Goto(top, span));
                 t.push(Task::Bind(exit));
             }
-            // `#sec-for-statement-runtime-semantics-labelledevaluation`, ForBodyEvaluation.
+            // `#sec-for-statement-runtime-semantics-labelledevaluation`, ForBodyEvaluation; a head
+            // with `let` or `const` is a scope around the loop
+            // (`#sec-runtime-semantics-forloopevaluation`), whose record a `let` head copies
+            // for each iteration (`#sec-createperiterationenvironment`).
             Stmt::For {
                 init,
                 test,
@@ -156,13 +203,25 @@ impl<'a> Compiler<'a> {
                 body,
             } => {
                 self.reset_completion(span, &mut t);
+                let mut record = false;
+                let mut copy = false;
                 match init {
-                    Some(ForInit::Var(declarators)) => self.declarators(id, declarators, &mut t)?,
+                    Some(ForInit::Var(kind, declarators)) if kind.is_lexical() => {
+                        record = self.enter_scope(ScopeKey::Head(id), span, &mut t)?;
+                        copy = record && *kind == DeclKind::Let;
+                        self.lexical_declarators(id, declarators, &mut t)?;
+                    }
+                    Some(ForInit::Var(_, declarators)) => {
+                        self.declarators(id, declarators, &mut t)?;
+                    }
                     Some(ForInit::Expression(e)) => {
                         t.push(Task::Expr(*e));
                         t.push(Task::Emit(Instruction::Pop, span));
                     }
                     None => {}
+                }
+                if copy {
+                    t.push(Task::Emit(Instruction::CopyEnv, span));
                 }
                 let (top, next, exit) = (self.label(), self.label(), self.label());
                 t.push(Task::Bind(top));
@@ -170,21 +229,38 @@ impl<'a> Compiler<'a> {
                     t.push(Task::Expr(*test));
                     t.push(Task::Emit(Instruction::JumpIfFalse(exit), span));
                 }
-                t.push(self.enter_loop(exit, next, self.items, std::mem::take(&mut labels)));
+                t.push(Task::PushControl(Control::Loop {
+                    exit,
+                    next,
+                    items: self.items,
+                    envs: self.envs.saturating_add(u32::from(record)),
+                    labels: std::mem::take(&mut labels),
+                }));
                 t.push(Task::Stmt(*body));
                 t.push(Task::PopControl(None));
                 t.push(Task::Bind(next));
+                if copy {
+                    t.push(Task::Emit(Instruction::CopyEnv, span));
+                }
                 if let Some(update) = update {
                     t.push(Task::Expr(*update));
                     t.push(Task::Emit(Instruction::Pop, span));
                 }
                 t.push(Task::Goto(top, span));
                 t.push(Task::Bind(exit));
+                leave_scope(record, span, &mut t);
             }
             // `#sec-for-in-and-for-of-statements-runtime-semantics-labelledevaluation`:
             // ForIn/OfHeadEvaluation, then ForIn/OfBodyEvaluation
             // (`#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`),
             // the enumerator on the operand stack for the whole loop.
+            Stmt::ForIn {
+                target: ForInTarget::Var(kind, name),
+                object,
+                body,
+            } if kind.is_lexical() => {
+                self.lexical_for_in(id, span, name.span, *object, *body, labels, &mut t)?;
+            }
             Stmt::ForIn {
                 target,
                 object,
@@ -199,7 +275,7 @@ impl<'a> Compiler<'a> {
                 t.push(Task::Emit(Instruction::ForInNext(exit), span));
                 // The key is on top; each iteration evaluates the target's reference, then puts.
                 let (target, target_span) = match target {
-                    ForInTarget::Var(name) => (
+                    ForInTarget::Var(_, name) => (
                         Target::Binding(self.binding(Site::ForInVar(id))?),
                         name.span,
                     ),
@@ -260,6 +336,7 @@ impl<'a> Compiler<'a> {
                 let exit = self.label();
                 let labels: Vec<_> = cases.iter().map(|_| self.label()).collect();
                 t.push(Task::Expr(*discriminant));
+                let record = self.enter_scope(ScopeKey::Case(id), span, &mut t)?;
                 let mut default = None;
                 for (case, label) in cases.iter().zip(&labels) {
                     match case.test {
@@ -275,7 +352,7 @@ impl<'a> Compiler<'a> {
                 t.push(Task::PushControl(Control::Switch {
                     exit,
                     items: self.items,
-                    envs: self.envs,
+                    envs: self.envs.saturating_add(u32::from(record)),
                 }));
                 for (case, label) in cases.iter().zip(&labels) {
                     t.push(Task::Bind(*label));
@@ -283,6 +360,7 @@ impl<'a> Compiler<'a> {
                 }
                 t.push(Task::PopControl(None));
                 t.push(Task::Bind(exit));
+                leave_scope(record, span, &mut t);
             }
             // `#sec-throw-statement-runtime-semantics-evaluation`.
             Stmt::Throw(e) => {
@@ -366,6 +444,141 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
+    /// The entry of the lexical scope `key`, when the resolver gave it one: the record of its
+    /// bindings that live in one, then its checked local slots uninitialized
+    /// (`#sec-blockdeclarationinstantiation`). Whether it made a record, which the exit of the
+    /// scope pops ([`leave_scope`]).
+    pub(crate) fn enter_scope(
+        &mut self,
+        key: ScopeKey,
+        span: Span,
+        t: &mut Vec<Task>,
+    ) -> Result<bool, CompileError> {
+        let Some(scope) = self.resolution.lexical_scopes.get(&key) else {
+            return Ok(false);
+        };
+        let record = !scope.env.is_empty();
+        if record {
+            let index = self.lexical_table(&scope.env)?;
+            t.push(Task::Emit(Instruction::PushLexicalEnv(index), span));
+            t.push(Task::EnvsUp);
+        }
+        for &n in &scope.uninitialize {
+            t.push(Task::Emit(Instruction::Uninitialize(n), span));
+        }
+        Ok(record)
+    }
+
+    /// The entry of the scope of the top level of the body of function `id`, before its
+    /// function declarations are instantiated (`#sec-functiondeclarationinstantiation`, steps
+    /// 30 to 36): emitted at once, at the start of the function's code.
+    pub(crate) fn enter_function_body(
+        &mut self,
+        id: FunctionId,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let mut t = Vec::new();
+        if self.enter_scope(ScopeKey::Body(id), span, &mut t)? {
+            self.envs = self.envs.saturating_add(1);
+        }
+        for task in t {
+            if let Task::Emit(instruction, span) = task {
+                self.emit(instruction, span)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A `scopes` entry naming the slots `names` of a record of `let` and `const` bindings.
+    fn lexical_table(&mut self, names: &[(String, bool)]) -> Result<u32, CompileError> {
+        let table = slot_names(self.constants, names)?;
+        let index =
+            u32::try_from(self.scopes.len()).map_err(|_| CompileError::TooMany("environments"))?;
+        self.scopes.push(table);
+        Ok(index)
+    }
+
+    /// The declarators of a `let` or `const` declaration, or of a `for` head that is one: each
+    /// value, `undefined` without an initializer, then InitializeBinding of its binding: the
+    /// store into its slot, or into the global environment's [[DeclarativeRecord]] for a name
+    /// of the script's top level (`#sec-let-and-const-declarations-runtime-semantics-evaluation`).
+    fn lexical_declarators(
+        &mut self,
+        id: StmtId,
+        declarators: &[VarDeclarator],
+        t: &mut Vec<Task>,
+    ) -> Result<(), CompileError> {
+        for (i, d) in declarators.iter().enumerate() {
+            let n = u32::try_from(i).map_err(|_| CompileError::TooMany("declarators"))?;
+            let span = d.name.span;
+            let store = match self.binding(Site::VarDecl(id, n))? {
+                Binding::Local(n) => Instruction::SetLocal(n),
+                Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
+                Binding::Global(name) | Binding::Dynamic(name) => {
+                    Instruction::InitGlobal(self.string(&name)?)
+                }
+                _ => return Err(malformed("a lexical declaration's binding")),
+            };
+            match d.init {
+                Some(init) => t.push(Task::Expr(init)),
+                None => t.push(Task::Emit(Instruction::Undefined, span)),
+            }
+            t.push(Task::Emit(store, span));
+            t.push(Task::Emit(Instruction::Pop, span));
+        }
+        Ok(())
+    }
+
+    /// A for-in with `let` or `const` (`#sec-runtime-semantics-forinofheadevaluation`, step 2,
+    /// and `#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`,
+    /// step 6.i): the expression in the scope of the head's names, uninitialized; each iteration
+    /// in a scope of its own, whose binding the key initializes. A `continue` leaves the
+    /// iteration's scope as a `break` does.
+    #[allow(clippy::too_many_arguments)]
+    fn lexical_for_in(
+        &mut self,
+        id: StmtId,
+        span: Span,
+        name_span: Span,
+        object: ExprId,
+        body: StmtId,
+        labels: Vec<String>,
+        t: &mut Vec<Task>,
+    ) -> Result<(), CompileError> {
+        self.reset_completion(span, t);
+        let (top, exit) = (self.label(), self.label());
+        let tdz = self.enter_scope(ScopeKey::Tdz(id), span, t)?;
+        t.push(Task::Expr(object));
+        leave_scope(tdz, span, t);
+        t.push(Task::Emit(Instruction::ForInStart, span));
+        t.push(Task::ItemsUp);
+        t.push(Task::Bind(top));
+        t.push(Task::Emit(Instruction::ForInNext(exit), span));
+        let iteration = self.enter_scope(ScopeKey::Iteration(id), span, t)?;
+        let store = match self.binding(Site::ForInVar(id))? {
+            Binding::Local(n) => Instruction::SetLocal(n),
+            Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
+            _ => return Err(malformed("a for-in binding")),
+        };
+        t.push(Task::Emit(store, name_span));
+        t.push(Task::Emit(Instruction::Pop, name_span));
+        t.push(Task::PushControl(Control::Loop {
+            exit,
+            next: top,
+            items: self.items.saturating_add(1),
+            envs: self.envs,
+            labels,
+        }));
+        t.push(Task::Stmt(body));
+        t.push(Task::PopControl(None));
+        leave_scope(iteration, span, t);
+        t.push(Task::Goto(top, span));
+        t.push(Task::Bind(exit));
+        t.push(Task::Emit(Instruction::Pop, span));
+        t.push(Task::ItemsDown);
+        Ok(())
+    }
+
     /// `#sec-try-statement-runtime-semantics-evaluation`, with CatchClauseEvaluation
     /// (`#sec-runtime-semantics-catchclauseevaluation`). The catch handler covers the try block;
     /// the finally handler covers the try block and the catch block, and the `finally` block is
@@ -396,7 +609,9 @@ impl<'a> Compiler<'a> {
                 jumps: Vec::new(),
             }));
         }
+        let record = self.enter_scope(ScopeKey::Try(id), span, t)?;
         t.extend(block.iter().map(|s| Task::Stmt(*s)));
+        leave_scope(record, span, t);
         let catch_end = if catch {
             let Some(Stmt::Try {
                 handler: Some(h), ..
@@ -421,7 +636,8 @@ impl<'a> Compiler<'a> {
                         Binding::Env { slot, .. } => {
                             // Named when it encloses a `with` body (`resolve.rs`).
                             let push = if self.resolution.named_catches.contains(&id) {
-                                let name = self.string(&param.name)?;
+                                let name = SlotName::plain(self.string(&param.name)?)
+                                    .ok_or(crate::CompileError::TooMany("strings"))?;
                                 let index = u32::try_from(self.scopes.len())
                                     .map_err(|_| crate::CompileError::TooMany("environments"))?;
                                 self.scopes.push(vec![name]);
@@ -445,7 +661,9 @@ impl<'a> Compiler<'a> {
                 }
             };
             self.reset_completion(span, t);
+            let record = self.enter_scope(ScopeKey::Catch(id), span, t)?;
             t.extend(h.body.iter().map(|s| Task::Stmt(*s)));
+            leave_scope(record, span, t);
             if env {
                 t.push(Task::Emit(Instruction::PopEnv, span));
                 t.push(Task::EnvsDown);
@@ -473,7 +691,9 @@ impl<'a> Compiler<'a> {
                 // UpdateEmpty(finallyResult, undefined): its own value or undefined, not the
                 // value it kept.
                 self.reset_completion(span, t);
+                let record = self.enter_scope(ScopeKey::Finally(id), span, t)?;
                 t.extend(list.iter().map(|s| Task::Stmt(*s)));
+                leave_scope(record, span, t);
                 if self.script {
                     t.push(Task::Emit(Instruction::StoreCompletion, span));
                     t.push(Task::ItemsDown);

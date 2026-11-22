@@ -2,7 +2,9 @@
 //! `docs/design/host-interface.md`, decision 2, `memory_bytes`): every allocation and every growth
 //! of the heap is charged through [`Accounting::charge`], the one accounting function, and a
 //! sweep credits what it frees. Over the budget the allocation is refused and nothing is
-//! charged; the caller ends the run in `Terminated(MemoryBudget)`.
+//! charged; the caller ends the run in `Terminated(MemoryBudget)`. The lib tests read the
+//! high-water mark of the bytes charged and the length of the largest list of property keys
+//! an [[OwnPropertyKeys]] allocated (`story:own-keys-charged-before-the-list-exists`).
 
 /// An allocation would take the heap over its budget.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -14,6 +16,13 @@ pub(crate) struct Accounting {
     used: u64,
     limit: u64,
     since_collection: u64,
+    /// The most `used` has read since the agent was made or the last reset, in the lib tests.
+    #[cfg(test)]
+    high_water: u64,
+    /// The length of the largest list of keys an [[OwnPropertyKeys]] allocated, in the lib
+    /// tests.
+    #[cfg(test)]
+    largest_key_list: usize,
 }
 
 impl Accounting {
@@ -23,6 +32,10 @@ impl Accounting {
             used: 0,
             limit,
             since_collection: 0,
+            #[cfg(test)]
+            high_water: 0,
+            #[cfg(test)]
+            largest_key_list: 0,
         }
     }
 
@@ -35,7 +48,36 @@ impl Accounting {
         }
         self.used = used;
         self.since_collection = self.since_collection.saturating_add(bytes);
+        #[cfg(test)]
+        {
+            self.high_water = self.high_water.max(used);
+        }
         Ok(())
+    }
+
+    /// The most the heap was charged since the agent was made or the last
+    /// [`Accounting::reset_high_water`].
+    #[cfg(test)]
+    pub(crate) fn high_water(&self) -> u64 {
+        self.high_water
+    }
+
+    /// Count the high-water mark again from the bytes charged now.
+    #[cfg(test)]
+    pub(crate) fn reset_high_water(&mut self) {
+        self.high_water = self.used;
+    }
+
+    /// An [[OwnPropertyKeys]] allocated a list of `length` keys.
+    #[cfg(test)]
+    pub(crate) fn note_key_list(&mut self, length: usize) {
+        self.largest_key_list = self.largest_key_list.max(length);
+    }
+
+    /// The length of the largest list of keys an [[OwnPropertyKeys]] allocated.
+    #[cfg(test)]
+    pub(crate) fn largest_key_list(&self) -> usize {
+        self.largest_key_list
     }
 
     /// Whether `bytes` more would fit the budget, charging nothing: asked before a large copy,
