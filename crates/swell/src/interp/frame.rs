@@ -111,6 +111,9 @@ pub(crate) struct Frame {
     /// The index of the next instruction.
     pub(crate) pc: usize,
     pub(crate) stack: Vec<Entry>,
+    /// The local slots of the code; for a call of a function whose parameter list is not
+    /// simple the arguments follow them, kept for the code that binds the parameters
+    /// (`interp/parameters.rs`).
     pub(crate) locals: Vec<SlotValue>,
     /// The LexicalEnvironment: a record of the `environments` arena, or `None` for the global
     /// environment of `realm`.
@@ -119,11 +122,13 @@ pub(crate) struct Frame {
     /// function bindings (`#sec-performeval`, `#sec-evaldeclarationinstantiation`): `None` for
     /// the global environment of `realm` (a script), the record the call made for a function
     /// (one whose code contains a direct `eval` always makes one, `swell-compiler`'s
-    /// `resolve.rs`), and the caller's, or the record of its own for strict eval code, for eval
-    /// code.
+    /// `resolve.rs`; while the parameters of non-strict code with an initializer that calls
+    /// `eval` directly are bound, the empty record outside it, and from `PushVarEnv` on the
+    /// record of the body's `var` names), and the caller's, or the record of its own for strict
+    /// eval code, for eval code.
     pub(crate) var_env: Option<Handle>,
     /// How many of the environments on the way out from `env` this frame made (`PushEnv`,
-    /// `PushNamedEnv` and `PushWith`).
+    /// `PushNamedEnv`, `PushLexicalEnv`, `PushVarEnv` and `PushWith`).
     pub(crate) pushed_envs: u32,
     /// The `this` binding (ResolveThisBinding, `#sec-resolvethisbinding`).
     pub(crate) this: Value,

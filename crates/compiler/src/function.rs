@@ -5,8 +5,14 @@
 //!   FunctionDeclarationInstantiation step 36 (`#sec-functiondeclarationinstantiation`): for the
 //!   last declaration of each name, in source order, InstantiateFunctionObject
 //!   (`#sec-runtime-semantics-instantiatefunctionobject`) and the store into its binding. The
-//!   call itself binds the parameters ([`FunctionTemplate::params`]); `var` bindings start as
-//!   `undefined`.
+//!   call itself binds the parameters of a simple list ([`FunctionTemplate::params`]); `var`
+//!   bindings start as `undefined`.
+//! - The code of a function whose parameter list is not simple binds its parameters first
+//!   ([`FunctionTemplate::binds_parameters`], `docs/design/engine.md`, decision 3, "A parameter
+//!   list that is not simple"): each in order from the arguments the call kept, a default
+//!   evaluated only for `undefined`, the rest parameter an Array of the remaining arguments,
+//!   then, when a parameter has an initializer, the record of the body's `var` names. Its
+//!   `length` is ExpectedArgumentCount (`#sec-static-semantics-expectedargumentcount`).
 //! - A script's function declarations are instantiated by GlobalDeclarationInstantiation
 //!   (`#sec-globaldeclarationinstantiation`), which the interpreter runs from
 //!   [`Code::function_declarations`](crate::bytecode::Code) before the script's code, because it
@@ -31,12 +37,12 @@
 //!   the eval code adds its `var` names to.
 
 use swell_syntax::Script;
-use swell_syntax::ast::{Ast, FunctionId, Span};
+use swell_syntax::ast::{Ast, ExprId, FunctionId, Span};
 use swell_syntax::ledger::Meter;
 
-use crate::bytecode::{FunctionTemplate, Instruction};
-use crate::resolve::{Binding, Resolution, Site};
-use crate::{Body, CompileError, Compiler, Constants, malformed};
+use crate::bytecode::{FunctionTemplate, Instruction, SlotName};
+use crate::resolve::{Binding, FunctionInfo, Resolution, Site};
+use crate::{Body, Chain, CompileError, Compiler, Constants, Task, malformed};
 
 /// The code of the script itself.
 pub(crate) fn compile_script_body(
@@ -77,10 +83,14 @@ pub(crate) fn compile_function(
     for n in &info.captured {
         captured.push(constants.string_str(n, m)?);
     }
-    let length = u32::try_from(f.params.len()).map_err(|_| CompileError::TooMany("parameters"))?;
+    let length = u32::try_from(f.expected_argument_count())
+        .map_err(|_| CompileError::TooMany("parameters"))?;
     let params = m.copy(&info.params)?;
 
     let mut c = Compiler::new(ast, resolution, constants, false, m);
+    if !f.is_simple() {
+        bind_parameters(&mut c, id, info)?;
+    }
     c.enter_function_body(id, f.span)?;
     for d in &f.scope.functions {
         let span = ast.function(*d).map(|x| x.span).unwrap_or(f.span);
@@ -103,6 +113,8 @@ pub(crate) fn compile_function(
         length,
         strict: f.strict,
         params,
+        binds_parameters: !f.is_simple(),
+        parameter_environment: !f.strict && f.scope.parameters_contain_direct_eval,
         locals: info.locals,
         captured,
         self_binding: info.self_binding,
@@ -114,4 +126,139 @@ pub(crate) fn compile_function(
         handlers: body.handlers,
         source_text: f.span,
     })
+}
+
+/// The binding of the parameters of function `id`, whose list is not simple, from the
+/// arguments the call kept after the frame's `locals` slots
+/// (`#sec-functiondeclarationinstantiation`, step 26, IteratorBindingInitialization of the
+/// FormalParameters with the list iterator of the arguments,
+/// `#sec-runtime-semantics-iteratorbindinginitialization`): each parameter in order, its
+/// argument, or for `undefined` the value of its initializer, or the rest Array; then, when a
+/// parameter has an initializer, the record of the body's `var` names, which becomes the
+/// VariableEnvironment, and the `var` names a parameter or `arguments` also binds set to its
+/// value (steps 27 and 28).
+fn bind_parameters(
+    c: &mut Compiler<'_, '_>,
+    id: FunctionId,
+    info: &FunctionInfo,
+) -> Result<(), CompileError> {
+    let ast = c.ast;
+    let f = ast
+        .function(id)
+        .ok_or_else(|| malformed("a function index"))?;
+    let last = f.params.len().saturating_sub(1);
+    for (i, p) in f.params.iter().enumerate() {
+        let n = u32::try_from(i).map_err(|_| CompileError::TooMany("parameters"))?;
+        let at = info
+            .locals
+            .checked_add(n)
+            .ok_or(CompileError::TooMany("local slots"))?;
+        let span = p.span;
+        if f.rest && i == last {
+            c.emit(Instruction::RestArguments(at), span)?;
+        } else {
+            c.emit(Instruction::Argument(at), span)?;
+            if let Some(e) = f.initializer(i) {
+                let given = c.label();
+                c.emit(Instruction::JumpIfNotUndefined(given), span)?;
+                expression_value(c, e)?;
+                c.bind(given)?;
+            }
+        }
+        let store = match c.binding(Site::Param(id, n))? {
+            Binding::Local(slot) => Instruction::SetLocal(slot),
+            Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
+            _ => return Err(malformed("a parameter's binding")),
+        };
+        c.emit(store, span)?;
+        c.emit(Instruction::Pop, span)?;
+    }
+    if !f.has_parameter_expressions() {
+        return Ok(());
+    }
+    let pushed = match &info.var_env {
+        Some(names) => {
+            let mut table = c.m.with_capacity(names.len())?;
+            for name in names {
+                let k = c.string(name)?;
+                table.push(SlotName::plain(k).ok_or(CompileError::TooMany("strings"))?);
+            }
+            let index =
+                u32::try_from(c.scopes.len()).map_err(|_| CompileError::TooMany("environments"))?;
+            c.m.push(&mut c.scopes, table)?;
+            c.emit(Instruction::PushVarEnv(index), f.span)?;
+            c.envs = c.envs.saturating_add(1);
+            1
+        }
+        None => 0,
+    };
+    for (j, name) in f.scope.var_names.iter().enumerate() {
+        let n = u32::try_from(j).map_err(|_| CompileError::TooMany("var names"))?;
+        let resolution = c.resolution;
+        let Some(target) = resolution.sites.get(&Site::BodyVar(id, n)) else {
+            continue;
+        };
+        let source = match f.params.iter().rposition(|p| p.name == *name) {
+            Some(k) => {
+                let k = u32::try_from(k).map_err(|_| CompileError::TooMany("parameters"))?;
+                Site::Param(id, k)
+            }
+            None => Site::Arguments(id),
+        };
+        let load = match c.binding(source)? {
+            Binding::Local(slot) => Instruction::GetLocal(slot),
+            Binding::Env { hops, slot } => Instruction::GetEnv {
+                hops: hops.saturating_add(pushed),
+                slot,
+            },
+            _ => return Err(malformed("a parameter's binding")),
+        };
+        let store = match target {
+            Binding::Local(slot) => Instruction::SetLocal(*slot),
+            Binding::Env { hops, slot } => Instruction::SetEnv {
+                hops: *hops,
+                slot: *slot,
+            },
+            _ => return Err(malformed("a var binding of the body")),
+        };
+        c.emit(load, f.span)?;
+        c.emit(store, f.span)?;
+        c.emit(Instruction::Pop, f.span)?;
+    }
+    Ok(())
+}
+
+/// The value of the expression `e` onto the operand stack: its tasks run as
+/// [`Compiler::run`] runs a statement's, of the kinds an expression expands to
+/// (`expression.rs`), each expansion charged as it is made.
+fn expression_value(c: &mut Compiler<'_, '_>, e: ExprId) -> Result<(), CompileError> {
+    let base = c.tasks.len();
+    c.m.push(&mut c.tasks, Task::Expr(e))?;
+    while c.tasks.len() > base {
+        let Some(task) = c.tasks.pop() else { break };
+        match task {
+            Task::Expr(id) => {
+                c.m.visit()?;
+                let mut expanded = c.expression(id)?;
+                c.m.grow_by(&mut c.tasks, expanded.len())?;
+                c.tasks.extend(expanded.drain().rev());
+                drop(expanded);
+                c.m.check()?;
+            }
+            Task::Emit(instruction, span) => c.emit(instruction, span)?,
+            Task::Goto(label, span) => c.goto(label, span)?,
+            Task::Bind(label) => c.bind(label)?,
+            Task::ChainOpen(short) => c.m.push(
+                &mut c.chains,
+                Chain {
+                    short,
+                    stubs: Vec::new(),
+                },
+            )?,
+            Task::ChainCheck(depth, span) => c.chain_check(depth, span)?,
+            Task::ChainClose(span) => c.chain_close(span)?,
+            _ => return Err(malformed("a task no expression expands to")),
+        }
+    }
+    Ok(())
 }

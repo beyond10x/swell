@@ -934,9 +934,9 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// `CoverParenthesizedExpressionAndArrowParameterList` (`#sec-grouping-operator`,
     /// `#sec-arrow-function-definitions`): `( Expression )`, and before `=>` also `()` and a
-    /// trailing comma. The expression is marked parenthesized; an arrow function reads it again
-    /// as its parameters ([`Parser::arrow_function`]). A rest element is refused with the rest
-    /// parameter of slice 6.
+    /// trailing comma and a rest element last ([`Parser::cover_rest`]). The expression is marked
+    /// parenthesized; an arrow function reads it again as its parameters
+    /// ([`Parser::arrow_function`]).
     fn parenthesized(&mut self) -> R<ExprId> {
         self.enter()?;
         let e = match self.paren_open()? {
@@ -950,8 +950,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// The `(` of a parenthesized expression. `()` stands only before `=>`: it answers an empty
-    /// comma expression, the empty parameter list the arrow function reads; `(...` is a rest
-    /// parameter, refused.
+    /// comma expression, the empty parameter list the arrow function reads; `(...` answers the
+    /// rest element alone ([`Parser::cover_rest`]).
     #[inline(never)]
     fn paren_open(&mut self) -> R<Option<ExprId>> {
         let start = self.start();
@@ -964,9 +964,29 @@ impl<'a, 'm> Parser<'a, 'm> {
             return self.unexpected();
         }
         if self.is(Punct::Ellipsis) {
-            return self.refuse("rest parameter", 6);
+            return self.cover_rest().map(Some);
         }
         Ok(None)
+    }
+
+    /// The rest element `... BindingIdentifier` of a parenthesized list at its `...`, which
+    /// only `ArrowFormalParameters` take: the `)` and a `=>` must follow it
+    /// (`#sec-arrow-function-definitions`). It is held as the identifier, its span starting at
+    /// the `...`, which marks it for the arrow function that reads the list again
+    /// ([`Parser::arrow_function`]); a pattern keeps its refusal.
+    #[inline(never)]
+    fn cover_rest(&mut self) -> R<ExprId> {
+        let start = self.start();
+        self.advance()?;
+        let name = self.binding_identifier()?;
+        if !self.is(Punct::RParen) {
+            return self.fail_here(super::function::REST_NOT_LAST);
+        }
+        if self.peek()?.kind != TokenKind::Punct(Punct::Arrow) {
+            return self.fail_here(super::function::REST_WITHOUT_ARROW);
+        }
+        let span = self.finish(start);
+        self.push_expr(Expr::Identifier(name.name), span)
     }
 
     /// The `Expression` inside the parentheses, with a trailing comma allowed before `) =>`.
@@ -986,7 +1006,11 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.enter()?;
         let id = self.reserve_sequence(first)?;
         while self.paren_comma()? {
-            let e = self.assignment(false)?;
+            let e = if self.is(Punct::Ellipsis) {
+                self.cover_rest()?
+            } else {
+                self.assignment(false)?
+            };
             self.append_expr(id, Some(e))?;
         }
         let id = self.complete_expr(id, start)?;
@@ -996,9 +1020,7 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// Whether another operand follows inside parentheses: consumes its `,`. A `,` before the
     /// `)` is a trailing comma, which only `ArrowFormalParameters` take, so `=>` must follow the
-    /// `)`. A `...` after the `,` is an unexpected token until `story:default-and-rest-parameters`
-    /// reads rest parameters: a refusal there would fail the negative cases of test262 that pass
-    /// on that error now.
+    /// `)`. A `...` after the `,` starts the rest element ([`Parser::cover_rest`]).
     #[inline(never)]
     fn paren_comma(&mut self) -> R<bool> {
         if !self.eat(Punct::Comma)? {

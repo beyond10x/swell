@@ -456,22 +456,26 @@ impl<H: Host> Agent<H> {
     }
 
     /// The name of slot `slot` of the record `env`, for a message: its records of `let` and
-    /// `const` bindings always name their slots.
+    /// `const` bindings and a function's environment, whose parameters may be uninitialized,
+    /// always name their slots.
     pub(crate) fn slot_name(&mut self, env: Handle, slot: u32) -> String {
         let name = self.heap.environments.get(env).ok().and_then(|record| {
             let names = record.slot_names()?;
             let code = &names.compiled.code;
-            let NameTable::Scope { template, index } = names.table else {
-                return None;
+            let template = |t: u32| code.functions.get(usize::try_from(t).ok()?);
+            let slot = usize::try_from(slot).ok()?;
+            let name = match names.table {
+                NameTable::Function(t) => *template(t)?.captured.get(slot)?,
+                NameTable::Scope { template: t, index } => {
+                    let scopes = match t {
+                        Some(t) => &template(t)?.scopes,
+                        None => &code.scopes,
+                    };
+                    scopes.get(usize::try_from(index).ok()?)?.get(slot)?.name()
+                }
+                NameTable::SelfName(_) => return None,
             };
-            let scopes = match template {
-                Some(t) => &code.functions.get(usize::try_from(t).ok()?)?.scopes,
-                None => &code.scopes,
-            };
-            let name = scopes
-                .get(usize::try_from(index).ok()?)?
-                .get(usize::try_from(slot).ok()?)?;
-            code.strings.get(usize::try_from(name.name()).ok()?)
+            code.strings.get(usize::try_from(name).ok()?)
         });
         name.map(|units| String::from_utf16_lossy(units))
             .unwrap_or_default()
@@ -719,20 +723,23 @@ impl<H: Host> Agent<H> {
             }
             NameReference::Global => self.global_set_mutable_binding(realm, key, value, strict),
             NameReference::Declarative(env) => match self.bound(env, key)? {
-                Some(Bound::Slot(slot, SlotKind::Mutable)) => {
-                    self.set_slot(Some(env), 0, slot, value)
-                }
-                // Steps 3 and 5: an uninitialized binding is a `ReferenceError`, a `const` one a
+                // Steps 3 and 5: an uninitialized binding is a `ReferenceError` (a `let` or
+                // `const` one, or a parameter whose default has not run yet), a `const` one a
                 // `TypeError` in any code.
-                Some(Bound::Slot(slot, kind @ (SlotKind::Let | SlotKind::Const))) => {
-                    let state = self.slot_state(Some(env), 0, slot)?;
-                    let name = self.key_text(key);
-                    match (state, kind) {
-                        (SlotValue::Uninitialized, _) => Err(self.not_initialized(&name)),
-                        (_, SlotKind::Const) => self.assign_const(&name),
-                        _ => self.set_slot(Some(env), 0, slot, value),
+                Some(Bound::Slot(
+                    slot,
+                    kind @ (SlotKind::Mutable | SlotKind::Let | SlotKind::Const),
+                )) => match (self.slot_state(Some(env), 0, slot)?, kind) {
+                    (SlotValue::Uninitialized, _) => {
+                        let name = self.key_text(key);
+                        Err(self.not_initialized(&name))
                     }
-                }
+                    (_, SlotKind::Const) => {
+                        let name = self.key_text(key);
+                        self.assign_const(&name)
+                    }
+                    _ => self.set_slot(Some(env), 0, slot, value),
+                },
                 Some(Bound::Slot(_, SlotKind::SelfName)) => {
                     let name = self.key_text(key);
                     self.assign_immutable(strict, &name)
