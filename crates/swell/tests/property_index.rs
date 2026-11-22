@@ -12,9 +12,12 @@
 
 mod support;
 
-use support::host::{agent_with, limits, realm, seeds};
-use support::script::{Outcome, eval_text};
-use swell::{Agent, Seeds, Termination};
+use support::host::{TestHost, agent_with, global, key, limits, object, realm, seeds};
+use support::script::{Outcome, describe, eval_text, parse};
+use swell::{
+    Agent, Brand, HostObjectSpec, Limits, Outcome as HostOutcome, Prototype, Realm, Seeds,
+    Termination, Value,
+};
 
 /// HOST-10 with a budget a debug build fills in seconds: `var a = []; while (true)
 /// a.push({});` with `memory_bytes` 8 MiB ends in `Terminated(MemoryBudget)` and `heap_bytes()`
@@ -187,4 +190,83 @@ fn the_same_seeds_give_the_same_steps_and_heap_bytes() {
     assert_eq!(one.0, Outcome::Normal(expected.to_string()));
     assert_eq!(one, two);
     assert_eq!(one, three);
+}
+
+/// The code units of the long key of HOST-182.
+const LONG_KEY: u64 = 1_000_000;
+
+/// An agent with `limits` and a realm whose global object has `o`, an object the host made
+/// (its [[Prototype]] `%Object.prototype%`), `k`, a String of [`LONG_KEY`] code units, and
+/// `q`, a String of one code unit, each defined by the host.
+fn agent_with_long_key(limits: Limits) -> (Agent<TestHost>, Realm) {
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    agent
+        .with_cx(&realm, |cx| {
+            let global = object(cx, &global_root);
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            let o = cx
+                .new_host_object(HostObjectSpec {
+                    prototype: Prototype::ObjectPrototypeOf(realm_ref),
+                    brand: Brand(1),
+                    data: None,
+                })
+                .unwrap()
+                .unwrap();
+            let k = cx.new_string_utf16(&vec![0x6B; LONG_KEY as usize]).unwrap();
+            let q = cx.new_string_utf16(&[0x71]).unwrap();
+            for (name, value) in [
+                ("o", Value::Object(o)),
+                ("k", Value::String(k)),
+                ("q", Value::String(q)),
+            ] {
+                let name = key(cx, name);
+                cx.set(global, name, value, true).unwrap().unwrap();
+            }
+        })
+        .unwrap();
+    (agent, realm)
+}
+
+/// HOST-182: a String made a property key charges a step per code unit past 32 before it is
+/// hashed (`docs/design/engine.md`, "The step budget"; ToPropertyKey, `#sec-topropertykey`).
+/// `o[k]` with the host's key `k` of 1,000,000 code units spends at least 999,968 steps more
+/// than `o[q]` with the key `q` of one; with `steps_per_entry` 10,000 and a `collect()` before
+/// the entry it ends in `Terminated(StepBudget)`, and `heap_bytes()` after the entry reads what
+/// it read before: no atom was made.
+#[test]
+fn host_182_a_long_key_is_charged_before_it_is_interned() {
+    let mut roomy = limits();
+    roomy.steps_per_entry = 10_000_000;
+    let (mut agent, realm) = agent_with_long_key(roomy);
+    let mut counted = |source: &str| {
+        let script = parse(&mut agent, &realm, source);
+        let outcome = agent.evaluate_script(&script).unwrap();
+        let steps = agent.last_entry_steps().unwrap();
+        (describe(&mut agent, &realm, outcome), steps)
+    };
+    let undefined = Outcome::Normal("undefined".to_string());
+    let (outcome, short) = counted("o[q]");
+    assert_eq!(outcome, undefined);
+    let (outcome, long) = counted("o[k]");
+    assert_eq!(outcome, undefined);
+    assert!(
+        long >= short + (LONG_KEY - 32),
+        "o[k] spent {long} steps, o[q] {short}"
+    );
+
+    let mut tight = limits();
+    tight.steps_per_entry = 10_000;
+    let (mut agent, realm) = agent_with_long_key(tight);
+    let script = parse(&mut agent, &realm, "o[k]");
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    let before = agent.heap_bytes().unwrap();
+    let outcome = agent.evaluate_script(&script).unwrap();
+    let after = agent.heap_bytes().unwrap();
+    assert_eq!(
+        describe(&mut agent, &realm, outcome),
+        Outcome::Terminated(Termination::StepBudget)
+    );
+    assert_eq!(after, before, "an atom was made");
 }

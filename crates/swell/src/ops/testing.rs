@@ -2,12 +2,23 @@
 //! IsCallable, IsConstructor, IsArray, SameValue, SameValueZero, IsLooselyEqual,
 //! IsStrictlyEqual and IsLessThan. No Proxy exists before slice 9 and no BigInt before slice 12,
 //! so the steps for them are not reached here. Written by `story:object-model-and-realms`.
+//!
+//! Two Strings are compared in place, with no copy. Equality charges a step per code unit past
+//! [`FREE_CODE_UNITS`], IsLessThan a step per code unit of the shorter String, each before a
+//! unit is read (`docs/design/engine.md`, "The step budget").
+
+use std::cmp::Ordering;
 
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{Host, PreferredType};
 use crate::object::KindTag;
 use crate::value::{StringRef, Value};
+
+/// The code units of a String that a comparison of two Strings, or the String made a property
+/// key, reads without a step of its own; past them, a step per code unit
+/// (`docs/design/engine.md`, "The step budget").
+pub(crate) const FREE_CODE_UNITS: usize = 32;
 
 /// Number::sameValue (`#sec-numeric-types-number-sameValue`).
 pub(crate) fn number_same_value(x: f64, y: f64) -> bool {
@@ -39,12 +50,36 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// Whether two Strings have the same code units.
+    /// A step per code unit of `length` past [`FREE_CODE_UNITS`], before the units are read; none
+    /// for `length` of at most that.
+    pub(crate) fn charge_code_units(&mut self, length: usize) -> Completion<()> {
+        match length.checked_sub(FREE_CODE_UNITS) {
+            Some(past) if past > 0 => self.charge_steps(u64::try_from(past).unwrap_or(u64::MAX)),
+            _ => Ok(()),
+        }
+    }
+
+    /// Whether two Strings have the same code units (SameValueNonNumber,
+    /// `#sec-samevaluenonnumber`, step 5). One String, or two of different lengths, answer
+    /// without a step; otherwise a step per code unit past [`FREE_CODE_UNITS`] is charged before
+    /// a unit is read, and the two records are compared in place.
     pub(crate) fn string_equals(&mut self, x: StringRef, y: StringRef) -> Completion<bool> {
         if x == y {
             return Ok(true);
         }
-        Ok(self.string_units(x)? == self.string_units(y)?)
+        let length = self.string_length(x)?;
+        if self.string_length(y)? != length {
+            return Ok(false);
+        }
+        self.charge_code_units(length)?;
+        let equal = match (
+            self.heap.strings.get(x.handle),
+            self.heap.strings.get(y.handle),
+        ) {
+            (Ok(x), Ok(y)) => Some(x.equals_string(y)),
+            _ => None,
+        };
+        equal.ok_or_else(|| self.fault())
     }
 
     /// SameValueNonNumber (`#sec-samevaluenonnumber`), for values of one type.
@@ -150,11 +185,18 @@ impl<H: Host> Agent<H> {
             (px?, py)
         };
         if let (Value::String(px), Value::String(py)) = (px, py) {
-            // 3. Both Strings: the code units compared in order; a prefix is less.
-            let (px, py) = (self.string_units(px)?, self.string_units(py)?);
-            let compared = u64::try_from(px.len().min(py.len())).unwrap_or(u64::MAX);
-            self.charge_steps(compared)?;
-            return Ok(Some(px < py));
+            // 3. Both Strings: the code units compared in order; a prefix is less. The shorter
+            // length is charged before a unit is read, and the records are compared in place.
+            let compared = self.string_length(px)?.min(self.string_length(py)?);
+            self.charge_steps(u64::try_from(compared).unwrap_or(u64::MAX))?;
+            let less = match (
+                self.heap.strings.get(px.handle),
+                self.heap.strings.get(py.handle),
+            ) {
+                (Ok(x), Ok(y)) => Some(x.cmp_string(y) == Ordering::Less),
+                _ => None,
+            };
+            return less.map(Some).ok_or_else(|| self.fault());
         }
         let nx = self.to_number(px)?;
         let ny = self.to_number(py)?;
@@ -168,6 +210,8 @@ impl<H: Host> Agent<H> {
 #[cfg(test)]
 mod tests {
     use crate::host::hooks::test_host::{agent_with_realm, enter};
+    use crate::host::outcome::{Abrupt, Termination};
+    use crate::object::string::copies;
     use crate::value::Value;
 
     /// SameValue, SameValueZero and IsStrictlyEqual differ on NaN and the signed zeros
@@ -199,5 +243,41 @@ mod tests {
         assert_eq!(agent.is_array(a), Ok(false));
         assert_eq!(agent.is_constructor(Value::Object(array)), Ok(false));
         assert_eq!(agent.is_constructor(a), Ok(false));
+    }
+
+    /// The code units of the long Strings of the tests below.
+    const LONG: usize = 1_000_000;
+
+    /// IsLessThan (`#sec-islessthan`, step 3) compares two Strings in place: `"a" < s` with `s`
+    /// of 1,000,000 code units answers true, and no copy of a String's units was made.
+    #[test]
+    fn is_less_than_copies_nothing() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        let a = Value::String(agent.new_string_str("a").unwrap());
+        let s = Value::String(agent.new_string_value(&vec![0x61; LONG]).unwrap());
+        agent.keep(a);
+        agent.keep(s);
+        copies::reset();
+        assert_eq!(agent.is_less_than(a, s, true), Ok(Some(true)));
+        assert_eq!(copies::longest(), 0);
+    }
+
+    /// StringToNumber (`#sec-stringtonumber`) charges a step per code unit before it copies
+    /// them: `+s` of 1,000,000 code units with 1,000 steps left ends in
+    /// `Terminated(StepBudget)`, and no copy of its units was made.
+    #[test]
+    fn string_to_number_is_charged_before_its_copy() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        let s = Value::String(agent.new_string_value(&vec![0x31; LONG]).unwrap());
+        agent.keep(s);
+        copies::reset();
+        agent.limits.steps_per_entry = agent.steps + 1_000;
+        assert_eq!(
+            agent.to_number(s),
+            Err(Abrupt::Terminated(Termination::StepBudget))
+        );
+        assert_eq!(copies::longest(), 0);
     }
 }
