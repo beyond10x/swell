@@ -25,6 +25,8 @@ prose *.md
 code docs/design/engine.md
 # host-requirements-check (taskfiles/host-requirements.yml): the HOST-<n> requirements.
 code docs/design/host-interface.md
+# host-surface-check (taskfiles/host-surface.yml): the names under "### Host interface" of [Unreleased].
+code CHANGELOG.md
 # Files under these directories are read by tests, builds and gate steps (the fixtures
 # crates/test262/tests/fixtures/*.md are read by the tests of swell-test262).
 code crates/*

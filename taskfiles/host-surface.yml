@@ -1,0 +1,575 @@
+version: '3'
+
+set: [pipefail]
+
+tasks:
+  host-surface-scan:
+    desc: Print the public host interface of the tree, one sorted line per public item of crates/swell/src/value.rs and host/*.rs and per HOST-<n> requirement, as host-surface-check compares it.
+    summary: |
+      Print the public host interface of the tree as sorted lines "<name> <rest>", the lines
+      host-surface-check compares with the snapshot of the last release and that
+      host-surface-snapshot writes at a release.
+
+      Reads, under HOST_SURFACE_ROOT (default .), crates/swell/src/value.rs,
+      crates/swell/src/host/*.rs and docs/design/host-interface.md: the public interface of
+      swell is the glob re-export of value and host (crates/swell/src/lib.rs). One line per
+      public item: a pub fn, struct, enum, union, trait, type alias, const or static, each pub
+      field of a pub struct, each variant of a pub enum, each item of a pub trait (the Host
+      trait's methods have no pub keyword), and each pub fn, const and type of an inherent impl
+      of a pub type or of the macro scoped_methods!, whose methods Cx and HookCx both get. The
+      rest of the line is the item's attributes derive, cfg, non_exhaustive and repr (an impl's
+      go to its items) and its signature joined to one line up to the first { or ; outside
+      brackets, spaces collapsed, doc comments, other comments and bodies left out; a field or
+      a variant is its text up to its comma. A doc comment, a private item and a body change no
+      line. The name has the form docs/releasing.md states: a method by its bare name, with its
+      type before it (Agent::host) where two types of the interface have a method of that
+      name; a method of scoped_methods! once, bare; a field or a variant as Type::name; any
+      other item by its name. One line per line of docs/design/host-interface.md that starts
+      with **HOST-: "HOST-<n> <SHA-256 of the line>".
+      Fails, naming it, on a missing file, a file set with no public item, no requirement, a
+      line that starts with **HOST- and is not **HOST-<n>**, and a requirement stated twice.
+      awk, sort and sha256sum only; nothing compiles. Writes HOST_SURFACE_OUT/scan.txt
+      (default .out/host-surface).
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    vars:
+      HOST_SURFACE_ROOT: '{{.HOST_SURFACE_ROOT | default "."}}'
+      HOST_SURFACE_OUT: '{{.HOST_SURFACE_OUT | default ".out/host-surface"}}'
+    cmds:
+      - task: host-surface-write
+        vars:
+          HOST_SURFACE_ROOT: '{{.HOST_SURFACE_ROOT}}'
+          HOST_SURFACE_OUT: '{{.HOST_SURFACE_OUT}}'
+          HOST_SURFACE_TARGET: '{{.HOST_SURFACE_OUT}}/scan.txt'
+      - cat {{shellQuote .HOST_SURFACE_OUT}}/scan.txt
+
+  host-surface-snapshot:
+    desc: Write the scan of the tree into conformance/host/surface.txt, headed "# swell <version>"; a step of a release (docs/releasing.md).
+    summary: |
+      Write the scan of host-surface-scan of the tree under HOST_SURFACE_ROOT (default .) into
+      HOST_SURFACE_SNAPSHOT (default conformance/host/surface.txt), with the first line
+      "# swell <version>". The version is HOST_SURFACE_VERSION, or else the version of
+      [workspace.package] in HOST_SURFACE_ROOT/Cargo.toml. A release runs it on the release
+      commit and commits the file with it (docs/releasing.md, step 2); host-surface-check
+      compares the tree with it until the next release. Fails when no version is found or the
+      scan fails. Prints "host-surface: wrote <file>, <n> line(s) of swell <version>".
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    vars:
+      HOST_SURFACE_ROOT: '{{.HOST_SURFACE_ROOT | default "."}}'
+      HOST_SURFACE_OUT: '{{.HOST_SURFACE_OUT | default ".out/host-surface"}}'
+      HOST_SURFACE_SNAPSHOT: '{{.HOST_SURFACE_SNAPSHOT | default "conformance/host/surface.txt"}}'
+      HOST_SURFACE_VERSION: '{{.HOST_SURFACE_VERSION | default ""}}'
+    cmds:
+      - task: host-surface-write
+        vars:
+          HOST_SURFACE_ROOT: '{{.HOST_SURFACE_ROOT}}'
+          HOST_SURFACE_OUT: '{{.HOST_SURFACE_OUT}}'
+          HOST_SURFACE_TARGET: '{{.HOST_SURFACE_OUT}}/scan.txt'
+      - |
+        root={{shellQuote .HOST_SURFACE_ROOT}}
+        snapshot={{shellQuote .HOST_SURFACE_SNAPSHOT}}
+        scan={{shellQuote .HOST_SURFACE_OUT}}/scan.txt
+        version={{shellQuote .HOST_SURFACE_VERSION}}
+        if [ -z "$version" ]; then
+          if [ ! -f "$root/Cargo.toml" ]; then
+            echo "host-surface: $root/Cargo.toml is missing and HOST_SURFACE_VERSION is not set"
+            exit 1
+          fi
+          version=$(awk '
+            /^\[/ { package = ($0 == "[workspace.package]"); next }
+            package && /^version *= *"/ { v = $0; sub(/^version *= *"/, "", v); sub(/".*/, "", v); print v; exit }
+          ' "$root/Cargo.toml")
+        fi
+        case $version in
+          ''|*' '*) echo "host-surface: no version in [workspace.package] of $root/Cargo.toml"; exit 1 ;;
+        esac
+        mkdir -p "$(dirname "$snapshot")"
+        { echo "# swell $version"; cat "$scan"; } >"$snapshot.tmp" && mv "$snapshot.tmp" "$snapshot"
+        echo "host-surface: wrote $snapshot, $(wc -l <"$scan" | tr -d ' ') line(s) of swell $version"
+
+  host-surface-check:
+    desc: Fail, one line per name, when a line of the host interface's scan moved since the snapshot of the last release and [Unreleased] of CHANGELOG.md does not name it under "### Host interface".
+    summary: |
+      Compare the scan of the tree (host-surface-scan, under HOST_SURFACE_ROOT, default .) with
+      the snapshot of the last release, HOST_SURFACE_SNAPSHOT (default
+      conformance/host/surface.txt, first line "# swell <version>"), by comm. For each line
+      added or removed it takes the name, the first word, and fails when the name does not
+      stand in backticks under a "### Host interface" heading of "## [Unreleased]" in
+      HOST_SURFACE_CHANGELOG (default CHANGELOG.md). A name is found only as the whole token
+      between two backticks, in the form docs/releasing.md states; another form of the same
+      item is not found, and a name under another heading or another release is not found.
+      One line per name not found:
+      "host-surface: <name> changed since <version> and [Unreleased] does not name it (name
+      form: docs/releasing.md); write `<name>` under "### Host interface" of "## [Unreleased]"
+      in <changelog>; <snapshot>:<line> was: <rest>; the tree has: <rest>" (a side with no
+      line reads "has no line of it"), then "host-surface: <m> of <n> changed name(s) since
+      <version> not named; ...". A rename is a removal and an addition, both named. Passing,
+      it prints "host-surface: <n> change(s) since <version>, each named". Fails also on a
+      missing snapshot or changelog, a snapshot without its first line or with no other line,
+      and a scan that fails. Reads files only and compiles nothing; a step of check before
+      build.
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    vars:
+      HOST_SURFACE_ROOT: '{{.HOST_SURFACE_ROOT | default "."}}'
+      HOST_SURFACE_OUT: '{{.HOST_SURFACE_OUT | default ".out/host-surface"}}'
+      HOST_SURFACE_SNAPSHOT: '{{.HOST_SURFACE_SNAPSHOT | default "conformance/host/surface.txt"}}'
+      HOST_SURFACE_CHANGELOG: '{{.HOST_SURFACE_CHANGELOG | default "CHANGELOG.md"}}'
+    cmds:
+      - task: host-surface-write
+        vars:
+          HOST_SURFACE_ROOT: '{{.HOST_SURFACE_ROOT}}'
+          HOST_SURFACE_OUT: '{{.HOST_SURFACE_OUT}}'
+          HOST_SURFACE_TARGET: '{{.HOST_SURFACE_OUT}}/scan.txt'
+      - |
+        out={{shellQuote .HOST_SURFACE_OUT}}
+        snapshot={{shellQuote .HOST_SURFACE_SNAPSHOT}}
+        changelog={{shellQuote .HOST_SURFACE_CHANGELOG}}
+        if [ ! -f "$snapshot" ]; then
+          echo "host-surface: $snapshot is missing; task host-surface-snapshot writes it at a release"
+          exit 1
+        fi
+        if [ ! -f "$changelog" ]; then
+          echo "host-surface: $changelog is missing"
+          exit 1
+        fi
+        version=$(sed -n '1s/^# swell \([^ ][^ ]*\)$/\1/p' "$snapshot")
+        if [ -z "$version" ]; then
+          echo "host-surface: the first line of $snapshot is not \"# swell <version>\""
+          exit 1
+        fi
+        sed 1d "$snapshot" | LC_ALL=C sort >"$out/snapshot.txt"
+        if [ ! -s "$out/snapshot.txt" ]; then
+          echo "host-surface: $snapshot holds no line after its first"
+          exit 1
+        fi
+        LC_ALL=C comm -3 "$out/snapshot.txt" "$out/scan.txt" >"$out/moved.txt"
+        LC_ALL=C awk -v version="$version" -v snapshot="$snapshot" -v changelog="$changelog" -v bq='`' '
+          FILENAME == ARGV[1] {
+            if ($0 ~ /^## /) {
+              unreleased = ($0 ~ /^## \[Unreleased\]/)
+              host = 0
+              next
+            }
+            if ($0 ~ /^### /) {
+              host = unreleased && ($0 ~ /^### Host interface[ \t]*$/)
+              next
+            }
+            if (host) {
+              s = $0
+              while ((i = index(s, bq)) > 0) {
+                s = substr(s, i + 1)
+                j = index(s, bq)
+                if (j == 0) break
+                named[substr(s, 1, j - 1)] = 1
+                s = substr(s, j + 1)
+              }
+            }
+            next
+          }
+          FILENAME == ARGV[2] {
+            if (FNR > 1 && !($0 in at)) at[$0] = FNR
+            next
+          }
+          {
+            added = (substr($0, 1, 1) == "\t")
+            line = added ? substr($0, 2) : $0
+            name = line
+            sub(/ .*/, "", name)
+            rest = ""
+            if (index(line, " ")) rest = substr(line, index(line, " ") + 1)
+            if (!(name in seen)) {
+              seen[name] = 1
+              order[++n] = name
+            }
+            if (added) has[name] = has[name] "; the tree has: " rest
+            else was[name] = was[name] "; " snapshot ":" at[line] " was: " rest
+          }
+          END {
+            missing = 0
+            for (k = 1; k <= n; k++) {
+              name = order[k]
+              if (name in named) continue
+              missing++
+              w = (name in was) ? was[name] : "; " snapshot " has no line of it"
+              h = (name in has) ? has[name] : "; the tree has no line of it"
+              print "host-surface: " name " changed since " version " and [Unreleased] does not name it (name form: docs/releasing.md); write " bq name bq " under \"### Host interface\" of \"## [Unreleased]\" in " changelog w h
+            }
+            if (missing) {
+              print "host-surface: " missing " of " n " changed name(s) since " version " not named; the lines are those of " snapshot " and of task host-surface-scan"
+              exit 1
+            }
+            print "host-surface: " n + 0 " change(s) since " version ", each named"
+          }
+        ' "$changelog" "$snapshot" "$out/moved.txt"
+
+  host-surface-write:
+    internal: true
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    vars:
+      HOST_SURFACE_ROOT: '{{.HOST_SURFACE_ROOT | default "."}}'
+      HOST_SURFACE_OUT: '{{.HOST_SURFACE_OUT | default ".out/host-surface"}}'
+      HOST_SURFACE_TARGET: '{{.HOST_SURFACE_TARGET | default ".out/host-surface/scan.txt"}}'
+    cmds:
+      - |
+        export LC_ALL=C
+        root={{shellQuote .HOST_SURFACE_ROOT}}
+        out={{shellQuote .HOST_SURFACE_OUT}}
+        target={{shellQuote .HOST_SURFACE_TARGET}}
+        src=$root/crates/swell/src
+        doc=$root/docs/design/host-interface.md
+        missing=0
+        for f in "$src/value.rs" "$src/host/mod.rs" "$doc"; do
+          if [ ! -f "$f" ]; then
+            echo "host-surface: $f is missing"
+            missing=1
+          fi
+        done
+        if [ "$missing" != 0 ]; then exit 1; fi
+        mkdir -p "$out" "$(dirname "$target")"
+        req=$out/requirements
+        rm -rf "$req"
+        mkdir -p "$req"
+
+        # The requirements: one file per **HOST-<n>** line holding the line, then one SHA-256 each.
+        awk -v dir="$req" '
+          /^\*\*HOST-/ {
+            n++
+            if (!match($0, /^\*\*HOST-[0-9]+\*\*/)) {
+              print "host-surface: " FILENAME ":" FNR ": starts with **HOST- and is not **HOST-<n>**"
+              bad = 1
+              next
+            }
+            id = substr($0, 3, RLENGTH - 4)
+            if (id in line) {
+              print "host-surface: " FILENAME ":" FNR ": " id " is stated twice, first at line " line[id]
+              bad = 1
+              next
+            }
+            line[id] = FNR
+            f = dir "/" id
+            printf "%s", $0 >f
+            close(f)
+          }
+          END {
+            if (bad) exit 1
+            if (!n) {
+              print "host-surface: " FILENAME " holds no line that starts with **HOST-"
+              exit 1
+            }
+          }
+        ' "$doc"
+        (cd "$req" && sha256sum -- HOST-*) | awk '{ print $2 " " $1 }' >"$out/requirements.txt"
+
+        # The public items of value.rs and host/*.rs.
+        awk -v q="'" '
+          function trim(s) {
+            sub(/^[ \t]+/, "", s)
+            sub(/[ \t]+$/, "", s)
+            return s
+          }
+          function norm(s) {
+            gsub(/[ \t]+/, " ", s)
+            s = trim(s)
+            gsub(/\( /, "(", s)
+            gsub(/ \)/, ")", s)
+            gsub(/,\)/, ")", s)
+            gsub(/\[ /, "[", s)
+            gsub(/ \]/, "]", s)
+            gsub(/,\]/, "]", s)
+            gsub(/, \}/, " }", s)
+            sub(/,$/, "", s)
+            return s
+          }
+          # The leading attributes of s off: ATTRS holds the kept ones, each with a blank after it.
+          function attrs(s,    a, i, n, d, c) {
+            ATTRS = ""
+            while (substr(s, 1, 1) == "#") {
+              n = length(s)
+              d = 0
+              for (i = 2; i <= n; i++) {
+                c = substr(s, i, 1)
+                if (c == "[") d++
+                else if (c == "]") {
+                  d--
+                  if (d == 0) break
+                }
+              }
+              a = substr(s, 1, i)
+              s = trim(substr(s, i + 1))
+              if (a ~ /^#\[(derive|cfg|non_exhaustive|repr)(\(|])/) ATTRS = ATTRS a " "
+            }
+            return s
+          }
+          function word(s) {
+            sub(/[^A-Za-z0-9_].*/, "", s)
+            return s
+          }
+          function plain(name, text) {
+            nrec++
+            kind[nrec] = "p"
+            rname[nrec] = name
+            rtext[nrec] = text
+          }
+          function method(type, name, text) {
+            nrec++
+            kind[nrec] = "m"
+            rtype[nrec] = type
+            rname[nrec] = name
+            rtext[nrec] = text
+          }
+          # An item or impl header ending in term ("{" or ";") in the context at depth; answers
+          # the context a "{" opens, with NEWTYPE and NEWATTR for it.
+          function classify(stmt, term,    k, s, t, kw, nm, i, n, d, c) {
+            k = ctx[depth]
+            s = attrs(norm(stmt))
+            if (s == "") return "other"
+            if (k == "trait") {
+              if (s ~ /^((const|unsafe|async) )*fn /) {
+                t = s
+                sub(/^((const|unsafe|async) )*fn /, "", t)
+                method(ctype[depth], word(t), ATTRS s)
+              } else if (s ~ /^(const|type) /) {
+                t = s
+                sub(/^(const|type) /, "", t)
+                method(ctype[depth], word(t), ATTRS s)
+              }
+              return "other"
+            }
+            if (s ~ /^macro_rules! /) return "macro"
+            if (s ~ /^(unsafe )?impl([ <]|$)/) {
+              t = s
+              sub(/^(unsafe )?impl/, "", t)
+              t = trim(t)
+              if (substr(t, 1, 1) == "<") {
+                n = length(t)
+                d = 0
+                for (i = 1; i <= n; i++) {
+                  c = substr(t, i, 1)
+                  if (c == "<") d++
+                  else if (c == ">" && substr(t, i - 1, 1) != "-") {
+                    d--
+                    if (d == 0) break
+                  }
+                }
+                t = trim(substr(t, i + 1))
+              }
+              sub(/ where .*/, "", t)
+              if (t ~ / for [^<]/ || t ~ /^!/) return "other"
+              nm = t
+              sub(/<.*/, "", nm)
+              sub(/ .*/, "", nm)
+              sub(/.*::/, "", nm)
+              NEWTYPE = (k == "macro" && nm ~ /^\$/) ? "$scoped" : nm
+              NEWATTR = ATTRS
+              return "impl"
+            }
+            if (k == "macro") return "macro"
+            if (s !~ /^pub /) return "other"
+            t = s
+            sub(/^pub /, "", t)
+            if (t ~ /^([a-z]+ )*fn /) {
+              sub(/^([a-z]+ )*fn /, "", t)
+              if (k == "impl") method(ctype[depth], word(t), cattr[depth] ATTRS s)
+              else if (k == "file") plain(word(t), ATTRS s)
+              return "other"
+            }
+            sub(/^(unsafe |auto )+/, "", t)
+            kw = t
+            sub(/ .*/, "", kw)
+            nm = t
+            sub(/^[a-z]+ /, "", nm)
+            sub(/^mut /, "", nm)
+            nm = word(nm)
+            if (kw == "use" || kw == "mod" || kw == "extern" || kw == "crate" || nm == "") return "other"
+            if (k == "impl") {
+              if (kw == "const" || kw == "type") method(ctype[depth], nm, cattr[depth] ATTRS s)
+              return "other"
+            }
+            if (k != "file") return "other"
+            if (kw == "struct" || kw == "enum" || kw == "union" || kw == "trait" || kw == "type") pubtype[nm] = 1
+            plain(nm, ATTRS s)
+            NEWTYPE = nm
+            if (kw == "struct" || kw == "union") return "struct"
+            if (kw == "enum") return "enum"
+            if (kw == "trait") return "trait"
+            return "other"
+          }
+          function items(k) {
+            return k == "file" || k == "impl" || k == "trait" || k == "macro"
+          }
+          function open_block(    next_kind) {
+            NEWTYPE = ""
+            NEWATTR = ""
+            next_kind = items(ctx[depth]) ? classify(buf, "{") : "other"
+            depth++
+            ctx[depth] = next_kind
+            ctype[depth] = (next_kind == "other" || next_kind == "macro") ? "" : NEWTYPE
+            cattr[depth] = (next_kind == "impl") ? NEWATTR : ""
+            buf = ""
+          }
+          # A field of a pub struct or a variant of a pub enum, ended by a comma or the brace.
+          function member(    s, k) {
+            s = attrs(norm(buf))
+            buf = ""
+            ad = 0
+            if (s == "") return
+            k = ctx[depth]
+            if (k == "struct") {
+              if (s !~ /^pub /) return
+              t = s
+              sub(/^pub /, "", t)
+              plain(ctype[depth] "::" word(t), ATTRS s)
+            } else plain(ctype[depth] "::" word(s), ATTRS s)
+          }
+          function close_block() {
+            if (ctx[depth] == "enum" || ctx[depth] == "struct") member()
+            if (depth > 0) depth--
+            buf = ""
+          }
+          # CODE: the line without comments; MASK: the same with the inside of each string and
+          # character literal blanked, so that a brace in one is not counted.
+          function lex(line,    i, n, c, two, rest, piece) {
+            CODE = ""
+            MASK = ""
+            n = length(line)
+            i = 1
+            while (i <= n) {
+              c = substr(line, i, 1)
+              two = substr(line, i, 2)
+              if (comment > 0) {
+                if (two == "*/") {
+                  comment--
+                  i += 2
+                } else if (two == "/*") {
+                  comment++
+                  i += 2
+                } else i++
+                continue
+              }
+              if (string) {
+                if (c == "\\") {
+                  piece = substr(line, i, 2)
+                  CODE = CODE piece
+                  MASK = MASK substr("__", 1, length(piece))
+                  i += 2
+                  continue
+                }
+                CODE = CODE c
+                if (c == "\"") {
+                  MASK = MASK c
+                  string = 0
+                } else MASK = MASK "_"
+                i++
+                continue
+              }
+              if (two == "//") break
+              if (two == "/*") {
+                comment = 1
+                CODE = CODE " "
+                MASK = MASK " "
+                i += 2
+                continue
+              }
+              if (c == "\"") string = 1
+              if (c == q) {
+                rest = substr(line, i)
+                if (match(rest, CHAR1) || match(rest, CHAR2)) {
+                  CODE = CODE substr(rest, 1, RLENGTH)
+                  MASK = MASK q substr(UNDERS, 1, RLENGTH - 2) q
+                  i += RLENGTH
+                  continue
+                }
+              }
+              CODE = CODE c
+              MASK = MASK c
+              i++
+            }
+          }
+          BEGIN {
+            CHAR1 = "^" q "[^" q "\\\\]" q
+            CHAR2 = "^" q "\\\\.[^" q "]*" q
+            UNDERS = "________________________________"
+          }
+          FNR == 1 {
+            depth = 0
+            ctx[0] = "file"
+            ctype[0] = ""
+            cattr[0] = ""
+            buf = ""
+            pd = 0
+            ad = 0
+            comment = 0
+            string = 0
+          }
+          {
+            lex($0)
+            n = length(MASK)
+            for (j = 1; j <= n; j++) {
+              m = substr(MASK, j, 1)
+              c = substr(CODE, j, 1)
+              mem = (ctx[depth] == "enum" || ctx[depth] == "struct")
+              if (m == "(" || m == "[" || (mem && m == "{")) {
+                pd++
+                buf = buf c
+                continue
+              }
+              if (pd > 0 && (m == ")" || m == "]" || (mem && m == "}"))) {
+                pd--
+                buf = buf c
+                continue
+              }
+              if (pd > 0) {
+                buf = buf c
+                continue
+              }
+              if (mem && m == "<") ad++
+              else if (mem && m == ">" && (j == 1 || substr(MASK, j - 1, 1) != "-") && ad > 0) ad--
+              else if (m == "{") {
+                open_block()
+                continue
+              } else if (m == "}") {
+                close_block()
+                continue
+              } else if (m == ";" && !mem) {
+                if (items(ctx[depth])) classify(buf, ";")
+                buf = ""
+                continue
+              } else if (m == "," && mem && ad == 0) {
+                member()
+                continue
+              }
+              buf = buf c
+            }
+            buf = buf " "
+          }
+          END {
+            for (i = 1; i <= nrec; i++) {
+              if (kind[i] != "m") continue
+              t = rtype[i]
+              if (t != "$scoped" && !(t in pubtype)) continue
+              if (!((rname[i], t) in types)) {
+                types[rname[i], t] = 1
+                ntypes[rname[i]]++
+              }
+            }
+            for (i = 1; i <= nrec; i++) {
+              if (kind[i] == "m") {
+                t = rtype[i]
+                if (t != "$scoped" && !(t in pubtype)) continue
+                name = (t == "$scoped" || ntypes[rname[i]] < 2) ? rname[i] : t "::" rname[i]
+              } else name = rname[i]
+              print name " " rtext[i]
+              printed++
+            }
+            if (!printed) {
+              print "host-surface: no public item in " ARGV[1] " and the files after it" >"/dev/stderr"
+              exit 1
+            }
+          }
+        ' "$src/value.rs" "$src"/host/*.rs >"$out/items.txt"
+
+        sort "$out/items.txt" "$out/requirements.txt" >"$target.tmp"
+        mv "$target.tmp" "$target"
