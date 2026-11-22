@@ -27,8 +27,10 @@ tasks:
       summary line "<n> scenarios: <p> passed, <f> failed, <e> error, <u> unsupported". It
       fails, naming both numbers, when a scenario failed or errored, when fewer than 14 passed,
       or when more than ESS_UNSUPPORTED_MAX (default 44) were unsupported; then the lines of
-      the log for the scenarios that did not pass are printed too. The first build fetches the
-      ess crates of conformance/ess/Cargo.lock by their pinned tag.
+      the log for the scenarios that did not pass are printed too. Both commands find their
+      binaries built before the clock by build-conform-engine: the nextest log and the log of
+      cargo run (written without --quiet, so that cargo's Compiling lines show) each fail the
+      step when they hold a Compiling line, naming build-conform-engine (task compile-check).
     env:
       RUSTFLAGS: -D warnings
     silent: true
@@ -49,7 +51,7 @@ tasks:
           --config-file .config/nextest.toml > .out/conform-engine-test.log 2>&1 || status=$?
         echo "$status" > .out/conform-engine-test.status
       - task: nextest-report
-        vars: {STEP: conform-engine, PREFIX: 'conform-engine: ', LOG: .out/conform-engine-test.log, STATUS: .out/conform-engine-test.status, JUNIT: conformance/ess/target/nextest/default/junit.xml, MIN_PASSED: '1'}
+        vars: {STEP: conform-engine, PREFIX: 'conform-engine: ', LOG: .out/conform-engine-test.log, STATUS: .out/conform-engine-test.status, JUNIT: conformance/ess/target/nextest/default/junit.xml, MIN_PASSED: '1', BUILT_BY: build-conform-engine}
       - |
         suite='{{.ESS_SUITE}}'
         case "$suite" in
@@ -62,7 +64,7 @@ tasks:
         fi
         echo "conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok"
         status=0
-        cargo run --locked --quiet --manifest-path conformance/ess/Cargo.toml -- "$suite" .out/conform-engine.json > .out/conform-engine.log 2>&1 || status=$?
+        cargo run --locked --manifest-path conformance/ess/Cargo.toml -- "$suite" .out/conform-engine.json > .out/conform-engine.log 2>&1 || status=$?
         if [ "$status" -ge 2 ]; then
           cat .out/conform-engine.log
           echo "conform-engine: swell-conformance could not run the suite, exit $status"
@@ -86,3 +88,41 @@ tasks:
           grep -E '^  (failed|error|unsupported) ' .out/conform-engine.log || true
           exit 1
         fi
+      - task: compile-check
+        vars: {STEP: conform-engine, LOG: .out/conform-engine.log, BUILT_BY: build-conform-engine}
+
+  build-conform-engine:
+    desc: Build, without running them, the test binaries and the binary swell-conformance that the step conform-engine runs, with its flags and manifest; part of the gate's build phase.
+    summary: |
+      Build, without running them, what the step conform-engine runs, in the workspace of its
+      own conformance/ess (its target directory conformance/ess/target), with the step's
+      RUSTFLAGS="-D warnings": first "cargo nextest run --no-run --locked --manifest-path
+      conformance/ess/Cargo.toml --profile default --config-file .config/nextest.toml" (the
+      step's test run) into .out/build-conform-engine-test.log, then "cargo build --locked
+      --manifest-path conformance/ess/Cargo.toml --bin swell-conformance" (what the step's
+      cargo run builds) into .out/build-conform-engine.log. A step of build-tests, before
+      gate-time-start, so that conform-engine compiles nothing inside its timed step: its
+      nextest log and the log of its cargo run each fail it when they hold a Compiling line
+      (task compile-check). It prints "build-conform-engine: <cargo's Finished line>" for each
+      of the two; when cargo fails it prints that log and fails. The first build fetches the ess
+      crates of conformance/ess/Cargo.lock by their pinned tag.
+    env:
+      RUSTFLAGS: -D warnings
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        esc=$(printf '\033')
+        for part in test bin; do
+          status=0
+          if [ "$part" = test ]; then
+            log=.out/build-conform-engine-test.log
+            cargo nextest run --no-run --locked --manifest-path conformance/ess/Cargo.toml --profile default \
+              --config-file .config/nextest.toml > "$log" 2>&1 || status=$?
+          else
+            log=.out/build-conform-engine.log
+            cargo build --locked --manifest-path conformance/ess/Cargo.toml --bin swell-conformance > "$log" 2>&1 || status=$?
+          fi
+          if [ "$status" -ne 0 ]; then cat "$log"; echo "build-conform-engine: cargo failed, exit $status (log $log)"; exit 1; fi
+          LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" "$log" | awk '/^ *Finished / { sub(/^ */, ""); line = $0 } END { print "build-conform-engine: " line }'
+        done

@@ -15,7 +15,9 @@ tasks:
       "test-faults: <b> test binaries: <p> passed, <f> failed, <i> ignored", then up to ten
       lines "gate-slowest test-faults <seconds> <binary> <test>". It fails when nextest fails (a
       failing test, a build error, or a crates/swell without the feature fault-injection or
-      without the test faults), when a test fails, and when no test passed.
+      without the test faults), when a test fails, and when no test passed. Its binary is built
+      before the clock by build-faults; it fails when its log has a cargo Compiling line, naming
+      build-faults (task compile-check).
     env:
       RUSTFLAGS: -D warnings
     silent: true
@@ -26,4 +28,26 @@ tasks:
         cargo nextest run --locked -p swell --features fault-injection --test faults --profile default > .out/test-faults.log 2>&1 || status=$?
         echo "$status" > .out/test-faults.status
       - task: nextest-report
-        vars: {STEP: test-faults, PREFIX: 'test-faults: ', LOG: .out/test-faults.log, STATUS: .out/test-faults.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}
+        vars: {STEP: test-faults, PREFIX: 'test-faults: ', LOG: .out/test-faults.log, STATUS: .out/test-faults.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1', BUILT_BY: build-faults}
+
+  build-faults:
+    desc: Build, without running it, the test binary the step test-faults runs, with its flags and feature; part of the gate's build phase.
+    summary: |
+      Build, without running it, the test binary the step test-faults runs: "cargo nextest run
+      --no-run" with the step's arguments ("--locked -p swell --features fault-injection --test
+      faults --profile default") and RUSTFLAGS="-D warnings", into .out/build-faults.log. A step
+      of build-tests, before gate-time-start, so that test-faults compiles nothing inside its
+      timed step (nextest-report fails it when its log has a Compiling line). It prints
+      "build-faults: <cargo's Finished line>"; when cargo fails (a build error, or a crates/swell
+      without the feature fault-injection or the test faults) it prints the log and fails.
+    env:
+      RUSTFLAGS: -D warnings
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        status=0
+        cargo nextest run --no-run --locked -p swell --features fault-injection --test faults --profile default > .out/build-faults.log 2>&1 || status=$?
+        if [ "$status" -ne 0 ]; then cat .out/build-faults.log; echo "build-faults: cargo nextest run --no-run failed, exit $status"; exit 1; fi
+        esc=$(printf '\033')
+        LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" .out/build-faults.log | awk '/^ *Finished / { sub(/^ */, ""); line = $0 } END { print "build-faults: " line }'
