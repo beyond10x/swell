@@ -194,7 +194,9 @@ struct Index {
 }
 
 /// What [`KeyedList::make_room`] did: the bytes it charged, which the owner records to credit
-/// when it is freed, and the entries a compaction visited, which the caller charges as steps.
+/// when it is freed, and the entries a compaction visited. An object's properties and the
+/// bindings eval code adds charge those as steps before they ask for room
+/// ([`KeyedList::compaction_visits`]) and do not read `visited`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Room {
     pub(crate) bytes: u64,
@@ -329,13 +331,36 @@ impl<V> KeyedList<V> {
         to_u64(size_of::<Option<(Key, V)>>())
     }
 
+    /// Whether [`KeyedList::make_room`] compacts the list in place: it is full and at least
+    /// half of it is positions removals left empty.
+    fn compacts(&self) -> bool {
+        let length = self.entries.len();
+        length >= self.entries.capacity()
+            && self
+                .index
+                .as_ref()
+                .is_some_and(|index| index.removed > 0 && index.removed.saturating_mul(2) >= length)
+    }
+
+    /// The entries [`KeyedList::make_room`] would visit if it were asked now: the list's length
+    /// when it compacts, else 0. Read from the length, the room and the removed positions,
+    /// without a walk, so that the caller charges them as steps before the compaction runs
+    /// (`docs/design/engine.md`, "Memory budget": work is charged before it is done).
+    pub(crate) fn compaction_visits(&self) -> u64 {
+        if self.compacts() {
+            to_u64(self.entries.len())
+        } else {
+            0
+        }
+    }
+
     /// Make room for one more entry: nothing while the list has room; a compaction in place
-    /// when it is full and at least half of it is empty (`room.visited` entries visited);
-    /// otherwise the list's room doubles (at least 4) and, once that passes [`SMALL`], the map
-    /// gets as much. The growth of both is charged to `accounting` before it is made and added
-    /// to `room.bytes`; over the budget nothing more is charged or made and the answer is
-    /// `OverBudget`. What `room.bytes` holds was charged, also on a refusal, and the owner
-    /// records it.
+    /// when it is full and at least half of it is empty (`room.visited` entries visited, as
+    /// [`KeyedList::compaction_visits`] answers before it runs); otherwise the list's room
+    /// doubles (at least 4) and, once that passes [`SMALL`], the map gets as much. The growth
+    /// of both is charged to `accounting` before it is made and added to `room.bytes`; over
+    /// the budget nothing more is charged or made and the answer is `OverBudget`. What
+    /// `room.bytes` holds was charged, also on a refusal, and the owner records it.
     pub(crate) fn make_room(
         &mut self,
         accounting: &mut Accounting,
@@ -347,10 +372,7 @@ impl<V> KeyedList<V> {
         if length < capacity {
             return Ok(());
         }
-        if let Some(index) = &self.index
-            && index.removed > 0
-            && index.removed.saturating_mul(2) >= length
-        {
+        if self.compacts() {
             room.visited = room.visited.saturating_add(to_u64(length));
             return self.compact();
         }
@@ -607,7 +629,7 @@ impl KeyedList<Property> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Key, Properties, SMALL, Slot, array_index};
+    use super::{Key, Properties, Property, SMALL, Slot, array_index};
     use crate::Realm;
     use crate::host::agent::Agent;
     use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, enter, limits};
@@ -840,6 +862,81 @@ mod tests {
         let keys = agent.own_property_keys(object).unwrap().keys;
         let expected: Vec<Key> = (1..16u32).step_by(2).chain([99]).map(Key::Index).collect();
         assert_eq!(keys, expected);
+    }
+
+    /// An object whose list is full at 65,536 index keys, with the `removed` lowest even ones
+    /// removed.
+    fn full_list(agent: &mut Agent<NoHooks>, removed: u32) -> ObjectRef {
+        const N: u32 = 65_536;
+        let object = plain(agent);
+        for i in 0..N {
+            assert_eq!(
+                agent.create_data_property(object, Key::Index(i), Value::Null),
+                Ok(true)
+            );
+        }
+        for i in (0..N).step_by(2).take(removed as usize) {
+            assert_eq!(agent.internal_delete(object, Key::Index(i)), Ok(true));
+        }
+        let list = &agent.engine_object(object).unwrap().properties;
+        assert_eq!(
+            (list.entries.len(), list.entries.capacity()),
+            (65_536, 65_536)
+        );
+        object
+    }
+
+    /// The length of the list of `object` with its empty positions, and the positions removals
+    /// left empty.
+    fn list_state(agent: &mut Agent<NoHooks>, object: ObjectRef) -> (usize, Option<usize>) {
+        let list = &agent.engine_object(object).unwrap().properties;
+        (
+            list.entries.len(),
+            list.index.as_ref().map(|index| index.removed),
+        )
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (work is charged before it is done): the
+    /// entries a compaction would visit are read from the list's length, room and removals
+    /// before it runs: 65,536 for a full list of 65,536 entries with 32,768 removed, and 0
+    /// with one removed fewer than half.
+    #[test]
+    fn a_compaction_is_counted_before_it_runs() {
+        let (mut agent, _realm) = agent();
+        let object = full_list(&mut agent, 32_767);
+        let visits = |agent: &mut Agent<NoHooks>| {
+            agent
+                .engine_object(object)
+                .unwrap()
+                .properties
+                .compaction_visits()
+        };
+        assert_eq!(visits(&mut agent), 0);
+        assert_eq!(agent.internal_delete(object, Key::Index(65_534)), Ok(true));
+        assert_eq!(list_state(&mut agent, object), (65_536, Some(32_768)));
+        assert_eq!(visits(&mut agent), 65_536);
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (work is charged before it is done): an
+    /// object whose list is full at 65,536 entries with 32,768 removed, and one step left. The
+    /// addition of a new key ends in `Terminated(StepBudget)` before the compaction runs: the
+    /// list keeps its length and its removed positions.
+    #[test]
+    fn an_added_property_charges_its_compaction_before_it_runs() {
+        let (mut agent, _realm) = agent();
+        let object = full_list(&mut agent, 32_768);
+        assert_eq!(list_state(&mut agent, object), (65_536, Some(32_768)));
+        agent.steps = 0;
+        agent.limits.steps_per_entry = 1;
+        assert_eq!(
+            agent.add_property(
+                object,
+                Key::Index(70_000),
+                Property::data(Value::Null, true, true, true)
+            ),
+            Err(Abrupt::Terminated(Termination::StepBudget))
+        );
+        assert_eq!(list_state(&mut agent, object), (65_536, Some(32_768)));
     }
 
     /// OrdinaryOwnPropertyKeys (`#sec-ordinaryownpropertykeys`) answers the indices ascending:

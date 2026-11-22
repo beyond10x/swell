@@ -285,13 +285,21 @@ impl<H: Host> Agent<H> {
     /// Add a property `object` does not have, making room in its list first
     /// (`KeyedList::make_room`): the growth of the list and of its index map is charged before
     /// it is made and recorded in [`Grown`]; over the budget the run ends in
-    /// `Terminated(MemoryBudget)`. A compaction of the list charges a step per entry it visits.
+    /// `Terminated(MemoryBudget)`. A compaction of the list charges a step per entry it visits,
+    /// before it runs.
     pub(crate) fn add_property(
         &mut self,
         object: ObjectRef,
         key: Key,
         property: Property,
     ) -> Completion<()> {
+        let compaction = match self.heap.objects.get(object.handle) {
+            Ok(record) => record.properties.compaction_visits(),
+            Err(_) => return Err(self.fault()),
+        };
+        if compaction > 0 {
+            self.charge_steps(compaction)?;
+        }
         let queue = Rc::clone(&self.credit);
         let hasher = self.heap.hasher;
         let mut room = Room::default();
@@ -310,9 +318,6 @@ impl<H: Host> Agent<H> {
         };
         if made.is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
-        }
-        if room.visited > 0 {
-            self.charge_steps(room.visited)?;
         }
         let pushed = self
             .engine_object_mut(object)?
