@@ -43,6 +43,10 @@ includes:
     taskfile: taskfiles/nextest.yml
     flatten: true
     optional: true
+  forge:
+    taskfile: taskfiles/forge.yml
+    flatten: true
+    optional: true
 
 tasks:
   check:
@@ -64,6 +68,7 @@ tasks:
       - task: python-check
       - task: forbid-unsafe-check
       - task: lock-check
+      - task: forge-check
       - task: nextest-check
       - task: test262-fetch
       - task: unicode-data-check
@@ -286,6 +291,7 @@ tasks:
         TEST262_DESIGN TEST262_FEATURES TEST262_SECTIONS TEST262_EXPECTED TEST262_DIGEST TEST262_OUT TEST262_WORKERS TEST262_RUN
         TEST262_MOVES TEST262_LATER_PARTS
         GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_SELFTEST_DIR GATE_SELFTEST_JOBS
+        GATE_RUNNER_ENV
     silent: true
     cmds:
       - |
