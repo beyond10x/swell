@@ -25,7 +25,7 @@ use swell_syntax::ast::{
 
 use crate::bytecode::Instruction;
 use crate::resolve::{Binding, LexicalPlace, Site, property_key};
-use crate::{CompileError, Compiler, Short, Task, malformed};
+use crate::{CompileError, Compiler, Short, Task, Tasks, malformed};
 
 /// The reference an assignment, an update, a `delete` or a for-in head works on.
 pub(crate) enum Target {
@@ -55,14 +55,19 @@ impl Target {
 
 /// The jump to `decided`, taken when the value on top (a copy of the left value, which the jump
 /// consumes) decides a logical operator `op` on its own.
-fn logical_test(op: LogicalOp, decided: u32, span: Span, t: &mut Vec<Task>) {
+fn logical_test(
+    op: LogicalOp,
+    decided: u32,
+    span: Span,
+    t: &mut Tasks<'_, '_>,
+) -> Result<(), CompileError> {
     match op {
         LogicalOp::And => t.push(Task::Emit(Instruction::JumpIfFalse(decided), span)),
         LogicalOp::Or => t.push(Task::Emit(Instruction::JumpIfTrue(decided), span)),
         LogicalOp::Coalesce => {
-            t.push(Task::Emit(Instruction::Null, span));
-            t.push(Task::Emit(Instruction::Eq, span));
-            t.push(Task::Emit(Instruction::JumpIfFalse(decided), span));
+            t.push(Task::Emit(Instruction::Null, span))?;
+            t.push(Task::Emit(Instruction::Eq, span))?;
+            t.push(Task::Emit(Instruction::JumpIfFalse(decided), span))
         }
     }
 }
@@ -123,45 +128,48 @@ impl<'a, 'm> Compiler<'a, 'm> {
         target: &Target,
         convert: bool,
         span: Span,
-    ) -> Result<Vec<Task>, CompileError> {
-        Ok(match target {
+    ) -> Result<Tasks<'a, 'm>, CompileError> {
+        let mut t = Tasks::new(self.m);
+        match target {
             Target::Binding(Binding::Global(name)) => {
-                vec![Task::Emit(
-                    Instruction::ResolveGlobal(self.string(name)?),
-                    span,
-                )]
+                let name = self.string(name)?;
+                t.push(Task::Emit(Instruction::ResolveGlobal(name), span))?;
             }
             Target::Binding(Binding::Dynamic(name)) => {
-                vec![Task::Emit(
-                    Instruction::ResolveName(self.string(name)?),
-                    span,
-                )]
+                let name = self.string(name)?;
+                t.push(Task::Emit(Instruction::ResolveName(name), span))?;
             }
-            Target::Binding(_) => Vec::new(),
-            Target::Member { object, .. } => vec![Task::Expr(*object)],
+            Target::Binding(_) => {}
+            Target::Member { object, .. } => t.push(Task::Expr(*object))?,
             Target::Index { object, key } => {
-                let mut t = vec![Task::Expr(*object), Task::Expr(*key)];
+                t.push(Task::Expr(*object))?;
+                t.push(Task::Expr(*key))?;
                 if convert {
-                    t.push(Task::Emit(Instruction::PropertyKey, span));
+                    t.push(Task::Emit(Instruction::PropertyKey, span))?;
                 }
-                t
             }
-        })
+        }
+        Ok(t)
     }
 
     /// GetValue of an evaluated reference, which stays on the stack under the value.
-    fn get_keeping(&mut self, target: &Target, span: Span) -> Result<Vec<Task>, CompileError> {
-        Ok(match target {
-            Target::Binding(b) => vec![Task::Emit(self.load(b)?, span)],
-            Target::Member { name, .. } => vec![
-                Task::Emit(Instruction::Dup, span),
-                Task::Emit(Instruction::GetNamed(*name), span),
-            ],
-            Target::Index { .. } => vec![
-                Task::Emit(Instruction::Dup2, span),
-                Task::Emit(Instruction::GetIndex, span),
-            ],
-        })
+    fn get_keeping(&mut self, target: &Target, span: Span) -> Result<Tasks<'a, 'm>, CompileError> {
+        let mut t = Tasks::new(self.m);
+        match target {
+            Target::Binding(b) => {
+                let load = self.load(b)?;
+                t.push(Task::Emit(load, span))?;
+            }
+            Target::Member { name, .. } => {
+                t.push(Task::Emit(Instruction::Dup, span))?;
+                t.push(Task::Emit(Instruction::GetNamed(*name), span))?;
+            }
+            Target::Index { .. } => {
+                t.push(Task::Emit(Instruction::Dup2, span))?;
+                t.push(Task::Emit(Instruction::GetIndex, span))?;
+            }
+        }
+        Ok(t)
     }
 
     /// The instruction that reads a binding: for a global name, the read of the reference that
@@ -231,17 +239,17 @@ impl<'a, 'm> Compiler<'a, 'm> {
     }
 
     /// The tasks that push the value of the expression `id`.
-    pub(crate) fn expression(&mut self, id: ExprId) -> Result<Vec<Task>, CompileError> {
+    pub(crate) fn expression(&mut self, id: ExprId) -> Result<Tasks<'a, 'm>, CompileError> {
         let node = self
             .ast
             .expr(id)
             .ok_or_else(|| malformed("an expression index"))?;
         let span = node.span;
         let emit = |i: Instruction| Task::Emit(i, span);
-        let mut t = Vec::new();
+        let mut t = Tasks::new(self.m);
         match &node.expr {
             // `#sec-this-keyword-runtime-semantics-evaluation`.
-            Expr::This => t.push(emit(Instruction::This)),
+            Expr::This => t.push(emit(Instruction::This))?,
             // `#sec-identifiers-runtime-semantics-evaluation`: ResolveBinding, then GetValue.
             Expr::Identifier(_) => {
                 let instruction = match self.binding(Site::Expr(id))? {
@@ -249,30 +257,30 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     Binding::Dynamic(name) => Instruction::GetName(self.string(&name)?),
                     b => self.load(&b)?,
                 };
-                t.push(emit(instruction));
+                t.push(emit(instruction))?;
             }
             // `#sec-literals-runtime-semantics-evaluation`.
-            Expr::Null => t.push(emit(Instruction::Null)),
-            Expr::Boolean(true) => t.push(emit(Instruction::True)),
-            Expr::Boolean(false) => t.push(emit(Instruction::False)),
+            Expr::Null => t.push(emit(Instruction::Null))?,
+            Expr::Boolean(true) => t.push(emit(Instruction::True))?,
+            Expr::Boolean(false) => t.push(emit(Instruction::False))?,
             Expr::Number(n) => {
                 // `#sec-numericvalue`, computed by `swell-num`.
                 let value = numeric_literal(n.text.as_bytes())
                     .ok_or_else(|| malformed("a numeric literal swell-num does not read"))?
                     .value;
-                t.push(emit(Instruction::Number(self.number(value)?)));
+                t.push(emit(Instruction::Number(self.number(value)?)))?;
             }
-            Expr::String(s) => t.push(emit(Instruction::String(self.string_units(&s.value)?))),
+            Expr::String(s) => t.push(emit(Instruction::String(self.string_units(&s.value)?)))?,
             Expr::RegExp(_) => {
                 t.push(emit(Instruction::ThrowSyntaxError(
                     self.string(REGEXP_REFUSAL)?,
-                )));
+                )))?;
             }
             // `#sec-array-initializer-runtime-semantics-evaluation` and ArrayAccumulation
             // (`#sec-runtime-semantics-arrayaccumulation`): a run of elisions sets the length to
             // the next index.
             Expr::Array(elements) => {
-                t.push(emit(Instruction::NewArray));
+                t.push(emit(Instruction::NewArray))?;
                 let mut next: u32 = 0;
                 let mut elided = false;
                 for element in elements {
@@ -285,11 +293,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
                         }
                         Some(e) => {
                             if elided {
-                                t.push(emit(Instruction::ArrayLength(next)));
+                                t.push(emit(Instruction::ArrayLength(next)))?;
                                 elided = false;
                             }
-                            t.push(Task::Expr(*e));
-                            t.push(emit(Instruction::DefineIndex(next)));
+                            t.push(Task::Expr(*e))?;
+                            t.push(emit(Instruction::DefineIndex(next)))?;
                             next = next
                                 .checked_add(1)
                                 .ok_or(CompileError::TooMany("array elements"))?;
@@ -297,7 +305,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     }
                 }
                 if elided {
-                    t.push(emit(Instruction::ArrayLength(next)));
+                    t.push(emit(Instruction::ArrayLength(next)))?;
                 }
             }
             // `#sec-object-initializer-runtime-semantics-evaluation` and
@@ -305,7 +313,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
             // (`#sec-object-initializer-runtime-semantics-propertydefinitionevaluation`,
             // `#sec-method-definitions-runtime-semantics-propertydefinitionevaluation`).
             Expr::Object(properties) => {
-                t.push(emit(Instruction::NewObject));
+                t.push(emit(Instruction::NewObject))?;
                 for p in properties {
                     let key = property_key(&p.key, self.m)?;
                     let proto = !matches!(p.key, swell_syntax::ast::PropertyKey::Number(_))
@@ -315,41 +323,41 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     let k = k?;
                     match p.value {
                         PropertyValue::Init(e) => {
-                            t.push(Task::Expr(e));
+                            t.push(Task::Expr(e))?;
                             if proto {
-                                t.push(Task::Emit(Instruction::InitProto, p.span));
+                                t.push(Task::Emit(Instruction::InitProto, p.span))?;
                             } else {
-                                t.push(Task::Emit(Instruction::DefineField(k), p.span));
+                                t.push(Task::Emit(Instruction::DefineField(k), p.span))?;
                             }
                         }
                         PropertyValue::Get(f) | PropertyValue::Set(f) => {
                             let fspan = self.ast.function(f).map(|x| x.span).unwrap_or(p.span);
-                            t.push(Task::Emit(Instruction::Closure(f.0), fspan));
+                            t.push(Task::Emit(Instruction::Closure(f.0), fspan))?;
                             let define = if matches!(p.value, PropertyValue::Get(_)) {
                                 Instruction::DefineGetter(k)
                             } else {
                                 Instruction::DefineSetter(k)
                             };
-                            t.push(Task::Emit(define, p.span));
+                            t.push(Task::Emit(define, p.span))?;
                         }
                         // `#sec-method-definitions-runtime-semantics-propertydefinitionevaluation`:
                         // DefineMethod, then DefineMethodProperty, enumerable.
                         PropertyValue::Method(f) => {
                             let fspan = self.ast.function(f).map(|x| x.span).unwrap_or(p.span);
-                            t.push(Task::Emit(Instruction::Closure(f.0), fspan));
-                            t.push(Task::Emit(Instruction::DefineMethod(k), p.span));
+                            t.push(Task::Emit(Instruction::Closure(f.0), fspan))?;
+                            t.push(Task::Emit(Instruction::DefineMethod(k), p.span))?;
                         }
                         // `PropertyDefinition : IdentifierReference`: the value of the reference,
                         // defined as a data property even when the name is `__proto__`.
                         PropertyValue::Shorthand(e) => {
-                            t.push(Task::Expr(e));
-                            t.push(Task::Emit(Instruction::DefineField(k), p.span));
+                            t.push(Task::Expr(e))?;
+                            t.push(Task::Emit(Instruction::DefineField(k), p.span))?;
                         }
                     }
                 }
             }
             // `#sec-function-definitions-runtime-semantics-evaluation`.
-            Expr::Function(f) => t.push(emit(Instruction::Closure(f.0))),
+            Expr::Function(f) => t.push(emit(Instruction::Closure(f.0)))?,
             Expr::Unary { op, operand } => self.unary(*op, *operand, span, &mut t)?,
             Expr::Update {
                 op,
@@ -360,42 +368,42 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 // decrement ones: the old value is ToNumeric of GetValue.
                 let target = self.target(*operand)?;
                 let r = target.reference_items();
-                t.extend(self.reference(&target, true, span)?);
-                t.extend(self.get_keeping(&target, span)?);
-                t.push(emit(Instruction::ToNumeric));
+                t.append(self.reference(&target, true, span)?)?;
+                t.append(self.get_keeping(&target, span)?)?;
+                t.push(emit(Instruction::ToNumeric))?;
                 if !*prefix {
-                    t.push(emit(Instruction::Dup));
+                    t.push(emit(Instruction::Dup))?;
                     if r > 0 {
-                        t.push(emit(Instruction::Bury(r + 1)));
+                        t.push(emit(Instruction::Bury(r + 1)))?;
                     }
                 }
                 t.push(emit(match op {
                     UpdateOp::Increment => Instruction::Increment,
                     UpdateOp::Decrement => Instruction::Decrement,
-                }));
-                t.push(emit(self.put(&target)?));
+                }))?;
+                t.push(emit(self.put(&target)?))?;
                 if !*prefix {
-                    t.push(emit(Instruction::Pop));
+                    t.push(emit(Instruction::Pop))?;
                 }
             }
             // `#sec-evaluatestringornumericbinaryexpression` and the relational and equality
             // clauses: left, right, the operator.
             Expr::Binary { op, left, right } => {
-                t.push(Task::Expr(*left));
-                t.push(Task::Expr(*right));
-                t.push(emit(binary(*op)));
+                t.push(Task::Expr(*left))?;
+                t.push(Task::Expr(*right))?;
+                t.push(emit(binary(*op)))?;
             }
             // `#sec-binary-logical-operators-runtime-semantics-evaluation`: the left value
             // decides when it is falsy for `&&`, truthy for `||`, and neither `undefined` nor
             // `null` for `??`.
             Expr::Logical { op, left, right } => {
                 let end = self.label();
-                t.push(Task::Expr(*left));
-                t.push(emit(Instruction::Dup));
-                logical_test(*op, end, span, &mut t);
-                t.push(emit(Instruction::Pop));
-                t.push(Task::Expr(*right));
-                t.push(Task::Bind(end));
+                t.push(Task::Expr(*left))?;
+                t.push(emit(Instruction::Dup))?;
+                logical_test(*op, end, span, &mut t)?;
+                t.push(emit(Instruction::Pop))?;
+                t.push(Task::Expr(*right))?;
+                t.push(Task::Bind(end))?;
             }
             // `#sec-conditional-operator-runtime-semantics-evaluation`.
             Expr::Conditional {
@@ -404,13 +412,13 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 alternate,
             } => {
                 let (otherwise, end) = (self.label(), self.label());
-                t.push(Task::Expr(*test));
-                t.push(emit(Instruction::JumpIfFalse(otherwise)));
-                t.push(Task::Expr(*consequent));
-                t.push(Task::Goto(end, span));
-                t.push(Task::Bind(otherwise));
-                t.push(Task::Expr(*alternate));
-                t.push(Task::Bind(end));
+                t.push(Task::Expr(*test))?;
+                t.push(emit(Instruction::JumpIfFalse(otherwise)))?;
+                t.push(Task::Expr(*consequent))?;
+                t.push(Task::Goto(end, span))?;
+                t.push(Task::Bind(otherwise))?;
+                t.push(Task::Expr(*alternate))?;
+                t.push(Task::Bind(end))?;
             }
             // `#sec-assignment-operators-runtime-semantics-evaluation`. NamedEvaluation of an
             // anonymous function is the name of its template.
@@ -418,77 +426,77 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 let target = self.target(*target)?;
                 match op {
                     AssignOp::Assign => {
-                        t.extend(self.reference(&target, false, span)?);
-                        t.push(Task::Expr(*value));
+                        t.append(self.reference(&target, false, span)?)?;
+                        t.push(Task::Expr(*value))?;
                     }
                     AssignOp::Compound(op) => {
-                        t.extend(self.reference(&target, true, span)?);
-                        t.extend(self.get_keeping(&target, span)?);
-                        t.push(Task::Expr(*value));
-                        t.push(emit(binary(*op)));
+                        t.append(self.reference(&target, true, span)?)?;
+                        t.append(self.get_keeping(&target, span)?)?;
+                        t.push(Task::Expr(*value))?;
+                        t.push(emit(binary(*op)))?;
                     }
                     // `&&=`, `||=` and `??=`: when the left value decides, it is the result and
                     // nothing is put; the reference under it is dropped.
                     AssignOp::Logical(op) => {
                         let r = target.reference_items();
                         let keep = self.label();
-                        t.extend(self.reference(&target, true, span)?);
-                        t.extend(self.get_keeping(&target, span)?);
-                        t.push(emit(Instruction::Dup));
-                        logical_test(*op, keep, span, &mut t);
-                        t.push(emit(Instruction::Pop));
-                        t.push(Task::Expr(*value));
-                        t.push(emit(self.put(&target)?));
+                        t.append(self.reference(&target, true, span)?)?;
+                        t.append(self.get_keeping(&target, span)?)?;
+                        t.push(emit(Instruction::Dup))?;
+                        logical_test(*op, keep, span, &mut t)?;
+                        t.push(emit(Instruction::Pop))?;
+                        t.push(Task::Expr(*value))?;
+                        t.push(emit(self.put(&target)?))?;
                         if r > 0 {
                             let end = self.label();
-                            t.push(Task::Goto(end, span));
-                            t.push(Task::Bind(keep));
-                            t.push(emit(Instruction::Nip(r)));
-                            t.push(Task::Bind(end));
+                            t.push(Task::Goto(end, span))?;
+                            t.push(Task::Bind(keep))?;
+                            t.push(emit(Instruction::Nip(r)))?;
+                            t.push(Task::Bind(end))?;
                         } else {
-                            t.push(Task::Bind(keep));
+                            t.push(Task::Bind(keep))?;
                         }
                         return Ok(t);
                     }
                 }
-                t.push(emit(self.put(&target)?));
+                t.push(emit(self.put(&target)?))?;
             }
             // `#sec-comma-operator-runtime-semantics-evaluation`.
             Expr::Sequence(list) => {
                 for (i, e) in list.iter().enumerate() {
                     if i > 0 {
-                        t.push(emit(Instruction::Pop));
+                        t.push(emit(Instruction::Pop))?;
                     }
-                    t.push(Task::Expr(*e));
+                    t.push(Task::Expr(*e))?;
                 }
             }
             // `#sec-property-accessors-runtime-semantics-evaluation`.
             Expr::Member { object, property } => {
-                t.push(Task::Expr(*object));
-                t.push(emit(Instruction::GetNamed(self.string(property)?)));
+                t.push(Task::Expr(*object))?;
+                t.push(emit(Instruction::GetNamed(self.string(property)?)))?;
             }
             Expr::Index { object, index } => {
-                t.push(Task::Expr(*object));
-                t.push(Task::Expr(*index));
-                t.push(emit(Instruction::GetIndex));
+                t.push(Task::Expr(*object))?;
+                t.push(Task::Expr(*index))?;
+                t.push(emit(Instruction::GetIndex))?;
             }
             // `#sec-optional-chaining-evaluation`: the chain's links, then its short-circuits.
             Expr::OptionalChain(inner) => {
-                t.push(Task::ChainOpen(Short::Undefined));
-                t.push(Task::Expr(*inner));
-                t.push(Task::ChainClose(span));
+                t.push(Task::ChainOpen(Short::Undefined))?;
+                t.push(Task::Expr(*inner))?;
+                t.push(Task::ChainClose(span))?;
             }
             // `#sec-optional-chaining-chain-evaluation`: `?.` tests the base value first.
             Expr::OptionalMember { object, property } => {
-                t.push(Task::Expr(*object));
-                t.push(Task::ChainCheck(1, span));
-                t.push(emit(Instruction::GetNamed(self.string(property)?)));
+                t.push(Task::Expr(*object))?;
+                t.push(Task::ChainCheck(1, span))?;
+                t.push(emit(Instruction::GetNamed(self.string(property)?)))?;
             }
             Expr::OptionalIndex { object, index } => {
-                t.push(Task::Expr(*object));
-                t.push(Task::ChainCheck(1, span));
-                t.push(Task::Expr(*index));
-                t.push(emit(Instruction::GetIndex));
+                t.push(Task::Expr(*object))?;
+                t.push(Task::ChainCheck(1, span))?;
+                t.push(Task::Expr(*index))?;
+                t.push(emit(Instruction::GetIndex))?;
             }
             // `#sec-function-calls-runtime-semantics-evaluation`: the function and its this value
             // (the base of a property reference, the binding object of a `with` statement for a
@@ -500,25 +508,25 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 self.callee(*callee, span, &mut t)?;
                 let optional = matches!(node.expr, Expr::OptionalCall { .. });
                 if optional {
-                    t.push(Task::ChainCheck(2, span));
+                    t.push(Task::ChainCheck(2, span))?;
                 }
-                t.extend(arguments.iter().map(|e| Task::Expr(*e)));
+                t.extend(arguments.iter().map(|e| Task::Expr(*e)))?;
                 let n = u32::try_from(arguments.len())
                     .map_err(|_| CompileError::TooMany("arguments"))?;
                 if !optional && self.ast.is_direct_eval_callee(*callee) {
-                    t.push(emit(Instruction::CallEval(n)));
+                    t.push(emit(Instruction::CallEval(n)))?;
                 } else {
-                    t.push(emit(Instruction::Call(n)));
+                    t.push(emit(Instruction::Call(n)))?;
                 }
             }
             // `#sec-new-operator-runtime-semantics-evaluation`.
             Expr::New { callee, arguments } => {
-                t.push(Task::Expr(*callee));
+                t.push(Task::Expr(*callee))?;
                 let arguments = arguments.as_deref().unwrap_or(&[]);
-                t.extend(arguments.iter().map(|e| Task::Expr(*e)));
+                t.extend(arguments.iter().map(|e| Task::Expr(*e)))?;
                 let n = u32::try_from(arguments.len())
                     .map_err(|_| CompileError::TooMany("arguments"))?;
-                t.push(emit(Instruction::New(n)));
+                t.push(emit(Instruction::New(n)))?;
             }
             // `#sec-template-literals-runtime-semantics-evaluation`: the TV of each template
             // string and the value of each substitution through ToString, in source order,
@@ -534,19 +542,19 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 let mut started = false;
                 for (i, string) in strings.iter().enumerate() {
                     if let Some(e) = i.checked_sub(1).and_then(|s| substitutions.get(s)) {
-                        t.push(Task::Expr(*e));
-                        t.push(emit(Instruction::ToString));
+                        t.push(Task::Expr(*e))?;
+                        t.push(emit(Instruction::ToString))?;
                         if started {
-                            t.push(emit(Instruction::Add));
+                            t.push(emit(Instruction::Add))?;
                         }
                         started = true;
                     }
                     let last = i + 1 == strings.len();
                     if !string.cooked.is_empty() || (last && !started) {
                         let k = self.string_units(&string.cooked)?;
-                        t.push(emit(Instruction::String(k)));
+                        t.push(emit(Instruction::String(k)))?;
                         if started {
-                            t.push(emit(Instruction::Add));
+                            t.push(emit(Instruction::Add))?;
                         }
                         started = true;
                     }
@@ -564,7 +572,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
         &mut self,
         callee: ExprId,
         span: Span,
-        t: &mut Vec<Task>,
+        t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
         let node = self.ast.expr(callee).ok_or_else(|| malformed("a callee"))?;
         let (link, chain) = match &node.expr {
@@ -580,35 +588,35 @@ impl<'a, 'm> Compiler<'a, 'm> {
                         | Expr::OptionalMember { .. }
                         | Expr::OptionalIndex { .. }
                 ) {
-                    t.push(Task::Emit(Instruction::Undefined, span));
-                    t.push(Task::Expr(callee));
+                    t.push(Task::Emit(Instruction::Undefined, span))?;
+                    t.push(Task::Expr(callee))?;
                     return Ok(());
                 }
-                t.push(Task::ChainOpen(Short::Pair));
+                t.push(Task::ChainOpen(Short::Pair))?;
                 (inner_node, Some(node.span))
             }
             _ => (node, None),
         };
         match &link.expr {
             Expr::Member { object, property } | Expr::OptionalMember { object, property } => {
-                t.push(Task::Expr(*object));
+                t.push(Task::Expr(*object))?;
                 if matches!(link.expr, Expr::OptionalMember { .. }) {
-                    t.push(Task::ChainCheck(1, link.span));
+                    t.push(Task::ChainCheck(1, link.span))?;
                 }
-                t.push(Task::Emit(Instruction::Dup, span));
+                t.push(Task::Emit(Instruction::Dup, span))?;
                 t.push(Task::Emit(
                     Instruction::GetNamed(self.string(property)?),
                     span,
-                ));
+                ))?;
             }
             Expr::Index { object, index } | Expr::OptionalIndex { object, index } => {
-                t.push(Task::Expr(*object));
+                t.push(Task::Expr(*object))?;
                 if matches!(link.expr, Expr::OptionalIndex { .. }) {
-                    t.push(Task::ChainCheck(1, link.span));
+                    t.push(Task::ChainCheck(1, link.span))?;
                 }
-                t.push(Task::Emit(Instruction::Dup, span));
-                t.push(Task::Expr(*index));
-                t.push(Task::Emit(Instruction::GetIndex, span));
+                t.push(Task::Emit(Instruction::Dup, span))?;
+                t.push(Task::Expr(*index))?;
+                t.push(Task::Emit(Instruction::GetIndex, span))?;
             }
             // A name looked up by name gives its record's WithBaseObject as this value.
             Expr::Identifier(_) if chain.is_none() => match self.binding(Site::Expr(callee))? {
@@ -616,20 +624,20 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     t.push(Task::Emit(
                         Instruction::GetNameForCall(self.string(&name)?),
                         span,
-                    ));
+                    ))?;
                 }
                 _ => {
-                    t.push(Task::Emit(Instruction::Undefined, span));
-                    t.push(Task::Expr(callee));
+                    t.push(Task::Emit(Instruction::Undefined, span))?;
+                    t.push(Task::Expr(callee))?;
                 }
             },
             _ => {
-                t.push(Task::Emit(Instruction::Undefined, span));
-                t.push(Task::Expr(callee));
+                t.push(Task::Emit(Instruction::Undefined, span))?;
+                t.push(Task::Expr(callee))?;
             }
         }
         if let Some(chain_span) = chain {
-            t.push(Task::ChainClose(chain_span));
+            t.push(Task::ChainClose(chain_span))?;
         }
         Ok(())
     }
@@ -642,34 +650,35 @@ impl<'a, 'm> Compiler<'a, 'm> {
         inner: ExprId,
         chain_span: Span,
         span: Span,
-    ) -> Result<Option<Vec<Task>>, CompileError> {
+    ) -> Result<Option<Tasks<'a, 'm>>, CompileError> {
         let link = self
             .ast
             .expr(inner)
             .ok_or_else(|| malformed("an optional chain"))?;
-        let mut t = vec![Task::ChainOpen(Short::True)];
+        let mut t = Tasks::new(self.m);
+        t.push(Task::ChainOpen(Short::True))?;
         match &link.expr {
             Expr::Member { object, property } | Expr::OptionalMember { object, property } => {
-                t.push(Task::Expr(*object));
+                t.push(Task::Expr(*object))?;
                 if matches!(link.expr, Expr::OptionalMember { .. }) {
-                    t.push(Task::ChainCheck(1, link.span));
+                    t.push(Task::ChainCheck(1, link.span))?;
                 }
                 t.push(Task::Emit(
                     Instruction::DeleteNamed(self.string(property)?),
                     span,
-                ));
+                ))?;
             }
             Expr::Index { object, index } | Expr::OptionalIndex { object, index } => {
-                t.push(Task::Expr(*object));
+                t.push(Task::Expr(*object))?;
                 if matches!(link.expr, Expr::OptionalIndex { .. }) {
-                    t.push(Task::ChainCheck(1, link.span));
+                    t.push(Task::ChainCheck(1, link.span))?;
                 }
-                t.push(Task::Expr(*index));
-                t.push(Task::Emit(Instruction::DeleteIndex, span));
+                t.push(Task::Expr(*index))?;
+                t.push(Task::Emit(Instruction::DeleteIndex, span))?;
             }
             _ => return Ok(None),
         }
-        t.push(Task::ChainClose(chain_span));
+        t.push(Task::ChainClose(chain_span))?;
         Ok(Some(t))
     }
 
@@ -679,7 +688,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
         op: UnaryOp,
         operand: ExprId,
         span: Span,
-        t: &mut Vec<Task>,
+        t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
         let emit = |i: Instruction| Task::Emit(i, span);
         let operand_node = self
@@ -694,73 +703,73 @@ impl<'a, 'm> Compiler<'a, 'm> {
             UnaryOp::Delete => match &operand_node.expr {
                 Expr::Identifier(_) => match self.binding(Site::Expr(operand))? {
                     Binding::Global(name) => {
-                        t.push(emit(Instruction::DeleteGlobal(self.string(&name)?)));
+                        t.push(emit(Instruction::DeleteGlobal(self.string(&name)?)))?;
                     }
                     Binding::Dynamic(name) => {
-                        t.push(emit(Instruction::DeleteName(self.string(&name)?)));
+                        t.push(emit(Instruction::DeleteName(self.string(&name)?)))?;
                     }
-                    _ => t.push(emit(Instruction::False)),
+                    _ => t.push(emit(Instruction::False))?,
                 },
                 Expr::Member { object, property } => {
-                    t.push(Task::Expr(*object));
-                    t.push(emit(Instruction::DeleteNamed(self.string(property)?)));
+                    t.push(Task::Expr(*object))?;
+                    t.push(emit(Instruction::DeleteNamed(self.string(property)?)))?;
                 }
                 Expr::Index { object, index } => {
-                    t.push(Task::Expr(*object));
-                    t.push(Task::Expr(*index));
-                    t.push(emit(Instruction::DeleteIndex));
+                    t.push(Task::Expr(*object))?;
+                    t.push(Task::Expr(*index))?;
+                    t.push(emit(Instruction::DeleteIndex))?;
                 }
                 Expr::OptionalChain(inner) => {
                     match self.delete_chain(*inner, operand_node.span, span)? {
-                        Some(tasks) => t.extend(tasks),
+                        Some(tasks) => t.append(tasks)?,
                         None => {
-                            t.push(Task::Expr(operand));
-                            t.push(emit(Instruction::Pop));
-                            t.push(emit(Instruction::True));
+                            t.push(Task::Expr(operand))?;
+                            t.push(emit(Instruction::Pop))?;
+                            t.push(emit(Instruction::True))?;
                         }
                     }
                 }
                 _ => {
-                    t.push(Task::Expr(operand));
-                    t.push(emit(Instruction::Pop));
-                    t.push(emit(Instruction::True));
+                    t.push(Task::Expr(operand))?;
+                    t.push(emit(Instruction::Pop))?;
+                    t.push(emit(Instruction::True))?;
                 }
             },
             // `#sec-void-operator-runtime-semantics-evaluation`.
             UnaryOp::Void => {
-                t.push(Task::Expr(operand));
-                t.push(emit(Instruction::Pop));
-                t.push(emit(Instruction::Undefined));
+                t.push(Task::Expr(operand))?;
+                t.push(emit(Instruction::Pop))?;
+                t.push(emit(Instruction::Undefined))?;
             }
             // `#sec-typeof-operator-runtime-semantics-evaluation`: an unresolvable reference
             // gives "undefined".
             UnaryOp::Typeof => match self.name_binding(operand)? {
                 Some(Binding::Global(name)) => {
-                    t.push(emit(Instruction::TypeofGlobal(self.string(&name)?)));
+                    t.push(emit(Instruction::TypeofGlobal(self.string(&name)?)))?;
                 }
                 Some(Binding::Dynamic(name)) => {
-                    t.push(emit(Instruction::TypeofName(self.string(&name)?)));
+                    t.push(emit(Instruction::TypeofName(self.string(&name)?)))?;
                 }
                 _ => {
-                    t.push(Task::Expr(operand));
-                    t.push(emit(Instruction::Typeof));
+                    t.push(Task::Expr(operand))?;
+                    t.push(emit(Instruction::Typeof))?;
                 }
             },
             UnaryOp::Plus => {
-                t.push(Task::Expr(operand));
-                t.push(emit(Instruction::ToNumber));
+                t.push(Task::Expr(operand))?;
+                t.push(emit(Instruction::ToNumber))?;
             }
             UnaryOp::Minus => {
-                t.push(Task::Expr(operand));
-                t.push(emit(Instruction::Negate));
+                t.push(Task::Expr(operand))?;
+                t.push(emit(Instruction::Negate))?;
             }
             UnaryOp::BitNot => {
-                t.push(Task::Expr(operand));
-                t.push(emit(Instruction::BitNot));
+                t.push(Task::Expr(operand))?;
+                t.push(emit(Instruction::BitNot))?;
             }
             UnaryOp::Not => {
-                t.push(Task::Expr(operand));
-                t.push(emit(Instruction::Not));
+                t.push(Task::Expr(operand))?;
+                t.push(emit(Instruction::Not))?;
             }
         }
         Ok(())

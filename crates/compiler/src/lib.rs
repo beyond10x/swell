@@ -124,10 +124,12 @@ pub fn compile_eval(script: &Script) -> Result<Code, CompileError> {
 ///
 /// What the step holds is charged as it grows: the code's vectors by capacity, and the
 /// scratch (the resolver's structures, the constant maps, the task and control stacks of each
-/// template). The scratch is credited when the step ends, as a whole: on success the ledger
-/// then holds exactly what the code's vectors take ([`Code::capacity_bytes`]), which the code
-/// carries in [`Code::charged`]; on any error, and at a stop, which wins over every other
-/// answer, nothing.
+/// template, and the lists of tasks and the small lists each node's expansion builds, by what
+/// each growth takes). A list an expansion builds is credited when it drops, once its tasks are
+/// on the stack; the rest of the scratch is credited when the step ends, as a whole: on success
+/// the ledger then holds exactly what the code's vectors take ([`Code::capacity_bytes`]), which
+/// the code carries in [`Code::charged`]; on any error, and at a stop, which wins over every
+/// other answer, nothing.
 fn compile(
     script: &Script,
     eval_code: bool,
@@ -468,15 +470,86 @@ pub(crate) struct Body {
     pub scopes: Vec<Vec<SlotName>>,
 }
 
-/// The bytes the expansion of a node with `children` children may allocate, charged before it
-/// is made: its list of tasks, 32 and 8 more per child (a node expands to a few tasks per
-/// child, and the list's capacity is at most twice its length), and the small lists some
-/// expansions make beside it. A label a task names is charged where it is copied.
-fn expansion_bytes(children: usize) -> usize {
-    children
-        .saturating_mul(8)
-        .saturating_add(32)
-        .saturating_mul(size_of::<Task>())
+/// A list the compile step builds and drops while it runs: every growth is charged to the
+/// step's meter before it is made, by the meter's doubling, and its capacity is credited when
+/// it drops, on every way out. What its elements own is charged where they are made and passes
+/// on with them.
+pub(crate) struct List<'a, 'm, T> {
+    items: Vec<T>,
+    m: &'a Meter<'m>,
+}
+
+/// The tasks of one expansion, in order: [`Compiler::run`] moves them onto its task stack.
+pub(crate) type Tasks<'a, 'm> = List<'a, 'm, Task>;
+
+impl<'a, 'm, T> List<'a, 'm, T> {
+    pub(crate) fn new(m: &'a Meter<'m>) -> List<'a, 'm, T> {
+        List {
+            items: Vec::new(),
+            m,
+        }
+    }
+
+    /// Push `item`, the list grown first.
+    pub(crate) fn push(&mut self, item: T) -> Result<(), CompileError> {
+        self.m.push(&mut self.items, item)?;
+        Ok(())
+    }
+
+    /// Push every item of `items`, the list grown once for all of them first.
+    pub(crate) fn extend(
+        &mut self,
+        items: impl ExactSizeIterator<Item = T>,
+    ) -> Result<(), CompileError> {
+        self.m.grow_by(&mut self.items, items.len())?;
+        self.items.extend(items);
+        Ok(())
+    }
+
+    /// Push the items of `other`, the list grown first; `other` is credited as it drops here.
+    pub(crate) fn append(&mut self, mut other: List<'_, '_, T>) -> Result<(), CompileError> {
+        self.m.grow_by(&mut self.items, other.items.len())?;
+        self.items.append(&mut other.items);
+        Ok(())
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub(crate) fn as_slice(&self) -> &[T] {
+        &self.items
+    }
+
+    #[cfg(test)]
+    pub(crate) fn capacity(&self) -> usize {
+        self.items.capacity()
+    }
+
+    /// The items, in order, taken out of the list; its capacity stays charged until it drops.
+    pub(crate) fn drain(&mut self) -> std::vec::Drain<'_, T> {
+        self.items.drain(..)
+    }
+}
+
+impl<T> Drop for List<'_, '_, T> {
+    fn drop(&mut self) {
+        self.m
+            .credit(self.items.capacity().saturating_mul(size_of::<T>()));
+    }
+}
+
+/// Drop the exits of a `finally` block and credit their list.
+fn release_jumps(m: &Meter<'_>, jumps: Vec<(JumpKind, usize)>) {
+    let bytes = jumps
+        .capacity()
+        .saturating_mul(size_of::<(JumpKind, usize)>());
+    drop(jumps);
+    m.credit(bytes);
 }
 
 pub(crate) fn malformed(what: &str) -> CompileError {
@@ -602,25 +675,21 @@ impl<'a, 'm> Compiler<'a, 'm> {
         self.tasks.extend(body.iter().rev().map(|s| Task::Stmt(*s)));
         while self.tasks.len() > base {
             let Some(task) = self.tasks.pop() else { break };
-            // The expansion of a node is charged before it is made, as a bound of what it
-            // allocates from the number of the node's children, and credited once its tasks
-            // are on the stack.
-            let reserve = match &task {
-                Task::Stmt(id) | Task::LabelledLoop(id, _) => {
+            // The expansion of a node charges its list of tasks, and the small lists it makes
+            // beside it, as they grow; the list is credited once its tasks are on the stack.
+            let mut expanded = match task {
+                Task::Stmt(id) => {
                     self.m.visit()?;
-                    expansion_bytes(self.ast.stmt_child_count(*id))
+                    self.statement(id, Vec::new())?
+                }
+                Task::LabelledLoop(id, labels) => {
+                    self.m.visit()?;
+                    self.statement(id, labels)?
                 }
                 Task::Expr(id) => {
                     self.m.visit()?;
-                    expansion_bytes(self.ast.expr_child_count(*id))
+                    self.expression(id)?
                 }
-                _ => 0,
-            };
-            self.m.charge(reserve)?;
-            let expanded = match task {
-                Task::Stmt(id) => self.statement(id, Vec::new())?,
-                Task::LabelledLoop(id, labels) => self.statement(id, labels)?,
-                Task::Expr(id) => self.expression(id)?,
                 Task::ChainOpen(short) => {
                     self.m.push(
                         &mut self.chains,
@@ -672,16 +741,26 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     continue;
                 }
                 Task::PopControl(key) => {
-                    if let Some(Control::Finally { returns, jumps, .. }) = self.control.pop()
-                        && let Some(key) = key
-                    {
-                        self.m.charge(map_entry_bytes::<u32, Exits>())?;
-                        self.finished.insert(key, Exits { returns, jumps });
+                    match (self.control.pop(), key) {
+                        (Some(Control::Finally { returns, jumps, .. }), Some(key)) => {
+                            self.m.charge(map_entry_bytes::<u32, Exits>())?;
+                            self.finished.insert(key, Exits { returns, jumps });
+                        }
+                        (Some(Control::Finally { jumps, .. }), None) => {
+                            release_jumps(self.m, jumps)
+                        }
+                        (Some(Control::Loop { labels, .. } | Control::Label { labels, .. }), _) => {
+                            self.m.release(labels)
+                        }
+                        (Some(Control::Switch { .. }) | None, _) => {}
                     }
                     continue;
                 }
                 Task::Jump(kind, label, span) => {
                     self.exit_jump(kind, label.as_deref(), span)?;
+                    if let Some(label) = label {
+                        self.m.release(label);
+                    }
                     continue;
                 }
                 Task::Return(span) => {
@@ -715,8 +794,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 }
             };
             self.m.grow_by(&mut self.tasks, expanded.len())?;
-            self.tasks.extend(expanded.into_iter().rev());
-            self.m.credit(reserve);
+            self.tasks.extend(expanded.drain().rev());
+            drop(expanded);
             self.m.check()?;
         }
         Ok(())
@@ -809,7 +888,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
         let end = self.label();
         self.goto(end, span)?;
         let last = chain.stubs.len().saturating_sub(1);
-        for (i, (stub, depth)) in chain.stubs.into_iter().enumerate() {
+        let stubs = List {
+            items: chain.stubs,
+            m: self.m,
+        };
+        for (i, (stub, depth)) in stubs.items.iter().copied().enumerate() {
             self.bind(stub)?;
             if depth > 1 {
                 self.emit(Instruction::Nip(depth - 1), span)?;
@@ -839,6 +922,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
         span: Span,
     ) -> Result<(), CompileError> {
         let (items, envs) = (self.items, self.envs);
+        let m = self.m;
         let mut through = None;
         for (i, c) in self.control.iter_mut().enumerate().rev() {
             if i <= target {
@@ -855,7 +939,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 let index = match jumps.iter().position(|j| *j == (kind, target)) {
                     Some(index) => index,
                     None => {
-                        jumps.push((kind, target));
+                        m.push(jumps, (kind, target))?;
                         jumps.len() - 1
                     }
                 };
@@ -912,8 +996,18 @@ impl<'a, 'm> Compiler<'a, 'm> {
     /// [`Instruction::EndFinally`] for normal and throw completions, then the code that goes on
     /// with each of those exits from here.
     fn finally_dispatch(&mut self, key: u32, span: Span) -> Result<(), CompileError> {
-        let exits = self.finished.remove(&key).unwrap_or_default();
-        let mut stubs: Vec<(Label, Option<(JumpKind, usize)>)> = Vec::new();
+        let exits = match self.finished.remove(&key) {
+            Some(exits) => {
+                self.m.credit(map_entry_bytes::<u32, Exits>());
+                exits
+            }
+            None => Exits::default(),
+        };
+        let jumps = List {
+            items: exits.jumps,
+            m: self.m,
+        };
+        let mut stubs: List<'_, '_, (Label, Option<(JumpKind, usize)>)> = List::new(self.m);
         if exits.returns {
             let l = self.label();
             self.emit(
@@ -923,17 +1017,18 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 },
                 span,
             )?;
-            stubs.push((l, None));
+            stubs.push((l, None))?;
         }
-        for (i, jump) in exits.jumps.iter().enumerate() {
+        for (i, jump) in jumps.items.iter().enumerate() {
             let tag = u32::try_from(i)
                 .ok()
                 .and_then(|i| i.checked_add(TAG_FIRST_JUMP))
                 .ok_or(CompileError::TooMany("exits through a finally block"))?;
             let l = self.label();
             self.emit(Instruction::JumpIfTag { tag, target: l }, span)?;
-            stubs.push((l, Some(*jump)));
+            stubs.push((l, Some(*jump)))?;
         }
+        drop(jumps);
         self.emit(Instruction::EndFinally, span)?;
         self.items = self.items.saturating_sub(2);
         if stubs.is_empty() {
@@ -941,7 +1036,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
         }
         let after = self.label();
         self.goto(after, span)?;
-        for (l, exit) in stubs {
+        for (l, exit) in stubs.drain() {
             self.bind(l)?;
             match exit {
                 None => self.exit_return(span)?,
@@ -1015,16 +1110,19 @@ impl<'a, 'm> Compiler<'a, 'm> {
 
 #[cfg(test)]
 mod tests {
-    use swell_syntax::ledger::{Ledger, POLL_INTERVAL, Stop, map_entry_bytes};
+    use std::cell::Cell;
+
+    use swell_syntax::ledger::{Ledger, Meter, POLL_INTERVAL, Stop, map_entry_bytes};
     use swell_syntax::{ParseOptions, Script, parse_script};
 
-    use super::{CompileError, compile_script_with};
+    use super::{CompileError, Compiler, Constants, Task, compile_script_with, resolve};
     use crate::bytecode::{
         Code, FunctionTemplate, Handler, Instruction, LexicalName, Slot, SlotName,
     };
-    use swell_syntax::ast::Span;
+    use swell_syntax::ast::{Span, Stmt};
 
-    /// A ledger that counts what it is asked and refuses a charge past `limit`.
+    /// A ledger that counts what it is asked, refuses a charge past `limit`, and refuses the
+    /// charge numbered `refuse_at` (from 1).
     #[derive(Debug, Default)]
     struct Counting {
         charged: usize,
@@ -1032,6 +1130,8 @@ mod tests {
         high: usize,
         polls: usize,
         limit: Option<usize>,
+        charges: usize,
+        refuse_at: Option<usize>,
     }
 
     impl Counting {
@@ -1042,6 +1142,10 @@ mod tests {
 
     impl Ledger for Counting {
         fn charge(&mut self, bytes: usize) -> Result<(), Stop> {
+            self.charges += 1;
+            if self.refuse_at == Some(self.charges) {
+                return Err(Stop::OverBudget);
+            }
             let held = self.held() + bytes;
             if self.limit.is_some_and(|limit| held > limit) {
                 return Err(Stop::OverBudget);
@@ -1189,5 +1293,105 @@ mod tests {
             "high-water {} below {floor}",
             ledger.high
         );
+    }
+
+    /// A ledger over cells the test reads while the step holds it: what is held and the
+    /// high-water mark.
+    struct Watch<'c> {
+        held: &'c Cell<usize>,
+        high: &'c Cell<usize>,
+    }
+
+    impl Ledger for Watch<'_> {
+        fn charge(&mut self, bytes: usize) -> Result<(), Stop> {
+            self.held.set(self.held.get() + bytes);
+            self.high.set(self.high.get().max(self.held.get()));
+            Ok(())
+        }
+
+        fn credit(&mut self, bytes: usize) {
+            self.held.set(self.held.get() - bytes);
+        }
+
+        fn poll(&mut self) -> Result<(), Stop> {
+            Ok(())
+        }
+    }
+
+    /// A call with 10,000 arguments, the widest node of its script: while the code generator
+    /// runs, the ledger's high-water mark above what it held before is at least what the task
+    /// stack and the call's expansion hold at once by capacity, and at most twice that plus
+    /// 1 KiB. The capacities are read after the run: the task stack keeps the capacity it grew
+    /// to, and the call's expansion is made once more in the same way.
+    #[test]
+    fn a_wide_node_is_charged_near_what_its_lists_hold() {
+        let script = parsed(&format!("f({});", vec!["0"; 10_000].join(", ")));
+        let (held, high) = (Cell::new(0), Cell::new(0));
+        let mut ledger = Watch {
+            held: &held,
+            high: &high,
+        };
+        let meter = Meter::new(&mut ledger);
+        let resolution = resolve::resolve(&script, false, &meter).unwrap();
+        let mut constants = Constants::default();
+        let mut c = Compiler::new(&script.ast, &resolution, &mut constants, true, &meter);
+        let before = held.get();
+        high.set(before);
+        c.run(&script.body).unwrap();
+        let peak = high.get() - before;
+        let Some(Stmt::Expression(call)) = script.ast.stmt(script.body[0]).map(|n| &n.stmt) else {
+            panic!("the script is no expression statement");
+        };
+        let widest = c.expression(*call).unwrap();
+        let lists = (c.tasks.capacity() + widest.capacity()) * size_of::<Task>();
+        println!(
+            "peak {peak} above {before}; the task stack {} and the expansion {} tasks, {lists} bytes",
+            c.tasks.capacity(),
+            widest.capacity()
+        );
+        assert!(peak >= lists, "peak {peak} below the lists' {lists}");
+        assert!(
+            peak <= 2 * lists + 1024,
+            "peak {peak} above twice the lists' {lists} and 1 KiB"
+        );
+    }
+
+    /// A ledger that refuses the n-th charge of the compile step, for every n up to the number of
+    /// charges the step makes for a script of every kind of node that builds a list beside its
+    /// tasks, ends the step with `Stopped(OverBudget)` and everything credited.
+    #[test]
+    fn a_refusal_at_any_charge_ends_the_step_with_everything_credited() {
+        let script = parsed(
+            r#"
+            var a = [1, , "two"], o = { k: a, get g() { return 1; }, m(x) { return x; } };
+            let b = 2;
+            function f(p, q) {
+                outer: for (let i in o) {
+                    try { if (p) break outer; else continue outer; } finally { q = 1; }
+                }
+                try { return p; } catch (e) { return e; } finally { q = 2; }
+            }
+            switch (b) { case 1: a.x++; break; default: a.y ??= `t${b}`; }
+            delete a?.b; a?.b?.(b);
+            "#,
+        );
+        let mut ledger = Counting::default();
+        assert!(compile_script_with(&script, &mut ledger).is_ok());
+        let charges = ledger.charges;
+        println!("{charges} charges");
+        assert!(charges > 100, "{charges} charges");
+        for n in 1..=charges {
+            let mut ledger = Counting {
+                refuse_at: Some(n),
+                ..Counting::default()
+            };
+            let answer = compile_script_with(&script, &mut ledger);
+            assert_eq!(
+                answer.err(),
+                Some(CompileError::Stopped(Stop::OverBudget)),
+                "charge {n}"
+            );
+            assert_eq!(ledger.held(), 0, "charge {n}: {ledger:?}");
+        }
     }
 }

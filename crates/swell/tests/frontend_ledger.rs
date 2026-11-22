@@ -202,16 +202,14 @@ impl swell_syntax::Ledger for HighWater {
 
 /// The compile step of a script of a few code units charges near what it holds: for `1` and
 /// `1 + 1`, the ledger holds at no time more than 1 KiB above the tree and the finished code.
-/// Measured on `7a7bf0a`: 2,411 bytes above them for `1` (the tree 881 bytes, the code 144,
-/// the peak 3,436) and 2,771 for `1 + 1` (882, 232, 3,885). The peak is the charge for one
-/// node's expansion, made before it as a bound from the node's children, 56 bytes a task for 8
-/// tasks a child and 32 more (1,792 bytes for a leaf, 2,240 for one child, 2,688 for two),
-/// where each of these expansions takes 224 bytes; the rest of the step's scratch at that
-/// point is 315 bytes. The bound is what the parse and compile of `1` add to what the script
-/// keeps, so a run that ends in the memory budget with less room than its 3,438 bytes leaves
-/// an agent in which `1` ends in the memory budget too (HOST-70).
+/// The step charges each node's expansion as its lists grow (224 bytes for a list of up to
+/// four tasks). Measured on `7a7bf0a`, when it charged a bound from the node's children before
+/// the expansion (56 bytes a task for 8 tasks a child and 32 more: 1,792 bytes for a leaf,
+/// 2,240 for one child, 2,688 for two): 2,411 bytes above the tree and the code for `1` (the
+/// tree 881 bytes, the code 144, the peak 3,436) and 2,771 for `1 + 1` (882, 232, 3,885). The
+/// peak is part of the room an entry of `1` needs after a memory-budget termination
+/// (HOST-190). The test prints each peak.
 #[test]
-#[ignore = "the compile step of 1 holds 2,411 bytes above its tree and code at its peak, the bound of one node's expansion that takes 224"]
 fn the_compile_step_of_a_short_script_charges_near_what_it_holds() {
     for text in ["1", "1 + 1"] {
         let units: Vec<u16> = text.encode_utf16().collect();
@@ -225,6 +223,12 @@ fn the_compile_step_of_a_short_script_charges_near_what_it_holds() {
             panic!("{text:?} did not compile");
         };
         let held = tree.charged + code.charged;
+        println!(
+            "{text:?}: peak {} above the tree {} and the code {}",
+            ledger.high.saturating_sub(held),
+            tree.charged,
+            code.charged
+        );
         assert_eq!(ledger.held, held, "{text:?}: the step credited its scratch");
         assert!(
             ledger.high <= held + 1024,
