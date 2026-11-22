@@ -28,6 +28,8 @@ use collect::Mark;
 use roots::RootTable;
 use string::{Atoms, HeapString};
 
+use swell_num::siphash::SipBuildHasher;
+
 /// A Symbol record (6.1.5): its [[Description]], a String or undefined.
 pub(crate) struct SymbolRecord {
     /// [[Description]].
@@ -69,6 +71,9 @@ pub(crate) struct Heap {
     pub(crate) scripts: Arena<ScriptRecord>,
     pub(crate) roots: RootTable,
     pub(crate) atoms: Atoms,
+    /// The hasher of every other keyed map of this heap (`map::KeyedMap`, HOST-145): keyed by
+    /// `hash_key` and by nothing else, as the atom table's is. Its `Debug` never prints the key.
+    pub(crate) hasher: SipBuildHasher,
     /// The bytes allocated since the last collection at which a safe point collects.
     pub(crate) trigger_bytes: u64,
 }
@@ -88,6 +93,7 @@ impl Heap {
             scripts: Arena::new(key),
             roots: RootTable::new(key),
             atoms: Atoms::new(hash_key),
+            hasher: SipBuildHasher::new(hash_key),
             trigger_bytes: MIN_TRIGGER_BYTES,
         }
     }

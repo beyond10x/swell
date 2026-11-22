@@ -60,6 +60,54 @@ impl Ordinary {
     }
 }
 
+/// The property ValidateAndApplyPropertyDescriptor (`#sec-validateandapplypropertydescriptor`)
+/// leaves once `descriptor` is valid: step 2.c of a new one (`current` absent; every absent
+/// field its default) or step 6 of a change of `current` (every absent field kept, a change of
+/// kind keeping only the two attributes).
+pub(crate) fn applied_property(descriptor: &Descriptor, current: Option<Property>) -> Property {
+    let Some(current) = current else {
+        let slot = if descriptor.is_accessor() {
+            Slot::Accessor {
+                get: descriptor.get.flatten(),
+                set: descriptor.set.flatten(),
+            }
+        } else {
+            Slot::Data {
+                value: descriptor.value.unwrap_or(Value::Undefined),
+                writable: descriptor.writable.unwrap_or(false),
+            }
+        };
+        return Property {
+            slot,
+            enumerable: descriptor.enumerable.unwrap_or(false),
+            configurable: descriptor.configurable.unwrap_or(false),
+        };
+    };
+    let slot = match current.slot {
+        Slot::Data { .. } if descriptor.is_accessor() => Slot::Accessor {
+            get: descriptor.get.flatten(),
+            set: descriptor.set.flatten(),
+        },
+        Slot::Accessor { .. } if descriptor.is_data() => Slot::Data {
+            value: descriptor.value.unwrap_or(Value::Undefined),
+            writable: descriptor.writable.unwrap_or(false),
+        },
+        Slot::Data { value, writable } => Slot::Data {
+            value: descriptor.value.unwrap_or(value),
+            writable: descriptor.writable.unwrap_or(writable),
+        },
+        Slot::Accessor { get, set } => Slot::Accessor {
+            get: descriptor.get.unwrap_or(get),
+            set: descriptor.set.unwrap_or(set),
+        },
+    };
+    Property {
+        slot,
+        enumerable: descriptor.enumerable.unwrap_or(current.enumerable),
+        configurable: descriptor.configurable.unwrap_or(current.configurable),
+    }
+}
+
 impl<H: Host> Agent<H> {
     /// OrdinaryGetPrototypeOf (`#sec-ordinarygetprototypeof`).
     pub(crate) fn ordinary_get_prototype_of(
@@ -153,28 +201,7 @@ impl<H: Host> Agent<H> {
             let Some(object) = object else {
                 return Ok(true);
             };
-            let enumerable = descriptor.enumerable.unwrap_or(false);
-            let configurable = descriptor.configurable.unwrap_or(false);
-            let slot = if descriptor.is_accessor() {
-                Slot::Accessor {
-                    get: descriptor.get.flatten(),
-                    set: descriptor.set.flatten(),
-                }
-            } else {
-                Slot::Data {
-                    value: descriptor.value.unwrap_or(Value::Undefined),
-                    writable: descriptor.writable.unwrap_or(false),
-                }
-            };
-            self.add_property(
-                object,
-                key,
-                Property {
-                    slot,
-                    enumerable,
-                    configurable,
-                },
-            )?;
+            self.add_property(object, key, applied_property(&descriptor, None))?;
             return Ok(true);
         };
         // 4. If Desc does not have any fields, return true.
@@ -222,33 +249,10 @@ impl<H: Host> Agent<H> {
         }
         // 6. If O is not undefined, then
         if let Some(object) = object {
-            let enumerable = descriptor.enumerable.unwrap_or(current.enumerable);
-            let configurable = descriptor.configurable.unwrap_or(current.configurable);
-            let slot = match current.slot {
-                Slot::Data { .. } if descriptor.is_accessor() => Slot::Accessor {
-                    get: descriptor.get.flatten(),
-                    set: descriptor.set.flatten(),
-                },
-                Slot::Accessor { .. } if descriptor.is_data() => Slot::Data {
-                    value: descriptor.value.unwrap_or(Value::Undefined),
-                    writable: descriptor.writable.unwrap_or(false),
-                },
-                Slot::Data { value, writable } => Slot::Data {
-                    value: descriptor.value.unwrap_or(value),
-                    writable: descriptor.writable.unwrap_or(writable),
-                },
-                Slot::Accessor { get, set } => Slot::Accessor {
-                    get: descriptor.get.unwrap_or(get),
-                    set: descriptor.set.unwrap_or(set),
-                },
-            };
+            let applied = applied_property(&descriptor, Some(current));
             let record = self.engine_object_mut(object)?;
             if let Some(property) = record.properties.get_mut(key) {
-                *property = Property {
-                    slot,
-                    enumerable,
-                    configurable,
-                };
+                *property = applied;
             }
         }
         Ok(true)
@@ -374,10 +378,12 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// OrdinaryOwnPropertyKeys (`#sec-ordinaryownpropertykeys`): a step per key.
+    /// OrdinaryOwnPropertyKeys (`#sec-ordinaryownpropertykeys`): a step per key, and a step per
+    /// comparison when the indices were not added ascending and are sorted.
     pub(crate) fn ordinary_own_property_keys(&mut self, object: ObjectRef) -> Completion<Vec<Key>> {
-        let keys = self.engine_object(object)?.properties.keys();
-        self.charge_steps(u64::try_from(keys.len()).unwrap_or(u64::MAX))?;
+        let (keys, comparisons) = self.engine_object(object)?.properties.keys();
+        let steps = u64::try_from(keys.len()).unwrap_or(u64::MAX);
+        self.charge_steps(steps.saturating_add(comparisons))?;
         Ok(keys)
     }
 
