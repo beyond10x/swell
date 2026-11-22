@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: epic:slice-03-builtins-core
 kind: epic
-status: active
+status: implemented
 title: 'Slice 3, builtins-core: Object, Function, Array, String, JSON'
 summary: 'Object, Function, Array, String, Boolean, Error, JSON and the global functions: 7,580 cases and 14,992 runs.'
 relations:
 - depends_on: epic:slice-02-language-core
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:47Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:47Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:10:13Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:string-transform-and-compare-methods
 kind: story
-status: active
+status: implemented
 title: 'String.prototype: repeat, padStart, padEnd, the trims, the four case methods and localeCompare; the tests of HOST-21 and HOST-165'
 summary: Eleven methods that make a String from a String or compare two; a result past string_length is a RangeError before a unit is copied; case mapping and comparison for ASCII, a counted refusal outside it until slice 5; 271 failing cases name nothing else and pass.
 relations:
@@ -21,10 +21,11 @@ scope:
   path: crates/swell/tests/language/builtin-string-repeat-and-pad.js
 - confidence: cited
   path: crates/swell/tests/language/builtin-string-trim.js
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:46Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:46Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:10:02Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

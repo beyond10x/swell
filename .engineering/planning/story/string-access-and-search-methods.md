@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:string-access-and-search-methods
 kind: story
-status: active
+status: implemented
 title: 'String: fromCharCode, fromCodePoint, raw, and the thirteen methods that read code units or search'
 summary: 'Sixteen builtins of String: at, charAt, charCodeAt, codePointAt, concat, slice, substring, lastIndexOf, includes, startsWith, endsWith, isWellFormed, toWellFormed and three of the constructor; every search charged per code unit; 309 failing cases name nothing else and pass.'
 relations:
@@ -25,10 +25,11 @@ scope:
   path: crates/swell/tests/language/builtin-string-search.js
 - confidence: cited
   path: crates/swell/tests/language/builtin-string-slice-and-substring.js
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:46Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:46Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:10:02Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

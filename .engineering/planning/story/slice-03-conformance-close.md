@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slice-03-conformance-close
 kind: story
-status: active
+status: implemented
 title: 'Every run of slice 3 passes: the cases that need a later slice move by rule lines with their evidence'
 summary: 'Measured with the run lines once every builtin of slice 3 exists: about 620 failing cases move to slices 4 to 13 by the estimate, each with its evidence in moves.tsv; the seven directories move whole as ruled on 2026-11-21, their 9 passing cases marked and still counted as passed; the design counts, the moves check, the four requirement lines and the four omissions of the slice, and expected.txt in the same change.'
 relations:
@@ -36,10 +36,11 @@ scope:
   path: tests/gate/test262-moves-check-refuses-a-line-without-evidence.sh
 - confidence: cited
   path: tests/gate/test262-paths-agree-when-exported-and-passed.sh
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:47Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:47Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:10:02Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

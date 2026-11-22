@@ -2,12 +2,13 @@
 format: aep.planning-md/3
 id: story:gate-test-steps-within-budget
 kind: story
-status: active
+status: implemented
 title: The gate's test steps end within two minutes
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:08:02Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:08:03Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:10:03Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

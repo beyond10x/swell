@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:function-apply-and-source-text
 kind: story
-status: active
+status: implemented
 title: 'Function.prototype.apply and toString: the source text of a function kept from the parser to the object; the test of HOST-120'
 summary: apply with CreateListFromArrayLike charged per element; toString from a span the parser has and the compiler carries, the text charged to the memory budget, a NativeFunction string where the host has no source text; 64 failing cases pass, 35 toString cases wait for slice 6.
 relations:
@@ -39,10 +39,11 @@ scope:
   path: crates/syntax/src/parser/function.rs
 - confidence: cited
   path: crates/syntax/tests/sources.rs
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:44Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:45Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:10:00Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

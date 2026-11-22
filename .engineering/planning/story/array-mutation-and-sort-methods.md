@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:array-mutation-and-sort-methods
 kind: story
-status: active
+status: implemented
 title: 'Array.prototype: pop, shift, unshift, splice, reverse, fill, copyWithin, sort and toSorted'
 summary: Nine methods that change their receiver or sort; a stable merge sort charged per comparison and bounded by the memory budget; 196 failing cases name nothing else and pass.
 relations:
@@ -22,10 +22,11 @@ scope:
   path: crates/swell/tests/language/builtin-array-sort.js
 - confidence: cited
   path: crates/swell/tests/language/builtin-array-splice.js
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:46Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:46Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:10:01Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

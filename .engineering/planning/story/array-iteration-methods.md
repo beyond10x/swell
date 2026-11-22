@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:array-iteration-methods
 kind: story
-status: active
+status: implemented
 title: 'Array.prototype: forEach, every, some, filter, reduce, reduceRight, the four find methods, flat and flatMap'
 summary: Twelve methods that walk an array with a callback or flatten it, a step per index, flattening on an explicit stack; 1,271 failing cases name nothing else and pass; each callback tested at the re-entry limit on the promised stack.
 relations:
@@ -24,10 +24,11 @@ scope:
   path: crates/swell/tests/language/builtin-array-for-each-every-some.js
 - confidence: cited
   path: crates/swell/tests/language/builtin-array-reduce.js
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T21:30:45Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-21T21:30:45Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T11:10:00Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
