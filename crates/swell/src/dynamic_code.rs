@@ -241,7 +241,7 @@ impl<H: Host> Agent<H> {
             Ok(made) => made,
             Err(error) => return Err(Abrupt::Throw(error)),
         };
-        let script = self.make_script_record(realm, code, copy, host_defined)?;
+        let script = self.make_script_record(realm, code, copy, host_defined, true)?;
         let (_, compiled) = self.script_parts(script)?;
         Ok(EvalStart::Code {
             script,
@@ -765,7 +765,7 @@ impl<H: Host> Agent<H> {
                 .accounting
                 .credit(u64::try_from(old_bytes).unwrap_or(u64::MAX));
         }
-        let script = self.make_script_record(realm, code, copy, None)?;
+        let script = self.make_script_record(realm, code, copy, None, true)?;
         let (_, compiled) = self.script_parts(script)?;
         // Steps 27 to 31: OrdinaryFunctionCreate in the global environment of the realm, with
         // its name and MakeConstructor, then the [[Prototype]] step 26 gives it.

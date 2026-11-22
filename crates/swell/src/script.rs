@@ -76,6 +76,9 @@ pub(crate) struct Compiled {
     pub(crate) names: Vec<StringRef>,
     /// The property key of each function template's name.
     pub(crate) name_keys: Vec<Key>,
+    /// The code is eval code or the code of a `Function` constructor, its positions counted in
+    /// that code's own text (decision 13, `ErrorSite::dynamic`).
+    pub(crate) dynamic: bool,
 }
 
 /// The `[[HostDefined]]` value of a script, kept as the data of a [`HostObject`] so that its
@@ -274,7 +277,7 @@ impl<H: Host> Agent<H> {
             Ok(made) => made,
             Err(error) => return Ok(ParseAnswer::Errors(vec![error])),
         };
-        self.make_script_record(realm, code, copy, host_defined)
+        self.make_script_record(realm, code, copy, host_defined, false)
             .map(ParseAnswer::Script)
     }
 
@@ -376,8 +379,9 @@ impl<H: Host> Agent<H> {
     }
 
     /// The `SyntaxError` objects of `realm` for the errors of a parse, each message with its
-    /// line and column; each refusal among them is counted ([`Agent::refusals`]). Every parse
-    /// of the engine answers its errors here: `parse_script`, `eval` and `Function`.
+    /// line and column; each refusal among them is counted ([`Agent::refusals`]), and the line
+    /// and column of the first are kept for `parse_script`'s error site (decision 13). Every
+    /// parse of the engine answers its errors here: `parse_script`, `eval` and `Function`.
     pub(crate) fn syntax_errors(
         &mut self,
         realm: Handle,
@@ -385,6 +389,9 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Vec<Value>> {
         let mut objects = Vec::new();
         for error in errors {
+            if objects.is_empty() {
+                self.syntax_error_at = Some((error.line, error.column));
+            }
             self.count_refusal(&error.message);
             let message = format!("{} ({}:{})", error.message, error.line, error.column);
             let object = self.new_error_in(realm, ErrorKind::SyntaxError, &message)?;
@@ -427,13 +434,15 @@ impl<H: Host> Agent<H> {
     /// compile step) and the copy's become the record's, with no credit and no check between,
     /// and the sweep that frees the record credits them (decision 4, "Source text."). The record
     /// and its atom vectors are charged before they are allocated; on every way out without a
-    /// record everything is credited.
+    /// record everything is credited. `dynamic` is true for eval code and the code of a
+    /// `Function` constructor ([`Compiled::dynamic`]).
     pub(crate) fn make_script_record(
         &mut self,
         realm: Handle,
         code: Code,
         copy: SourceCopy,
         host_defined: Option<HostDefined>,
+        dynamic: bool,
     ) -> Completion<Handle> {
         let SourceCopy {
             units: source,
@@ -470,6 +479,7 @@ impl<H: Host> Agent<H> {
                 keys,
                 names,
                 name_keys,
+                dynamic,
             })),
             host_defined: host_defined.map(|value| HostObject {
                 brand: Brand(0),
