@@ -96,7 +96,8 @@ pub(crate) const PROTOTYPE_METHODS: &[Method<AccessBuiltin>] = &[
 ];
 
 /// The data properties keyed by a well-known symbol this group defines on
-/// `%String.prototype%`, after its methods: none (`String.prototype[@@iterator]` is slice 6).
+/// `%String.prototype%`, after its methods: none (`String.prototype[@@iterator]` is defined with
+/// the base's keys, `builtins/string/mod.rs`).
 pub(crate) fn prototype_symbol_data<H: Host>() -> [SymbolData<H>; 0] {
     []
 }
