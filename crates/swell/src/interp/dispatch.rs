@@ -347,6 +347,10 @@ impl<H: Host> Agent<H> {
             I::CaseJump(target) => self.case_jump(target),
             I::ForInStart => self.for_in_start(),
             I::ForInNext(target) => self.for_in_next(target),
+            // `interp/for_of.rs`.
+            I::GetIterator => self.get_iterator_instruction(),
+            I::IteratorStep(target) => self.iterator_step_instruction(target),
+            I::IteratorClose => self.iterator_close_instruction(),
             I::Throw => self.throw_instruction(),
             I::ThrowSyntaxError(index) => self.throw_syntax_error(index),
             I::Return => self.return_instruction(),

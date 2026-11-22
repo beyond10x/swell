@@ -1,0 +1,36 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "g" length 1 locals 2
+  params local 0
+  0000 4:19 GetLocal 0
+  0001 4:19 GetIterator
+  0002 4:5 IteratorStep 0016
+  0003 4:14 SetLocal 1
+  0004 4:14 Pop
+  0005 4:29 GetLocal 1
+  0006 4:22 Tag 2
+  0007 4:22 Jump 0009
+  0008 4:5 LoopJump 0002
+  0009 4:5 IteratorClose
+  0010 4:5 JumpIfTag 2 0013
+  0011 4:5 EndFinally
+  0012 4:5 Jump 0016
+  0013 4:5 Nip 1
+  0014 4:5 Tag 2
+  0015 4:5 Jump 0019
+  0016 4:5 Pop
+  0017 3:3 Undefined
+  0018 3:3 Tag 0
+  0019 6:5 GetLocal 0
+  0020 6:5 Pop
+  0021 3:3 JumpIfTag 2 0024
+  0022 3:3 EndFinally
+  0023 3:3 Jump 0025
+  0024 3:3 Return
+  0025 2:1 Undefined
+  0026 2:1 Return
+  finally 0002..0009 -> 0009 items 1 envs 0
+  finally 0000..0017 -> 0019 items 0 envs 0

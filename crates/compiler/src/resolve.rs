@@ -940,6 +940,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 target: ForInTarget::Var(kind, target),
                 object,
                 body,
+                ..
             } if kind.is_lexical() => {
                 self.work.push(Walk::LeaveLexical(ScopeKey::Iteration(id)));
                 self.work.push(Walk::Stmt(*body));
@@ -954,6 +955,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 target,
                 object,
                 body,
+                ..
             } => {
                 self.work.push(Walk::Stmt(*body));
                 self.work.push(Walk::Expr(*object));

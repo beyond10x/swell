@@ -20,11 +20,12 @@
 //!
 //! # Values on the operand stack
 //!
-//! Besides language values the stack holds four kinds of engine entries, each produced and
+//! Besides language values the stack holds five kinds of engine entries, each produced and
 //! consumed by instructions of this set only: the reference of a global name
 //! ([`Instruction::ResolveGlobal`]), the reference of a name looked up at run time
 //! ([`Instruction::ResolveName`]), the enumerator of a for-in statement
-//! ([`Instruction::ForInStart`]) and the tag of a completion record ([`Instruction::Tag`]).
+//! ([`Instruction::ForInStart`]), the Iterator Record of a for-of statement
+//! ([`Instruction::GetIterator`]) and the tag of a completion record ([`Instruction::Tag`]).
 //!
 //! # Completion records
 //!
@@ -328,6 +329,21 @@ pub enum Instruction {
     ForInStart,
     /// `[e] -> [e, key]`, or `[e]` and a jump to `t`, after this one, when the enumerator is done.
     ForInNext(u32),
+    /// `[v] -> [i]`: ForIn/OfHeadEvaluation for `iterate`
+    /// (`#sec-runtime-semantics-forinofheadevaluation`, step 7.b): the Iterator Record of
+    /// GetIterator(v, sync) (`#sec-getiterator`), a `TypeError` when `v` is not iterable.
+    GetIterator,
+    /// `[i] -> [i, v]`, or `[i]` and a jump to `t`, after this one, when the iterator is done:
+    /// IteratorStepValue (`#sec-iteratorstepvalue`), a call of [[NextMethod]]. A throw of it,
+    /// a result that is not an object, and a throw while "done" or "value" is read set the
+    /// record's [[Done]].
+    IteratorStep(u32),
+    /// `[i, v, tag] -> [i, v, tag]`: IteratorClose (`#sec-iteratorclose`) of the record under a
+    /// completion record, unless its [[Done]] is set, which it then sets: with the throw
+    /// completion for [`TAG_THROW`], whose throw then stands, and with a normal completion for
+    /// every other tag, whose completion a throw of `return`, or a result of it that is no
+    /// object, replaces.
+    IteratorClose,
     /// `[v] -> `: throws `v`.
     Throw,
     /// Throws a `SyntaxError` of the current realm with the message `strings[k]`: evaluating a
@@ -498,6 +514,7 @@ impl Instruction {
             | Instruction::LoopJump(t)
             | Instruction::CaseJump(t)
             | Instruction::ForInNext(t)
+            | Instruction::IteratorStep(t)
             | Instruction::JumpIfTag { target: t, .. } => Some(t),
             Instruction::Undefined
             | Instruction::Null
@@ -580,6 +597,8 @@ impl Instruction {
             | Instruction::CallEval(_)
             | Instruction::New(_)
             | Instruction::ForInStart
+            | Instruction::GetIterator
+            | Instruction::IteratorClose
             | Instruction::Throw
             | Instruction::ThrowSyntaxError(_)
             | Instruction::Return
@@ -628,6 +647,7 @@ impl Instruction {
             Instruction::LoopJump(_) => Instruction::LoopJump(t),
             Instruction::CaseJump(_) => Instruction::CaseJump(t),
             Instruction::ForInNext(_) => Instruction::ForInNext(t),
+            Instruction::IteratorStep(_) => Instruction::IteratorStep(t),
             Instruction::JumpIfTag { tag, .. } => Instruction::JumpIfTag { tag, target: t },
             Instruction::JumpIfNotUndefined(_) => Instruction::JumpIfNotUndefined(t),
             other => other,

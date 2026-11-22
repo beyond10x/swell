@@ -444,6 +444,16 @@ pub enum ForInTarget {
     Expression(ExprId),
 }
 
+/// The iterationKind of ForIn/OfHeadEvaluation (`#sec-runtime-semantics-forinofheadevaluation`)
+/// of a [`Stmt::ForIn`]: the keys of a for-in, the values of a for-of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IterationKind {
+    /// `for (... in ...)`: EnumerateObjectProperties.
+    Enumerate,
+    /// `for (... of ...)`: GetIterator.
+    Iterate,
+}
+
 /// A name a `let` or `const` declaration binds (the BoundNames of a `LexicalDeclaration`), or a
 /// function declaration in a block or a `case` block ([`Ast::lexical_names`]), with the
 /// statement that declares it.
@@ -496,10 +506,14 @@ pub enum Stmt {
         update: Option<ExprId>,
         body: StmtId,
     },
+    /// `for (target in object) body` or `for (target of object) body`: one statement with its
+    /// `iteration` kind, whose head declares, binds and assigns alike
+    /// (`#sec-for-in-and-for-of-statements`).
     ForIn {
         target: ForInTarget,
         object: ExprId,
         body: StmtId,
+        iteration: IterationKind,
     },
     /// `continue` with its `LabelIdentifier`, if any.
     Continue(Option<Name>),
@@ -1240,6 +1254,7 @@ impl Stmt {
                 target,
                 object,
                 body,
+                ..
             } => {
                 match target {
                     ForInTarget::Expression(e) => f(Child::Expr(*e)),

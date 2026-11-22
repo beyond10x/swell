@@ -39,7 +39,7 @@
 //!   `#sec-destructuring-binding-patterns`: each target of an ObjectAssignmentPattern that is no
 //!   nested pattern is a simple assignment target; the names a binding pattern binds are
 //!   checked as those of its declaration, a parameter list or a `catch` parameter, and a pattern
-//!   in a declaration has an initializer outside a for-in head;
+//!   in a declaration has an initializer outside a for-in or for-of head;
 //! - `#sec-method-definitions-static-semantics-early-errors`: the `UniqueFormalParameters` of a
 //!   method, in any code;
 //! - `#sec-arrow-function-definitions-static-semantics-early-errors`: the
@@ -51,10 +51,10 @@
 //!   recorded omission of `sec-literals-regular-expression-literals`);
 //! - `#sec-let-and-const-declarations-static-semantics-early-errors`: a `let` or `const`
 //!   declaration binds no name `let` and no name twice, and a `const` one has an initializer
-//!   outside a for-in head;
+//!   outside a for-in or for-of head;
 //! - the LexicallyDeclaredNames of a script, a function body, a block and a `case` block, and
-//!   the names a `for` or for-in head declares with `let` or `const`, hold no duplicate and no
-//!   name of the VarDeclaredNames around them (`#sec-scripts-static-semantics-early-errors`,
+//!   the names a `for`, for-in or for-of head declares with `let` or `const`, hold no duplicate
+//!   and no name of the VarDeclaredNames around them (`#sec-scripts-static-semantics-early-errors`,
 //!   `#sec-function-definitions-static-semantics-early-errors`,
 //!   `#sec-block-static-semantics-early-errors`, `#sec-switch-statement-static-semantics-early-errors`,
 //!   `#sec-for-statement-static-semantics-early-errors`,
@@ -191,7 +191,8 @@ enum Names<'a> {
     Cases(&'a [SwitchCase]),
     /// The declarators of a `for` head.
     Declarators(&'a [VarDeclarator]),
-    /// The binding of a for-in head, or the names of a `catch` parameter that is a pattern.
+    /// The binding of a for-in or for-of head, or the names of a `catch` parameter that is a
+    /// pattern.
     One(&'a BindingTarget),
 }
 
@@ -415,8 +416,8 @@ impl<'a, 'm> Checker<'a, 'm> {
     }
 
     /// Enters the lexical names the statement `id` declares for its children: those of a block,
-    /// a `case` block, or a `for` or for-in head. A `try` pushes its children itself, a frame
-    /// around each of its blocks; then this answers true.
+    /// a `case` block, or a `for`, for-in or for-of head. A `try` pushes its children itself, a
+    /// frame around each of its blocks; then this answers true.
     fn lexical_scope(&mut self, id: StmtId, stack: &mut Vec<Step>) -> bool {
         let ast = self.ast;
         let Some(node) = ast.stmt(id) else {
@@ -513,7 +514,7 @@ impl<'a, 'm> Checker<'a, 'm> {
         );
     }
 
-    /// The target of an assignment, an update or a for-in head
+    /// The target of an assignment, an update or a for-in or for-of head
     /// (`#sec-static-semantics-assignmenttargettype`).
     fn target(&mut self, e: ExprId) {
         let Some(node) = self.ast.expr(e) else {
@@ -717,7 +718,7 @@ impl<'a, 'm> Checker<'a, 'm> {
                     }
                     // `#sec-destructuring-binding-patterns`: a `BindingPattern` in a
                     // declaration has an `Initializer` (the grammar of `LexicalBinding` and
-                    // `VariableDeclaration`), but in the head of a for-in.
+                    // `VariableDeclaration`), but in the head of a for-in or a for-of.
                     if d.target.pattern().is_some() {
                         self.error(
                             "missing initializer in a destructuring declaration",

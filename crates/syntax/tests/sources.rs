@@ -497,6 +497,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "while" => ("", "while (a) ", ";", "", ""),
         "for" => ("", "for (;;) ", ";", "", ""),
         "for_in" => ("", "for (x in o) ", ";", "", ""),
+        "for_of" => ("", "for (x of a) ", ";", "", ""),
         "do_while" => ("", "do ", ";", " while (a);", ""),
         "try" => ("", "try {", "", "} finally {}", ""),
         "catch" => ("", "try {} catch (e) {", "", "}", ""),
@@ -528,7 +529,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 45] = [
+const NESTING_KINDS: [&str; 46] = [
     "array",
     "paren",
     "block",
@@ -552,6 +553,7 @@ const NESTING_KINDS: [&str; 45] = [
     "while",
     "for",
     "for_in",
+    "for_of",
     "do_while",
     "try",
     "catch",

@@ -33,6 +33,7 @@
 mod arrow;
 pub(crate) mod budget;
 pub(crate) mod dispatch;
+mod for_of;
 pub(crate) mod frame;
 mod lexical;
 mod object_literal;
@@ -294,10 +295,11 @@ impl<H: Host> Agent<H> {
 
     /// Cut the running frame's operand stack back to its first `len` entries: how `Pop`,
     /// [`Agent::drop_entries`] and the `items` of a handler drop entries without their frame
-    /// (an entry [`Agent::pop_entry`] takes is one an instruction uses, never an enumerator
-    /// in the bytecode). The key list an enumerator among the removed entries holds
-    /// leaves the frame's `charged` and is credited, so a `for`-`in` loop that ends, normally,
-    /// by a jump out of it or by a throw caught outside it, credits its list at once.
+    /// (an entry [`Agent::pop_entry`] takes is one an instruction uses, never an enumerator or
+    /// an Iterator Record in the bytecode). The key list an enumerator among the removed
+    /// entries holds, and the box of an Iterator Record among them, leave the frame's `charged`
+    /// and are credited, so a `for`-`in` or `for`-`of` loop that ends, normally, by a jump out
+    /// of it or by a throw caught outside it, credits them at once.
     pub(crate) fn truncate_stack(&mut self, len: usize) -> Completion<()> {
         let frame = self.top_frame()?;
         let Some(removed) = frame.stack.get(len..) else {
@@ -305,6 +307,7 @@ impl<H: Host> Agent<H> {
         };
         let held = removed.iter().fold(0u64, |held, entry| match entry {
             Entry::Enumerator(enumerator) => held.saturating_add(enumerator.bytes),
+            Entry::Iterator(_) => held.saturating_add(for_of::record_bytes()),
             _ => held,
         });
         frame.stack.truncate(len);

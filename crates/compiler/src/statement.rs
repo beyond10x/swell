@@ -1,11 +1,23 @@
 //! Statements (clause 14, `#sec-ecmascript-language-statements-and-declarations`): block, `var`,
-//! empty, expression, `if`, `do-while`, `while`, `for`, `for-in` with `var` or a left-hand side,
-//! `continue`, `break`, `return`, `switch`, `throw`, `try` with `catch` and `finally`,
-//! `debugger`, labelled statements with `break` and `continue` to a label, and `with` in non-strict
-//! code (its body runs in an Object Environment Record; the names in it are looked up at run
-//! time, `resolve.rs`). A declarator, a for-in head or a `catch` parameter that is an object
-//! pattern destructures its value through the pattern node (`expression.rs`); a `catch`
-//! pattern's names are a scope of their own ([`ScopeKey::CatchParameter`]).
+//! empty, expression, `if`, `do-while`, `while`, `for`, `for-in` and `for-of` with `var`, `let`,
+//! `const` or a left-hand side, `continue`, `break`, `return`, `switch`, `throw`, `try` with
+//! `catch` and `finally`, `debugger`, labelled statements with `break` and `continue` to a label,
+//! and `with` in non-strict code (its body runs in an Object Environment Record; the names in it
+//! are looked up at run time, `resolve.rs`). A declarator, a for-in or for-of head or a `catch`
+//! parameter that is an object pattern destructures its value through the pattern node
+//! (`expression.rs`); a `catch` pattern's names are a scope of their own
+//! ([`ScopeKey::CatchParameter`]).
+//!
+//! # The iterator of a for-of
+//!
+//! A for-of keeps its Iterator Record on the operand stack for the whole loop
+//! ([`Instruction::GetIterator`], [`Instruction::IteratorStep`]), and its IteratorClose
+//! ([`Instruction::IteratorClose`]) is compiled like a `finally` block over the step and the
+//! body (`docs/design/engine.md`, decision 3, "The iterator of `for`-`of`, of an array pattern
+//! and of a spread"): a control entry of its own inside the loop's, entered with a completion
+//! record by a throw, a `return`, and a `break` or `continue` that leaves the loop, and a
+//! [`HandlerKind::Finally`] handler. A `continue` of the loop itself goes past it
+//! ([`Control::Finally`]'s `closes`).
 //!
 //! # Labels
 //!
@@ -46,8 +58,8 @@
 //! ([`Instruction::CopyEnv`], `#sec-forbodyevaluation`).
 
 use swell_syntax::ast::{
-    BindingTarget, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, Span, Stmt, StmtId,
-    VarDeclarator,
+    BindingTarget, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, IterationKind, Span,
+    Stmt, StmtId, VarDeclarator,
 };
 
 use crate::bytecode::{HandlerKind, Instruction, SlotName, TAG_NORMAL};
@@ -264,11 +276,20 @@ impl<'a, 'm> Compiler<'a, 'm> {
             // `#sec-for-in-and-for-of-statements-runtime-semantics-labelledevaluation`:
             // ForIn/OfHeadEvaluation, then ForIn/OfBodyEvaluation
             // (`#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`),
-            // the enumerator on the operand stack for the whole loop.
+            // the enumerator on the operand stack for the whole loop; for-of, the Iterator Record.
+            Stmt::ForIn {
+                target,
+                object,
+                body,
+                iteration: IterationKind::Iterate,
+            } => {
+                self.for_of(id, span, target, *object, *body, labels, &mut t)?;
+            }
             Stmt::ForIn {
                 target: ForInTarget::Var(kind, target),
                 object,
                 body,
+                ..
             } if kind.is_lexical() => {
                 self.lexical_for_in(id, span, target, *object, *body, labels, &mut t)?;
             }
@@ -276,6 +297,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 target,
                 object,
                 body,
+                ..
             } => {
                 self.reset_completion(span, &mut t)?;
                 let (top, exit) = (self.label(), self.label());
@@ -284,39 +306,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 t.push(Task::ItemsUp)?;
                 t.push(Task::Bind(top))?;
                 t.push(Task::Emit(Instruction::ForInNext(exit), span))?;
-                // The key is on top; each iteration evaluates the target's reference, then puts,
-                // or destructures the key with the pattern of the head.
-                let pattern = match target {
-                    ForInTarget::Var(_, target) => target.pattern(),
-                    ForInTarget::Expression(e) => self
-                        .ast
-                        .expr(*e)
-                        .filter(|n| matches!(n.expr, Expr::ObjectPattern { .. }))
-                        .map(|_| *e),
-                };
-                if let Some(pattern) = pattern {
-                    let pspan = self.ast.expr(pattern).map(|n| n.span).unwrap_or(span);
-                    t.push(Task::Expr(pattern))?;
-                    t.push(Task::Emit(Instruction::Pop, pspan))?;
-                } else {
-                    let (target, target_span) = match target {
-                        ForInTarget::Var(_, name) => (
-                            Target::Binding(self.binding(Site::ForInVar(id))?),
-                            name.span(),
-                        ),
-                        ForInTarget::Expression(e) => {
-                            let span = self.ast.expr(*e).map(|n| n.span).unwrap_or(span);
-                            (self.target(*e)?, span)
-                        }
-                    };
-                    let r = target.reference_items();
-                    t.append(self.reference(&target, false, target_span)?)?;
-                    for _ in 0..r {
-                        t.push(Task::Emit(Instruction::Bury(r), target_span))?;
-                    }
-                    t.push(Task::Emit(self.put(&target)?, target_span))?;
-                    t.push(Task::Emit(Instruction::Pop, target_span))?;
-                }
+                self.put_to_head(id, span, target, &mut t)?;
                 t.push(self.enter_loop(
                     exit,
                     top,
@@ -641,19 +631,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
         t.push(Task::Bind(top))?;
         t.push(Task::Emit(Instruction::ForInNext(exit), span))?;
         let iteration = self.enter_scope(ScopeKey::Iteration(id), span, t)?;
-        let name_span = target.span();
-        match target.pattern() {
-            Some(pattern) => t.push(Task::Expr(pattern))?,
-            None => {
-                let store = match self.binding(Site::ForInVar(id))? {
-                    Binding::Local(n) => Instruction::SetLocal(n),
-                    Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
-                    _ => return Err(malformed("a for-in binding")),
-                };
-                t.push(Task::Emit(store, name_span))?;
-            }
-        }
-        t.push(Task::Emit(Instruction::Pop, name_span))?;
+        self.initialize_head(id, target, t)?;
         t.push(Task::PushControl(Control::Loop {
             exit,
             next: top,
@@ -669,6 +647,160 @@ impl<'a, 'm> Compiler<'a, 'm> {
         t.push(Task::Emit(Instruction::Pop, span))?;
         t.push(Task::ItemsDown)?;
         Ok(())
+    }
+
+    /// The value on top, a key or a value of the iterator, initializes the binding of the
+    /// `let` or `const` head of the for-in or for-of `id`, in the iteration's scope, or the
+    /// pattern of the head initializes the names from it; then it is dropped
+    /// (`#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`,
+    /// steps 6.h and 6.i).
+    fn initialize_head(
+        &mut self,
+        id: StmtId,
+        target: &BindingTarget,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let name_span = target.span();
+        match target.pattern() {
+            Some(pattern) => t.push(Task::Expr(pattern))?,
+            None => {
+                let store = match self.binding(Site::ForInVar(id))? {
+                    Binding::Local(n) => Instruction::SetLocal(n),
+                    Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
+                    _ => return Err(malformed("a for-in binding")),
+                };
+                t.push(Task::Emit(store, name_span))?;
+            }
+        }
+        t.push(Task::Emit(Instruction::Pop, name_span))
+    }
+
+    /// The value on top, a key or a value of the iterator, goes to the `var` or left-hand side
+    /// head of the for-in or for-of `id`, and is dropped: each iteration evaluates the target's
+    /// reference, then puts, or destructures the value with the pattern of the head
+    /// (`#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`,
+    /// steps 6.g and 6.h).
+    fn put_to_head(
+        &mut self,
+        id: StmtId,
+        span: Span,
+        target: &ForInTarget,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let pattern = match target {
+            ForInTarget::Var(_, target) => target.pattern(),
+            ForInTarget::Expression(e) => self
+                .ast
+                .expr(*e)
+                .filter(|n| matches!(n.expr, Expr::ObjectPattern { .. }))
+                .map(|_| *e),
+        };
+        if let Some(pattern) = pattern {
+            let pspan = self.ast.expr(pattern).map(|n| n.span).unwrap_or(span);
+            t.push(Task::Expr(pattern))?;
+            return t.push(Task::Emit(Instruction::Pop, pspan));
+        }
+        let (target, target_span) = match target {
+            ForInTarget::Var(_, name) => (
+                Target::Binding(self.binding(Site::ForInVar(id))?),
+                name.span(),
+            ),
+            ForInTarget::Expression(e) => {
+                let span = self.ast.expr(*e).map(|n| n.span).unwrap_or(span);
+                (self.target(*e)?, span)
+            }
+        };
+        let r = target.reference_items();
+        t.append(self.reference(&target, false, target_span)?)?;
+        for _ in 0..r {
+            t.push(Task::Emit(Instruction::Bury(r), target_span))?;
+        }
+        t.push(Task::Emit(self.put(&target)?, target_span))?;
+        t.push(Task::Emit(Instruction::Pop, target_span))
+    }
+
+    /// A for-of (`#sec-runtime-semantics-forinofheadevaluation` and
+    /// `#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`
+    /// for `iterate`): the expression, in the scope of the head's `let` or `const` names,
+    /// uninitialized; the Iterator Record on the operand stack for the whole loop; each step
+    /// puts its value to the head, in a scope of its own for `let` and `const`. Inside the loop's
+    /// control entry, a [`Control::Finally`] that `closes`: a throw from the step to the end of
+    /// the body, a `return`, and a `break` or `continue` that leaves the loop enter
+    /// [`Instruction::IteratorClose`] with their completion record, then go on as after a
+    /// `finally` block (ForIn/OfBodyEvaluation, steps 6.i.iii, 6.k and 6.l.iii). The step jumps
+    /// past it when the iterator is done, and a `continue` of the loop itself goes past it.
+    #[allow(clippy::too_many_arguments)]
+    fn for_of(
+        &mut self,
+        id: StmtId,
+        span: Span,
+        target: &ForInTarget,
+        object: ExprId,
+        body: StmtId,
+        labels: Vec<String>,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let lexical = matches!(target, ForInTarget::Var(kind, _) if kind.is_lexical());
+        self.reset_completion(span, t)?;
+        let (items, envs) = (self.items.saturating_add(1), self.envs);
+        let (top, end, entry, exit) = (self.label(), self.label(), self.label(), self.label());
+        let key = self.finally_key();
+        let tdz = lexical && self.enter_scope(ScopeKey::Tdz(id), span, t)?;
+        t.push(Task::Expr(object))?;
+        leave_scope(tdz, span, t)?;
+        let object_span = self.ast.expr(object).map(|n| n.span).unwrap_or(span);
+        t.push(Task::Emit(Instruction::GetIterator, object_span))?;
+        t.push(Task::ItemsUp)?;
+        t.push(Task::PushControl(Control::Loop {
+            exit,
+            next: top,
+            items,
+            envs,
+            labels,
+        }))?;
+        t.push(Task::PushControl(Control::Finally {
+            entry,
+            items,
+            envs,
+            returns: false,
+            jumps: Vec::new(),
+            closes: true,
+        }))?;
+        t.push(Task::Bind(top))?;
+        t.push(Task::Emit(Instruction::IteratorStep(exit), span))?;
+        let iteration = match target {
+            ForInTarget::Var(kind, target) if kind.is_lexical() => {
+                let iteration = self.enter_scope(ScopeKey::Iteration(id), span, t)?;
+                self.initialize_head(id, target, t)?;
+                iteration
+            }
+            _ => {
+                self.put_to_head(id, span, target, t)?;
+                false
+            }
+        };
+        t.push(Task::Stmt(body))?;
+        leave_scope(iteration, span, t)?;
+        t.push(Task::PopControl(Some(key)))?;
+        t.push(Task::Goto(top, span))?;
+        t.push(Task::Bind(end))?;
+        t.push(Task::Bind(entry))?;
+        t.push(Task::ItemsUp)?;
+        t.push(Task::ItemsUp)?;
+        t.push(Task::Emit(Instruction::IteratorClose, span))?;
+        t.push(Task::FinallyDispatch(key, span))?;
+        t.push(Task::PopControl(None))?;
+        t.push(Task::Bind(exit))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        t.push(Task::ItemsDown)?;
+        t.push(Task::Handler {
+            kind: HandlerKind::Finally,
+            start: top,
+            end,
+            target: entry,
+            items,
+            envs,
+        })
     }
 
     /// `#sec-try-statement-runtime-semantics-evaluation`, with CatchClauseEvaluation
@@ -699,6 +831,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 envs,
                 returns: false,
                 jumps: Vec::new(),
+                closes: false,
             }))?;
         }
         let record = self.enter_scope(ScopeKey::Try(id), span, t)?;
