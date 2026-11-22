@@ -407,14 +407,15 @@ fn host_72_a_host_function_cannot_end_a_termination() {
 }
 
 /// The argument of `fib` in [`same_script_twice_gives_the_same_steps_and_value`] and the value
-/// it answers: `fib(12)`, 144, the full count, which the lane `slow` (`SWELL_FULL_COUNTS=1`)
-/// runs in both modes; `fib(7)`, 13, in the gate with the collector at every safe point, where
-/// every step collects (the test took 43.3 s there with `fib(12)`, 465 calls a run and four
-/// runs, at a load of 100 to 110 on 17 cores, cargo-nextest). `fib(7)` makes 41 calls a run,
-/// each with its frames live across the collections of the calls below it, which is what the
-/// collect mode looks at, and its steps are compared run for run in the same way.
+/// it answers: `fib(12)`, 144, the full count, in the default mode; `fib(7)`, 13, with the
+/// collector at every safe point, where every step collects, in the gate and in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`) alike (the test took 43.3 s there with `fib(12)`, 465 calls a run
+/// and four runs, at a load of 100 to 110 on 17 cores, cargo-nextest, and 4.4 CPU seconds alone
+/// in the lane, measured on 2026-11-22). `fib(7)` makes 41 calls a run, each with its frames
+/// live across the collections of the calls below it, which is what the collect mode looks at,
+/// and its steps are compared run for run in the same way.
 fn fib_argument_and_value() -> (u32, u32) {
-    if in_the_collect_gate() {
+    if cfg!(feature = "collect-every-safe-point") {
         (7, 13)
     } else {
         (12, 144)

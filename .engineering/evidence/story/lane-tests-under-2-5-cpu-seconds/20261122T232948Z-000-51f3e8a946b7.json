@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-22T23:29:48Z",
+  "actor": "human:operator",
+  "artifact": "story:lane-tests-under-2-5-cpu-seconds",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "slot --timeout 30m task slow-tests, on b596c34",
+    "reference": "CHANGELOG.md"
+  }
+}

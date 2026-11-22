@@ -545,16 +545,22 @@ const DEPTH: usize = if cfg!(feature = "collect-every-safe-point") {
     100_000
 };
 
-/// The nesting in this run: [`DEPTH`] in the lane `slow` (`SWELL_FULL_COUNTS=1`); 25,000 in the
-/// default mode's gate (100,000 took 16.2 s there at a load of 100 to 110 on 17 cores,
-/// cargo-nextest), 1,000 in the collect mode's gate (2,000 took 2.1 CPU seconds there, run
-/// alone, 1.0 s more than the default mode's 25,000). 25,000 still shows the stack bound: a Rust
-/// call per level takes at least 16 bytes (a return address and a saved frame pointer), 400,000
-/// bytes for the nesting, more than the [`STACK_BYTES`] (262,144) the walk runs on; 1,000 still
-/// makes every level by a call that collects with the levels below it held.
+/// The nesting in this run: [`DEPTH`] in the collect mode's lane `slow` (`SWELL_FULL_COUNTS=1`)
+/// and 40,000 in the default mode's (100,000 took 4.4 CPU seconds alone there, measured on
+/// 2026-11-22); 25,000 in the default mode's gate (100,000 took 16.2 s there at a load of 100
+/// to 110 on 17 cores, cargo-nextest), 1,000 in the collect mode's gate (2,000 took 2.1 CPU
+/// seconds there, run alone, 1.0 s more than the default mode's 25,000). 25,000 still shows
+/// the stack bound: a Rust call per level takes at least 16 bytes (a return address and a saved
+/// frame pointer), 400,000 bytes for the nesting, more than the [`STACK_BYTES`] (262,144) the
+/// walk runs on, and 40,000 more than twice it; 1,000 still makes every level by a call that
+/// collects with the levels below it held.
 fn depth() -> usize {
     if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
-        DEPTH
+        if cfg!(feature = "collect-every-safe-point") {
+            DEPTH
+        } else {
+            40_000
+        }
     } else if cfg!(feature = "collect-every-safe-point") {
         1_000
     } else {
