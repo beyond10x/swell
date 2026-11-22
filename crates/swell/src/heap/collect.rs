@@ -594,16 +594,19 @@ mod tests {
     /// String is a 1,024-unit String repeated 512 times: `"x".repeat(1 << 19)` makes the same
     /// String by 2^19 appends of one unit, and 128 of those ran past the 60 s a test is given.
     ///
-    /// The lane `slow` (`SWELL_FULL_COUNTS=1`) stores the story's 262,144 records and makes
-    /// 128 Strings, 64 MiB. The gate stores 65,536, whose slots charge more than the room, and
-    /// makes as many Strings as fill the room M - U and two more: past the room's end is the
-    /// first collection the live reading makes and the charged one would put after the
-    /// budget's refusal. With the feature `collect-every-safe-point` every safe point collects,
-    /// so there the test passes whichever reading the threshold takes; the loop runs 4 times
-    /// in the lane `slow` and twice in the gate, each collection sweeping every slot.
+    /// The lane `slow` (`SWELL_FULL_COUNTS=1`) stores the story's 262,144 records, the gate
+    /// 65,536, whose slots charge more than the room; both make as many Strings as fill the
+    /// room M - U and two more: past the room's end is the first collection the live reading
+    /// makes and the charged one would put after the budget's refusal. The lane made the
+    /// story's 128 Strings, 64 MiB, before, and took 2.6 CPU seconds alone (measured on
+    /// 2026-11-22). With the feature `collect-every-safe-point` every safe point collects,
+    /// so there the test passes whichever reading the threshold takes: it stores the gate's
+    /// 65,536 records and runs the loop twice, in the gate and in the lane `slow` alike, each
+    /// collection sweeping every slot (with 262,144 records and 4 loops the lane took 3.8 CPU
+    /// seconds alone, measured on 2026-11-22).
     #[test]
     fn the_collection_threshold_follows_the_live_reading() {
-        let full = full_counts();
+        let full = full_counts() && !cfg!(feature = "collect-every-safe-point");
         let mut limits = test_host::limits();
         limits.memory_bytes = 1 << 30;
         limits.steps_per_entry = u64::MAX;
@@ -622,11 +625,10 @@ mod tests {
             charged > room,
             "heap_bytes {charged}, live_bytes {live}: the empty slots are not charged"
         );
-        let rounds = match (cfg!(feature = "collect-every-safe-point"), full) {
-            (true, true) => 4,
-            (true, false) => 2,
-            (false, true) => 128,
-            (false, false) => room.div_ceil(1 << 19) + 2,
+        let rounds = if cfg!(feature = "collect-every-safe-point") {
+            2
+        } else {
+            room.div_ceil(1 << 19) + 2
         };
         let source = format!(
             "var s = \"x\".repeat(1 << 10); \

@@ -387,18 +387,17 @@ fn sort_puts_undefined_last_and_holes_after_it() {
 
 /// The elements of the arrays the lying comparators of
 /// [`sort_with_a_comparator_that_throws_or_lies_ends`] sort: 40, the full count, in the default
-/// mode; with the feature `collect-every-safe-point`, where every comparator call collects, 12
-/// in the gate and 20 in the lane `slow` (`SWELL_FULL_COUNTS=1`) (with 40 the test took 22.1 s
-/// there at a load of 100 to 110 on 17 cores, cargo-nextest, and 6.0 CPU seconds alone in the
-/// lane; 12 took 1.8, measured on 2026-11-22). The sort is a merge sort bottom up from runs of
-/// one, so 12 elements still take it through four passes and 20 through five, with every lie
+/// mode; with the feature `collect-every-safe-point`, where every comparator call collects, 12,
+/// in the gate and in the lane `slow` (`SWELL_FULL_COUNTS=1`) alike (with 40 the test took
+/// 22.1 s there at a load of 100 to 110 on 17 cores, cargo-nextest, and 6.0 CPU seconds alone
+/// in the lane, and 2.8 with 20; 12 took 1.8, measured on 2026-11-22). The sort is a merge sort
+/// bottom up from runs of one, so 12 elements still take it through four passes, with every lie
 /// answered in each.
 fn lying_sort_elements() -> u32 {
-    let full = std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1");
-    match (cfg!(feature = "collect-every-safe-point"), full) {
-        (true, false) => 12,
-        (true, true) => 20,
-        (false, _) => 40,
+    if cfg!(feature = "collect-every-safe-point") {
+        12
+    } else {
+        40
     }
 }
 
@@ -528,18 +527,17 @@ fn sort_steps(n: u32) -> u64 {
 /// The step budget (decision 2): a sort is charged a step per comparison and per element moved,
 /// and its reads and writes a step per index, so the entry that sorts `n` elements spends at
 /// least `n` steps and at most 8 n log2 n (2,048 elements; with the feature
-/// `collect-every-safe-point` 513 in the lane `slow`, `SWELL_FULL_COUNTS=1`, and 129 in the
-/// gate: with 513 the test took 2.1 CPU seconds there, run alone, most of it in the loop that
-/// makes the Array, which collects at every instruction. 129 is 2^7 + 1 as 513 is 2^9 + 1, so
-/// the bottom-up merge sort still carries a lone last run through every pass).
+/// `collect-every-safe-point` 129, in the gate and in the lane `slow`, `SWELL_FULL_COUNTS=1`,
+/// alike: with 513 the test took 2.1 CPU seconds there, run alone, and 2.4 to 2.6 in the lane,
+/// measured on 2026-11-22, most of it in the loop that makes the Array, which collects at
+/// every instruction. 129 is 2^7 + 1 as 513 is 2^9 + 1, so the bottom-up merge sort still
+/// carries a lone last run through every pass, and the bounds are the same per element).
 #[test]
 fn sort_charges_a_step_per_comparison() {
-    let n: u32 = if !cfg!(feature = "collect-every-safe-point") {
-        2048
-    } else if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
-        513
-    } else {
+    let n: u32 = if cfg!(feature = "collect-every-safe-point") {
         129
+    } else {
+        2048
     };
     let steps = sort_steps(n);
     let n = f64::from(n);

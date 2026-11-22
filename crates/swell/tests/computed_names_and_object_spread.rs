@@ -147,12 +147,13 @@ fn an_object_rest_excludes_the_keys_read_before_it() {
 }
 
 /// The properties of `large` in the tests of the budgets of a spread: 10,000, the full count, in
-/// the default mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`); 1,000 in the gate with the
-/// feature `collect-every-safe-point`, where every instruction that makes `large` collects.
+/// the default mode; 1,000 with the feature `collect-every-safe-point`, where every instruction
+/// that makes `large` collects, in the gate and in the lane `slow` (`SWELL_FULL_COUNTS=1`)
+/// alike (with 10,000 the budget test took 3.1 CPU seconds alone in the lane, measured on
+/// 2026-11-22). The budgets are readings of an agent that ran the same scripts plus a room
+/// that scales with the count, so 1,000 still end the spread in each budget.
 fn large_properties() -> usize {
-    if cfg!(feature = "collect-every-safe-point")
-        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-    {
+    if cfg!(feature = "collect-every-safe-point") {
         1_000
     } else {
         10_000

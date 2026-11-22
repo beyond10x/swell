@@ -237,17 +237,21 @@ fn steps_of_next_calls(calls: u32) -> u64 {
 }
 
 /// Whether a test takes its gate count: with the feature `collect-every-safe-point`, where
-/// every instruction collects, unless `SWELL_FULL_COUNTS=1` (the lane `slow`) asks for the full
-/// one.
+/// every instruction collects, in the gate and in the lane `slow` (`SWELL_FULL_COUNTS=1`)
+/// alike. What that mode looks for, a value held without a root across a collection, shows at
+/// any count, and the default mode keeps the full one. At the full count in that mode
+/// [`each_next_is_charged`] took 4.2 CPU seconds alone and was killed at 60 s at a load of 37
+/// to 165 on 18 cores, and [`an_array_iterator_over_a_growing_array_ends_at_the_step_budget`]
+/// took 3.2 (measured on 2026-11-22).
 fn gate_count() -> bool {
     cfg!(feature = "collect-every-safe-point")
-        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
 }
 
 /// `docs/design/engine.md`, decision 3, item 2: every call of `next` goes through the agent's
 /// call path, which charges its step. `last_entry_steps()` of the entry that calls `next` 1,000
 /// times exceeds that of the entry that calls it 10 times by at least 990. The gate count with
-/// the feature `collect-every-safe-point` is 100 calls against 10, at least 90 steps more.
+/// the feature `collect-every-safe-point` ([`gate_count`]) is 100 calls against 10, at least 90
+/// steps more: a call that charged no step fails it as at 1,000.
 #[test]
 fn each_next_is_charged() {
     let calls = if gate_count() { 100 } else { 1_000 };
@@ -261,15 +265,10 @@ fn each_next_is_charged() {
 
 /// The steps a run of [`an_array_iterator_over_a_growing_array_ends_at_the_step_budget`] may
 /// spend: 200,000 in the default mode; with the feature `collect-every-safe-point`, where
-/// every instruction collects, 20,000 at the full count and 4,000 at the gate's.
+/// every instruction collects, 4,000, the gate's count ([`gate_count`]; 20,000 before): the
+/// loop still ends at the step budget with the array grown by an element per hundred steps.
 fn growing_steps() -> u64 {
-    if !cfg!(feature = "collect-every-safe-point") {
-        200_000
-    } else if gate_count() {
-        4_000
-    } else {
-        20_000
-    }
+    if gate_count() { 4_000 } else { 200_000 }
 }
 
 /// The memory a run of [`an_array_iterator_over_a_growing_array_ends_at_the_step_budget`] is

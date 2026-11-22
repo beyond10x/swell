@@ -713,8 +713,11 @@ fn fits_the_stack_bound(entry: Entry, kind: &str, limit: u32) {
 }
 
 /// The deep limit of the check of the stack bound, at which the per-level part of
-/// `ParseOptions::stack_bytes` decides: 10,000 at the full count (the lane `slow`,
-/// `SWELL_FULL_COUNTS=1`), 2,500 in the gate, each on the stack [`deep_stack`] gives.
+/// `ParseOptions::stack_bytes` decides: 7,500 at the full count (the lane `slow`,
+/// `SWELL_FULL_COUNTS=1`), 2,500 in the gate, each on the stack [`deep_stack`] gives. The full
+/// count was 10,000, where the eighth part took 2.5 CPU seconds alone (measured on
+/// 2026-11-22), at the lane's bound for a test; on its scaled stack 7,500 fails whenever 10,000
+/// does ([`deep_stack`]).
 ///
 /// A frame grows in steps of 16 bytes, but one nesting takes several levels (3 for an arrow
 /// function, up to 14 for a getter or a method), so a growth of 16 bytes is 16 / k bytes a level
@@ -736,7 +739,7 @@ fn fits_the_stack_bound(entry: Entry, kind: &str, limit: u32) {
 /// runs; 7.6 s with a search whose every source that parsed went through the early errors).
 fn deep_limit() -> u32 {
     if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
-        10_000
+        7_500
     } else {
         2_500
     }
@@ -748,7 +751,8 @@ fn deep_limit() -> u32 {
 /// stated stack, at 2,500 the stated 592,768 bytes less 24,576, a quarter of 2,272,768. With a
 /// fixed part of f bytes and p bytes a level, the check at 10,000 overflows its stack S when
 /// f + 10,000 p > S, and then f + 2,500 p ≥ (f + 10,000 p) / 4 > S / 4: the gate's check
-/// overflows whenever the one at 10,000 does, whatever f is. The other way it is stricter, by
+/// overflows whenever the one at 10,000 does, whatever f is, and so does the lane's at 7,500,
+/// f + 7,500 p ≥ 3 (f + 10,000 p) / 4 > 3 S / 4. The other way it is stricter, by
 /// f × 3/4 over 2,500 levels: through `parse_script` (f = 11,204) by 3.4 bytes a level, so it
 /// also fails a kind up to 1.2 bytes a level under the bound; the kinds closest to the bound
 /// stand 42.7 bytes under it.
@@ -792,7 +796,8 @@ macro_rules! stack_bound_parts {
 // each stay within the limit): a test fails when a frame of the parser grows past
 // `STACK_BYTES_PER_LEVEL`, or its fixed part past `STACK_BYTES_FIXED`, and the stack
 // overflows. At the deep limit (`deep_limit`: 2,500 levels in the gate, on a quarter of the
-// stack of 10,000, and 10,000 at the full count) the per-level bound decides; at 10 the fixed
+// stack of 10,000, and 7,500 at the full count, on three quarters of it) the per-level bound
+// decides; at 10 the fixed
 // part does.
 // The combinations of entry and kind are split over `every_nesting_kind_fits_the_stack_bound`,
 // the first part, and `every_nesting_kind_fits_the_stack_bound_part_<n>`, so that under

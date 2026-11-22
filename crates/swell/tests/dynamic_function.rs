@@ -186,13 +186,6 @@ fn function_past_reentry_depth_throws_a_range_error() {
     );
 }
 
-/// Whether this run is the gate's with the collector at every safe point: the feature
-/// `collect-every-safe-point`, without `SWELL_FULL_COUNTS=1` (which the lane `slow` sets).
-fn in_the_collect_gate() -> bool {
-    cfg!(feature = "collect-every-safe-point")
-        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-}
-
 /// The step budget of [`ends_in_step_budget`]: 100,000 steps; 2,000 with the collector at
 /// every safe point, where every step collects, in the gate and in the lane `slow`
 /// (`SWELL_FULL_COUNTS=1`) alike. With 10,000 the two tests took 16.3 and 10.6 s in that mode
@@ -274,14 +267,19 @@ fn memory_budget_ends_a_dynamic_function_whose_code_does_not_fit() {
 }
 
 /// The `frame_depth` of [`dynamic_function_recursion_ends_in_a_range_error`]: 500, the full
-/// count, which the lane `slow` (`SWELL_FULL_COUNTS=1`) runs in both modes; 100 in the gate
-/// with the collector at every safe point, where every step collects and every collection
-/// traces every frame, so the cost grows with the square of the depth (500 took 26.2 s there at
-/// a load of 100 to 110 on 17 cores, cargo-nextest). At 100 the frames of 50 calls of `g` and
-/// 50 dynamic functions are live across those collections and the depth still throws the
-/// `RangeError`; the default mode shows at 500 that no Rust call is made per level.
+/// count, in the default mode; 100 with the collector at every safe point, in the gate and in
+/// the lane `slow` (`SWELL_FULL_COUNTS=1`) alike, where every step collects and every
+/// collection traces every frame, so the cost grows with the square of the depth (500 took
+/// 26.2 s there at a load of 100 to 110 on 17 cores, cargo-nextest, and 3.2 CPU seconds alone
+/// in the lane, measured on 2026-11-22). At 100 the frames of 50 calls of `g` and 50 dynamic
+/// functions are live across those collections and the depth still throws the `RangeError`;
+/// the default mode shows at 500 that no Rust call is made per level.
 fn dynamic_frame_depth() -> u32 {
-    if in_the_collect_gate() { 100 } else { 500 }
+    if cfg!(feature = "collect-every-safe-point") {
+        100
+    } else {
+        500
+    }
 }
 
 /// `frame_depth` through `Function`: a function that makes a dynamic function calling it again

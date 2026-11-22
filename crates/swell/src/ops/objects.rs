@@ -1581,19 +1581,23 @@ mod tests {
     }
 
     /// The keys of the object of [`assert_key_list_credited`] and how many times it runs its
-    /// call. In the lane `slow` (`SWELL_FULL_COUNTS=1`) the story's 10,000 keys and 10 calls;
+    /// call. In the lane `slow` (`SWELL_FULL_COUNTS=1`) 5,000 keys and the story's 10 calls;
     /// in the gate 1,000 keys and 3 calls. At 1,000 the list's 16,000 bytes stand above the
     /// largest rise the uncharged lists showed at 10,000 keys (1,106 bytes for `JSON.stringify`,
     /// 752 for `Object.keys`, measured): below 10,000 bytes, so no byte of it is per key, and
-    /// at 1,000 keys the assertion fails on uncharged lists as at the full count; 3 calls are the first, the second and one
-    /// more for the second to equal. With the collector run at every safe point, where each
-    /// safe point walks the whole heap, 100 keys in both (1,600 bytes against the same rises).
+    /// at 1,000 keys the assertion fails on uncharged lists as at the full count; 3 calls are
+    /// the first, the second and one more for the second to equal. The lane's 10 calls look
+    /// for a rise that comes back only now and then; with the story's 10,000 keys
+    /// `json_parse_with_a_reviver` and `get_own_property_descriptors` took 2.9 and 2.6 CPU
+    /// seconds alone (measured on 2026-11-22). With the collector run at every safe point,
+    /// where each safe point walks the whole heap, 100 keys in both (1,600 bytes against the
+    /// same rises).
     fn credited_counts() -> (u32, usize) {
         let calls = if full_counts() { 10 } else { 3 };
         let keys = if cfg!(feature = "collect-every-safe-point") {
             100
         } else if full_counts() {
-            10_000
+            5_000
         } else {
             1_000
         };
@@ -1829,21 +1833,27 @@ mod tests {
     /// `docs/design/engine.md`, "The step budget" and "Memory budget": the key list a `for`-`in`
     /// enumerator holds is charged while the loop runs. A recursion of 61 loops over
     /// `new String(s)`, `s` of n code units, each loop holding its list while the next runs:
-    /// n = 100,000 in the lane `slow` (`SWELL_FULL_COUNTS=1`), 25,000 in the gate (at 100,000
-    /// the test took 10.6 s, and 18.6 s with the collector at every safe point, measured at a
-    /// load of about 150). One loop (`f(0)`) runs first under 1 GiB, and its high-water rise
-    /// is its peak: the String's own keys (L = n × `size_of::<Key>()`), the n one-unit Strings
-    /// the String's [[GetOwnProperty]] makes (41 bytes each), which the next safe point
-    /// collects, `found` (2^17 entries at 100,000 and 2^15 at 25,000, 1.31 L) and `visited`.
-    /// `memory_bytes` is then the reading after that run and a collection plus the peak plus
-    /// 64 KiB: one loop fits it, and a second loop beside a held list of 1.31 L, far above
-    /// 64 KiB at both counts, passes it, so `f(60)` ends in `Terminated(MemoryBudget)`. The
-    /// next script `1` and `f(0)` again answer `Normal(1)`. At both counts a loop charges more
-    /// than the collector's least trigger (1 MiB) in its Strings and own keys, so the
-    /// collection that frees one loop's Strings runs before the next loop starts.
+    /// n = 100,000 in the lane `slow` (`SWELL_FULL_COUNTS=1`) in the default mode, 25,000 in
+    /// the gate and with the collector at every safe point (at 100,000 the test took 10.6 s,
+    /// and 18.6 s with the collector at every safe point, measured at a load of about 150; 2.5
+    /// CPU seconds alone in that mode's lane, measured on 2026-11-22). One loop (`f(0)`) runs
+    /// first under 1 GiB, and its high-water rise is its peak: the String's own keys
+    /// (L = n × `size_of::<Key>()`), the n one-unit Strings the String's [[GetOwnProperty]]
+    /// makes (41 bytes each), which the next safe point collects, `found` (2^17 entries at
+    /// 100,000 and 2^15 at 25,000, 1.31 L) and `visited`. `memory_bytes` is then the reading
+    /// after that run and a collection plus the peak plus 64 KiB: one loop fits it, and a
+    /// second loop beside a held list of 1.31 L, far above 64 KiB at both counts, passes it,
+    /// so `f(60)` ends in `Terminated(MemoryBudget)`. The next script `1` and `f(0)` again
+    /// answer `Normal(1)`. At both counts a loop charges more than the collector's least
+    /// trigger (1 MiB) in its Strings and own keys, so the collection that frees one loop's
+    /// Strings runs before the next loop starts.
     #[test]
     fn for_in_enumerators_held_by_a_recursion_end_in_memory_budget() {
-        let n = if full_counts() { 100_000 } else { 25_000 };
+        let n = if full_counts() && !cfg!(feature = "collect-every-safe-point") {
+            100_000
+        } else {
+            25_000
+        };
         let mut limits = limits();
         limits.frame_depth = 64;
         limits.steps_per_entry = 100_000_000;
@@ -1886,7 +1896,10 @@ mod tests {
 
     /// The keys of `o`, the runs of each script and `steps_per_entry` of
     /// [`assert_every_exit_credits`] for a script that `ends` so. In the lane `slow`
-    /// (`SWELL_FULL_COUNTS=1`) 10,000 keys, 10 runs and the test host's 1,000,000 steps; in
+    /// (`SWELL_FULL_COUNTS=1`) 5,000 keys, 10 runs and 200,000 steps (with 10,000 keys and the
+    /// test host's 1,000,000 steps `normal_end` and `step_budget_in_the_body` took 2.9 and 2.7
+    /// CPU seconds alone, measured on 2026-11-22: the loop of the latter runs to the budget in
+    /// every run; 200,000 steps are still ten times the about 2 a key the loop takes); in
     /// the gate 1,000 keys, 3 runs (the first, the second and one more for the second to
     /// equal) and 50,000 steps (100,000 took 4.3 s where the step budget ends the loop,
     /// measured at a load of about 150): `found` then holds 1,024 entries, 16,384 bytes, above
@@ -1901,7 +1914,7 @@ mod tests {
             let steps = if ends == Ends::StepBudget { 200 } else { 500 };
             (16, runs, steps)
         } else if full_counts() {
-            (10_000, runs, 1_000_000)
+            (5_000, runs, 200_000)
         } else {
             (1_000, runs, 50_000)
         }
@@ -2054,11 +2067,13 @@ mod tests {
         /// (`SWELL_FULL_COUNTS=1`) 10,000 keys, 50,000 objects, 40,000 steps and 10 runs; in
         /// the gate 3 runs (10 took 6.2 s, measured at a load of about 130), and with the
         /// collector at every safe point (10 runs took 11.3 s) a tenth of the keys, the chain
-        /// and the steps: still more steps than twice the keys and fewer than the chain.
+        /// and the steps, in the gate and in the lane alike (the lane's full counts took 2.6 CPU
+        /// seconds alone there, measured on 2026-11-22): still more steps than twice the keys
+        /// and fewer than the chain.
         fn chain_counts() -> (u32, usize, u64, usize) {
             let full = super::full_counts();
             let runs = if full { 10 } else { 3 };
-            if cfg!(feature = "collect-every-safe-point") && !full {
+            if cfg!(feature = "collect-every-safe-point") {
                 (1_000, 5_000, 4_000, runs)
             } else {
                 (10_000, 50_000, 40_000, runs)
