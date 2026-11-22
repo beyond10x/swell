@@ -72,8 +72,13 @@ report and does not work around it.
   path (write `$HOME`), no machine name.
 - Anything that runs longer than about 30 seconds runs in the background. Every process a unit
   starts is stopped before it reports, checked with `kill -0`.
-- The gate for a unit is package-scoped (`cargo test -p <package>`, or `slot task <name>` where
-  the brief says so). The whole gate, `slot task check`, runs once on the wave branch.
+- The gate for a unit is package-scoped (`cargo nextest run -p <package>`, or `slot task <name>`
+  where the brief says so). The whole gate, `slot task check`, runs once on the wave branch.
+  A unit that changes what a script evaluates to (a builtin, the parser, the compiler, the
+  interpreter) also runs `cargo nextest run --locked -p swell-test262`: its tests run the
+  engine over a fixture tree and state counts. The twelve builtin units of slice 3 ran the
+  package `swell` only; one count of that package went stale and the wave's gate found it
+  (`an_unknown_rule_kind_fails_the_run`, 2026-11-22).
 - A report quotes each suite's own summary line and starts with these six lines:
 
   ```
