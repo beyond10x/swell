@@ -47,6 +47,10 @@ includes:
     taskfile: taskfiles/forge.yml
     flatten: true
     optional: true
+  site:
+    taskfile: taskfiles/site.yml
+    flatten: true
+    optional: true
 
 tasks:
   check:

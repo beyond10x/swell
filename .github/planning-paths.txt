@@ -1,18 +1,21 @@
-# The paths of planning and prose files, read by taskfiles/classify-changes.sh. A change whose
-# files are all planning or prose files skips the build and the tests on the forge
-# (.github/workflows/check.yml); any other change runs task check.
+# The paths of planning, prose and site files, read by taskfiles/classify-changes.sh. On the
+# forge (.github/workflows/check.yml) a change whose files are all planning or prose files runs
+# python-check only; one whose files are all planning, prose or site files, at least one of the
+# site, runs python-check and site-data-check; any other change runs task check.
 #
 # One line per pattern: "<class> <pattern>". A line that starts with # is a comment; a blank
 # line is skipped. The class is one of
 #   prose  a planning or prose file;
-#   code   a file a gate step, a test or a build reads, even if a prose line matches it too;
-#   site   a file of a built site (website/): code, and the classifier also reports site=true.
+#   site   a file of the documentation site, checked by site-data-check and built by the
+#          site's own workflows, not by the code's build and tests; wins over prose;
+#   code   a file a gate step, a test or a build of the code reads; wins over site and prose.
 # A pattern is a shell pattern over the path from the repository root, in which * also matches
 # "/" (".engineering/*" is every file under .engineering/). A path that no line matches is
-# code, and a path that matches code or site is code whatever prose line matches it. The
-# forge reads this file from the base of the change, and a change of this file is code.
+# code. The forge reads this file from the base of the change, and a change of this file is
+# code.
 #
-# A Markdown file a gate step reads as data gets a code line here, with the task that reads it.
+# A Markdown file a gate step reads as data gets a code line here, with the task that reads it;
+# so does a file under website/ that a gate step reads as data of the code (none today).
 
 prose .engineering/*
 prose *.md
@@ -30,4 +33,7 @@ code conformance/*
 code spec/*
 code data/*
 
+# The documentation site; website/data/status.json is written from the gate's files by
+# site-data and held by site-data-check. docs/img/: the logo's lockup for README.md.
 site website/*
+site docs/img/*
