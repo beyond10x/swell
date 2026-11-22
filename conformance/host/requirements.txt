@@ -182,7 +182,7 @@ HOST-181 test swell::conversion::host_181_comparing_long_strings_is_charged
 HOST-182 test swell::property_index::host_182_a_long_key_is_charged_before_it_is_interned
 HOST-183 test swell::host_objects::host_183_the_host_names_three_intrinsics
 HOST-184 test swell::host_objects::host_184_the_host_names_two_symbols
-HOST-185 pending slice 6
+HOST-185 test swell::host_objects::host_185_a_node_list_iterates_with_the_array_methods
 HOST-186 test swell::host_objects::host_186_a_host_function_charges_every_byte
 HOST-187 test swell::host_objects::host_187_a_realm_of_300_host_functions_and_40_host_objects
 HOST-188 test swell::termination::host_188_calls_that_take_no_memory_answer_with_a_room_of_0

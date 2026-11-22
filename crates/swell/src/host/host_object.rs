@@ -70,6 +70,19 @@ pub enum HostIntrinsic {
     /// `%Error.prototype%`: the [[Prototype]] of `DOMException`'s interface prototype object
     /// (`webidl:interface-prototype-object`).
     ErrorPrototype,
+    /// `%Array.prototype.values%` (`#sec-array.prototype.values`): the `@@iterator` of an
+    /// interface with an indexed property getter, and the `values` of one that also has a value
+    /// iterator (`webidl:define-the-iteration-methods`).
+    ArrayPrototypeValues,
+    /// `%Array.prototype.entries%` (`#sec-array.prototype.entries`): the `entries` of an
+    /// interface with an indexed property getter and a value iterator
+    /// (`webidl:define-the-iteration-methods`).
+    ArrayPrototypeEntries,
+    /// `%Array.prototype.keys%` (`#sec-array.prototype.keys`): its `keys`, as `entries`.
+    ArrayPrototypeKeys,
+    /// `%Array.prototype.forEach%` (`#sec-array.prototype.foreach`): its `forEach`, as
+    /// `entries`.
+    ArrayPrototypeForEach,
 }
 
 impl HostIntrinsic {
@@ -79,6 +92,10 @@ impl HostIntrinsic {
             HostIntrinsic::ObjectPrototype => Intrinsic::ObjectPrototype,
             HostIntrinsic::FunctionPrototype => Intrinsic::FunctionPrototype,
             HostIntrinsic::ErrorPrototype => Intrinsic::ErrorPrototype(ErrorKind::Error),
+            HostIntrinsic::ArrayPrototypeValues => Intrinsic::ArrayPrototypeValues,
+            HostIntrinsic::ArrayPrototypeEntries => Intrinsic::ArrayPrototypeEntries,
+            HostIntrinsic::ArrayPrototypeKeys => Intrinsic::ArrayPrototypeKeys,
+            HostIntrinsic::ArrayPrototypeForEach => Intrinsic::ArrayPrototypeForEach,
         }
     }
 }
@@ -93,6 +110,9 @@ pub enum WellKnownSymbol {
     /// `%Symbol.unscopables%`: the key of the object of an interface's `[Unscopable]` members
     /// (`webidl:interface-prototype-object`).
     Unscopables,
+    /// `%Symbol.iterator%`: the key under which an interface with an indexed property getter
+    /// gets `%Array.prototype.values%` (`webidl:define-the-iteration-methods`).
+    Iterator,
 }
 
 impl WellKnownSymbol {
@@ -101,6 +121,7 @@ impl WellKnownSymbol {
         match self {
             WellKnownSymbol::ToStringTag => symbols.to_string_tag,
             WellKnownSymbol::Unscopables => symbols.unscopables,
+            WellKnownSymbol::Iterator => symbols.iterator,
         }
     }
 }
