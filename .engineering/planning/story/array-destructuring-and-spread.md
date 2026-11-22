@@ -1,0 +1,111 @@
+---
+format: aep.planning-md/3
+id: story:array-destructuring-and-spread
+kind: story
+status: draft
+title: Array patterns, rest elements and spread in array literals, calls and new
+summary: 'Lifts the 3 array patterns and 1 spread of surf''s harness: after it testharness.js and test.js parse with no refusal of slice 6; 1,382 failing cases of slice 6 on its list.'
+relations:
+- decomposes: epic:slice-06-bindings-and-iteration
+- depends_on: story:for-of-statement
+scope:
+- confidence: cited
+  path: crates/compiler/src/bytecode.rs
+- confidence: cited
+  path: crates/compiler/src/disasm.rs
+- confidence: cited
+  path: crates/compiler/src/expression.rs
+- confidence: cited
+  path: crates/compiler/src/function.rs
+- confidence: cited
+  path: crates/compiler/src/resolve.rs
+- confidence: cited
+  path: crates/compiler/src/statement.rs
+- confidence: cited
+  path: crates/swell/src/interp/array_patterns.rs
+- confidence: cited
+  path: crates/swell/src/interp/dispatch.rs
+- confidence: cited
+  path: crates/swell/src/interp/mod.rs
+- confidence: cited
+  path: crates/swell/src/interp/spread.rs
+- confidence: cited
+  path: crates/swell/tests/array_patterns.rs
+- confidence: cited
+  path: crates/swell/tests/language/array-pattern-assignment.js
+- confidence: cited
+  path: crates/swell/tests/language/array-pattern-declarations.js
+- confidence: cited
+  path: crates/swell/tests/language/array-pattern-for-of-entries.js
+- confidence: cited
+  path: crates/swell/tests/language/spread-array-and-call.js
+- confidence: cited
+  path: crates/swell/tests/spread.rs
+- confidence: cited
+  path: crates/syntax/src/ast.rs
+- confidence: cited
+  path: crates/syntax/src/early.rs
+- confidence: cited
+  path: crates/syntax/src/parser/expression.rs
+- confidence: cited
+  path: crates/syntax/src/parser/function.rs
+- confidence: cited
+  path: crates/syntax/src/parser/statement.rs
+- confidence: cited
+  path: crates/syntax/src/scope.rs
+- confidence: cited
+  path: crates/syntax/tests/sources.rs
+- confidence: cited
+  path: crates/syntax/tests/sources/refused/destructuring-assignment.js
+- confidence: cited
+  path: crates/syntax/tests/sources/refused/destructuring-binding.js
+- confidence: cited
+  path: crates/syntax/tests/sources/refused/destructuring-for-in.js
+- confidence: cited
+  path: crates/syntax/tests/sources/refused/destructuring-parameter.js
+- confidence: cited
+  path: crates/syntax/tests/sources/refused/spread-in-array.js
+- confidence: cited
+  path: crates/syntax/tests/sources/refused/spread-in-call.js
+revision: 2
+---
+## Context
+
+Slice 6 is delivered before slices 4 and 5 because it closes most of the first gap of the consumer, the testharness.js tests of the HTML parser of surf (`docs/plan/waves.md`, "The order after slice 3"): 191 refused constructs of slice 6 in `resources/testharness.js` and the scripts of `html/syntax/parsing/html5lib_url.html`, measured with the parser of `main` (`6a43e18`). Of the 191, 3 are array patterns and 1 is a spread element: `for (const [prop, expected] of Object.entries(required_props))` (`testharness.js` line 2550), `for (const [name, value] of attrs)` (`html/syntax/parsing/resources/test.js` line 75), `const [expectedText, actualText] = actual` (`test.js` line 207) and `[...node.attributes]` (`test.js` line 70). After this story both scripts parse with no refusal of slice 6. The command, run in the directory of the measurement (`consumer-gap/`, the refusal logs of the parser of `main` under `out/gap/`), gives each refusal of slice 6 the story that lifts it (1 `story:let-const-and-block-scopes`, 2 `story:template-literals`, 3 `story:arrow-functions`, 4 `story:default-and-rest-parameters`, 5 `story:object-destructuring`, 6 `story:for-of-statement`, 7 this story) and prints the last one each script needs; it prints `testharness.log.tsv 7` and `test.log.tsv 7`:
+
+```
+awk -F'\t' 'FNR > 1 && $3 == 6 { s = $2 ~ /^(let|const) declaration$/ ? 1 : $2 == "template literal" ? 2 : $2 == "arrow function" ? 3 : $2 ~ /^(default|rest) parameter$/ ? 4 : $2 == "destructuring pattern" && $6 ~ /text "\{/ ? 5 : $2 == "for-of statement" ? 6 : 7; f = FILENAME; sub(/.*\//, "", f); if (s > m[f]) m[f] = s } END { for (f in m) print f, m[f] }' out/gap/*.log.tsv
+```
+
+`testharness.js` keeps 3 refusals of slice 10 (2 `await` expressions, 1 `async` function), so it parses whole only after slice 10; the stories of slice 6 leave nothing of slice 6 in it. `[...node.attributes]` spreads a host object of the consumer: it needs the `Symbol.iterator` method of that object on the side of the host, not of this engine.
+
+The base refuses an array pattern where a binding is read (`crates/syntax/src/parser/statement.rs` line 391, line 687 for a `for` head), an array literal read again as a pattern on the left of `=` (`crates/syntax/src/parser/expression.rs` line 180), a spread in the arguments of a call or `new` (line 660) and in an array literal (line 842), and a rest element of an object pattern (line 918, `story:computed-names-and-object-spread` lifts the rest of objects); `story:object-destructuring` keeps the refusal for an array pattern and for a rest element, `story:for-of-statement` for an array pattern in its head. Measured on `main` (`6a43e18`): the first failing run of 1,092 cases of slice 6 ends on `destructuring pattern is not supported` and of 254 on `spread element is not supported`; most of the first are array patterns (the object patterns are on the list of `story:object-destructuring`). Fixtures that rely on the refusal: `crates/syntax/tests/sources/refused/destructuring-binding.js`, `destructuring-parameter.js`, `destructuring-assignment.js`, `destructuring-for-in.js`, `spread-in-array.js` and `spread-in-call.js`, removed.
+
+The list of this story is `docs/plan/slice-06/story-array-patterns-and-spread.cases.txt`: 1382 failing cases (2734 runs) of slice 6 and of the six directories `story:slice-03-conformance-close` moves to slice 6 (`test/built-ins/Array/from/`, `Array/prototype/keys/`, `values/`, `entries/`, `Object/fromEntries/`, `Object/groupBy/`), on no list of the first five stories of the slice, whose text and harness files use an array pattern or a spread element, no other part of slice 6 than those of the stories this one depends on, and no part of a later slice. Found by the token scan `docs/plan/slice-06/scan.awk` (run as `story:let-const-and-block-scopes` gives it, but with a copy of `meta.tsv` whose includes leave out `propertyHelper.js`, whose three later tokens are a branch behind `typeof`, a case of a bigint value and the name `checkSet`; the comment at the head of `lists-b.awk` gives the command; over the first failing run of each failing case of slice 6 and of those six directories on `main`, `6a43e18`) and the assignment `docs/plan/slice-06/lists-b.awk` (`gawk -v root=<checkout> -v meta=.cache/inventory/meta.tsv -f docs/plan/slice-06/lists-b.awk <scan output>`, the cases of the five lists of the first part taken out), which puts a case on the list of the first story of the slice that holds every part the case needs and whose own construct the case uses. By directory: `language/statements/for-of` 292, `language/statements/for` 150, `language/expressions/assignment` 145, `language/expressions/object` 140, `language/statements/function` and `language/expressions/function` 108 each, `language/expressions/arrow-function` 107, `language/statements/try` 54, `language/statements/variable`, `let` and `const` 50 each, `language/expressions/call` 32, the rest 96. A case of the list that ends on a part outside this story is reported with that part, and the coordinator takes it off the list by a commit of the list file on the wave branch whose body names that part; the acceptance reads the list as committed there when the wave closes.
+
+Design it builds on: the iterator record and IteratorClose of the design (`docs/design/engine.md`, decision 3, as `story:iterator-protocol-and-array-string-iterators` and `story:for-of-statement` require it); a pattern or a spread holds its iterator record on the operand stack, as `for`-`of` does, and closes it on the exits `#sec-runtime-semantics-iteratorbindinginitialization` and `#sec-runtime-semantics-iteratordestructuringassignmentevaluation` name. No new design.
+
+## Domain relations
+
+- None new.
+
+## Change
+
+Failing tests first: the tests and fixtures below are written before the code and fail on the base (the parser refuses every array pattern and every spread).
+
+- `swell-syntax`. `parser/statement.rs`, `parser/function.rs` and `parser/expression.rs`: an ArrayBindingPattern (`#sec-destructuring-binding-patterns`) everywhere `story:object-destructuring` allows an object pattern (declarators, the heads of `for`, `for`-`in` and `for`-`of`, `catch`, parameters of functions, methods, accessors and arrows), with elisions, a default per element, nested patterns of both kinds and a rest element `...` (a name or a pattern) last and with no initializer; a rest element in an object pattern stays as `story:computed-names-and-object-spread` leaves it; the ArrayAssignmentPattern read again from an array literal on the left of `=` and in the heads of `for`-`in` and `for`-`of` (`#sec-destructuring-assignment`); a SpreadElement in an array literal (`#sec-array-initializer`) and in Arguments (`#sec-left-hand-side-expressions`, of a call, an optional call and `new`). `ast.rs`: the array patterns, with their arms in the pattern type of `story:object-destructuring` and in every match over it with no wildcard; the spread element of an array literal and of a list of arguments (a variant of the element, or a type of its own), with its arms in `Expr::children` (line 511) and the readers of `Expr::Array` (line 519), `Expr::Call` and `Expr::OptionalCall` (line 566) and `Expr::New` (line 572). `early.rs`: the grammar of `#sec-destructuring-binding-patterns` and `#sec-destructuring-assignment-static-semantics-early-errors` (a rest element with an initializer or not last, a trailing comma after it, a target that is not valid), the BoundNames of an array pattern in the rules of the declarations; `scope.rs`: the names an array pattern binds; `parser/expression.rs`: `is_literal_pattern` for array literals. `crates/syntax/tests/sources.rs`: the kinds `array_pattern` (`var [[[ ... a]]] = o;`), `array_assignment_pattern` (`[[[ ... a]]] = o;`) and `spread` (`[...[...[ ... a]]]`) added to `NESTING_KINDS` of `every_nesting_kind_fits_the_stack_bound` in the form the file has on the base of the unit (on `wave/s3-1` an arm of `nested`, line 417, and an entry of the array at line 462); the unit times `cargo nextest run --locked -p swell-syntax --test sources` before and after its change (29.6 s on `wave/s3-1`; `story:gate-test-steps-within-budget` changes how the binary runs) and reports both times. Fixtures `crates/syntax/tests/sources/valid/{array-pattern,spread}-*.js` and `early-errors/{array-pattern,spread}-*.js` (new); the refused fixtures named in Context removed.
+- `swell-compiler`. `statement.rs`, `expression.rs` and `function.rs`: IteratorBindingInitialization and IteratorDestructuringAssignmentEvaluation (`#sec-runtime-semantics-iteratorbindinginitialization`, `#sec-runtime-semantics-iteratordestructuringassignmentevaluation`): GetIterator of the value, one IteratorStep per element and elision, a default evaluated only for `undefined` with NamedEvaluation, the reference of an assignment target evaluated before the step, a rest element filled by the remaining steps into a new array, IteratorClose when the pattern ends before the iterator is done and on an abrupt completion of a target or a default, not after a throw of `next`; ArrayAccumulation of a spread (`#sec-runtime-semantics-arrayaccumulation`) and ArgumentListEvaluation of a spread (`#sec-runtime-semantics-argumentlistevaluation`), a call with a spread passing its arguments as one list (and `eval(...args)` is a direct eval only if its callee is `eval`, `#sec-function-calls-runtime-semantics-evaluation`); `resolve.rs`: the slots of the names of an array pattern, the arms of the spread in the match over `Expr` (line 498) and the readers of `Expr::Array`, `Expr::Call` and `Expr::New` (lines 506, 584 and 592); compiler `expression.rs`: the arms in the match over `Expr` (line 210) and its readers (lines 242, 465 and 481); `bytecode.rs`: the new instructions (a call and a `new` with their arguments in an array, the append of an iterable to an array, a step of a pattern, the rest of a pattern), each documented with its stack effect and its arm in `Instruction::target` (line 339, no wildcard); `disasm.rs`: their text. Fixtures `crates/compiler/tests/sources/{array-pattern,spread}-*.js` and `.disasm` (new).
+- `swell`. `interp/array_patterns.rs` and `interp/spread.rs` (new): the work of each new instruction in a function of its own, through the operations of `crates/swell/src/ops/iteration.rs`, called from one arm each of `interp/dispatch.rs` (line 237, no wildcard); nothing added to the frame of `Agent::execute`; `interp/mod.rs`: the `mod` lines. A spread charges a step per element it appends, a pattern a step per element; a call with a spread re-enters through the path of a call, not a path of its own.
+- Tests, each in both collection modes (`test-collect`): `crates/swell/tests/array_patterns.rs` (new): `array_patterns_bind_in_declarations_parameters_catch_and_for_heads`, `an_array_assignment_pattern_evaluates_its_targets_before_each_step`, `a_pattern_closes_its_iterator_when_it_ends_early_and_on_a_throw_of_a_target`, `a_pattern_does_not_close_an_iterator_that_is_done_or_whose_next_threw`, `rest_elements_collect_the_remaining_values`; `crates/swell/tests/spread.rs` (new): `spread_in_arrays_calls_and_new_iterates_once_in_order`, `a_spread_over_a_user_iterator_calls_next_until_done`, `spread_charges_each_element` (`last_entry_steps()` after `[...a]` over 1,000 elements exceeds that over 10, both arrays made by an earlier script, by at least 990), `a_spread_of_a_user_iterator_re_enters_on_the_promised_stack` (`reach_through` of `tests/support/stack.rs`, on seven eighths of `min_stack_bytes()`); `crates/swell/tests/language/` (new files): `array-pattern-for-of-entries.js` (the shape of `testharness.js` line 2550, over `Object.entries`), `array-pattern-declarations.js`, `array-pattern-assignment.js`, `spread-array-and-call.js`.
+- Time of the tests ("Tests stay fast", the `AGENTS.md` of the folder that holds the repository): the unit times each test before it adds it, names in its report each one over 5 s with its time and the reason, and adds none over 60 s; a product several tests share is built once inside one test function or is a committed file, never in a `static` (the test steps run a process per test); no test makes a network request; the unit runs the test binaries of its change and never the whole gate. None is expected over 1 s.
+- Run loop: each new instruction does its work in a function of its own in `interp/array_patterns.rs` or `interp/spread.rs`, called from one arm of `interp/dispatch.rs`; nothing is added to the frame of `Agent::execute`; `STACK_BYTES_PER_REENTRY` and the stack tests (`limits_scripts.rs`, `budgets.rs`, `eval_stack.rs`) do not change and pass on seven eighths of `min_stack_bytes()`; a path that does not fit is taken apart and reported with its bytes per re-entry before and after.
+
+Writes: `crates/syntax/src/{ast,scope,early}.rs`, `crates/syntax/src/parser/{statement,expression,function}.rs`, `crates/syntax/tests/sources.rs` (three nesting kinds), `crates/syntax/tests/sources/valid/{array-pattern,spread}-*.js` and `early-errors/{array-pattern,spread}-*.js` (new), `crates/syntax/tests/sources/refused/{destructuring-binding,destructuring-parameter,destructuring-assignment,destructuring-for-in,spread-in-array,spread-in-call}.js` (removed), `crates/compiler/src/{statement,expression,function,resolve,bytecode,disasm}.rs`, `crates/compiler/tests/sources/{array-pattern,spread}-*.js` and `.disasm` (new), `crates/swell/src/interp/{array_patterns,spread}.rs` (new), `crates/swell/src/interp/{mod,dispatch}.rs`, `crates/swell/tests/{array_patterns,spread}.rs` (new), `crates/swell/tests/language/{array-pattern-for-of-entries,array-pattern-declarations,array-pattern-assignment,spread-array-and-call}.js` (new). Not written: `conformance/test262/expected.txt` (the coordinator regenerates it on the wave branch after the merges), the list files under `docs/plan/slice-06/` (the coordinator), any file under `crates/swell/src/builtins/` and `crates/swell/src/ops/`. The matches with no wildcard this story adds arms to are all in files above: `Expr` (`ast.rs` line 511, `resolve.rs` line 498, compiler `expression.rs` line 210), the pattern type of `story:object-destructuring` and every match over it, `Instruction` (`bytecode.rs` line 339, `dispatch.rs` line 237). Shared: `story:array-from-and-object-from-entries`, which may run beside it, writes only under `crates/swell/src/builtins/` and its own tests; every file of `crates/syntax` and `crates/compiler` this story writes is also written by `story:for-of-statement`, which lands before it.
+
+## Acceptance
+
+The tests and fixtures named in Change pass in both collection modes, run by the binaries of this change and not as a whole step: `cargo nextest run --locked -p swell --test array_patterns --test spread --test language --test limits_scripts --test budgets --test eval_stack` and the same with `--features collect-every-safe-point`, `cargo nextest run --locked -p swell-syntax --test sources` and `cargo nextest run --locked -p swell-compiler --test compile` exit 0, and `slot task clippy` exits 0; `slot task test262` is run once after the change (the slow lane, in the background through the pool, never a test step) and ends with `test262: <n> line(s) differ from conformance/test262/expected.txt` and no other complaint, and on its run lines, with the list as committed on the wave branch when the wave closes, copied by `git show "$WAVE:docs/plan/slice-06/story-array-patterns-and-spread.cases.txt" > .out/story-array-patterns-and-spread.cases.txt` (`WAVE` the wave branch the unit merges into; the coordinator takes a case off the list by a commit there whose body names the part it ends on), (a) `awk -F'\t' 'NR == FNR { want[$1] = 1; next } ($3 in want) && $5 != "Passed" { print $3, $4, $6; bad = 1 } END { exit bad }' .out/story-array-patterns-and-spread.cases.txt .out/test262/runs.tsv` exits 0 (every case of that copy passes in every mode; on `6a43e18`, with the list as committed today, it exits 1 and prints 2734 runs), (b) `awk -F'\t' '$3 ~ /^test\/language\// && $6 ~ /(spread element|destructuring pattern) is not supported/' .out/test262/runs.tsv | wc -l` prints `0` (on `6a43e18` `2651`), (c) the lines `test262 language/statements/for-of`, `test262 language/expressions/assignment` and `test262 language/statements/for` of `.out/test262/lines.txt` each read at least B + L - R passed in the seventh field, where B is the passes of that line on the base of the unit (3, 130 and 75 on `6a43e18`), L the cases of the copy under that directory (292, 145 and 150 on the list of today) and R the cases under it among the runs (a) prints; it is a bound and not the count because a case off the list may pass as well, and (d) with the run of the base commit of the unit made before the change (`slot task test262 TEST262_OUT=.out/test262-base`), `awk -F'\t' 'NR == FNR { if ($5 == "Passed") p[$3 "\t" $4] = 1; next } (($3 "\t" $4) in p) && $5 != "Passed" { print $3, $4, $6 }' .out/test262-base/runs.tsv .out/test262/runs.tsv` prints nothing (no run that passed on the base fails).
+
+## Out of scope
+
+The `Symbol.iterator` of the host objects of the consumer (its side); generators as iterables and `yield` in a pattern (slice 7); `for await` and async iteration (slice 10); a rest element of an object pattern and object spread (`story:computed-names-and-object-spread`); the moves of cases and the slice lines of the design (`story:slice-06-conformance-close`).
