@@ -12,7 +12,7 @@ use super::{Parser, R};
 use crate::ast::{Child, Function, FunctionId, FunctionKind, Name, Scope, Span, StmtId};
 use crate::token::{Keyword, Punct};
 
-impl<'a> Parser<'a> {
+impl<'a, 'm> Parser<'a, 'm> {
     /// `FunctionDeclaration` at the current `function`.
     pub(super) fn function_declaration(&mut self) -> R<FunctionId> {
         self.enter()?;
@@ -125,10 +125,10 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         match kind {
             FunctionKind::Getter => {}
-            FunctionKind::Setter => params.push(self.parameter()?),
+            FunctionKind::Setter => self.push_parameter(&mut params)?,
             FunctionKind::Declaration | FunctionKind::Expression | FunctionKind::Method => {
                 while !self.is(Punct::RParen) {
-                    params.push(self.parameter()?);
+                    self.push_parameter(&mut params)?;
                     if !self.eat(Punct::Comma)? {
                         break;
                     }
@@ -151,7 +151,7 @@ impl<'a> Parser<'a> {
         self.advance()?;
         let mut params = Vec::new();
         while !self.at_eof() {
-            params.push(self.parameter()?);
+            self.push_parameter(&mut params)?;
             if !self.eat(Punct::Comma)? {
                 break;
             }
@@ -193,14 +193,26 @@ impl<'a> Parser<'a> {
         }
         self.leave();
         let span = self.finish(start);
+        let m = self.m;
         let depth = match self.ast.functions.get_mut(id.0 as usize) {
             Some(f) => {
-                f.name = None;
+                if let Some(name) = f.name.take() {
+                    m.release(name);
+                }
                 f.depth
             }
             None => return self.fail_here("parse failed"),
         };
-        Ok(self.wrap_in_statement(id, span, depth))
+        self.wrap_in_statement(id, span, depth)
+    }
+
+    /// One parameter, appended to `params`, the growth of the list charged first.
+    #[inline(never)]
+    fn push_parameter(&mut self, params: &mut Vec<Name>) -> R<()> {
+        let parameter = self.parameter()?;
+        let m = self.m;
+        let pushed = m.push(params, parameter);
+        self.charged(pushed)
     }
 
     /// One `FormalParameter`, a `BindingIdentifier` without an initializer.

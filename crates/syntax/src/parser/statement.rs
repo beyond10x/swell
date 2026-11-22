@@ -54,7 +54,7 @@ pub(super) enum Place {
     LabelledInStatement,
 }
 
-type StmtParser<'a> = fn(&mut Parser<'a>) -> R<StmtId>;
+type StmtParser<'a, 'm> = fn(&mut Parser<'a, 'm>) -> R<StmtId>;
 
 /// The message of a `const` declaration where only a Statement may stand: the body of `if`, a
 /// loop or `with`, or a labelled item (`#sec-ecmascript-language-statements-and-declarations`).
@@ -69,7 +69,7 @@ fn starts_binding(kind: &TokenKind) -> bool {
     )
 }
 
-impl<'a> Parser<'a> {
+impl<'a, 'm> Parser<'a, 'm> {
     /// The statements of a script (`top` true) or a function body, up to the end of the input or
     /// the `}` that closes the body; and whether its directive prologue holds a Use Strict
     /// Directive, which makes the rest of the body strict mode code.
@@ -81,7 +81,7 @@ impl<'a> Parser<'a> {
         while !self.at_eof() && (top || !self.is(Punct::RBrace)) {
             let directive = self.directive_candidate(prologue);
             let stmt = self.statement(Place::Body)?;
-            body.push(stmt);
+            self.push_item(&mut body, stmt)?;
             prologue = self.directive_end(stmt, directive, &mut use_strict);
         }
         self.leave();
@@ -147,7 +147,7 @@ impl<'a> Parser<'a> {
     /// Which parser takes the statement at the current token; refuses the statements of later
     /// slices and reports the ones that cannot stand at `place`.
     #[inline(never)]
-    fn statement_kind(&mut self, place: Place) -> R<StmtParser<'a>> {
+    fn statement_kind(&mut self, place: Place) -> R<StmtParser<'a, 'm>> {
         Ok(match &self.tok.kind {
             TokenKind::Punct(Punct::LBrace) => Parser::block_statement,
             TokenKind::Punct(Punct::Semicolon) => Parser::empty_statement,
@@ -198,10 +198,13 @@ impl<'a> Parser<'a> {
                 },
                 Keyword::Export => return self.refuse("export declaration", 11),
                 Keyword::Import => {
-                    let next = self.peek()?.kind.clone();
+                    let next = match &self.peek()?.kind {
+                        TokenKind::Punct(p) => Some(*p),
+                        _ => None,
+                    };
                     return match next {
-                        TokenKind::Punct(Punct::Dot) => self.refuse("import.meta", 11),
-                        TokenKind::Punct(Punct::LParen) => self.refuse("dynamic import", 11),
+                        Some(Punct::Dot) => self.refuse("import.meta", 11),
+                        Some(Punct::LParen) => self.refuse("dynamic import", 11),
                         _ => self.refuse("import declaration", 11),
                     };
                 }
@@ -353,7 +356,7 @@ impl<'a> Parser<'a> {
         self.expect(Punct::LBrace)?;
         while self.block_goes_on()? {
             let s = self.statement(Place::Block)?;
-            self.append(id, list, s);
+            self.append(id, list, s)?;
         }
         self.leave();
         Ok(())
@@ -361,7 +364,8 @@ impl<'a> Parser<'a> {
 
     /// Appends `s` to the list `list` of the statement `id`.
     #[inline(never)]
-    fn append(&mut self, id: StmtId, list: List, s: StmtId) {
+    fn append(&mut self, id: StmtId, list: List, s: StmtId) -> R<()> {
+        let m = self.m;
         let target = match (self.stmt_mut(id), list) {
             (Some(Stmt::Block(body)), List::Block) => body,
             (Some(Stmt::Try { block, .. }), List::Try) => block,
@@ -379,11 +383,12 @@ impl<'a> Parser<'a> {
             ) => f,
             (Some(Stmt::Switch { cases, .. }), List::Case) => match cases.last_mut() {
                 Some(c) => &mut c.body,
-                None => return,
+                None => return Ok(()),
             },
-            _ => return,
+            _ => return Ok(()),
         };
-        target.push(s);
+        let pushed = m.push(target, s);
+        self.charged(pushed)
     }
 
     /// Consumes the `}` that closes a block; whether a statement follows instead.
@@ -405,7 +410,8 @@ impl<'a> Parser<'a> {
         let span = self.start();
         match &self.tok.kind {
             TokenKind::Name(n) => {
-                let name = n.clone();
+                let name = super::copy_name(self.m, n);
+                let name = self.charged(name)?;
                 self.advance()?;
                 Ok(Name {
                     name,
@@ -485,10 +491,15 @@ impl<'a> Parser<'a> {
     #[inline(never)]
     fn declarator_name(&mut self, id: StmtId) -> R<()> {
         let name = self.binding_identifier()?;
-        if let Some(list) = self.declarators(id) {
-            list.push(VarDeclarator { name, init: None });
-        }
-        Ok(())
+        let m = self.m;
+        let pushed = match self.declarators(id) {
+            Some(list) => m.push(list, VarDeclarator { name, init: None }),
+            None => {
+                m.release(name);
+                Ok(())
+            }
+        };
+        self.charged(pushed)
     }
 
     #[inline(never)]
@@ -711,6 +722,8 @@ impl<'a> Parser<'a> {
                 let Some(d) = declarators.pop() else {
                     return self.unexpected();
                 };
+                // The emptied list goes; its capacity is credited.
+                self.m.release(declarators);
                 if d.init.is_some() {
                     // Annex B allows an initializer only for a `var` in non-strict code
                     // (`#sec-initializers-in-forin-statement-heads`).
@@ -818,7 +831,7 @@ impl<'a> Parser<'a> {
         self.case_head(id)?;
         while self.case_goes_on()? {
             let s = self.statement(Place::Block)?;
-            self.append(id, List::Case, s);
+            self.append(id, List::Case, s)?;
         }
         let end = self.prev_end;
         if let Some(Stmt::Switch { cases, .. }) = self.stmt_mut(id)
@@ -852,13 +865,19 @@ impl<'a> Parser<'a> {
             return self.unexpected();
         };
         self.expect(Punct::Colon)?;
-        if let Some(Stmt::Switch { cases, .. }) = self.stmt_mut(id) {
-            cases.push(SwitchCase {
-                test,
-                body: Vec::new(),
-                span,
-            });
-        }
+        let m = self.m;
+        let pushed = match self.stmt_mut(id) {
+            Some(Stmt::Switch { cases, .. }) => m.push(
+                cases,
+                SwitchCase {
+                    test,
+                    body: Vec::new(),
+                    span,
+                },
+            ),
+            _ => Ok(()),
+        };
+        self.charged(pushed)?;
         self.leave();
         Ok(())
     }

@@ -31,6 +31,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::ledger::{HeapBytes, Meter, Stop, map_entry_bytes};
+
 use crate::ast::{
     Ast, Child, DeclKind, Expr, ForInTarget, ForInit, FunctionId, LexicalName, Name, Scope, Stmt,
     StmtId,
@@ -77,13 +79,24 @@ pub(crate) fn is_use_strict(raw: &[u16]) -> bool {
 
 /// Analyses the script `body` and every function of `ast`; stores each function's scope in it
 /// and returns the script's.
-pub(crate) fn analyse(ast: &mut Ast, body: &[StmtId]) -> Scope {
-    let (script, scopes) = walk(ast, body);
-    for (id, scope) in scopes {
-        if let Some(f) = ast.functions.get_mut(id.0 as usize) {
-            f.scope = scope;
+///
+/// Every structure of the analysis is charged to `m` before it grows: the scopes it keeps in
+/// the tree by capacity, and its scratch (the sets of names seen, an entry each as
+/// [`crate::ledger::map_entry_bytes`] with the bytes of each name, the declarations, the stack
+/// of pending work and the bodies open), which it credits when it drops it. It calls
+/// [`Meter::visit`] for every node and ends at the first stop; the entry then answers the stop.
+pub(crate) fn analyse(ast: &mut Ast, body: &[StmtId], m: &Meter<'_>) -> Scope {
+    let (script, mut scopes) = walk(ast, body, m);
+    for (id, scope) in scopes.drain(..) {
+        match ast.functions.get_mut(id.0 as usize) {
+            Some(f) => {
+                let old = std::mem::replace(&mut f.scope, scope);
+                m.release(old);
+            }
+            None => m.release(scope),
         }
     }
+    m.release(scopes);
     script
 }
 
@@ -100,22 +113,53 @@ struct Collect {
     contains_direct_eval: bool,
 }
 
+impl HeapBytes for Collect {
+    fn heap_bytes(&self) -> usize {
+        self.var_names
+            .heap_bytes()
+            .saturating_add(self.var_seen.heap_bytes())
+            .saturating_add(self.declarations.heap_bytes())
+            .saturating_add(self.lexical.heap_bytes())
+            .saturating_add(self.references.heap_bytes())
+            .saturating_add(self.reference_seen.heap_bytes())
+    }
+}
+
+impl HeapBytes for Step {
+    fn heap_bytes(&self) -> usize {
+        0
+    }
+}
+
+/// A name new to `seen`: its entry and a copy charged, then a second copy pushed onto `list`.
+fn add_name(m: &Meter<'_>, seen: &mut BTreeSet<String>, list: &mut Vec<String>, name: &str) {
+    if seen.contains(name) {
+        return;
+    }
+    let Ok(key) = m.string(name) else {
+        return;
+    };
+    if !matches!(m.insert(seen, key), Ok(true)) {
+        return;
+    }
+    if let Ok(copy) = m.string(name) {
+        // A refusal stops the meter; the walk ends at its next node.
+        let _ = m.push(list, copy);
+    }
+}
+
 impl Collect {
-    fn var(&mut self, name: &str) {
-        if self.var_seen.insert(name.to_string()) {
-            self.var_names.push(name.to_string());
-        }
+    fn var(&mut self, m: &Meter<'_>, name: &str) {
+        add_name(m, &mut self.var_seen, &mut self.var_names, name);
     }
 
-    fn reference(&mut self, name: &str) {
-        if self.reference_seen.insert(name.to_string()) {
-            self.references.push(name.to_string());
-        }
+    fn reference(&mut self, m: &Meter<'_>, name: &str) {
+        add_name(m, &mut self.reference_seen, &mut self.references, name);
     }
 
     /// The scope of the body whose walk ends; `params` are the parameters of a function, `None`
-    /// for the script.
-    fn finish(self, params: Option<&[Name]>) -> Scope {
+    /// for the script. The scratch is credited.
+    fn finish(self, params: Option<&[Name]>, m: &Meter<'_>) -> Scope {
         // `#sec-functiondeclarationinstantiation`, steps 15 to 18: no arguments object when a
         // parameter, a function declaration or a lexical declaration of the body is named
         // `arguments`; a `var` of that name keeps it. A direct `eval` may reference it in code
@@ -129,15 +173,28 @@ impl Collect {
                     .any(|(name, _)| name == "arguments")
                 && !self.lexical.iter().any(|l| l.name.name == "arguments")
         });
-        // The last declaration of each name, in source order.
+        // The last declaration of each name, in source order; each entry of the names taken is
+        // charged when it is inserted and all are credited after.
+        let entry = map_entry_bytes::<&str, ()>();
         let mut taken = BTreeSet::new();
         let mut functions = Vec::new();
         for (name, id) in self.declarations.iter().rev() {
-            if taken.insert(name.as_str()) {
-                functions.push(*id);
+            if !taken.contains(name.as_str()) {
+                if m.charge(entry).is_err() {
+                    break;
+                }
+                taken.insert(name.as_str());
+                if m.push(&mut functions, *id).is_err() {
+                    break;
+                }
             }
         }
+        m.credit(taken.len().saturating_mul(entry));
+        drop(taken);
         functions.reverse();
+        m.release(self.var_seen);
+        m.release(self.declarations);
+        m.release(self.reference_seen);
         Scope {
             var_names: self.var_names,
             functions,
@@ -161,75 +218,139 @@ enum Step {
     End(FunctionId),
 }
 
-/// Pushes the statements of a body, so that each one's top-level step comes before its walk.
-fn push_body(stack: &mut Vec<Step>, body: &[StmtId]) {
+/// Pushes the statements of a body, so that each one's top-level step comes before its walk;
+/// the growth of the stack charged first.
+fn push_body(m: &Meter<'_>, stack: &mut Vec<Step>, body: &[StmtId]) -> Result<(), Stop> {
+    m.grow_by(stack, body.len().saturating_mul(2))?;
     for s in body.iter().rev() {
         stack.push(Step::Node(Child::Stmt(*s)));
         stack.push(Step::TopLevel(*s));
+    }
+    Ok(())
+}
+
+/// The names the statement `s` binds when it is a `let` or `const` declaration, each a copy
+/// charged to `m`, onto `names`.
+fn push_lexical_charged(m: &Meter<'_>, ast: &Ast, s: StmtId, names: &mut Vec<LexicalName>) {
+    let Some(Stmt::Var(kind, declarators)) = ast.stmt(s).map(|n| &n.stmt) else {
+        return;
+    };
+    if !kind.is_lexical() {
+        return;
+    }
+    for d in declarators {
+        let Ok(name) = m.string(&d.name.name) else {
+            return;
+        };
+        let lexical = LexicalName {
+            name: Name {
+                name,
+                span: d.name.span,
+            },
+            constant: *kind == DeclKind::Const,
+            declaration: s,
+        };
+        if m.push(names, lexical).is_err() {
+            return;
+        }
     }
 }
 
 /// Walks the script `body` and the functions in it, each node before its children and the
 /// children in source order; answers the script's scope and each function's.
-fn walk(ast: &Ast, body: &[StmtId]) -> (Scope, Vec<(FunctionId, Scope)>) {
+fn walk(ast: &Ast, body: &[StmtId], m: &Meter<'_>) -> (Scope, Vec<(FunctionId, Scope)>) {
     let mut scopes = Vec::new();
     let mut script = Collect::default();
     // The bodies being walked inside the script, innermost last.
     let mut open: Vec<Collect> = Vec::new();
     let mut stack = Vec::new();
-    push_body(&mut stack, body);
-    while let Some(step) = stack.pop() {
-        let c = open.last_mut().unwrap_or(&mut script);
-        match step {
-            Step::TopLevel(s) => {
-                if let Some(Stmt::FunctionDeclaration(f)) = ast.stmt(s).map(|n| &n.stmt)
-                    && let Some(name) = ast.function(*f).and_then(|x| x.name.as_ref())
-                {
-                    c.var(&name.name);
-                    c.declarations.push((name.name.clone(), *f));
-                }
-                push_lexical(ast, s, &mut c.lexical);
-            }
-            Step::End(id) => {
-                if let Some(done) = open.pop() {
-                    let params = ast.function(id).map(|f| f.params.as_slice()).unwrap_or(&[]);
-                    scopes.push((id, done.finish(Some(params))));
-                }
-            }
-            Step::Node(Child::Function(id)) => {
-                // A function is analysed on its own.
-                let Some(f) = ast.function(id) else {
-                    continue;
-                };
-                open.push(Collect::default());
-                stack.push(Step::End(id));
-                push_body(&mut stack, &f.body);
-            }
-            Step::Node(node @ Child::Stmt(id)) => {
-                collect_stmt(ast, id, c);
-                ast.push_children(node, &mut stack, Step::Node);
-            }
-            Step::Node(node @ Child::Expr(id)) => {
-                // An identifier is a reference of the body being analysed; a direct `eval` call
-                // is the body's own.
-                match ast.expr(id).map(|n| &n.expr) {
-                    Some(Expr::Identifier(n)) => c.reference(n),
-                    Some(Expr::Call { callee, .. }) if ast.is_direct_eval_callee(*callee) => {
-                        c.contains_direct_eval = true;
-                    }
-                    _ => {}
-                }
-                ast.push_children(node, &mut stack, Step::Node);
+    if push_body(m, &mut stack, body).is_ok() {
+        while let Some(step) = stack.pop() {
+            if walk_step(
+                ast,
+                m,
+                step,
+                &mut script,
+                &mut open,
+                &mut stack,
+                &mut scopes,
+            )
+            .is_err()
+            {
+                break;
             }
         }
     }
-    (script.finish(None), scopes)
+    m.release(stack);
+    m.release(open);
+    (script.finish(None, m), scopes)
+}
+
+/// One step of [`walk`].
+fn walk_step(
+    ast: &Ast,
+    m: &Meter<'_>,
+    step: Step,
+    script: &mut Collect,
+    open: &mut Vec<Collect>,
+    stack: &mut Vec<Step>,
+    scopes: &mut Vec<(FunctionId, Scope)>,
+) -> Result<(), Stop> {
+    let c = open.last_mut().unwrap_or(script);
+    match step {
+        Step::TopLevel(s) => {
+            if let Some(Stmt::FunctionDeclaration(f)) = ast.stmt(s).map(|n| &n.stmt)
+                && let Some(name) = ast.function(*f).and_then(|x| x.name.as_ref())
+            {
+                c.var(m, &name.name);
+                let copy = m.string(&name.name)?;
+                m.push(&mut c.declarations, (copy, *f))?;
+            }
+            push_lexical_charged(m, ast, s, &mut c.lexical);
+        }
+        Step::End(id) => {
+            if let Some(done) = open.pop() {
+                let params = ast.function(id).map(|f| f.params.as_slice()).unwrap_or(&[]);
+                let scope = done.finish(Some(params), m);
+                m.push(scopes, (id, scope))?;
+            }
+        }
+        Step::Node(Child::Function(id)) => {
+            m.visit()?;
+            // A function is analysed on its own.
+            let Some(f) = ast.function(id) else {
+                return Ok(());
+            };
+            m.push(open, Collect::default())?;
+            m.push(stack, Step::End(id))?;
+            push_body(m, stack, &f.body)?;
+        }
+        Step::Node(node @ Child::Stmt(id)) => {
+            m.visit()?;
+            collect_stmt(ast, id, c, m);
+            ast.push_children_charged(node, stack, Step::Node, m)?;
+        }
+        Step::Node(node @ Child::Expr(id)) => {
+            m.visit()?;
+            // An identifier is a reference of the body being analysed; a direct `eval` call
+            // is the body's own.
+            match ast.expr(id).map(|n| &n.expr) {
+                Some(Expr::Identifier(n)) => c.reference(m, n),
+                Some(Expr::Call { callee, .. }) if ast.is_direct_eval_callee(*callee) => {
+                    c.contains_direct_eval = true;
+                }
+                _ => {}
+            }
+            ast.push_children_charged(node, stack, Step::Node, m)?;
+        }
+    }
+    m.check()
 }
 
 /// The `var` names the statement `id` declares itself (`VarDeclaredNames` of a variable
 /// statement, a `for` with `var` and a for-in with `var`; a `let` or `const` declaration has
 /// none).
-fn collect_stmt(ast: &Ast, id: StmtId, c: &mut Collect) {
+fn collect_stmt(ast: &Ast, id: StmtId, c: &mut Collect, m: &Meter<'_>) {
     match ast.stmt(id).map(|n| &n.stmt) {
         Some(
             Stmt::Var(DeclKind::Var, declarators)
@@ -239,14 +360,54 @@ fn collect_stmt(ast: &Ast, id: StmtId, c: &mut Collect) {
             },
         ) => {
             for d in declarators {
-                c.var(&d.name.name);
+                c.var(m, &d.name.name);
             }
         }
         Some(Stmt::ForIn {
             target: ForInTarget::Var(DeclKind::Var, name),
             ..
-        }) => c.var(&name.name),
+        }) => c.var(m, &name.name),
         Some(Stmt::With { .. }) => c.contains_with = true,
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ledger::{Counting, Meter, map_entry_bytes};
+    use crate::{ParseOptions, parse_script};
+
+    /// A source that declares 10,000 distinct names with `var` and refers to each: while the
+    /// scope analysis runs, its two sets (`var_seen` and `reference_seen`) hold every name, each
+    /// entry charged the per-entry constant and each name its bytes.
+    #[test]
+    fn the_scope_sets_are_charged_per_entry() {
+        let mut text = String::new();
+        let mut name_bytes = 0;
+        for i in 0..10_000 {
+            let name = format!("name{i}");
+            name_bytes += name.len();
+            text.push_str(&format!("var {name}; {name};\n"));
+        }
+        let source: Vec<u16> = text.encode_utf16().collect();
+        let mut script = parse_script(&source, ParseOptions { max_nesting: 100 }).unwrap();
+        let mut ledger = Counting::default();
+        {
+            let meter = Meter::new(&mut ledger);
+            let scope = super::analyse(&mut script.ast, &script.body, &meter);
+            assert_eq!(scope.var_names.len(), 10_000);
+            assert_eq!(scope.references.len(), 10_000);
+        }
+        let floor = 20_000 * map_entry_bytes::<String, ()>() + 2 * name_bytes;
+        println!(
+            "high-water {} for a floor of {floor} (entry {})",
+            ledger.high,
+            map_entry_bytes::<String, ()>()
+        );
+        assert!(
+            ledger.high >= floor,
+            "high-water {} below {floor}",
+            ledger.high
+        );
     }
 }

@@ -14,12 +14,15 @@
 //! runs through its `Cx` is a re-entry counted as from a builtin, and spends the steps of the
 //! running entry.
 //!
-//! Both parse through one entry of `swell-syntax` (`parse_eval` or `parse_dynamic_function`)
-//! with the agent's `parser_nesting`, so the nesting limit is the `SyntaxError` naming
-//! `parser_nesting` (decision 9, item 9); a parse error is a `SyntaxError` of the current realm,
-//! counted when it is a refusal (`script.rs`, [`Agent::refusals`]). The UTF-16 copy of the source
-//! is charged to the memory budget from the start of the parse, the compiled code and its atoms
-//! when the script record that holds them is made, as `parse_script` charges them (`script.rs`).
+//! Both parse through one charged entry of `swell-syntax` (`parse_eval_with` or
+//! `parse_dynamic_function_with`) on the agent's ledger, with the agent's `parser_nesting`, so
+//! the nesting limit is the `SyntaxError` naming `parser_nesting` (decision 9, item 9); a parse
+//! error is a `SyntaxError` of the current realm, counted when it is a refusal (`script.rs`,
+//! [`Agent::refusals`]). Both read the interrupt flag before they copy the source; `eval` charges
+//! a step per code unit of its String before that. The UTF-16 copy of the source is charged to
+//! the memory budget from the start of the parse, the tree and the compile step's scratch and
+//! code as they grow, and the record and its atoms when it is made, as `parse_script` charges
+//! them (`script.rs`).
 //! The code is kept in a script record of its own, and the copy with it (`docs/design/engine.md`,
 //! decision 4, "Source text."): for eval code the String PerformEval parsed, for the `Function`
 //! constructor the whole text of its last parse, `function anonymous(` P `\n) {\n` body `\n}`
@@ -44,7 +47,7 @@ use crate::host::{CompilationType, CompileStrings, Cx, HookCx, Host};
 use crate::interp::frame::{Frame, SlotValue, frame_bytes};
 use crate::object::builtin_function::Activation;
 use crate::realm::intrinsics::Intrinsic;
-use crate::script::{Compiled, SourceCopy, vec_bytes};
+use crate::script::{Compiled, ParsedTree, SourceCopy, vec_bytes};
 use crate::value::{ObjectRef, RealmRef, StringRef, Value};
 
 /// What the steps of PerformEval before the evaluation answer.
@@ -126,14 +129,22 @@ impl<H: Host> Agent<H> {
         }
     }
 
+    /// The length in code units of the String `string`.
+    fn source_length(&mut self, string: StringRef) -> Completion<usize> {
+        match self.heap.strings.get(string.handle) {
+            Ok(crate::heap::string::HeapString::Latin1(bytes)) => Ok(bytes.len()),
+            Ok(crate::heap::string::HeapString::Utf16(units)) => Ok(units.len()),
+            Err(_) => Err(self.fault()),
+        }
+    }
+
     /// The code units of `string`, copied for a parse: the copy is charged to the memory budget
     /// until it is kept with the code made from it or credited (`script.rs`, [`SourceCopy`]).
+    /// The interrupt flag is read first (decision 12): a set flag is cleared and ends the run in
+    /// `Terminated(Interrupted)` before anything is copied.
     fn charged_source(&mut self, string: StringRef) -> Completion<SourceCopy> {
-        let length = match self.heap.strings.get(string.handle) {
-            Ok(crate::heap::string::HeapString::Latin1(bytes)) => bytes.len(),
-            Ok(crate::heap::string::HeapString::Utf16(units)) => units.len(),
-            Err(_) => return Err(self.fault()),
-        };
+        self.check_interrupt()?;
+        let length = self.source_length(string)?;
         let mut copy = self.source_copy(length, |_| {})?;
         match self.heap.strings.get(string.handle) {
             Ok(crate::heap::string::HeapString::Latin1(bytes)) => {
@@ -219,12 +230,13 @@ impl<H: Host> Agent<H> {
         let (script, copy) = self.parse_eval_code(realm, string, strict_caller)?;
         // Step 11: a source with no statement.
         if script.body.is_empty() {
+            self.drop_tree(script);
             self.credit_source_copy(copy);
             return Ok(EvalStart::Done(Value::Undefined));
         }
         let strict = script.strict;
-        let compiled = swell_compiler::compile_eval(&script);
-        drop(script);
+        let compiled = swell_compiler::compile_eval_with(&script, &mut self.ledger());
+        self.drop_tree(script);
         let (code, copy) = match self.compiled_with_source(realm, compiled, copy)? {
             Ok(made) => made,
             Err(error) => return Err(Abrupt::Throw(error)),
@@ -238,9 +250,11 @@ impl<H: Host> Agent<H> {
         })
     }
 
-    /// `ParseText(x, Script)` of PerformEval (steps 9 and 10) through `swell_syntax::parse_eval`,
-    /// with the agent's `parser_nesting`: the script with the charged copy of its source, or the
-    /// throw of its first `SyntaxError` in `realm`, the copy credited. Not inlined into the run
+    /// `ParseText(x, Script)` of PerformEval (steps 9 and 10) through
+    /// `swell_syntax::parse_eval_with` on the agent's ledger, with the agent's `parser_nesting`:
+    /// the script with the charged copy of its source, or the throw of its first `SyntaxError` in
+    /// `realm`, the copy credited. A step per code unit of the String is charged before the copy
+    /// (`Agent::charge_steps`, which reads the interrupt flag first). Not inlined into the run
     /// loop, whose frame stays as small as it was.
     #[inline(never)]
     fn parse_eval_code(
@@ -252,13 +266,14 @@ impl<H: Host> Agent<H> {
         let options = ParseOptions {
             max_nesting: self.limits.parser_nesting,
         };
+        let length = self.source_length(string)?;
+        self.charge_steps(u64::try_from(length).unwrap_or(u64::MAX))?;
         let copy = self.charged_source(string)?;
-        match swell_syntax::parse_eval(&copy.units, strict_caller, options) {
-            Ok(script) => Ok((script, copy)),
-            Err(errors) => {
-                self.credit_source_copy(copy);
-                Err(self.throw_parse_errors(realm, errors))
-            }
+        let parsed =
+            swell_syntax::parse_eval_with(&copy.units, strict_caller, options, &mut self.ledger());
+        match self.parsed_tree(parsed, copy)? {
+            ParsedTree::Tree(script, copy) => Ok((script, copy)),
+            ParsedTree::Errors(errors) => Err(self.throw_parse_errors(realm, errors)),
         }
     }
 
@@ -645,9 +660,15 @@ impl<H: Host> Agent<H> {
         params: &[Value],
         body: Option<Value>,
     ) -> Completion<ObjectRef> {
+        // The list of paramStrings, charged before it is made and credited once it is dropped.
+        let list = vec_bytes::<StringRef>(params.len());
+        if self.heap.accounting.charge(list).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
         let mark = self.kept.len();
         let made = self.dynamic_function_steps(new_target, params, body);
         self.release(mark);
+        self.heap.accounting.credit(list);
         made
     }
 
@@ -709,19 +730,40 @@ impl<H: Host> Agent<H> {
         // kept with the code: the function's [[SourceText]] (step 28) is all of it.
         let (script, copy) =
             self.parse_dynamic_function_code(realm, source_string, &param_strings)?;
-        let compiled = swell_compiler::compile_script(&script);
-        drop(script);
+        let compiled = swell_compiler::compile_script_with(&script, &mut self.ledger());
+        self.drop_tree(script);
         let (mut code, copy) = match self.compiled_with_source(realm, compiled, copy)? {
             Ok(made) => made,
             Err(error) => return Err(Abrupt::Throw(error)),
         };
-        // Step 30: SetFunctionName(F, "anonymous"), the name of the function's template.
-        match code.functions.first_mut() {
-            Some(template) => template.name = "anonymous".encode_utf16().collect(),
-            None => {
-                self.credit_source_copy(copy);
-                return Err(self.fault());
+        // Step 30: SetFunctionName(F, "anonymous"), the name of the function's template; the new
+        // name is charged with the code before it is made, and the old one credited.
+        let units = "anonymous".len();
+        let bytes = units.saturating_mul(size_of::<u16>());
+        let charged = self.heap.accounting.charge(vec_bytes::<u16>(units)).is_ok();
+        let mut name = Vec::new();
+        if code.functions.is_empty() || !charged || name.try_reserve_exact(units).is_err() {
+            let fault = code.functions.is_empty();
+            if charged {
+                self.heap.accounting.credit(vec_bytes::<u16>(units));
             }
+            self.drop_code(code);
+            self.credit_source_copy(copy);
+            return Err(if fault {
+                self.fault()
+            } else {
+                self.terminate(Termination::MemoryBudget)
+            });
+        }
+        name.extend("anonymous".encode_utf16());
+        if let Some(template) = code.functions.first_mut() {
+            let old = std::mem::replace(&mut template.name, name);
+            let old_bytes = old.capacity().saturating_mul(size_of::<u16>());
+            drop(old);
+            code.charged = code.charged.saturating_sub(old_bytes).saturating_add(bytes);
+            self.heap
+                .accounting
+                .credit(u64::try_from(old_bytes).unwrap_or(u64::MAX));
         }
         let script = self.make_script_record(realm, code, copy, None)?;
         let (_, compiled) = self.script_parts(script)?;
@@ -754,11 +796,7 @@ impl<H: Host> Agent<H> {
         let head = "function anonymous(".len();
         let mut joined = param_strings.len().saturating_sub(1);
         for &string in param_strings {
-            let length = match self.heap.strings.get(string.handle) {
-                Ok(crate::heap::string::HeapString::Latin1(bytes)) => bytes.len(),
-                Ok(crate::heap::string::HeapString::Utf16(units)) => units.len(),
-                Err(_) => return Err(self.fault()),
-            };
+            let length = self.source_length(string)?;
             joined = joined.saturating_add(length);
         }
         let options = ParseOptions {
@@ -772,21 +810,21 @@ impl<H: Host> Agent<H> {
             units.get(body_start..units.len().saturating_sub("\n}".len())),
         );
         let parsed = match parts {
-            (Some(parameters), Some(body)) => Some(swell_syntax::parse_dynamic_function(
-                parameters, body, options,
+            (Some(parameters), Some(body)) => Some(swell_syntax::parse_dynamic_function_with(
+                parameters,
+                body,
+                options,
+                &mut self.ledger(),
             )),
             _ => None,
         };
-        match parsed {
-            Some(Ok(script)) => Ok((script, copy)),
-            Some(Err(errors)) => {
-                self.credit_source_copy(copy);
-                Err(self.throw_parse_errors(realm, errors))
-            }
-            None => {
-                self.credit_source_copy(copy);
-                Err(self.fault())
-            }
+        let Some(parsed) = parsed else {
+            self.credit_source_copy(copy);
+            return Err(self.fault());
+        };
+        match self.parsed_tree(parsed, copy)? {
+            ParsedTree::Tree(script, copy) => Ok((script, copy)),
+            ParsedTree::Errors(errors) => Err(self.throw_parse_errors(realm, errors)),
         }
     }
 }

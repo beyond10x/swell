@@ -23,6 +23,10 @@ pub(crate) struct Accounting {
     /// tests.
     #[cfg(test)]
     largest_key_list: usize,
+    /// The polls of the frontend's ledger left before it sets the interrupt flag itself, in the
+    /// lib tests (`script.rs`, `AgentLedger::poll`): `Some(0)` once it has.
+    #[cfg(test)]
+    poll_countdown: Option<u64>,
 }
 
 impl Accounting {
@@ -36,6 +40,33 @@ impl Accounting {
             high_water: 0,
             #[cfg(test)]
             largest_key_list: 0,
+            #[cfg(test)]
+            poll_countdown: None,
+        }
+    }
+
+    /// The frontend's ledger sets the interrupt flag at its `polls`-th poll from now.
+    #[cfg(test)]
+    pub(crate) fn set_poll_countdown(&mut self, polls: u64) {
+        self.poll_countdown = Some(polls);
+    }
+
+    /// The polls left before the ledger sets the flag; `Some(0)` once it has.
+    #[cfg(test)]
+    pub(crate) fn poll_countdown(&self) -> Option<u64> {
+        self.poll_countdown
+    }
+
+    /// One poll of the frontend's ledger: whether the countdown reaches 0 with it, so that the
+    /// ledger sets the flag before it reads it.
+    #[cfg(test)]
+    pub(crate) fn count_down_poll(&mut self) -> bool {
+        match self.poll_countdown {
+            Some(left) if left > 0 => {
+                self.poll_countdown = Some(left - 1);
+                left == 1
+            }
+            _ => false,
         }
     }
 

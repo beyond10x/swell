@@ -49,15 +49,17 @@ use crate::bytecode::{HandlerKind, Instruction, SlotName, TAG_NORMAL};
 use crate::expression::Target;
 use crate::resolve::{Binding, ScopeKey, Site};
 use crate::{CompileError, Compiler, Constants, Control, JumpKind, Task, malformed};
+use swell_syntax::ledger::Meter;
 
 /// The names of a record's slots, `let` or `const` ones.
 pub(crate) fn slot_names(
     constants: &mut Constants,
     names: &[(String, bool)],
+    m: &Meter<'_>,
 ) -> Result<Vec<SlotName>, CompileError> {
-    let mut table = Vec::with_capacity(names.len());
+    let mut table = m.with_capacity(names.len())?;
     for (name, constant) in names {
-        let k = constants.string_str(name)?;
+        let k = constants.string_str(name, m)?;
         table.push(SlotName::lexical(k, *constant).ok_or(CompileError::TooMany("strings"))?);
     }
     Ok(table)
@@ -72,7 +74,7 @@ fn leave_scope(record: bool, span: Span, t: &mut Vec<Task>) {
     }
 }
 
-impl<'a> Compiler<'a> {
+impl<'a, 'm> Compiler<'a, 'm> {
     /// The tasks of the statement `id`; a loop gets the label set `labels`.
     pub(crate) fn statement(
         &mut self,
@@ -93,7 +95,8 @@ impl<'a> Compiler<'a> {
                 while let Some(Stmt::Labelled { label, body }) =
                     self.ast.stmt(item).map(|n| &n.stmt)
                 {
-                    labels.push(label.name.clone());
+                    let name = self.m.string(&label.name)?;
+                    self.m.push(&mut labels, name)?;
                     item = *body;
                 }
                 let is_loop = matches!(
@@ -305,17 +308,21 @@ impl<'a> Compiler<'a> {
                 t.push(Task::ItemsDown);
             }
             // `#sec-continue-statement-runtime-semantics-evaluation`.
-            Stmt::Continue(label) => t.push(Task::Jump(
-                JumpKind::Continue,
-                label.as_ref().map(|l| l.name.clone()),
-                span,
-            )),
+            Stmt::Continue(label) => {
+                let label = match label {
+                    Some(l) => Some(self.m.string(&l.name)?),
+                    None => None,
+                };
+                t.push(Task::Jump(JumpKind::Continue, label, span));
+            }
             // `#sec-break-statement-runtime-semantics-evaluation`.
-            Stmt::Break(label) => t.push(Task::Jump(
-                JumpKind::Break,
-                label.as_ref().map(|l| l.name.clone()),
-                span,
-            )),
+            Stmt::Break(label) => {
+                let label = match label {
+                    Some(l) => Some(self.m.string(&l.name)?),
+                    None => None,
+                };
+                t.push(Task::Jump(JumpKind::Break, label, span));
+            }
             // `#sec-return-statement-runtime-semantics-evaluation`.
             Stmt::Return(e) => {
                 match e {
@@ -334,7 +341,8 @@ impl<'a> Compiler<'a> {
             } => {
                 self.reset_completion(span, &mut t);
                 let exit = self.label();
-                let labels: Vec<_> = cases.iter().map(|_| self.label()).collect();
+                let mut labels = self.m.with_capacity(cases.len())?;
+                labels.extend(cases.iter().map(|_| self.label()));
                 t.push(Task::Expr(*discriminant));
                 let record = self.enter_scope(ScopeKey::Case(id), span, &mut t)?;
                 let mut default = None;
@@ -491,10 +499,10 @@ impl<'a> Compiler<'a> {
 
     /// A `scopes` entry naming the slots `names` of a record of `let` and `const` bindings.
     fn lexical_table(&mut self, names: &[(String, bool)]) -> Result<u32, CompileError> {
-        let table = slot_names(self.constants, names)?;
+        let table = slot_names(self.constants, names, self.m)?;
         let index =
             u32::try_from(self.scopes.len()).map_err(|_| CompileError::TooMany("environments"))?;
-        self.scopes.push(table);
+        self.m.push(&mut self.scopes, table)?;
         Ok(index)
     }
 
@@ -640,7 +648,9 @@ impl<'a> Compiler<'a> {
                                     .ok_or(crate::CompileError::TooMany("strings"))?;
                                 let index = u32::try_from(self.scopes.len())
                                     .map_err(|_| crate::CompileError::TooMany("environments"))?;
-                                self.scopes.push(vec![name]);
+                                let mut table = self.m.with_capacity(1)?;
+                                table.push(name);
+                                self.m.push(&mut self.scopes, table)?;
                                 Instruction::PushNamedEnv(index)
                             } else {
                                 Instruction::PushEnv(1)

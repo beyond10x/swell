@@ -11,21 +11,28 @@
 //! error of the draft: `CompileError::TooMany` (a bound of the bytecode format) is answered as
 //! one `SyntaxError` naming the bound, an implementation limit like `parser_nesting`;
 //! `CompileError::Tree` (a tree the parser cannot produce) is a broken engine invariant and ends
-//! the call in `Terminated(EngineFault)`. ParseScript runs no code, calls no hook, spends no step
-//! and reads no interrupt itself: `parse_script` and `cx.parse_script` read the flag before they
-//! call it (HOST-166, HOST-167).
+//! the call in `Terminated(EngineFault)`. ParseScript runs no code, calls no hook and spends no
+//! step: `parse_script` and `cx.parse_script` read the interrupt flag before they call it
+//! (HOST-166, HOST-167), and its parse and compile step read it through their ledger.
+//!
+//! The parse and the compile step run on the agent's ledger ([`AgentLedger`]): the tree, the
+//! scope analysis, the compile step's scratch and the code are charged to the memory budget
+//! before they grow and credited when they drop; a poll at least once per 4,096 code units or
+//! nodes reads the interrupt flag and clears it. A refusal ends the run in
+//! `Terminated(MemoryBudget)`, a read flag in `Terminated(Interrupted)`, with everything the step
+//! charged credited. The tree's charge ([`swell_syntax::Script::charged`]) is credited when the
+//! tree is dropped, after the compile step; the code's ([`Code::charged`]) passes to the record.
 //!
 //! The record owns the compiled code and the atoms of its String constants, of their property
-//! keys and of its functions' names; the code and the record are charged to the memory budget
-//! when it is made, the atoms as they are interned, and the sweep that frees the record credits
-//! them. The source's UTF-16 copy is charged from the start of the parse; the parser's tree is
-//! not, since `swell-syntax` allocates it with no access to the budget (its size is bounded by
-//! the source's).
+//! keys and of its functions' names; the record and its atom vectors are charged before they are
+//! allocated, the atoms as they are interned, and the sweep that frees the record credits them
+//! with the code.
 //!
 //! Source text (`docs/design/engine.md`, decision 4, "Source text."): the copy the parse read is
 //! kept with the compiled code ([`Compiled::source`]) and its charge becomes part of the
-//! record's ([`code_bytes`]) when the parse and compile step ends, two bytes per code unit; the
-//! sweep that frees the record credits it with the code, never earlier. The record lives while
+//! record's when the parse and compile step ends, two bytes per code unit, with no credit
+//! between ([`Agent::make_script_record`]); the sweep that frees the record credits it with the
+//! code, never earlier. The record lives while
 //! the host holds the script, while its code runs and while a function made from it is
 //! reachable (each reports its [[ScriptOrModule]]), so the text does too, and
 //! `Function.prototype.toString` reads a function's [[SourceText]] out of it
@@ -38,16 +45,18 @@
 use std::rc::Rc;
 
 use swell_compiler::CompileError;
-use swell_compiler::bytecode::{Code, Handler, Instruction, LexicalName, SlotName};
+use swell_compiler::bytecode::Code;
+use swell_syntax::Failure;
 use swell_syntax::ParseOptions;
-use swell_syntax::ast::Span;
+use swell_syntax::ledger::{Ledger, Stop};
 
+use crate::heap::accounting::Accounting;
 use crate::heap::arena::Handle;
 use crate::heap::collect::{Item, Mark};
 use crate::host::agent::Agent;
 use crate::host::host_object::{Brand, HostData, HostObject, Tracer};
 use crate::host::outcome::{Abrupt, Completion, Termination};
-use crate::host::{ErrorKind, Host, HostDefined, Source};
+use crate::host::{ErrorKind, Host, HostDefined, InterruptHandle, Source};
 use crate::interp::frame::{Frame, SlotValue, frame_bytes};
 use crate::object::property::{Key, array_index};
 use crate::value::{StringRef, Value};
@@ -132,6 +141,17 @@ pub(crate) enum ParseAnswer {
     Errors(Vec<Value>),
 }
 
+/// What a charged parse answers inside the engine when it was not stopped. The tree is not boxed:
+/// a box would be an allocation the budget does not see, for a value that lives one call.
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum ParsedTree {
+    /// The tree, whose parse charged [`swell_syntax::Script::charged`], with the copy of its
+    /// source.
+    Tree(swell_syntax::Script, SourceCopy),
+    /// The parse errors, at least one; the copy was credited.
+    Errors(Vec<swell_syntax::SyntaxError>),
+}
+
 /// The bytes a `Vec` of `len` elements of `T` owns.
 pub(crate) fn vec_bytes<T>(len: usize) -> u64 {
     u64::try_from(len.saturating_mul(size_of::<T>())).unwrap_or(u64::MAX)
@@ -145,52 +165,66 @@ pub(crate) struct SourceCopy {
     pub(crate) charged: u64,
 }
 
-/// The bytes of the names tables of the environments `PushNamedEnv` and `PushLexicalEnv` make
-/// (decision 3, "Names": they are charged with the compiled code).
-fn scopes_bytes(scopes: &[Vec<SlotName>]) -> u64 {
-    scopes
-        .iter()
-        .fold(vec_bytes::<Vec<SlotName>>(scopes.len()), |bytes, names| {
-            bytes.saturating_add(vec_bytes::<SlotName>(names.len()))
-        })
+/// The ledger of a parse or compile step (decision 4, "Memory budget"): a charge goes to the
+/// memory budget and a refusal is `Stop::OverBudget`; a credit gives bytes back; a poll reads the
+/// interrupt flag and clears it as [`Agent::check_interrupt`] does, `Stop::Interrupted` when it
+/// was set. Under test, the countdown of [`Accounting::set_poll_countdown`] sets the flag at the
+/// poll it names, before the poll reads it.
+pub(crate) struct AgentLedger<'a> {
+    accounting: &'a mut Accounting,
+    interrupt: &'a InterruptHandle,
 }
 
-/// The bytes the compiled code owns, charged with its record: the code, its constants and
-/// templates, and the `source_units` code units of the source kept with it (decision 4, "Source
-/// text.").
-pub(crate) fn code_bytes(code: &Code, source_units: usize) -> u64 {
-    let mut bytes = vec_bytes::<u16>(source_units)
-        .saturating_add(vec_bytes::<Instruction>(code.instructions.len()))
-        .saturating_add(vec_bytes::<Span>(code.positions.len()))
-        .saturating_add(vec_bytes::<Handler>(code.handlers.len()))
-        .saturating_add(vec_bytes::<f64>(code.numbers.len()))
-        .saturating_add(vec_bytes::<u32>(code.var_names.len()))
-        .saturating_add(vec_bytes::<u32>(code.function_declarations.len()))
-        .saturating_add(vec_bytes::<LexicalName>(code.lexical.len()))
-        .saturating_add(scopes_bytes(&code.scopes));
-    for string in &code.strings {
-        bytes = bytes
-            .saturating_add(vec_bytes::<u16>(string.len()))
-            .saturating_add(vec_bytes::<Vec<u16>>(1))
-            .saturating_add(vec_bytes::<StringRef>(1))
-            .saturating_add(vec_bytes::<Key>(1));
+impl Ledger for AgentLedger<'_> {
+    fn charge(&mut self, bytes: usize) -> Result<(), Stop> {
+        let bytes = u64::try_from(bytes).unwrap_or(u64::MAX);
+        self.accounting.charge(bytes).map_err(|_| Stop::OverBudget)
     }
-    for function in &code.functions {
-        bytes = bytes
-            .saturating_add(vec_bytes::<swell_compiler::bytecode::FunctionTemplate>(1))
-            .saturating_add(vec_bytes::<u16>(function.name.len()))
-            .saturating_add(vec_bytes::<StringRef>(1))
-            .saturating_add(vec_bytes::<Key>(1))
-            .saturating_add(vec_bytes::<swell_compiler::bytecode::Slot>(
-                function.params.len(),
-            ))
-            .saturating_add(vec_bytes::<u32>(function.captured.len()))
-            .saturating_add(scopes_bytes(&function.scopes))
-            .saturating_add(vec_bytes::<Instruction>(function.instructions.len()))
-            .saturating_add(vec_bytes::<Span>(function.positions.len()))
-            .saturating_add(vec_bytes::<Handler>(function.handlers.len()));
+
+    fn credit(&mut self, bytes: usize) {
+        self.accounting
+            .credit(u64::try_from(bytes).unwrap_or(u64::MAX));
     }
-    bytes.saturating_add(vec_bytes::<Compiled>(1))
+
+    fn poll(&mut self) -> Result<(), Stop> {
+        #[cfg(test)]
+        if self.accounting.count_down_poll() {
+            self.interrupt.interrupt();
+        }
+        if self.interrupt.is_set() {
+            self.interrupt.clear();
+            return Err(Stop::Interrupted);
+        }
+        Ok(())
+    }
+}
+
+/// The bytes of the `Rc` allocation of a [`Compiled`]: its two counts and the value.
+const COMPILED_BOX_BYTES: usize = size_of::<Compiled>() + 2 * size_of::<usize>();
+
+/// What a script record owns besides its code and its source copy, charged before it is
+/// allocated: the `Rc` allocation of its [`Compiled`], the four atom vectors of `strings` String
+/// constants and `functions` templates, and the box of its [[HostDefined]] when it has one.
+fn record_bytes(strings: usize, functions: usize, host_defined: bool) -> u64 {
+    let host = if host_defined {
+        size_of::<ScriptHostDefined>()
+    } else {
+        0
+    };
+    u64::try_from(COMPILED_BOX_BYTES.saturating_add(host))
+        .unwrap_or(u64::MAX)
+        .saturating_add(vec_bytes::<StringRef>(strings))
+        .saturating_add(vec_bytes::<Key>(strings))
+        .saturating_add(vec_bytes::<StringRef>(functions))
+        .saturating_add(vec_bytes::<Key>(functions))
+}
+
+/// A vector with room for exactly `n` elements, whose bytes are charged already; `None` when the
+/// allocator refuses.
+fn exact<T>(n: usize) -> Option<Vec<T>> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(n).ok()?;
+    Some(v)
 }
 
 impl<H: Host> Agent<H> {
@@ -227,21 +261,68 @@ impl<H: Host> Agent<H> {
                 self.source_copy(length, |copy| copy.extend(text.encode_utf16()))?
             }
         };
-        let script = match swell_syntax::parse_script(&copy.units, options) {
-            Ok(script) => script,
-            Err(errors) => {
-                self.credit_source_copy(copy);
+        let parsed = swell_syntax::parse_script_with(&copy.units, options, &mut self.ledger());
+        let (script, copy) = match self.parsed_tree(parsed, copy)? {
+            ParsedTree::Tree(script, copy) => (script, copy),
+            ParsedTree::Errors(errors) => {
                 return self.syntax_errors(realm, errors).map(ParseAnswer::Errors);
             }
         };
-        let compiled = swell_compiler::compile_script(&script);
-        drop(script);
+        let compiled = swell_compiler::compile_script_with(&script, &mut self.ledger());
+        self.drop_tree(script);
         let (code, copy) = match self.compiled_with_source(realm, compiled, copy)? {
             Ok(made) => made,
             Err(error) => return Ok(ParseAnswer::Errors(vec![error])),
         };
         self.make_script_record(realm, code, copy, host_defined)
             .map(ParseAnswer::Script)
+    }
+
+    /// The ledger of a parse or compile step of this agent.
+    pub(crate) fn ledger(&mut self) -> AgentLedger<'_> {
+        AgentLedger {
+            accounting: &mut self.heap.accounting,
+            interrupt: &self.interrupt,
+        }
+    }
+
+    /// The answer of a charged parse of the source whose copy is `copy`: the tree with the copy,
+    /// or the errors with the copy credited; a stopped parse (which credited what it charged)
+    /// ends the run, the copy credited.
+    pub(crate) fn parsed_tree(
+        &mut self,
+        parsed: Result<swell_syntax::Script, Failure>,
+        copy: SourceCopy,
+    ) -> Completion<ParsedTree> {
+        match parsed {
+            Ok(script) => Ok(ParsedTree::Tree(script, copy)),
+            Err(Failure::Errors(errors)) => {
+                self.credit_source_copy(copy);
+                Ok(ParsedTree::Errors(errors))
+            }
+            Err(Failure::Stopped(stop)) => {
+                self.credit_source_copy(copy);
+                Err(self.stopped(stop))
+            }
+        }
+    }
+
+    /// Drop the tree `script` and credit what its parse charged for it.
+    pub(crate) fn drop_tree(&mut self, script: swell_syntax::Script) {
+        let charged = script.charged;
+        drop(script);
+        self.heap
+            .accounting
+            .credit(u64::try_from(charged).unwrap_or(u64::MAX));
+    }
+
+    /// Drop `code` and credit what its compile step charged for it.
+    pub(crate) fn drop_code(&mut self, code: Code) {
+        let charged = code.charged;
+        drop(code);
+        self.heap
+            .accounting
+            .credit(u64::try_from(charged).unwrap_or(u64::MAX));
     }
 
     /// A copy of the `length` code units `fill` appends, charged to the memory budget first
@@ -327,12 +408,26 @@ impl<H: Host> Agent<H> {
                 Ok(Err(Value::Object(object)))
             }
             Err(CompileError::Tree(_)) => Err(self.fault()),
+            Err(CompileError::Stopped(stop)) => Err(self.stopped(stop)),
+        }
+    }
+
+    /// The end of a parse or compile step its ledger stopped: over the budget the run ends in
+    /// `Terminated(MemoryBudget)`, at an interrupt in `Terminated(Interrupted)` (the ledger
+    /// cleared the flag as it read it).
+    pub(crate) fn stopped(&mut self, stop: Stop) -> Abrupt {
+        match stop {
+            Stop::OverBudget => self.terminate(Termination::MemoryBudget),
+            Stop::Interrupted => self.terminate(Termination::Interrupted),
         }
     }
 
     /// The Script Record of `code` in `realm`, with its atoms interned and the source `copy` it
-    /// was compiled from kept with it: the copy's charge becomes part of the record's, which the
-    /// sweep that frees the record credits (decision 4, "Source text.").
+    /// was compiled from kept with it: the code's charge ([`Code::charged`], taken from its
+    /// compile step) and the copy's become the record's, with no credit and no check between,
+    /// and the sweep that frees the record credits them (decision 4, "Source text."). The record
+    /// and its atom vectors are charged before they are allocated; on every way out without a
+    /// record everything is credited.
     pub(crate) fn make_script_record(
         &mut self,
         realm: Handle,
@@ -340,33 +435,32 @@ impl<H: Host> Agent<H> {
         copy: SourceCopy,
         host_defined: Option<HostDefined>,
     ) -> Completion<Handle> {
-        // The copy is charged again below with the code, as a part of the record; no safe point
-        // comes between, and on every way out after this the copy is dropped uncharged.
         let SourceCopy {
             units: source,
-            charged,
+            charged: copy_charged,
         } = copy;
-        self.heap.accounting.credit(charged);
-        let owned = code_bytes(&code, source.len());
-        if self.heap.accounting.check(owned).is_err() {
+        let taken = u64::try_from(code.charged)
+            .unwrap_or(u64::MAX)
+            .saturating_add(copy_charged);
+        let own = record_bytes(
+            code.strings.len(),
+            code.functions.len(),
+            host_defined.is_some(),
+        );
+        if self.heap.accounting.charge(own).is_err() {
+            drop((code, source));
+            self.heap.accounting.credit(taken);
             return Err(self.terminate(Termination::MemoryBudget));
         }
-        // The atoms are reported by no site until the record holds them; no safe point comes
-        // before it does.
-        let mut strings = Vec::with_capacity(code.strings.len());
-        let mut keys = Vec::with_capacity(code.strings.len());
-        for units in &code.strings {
-            let (atom, key) = self.atom_and_key(units)?;
-            strings.push(atom);
-            keys.push(key);
-        }
-        let mut names = Vec::with_capacity(code.functions.len());
-        let mut name_keys = Vec::with_capacity(code.functions.len());
-        for function in &code.functions {
-            let (atom, key) = self.atom_and_key(&function.name)?;
-            names.push(atom);
-            name_keys.push(key);
-        }
+        let owned = taken.saturating_add(own);
+        let (strings, keys, names, name_keys) = match self.record_atoms(&code) {
+            Ok(atoms) => atoms,
+            Err(abrupt) => {
+                drop((code, source));
+                self.heap.accounting.credit(owned);
+                return Err(abrupt);
+            }
+        };
         let record = ScriptRecord {
             realm: Some(realm),
             compiled: Some(Rc::new(Compiled {
@@ -382,15 +476,47 @@ impl<H: Host> Agent<H> {
                 data: Some(Box::new(ScriptHostDefined(value))),
             }),
         };
-        match crate::heap::store(
+        match crate::heap::store_charged(
             &mut self.heap.accounting,
             &mut self.heap.scripts,
             record,
             owned,
         ) {
             Ok(handle) => Ok(handle),
-            Err(_) => Err(self.terminate(Termination::MemoryBudget)),
+            Err(_) => {
+                self.heap.accounting.credit(owned);
+                Err(self.terminate(Termination::MemoryBudget))
+            }
         }
+    }
+
+    /// The atoms of the String constants of `code` and of its templates' names, with their
+    /// property keys, in vectors whose bytes [`record_bytes`] charged. The atoms are reported by
+    /// no site until the record holds them; no safe point comes before it does.
+    #[allow(clippy::type_complexity)]
+    fn record_atoms(
+        &mut self,
+        code: &Code,
+    ) -> Completion<(Vec<StringRef>, Vec<Key>, Vec<StringRef>, Vec<Key>)> {
+        let (Some(mut strings), Some(mut keys), Some(mut names), Some(mut name_keys)) = (
+            exact(code.strings.len()),
+            exact(code.strings.len()),
+            exact(code.functions.len()),
+            exact(code.functions.len()),
+        ) else {
+            return Err(self.terminate(Termination::MemoryBudget));
+        };
+        for units in &code.strings {
+            let (atom, key) = self.atom_and_key(units)?;
+            strings.push(atom);
+            keys.push(key);
+        }
+        for function in &code.functions {
+            let (atom, key) = self.atom_and_key(&function.name)?;
+            names.push(atom);
+            name_keys.push(key);
+        }
+        Ok((strings, keys, names, name_keys))
     }
 
     /// The realm and the code of the script record `script`.
@@ -596,5 +722,357 @@ pub(crate) fn parse_termination(abrupt: Abrupt) -> Termination {
     match abrupt {
         Abrupt::Terminated(termination) => termination,
         Abrupt::Throw(_) => Termination::EngineFault,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use swell_syntax::ledger::{Ledger, Stop};
+    use swell_syntax::{ParseOptions, Script as Tree};
+
+    use crate::host::agent::Agent;
+    use crate::host::hooks::test_host::{NoHooks, agent_with, limits, new_realm};
+    use crate::{Outcome, Parsed, PropertyKey, Realm, Script, Source, Termination, Value};
+
+    const MIB: u64 = 1 << 20;
+    const OPTIONS: ParseOptions = ParseOptions { max_nesting: 100 };
+
+    /// `function unused() {`, 20,000 lines `x = 1;`, then `}`.
+    fn flat_source() -> String {
+        let mut text = String::from("function unused() {\n");
+        text.push_str(&"x = 1;\n".repeat(20_000));
+        text.push('}');
+        text
+    }
+
+    /// The body of the `Function` call: the 20,000 lines alone.
+    fn flat_body() -> String {
+        "x = 1;\n".repeat(20_000)
+    }
+
+    fn units(text: &str) -> Vec<u16> {
+        text.encode_utf16().collect()
+    }
+
+    /// The text of the last parse of `Function(body)`.
+    fn dynamic_text(body: &str) -> String {
+        format!("function anonymous(\n) {{\n{body}\n}}")
+    }
+
+    fn bytes(count: usize) -> u64 {
+        u64::try_from(count).unwrap_or(u64::MAX)
+    }
+
+    /// An agent whose budget is 64 MiB, with a realm.
+    fn agent() -> (Agent<NoHooks>, Realm) {
+        let mut limits = limits();
+        limits.memory_bytes = 64 * MIB;
+        limits.steps_per_entry = 10_000_000;
+        let mut agent = agent_with(limits);
+        let realm = new_realm(&mut agent);
+        (agent, realm)
+    }
+
+    fn parse(agent: &mut Agent<NoHooks>, realm: &Realm, text: &str, utf16: bool) -> Parsed<Script> {
+        let wide = units(text);
+        let source = if utf16 {
+            Source::Utf16(&wide)
+        } else {
+            Source::Utf8(text)
+        };
+        match agent.parse_script(realm, source, None) {
+            Ok(parsed) => parsed,
+            Err(error) => panic!("parse_script answered {error:?}"),
+        }
+    }
+
+    fn parsed(agent: &mut Agent<NoHooks>, realm: &Realm, text: &str) -> Script {
+        match parse(agent, realm, text, false) {
+            Parsed::Parsed(script) => script,
+            Parsed::Errors(_) => panic!("{text:?} did not parse"),
+            Parsed::Terminated(termination) => panic!("{text:?} ended in {termination:?}"),
+        }
+    }
+
+    fn heap_bytes(agent: &Agent<NoHooks>) -> u64 {
+        match agent.heap_bytes() {
+            Ok(bytes) => bytes,
+            Err(error) => panic!("heap_bytes answered {error:?}"),
+        }
+    }
+
+    fn collect(agent: &mut Agent<NoHooks>) {
+        if let Err(error) = agent.collect() {
+            panic!("collect answered {error:?}");
+        }
+    }
+
+    /// A free slot in the scripts arena: a script parsed, dropped and collected.
+    fn free_slot(agent: &mut Agent<NoHooks>, realm: &Realm) {
+        drop(parsed(agent, realm, "1"));
+        collect(agent);
+    }
+
+    /// The bytes the scripts arena's slots own: what the record in a freed slot owns is the
+    /// difference of this reading.
+    fn scripts_owned(agent: &Agent<NoHooks>) -> u64 {
+        agent.heap.scripts.ledger_floor()
+    }
+
+    /// The tree walk (`Script::capacity_bytes`) of `text` as a script.
+    fn tree_of_script(text: &str) -> u64 {
+        match swell_syntax::parse_script(&units(text), OPTIONS) {
+            Ok(tree) => bytes(tree.capacity_bytes()),
+            Err(errors) => panic!("{errors:?}"),
+        }
+    }
+
+    /// The tree walk of the last parse of `Function(body)`.
+    fn tree_of_function(body: &str) -> u64 {
+        match swell_syntax::parse_dynamic_function(&[], &units(body), OPTIONS) {
+            Ok(tree) => bytes(tree.capacity_bytes()),
+            Err(errors) => panic!("{errors:?}"),
+        }
+    }
+
+    /// A ledger with no bound that reads its high-water mark.
+    #[derive(Default)]
+    struct Peak {
+        held: usize,
+        high: usize,
+    }
+
+    impl Ledger for Peak {
+        fn charge(&mut self, bytes: usize) -> Result<(), Stop> {
+            self.held = self.held.saturating_add(bytes);
+            self.high = self.high.max(self.held);
+            Ok(())
+        }
+        fn credit(&mut self, bytes: usize) {
+            self.held = self.held.saturating_sub(bytes);
+        }
+        fn poll(&mut self) -> Result<(), Stop> {
+            Ok(())
+        }
+    }
+
+    /// The high-water mark of the parse alone (the tree with its scratch, before the compile
+    /// step), measured through the charged entry.
+    fn parse_peak(text: &str) -> u64 {
+        let mut peak = Peak::default();
+        let tree: Result<Tree, _> =
+            swell_syntax::parse_script_with(&units(text), OPTIONS, &mut peak);
+        assert!(tree.is_ok());
+        drop(tree);
+        bytes(peak.high)
+    }
+
+    /// Define the global Strings `src` (the flat source) and `body` (its lines alone).
+    fn define_sources(agent: &mut Agent<NoHooks>, realm: &Realm) {
+        let global = match agent.global_object(realm) {
+            Ok(root) => root,
+            Err(error) => panic!("global_object answered {error:?}"),
+        };
+        let defined = agent.with_cx(realm, |cx| {
+            let Ok(Value::Object(object)) = cx.get(&global) else {
+                panic!("the global is no object");
+            };
+            for (name, text) in [("src", flat_source()), ("body", flat_body())] {
+                let (Ok(key), Ok(value)) = (cx.new_string(name), cx.new_string(&text)) else {
+                    panic!("new_string failed");
+                };
+                assert!(matches!(
+                    cx.set(object, PropertyKey::String(key), Value::String(value), true),
+                    Ok(Ok(true))
+                ));
+            }
+        });
+        assert!(defined.is_ok());
+    }
+
+    fn evaluate(agent: &mut Agent<NoHooks>, script: &Script) -> Outcome<crate::Root> {
+        match agent.evaluate_script(script) {
+            Ok(outcome) => outcome,
+            Err(error) => panic!("evaluate_script answered {error:?}"),
+        }
+    }
+
+    /// HOST-169: a flat source of 20,000 statements, as UTF-8 and as UTF-16, with a free slot in
+    /// the scripts arena. P is the high-water mark of a successful parse over what the heap
+    /// read before, T the tree walk, R what the record owns. Under P the parse succeeds; under
+    /// P - T, and under R + 4 KiB, the tree does not fit and the parse ends in
+    /// `Terminated(MemoryBudget)`; after each refusal the heap reads as before and the next
+    /// parse succeeds.
+    #[test]
+    fn host_169_a_flat_source_whose_tree_does_not_fit_ends_in_memory_budget() {
+        let text = flat_source();
+        let t = tree_of_script(&text);
+        for utf16 in [false, true] {
+            let (mut agent, realm) = agent();
+            // The atoms of the source stay live, so its record is all a parse leaves.
+            let _kept = parsed(&mut agent, &realm, &text);
+            free_slot(&mut agent, &realm);
+            let before = heap_bytes(&agent);
+            let owned_before = scripts_owned(&agent);
+            agent.heap.accounting.reset_high_water();
+            let Parsed::Parsed(script) = parse(&mut agent, &realm, &text, utf16) else {
+                panic!("the flat source did not parse");
+            };
+            let p = agent.heap.accounting.high_water() - before;
+            let r = scripts_owned(&agent) - owned_before;
+            assert_eq!(
+                heap_bytes(&agent),
+                before + r,
+                "the record is all that stays"
+            );
+            drop(script);
+            collect(&mut agent);
+            println!("utf16 {utf16}: P {p} T {t} R {r}");
+            for (amount, expected) in [
+                (p, None),
+                (p - t, Some(Termination::MemoryBudget)),
+                (r + 4096, Some(Termination::MemoryBudget)),
+            ] {
+                let before = heap_bytes(&agent);
+                agent.heap.accounting.set_limit(before + amount);
+                match (parse(&mut agent, &realm, &text, utf16), expected) {
+                    (Parsed::Parsed(script), None) => {
+                        drop(script);
+                        agent.heap.accounting.set_limit(64 * MIB);
+                        collect(&mut agent);
+                    }
+                    (Parsed::Terminated(termination), Some(expected)) => {
+                        assert_eq!(termination, expected, "budget before + {amount}");
+                        assert_eq!(heap_bytes(&agent), before, "budget before + {amount}");
+                        let Parsed::Parsed(one) = parse(&mut agent, &realm, "1", utf16) else {
+                            panic!("1 did not parse after the refusal");
+                        };
+                        drop(one);
+                        agent.heap.accounting.set_limit(64 * MIB);
+                        collect(&mut agent);
+                    }
+                    (_, expected) => panic!("budget before + {amount}: expected {expected:?}"),
+                }
+            }
+        }
+    }
+
+    /// The peak of a parse covers the copy of its source and the tree: for `parse_script` as
+    /// UTF-8 and as UTF-16, for `eval(src)` and for `Function(body)`.
+    #[test]
+    fn the_peak_of_a_parse_covers_copy_tree_and_code() {
+        let text = flat_source();
+        let body = flat_body();
+        let script_floor = bytes(units(&text).len() * 2) + tree_of_script(&text);
+        for utf16 in [false, true] {
+            let (mut agent, realm) = agent();
+            let before = heap_bytes(&agent);
+            agent.heap.accounting.reset_high_water();
+            assert!(matches!(
+                parse(&mut agent, &realm, &text, utf16),
+                Parsed::Parsed(_)
+            ));
+            let peak = agent.heap.accounting.high_water() - before;
+            assert!(
+                peak >= script_floor,
+                "utf16 {utf16}: {peak} < {script_floor}"
+            );
+        }
+        let function_floor = bytes(units(&dynamic_text(&body)).len() * 2) + tree_of_function(&body);
+        for (call, floor) in [
+            ("eval(src);", script_floor),
+            ("Function(body);", function_floor),
+        ] {
+            let (mut agent, realm) = agent();
+            define_sources(&mut agent, &realm);
+            let script = parsed(&mut agent, &realm, call);
+            collect(&mut agent);
+            let before = heap_bytes(&agent);
+            agent.heap.accounting.reset_high_water();
+            assert!(matches!(evaluate(&mut agent, &script), Outcome::Normal(_)));
+            let peak = agent.heap.accounting.high_water() - before;
+            assert!(peak >= floor, "{call}: {peak} < {floor}");
+        }
+    }
+
+    /// With a free slot in the scripts arena and the source's atoms live, a successful parse
+    /// leaves its record charged, the bytes of the slot; a parse stopped at the copy, in the
+    /// tree or in the compile step leaves the heap as it read before.
+    #[test]
+    fn a_parse_leaves_only_its_record_charged() {
+        let text = flat_source();
+        let copy = bytes(units(&text).len() * 2);
+        let parse_peak = parse_peak(&text);
+        let (mut agent, realm) = agent();
+        let _kept = parsed(&mut agent, &realm, &text);
+        free_slot(&mut agent, &realm);
+        let before = heap_bytes(&agent);
+        let owned_before = scripts_owned(&agent);
+        agent.heap.accounting.reset_high_water();
+        let script = parsed(&mut agent, &realm, &text);
+        let p = agent.heap.accounting.high_water() - before;
+        let slot = scripts_owned(&agent) - owned_before;
+        assert_eq!(heap_bytes(&agent), before + slot);
+        drop(script);
+        collect(&mut agent);
+        // The copy, the tree and the compile step's scratch with the code.
+        let at_copy = copy / 2;
+        let in_tree = copy + parse_peak / 2;
+        let in_compile = copy + parse_peak + (p - copy - parse_peak) / 2;
+        println!("copy {copy} parse peak {parse_peak} P {p} slot {slot}");
+        for amount in [at_copy, in_tree, in_compile] {
+            let before = heap_bytes(&agent);
+            agent.heap.accounting.set_limit(before + amount);
+            assert!(
+                matches!(
+                    parse(&mut agent, &realm, &text, false),
+                    Parsed::Terminated(Termination::MemoryBudget)
+                ),
+                "budget before + {amount}"
+            );
+            assert_eq!(heap_bytes(&agent), before, "budget before + {amount}");
+            agent.heap.accounting.set_limit(64 * MIB);
+            collect(&mut agent);
+        }
+    }
+
+    /// The countdown of polls at 2: at the second poll the ledger sets the interrupt flag, and
+    /// `parse_script` (as UTF-8 and as UTF-16), `eval(src)` and `Function(body)` each end in
+    /// `Terminated(Interrupted)`, with the countdown at 0 and the heap as it read before.
+    #[test]
+    fn a_flag_raised_at_the_second_poll_ends_every_entry() {
+        let text = flat_source();
+        for utf16 in [false, true] {
+            let (mut agent, realm) = agent();
+            collect(&mut agent);
+            let before = heap_bytes(&agent);
+            agent.heap.accounting.set_poll_countdown(2);
+            assert!(matches!(
+                parse(&mut agent, &realm, &text, utf16),
+                Parsed::Terminated(Termination::Interrupted)
+            ));
+            assert_eq!(agent.heap.accounting.poll_countdown(), Some(0));
+            assert_eq!(heap_bytes(&agent), before);
+        }
+        for call in ["eval(src);", "Function(body);"] {
+            let (mut agent, realm) = agent();
+            define_sources(&mut agent, &realm);
+            let script = parsed(&mut agent, &realm, call);
+            collect(&mut agent);
+            let before = heap_bytes(&agent);
+            agent.heap.accounting.set_poll_countdown(2);
+            assert!(
+                matches!(
+                    evaluate(&mut agent, &script),
+                    Outcome::Terminated(Termination::Interrupted)
+                ),
+                "{call}"
+            );
+            assert_eq!(agent.heap.accounting.poll_countdown(), Some(0), "{call}");
+            // The String sourceString that `Function` builds before its parse (steps 12 to 15)
+            // is a heap String no root holds once the run ends: a collection frees it.
+            collect(&mut agent);
+            assert_eq!(heap_bytes(&agent), before, "{call}");
+        }
     }
 }

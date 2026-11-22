@@ -16,12 +16,13 @@
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
 //! and build nodes through helpers, so their own frames hold little more than ids and one span.
 
-use super::{Parser, R};
+use super::{Parser, R, copy_name, copy_number, copy_regexp, copy_string, copy_template};
 use crate::ast::{
     AssignOp, BinaryOp, Expr, ExprId, FunctionId, FunctionKind, LogicalOp, Property, PropertyKey,
     PropertyValue, Span, UnaryOp, UpdateOp,
 };
 use crate::error::SyntaxError;
+use crate::ledger::HeapBytes;
 use crate::token::{Keyword, Punct, TokenKind};
 
 /// A template string of a template without a tag holds a NotEscapeSequence, whose TV is
@@ -84,9 +85,21 @@ pub(crate) enum Prefix {
     Update(UpdateOp),
 }
 
-type ExprParser<'a> = fn(&mut Parser<'a>) -> R<ExprId>;
+impl HeapBytes for Pending {
+    fn heap_bytes(&self) -> usize {
+        0
+    }
+}
 
-impl<'a> Parser<'a> {
+impl HeapBytes for Prefix {
+    fn heap_bytes(&self) -> usize {
+        0
+    }
+}
+
+type ExprParser<'a, 'm> = fn(&mut Parser<'a, 'm>) -> R<ExprId>;
+
+impl<'a, 'm> Parser<'a, 'm> {
     // ---- the comma operator and assignment -----------------------------------------------------
 
     /// `Expression`: assignment expressions joined by the comma operator (`#sec-comma-operator`).
@@ -103,21 +116,32 @@ impl<'a> Parser<'a> {
 
     fn sequence_rest(&mut self, first: ExprId, start: Span, no_in: bool) -> R<ExprId> {
         self.enter()?;
-        let id = self.reserve_expr(Expr::Sequence(vec![first]));
+        let id = self.reserve_sequence(first)?;
         while self.eat(Punct::Comma)? {
             let e = self.assignment(no_in)?;
-            self.append_expr(id, Some(e));
+            self.append_expr(id, Some(e))?;
         }
         let id = self.complete_expr(id, start)?;
         self.leave();
         Ok(id)
     }
 
+    /// A comma expression whose first operand is `first`, reserved.
+    #[inline(never)]
+    fn reserve_sequence(&mut self, first: ExprId) -> R<ExprId> {
+        let id = self.reserve_expr(Expr::Sequence(Vec::new()));
+        self.append_expr(id, Some(first))?;
+        Ok(id)
+    }
+
     /// Appends `e` to the list of the expression `id`: the elements of an array literal (`None`
-    /// an elision), the arguments of a call or `new`, the operands of a comma expression.
-    fn append_expr(&mut self, id: ExprId, e: Option<ExprId>) {
-        match (self.expr_mut(id), e) {
-            (Some(Expr::Array(list)), e) => list.push(e),
+    /// an elision), the arguments of a call or `new`, the operands of a comma expression. The
+    /// growth of the list is charged first.
+    #[inline(never)]
+    fn append_expr(&mut self, id: ExprId, e: Option<ExprId>) -> R<()> {
+        let m = self.m;
+        let pushed = match (self.expr_mut(id), e) {
+            (Some(Expr::Array(list)), e) => m.push(list, e),
             (
                 Some(
                     Expr::Sequence(list)
@@ -133,9 +157,10 @@ impl<'a> Parser<'a> {
                     },
                 ),
                 Some(e),
-            ) => list.push(e),
-            _ => {}
-        }
+            ) => m.push(list, e),
+            _ => Ok(()),
+        };
+        self.charged(pushed)
     }
 
     /// Whether `e` is an object or array literal not in parentheses: as an assignment target it
@@ -304,11 +329,16 @@ impl<'a> Parser<'a> {
             return Ok(false);
         };
         let left = self.reduce(base, precedence, left)?;
-        self.operators.push(Pending {
-            op,
-            precedence,
-            left,
-        });
+        let m = self.m;
+        let pushed = m.push(
+            &mut self.operators,
+            Pending {
+                op,
+                precedence,
+                left,
+            },
+        );
+        self.charged(pushed)?;
         Ok(true)
     }
 
@@ -393,7 +423,9 @@ impl<'a> Parser<'a> {
     fn prefix_operators(&mut self) -> R<()> {
         while let Some(prefix) = self.prefix() {
             let start = self.start();
-            self.prefixes.push((prefix, start));
+            let m = self.m;
+            let pushed = m.push(&mut self.prefixes, (prefix, start));
+            self.charged(pushed)?;
             self.advance()?;
         }
         Ok(())
@@ -620,11 +652,13 @@ impl<'a> Parser<'a> {
     /// The `IdentifierName` of a property access on `object`, at the current token.
     #[inline(never)]
     fn member_name(&mut self, object: ExprId, start: Span, optional: bool) -> R<ExprId> {
+        let m = self.m;
         let property = match &self.tok.kind {
-            TokenKind::Name(n) => n.clone(),
-            TokenKind::Keyword(k) => k.as_str().to_string(),
+            TokenKind::Name(n) => copy_name(m, n),
+            TokenKind::Keyword(k) => copy_name(m, k.as_str()),
             _ => return self.unexpected(),
         };
+        let property = self.charged(property)?;
         self.advance()?;
         let expr = if optional {
             Expr::OptionalMember { object, property }
@@ -669,7 +703,7 @@ impl<'a> Parser<'a> {
         let mut first = true;
         while self.argument_next(first)? {
             let e = self.assignment(false)?;
-            self.append_expr(id, Some(e));
+            self.append_expr(id, Some(e))?;
             first = false;
         }
         self.leave();
@@ -733,7 +767,7 @@ impl<'a> Parser<'a> {
     /// Which parser takes the primary expression at the current token; refuses the forms of
     /// later slices.
     #[inline(never)]
-    fn primary_kind(&mut self) -> R<ExprParser<'a>> {
+    fn primary_kind(&mut self) -> R<ExprParser<'a, 'm>> {
         Ok(match &self.tok.kind {
             TokenKind::Keyword(k) => match *k {
                 Keyword::This | Keyword::Null | Keyword::True | Keyword::False => Parser::leaf,
@@ -741,10 +775,13 @@ impl<'a> Parser<'a> {
                 Keyword::Class => return self.refuse("class", 8),
                 Keyword::Super => return self.refuse("super", 8),
                 Keyword::Import => {
-                    let next = self.peek()?.kind.clone();
+                    let next = match &self.peek()?.kind {
+                        TokenKind::Punct(p) => Some(*p),
+                        _ => None,
+                    };
                     return match next {
-                        TokenKind::Punct(Punct::Dot) => self.refuse("import.meta", 11),
-                        TokenKind::Punct(Punct::LParen) => self.refuse("dynamic import", 11),
+                        Some(Punct::Dot) => self.refuse("import.meta", 11),
+                        Some(Punct::LParen) => self.refuse("dynamic import", 11),
                         _ => self.unexpected(),
                     };
                 }
@@ -808,21 +845,33 @@ impl<'a> Parser<'a> {
     /// error of a template without a tag (`#sec-static-semantics-template-early-errors`).
     #[inline(never)]
     fn template_string(&mut self, id: ExprId) -> R<bool> {
-        let (string, not_escape, substitution) = match &self.tok.kind {
+        let (not_escape, substitution) = match &self.tok.kind {
             TokenKind::NoSubstitutionTemplate(p) | TokenKind::TemplateTail(p) => {
-                (p.string.clone(), p.not_escape, false)
+                (p.not_escape, false)
             }
-            TokenKind::TemplateHead(p) | TokenKind::TemplateMiddle(p) => {
-                (p.string.clone(), p.not_escape, true)
-            }
+            TokenKind::TemplateHead(p) | TokenKind::TemplateMiddle(p) => (p.not_escape, true),
             _ => return self.unexpected(),
         };
         if let Some((line, column)) = not_escape {
             return self.fail(SyntaxError::new(NOT_ESCAPE_SEQUENCE, line, column));
         }
-        if let Some(Expr::Template { strings, .. }) = self.expr_mut(id) {
-            strings.push(string);
-        }
+        let m = self.m;
+        let string = match &self.tok.kind {
+            TokenKind::NoSubstitutionTemplate(p)
+            | TokenKind::TemplateTail(p)
+            | TokenKind::TemplateHead(p)
+            | TokenKind::TemplateMiddle(p) => copy_template(m, &p.string),
+            _ => return self.unexpected(),
+        };
+        let string = self.charged(string)?;
+        let pushed = match self.expr_mut(id) {
+            Some(Expr::Template { strings, .. }) => m.push(strings, string),
+            _ => {
+                m.release(string);
+                Ok(())
+            }
+        };
+        self.charged(pushed)?;
         self.advance()?;
         Ok(substitution)
     }
@@ -834,9 +883,12 @@ impl<'a> Parser<'a> {
         if !self.is(Punct::RBrace) {
             return self.unexpected();
         }
-        if let Some(Expr::Template { substitutions, .. }) = self.expr_mut(id) {
-            substitutions.push(e);
-        }
+        let m = self.m;
+        let pushed = match self.expr_mut(id) {
+            Some(Expr::Template { substitutions, .. }) => m.push(substitutions, e),
+            _ => Ok(()),
+        };
+        self.charged(pushed)?;
         self.rescan_template()
     }
 
@@ -846,17 +898,19 @@ impl<'a> Parser<'a> {
     fn leaf(&mut self) -> R<ExprId> {
         self.check_escaped_keyword()?;
         let start = self.start();
+        let m = self.m;
         let expr = match &self.tok.kind {
-            TokenKind::Keyword(Keyword::This) => Expr::This,
-            TokenKind::Keyword(Keyword::Null) => Expr::Null,
-            TokenKind::Keyword(Keyword::True) => Expr::Boolean(true),
-            TokenKind::Keyword(Keyword::False) => Expr::Boolean(false),
-            TokenKind::Name(n) => Expr::Identifier(n.clone()),
-            TokenKind::Number(n) => Expr::Number(n.clone()),
-            TokenKind::String(s) => Expr::String(s.clone()),
-            TokenKind::RegExp(r) => Expr::RegExp(r.clone()),
+            TokenKind::Keyword(Keyword::This) => Ok(Expr::This),
+            TokenKind::Keyword(Keyword::Null) => Ok(Expr::Null),
+            TokenKind::Keyword(Keyword::True) => Ok(Expr::Boolean(true)),
+            TokenKind::Keyword(Keyword::False) => Ok(Expr::Boolean(false)),
+            TokenKind::Name(n) => copy_name(m, n).map(Expr::Identifier),
+            TokenKind::Number(n) => copy_number(m, n).map(Expr::Number),
+            TokenKind::String(s) => copy_string(m, s).map(Expr::String),
+            TokenKind::RegExp(r) => copy_regexp(m, r).map(Expr::RegExp),
             _ => return self.unexpected(),
         };
+        let expr = self.charged(expr)?;
         self.advance()?;
         self.make(expr, start)
     }
@@ -907,7 +961,7 @@ impl<'a> Parser<'a> {
         let id = self.reserve_expr(Expr::Array(Vec::new()));
         while self.element_next(id)? {
             let e = self.assignment(false)?;
-            self.append_expr(id, Some(e));
+            self.append_expr(id, Some(e))?;
             self.element_end()?;
         }
         let id = self.complete_expr(id, start)?;
@@ -925,7 +979,7 @@ impl<'a> Parser<'a> {
             if !self.eat(Punct::Comma)? {
                 break;
             }
-            self.append_expr(id, None);
+            self.append_expr(id, None)?;
         }
         if self.is(Punct::Ellipsis) {
             return self.refuse("spread element", 6);
@@ -973,16 +1027,32 @@ impl<'a> Parser<'a> {
     /// The `PropertyName` at the current token, consumed.
     #[inline(never)]
     fn property_key(&mut self) -> R<PropertyKey> {
+        let m = self.m;
         let key = match &self.tok.kind {
-            TokenKind::Name(n) => PropertyKey::Identifier(n.clone()),
-            TokenKind::Keyword(k) => PropertyKey::Identifier(k.as_str().to_string()),
-            TokenKind::String(s) => PropertyKey::String(s.clone()),
-            TokenKind::Number(n) => PropertyKey::Number(n.clone()),
+            TokenKind::Name(n) => copy_name(m, n).map(PropertyKey::Identifier),
+            TokenKind::Keyword(k) => copy_name(m, k.as_str()).map(PropertyKey::Identifier),
+            TokenKind::String(s) => copy_string(m, s).map(PropertyKey::String),
+            TokenKind::Number(n) => copy_number(m, n).map(PropertyKey::Number),
             TokenKind::Punct(Punct::LBracket) => return self.refuse("computed property name", 6),
             _ => return self.unexpected(),
         };
+        let key = self.charged(key)?;
         self.advance()?;
         Ok(key)
+    }
+
+    /// Append `property` to the object literal `object`, the growth of its list charged first.
+    #[inline(never)]
+    fn push_property(&mut self, object: ExprId, property: Property) -> R<()> {
+        let m = self.m;
+        let pushed = match self.properties(object) {
+            Some(list) => m.push(list, property),
+            None => {
+                m.release(property);
+                Ok(())
+            }
+        };
+        self.charged(pushed)
     }
 
     /// One `PropertyDefinition`, appended to the object literal `object`.
@@ -1024,12 +1094,16 @@ impl<'a> Parser<'a> {
             }
             _ => return Ok(None),
         };
-        let next = self.peek()?.kind.clone();
-        if next == TokenKind::Punct(Punct::LBracket) {
+        let next = &self.peek()?.kind;
+        let (computed, named) = (
+            *next == TokenKind::Punct(Punct::LBracket),
+            Parser::is_property_name(next),
+        );
+        if computed {
             self.advance()?;
             return self.refuse("computed property name", 6);
         }
-        if Parser::is_property_name(&next) {
+        if named {
             self.advance()?;
             return Ok(Some(word));
         }
@@ -1076,13 +1150,14 @@ impl<'a> Parser<'a> {
             FunctionKind::Getter => PropertyValue::Get(id),
             _ => PropertyValue::Set(id),
         };
-        if let Some(list) = self.properties(object) {
-            list.push(Property {
+        self.push_property(
+            object,
+            Property {
                 key,
                 value,
                 span: start,
-            });
-        }
+            },
+        )?;
         Ok(id)
     }
 
@@ -1140,13 +1215,14 @@ impl<'a> Parser<'a> {
         } else {
             return self.unexpected();
         };
-        if let Some(list) = self.properties(object) {
-            list.push(Property {
+        self.push_property(
+            object,
+            Property {
                 key,
                 value,
                 span: start,
-            });
-        }
+            },
+        )?;
         Ok(head)
     }
 
@@ -1173,7 +1249,9 @@ impl<'a> Parser<'a> {
             return self.fail_at(crate::early::escaped_keyword(name), at);
         }
         let span = self.finish(at);
-        self.push_expr(Expr::Identifier(name.clone()), span)
+        let name = copy_name(self.m, name);
+        let name = self.charged(name)?;
+        self.push_expr(Expr::Identifier(name), span)
     }
 
     /// Pushes `expr`, which started at `start` and ends at the previous token.

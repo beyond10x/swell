@@ -165,8 +165,8 @@ HOST-164 test swell::eval::host_164_refusals_counts_every_refusal_caught_or_not
 HOST-165 test swell::builtins_string_transform::host_165_case_methods_and_locale_compare_refuse_a_unit_outside_ascii
 HOST-166 test swell::interrupt::host_166_a_pending_interrupt_ends_parse_script_before_the_parse
 HOST-167 test swell::interrupt::host_167_an_interrupt_set_in_a_host_function_ends_its_cx_parse_script
-HOST-168 pending slice 6
-HOST-169 pending slice 6
+HOST-168 test swell::frontend_ledger::host_168_an_interrupt_set_by_the_compile_strings_hook_ends_eval_before_its_parse
+HOST-169 test swell::lib::script::tests::host_169_a_flat_source_whose_tree_does_not_fit_ends_in_memory_budget
 HOST-170 test swell::collect::host_170_a_value_read_from_a_dropped_root_lives_until_its_scope_ends
 HOST-171 test swell::collect::host_171_live_bytes_reads_the_records_and_heap_bytes_the_budget
 HOST-172 pending slice 6
