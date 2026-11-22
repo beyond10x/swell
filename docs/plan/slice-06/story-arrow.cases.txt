@@ -17,7 +17,6 @@ test/language/expressions/arrow-function/arrow/capturing-closure-variables-1.js
 test/language/expressions/arrow-function/arrow/capturing-closure-variables-2.js
 test/language/expressions/arrow-function/arrow/concisebody-lookahead-assignmentexpression-1.js
 test/language/expressions/arrow-function/arrow/concisebody-lookahead-assignmentexpression-2.js
-test/language/expressions/arrow-function/dflt-params-abrupt.js
 test/language/expressions/arrow-function/empty-function-body-returns-undefined.js
 test/language/expressions/arrow-function/expression-body-implicit-return.js
 test/language/expressions/arrow-function/forbidden-ext/b1/arrow-function-forbidden-ext-direct-access-prop-arguments.js
@@ -31,9 +30,6 @@ test/language/expressions/arrow-function/object-literal-return-requires-body-par
 test/language/expressions/arrow-function/params-duplicate.js
 test/language/expressions/arrow-function/prototype-rules.js
 test/language/expressions/arrow-function/scope-body-lex-distinct.js
-test/language/expressions/arrow-function/scope-param-elem-var-close.js
-test/language/expressions/arrow-function/scope-param-elem-var-open.js
-test/language/expressions/arrow-function/scope-paramsbody-var-open.js
 test/language/expressions/arrow-function/statement-body-requires-braces-must-return-explicitly-missing.js
 test/language/expressions/arrow-function/statement-body-requires-braces-must-return-explicitly.js
 test/language/expressions/arrow-function/strict.js

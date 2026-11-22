@@ -36,6 +36,7 @@ test/language/eval-code/direct/meth-fn-body-cntns-arguments-var-bind-declare-arg
 test/language/eval-code/direct/meth-fn-body-cntns-arguments-var-bind-declare-arguments.js
 test/language/eval-code/direct/meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js
 test/language/eval-code/direct/meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js
+test/language/expressions/arrow-function/dflt-params-abrupt.js
 test/language/expressions/arrow-function/dflt-params-arg-val-not-undefined.js
 test/language/expressions/arrow-function/dflt-params-arg-val-undefined.js
 test/language/expressions/arrow-function/dflt-params-duplicates.js
@@ -44,7 +45,10 @@ test/language/expressions/arrow-function/dflt-params-ref-prior.js
 test/language/expressions/arrow-function/dflt-params-ref-self.js
 test/language/expressions/arrow-function/eval-var-scope-syntax-err.js
 test/language/expressions/arrow-function/length-dflt.js
+test/language/expressions/arrow-function/scope-param-elem-var-close.js
+test/language/expressions/arrow-function/scope-param-elem-var-open.js
 test/language/expressions/arrow-function/scope-paramsbody-var-close.js
+test/language/expressions/arrow-function/scope-paramsbody-var-open.js
 test/language/expressions/arrow-function/syntax/arrowparameters-cover-initialize-1.js
 test/language/expressions/arrow-function/syntax/arrowparameters-cover-rest-concisebody-functionbody.js
 test/language/expressions/arrow-function/syntax/arrowparameters-cover-rest-lineterminator-concisebody-functionbody.js
