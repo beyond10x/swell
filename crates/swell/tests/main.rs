@@ -24,6 +24,7 @@ mod builtins_string;
 mod builtins_string_access;
 mod builtins_string_transform;
 mod builtins_symbol;
+mod builtins_symbol_values;
 mod builtins_uri;
 mod calls;
 mod collect;
