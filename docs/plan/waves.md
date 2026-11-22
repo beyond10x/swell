@@ -199,6 +199,14 @@ run. Objects of the DOM and of the host are surf's side.
 
 ## Slice 6, `bindings-and-iteration`
 
+Delivered so far, in the second batch ([the record](second-batch.md), 2026-11-22): template
+literals, `let` and `const`, arrow functions, default and rest parameters and object
+destructuring, the first five of its stories, with the stories on resource accounting and on
+the host interface that the first consumer asked for. 1,364 of the slice's 4,436 cases pass
+(`test262-slice 06 4436 8413 0 0 4436 1364 3072 0`). Next by the order of the decomposition:
+computed names and object spread, block function declarations, `Symbol`, iterators, `for`-`of`,
+array destructuring, tagged templates, the close.
+
 `epic:slice-06-bindings-and-iteration`, next after slice 3 by the order above. Decomposed on
 2026-11-22 into fifteen stories in two parts (accepted, `active`), each part read once by the
 four plan critics (`review-result:slice-06-*`: 15 findings on the first five stories, 13 on

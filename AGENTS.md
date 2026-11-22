@@ -10,9 +10,9 @@ and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the byteco
 interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
 6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
-(the other 44 need a later slice and say so). 84 of 165 host requirements have a test.
+(the other 44 need a later slice and say so). 108 of 190 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate holds the test262 counts: 12,120 of the 44,812 run cases pass (2026-11-22). Release `0.1.0` was cut at the close of
+gate holds the test262 counts: 13,575 of the 44,812 run cases pass (2026-11-22, the second batch; 12,120 in release `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
 "Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
@@ -269,60 +269,66 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot --timeout 30m task check-runner` on 2026-11-22, on the wave branch of slice 3 after its
-last unit (the tree of `a6cf201`), exit 0, 122 s in the pool, load 52 before and 39 after on
-17 cores. The planted scripts' single `ok` lines and the slice lines after slice 4 are left out
-(`conformance/test262/expected.txt` has every slice line):
+`slot --timeout 30m task check-runner` on 2026-11-22, on the branch of the second batch after
+its last unit and the regenerated test262 counts (the tree of `7416cda`;
+`docs/plan/second-batch.md`), exit 0, load 15 before and 34 after on 18 cores. The planted
+scripts' single `ok` lines and the slice lines after slice 6 but for slices 1 to 4 and 6 are
+left out (`conformance/test262/expected.txt` has every slice line). The fault step's line
+counts the 524 tests its filter leaves out as ignored:
 
 ```
-python-check: no Python file among 1235 file(s)
+python-check: no Python file among 1467 file(s)
 forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
 Cargo.lock: 7 package(s), none from outside this repository
-toolchain-check: rustc 1.99.1, the channel rust-toolchain.toml pins; 3 workflow file(s), none names a compiler
-nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 13 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
+toolchain-check: rustc 1.99.1, the channel rust-toolchain.toml pins; 5 workflow file(s), none names a compiler
+nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 16 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
 data/unicode/17.0.0: 17 file(s), each with the SHA-256 its SOURCE line gives; 17 required path(s) present
 unicode-tables: 1 table(s) equal the generator output
 swell v1 — 2 file(s), 8 scenario(s), valid
 58 scenario(s) (8 authored), 41 refusal(s), written to .out/suite.json
   58 scenarios: 58 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 165 requirement(s), 165 line(s): 84 test, 81 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 4:9 5:2 6:1 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
+host-requirements: 190 requirement(s), 190 line(s): 108 test, 82 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 4:9 5:2 6:2 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
+host-surface: 63 change(s) since 0.3.0, each named
 site-data-check: website/data/status.json equals its regeneration from conformance/test262/expected.txt, conformance/slices-delivered.txt, conformance/host/requirements.txt, conformance/test262/moves.tsv, docs/design/engine.md, Cargo.toml, Cargo.lock and the crate roots under crates
-build-tests: Finished `test` profile [unoptimized + debuginfo] target(s) in 0.01s
-build-collect: Finished `test` profile [unoptimized + debuginfo] target(s) in 2.09s
-build-faults: Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
-build-conform-engine: Finished `test` profile [unoptimized + debuginfo] target(s) in 3.02s
-build-conform-engine: Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
-68 test binaries: 667 passed, 0 failed, 1 ignored
-gate-time test 18.8
-test-doc: 7 test suites: 11 passed, 0 failed, 0 ignored
-test-doc collect-every-safe-point: 2 test suites: 11 passed, 0 failed, 0 ignored
-gate-time test-doc 5.0
-test-collect: 49 test binaries: 506 passed, 0 failed, 1 ignored
-gate-time test-collect 27.2
-test-faults: 1 test binaries: 1 passed, 0 failed, 0 ignored
-gate-time test-faults 0.2
+test-main: 7 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
+test-binaries-check: 15 test executables, 7 integration-test binaries in 7 packages, none with a .debug_ section
+build-tests: Finished `test` profile [unoptimized] target(s) in 0.00s
+build-collect: Finished `test` profile [unoptimized] target(s) in 10.51s
+build-faults: Finished `test` profile [unoptimized] target(s) in 10.46s
+build-conform-engine: Finished `test` profile [unoptimized] target(s) in 1m 34s
+build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.10s
+15 test binaries: 858 passed, 0 failed, 1 ignored
+gate-time test 32.1
+test-doc: 7 test suites: 13 passed, 0 failed, 0 ignored
+test-doc collect-every-safe-point: 2 test suites: 13 passed, 0 failed, 0 ignored
+gate-time test-doc 5.1
+test-collect: 2 test binaries: 684 passed, 0 failed, 1 ignored
+gate-time test-collect 34.7
+test-faults: 1 test binaries: 1 passed, 0 failed, 524 ignored
+gate-time test-faults 0.5
 conform-engine: 3 test binaries: 12 passed, 0 failed, 0 ignored
 conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok
   58 scenarios: 14 passed, 0 failed, 0 error, 44 unsupported
-gate-time conform-engine 3.6
-test262-refused 46581
-test262 total 53801 8982 7 44812 12120 32692 0
+gate-time conform-engine 2.5
+test262-refused 41572
+test262 total 53801 8982 7 44812 13575 31236 1
 test262: 221 directory lines sum to the total
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
-test262-slice 04 1516 2992 0 0 1516 249 1267 0
+test262-slice 04 1516 2992 0 0 1516 254 1262 0
+test262-slice 06 4436 8413 0 0 4436 1364 3072 0
 test262: 22 slice lines equal the design
 test262-errors 0
-test262: 286 lines of conformance/test262/expected.txt; sources digest 02158d3cf750d26db83ea9366c92a7e7785e8fe348a8afc95c24e3c706cbeaff equals conformance/test262/expected.digest
-gate-time test262-check 0.1
+test262: 286 lines of conformance/test262/expected.txt; sources digest dade97317ca50618ba7157f3d0f892a9e6c4b30a8f86af5dde05980bac869024 equals conformance/test262/expected.digest
+gate-time test262-check 0.2
 test262-moves: 1656 case(s) moved, 3:78 4:318 5:276 6:719 7:44 8:104 9:18 10:78 11:4 12:3 13:14; slices 1 to 19: 44931 85794
-gate-time test262-moves-check 6.2
-gate-selftest: 51 passed, 0 failed
-gate-time gate-selftest 19.4
-gate-time test-steps 80.5 of 120, cpu 199.2, load 39.15 on 17 cores
+gate-time test262-moves-check 4.3
+gate-selftest: 64 passed, 0 failed
+gate-time gate-selftest 28.2
+gate-time test-steps 107.6 of 120, cpu 255.0, load 34.02 on 18 cores
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`

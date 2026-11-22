@@ -17,7 +17,7 @@ can use it.
 ## State
 
 swell runs scripts of the ES5 grammar in both modes, under a step budget and a memory budget.
-Its gate holds the test262 counts: 12,120 of the 44,812 cases that run pass (27.0 %), measured on 2026-11-22.
+Its gate holds the test262 counts: 13,575 of the 44,812 cases that run pass (30.2 %), measured on 2026-11-22.
 The first three of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |
@@ -33,12 +33,12 @@ What exists, measured on 2026-11-22:
 - The design, [`docs/design/engine.md`](docs/design/engine.md): what swell targets, how it is
   built, how it is measured, and the order in which it is delivered.
 - The host interface, specified before its code:
-  [`docs/design/host-interface.md`](docs/design/host-interface.md) has 165 numbered
-  requirements, and 84 of them have a test. An ESS model under [`spec/`](spec/) has 58
+  [`docs/design/host-interface.md`](docs/design/host-interface.md) has 190 numbered
+  requirements, and 108 of them have a test. An ESS model under [`spec/`](spec/) has 58
   scenarios. All 58 pass on ESS's interpreter. The gate runs them against the engine too, and
   14 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
-  pinned by checksum, both specifications checked, and 51 planted defects that the gate must
+  pinned by checksum, both specifications checked, and 64 planted defects that the gate must
   refuse. Its test steps have a budget of 120 seconds and a test is ended at 60.
 - The test262 runner, `swell-test262`. It reads all 53,801 cases, excludes 8,982 by recorded
   decision and runs the rest in both modes under budgets. It counts them per directory, per
@@ -46,7 +46,7 @@ What exists, measured on 2026-11-22:
   with a committed file on every run.
 - Refusals. A construct the parser does not have yet is refused, and a refusal never counts
   as a pass, also when the script catches its `SyntaxError`. The engine counts its refusals:
-  46,581 of the 85,556 runs meet one.
+  41,572 of the 85,556 runs meet one.
 - The first parts of the engine:
 
   | part | crate |
@@ -63,9 +63,10 @@ The one case of slice 3 that does not pass, `test/built-ins/String/prop-desc.js`
 the pinned test262 harness before the engine's answer is judged;
 [the design, section 12](docs/design/engine.md#12-delivery-order) states it.
 
-Next is slice 6 of nineteen, bindings and iteration: `let` and `const`, template literals,
-arrow functions, destructuring, `Symbol`, iterators and `for`-`of`. It has 4,436 cases, of
-which 100 pass today. The slices are taken in the order the first user, a browser, needs them:
+In work is slice 6 of nineteen, bindings and iteration. `let` and `const`, template literals
+without a tag, arrow functions, default and rest parameters and object destructuring run
+today; array destructuring, `Symbol`, iterators and `for`-`of` are next. Of its 4,436 cases
+1,364 pass. The slices are taken in the order the first user, a browser, needs them:
 6, 5, 7, 10, 4, 9.
 
 ## What swell is

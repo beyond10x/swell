@@ -23,6 +23,14 @@ Every number below comes from the gate, `task check`, on the released commit.
   assignments, `for` heads and `catch`, with shorthand names, renamed targets, nested object
   patterns and defaults; a rest property, a computed name and array patterns are refused by
   name until their stories.
+- test262 after these: `test262 total 53801 8982 7 44812 13575 31236 1`, 13,575 of the 44,812
+  cases that run pass (30.2 %; 12,120 in 0.3.0). The sixth slice passes 1,364 of its 4,436
+  cases (`test262-slice 06 4436 8413 0 0 4436 1364 3072 0`; 100 in 0.3.0).
+  `test262-refused 41572` of the 85,556 runs meet a refusal. One case ends at the memory
+  budget, `test/staging/sm/regress/regress-610026.js`: its source of about 4.19 million empty
+  blocks has a tree that the 512 MiB of the runner do not hold, now that the tree is charged.
+- The host interface: 190 numbered requirements, 108 of them with a test
+  (`host-requirements: 190 requirement(s), 190 line(s): 108 test, 82 pending`).
 
 ### Changed
 
