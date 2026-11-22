@@ -331,6 +331,12 @@ pub enum Instruction {
     LoadCompletion,
     /// `[v] -> []`: stores into the completion value register of a script.
     StoreCompletion,
+
+    // ---- templates ------------------------------------------------------------------------
+    /// `[v] -> [s]`: ToString (`#sec-tostring`) of a substitution of a template literal
+    /// (`#sec-template-literals-runtime-semantics-evaluation`): an object gives ToPrimitive with
+    /// hint string, so its `toString` is asked first.
+    ToString,
 }
 
 impl Instruction {
@@ -435,6 +441,7 @@ impl Instruction {
             | Instruction::EndFinally
             | Instruction::LoadCompletion
             | Instruction::StoreCompletion => None,
+            Instruction::ToString => None,
         }
     }
 

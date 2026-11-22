@@ -240,6 +240,10 @@ impl<'a> Parser<'a> {
             TokenKind::Number(n) => format!("unexpected number {}", n.text),
             TokenKind::String(_) => "unexpected string literal".to_string(),
             TokenKind::RegExp(_) => "unexpected regular expression literal".to_string(),
+            TokenKind::NoSubstitutionTemplate(_)
+            | TokenKind::TemplateHead(_)
+            | TokenKind::TemplateMiddle(_)
+            | TokenKind::TemplateTail(_) => "unexpected template literal".to_string(),
         };
         self.fail_here(message)
     }
@@ -306,6 +310,21 @@ impl<'a> Parser<'a> {
     #[inline(never)]
     fn rescan_regexp(&mut self) -> R<()> {
         match self.lexer.rescan_regexp(&self.tok) {
+            Ok(t) => {
+                self.tok = t;
+                Ok(())
+            }
+            Err(e) => self.fail(e),
+        }
+    }
+
+    /// Lexes the current `}`, the end of a substitution, again as a `TemplateMiddle` or
+    /// `TemplateTail`; a token the parser peeked at after it is dropped, as it was lexed in the
+    /// wrong goal.
+    #[inline(never)]
+    fn rescan_template(&mut self) -> R<()> {
+        self.peeked = None;
+        match self.lexer.rescan_template(&self.tok) {
             Ok(t) => {
                 self.tok = t;
                 Ok(())

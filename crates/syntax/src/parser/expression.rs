@@ -4,12 +4,13 @@
 //! and the comma operator. Slice 2 adds `??` (`#sec-binary-logical-operators`), optional chains
 //! (`#sec-optional-chains`), the logical assignments (`#sec-assignment-operators`), a trailing
 //! comma in `Arguments` (`#sec-left-hand-side-expressions`), and plain methods and shorthand
-//! properties in object literals (`#sec-object-initializer`, `#sec-method-definitions`).
+//! properties in object literals (`#sec-object-initializer`, `#sec-method-definitions`). Slice 6
+//! adds template literals without a tag (`#sec-template-literals`).
 //!
 //! Refused, each with its slice: `**` and `**=` (4), arrow functions, spread elements,
-//! destructuring assignment, computed property names and a `CoverInitializedName` (6), generator
-//! methods (7), `class`, `super`, `new.target` (8), `async` functions and `await` (10),
-//! `import.meta` and dynamic `import` (11).
+//! destructuring assignment, computed property names, a `CoverInitializedName` and a tagged
+//! template (6), generator methods (7), `class`, `super`, `new.target` (8), `async` functions and
+//! `await` (10), `import.meta` and dynamic `import` (11).
 //!
 //! The functions that stay on the Rust stack while the parser recurses (each one an entry of the
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
@@ -20,7 +21,16 @@ use crate::ast::{
     AssignOp, BinaryOp, Expr, ExprId, FunctionId, FunctionKind, LogicalOp, Property, PropertyKey,
     PropertyValue, Span, UnaryOp, UpdateOp,
 };
+use crate::error::SyntaxError;
 use crate::token::{Keyword, Punct, TokenKind};
+
+/// A template string of a template without a tag holds a NotEscapeSequence, whose TV is
+/// undefined (`#sec-static-semantics-template-early-errors`).
+const NOT_ESCAPE_SEQUENCE: &str = "invalid escape sequence in a template literal without a tag";
+
+/// `OptionalChain TemplateLiteral` or `?. TemplateLiteral`
+/// (`#sec-left-hand-side-expressions-static-semantics-early-errors`).
+const TEMPLATE_AFTER_OPTIONAL_CHAIN: &str = "template literal after an optional chain";
 
 /// An operator of a binary expression waiting for its right operand.
 pub(crate) struct Pending {
@@ -52,6 +62,8 @@ enum Suffix {
     Index,
     /// `?.`
     Optional,
+    /// A template token: a tagged template.
+    Template,
 }
 
 /// What the `PropertyName` of a value property starts.
@@ -440,8 +452,22 @@ impl<'a> Parser<'a> {
             TokenKind::Punct(Punct::Dot) => Suffix::Dot,
             TokenKind::Punct(Punct::LBracket) => Suffix::Index,
             TokenKind::Punct(Punct::QuestionDot) => Suffix::Optional,
+            TokenKind::NoSubstitutionTemplate(_) | TokenKind::TemplateHead(_) => Suffix::Template,
             _ => Suffix::None,
         })
+    }
+
+    /// A template after a member expression, a call or a link of an optional chain: a tagged
+    /// template (`MemberExpression TemplateLiteral`, `CallExpression TemplateLiteral`,
+    /// `#sec-tagged-templates`) is refused; after an optional chain it is an early error
+    /// (`#sec-left-hand-side-expressions-static-semantics-early-errors`), whatever is on the
+    /// line before it: no semicolon is inserted there.
+    #[inline(never)]
+    fn template_after<T>(&mut self, chain: bool) -> R<T> {
+        if chain {
+            return self.fail_here(TEMPLATE_AFTER_OPTIONAL_CHAIN);
+        }
+        self.refuse("tagged template", 6)
     }
 
     /// `LeftHandSideExpression`: a member or `new` expression followed by calls and property
@@ -464,6 +490,7 @@ impl<'a> Parser<'a> {
                     chain = true;
                     self.optional_rest(e, start)?
                 }
+                Suffix::Template => return self.template_after(chain),
             };
         }
         if chain {
@@ -508,6 +535,9 @@ impl<'a> Parser<'a> {
             TokenKind::Punct(Punct::LParen) => Suffix::Call,
             TokenKind::Punct(Punct::LBracket) => Suffix::Index,
             TokenKind::Name(_) | TokenKind::Keyword(_) => Suffix::Dot,
+            TokenKind::NoSubstitutionTemplate(_) | TokenKind::TemplateHead(_) => {
+                return self.template_after(true);
+            }
             _ => return self.unexpected(),
         })
     }
@@ -525,6 +555,7 @@ impl<'a> Parser<'a> {
             e = match self.suffix(false)? {
                 Suffix::Dot => self.dot_rest(e, start)?,
                 Suffix::Index => self.index_rest(e, start, false)?,
+                Suffix::Template => return self.template_after(false),
                 Suffix::None | Suffix::Call | Suffix::Optional => break,
             };
         }
@@ -747,8 +778,66 @@ impl<'a> Parser<'a> {
             TokenKind::Punct(Punct::LBracket) => Parser::array,
             TokenKind::Punct(Punct::LBrace) => Parser::object,
             TokenKind::Punct(Punct::LParen) => Parser::parenthesized,
+            TokenKind::NoSubstitutionTemplate(_) | TokenKind::TemplateHead(_) => Parser::template,
             _ => return self.unexpected(),
         })
+    }
+
+    /// `TemplateLiteral[~Tagged]` (`#sec-template-literals`): its template strings and, after
+    /// each `TemplateHead` and `TemplateMiddle`, an `Expression[+In]` that ends at the `}` the
+    /// lexer reads again as the next template token. Each substitution is one more entry of the
+    /// depth counter than its template, as a parenthesized expression is.
+    fn template(&mut self) -> R<ExprId> {
+        self.enter()?;
+        let start = self.start();
+        let id = self.reserve_expr(Expr::Template {
+            strings: Vec::new(),
+            substitutions: Vec::new(),
+        });
+        while self.template_string(id)? {
+            let e = self.expression(false)?;
+            self.template_substitution(id, e)?;
+        }
+        let id = self.complete_expr(id, start)?;
+        self.leave();
+        Ok(id)
+    }
+
+    /// Appends the template string of the current template token to the template `id` and
+    /// consumes the token; whether a substitution follows it. A NotEscapeSequence is an early
+    /// error of a template without a tag (`#sec-static-semantics-template-early-errors`).
+    #[inline(never)]
+    fn template_string(&mut self, id: ExprId) -> R<bool> {
+        let (string, not_escape, substitution) = match &self.tok.kind {
+            TokenKind::NoSubstitutionTemplate(p) | TokenKind::TemplateTail(p) => {
+                (p.string.clone(), p.not_escape, false)
+            }
+            TokenKind::TemplateHead(p) | TokenKind::TemplateMiddle(p) => {
+                (p.string.clone(), p.not_escape, true)
+            }
+            _ => return self.unexpected(),
+        };
+        if let Some((line, column)) = not_escape {
+            return self.fail(SyntaxError::new(NOT_ESCAPE_SEQUENCE, line, column));
+        }
+        if let Some(Expr::Template { strings, .. }) = self.expr_mut(id) {
+            strings.push(string);
+        }
+        self.advance()?;
+        Ok(substitution)
+    }
+
+    /// The substitution `e` of the template `id`, which the `}` at the current token ends; the
+    /// `}` is lexed again as a `TemplateMiddle` or `TemplateTail`.
+    #[inline(never)]
+    fn template_substitution(&mut self, id: ExprId, e: ExprId) -> R<()> {
+        if !self.is(Punct::RBrace) {
+            return self.unexpected();
+        }
+        if let Some(Expr::Template { substitutions, .. }) = self.expr_mut(id) {
+            substitutions.push(e);
+        }
+        self.rescan_template()
     }
 
     /// A primary expression of one token: `this`, a literal or an identifier reference, which may

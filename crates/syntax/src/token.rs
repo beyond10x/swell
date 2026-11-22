@@ -1,9 +1,10 @@
 //! The tokens of the lexical grammar (`#sec-ecmascript-language-lexical-grammar`) as the lexer
 //! hands them to the parser: an `IdentifierName` that is no `ReservedWord`, a `ReservedWord`
-//! (`#sec-keywords-and-reserved-words`), a `Punctuator` (`#sec-punctuators`) or one of the
-//! literals of `#sec-ecmascript-language-lexical-grammar-literals`.
+//! (`#sec-keywords-and-reserved-words`), a `Punctuator` (`#sec-punctuators`), one of the
+//! literals of `#sec-ecmascript-language-lexical-grammar-literals` or a template token
+//! (`#sec-template-literal-lexical-components`).
 
-use crate::ast::{NumberLiteral, RegExpLiteral, StringLiteral};
+use crate::ast::{NumberLiteral, RegExpLiteral, StringLiteral, TemplateString};
 
 /// A token with its source position: `start` and `end` are code unit offsets, `line` and
 /// `column` count from 1. `newline_before` says whether a `LineTerminator`, or a
@@ -36,6 +37,26 @@ pub(crate) enum TokenKind {
     String(StringLiteral),
     /// Produced only when the parser asks for the `InputElementRegExp` goal.
     RegExp(RegExpLiteral),
+    /// `` `...` `` (`#sec-template-literal-lexical-components`). The parts of a template token
+    /// are boxed, so a token is no larger than before templates: the parser's frames hold
+    /// tokens.
+    NoSubstitutionTemplate(Box<TemplatePart>),
+    /// `` `...${ ``.
+    TemplateHead(Box<TemplatePart>),
+    /// `}...${`, produced only when the parser asks for the `InputElementTemplateTail` goal at
+    /// the `}` that ends a substitution.
+    TemplateMiddle(Box<TemplatePart>),
+    /// `` }...` ``, likewise.
+    TemplateTail(Box<TemplatePart>),
+}
+
+/// The characters of a template token: its TV and TRV, and where its first NotEscapeSequence
+/// starts (line and column of its `\`), if it has one: then its TV is undefined
+/// (`#sec-static-semantics-tv`), which only a tagged template may have.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TemplatePart {
+    pub string: TemplateString,
+    pub not_escape: Option<(u32, u32)>,
 }
 
 /// The `ReservedWord`s but `await` and `yield`, which the grammar allows as identifiers in
