@@ -1,0 +1,2 @@
+test/language/expressions/optional-chaining/early-errors-tail-position-op-template-string-esi.js	let-const,template
+test/language/expressions/optional-chaining/early-errors-tail-position-op-template-string.js	let-const,template

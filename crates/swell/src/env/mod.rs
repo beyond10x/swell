@@ -21,12 +21,18 @@
 //! the records from the LexicalEnvironment outward ([`Agent::resolve_name`]), one step per record
 //! it visits. A declarative record the compiler made for such a scope knows the names of its
 //! slots ([`SlotNames`], a table of the compiled code); a record without names binds no name a
-//! lookup asks for and is passed.
+//! lookup asks for and is passed. That table stays a scan
+//! (`story:property-index-and-dense-elements`): it belongs to the compiled code, which an
+//! Environment Record shares and does not own, and its size is fixed by the source text; each
+//! comparison past the small size of `object/property.rs` (8) is charged as a step, the first
+//! ones being covered by the step the lookup pays for the record, so no lookup does work the
+//! step budget does not see.
 //!
 //! Non-strict eval code adds its `var` and function bindings to the VariableEnvironment of its
 //! caller at run time (`#sec-evaldeclarationinstantiation`, `dynamic_code.rs`), and strict eval
 //! code to a declarative record of its own: a declarative record keeps such bindings by name
-//! beside its slots ([`Added`]), mutable and deletable, and a lookup by name finds them. A
+//! beside its slots ([`Added`]), mutable and deletable, and a lookup by name finds them, through
+//! an index map above the small size as an object's properties are. A
 //! reference that may reach one is looked up by name (decision 3, "Names", item 1).
 //!
 //! Each record's slots are charged to the memory budget when it is made and credited when the
@@ -49,7 +55,7 @@ use crate::heap::collect::{Item, Mark};
 use crate::host::Host;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
-use crate::object::property::Key;
+use crate::object::property::{Key, KeyedList, Room, SMALL};
 use crate::script::Compiled;
 use crate::value::{ObjectRef, Value};
 
@@ -75,8 +81,18 @@ pub(crate) struct SlotNames {
 }
 
 impl SlotNames {
-    /// The slot that binds `key`, and whether the binding is mutable.
-    fn find(&self, key: Key) -> Option<(u32, bool)> {
+    /// The slot that binds `key` and whether the binding is mutable, with the steps the scan
+    /// costs: the table is scanned, and each comparison past the first [`SMALL`] is a step (the
+    /// first ones are covered by the step the lookup pays for the record).
+    fn find(&self, key: Key) -> (Option<(u32, bool)>, u64) {
+        let mut visited = 0usize;
+        let found = self.scan(key, &mut visited);
+        let steps = u64::try_from(visited.saturating_sub(SMALL)).unwrap_or(u64::MAX);
+        (found, steps)
+    }
+
+    /// The scan of [`SlotNames::find`], counting the names it compares in `visited`.
+    fn scan(&self, key: Key, visited: &mut usize) -> Option<(u32, bool)> {
         let code = &self.compiled.code;
         let template = |t: u32| code.functions.get(usize::try_from(t).ok()?);
         let (names, mutable): (&[u32], bool) = match self.table {
@@ -90,10 +106,12 @@ impl SlotNames {
             }
             NameTable::SelfName(t) => {
                 let own = self.compiled.name_keys.get(usize::try_from(t).ok()?)?;
+                *visited = 1;
                 return (*own == key).then_some((0, false));
             }
         };
         let position = names.iter().position(|&name| {
+            *visited += 1;
             usize::try_from(name)
                 .ok()
                 .and_then(|name| self.compiled.keys.get(name))
@@ -105,25 +123,29 @@ impl SlotNames {
 
 /// The bindings eval code added to a declarative record at run time
 /// (`#sec-evaldeclarationinstantiation`, steps 17 and 18: CreateMutableBinding(name, true) and
-/// InitializeBinding), each mutable and deletable, in the order they were made. Their growth is
-/// charged to the memory budget as it is made; the drop queues the bytes for the agent to
-/// credit after the sweep that frees the record, as an object's property map does.
+/// InitializeBinding), each mutable and deletable, in the order they were made: a
+/// [`KeyedList`], found through an index map above the small size as an object's properties are
+/// (`object/property.rs`), so that a script that adds bindings without end does not make each
+/// lookup longer. Their growth is charged to the memory budget before it is made; the drop
+/// queues the bytes for the agent to credit after the sweep that frees the record, as an
+/// object's property map does.
 #[derive(Default)]
 pub(crate) struct Added {
-    bindings: Vec<(Key, Value)>,
+    bindings: KeyedList<Value>,
     bytes: u64,
     queue: Option<Rc<Cell<u64>>>,
 }
 
 impl Added {
-    /// The index of the binding of `key`.
+    /// The position of the binding of `key`.
     fn find(&self, key: Key) -> Option<usize> {
-        self.bindings.iter().position(|(name, _)| *name == key)
+        self.bindings.position(key)
     }
 
-    /// The bytes one more binding takes.
-    fn entry_bytes() -> u64 {
-        u64::try_from(size_of::<(Key, Value)>()).unwrap_or(u64::MAX)
+    /// The entries lookups visited so far.
+    #[cfg(test)]
+    pub(crate) fn visited(&self) -> u64 {
+        self.bindings.visited()
     }
 }
 
@@ -170,7 +192,7 @@ impl EnvironmentRecord {
         for &value in &self.slots {
             mark.value(value);
         }
-        for (key, value) in &self.added.bindings {
+        for (key, value) in self.added.bindings.iter() {
             key.trace(mark);
             mark.value(*value);
         }
@@ -368,19 +390,22 @@ impl<H: Host> Agent<H> {
                     NameReference::Unresolvable
                 });
             };
-            let (outer, object, found) = {
+            let (outer, object, found, steps) = {
                 let record = self.environment(handle)?;
+                let (named, steps) = record
+                    .names
+                    .as_ref()
+                    .map_or((None, 0), |names| names.find(key));
                 (
                     record.outer,
                     record.binding_object,
-                    record
-                        .names
-                        .as_ref()
-                        .and_then(|names| names.find(key))
-                        .is_some()
-                        || record.added.find(key).is_some(),
+                    named.is_some() || record.added.find(key).is_some(),
+                    steps,
                 )
             };
+            if steps > 0 {
+                self.charge_steps(steps)?;
+            }
             if let Some(object) = object {
                 if self.with_has_binding(object, key)? {
                     return Ok(NameReference::Object(object));
@@ -396,10 +421,18 @@ impl<H: Host> Agent<H> {
     /// added; `None` when it binds no such name (an added binding a `delete` removed).
     fn bound(&mut self, env: Handle, key: Key) -> Completion<Option<Bound>> {
         let record = self.environment(env)?;
-        if let Some((slot, mutable)) = record.names.as_ref().and_then(|names| names.find(key)) {
-            return Ok(Some(Bound::Slot(slot, mutable)));
+        let (named, steps) = record
+            .names
+            .as_ref()
+            .map_or((None, 0), |names| names.find(key));
+        let bound = match named {
+            Some((slot, mutable)) => Some(Bound::Slot(slot, mutable)),
+            None => record.added.find(key).map(Bound::Added),
+        };
+        if steps > 0 {
+            self.charge_steps(steps)?;
         }
-        Ok(record.added.find(key).map(Bound::Added))
+        Ok(bound)
     }
 
     /// HasBinding of the declarative record `env`
@@ -416,45 +449,39 @@ impl<H: Host> Agent<H> {
     /// (decision 3, "Names", item 5); over the budget the run ends in
     /// `Terminated(MemoryBudget)`.
     pub(crate) fn add_binding(&mut self, env: Handle, key: Key, value: Value) -> Completion<()> {
-        let (full, capacity) = {
-            let added = &self.environment(env)?.added.bindings;
-            (added.len() == added.capacity(), added.capacity())
-        };
-        if full {
-            let wanted = capacity.saturating_mul(2).max(4);
-            let more = u64::try_from(wanted.saturating_sub(capacity)).unwrap_or(u64::MAX);
-            let bytes = more.saturating_mul(Added::entry_bytes());
-            if self.heap.accounting.charge(bytes).is_err() {
-                return Err(self.terminate(Termination::MemoryBudget));
-            }
-            let queue = Rc::clone(&self.credit);
-            let reserved = match self.heap.environments.get_mut(env) {
-                Ok(record) => {
-                    let added = &mut record.added;
-                    let additional = wanted.saturating_sub(added.bindings.len());
-                    let reserved = added.bindings.try_reserve_exact(additional).is_ok();
-                    if reserved {
-                        added.bytes = added.bytes.saturating_add(bytes);
-                        if added.queue.is_none() {
-                            added.queue = Some(queue);
-                        }
-                    }
-                    reserved
-                }
-                Err(_) => false,
-            };
-            if !reserved {
-                self.heap.accounting.credit(bytes);
-                return Err(self.terminate(Termination::MemoryBudget));
-            }
-        }
-        match self.heap.environments.get_mut(env) {
+        let queue = Rc::clone(&self.credit);
+        let hasher = self.heap.hasher;
+        let mut room = Room::default();
+        let made = match self.heap.environments.get_mut(env) {
             Ok(record) => {
-                record.added.bindings.push((key, value));
-                Ok(())
+                let added = &mut record.added;
+                let made = added
+                    .bindings
+                    .make_room(&mut self.heap.accounting, &hasher, &mut room);
+                if room.bytes > 0 {
+                    added.bytes = added.bytes.saturating_add(room.bytes);
+                    if added.queue.is_none() {
+                        added.queue = Some(queue);
+                    }
+                }
+                made
             }
-            Err(_) => Err(self.fault()),
+            Err(_) => return Err(self.fault()),
+        };
+        if made.is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
         }
+        if room.visited > 0 {
+            self.charge_steps(room.visited)?;
+        }
+        let pushed = match self.heap.environments.get_mut(env) {
+            Ok(record) => record.added.bindings.push(key, value),
+            Err(_) => return Err(self.fault()),
+        };
+        if pushed.is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        Ok(())
     }
 
     /// SetMutableBinding(`key`, `value`, false) of a binding the declarative record `env` has
@@ -476,8 +503,8 @@ impl<H: Host> Agent<H> {
 
     /// The value of the binding eval code added to `env` at `index`.
     fn added_value(&mut self, env: Handle, index: usize) -> Completion<Value> {
-        match self.environment(env)?.added.bindings.get(index) {
-            Some(&(_, value)) => Ok(value),
+        match self.environment(env)?.added.bindings.at(index) {
+            Some(&value) => Ok(value),
             None => Err(self.fault()),
         }
     }
@@ -489,8 +516,8 @@ impl<H: Host> Agent<H> {
             .environments
             .get_mut(env)
             .ok()
-            .and_then(|record| record.added.bindings.get_mut(index))
-            .map(|binding| binding.1 = value);
+            .and_then(|record| record.added.bindings.at_mut(index))
+            .map(|binding| *binding = value);
         match stored {
             Some(()) => Ok(()),
             None => Err(self.fault()),
@@ -577,14 +604,13 @@ impl<H: Host> Agent<H> {
             NameReference::Global => self.global_delete_binding(realm, key),
             NameReference::Declarative(env) => match self.bound(env, key)? {
                 Some(Bound::Slot(..)) => Ok(false),
-                Some(Bound::Added(index)) => {
+                Some(Bound::Added(_)) => {
                     let removed = self
                         .heap
                         .environments
                         .get_mut(env)
                         .ok()
-                        .filter(|record| index < record.added.bindings.len())
-                        .map(|record| record.added.bindings.remove(index));
+                        .and_then(|record| record.added.bindings.remove(key));
                     match removed {
                         Some(_) => Ok(true),
                         None => Err(self.fault()),
@@ -608,5 +634,72 @@ impl<H: Host> Agent<H> {
                 .unwrap_or_default(),
             Key::Symbol(_) => String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NameReference;
+    use crate::host::hooks::test_host::{agent_with_realm, enter};
+    use crate::host::outcome::{Abrupt, Termination};
+    use crate::object::property::{Key, SMALL};
+    use crate::value::Value;
+
+    fn number(i: u32) -> Value {
+        Value::Number(f64::from(i))
+    }
+
+    /// EvalDeclarationInstantiation (`#sec-evaldeclarationinstantiation`, steps 17 and 18) and
+    /// DeleteBinding (`#sec-declarative-environment-records-deletebinding-n`): 100 bindings
+    /// added to a declarative record, past the small size, are each found visiting one entry
+    /// of the map; a deleted one is found no more and the others still are. The growth of the
+    /// bindings and of their map is charged before it is made: over the budget it is refused
+    /// with nothing charged.
+    #[test]
+    fn added_bindings_are_found_through_the_map_and_charged() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        let realm_handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let env = agent.new_environment(None, 0, None).unwrap();
+        let reference = NameReference::Declarative(env);
+        for i in 0..100 {
+            assert_eq!(agent.add_binding(env, Key::Index(i), number(i)), Ok(()));
+        }
+        let visited = |agent: &mut crate::host::agent::Agent<_>| {
+            agent.environment(env).unwrap().added.visited()
+        };
+        let before = visited(&mut agent);
+        for i in 0..100 {
+            assert_eq!(
+                agent.name_value(reference, realm_handle, Key::Index(i), false),
+                Ok(Some(number(i)))
+            );
+        }
+        assert_eq!(visited(&mut agent) - before, 100);
+        assert_eq!(
+            agent.delete_name(reference, realm_handle, Key::Index(5)),
+            Ok(true)
+        );
+        assert_eq!(agent.declarative_has_binding(env, Key::Index(5)), Ok(false));
+        assert_eq!(
+            agent.name_value(reference, realm_handle, Key::Index(6), false),
+            Ok(Some(number(6)))
+        );
+
+        let small = agent.new_environment(None, 0, None).unwrap();
+        for i in 0..SMALL as u32 {
+            assert_eq!(agent.add_binding(small, Key::Index(i), number(i)), Ok(()));
+        }
+        let bytes = agent.heap.bytes();
+        agent.heap.accounting.set_limit(bytes);
+        assert_eq!(
+            agent.add_binding(small, Key::Index(99), Value::Null),
+            Err(Abrupt::Terminated(Termination::MemoryBudget))
+        );
+        assert_eq!(agent.heap.bytes(), bytes);
+        assert_eq!(
+            agent.declarative_has_binding(small, Key::Index(99)),
+            Ok(false)
+        );
     }
 }

@@ -541,6 +541,14 @@ pub struct FunctionTemplate {
     /// The source position of each instruction.
     pub positions: Vec<Span>,
     pub handlers: Vec<Handler>,
+    /// The span of the function's source text, in code units of the source the parser read:
+    /// "the source text matched by" its FunctionDeclaration, FunctionExpression or
+    /// MethodDefinition (`#sec-runtime-semantics-instantiateordinaryfunctionobject`,
+    /// `#sec-runtime-semantics-definemethod`), from its first token (`function`; `get` or `set`
+    /// of an accessor; the property name of a plain method) to its closing brace. An engine that
+    /// keeps the source with the code reads the function's [[SourceText]] out of it
+    /// (`#sec-function.prototype.tostring`).
+    pub source_text: Span,
 }
 
 /// The compiled script: its own code and every function template in it.

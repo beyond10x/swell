@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-22T01:15:00Z",
+  "actor": "human:operator",
+  "artifact": "story:global-this-uri-functions-and-is-error",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator re-run on impl/global-this-uri-functions-and-is-error: cargo test -p swell --lib and the binaries builtins_global_this (4), builtins_uri (26), builtins_error_is_error (2), language, source_scan, each in both collection modes; clippy; run lines against main: 256 runs of slice 3 gained, none lost"
+  }
+}

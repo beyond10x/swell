@@ -664,3 +664,39 @@ fn direct_eval_looks_up_by_name_what_eval_code_may_shadow() {
     assert_eq!(code.var_names.len(), 1);
     assert_eq!(code.function_declarations, [0]);
 }
+
+/// Each template carries the span of its function's source text, the [[SourceText]] that
+/// OrdinaryFunctionCreate gives the function object
+/// (`#sec-runtime-semantics-instantiateordinaryfunctionobject`,
+/// `#sec-runtime-semantics-definemethod`): the span the parser gave the function, from its first
+/// token to its closing brace, in code units of the source; in eval code the same.
+#[test]
+fn templates_carry_the_span_of_their_source_text() {
+    let text = "// lead\nfunction f(a) { return a; } /* x */\n\
+                var o = { get p() { return 1; }, m() {} };\n\
+                var g = function () { /* in */ };";
+    let script = parse(text).unwrap();
+    let code = compile_script(&script).unwrap();
+    let source = units(text);
+    let spans: Vec<_> = script.ast.functions().iter().map(|f| f.span).collect();
+    let carried: Vec<_> = code.functions.iter().map(|f| f.source_text).collect();
+    assert_eq!(carried, spans);
+    let texts: Vec<String> = carried
+        .iter()
+        .map(|span| String::from_utf16(&source[span.start as usize..span.end as usize]).unwrap())
+        .collect();
+    assert_eq!(
+        texts,
+        [
+            "function f(a) { return a; }",
+            "get p() { return 1; }",
+            "m() {}",
+            "function () { /* in */ }",
+        ]
+    );
+
+    let text = " (function h() {});";
+    let code = compile_eval_code(text).unwrap();
+    let span = code.functions[0].source_text;
+    assert_eq!((span.start, span.end), (2, 17));
+}

@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-22T01:50:00Z",
+  "actor": "human:operator",
+  "artifact": "story:string-access-and-search-methods",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator re-run on impl/string-access-and-search-methods adebc23: cargo test -p swell --lib and the binaries builtins_string_access (18 passed), builtins_string, language, limits_scripts, each in both collection modes; clippy; run lines against main: 630 runs of slice 3 gained, 2 cases of slice 6 lost"
+  }
+}

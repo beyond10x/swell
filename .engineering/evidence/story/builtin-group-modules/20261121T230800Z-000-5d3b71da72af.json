@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-21T23:08:00Z",
+  "actor": "human:operator",
+  "artifact": "story:builtin-group-modules",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator re-run on impl/builtin-group-modules e0b4629: cargo test -p swell --lib (51 passed) and 7 test binaries, each in both collection modes; clippy; 85556 test262 run lines equal main"
+  }
+}

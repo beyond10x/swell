@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-22T01:05:00Z",
+  "actor": "human:operator",
+  "artifact": "story:property-index-and-dense-elements",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator re-run on impl/property-index-and-dense-elements 4bce0a1: cargo test -p swell --lib and the binaries property_index, budgets, limits_scripts, eval_stack, determinism, builtins_array, builtins_object, names, each in both collection modes; clippy; 85556 test262 run lines equal main"
+  }
+}

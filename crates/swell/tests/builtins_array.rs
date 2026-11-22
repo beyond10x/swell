@@ -5,10 +5,10 @@
 //! the step budget and `string_length` (`docs/design/host-interface.md`, section 2). No script
 //! runs: the callbacks are host functions. A constructor with its own @@species needs a
 //! well-known symbol, which the host interface does not hand out, so that part of `map` is a
-//! unit test of `builtins/array.rs`. `Array.prototype.toString` (`#sec-array.prototype.tostring`),
-//! which slice 2 takes early (`docs/design/engine.md`, section 12, "A part before its slice"), is
-//! tested with scripts, in sloppy and in strict code. Run also with the feature
-//! `collect-every-safe-point`.
+//! unit test of `builtins/array/mod.rs`. `Array.prototype.toString`
+//! (`#sec-array.prototype.tostring`), which slice 2 takes early (`docs/design/engine.md`,
+//! section 12, "A part before its slice"), is tested with scripts, in sloppy and in strict
+//! code. Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
 mod support;

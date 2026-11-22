@@ -1,0 +1,95 @@
+---
+format: aep.planning-md/3
+id: review-result:slice-03-parallel-safety-round-1
+kind: review-result
+status: active
+title: parallel-safety critic, slice 3 stories, round 1
+relations:
+- reviews: story:builtin-group-modules
+- reviews: story:property-index-and-dense-elements
+- reviews: story:object-integrity-and-prototype-methods
+- reviews: story:object-enumeration-and-copy-methods
+- reviews: story:function-apply-and-source-text
+- reviews: story:global-this-uri-functions-and-is-error
+- reviews: story:json-parse-and-raw-json
+- reviews: story:array-iteration-methods
+- reviews: story:array-search-and-copy-methods
+- reviews: story:array-mutation-and-sort-methods
+- reviews: story:string-access-and-search-methods
+- reviews: story:string-transform-and-compare-methods
+- reviews: story:slice-03-conformance-close
+revision: 1
+---
+needs-revision
+story:builtin-group-modules — its test `every_group_module_installs_and_runs_through_its_constructor` (array, object and string `mod.rs`) pins the own property keys of `Array`, `Array.prototype` and the other constructors to "those of the base, in the same order", so it fails in each of the seven wave-2 stories that adds a builtin, and none may change those files beyond their marks; state the test as "the base keys stay, in order" instead — .engineering/planning/story/builtin-group-modules.md:39
+story:builtin-group-modules — it opens CreateDataPropertyOrThrow for the wave but not Invoke, which `Object.prototype.toLocaleString` and `Array.prototype.toLocaleString` each need; `fn invoke` does not exist in `crates/swell/src` and neither story lists `ops/objects.rs`, so both would add it or each write a private copy (cited needs, absence found by grep) — .engineering/planning/story/builtin-group-modules.md:18, .engineering/planning/story/object-integrity-and-prototype-methods.md:26, .engineering/planning/story/array-search-and-copy-methods.md:28
+story:json-parse-and-raw-json — `JSON.rawJSON` returns a frozen object and its test asserts that, but SetIntegrityLevel and `Object.isFrozen` are written by story:object-integrity-and-prototype-methods with no `depends_on` edge, and `prevent_extensions` in `object/mod.rs` carries `expect(dead_code, reason = "Object.preventExtensions: story:harness-builtins")`, which that story removes and this one's `Writes:` does not list (that this story calls `prevent_extensions` is inferred); name the order or give this story its own freeze and `object/mod.rs` mark — .engineering/planning/story/json-parse-and-raw-json.md:30, .engineering/planning/story/object-integrity-and-prototype-methods.md:20, crates/swell/src/object/mod.rs:282
+story:object-integrity-and-prototype-methods — it and story:json-parse-and-raw-json both write `crates/swell/src/object/ordinary.rs`, and this story may also edit `object/{array,arguments,string}.rs`, but its "Shared with the wave" sentence names only `expected.txt` and the mark lines; say that JSON adds the `OrdinaryData` slot there (cited, both bodies) — .engineering/planning/story/object-integrity-and-prototype-methods.md:31, .engineering/planning/story/json-parse-and-raw-json.md:36
+story:object-integrity-and-prototype-methods — the acceptance regexp reads every run of every slice and its unanchored `is` and `toLocaleString` match `globalThis should be an own property` (story:global-this-uri-functions-and-is-error's, no edge) and `Number/prototype/toLocaleString/prop-desc.js` (slice 4), so `wc -l` cannot reach 0 in this unit's tree; anchor the names to `Object` — .engineering/planning/story/object-integrity-and-prototype-methods.md:35, .out/decompose-slice-03/runs.tsv:38463, .out/decompose-slice-03/runs.tsv:16270
+story:array-mutation-and-sort-methods — the test `a_frozen_receiver_throws_and_keeps_its_elements` needs a frozen array, and `Object.freeze` is story:object-integrity-and-prototype-methods's, built in parallel with no edge; say how the receiver is frozen without it (`Object.defineProperty` or the Rust define API), or add the edge (inferred from the test name and "a frozen receiver") — .engineering/planning/story/array-mutation-and-sort-methods.md:26, .engineering/planning/story/array-mutation-and-sort-methods.md:28
+
+What I read: 13 stories, the epic and the graph (`aep plan artifact show` on each, `graph`, `waves`), plus the code under the `Writes:` lines (`git grep` over `crates/swell/src` and `tests`, `ops`, `object`, `realm`, `crates/syntax/src/error.rs`, `sections.txt`, `requirements.txt`) and the base runs. I checked the acceptance regexps of all ten wave-2 stories against `.out/decompose-slice-03/runs.tsv`.
+
+Surfaces: 13 cited, 0 inferred, 0 unplaced (the three findings that rest on an inferred call path or test say so above). I traced 36 acceptance reads to a producer in the set, and `depends_on` records 33 of them. The three not recorded are the findings on json-parse, object-integrity (`globalThis`) and array-mutation.
+
+Admitted overlaps I judged safe:
+- `expected.txt` is regenerated by the coordinator.
+- The mark lines of `builtins/{array,object,string}/mod.rs` sit on separate lines.
+- `realm/mod.rs` is shared by array-search and string-access, one mark each.
+- `sections.txt` lines 20, 26 and 48 are far apart.
+- `requirements.txt` lines 21, 120 and 155 are far apart.
+- The language-test file names are unique and the directory is globbed.
+- Wave 1 shares no file.
+- `crates/syntax` and `crates/compiler` have one writer.
+- `realm/intrinsics.rs`, `global_object.rs` and `builtin_function.rs` have one writer.
+
+What I could not establish:
+- **Out of my lane (acceptance):** eight stories' acceptance reads `.out/decompose-slice-03/story-*.cases.txt`. `.out` is gitignored and a unit's managed worktree does not contain it. The producer is the decomposer's scratch, outside the set.
+- **Out of my lane (acceptance):** `function-apply-and-source-text`'s "prints 0" check over `apply/` and `toString/` covers `apply/argarray-not-object.js` and two `-realm` cases that are not on its list. Whether they end on a refusal after the work I could not tell.
+- **Unassessed by the CLI:** `aep plan artifact waves` lists all 13 stories as unassessed because no scope is recorded. I judged from the bodies.
+- **Not checked:** whether the Rust frame of the shared builtin dispatch grows with ten stories' arms. Only the post-wave gate shows it.
+
+```findings
+- file: .engineering/planning/story/builtin-group-modules.md
+  line: 39
+  category: parallel-safety
+  severity: blocker
+  verdict: needs-revision
+  origin: introduced
+  message: "the test every_group_module_installs_and_runs_through_its_constructor pins the own keys of Array, Array.prototype and the other constructors to those of the base, so it fails in each of the seven wave-2 stories that adds a builtin, none of which may change those mod.rs files beyond their marks; state the test as the base keys staying in order"
+- file: .engineering/planning/story/builtin-group-modules.md
+  line: 18
+  category: parallel-safety
+  severity: warning
+  verdict: needs-revision
+  origin: introduced
+  message: "the story opens CreateDataPropertyOrThrow for the wave but not Invoke, which Object.prototype.toLocaleString (object-integrity, line 26) and Array.prototype.toLocaleString (array-search, line 28) each need; no fn invoke exists in crates/swell/src and neither lists ops/objects.rs, so both add it or each keeps a private copy"
+- file: .engineering/planning/story/json-parse-and-raw-json.md
+  line: 30
+  category: parallel-safety
+  severity: blocker
+  verdict: needs-revision
+  origin: introduced
+  message: "JSON.rawJSON returns a frozen object and its test asserts it, but SetIntegrityLevel and Object.isFrozen are written by story:object-integrity-and-prototype-methods with no depends_on edge, and prevent_extensions in object/mod.rs carries expect(dead_code, reason = Object.preventExtensions: story:harness-builtins), which that story removes and this one's Writes does not list; that this story would call prevent_extensions is inferred; name the order or give this story its own freeze and the object/mod.rs mark"
+- file: .engineering/planning/story/object-integrity-and-prototype-methods.md
+  line: 31
+  category: parallel-safety
+  severity: warning
+  verdict: needs-revision
+  origin: introduced
+  message: "this story and story:json-parse-and-raw-json both write crates/swell/src/object/ordinary.rs, and this story may also edit object/{array,arguments,string}.rs, but its Shared with the wave sentence names only expected.txt and the mark lines; the JSON body (line 36) admits the file and this one does not"
+- file: .engineering/planning/story/object-integrity-and-prototype-methods.md
+  line: 35
+  category: parallel-safety
+  severity: blocker
+  verdict: needs-revision
+  origin: introduced
+  message: "the acceptance regexp reads every run of every slice and its unanchored is and toLocaleString match globalThis should be an own property (story:global-this-uri-functions-and-is-error's, no edge) and Number/prototype/toLocaleString/prop-desc.js (slice 4), so wc -l cannot print 0 in this unit's tree; anchor the names to Object"
+- file: .engineering/planning/story/array-mutation-and-sort-methods.md
+  line: 28
+  category: parallel-safety
+  severity: warning
+  verdict: needs-revision
+  origin: introduced
+  message: "the test a_frozen_receiver_throws_and_keeps_its_elements needs a frozen array and Object.freeze is story:object-integrity-and-prototype-methods's, built in parallel with no depends_on edge; say how the receiver is frozen without it or add the edge; inferred from the test name and the words a frozen receiver in line 26"
+```

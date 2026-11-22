@@ -1,6 +1,7 @@
 //! The parts the integration tests of `swell` share: a test host that records every hook call,
-//! the limits and seeds the tests use (`host`), and the script helpers of
-//! `story:interpreter-and-script-entry-points` (`script`).
+//! the limits and seeds the tests use (`host`), the script helpers of
+//! `story:interpreter-and-script-entry-points` (`script`), and the helpers of the stack tests
+//! through builtins that call back into script (`stack`, `story:builtin-group-modules`).
 //!
 //! Each test file declares `mod support;` and uses a part of it, so an item one file does not use
 //! is not dead code of the suite.
@@ -8,3 +9,4 @@
 
 pub mod host;
 pub mod script;
+pub mod stack;

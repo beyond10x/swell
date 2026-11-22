@@ -364,6 +364,35 @@ session coordinates; this section is its procedure, taken from how surf is run
   and accept all the drafts for the ECMA engine." So the coordinator moves a draft epic or
   story to `proposed` and `active` itself, once the plan-critic panel's findings on it are
   resolved and its scope is recorded. The panel and the measured acceptance numbers stay.
+- **Planning never holds code back.** On 2026-11-21 no code reached `main` for two hours while
+  the thirteen stories of slice 3 went through two rounds of the panel and three revisions,
+  one after the other; the operator: "You really should get things moving now", "you're not
+  implementing anything". So: a story's unit starts as soon as no blocker finding is open on
+  that story, with the remaining corrections in its brief, while the rest of the set is still
+  revised; a design author starts when the decomposition names the change it needs, not after
+  the panel; and review, design and a gate repair run side by side, not in a row. A unit that
+  starts before its story is on `main` reads the story from a file in its scratch directory.
+- **A red time line under load goes to the forge.** The gate's last line fails when its test
+  steps ran over 120 s of wall time, and it prints the load and the core count the run had.
+  Measured on 2026-11-22: the steps cost 172 to 183 CPU seconds in every run and took 166.9 s
+  at load 24 to 30, 183.0 s at load 32 to 38 and 307.4 s at load 42 to 62, on 2 to 5 cores of
+  the shared pool. The operator, 2026-11-22 05:47 CET, to the question what the gate does
+  then: "A: forge judges". The rule is unchanged. When `gate-time test-steps` is the only red
+  line of a local run and the load it prints is above the core count, the commit is handed
+  to the session that publishes with the line quoted, and the forge's run judges the budget.
+  A forge run over 120 s is a budget defect: it gets a story and is fixed before the next
+  feature, and nothing else of the batch is published until then. Any other red line holds
+  the commit as before.
+- **A merged wave branch is compiled before a unit is based on it.** On 2026-11-22 the twelfth
+  unit of slice 3 was merged on its own report into a branch that had moved since its base:
+  the merge applied without a conflict and the crate did not compile, because two units had
+  each defined `Agent::to_clamped_index`. The unit that closes the slice was opened on that
+  commit, waited for its first full run in the pool and stopped at the compile error. So: after the merge of a unit whose base
+  is not the head of the wave branch, `cargo check --locked --workspace --all-targets` runs
+  on the merged commit in the check tree (one pool job, in the background), and no unit is
+  opened on the branch and nothing is reported as merged and working before it exits 0. The
+  combined test run of the merged branch stays what it was: a later check of several units
+  at once.
 - **Quota is shared with surf's session.** Prefer fewer, longer units to many short ones, and
   keep every unit resumable (a brief file, a worktree, a report form): a sub-agent cut off by a
   rate limit is resumed with its context on the same model, never restarted.

@@ -9,11 +9,18 @@
 //! (`#sec-object.prototype.tostring`); with ToPropertyDescriptor (`#sec-topropertydescriptor`),
 //! FromPropertyDescriptor (`#sec-frompropertydescriptor`), GetOwnPropertyKeys
 //! (`#sec-getownpropertykeys`) and CreateArrayFromList (`#sec-createarrayfromlist`). Written by
-//! `story:harness-builtins`; the other members are slice 3.
+//! `story:harness-builtins`; the other members are slice 3, in the group modules beside this
+//! file (`story:builtin-group-modules`): `integrity.rs`
+//! (`story:object-integrity-and-prototype-methods`) and `enumeration.rs`
+//! (`story:object-enumeration-and-copy-methods`). Their keys follow the keys of this file on
+//! `%Object%` and `%Object.prototype%`, in that order of the groups.
 //!
 //! A value a builtin holds across a step that may run code (a getter, a toString) is kept on
 //! the agent's kept stack, which the root site of `object/builtin_function.rs` reports
 //! (decision 4); a key's atom is kept the same way, since atoms are held weakly.
+
+pub(crate) mod enumeration;
+pub(crate) mod integrity;
 
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
@@ -44,6 +51,10 @@ pub(crate) enum ObjectBuiltin {
     PropertyIsEnumerable,
     /// `Object.prototype.toString ( )` (20.1.3.6).
     ToString,
+    /// A builtin of the group `integrity.rs`.
+    Integrity(integrity::IntegrityBuiltin),
+    /// A builtin of the group `enumeration.rs`.
+    Enumeration(enumeration::EnumerationBuiltin),
 }
 
 /// The argument at `index`, undefined when it is not present (clause 18: "If a built-in
@@ -91,6 +102,31 @@ impl<H: Host> Agent<H> {
                 BuiltinId::Object(id),
             )?;
         }
+        for (object, on_prototype) in [(constructor, false), (making.object_prototype, true)] {
+            self.define_group_methods(
+                making,
+                object,
+                if on_prototype {
+                    integrity::PROTOTYPE_METHODS
+                } else {
+                    integrity::CONSTRUCTOR_METHODS
+                },
+                |id| BuiltinId::Object(ObjectBuiltin::Integrity(id)),
+            )?;
+            self.define_group_methods(
+                making,
+                object,
+                if on_prototype {
+                    enumeration::PROTOTYPE_METHODS
+                } else {
+                    enumeration::CONSTRUCTOR_METHODS
+                },
+                |id| BuiltinId::Object(ObjectBuiltin::Enumeration(id)),
+            )?;
+        }
+        let prototype = making.object_prototype;
+        self.define_symbol_data(making, prototype, &integrity::prototype_symbol_data())?;
+        self.define_symbol_data(making, prototype, &enumeration::prototype_symbol_data())?;
         Ok(constructor)
     }
 
@@ -114,6 +150,12 @@ impl<H: Host> Agent<H> {
             ObjectBuiltin::HasOwnProperty => self.object_has_own_property(this, args),
             ObjectBuiltin::PropertyIsEnumerable => self.object_property_is_enumerable(this, args),
             ObjectBuiltin::ToString => self.object_to_string(this),
+            ObjectBuiltin::Integrity(id) => {
+                self.run_object_integrity_builtin(id, function, this, args, new_target)
+            }
+            ObjectBuiltin::Enumeration(id) => {
+                self.run_object_enumeration_builtin(id, function, this, args, new_target)
+            }
         }
     }
 
@@ -431,8 +473,8 @@ impl<H: Host> Agent<H> {
     }
 
     /// Steps 4 to 14 of `Object.prototype.toString`: the builtinTag of the kinds this slice
-    /// has. No object has [[ParameterMap]], [[DateValue]] or [[RegExpMatcher]] before their
-    /// slices.
+    /// has. No object has [[DateValue]] or [[RegExpMatcher]] before their slices; an ordinary
+    /// object with a slot the steps do not name, and every other kind, is step 14's "Object".
     fn builtin_tag(&mut self, object: ObjectRef) -> Completion<&'static str> {
         // 4, 5. If isArray is true, let builtinTag be "Array".
         if self.is_array(Value::Object(object))? {
@@ -452,7 +494,8 @@ impl<H: Host> Agent<H> {
                 OrdinaryData::Boolean(_) => "Boolean",
                 // 10. [[NumberData]]: "Number".
                 OrdinaryData::Number(_) => "Number",
-                OrdinaryData::Plain | OrdinaryData::ImmutablePrototype => "Object",
+                // 14. Else, let builtinTag be "Object".
+                _ => "Object",
             },
             // 11. [[StringData]]: "String".
             ObjectKind::String(_) => "String",
@@ -464,12 +507,73 @@ impl<H: Host> Agent<H> {
 
 #[cfg(test)]
 mod tests {
+    use super::{ObjectBuiltin, enumeration, integrity};
+    use crate::builtins::group_testing::{GroupMethod, check_group_keys, group_methods};
     use crate::host::agent::Agent;
     use crate::host::hooks::test_host::{NoHooks, agent_with_realm, enter};
+    use crate::object::builtin_function::BuiltinId;
     use crate::object::ordinary::OrdinaryData;
     use crate::object::property::Key;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
+
+    /// The order of keys of `Object` and `Object.prototype` (`story:builtin-group-modules`):
+    /// the keys of the base in the base's order, then the keys of the groups `integrity` and
+    /// `enumeration`, and nothing else, each a method of its group that runs through its
+    /// function object; `Object.prototype` has no Symbol key on the base.
+    #[test]
+    fn every_group_module_installs_and_runs_through_its_constructor() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        let handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let constructor = agent.intrinsic(handle, Intrinsic::Object).unwrap();
+        let prototype = agent.intrinsic(handle, Intrinsic::ObjectPrototype).unwrap();
+        let constructor_groups: Vec<GroupMethod> = [
+            group_methods(integrity::CONSTRUCTOR_METHODS, |i| {
+                BuiltinId::Object(ObjectBuiltin::Integrity(i))
+            }),
+            group_methods(enumeration::CONSTRUCTOR_METHODS, |i| {
+                BuiltinId::Object(ObjectBuiltin::Enumeration(i))
+            }),
+        ]
+        .concat();
+        let prototype_groups: Vec<GroupMethod> = [
+            group_methods(integrity::PROTOTYPE_METHODS, |i| {
+                BuiltinId::Object(ObjectBuiltin::Integrity(i))
+            }),
+            group_methods(enumeration::PROTOTYPE_METHODS, |i| {
+                BuiltinId::Object(ObjectBuiltin::Enumeration(i))
+            }),
+        ]
+        .concat();
+        check_group_keys(
+            &mut agent,
+            constructor,
+            &[
+                "length",
+                "name",
+                "prototype",
+                "defineProperty",
+                "getOwnPropertyDescriptor",
+                "getOwnPropertyNames",
+                "getPrototypeOf",
+            ],
+            &constructor_groups,
+            &[],
+        );
+        check_group_keys(
+            &mut agent,
+            prototype,
+            &[
+                "constructor",
+                "hasOwnProperty",
+                "propertyIsEnumerable",
+                "toString",
+            ],
+            &prototype_groups,
+            &[],
+        );
+    }
 
     /// `#sec-object.prototype.tostring`, steps 15 and 16: an own @@toStringTag that is a String
     /// replaces the builtinTag, of an ordinary object and of an Array; one that is not a String

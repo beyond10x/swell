@@ -2,8 +2,11 @@
 //! with SerializeJSONProperty (`#sec-serializejsonproperty`), QuoteJSONString
 //! (`#sec-quotejsonstring`), UnicodeEscape (`#sec-unicodeescape`), SerializeJSONObject
 //! (`#sec-serializejsonobject`) and SerializeJSONArray (`#sec-serializejsonarray`), and
-//! `JSON[@@toStringTag]` (`#sec-json-%symbol.tostringtag%`). Written by `story:harness-builtins`;
-//! `JSON.parse` is slice 3.
+//! `JSON[@@toStringTag]` (`#sec-json-%symbol.tostringtag%`). Written by `story:harness-builtins`.
+//! `story:json-parse-and-raw-json` completes the clause: `JSON.isRawJSON`, `JSON.parse` and
+//! `JSON.rawJSON` are in `parse.rs`, defined after the keys of the base in the order of their
+//! clauses, and SerializeJSONProperty writes an object with [[IsRawJSON]] as its text (step
+//! 4.a).
 //!
 //! The serialization walks nested values on an explicit stack of frames, one per object or
 //! array being serialized, so a nesting of any depth takes no Rust stack (decision 3, "Depth
@@ -14,6 +17,8 @@
 //! written, so writing as it goes gives the Strings the clauses concatenate. What the walk
 //! holds across code (the wrapper, the property list, each open frame's object and keys) is
 //! on the agent's kept stack (decision 4).
+
+mod parse;
 
 use std::collections::BTreeSet;
 
@@ -34,6 +39,12 @@ use crate::value::{ObjectRef, StringRef, Value};
 pub(crate) enum JsonBuiltin {
     /// `JSON.stringify ( value [ , replacer [ , space ] ] )` (25.5.4).
     Stringify,
+    /// `JSON.isRawJSON ( obj )` (25.5.1).
+    IsRawJson,
+    /// `JSON.parse ( text [ , reviver ] )` (25.5.2).
+    Parse,
+    /// `JSON.rawJSON ( text )` (25.5.3).
+    RawJson,
 }
 
 /// The most code units of a gap (`#sec-json.stringify`, steps 7 and 8).
@@ -110,7 +121,8 @@ fn identity(object: ObjectRef) -> (u32, u32, u32) {
 
 impl<H: Host> Agent<H> {
     /// `%JSON%` (25.5): an ordinary object whose [[Prototype]] is `%Object.prototype%`, with
-    /// `stringify` and @@toStringTag "JSON" (25.5.5).
+    /// `stringify` and @@toStringTag "JSON" (25.5.5), then `isRawJSON`, `parse` and `rawJSON`
+    /// (25.5.1 to 25.5.3).
     pub(crate) fn create_json_object(&mut self, making: Making) -> Completion<ObjectRef> {
         let json =
             self.ordinary_object_create(Some(making.object_prototype), OrdinaryData::Plain)?;
@@ -122,6 +134,13 @@ impl<H: Host> Agent<H> {
             BuiltinId::Json(JsonBuiltin::Stringify),
         )?;
         self.define_to_string_tag(making, json, "JSON")?;
+        for (name, length, id) in [
+            ("isRawJSON", 1, JsonBuiltin::IsRawJson),
+            ("parse", 2, JsonBuiltin::Parse),
+            ("rawJSON", 1, JsonBuiltin::RawJson),
+        ] {
+            self.define_builtin_method(making, json, name, length, BuiltinId::Json(id))?;
+        }
         Ok(json)
     }
 
@@ -152,6 +171,9 @@ impl<H: Host> Agent<H> {
                 self.release(mark);
                 result
             }
+            JsonBuiltin::IsRawJson => self.json_is_raw_json(args),
+            JsonBuiltin::Parse => self.json_parse(args),
+            JsonBuiltin::RawJson => self.json_raw_json(args),
         }
     }
 
@@ -368,11 +390,12 @@ impl<H: Host> Agent<H> {
             let key_value = self.json_key_value(key)?;
             value = self.call_value(replacer, Value::Object(holder), &[key_value, value])?;
         }
-        // 4. If value is an Object: no [[IsRawJSON]] before `JSON.rawJSON`; a Number object
-        // gives ? ToNumber(value), a String object ? ToString(value), a Boolean object its
-        // [[BooleanData]]; no [[BigIntData]] before slice 12.
+        // 4. If value is an Object: an object with [[IsRawJSON]] gives its "rawJSON" (4.a); a
+        // Number object gives ? ToNumber(value), a String object ? ToString(value), a Boolean
+        // object its [[BooleanData]]; no [[BigIntData]] before slice 12.
         if let Value::Object(object) = value {
             enum Wrapped {
+                Raw,
                 Number,
                 String,
                 Boolean(bool),
@@ -380,6 +403,7 @@ impl<H: Host> Agent<H> {
             let wrapped = match &self.engine_object(object)?.kind {
                 ObjectKind::String(_) => Some(Wrapped::String),
                 ObjectKind::Ordinary(ordinary) => match ordinary.data {
+                    OrdinaryData::RawJson => Some(Wrapped::Raw),
                     OrdinaryData::Number(_) => Some(Wrapped::Number),
                     OrdinaryData::Boolean(boolean) => Some(Wrapped::Boolean(boolean)),
                     _ => None,
@@ -387,6 +411,7 @@ impl<H: Host> Agent<H> {
                 _ => None,
             };
             value = match wrapped {
+                Some(Wrapped::Raw) => return self.json_raw_text(object),
                 Some(Wrapped::Number) => Value::Number(self.to_number(value)?),
                 Some(Wrapped::String) => Value::String(self.to_string(value)?),
                 Some(Wrapped::Boolean(boolean)) => Value::Boolean(boolean),
@@ -413,6 +438,16 @@ impl<H: Host> Agent<H> {
             // 12. Return undefined.
             Value::Undefined | Value::Symbol(_) | Value::Object(_) => Serialized::Undefined,
         })
+    }
+
+    /// Step 4.a of SerializeJSONProperty: the text of an object with [[IsRawJSON]], ! Get(value,
+    /// "rawJSON"), which is a String (the property is frozen as `JSON.rawJSON` made it).
+    fn json_raw_text(&mut self, object: ObjectRef) -> Completion<Serialized> {
+        let key = self.name_key("rawJSON")?;
+        match self.get(object, key)? {
+            Value::String(text) => Ok(Serialized::Text(self.string_units(text)?)),
+            _ => Err(self.fault()),
+        }
     }
 
     /// Write a serialized value that is not undefined: its text, its quoted String, or the
@@ -502,8 +537,9 @@ impl<H: Host> Agent<H> {
                 next: 0,
             }
         } else {
-            // SerializeJSONObject, 6. Let K be ? EnumerableOwnProperties(value, key).
-            let keys = self.json_enumerable_own_keys(object)?;
+            // SerializeJSONObject, 6. Let K be ? EnumerableOwnProperties(value, key)
+            // (`ops/objects.rs`): each key kept until the frame's mark is released.
+            let keys = self.enumerable_own_keys(object)?;
             Members::Object {
                 keys: Some(keys),
                 next: 0,
@@ -538,34 +574,6 @@ impl<H: Host> Agent<H> {
             charged,
         });
         Ok(())
-    }
-
-    /// EnumerableOwnProperties (`#sec-enumerableownproperties`) of kind key: the String keys
-    /// of `object` whose own property is enumerable, each kept. A step per key.
-    fn json_enumerable_own_keys(&mut self, object: ObjectRef) -> Completion<Vec<Key>> {
-        // 1. Let ownKeys be ? obj.[[OwnPropertyKeys]]().
-        let own_keys = self.own_property_keys(object)?;
-        let mut keys = Vec::new();
-        if keys.try_reserve(own_keys.len()).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        // 3. For each element key of ownKeys that is a String.
-        for key in own_keys {
-            self.charge_steps(1)?;
-            if matches!(key, Key::Symbol(_)) {
-                continue;
-            }
-            // 3.a.i, ii. Let desc be ? obj.[[GetOwnProperty]](key); keep the key if it is
-            // enumerable.
-            if self
-                .get_own_property(object, key)?
-                .is_some_and(|property| property.enumerable)
-            {
-                self.keep_key(key);
-                keys.push(key);
-            }
-        }
-        Ok(keys)
     }
 
     /// The members of the open frames, the innermost first, until none is open: a step per

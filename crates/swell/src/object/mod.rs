@@ -10,9 +10,12 @@
 //! [[Construct]] have an arm for each function kind, the bound function and ECMAScript function
 //! arms calling into files their own stories fill.
 //!
-//! The growth of an object's property map is charged to the memory budget when it grows and
-//! credited when the object is freed: the record keeps what it was charged in [`Grown`], whose
-//! drop queues the bytes for the agent to credit after the sweep.
+//! The growth of an object's property map (its list and, above the small size, its index map,
+//! `object/property.rs`) and of an Array's dense elements (`object/array.rs`) is charged to the
+//! memory budget before it is made and credited when the object is freed: the record keeps what
+//! it was charged in [`Grown`], whose drop queues the bytes for the agent to credit after the
+//! sweep. `story:property-index-and-dense-elements` added the map, the dense elements and the
+//! Array arms of [[GetOwnProperty]], [[Delete]] and [[OwnPropertyKeys]].
 
 pub(crate) mod arguments;
 pub(crate) mod array;
@@ -37,7 +40,7 @@ use bound_function::BoundFunction;
 use builtin_function::BuiltinFunction;
 use ecmascript_function::EcmascriptFunction;
 use ordinary::Ordinary;
-use property::{Descriptor, Key, Properties, Property};
+use property::{Descriptor, Key, Properties, Property, Room};
 use string::StringObject;
 
 /// The bytes an object's property map was charged as it grew, credited when the record is
@@ -204,46 +207,53 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// Add a property `object` does not have, growing its map first when it is full. The growth
-    /// is charged before it is made; over the budget the run ends in
-    /// `Terminated(MemoryBudget)`.
+    /// Add a property `object` does not have, making room in its list first
+    /// (`KeyedList::make_room`): the growth of the list and of its index map is charged before
+    /// it is made and recorded in [`Grown`]; over the budget the run ends in
+    /// `Terminated(MemoryBudget)`. A compaction of the list charges a step per entry it visits.
     pub(crate) fn add_property(
         &mut self,
         object: ObjectRef,
         key: Key,
         property: Property,
     ) -> Completion<()> {
-        let (full, capacity) = {
-            let record = self.engine_object(object)?;
-            (record.properties.is_full(), record.properties.capacity())
-        };
-        if full {
-            let wanted = capacity.saturating_mul(2).max(4);
-            let added = u64::try_from(wanted.saturating_sub(capacity)).unwrap_or(u64::MAX);
-            let bytes = added.saturating_mul(Properties::entry_bytes());
-            if self.heap.accounting.charge(bytes).is_err() {
-                return Err(self.terminate(Termination::MemoryBudget));
-            }
-            let queue = Rc::clone(&self.credit);
-            let reserved = match self.heap.objects.get_mut(object.handle) {
-                Ok(record) => {
-                    let additional = wanted.saturating_sub(record.properties.len());
-                    let reserved = record.properties.reserve(additional).is_ok();
-                    if reserved {
-                        record.grown.add(bytes, &queue);
-                    }
-                    reserved
+        let queue = Rc::clone(&self.credit);
+        let hasher = self.heap.hasher;
+        let mut room = Room::default();
+        let made = match self.heap.objects.get_mut(object.handle) {
+            Ok(record) => {
+                let made =
+                    record
+                        .properties
+                        .make_room(&mut self.heap.accounting, &hasher, &mut room);
+                if room.bytes > 0 {
+                    record.grown.add(room.bytes, &queue);
                 }
-                Err(_) => false,
-            };
-            if !reserved {
-                self.heap.accounting.credit(bytes);
-                return Err(self.terminate(Termination::MemoryBudget));
+                made
             }
+            Err(_) => return Err(self.fault()),
+        };
+        if made.is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
         }
-        self.engine_object_mut(object)?
+        if room.visited > 0 {
+            self.charge_steps(room.visited)?;
+        }
+        let pushed = self
+            .engine_object_mut(object)?
             .properties
             .push(key, property);
+        if pushed.is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        Ok(())
+    }
+
+    /// Record `bytes` charged for storage `object` owns beside its list (the dense elements of
+    /// an Array), to be credited when it is freed.
+    pub(crate) fn record_grown(&mut self, object: ObjectRef, bytes: u64) -> Completion<()> {
+        let queue = Rc::clone(&self.credit);
+        self.engine_object_mut(object)?.grown.add(bytes, &queue);
         Ok(())
     }
 
@@ -254,10 +264,6 @@ impl<H: Host> Agent<H> {
 
     /// [[SetPrototypeOf]]: SetImmutablePrototype for `%Object.prototype%` (10.4.7.1,
     /// `#sec-immutable-prototype-exotic-objects-setprototypeof-v`), ordinary for the others.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Object.setPrototypeOf: story:harness-builtins")
-    )]
     pub(crate) fn set_prototype_of(
         &mut self,
         object: ObjectRef,
@@ -277,22 +283,20 @@ impl<H: Host> Agent<H> {
     }
 
     /// [[PreventExtensions]].
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Object.preventExtensions: story:harness-builtins")
-    )]
     pub(crate) fn prevent_extensions(&mut self, object: ObjectRef) -> Completion<bool> {
         self.ordinary_prevent_extensions(object)
     }
 
     /// [[GetOwnProperty]]: the String (10.4.3.1) and arguments (10.4.4.1) exotic methods,
-    /// ordinary for the others.
+    /// OrdinaryGetOwnProperty over both storages of an Array (`object/array.rs`), ordinary for
+    /// the others.
     pub(crate) fn get_own_property(
         &mut self,
         object: ObjectRef,
         key: Key,
     ) -> Completion<Option<Property>> {
         match self.kind_of(object)? {
+            KindTag::Array => self.array_get_own_property(object, key),
             KindTag::String => self.string_get_own_property_method(object, key),
             KindTag::Arguments => self.arguments_get_own_property(object, key),
             _ => self.ordinary_get_own_property(object, key),
@@ -343,21 +347,24 @@ impl<H: Host> Agent<H> {
         self.ordinary_set(object, key, value, receiver)
     }
 
-    /// [[Delete]]: the arguments exotic method (10.4.4.5), ordinary for the others.
+    /// [[Delete]]: the arguments exotic method (10.4.4.5), OrdinaryDelete over both storages of
+    /// an Array, ordinary for the others.
     pub(crate) fn internal_delete(&mut self, object: ObjectRef, key: Key) -> Completion<bool> {
-        if self.kind_of(object)? == KindTag::Arguments {
-            return self.arguments_delete(object, key);
+        match self.kind_of(object)? {
+            KindTag::Arguments => self.arguments_delete(object, key),
+            KindTag::Array => self.array_delete(object, key),
+            _ => self.ordinary_delete(object, key),
         }
-        self.ordinary_delete(object, key)
     }
 
-    /// [[OwnPropertyKeys]]: the String exotic method (10.4.3.3) for String objects, ordinary for
-    /// the others.
+    /// [[OwnPropertyKeys]]: the String exotic method (10.4.3.3) for String objects,
+    /// OrdinaryOwnPropertyKeys over both storages of an Array, ordinary for the others.
     pub(crate) fn own_property_keys(&mut self, object: ObjectRef) -> Completion<Vec<Key>> {
-        if self.kind_of(object)? == KindTag::String {
-            return self.string_own_property_keys(object);
+        match self.kind_of(object)? {
+            KindTag::String => self.string_own_property_keys(object),
+            KindTag::Array => self.array_own_property_keys(object),
+            _ => self.ordinary_own_property_keys(object),
         }
-        self.ordinary_own_property_keys(object)
     }
 
     /// [[Call]] of a function object. The caller has checked IsCallable.

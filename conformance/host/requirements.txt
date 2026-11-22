@@ -162,3 +162,4 @@ HOST-161 test swell::lib::realm::tests::host_161_the_entry_names_the_current_rea
 HOST-162 test swell::eval::host_162_a_stale_or_foreign_handle_from_either_hook_faults_the_agent
 HOST-163 test swell::eval_stack::host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting
 HOST-164 test swell::eval::host_164_refusals_counts_every_refusal_caught_or_not
+HOST-165 pending slice 3

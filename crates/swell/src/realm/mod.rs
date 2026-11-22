@@ -27,7 +27,8 @@ use crate::object::ordinary::OrdinaryData;
 use crate::value::{ObjectRef, Realm, RealmRef, SymbolRef, Value};
 use intrinsics::{Intrinsic, Intrinsics};
 
-/// The well-known symbols of this part (`#sec-well-known-symbols`, Table 1).
+/// The well-known symbols of this part (`#sec-well-known-symbols`, Table 1): seven of its
+/// thirteen; `Symbol` and the others come with slice 6.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WellKnown {
     pub(crate) has_instance: SymbolRef,
@@ -37,16 +38,25 @@ pub(crate) struct WellKnown {
     /// @@unscopables, which HasBinding of the Object Environment Record of a `with` statement
     /// reads (`#sec-object-environment-records-hasbinding-n`).
     pub(crate) unscopables: SymbolRef,
+    /// @@isConcatSpreadable, which IsConcatSpreadable reads for `Array.prototype.concat`
+    /// (`#sec-isconcatspreadable`). No script obtains it before `Symbol` (slice 6).
+    pub(crate) is_concat_spreadable: SymbolRef,
+    /// @@match, which IsRegExp reads for `includes`, `startsWith` and `endsWith` of
+    /// `String.prototype` (`#sec-isregexp`). No script obtains it before `Symbol` (slice 6).
+    pub(crate) r#match: SymbolRef,
 }
 
 impl WellKnown {
-    fn all(&self) -> [SymbolRef; 5] {
+    /// Every symbol, in the order they are made; the tracer reads each.
+    fn all(&self) -> [SymbolRef; 7] {
         [
             self.has_instance,
             self.to_primitive,
             self.to_string_tag,
             self.species,
             self.unscopables,
+            self.is_concat_spreadable,
+            self.r#match,
         ]
     }
 }
@@ -214,6 +224,8 @@ impl<H: Host> Agent<H> {
             "Symbol.toStringTag",
             "Symbol.species",
             "Symbol.unscopables",
+            "Symbol.isConcatSpreadable",
+            "Symbol.match",
         ] {
             let description = self.new_string_str(description)?;
             match self.heap.new_symbol(Some(description)) {
@@ -227,6 +239,8 @@ impl<H: Host> Agent<H> {
             to_string_tag,
             species,
             unscopables,
+            is_concat_spreadable,
+            r#match,
         ] = made.as_slice()
         else {
             return Err(self.fault());
@@ -237,6 +251,8 @@ impl<H: Host> Agent<H> {
             to_string_tag,
             species,
             unscopables,
+            is_concat_spreadable,
+            r#match,
         };
         self.symbols = Some(symbols);
         Ok(symbols)
@@ -392,6 +408,49 @@ mod tests {
         assert!(agent.heap.objects.get(before.handle).is_ok());
         assert_eq!(agent.get_prototype_of(global), Ok(Some(before)));
         assert_eq!(agent.kind_of(before), Ok(KindTag::ImmutablePrototype));
+    }
+
+    /// `#sec-well-known-symbols`: %Symbol.isConcatSpreadable% and %Symbol.match%, which
+    /// IsConcatSpreadable (`#sec-isconcatspreadable`) and IsRegExp (`#sec-isregexp`) read, are
+    /// two Symbols with the descriptions of Table 1, distinct from each other and from the
+    /// five others; "shared by all realms", so two realms of one agent hold the same ones; a
+    /// realm keeps them alive across a collection, and they are the same after it.
+    #[test]
+    fn is_concat_spreadable_and_match_are_well_known_in_every_realm() {
+        let (mut agent, a) = agent_with_realm();
+        let b = crate::host::hooks::test_host::new_realm(&mut agent);
+        let symbols_of = |agent: &mut Agent<NoHooks>, realm: &Realm| {
+            let handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+            agent.realm_record(handle).unwrap().symbols.unwrap()
+        };
+        let symbols = symbols_of(&mut agent, &a);
+        assert_eq!(symbols_of(&mut agent, &b), symbols);
+        assert_eq!(agent.well_known(), Some(symbols));
+        let all = symbols.all();
+        for (index, symbol) in all.iter().enumerate() {
+            for other in all.iter().skip(index + 1) {
+                assert_ne!(symbol, other);
+            }
+        }
+        for (symbol, expected) in [
+            (symbols.is_concat_spreadable, "Symbol.isConcatSpreadable"),
+            (symbols.r#match, "Symbol.match"),
+        ] {
+            assert!(all.contains(&symbol));
+            let description = agent
+                .heap
+                .symbols
+                .get(symbol.handle)
+                .unwrap()
+                .description
+                .unwrap();
+            let units = agent.string_units(description).unwrap();
+            assert_eq!(String::from_utf16_lossy(&units), expected);
+        }
+        drop(b);
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        assert_eq!(symbols_of(&mut agent, &a), symbols);
+        assert_eq!(agent.well_known(), Some(symbols));
     }
 
     /// What HOST-161 reads of realm `a`: ToObject of `true` in `with_cx` of `a`, and the

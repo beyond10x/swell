@@ -1248,19 +1248,6 @@ impl<H: Host> Agent<H> {
         Ok(deleted)
     }
 
-    /// CreateDataPropertyOrThrow (`#sec-createdatapropertyorthrow`).
-    fn create_data_property_or_throw(
-        &mut self,
-        object: ObjectRef,
-        key: Key,
-        value: Value,
-    ) -> Completion<()> {
-        if !self.create_data_property(object, key, value)? {
-            return Err(self.throw_error(ErrorKind::TypeError, "Cannot define the property"));
-        }
-        Ok(())
-    }
-
     /// The Number of ToNumeric of `value`: no BigInt exists before slice 12.
     fn numeric_number(&mut self, value: Value) -> Completion<f64> {
         match self.to_numeric(value)? {

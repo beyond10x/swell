@@ -1164,3 +1164,75 @@ fn regexp_literal_is_lexed_to_its_end() {
         Expr::Binary { .. }
     ));
 }
+
+/// The text of each function's span, in source order; a span outside `source` reads as
+/// `<out of the source>`, which no expectation names.
+fn function_texts(script: &Script, source: &[u16]) -> Vec<String> {
+    script
+        .ast
+        .functions()
+        .iter()
+        .map(
+            |f| match source.get(f.span.start as usize..f.span.end as usize) {
+                Some(units) => String::from_utf16_lossy(units),
+                None => "<out of the source>".to_string(),
+            },
+        )
+        .collect()
+}
+
+/// The span of a function is its source text, "the source text matched by" the
+/// FunctionDeclaration, FunctionExpression or MethodDefinition
+/// (`#sec-runtime-semantics-instantiateordinaryfunctionobject`,
+/// `#sec-runtime-semantics-instantiateordinaryfunctionexpression`,
+/// `#sec-runtime-semantics-definemethod`, `#sec-runtime-semantics-methoddefinitionevaluation`):
+/// from its first token (`function`; `get` or `set` of an accessor; the property name of a plain
+/// method) to its closing brace. A comment before or after it is outside; a comment and a line
+/// end inside are kept. Through `parse_dynamic_function` the span is the whole text of the third
+/// parse (`#sec-createdynamicfunction`), and a function in its body is placed in that text.
+#[test]
+fn function_spans_are_their_source_text() {
+    let text = "/* a */ function d(a, /* in */ b) {\n  return a; // end\n} /* b */\n\
+                var e = /* c */ function (x) { return x; } /* d */;\n\
+                var o = { /* e */ get p() { return 1; } /* f */, /* g */ set p(v) {} /* h */,\n\
+                /* i */ m(a) { return function () {}; } /* j */, \"q r\"() {} };";
+    let source = units(text);
+    let script = parse_units(&source, LIMIT).unwrap();
+    let kinds: Vec<FunctionKind> = script.ast.functions().iter().map(|f| f.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            FunctionKind::Declaration,
+            FunctionKind::Expression,
+            FunctionKind::Getter,
+            FunctionKind::Setter,
+            FunctionKind::Method,
+            FunctionKind::Expression,
+            FunctionKind::Method,
+        ]
+    );
+    assert_eq!(
+        function_texts(&script, &source),
+        vec![
+            "function d(a, /* in */ b) {\n  return a; // end\n}",
+            "function (x) { return x; }",
+            "get p() { return 1; }",
+            "set p(v) {}",
+            "m(a) { return function () {}; }",
+            "function () {}",
+            "\"q r\"() {}",
+        ]
+    );
+
+    let options = ParseOptions { max_nesting: LIMIT };
+    let (parameters, body) = (units("a,\nb"), units("return function g() { /* x */ };"));
+    let script = parse_dynamic_function(&parameters, &body, options).unwrap();
+    let whole = units("function anonymous(a,\nb\n) {\nreturn function g() { /* x */ };\n}");
+    assert_eq!(
+        function_texts(&script, &whole),
+        vec![
+            String::from_utf16(&whole).unwrap(),
+            "function g() { /* x */ }".to_string(),
+        ]
+    );
+}

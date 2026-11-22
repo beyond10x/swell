@@ -2,7 +2,8 @@
 //! `String` constructor (`#sec-string-constructor-string-value`) and
 //! `String.prototype.indexOf` (`#sec-string.prototype.indexof`) with StringIndexOf
 //! (`#sec-stringindexof`). No script runs. A Symbol argument needs a well-known symbol, which
-//! the host interface does not hand out, so that case is a unit test of `builtins/string.rs`.
+//! the host interface does not hand out, so that case is a unit test of
+//! `builtins/string/mod.rs`.
 #![cfg(test)]
 
 mod support;

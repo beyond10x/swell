@@ -110,6 +110,115 @@ wait for are in the design since wave 6 of slice 1 (`20c1f35`): the parts taken 
 slice, `Function` in slice 2, name resolution under `with` and direct `eval`, the omission
 rule, `HOST-162` to `HOST-164`.
 
+## Slice 3, `builtins-core`
+
+`epic:slice-03-builtins-core`: `Object`, `Function`, `Array`, `String`, `Error`, `JSON`,
+`globalThis` and the URI functions, and the object model of decision 4 (an index map above a
+small size, dense elements of arrays). Decomposed on 2026-11-21 into thirteen stories
+(accepted, `active`), read by the four plan critics in two rounds
+(`review-result:slice-03-*`: 21 findings in round 1, 3 in round 2, all applied). Measured on
+`main` after slice 2 (`test262-slice 03 7635 15074 0 0 7635 2762 4873 0`): 2,762 of its 7,635
+cases pass. The 4,873 failing cases are on lists the stories read, under
+[`slice-03/`](slice-03/): 4,050 on the ten lists of the builtin stories
+(`story-<key>.cases.txt`), 203 that need the builtin of two stories (`cross-story.tsv`), 620
+that are estimated to need a later slice (`move-estimate.tsv`).
+
+| wave | stories | closes |
+|---|---|---|
+| 1 | `builtin-group-modules`, `property-index-and-dense-elements` | one file per group of builtins, and the operations two stories of wave 2 need, each with its tests; the object model, so that a lookup's time does not grow with the object |
+| 2 | `object-integrity-and-prototype-methods`, `object-enumeration-and-copy-methods`, `function-apply-and-source-text`, `global-this-uri-functions-and-is-error`, `json-parse-and-raw-json`, `array-iteration-methods`, `array-search-and-copy-methods`, `array-mutation-and-sort-methods`, `string-access-and-search-methods`, `string-transform-and-compare-methods` | the builtins, ten units side by side, each writing its group file and its tests |
+| 3 | `slice-03-conformance-close` | the cases that need a later slice move with their evidence; four requirement lines and four `omit` lines; every run of the slice passes |
+
+`aep plan artifact waves` prints four waves for this set: it puts the two stories of wave 1
+one after the other because both record `crates/swell/src/object/mod.rs`. They run side by
+side by decision: each story names its lines of that file. The ten stories of wave 2 share
+mark lines in four files (`ops/objects.rs`, `ops/testing.rs`, `object/mod.rs`,
+`builtins/string/mod.rs`); each story says which, and the recorded scope leaves them out.
+
+Before wave 1, `story:gate-test-steps-within-budget`: the gate's test steps took 284 s on
+`29f674c` (`test` 84 s, `test-collect` 110 s, `test262` 90 s) against a budget of 120 s set on
+2026-11-21. A unit of slice 3 runs the tests of the code it touched and not the gate.
+
+The design changes wave 2 waits for are in the design (`8d5828d`): a String method that needs
+the tables of slice 5 refuses a code unit outside ASCII with a counted refusal (`HOST-165`),
+and a function's source text lives as long as the function and is charged to the memory
+budget.
+
+Decided by the deciding session on 2026-11-21: the seven directories of builtins that need
+iterators or the normalization tables (`Array/from`, `Object/fromEntries`, `Object/groupBy`,
+`Array/prototype/keys`, `values`, `entries`, `String/prototype/normalize`; 79 cases) move
+whole to slices 6 and 5 at the close, the 9 included that pass today on the `TypeError` of the
+missing method. Each of the 9 has its own line of evidence that says it passed at the move,
+`expected.txt` keeps them as passing, and `test262-moves-check` is not loosened for it.
+
+## The order after slice 3
+
+The consumer of swell is the browser surf. A rule of the organization of 2026-11-21 ("Goal
+first") orders the waves by the consumer's first gap. surf's first use of a script engine,
+named by the deciding session: the testharness.js tests of its HTML parser (101 files of
+web-platform-tests at the commit surf pins; none runs today).
+
+Measured on 2026-11-21 with the parser of `main` (`6a43e18`): `resources/testharness.js`,
+`resources/testharnessreport.js`, `html/syntax/parsing/html5lib_url.html` and the three
+scripts it loads. Each script was parsed, the first refused construct rewritten into text
+slice 2 accepts, and parsed again until it was accepted, so every refused construct is
+counted and not only the first.
+
+| slice | refused constructs | what |
+|---|---|---|
+| 6 | 191 | `const` 75, arrow functions 41, `let` 23, template literals 22, `for`-`of` 12, default parameters 9, destructuring 6, rest parameters 2, spread 1 |
+| 5 | 12 | regular expression literals (parsed; evaluating one is refused) |
+| 10 | 3 | one async function and two `await`, all in `testharness.js` |
+| 7, 8, 11 to 19 | 0 | |
+
+`testharnessreport.js` and two of the three loaded scripts are accepted as they are. Builtins
+the scripts name that swell lacks after slice 3, by a count of identifiers (an estimate:
+references, not calls): `Promise` 13 (slice 10), `Math` and `Date` 8 (slice 4), `Map` and
+`Set` 4 (slice 9), `RegExp` 2 (slice 5); no `Symbol`, typed array, `WeakMap`, `Proxy` or
+`Reflect`.
+
+The order that follows: **6, 5, 7, 10, 4, 9**, then the design's order for the rest. Slice 7
+has no use of its own in these scripts and comes before 10 because async functions need its
+suspended frames (the design, section 12). The design's slice table and its counts do not
+change; only the order of delivery does, and it is decided again at each boundary.
+
+How surf takes swell, as the deciding session said on 2026-11-22: as a git dependency on a
+release tag (surf's `epic:scripts-in-a-page`, a draft there). Seven requirements surf needs
+from the host interface come as a list when that epic is accepted; until then nothing of the
+host interface is ordered by surf.
+
+Not measured: the inline and linked scripts of the 101 test files themselves (the listing of
+the repository at that commit was cut off at 61,341 entries), and which paths of the harness
+run. Objects of the DOM and of the host are surf's side.
+
+## Slice 6, `bindings-and-iteration`
+
+`epic:slice-06-bindings-and-iteration`, next after slice 3 by the order above. Decomposed on
+2026-11-22 into fifteen stories in two parts (accepted, `active`), each part read once by the
+four plan critics (`review-result:slice-06-*`: 15 findings on the first five stories, 13 on
+the other ten, all applied; a story without a blocker finding is accepted after one
+revision). Measured on `main` (`6a43e18`): 4,204 cases and 7,952 runs, 94 cases pass. The
+lists the stories read are under [`slice-06/`](slice-06/); about 657 cases need a later
+slice and move at the close (`move-estimate.tsv`).
+
+| order | stories | starts after | lifts of the consumer's 191 constructs |
+|---|---|---|---|
+| 1 | `let-const-and-block-scopes`, `template-literals` (side by side, seven shared files) | `function-apply-and-source-text` of slice 3, which writes the same parser and compiler files | `const` 75, `let` 23; template literals 22 |
+| 2 | `arrow-functions` | 1 | arrow functions 41 |
+| 3 | `default-and-rest-parameters` | 2 | default parameters 9, rest 2 |
+| 4 | `object-destructuring` | 3 | 3 of the 6 patterns |
+| 5 | `computed-names-and-object-spread` | 4 | none |
+| 6 | `block-function-declarations`, `symbol-constructor-and-well-known-symbols` | 5; the Symbol story also after slice 3's close | none |
+| 7 | `iterator-protocol-and-array-string-iterators` | the Symbol story | none |
+| 8 | `for-of-statement`, `symbol-values-in-core-builtins` | 7 and `block-function-declarations` | `for`-`of` 10 of 12 |
+| 9 | `array-destructuring-and-spread`, `array-from-and-object-from-entries` | 8 | the last 2 `for`-`of` heads, array patterns 3, spread 1: both scripts parse with no refusal of slice 6 |
+| 10 | `tagged-templates` | 9 | none |
+| 11 | `slice-06-conformance-close` | 10 and slice 3's close | none |
+
+The chain is long because the stories write the same files of the parser and the compiler;
+each edge says which. The design text they build on is in decisions 3 and 4 (`0458ebd`,
+`aec8a36`).
+
 ## What later slices take over
 
 Findings of delivered waves that belong to a slice not yet decomposed. The decomposition of

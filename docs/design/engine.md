@@ -246,6 +246,13 @@ a case with an excluded feature.
 - `swell-unicode-gen`: a tool that writes `swell-unicode`'s tables from the vendored Unicode
   data. Depends on nothing; never ships.
 
+Seven of the nine exist (corrected on 2026-11-21: the root `Cargo.toml` takes every directory
+under `crates/` as a member, and the root `Cargo.lock` lists seven packages): the five library
+crates `swell-unicode`, `swell-num`, `swell-syntax`, `swell-compiler` and `swell`, and the two
+binary crates `swell-test262` and `swell-unicode-gen`. `swell-regexp` and `swell-cli` are not
+created yet: a crate is created in the first slice that needs any part of it (section 12, "A
+part before its slice"), which for `swell-regexp` is slice 5.
+
 Why: each crate below `swell` holds no heap value and can be tested and fuzzed alone (the parser
 on source text, the matcher on a pattern and a string, the number code on bit patterns), and the
 dependency graph has no cycle. The builtins stay inside `swell` because every one of them reads
@@ -315,7 +322,10 @@ The rule:
    item 2 still use its slot.
 4. A function whose code contains a direct `eval` gets its arguments object whenever
    FunctionDeclarationInstantiation creates one (`sec-functiondeclarationinstantiation`,
-   steps 15 to 22), whether or not its own code names `arguments`.
+   steps 15 to 22), whether or not its own code names `arguments`. A direct `eval` in an arrow
+   function, at any depth of arrows, counts for the nearest enclosing function that is not an
+   arrow: an arrow never has an arguments object (step 16), and the eval code's `arguments`
+   is that function's ("`this` and `arguments` in an arrow function" below).
 5. Budgets. A lookup by name charges one step per Environment Record it visits, so that a read
    through n records spends at least n steps more than a slot read (`last_entry_steps()`);
    the HasProperty and the `@@unscopables` Get of an Object Environment Record are property
@@ -326,6 +336,385 @@ The rule:
 
 The results are the standard's and test262 holds them; which form a reference takes is held by
 the compiler's source tests, whose disassembly shows a slot or a lookup by name.
+
+**Lexical bindings.** Added on 2026-11-22 for slice 6. What a script sees, the standard's:
+
+- A `let` or `const` binding exists from the entry of its scope and is uninitialized until its
+  declaration is evaluated (`let x;` initializes it to `undefined`,
+  `sec-let-and-const-declarations-runtime-semantics-evaluation`). The scopes: a Block
+  (`sec-block-runtime-semantics-evaluation`, BlockDeclarationInstantiation
+  `sec-blockdeclarationinstantiation`); the CaseBlock of a `switch`, one scope for all its
+  clauses, entered after the discriminant (`sec-switch-statement-runtime-semantics-evaluation`);
+  the head of `for (;;)` (`sec-runtime-semantics-forloopevaluation`); the head of a `for`-`in`
+  (and later `for`-`of`), whose expression is evaluated in a scope of its own that binds the
+  head's names uninitialized for good, and whose body gets new bindings each iteration
+  (`sec-runtime-semantics-forinofheadevaluation`, step 2;
+  `sec-runtime-semantics-forinofloopevaluation`); the top level of a function body
+  (`sec-functiondeclarationinstantiation`, steps 31 to 35); the script (the global
+  environment's [[DeclarativeRecord]], below); eval code (below). A `catch` Block is a Block
+  inside the scope of the `catch` parameter.
+- Reading an uninitialized binding, writing it (`=`, a compound or logical assignment, `++`,
+  `--`) and `typeof` of it throw a `ReferenceError`
+  (`sec-declarative-environment-records-getbindingvalue-n-s`, step 2;
+  `sec-declarative-environment-records-setmutablebinding-n-v-s`, step 3;
+  `sec-typeof-operator-runtime-semantics-evaluation`). A write throws when the value is
+  stored, after its right side was evaluated. `delete x` of a lexical binding (non-strict code
+  only) answers `false` and checks nothing (`sec-declarative-environment-records-deletebinding-n`).
+- Every assignment to a `const` binding throws a `TypeError`, in strict and in non-strict code:
+  it is an immutable binding created strict (CreateImmutableBinding(N, true),
+  `sec-declarative-environment-records-createimmutablebinding-n-s`;
+  `sec-declarative-environment-records-setmutablebinding-n-v-s`, steps 2 and 5). The check of
+  step 3 comes first: a write to a `const` before its declaration is the `ReferenceError`.
+- `for (let ...; ...; ...)` gives each iteration a copy of the head's `let` bindings, made
+  before the first test and after each body, before the update
+  (`sec-forbodyevaluation`, `sec-createperiterationenvironment`), so a closure made in the body
+  of one iteration keeps that iteration's value; `const` in that head has one binding.
+- A script's lexical bindings are the global environment's: no property of the global object,
+  seen by name by every later script of the realm. GlobalDeclarationInstantiation
+  (`sec-globaldeclarationinstantiation`) throws a `SyntaxError` before it makes any binding of
+  the script when one of its lexical names is already a lexical binding of the realm or a
+  restricted global property (an own non-configurable property of the global object, such as
+  a `var` of an earlier script or `undefined`, `sec-hasrestrictedglobalproperty`; step 3), or
+  one of its `var` or function names is a lexical binding of the realm (step 4). A lexical
+  name over a configurable property of the global object is allowed and shadows it. A binding
+  whose script threw before its declaration ran stays uninitialized for the realm's life
+  (HOST-156 holds the case of one script evaluated twice).
+- Eval code's lexical bindings live in the declarative record PerformEval makes, direct or
+  indirect, strict or not (`sec-performeval`, steps 17 to 19), and end with the eval code.
+  Non-strict eval code whose `var` or function name is a lexical binding of the global
+  environment, or of a record between the eval's LexicalEnvironment and its
+  VariableEnvironment, throws a `SyntaxError` before it binds anything
+  (`sec-evaldeclarationinstantiation`, step 3); a `catch` parameter's record lets it pass
+  (B.3.4, applied since slice 2).
+
+The mechanism, in the form of "Names":
+
+1. Every scope above but the script's is a scope of the compiler (`resolve.rs`), as a function
+   and a `catch` clause are. A binding of it is a local slot of its function's frame unless a
+   nested function (an arrow included) refers to it or a lookup by name can reach it (item 3
+   of "Names"); such a binding is a slot of a declarative record the code makes at the entry of
+   the scope and leaves on every exit, abrupt ones included (`PopEnv` on a `break`, `continue`
+   or `return` through it, a handler's `envs` on a throw, as for a `catch` clause today). A
+   scope with no such binding makes no record. The top level of a function body is a scope of
+   its own inside the function's scope, never slots of the function environment, so that
+   step 3 of EvalDeclarationInstantiation finds it between the two environments (FDI step 32);
+   for strict code the separation is not observable and is kept anyway.
+2. The uninitialized state is a state of the slot, never a `Value`: a local slot and a slot of
+   a declarative record hold either a `Value` or "uninitialized", in a type of the engine that
+   no host interface and no builtin receives. An instruction that reads or writes a binding
+   that may be uninitialized there is an instruction of its own kind that checks and accesses
+   in one, so the check spends no step beyond the access (one unit per instruction). The
+   compiler leaves the check out only for an access in the same function's code that follows
+   the end of the declaration in the StatementList of the same Block, function body or script,
+   never in a CaseBlock (a jump to a later clause passes over a declaration). Each entry of a
+   scope sets its local slots that are checked anywhere to "uninitialized", and a record's
+   lexical slots start in that state; a declaration's evaluation is InitializeBinding
+   (`sec-declarative-environment-records-initializebinding-n-v`). The names table of a record
+   (`SlotNames`) marks each `const` slot immutable and strict, so that a write through a
+   lookup by name throws the same `TypeError`.
+3. `for (let ...)`: when a `let` binding of the head lives in a record (item 1), each
+   iteration makes a new record of the same table whose record slots are copies of the last
+   one's, CreatePerIterationEnvironment, and makes it the frame's LexicalEnvironment in place
+   of the last; head bindings in local slots are copied by nothing, since without a closure or
+   a lookup by name no code can tell one slot from one per iteration. A `for`-`in` with `let`
+   or `const` makes the record of an iteration under the same rule, and the head expression's
+   scope of uninitialized names under the same rule.
+4. The [[DeclarativeRecord]] of a realm's global environment is a declarative record of the
+   `environments` arena whose bindings are kept by name, each with its state and whether it is
+   `const`, found through a keyed map (decision 4) and never deleted; the caller of CreateRealm
+   makes it once the realm record is stored, and `RealmGlobalEnv` holds and traces it
+   (`env/global.rs`, "What slice 6 adds"). A script's lexical names are therefore global names
+   of its code, not slots: GlobalDeclarationInstantiation creates them uninitialized (step
+   15), the declaration initializes them, and the global name instructions, and a lookup by
+   name that reaches the global environment, ask this record first and the global object only
+   when it has no such binding (`sec-global-environment-records-hasbinding-n` and the other
+   concrete methods). Rejected: slots for them (a later script, compiled apart, finds them by
+   name).
+5. Eval code's lexical declarations are a scope of the eval code under item 1: its record is
+   the one of PerformEval, step 17 or 18, made when one of them lives in a record and left out
+   otherwise (a record with no binding in it changes nothing a script can see). Strict eval
+   code makes that record always, being its VariableEnvironment too (step 19), and its record
+   slots are its lexical bindings beside the `var` bindings it adds by name. Step 3 of
+   EvalDeclarationInstantiation walks the records from the LexicalEnvironment of the call to
+   its VariableEnvironment, passing a `catch` parameter's and a `with` statement's; item 3 of
+   "Names" makes every lexical binding on that way a named slot it can ask.
+6. Budgets. A record of a block, a head, an iteration or eval code is an allocation charged as
+   any record (`new_environment`); a binding of the global [[DeclarativeRecord]] is charged
+   when GlobalDeclarationInstantiation creates it and is credited with the realm. The copy of
+   CreatePerIterationEnvironment charges one step per binding it copies, beside its
+   instruction's. The check of item 2 is no step of its own, nor is the global record's map
+   lookup inside a global name instruction; a lookup by name still charges one step per record
+   it visits, the global environment counting as one. Every check of GlobalDeclarationInstantiation
+   and EvalDeclarationInstantiation is a step, as today.
+
+**`this` and `arguments` in an arrow function.** Added on 2026-11-22 for slice 6. What a script
+sees, the standard's: an arrow function has no `this`, `arguments`, `super` or `new.target` of
+its own; in its parameters and body each means what it means in the code around the arrow
+(`sec-arrow-function-definitions-runtime-semantics-evaluation`,
+`sec-runtime-semantics-instantiatearrowfunctionexpression`). OrdinaryCallBindThis does nothing
+for it (`sec-ordinarycallbindthis`, step 2: [[ThisMode]] lexical), so the `this` argument of
+`call`, `apply` or `bind` is ignored; GetThisEnvironment passes over its function environment
+(`sec-getthisenvironment`), FunctionDeclarationInstantiation makes it no arguments object
+(step 16), and it has no [[Construct]] (`new` throws the `TypeError` of a value that is not a
+constructor) and no `prototype`. A direct `eval` in an arrow sees the same `this` and
+`arguments`; its `var` names go to the arrow's own VariableEnvironment.
+
+The mechanism:
+
+1. `this` is taken when the arrow is made. The closure instruction of an arrow stores the
+   `this` value of the frame that makes it in the function object, which the collector traces;
+   a call of the arrow puts that value in its frame's `this` and runs no OrdinaryCallBindThis.
+   The `This` instruction and the `this` a direct `eval` takes from its caller's frame
+   (`dynamic_code.rs`) stay as they are, so an arrow in an arrow, and eval code in an arrow,
+   get it too. This equals the standard while every function's `this` binding is initialized
+   before its code runs and never changes afterwards (OrdinaryCallBindThis runs before
+   FunctionDeclarationInstantiation; BindThisValue, `sec-bindthisvalue`, throws on a second
+   binding), which holds for every function of slices 6, 7 and 10.
+2. `arguments` resolves outward like any name. The scope analysis counts an arrow's references
+   to `arguments` and its direct `eval` (item 4 of "Names") for the nearest enclosing function
+   that is not an arrow, which then makes its arguments object when FunctionDeclarationInstantiation
+   does; the reference resolves to that function's binding `arguments`, a slot of its
+   function environment, since another function's code uses it. An arrow that has a parameter
+   or a declaration named `arguments` binds that name itself, as any name; at the top of a
+   script the reference is a global name.
+3. Rejected for now: `this` as a binding of the enclosing function's environment, read by the
+   arrow through a slot as a captured name is. It gives every function whose arrows read
+   `this` a function environment per call, an allocation where the copy costs one value per
+   arrow, and before slice 8 no script can tell the two apart: a method that makes an arrow
+   and is called with another `this` through `call`, an arrow kept after its function returned,
+   eval code in an arrow, all give the same value in both. What tells them apart comes with
+   the derived constructors of slice 8, whose `this` is uninitialized until `super()` returns
+   (`sec-super-keyword-runtime-semantics-evaluation`): in `constructor() { const f = () =>
+   this; super(); return f(); }` the call must answer the new object, where a copy made
+   before `super()` has nothing to copy; in `constructor() { const f = () => this; f(); }` it
+   must throw a `ReferenceError`; and in `constructor() { const s = () => super(); s(); }` the
+   `super()` inside the arrow must initialize the constructor's binding, which a copy cannot.
+   Slice 8 therefore changes item 1 for the arrows of a derived constructor only: there `this`
+   becomes a slot of the constructor's function environment, uninitialized until `super()`
+   returns (the state of item 2 of "Lexical bindings"), which those arrows read and a `super()`
+   in one of them initializes, in place of a value copied when the arrow is made.
+
+**A parameter list that is not simple.** Added on 2026-11-22 for slice 6. What a script sees, the
+standard's (`sec-functiondeclarationinstantiation`, steps 19 to 30;
+IsSimpleParameterList and ContainsExpression, `sec-static-semantics-issimpleparameterlist`,
+`sec-static-semantics-containsexpression`): a list with a default, a rest parameter or a
+pattern binds its parameters left to right, each uninitialized until its turn; a default is
+evaluated only when its argument is `undefined` or missing, and may read an earlier parameter,
+while reading the parameter itself or a later one throws the `ReferenceError` of an
+uninitialized binding; a rest parameter is a new Array of the remaining arguments. The
+parameter expressions see `this`, the function's `arguments`, the function's own name and the
+scopes around the function, and none of the body's declarations: a closure made in a default
+reads the parameter of a name, not the body's `var` of that name, which is a binding of its own
+that starts with the parameter's value (step 30). A direct `eval` in a parameter expression of
+non-strict code puts its `var` names in a record outside the parameters (step 20), so that one
+of a parameter's name, or `arguments`, is the `SyntaxError` of EvalDeclarationInstantiation,
+step 3. The function's arguments object is unmapped (step 22, CreateUnmappedArgumentsObject,
+`sec-createunmappedargumentsobject`), also in non-strict code, and none is made when a
+parameter is named `arguments` (step 17) or, in a list without an expression, when the body
+declares a function or a lexical binding of that name (step 18). `length` is
+ExpectedArgumentCount, the parameters before the first default or rest parameter
+(`sec-static-semantics-expectedargumentcount`, `sec-setfunctionlength`).
+
+The mechanism:
+
+1. The function's code binds the parameters, not the call. A call of such a function binds
+   `this`, makes the function environment as today, keeps its argument list in the frame
+   (charged to the memory budget with the frame and traced with its locals), stores the
+   arguments object in its slot when the template asks for one, and starts the code, which
+   initializes each parameter in order from the kept list (IteratorBindingInitialization,
+   `sec-runtime-semantics-iteratorbindinginitialization`, over a list iterator that no script
+   can reach), evaluating a default with NamedEvaluation for an anonymous function. A
+   parameter is a slot by the rules above, uninitialized until its turn (item 2 of "Lexical
+   bindings"). A simple list keeps the call's binding of today.
+2. Scopes. Such a function has a scope for its parameters and `arguments` and, when the list
+   has an expression, a second one for the body's `var` names and function declarations
+   (step 30), each a local slot or a record slot by item 1 of "Lexical bindings", the body's
+   top-level lexical scope inside it. A record of the second scope is pushed by the code once
+   the last parameter is bound, and becomes the frame's VariableEnvironment. When a direct
+   `eval` stands in a parameter expression of non-strict code, the parameters' scope lives in
+   a record pushed inside the function environment, which stays the VariableEnvironment while
+   the parameters are bound (step 20); otherwise the parameters are slots of the function
+   environment or locals, which no code can tell from step 20's two records. For item 1 of
+   "Names", the scope a direct `eval` adds `var` bindings to is the function scope for an
+   `eval` in a parameter expression and the body's `var` scope for one in the body; a
+   reference that crosses it is looked up by name.
+3. Budgets. Binding the parameters is the code's instructions, one step each; the rest Array
+   charges a step per element and its allocation (`create_array_from_list`); the records of
+   item 2 are charged as any record.
+
+**Function declarations in a block.** Added on 2026-11-22 for slice 6. What a script sees, the
+standard's (BlockDeclarationInstantiation, `sec-blockdeclarationinstantiation`): a function
+declared in a Block or in the CaseBlock of a `switch` is a lexical binding of that scope, not a
+`var` of the function, the script or the eval code. Each entry of the scope makes a new function
+object for it, whose [[Environment]] is the scope's environment, and initializes the binding
+before any statement of the scope runs (in a `switch` after the discriminant, before the first
+clause's test): it can be called above its declaration, each iteration of a loop body gets
+another object, and every clause of a `switch` sees the same one. After the scope the name means
+what it meant around it, a `ReferenceError` when nothing binds it. A name bound twice in one
+Block or CaseBlock, by two functions, or by a function and a `let` or `const`, or by a function
+and a `var` declared in it at any depth, is a `SyntaxError` in strict and in non-strict code
+(`sec-block-static-semantics-early-errors`, `sec-switch-statement-static-semantics-early-errors`).
+The evaluation of the declaration does nothing. A function declared at the top level of a function
+body, a script or eval code stays a `var`-scoped declaration, as in slice 1.
+
+Non-strict code until slice 18: as strict code. Annex B, B.3.2
+(`sec-block-level-function-declarations-web-legacy-compatibility-semantics`), which a web browser
+host implements, gives a block function of non-strict code also a `var` binding of the enclosing
+function, script or eval code, assigned when the declaration is evaluated, and lets one block
+declare a function twice; it comes with slice 18, with B.3.3 (a function declaration as the
+clause of an `if`, `sec-functiondeclarations-in-ifstatement-statement-clauses`), which stays
+refused until then. It is a recorded omission: `conformance/test262/sections.txt` gets the section
+`sec-block-level-function-declarations-web-legacy-compatibility-semantics` with the paths
+`test/annexB/language/function-code/`, `test/annexB/language/global-code/` and
+`test/annexB/language/eval-code/`, and the line `omit
+sec-block-level-function-declarations-web-legacy-compatibility-semantics
+var-binding-of-block-functions section-12-slice-18`, written with the block functions and removed
+by slice 18. Why not now (counted on the pinned checkout from the front matter, with no run):
+test262 holds the main body outside `test/annexB/`, where the 12 cases whose `esid` is a clause of
+B.3.2 or B.3.3 are `onlyStrict` (9) or `noStrict` with strict eval code (3), and expect the answer
+of a host without B.3.2; the 776 cases of those clauses are under `test/annexB/`, counted in slice
+18 (`dir test/annexB/ 18`), 480 of them B.3.3's; and B.3.2 changes FunctionDeclarationInstantiation,
+GlobalDeclarationInstantiation and EvalDeclarationInstantiation
+(`sec-web-compat-functiondeclarationinstantiation`, `sec-web-compat-globaldeclarationinstantiation`,
+`sec-web-compat-evaldeclarationinstantiation`), so it would raise no count of slice 6. Not
+measured: whether a case outside `test/annexB/` that runs non-strict reads a block function after
+its block; the run of the slice shows it.
+
+The mechanism, in the terms of "Lexical bindings":
+
+1. A block function is a binding of its Block's or CaseBlock's scope under item 1 of "Lexical
+   bindings": a local slot, or a slot of the scope's record when a nested function refers to it
+   (the function itself, when it calls itself by name) or a lookup by name can reach it. A scope
+   whose only declarations are functions makes a record by the same rule. At the entry of the
+   scope, once its record (if any) is the LexicalEnvironment and before its first statement, the
+   code makes each function object with the closure instruction, in source order, and initializes
+   its binding (InitializeBinding); its [[Environment]] is that LexicalEnvironment, the scope's
+   record or, when the scope makes none, the one around it.
+2. No access to a block function is checked (item 2 of "Lexical bindings"): no code of the scope
+   runs before every one of them is initialized.
+3. In eval code a function of a Block belongs to that Block's scope, never to the record of
+   PerformEval (item 5 of "Lexical bindings"), whose lexical slots are the eval code's top-level
+   lexical declarations only; a top-level function of eval code stays a `var` declaration of
+   EvalDeclarationInstantiation.
+4. What slice 18 adds, so that nothing here is undone: the `var` binding, made by the three
+   instantiations as a `var` is, and at the position of the declaration in its statement list an
+   instruction that copies the block binding's value to it (the Normative Optional steps of the
+   three, "When the FunctionDeclaration funcDecl is evaluated, perform the following steps in
+   place of the FunctionDeclaration Evaluation algorithm"); the duplicate declarations of
+   non-strict code (the Normative Optional steps of BlockDeclarationInstantiation).
+   The block binding stays as it is, and the position of the declaration emits nothing before
+   slice 18. A test that a block function of non-strict code is not visible after its block
+   changes its answer then.
+5. Budgets. Each function object is the closure instruction's allocation and step; a record is
+   charged by item 6 of "Lexical bindings".
+
+**Iterators held by a builtin.** Added on 2026-11-22 for slice 6. What a script sees, the
+standard's: a builtin that iterates (in slice 6 `Array.from`, `Object.fromEntries` and
+`Object.groupBy`) gets an Iterator Record by GetIterator (`sec-getiterator`,
+`sec-getiteratorfrommethod`), the iterator and its `next` method read once (`sec-iterator-records`),
+and steps it by IteratorStepValue (`sec-iteratorstepvalue`). A throw of `next`, of reading `done`
+or `value`, and the `TypeError` of a result that is no object end the builtin with that throw,
+and the iterator is not closed. An abrupt completion of the builtin's own work between two steps
+(a callback or a conversion that throws, a property it cannot define) closes the iterator first
+(IfAbruptCloseIterator, `sec-ifabruptcloseiterator`; IteratorClose, `sec-iteratorclose`): `return`
+is called when it is not undefined, and the first throw is what the builtin throws, whatever
+`return` throws or answers. Every `next` and `return` is a call that may run any code, so an
+iterator that is never done ends at the step budget, and a `next` that iterates again in itself
+ends at a depth bound. A termination closes nothing: no code runs after it, `return` included.
+
+The mechanism:
+
+1. Rust code holds the record as a value of an engine type, `IteratorRecord` ([[Iterator]],
+   [[NextMethod]], [[Done]]; `crates/swell/src/ops/iteration.rs`), handles only. A builtin keeps
+   [[Iterator]] and [[NextMethod]] on the agent's kept stack (`Agent::keep`,
+   `object/builtin_function.rs`, the form that decision 4's "slots of its own frame on the engine
+   stack" takes in the code) from GetIterator until it returns, on every way out, a throw
+   included (`Agent::release` to its mark), and keeps the same way every value it still needs
+   across a call: the result object of `next` while `done` and `value` are read, the values it
+   collects, the object it builds, its callback. The Rust copies stay valid while kept: the
+   collector moves no record and marks every kept value; `test-collect` fails a builtin that
+   leaves one out.
+2. Every call of `next` and of `return` goes through the agent's call path, as every call from
+   Rust does: it charges the call's step, counts against `reentry_depth` (a builtin or host `next`
+   by its activation, an ECMAScript one as a run loop nested in the builtin's), and an ECMAScript
+   `next` pushes a frame against `frame_depth`. A bound exceeded is the `RangeError` of "Depth
+   bounds" below, a throw of `next`, after which the iterator is not closed. The operations of
+   `ops/iteration.rs` charge no step of their own for the calls they make.
+3. A builtin's loop over an iterator charges one step per iteration through `charge_steps`,
+   beside the step of the call of `next`, and so checks the step budget and the interrupt in the
+   loop itself, whatever `next` is: a builtin `next` such as `%ArrayIteratorPrototype%.next` runs
+   no instruction. The builtin's own work in an iteration charges as this decision says (a
+   callback is a call).
+4. IteratorClose takes the completion: for a throw it calls `return`, if there is one, and answers
+   the throw it was given; for a normal completion it answers a throw of `return`, or the
+   `TypeError` of a result that is no object. It is given `Abrupt::Throw` or a normal completion,
+   never `Abrupt::Terminated`, which passes up untouched; a termination inside `return` ends the
+   run as any termination does.
+
+**The iterator of `for`-`of`, of an array pattern and of a spread.** Added on 2026-11-22 for slice
+6. What a script sees, the standard's: a `for`-`of` gets the iterator of its head's value and runs
+the body for each value, each step calling `next` and reading `done` and `value`
+(`sec-runtime-semantics-forinofheadevaluation`,
+`sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`). It closes
+the iterator (IteratorClose, `sec-iteratorclose`) on every exit before the iterator is done: a
+`break` of the loop, a `break` or `continue` to a statement around it, a `return`, a throw of the
+body or of binding or assigning the value to the head (a pattern included). A `continue` of the
+loop itself does not close it, nor does a throw of `next`, of reading `done` or `value`, a result
+that is no object, or the end of the iteration. On a throw, `return`'s throw or answer is dropped
+for the first throw; on the other exits a throw of `return` replaces the exit (the `break` or
+`return` does not happen), and an answer that is no object is a `TypeError`. An array pattern
+(`sec-runtime-semantics-iteratorbindinginitialization`,
+`sec-runtime-semantics-iteratordestructuringassignmentevaluation`) closes its iterator when it ends
+before the iterator is done (`[a] = it` closes it, `[a, ...r] = it` never does) and when a target,
+a default or a nested pattern throws, not after a throw of `next`, `done` or `value`. A spread
+(`sec-runtime-semantics-arrayaccumulation`, `sec-runtime-semantics-argumentlistevaluation`) runs
+its iterator to the end and never closes it. A termination closes nothing.
+
+The mechanism:
+
+1. The record lives on the operand stack of the frame, as the enumerator of a `for`-`in` does: the
+   head's GetIterator pushes an engine entry of its own (`interp/frame.rs`, `Entry`, beside
+   `Entry::Enumerator`, inline or boxed as the enumerator is, whichever keeps `Entry` at its size)
+   holding [[Iterator]], [[NextMethod]] and [[Done]], below the values of the head and the body,
+   until the loop's exit pops it. `Frame::trace` marks the iterator and the next method; the
+   entry is charged as the stack's growth is. Rejected: a local slot. The stack is cut back on
+   every exit by the jumps' pops and a handler's `items`, as for the enumerator, and slice 7
+   saves the operand stack with a suspended frame, so a `for`-`of` around a `yield` keeps its
+   record with no other change.
+2. The step instruction calls `next` through the operations of `ops/iteration.rs`, a call by
+   item 2 of "Iterators held by a builtin" (a re-entry), and reads `done` and `value` as any Get of
+   an instruction; a throw of any of them, and a result whose `done` is true, set the entry's
+   [[Done]] to true. Each iteration charges the steps of its instructions and its `LoopJump`.
+   Rejected for now: calling `next` by the call instruction, which spares a re-entry per step but
+   splits each step into several instructions; a re-entry here nests no deeper than the `next` it
+   calls, and a measurement decides.
+3. IteratorClose is compiled as a `try` with a `finally` block is
+   (`crates/compiler/src/statement.rs`, `try_statement`; `lib.rs`, `Control::Finally`,
+   `exit_jump_to`, `exit_return`, `finally_dispatch`), with a control entry of its own kind
+   pushed inside the loop's. A handler of kind `Finally` in the frame's handler table covers the
+   code from the first step to the end of the body, the head's binding and pattern included, and
+   its `items` keep the iterator entry; a `break` or `continue` that leaves through it and a
+   `return` are emitted as for a `finally`: the pops down to its `items`, the tag of the exit, a
+   jump to its entry. It differs from a `Control::Finally` in one point: a `continue` whose
+   target is this loop does not pass it, a `break` of this loop does. Its entry, outside the
+   handler's range, is one instruction, `[i, v, tag] -> [i, v, tag]`: when the entry's [[Done]]
+   is false it sets it and runs IteratorClose (item 4 of "Iterators held by a builtin") with a
+   throw completion of `v` for `TAG_THROW` and a normal one for every other tag; then the code
+   `finally_dispatch` emits goes on with the exit, and `EndFinally` throws `v` again. A throw of
+   `return` on a `break`, `continue` or `return` comes from that instruction, outside the range,
+   and goes to the handlers around the loop. No new handler kind is needed.
+4. A termination enters no handler (`bytecode.rs`, `Handler`) and runs no exit code, so
+   IteratorClose is not called.
+5. An array pattern holds its record in the same entry and closes it by the same handler and
+   instruction, over the code of the pattern (its targets' references, its steps, defaults and
+   nested patterns). A pattern has no `break`, `continue` or `return` in it, so only a throw and
+   its normal end close it: at its end it runs the instruction with a normal completion, which
+   closes when [[Done]] is false; a rest element leaves [[Done]] true. A nested pattern has an
+   entry and a handler of its own, inner first in the table, so a throw closes the inner iterator,
+   then the outer one. A spread is one instruction that runs its iteration in Rust as a builtin
+   does (item 1 of "Iterators held by a builtin", the kept stack), appending each value and
+   charging one step per element beside the call of `next`; nothing runs between its steps but
+   `next`, so it needs no entry and no handler.
 
 **The step budget.** One unit per bytecode instruction, plus units charged by builtins in
 proportion to their work: per element for array, typed array and collection loops, per code unit
@@ -392,11 +781,12 @@ source, which is ambient authority, and a fixed key lets a hostile script choose
 
 **Collector.** Precise, stop-the-world mark and sweep over the arenas. Roots: the frame stack and
 its operand stacks, the job queue, the realms and their intrinsics, the module map, the kept-objects
-list of 9.10, and the host's root table. A builtin that can call script keeps every value it still
-needs in slots of its own frame on the engine stack, which the collector scans; a Rust local
-holding a handle across a call into script is a bug, found by a test mode that collects at every
-safe point and by the generation check. Collections run only at safe points (instruction
-boundaries and the re-entry points), when the bytes allocated since the last collection pass a
+list of 9.10, the GlobalSymbolRegistry ("Symbols" below), and the host's root table. A builtin
+that can call script keeps every value it still needs in slots of its own frame on the engine
+stack, which the collector scans; a Rust local holding a handle across a call into script is a
+bug, found by a test mode that collects at every safe point and by the generation check.
+Collections run only at safe points (instruction boundaries and the re-entry points), when the
+bytes allocated since the last collection pass a
 threshold that grows with the live size, and when the host asks. They never run inside an
 allocation. Triggers count bytes, never time, so for the same inputs and budgets the same objects
 are collected at the same points, and `WeakRef` and `FinalizationRegistry` results are
@@ -414,6 +804,116 @@ Growth of large buffers uses `Vec::try_reserve`, so a refusal by the allocator b
 instead of an abort. Over the budget: `new ArrayBuffer` and the typed array constructors throw a
 `RangeError`, as `CreateByteDataBlock` allows; any other allocation ends the run with
 `Terminated(MemoryBudget)`.
+
+**Source text.** Added on 2026-11-21 for slice 3. The source text of a script, of eval code
+and of a dynamic function stays alive as long as a function made from it, and is charged to
+the memory budget with the compiled code. The text is the code units the parse read: the
+source given to ParseScript, the String PerformEval parsed, and for CreateDynamicFunction the
+whole text of its last parse, `function anonymous(` P `\n) {\n` body `\n}`
+(`sec-createdynamicfunction`). It is kept with the compiled code made from it, which lives
+while the host holds the script, while that code runs, and while a function object made from
+it is reachable (its [[ScriptOrModule]], "Collector" above). The charge is taken with the
+compiled code's, when the parse and compile step that made the code ends, at least one byte
+per code unit in either stored form of decision 5; the sweep that frees the compiled code
+credits it back with the code, never earlier. A text that does not fit what is left of the
+budget ends the run with `Terminated(MemoryBudget)`, as any other allocation. The text is kept
+whatever HostHasSourceTextAvailable answers: `Function.prototype.toString` of an ECMAScript
+function returns the part of it its [[SourceText]] covers ("Return
+CodePointsToString(func.[[SourceText]])", `sec-function.prototype.tostring`) when the host's
+hook answers true, and a String with the syntax of a NativeFunction when it answers false
+(`HOST-120`, `sec-hosthassourcetextavailable`), as for a built-in or a bound function. What a
+test reads: `heap_bytes()` after `parse_script` of a source of n code units is at least n more
+than before it; it stays at least n more while a function made from that script is reachable,
+also after the host released the script; and `collect()` after the host released the script
+and no function made from it is reachable gives at least n bytes back.
+
+**Symbols.** Added on 2026-11-22 for slice 6. What a script sees, the standard's
+(`sec-symbol-objects`): `Symbol(d)` makes a new Symbol at each call, whose [[Description]] is
+ToString(d), or undefined when `d` is undefined (`sec-symbol-description`); `new Symbol()` throws a
+`TypeError`. `Symbol.for(k)` answers the Symbol of the GlobalSymbolRegistry whose key is
+ToString(k), made and added the first time, and `Symbol.keyFor(s)` answers that key, or undefined
+for a Symbol `Symbol.for` did not make (`sec-symbol.for`, `sec-symbol.keyfor`, `sec-keyforsymbol`).
+The registry is the agent's, the append-only [[GlobalSymbolRegistry]] of its Agent Record
+(`sec-agents`, `sec-globalsymbolregistry-records`): every realm of the agent gets the same Symbol
+for a key. The well-known symbols (`sec-well-known-symbols`) are agent values as well
+(`realm/mod.rs`), twelve in slice 6 (`Symbol.asyncIterator` comes with slice 10), and none of them
+is in the registry. A Symbol is never converted to a String or a Number implicitly: ToString and
+ToNumber of it throw a `TypeError` (`sec-tostring`, `sec-tonumber`), and so do `"" + s`,
+`` `${s}` ``, `+s`, `s < 1` and every builtin that passes it to them or to an operation built on
+them (ToIntegerOrInfinity, ToLength, ToNumeric). ToPropertyKey takes it as it is, a property key;
+`String(s)`, `s.toString()` and `s.description` answer without a throw (SymbolDescriptiveString,
+`sec-symboldescriptivestring`; `sec-string-constructor-string-value`). ToObject of a Symbol makes a
+Symbol object, an ordinary object whose [[SymbolData]] is the Symbol
+(`sec-properties-of-symbol-instances`), whose prototype is `%Symbol.prototype%` of the current
+realm.
+
+The mechanism:
+
+1. A Symbol is a record of the `symbols` arena (`heap/mod.rs`, `SymbolRecord`) whose
+   [[Description]] is a String handle or none; two Symbols are the same exactly when their
+   handles are.
+2. The GlobalSymbolRegistry is a part of the heap, beside the atom table: a keyed map
+   (`heap/map.rs`, `KeyedMap`, with the heap's hasher, keyed by `hash_key` alone, HOST-145) from
+   the code units of a key to its Symbol, whose [[Description]] is the key's String. The record of
+   a registered Symbol says that it is registered, so `Symbol.keyFor` answers its description with
+   no second map. The registry is a root of the collector, traced at a root site of the layout of
+   `heap/collect.rs`: every registered Symbol, and its key with it, lives as long as the agent, and
+   no entry is ever removed.
+3. Charges. `Symbol.for` of a new key charges the Symbol's record, the map's copy of the key's
+   units and the growth of the map's table (`KeyedMap::table_bytes_for`, before it grows); the
+   key's String is charged as any String. No sweep credits them, since none frees them. A script
+   that registers a Symbol for a new key in a loop (`for (let i = 0; ; i++) Symbol.for(String(i))`)
+   therefore ends in `Terminated(MemoryBudget)`, which it cannot catch, where the same loop over
+   `Symbol(String(i))` keeps nothing past a collection; the story of the `Symbol` builtin tests
+   both under one memory budget. Steps: the call's, and one per code unit of the key hashed and
+   compared, as any string operation.
+4. A Symbol object keeps its Symbol in `OrdinaryData` (`object/ordinary.rs`), as the Boolean and
+   Number objects keep theirs, traced with the object; thisSymbolValue (`sec-thissymbolvalue`)
+   reads it.
+5. The conversions of `ops/conversion.rs` are the one place a Symbol meets ToString or ToNumber:
+   a builtin converts an argument through them, never by formatting a value in Rust, so a Symbol
+   argument gives the `TypeError` wherever the clause converts it.
+
+**Template objects.** Added on 2026-11-22 for slice 6. What a script sees, the standard's
+(GetTemplateObject, `sec-gettemplateobject`; `sec-tagged-templates-runtime-semantics-evaluation`):
+a tagged template passes its tag a template object, an Array of the cooked strings (undefined for
+a part with a NotEscapeSequence) whose `raw` property is an Array of the raw strings; each element
+is not writable and not configurable, `raw` is not writable, not enumerable and not configurable,
+and both Arrays are frozen. There is one object per site, the TemplateLiteral of the source (its
+Parse Node), per realm: every evaluation of a site gives the same object, from every function
+object made from its code (closures made in a loop included); two sites with the same text give
+two objects, and so does one source parsed twice (two scripts, `eval` of one String twice).
+
+The mechanism:
+
+1. The key of a site is its compiled code and the site's index in it: the compiler numbers the
+   tagged templates of a `Code` (a script, eval code or a dynamic function, with all its function
+   templates) and keeps a site table of each site's cooked and raw strings as String constants
+   (`swell-compiler`, `bytecode.rs`); the instruction that pushes a template object names its
+   index.
+2. The realm's [[TemplateMap]] is kept with the code: the script record that holds the compiled
+   code (`script.rs`, `ScriptRecord`; eval code and dynamic functions have records of their own,
+   `dynamic_code.rs`) has an entry per site of its code, empty until the site's first evaluation
+   makes the two Arrays, traced by `ScriptRecord::trace`; the instruction finds it through the
+   frame's script. That is the realm's map divided by code: a script record has one [[Realm]], and
+   every frame that runs its code runs in that realm, since its own code runs in its [[Realm]]
+   (ScriptEvaluation, PerformEval and CreateDynamicFunction make a record in the realm they run
+   in) and every function object made from it gets the realm of the frame that makes it (the
+   current Realm Record of OrdinaryFunctionCreate). Rejected: a map on the realm record keyed by
+   code and index, which keeps the template objects of every eval code the realm ever ran for as
+   long as the realm lives.
+3. The entries are freed with the code: by the sweep that frees the script record, once the host
+   no longer holds it, no frame runs its code and no function object made from it is reachable
+   ("Source text." above). It is safe: every evaluation of a site runs in a frame of its code, so
+   after that no evaluation can ask for an entry again, and an object no evaluation can ask for
+   and nothing else references is not live (`sec-liveness`). A template object the tag kept is an
+   ordinary object, alive while it is referenced, its `raw` with it.
+4. Charges. The site table and its strings are part of the compiled code, charged with it when
+   its record is made, and so is the entry per site of the record. The two Arrays and their
+   elements are charged as any Array when the site's first evaluation makes them, and credited by
+   the sweep that frees them; a later evaluation allocates nothing. Steps: the instruction's, and
+   at the first evaluation one per element it defines in the two Arrays (an array loop, decision
+   3).
 
 **Cost.** The arenas cost a bounds check and a generation compare on every access, and plain maps
 cost a search per property access where shapes would cost an offset. How much slower this is than
@@ -540,8 +1040,9 @@ generator is build tooling and never ships; the tables it writes do.
 **Settled in `docs/design/host-interface.md` (2026-11-21), which holds wherever it and this
 section differ.** This section is the first description; the first ESS model of it came back
 with nine places where it is unclear or silent, and that document answers them from the text of
-ECMA-262 and HTML, as 19 decisions and 135 numbered requirements (`HOST-<n>`). The ten places
-where it departs from this document:
+ECMA-262 and HTML, as 19 decisions and numbered requirements (`HOST-<n>`): 165 on 2026-11-21,
+the count `task host-requirements-check` prints (corrected that day from 135, the count when
+the document was written). The eleven places where it departs from this document:
 
 1. Each entry point has a result type of its own instead of one `Outcome`; misuse answers
    `Err(HostError)`, never a panic.
@@ -697,8 +1198,9 @@ first.
   `negative` case asks for: the runner reads the kind of the error from its message
   (`swell_syntax::message_kind`), and a run that a refusal or the nesting limit ends, in a
   harness file or in the case, fails whatever the case's `negative` says (decided in wave 5 of
-  slice 1). A refusal the script catches (through `eval`, `Function`, `$262.evalScript`, or a
-  regular expression literal evaluated before slice 5) does not end the run, so the runner also
+  slice 1). A refusal the script catches (through `eval`, `Function`, `$262.evalScript`, a
+  regular expression literal evaluated before slice 5, or a `String` method given a code unit
+  outside ASCII before slice 5, section 12) does not end the run, so the runner also
   reads the agent's count of refusals (`Agent::refusals`, `host-interface.md` decision 13)
   after each run, every run having an agent of its own, and fails every run in which the count
   moved, whatever the case's `negative` and outcome say.
@@ -937,10 +1439,32 @@ from `swell-unicode`. The rule:
   the input with a defined outcome instead of guessing: before slice 5, an identifier character
   outside ASCII is a `SyntaxError`, a regular expression
   literal is lexed to its end and evaluating it throws a `SyntaxError`, and the `String` methods
-  that need Unicode tables (`normalize`, case mapping outside ASCII) are slice 5's, with their
-  cases moved there by rule lines when slice 3 measures them. White space is not among these
-  gaps: `story:syntax-es5-and-strict` accepts every `Zs` code point in slice 1 with the table of
-  `story:num-and-unicode-early-parts`.
+  that need the Unicode tables of slice 5 answer what they can and refuse the rest, as follows
+  (decided on 2026-11-21 for slice 3). The four case methods `toLowerCase`, `toUpperCase`,
+  `toLocaleLowerCase` and `toLocaleUpperCase` (`sec-string.prototype.tolowercase`,
+  `sec-string.prototype.touppercase`, `sec-string.prototype.tolocalelowercase`,
+  `sec-string.prototype.tolocaleuppercase`) and `localeCompare`
+  (`sec-string.prototype.localecompare`) exist in slice 3 for a String whose code units are all
+  below 0x80, and refuse any other String until slice 5. For such a String each answers as the
+  standard does: among the code points below 0x80 the case mappings of the Unicode Character
+  Database map the 26 letters and nothing else, the two locale methods answer as `toLowerCase`
+  and `toUpperCase` (no host locale; ECMA-402 is out, section 1), and two Strings of such code
+  units are canonically equivalent only when they are equal, so `localeCompare` orders them by
+  their code units and returns -1, +0 or 1. `localeCompare` refuses when the this value or
+  `that`, each converted to a String, has a code unit of 0x80 or above. A refusal comes after
+  the steps the clause gives before the mapping or the comparison (RequireObjectCoercible, then
+  ToString of the this value and, for `localeCompare`, of `that`), so an error those steps
+  throw is thrown instead of it; it throws a `SyntaxError` of the method's realm whose message
+  is `case mapping outside ASCII is not supported before slice 5` (the four case methods) or
+  `comparison outside ASCII is not supported before slice 5` (`localeCompare`), which
+  `swell_syntax::message_kind` reads as a refusal of slice 5, and the agent counts it like a
+  refused parse, caught or not (`host-interface.md`, decision 13). `normalize`
+  (`sec-string.prototype.normalize`) does not exist before slice 5: `String.prototype` has no
+  property `normalize`. Slice 5 brings the tables and removes both refusals; from then the five
+  methods refuse no input. The cases of slice 3 these methods cannot pass (a String outside
+  ASCII in the case or a harness file it includes) move to slice 5 by rule lines when slice 3
+  measures them. White space is not among these gaps: `story:syntax-es5-and-strict` accepts
+  every `Zs` code point in slice 1 with the table of `story:num-and-unicode-early-parts`.
 - A slice may also deliver a feature of its own without a part that needs a later slice (added
   on 2026-11-21 for slice 2). The part is absent, never a stand-in with a wrong answer, and it
   is recorded where the gate reads it: the section's omission list in
@@ -955,15 +1479,21 @@ from `swell-unicode`. The rule:
   symbol-iterator-property section-12-slice-6`.
 - The builtins the harness files call are built in slice 1 as far as `assert.js`, `sta.js` and
   the 31 cases need them; slice 3 completes each builtin. A method that exists is correct for
-  every argument, or it does not exist yet.
+  every argument, or it does not exist yet, or it takes the third form stated for the five
+  `String` methods above (added on 2026-11-21 for slice 3): it exists, answers a stated set of
+  inputs, and refuses every other input with a counted refusal naming the slice that completes
+  it. The third form is allowed only where the answer for every input of that set is the
+  standard's and every other input ends in the counted refusal, never in a guessed answer, and
+  only for a method this section names with its set; any other method has the first two forms
+  only.
 - A refusal is a `SyntaxError`, but not the one a `negative: parse` case names: the runner
   reads the kind of a parse error from its message (`swell_syntax::message_kind`), and a run
   that a refusal or the nesting limit ends, in a harness file or in the case, fails whatever the
   case's `negative` says. It prints the number of such runs as `test262-refused <runs>`, so the
   share of the checkout a later slice's parser still declines stays visible (53,564 of 85,556
   runs at slice 1). Before this rule, 3,011 negative parse cases of slices 2 to 18 were counted
-  passed on a refusal. A refusal the script catches (through `eval` or `Function`, or of a
-  regular expression literal) is counted by the agent (`Agent::refusals`, `host-interface.md`
+  passed on a refusal. A refusal the script catches (through `eval` or `Function`, of a
+  regular expression literal, or of a `String` method of the third form) is counted by the agent (`Agent::refusals`, `host-interface.md`
   decision 13), and the runner fails every run in which that count moved (decision 11).
 
 **For surf.** A script that touches no DOM and uses only ES5 can run after slice 4, and with

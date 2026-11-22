@@ -178,11 +178,15 @@ impl<H: Host> Agent<H> {
     }
 
     /// [[OwnPropertyKeys]] of a String object
-    /// (`#sec-string-exotic-objects-ownpropertykeys`): a step per key.
+    /// (`#sec-string-exotic-objects-ownpropertykeys`): a step per key, and a step per comparison
+    /// of a sort of the indices of the list (`object/property.rs`).
     pub(crate) fn string_own_property_keys(&mut self, object: ObjectRef) -> Completion<Vec<Key>> {
         let data = self.string_data(object)?;
         let length = self.string_length(data)?;
-        let own = self.engine_object(object)?.properties.keys();
+        let (own, comparisons) = self.engine_object(object)?.properties.keys();
+        if comparisons > 0 {
+            self.charge_steps(comparisons)?;
+        }
         let mut keys = Vec::new();
         keys.extend(
             (0..length)

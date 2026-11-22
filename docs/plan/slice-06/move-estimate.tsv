@@ -1,0 +1,657 @@
+test/built-ins/Array/from/items-is-arraybuffer.js	13	ArrayBuffer
+test/built-ins/Array/prototype/concat/Array.prototype.concat_large-typed-array.js	13	Uint8Array
+test/built-ins/Array/prototype/concat/Array.prototype.concat_small-typed-array.js	13	Uint8Array
+test/built-ins/Array/prototype/concat/Array.prototype.concat_spreadable-reg-exp.js	5	= /abc/;
+test/built-ins/Array/prototype/flatMap/array-like-objects-poisoned-length.js	9	Map (token of later-parts.tsv)
+test/built-ins/Array/prototype/flatMap/non-callable-argument-throws.js	9	Map (token of later-parts.tsv)
+test/built-ins/Array/prototype/flatMap/target-array-non-extensible.js	9	 Set 
+test/built-ins/Array/prototype/flatMap/target-array-with-non-configurable-property.js	9	Map (token of later-parts.tsv)
+test/built-ins/Array/prototype/flatMap/target-array-with-non-writable-property.js	13	Uint8Array (harness)
+test/built-ins/Array/prototype/flatMap/this-value-ctor-non-object.js	9	 Set 
+test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species-bad-throws.js	9	 Set 
+test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species-custom-ctor.js	9	 Set 
+test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species-custom-ctor-poisoned-throws.js	9	 Set 
+test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species.js	9	 Set 
+test/built-ins/Array/prototype/methods-called-as-functions.js	9	Map (token of later-parts.tsv)
+test/built-ins/Array/prototype/sort/comparefn-nonfunction-call-throws.js	5	(/a/g)
+test/built-ins/Array/prototype/splice/create-species-length-exceeding-integer-limit.js	9	 Set(
+test/built-ins/Array/prototype/Symbol.unscopables/value.js	13	Uint8Array (harness)
+test/built-ins/Date/prototype/getDate/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getDay/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getFullYear/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getHours/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getMilliseconds/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getMinutes/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getMonth/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getSeconds/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getTime/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getTimezoneOffset/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getUTCDate/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getUTCDay/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getUTCFullYear/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getUTCHours/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getUTCMilliseconds/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getUTCMinutes/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getUTCMonth/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/getUTCSeconds/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/setDate/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/setFullYear/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/setHours/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/setMilliseconds/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/setMinutes/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/setMonth/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/setSeconds/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/setTime/this-value-non-object.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/called-as-function.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-default-first-invalid.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-default-first-non-callable.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-default-first-valid.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-default-no-callables.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-invalid.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-number-first-invalid.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-number-first-non-callable.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-number-first-valid.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-number-no-callables.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-string-first-invalid.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-string-first-non-callable.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-string-first-valid.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/hint-string-no-callables.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/length.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/name.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/prop-desc.js	4	Date
+test/built-ins/Date/prototype/Symbol.toPrimitive/this-val-non-obj.js	4	Date
+test/built-ins/Date/prototype/toJSON/called-as-function.js	4	Date
+test/built-ins/Date/prototype/toJSON/to-object.js	4	Date
+test/built-ins/Date/prototype/toJSON/to-primitive-symbol.js	4	Date
+test/built-ins/Date/value-get-symbol-to-prim-err.js	4	Date
+test/built-ins/Date/value-symbol-to-prim-err.js	4	Date
+test/built-ins/Date/value-symbol-to-prim-invocation.js	4	Date
+test/built-ins/Date/value-symbol-to-prim-return-obj.js	7	yield
+test/built-ins/Date/value-symbol-to-prim-return-prim.js	7	yield
+test/built-ins/Date/value-to-primitive-call-err.js	4	Date
+test/built-ins/Date/value-to-primitive-call.js	4	Date
+test/built-ins/Date/value-to-primitive-get-meth-err.js	4	Date
+test/built-ins/Date/value-to-primitive-result-faulty.js	4	Date
+test/built-ins/Date/value-to-primitive-result-non-string-prim.js	4	Date
+test/built-ins/Date/value-to-primitive-result-string.js	4	Date
+test/built-ins/Math/Symbol.toStringTag.js	13	Uint8Array (harness)
+test/built-ins/Number/isFinite/arg-is-not-number.js	4	Number.isFinite (token of later-parts.tsv)
+test/built-ins/Number/isInteger/arg-is-not-number.js	4	Number.isInteger (token of later-parts.tsv)
+test/built-ins/Number/isNaN/arg-is-not-number.js	4	Number.isNaN (token of later-parts.tsv)
+test/built-ins/Number/isSafeInteger/arg-is-not-number.js	4	Number.isSafeInteger (token of later-parts.tsv)
+test/built-ins/Number/prototype/toExponential/return-abrupt-tointeger-fractiondigits-symbol.js	4	.toExponential (token of later-parts.tsv)
+test/built-ins/Number/prototype/toFixed/toFixed-tonumber-throws-typeerror-symbol.js	12	BigInt
+test/built-ins/Number/prototype/toPrecision/precision-cannot-be-coerced-to-a-number-in-range.js	4	.toPrecision (token of later-parts.tsv)
+test/built-ins/Number/prototype/toPrecision/return-abrupt-tointeger-precision-symbol.js	4	.toPrecision (token of later-parts.tsv)
+test/built-ins/Object/keys/proxy-keys.js	9	 Proxy(
+test/built-ins/Object/prototype/toString/symbol-tag-non-str-builtin.js	4	Math
+test/built-ins/Object/prototype/toString/symbol-tag-override-instances.js	5	= /./;
+test/built-ins/RegExp/call_with_non_regexp_same_constructor.js	5	RegExp
+test/built-ins/RegExp/call_with_regexp_match_falsy.js	5	RegExp
+test/built-ins/RegExp/from-regexp-like-flag-override.js	5	RegExp
+test/built-ins/RegExp/from-regexp-like-get-ctor-err.js	5	RegExp
+test/built-ins/RegExp/from-regexp-like-get-flags-err.js	5	RegExp
+test/built-ins/RegExp/from-regexp-like-get-source-err.js	5	RegExp
+test/built-ins/RegExp/from-regexp-like.js	5	RegExp
+test/built-ins/RegExp/from-regexp-like-short-circuit.js	5	RegExp
+test/built-ins/RegExp/prototype/dotAll/this-val-non-obj.js	12	4n)
+test/built-ins/RegExp/prototype/flags/coercion-dotall.js	5	RegExp
+test/built-ins/RegExp/prototype/flags/coercion-global.js	5	RegExp
+test/built-ins/RegExp/prototype/flags/coercion-hasIndices.js	5	RegExp
+test/built-ins/RegExp/prototype/flags/coercion-ignoreCase.js	5	RegExp
+test/built-ins/RegExp/prototype/flags/coercion-multiline.js	5	RegExp
+test/built-ins/RegExp/prototype/flags/coercion-sticky.js	5	RegExp
+test/built-ins/RegExp/prototype/flags/coercion-unicode.js	5	RegExp
+test/built-ins/RegExp/prototype/flags/this-val-non-obj.js	12	4n)
+test/built-ins/RegExp/prototype/global/this-val-non-obj.js	12	4n)
+test/built-ins/RegExp/prototype/hasIndices/this-val-non-obj.js	12	4n)
+test/built-ins/RegExp/prototype/ignoreCase/this-val-non-obj.js	12	4n)
+test/built-ins/RegExp/prototype/multiline/this-val-non-obj.js	12	4n)
+test/built-ins/RegExp/prototype/source/this-val-non-obj.js	12	4n)
+test/built-ins/RegExp/prototype/sticky/this-val-non-obj.js	12	4n)
+test/built-ins/RegExp/prototype/Symbol.matchAll/isregexp-called-once.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/isregexp-this-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/length.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/name.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/prop-desc.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/regexpcreate-this-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/species-constructor-get-constructor-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/species-constructor-get-species-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/species-constructor-is-not-object-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/species-constructor-is-undefined.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/species-constructor.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/species-constructor-species-is-not-constructor.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/species-constructor-species-is-null-or-undefined.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/species-constructor-species-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/species-regexp-get-global-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/species-regexp-get-unicode-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/string-tostring.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/string-tostring-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/this-get-flags.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/this-get-flags-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/this-lastindex-cached.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.matchAll/this-not-object-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/this-tolength-lastindex-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/this-tostring-flags.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.matchAll/this-tostring-flags-throws.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/builtin-coerce-lastindex.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/builtin-failure-g-set-lastindex-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/builtin-failure-g-set-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/builtin-failure-return-val.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/builtin-failure-y-return-val.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/builtin-failure-y-set-lastindex-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/builtin-failure-y-set-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/builtin-infer-unicode.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/builtin-success-g-set-lastindex-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/builtin-success-g-set-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/builtin-success-return-val-groups.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/builtin-success-return-val.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/builtin-success-u-return-val-groups.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/builtin-success-y-set-lastindex-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/builtin-success-y-set-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/builtin-y-coerce-lastindex-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/coerce-arg-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/coerce-arg.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/coerce-global.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/exec-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/exec-invocation.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/exec-return-type-invalid.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/exec-return-type-valid.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/flags-tostring-error.js	5	= /./;
+test/built-ins/RegExp/prototype/Symbol.match/g-coerce-result-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/get-exec-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/get-flags-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/get-global-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/get-unicode-error.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/g-get-exec-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/g-get-result-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/g-init-lastindex-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/g-init-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/g-match-empty-advance-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/g-match-empty-coerce-lastindex-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/g-match-empty-set-lastindex-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/g-match-no-coerce-lastindex.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/g-match-no-set-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/g-success-return-val.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/g-zero-matches.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/length.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/name.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/prop-desc.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/this-val-non-obj.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/this-val-non-regexp.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/u-advance-after-empty.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/y-fail-global-return.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/y-fail-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/y-fail-lastindex-no-write.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.match/y-fail-return.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/y-init-lastindex.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.match/y-set-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.replace/arg-1-coerce-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/arg-1-coerce.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/arg-2-coerce-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/arg-2-coerce.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/coerce-global.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/coerce-lastindex-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/coerce-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.replace/coerce-unicode.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/exec-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/exec-invocation.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/flags-tostring-error.js	9	 Set 
+test/built-ins/RegExp/prototype/Symbol.replace/fn-coerce-replacement-err.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/fn-coerce-replacement.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/fn-err.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/fn-invoke-args-empty-result.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/fn-invoke-args.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/fn-invoke-this-no-strict.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/fn-invoke-this-strict.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/get-exec-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/get-flags-err.js	9	 Set 
+test/built-ins/RegExp/prototype/Symbol.replace/get-global-err.js	9	 Set 
+test/built-ins/RegExp/prototype/Symbol.replace/get-unicode-error.js	9	 Set 
+test/built-ins/RegExp/prototype/Symbol.replace/g-init-lastindex-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.replace/g-init-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.replace/g-pos-decrement.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/g-pos-increment.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/length.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/match-failure.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/named-groups-fn.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/named-groups.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/name.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/poisoned-stdlib.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/prop-desc.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/replace-without-trailing.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/replace-with-trailing.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-capture-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-capture.js	9	 Set 
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-groups-err.js	9	 Set 
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-groups.js	9	 Set 
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-groups-prop-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-groups-prop.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-index-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-index.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-index-undefined.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-length-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-length.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-matched-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-matched-global.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.replace/result-coerce-matched.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-get-capture-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-get-groups-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-get-groups-prop-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-get-index-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-get-length-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/result-get-matched-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/subst-after.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/subst-before.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/subst-capture-idx-1.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/subst-capture-idx-2.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/subst-dollar.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/subst-matched.js	5	.replace (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.replace/this-val-non-obj.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/u-advance-after-empty.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.replace/y-fail-global-return.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/y-fail-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.replace/y-fail-lastindex-no-write.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.replace/y-fail-return.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/y-init-lastindex.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.replace/y-set-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.search/coerce-string-err.js	5	.search (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.search/coerce-string.js	5	.search (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.search/cstm-exec-return-index.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.search/cstm-exec-return-invalid.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.search/failure-return-val.js	5	.search (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.search/get-lastindex-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.search/lastindex-no-restore.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.search/length.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.search/match-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.search/name.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.search/prop-desc.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.search/set-lastindex-init-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.search/set-lastindex-init.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.search/set-lastindex-init-samevalue.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.search/set-lastindex-restore-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.search/set-lastindex-restore.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.search/set-lastindex-restore-samevalue.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.search/success-get-index-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.search/success-return-val.js	5	.search (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.search/this-val-non-obj.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.search/u-lastindex-advance.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.search/y-fail-return.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/coerce-flags-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/coerce-flags.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/coerce-limit-err.js	5	.split (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.split/coerce-limit.js	5	.split (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.split/coerce-string-err.js	5	.split (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.split/coerce-string.js	5	.split (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.split/get-flags-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/last-index-exceeds-str-size.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/length.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/limit-0-bail.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/name.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/prop-desc.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/species-ctor-ctor-get-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/species-ctor-ctor-non-obj.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/species-ctor-ctor-undef.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/species-ctor-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/species-ctor.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/species-ctor-species-get-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/species-ctor-species-non-ctor.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/species-ctor-species-undef.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/species-ctor-y.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/splitter-proto-from-ctor-realm.js	5	= /./;
+test/built-ins/RegExp/prototype/Symbol.split/str-adv-thru-empty-match.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-coerce-lastindex-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-coerce-lastindex.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-empty-match-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/str-empty-match.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/str-empty-no-match.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/str-get-lastindex-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-limit-capturing.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-limit.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-match-err.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/str-result-coerce-length-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-result-coerce-length.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-result-get-capture-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-result-get-length-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-set-lastindex-err.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-set-lastindex-match.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-set-lastindex-no-match.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/str-trailing-chars.js	5	.split (token of later-parts.tsv)
+test/built-ins/RegExp/prototype/Symbol.split/this-val-non-obj.js	5	RegExp
+test/built-ins/RegExp/prototype/Symbol.split/u-lastindex-adv-thru-failure.js	9	 Set(
+test/built-ins/RegExp/prototype/Symbol.split/u-lastindex-adv-thru-match.js	9	 Set(
+test/built-ins/RegExp/prototype/unicodeSets/this-val-non-obj.js	12	4n)
+test/built-ins/RegExp/prototype/unicode/this-val-non-obj.js	12	4n)
+test/built-ins/RegExpStringIteratorPrototype/ancestry.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/custom-regexpexec-call-throws.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/custom-regexpexec-get-throws.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/custom-regexpexec.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/custom-regexpexec-match-get-0-throws.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/custom-regexpexec-match-get-0-tostring.js	9	 Set(
+test/built-ins/RegExpStringIteratorPrototype/next/custom-regexpexec-match-get-0-tostring-throws.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/custom-regexpexec-not-callable.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/length.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/name.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/next-iteration-global.js	9	 Set 
+test/built-ins/RegExpStringIteratorPrototype/next/next-iteration.js	9	 Set 
+test/built-ins/RegExpStringIteratorPrototype/next/next-missing-internal-slots.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/prop-desc.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/regexp-tolength-lastindex-throws.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/next/this-is-not-object-throws.js	5	RegExp
+test/built-ins/RegExpStringIteratorPrototype/Symbol.toStringTag.js	5	RegExp
+test/built-ins/RegExp/Symbol.species/length.js	5	RegExp
+test/built-ins/RegExp/Symbol.species/return-value.js	5	RegExp
+test/built-ins/RegExp/Symbol.species/symbol-species.js	5	RegExp
+test/built-ins/RegExp/Symbol.species/symbol-species-name.js	5	RegExp
+test/built-ins/String/prototype/endsWith/return-abrupt-from-searchstring-regexp-test.js	5	RegExp
+test/built-ins/String/prototype/includes/return-abrupt-from-searchstring-regexp-test.js	5	RegExp
+test/built-ins/String/prototype/matchAll/cstm-matchall-on-bigint-primitive.js	12	BigInt
+test/built-ins/String/prototype/matchAll/cstm-matchall-on-boolean-primitive.js	5	.matchAll(
+test/built-ins/String/prototype/matchAll/cstm-matchall-on-number-primitive.js	5	.matchAll(
+test/built-ins/String/prototype/matchAll/cstm-matchall-on-string-primitive.js	5	.matchAll(
+test/built-ins/String/prototype/matchAll/flags-nonglobal-throws.js	5	RegExp
+test/built-ins/String/prototype/matchAll/flags-undefined-throws.js	5	RegExp
+test/built-ins/String/prototype/matchAll/regexp-get-matchAll-throws.js	5	= /./g;
+test/built-ins/String/prototype/matchAll/regexp-matchAll-invocation.js	5	RegExp
+test/built-ins/String/prototype/matchAll/regexp-matchAll-is-undefined-or-null.js	5	RegExp
+test/built-ins/String/prototype/matchAll/regexp-matchAll-not-callable.js	5	= /./;
+test/built-ins/String/prototype/matchAll/regexp-matchAll-throws.js	5	= /./g;
+test/built-ins/String/prototype/matchAll/regexp-prototype-get-matchAll-throws.js	5	RegExp
+test/built-ins/String/prototype/matchAll/regexp-prototype-has-no-matchAll.js	5	RegExp
+test/built-ins/String/prototype/matchAll/regexp-prototype-matchAll-invocation.js	5	RegExp
+test/built-ins/String/prototype/matchAll/regexp-prototype-matchAll-throws.js	5	RegExp
+test/built-ins/String/prototype/matchAll/regexp-prototype-matchAll-v-u-flag.js	5	RegExp
+test/built-ins/String/prototype/matchAll/toString-this-val.js	5	RegExp
+test/built-ins/String/prototype/match/cstm-matcher-get-err.js	5	.match(
+test/built-ins/String/prototype/match/cstm-matcher-invocation.js	5	.match(
+test/built-ins/String/prototype/match/cstm-matcher-is-null.js	5	.match(
+test/built-ins/String/prototype/match/cstm-matcher-on-bigint-primitive.js	12	BigInt
+test/built-ins/String/prototype/match/cstm-matcher-on-boolean-primitive.js	5	.match(
+test/built-ins/String/prototype/match/cstm-matcher-on-number-primitive.js	5	.match(
+test/built-ins/String/prototype/match/cstm-matcher-on-string-primitive.js	5	.match(
+test/built-ins/String/prototype/match/invoke-builtin-match.js	5	RegExp
+test/built-ins/String/prototype/match/regexp-prototype-match-v-u-flag.js	5	RegExp
+test/built-ins/String/prototype/normalize/return-abrupt-from-form-as-symbol.js	5	.normalize (token of later-parts.tsv)
+test/built-ins/String/prototype/normalize/return-abrupt-from-this-as-symbol.js	5	.normalize (token of later-parts.tsv)
+test/built-ins/String/prototype/replaceAll/cstm-replaceall-on-bigint-primitive.js	12	BigInt
+test/built-ins/String/prototype/replaceAll/cstm-replaceall-on-boolean-primitive.js	5	.replaceAll(
+test/built-ins/String/prototype/replaceAll/cstm-replaceall-on-number-primitive.js	5	.replaceAll(
+test/built-ins/String/prototype/replaceAll/cstm-replaceall-on-string-primitive.js	5	.replaceAll(
+test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x003C.js	5	.replaceAll(
+test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024N.js	5	.replaceAll(
+test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024NN.js	5	.replaceAll(
+test/built-ins/String/prototype/replaceAll/replaceValue-call-tostring-abrupt.js	5	.replaceAll(
+test/built-ins/String/prototype/replaceAll/replaceValue-tostring-abrupt.js	5	.replaceAll (token of later-parts.tsv)
+test/built-ins/String/prototype/replaceAll/replaceValue-value-tostring.js	5	.replaceAll(
+test/built-ins/String/prototype/replaceAll/searchValue-flags-no-g-throws.js	5	RegExp
+test/built-ins/String/prototype/replaceAll/searchValue-flags-null-undefined-throws.js	5	RegExp
+test/built-ins/String/prototype/replaceAll/searchValue-flags-toString-abrupt.js	5	RegExp
+test/built-ins/String/prototype/replaceAll/searchValue-get-flags-abrupt.js	5	RegExp
+test/built-ins/String/prototype/replaceAll/searchValue-isRegExp-abrupt.js	5	RegExp
+test/built-ins/String/prototype/replaceAll/searchValue-replacer-before-tostring.js	5	RegExp
+test/built-ins/String/prototype/replaceAll/searchValue-replacer-call-abrupt.js	5	RegExp
+test/built-ins/String/prototype/replaceAll/searchValue-replacer-call.js	5	RegExp
+test/built-ins/String/prototype/replaceAll/searchValue-replacer-is-null.js	5	.replaceAll(
+test/built-ins/String/prototype/replaceAll/searchValue-replacer-method-abrupt.js	5	RegExp
+test/built-ins/String/prototype/replaceAll/searchValue-tostring-abrupt.js	5	.replaceAll (token of later-parts.tsv)
+test/built-ins/String/prototype/replaceAll/searchValue-tostring-regexp.js	5	= /./g;
+test/built-ins/String/prototype/replaceAll/this-tostring-abrupt.js	5	.replaceAll (token of later-parts.tsv)
+test/built-ins/String/prototype/replaceAll/this-tostring.js	5	.replaceAll (token of later-parts.tsv)
+test/built-ins/String/prototype/replace/cstm-replace-get-err.js	5	.replace(
+test/built-ins/String/prototype/replace/cstm-replace-invocation.js	5	.replace(
+test/built-ins/String/prototype/replace/cstm-replace-is-null.js	5	.replace(
+test/built-ins/String/prototype/replace/cstm-replace-on-bigint-primitive.js	12	BigInt
+test/built-ins/String/prototype/replace/cstm-replace-on-boolean-primitive.js	5	.replace(
+test/built-ins/String/prototype/replace/cstm-replace-on-number-primitive.js	5	.replace(
+test/built-ins/String/prototype/replace/cstm-replace-on-string-primitive.js	5	.replace(
+test/built-ins/String/prototype/replace/regexp-prototype-replace-v-u-flag.js	5	RegExp
+test/built-ins/String/prototype/search/cstm-search-get-err.js	5	.search(
+test/built-ins/String/prototype/search/cstm-search-invocation.js	5	.search(
+test/built-ins/String/prototype/search/cstm-search-is-null.js	5	.search(
+test/built-ins/String/prototype/search/cstm-search-on-bigint-primitive.js	12	BigInt
+test/built-ins/String/prototype/search/cstm-search-on-boolean-primitive.js	5	.search(
+test/built-ins/String/prototype/search/cstm-search-on-number-primitive.js	5	.search(
+test/built-ins/String/prototype/search/cstm-search-on-string-primitive.js	5	.search(
+test/built-ins/String/prototype/search/invoke-builtin-search.js	5	RegExp
+test/built-ins/String/prototype/search/invoke-builtin-search-searcher-undef.js	5	RegExp
+test/built-ins/String/prototype/search/regexp-prototype-search-v-flag.js	5	RegExp
+test/built-ins/String/prototype/search/regexp-prototype-search-v-u-flag.js	9	 Set 
+test/built-ins/String/prototype/split/cstm-split-get-err.js	5	.split(
+test/built-ins/String/prototype/split/cstm-split-invocation.js	5	.split(
+test/built-ins/String/prototype/split/cstm-split-is-null.js	5	.split(
+test/built-ins/String/prototype/split/cstm-split-on-bigint-primitive.js	12	BigInt
+test/built-ins/String/prototype/split/cstm-split-on-boolean-primitive.js	5	.split(
+test/built-ins/String/prototype/split/cstm-split-on-number-primitive.js	5	.split(
+test/built-ins/String/prototype/split/cstm-split-on-string-primitive.js	5	.split(
+test/built-ins/String/prototype/split/limit-touint32-error.js	5	.split(
+test/built-ins/String/prototype/split/this-value-tostring-error.js	5	.split (token of later-parts.tsv)
+test/built-ins/String/prototype/split/valueOf-is-called-for-limit-argument.js	5	.split(
+test/built-ins/String/prototype/startsWith/return-abrupt-from-searchstring-regexp-test.js	5	RegExp
+test/built-ins/Symbol/matchAll/cross-realm.js	5	.matchAll (token of later-parts.tsv)
+test/built-ins/Symbol/matchAll/prop-desc.js	13	Uint8Array (harness)
+test/built-ins/Symbol/match/cross-realm.js	5	.match (token of later-parts.tsv)
+test/built-ins/Symbol/match/prop-desc.js	13	Uint8Array (harness)
+test/built-ins/Symbol/prototype/description/this-val-non-symbol.js	9	 Proxy(
+test/built-ins/Symbol/prototype/Symbol.toPrimitive/removed-symbol-wrapper-ordinary-toprimitive.js	4	Date
+test/built-ins/Symbol/replace/cross-realm.js	5	.replace (token of later-parts.tsv)
+test/built-ins/Symbol/replace/prop-desc.js	13	Uint8Array (harness)
+test/built-ins/Symbol/search/cross-realm.js	5	.search (token of later-parts.tsv)
+test/built-ins/Symbol/search/prop-desc.js	13	Uint8Array (harness)
+test/built-ins/Symbol/species/builtin-getter-name.js	10	(Promise,
+test/built-ins/Symbol/species/subclassing.js	8	 class M
+test/built-ins/Symbol/split/cross-realm.js	5	.split (token of later-parts.tsv)
+test/built-ins/Symbol/split/prop-desc.js	13	Uint8Array (harness)
+test/built-ins/Symbol/toPrimitive/cross-realm.js	5	.split (token of later-parts.tsv)
+test/harness/asyncHelpers-asyncTest-rejects-non-callable.js	10	/async- (harness)
+test/harness/asyncHelpers-asyncTest-return-not-thenable.js	10	/async- (harness)
+test/harness/nativeFunctionMatcher.js	5	= /(?:[A-Za-z\xAA\xB5\xBA\xC0-\xD6\xD8-\xF6\xF8-\u02C1\u02C6-\u02D1\u02E0-\u02E4\u02EC\u02EE\u0370-\u0374\u0376\u0377\u037A-\u037D\u037F\u0386\u0388-\u038A\u038C\u038E-\u03A1\u03A3-\u03F5\u03F7-\u0481\u048A-\u052F\u0531-\u0556\u0559\u0560-\u0588\u05D0-\u05EA\u05EF-\u05F2\u0620-\u064A\u066E\u066F\u0671-\u06D3\u06D5\u06E5\u06E6\u06EE\u06EF\u06FA-\u06FC\u06FF\u0710\u0712-\u072F\u074D-\u07A5\u07B1\u07CA-\u07EA\u07F4\u07F5\u07FA\u0800-\u0815\u081A\u0824\u0828\u0840-\u0858\u0860-\u086A\u08A0-\u08B4\u08B6-\u08C7\u0904-\u0939\u093D\u0950\u0958-\u0961\u0971-\u0980\u0985-\u098C\u098F\u0990\u0993-\u09A8\u09AA-\u09B0\u09B2\u09B6-\u09B9\u09BD\u09CE\u09DC\u09DD\u09DF-\u09E1\u09F0\u09F1\u09FC\u0A05-\u0A0A\u0A0F\u0A10\u0A13-\u0A28\u0A2A-\u0A30\u0A32\u0A33\u0A35\u0A36\u0A38\u0A39\u0A59-\u0A5C\u0A5E\u0A72-\u0A74\u0A85-\u0A8D\u0A8F-\u0A91\u0A93-\u0AA8\u0AAA-\u0AB0\u0AB2\u0AB3\u0AB5-\u0AB9\u0ABD\u0AD0\u0AE0\u0AE1\u0AF9\u0B05-\u0B0C\u0B0F\u0B10\u0B13-\u0B28\u0B2A-\u0B30\u0B32\u0B33\u0B35-\u0B39\u0B3D\u0B5C\u0B5D\u0B5F-\u0B61\u0B71\u0B83\u0B85-\u0B8A\u0B8E-\u0B90\u0B92-\u0B95\u0B99\u0B9A\u0B9C\u0B9E\u0B9F\u0BA3\u0BA4\u0BA8-\u0BAA\u0BAE-\u0BB9\u0BD0\u0C05-\u0C0C\u0C0E-\u0C10\u0C12-\u0C28\u0C2A-\u0C39\u0C3D\u0C58-\u0C5A\u0C60\u0C61\u0C80\u0C85-\u0C8C\u0C8E-\u0C90\u0C92-\u0CA8\u0CAA-\u0CB3\u0CB5-\u0CB9\u0CBD\u0CDE\u0CE0\u0CE1\u0CF1\u0CF2\u0D04-\u0D0C\u0D0E-\u0D10\u0D12-\u0D3A\u0D3D\u0D4E\u0D54-\u0D56\u0D5F-\u0D61\u0D7A-\u0D7F\u0D85-\u0D96\u0D9A-\u0DB1\u0DB3-\u0DBB\u0DBD\u0DC0-\u0DC6\u0E01-\u0E30\u0E32\u0E33\u0E40-\u0E46\u0E81\u0E82\u0E84\u0E86-\u0E8A\u0E8C-\u0EA3\u0EA5\u0EA7-\u0EB0\u0EB2\u0EB3\u0EBD\u0EC0-\u0EC4\u0EC6\u0EDC-\u0EDF\u0F00\u0F40-\u0F47\u0F49-\u0F6C\u0F88-\u0F8C\u1000-\u102A\u103F\u1050-\u1055\u105A-\u105D\u1061\u1065\u1066\u106E-\u1070\u1075-\u1081\u108E\u10A0-\u10C5\u10C7\u10CD\u10D0-\u10FA\u10FC-\u1248\u124A-\u124D\u1250-\u1256\u1258\u125A-\u125D\u1260-\u1288\u128A-\u128D\u1290-\u12B0\u12B2-\u12B5\u12B8-\u12BE\u12C0\u12C2-\u12C5\u12C8-\u12D6\u12D8-\u1310\u1312-\u1315\u1318-\u135A\u1380-\u138F\u13A0-\u13F5\u13F8-\u13FD\u1401-\u166C\u166F-\u167F\u1681-\u169A\u16A0-\u16EA\u16EE-\u16F8\u1700-\u170C\u170E-\u1711\u1720-\u1731\u1740-\u1751\u1760-\u176C\u176E-\u1770\u1780-\u17B3\u17D7\u17DC\u1820-\u1878\u1880-\u18A8\u18AA\u18B0-\u18F5\u1900-\u191E\u1950-\u196D\u1970-\u1974\u1980-\u19AB\u19B0-\u19C9\u1A00-\u1A16\u1A20-\u1A54\u1AA7\u1B05-\u1B33\u1B45-\u1B4B\u1B83-\u1BA0\u1BAE\u1BAF\u1BBA-\u1BE5\u1C00-\u1C23\u1C4D-\u1C4F\u1C5A-\u1C7D\u1C80-\u1C88\u1C90-\u1CBA\u1CBD-\u1CBF\u1CE9-\u1CEC\u1CEE-\u1CF3\u1CF5\u1CF6\u1CFA\u1D00-\u1DBF\u1E00-\u1F15\u1F18-\u1F1D\u1F20-\u1F45\u1F48-\u1F4D\u1F50-\u1F57\u1F59\u1F5B\u1F5D\u1F5F-\u1F7D\u1F80-\u1FB4\u1FB6-\u1FBC\u1FBE\u1FC2-\u1FC4\u1FC6-\u1FCC\u1FD0-\u1FD3\u1FD6-\u1FDB\u1FE0-\u1FEC\u1FF2-\u1FF4\u1FF6-\u1FFC\u2071\u207F\u2090-\u209C\u2102\u2107\u210A-\u2113\u2115\u2118-\u211D\u2124\u2126\u2128\u212A-\u2139\u213C-\u213F\u2145-\u2149\u214E\u2160-\u2188\u2C00-\u2C2E\u2C30-\u2C5E\u2C60-\u2CE4\u2CEB-\u2CEE\u2CF2\u2CF3\u2D00-\u2D25\u2D27\u2D2D\u2D30-\u2D67\u2D6F\u2D80-\u2D96\u2DA0-\u2DA6\u2DA8-\u2DAE\u2DB0-\u2DB6\u2DB8-\u2DBE\u2DC0-\u2DC6\u2DC8-\u2DCE\u2DD0-\u2DD6\u2DD8-\u2DDE\u3005-\u3007\u3021-\u3029\u3031-\u3035\u3038-\u303C\u3041-\u3096\u309B-\u309F\u30A1-\u30FA\u30FC-\u30FF\u3105-\u312F\u3131-\u318E\u31A0-\u31BF\u31F0-\u31FF\u3400-\u4DBF\u4E00-\u9FFC\uA000-\uA48C\uA4D0-\uA4FD\uA500-\uA60C\uA610-\uA61F\uA62A\uA62B\uA640-\uA66E\uA67F-\uA69D\uA6A0-\uA6EF\uA717-\uA71F\uA722-\uA788\uA78B-\uA7BF\uA7C2-\uA7CA\uA7F5-\uA801\uA803-\uA805\uA807-\uA80A\uA80C-\uA822\uA840-\uA873\uA882-\uA8B3\uA8F2-\uA8F7\uA8FB\uA8FD\uA8FE\uA90A-\uA925\uA930-\uA946\uA960-\uA97C\uA984-\uA9B2\uA9CF\uA9E0-\uA9E4\uA9E6-\uA9EF\uA9FA-\uA9FE\uAA00-\uAA28\uAA40-\uAA42\uAA44-\uAA4B\uAA60-\uAA76\uAA7A\uAA7E-\uAAAF\uAAB1\uAAB5\uAAB6\uAAB9-\uAABD\uAAC0\uAAC2\uAADB-\uAADD\uAAE0-\uAAEA\uAAF2-\uAAF4\uAB01-\uAB06\uAB09-\uAB0E\uAB11-\uAB16\uAB20-\uAB26\uAB28-\uAB2E\uAB30-\uAB5A\uAB5C-\uAB69\uAB70-\uABE2\uAC00-\uD7A3\uD7B0-\uD7C6\uD7CB-\uD7FB\uF900-\uFA6D\uFA70-\uFAD9\uFB00-\uFB06\uFB13-\uFB17\uFB1D\uFB1F-\uFB28\uFB2A-\uFB36\uFB38-\uFB3C\uFB3E\uFB40\uFB41\uFB43\uFB44\uFB46-\uFBB1\uFBD3-\uFD3D\uFD50-\uFD8F\uFD92-\uFDC7\uFDF0-\uFDFB\uFE70-\uFE74\uFE76-\uFEFC\uFF21-\uFF3A\uFF41-\uFF5A\uFF66-\uFFBE\uFFC2-\uFFC7\uFFCA-\uFFCF\uFFD2-\uFFD7\uFFDA-\uFFDC]|\uD800[\uDC00-\uDC0B\uDC0D-\uDC26\uDC28-\uDC3A\uDC3C\uDC3D\uDC3F-\uDC4D\uDC50-\uDC5D\uDC80-\uDCFA\uDD40-\uDD74\uDE80-\uDE9C\uDEA0-\uDED0\uDF00-\uDF1F\uDF2D-\uDF4A\uDF50-\uDF75\uDF80-\uDF9D\uDFA0-\uDFC3\uDFC8-\uDFCF\uDFD1-\uDFD5]|\uD801[\uDC00-\uDC9D\uDCB0-\uDCD3\uDCD8-\uDCFB\uDD00-\uDD27\uDD30-\uDD63\uDE00-\uDF36\uDF40-\uDF55\uDF60-\uDF67]|\uD802[\uDC00-\uDC05\uDC08\uDC0A-\uDC35\uDC37\uDC38\uDC3C\uDC3F-\uDC55\uDC60-\uDC76\uDC80-\uDC9E\uDCE0-\uDCF2\uDCF4\uDCF5\uDD00-\uDD15\uDD20-\uDD39\uDD80-\uDDB7\uDDBE\uDDBF\uDE00\uDE10-\uDE13\uDE15-\uDE17\uDE19-\uDE35\uDE60-\uDE7C\uDE80-\uDE9C\uDEC0-\uDEC7\uDEC9-\uDEE4\uDF00-\uDF35\uDF40-\uDF55\uDF60-\uDF72\uDF80-\uDF91]|\uD803[\uDC00-\uDC48\uDC80-\uDCB2\uDCC0-\uDCF2\uDD00-\uDD23\uDE80-\uDEA9\uDEB0\uDEB1\uDF00-\uDF1C\uDF27\uDF30-\uDF45\uDFB0-\uDFC4\uDFE0-\uDFF6]|\uD804[\uDC03-\uDC37\uDC83-\uDCAF\uDCD0-\uDCE8\uDD03-\uDD26\uDD44\uDD47\uDD50-\uDD72\uDD76\uDD83-\uDDB2\uDDC1-\uDDC4\uDDDA\uDDDC\uDE00-\uDE11\uDE13-\uDE2B\uDE80-\uDE86\uDE88\uDE8A-\uDE8D\uDE8F-\uDE9D\uDE9F-\uDEA8\uDEB0-\uDEDE\uDF05-\uDF0C\uDF0F\uDF10\uDF13-\uDF28\uDF2A-\uDF30\uDF32\uDF33\uDF35-\uDF39\uDF3D\uDF50\uDF5D-\uDF61]|\uD805[\uDC00-\uDC34\uDC47-\uDC4A\uDC5F-\uDC61\uDC80-\uDCAF\uDCC4\uDCC5\uDCC7\uDD80-\uDDAE\uDDD8-\uDDDB\uDE00-\uDE2F\uDE44\uDE80-\uDEAA\uDEB8\uDF00-\uDF1A]|\uD806[\uDC00-\uDC2B\uDCA0-\uDCDF\uDCFF-\uDD06\uDD09\uDD0C-\uDD13\uDD15\uDD16\uDD18-\uDD2F\uDD3F\uDD41\uDDA0-\uDDA7\uDDAA-\uDDD0\uDDE1\uDDE3\uDE00\uDE0B-\uDE32\uDE3A\uDE50\uDE5C-\uDE89\uDE9D\uDEC0-\uDEF8]|\uD807[\uDC00-\uDC08\uDC0A-\uDC2E\uDC40\uDC72-\uDC8F\uDD00-\uDD06\uDD08\uDD09\uDD0B-\uDD30\uDD46\uDD60-\uDD65\uDD67\uDD68\uDD6A-\uDD89\uDD98\uDEE0-\uDEF2\uDFB0]|\uD808[\uDC00-\uDF99]|\uD809[\uDC00-\uDC6E\uDC80-\uDD43]|[\uD80C\uD81C-\uD820\uD822\uD840-\uD868\uD86A-\uD86C\uD86F-\uD872\uD874-\uD879\uD880-\uD883][\uDC00-\uDFFF]|\uD80D[\uDC00-\uDC2E]|\uD811[\uDC00-\uDE46]|\uD81A[\uDC00-\uDE38\uDE40-\uDE5E\uDED0-\uDEED\uDF00-\uDF2F\uDF40-\uDF43\uDF63-\uDF77\uDF7D-\uDF8F]|\uD81B[\uDE40-\uDE7F\uDF00-\uDF4A\uDF50\uDF93-\uDF9F\uDFE0\uDFE1\uDFE3]|\uD821[\uDC00-\uDFF7]|\uD823[\uDC00-\uDCD5\uDD00-\uDD08]|\uD82C[\uDC00-\uDD1E\uDD50-\uDD52\uDD64-\uDD67\uDD70-\uDEFB]|\uD82F[\uDC00-\uDC6A\uDC70-\uDC7C\uDC80-\uDC88\uDC90-\uDC99]|\uD835[\uDC00-\uDC54\uDC56-\uDC9C\uDC9E\uDC9F\uDCA2\uDCA5\uDCA6\uDCA9-\uDCAC\uDCAE-\uDCB9\uDCBB\uDCBD-\uDCC3\uDCC5-\uDD05\uDD07-\uDD0A\uDD0D-\uDD14\uDD16-\uDD1C\uDD1E-\uDD39\uDD3B-\uDD3E\uDD40-\uDD44\uDD46\uDD4A-\uDD50\uDD52-\uDEA5\uDEA8-\uDEC0\uDEC2-\uDEDA\uDEDC-\uDEFA\uDEFC-\uDF14\uDF16-\uDF34\uDF36-\uDF4E\uDF50-\uDF6E\uDF70-\uDF88\uDF8A-\uDFA8\uDFAA-\uDFC2\uDFC4-\uDFCB]|\uD838[\uDD00-\uDD2C\uDD37-\uDD3D\uDD4E\uDEC0-\uDEEB]|\uD83A[\uDC00-\uDCC4\uDD00-\uDD43\uDD4B]|\uD83B[\uDE00-\uDE03\uDE05-\uDE1F\uDE21\uDE22\uDE24\uDE27\uDE29-\uDE32\uDE34-\uDE37\uDE39\uDE3B\uDE42\uDE47\uDE49\uDE4B\uDE4D-\uDE4F\uDE51\uDE52\uDE54\uDE57\uDE59\uDE5B\uDE5D\uDE5F\uDE61\uDE62\uDE64\uDE67-\uDE6A\uDE6C-\uDE72\uDE74-\uDE77\uDE79-\uDE7C\uDE7E\uDE80-\uDE89\uDE8B-\uDE9B\uDEA1-\uDEA3\uDEA5-\uDEA9\uDEAB-\uDEBB]|\uD869[\uDC00-\uDEDD\uDF00-\uDFFF]|\uD86D[\uDC00-\uDF34\uDF40-\uDFFF]|\uD86E[\uDC00-\uDC1D\uDC20-\uDFFF]|\uD873[\uDC00-\uDEA1\uDEB0-\uDFFF]|\uD87A[\uDC00-\uDFE0]|\uD87E[\uDC00-\uDE1D]|\uD884[\uDC00-\uDF4A])/; (harness)
+test/harness/wellKnownIntrinsicObjects.js	13	ArrayBuffer (harness)
+test/language/computed-property-names/class/accessor/getter-duplicates.js	8	 class C
+test/language/computed-property-names/class/accessor/getter.js	8	 class C
+test/language/computed-property-names/class/accessor/setter-duplicates.js	8	 class C
+test/language/computed-property-names/class/accessor/setter.js	8	 class C
+test/language/computed-property-names/class/method/constructor-can-be-generator.js	8	 class C
+test/language/computed-property-names/class/method/constructor-can-be-getter.js	8	 class C
+test/language/computed-property-names/class/method/constructor-can-be-setter.js	8	 class C
+test/language/computed-property-names/class/method/constructor-duplicate-1.js	8	 class C
+test/language/computed-property-names/class/method/constructor-duplicate-2.js	8	 class C
+test/language/computed-property-names/class/method/constructor-duplicate-3.js	8	 class C
+test/language/computed-property-names/class/method/constructor.js	8	 class C
+test/language/computed-property-names/class/method/generator.js	8	 class i
+test/language/computed-property-names/class/method/number.js	8	 class m
+test/language/computed-property-names/class/method/string.js	8	 class m
+test/language/computed-property-names/class/method/symbol.js	8	 class m
+test/language/computed-property-names/class/static/generator-constructor.js	8	 class C
+test/language/computed-property-names/class/static/generator-prototype.js	8	 class C
+test/language/computed-property-names/class/static/getter-constructor.js	8	 class C
+test/language/computed-property-names/class/static/getter-prototype.js	8	 class C
+test/language/computed-property-names/class/static/method-constructor.js	8	 class C
+test/language/computed-property-names/class/static/method-number.js	9	 Set 
+test/language/computed-property-names/class/static/method-number-order.js	9	 Set 
+test/language/computed-property-names/class/static/method-prototype.js	8	 class C
+test/language/computed-property-names/class/static/method-string.js	9	 Set 
+test/language/computed-property-names/class/static/method-string-order.js	9	 Set 
+test/language/computed-property-names/class/static/method-symbol.js	9	 Set 
+test/language/computed-property-names/class/static/method-symbol-order.js	9	 Set 
+test/language/computed-property-names/class/static/setter-constructor.js	8	 class C
+test/language/computed-property-names/class/static/setter-prototype.js	8	 class C
+test/language/computed-property-names/object/accessor/getter-super.js	8	 super
+test/language/computed-property-names/object/accessor/setter-super.js	8	 super
+test/language/computed-property-names/object/method/generator.js	7	yield
+test/language/computed-property-names/object/method/super.js	8	 super
+test/language/computed-property-names/to-name-side-effects/class.js	8	 class C
+test/language/computed-property-names/to-name-side-effects/numbers-class.js	8	 class C
+test/language/destructuring/binding/syntax/destructuring-array-parameters-function-arguments-length.js	10	(async 
+test/language/destructuring/binding/syntax/destructuring-object-parameters-function-arguments-length.js	10	(async 
+test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	7	a generator method (*)
+test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	7	a generator method (*)
+test/language/expressions/arrow-function/dstr/ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/expressions/arrow-function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/expressions/arrow-function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/expressions/arrow-function/dstr/obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/expressions/arrow-function/lexical-supercall-from-immediately-invoked-arrow.js	8	 super
+test/language/expressions/arrow-function/lexical-super-call-from-within-constructor.js	8	 super
+test/language/expressions/arrow-function/lexical-super-property-from-within-constructor.js	8	 super
+test/language/expressions/arrow-function/lexical-super-property.js	8	 super
+test/language/expressions/arrow-function/param-dflt-yield-id-non-strict.js	7	yield
+test/language/expressions/arrow-function/param-dflt-yield-id-strict.js	7	yield
+test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-yield.js	7	yield
+test/language/expressions/arrow-function/syntax/arrowparameters-cover-formalparameters-yield.js	7	yield
+test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-no-yield.js	7	yield
+test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-yield.js	7	yield
+test/language/expressions/assignment/destructuring/default-expr-throws-iterator-return-is-not-callable.js	12	0n,
+test/language/expressions/assignment/destructuring/target-assign-throws-iterator-return-is-not-callable.js	12	0n,
+test/language/expressions/assignment/dstr/array-elem-init-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/array-elem-init-yield-ident-valid.js	7	yield
+test/language/expressions/assignment/dstr/array-elem-nested-array-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/array-elem-nested-array-yield-ident-valid.js	7	yield
+test/language/expressions/assignment/dstr/array-elem-nested-obj-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/array-elem-nested-obj-yield-ident-valid.js	7	yield
+test/language/expressions/assignment/dstr/array-elem-target-yield-invalid.js	7	yield
+test/language/expressions/assignment/dstr/array-elem-target-yield-valid.js	7	yield
+test/language/expressions/assignment/dstr/array-rest-nested-array-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/array-rest-nested-array-yield-ident-valid.js	7	yield
+test/language/expressions/assignment/dstr/array-rest-nested-obj-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/array-rest-nested-obj-yield-ident-valid.js	7	yield
+test/language/expressions/assignment/dstr/array-rest-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/array-rest-yield-ident-valid.js	7	yield
+test/language/expressions/assignment/dstr/ident-name-prop-name-literal-class-escaped.js	8	 class i
+test/language/expressions/assignment/dstr/ident-name-prop-name-literal-export-escaped.js	11	export (token of later-parts.tsv)
+test/language/expressions/assignment/dstr/ident-name-prop-name-literal-import-escaped.js	11	import (token of later-parts.tsv)
+test/language/expressions/assignment/dstr/ident-name-prop-name-literal-in-escaped.js	12	9n:
+test/language/expressions/assignment/dstr/ident-name-prop-name-literal-super-escaped.js	8	/super
+test/language/expressions/assignment/dstr/obj-id-identifier-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/obj-id-identifier-yield-ident-valid.js	7	yield
+test/language/expressions/assignment/dstr/obj-id-init-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/obj-id-init-yield-ident-valid.js	7	yield
+test/language/expressions/assignment/dstr/obj-prop-elem-init-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/obj-prop-elem-init-yield-ident-valid.js	7	yield
+test/language/expressions/assignment/dstr/obj-prop-elem-target-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/obj-prop-elem-target-yield-ident-valid.js	7	yield
+test/language/expressions/assignment/dstr/obj-prop-nested-array-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/obj-prop-nested-array-yield-ident-valid.js	7	yield
+test/language/expressions/assignment/dstr/obj-prop-nested-obj-yield-ident-invalid.js	7	yield
+test/language/expressions/assignment/dstr/obj-prop-nested-obj-yield-ident-valid.js	7	yield
+test/language/expressions/exponentiation/int32_min-exponent.js	4	**
+test/language/expressions/exponentiation/order-of-evaluation.js	4	**
+test/language/expressions/function/dstr/ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/expressions/function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/expressions/function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/expressions/function/dstr/obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/expressions/object/accessor-name-computed.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-computed-yield-id.js	7	yield
+test/language/expressions/object/accessor-name-literal-numeric-binary.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-numeric-exponent.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-numeric-hex.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-numeric-leading-decimal.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-numeric-non-canonical.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-numeric-octal.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-numeric-zero.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-string-char-escape.js	18	escape (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-string-default-escaped-ext.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-string-default-escaped.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-string-default.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-string-double-quote.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-string-empty.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-string-hex-escape.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-string-line-continuation.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-string-single-quote.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/accessor-name-literal-string-unicode-escape.js	9	Set (token of later-parts.tsv)
+test/language/expressions/object/computed-__proto__.js	18	.__proto__ (token of later-parts.tsv)
+test/language/expressions/object/cpn-obj-lit-computed-property-name-from-async-arrow-function-expression.js	10	-async-
+test/language/expressions/object/cpn-obj-lit-computed-property-name-from-exponetiation-expression.js	4	**
+test/language/expressions/object/cpn-obj-lit-computed-property-name-from-generator-function-declaration.js	7	function *
+test/language/expressions/object/cpn-obj-lit-computed-property-name-from-math.js	4	**
+test/language/expressions/object/cpn-obj-lit-computed-property-name-from-yield-expression.js	7	yield
+test/language/expressions/object/dstr/meth-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/expressions/object/dstr/meth-dflt-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/expressions/object/dstr/meth-dflt-obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/expressions/object/dstr/meth-obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/expressions/object/method-definition/name-param-init-yield.js	7	yield
+test/language/expressions/object/method-definition/name-prop-name-yield-id.js	7	yield
+test/language/expressions/object/__proto__-duplicate-computed.js	18	.__proto__ (token of later-parts.tsv)
+test/language/expressions/tagged-template/invalid-escape-sequences.js	18	escape (token of later-parts.tsv)
+test/language/expressions/template-literal/tv-zwnbsp.js	18	escape (token of later-parts.tsv)
+test/language/rest-parameters/with-new-target.js	8	 class B
+test/language/statements/const/dstr/ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/const/dstr/obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/statements/for/dstr/const-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/for/dstr/const-obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/statements/for/dstr/let-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/for/dstr/let-obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/statements/for/dstr/var-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/for/dstr/var-obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/statements/for-in/dstr/array-elem-init-yield-ident-invalid.js	7	yield
+test/language/statements/for-in/dstr/array-elem-nested-array-yield-ident-invalid.js	7	yield
+test/language/statements/for-in/dstr/array-elem-nested-obj-yield-ident-invalid.js	7	yield
+test/language/statements/for-in/dstr/array-elem-target-yield-invalid.js	7	yield
+test/language/statements/for-in/dstr/array-rest-nested-array-yield-ident-invalid.js	7	yield
+test/language/statements/for-in/dstr/array-rest-nested-obj-yield-ident-invalid.js	7	yield
+test/language/statements/for-in/dstr/array-rest-yield-ident-invalid.js	7	yield
+test/language/statements/for-in/dstr/obj-id-identifier-yield-ident-invalid.js	7	yield
+test/language/statements/for-in/dstr/obj-id-init-yield-ident-invalid.js	7	yield
+test/language/statements/for-in/dstr/obj-prop-elem-init-yield-ident-invalid.js	7	yield
+test/language/statements/for-in/dstr/obj-prop-elem-target-yield-ident-invalid.js	7	yield
+test/language/statements/for-in/dstr/obj-prop-nested-array-yield-ident-invalid.js	7	yield
+test/language/statements/for-in/dstr/obj-prop-nested-obj-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/body-dstr-assign-error.js	9	 Set 
+test/language/statements/for-of/decl-cls.js	8	 class C
+test/language/statements/for-of/dstr/array-elem-init-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/array-elem-init-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/array-elem-nested-array-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/array-elem-nested-array-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/array-elem-nested-obj-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/array-elem-nested-obj-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/array-elem-target-yield-invalid.js	7	yield
+test/language/statements/for-of/dstr/array-elem-target-yield-valid.js	7	yield
+test/language/statements/for-of/dstr/array-rest-nested-array-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/array-rest-nested-array-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/array-rest-nested-obj-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/array-rest-nested-obj-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/array-rest-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/array-rest-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/const-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/for-of/dstr/const-obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/statements/for-of/dstr/let-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/for-of/dstr/let-obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/statements/for-of/dstr/obj-id-identifier-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/obj-id-identifier-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/obj-id-init-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/obj-id-init-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/obj-prop-elem-init-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/obj-prop-elem-init-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/obj-prop-elem-target-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/obj-prop-elem-target-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/obj-prop-nested-array-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/obj-prop-nested-array-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/obj-prop-nested-obj-yield-ident-invalid.js	7	yield
+test/language/statements/for-of/dstr/obj-prop-nested-obj-yield-ident-valid.js	7	yield
+test/language/statements/for-of/dstr/var-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/for-of/dstr/var-obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/statements/for-of/head-lhs-async-dot.js	10	`async`
+test/language/statements/for-of/head-lhs-async-escaped.js	10	`async`
+test/language/statements/for-of/head-lhs-async-invalid.js	10	`async`
+test/language/statements/for-of/head-lhs-async-parens.js	10	`async`
+test/language/statements/for-of/iterator-next-result-type.js	9	 Proxy(
+test/language/statements/function/dstr/ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/statements/function/dstr/obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/statements/let/dstr/ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/let/dstr/obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/statements/let/syntax/let-newline-await-in-normal-function.js	10	 await`
+test/language/statements/let/syntax/let-newline-yield-in-normal-function.js	7	yield
+test/language/statements/try/dstr/ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/try/dstr/obj-ptrn-id-init-fn-name-class.js	8	 class {
+test/language/statements/variable/dstr/ary-ptrn-elem-id-init-fn-name-class.js	8	 class {
+test/language/statements/variable/dstr/obj-ptrn-id-init-fn-name-class.js	8	 class {

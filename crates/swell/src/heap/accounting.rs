@@ -52,6 +52,12 @@ impl Accounting {
         self.used = self.used.saturating_sub(bytes);
     }
 
+    /// A test sets the budget to reach it with a small subject.
+    #[cfg(test)]
+    pub(crate) fn set_limit(&mut self, limit: u64) {
+        self.limit = limit;
+    }
+
     /// The bytes charged now.
     pub(crate) fn used(&self) -> u64 {
         self.used

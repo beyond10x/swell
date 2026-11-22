@@ -1,0 +1,23 @@
+test/harness/verifyProperty-arguments.js	story-arrow.cases.txt
+test/harness/verifyProperty-noproperty.js	story-arrow.cases.txt
+test/harness/verifyProperty-undefined-desc.js	story-arrow.cases.txt
+test/language/expressions/arrow-function/length-dflt.js	story-parameters.cases.txt
+test/language/expressions/arrow-function/name.js	story-arrow.cases.txt
+test/language/expressions/assignment/dstr/obj-id-init-fn-name-arrow.js	story-object-pattern.cases.txt
+test/language/expressions/assignment/dstr/obj-id-init-fn-name-cover.js	story-object-pattern.cases.txt
+test/language/expressions/assignment/dstr/obj-id-init-fn-name-fn.js	story-object-pattern.cases.txt
+test/language/expressions/assignment/dstr/obj-prop-elem-init-fn-name-arrow.js	story-object-pattern.cases.txt
+test/language/expressions/assignment/fn-name-arrow.js	story-arrow.cases.txt
+test/language/expressions/function/length-dflt.js	story-parameters.cases.txt
+test/language/expressions/object/method-definition/name-length-dflt.js	story-parameters.cases.txt
+test/language/expressions/object/setter-length-dflt.js	story-parameters.cases.txt
+test/language/expressions/optional-chaining/early-errors-tail-position-op-template-string-esi.js	cross-story.tsv (already there)
+test/language/expressions/optional-chaining/early-errors-tail-position-op-template-string.js	cross-story.tsv (already there)
+test/language/statements/const/fn-name-arrow.js	story-arrow.cases.txt
+test/language/statements/const/fn-name-cover.js	story-let-const.cases.txt
+test/language/statements/const/fn-name-fn.js	story-let-const.cases.txt
+test/language/statements/function/length-dflt.js	story-parameters.cases.txt
+test/language/statements/let/fn-name-arrow.js	story-arrow.cases.txt
+test/language/statements/let/fn-name-cover.js	story-let-const.cases.txt
+test/language/statements/let/fn-name-fn.js	story-let-const.cases.txt
+test/language/statements/variable/fn-name-arrow.js	story-arrow.cases.txt
