@@ -26,6 +26,7 @@ pub(crate) mod access;
 pub(crate) mod transform;
 
 use crate::builtins::object::argument;
+use crate::heap::string::HeapString;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host, Termination};
@@ -208,14 +209,45 @@ impl<H: Host> Agent<H> {
         self.append_units(builder, &units_of(text))
     }
 
-    /// Append the code units of `string`, as [`Agent::append_units`].
+    /// Append the code units of `string`, as [`Agent::append_units`], from its length: the
+    /// `RangeError` past `string_length`, the step per code unit and the memory budget come
+    /// before a unit is read, and the units are then read from the String in place into the
+    /// builder, with no copy between.
     pub(crate) fn append_string(
         &mut self,
         builder: &mut StringBuilder,
         string: StringRef,
     ) -> Completion<()> {
-        let units = self.string_units(string)?;
-        self.append_units(builder, &units)
+        let count = self.string_length(string)?;
+        let length = builder.units.len().saturating_add(count);
+        if u64::try_from(length).unwrap_or(u64::MAX) > self.limits.string_length {
+            return Err(self.throw_error(
+                ErrorKind::RangeError,
+                "the string would be longer than string_length",
+            ));
+        }
+        self.charge_steps(u64::try_from(count).unwrap_or(u64::MAX))?;
+        let bytes = u64::try_from(length).unwrap_or(u64::MAX).saturating_mul(2);
+        if self.heap.accounting.check(bytes).is_err() || builder.units.try_reserve(count).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        let appended = match self.heap.strings.get(string.handle) {
+            Ok(HeapString::Latin1(latin1)) => {
+                builder
+                    .units
+                    .extend(latin1.iter().map(|&byte| u16::from(byte)));
+                true
+            }
+            Ok(HeapString::Utf16(units)) => {
+                builder.units.extend_from_slice(units);
+                true
+            }
+            Err(_) => false,
+        };
+        if !appended {
+            return Err(self.fault());
+        }
+        Ok(())
     }
 
     /// The String of the units built.
@@ -670,5 +702,20 @@ mod tests {
         );
         assert_eq!(builder.units.len(), 1000);
         assert_eq!(agent.heap.accounting.used(), used);
+    }
+
+    /// `String.prototype.concat` (`#sec-string.prototype.concat`) builds its result from other
+    /// values, so it is bounded by `string_length` (`docs/design/host-interface.md`, section 2):
+    /// with `string_length` 1,000,000, `"a".concat(s)` with s of 1,000,000 code units throws a
+    /// `RangeError` before a unit of s is copied.
+    #[test]
+    fn concat_past_string_length_copies_nothing() {
+        use crate::builtins::string::transform::tests::{Answer, Counting, FEW_STEPS, LONG};
+        let mut counting = Counting::new(LONG as u64);
+        counting.string("s", &vec![0x61; LONG]);
+        assert_eq!(
+            counting.counted(FEW_STEPS, "\"a\".concat(s)"),
+            (Answer::Throw("RangeError".to_string()), 0)
+        );
     }
 }

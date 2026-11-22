@@ -247,21 +247,54 @@ impl<H: Host> Agent<H> {
                 "the count of String.prototype.repeat is negative or infinite",
             ));
         }
-        let units = self.string_units(string)?;
         // 6. If n = 0, return the empty String. n copies of the empty String are the empty
         // String, S itself.
-        if units.is_empty() {
+        let length = self.string_length(string)?;
+        if length == 0 {
             return Ok(Value::String(string));
         }
         // 7. Return the String value that is made from n copies of S appended together. Its
-        // length, n times that of S, is asked of the limits first.
-        let mut builder = self.result_builder(n * units.len() as f64)?;
+        // length, n times that of S, is asked of the limits first. For n = 0 nothing of S is
+        // read.
+        let mut builder = self.result_builder(n * length as f64)?;
         // n is at most the length asked, which the limits admitted.
         let copies = n as u64;
-        for _ in 0..copies {
-            self.append_units(&mut builder, &units)?;
+        if copies > 0 {
+            // The first copy is read from S, charged before; the others from the first.
+            self.append_string(&mut builder, string)?;
+            for _ in 1..copies {
+                self.append_again(&mut builder, length)?;
+            }
         }
         Ok(Value::String(self.finish_string(builder)?))
+    }
+
+    /// Append the first `units` code units of `builder` to it again, as
+    /// [`Agent::append_units`] appends units: the `RangeError` past `string_length`, a step per
+    /// code unit and the memory budget before the copy.
+    fn append_again(&mut self, builder: &mut StringBuilder, units: usize) -> Completion<()> {
+        if units > builder.units.len() {
+            return Err(self.fault());
+        }
+        let length = builder.units.len().saturating_add(units);
+        if count(length) > self.limits.string_length {
+            return Err(self.throw_error(
+                ErrorKind::RangeError,
+                "the string would be longer than string_length",
+            ));
+        }
+        self.charge_steps(count(units))?;
+        if self
+            .heap
+            .accounting
+            .check(count(length).saturating_mul(2))
+            .is_err()
+            || builder.units.try_reserve(units).is_err()
+        {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        builder.units.extend_from_within(..units);
+        Ok(())
     }
 
     /// `String.prototype.padEnd` and `padStart` (`#sec-string.prototype.padend`,
@@ -300,11 +333,17 @@ impl<H: Host> Agent<H> {
         }
         // 5. If fillString is undefined, set fillString to the String value consisting solely
         // of the code unit 0x0020 (SPACE). 6. Else, set fillString to ? ToString(fillString).
+        // Of fillString only the units truncatedStringFiller takes are read: at most
+        // intMaxLength - stringLength (StringPad, steps 4 and 5).
         let filler = match argument(args, 1) {
             Value::Undefined => vec![0x0020],
             fill_string => {
                 let fill_string = self.to_string(fill_string)?;
-                self.string_units(fill_string)?
+                // A positive integer below 2^53: the cast keeps it.
+                let fill_length =
+                    usize::try_from((max_length - length as f64) as u64).unwrap_or(usize::MAX);
+                let used = self.string_length(fill_string)?.min(fill_length);
+                self.string_units_in(fill_string, 0, used)?
             }
         };
         // 7. Return StringPad(S, intMaxLength, fillString, placement).
@@ -312,8 +351,9 @@ impl<H: Host> Agent<H> {
     }
 
     /// StringPad ( string, maxLength, fillString, placement ) (`#sec-stringpad`), with
-    /// `filler` the code units of fillString. The length of the result, maxLength, is asked of
-    /// the limits before a unit is copied.
+    /// `filler` the code units of fillString it uses. The length of the result, maxLength, is
+    /// asked of the limits before a unit is copied, and string is appended by its steps before
+    /// its units are read.
     fn string_pad(
         &mut self,
         string: StringRef,
@@ -321,10 +361,10 @@ impl<H: Host> Agent<H> {
         filler: &[u16],
         placement: Placement,
     ) -> Completion<StringRef> {
-        let units = self.string_units(string)?;
         // 1. Let stringLength be the length of string. 2. If maxLength ≤ stringLength, return
         // string. 3. If fillString is the empty String, return string.
-        if max_length <= units.len() as f64 || filler.is_empty() {
+        let length = self.string_length(string)?;
+        if max_length <= length as f64 || filler.is_empty() {
             return Ok(string);
         }
         let mut builder = self.result_builder(max_length)?;
@@ -332,11 +372,11 @@ impl<H: Host> Agent<H> {
         // so it is an integer the cast keeps.
         let mut left = usize::try_from(max_length as u64)
             .unwrap_or(usize::MAX)
-            .saturating_sub(units.len());
+            .saturating_sub(length);
         // 6. If placement is start, return the string-concatenation of truncatedStringFiller
         // and string. 7. Return the string-concatenation of string and truncatedStringFiller.
         if placement == Placement::End {
-            self.append_units(&mut builder, &units)?;
+            self.append_string(&mut builder, string)?;
         }
         // 5. Let truncatedStringFiller be the String value consisting of repeated
         // concatenations of fillString truncated to length fillLength.
@@ -346,7 +386,7 @@ impl<H: Host> Agent<H> {
             left -= take;
         }
         if placement == Placement::Start {
-            self.append_units(&mut builder, &units)?;
+            self.append_string(&mut builder, string)?;
         }
         self.finish_string(builder)
     }
@@ -358,8 +398,7 @@ impl<H: Host> Agent<H> {
         // TrimString (`#sec-trimstring`): 1. Perform ? RequireObjectCoercible(string). 2. Let S
         // be ? ToString(string).
         let string = self.this_string(this, method)?;
-        let units = self.string_units(string)?;
-        self.charge_steps(count(units.len()))?;
+        let units = self.charged_units(string)?;
         // 3, 4, 5. A copy of S with the leading white space, the trailing white space or both
         // removed: WhiteSpace and LineTerminator, whose code points are all below 0x10000, so
         // each is one code unit, and no unit of a surrogate pair is one.
@@ -398,8 +437,7 @@ impl<H: Host> Agent<H> {
         // 1. Let O be the this value. 2. Perform ? RequireObjectCoercible(O). 3. Let S be ?
         // ToString(O).
         let string = self.this_string(this, method)?;
-        let units = self.string_units(string)?;
-        self.charge_steps(count(units.len()))?;
+        let units = self.charged_units(string)?;
         if !is_ascii(&units) {
             return Err(self.refuse_before_slice_5(CASE_REFUSAL));
         }
@@ -425,9 +463,8 @@ impl<H: Host> Agent<H> {
         let that = self.to_string(argument(args, 0));
         self.release(keep);
         let that = that?;
-        let units = self.string_units(string)?;
-        let that_units = self.string_units(that)?;
-        self.charge_steps(count(units.len()).saturating_add(count(that_units.len())))?;
+        let units = self.charged_units(string)?;
+        let that_units = self.charged_units(that)?;
         if !is_ascii(&units) || !is_ascii(&that_units) {
             return Err(self.refuse_before_slice_5(COMPARE_REFUSAL));
         }
@@ -438,5 +475,210 @@ impl<H: Host> Agent<H> {
             std::cmp::Ordering::Equal => 0.0,
             std::cmp::Ordering::Greater => 1.0,
         }))
+    }
+}
+
+/// The tests of the copies the builtins of this group make, and the agent the tests of the
+/// other builtins of `story:string-builtins-charge-before-they-copy` share: a script runs on
+/// Strings of [`tests::LONG`] code units the host made with `new_string_utf16`, and the test
+/// reads the longest copy of a String's code units its entry made (`object/string.rs`,
+/// `copies`).
+#[cfg(test)]
+pub(crate) mod tests {
+    use crate::host::agent::Agent;
+    use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, limits};
+    use crate::object::string::copies;
+    use crate::{Outcome, Parsed, PropertyKey, Realm, Root, Source, Termination, Value};
+
+    /// The code units of the long Strings.
+    pub(crate) const LONG: usize = 1_000_000;
+
+    /// What an entry answered: the text of a String or the debug form of another value, the
+    /// `name` of a thrown object, or a termination.
+    #[derive(Debug, PartialEq)]
+    pub(crate) enum Answer {
+        Normal(String),
+        Throw(String),
+        Terminated(Termination),
+    }
+
+    /// An agent and its realm, with globals the host set.
+    pub(crate) struct Counting {
+        agent: Agent<NoHooks>,
+        realm: Realm,
+    }
+
+    impl Counting {
+        /// An agent with `string_length`, steps for the entries that set up, and 256 MiB of
+        /// memory: a realm and the long Strings (about 1 MB each, a copy 2 MB) take a few MB of
+        /// it, and no test of this file reaches the memory budget.
+        pub(crate) fn new(string_length: u64) -> Counting {
+            let mut limits = limits();
+            limits.memory_bytes = 1 << 28;
+            limits.string_length = string_length;
+            limits.steps_per_entry = 1 << 26;
+            let (agent, realm) = agent_with_realm_and(limits);
+            Counting { agent, realm }
+        }
+
+        /// The global `name`, a String of `units` the host makes with `new_string_utf16`.
+        pub(crate) fn string(&mut self, name: &str, units: &[u16]) {
+            let global = self.agent.global_object(&self.realm).unwrap();
+            self.agent
+                .with_cx(&self.realm, |cx| {
+                    let string = cx.new_string_utf16(units).unwrap();
+                    let Value::Object(global) = cx.get(&global).unwrap() else {
+                        panic!("the global object is no object");
+                    };
+                    let key = PropertyKey::String(cx.new_string(name).unwrap());
+                    let set = cx.set(global, key, Value::String(string), true).unwrap();
+                    assert_eq!(set, Ok(true), "{name}");
+                })
+                .unwrap();
+        }
+
+        /// The answer of `source` with the steps of the agent's limits.
+        pub(crate) fn eval(&mut self, source: &str) -> Answer {
+            let script = self.parse(source);
+            let outcome = self.agent.evaluate_script(&script).unwrap();
+            self.describe(outcome)
+        }
+
+        /// The answer of `source` with `steps` for its entry, and the longest copy of a
+        /// String's code units the entry made.
+        pub(crate) fn counted(&mut self, steps: u64, source: &str) -> (Answer, usize) {
+            let script = self.parse(source);
+            let saved = self.agent.limits.steps_per_entry;
+            self.agent.limits.steps_per_entry = steps;
+            copies::reset();
+            let outcome = self.agent.evaluate_script(&script).unwrap();
+            let longest = copies::longest();
+            self.agent.limits.steps_per_entry = saved;
+            (self.describe(outcome), longest)
+        }
+
+        /// `source`, parsed.
+        fn parse(&mut self, source: &str) -> crate::Script {
+            match self
+                .agent
+                .parse_script(&self.realm, Source::Utf8(source), None)
+            {
+                Ok(Parsed::Parsed(script)) => script,
+                other => panic!("{source} did not parse: {other:?}"),
+            }
+        }
+
+        /// The answer of `outcome`.
+        fn describe(&mut self, outcome: Outcome<Root>) -> Answer {
+            let (root, thrown) = match outcome {
+                Outcome::Normal(root) => (root, false),
+                Outcome::Throw(root) => (root, true),
+                Outcome::Terminated(termination) => return Answer::Terminated(termination),
+            };
+            self.agent
+                .with_cx(&self.realm, |cx| {
+                    let mut value = cx.get(&root).unwrap();
+                    if let (true, Value::Object(error)) = (thrown, value) {
+                        let key = PropertyKey::String(cx.new_string("name").unwrap());
+                        value = cx.get_property(error, key).unwrap().unwrap();
+                    }
+                    let text = match value {
+                        Value::String(string) => cx.to_rust_string_lossy(string).unwrap(),
+                        other => format!("{other:?}"),
+                    };
+                    if thrown {
+                        Answer::Throw(text)
+                    } else {
+                        Answer::Normal(text)
+                    }
+                })
+                .unwrap()
+        }
+    }
+
+    /// An agent with `string_length` 2^21 and the global `s`, [`LONG`] code units of `unit`.
+    pub(crate) fn with_long(unit: u16) -> Counting {
+        let mut counting = Counting::new(1 << 21);
+        counting.string("s", &vec![unit; LONG]);
+        counting
+    }
+
+    /// The steps a test leaves the builtin: far fewer than the units of the long String.
+    pub(crate) const FEW_STEPS: u64 = 1_000;
+
+    /// Each of `sources`, in an agent of its own with the long String `s` of `unit`, with
+    /// [`FEW_STEPS`] for its entry, ends in `Terminated(StepBudget)` before a unit of `s` is
+    /// copied.
+    fn charged_before_the_copy(unit: u16, sources: &[&str]) {
+        for source in sources {
+            let mut counting = with_long(unit);
+            assert_eq!(
+                counting.counted(FEW_STEPS, source),
+                (Answer::Terminated(Termination::StepBudget), 0),
+                "{source}"
+            );
+        }
+    }
+
+    /// `#sec-string.prototype.repeat`, step 6: a count of 0 answers the empty String, and
+    /// nothing of S is copied for it.
+    #[test]
+    fn repeat_zero_copies_nothing() {
+        let mut counting = with_long(0x61);
+        assert_eq!(
+            counting.counted(FEW_STEPS, "s.repeat(0)"),
+            (Answer::Normal(String::new()), 0)
+        );
+    }
+
+    /// `#sec-string.prototype.repeat`, step 7: the steps of S's units are charged before they
+    /// are copied, so a budget that cannot pay them ends the entry with no copy.
+    #[test]
+    fn repeat_is_charged_before_its_copy() {
+        charged_before_the_copy(0x61, &["s.repeat(1)"]);
+    }
+
+    /// StringPaddingBuiltinsImpl (`#sec-stringpaddingbuiltinsimpl`) and StringPad
+    /// (`#sec-stringpad`): of the fill String only the units truncatedStringFiller takes are
+    /// read, here 2 of [`LONG`].
+    #[test]
+    fn pad_copies_only_the_fill_it_uses() {
+        let mut counting = with_long(0x66);
+        let (answer, longest) = counting.counted(FEW_STEPS, "\"x\".padStart(3, s)");
+        assert_eq!(answer, Answer::Normal("ffx".to_string()));
+        assert!(longest <= 2, "{longest}");
+    }
+
+    /// StringPad (`#sec-stringpad`): S is appended by its steps before its units are copied.
+    #[test]
+    fn pad_is_charged_before_it_copies_s() {
+        charged_before_the_copy(0x61, &["s.padEnd(1000001)"]);
+    }
+
+    /// TrimString (`#sec-trimstring`): a step per code unit of S before S is read.
+    #[test]
+    fn trim_methods_are_charged_before_their_copy() {
+        charged_before_the_copy(0x61, &["s.trim()", "s.trimStart()", "s.trimEnd()"]);
+    }
+
+    /// The four case methods (`#sec-string.prototype.tolowercase` and the others): a step per
+    /// code unit of S before S is read.
+    #[test]
+    fn case_methods_are_charged_before_their_copy() {
+        charged_before_the_copy(
+            0x61,
+            &[
+                "s.toLowerCase()",
+                "s.toUpperCase()",
+                "s.toLocaleLowerCase()",
+                "s.toLocaleUpperCase()",
+            ],
+        );
+    }
+
+    /// `#sec-string.prototype.localecompare`: a step per code unit of S before S is read.
+    #[test]
+    fn locale_compare_is_charged_before_its_copies() {
+        charged_before_the_copy(0x61, &["s.localeCompare(\"a\")"]);
     }
 }
