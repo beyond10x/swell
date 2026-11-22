@@ -18,7 +18,13 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Host interface
 
-- `get_prototype_of`, `set_prototype_of`: new methods of `Cx`, the prototype of an object.
+- Breaking: `get` takes `&mut self`. The value read is handed to the running scope and stays
+  valid until the scope ends, also when the host drops the root and calls back into the
+  engine. A caller that read through a shared `&Cx` or `&HookCx` takes `&mut` instead
+  (`HOST-170`).
+- `get_prototype_of`, `set_prototype_of`: new methods of `Cx`, the [[GetPrototypeOf]] and
+  [[SetPrototypeOf]] of an object, so an interface object takes its parent's interface object
+  as [[Prototype]] (`HOST-180`).
 - `HOST-165`, `HOST-166`, `HOST-167`, `HOST-168`, `HOST-169`, `HOST-170`, `HOST-171`, `HOST-172`, `HOST-173`, `HOST-174`, `HOST-175`, `HOST-176`, `HOST-177`, `HOST-178`, `HOST-179`, `HOST-180`, `HOST-181`, `HOST-182`, `HOST-183`, `HOST-184`, `HOST-185`, `HOST-186`, `HOST-187`: new requirements.
 - `HOST-29`, `HOST-52`, `HOST-102`: changed requirements.
 
