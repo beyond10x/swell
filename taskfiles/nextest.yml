@@ -1,0 +1,209 @@
+version: '3'
+
+set: [pipefail]
+
+tasks:
+  nextest-check:
+    desc: Fail when the nextest configuration lets a test run past 60 s, or when a gate task runs tests with cargo test instead of cargo-nextest.
+    summary: |
+      Fail when the nextest configuration lets a test run past 60 s, or when a gate task runs
+      tests with cargo test instead of cargo-nextest (the organization's rule "Tests stay fast":
+      a test over 60 s is killed and counts as failed).
+
+      Reads GATE_ROOT/.config/nextest.toml (GATE_ROOT default .). Every slow-timeout in it, of
+      any profile or override, in the inline form or as a table of its own, must give a period
+      and a terminate-after whose product is at most 60 s; a slow-timeout without
+      terminate-after (a slow test is only reported) fails, and so does a profile default that
+      sets none. Each is named as "nextest-check: <file>:<line>: ...". Durations are read as
+      humantime writes them (500ms, 60s, 1m, 1m 30s, 1h).
+      Then reads GATE_ROOT/Taskfile.yml and every GATE_ROOT/taskfiles/*.yml, outside their
+      summary and desc texts and comments: a line that runs cargo test without --doc or
+      --no-run is named as "nextest-check: <file>:<line>: cargo test runs tests outside
+      cargo-nextest", and each step of GATE_NEXTEST_STEPS (default test test-collect
+      test-faults conform-engine) whose task runs no cargo nextest run is named as
+      "nextest-check: the step <name> runs no cargo nextest run". A missing file fails too.
+      It prints "nextest-check: <config>: every test is terminated by <n> s at the latest;
+      <k> task file(s): <s> step(s) through cargo-nextest, no cargo test but doc tests".
+    vars:
+      GATE_ROOT: '{{.GATE_ROOT | default "."}}'
+      GATE_NEXTEST_STEPS: '{{.GATE_NEXTEST_STEPS | default "test test-collect test-faults conform-engine"}}'
+    env:
+      GATE_ROOT: '{{.GATE_ROOT}}'
+      GATE_NEXTEST_STEPS: '{{.GATE_NEXTEST_STEPS}}'
+    silent: true
+    cmds:
+      - |
+        config="$GATE_ROOT/.config/nextest.toml"
+        [ -f "$config" ] || { echo "nextest-check: $config is missing"; exit 1; }
+        [ -f "$GATE_ROOT/Taskfile.yml" ] || { echo "nextest-check: $GATE_ROOT/Taskfile.yml is missing"; exit 1; }
+        limit=$(LC_ALL=C awk -v file="$config" '
+          function secs(text,    rest, n, unit, total, ok) {
+            rest = text; total = 0; ok = 0
+            gsub(/^[ \t]+|[ \t]+$/, "", rest)
+            while (rest != "") {
+              if (!match(rest, /^[0-9]+(\.[0-9]+)?/)) return -1
+              n = substr(rest, 1, RLENGTH) + 0; rest = substr(rest, RLENGTH + 1)
+              if (!match(rest, /^[a-z]+/)) return -1
+              unit = substr(rest, 1, RLENGTH); rest = substr(rest, RLENGTH + 1)
+              sub(/^[ \t]+/, "", rest)
+              if (unit == "ms" || unit == "msec") total += n / 1000
+              else if (unit ~ /^(s|sec|secs|second|seconds)$/) total += n
+              else if (unit ~ /^(m|min|mins|minute|minutes)$/) total += n * 60
+              else if (unit ~ /^(h|hr|hrs|hour|hours)$/) total += n * 3600
+              else return -1
+              ok = 1
+            }
+            return ok ? total : -1
+          }
+          function judge(where, period, after,    p, t) {
+            if (period == "") { printf "nextest-check: %s:%d: a slow-timeout without a period\n", file, where; bad = 1; return }
+            p = secs(period)
+            if (p < 0) { printf "nextest-check: %s:%d: a period nextest-check cannot read: %s\n", file, where, period; bad = 1; return }
+            if (after == "") { printf "nextest-check: %s:%d: a slow-timeout with no terminate-after: a slow test is reported and never terminated\n", file, where; bad = 1; return }
+            if (after !~ /^[0-9]+$/ || after + 0 < 1) { printf "nextest-check: %s:%d: terminate-after %s is not a count of at least 1\n", file, where, after; bad = 1; return }
+            t = p * after
+            if (t > 60) { printf "nextest-check: %s:%d: a test runs for %g s before it is terminated, more than 60 s\n", file, where, t; bad = 1; return }
+            if (t > most) most = t
+            seen++
+          }
+          function value(text, key,    v) {
+            if (!match(text, key "[ \t]*=[ \t]*(\"[^\"]*\"|[0-9]+)")) return ""
+            v = substr(text, RSTART, RLENGTH); sub(/^[^=]*=[ \t]*/, "", v); gsub(/"/, "", v)
+            return v
+          }
+          function flush() {
+            if (table) judge(table, tperiod, tafter)
+            table = 0; tperiod = ""; tafter = ""
+          }
+          /^[ \t]*#/ || /^[ \t]*$/ { next }
+          /^[ \t]*\[/ {
+            flush()
+            section = $0; gsub(/^[ \t]*\[+[ \t]*|[ \t]*\]+.*$/, "", section)
+            if (section ~ /\.slow-timeout$/) {
+              table = NR
+              if (section == "profile.default.slow-timeout") defaulted = 1
+            }
+            next
+          }
+          table && /^[ \t]*period[ \t]*=/ { tperiod = value($0, "period"); next }
+          table && /^[ \t]*terminate-after[ \t]*=/ { tafter = value($0, "terminate-after"); next }
+          /^[ \t]*slow-timeout[ \t]*=/ {
+            if (section == "profile.default") defaulted = 1
+            rest = $0; sub(/^[^=]*=[ \t]*/, "", rest)
+            if (rest ~ /^"/) { judge(NR, rest, ""); next }
+            judge(NR, value(rest, "period"), value(rest, "terminate-after"))
+            next
+          }
+          END {
+            flush()
+            if (!defaulted) { printf "nextest-check: %s: the profile default sets no slow-timeout\n", file; bad = 1 }
+            if (bad) exit 1
+            print most
+          }
+        ' "$config") || { printf '%s\n' "$limit"; exit 1; }
+        files="$GATE_ROOT/Taskfile.yml"
+        for f in "$GATE_ROOT"/taskfiles/*.yml; do [ -f "$f" ] && files="$files $f"; done
+        # shellcheck disable=SC2086
+        LC_ALL=C awk -v steps="$GATE_NEXTEST_STEPS" -v config="$config" -v limit="$limit" '
+          BEGIN {
+            # A command where the shell starts one: at the start of a line or of a list item, or
+            # after ; & | ( or then, do, else, {, with variable assignments before it. Text in a
+            # message (echo "... cargo test ...") is not at such a place.
+            at = "(^[ \t]*(-[ \t]+)?|[;&|(][ \t]*|(then|do|else|[{])[ \t]+)([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|\047[^\047]*\047|[^ \t\"\047]*)[ \t]+)*"
+          }
+          FNR == 1 { files++; block = -1; task = "" }
+          {
+            line = $0
+            indent = match(line, /[^ ]/) - 1
+            if (block >= 0) { if (line ~ /^[ \t]*$/ || indent > block) next; block = -1 }
+            if (line ~ /^[ \t]*#/) next
+            if (line ~ /^[ \t]*(summary|desc):[ \t]*[|>][-+]?[ \t]*$/) { block = indent; next }
+            if (line ~ /^[ \t]*(summary|desc):/) next
+            if (line ~ /^  [A-Za-z0-9_:-]+:[ \t]*$/) { task = line; gsub(/[ :\t]/, "", task); next }
+            if (line ~ /^[^ ]/) task = ""
+            if (line ~ (at "cargo[ \t]+nextest[ \t]+run([ \t]|$)") && task != "") nextest[task] = 1
+            if (line ~ (at "cargo[ \t]+test([ \t]|$)") && line !~ /[ \t]--(doc|no-run)([ \t]|$)/) {
+              printf "nextest-check: %s:%d: cargo test runs tests outside cargo-nextest: %s\n", FILENAME, FNR, line
+              bad = 1
+            }
+          }
+          END {
+            n = split(steps, s, " ")
+            for (i = 1; i <= n; i++) if (!(s[i] in nextest)) {
+              printf "nextest-check: the step %s runs no cargo nextest run\n", s[i]; bad = 1
+            }
+            if (bad) exit 1
+            printf "nextest-check: %s: every test is terminated by %g s at the latest; %d task file(s): %d step(s) through cargo-nextest, no cargo test but doc tests\n", config, limit, files, n
+          }
+        ' $files
+
+  nextest-report:
+    desc: Internal. Print the summed counts and the ten slowest tests of one cargo-nextest run of a gate step, and fail when it failed.
+    summary: |
+      Internal, called by the steps that run cargo-nextest. Reads STATUS (the exit status of
+      cargo nextest run), LOG (its output) and JUNIT (the JUnit file the profile default of
+      .config/nextest.toml writes). It prints, after PREFIX, "<b> test binaries: <p> passed,
+      <f> failed, <i> ignored": the binaries of nextest's "Starting" line, the tests run less
+      those passed as failed (a test terminated at its slow-timeout among them), the skipped
+      ones (ignored) as ignored. Then the ten slowest test cases of JUNIT, slowest first, each as
+      "gate-slowest <STEP> <seconds> <binary> <test>". It fails when cargo nextest failed, a
+      test failed, there is no Summary line, or fewer than MIN_PASSED (default 0) passed; then
+      LOG is printed first, and the ten slowest follow it when the run got to its Summary line
+      (a test terminated at 60 s is then among them).
+    silent: true
+    vars:
+      MIN_PASSED: '{{.MIN_PASSED | default "0"}}'
+    cmds:
+      - |
+        status=$(cat '{{.STATUS}}' 2>/dev/null || echo 1)
+        log='{{.LOG}}'
+        junit='{{.JUNIT}}'
+        if ! LC_ALL=C awk -v status="$status" -v prefix='{{.PREFIX}}' -v min='{{.MIN_PASSED}}' '
+          /^ *Starting [0-9]+ tests? across [0-9]+ binar/ {
+            for (i = 1; i <= NF; i++) {
+              if ($i == "across") binaries = $(i + 1)
+              if ($i ~ /^skipped/ && i > 2) { n = $(i - 2); gsub(/[^0-9]/, "", n); startskipped = n + 0 }
+            }
+          }
+          /^ *Summary \[/ {
+            summary = 1; run = 0; passed = 0; skipped = 0
+            for (i = 1; i <= NF; i++) {
+              w = $(i + 1); gsub(/[^a-z]/, "", w)
+              if ($i ~ /^run:?$/ && i > 2 && $(i - 2) ~ /^[0-9]+$/) run = $(i - 2)
+              if (w == "passed" && $i ~ /^[0-9]+$/) passed = $i
+              if (w == "skipped" && $i ~ /^[0-9]+$/) skipped = $i
+            }
+          }
+          END {
+            if (!summary) skipped = startskipped
+            failed = run - passed
+            printf "%s%d test binaries: %d passed, %d failed, %d ignored\n", prefix, binaries, passed, failed, skipped
+            exit (status != 0 || !summary || failed > 0 || passed < min)
+          }
+        ' "$log" > "$log.summary"; then
+          cat "$log"
+          cat "$log.summary"
+          ok=0
+        else
+          cat "$log.summary"
+          ok=1
+        fi
+        if ! grep -q '^ *Summary \[' "$log"; then exit 1; fi
+        [ -f "$junit" ] || { echo "{{.STEP}}: no JUnit file $junit; .config/nextest.toml writes it"; exit 1; }
+        LC_ALL=C awk -v step='{{.STEP}}' '
+          {
+            rest = $0
+            while (match(rest, /<testcase [^>]*>/)) {
+              tag = substr(rest, RSTART, RLENGTH); rest = substr(rest, RSTART + RLENGTH)
+              n = attr(tag, "name"); c = attr(tag, "classname"); t = attr(tag, "time")
+              if (t != "") printf "%.3f %s %s\n", t, c, n
+            }
+          }
+          function attr(tag, key,    v) {
+            if (!match(tag, " " key "=\"[^\"]*\"")) return ""
+            v = substr(tag, RSTART + length(key) + 3, RLENGTH - length(key) - 4)
+            gsub(/&lt;/, "<", v); gsub(/&gt;/, ">", v); gsub(/&quot;/, "\"", v); gsub(/&apos;/, "\047", v); gsub(/&amp;/, "\\&", v)
+            return v
+          }
+        ' "$junit" | LC_ALL=C sort -k1,1gr -k2,2 -k3,3 | awk -v step='{{.STEP}}' 'NR <= 10 { printf "gate-slowest %s %.2f %s %s\n", step, $1, $2, $3 }'
+        [ "$ok" -eq 1 ]

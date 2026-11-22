@@ -43,9 +43,12 @@ valid() {
     '  - name: b' >"$1/spec/host.yaml"
 }
 run() {
+  # The fixture has no test line: one listed test is all the check reads, and the task does not
+  # build the tests of the workspace to list them (host-requirements-test-list).
+  [ -f "$1/tests.txt" ] || printf "%s\n" "swell::lib::a_fixture_test" >"$1/tests.txt" || return 1
   task -d . -t taskfiles/host-requirements.yml host-requirements-check \
     HOST_REQ_DOC="$1/host-interface.md" HOST_REQ_LIST="$1/requirements.txt" HOST_REQ_SPEC="$1/spec" \
-    HOST_REQ_DELIVERED="$1/slices-delivered.txt" >"$2" 2>&1
+    HOST_REQ_DELIVERED="$1/slices-delivered.txt" HOST_REQ_TEST_LIST="$1/tests.txt" >"$2" 2>&1
 }
 
 rm -rf "$work" && mkdir -p "$work" || fail "cannot make $work"

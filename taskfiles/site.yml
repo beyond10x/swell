@@ -1,0 +1,356 @@
+version: '3'
+
+set: [pipefail]
+
+vars:
+  SITE_DATA_FILE: '{{.SITE_DATA_FILE | default "website/data/status.json"}}'
+  SITE_DATA_OUT: '{{.SITE_DATA_OUT | default ".out/site-data"}}'
+  SITE_DATA_EXPECTED: '{{.SITE_DATA_EXPECTED | default "conformance/test262/expected.txt"}}'
+  SITE_DATA_DELIVERED: '{{.SITE_DATA_DELIVERED | default "conformance/slices-delivered.txt"}}'
+  SITE_DATA_REQUIREMENTS: '{{.SITE_DATA_REQUIREMENTS | default "conformance/host/requirements.txt"}}'
+  SITE_DATA_MOVES: '{{.SITE_DATA_MOVES | default "conformance/test262/moves.tsv"}}'
+  SITE_DATA_DESIGN: '{{.SITE_DATA_DESIGN | default "docs/design/engine.md"}}'
+  SITE_DATA_MANIFEST: '{{.SITE_DATA_MANIFEST | default "Cargo.toml"}}'
+  SITE_DATA_LOCK: '{{.SITE_DATA_LOCK | default "Cargo.lock"}}'
+  SITE_DATA_CRATES: '{{.SITE_DATA_CRATES | default "crates"}}'
+
+tasks:
+  site-data:
+    desc: Write website/data/status.json, every number the website shows, from the committed gate files, with awk.
+    summary: |
+      Write SITE_DATA_FILE (default website/data/status.json), the only place the website reads a
+      number from, from the committed files of the gate. The site types no number; this task and
+      site-data-check are why.
+
+      Reads, each through its variable: SITE_DATA_EXPECTED (conformance/test262/expected.txt: the
+      "test262 total" line and the 22 "test262-slice" lines), SITE_DATA_DESIGN
+      (docs/design/engine.md: the name of each slice from the table of section 12, and which
+      slices are delivery slices, the rows above "slices 1 to 19"), SITE_DATA_DELIVERED
+      (conformance/slices-delivered.txt), SITE_DATA_REQUIREMENTS
+      (conformance/host/requirements.txt: test, pending, omitted, and pending by slice),
+      SITE_DATA_MOVES (conformance/test262/moves.tsv: moved cases by target slice),
+      SITE_DATA_MANIFEST (Cargo.toml: the workspace version), SITE_DATA_LOCK (Cargo.lock: its
+      packages, their dependencies, and those with a source line) and the crate roots under
+      SITE_DATA_CRATES (src/lib.rs, src/main.rs and src/bin/*.rs, as forbid-unsafe-check reads
+      them: how many hold the line #![forbid(unsafe_code)]).
+
+      The file holds no date and nothing about the machine: it changes only when an input does.
+      Shell and awk only, no Node, no network. Fails, naming it, on a missing or empty input, a
+      missing total line, no slice line, a slice without a row in the design's table, or a
+      requirement line of no known form. Writes through a temporary file, so a failed run leaves
+      the previous file.
+
+      Runs from the repository root, alone (task -d . -t taskfiles/site.yml site-data) and
+      included from the root Taskfile.yml alike.
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    cmds:
+      - task: site-data-write
+        vars:
+          SITE_DATA_TARGET: '{{.SITE_DATA_FILE}}'
+      - 'echo "site-data: wrote {{.SITE_DATA_FILE}}"'
+
+  site-data-check:
+    desc: Fail, naming the first line that differs, when website/data/status.json is not what site-data writes from the committed gate files.
+    summary: |
+      Regenerate the website's numbers as site-data does, into SITE_DATA_OUT (default
+      .out/site-data/status.json), and compare the result with SITE_DATA_FILE (default
+      website/data/status.json), byte for byte. Fails when the committed file is missing, or
+      when they differ, printing the first line that differs as
+      "site-data-check: <file> differs from its regeneration at line <n>: committed `<line>`,
+      regenerated `<line>`; run task site-data" (a line one side lacks reads "no line"). A number typed into the file by hand and an input
+      that moved without a regeneration both fail here. Needs no Node and no network; meant for
+      task check. Passing, it prints
+      "site-data-check: <file> equals its regeneration from <inputs>".
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    cmds:
+      - task: site-data-write
+        vars:
+          SITE_DATA_TARGET: '{{.SITE_DATA_OUT}}/status.json'
+      - |
+        committed='{{.SITE_DATA_FILE}}'
+        regenerated='{{.SITE_DATA_OUT}}/status.json'
+        if [ ! -f "$committed" ]; then
+          echo "site-data-check: $committed is missing; run task site-data"
+          exit 1
+        fi
+        if cmp -s "$committed" "$regenerated"; then
+          echo "site-data-check: $committed equals its regeneration from {{.SITE_DATA_EXPECTED}}, {{.SITE_DATA_DELIVERED}}, {{.SITE_DATA_REQUIREMENTS}}, {{.SITE_DATA_MOVES}}, {{.SITE_DATA_DESIGN}}, {{.SITE_DATA_MANIFEST}}, {{.SITE_DATA_LOCK}} and the crate roots under {{.SITE_DATA_CRATES}}"
+          exit 0
+        fi
+        awk -v file="$committed" '
+          NR == FNR { regen[FNR] = $0; nregen = FNR; next }
+          { committed[FNR] = $0; ncommitted = FNR }
+          END {
+            n = (ncommitted > nregen) ? ncommitted : nregen
+            for (i = 1; i <= n; i++) {
+              a = (i <= ncommitted) ? committed[i] : ""
+              b = (i <= nregen) ? regen[i] : ""
+              if (a != b || (i > ncommitted) != (i > nregen)) {
+                sub(/^[ \t]+/, "", a)
+                sub(/^[ \t]+/, "", b)
+                a = (i <= ncommitted) ? "`" a "`" : "no line"
+                b = (i <= nregen) ? "`" b "`" : "no line"
+                print "site-data-check: " file " differs from its regeneration at line " i ": committed " a ", regenerated " b "; run task site-data"
+                exit
+              }
+            }
+            print "site-data-check: " file " differs from its regeneration in its last byte; run task site-data"
+          }
+        ' "$regenerated" "$committed"
+        exit 1
+
+  site-data-write:
+    internal: true
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    env:
+      SITE_DATA_TARGET: '{{.SITE_DATA_TARGET}}'
+      SITE_DATA_EXPECTED: '{{.SITE_DATA_EXPECTED}}'
+      SITE_DATA_DELIVERED: '{{.SITE_DATA_DELIVERED}}'
+      SITE_DATA_REQUIREMENTS: '{{.SITE_DATA_REQUIREMENTS}}'
+      SITE_DATA_MOVES: '{{.SITE_DATA_MOVES}}'
+      SITE_DATA_DESIGN: '{{.SITE_DATA_DESIGN}}'
+      SITE_DATA_MANIFEST: '{{.SITE_DATA_MANIFEST}}'
+      SITE_DATA_LOCK: '{{.SITE_DATA_LOCK}}'
+      SITE_DATA_CRATES: '{{.SITE_DATA_CRATES}}'
+    cmds:
+      - |
+        export LC_ALL=C
+        for input in "$SITE_DATA_EXPECTED" "$SITE_DATA_DELIVERED" "$SITE_DATA_REQUIREMENTS" "$SITE_DATA_MOVES" "$SITE_DATA_DESIGN" "$SITE_DATA_MANIFEST" "$SITE_DATA_LOCK"; do
+          if [ ! -s "$input" ]; then
+            echo "site-data: $input is missing or empty"
+            exit 1
+          fi
+        done
+        roots=""
+        for root in "$SITE_DATA_CRATES"/*/src/lib.rs "$SITE_DATA_CRATES"/*/src/main.rs "$SITE_DATA_CRATES"/*/src/bin/*.rs; do
+          if [ -f "$root" ]; then
+            roots="$roots$root
+        "
+          fi
+        done
+        if [ -z "$roots" ]; then
+          echo "site-data: no crate root under $SITE_DATA_CRATES"
+          exit 1
+        fi
+        target_dir=$(dirname "$SITE_DATA_TARGET")
+        mkdir -p "$target_dir"
+        tmp="$SITE_DATA_TARGET.tmp"
+        printf '%s' "$roots" | awk '
+          function fail(msg) { print "site-data: " msg > "/dev/stderr"; failed = 1; exit 1 }
+          function q(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return "\"" s "\"" }
+          function num(s) { return s + 0 }
+          BEGIN {
+            expected = ENVIRON["SITE_DATA_EXPECTED"]
+            delivered_file = ENVIRON["SITE_DATA_DELIVERED"]
+            requirements = ENVIRON["SITE_DATA_REQUIREMENTS"]
+            moves = ENVIRON["SITE_DATA_MOVES"]
+            design = ENVIRON["SITE_DATA_DESIGN"]
+            manifest = ENVIRON["SITE_DATA_MANIFEST"]
+            lock = ENVIRON["SITE_DATA_LOCK"]
+
+            # Slice names and delivery slices, from the table of section 12 of the design.
+            section = 0
+            in_table = 0
+            after_delivery = 0
+            while ((r = (getline line < design)) > 0) {
+              if (line ~ /^## /) section = (line ~ /^## 12\. /)
+              if (!section) continue
+              if (line ~ /^\| slice \| name \|/) { in_table = 1; continue }
+              if (!in_table) continue
+              if (line !~ /^\|/) { in_table = 0; continue }
+              if (line ~ /^\| *\| *slices 1 to/) { after_delivery = 1; continue }
+              n = split(line, cell, /\|/)
+              id = cell[2]; gsub(/^ +| +$/, "", id)
+              label = cell[3]; gsub(/^ +| +$/, "", label)
+              if (id !~ /^([0-9]+|x)$/) continue
+              if (match(label, /`[^`]+`/)) name = substr(label, RSTART + 1, RLENGTH - 2)
+              else { name = label; sub(/ *\(.*$/, "", name) }
+              key = (id == "x") ? "x" : sprintf("%02d", id + 0)
+              slice_name[key] = name
+              slice_delivery[key] = (id ~ /^[0-9]+$/ && !after_delivery) ? "true" : "false"
+              if (slice_delivery[key] == "true") delivery_count++
+            }
+            close(design)
+            if (delivery_count == 0) fail(design ": no delivery slice in the table of section 12")
+
+            while ((r = (getline line < delivered_file)) > 0) {
+              if (line ~ /^#/ || line ~ /^[ \t]*$/) continue
+              if (line !~ /^[0-9]+$/) fail(delivered_file ": " line ": not a slice number")
+              delivered[sprintf("%02d", line + 0)] = 1
+              delivered_list = delivered_list (delivered_list == "" ? "" : ", ") (line + 0)
+              delivered_n++
+            }
+            close(delivered_file)
+
+            while ((r = (getline line < expected)) > 0) {
+              split(line, f, " ")
+              if (f[1] == "test262" && f[2] == "total") {
+                totals++
+                total_line = line
+                for (i = 3; i <= 9; i++) total[i] = num(f[i])
+              } else if (f[1] == "test262-slice") {
+                ns++
+                sid[ns] = f[2]
+                sline[ns] = line
+                for (i = 3; i <= 10; i++) sv[ns, i] = num(f[i])
+              }
+            }
+            close(expected)
+            if (totals != 1) fail(expected ": " totals + 0 " test262 total line(s), one expected")
+            if (ns == 0) fail(expected ": no test262-slice line")
+
+            nreq = 0
+            while ((r = (getline line < requirements)) > 0) {
+              if (line ~ /^[ \t]*$/) continue
+              split(line, f, " ")
+              nreq++
+              if (f[2] == "test") req_test++
+              else if (f[2] == "pending" && f[3] == "slice") { req_pending++; pending_by[f[4] + 0]++; if (f[4] + 0 > max_pending) max_pending = f[4] + 0 }
+              else if (f[2] == "omitted") req_omitted++
+              else fail(requirements ": " line ": neither test, pending slice nor omitted")
+            }
+            close(requirements)
+
+            nmoves = 0
+            while ((r = (getline line < moves)) > 0) {
+              if (line ~ /^[ \t]*$/) continue
+              split(line, f, "\t")
+              nmoves++
+              moved_to[f[3] + 0]++
+              if (f[3] + 0 > max_move) max_move = f[3] + 0
+            }
+            close(moves)
+
+            in_ws = 0
+            while ((r = (getline line < manifest)) > 0) {
+              if (line ~ /^\[/) in_ws = (line == "[workspace.package]")
+              if (in_ws && line ~ /^version *= *"/) { version = line; sub(/^version *= *"/, "", version); sub(/".*$/, "", version) }
+            }
+            close(manifest)
+            if (version == "") fail(manifest ": no version in [workspace.package]")
+
+            np = 0
+            while ((r = (getline line < lock)) > 0) {
+              if (line == "[[package]]") { np++; in_deps = 0; continue }
+              if (line ~ /^name = /) { v = line; sub(/^name = "/, "", v); sub(/"$/, "", v); pname[np] = v }
+              if (line ~ /^source = /) outside++
+              if (line ~ /^dependencies = \[/) { in_deps = 1; continue }
+              if (in_deps && line ~ /^\]/) { in_deps = 0; continue }
+              if (in_deps) { v = line; gsub(/^ *"|",?$/, "", v); sub(/ .*$/, "", v); pdeps[np] = pdeps[np] (pdeps[np] == "" ? "" : ", ") q(v) }
+            }
+            close(lock)
+            if (np == 0) fail(lock ": no package")
+          }
+          {
+            roots++
+            path = $0
+            found = 0
+            while ((r = (getline line < path)) > 0) if (line == "#![forbid(unsafe_code)]") found = 1
+            close(path)
+            forbidding += found
+          }
+          END {
+            if (failed) exit 1
+            for (i = 1; i <= ns; i++) {
+              key = (sid[i] ~ /^x/) ? "x" : sid[i]
+              if (!(key in slice_name)) fail(design ": no row for slice " sid[i] " in the table of section 12")
+            }
+            if (failed) exit 1
+            print "{"
+            print "  \"format\": \"swell-site-status/1\","
+            print "  \"generated_by\": \"task site-data, taskfiles/site.yml\","
+            print "  \"version\": " q(version) ","
+            print "  \"crates\": {"
+            print "    \"roots\": " roots + 0 ","
+            print "    \"roots_forbidding_unsafe\": " forbidding + 0 ","
+            print "    \"lock_packages\": " np ","
+            print "    \"lock_packages_outside\": " outside + 0 ","
+            print "    \"packages\": ["
+            for (i = 1; i <= np; i++) print "      {\"name\": " q(pname[i]) ", \"dependencies\": [" pdeps[i] "]}" (i < np ? "," : "")
+            print "    ]"
+            print "  },"
+            print "  \"test262\": {"
+            print "    \"line\": " q(total_line) ","
+            print "    \"exist\": " total[3] ","
+            print "    \"excluded\": " total[4] ","
+            print "    \"not_applicable\": " total[5] ","
+            print "    \"run\": " total[6] ","
+            print "    \"passed\": " total[7] ","
+            print "    \"failed\": " total[8] ","
+            print "    \"budget\": " total[9] ","
+            print "    \"passed_percent\": " q(total[6] ? sprintf("%.1f", 100 * total[7] / total[6]) : "0.0")
+            print "  },"
+            print "  \"delivery_slices\": " delivery_count ","
+            print "  \"delivered\": [" delivered_list "],"
+            print "  \"delivered_count\": " delivered_n + 0 ","
+            print "  \"slices\": ["
+            for (i = 1; i <= ns; i++) {
+              id = sid[i]
+              key = (id ~ /^x/) ? "x" : id
+              runs_of = sv[i, 7]
+              print "    {"
+              print "      \"slice\": " q(id) ","
+              print "      \"name\": " q(slice_name[key]) ","
+              print "      \"delivery\": " slice_delivery[key] ","
+              print "      \"delivered\": " ((id in delivered) ? "true" : "false") ","
+              print "      \"line\": " q(sline[i]) ","
+              print "      \"cases\": " sv[i, 3] ","
+              print "      \"runs\": " sv[i, 4] ","
+              print "      \"excluded\": " sv[i, 5] ","
+              print "      \"not_applicable\": " sv[i, 6] ","
+              print "      \"run\": " sv[i, 7] ","
+              print "      \"passed\": " sv[i, 8] ","
+              print "      \"failed\": " sv[i, 9] ","
+              print "      \"budget\": " sv[i, 10] ","
+              print "      \"passed_percent\": " q(runs_of ? sprintf("%.1f", 100 * sv[i, 8] / runs_of) : "0.0")
+              print "    }" (i < ns ? "," : "")
+            }
+            print "  ],"
+            print "  \"host_requirements\": {"
+            print "    \"total\": " nreq ","
+            print "    \"test\": " req_test + 0 ","
+            print "    \"pending\": " req_pending + 0 ","
+            print "    \"omitted\": " req_omitted + 0 ","
+            print "    \"pending_by_slice\": ["
+            first = 1
+            for (s = 1; s <= max_pending; s++) if (s in pending_by) {
+              printf "%s      {\"slice\": %d, \"count\": %d}", (first ? "" : ",\n"), s, pending_by[s]
+              first = 0
+            }
+            if (!first) printf "\n"
+            print "    ]"
+            print "  },"
+            print "  \"moves\": {"
+            print "    \"cases\": " nmoves ","
+            print "    \"by_target_slice\": ["
+            first = 1
+            for (s = 1; s <= max_move; s++) if (s in moved_to) {
+              printf "%s      {\"slice\": %d, \"count\": %d}", (first ? "" : ",\n"), s, moved_to[s]
+              first = 0
+            }
+            if (!first) printf "\n"
+            print "    ]"
+            print "  }"
+            print "}"
+          }
+        ' > "$tmp" || { rm -f "$tmp"; exit 1; }
+        mv "$tmp" "$SITE_DATA_TARGET"
+
+  site-build:
+    desc: Install the website's packages from its lock file and build it into website/build; not part of check.
+    summary: |
+      npm --prefix website ci, then npm --prefix website run build, as surf has it. Needs Node
+      and the network for registry.npmjs.org and github.com/beyond10x/docs-system (the shared
+      documentation system, pinned by commit in website/package.json). Docusaurus telemetry is
+      off (DOCUSAURUS_DISABLE_TELEMETRY=1); broken links and anchors fail the build. The numbers
+      the site shows come from website/data/status.json, which site-data writes and
+      site-data-check holds; this task does not write it.
+    dir: '{{.TASKFILE_DIR}}/..'
+    env:
+      DOCUSAURUS_DISABLE_TELEMETRY: '1'
+    cmds:
+      - npm --prefix website ci
+      - npm --prefix website run build

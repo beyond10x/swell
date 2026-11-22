@@ -532,49 +532,152 @@ fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     }
 }
 
-/// Every kind of nesting, at the deepest the limit admits and 100,000 deep, parses or fails on
-/// the stack `ParseOptions::stack_bytes` gives, in a child process, through each parse entry
-/// (`parse_script`, `parse_eval` and the body of `parse_dynamic_function`, whose three parses
-/// each stay within the limit): the test fails when a frame of the parser grows past
-/// `STACK_BYTES_PER_LEVEL`, or its fixed part past `STACK_BYTES_FIXED`, and the stack
-/// overflows. At 10,000 levels the per-level bound decides; at 10 the fixed part does.
-#[test]
-fn every_nesting_kind_fits_the_stack_bound() {
-    for limit in [10, 10_000] {
-        on_bounded_stack("every_nesting_kind_fits_the_stack_bound", limit, |limit| {
-            for entry in ENTRIES {
-                for kind in NESTING_KINDS {
-                    // The deepest source the limit admits, found by bisection on this stack.
-                    let (mut parses, mut refused) = (0, limit as usize + 2);
-                    assert_eq!(
-                        admitted(entry, kind, refused, limit),
-                        Some(false),
-                        "{entry:?} {kind}"
-                    );
-                    while refused - parses > 1 {
-                        let mid = (parses + refused) / 2;
-                        match admitted(entry, kind, mid, limit) {
-                            Some(true) => parses = mid,
-                            Some(false) => refused = mid,
-                            None => panic!(
-                                "{entry:?} {kind} {mid}: an error other than the nesting error"
-                            ),
+/// Every combination of a parse entry and a kind of nesting, kind by kind in the order of
+/// `NESTING_KINDS`, each through the [`ENTRIES`] in order; so the three entries of one kind,
+/// whose sources cost alike, fall into three parts ([`stack_bound_part`]).
+fn nesting_combinations() -> Vec<(Entry, &'static str)> {
+    NESTING_KINDS
+        .iter()
+        .flat_map(|&kind| ENTRIES.iter().map(move |&entry| (entry, kind)))
+        .collect()
+}
+
+/// The combinations part `part` of [`STACK_BOUND_PARTS`] checks: every one whose index in
+/// [`nesting_combinations`] leaves `part` when divided by the number of parts, 17: a prime, so
+/// that the three entries of a kind fall into three parts and two kinds share parts only when
+/// they stand 17 apart in the list. A kind added
+/// to `NESTING_KINDS` lands in parts by its index, and no part is edited for it.
+fn stack_bound_part(part: usize) -> Vec<(Entry, &'static str)> {
+    nesting_combinations()
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| i % STACK_BOUND_PARTS.len() == part)
+        .map(|(_, combination)| combination)
+        .collect()
+}
+
+/// The deepest source of `kind` that `limit` admits through `entry`, found by a search on the
+/// stack the test runs on, parses or fails with the nesting error alone, and so does one 100,000
+/// deep ([`every_nesting_kind_fits_the_stack_bound`]).
+///
+/// The search narrows the depths between the deepest source that parsed and the shallowest that
+/// was refused, as a bisection does, but probes three quarters of the way up, not half: a source
+/// that parses also goes through the early errors, which cost far more than a refused parse, which
+/// stops at the limit (a chain of 5,000 labels: about 0.5 s against 0.03 s, as the early errors
+/// look each label up among those around it). So most probes are refused, and the search finds
+/// the same depth with about half the parses (labels at limit 10,000: 5 parses, not 11).
+fn fits_the_stack_bound(entry: Entry, kind: &str, limit: u32) {
+    let (mut parses, mut refused) = (0, limit as usize + 2);
+    assert_eq!(
+        admitted(entry, kind, refused, limit),
+        Some(false),
+        "{entry:?} {kind}"
+    );
+    while refused - parses > 1 {
+        let mid = parses + (refused - parses) * 3 / 4;
+        let fits = admitted(entry, kind, mid, limit);
+        assert!(
+            fits.is_some(),
+            "{entry:?} {kind} {mid}: an error other than the nesting error"
+        );
+        if fits == Some(true) {
+            parses = mid;
+        } else {
+            refused = mid;
+        }
+    }
+    assert!(
+        parses > 0 || limit < 20,
+        "{entry:?} {kind}: nothing parses at {limit}"
+    );
+    assert_eq!(
+        admitted(entry, kind, 100_000, limit),
+        Some(false),
+        "{entry:?} {kind}"
+    );
+}
+
+/// The tests of the stack bound, one per part, and the list of their parts,
+/// [`STACK_BOUND_PARTS`], whose length is the number of parts. Each test checks the
+/// combinations of its part ([`stack_bound_part`]) at the limits 10 and 10,000, each limit in a
+/// child process on the stack `ParseOptions::stack_bytes` gives for it.
+macro_rules! stack_bound_parts {
+    ($($name:ident = $part:literal),* $(,)?) => {
+        /// The parts of the check of the stack bound, one test each ([`stack_bound_part`]).
+        const STACK_BOUND_PARTS: &[usize] = &[$($part),*];
+        $(
+            #[test]
+            fn $name() {
+                for limit in [10, 10_000] {
+                    on_bounded_stack(stringify!($name), limit, |limit| {
+                        for (entry, kind) in stack_bound_part($part) {
+                            fits_the_stack_bound(entry, kind, limit);
                         }
-                    }
-                    assert!(
-                        parses > 0 || limit < 20,
-                        "{entry:?} {kind}: nothing parses at {limit}"
-                    );
-                    assert_eq!(
-                        admitted(entry, kind, 100_000, limit),
-                        Some(false),
-                        "{entry:?} {kind}"
-                    );
+                    })
+                    .unwrap();
                 }
             }
-        })
-        .unwrap();
+        )*
+    };
+}
+
+// Every kind of nesting, at the deepest the limit admits and 100,000 deep, parses or fails on
+// the stack `ParseOptions::stack_bytes` gives, in a child process, through each parse entry
+// (`parse_script`, `parse_eval` and the body of `parse_dynamic_function`, whose three parses
+// each stay within the limit): a test fails when a frame of the parser grows past
+// `STACK_BYTES_PER_LEVEL`, or its fixed part past `STACK_BYTES_FIXED`, and the stack
+// overflows. At 10,000 levels the per-level bound decides; at 10 the fixed part does.
+// The combinations of entry and kind are split over `every_nesting_kind_fits_the_stack_bound`,
+// the first part, and `every_nesting_kind_fits_the_stack_bound_part_<n>`, so that under
+// cargo-nextest each part runs in a process of its own and no part takes long; the parts
+// together check each combination once (`the_parts_cover_every_combination`).
+stack_bound_parts!(
+    every_nesting_kind_fits_the_stack_bound = 0,
+    every_nesting_kind_fits_the_stack_bound_part_2 = 1,
+    every_nesting_kind_fits_the_stack_bound_part_3 = 2,
+    every_nesting_kind_fits_the_stack_bound_part_4 = 3,
+    every_nesting_kind_fits_the_stack_bound_part_5 = 4,
+    every_nesting_kind_fits_the_stack_bound_part_6 = 5,
+    every_nesting_kind_fits_the_stack_bound_part_7 = 6,
+    every_nesting_kind_fits_the_stack_bound_part_8 = 7,
+    every_nesting_kind_fits_the_stack_bound_part_9 = 8,
+    every_nesting_kind_fits_the_stack_bound_part_10 = 9,
+    every_nesting_kind_fits_the_stack_bound_part_11 = 10,
+    every_nesting_kind_fits_the_stack_bound_part_12 = 11,
+    every_nesting_kind_fits_the_stack_bound_part_13 = 12,
+    every_nesting_kind_fits_the_stack_bound_part_14 = 13,
+    every_nesting_kind_fits_the_stack_bound_part_15 = 14,
+    every_nesting_kind_fits_the_stack_bound_part_16 = 15,
+    every_nesting_kind_fits_the_stack_bound_part_17 = 16,
+);
+
+/// The parts of the check of the stack bound together check every combination of entry and kind
+/// exactly once, each part is listed once, and the parts are numbered from 0 without a gap, so
+/// a part is neither lost nor run twice ([`stack_bound_part`]).
+#[test]
+fn the_parts_cover_every_combination() {
+    let all = nesting_combinations();
+    assert_eq!(all.len(), ENTRIES.len() * NESTING_KINDS.len());
+    let mut parts = STACK_BOUND_PARTS.to_vec();
+    parts.sort_unstable();
+    assert_eq!(parts, (0..STACK_BOUND_PARTS.len()).collect::<Vec<_>>());
+    let mut checked: Vec<String> = Vec::new();
+    for &part in STACK_BOUND_PARTS {
+        let combinations = stack_bound_part(part);
+        assert!(!combinations.is_empty(), "part {part} checks nothing");
+        checked.extend(
+            combinations
+                .iter()
+                .map(|(entry, kind)| format!("{entry:?} {kind}")),
+        );
     }
+    let mut expected: Vec<String> = all
+        .iter()
+        .map(|(entry, kind)| format!("{entry:?} {kind}"))
+        .collect();
+    checked.sort();
+    expected.sort();
+    assert_eq!(checked, expected);
 }
 
 /// `#sec-performeval` and `#sec-createdynamicfunction` parse through the same parser and the

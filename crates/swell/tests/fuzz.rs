@@ -6,8 +6,10 @@
 //! arguments: stale, released, foreign and wrong-kind handles among them, and small scripts of
 //! the slice 1 grammar and broken sources, under small and random limits.
 //!
-//! 2,000 sequences from fixed seeds per run, 150 with the feature `collect-every-safe-point`
-//! ([`SEQUENCES`]). A sequence fails on a panic, on an abort (a stack
+//! 2,000 sequences from fixed seeds per run, 150 with the feature `collect-every-safe-point`, in
+//! the lane `slow`; the gate runs the first 400 and 40 ([`sequences`]). They are divided among
+//! eight tests ([`PARTS`]) that cargo-nextest runs side by side. A sequence fails on a panic, on
+//! an abort (a stack
 //! overflow; the sequences run in a child process, which prints each seed before it runs it, so
 //! the parent names the seed the child died in), on a run past its budget (`last_entry_steps()`
 //! over `steps_per_entry` or `heap_bytes()` over `memory_bytes` after an entry), on an answer
@@ -38,11 +40,20 @@ use swell::{
 /// without a root, which any sequence that keeps a value across a safe point shows; a
 /// sequence costs many times more in it (2,000 took 170.9 s there against 24.6 s in the default
 /// mode in one pool job, a factor of 7: 11.7 against 81 sequences per second, measured).
-const SEQUENCES: u64 = if cfg!(feature = "collect-every-safe-point") {
-    150
-} else {
-    2_000
-};
+///
+/// Those are the full counts, which the lane `slow` runs (`SWELL_FULL_COUNTS=1`). The gate runs
+/// the first 400 and, in the collect mode, the first 40: every choice of the generator is drawn
+/// uniformly among at most 34 kinds, so the 9,600 entry calls of 400 sequences (960 of 40) draw
+/// each kind hundreds of times (dozens), and a kind the full count reaches is not left out.
+fn sequences() -> u64 {
+    let full = std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1");
+    match (cfg!(feature = "collect-every-safe-point"), full) {
+        (true, true) => 150,
+        (true, false) => 40,
+        (false, true) => 2_000,
+        (false, false) => 400,
+    }
+}
 /// The seed of the first sequence; the others follow it.
 const FIRST_SEED: u64 = 0x5EED_0000;
 /// The calls of one sequence at the top level.
@@ -2111,11 +2122,24 @@ fn run_twice(seed: u64) {
     }
 }
 
-/// HOST-3: no entry point, read or hook dispatch panics for any argument: 2,000 seeded
-/// sequences of interface calls with arbitrary arguments (stale, released, foreign and
+/// The tests the sequences of a run are divided among, each in a process of its own under
+/// cargo-nextest: a test that runs all of them takes 19 s alone in the default mode and was
+/// killed at 60 s on a loaded machine. Together they run every one of the [`sequences`].
+const PARTS: u64 = 8;
+
+/// The seeds of part `part` of the [`PARTS`].
+fn part_seeds(part: u64) -> std::ops::Range<u64> {
+    FIRST_SEED + sequences() * part / PARTS..FIRST_SEED + sequences() * (part + 1) / PARTS
+}
+
+/// HOST-3: no entry point, read or hook dispatch panics for any argument: the seeded sequences
+/// of [`sequences`] (2,000 in the lane `slow`) of interface calls with arbitrary arguments
+/// (stale, released, foreign and
 /// wrong-kind handles included), run in a child process, end with no panic, no abort, no run
 /// past its budget, no answer the design excludes, and the same transcript in two runs of each
-/// seed. The seed of a failing sequence is printed.
+/// seed. The seed of a failing sequence is printed. This test runs the first of the [`PARTS`]
+/// of the sequences, and runs the one sequence of `SWELL_FUZZ_SEED` when it is set; the tests
+/// `host_3_no_entry_point_read_or_hook_panics_part_<n>` run the others.
 #[test]
 fn host_3_no_entry_point_read_or_hook_panics() {
     if let Some(seed) = std::env::var_os(ONE_SEED) {
@@ -2124,28 +2148,76 @@ fn host_3_no_entry_point_read_or_hook_panics() {
         run_twice(seed);
         return;
     }
+    run_part("host_3_no_entry_point_read_or_hook_panics", 0);
+}
+
+/// Part 2 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
+#[test]
+fn host_3_no_entry_point_read_or_hook_panics_part_2() {
+    run_part("host_3_no_entry_point_read_or_hook_panics_part_2", 1);
+}
+
+/// Part 3 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
+#[test]
+fn host_3_no_entry_point_read_or_hook_panics_part_3() {
+    run_part("host_3_no_entry_point_read_or_hook_panics_part_3", 2);
+}
+
+/// Part 4 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
+#[test]
+fn host_3_no_entry_point_read_or_hook_panics_part_4() {
+    run_part("host_3_no_entry_point_read_or_hook_panics_part_4", 3);
+}
+
+/// Part 5 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
+#[test]
+fn host_3_no_entry_point_read_or_hook_panics_part_5() {
+    run_part("host_3_no_entry_point_read_or_hook_panics_part_5", 4);
+}
+
+/// Part 6 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
+#[test]
+fn host_3_no_entry_point_read_or_hook_panics_part_6() {
+    run_part("host_3_no_entry_point_read_or_hook_panics_part_6", 5);
+}
+
+/// Part 7 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
+#[test]
+fn host_3_no_entry_point_read_or_hook_panics_part_7() {
+    run_part("host_3_no_entry_point_read_or_hook_panics_part_7", 6);
+}
+
+/// Part 8 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
+#[test]
+fn host_3_no_entry_point_read_or_hook_panics_part_8() {
+    run_part("host_3_no_entry_point_read_or_hook_panics_part_8", 7);
+}
+
+/// The sequences of part `part`, run in a child process that runs only the test `test`; the
+/// parent names the seed the child died in.
+fn run_part(test: &str, part: u64) {
+    if std::env::var_os(ONE_SEED).is_some() {
+        return;
+    }
+    let seeds = part_seeds(part);
+    let count = seeds.end - seeds.start;
     if std::env::var_os(CHILD).is_some() {
-        for seed in FIRST_SEED..FIRST_SEED + SEQUENCES {
+        for seed in seeds {
             eprintln!("fuzz: seed {seed}");
             run_twice(seed);
         }
-        println!("fuzz: {SEQUENCES} sequences done");
+        println!("fuzz: {count} sequences done");
         return;
     }
     let exe = std::env::current_exe().unwrap();
     let out = std::process::Command::new(exe)
-        .args([
-            "host_3_no_entry_point_read_or_hook_panics",
-            "--exact",
-            "--nocapture",
-            "--test-threads=1",
-        ])
+        .args([test, "--exact", "--nocapture", "--test-threads=1"])
         .env(CHILD, "1")
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    let done = format!("fuzz: {SEQUENCES} sequences done");
+    let done = format!("fuzz: {count} sequences done");
     if out.status.success() && stdout.contains(&done) {
         return;
     }
@@ -2162,4 +2234,17 @@ fn host_3_no_entry_point_read_or_hook_panics() {
         out.status,
         tail.join("\n")
     );
+}
+
+/// The parts cover every sequence once, in order.
+#[test]
+fn the_parts_cover_every_sequence() {
+    let mut next = FIRST_SEED;
+    for part in 0..PARTS {
+        let seeds = part_seeds(part);
+        assert_eq!(seeds.start, next, "part {part}");
+        assert!(seeds.end > seeds.start, "part {part} is empty");
+        next = seeds.end;
+    }
+    assert_eq!(next, FIRST_SEED + sequences());
 }
