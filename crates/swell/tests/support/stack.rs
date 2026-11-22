@@ -70,13 +70,53 @@ pub fn reenter(cx: &mut Cx<'_, TestHost>, call: HostCall<'_>) -> Completion<Valu
     cx.call(function, Value::Undefined, &[]).unwrap()
 }
 
+/// The full path of a test in the crate's one test binary, `<module>::<name>` (with any inline
+/// module between), which a test passes after `--exact` when it starts its own binary again
+/// (`story:one-integration-test-binary-per-crate`). A bare name matches no test there: the
+/// child would run nothing, exit 0 and print no "done" line. Made only by [`test_path!`]: write
+/// `test_path!("<name>")` with the test's own name, never the name as a string.
+#[derive(Clone, Debug)]
+pub struct TestPath(String);
+
+impl TestPath {
+    /// Called by [`test_path!`] with the caller's `module_path!()`, whose first segment, the
+    /// crate, is cut off; write `test_path!("<name>")`.
+    #[doc(hidden)]
+    pub fn from_module_path(module: &str, name: &str) -> Self {
+        match module.split_once("::") {
+            Some((_, path)) => Self(format!("{path}::{name}")),
+            None => Self(name.to_owned()),
+        }
+    }
+
+    /// The path, as `--exact` takes it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for TestPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// `test_path!("<name>")`: the [`TestPath`] of the test `<name>` of the module the macro is
+/// written in.
+macro_rules! test_path {
+    ($name:expr) => {
+        $crate::support::stack::TestPath::from_module_path(module_path!(), $name)
+    };
+}
+pub(crate) use test_path;
+
 /// The variable that tells a child process which stack test to run.
 const STACK_CHILD: &str = "SWELL_SUPPORT_STACK_CHILD";
 
 /// Run `body` on a thread of `stack` bytes in a child process that runs only the test `test`
 /// (the test binary started again). A stack overflow aborts the process, which no test can
 /// catch in its own process; in the child it fails this test alone, with the child's output.
-pub fn on_bounded_stack(test: &str, stack: usize, body: fn()) -> Result<(), String> {
+pub fn on_bounded_stack(test: TestPath, stack: usize, body: fn()) -> Result<(), String> {
     let done = format!("{STACK_CHILD}: {test} on {stack} bytes done");
     if std::env::var_os(STACK_CHILD).is_some() {
         std::thread::Builder::new()
@@ -90,7 +130,7 @@ pub fn on_bounded_stack(test: &str, stack: usize, body: fn()) -> Result<(), Stri
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let out = std::process::Command::new(exe)
-        .args([test, "--exact", "--nocapture", "--test-threads=1"])
+        .args(["--exact", test.as_str(), "--nocapture", "--test-threads=1"])
         .env(STACK_CHILD, "1")
         .output()
         .map_err(|e| e.to_string())?;

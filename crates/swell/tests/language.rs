@@ -10,7 +10,7 @@
 //! `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::PathBuf;

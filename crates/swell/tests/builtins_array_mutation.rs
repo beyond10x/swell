@@ -17,11 +17,11 @@
 //! Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{agent_with, limits, realm, stack_with_room};
 use support::script::{Outcome, eval_text, run, run_both};
-use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits};
+use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
 use swell::{AgentState, Limits, Termination};
 
 /// Both modes of `source` answer `expected`, a normal completion as `show` writes it.
@@ -638,7 +638,7 @@ fn reach_through_mutation_builtins() {
 fn comparator_and_conversions_reach_the_reentry_limit_on_the_promised_stack() {
     let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
     on_bounded_stack(
-        "comparator_and_conversions_reach_the_reentry_limit_on_the_promised_stack",
+        test_path!("comparator_and_conversions_reach_the_reentry_limit_on_the_promised_stack"),
         stack,
         reach_through_mutation_builtins,
     )

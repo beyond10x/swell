@@ -1,7 +1,7 @@
 //! The collector and the root table (`docs/design/host-interface.md`, decisions 4 and 18;
 //! `engine.md`, decision 4, "Collector"). Run also with the feature `collect-every-safe-point`.
 
-mod support;
+use crate::support;
 
 use swell::{Brand, HostData, HostError, HostObjectSpec, Outcome, Prototype, Tracer, Value};
 

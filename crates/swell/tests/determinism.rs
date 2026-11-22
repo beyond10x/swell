@@ -11,9 +11,10 @@
 //! calls and to two processes. Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{limits, seeds};
+use support::stack::{TestPath, test_path};
 use swell::{
     Abrupt, Agent, CompileStrings, Completion, Cx, Handled, HookCx, Host, HostCall, IsoDateTime,
     Job, Limits, LoadRequest, ModuleRef, ObjectRef, Outcome, Parsed, PropertyKey, Realm, RealmRef,
@@ -504,19 +505,14 @@ const CHILD: &str = "SWELL_DETERMINISM_CHILD";
 const BEGIN: &str = "--- determinism transcript begin ---";
 const END: &str = "--- determinism transcript end ---";
 
-/// A child process that runs the corpus and prints its transcript, started and not waited for:
-/// the two children of the test run beside each other and beside the test's own two agents,
-/// each in a process of its own, so that the test takes the time of one of the three runs rather
-/// than of all of them.
-fn spawn_child() -> std::process::Child {
+/// A child process that runs only the test `test`, which runs the corpus and prints its
+/// transcript, started and not waited for: the two children of the test run beside each other
+/// and beside the test's own two agents, each in a process of its own, so that the test takes
+/// the time of one of the three runs rather than of all of them.
+fn spawn_child(test: TestPath) -> std::process::Child {
     let exe = std::env::current_exe().unwrap();
     std::process::Command::new(exe)
-        .args([
-            "host_133_same_calls_same_hooks_same_outcomes",
-            "--exact",
-            "--nocapture",
-            "--test-threads=1",
-        ])
+        .args(["--exact", test.as_str(), "--nocapture", "--test-threads=1"])
         .env(CHILD, "1")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -562,7 +558,8 @@ fn host_133_same_calls_same_hooks_same_outcomes() {
         println!("{BEGIN}\n{a}\n{END}");
         return;
     }
-    let children = [spawn_child(), spawn_child()];
+    let test = test_path!("host_133_same_calls_same_hooks_same_outcomes");
+    let children = [spawn_child(test.clone()), spawn_child(test)];
     let (a, b) = two_agents_interleaved();
     assert_eq!(a, b, "two agents in one process");
     let lines: Vec<&str> = a.lines().collect();

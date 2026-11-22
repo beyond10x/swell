@@ -21,11 +21,11 @@
 //! delivers.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{agent_with, limits, realm, stack_with_room};
 use support::script::{Outcome, eval, eval_text, run_both};
-use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits};
+use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
 use swell::{Agent, AgentState, Outcome as HostOutcome, Realm, Termination};
 
 use support::host::TestHost;
@@ -993,7 +993,7 @@ macro_rules! reaches_the_reentry_limit {
                 reach_through($through, BUILTINS_REENTRY);
             }
             let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
-            on_bounded_stack(stringify!($name), stack, body).unwrap();
+            on_bounded_stack(test_path!(stringify!($name)), stack, body).unwrap();
         }
     };
 }

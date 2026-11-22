@@ -3,6 +3,11 @@ name = "swell"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
+autotests = false
+
+[[test]]
+name = "main"
+path = "tests/main.rs"
 
 [dependencies]
 swell-compiler = { path = "../compiler" }

@@ -25,8 +25,9 @@
 //! functions. Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
+use support::stack::{TestPath, test_path};
 use swell::{
     Abrupt, Agent, AgentState, Brand, CompileStrings, Completion, Cx, ErrorKind, GlobalObjects,
     Handled, HookCx, Host, HostCall, HostData, HostError, HostObjectSpec, IsoDateTime, Job, Limits,
@@ -2154,54 +2155,75 @@ fn host_3_no_entry_point_read_or_hook_panics() {
         run_twice(seed);
         return;
     }
-    run_part("host_3_no_entry_point_read_or_hook_panics", 0);
+    run_part(test_path!("host_3_no_entry_point_read_or_hook_panics"), 0);
 }
 
 /// Part 2 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
 #[test]
 fn host_3_no_entry_point_read_or_hook_panics_part_2() {
-    run_part("host_3_no_entry_point_read_or_hook_panics_part_2", 1);
+    run_part(
+        test_path!("host_3_no_entry_point_read_or_hook_panics_part_2"),
+        1,
+    );
 }
 
 /// Part 3 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
 #[test]
 fn host_3_no_entry_point_read_or_hook_panics_part_3() {
-    run_part("host_3_no_entry_point_read_or_hook_panics_part_3", 2);
+    run_part(
+        test_path!("host_3_no_entry_point_read_or_hook_panics_part_3"),
+        2,
+    );
 }
 
 /// Part 4 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
 #[test]
 fn host_3_no_entry_point_read_or_hook_panics_part_4() {
-    run_part("host_3_no_entry_point_read_or_hook_panics_part_4", 3);
+    run_part(
+        test_path!("host_3_no_entry_point_read_or_hook_panics_part_4"),
+        3,
+    );
 }
 
 /// Part 5 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
 #[test]
 fn host_3_no_entry_point_read_or_hook_panics_part_5() {
-    run_part("host_3_no_entry_point_read_or_hook_panics_part_5", 4);
+    run_part(
+        test_path!("host_3_no_entry_point_read_or_hook_panics_part_5"),
+        4,
+    );
 }
 
 /// Part 6 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
 #[test]
 fn host_3_no_entry_point_read_or_hook_panics_part_6() {
-    run_part("host_3_no_entry_point_read_or_hook_panics_part_6", 5);
+    run_part(
+        test_path!("host_3_no_entry_point_read_or_hook_panics_part_6"),
+        5,
+    );
 }
 
 /// Part 7 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
 #[test]
 fn host_3_no_entry_point_read_or_hook_panics_part_7() {
-    run_part("host_3_no_entry_point_read_or_hook_panics_part_7", 6);
+    run_part(
+        test_path!("host_3_no_entry_point_read_or_hook_panics_part_7"),
+        6,
+    );
 }
 
 /// Part 8 of the sequences of [`host_3_no_entry_point_read_or_hook_panics`].
 #[test]
 fn host_3_no_entry_point_read_or_hook_panics_part_8() {
-    run_part("host_3_no_entry_point_read_or_hook_panics_part_8", 7);
+    run_part(
+        test_path!("host_3_no_entry_point_read_or_hook_panics_part_8"),
+        7,
+    );
 }
 
 /// The sequences of part `part`, run in a child process that runs only the test `test`; the
 /// parent names the seed the child died in.
-fn run_part(test: &str, part: u64) {
+fn run_part(test: TestPath, part: u64) {
     if std::env::var_os(ONE_SEED).is_some() {
         return;
     }
@@ -2217,7 +2239,7 @@ fn run_part(test: &str, part: u64) {
     }
     let exe = std::env::current_exe().unwrap();
     let out = std::process::Command::new(exe)
-        .args([test, "--exact", "--nocapture", "--test-threads=1"])
+        .args(["--exact", test.as_str(), "--nocapture", "--test-threads=1"])
         .env(CHILD, "1")
         .output()
         .unwrap();

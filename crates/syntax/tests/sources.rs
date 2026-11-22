@@ -340,6 +340,44 @@ fn message_kind_tells_refusals_from_early_errors() {
     );
 }
 
+/// The full path of a test in the crate's one test binary, `sources::<name>`, which a test
+/// passes after `--exact` when it starts its own binary again
+/// (`story:one-integration-test-binary-per-crate`). A bare name matches no test there: the
+/// child would run nothing, exit 0 and print no "done" line. Made only by [`test_path!`]: write
+/// `test_path!("<name>")` with the test's own name, never the name as a string.
+#[derive(Clone, Debug)]
+struct TestPath(String);
+
+impl TestPath {
+    /// Called by [`test_path!`] with the caller's `module_path!()`, whose first segment, the
+    /// crate, is cut off; write `test_path!("<name>")`.
+    fn from_module_path(module: &str, name: &str) -> Self {
+        match module.split_once("::") {
+            Some((_, path)) => Self(format!("{path}::{name}")),
+            None => Self(name.to_owned()),
+        }
+    }
+
+    /// The path, as `--exact` takes it.
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for TestPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// `test_path!("<name>")`: the [`TestPath`] of the test `<name>` of the module the macro is
+/// written in.
+macro_rules! test_path {
+    ($name:expr) => {
+        TestPath::from_module_path(module_path!(), $name)
+    };
+}
+
 /// Set in the environment of a child process a test starts: the nesting limit the child runs its
 /// test body with.
 const STACK_CHILD: &str = "SWELL_SYNTAX_STACK_CHILD";
@@ -348,7 +386,7 @@ const STACK_CHILD: &str = "SWELL_SYNTAX_STACK_CHILD";
 /// `ParseOptions::stack_bytes` for that limit, in a child process that runs only the test
 /// `test`. A stack overflow aborts the process, which no test can catch in its own process; in
 /// the child it fails this test alone, with the child's output.
-fn on_bounded_stack(test: &str, limit: u32, body: fn(u32)) -> Result<(), String> {
+fn on_bounded_stack(test: TestPath, limit: u32, body: fn(u32)) -> Result<(), String> {
     let stack = ParseOptions { max_nesting: limit }.stack_bytes();
     let done = format!("{STACK_CHILD}: {test} at {limit} done");
     if let Some(value) = std::env::var_os(STACK_CHILD) {
@@ -366,7 +404,7 @@ fn on_bounded_stack(test: &str, limit: u32, body: fn(u32)) -> Result<(), String>
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let out = std::process::Command::new(exe)
-        .args([test, "--exact", "--nocapture", "--test-threads=1"])
+        .args(["--exact", test.as_str(), "--nocapture", "--test-threads=1"])
         .env(STACK_CHILD, limit.to_string())
         .output()
         .map_err(|e| e.to_string())?;
@@ -383,7 +421,8 @@ fn on_bounded_stack(test: &str, limit: u32, body: fn(u32)) -> Result<(), String>
 
 #[test]
 fn nesting_of_100000_brackets_is_one_error() {
-    on_bounded_stack("nesting_of_100000_brackets_is_one_error", LIMIT, |limit| {
+    let test = test_path!("nesting_of_100000_brackets_is_one_error");
+    on_bounded_stack(test, LIMIT, |limit| {
         let mut source = vec![u16::from(b'['); 100_000];
         source.extend(std::iter::repeat_n(u16::from(b']'), 100_000));
         let errors = parse_units(&source, limit).err().unwrap();
@@ -650,7 +689,8 @@ macro_rules! stack_bound_parts {
             #[test]
             fn $name() {
                 for limit in [10, deep_limit()] {
-                    on_bounded_stack(stringify!($name), limit, |limit| {
+                    let test = test_path!(stringify!($name));
+                    on_bounded_stack(test, limit, |limit| {
                         for (entry, kind) in stack_bound_part($part) {
                             fits_the_stack_bound(entry, kind, limit);
                         }

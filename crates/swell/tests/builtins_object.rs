@@ -10,7 +10,7 @@
 //! runs: the tests call the builtins through `Cx` with host functions as callbacks.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{
     TestHost, agent, data, get, get_object, global, is_error_of, key, object, realm, string, text,

@@ -5,7 +5,7 @@
 //! `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{TestHost, agent, realm};
 use support::script::{Outcome, eval, run_both};

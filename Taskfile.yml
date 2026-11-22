@@ -168,13 +168,16 @@ tasks:
       The lane slow's part of the tests. A test whose iteration count is large for a reason other
       than its subject runs a part of it in the gate and the whole when SWELL_FULL_COUNTS is 1
       (story gate-test-steps-within-budget, point 3; each such test says how its gate count
-      reaches what the full count does). This task finds those test binaries itself, every
-      crates/<crate>/tests/<name>.rs that reads SWELL_FULL_COUNTS, and the library's test binary
-      of swell when a file under crates/swell/src reads it, and runs them through
-      cargo-nextest with SWELL_FULL_COUNTS=1, then those of swell again with the feature
-      collect-every-safe-point, so that a test that takes the variable up runs here with nothing
-      to edit. Prints "slow-tests: <b> test binaries: <p> passed, <f> failed, <i> ignored" and
-      the same after "slow-tests collect-every-safe-point: ", each with its ten slowest.
+      reaches what the full count does). This task finds those tests itself: every
+      crates/<crate>/tests/<name>.rs that reads SWELL_FULL_COUNTS, which is the module <name> of
+      the crate's one test binary main (tests/main.rs) and is named "(binary_id(<package>::main)
+      & test(/^<name>::/))", anchored so that a module whose name ends in <name> is not taken,
+      and the library's test binary of swell when a file under crates/swell/src reads it; it
+      runs them through cargo-nextest with SWELL_FULL_COUNTS=1, then those of swell again with
+      the feature collect-every-safe-point, so that a test that takes the variable up runs here
+      with nothing to edit. Prints "slow-tests: <b> test binaries: <p> passed, <f> failed, <i>
+      ignored" and the same after "slow-tests collect-every-safe-point: ", each with its ten
+      slowest.
     silent: true
     env:
       RUSTFLAGS: -D warnings
@@ -187,9 +190,11 @@ tasks:
           dir=${f%/tests/*}
           stem=${f##*/}
           stem=${stem%.rs}
+          [ "$stem" = main ] && continue
           pkg=$(awk -F '"' '/^name *=/ { print $2; exit }' "$dir/Cargo.toml")
-          all="$all${all:+ | }binary_id($pkg::$stem)"
-          if [ "$pkg" = swell ]; then swell="$swell${swell:+ | }binary_id($pkg::$stem)"; fi
+          term="(binary_id($pkg::main) & test(/^$stem::/))"
+          all="$all${all:+ | }$term"
+          if [ "$pkg" = swell ]; then swell="$swell${swell:+ | }$term"; fi
         done
         if grep -rqs SWELL_FULL_COUNTS crates/swell/src; then all="$all${all:+ | }binary_id(swell)"; swell="$swell${swell:+ | }binary_id(swell)"; fi
         if [ -z "$all" ]; then echo "slow-tests: no test reads SWELL_FULL_COUNTS"; exit 1; fi

@@ -12,7 +12,7 @@
 //! methods of `Cx` and `HookCx`. Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use std::cell::Cell;
 use std::rc::Rc;

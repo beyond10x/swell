@@ -10,11 +10,11 @@
 //! a default or rest parameter or a destructuring pattern.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{agent, limits, realm, stack_with_room};
 use support::script::{Outcome, eval_text, run, run_both};
-use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits};
+use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
 use swell::{Outcome as HostOutcome, Parsed, Source};
 
 /// What a script that checks its own results answers.
@@ -148,7 +148,7 @@ fn reach_through_arrows() {
 fn calls_of_arrows_reach_the_reentry_limit_on_the_promised_stack() {
     let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
     on_bounded_stack(
-        "calls_of_arrows_reach_the_reentry_limit_on_the_promised_stack",
+        test_path!("calls_of_arrows_reach_the_reentry_limit_on_the_promised_stack"),
         stack,
         reach_through_arrows,
     )

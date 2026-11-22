@@ -10,7 +10,7 @@
 //! Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{agent, agent_with, limits, realm};
 use support::script::{Outcome, describe, eval_text, parse, run, run_both};
