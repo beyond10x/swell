@@ -37,6 +37,11 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The ESS pins moved from 0.96.0 to 0.97.4 (`spec/ess-inputs.yaml`, the conformance workspace,
   the forge's workflow). The suite is byte-identical: 58 scenarios, 41 refusals, 58 passing on
   the interpreter and 14 against the engine, as before.
+- The heaviest tests are lighter, so that none is near the 60 s limit of a test when the
+  machine is loaded: no test of the gate takes over 1.5 CPU seconds alone in the default mode,
+  and none of the lane `slow` over 5 at its full count. The fuzz test of the host interface
+  runs 1,000 sequences at its full count (2,000 before); the gate's count is unchanged. Only
+  test code changed.
 - The gate now fails when a public item of the host interface or a `HOST-<n>` requirement
   changed since the last release and the changelog does not name it under Host interface, in
   the name form of `docs/releasing.md`.

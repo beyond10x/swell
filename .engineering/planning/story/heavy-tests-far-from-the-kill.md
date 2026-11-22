@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:heavy-tests-far-from-the-kill
 kind: story
-status: active
+status: implemented
 title: The heaviest tests of the gate and of the lane slow stay far from the 60 s kill
 summary: Measured per test in CPU seconds, alone, in the four runs; the tests over 1.5 s (gate, default mode), 2 s (gate, collect mode) and 5 s (lane slow at full counts) get smaller counts where the size is not the property, and a gate count where it is; one gate stack bound is scaled the way sources.rs scales it.
 relations:
 - decomposes: epic:slice-06-bindings-and-iteration
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T20:12:58Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T20:12:59Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T20:27:24Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 
 # The heaviest tests of the gate and of the lane slow stay far from the 60 s kill
