@@ -238,18 +238,17 @@ fn charged_as_read(text: &str) {
 }
 
 /// The properties of the pattern of [`the_properties_of_a_large_pattern_are_charged_as_they_are_read`]:
-/// 10,000, the full count, in the default mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`);
-/// 1,000 in the gate with the feature `collect-every-safe-point`, whose build is slower (with
-/// 10,000 the test took 5.5 s there at a load of 55 to 67 on 20 cores, cargo-nextest). The test
-/// runs no script, so the feature changes nothing it checks; 1,000 properties still grow every
-/// list of the parse and the compile step past its first capacity many times over.
+/// 10,000, the full count, in the lane `slow` (`SWELL_FULL_COUNTS=1`); 1,000 in the gate, with
+/// the feature `collect-every-safe-point`, whose build is slower (with 10,000 the test took
+/// 5.5 s there at a load of 55 to 67 on 20 cores, cargo-nextest), and in the default mode (with
+/// 10,000 1.57 CPU seconds alone, measured on 2026-11-22). The test runs no script, so the
+/// feature changes nothing it checks; 1,000 properties still grow every list of the parse and
+/// the compile step past its first capacity many times over.
 fn pattern_properties() -> usize {
-    if cfg!(feature = "collect-every-safe-point")
-        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-    {
-        1_000
-    } else {
+    if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
         10_000
+    } else {
+        1_000
     }
 }
 
