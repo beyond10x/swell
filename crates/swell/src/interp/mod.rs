@@ -96,9 +96,15 @@ impl<H: Host> Agent<H> {
     }
 
     /// The check of code reached from Rust (the module's documentation): `reentry_depth`, then
-    /// the interrupt. `activation` is what the code is called with, pushed when no builtin is
-    /// between the running loop and this call.
-    pub(crate) fn enter_code(&mut self, activation: Option<Activation>) -> Completion<Entered> {
+    /// the interrupt. `activation` is what the code is called with, its `args` empty, and the
+    /// arguments of the call: when no builtin is between the running loop and this call, the
+    /// arguments are charged to the memory budget, copied into the activation and it is pushed;
+    /// otherwise nothing is copied. A refused charge ends the run in `Terminated(MemoryBudget)`
+    /// with nothing pushed.
+    pub(crate) fn enter_code(
+        &mut self,
+        activation: Option<(Activation, &[Value])>,
+    ) -> Completion<Entered> {
         let depth = self.activations.len();
         let base = self.interp.running.unwrap_or(0);
         let entered = if depth > base || self.interp.running.is_some() {
@@ -113,7 +119,23 @@ impl<H: Host> Agent<H> {
                 return Err(self.throw_error(ErrorKind::RangeError, "reentry_depth exceeded"));
             }
             match activation {
-                Some(activation) if depth == base => {
+                Some((mut activation, args)) if depth == base => {
+                    // The activation's copy of the arguments lives until `leave_code` pops it:
+                    // charged before it is made, credited there.
+                    let bytes = u64::try_from(size_of_val(args)).unwrap_or(u64::MAX);
+                    self.charge_bytes(bytes)?;
+                    let mut kept = Vec::new();
+                    if kept.try_reserve_exact(args.len()).is_err() {
+                        self.heap.accounting.credit(bytes);
+                        return Err(self.terminate(Termination::MemoryBudget));
+                    }
+                    kept.extend_from_slice(args);
+                    #[cfg(test)]
+                    crate::object::ecmascript_function::CALL_ARGUMENTS_COPIED.with(|copied| {
+                        let count = u64::try_from(args.len()).unwrap_or(u64::MAX);
+                        copied.set(copied.get().saturating_add(count));
+                    });
+                    activation.args = kept;
                     self.activations.push(activation);
                     Entered::Activation
                 }
@@ -129,10 +151,13 @@ impl<H: Host> Agent<H> {
         Ok(entered)
     }
 
-    /// Undo what [`Agent::enter_code`] pushed.
+    /// Undo what [`Agent::enter_code`] pushed: the activation, whose arguments are credited.
     pub(crate) fn leave_code(&mut self, entered: Entered) {
-        if entered == Entered::Activation {
-            self.activations.pop();
+        if entered == Entered::Activation
+            && let Some(activation) = self.activations.pop()
+        {
+            let bytes = u64::try_from(size_of_val(activation.args.as_slice())).unwrap_or(u64::MAX);
+            self.heap.accounting.credit(bytes);
         }
     }
 
