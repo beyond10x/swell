@@ -1,0 +1,31 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 0 locals 3 binds-parameters
+  params local 0, local 1, local 2
+  0000 2:12 Argument 3
+  0001 2:12 JumpIfNotUndefined 0003
+  0002 2:27 NewObject
+  0003 2:12 RequireObjectCoercible
+  0004 2:14 PatternGet 0 "a"
+  0005 2:14 SetLocal 0
+  0006 2:14 Pop
+  0007 2:17 PatternGet 0 "b"
+  0008 2:17 JumpIfNotUndefined 0010
+  0009 2:21 GetLocalChecked 0 "a"
+  0010 2:17 SetLocal 1
+  0011 2:17 Pop
+  0012 2:12 Pop
+  0013 2:31 Argument 4
+  0014 2:31 SetLocal 2
+  0015 2:31 Pop
+  0016 2:43 GetLocal 0
+  0017 2:47 GetLocal 1
+  0018 2:43 Add
+  0019 2:51 GetLocal 2
+  0020 2:43 Add
+  0021 2:36 Return
+  0022 2:1 Undefined
+  0023 2:1 Return

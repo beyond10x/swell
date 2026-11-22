@@ -189,7 +189,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// The property key of String constant `index`.
-    fn constant_key(&mut self, index: u32) -> Completion<Key> {
+    pub(super) fn constant_key(&mut self, index: u32) -> Completion<Key> {
         let position = usize::try_from(index).unwrap_or(usize::MAX);
         let found = self.top_frame()?.compiled.keys.get(position).copied();
         match found {
@@ -382,6 +382,11 @@ impl<H: Host> Agent<H> {
             }
             I::RestArguments(slot) => self.rest_arguments(slot).map(|()| Flow::Next),
             I::PushVarEnv(table) => self.push_var_env(table).map(|()| Flow::Next),
+            // ---- object patterns (`interp/patterns.rs`) ----
+            I::RequireObjectCoercible => {
+                self.require_object_coercible_pattern().map(|()| Flow::Next)
+            }
+            I::PatternGet { depth, name } => self.pattern_get(depth, name).map(|()| Flow::Next),
             // ---- templates (`interp/template.rs`) ----
             I::ToString => self.substitution_to_string(),
         }
@@ -1226,7 +1231,7 @@ impl<H: Host> Agent<H> {
 
     /// GetValue (`#sec-getvalue`) of the property reference `base[key]`: [[Get]] of ToObject of
     /// the base with the base itself as the receiver (GetThisValue).
-    fn get_value(&mut self, base: Value, key: Key) -> Completion<Value> {
+    pub(super) fn get_value(&mut self, base: Value, key: Key) -> Completion<Value> {
         let object = self.require_object_coercible_and_wrap(base)?;
         let keep = self.keep(Value::Object(object));
         let value = self.internal_get(object, key, base);

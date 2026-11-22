@@ -1,0 +1,38 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 4
+  params local 0
+  0000 2:23 Undefined
+  0001 2:23 GetGlobal "g"
+  0002 2:23 Call 0
+  0003 2:23 Pop
+  0004 2:17 Jump 0012
+  0005 2:37 RequireObjectCoercible
+  0006 2:39 PatternGet 0 "message"
+  0007 2:39 SetLocal 1
+  0008 2:39 Pop
+  0009 2:37 Pop
+  0010 2:59 GetLocal 1
+  0011 2:52 Return
+  0012 2:93 GetLocal 0
+  0013 2:70 ForInStart
+  0014 2:70 ForInNext 0027
+  0015 2:70 Uninitialize 3
+  0016 2:79 RequireObjectCoercible
+  0017 2:81 PatternGet 0 "length"
+  0018 2:81 SetLocal 3
+  0019 2:81 Pop
+  0020 2:79 Pop
+  0021 2:98 Undefined
+  0022 2:98 GetGlobal "h"
+  0023 2:100 GetLocalChecked 3 "length"
+  0024 2:98 Call 1
+  0025 2:98 Pop
+  0026 2:70 LoopJump 0014
+  0027 2:70 Pop
+  0028 2:1 Undefined
+  0029 2:1 Return
+  catch 0000..0005 -> 0005 items 0 envs 0

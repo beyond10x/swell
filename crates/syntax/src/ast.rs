@@ -158,6 +158,11 @@ pub enum PropertyValue {
     Method(FunctionId),
     /// `PropertyDefinition : IdentifierReference`, the identifier expression of its value.
     Shorthand(ExprId),
+    /// `PropertyDefinition : CoverInitializedName`, `name = init`: the identifier expression
+    /// and the initializer. It stands only in an object literal that is read again as an
+    /// ObjectAssignmentPattern or an ObjectBindingPattern; one left in an object literal is the
+    /// early error of `#sec-object-initializer-static-semantics-early-errors`.
+    CoverInitialized(ExprId, ExprId),
 }
 
 /// A `PropertyDefinition` of an object literal (`#sec-object-initializer`).
@@ -166,6 +171,104 @@ pub struct Property {
     pub key: PropertyKey,
     pub value: PropertyValue,
     pub span: Span,
+}
+
+/// How the targets of an object pattern are bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PatternKind {
+    /// An ObjectAssignmentPattern (`#sec-destructuring-assignment`): each target is a reference,
+    /// evaluated before its value is read, then PutValue.
+    Assignment,
+    /// The ObjectBindingPattern of a `var` declaration or a for-in head with `var`:
+    /// BindingInitialization with no environment, ResolveBinding before the value is read, then
+    /// PutValue (`#sec-runtime-semantics-keyedbindinginitialization`).
+    Var,
+    /// The ObjectBindingPattern of a `let` or `const` declaration, a parameter or a `catch`
+    /// parameter: InitializeReferencedBinding of each name.
+    Initialize,
+}
+
+/// The target of one property of an object pattern.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PatternTarget {
+    /// A `BindingIdentifier` of a binding pattern.
+    Binding(Name),
+    /// An assignment target (an identifier, a property access, in parentheses or not) of an
+    /// assignment pattern, or a nested object pattern of the same kind.
+    Expr(ExprId),
+}
+
+/// A `BindingProperty` (`#sec-destructuring-binding-patterns`) or an `AssignmentProperty`
+/// (`#sec-destructuring-assignment`): the key read, its target and its default.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PatternProperty {
+    pub key: PropertyKey,
+    pub target: PatternTarget,
+    /// The `Initializer`, evaluated when the property's value is `undefined`.
+    pub default: Option<ExprId>,
+    pub span: Span,
+}
+
+/// A name a binding pattern binds: the name, and the pattern node and property index of its
+/// `BindingIdentifier`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoundName {
+    pub name: Name,
+    pub pattern: ExprId,
+    pub property: u32,
+}
+
+/// An ObjectBindingPattern where a binding stands: the pattern node, its BoundNames in source
+/// order (`#sec-static-semantics-boundnames`) and whether it holds a default
+/// (ContainsExpression, `#sec-static-semantics-containsexpression`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pattern {
+    pub pattern: ExprId,
+    pub names: Vec<BoundName>,
+    pub expressions: bool,
+    pub span: Span,
+}
+
+/// What a declarator, a for-in head, a `catch` clause or a parameter binds: a
+/// `BindingIdentifier` or a `BindingPattern`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum BindingTarget {
+    Identifier(Name),
+    Pattern(Pattern),
+}
+
+impl BindingTarget {
+    /// The BoundNames, in source order.
+    pub fn names(&self) -> impl Iterator<Item = &Name> {
+        let (one, many) = match self {
+            BindingTarget::Identifier(name) => (Some(name), &[][..]),
+            BindingTarget::Pattern(p) => (None, p.names.as_slice()),
+        };
+        one.into_iter().chain(many.iter().map(|b| &b.name))
+    }
+
+    /// The `BindingIdentifier`, when it is one.
+    pub fn identifier(&self) -> Option<&Name> {
+        match self {
+            BindingTarget::Identifier(name) => Some(name),
+            BindingTarget::Pattern(_) => None,
+        }
+    }
+
+    /// The pattern node, when it is a pattern.
+    pub fn pattern(&self) -> Option<ExprId> {
+        match self {
+            BindingTarget::Identifier(_) => None,
+            BindingTarget::Pattern(p) => Some(p.pattern),
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            BindingTarget::Identifier(name) => name.span,
+            BindingTarget::Pattern(p) => p.span,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -258,6 +361,13 @@ pub enum Expr {
         strings: Vec<TemplateString>,
         substitutions: Vec<ExprId>,
     },
+    /// An ObjectBindingPattern or an ObjectAssignmentPattern (`#sec-destructuring-binding-patterns`,
+    /// `#sec-destructuring-assignment`), its properties in source order. It destructures the
+    /// value its context gives it; an assignment whose target is one has that value as its own.
+    ObjectPattern {
+        properties: Vec<PatternProperty>,
+        kind: PatternKind,
+    },
 }
 
 /// One template string of a `TemplateLiteral` (`#sec-templatestring`), as UTF-16 code units:
@@ -285,7 +395,7 @@ pub struct ExprNode {
 /// A `VariableDeclaration` or a `LexicalBinding`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VarDeclarator {
-    pub name: Name,
+    pub target: BindingTarget,
     pub init: Option<ExprId>,
 }
 
@@ -315,7 +425,8 @@ pub enum ForInit {
 /// The left side of `for (... in ...)`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ForInTarget {
-    Var(DeclKind, Name),
+    Var(DeclKind, BindingTarget),
+    /// A `LeftHandSideExpression`: an assignment target or an ObjectAssignmentPattern.
     Expression(ExprId),
 }
 
@@ -340,7 +451,7 @@ pub struct SwitchCase {
 /// A `Catch`; `param` is `None` for `catch Block`, which binds nothing.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CatchClause {
-    pub param: Option<Name>,
+    pub param: Option<BindingTarget>,
     pub body: Vec<StmtId>,
 }
 
@@ -480,9 +591,9 @@ pub struct Scope {
 pub struct Function {
     pub kind: FunctionKind,
     pub name: Option<Name>,
-    /// The BoundNames of the FormalParameters, one per parameter in order, the rest parameter
-    /// last (`#sec-function-definitions`).
-    pub params: Vec<Name>,
+    /// The FormalParameters, one per parameter in order, each a `BindingIdentifier` or an
+    /// ObjectBindingPattern, the rest parameter last (`#sec-function-definitions`).
+    pub params: Vec<BindingTarget>,
     /// The Initializer of each parameter, beside its name in `params`: empty when no parameter
     /// has one, else as long as `params`, `None` for a parameter without one.
     pub initializers: Vec<Option<ExprId>>,
@@ -499,16 +610,28 @@ pub struct Function {
 }
 
 impl Function {
-    /// IsSimpleParameterList (`#sec-static-semantics-issimpleparameterlist`): no initializer
-    /// and no rest parameter (a pattern is refused before its story).
+    /// IsSimpleParameterList (`#sec-static-semantics-issimpleparameterlist`): no initializer,
+    /// no rest parameter and no pattern.
     pub fn is_simple(&self) -> bool {
-        self.initializers.is_empty() && !self.rest
+        self.initializers.is_empty()
+            && !self.rest
+            && self.params.iter().all(|p| p.identifier().is_some())
     }
 
     /// ContainsExpression of the FormalParameters
-    /// (`#sec-static-semantics-containsexpression`): a parameter has an initializer.
+    /// (`#sec-static-semantics-containsexpression`): a parameter has an initializer, or a
+    /// pattern has a default.
     pub fn has_parameter_expressions(&self) -> bool {
         !self.initializers.is_empty()
+            || self
+                .params
+                .iter()
+                .any(|p| matches!(p, BindingTarget::Pattern(p) if p.expressions))
+    }
+
+    /// The BoundNames of the FormalParameters, in source order.
+    pub fn parameter_names(&self) -> impl Iterator<Item = &Name> {
+        self.params.iter().flat_map(BindingTarget::names)
     }
 
     /// The Initializer of parameter `i`, if it has one.
@@ -619,6 +742,7 @@ impl Ast {
                         .iter()
                         .flatten()
                         .count()
+                        .saturating_add(f.params.iter().filter_map(BindingTarget::pattern).count())
                         .saturating_add(f.body.len())
                 });
             }
@@ -651,8 +775,13 @@ impl Ast {
             }
             Child::Function(id) => {
                 if let Some(f) = self.function(id) {
-                    for e in f.initializers.iter().flatten() {
-                        stack.push(step(Child::Expr(*e)));
+                    for (i, p) in f.params.iter().enumerate() {
+                        if let Some(e) = p.pattern() {
+                            stack.push(step(Child::Expr(e)));
+                        }
+                        if let Some(e) = f.initializer(i) {
+                            stack.push(step(Child::Expr(e)));
+                        }
                     }
                     for s in &f.body {
                         stack.push(step(Child::Stmt(*s)));
@@ -728,6 +857,38 @@ impl HeapBytes for Property {
     }
 }
 
+impl HeapBytes for PatternTarget {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            PatternTarget::Binding(name) => name.heap_bytes(),
+            PatternTarget::Expr(_) => 0,
+        }
+    }
+}
+
+impl HeapBytes for PatternProperty {
+    fn heap_bytes(&self) -> usize {
+        self.key
+            .heap_bytes()
+            .saturating_add(self.target.heap_bytes())
+    }
+}
+
+impl HeapBytes for BoundName {
+    fn heap_bytes(&self) -> usize {
+        self.name.heap_bytes()
+    }
+}
+
+impl HeapBytes for BindingTarget {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            BindingTarget::Identifier(name) => name.heap_bytes(),
+            BindingTarget::Pattern(p) => p.names.heap_bytes(),
+        }
+    }
+}
+
 impl HeapBytes for Expr {
     fn heap_bytes(&self) -> usize {
         match self {
@@ -764,6 +925,7 @@ impl HeapBytes for Expr {
             } => strings
                 .heap_bytes()
                 .saturating_add(substitutions.heap_bytes()),
+            Expr::ObjectPattern { properties, .. } => properties.heap_bytes(),
         }
     }
 }
@@ -776,7 +938,7 @@ impl HeapBytes for ExprNode {
 
 impl HeapBytes for VarDeclarator {
     fn heap_bytes(&self) -> usize {
-        self.name.heap_bytes()
+        self.target.heap_bytes()
     }
 }
 
@@ -792,7 +954,7 @@ impl HeapBytes for ForInit {
 impl HeapBytes for ForInTarget {
     fn heap_bytes(&self) -> usize {
         match self {
-            ForInTarget::Var(_, name) => name.heap_bytes(),
+            ForInTarget::Var(_, target) => target.heap_bytes(),
             ForInTarget::Expression(_) => 0,
         }
     }
@@ -907,9 +1069,23 @@ impl Expr {
                 for p in properties {
                     match p.value {
                         PropertyValue::Init(e) | PropertyValue::Shorthand(e) => f(Child::Expr(e)),
+                        PropertyValue::CoverInitialized(name, init) => {
+                            f(Child::Expr(name));
+                            f(Child::Expr(init));
+                        }
                         PropertyValue::Get(id)
                         | PropertyValue::Set(id)
                         | PropertyValue::Method(id) => f(Child::Function(id)),
+                    }
+                }
+            }
+            Expr::ObjectPattern { properties, .. } => {
+                for p in properties {
+                    if let PatternTarget::Expr(e) = p.target {
+                        f(Child::Expr(e));
+                    }
+                    if let Some(e) = p.default {
+                        f(Child::Expr(e));
                     }
                 }
             }
@@ -978,6 +1154,9 @@ impl Stmt {
             Stmt::Block(body) => list(body, &mut f),
             Stmt::Var(_, declarators) => {
                 for d in declarators {
+                    if let Some(e) = d.target.pattern() {
+                        f(Child::Expr(e));
+                    }
                     if let Some(e) = d.init {
                         f(Child::Expr(e));
                     }
@@ -1014,6 +1193,9 @@ impl Stmt {
                 match init {
                     Some(ForInit::Var(_, declarators)) => {
                         for d in declarators {
+                            if let Some(e) = d.target.pattern() {
+                                f(Child::Expr(e));
+                            }
                             if let Some(e) = d.init {
                                 f(Child::Expr(e));
                             }
@@ -1035,8 +1217,13 @@ impl Stmt {
                 object,
                 body,
             } => {
-                if let ForInTarget::Expression(e) = target {
-                    f(Child::Expr(*e));
+                match target {
+                    ForInTarget::Expression(e) => f(Child::Expr(*e)),
+                    ForInTarget::Var(_, t) => {
+                        if let Some(e) = t.pattern() {
+                            f(Child::Expr(e));
+                        }
+                    }
                 }
                 f(Child::Expr(*object));
                 f(Child::Stmt(*body));
@@ -1065,6 +1252,9 @@ impl Stmt {
             } => {
                 list(block, &mut f);
                 if let Some(h) = handler {
+                    if let Some(e) = h.param.as_ref().and_then(BindingTarget::pattern) {
+                        f(Child::Expr(e));
+                    }
                     list(&h.body, &mut f);
                 }
                 if let Some(body) = finalizer {

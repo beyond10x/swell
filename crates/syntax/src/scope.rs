@@ -23,9 +23,11 @@
 //!   the list itself. A function declaration in a block is refused before a later story of slice
 //!   6, and one at the top level of a body is var scoped (TopLevelLexicallyScopedDeclarations).
 //!
-//! The initializers of a function's parameters are the function's own code, walked before its
-//! body: their references and direct `eval` calls count for the function, and whether they hold
-//! a direct `eval` call is kept apart ([`Scope::parameters_contain_direct_eval`]).
+//! The initializers of a function's parameters, and the patterns among its parameters with their
+//! defaults, are the function's own code, walked before its body: their references and direct
+//! `eval` calls count for the function, and whether they hold a direct `eval` call is kept apart
+//! ([`Scope::parameters_contain_direct_eval`]). A binding pattern declares each of its
+//! BoundNames as its declaration does (`var` or lexical names, or parameters).
 //!
 //! An arrow function is a function scope with no `arguments` of its own: its references to
 //! `arguments`, where it binds no such name itself, and its direct `eval` calls count for the
@@ -44,8 +46,8 @@ use std::collections::BTreeSet;
 use crate::ledger::{HeapBytes, Meter, Stop, map_entry_bytes};
 
 use crate::ast::{
-    Ast, Child, DeclKind, Expr, ForInTarget, ForInit, Function, FunctionId, FunctionKind,
-    LexicalName, Name, Scope, Stmt, StmtId,
+    Ast, BindingTarget, Child, DeclKind, Expr, ForInTarget, ForInit, Function, FunctionId,
+    FunctionKind, LexicalName, Name, Scope, Stmt, StmtId,
 };
 
 impl Ast {
@@ -70,9 +72,9 @@ fn push_lexical(ast: &Ast, s: StmtId, names: &mut Vec<LexicalName>) {
     if !kind.is_lexical() {
         return;
     }
-    for d in declarators {
+    for name in declarators.iter().flat_map(|d| d.target.names()) {
         names.push(LexicalName {
-            name: d.name.clone(),
+            name: name.clone(),
             constant: *kind == DeclKind::Const,
             declaration: s,
         });
@@ -179,8 +181,11 @@ impl Collect {
     /// binds no `arguments` of its own (a parameter, a `var`, a function or a lexical
     /// declaration), or its own code holds a direct `eval` call, whose eval code may reference
     /// it (decision 3, "Names", item 4).
-    fn arguments_of_outer_function(&self, params: &[Name]) -> bool {
-        let binds = params.iter().any(|p| p.name == "arguments")
+    fn arguments_of_outer_function(&self, params: &[BindingTarget]) -> bool {
+        let binds = params
+            .iter()
+            .flat_map(BindingTarget::names)
+            .any(|p| p.name == "arguments")
             || self.var_seen.contains("arguments")
             || self
                 .declarations
@@ -205,7 +210,7 @@ impl Collect {
                 && (self.reference_seen.contains("arguments")
                     || self.contains_direct_eval
                     || self.inner_arguments)
-                && !f.params.iter().any(|p| p.name == "arguments")
+                && !f.parameter_names().any(|p| p.name == "arguments")
                 && (f.has_parameter_expressions()
                     || (!self
                         .declarations
@@ -281,14 +286,14 @@ fn push_lexical_charged(m: &Meter<'_>, ast: &Ast, s: StmtId, names: &mut Vec<Lex
     if !kind.is_lexical() {
         return;
     }
-    for d in declarators {
-        let Ok(name) = m.string(&d.name.name) else {
+    for bound in declarators.iter().flat_map(|d| d.target.names()) {
+        let Ok(name) = m.string(&bound.name) else {
             return;
         };
         let lexical = LexicalName {
             name: Name {
                 name,
-                span: d.name.span,
+                span: bound.span,
             },
             constant: *kind == DeclKind::Const,
             declaration: s,
@@ -376,10 +381,22 @@ fn walk_step(
             m.push(open, Collect::default())?;
             m.push(stack, Step::End(id))?;
             push_body(m, stack, &f.body)?;
-            m.grow_by(stack, f.initializers.len().saturating_add(1))?;
+            // The patterns of the parameters, with their defaults, are the parameters' code
+            // as the initializers are.
+            let patterns = f.params.iter().filter_map(BindingTarget::pattern);
+            m.grow_by(
+                stack,
+                f.initializers
+                    .len()
+                    .saturating_add(patterns.clone().count())
+                    .saturating_add(1),
+            )?;
             stack.push(Step::Parameters);
             for e in f.initializers.iter().rev().flatten() {
                 stack.push(Step::Node(Child::Expr(*e)));
+            }
+            for e in patterns {
+                stack.push(Step::Node(Child::Expr(e)));
             }
         }
         Step::Node(node @ Child::Stmt(id)) => {
@@ -416,14 +433,18 @@ fn collect_stmt(ast: &Ast, id: StmtId, c: &mut Collect, m: &Meter<'_>) {
                 ..
             },
         ) => {
-            for d in declarators {
-                c.var(m, &d.name.name);
+            for name in declarators.iter().flat_map(|d| d.target.names()) {
+                c.var(m, &name.name);
             }
         }
         Some(Stmt::ForIn {
-            target: ForInTarget::Var(DeclKind::Var, name),
+            target: ForInTarget::Var(DeclKind::Var, target),
             ..
-        }) => c.var(m, &name.name),
+        }) => {
+            for name in target.names() {
+                c.var(m, &name.name);
+            }
+        }
         Some(Stmt::With { .. }) => c.contains_with = true,
         _ => {}
     }

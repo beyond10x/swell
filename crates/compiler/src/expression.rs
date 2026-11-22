@@ -16,12 +16,16 @@
 //! to a short-circuit at the end of the chain, which drops what the chain pushed and leaves
 //! `undefined`; so a short-circuit skips every link after it to the end of the chain, and a
 //! parenthesized chain is a chain of its own (`#sec-optional-chaining-evaluation`).
+//!
+//! An object pattern node destructures the value on top of the stack, which stays: the value
+//! of an assignment to it, of a declaration, of a parameter, of a for-in key or of an exception
+//! ([`Instruction::RequireObjectCoercible`], then [`Instruction::PatternGet`] per property).
 
 use swell_num::literal::numeric_literal;
 use swell_syntax::REGEXP_REFUSAL;
 use swell_syntax::ast::{
-    AssignOp, BinaryOp, Expr, ExprId, FunctionKind, LogicalOp, PropertyValue, Span, UnaryOp,
-    UpdateOp,
+    AssignOp, BinaryOp, Expr, ExprId, FunctionKind, LogicalOp, PatternKind, PatternProperty,
+    PatternTarget, PropertyValue, Span, UnaryOp, UpdateOp,
 };
 
 use crate::bytecode::Instruction;
@@ -354,8 +358,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
                             t.push(Task::Expr(e))?;
                             t.push(Task::Emit(Instruction::DefineField(k), p.span))?;
                         }
+                        // The parser rereads such a literal as a pattern, or refuses it.
+                        PropertyValue::CoverInitialized(..) => {
+                            return Err(malformed("a CoverInitializedName in an object literal"));
+                        }
                     }
                 }
+            }
+            // An object pattern destructures the value on top, which stays.
+            Expr::ObjectPattern { properties, kind } => {
+                self.object_pattern(id, properties, *kind, span, &mut t)?;
             }
             // `#sec-function-definitions-runtime-semantics-evaluation`; an arrow function,
             // `#sec-arrow-function-definitions-runtime-semantics-evaluation`, keeps the `this` of
@@ -437,6 +449,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
             // `#sec-assignment-operators-runtime-semantics-evaluation`. NamedEvaluation of an
             // anonymous function is the name of its template.
             Expr::Assign { op, target, value } => {
+                // `AssignmentExpression : LeftHandSideExpression = AssignmentExpression` with an
+                // ObjectAssignmentPattern: the value, destructured, is the result.
+                if let Some(Expr::ObjectPattern { .. }) = self.ast.expr(*target).map(|n| &n.expr) {
+                    if *op != AssignOp::Assign {
+                        return Err(malformed("a compound assignment to a pattern"));
+                    }
+                    t.push(Task::Expr(*value))?;
+                    t.push(Task::Expr(*target))?;
+                    return Ok(t);
+                }
                 let target = self.target(*target)?;
                 match op {
                     AssignOp::Assign => {
@@ -576,6 +598,97 @@ impl<'a, 'm> Compiler<'a, 'm> {
             }
         }
         Ok(t)
+    }
+
+    /// BindingInitialization of the ObjectBindingPattern `id` (`#sec-runtime-semantics-bindinginitialization`,
+    /// KeyedBindingInitialization, `#sec-runtime-semantics-keyedbindinginitialization`) or
+    /// DestructuringAssignmentEvaluation of the ObjectAssignmentPattern `id`
+    /// (`#sec-runtime-semantics-destructuringassignmentevaluation`,
+    /// `#sec-runtime-semantics-keyeddestructuringassignmentevaluation`), of the value on top,
+    /// which stays: RequireObjectCoercible, then each property in source order. A target that is
+    /// a reference (a `var` name, an assignment target) is evaluated first; then GetV of the
+    /// key; the default for `undefined`; then PutValue, the initialization of the binding, or
+    /// the nested pattern.
+    fn object_pattern(
+        &mut self,
+        id: ExprId,
+        properties: &[PatternProperty],
+        kind: PatternKind,
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        t.push(Task::Emit(Instruction::RequireObjectCoercible, span))?;
+        for (i, p) in properties.iter().enumerate() {
+            let n = u32::try_from(i).map_err(|_| CompileError::TooMany("properties"))?;
+            let key = property_key(&p.key, self.m)?;
+            let name = self.string_units(&key);
+            self.m.release(key);
+            let name = name?;
+            let pspan = p.span;
+            let get = |depth: u32| Task::Emit(Instruction::PatternGet { depth, name }, pspan);
+            match &p.target {
+                // `var`: ResolveBinding before the value is read, then PutValue.
+                PatternTarget::Binding(leaf) if kind == PatternKind::Var => {
+                    let target = Target::Binding(self.binding(Site::Bound(id, n))?);
+                    t.append(self.reference(&target, false, leaf.span)?)?;
+                    t.push(get(target.reference_items()))?;
+                    self.pattern_default(p.default, pspan, t)?;
+                    t.push(Task::Emit(self.put(&target)?, leaf.span))?;
+                }
+                // InitializeReferencedBinding: the store into the slot, or into the global
+                // environment's [[DeclarativeRecord]] for a name of the script's top level.
+                PatternTarget::Binding(leaf) => {
+                    let store = match self.binding(Site::Bound(id, n))? {
+                        Binding::Local(slot) => Instruction::SetLocal(slot),
+                        Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
+                        Binding::Global(name) | Binding::Dynamic(name) => {
+                            Instruction::InitGlobal(self.string(&name)?)
+                        }
+                        _ => return Err(malformed("a binding of a pattern")),
+                    };
+                    t.push(get(0))?;
+                    self.pattern_default(p.default, pspan, t)?;
+                    t.push(Task::Emit(store, leaf.span))?;
+                }
+                PatternTarget::Expr(e) => {
+                    let nested = matches!(
+                        self.ast.expr(*e).map(|x| &x.expr),
+                        Some(Expr::ObjectPattern { .. })
+                    );
+                    if nested {
+                        t.push(get(0))?;
+                        self.pattern_default(p.default, pspan, t)?;
+                        t.push(Task::Expr(*e))?;
+                    } else {
+                        let target = self.target(*e)?;
+                        t.append(self.reference(&target, false, pspan)?)?;
+                        t.push(get(target.reference_items()))?;
+                        self.pattern_default(p.default, pspan, t)?;
+                        t.push(Task::Emit(self.put(&target)?, pspan))?;
+                    }
+                }
+            }
+            t.push(Task::Emit(Instruction::Pop, pspan))?;
+        }
+        Ok(())
+    }
+
+    /// The `Initializer` `default` of a property of a pattern, if any, for the value on top:
+    /// evaluated in its place only when the value is `undefined`.
+    fn pattern_default(
+        &mut self,
+        default: Option<ExprId>,
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let Some(default) = default else {
+            return Ok(());
+        };
+        let given = self.label();
+        t.push(Task::Emit(Instruction::JumpIfNotUndefined(given), span))?;
+        t.push(Task::Expr(default))?;
+        t.push(Task::Bind(given))?;
+        Ok(())
     }
 
     /// The this value and the function of a call with callee `callee` (`#sec-function-calls`),

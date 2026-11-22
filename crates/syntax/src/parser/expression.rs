@@ -10,25 +10,38 @@
 //! `=>` is an `ArrowFunction` when that operand is a `BindingIdentifier` or a
 //! `CoverParenthesizedExpressionAndArrowParameterList` that reads again as
 //! `ArrowFormalParameters` (`parser/function.rs`); a parenthesized expression takes `()` and a
-//! trailing comma only before `=>`.
+//! trailing comma only before `=>`. An object literal on the left of `=` or in the head of a
+//! for-in is read again as an ObjectAssignmentPattern (`#sec-destructuring-assignment`), and one
+//! that stands as an arrow parameter as an ObjectBindingPattern
+//! (`#sec-destructuring-binding-patterns`); a `CoverInitializedName` stands only there.
 //!
-//! Refused, each with its slice: `**` and `**=` (4), spread elements,
-//! destructuring assignment, computed property names, a `CoverInitializedName` and a tagged
-//! template (6), generator methods (7), `class`, `super`, `new.target` (8), `async` functions and
+//! Refused, each with its slice: `**` and `**=` (4), spread elements, an array pattern,
+//! computed property names and a tagged template (6), generator methods (7), `class`, `super`, `new.target` (8), `async` functions and
 //! `await` (10), `import.meta` and dynamic `import` (11).
 //!
 //! The functions that stay on the Rust stack while the parser recurses (each one an entry of the
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
 //! and build nodes through helpers, so their own frames hold little more than ids and one span.
 
-use super::{Parser, R, copy_name, copy_number, copy_regexp, copy_string, copy_template};
+use super::{Halt, Parser, R, copy_name, copy_number, copy_regexp, copy_string, copy_template};
 use crate::ast::{
-    AssignOp, BinaryOp, Expr, ExprId, FunctionId, FunctionKind, LogicalOp, Property, PropertyKey,
-    PropertyValue, Span, UnaryOp, UpdateOp,
+    AssignOp, BinaryOp, BoundName, Expr, ExprId, FunctionId, FunctionKind, LogicalOp, Name,
+    Pattern, PatternKind, PatternProperty, PatternTarget, Property, PropertyKey, PropertyValue,
+    Span, UnaryOp, UpdateOp,
 };
 use crate::error::SyntaxError;
 use crate::ledger::HeapBytes;
 use crate::token::{Keyword, Punct, TokenKind};
+
+/// A property of an object literal read again as a binding pattern that is no
+/// `BindingProperty`, or a target there that is no name and no nested pattern
+/// (`#sec-destructuring-binding-patterns`); also a method, getter or setter in an
+/// assignment pattern.
+pub(super) const INVALID_DESTRUCTURING_TARGET: &str = "invalid destructuring target";
+
+/// A target of an ObjectAssignmentPattern that is no simple assignment target and no nested
+/// pattern (`#sec-destructuring-assignment-static-semantics-early-errors`).
+const INVALID_ASSIGNMENT_PATTERN_TARGET: &str = "invalid destructuring assignment target";
 
 /// A template string of a template without a tag holds a NotEscapeSequence, whose TV is
 /// undefined (`#sec-static-semantics-template-early-errors`).
@@ -83,6 +96,8 @@ enum Head {
     Method(FunctionId),
     /// A shorthand property, complete.
     Done,
+    /// A `CoverInitializedName` at its `=`, its initializer to come.
+    Cover,
 }
 
 /// A prefix operator.
@@ -193,8 +208,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(e)
     }
 
-    /// What follows the operand `left` of an assignment expression; refuses `**=` and a
-    /// destructuring assignment.
+    /// What follows the operand `left` of an assignment expression; refuses `**=`. An object
+    /// literal before `=` is read again as an ObjectAssignmentPattern; an array literal keeps
+    /// the refusal of its story.
     fn assign_tail(&mut self, left: ExprId) -> R<AssignTail> {
         let op = match &self.tok.kind {
             TokenKind::Punct(p) => match p {
@@ -221,8 +237,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             _ => return Ok(AssignTail::None),
         };
         if op == AssignOp::Assign && self.is_literal_pattern(left) {
-            let at = self.expr_span(left);
-            return self.refuse_at("destructuring pattern", 6, at);
+            self.assignment_pattern(left)?;
         }
         self.advance()?;
         Ok(AssignTail::Assign(op))
@@ -1094,7 +1109,7 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// `ObjectLiteral` (`#sec-object-initializer`): `PropertyName : AssignmentExpression` and the
     /// accessors `get` and `set`.
-    fn object(&mut self) -> R<ExprId> {
+    pub(super) fn object(&mut self) -> R<ExprId> {
         self.enter()?;
         let start = self.start();
         self.advance()?;
@@ -1269,6 +1284,11 @@ impl<'a, 'm> Parser<'a, 'm> {
             }
             Head::Method(id) => self.function_rest(id)?,
             Head::Done => {}
+            Head::Cover => {
+                self.advance()?;
+                let init = self.assignment(false)?;
+                self.set_cover_initializer(object, init);
+            }
         }
         self.property_end(object);
         self.leave();
@@ -1282,11 +1302,22 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
     }
 
+    /// Sets the initializer of the `CoverInitializedName` last in `object`.
+    #[inline(never)]
+    fn set_cover_initializer(&mut self, object: ExprId, init: ExprId) {
+        if let Some(p) = self.properties(object).and_then(|l| l.last_mut())
+            && let PropertyValue::CoverInitialized(_, value) = &mut p.value
+        {
+            *value = init;
+        }
+    }
+
     /// The `PropertyName` of a value property and what follows it, appended to `object`: with
     /// `:` its value comes next, with `(` a method's parameters (`#sec-method-definitions`); a
     /// shorthand property is complete (`#sec-object-initializer`). A shorthand property is an
-    /// `IdentifierReference`, so no reserved word, and a `CoverInitializedName` (`a = 1`) is
-    /// refused (slice 6, with destructuring assignment, the only place it may stand).
+    /// `IdentifierReference`, so no reserved word; so is the name of a `CoverInitializedName`
+    /// (`a = 1`), whose initializer comes next: it stands only where the literal is read again
+    /// as a pattern, and anywhere else it is an early error (`src/early.rs`).
     #[inline(never)]
     fn value_property_head(&mut self, object: ExprId, start: Span) -> R<Head> {
         let name_token = self.start();
@@ -1308,7 +1339,11 @@ impl<'a, 'm> Parser<'a, 'm> {
             && keyword.is_none()
             && matches!(key, PropertyKey::Identifier(_))
         {
-            return self.refuse_at("CoverInitializedName", 6, start);
+            let e = self.shorthand(&key, keyword, escaped, name_token)?;
+            (
+                Head::Cover,
+                PropertyValue::CoverInitialized(e, ExprId(u32::MAX)),
+            )
         } else {
             return self.unexpected();
         };
@@ -1349,6 +1384,250 @@ impl<'a, 'm> Parser<'a, 'm> {
         let name = copy_name(self.m, name);
         let name = self.charged(name)?;
         self.push_expr(Expr::Identifier(name), span)
+    }
+
+    // ---- object patterns -----------------------------------------------------------------------
+
+    /// The literal `left` before `=` or in a for-in head, read again as an
+    /// ObjectAssignmentPattern (`#sec-destructuring-assignment`); an array literal keeps the
+    /// refusal of its story.
+    #[inline(never)]
+    pub(super) fn assignment_pattern(&mut self, left: ExprId) -> R<()> {
+        if matches!(self.expr_node(left).map(|n| &n.expr), Some(Expr::Object(_))) {
+            return self.reread_as_pattern(left, PatternKind::Assignment);
+        }
+        let at = self.expr_span(left);
+        self.refuse_at("destructuring pattern", 6, at)
+    }
+
+    /// Reads the object literal `root` again as an object pattern of `kind`, in place, with each
+    /// object literal that stands as a target in it; an ObjectAssignmentPattern read before (a
+    /// target with a default, `{a: {b} = c}`) takes `kind` too. Each `PropertyDefinition` must
+    /// be one of a pattern: `PropertyName : AssignmentElement` (its value an assignment target
+    /// with an optional default), a shorthand or a `CoverInitializedName`; a binding pattern's
+    /// targets are names not in parentheses and nested patterns
+    /// (`#sec-destructuring-binding-patterns`). The nodes of the first reading that no longer
+    /// stand in the tree (an `=` that became a default) stay in the arena; the name a binding
+    /// takes moves out of its identifier node. The work list is charged as it grows, and the
+    /// list of each node is made anew, charged first, the old one credited.
+    #[inline(never)]
+    pub(super) fn reread_as_pattern(&mut self, root: ExprId, kind: PatternKind) -> R<()> {
+        let made = self.m.with_capacity(4);
+        let mut work: Vec<ExprId> = self.charged(made)?;
+        work.push(root);
+        let mut done = Ok(());
+        while let Some(node) = work.pop() {
+            done = self.pattern_node(node, kind, &mut work);
+            if done.is_err() {
+                break;
+            }
+        }
+        self.m.release(work);
+        done
+    }
+
+    /// One node of [`Parser::reread_as_pattern`]: its properties read as pattern properties; the
+    /// nested patterns onto `work`.
+    #[inline(never)]
+    fn pattern_node(&mut self, node: ExprId, kind: PatternKind, work: &mut Vec<ExprId>) -> R<()> {
+        let m = self.m;
+        let (mut literal, mut read) = match self.expr_mut(node) {
+            Some(Expr::Object(list)) => (std::mem::take(list), Vec::new()),
+            Some(Expr::ObjectPattern {
+                properties,
+                kind: k,
+            }) => {
+                if *k == kind {
+                    return Ok(());
+                }
+                (Vec::new(), std::mem::take(properties))
+            }
+            _ => return self.unexpected(),
+        };
+        let mut properties: Vec<PatternProperty> =
+            match m.with_capacity(literal.len().max(read.len())) {
+                Ok(list) => list,
+                Err(stop) => {
+                    m.release(literal);
+                    m.release(read);
+                    return self.charged(Err(stop));
+                }
+            };
+        // Taken from the end of each list, reversed first, so that what is left is released.
+        literal.reverse();
+        read.reverse();
+        let mut done = Ok(());
+        while let Some(p) = literal.pop() {
+            let (target, default) = match p.value {
+                PropertyValue::Init(e) => self.split_default(e),
+                PropertyValue::Shorthand(e) => (e, None),
+                PropertyValue::CoverInitialized(e, init) => (e, Some(init)),
+                PropertyValue::Get(_) | PropertyValue::Set(_) | PropertyValue::Method(_) => {
+                    let span = p.span;
+                    m.release(p);
+                    done = self.fail_at(INVALID_DESTRUCTURING_TARGET, span);
+                    break;
+                }
+            };
+            match self.pattern_target(target, kind, work) {
+                Ok(target) => properties.push(PatternProperty {
+                    key: p.key,
+                    target,
+                    default,
+                    span: p.span,
+                }),
+                Err(stop) => {
+                    m.release(p);
+                    done = Err(stop);
+                    break;
+                }
+            }
+        }
+        while done.is_ok()
+            && let Some(p) = read.pop()
+        {
+            let target = match p.target {
+                PatternTarget::Expr(e) => self.pattern_target(e, kind, work),
+                binding @ PatternTarget::Binding(_) => Ok(binding),
+            };
+            match target {
+                Ok(target) => properties.push(PatternProperty { target, ..p }),
+                Err(stop) => {
+                    m.release(p.key);
+                    done = Err(stop);
+                }
+            }
+        }
+        m.release(literal);
+        m.release(read);
+        if done.is_err() {
+            m.release(properties);
+            return done;
+        }
+        match self.expr_mut(node) {
+            Some(expr) => *expr = Expr::ObjectPattern { properties, kind },
+            None => m.release(properties),
+        }
+        Ok(())
+    }
+
+    /// The target and the default of the value `e` of `PropertyName : AssignmentExpression`
+    /// read as an `AssignmentElement` or a `BindingElement`: an `=` not in parentheses splits
+    /// into both.
+    fn split_default(&self, e: ExprId) -> (ExprId, Option<ExprId>) {
+        match self.expr_node(e) {
+            Some(n) if !n.parenthesized => match n.expr {
+                Expr::Assign {
+                    op: AssignOp::Assign,
+                    target,
+                    value,
+                } => (target, Some(value)),
+                _ => (e, None),
+            },
+            _ => (e, None),
+        }
+    }
+
+    /// The expression `t` as the target of a property of a pattern of `kind`: a nested object
+    /// literal or pattern not in parentheses (pushed onto `work`), an array literal (refused
+    /// before its story), a name, or for an assignment pattern a property access; a name in a
+    /// binding pattern moves into the target. Anything else is a `SyntaxError`
+    /// (`#sec-destructuring-assignment-static-semantics-early-errors`,
+    /// `#sec-destructuring-binding-patterns`).
+    #[inline(never)]
+    fn pattern_target(
+        &mut self,
+        t: ExprId,
+        kind: PatternKind,
+        work: &mut Vec<ExprId>,
+    ) -> R<PatternTarget> {
+        let Some(n) = self.expr_node(t) else {
+            return self.unexpected();
+        };
+        let (span, parenthesized) = (n.span, n.parenthesized);
+        let assignment = kind == PatternKind::Assignment;
+        match &n.expr {
+            Expr::Object(_) | Expr::ObjectPattern { .. } if !parenthesized => {
+                let pushed = self.m.push(work, t);
+                self.charged(pushed)?;
+                Ok(PatternTarget::Expr(t))
+            }
+            Expr::Array(_) if !parenthesized => self.refuse_at("destructuring pattern", 6, span),
+            Expr::Identifier(_) | Expr::Member { .. } | Expr::Index { .. } if assignment => {
+                Ok(PatternTarget::Expr(t))
+            }
+            Expr::Identifier(_) if !parenthesized => {
+                let name = match self.expr_mut(t) {
+                    Some(Expr::Identifier(name)) => std::mem::take(name),
+                    _ => String::new(),
+                };
+                Ok(PatternTarget::Binding(Name { name, span }))
+            }
+            _ if assignment => self.fail_at(INVALID_ASSIGNMENT_PATTERN_TARGET, span),
+            _ => self.fail_at(INVALID_DESTRUCTURING_TARGET, span),
+        }
+    }
+
+    /// The binding pattern `root`, read by [`Parser::reread_as_pattern`], with its BoundNames in source
+    /// order and whether it holds a default; each name a copy charged first, the work list
+    /// charged as it grows.
+    #[inline(never)]
+    pub(super) fn bound_names(&mut self, root: ExprId) -> R<Pattern> {
+        let m = self.m;
+        let made = m.with_capacity(4);
+        let mut work: Vec<(ExprId, usize)> = self.charged(made)?;
+        work.push((root, 0));
+        let mut names: Vec<BoundName> = Vec::new();
+        let mut expressions = false;
+        let mut done: Result<(), Halt> = Ok(());
+        while let Some((node, next)) = work.pop() {
+            let Some(Expr::ObjectPattern { properties, .. }) = self.ast.expr(node).map(|n| &n.expr)
+            else {
+                continue;
+            };
+            let Some(p) = properties.get(next) else {
+                continue;
+            };
+            expressions |= p.default.is_some();
+            done = m.grow(&mut work).map(|()| work.push((node, next + 1)));
+            if done.is_err() {
+                break;
+            }
+            match &p.target {
+                PatternTarget::Binding(name) => {
+                    let property = u32::try_from(next).unwrap_or(u32::MAX);
+                    done = copy_name(m, &name.name).and_then(|copy| {
+                        m.push(
+                            &mut names,
+                            BoundName {
+                                name: Name {
+                                    name: copy,
+                                    span: name.span,
+                                },
+                                pattern: node,
+                                property,
+                            },
+                        )
+                    });
+                }
+                PatternTarget::Expr(e) => done = m.grow(&mut work).map(|()| work.push((*e, 0))),
+            }
+            if done.is_err() {
+                break;
+            }
+        }
+        m.release(work);
+        if let Err(stop) = done {
+            m.release(names);
+            return self.charged(Err(stop));
+        }
+        let span = self.expr_span(root);
+        Ok(Pattern {
+            pattern: root,
+            names,
+            expressions,
+            span,
+        })
     }
 
     /// Pushes `expr`, which started at `start` and ends at the previous token.

@@ -1,0 +1,24 @@
+script locals 0
+  var "a" "o" "p"
+  0000 3:1 ResolveGlobal "x"
+  0001 3:35 GetGlobal "o"
+  0002 3:6 RequireObjectCoercible
+  0003 3:8 ResolveGlobal "a"
+  0004 3:8 PatternGet 1 "a"
+  0005 3:8 PutGlobalRef "a"
+  0006 3:8 Pop
+  0007 3:14 GetGlobal "p"
+  0008 3:11 PatternGet 1 "b"
+  0009 3:11 PutNamed "q"
+  0010 3:11 Pop
+  0011 3:22 GetGlobal "p"
+  0012 3:24 GetGlobal "a"
+  0013 3:19 PatternGet 2 "c"
+  0014 3:19 JumpIfNotUndefined 0016
+  0015 3:29 Number 2
+  0016 3:19 PutIndex
+  0017 3:19 Pop
+  0018 3:1 PutGlobalRef "x"
+  0019 3:1 StoreCompletion
+  0020 0:0 LoadCompletion
+  0021 0:0 Return
