@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-22T00:20:00Z",
+  "actor": "human:operator",
+  "artifact": "story:string-transform-and-compare-methods",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator re-run on impl/string-transform-and-compare-methods: cargo test -p swell --lib and the binaries builtins_string_transform (23 passed), language, builtins_string, limits_scripts, each in both collection modes; clippy; run lines against main: 544 runs of slice 3 gained, 5 cases of slices 6 and 18 lost"
+  }
+}

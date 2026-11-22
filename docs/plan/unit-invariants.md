@@ -7,7 +7,11 @@ report and does not work around it.
   worktree: never set `CARGO_TARGET_DIR`, never build in another tree.
 - `cargo` in the shell is a shim that queues in the shared build pool. Prefix every other
   command that compiles or tests with `slot` (`slot task check`). `slot: job N queued` means
-  waiting. Never pass `-j`, never set `CARGO_BUILD_JOBS`, never bypass the pool.
+  waiting. Never pass `-j`, never set `CARGO_BUILD_JOBS`, never bypass the pool. A job asks for
+  one slot: never pass `--tokens` or a priority to `slot`. A unit that was told to measure a
+  step "alone" asked for all 17 slots on 2026-11-22; its job stood first in the queue for 13
+  minutes and held 54 jobs of other sessions behind it. Nothing is measured alone on this
+  machine: measure in an ordinary job and report CPU seconds and the load beside wall seconds.
 - No third-party crate, as a dependency or a development dependency. A `Cargo.toml` holds path
   dependencies on crates of this repository and nothing else. The one exception is a separate
   workspace of tooling that the brief names.
