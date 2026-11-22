@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:computed-names-and-object-spread
 kind: story
-status: active
+status: implemented
 title: 'Computed property names and object rest and spread: ToPropertyKey of a key, CopyDataProperties'
 summary: No construct of surf's harness; 125 failing cases of slice 6 on its list; needs no builtin of slice 3 and starts after object-destructuring, before slice 3's close.
 relations:
@@ -53,10 +53,11 @@ scope:
   path: crates/syntax/tests/sources/refused/computed-property-name.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/spread-in-object.js
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T00:38:40Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:38:40Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T22:03:55Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

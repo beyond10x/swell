@@ -258,6 +258,7 @@ fn compile_charged(script: &Script, eval_code: bool, m: &Meter<'_>) -> Result<Co
         function_declarations,
         lexical,
         eval_scope,
+        template_sites: constants.template_sites,
         charged: 0,
     })
 }
@@ -269,6 +270,8 @@ pub(crate) struct Constants {
     string_index: BTreeMap<Vec<u16>, u32>,
     numbers: Vec<f64>,
     number_index: BTreeMap<u64, u32>,
+    /// The site table of the code ([`bytecode::Code::template_sites`]), shared by its templates.
+    template_sites: Vec<bytecode::TemplateSite>,
 }
 
 impl Constants {
@@ -305,6 +308,34 @@ impl Constants {
         m.charge(map_entry_bytes::<u64, u32>())?;
         m.push(&mut self.numbers, value)?;
         self.number_index.insert(value.to_bits(), k);
+        Ok(k)
+    }
+
+    /// The number of a new tagged template site whose template strings are `strings`, its
+    /// entry in the site table with each string a String constant; the entry's lists and the
+    /// table's growth charged to `m` first, a visit per string.
+    pub(crate) fn template_site(
+        &mut self,
+        strings: &[swell_syntax::ast::TaggedString],
+        m: &Meter<'_>,
+    ) -> Result<u32, CompileError> {
+        let k = u32::try_from(self.template_sites.len())
+            .map_err(|_| CompileError::TooMany("tagged templates"))?;
+        let mut cooked = m.with_capacity(strings.len())?;
+        let mut raw = m.with_capacity(strings.len())?;
+        for string in strings {
+            m.visit()?;
+            let tv = match &string.cooked {
+                Some(units) => Some(self.string(units, m)?),
+                None => None,
+            };
+            cooked.push(tv);
+            raw.push(self.string(&string.raw, m)?);
+        }
+        m.push(
+            &mut self.template_sites,
+            bytecode::TemplateSite { cooked, raw },
+        )?;
         Ok(k)
     }
 }
@@ -605,6 +636,12 @@ impl<'a, 'm> Compiler<'a, 'm> {
         self.next_key
     }
 
+    /// Appends the handler `h`, its labels bound by the end of the body, to the table of the
+    /// body, the growth charged first: inner handlers come first, as their tasks end first.
+    pub(crate) fn handler(&mut self, h: Handler) -> Result<(), CompileError> {
+        Ok(self.m.push(&mut self.handlers, h)?)
+    }
+
     pub(crate) fn string(&mut self, s: &str) -> Result<u32, CompileError> {
         self.constants.string_str(s, self.m)
     }
@@ -785,17 +822,14 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     items,
                     envs,
                 } => {
-                    self.m.push(
-                        &mut self.handlers,
-                        Handler {
-                            kind,
-                            start,
-                            end,
-                            target,
-                            items,
-                            envs,
-                        },
-                    )?;
+                    self.handler(Handler {
+                        kind,
+                        start,
+                        end,
+                        target,
+                        items,
+                        envs,
+                    })?;
                     continue;
                 }
             };

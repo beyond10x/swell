@@ -13,10 +13,12 @@
 //! trailing comma only before `=>`. An object literal on the left of `=` or in the head of a
 //! for-in is read again as an ObjectAssignmentPattern (`#sec-destructuring-assignment`), and one
 //! that stands as an arrow parameter as an ObjectBindingPattern
-//! (`#sec-destructuring-binding-patterns`); a `CoverInitializedName` stands only there.
+//! (`#sec-destructuring-binding-patterns`); a `CoverInitializedName` stands only there. An array
+//! literal is read again the same way, as an ArrayAssignmentPattern or an ArrayBindingPattern,
+//! its spread element last as the rest element; a spread element stands in an array literal and
+//! among the arguments of a call or `new` (`#sec-argument-lists`).
 //!
-//! Refused, each with its slice: `**` and `**=` (4), spread elements of arrays and arguments,
-//! an array pattern and a tagged template (6), generator methods (7), `class`, `super`,
+//! Refused, each with its slice: `**` and `**=` (4), generator methods (7), `class`, `super`,
 //! `new.target` (8), `async` functions and
 //! `await` (10), `import.meta` and dynamic `import` (11).
 //!
@@ -27,8 +29,8 @@
 use super::{Halt, Parser, R, copy_name, copy_number, copy_regexp, copy_string, copy_template};
 use crate::ast::{
     AssignOp, BinaryOp, BoundName, Expr, ExprId, FunctionId, FunctionKind, LogicalOp, Name,
-    Pattern, PatternKind, PatternProperty, PatternTarget, Property, PropertyKey, PropertyValue,
-    Span, UnaryOp, UpdateOp,
+    Pattern, PatternElement, PatternKind, PatternProperty, PatternTarget, Property, PropertyKey,
+    PropertyValue, Span, UnaryOp, UpdateOp,
 };
 use crate::error::SyntaxError;
 use crate::ledger::HeapBytes;
@@ -122,6 +124,25 @@ impl HeapBytes for Prefix {
 
 type ExprParser<'a, 'm> = fn(&mut Parser<'a, 'm>) -> R<ExprId>;
 
+/// A copy of the template string of the template token part `p` for a tagged template, charged
+/// to `m`: no cooked string where the part holds a NotEscapeSequence.
+fn copy_tagged(
+    m: &crate::ledger::Meter<'_>,
+    p: &crate::token::TemplatePart,
+) -> Result<crate::ast::TaggedString, Halt> {
+    let cooked = match p.not_escape {
+        Some(_) => None,
+        None => Some(m.copy(&p.string.cooked)?),
+    };
+    match m.copy(&p.string.raw) {
+        Ok(raw) => Ok(crate::ast::TaggedString { cooked, raw }),
+        Err(stop) => {
+            m.release(cooked);
+            Err(stop)
+        }
+    }
+}
+
 impl<'a, 'm> Parser<'a, 'm> {
     // ---- the comma operator and assignment -----------------------------------------------------
 
@@ -209,9 +230,8 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(e)
     }
 
-    /// What follows the operand `left` of an assignment expression; refuses `**=`. An object
-    /// literal before `=` is read again as an ObjectAssignmentPattern; an array literal keeps
-    /// the refusal of its story.
+    /// What follows the operand `left` of an assignment expression; refuses `**=`. An object or
+    /// array literal before `=` is read again as an assignment pattern.
     fn assign_tail(&mut self, left: ExprId) -> R<AssignTail> {
         let op = match &self.tok.kind {
             TokenKind::Punct(p) => match p {
@@ -513,17 +533,88 @@ impl<'a, 'm> Parser<'a, 'm> {
         })
     }
 
-    /// A template after a member expression, a call or a link of an optional chain: a tagged
-    /// template (`MemberExpression TemplateLiteral`, `CallExpression TemplateLiteral`,
-    /// `#sec-tagged-templates`) is refused; after an optional chain it is an early error
+    /// A template after a link of an optional chain: an early error
     /// (`#sec-left-hand-side-expressions-static-semantics-early-errors`), whatever is on the
     /// line before it: no semicolon is inserted there.
     #[inline(never)]
-    fn template_after<T>(&mut self, chain: bool) -> R<T> {
+    fn template_after<T>(&mut self) -> R<T> {
+        self.fail_here(TEMPLATE_AFTER_OPTIONAL_CHAIN)
+    }
+
+    /// A template after the member expression or call `tag`: a tagged template
+    /// (`MemberExpression TemplateLiteral`, `CallExpression TemplateLiteral`,
+    /// `#sec-tagged-templates`), its template strings and, after each `TemplateHead` and
+    /// `TemplateMiddle`, an `Expression[+In]` that ends at the `}` the lexer reads again as the
+    /// next template token; after an optional chain (`chain`) the early error of
+    /// [`Parser::template_after`]. Each substitution is one more entry of the depth counter than
+    /// its template, as in a template without a tag. Not inlined, so that the frames of the
+    /// loops that call it stay as they were.
+    #[inline(never)]
+    fn tagged_rest(&mut self, tag: ExprId, start: Span, chain: bool) -> R<ExprId> {
         if chain {
-            return self.fail_here(TEMPLATE_AFTER_OPTIONAL_CHAIN);
+            return self.template_after();
         }
-        self.refuse("tagged template", 6)
+        self.enter()?;
+        let id = self.reserve_tagged(tag);
+        while self.tagged_string(id)? {
+            let e = self.expression(false)?;
+            self.tagged_substitution(id, e)?;
+        }
+        let id = self.complete_expr(id, start)?;
+        self.leave();
+        Ok(id)
+    }
+
+    /// Reserves the node of a tagged template with tag `tag`.
+    #[inline(never)]
+    fn reserve_tagged(&mut self, tag: ExprId) -> ExprId {
+        self.reserve_expr(Expr::TaggedTemplate {
+            tag,
+            strings: Vec::new(),
+            substitutions: Vec::new(),
+        })
+    }
+
+    /// Appends the template string of the current template token to the tagged template `id`
+    /// and consumes the token; whether a substitution follows it. A part with a
+    /// NotEscapeSequence keeps no cooked string: its TV is undefined (`#sec-static-semantics-tv`).
+    #[inline(never)]
+    fn tagged_string(&mut self, id: ExprId) -> R<bool> {
+        let m = self.m;
+        let (string, substitution) = match &self.tok.kind {
+            TokenKind::NoSubstitutionTemplate(p) | TokenKind::TemplateTail(p) => {
+                (copy_tagged(m, p), false)
+            }
+            TokenKind::TemplateHead(p) | TokenKind::TemplateMiddle(p) => (copy_tagged(m, p), true),
+            _ => return self.unexpected(),
+        };
+        let string = self.charged(string)?;
+        let pushed = match self.expr_mut(id) {
+            Some(Expr::TaggedTemplate { strings, .. }) => m.push(strings, string),
+            _ => {
+                m.release(string);
+                Ok(())
+            }
+        };
+        self.charged(pushed)?;
+        self.advance()?;
+        Ok(substitution)
+    }
+
+    /// The substitution `e` of the tagged template `id`, which the `}` at the current token
+    /// ends; the `}` is lexed again as a `TemplateMiddle` or `TemplateTail`.
+    #[inline(never)]
+    fn tagged_substitution(&mut self, id: ExprId, e: ExprId) -> R<()> {
+        if !self.is(Punct::RBrace) {
+            return self.unexpected();
+        }
+        let m = self.m;
+        let pushed = match self.expr_mut(id) {
+            Some(Expr::TaggedTemplate { substitutions, .. }) => m.push(substitutions, e),
+            _ => Ok(()),
+        };
+        self.charged(pushed)?;
+        self.rescan_template()
     }
 
     /// `LeftHandSideExpression`: a member or `new` expression followed by calls and property
@@ -546,7 +637,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                     chain = true;
                     self.optional_rest(e, start)?
                 }
-                Suffix::Template => return self.template_after(chain),
+                Suffix::Template => self.tagged_rest(e, start, chain)?,
             };
         }
         if chain {
@@ -592,7 +683,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             TokenKind::Punct(Punct::LBracket) => Suffix::Index,
             TokenKind::Name(_) | TokenKind::Keyword(_) => Suffix::Dot,
             TokenKind::NoSubstitutionTemplate(_) | TokenKind::TemplateHead(_) => {
-                return self.template_after(true);
+                return self.template_after();
             }
             _ => return self.unexpected(),
         })
@@ -611,7 +702,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             e = match self.suffix(false)? {
                 Suffix::Dot => self.dot_rest(e, start)?,
                 Suffix::Index => self.index_rest(e, start, false)?,
-                Suffix::Template => return self.template_after(false),
+                Suffix::Template => self.tagged_rest(e, start, false)?,
                 Suffix::None | Suffix::Call | Suffix::Optional => break,
             };
         }
@@ -719,19 +810,34 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.make(expr, start)
     }
 
-    /// `Arguments` (`#sec-argument-lists`), with a trailing comma allowed; spread is refused.
+    /// `Arguments` (`#sec-argument-lists`), with a trailing comma allowed and spread elements.
     /// The arguments are appended to the call or `new` expression `id`.
     fn arguments(&mut self, id: ExprId) -> R<()> {
         self.enter()?;
         self.advance()?;
         let mut first = true;
         while self.argument_next(first)? {
-            let e = self.assignment(false)?;
+            let e = self.element_or_spread()?;
             self.append_expr(id, Some(e))?;
             first = false;
         }
         self.leave();
         Ok(())
+    }
+
+    /// An `AssignmentExpression`, or at `...` a spread element `... AssignmentExpression`
+    /// ([`Expr::Spread`]): an element of an array literal or an argument.
+    fn element_or_spread(&mut self) -> R<ExprId> {
+        if !self.is(Punct::Ellipsis) {
+            return self.assignment(false);
+        }
+        self.enter()?;
+        let start = self.start();
+        self.advance()?;
+        let e = self.assignment(false)?;
+        let e = self.make(Expr::Spread(e), start)?;
+        self.leave();
+        Ok(e)
     }
 
     /// Whether another argument follows; consumes the `,` before it, or the closing `)`.
@@ -744,9 +850,6 @@ impl<'a, 'm> Parser<'a, 'm> {
             if self.eat(Punct::RParen)? {
                 return Ok(false);
             }
-        }
-        if self.is(Punct::Ellipsis) {
-            return self.refuse("spread element", 6);
         }
         Ok(true)
     }
@@ -985,16 +1088,20 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(None)
     }
 
-    /// The rest element `... BindingIdentifier` of a parenthesized list at its `...`, which
-    /// only `ArrowFormalParameters` take: the `)` and a `=>` must follow it
-    /// (`#sec-arrow-function-definitions`). It is held as the identifier, its span starting at
-    /// the `...`, which marks it for the arrow function that reads the list again
-    /// ([`Parser::arrow_function`]); a pattern keeps its refusal.
+    /// The rest element `... BindingIdentifier` or `... BindingPattern` of a parenthesized list
+    /// at its `...`, which only `ArrowFormalParameters` take: the `)` and a `=>` must follow it
+    /// (`#sec-arrow-function-definitions`). It is held as the identifier, or as a spread of the
+    /// literal the pattern covers, its span starting at the `...`, which marks it for the arrow
+    /// function that reads the list again ([`Parser::arrow_function`]).
     #[inline(never)]
     fn cover_rest(&mut self) -> R<ExprId> {
         let start = self.start();
         self.advance()?;
-        let name = self.binding_identifier()?;
+        let pattern = self.pattern_literal()?;
+        let name = match pattern {
+            Some(_) => None,
+            None => Some(self.binding_identifier()?),
+        };
         if !self.is(Punct::RParen) {
             return self.fail_here(super::function::REST_NOT_LAST);
         }
@@ -1002,7 +1109,11 @@ impl<'a, 'm> Parser<'a, 'm> {
             return self.fail_here(super::function::REST_WITHOUT_ARROW);
         }
         let span = self.finish(start);
-        self.push_expr(Expr::Identifier(name.name), span)
+        match (pattern, name) {
+            (Some(pattern), _) => self.push_expr(Expr::Spread(pattern), span),
+            (None, Some(name)) => self.push_expr(Expr::Identifier(name.name), span),
+            (None, None) => self.unexpected(),
+        }
     }
 
     /// The `Expression` inside the parentheses, with a trailing comma allowed before `) =>`.
@@ -1066,16 +1177,16 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(())
     }
 
-    /// `ArrayLiteral` (`#sec-array-initializer`), with elisions; spread is refused.
-    fn array(&mut self) -> R<ExprId> {
+    /// `ArrayLiteral` (`#sec-array-initializer`), with elisions and spread elements.
+    pub(super) fn array(&mut self) -> R<ExprId> {
         self.enter()?;
         let start = self.start();
         self.advance()?;
         let id = self.reserve_expr(Expr::Array(Vec::new()));
         while self.element_next(id)? {
-            let e = self.assignment(false)?;
+            let e = self.element_or_spread()?;
             self.append_expr(id, Some(e))?;
-            self.element_end()?;
+            self.element_end(e)?;
         }
         let id = self.complete_expr(id, start)?;
         self.leave();
@@ -1094,16 +1205,21 @@ impl<'a, 'm> Parser<'a, 'm> {
             }
             self.append_expr(id, None)?;
         }
-        if self.is(Punct::Ellipsis) {
-            return self.refuse("spread element", 6);
-        }
         Ok(true)
     }
 
-    /// The `,` after an element, unless the `]` follows.
-    fn element_end(&mut self) -> R<()> {
+    /// The `,` after the element `e`, unless the `]` follows; a spread element's span is
+    /// extended over it (see [`Expr::Spread`]).
+    #[inline(never)]
+    fn element_end(&mut self, e: ExprId) -> R<()> {
         if !self.is(Punct::RBracket) {
             self.expect(Punct::Comma)?;
+            let end = self.prev_end;
+            if let Some(node) = self.ast.exprs.get_mut(e.0 as usize)
+                && matches!(node.expr, Expr::Spread(_))
+            {
+                node.span.end = end;
+            }
         }
         Ok(())
     }
@@ -1451,15 +1567,10 @@ impl<'a, 'm> Parser<'a, 'm> {
     // ---- object patterns -----------------------------------------------------------------------
 
     /// The literal `left` before `=` or in a for-in head, read again as an
-    /// ObjectAssignmentPattern (`#sec-destructuring-assignment`); an array literal keeps the
-    /// refusal of its story.
+    /// ObjectAssignmentPattern or an ArrayAssignmentPattern (`#sec-destructuring-assignment`).
     #[inline(never)]
     pub(super) fn assignment_pattern(&mut self, left: ExprId) -> R<()> {
-        if matches!(self.expr_node(left).map(|n| &n.expr), Some(Expr::Object(_))) {
-            return self.reread_as_pattern(left, PatternKind::Assignment);
-        }
-        let at = self.expr_span(left);
-        self.refuse_at("destructuring pattern", 6, at)
+        self.reread_as_pattern(left, PatternKind::Assignment)
     }
 
     /// Reads the object literal `root` again as an object pattern of `kind`, in place, with each
@@ -1506,6 +1617,9 @@ impl<'a, 'm> Parser<'a, 'm> {
                 }
                 rest = *r;
                 (Vec::new(), std::mem::take(properties))
+            }
+            Some(Expr::Array(_) | Expr::ArrayPattern { .. }) => {
+                return self.array_pattern_node(node, kind, work);
             }
             _ => return self.unexpected(),
         };
@@ -1593,6 +1707,139 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(())
     }
 
+    /// One array literal or array pattern `node` of [`Parser::reread_as_pattern`]: its elements
+    /// read as the elements of an array pattern of `kind`, an elision kept, a spread element last
+    /// as the rest element; the nested patterns onto `work`. The list is made anew, charged
+    /// first, the old one credited.
+    #[inline(never)]
+    fn array_pattern_node(
+        &mut self,
+        node: ExprId,
+        kind: PatternKind,
+        work: &mut Vec<ExprId>,
+    ) -> R<()> {
+        let m = self.m;
+        let mut rest = false;
+        let (mut literal, mut read) = match self.expr_mut(node) {
+            Some(Expr::Array(list)) => (std::mem::take(list), Vec::new()),
+            Some(Expr::ArrayPattern {
+                elements,
+                kind: k,
+                rest: r,
+            }) => {
+                if *k == kind {
+                    return Ok(());
+                }
+                rest = *r;
+                (Vec::new(), std::mem::take(elements))
+            }
+            _ => return self.unexpected(),
+        };
+        let mut elements: Vec<Option<PatternElement>> =
+            match m.with_capacity(literal.len().max(read.len())) {
+                Ok(list) => list,
+                Err(stop) => {
+                    m.release(literal);
+                    m.release(read);
+                    return self.charged(Err(stop));
+                }
+            };
+        literal.reverse();
+        read.reverse();
+        let mut done = Ok(());
+        while let Some(element) = literal.pop() {
+            let Some(e) = element else {
+                elements.push(None);
+                continue;
+            };
+            let span = self.expr_span(e);
+            let (target, default) = match self.expr_node(e).map(|n| &n.expr) {
+                Some(Expr::Spread(inner)) => {
+                    let inner = *inner;
+                    match self.rest_element(inner, span, literal.is_empty()) {
+                        Ok(()) => {
+                            rest = true;
+                            (inner, None)
+                        }
+                        Err(stop) => {
+                            done = Err(stop);
+                            break;
+                        }
+                    }
+                }
+                _ => self.split_default(e),
+            };
+            match self.pattern_target(target, kind, work) {
+                Ok(target) => elements.push(Some(PatternElement {
+                    target,
+                    default,
+                    span,
+                })),
+                Err(stop) => {
+                    done = Err(stop);
+                    break;
+                }
+            }
+        }
+        while done.is_ok()
+            && let Some(element) = read.pop()
+        {
+            let Some(p) = element else {
+                elements.push(None);
+                continue;
+            };
+            let target = match p.target {
+                PatternTarget::Expr(e) => self.pattern_target(e, kind, work),
+                binding @ PatternTarget::Binding(_) => Ok(binding),
+            };
+            match target {
+                Ok(target) => elements.push(Some(PatternElement { target, ..p })),
+                Err(stop) => done = Err(stop),
+            }
+        }
+        m.release(literal);
+        m.release(read);
+        if done.is_err() {
+            m.release(elements);
+            return done;
+        }
+        match self.expr_mut(node) {
+            Some(expr) => {
+                *expr = Expr::ArrayPattern {
+                    elements,
+                    kind,
+                    rest,
+                }
+            }
+            None => m.release(elements),
+        }
+        Ok(())
+    }
+
+    /// The spread element `... e` at `span`, `last` when no element follows it, read again as
+    /// the rest element of an array pattern: last and without a comma after it, its target no
+    /// assignment outside parentheses (the constants `REST_ELEMENT_*` of `src/early.rs`); the
+    /// target itself, which may be a nested pattern, is checked as any other.
+    #[inline(never)]
+    fn rest_element(&mut self, e: ExprId, span: Span, last: bool) -> R<()> {
+        let comma = span
+            .end
+            .checked_sub(1)
+            .and_then(|at| self.src.get(at as usize))
+            == Some(&u16::from(b','));
+        if !last || comma {
+            return self.fail_at(crate::early::REST_ELEMENT_NOT_LAST, span);
+        }
+        match self.expr_node(e) {
+            Some(n) if !n.parenthesized && matches!(n.expr, Expr::Assign { .. }) => {
+                let at = n.span;
+                self.fail_at(crate::early::REST_ELEMENT_INITIALIZER, at)
+            }
+            Some(_) => Ok(()),
+            None => self.unexpected(),
+        }
+    }
+
     /// The spread property `... e` at `span`, `last` when no property follows it, read again as
     /// the rest property of a pattern: last and without a comma after it, its target no
     /// assignment and no object or array literal outside parentheses (the constants
@@ -1639,9 +1886,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
     }
 
-    /// The expression `t` as the target of a property of a pattern of `kind`: a nested object
-    /// literal or pattern not in parentheses (pushed onto `work`), an array literal (refused
-    /// before its story), a name, or for an assignment pattern a property access; a name in a
+    /// The expression `t` as the target of a property or element of a pattern of `kind`: a
+    /// nested object or array literal or pattern not in parentheses (pushed onto `work`), a
+    /// name, or for an assignment pattern a property access; a name in a
     /// binding pattern moves into the target. Anything else is a `SyntaxError`
     /// (`#sec-destructuring-assignment-static-semantics-early-errors`,
     /// `#sec-destructuring-binding-patterns`).
@@ -1658,12 +1905,16 @@ impl<'a, 'm> Parser<'a, 'm> {
         let (span, parenthesized) = (n.span, n.parenthesized);
         let assignment = kind == PatternKind::Assignment;
         match &n.expr {
-            Expr::Object(_) | Expr::ObjectPattern { .. } if !parenthesized => {
+            Expr::Object(_)
+            | Expr::ObjectPattern { .. }
+            | Expr::Array(_)
+            | Expr::ArrayPattern { .. }
+                if !parenthesized =>
+            {
                 let pushed = self.m.push(work, t);
                 self.charged(pushed)?;
                 Ok(PatternTarget::Expr(t))
             }
-            Expr::Array(_) if !parenthesized => self.refuse_at("destructuring pattern", 6, span),
             Expr::Identifier(_) | Expr::Member { .. } | Expr::Index { .. } if assignment => {
                 Ok(PatternTarget::Expr(t))
             }
@@ -1692,19 +1943,33 @@ impl<'a, 'm> Parser<'a, 'm> {
         let mut expressions = false;
         let mut done: Result<(), Halt> = Ok(());
         while let Some((node, next)) = work.pop() {
-            let Some(Expr::ObjectPattern { properties, .. }) = self.ast.expr(node).map(|n| &n.expr)
-            else {
-                continue;
+            // The target of the property or element `next` of `node`; `None` for an elision.
+            let target = match self.ast.expr(node).map(|n| &n.expr) {
+                Some(Expr::ObjectPattern { properties, .. }) => match properties.get(next) {
+                    Some(p) => {
+                        expressions |=
+                            p.default.is_some() || matches!(p.key, PropertyKey::Computed(_));
+                        Some(&p.target)
+                    }
+                    None => continue,
+                },
+                Some(Expr::ArrayPattern { elements, .. }) => match elements.get(next) {
+                    Some(element) => element.as_ref().map(|p| {
+                        expressions |= p.default.is_some();
+                        &p.target
+                    }),
+                    None => continue,
+                },
+                _ => continue,
             };
-            let Some(p) = properties.get(next) else {
-                continue;
-            };
-            expressions |= p.default.is_some() || matches!(p.key, PropertyKey::Computed(_));
             done = m.grow(&mut work).map(|()| work.push((node, next + 1)));
             if done.is_err() {
                 break;
             }
-            match &p.target {
+            let Some(target) = target else {
+                continue;
+            };
+            match target {
                 PatternTarget::Binding(name) => {
                     let property = u32::try_from(next).unwrap_or(u32::MAX);
                     done = copy_name(m, &name.name).and_then(|copy| {

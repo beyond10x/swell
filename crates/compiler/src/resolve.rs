@@ -1183,6 +1183,40 @@ impl<'a, 'm> Resolver<'a, 'm> {
                     children.push(Walk::Expr(default));
                 }
             }
+            // `#sec-runtime-semantics-iteratorbindinginitialization` and
+            // `#sec-runtime-semantics-iteratordestructuringassignmentevaluation`: as an object
+            // pattern's, each element's name a site of its index, elisions counted.
+            Expr::ArrayPattern { elements, .. } => {
+                for (i, p) in elements.iter().enumerate() {
+                    let Some(p) = p else { continue };
+                    let n = u32::try_from(i).map_err(|_| CompileError::TooMany("elements"))?;
+                    let name = match &p.target {
+                        PatternTarget::Binding(name) => {
+                            self.occur(Site::Bound(id, n), &name.name);
+                            Some(name.name.as_str())
+                        }
+                        PatternTarget::Expr(e) => {
+                            children.push(Walk::Expr(*e));
+                            match self.ast.expr(*e) {
+                                Some(t) if !t.parenthesized => match &t.expr {
+                                    Expr::Identifier(name) => Some(name.as_str()),
+                                    _ => None,
+                                },
+                                _ => None,
+                            }
+                        }
+                    };
+                    let Some(default) = p.default else { continue };
+                    if let Some(name) = name
+                        && let Some(f) = self.anonymous_function(default)
+                    {
+                        let name = self.m.utf16(name)?;
+                        self.give_name(f, name)?;
+                    }
+                    children.push(Walk::Expr(default));
+                }
+            }
+            Expr::Spread(e) => children.push(Walk::Expr(*e)),
             Expr::Function(f) => children.push(Walk::Function(*f)),
             Expr::Unary { operand, .. } | Expr::Update { operand, .. } => {
                 children.push(Walk::Expr(*operand));
@@ -1239,6 +1273,14 @@ impl<'a, 'm> Resolver<'a, 'm> {
             }
             // The substitutions of a template, whose names resolve as any expression's.
             Expr::Template { substitutions, .. } => {
+                children.extend(substitutions.iter().map(|e| Walk::Expr(*e)));
+            }
+            // A tag and the substitutions of a tagged template resolve as a callee and its
+            // arguments do; a tag `eval` is no direct eval (`#sec-function-calls`).
+            Expr::TaggedTemplate {
+                tag, substitutions, ..
+            } => {
+                children.push(Walk::Expr(*tag));
                 children.extend(substitutions.iter().map(|e| Walk::Expr(*e)));
             }
         }

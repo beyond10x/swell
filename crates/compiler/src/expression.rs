@@ -19,16 +19,18 @@
 //!
 //! An object pattern node destructures the value on top of the stack, which stays: the value
 //! of an assignment to it, of a declaration, of a parameter, of a for-in key or of an exception
-//! ([`Instruction::RequireObjectCoercible`], then [`Instruction::PatternGet`] per property).
+//! ([`Instruction::RequireObjectCoercible`], then [`Instruction::PatternGet`] per property); an
+//! array pattern node the same, through the value's iterator, whose record it holds above the
+//! value under a handler of its own ([`HandlerKind::Pattern`]).
 
 use swell_num::literal::numeric_literal;
 use swell_syntax::REGEXP_REFUSAL;
 use swell_syntax::ast::{
-    AssignOp, BinaryOp, Expr, ExprId, FunctionKind, LogicalOp, PatternKind, PatternProperty,
-    PatternTarget, Property, PropertyKey, PropertyValue, Span, UnaryOp, UpdateOp,
+    AssignOp, BinaryOp, Expr, ExprId, FunctionKind, LogicalOp, PatternElement, PatternKind,
+    PatternProperty, PatternTarget, Property, PropertyKey, PropertyValue, Span, UnaryOp, UpdateOp,
 };
 
-use crate::bytecode::Instruction;
+use crate::bytecode::{HandlerKind, Instruction, TAG_NORMAL};
 use crate::resolve::{Binding, LexicalPlace, Site, anonymous_function, property_key};
 use crate::{CompileError, Compiler, Short, Task, Tasks, malformed};
 
@@ -284,6 +286,10 @@ impl<'a, 'm> Compiler<'a, 'm> {
             // `#sec-array-initializer-runtime-semantics-evaluation` and ArrayAccumulation
             // (`#sec-runtime-semantics-arrayaccumulation`): a run of elisions sets the length to
             // the next index.
+            Expr::Array(elements) if self.has_spread(elements.iter().flatten()) => {
+                t.push(emit(Instruction::NewArray))?;
+                self.spread_elements(elements, span, &mut t)?;
+            }
             Expr::Array(elements) => {
                 t.push(emit(Instruction::NewArray))?;
                 let mut next: u32 = 0;
@@ -379,6 +385,17 @@ impl<'a, 'm> Compiler<'a, 'm> {
             } => {
                 self.object_pattern(id, properties, *kind, *rest, span, &mut t)?;
             }
+            // An array pattern destructures the value on top, which stays.
+            Expr::ArrayPattern {
+                elements,
+                kind,
+                rest,
+            } => {
+                self.array_pattern(id, elements, *kind, *rest, span, &mut t)?;
+            }
+            // The parser leaves a spread only in an array literal and among arguments, which
+            // read it themselves.
+            Expr::Spread(_) => return Err(malformed("a spread outside a list")),
             // `#sec-function-definitions-runtime-semantics-evaluation`; an arrow function,
             // `#sec-arrow-function-definitions-runtime-semantics-evaluation`, keeps the `this` of
             // the code that makes it.
@@ -460,8 +477,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
             // anonymous function is the name of its template.
             Expr::Assign { op, target, value } => {
                 // `AssignmentExpression : LeftHandSideExpression = AssignmentExpression` with an
-                // ObjectAssignmentPattern: the value, destructured, is the result.
-                if let Some(Expr::ObjectPattern { .. }) = self.ast.expr(*target).map(|n| &n.expr) {
+                // ObjectAssignmentPattern or an ArrayAssignmentPattern: the value, destructured,
+                // is the result.
+                if let Some(Expr::ObjectPattern { .. } | Expr::ArrayPattern { .. }) =
+                    self.ast.expr(*target).map(|n| &n.expr)
+                {
                     if *op != AssignOp::Assign {
                         return Err(malformed("a compound assignment to a pattern"));
                     }
@@ -556,6 +576,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 if optional {
                     t.push(Task::ChainCheck(2, span))?;
                 }
+                // ArgumentListEvaluation with a spread: the list as an Array.
+                if self.has_spread(arguments.iter()) {
+                    self.argument_array(arguments, span, &mut t)?;
+                    if !optional && self.ast.is_direct_eval_callee(*callee) {
+                        t.push(emit(Instruction::CallEvalSpread))?;
+                    } else {
+                        t.push(emit(Instruction::CallSpread))?;
+                    }
+                    return Ok(t);
+                }
                 t.extend(arguments.iter().map(|e| Task::Expr(*e)))?;
                 let n = u32::try_from(arguments.len())
                     .map_err(|_| CompileError::TooMany("arguments"))?;
@@ -569,6 +599,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
             Expr::New { callee, arguments } => {
                 t.push(Task::Expr(*callee))?;
                 let arguments = arguments.as_deref().unwrap_or(&[]);
+                if self.has_spread(arguments.iter()) {
+                    self.argument_array(arguments, span, &mut t)?;
+                    t.push(emit(Instruction::NewSpread))?;
+                    return Ok(t);
+                }
                 t.extend(arguments.iter().map(|e| Task::Expr(*e)))?;
                 let n = u32::try_from(arguments.len())
                     .map_err(|_| CompileError::TooMany("arguments"))?;
@@ -605,6 +640,27 @@ impl<'a, 'm> Compiler<'a, 'm> {
                         started = true;
                     }
                 }
+            }
+            // `#sec-tagged-templates-runtime-semantics-evaluation`: the tag and its this value as
+            // for a call (`#sec-evaluatecall`), then ArgumentListEvaluation of the template
+            // (`#sec-template-literals-runtime-semantics-argumentlistevaluation`): the template
+            // object of the site, then the substitutions in order; then the call, never a direct
+            // eval.
+            Expr::TaggedTemplate {
+                tag,
+                strings,
+                substitutions,
+            } => {
+                if strings.len() != substitutions.len().saturating_add(1) {
+                    return Err(malformed("a tagged template"));
+                }
+                self.callee(*tag, span, &mut t)?;
+                let site = self.constants.template_site(strings, self.m)?;
+                t.push(emit(Instruction::TemplateObject(site)))?;
+                t.extend(substitutions.iter().map(|e| Task::Expr(*e)))?;
+                let n =
+                    u32::try_from(strings.len()).map_err(|_| CompileError::TooMany("arguments"))?;
+                t.push(emit(Instruction::Call(n)))?;
             }
         }
         Ok(t)
@@ -672,7 +728,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 PatternTarget::Expr(e) => {
                     let nested = matches!(
                         self.ast.expr(*e).map(|x| &x.expr),
-                        Some(Expr::ObjectPattern { .. })
+                        Some(Expr::ObjectPattern { .. } | Expr::ArrayPattern { .. })
                     );
                     if nested {
                         t.push(get(0))?;
@@ -779,6 +835,220 @@ impl<'a, 'm> Compiler<'a, 'm> {
         }
         if kept > 0 {
             t.push(Task::Emit(Instruction::Nip(kept), pspan))?;
+        }
+        t.push(Task::Emit(Instruction::Pop, pspan))
+    }
+
+    /// Whether one of `list` is a spread element.
+    fn has_spread<'e>(&self, mut list: impl Iterator<Item = &'e ExprId>) -> bool {
+        list.any(|e| matches!(self.ast.expr(*e).map(|n| &n.expr), Some(Expr::Spread(_))))
+    }
+
+    /// The operand of the spread element `e`, with its span, or `None` when `e` is none.
+    fn spread_operand(&self, e: ExprId) -> Option<(ExprId, Span)> {
+        match self.ast.expr(e).map(|n| &n.expr) {
+            Some(Expr::Spread(inner)) => {
+                let span = self.ast.expr(*inner).map(|n| n.span)?;
+                Some((*inner, span))
+            }
+            _ => None,
+        }
+    }
+
+    /// ArrayAccumulation (`#sec-runtime-semantics-arrayaccumulation`) of the elements of an
+    /// array literal with a spread element, onto the new Array on top: before the first spread
+    /// each element at its index, as without one; from it on, the index is the length the run
+    /// reaches, so each element is appended ([`Instruction::ArrayAppend`]), each spread
+    /// ([`Instruction::SpreadArray`]) appends its values, and a run of elisions grows the
+    /// length ([`Instruction::ArrayGrow`]).
+    fn spread_elements(
+        &mut self,
+        elements: &[Option<ExprId>],
+        mut span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let mut next: u32 = 0;
+        let mut elided: u32 = 0;
+        let mut spread = false;
+        for element in elements {
+            let Some(e) = element else {
+                elided = elided
+                    .checked_add(1)
+                    .ok_or(CompileError::TooMany("array elements"))?;
+                continue;
+            };
+            span = self.ast.expr(*e).map_or(span, |n| n.span);
+            if elided > 0 {
+                let grow = if spread {
+                    Instruction::ArrayGrow(elided)
+                } else {
+                    next = next
+                        .checked_add(elided)
+                        .ok_or(CompileError::TooMany("array elements"))?;
+                    Instruction::ArrayLength(next)
+                };
+                t.push(Task::Emit(grow, span))?;
+                elided = 0;
+            }
+            if let Some((inner, at)) = self.spread_operand(*e) {
+                t.push(Task::Expr(inner))?;
+                t.push(Task::Emit(Instruction::SpreadArray, at))?;
+                spread = true;
+            } else if spread {
+                t.push(Task::Expr(*e))?;
+                t.push(Task::Emit(Instruction::ArrayAppend, span))?;
+            } else {
+                t.push(Task::Expr(*e))?;
+                t.push(Task::Emit(Instruction::DefineIndex(next), span))?;
+                next = next
+                    .checked_add(1)
+                    .ok_or(CompileError::TooMany("array elements"))?;
+            }
+        }
+        if elided > 0 {
+            t.push(Task::Emit(Instruction::ArrayGrow(elided), span))?;
+        }
+        Ok(())
+    }
+
+    /// ArgumentListEvaluation (`#sec-runtime-semantics-argumentlistevaluation`) of `arguments`
+    /// with a spread element, as a new Array: each argument appended, each spread's values
+    /// appended in order.
+    fn argument_array(
+        &mut self,
+        arguments: &[ExprId],
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        t.push(Task::Emit(Instruction::NewArray, span))?;
+        for e in arguments {
+            match self.spread_operand(*e) {
+                Some((inner, at)) => {
+                    t.push(Task::Expr(inner))?;
+                    t.push(Task::Emit(Instruction::SpreadArray, at))?;
+                }
+                None => {
+                    let at = self.ast.expr(*e).map_or(span, |n| n.span);
+                    t.push(Task::Expr(*e))?;
+                    t.push(Task::Emit(Instruction::ArrayAppend, at))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// IteratorBindingInitialization of the ArrayBindingPattern `id`
+    /// (`#sec-runtime-semantics-iteratorbindinginitialization`) or
+    /// IteratorDestructuringAssignmentEvaluation of the ArrayAssignmentPattern `id`
+    /// (`#sec-runtime-semantics-iteratordestructuringassignmentevaluation`), of the value on
+    /// top, which stays: GetIterator of a copy, its record kept above the value; then each
+    /// element in source order, the reference of its target first, then its step
+    /// ([`Instruction::PatternStep`], [`Instruction::PatternSkip`] for an elision,
+    /// [`Instruction::PatternRest`] for the rest element), the default for `undefined`, then
+    /// PutValue, the initialization of the binding, or the nested pattern; at the end
+    /// IteratorClose with a normal completion unless the iterator is done, and the record
+    /// dropped. A throw from the first step to the end of the last element enters the
+    /// pattern's handler ([`HandlerKind::Pattern`]), which runs the same close with the throw
+    /// completion and throws again (`#sec-runtime-semantics-bindinginitialization`, step 4 of
+    /// `BindingPattern : ArrayBindingPattern`, and
+    /// `#sec-runtime-semantics-destructuringassignmentevaluation`, step 4 of
+    /// `ArrayAssignmentPattern`). `docs/design/engine.md`, decision 3, item 5 of "The iterator
+    /// of `for`-`of`, of an array pattern and of a spread".
+    fn array_pattern(
+        &mut self,
+        id: ExprId,
+        elements: &[Option<PatternElement>],
+        kind: PatternKind,
+        rest: bool,
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let (start, end, entry) = (self.label(), self.label(), self.label());
+        t.push(Task::Emit(Instruction::Dup, span))?;
+        t.push(Task::Emit(Instruction::GetIterator, span))?;
+        t.push(Task::Bind(start))?;
+        for (i, element) in elements.iter().enumerate() {
+            let n = u32::try_from(i).map_err(|_| CompileError::TooMany("elements"))?;
+            match element {
+                None => t.push(Task::Emit(Instruction::PatternSkip, span))?,
+                Some(p) => {
+                    let last = rest && i + 1 == elements.len();
+                    self.array_element(id, n, p, kind, last, t)?;
+                }
+            }
+        }
+        t.push(Task::Bind(end))?;
+        t.push(Task::Emit(Instruction::Undefined, span))?;
+        t.push(Task::Emit(Instruction::Tag(TAG_NORMAL), span))?;
+        t.push(Task::Bind(entry))?;
+        t.push(Task::Emit(Instruction::IteratorClose, span))?;
+        t.push(Task::Emit(Instruction::Bury(2), span))?;
+        t.push(Task::Emit(Instruction::Bury(2), span))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        t.push(Task::Emit(Instruction::EndFinally, span))?;
+        t.push(Task::Handler {
+            kind: HandlerKind::Pattern,
+            start,
+            end,
+            target: entry,
+            items: self.items,
+            envs: self.envs,
+        })
+    }
+
+    /// The element `p`, the `n`th of the array pattern `id`, the rest element when `rest`: the
+    /// reference of its target, its step, its default, then PutValue, the initialization of
+    /// the binding or the nested pattern, and the value dropped.
+    fn array_element(
+        &mut self,
+        id: ExprId,
+        n: u32,
+        p: &PatternElement,
+        kind: PatternKind,
+        rest: bool,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let pspan = p.span;
+        let step = |depth: u32| {
+            let step = if rest {
+                Instruction::PatternRest(depth)
+            } else {
+                Instruction::PatternStep(depth)
+            };
+            Task::Emit(step, pspan)
+        };
+        match &p.target {
+            // `var`: ResolveBinding before the value is read, then PutValue.
+            PatternTarget::Binding(leaf) if kind == PatternKind::Var => {
+                let target = Target::Binding(self.binding(Site::Bound(id, n))?);
+                t.append(self.reference(&target, false, leaf.span)?)?;
+                t.push(step(target.reference_items()))?;
+                self.pattern_default(p.default, pspan, t)?;
+                t.push(Task::Emit(self.put(&target)?, leaf.span))?;
+            }
+            PatternTarget::Binding(leaf) => {
+                let store = self.bound_store(id, n)?;
+                t.push(step(0))?;
+                self.pattern_default(p.default, pspan, t)?;
+                t.push(Task::Emit(store, leaf.span))?;
+            }
+            PatternTarget::Expr(e) => {
+                let nested = matches!(
+                    self.ast.expr(*e).map(|x| &x.expr),
+                    Some(Expr::ObjectPattern { .. } | Expr::ArrayPattern { .. })
+                );
+                if nested {
+                    t.push(step(0))?;
+                    self.pattern_default(p.default, pspan, t)?;
+                    t.push(Task::Expr(*e))?;
+                } else {
+                    let target = self.target(*e)?;
+                    t.append(self.reference(&target, false, pspan)?)?;
+                    t.push(step(target.reference_items()))?;
+                    self.pattern_default(p.default, pspan, t)?;
+                    t.push(Task::Emit(self.put(&target)?, pspan))?;
+                }
+            }
         }
         t.push(Task::Emit(Instruction::Pop, pspan))
     }

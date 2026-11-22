@@ -24,7 +24,7 @@
 //! consumed by instructions of this set only: the reference of a global name
 //! ([`Instruction::ResolveGlobal`]), the reference of a name looked up at run time
 //! ([`Instruction::ResolveName`]), the enumerator of a for-in statement
-//! ([`Instruction::ForInStart`]), the Iterator Record of a for-of statement
+//! ([`Instruction::ForInStart`]), the Iterator Record of a for-of statement or an array pattern
 //! ([`Instruction::GetIterator`]) and the tag of a completion record ([`Instruction::Tag`]).
 //!
 //! # Completion records
@@ -246,6 +246,20 @@ pub enum Instruction {
     /// `[o, v] -> [o]`: CopyDataProperties(o, v, an empty list) (`#sec-copydataproperties`) of
     /// `PropertyDefinition : ... AssignmentExpression`: nothing for `undefined` and `null`.
     CopyDataProperties,
+    /// `[a, v] -> [a]`: ArrayAccumulation of a SpreadElement
+    /// (`#sec-runtime-semantics-arrayaccumulation`): GetIterator(v, sync), then each value of
+    /// IteratorStepValue until the iterator is done, CreateDataPropertyOrThrow(a, ToString(len),
+    /// value) at the length `len` of `a`; one step per value, the record held on the kept stack
+    /// while `next` runs, the iterator never closed (`docs/design/engine.md`, decision 3, "The
+    /// iterator of `for`-`of`, of an array pattern and of a spread", item 5). The same builds
+    /// the argument list of a call with a spread.
+    SpreadArray,
+    /// `[a, v] -> [a]`: CreateDataPropertyOrThrow(a, ToString(len), v) at the length `len` of
+    /// `a`: an element after a spread element, whose index only the run knows.
+    ArrayAppend,
+    /// `[a] -> [a]`: Set(a, "length", len + n, true) of the length `len` of `a`: a run of `n`
+    /// elisions after a spread element.
+    ArrayGrow(u32),
 
     // ---- operators ------------------------------------------------------------------------
     /// `[v] -> [s]`: `typeof` (`#sec-typeof-operator`).
@@ -308,6 +322,16 @@ pub enum Instruction {
     /// `[f, a1 .. an] -> [v]`: EvaluateNew (`#sec-evaluatenew`): a `TypeError` when `f` is not a
     /// constructor, then Construct(f, «a1 .. an»).
     New(u32),
+    /// `[this, f, args] -> [v]`: `Call(n)` with the elements of the Array `args` as the
+    /// arguments, the list ArgumentListEvaluation of `Arguments` with a spread element made
+    /// (`#sec-runtime-semantics-argumentlistevaluation`), built by [`Instruction::NewArray`],
+    /// [`Instruction::ArrayAppend`] and [`Instruction::SpreadArray`].
+    CallSpread,
+    /// `[this, f, args] -> [v]`: `CallEval(n)` with the elements of `args`: a direct `eval` of
+    /// its first element, or `undefined` when it has none.
+    CallEvalSpread,
+    /// `[f, args] -> [v]`: `New(n)` with the elements of `args`.
+    NewSpread,
 
     // ---- control --------------------------------------------------------------------------
     /// Continues at instruction `t`, which is after this one.
@@ -497,11 +521,33 @@ pub enum Instruction {
         kept: u32,
     },
 
+    // ---- array patterns -------------------------------------------------------------------
+    /// `[i, r1..rn] -> [i, r1..rn, x]` with `depth` n: the next value of the Iterator Record
+    /// `i` of an array pattern, after the reference of the element's target: IteratorStepValue
+    /// (`#sec-iteratorstepvalue`) unless [[Done]] is set, `x` its value, or `undefined` once the
+    /// iterator is done (`#sec-runtime-semantics-iteratorbindinginitialization`,
+    /// `#sec-runtime-semantics-iteratordestructuringassignmentevaluation`). A throw of `next`,
+    /// a result that is no object, done, and a throw while "done" or "value" is read set
+    /// [[Done]].
+    PatternStep(u32),
+    /// `[i] -> [i]`: an elision of an array pattern, IteratorStep (`#sec-iteratorstep`) unless
+    /// [[Done]] is set, its value not read.
+    PatternSkip,
+    /// `[i, r1..rn] -> [i, r1..rn, a]` with `depth` n: the rest element of an array pattern, a
+    /// new Array of the values IteratorStepValue answers until the iterator is done, one step
+    /// per value; [[Done]] is set after it.
+    PatternRest(u32),
+
     // ---- templates ------------------------------------------------------------------------
     /// `[v] -> [s]`: ToString (`#sec-tostring`) of a substitution of a template literal
     /// (`#sec-template-literals-runtime-semantics-evaluation`): an object gives ToPrimitive with
     /// hint string, so its `toString` is asked first.
     ToString,
+    /// `[] -> [t]`: GetTemplateObject (`#sec-gettemplateobject`) of tagged template site `k` of
+    /// the code ([`Code::template_sites`]): the template object the record of the code holds
+    /// for the site, made at its first evaluation, an argument of the tag's call
+    /// (`#sec-tagged-templates-runtime-semantics-evaluation`).
+    TemplateObject(u32),
 }
 
 impl Instruction {
@@ -621,6 +667,7 @@ impl Instruction {
             | Instruction::AssignConstEnv { .. }
             | Instruction::InitGlobal(_) => None,
             Instruction::ToString => None,
+            Instruction::TemplateObject(_) => None,
             Instruction::Argument(_)
             | Instruction::RestArguments(_)
             | Instruction::PushVarEnv(_) => None,
@@ -634,6 +681,15 @@ impl Instruction {
             | Instruction::CopyDataProperties
             | Instruction::PatternGetKey { .. }
             | Instruction::ObjectRest { .. } => None,
+            Instruction::SpreadArray
+            | Instruction::ArrayAppend
+            | Instruction::ArrayGrow(_)
+            | Instruction::CallSpread
+            | Instruction::CallEvalSpread
+            | Instruction::NewSpread
+            | Instruction::PatternStep(_)
+            | Instruction::PatternSkip
+            | Instruction::PatternRest(_) => None,
             Instruction::JumpIfNotUndefined(t) => Some(t),
         }
     }
@@ -663,6 +719,13 @@ pub enum HandlerKind {
     /// The throw completion record `[exception, TAG_THROW]` is pushed and the run continues at
     /// the target, the `finally` block.
     Finally,
+    /// The handler of an array pattern, which an expression holds: the operand stack is dropped
+    /// down to the topmost Iterator Record at `items` or above, the pattern's own, the one
+    /// handler a temporary of an expression may stand under (the compiler counts the entries of
+    /// statements alone); then as [`HandlerKind::Finally`]. Its target closes the record, drops
+    /// it and throws again (`docs/design/engine.md`, decision 3, item 5 of "The iterator of
+    /// `for`-`of`, of an array pattern and of a spread").
+    Pattern,
 }
 
 /// An entry of a handler table: a throw from an instruction `i` with `start <= i < end` continues
@@ -877,11 +940,24 @@ pub struct Code {
     /// PerformEval makes for its lexical bindings (`#sec-performeval`, steps 17 to 19), when one
     /// of them lives there; `None` otherwise.
     pub eval_scope: Option<u32>,
+    /// The site table: each tagged template of the code, its functions' included, numbered as
+    /// the compile step reaches it ([`Instruction::TemplateObject`] names the number), with its
+    /// template strings (`docs/design/engine.md`, decision 4, "Template objects", item 1).
+    pub template_sites: Vec<TemplateSite>,
     /// The bytes the compile step's ledger charged for the code's vectors, by capacity, and
     /// still holds: the vectors above, the inner ones and those of every template. The owner of
     /// the code takes them over (the engine's script record owns them) or credits them when it
     /// drops the code.
     pub charged: usize,
+}
+
+/// A tagged template site of a [`Code`]: per template string in source order its TV as a
+/// `strings` index, `None` where it is undefined (a NotEscapeSequence), and its TRV as a
+/// `strings` index (`#sec-static-semantics-templatestrings`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TemplateSite {
+    pub cooked: Vec<Option<u32>>,
+    pub raw: Vec<u32>,
 }
 
 /// The bytes of a vector's buffer by its capacity.
@@ -937,6 +1013,12 @@ impl Code {
             buffer(&self.var_names),
             buffer(&self.function_declarations),
             buffer(&self.lexical),
+            self.template_sites
+                .iter()
+                .fold(buffer(&self.template_sites), |sum, site| {
+                    sum.saturating_add(buffer(&site.cooked))
+                        .saturating_add(buffer(&site.raw))
+                }),
         ]
         .iter()
         .fold(0usize, |sum, bytes| sum.saturating_add(*bytes))

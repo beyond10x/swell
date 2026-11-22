@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:symbol-constructor-and-well-known-symbols
 kind: story
-status: active
+status: implemented
 title: 'The Symbol builtin: the constructor, Symbol.for and keyFor, Symbol.prototype and the well-known symbols'
 summary: 241 failing cases of slice 6 on its list; the GlobalSymbolRegistry and Symbol objects as decision 4 gives them; after slice 3's close.
 relations:
@@ -44,10 +44,11 @@ scope:
   path: crates/swell/tests/language/builtin-symbol.js
 - confidence: cited
   path: crates/swell/tests/language/symbol-as-property-key.js
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T00:38:41Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:38:41Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T22:03:55Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
