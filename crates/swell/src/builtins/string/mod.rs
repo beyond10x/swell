@@ -31,6 +31,7 @@ use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host, Termination};
 use crate::object::ObjectKind;
 use crate::object::builtin_function::BuiltinId;
+use crate::ops::conversion::clamp_index;
 use crate::realm::intrinsics::{Intrinsic, Making};
 use crate::value::{ObjectRef, StringRef, SymbolRef, Value};
 
@@ -70,13 +71,6 @@ pub(crate) fn units_of(text: &str) -> Vec<u16> {
 }
 
 /// The Record CodePointAt answers (`#sec-codepointat`).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Encode, Decode, codePointAt, isWellFormed, toWellFormed: story:global-this-uri-functions-and-is-error, story:string-access-and-search-methods"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CodePoint {
     /// [[CodePoint]].
@@ -90,13 +84,6 @@ pub(crate) struct CodePoint {
 /// CodePointAt ( string, position ) (`#sec-codepointat`): the code point of `string` that
 /// starts at the code unit at `position`. `None` where step 2's assertion (position < size)
 /// does not hold. Touches no heap.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Encode, Decode, codePointAt, isWellFormed, toWellFormed: story:global-this-uri-functions-and-is-error, story:string-access-and-search-methods"
-    )
-)]
 pub(crate) fn code_point_at(string: &[u16], position: usize) -> Option<CodePoint> {
     // A leading surrogate is 0xD800 to 0xDBFF, a trailing one 0xDC00 to 0xDFFF (6.1.4).
     let is_leading_surrogate = |unit: u16| (0xD800..=0xDBFF).contains(&unit);
@@ -144,26 +131,12 @@ pub(crate) fn code_point_at(string: &[u16], position: usize) -> Option<CodePoint
 }
 
 /// The code units of a code point, as UTF16EncodeCodePoint answers them: one or two.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Encode, Decode, fromCodePoint, toWellFormed: story:global-this-uri-functions-and-is-error, story:string-access-and-search-methods"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct EncodedCodePoint {
     units: [u16; 2],
     count: usize,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Encode, Decode, fromCodePoint, toWellFormed: story:global-this-uri-functions-and-is-error, story:string-access-and-search-methods"
-    )
-)]
 impl EncodedCodePoint {
     /// The code units, one or two.
     pub(crate) fn units(&self) -> &[u16] {
@@ -173,13 +146,6 @@ impl EncodedCodePoint {
 
 /// UTF16EncodeCodePoint ( cp ) (`#sec-utf16encodecodepoint`): the code units of `code_point`.
 /// `None` where step 1's assertion (0 ≤ cp ≤ 0x10FFFF) does not hold. Touches no heap.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Encode, Decode, fromCodePoint, toWellFormed: story:global-this-uri-functions-and-is-error, story:string-access-and-search-methods"
-    )
-)]
 pub(crate) fn utf16_encode_code_point(code_point: u32) -> Option<EncodedCodePoint> {
     // 1. Assert: 0 ≤ cp ≤ 0x10FFFF.
     if code_point > 0x10FFFF {
@@ -450,22 +416,21 @@ impl<H: Host> Agent<H> {
         let position = self.to_integer_or_infinity(argument(args, 1));
         self.release(keep);
         let position = position?;
-        let units = self.string_units(string)?;
-        let search = self.string_units(search)?;
         // 7. Let len be the length of S. 8. Let start be the result of clamping pos between 0
         // and len.
-        let length = units.len();
-        let start = if position <= 0.0 {
-            0
-        } else if position >= length as f64 {
-            length
-        } else {
-            // 0 < position < length: an integer that fits.
-            position as usize
-        };
+        let length = self.string_length(string)?;
+        let start = clamp_index(position, length);
+        // 9. Let result be StringIndexOf(S, searchStr, start): the search of the code units from
+        // start on, from their first, each read charged a step before it is copied
+        // (`access.rs`, [`Agent::read_units`]).
+        let search_length = self.string_length(search)?;
+        let units = self.read_units(string, start, length)?;
+        let search = self.read_units(search, 0, search_length)?;
+        // 10. If result is not-found, return -1𝔽. 11. Return 𝔽(result). An index of a String is
+        // below 2^53, so the conversion is exact.
         Ok(Value::Number(
-            match self.string_index_of(&units, &search, start)? {
-                Some(index) => index as f64,
+            match self.string_index_of(&units, &search, 0)? {
+                Some(index) => (start + index) as f64,
                 None => -1.0,
             },
         ))
