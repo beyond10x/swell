@@ -23,6 +23,9 @@ pub struct TestHost {
     pub now: i128,
     /// A counter host functions of the tests may use.
     pub count: u32,
+    /// The host's map from a node number to the handle it keeps for that node, with no root: a
+    /// weak reference (HOST-178).
+    pub kept: Vec<Option<ObjectRef>>,
 }
 
 impl Host for TestHost {
