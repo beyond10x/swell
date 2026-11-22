@@ -89,8 +89,8 @@ struct Frame {
 /// stand for the nested calls of SerializeJSONProperty and the result being written.
 struct State {
     replacer: Option<Value>,
-    /// The property list, each String with its code units.
-    property_list: Option<Vec<(StringRef, Vec<u16>)>>,
+    /// The property list, its Strings kept for the whole call.
+    property_list: Option<Vec<StringRef>>,
     gap: Vec<u16>,
     indent: Vec<u16>,
     /// The handles of the objects on state.[[Stack]], for the cycle check.
@@ -106,11 +106,13 @@ struct State {
 }
 
 /// What SerializeJSONProperty of a value gives, before anything is written: undefined, a
-/// String of JSON text, or an object or array to open.
+/// String of JSON text, a String value to quote, the text of an object with [[IsRawJSON]], or
+/// an object or array to open. A String is kept while it is read.
 enum Serialized {
     Undefined,
     Text(Vec<u16>),
-    Quoted(Vec<u16>),
+    Quoted(StringRef),
+    Raw(StringRef),
     Open(ObjectRef),
 }
 
@@ -230,10 +232,12 @@ impl<H: Host> Agent<H> {
     }
 
     /// Step 5.b of `JSON.stringify`: the property list of the array `replacer`, each item once,
-    /// in order. A step per element and per comparison with an item already listed.
+    /// in order. A step per element and per comparison with an item already listed; the
+    /// comparison is in place and charges a step per code unit past 32 of two items of the
+    /// same length before it reads them ([`Agent::string_equals`]).
     fn json_property_list(&mut self, state: &mut State, replacer: ObjectRef) -> Completion<()> {
         // 5.b.i. Set propertyList to a new empty List.
-        let mut list: Vec<(StringRef, Vec<u16>)> = Vec::new();
+        let mut list: Vec<StringRef> = Vec::new();
         // 5.b.ii. Let len be ? LengthOfArrayLike(replacer).
         let length = self.length_of_array_like(replacer)?;
         // 5.b.iii, iv. For each k below len.
@@ -255,25 +259,22 @@ impl<H: Host> Agent<H> {
             // 5.b.iv.7. If item is not undefined and propertyList does not contain item,
             // append item to propertyList.
             if let Some(item) = item {
-                let units = self.string_units(item)?;
                 let mut listed = false;
-                for (_, other) in &list {
+                for &other in &list {
                     self.charge_steps(1)?;
-                    if *other == units {
+                    if self.string_equals(other, item)? {
                         listed = true;
                         break;
                     }
                 }
                 if !listed {
-                    let bytes = size_of::<(StringRef, Vec<u16>)>()
-                        .saturating_add(units.len().saturating_mul(2))
-                        .saturating_add(size_of::<Value>());
+                    let bytes = size_of::<StringRef>().saturating_add(size_of::<Value>());
                     self.json_charge(state, u64::try_from(bytes).unwrap_or(u64::MAX))?;
                     if list.try_reserve(1).is_err() {
                         return Err(self.terminate(Termination::MemoryBudget));
                     }
                     self.keep(Value::String(item));
-                    list.push((item, units));
+                    list.push(item);
                 }
             }
             index += 1.0;
@@ -321,11 +322,10 @@ impl<H: Host> Agent<H> {
                     vec![u16::from(b' '); count as usize]
                 }
             }
-            // 8. If space is a String: its first 10 code units.
+            // 8. If space is a String: its first 10 code units, and no more of it is read.
             Value::String(string) => {
-                let mut units = self.string_units(string)?;
-                units.truncate(GAP_MAX);
-                units
+                let length = self.string_length(string)?.min(GAP_MAX);
+                self.string_units_in(string, 0, length)?
             }
             // 9. Else, the empty String.
             _ => Vec::new(),
@@ -353,15 +353,21 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// The code units of `key`, which QuoteJSONString quotes for a member of an object.
-    fn json_key_units(&mut self, key: JsonKey) -> Completion<Vec<u16>> {
+    /// QuoteJSONString of `key` for a member of an object, appended to the result: an index by
+    /// its digits, a String key read in ranges as a String value is.
+    fn json_quote_key(&mut self, state: &mut State, key: JsonKey) -> Completion<()> {
         match key {
-            JsonKey::Key(Key::Index(index)) => Ok(units_of(&index.to_string())),
+            JsonKey::Key(Key::Index(index)) => {
+                self.json_quote_units(state, &units_of(&index.to_string()))
+            }
             JsonKey::Key(Key::String(string)) | JsonKey::String(string) => {
-                self.string_units(string)
+                self.json_quote_string(state, string)
             }
             JsonKey::Key(Key::Symbol(_)) => Err(self.fault()),
-            JsonKey::Index(index) => Ok(units_of(&swell_num::to_string::number_to_string(index))),
+            JsonKey::Index(index) => self.json_quote_units(
+                state,
+                &units_of(&swell_num::to_string::number_to_string(index)),
+            ),
         }
     }
 
@@ -429,7 +435,7 @@ impl<H: Host> Agent<H> {
             Value::Boolean(true) => Serialized::Text(units_of("true")),
             Value::Boolean(false) => Serialized::Text(units_of("false")),
             // 8. If value is a String, return QuoteJSONString(value).
-            Value::String(string) => Serialized::Quoted(self.string_units(string)?),
+            Value::String(string) => Serialized::Quoted(string),
             // 9. A finite Number gives ! ToString(value), another "null".
             Value::Number(number) if number.is_finite() => {
                 Serialized::Text(units_of(&swell_num::to_string::number_to_string(number)))
@@ -450,27 +456,81 @@ impl<H: Host> Agent<H> {
     fn json_raw_text(&mut self, object: ObjectRef) -> Completion<Serialized> {
         let key = self.name_key("rawJSON")?;
         match self.get(object, key)? {
-            Value::String(text) => Ok(Serialized::Text(self.string_units(text)?)),
+            Value::String(text) => Ok(Serialized::Raw(text)),
             _ => Err(self.fault()),
         }
     }
 
-    /// Write a serialized value that is not undefined: its text, its quoted String, or the
-    /// opening of its object or array.
+    /// Write a serialized value that is not undefined: its text, its quoted String, the text
+    /// of a raw JSON object, or the opening of its object or array. A String is kept while it
+    /// is read: it may be one no object holds, made by toJSON or the replacer.
     fn json_write(&mut self, state: &mut State, serialized: Serialized) -> Completion<()> {
         match serialized {
             Serialized::Undefined => Err(self.fault()),
             Serialized::Text(units) => self.append_units(&mut state.out, &units),
-            Serialized::Quoted(units) => self.json_quote(state, &units),
+            Serialized::Quoted(string) => {
+                let keep = self.keep(Value::String(string));
+                let quoted = self.json_quote_string(state, string);
+                self.release(keep);
+                quoted
+            }
+            Serialized::Raw(text) => {
+                let keep = self.keep(Value::String(text));
+                let appended = self.append_string(&mut state.out, text);
+                self.release(keep);
+                appended
+            }
             Serialized::Open(object) => self.json_open(state, object),
         }
     }
 
-    /// QuoteJSONString (`#sec-quotejsonstring`) of `units`, appended to the result.
-    fn json_quote(&mut self, state: &mut State, units: &[u16]) -> Completion<()> {
-        let mut chunk: Vec<u16> = Vec::new();
+    /// QuoteJSONString (`#sec-quotejsonstring`) of the code units `units`, appended to the
+    /// result.
+    fn json_quote_units(&mut self, state: &mut State, units: &[u16]) -> Completion<()> {
         // 1. Let product be the String value consisting solely of the code unit 0x0022.
+        let mut chunk: Vec<u16> = vec![u16::from(b'"')];
+        self.json_quote_range(state, &mut chunk, units)?;
+        // 3. Append the code unit 0x0022 (QUOTATION MARK).
         chunk.push(u16::from(b'"'));
+        self.append_units(&mut state.out, &chunk)
+    }
+
+    /// QuoteJSONString (`#sec-quotejsonstring`) of `string`, appended to the result. The String
+    /// is read in ranges of at most [`QUOTE_CHUNK`] code units, each quoted before the next is
+    /// read; a range that would end between the two units of a surrogate pair ends before the
+    /// first, so each pair is read whole.
+    fn json_quote_string(&mut self, state: &mut State, string: StringRef) -> Completion<()> {
+        let length = self.string_length(string)?;
+        // 1. Let product be the String value consisting solely of the code unit 0x0022.
+        let mut chunk: Vec<u16> = vec![u16::from(b'"')];
+        let mut from = 0;
+        while from < length {
+            let mut to = from.saturating_add(QUOTE_CHUNK).min(length);
+            // A range of QUOTE_CHUNK units that ends before the String does has at least two.
+            if to < length
+                && matches!(self.code_unit_at(string, to - 1)?, Some(0xD800..=0xDBFF))
+                && matches!(self.code_unit_at(string, to)?, Some(0xDC00..=0xDFFF))
+            {
+                to -= 1;
+            }
+            let units = self.string_units_in(string, from, to)?;
+            self.json_quote_range(state, &mut chunk, &units)?;
+            from = to;
+        }
+        // 3. Append the code unit 0x0022 (QUOTATION MARK).
+        chunk.push(u16::from(b'"'));
+        self.append_units(&mut state.out, &chunk)
+    }
+
+    /// Step 2 of QuoteJSONString for `units`, which end with no half of a surrogate pair whose
+    /// other half follows: the code units are gathered in `chunk`, which is appended to the
+    /// result and emptied each time it holds [`QUOTE_CHUNK`] units or more.
+    fn json_quote_range(
+        &mut self,
+        state: &mut State,
+        chunk: &mut Vec<u16>,
+        units: &[u16],
+    ) -> Completion<()> {
         // 2. For each code point of StringToCodePoints(value).
         let mut index = 0;
         while let Some(&unit) = units.get(index) {
@@ -506,13 +566,11 @@ impl<H: Host> Agent<H> {
             }
             index += 1;
             if chunk.len() >= QUOTE_CHUNK {
-                self.append_units(&mut state.out, &chunk)?;
+                self.append_units(&mut state.out, chunk)?;
                 chunk.clear();
             }
         }
-        // 3. Append the code unit 0x0022 (QUOTATION MARK).
-        chunk.push(u16::from(b'"'));
-        self.append_units(&mut state.out, &chunk)
+        Ok(())
     }
 
     /// SerializeJSONObject (`#sec-serializejsonobject`) and SerializeJSONArray
@@ -588,7 +646,7 @@ impl<H: Host> Agent<H> {
                             .property_list
                             .as_ref()
                             .and_then(|list| list.get(*next))
-                            .map(|(string, _)| JsonKey::String(*string)),
+                            .map(|string| JsonKey::String(*string)),
                     };
                     *next += 1;
                     key.map(|key| (key, false))
@@ -620,8 +678,7 @@ impl<H: Host> Agent<H> {
                     continue;
                 }
                 self.json_separator(state, b'{')?;
-                let units = self.json_key_units(key)?;
-                self.json_quote(state, &units)?;
+                self.json_quote_key(state, key)?;
                 self.append_str(&mut state.out, ":")?;
                 if !state.gap.is_empty() {
                     self.append_str(&mut state.out, " ")?;
@@ -685,5 +742,65 @@ impl<H: Host> Agent<H> {
         self.heap.accounting.credit(frame.charged);
         state.charged = state.charged.saturating_sub(frame.charged);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Termination;
+    use crate::builtins::string::transform::tests::{Answer, FEW_STEPS, LONG, with_long};
+
+    /// `#sec-json.stringify`, step 8: a String space gives its first 10 code units, and no
+    /// more of it is read.
+    #[test]
+    fn a_string_gap_copies_ten_units() {
+        let mut counting = with_long(0x67);
+        let (answer, longest) = counting.counted(FEW_STEPS, "JSON.stringify([1], null, s)");
+        assert_eq!(answer, Answer::Normal("[\ngggggggggg1\n]".to_string()));
+        assert!(longest <= 10, "{longest}");
+    }
+
+    /// QuoteJSONString (`#sec-quotejsonstring`) reads a String in ranges of at most 256 code
+    /// units and appends each before it reads the next: with few steps left the entry ends at
+    /// the step budget with no longer copy made.
+    #[test]
+    fn quoting_reads_a_string_in_ranges() {
+        let mut counting = with_long(0x61);
+        let (answer, longest) = counting.counted(FEW_STEPS, "JSON.stringify(s)");
+        assert_eq!(answer, Answer::Terminated(Termination::StepBudget));
+        assert!(longest <= 256, "{longest}");
+    }
+
+    /// SerializeJSONObject (`#sec-serializejsonobject`), step 8.b: the key of a member is
+    /// quoted as a String value is, in ranges.
+    #[test]
+    fn quoting_a_key_reads_it_in_ranges() {
+        let mut counting = with_long(0x61);
+        assert_eq!(
+            counting.eval("var o = {}; o[s] = 1; 0"),
+            Answer::Normal("Number(0.0)".to_string())
+        );
+        let (answer, longest) = counting.counted(FEW_STEPS, "JSON.stringify(o)");
+        assert_eq!(answer, Answer::Terminated(Termination::StepBudget));
+        assert!(longest <= 256, "{longest}");
+    }
+
+    /// SerializeJSONProperty (`#sec-serializejsonproperty`), step 4.a: the text of an object
+    /// with [[IsRawJSON]] is appended by its steps before it is copied.
+    #[test]
+    fn a_raw_text_is_charged_before_its_copy() {
+        let mut counting = with_long(0x61);
+        let mut literal = vec![0x61; LONG];
+        literal[0] = 0x22;
+        literal[LONG - 1] = 0x22;
+        counting.string("t", &literal);
+        assert_eq!(
+            counting.eval("var r = JSON.rawJSON(t); 0"),
+            Answer::Normal("Number(0.0)".to_string())
+        );
+        assert_eq!(
+            counting.counted(FEW_STEPS, "JSON.stringify(r)"),
+            (Answer::Terminated(Termination::StepBudget), 0)
+        );
     }
 }

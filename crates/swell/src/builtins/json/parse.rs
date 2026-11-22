@@ -84,12 +84,10 @@ impl Parser<'_> {
         self.text.get(self.position).copied()
     }
 
-    /// Read `count` code units: a step each, charged in chunks.
+    /// Read `count` code units: their steps, one each, were charged with the text before it
+    /// was copied ([`Agent::json_text_units`]).
     fn advance(&mut self, count: usize) {
         self.position = self.position.saturating_add(count);
-        self.unpaid = self
-            .unpaid
-            .saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
     }
 }
 
@@ -257,7 +255,10 @@ impl<H: Host> Agent<H> {
         result
     }
 
-    /// The code units of `string`, charged to the memory budget while the parse reads them.
+    /// The code units of `string`, charged to the memory budget while the parse reads them,
+    /// and a step per code unit, the step of reading it, charged before they are copied: a
+    /// parse that reads the text to its end costs what it costs to read it unit by unit, and
+    /// one that fails early has paid for the whole text.
     fn json_text_units(&mut self, string: StringRef, charged: &mut u64) -> Completion<Vec<u16>> {
         let length = self.string_length(string)?;
         let bytes = bytes_of::<u16>(length);
@@ -265,7 +266,7 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         *charged = charged.saturating_add(bytes);
-        self.string_units(string)
+        self.charged_units(string)
     }
 
     /// Charge `bytes` of the parse to the memory budget.
@@ -1091,6 +1092,8 @@ impl<H: Host> Agent<H> {
 
 #[cfg(test)]
 mod tests {
+    use crate::Termination;
+    use crate::builtins::string::transform::tests::{Answer, Counting, LONG};
     use crate::host::hooks::test_host::{agent_with_realm, enter};
     use crate::ops::objects::IntegrityLevel;
     use crate::value::Value;
@@ -1115,5 +1118,41 @@ mod tests {
             .ordinary_object_create(None, crate::object::ordinary::OrdinaryData::Plain)
             .unwrap();
         assert_eq!(agent.json_has_raw_json(plain), Ok(false));
+    }
+
+    /// The steps of an entry below: a tenth of the step per code unit of the long text.
+    const PARSE_STEPS: u64 = 100_000;
+
+    /// An agent with the global `t`: "}" and then 999,999 "0", a text that is not JSON at its
+    /// first code unit.
+    fn invalid_at_its_first_unit() -> Counting {
+        let mut counting = Counting::new(1 << 21);
+        let mut text = vec![0x30; LONG];
+        text[0] = 0x7D;
+        counting.string("t", &text);
+        counting
+    }
+
+    /// `JSON.parse` (`#sec-json.parse`) charges the step per code unit of its text before it
+    /// copies the text, so a text that fails at its first unit has paid for all of it: with
+    /// 100,000 steps the entry ends at the step budget and no copy of the text was made.
+    #[test]
+    fn a_text_invalid_at_its_first_unit_pays_for_its_copy() {
+        let mut counting = invalid_at_its_first_unit();
+        assert_eq!(
+            counting.counted(PARSE_STEPS, "JSON.parse(t)"),
+            (Answer::Terminated(Termination::StepBudget), 0)
+        );
+    }
+
+    /// `JSON.rawJSON` (`#sec-json.rawjson`) charges the same before its copy, so a text its
+    /// step 3 refuses by the first code unit has paid for all of it.
+    #[test]
+    fn a_raw_json_text_refused_by_its_first_unit_pays_for_its_copy() {
+        let mut counting = invalid_at_its_first_unit();
+        assert_eq!(
+            counting.counted(PARSE_STEPS, "JSON.rawJSON(t)"),
+            (Answer::Terminated(Termination::StepBudget), 0)
+        );
     }
 }
