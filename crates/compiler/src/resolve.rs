@@ -810,17 +810,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
 
     /// The anonymous function definition `e` is, if it is one (`#sec-isanonymousfunctiondefinition`).
     fn anonymous_function(&self, e: ExprId) -> Option<FunctionId> {
-        match self.ast.expr(e).map(|n| &n.expr) {
-            Some(Expr::Function(f)) => self
-                .ast
-                .function(*f)
-                .filter(|x| {
-                    x.name.is_none()
-                        && matches!(x.kind, FunctionKind::Expression | FunctionKind::Arrow)
-                })
-                .map(|_| *f),
-            _ => None,
-        }
+        anonymous_function(self.ast, e)
     }
 
     fn stmt(&mut self, id: StmtId) -> Result<(), CompileError> {
@@ -1077,10 +1067,20 @@ impl<'a, 'm> Resolver<'a, 'm> {
             }
             Expr::Object(properties) => {
                 for p in properties {
+                    // A computed key is evaluated before its value, and its function gets its
+                    // name when the literal is evaluated (`#sec-setfunctionname`).
+                    let computed = match p.key {
+                        PropertyKey::Computed(k) => {
+                            children.push(Walk::Expr(k));
+                            true
+                        }
+                        _ => false,
+                    };
                     match p.value {
                         PropertyValue::Init(e) => {
                             if let Some(f) = self.anonymous_function(e)
                                 && !is_proto(&p.key)
+                                && !computed
                             {
                                 let key = property_key(&p.key, self.m)?;
                                 self.give_name(f, key)?;
@@ -1088,6 +1088,10 @@ impl<'a, 'm> Resolver<'a, 'm> {
                             children.push(Walk::Expr(e));
                         }
                         PropertyValue::Get(f) | PropertyValue::Set(f) => {
+                            if computed {
+                                children.push(Walk::Function(f));
+                                continue;
+                            }
                             let prefix = if matches!(p.value, PropertyValue::Get(_)) {
                                 "get "
                             } else {
@@ -1105,11 +1109,15 @@ impl<'a, 'm> Resolver<'a, 'm> {
                         // (`#sec-runtime-semantics-definemethod`, SetFunctionName in
                         // DefineMethodProperty's caller).
                         PropertyValue::Method(f) => {
-                            let key = property_key(&p.key, self.m)?;
-                            self.give_name(f, key)?;
+                            if !computed {
+                                let key = property_key(&p.key, self.m)?;
+                                self.give_name(f, key)?;
+                            }
                             children.push(Walk::Function(f));
                         }
-                        PropertyValue::Shorthand(e) => children.push(Walk::Expr(e)),
+                        PropertyValue::Shorthand(e) | PropertyValue::Spread(e) => {
+                            children.push(Walk::Expr(e));
+                        }
                         // The parser rereads such a literal as a pattern, or refuses it.
                         PropertyValue::CoverInitialized(..) => {
                             return Err(malformed("a CoverInitializedName in an object literal"));
@@ -1125,6 +1133,9 @@ impl<'a, 'm> Resolver<'a, 'm> {
             Expr::ObjectPattern { properties, .. } => {
                 for (i, p) in properties.iter().enumerate() {
                     let n = u32::try_from(i).map_err(|_| CompileError::TooMany("properties"))?;
+                    if let PropertyKey::Computed(k) = p.key {
+                        children.push(Walk::Expr(k));
+                    }
                     let name = match &p.target {
                         PatternTarget::Binding(name) => {
                             self.occur(Site::Bound(id, n), &name.name);
@@ -1811,7 +1822,21 @@ fn is_proto(key: &PropertyKey) -> bool {
     match key {
         PropertyKey::Identifier(s) => s == "__proto__",
         PropertyKey::String(s) => s.value.iter().copied().eq("__proto__".encode_utf16()),
-        PropertyKey::Number(_) => false,
+        PropertyKey::Number(_) | PropertyKey::Computed(_) => false,
+    }
+}
+
+/// The anonymous function definition `e` of `ast` is, if it is one
+/// (`#sec-isanonymousfunctiondefinition`).
+pub(crate) fn anonymous_function(ast: &Ast, e: ExprId) -> Option<FunctionId> {
+    match ast.expr(e).map(|n| &n.expr) {
+        Some(Expr::Function(f)) => ast
+            .function(*f)
+            .filter(|x| {
+                x.name.is_none() && matches!(x.kind, FunctionKind::Expression | FunctionKind::Arrow)
+            })
+            .map(|_| *f),
+        _ => None,
     }
 }
 
@@ -1834,5 +1859,6 @@ pub(crate) fn property_key(key: &PropertyKey, m: &Meter<'_>) -> Result<Vec<u16>,
             m.credit(32);
             units?
         }
+        PropertyKey::Computed(_) => return Err(malformed("a computed key read as a literal one")),
     })
 }

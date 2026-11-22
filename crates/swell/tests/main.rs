@@ -25,6 +25,7 @@ mod builtins_string_transform;
 mod builtins_uri;
 mod calls;
 mod collect;
+mod computed_names_and_object_spread;
 mod conversion;
 mod determinism;
 mod dynamic_function;

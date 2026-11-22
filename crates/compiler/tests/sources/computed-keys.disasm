@@ -1,0 +1,52 @@
+script locals 0
+  var "k" "m" "g" "s"
+  0000 3:1 ResolveGlobal "x"
+  0001 3:5 NewObject
+  0002 3:10 Number 1
+  0003 3:7 DefineField "a"
+  0004 3:14 GetGlobal "k"
+  0005 3:14 ToPropertyKey
+  0006 3:18 Number 2
+  0007 3:13 DefineComputedField
+  0008 3:22 GetGlobal "k"
+  0009 3:26 Number 1
+  0010 3:22 Add
+  0011 3:22 ToPropertyKey
+  0012 3:30 Closure 0
+  0013 3:21 SetFunctionName
+  0014 3:21 DefineComputedField
+  0015 3:47 GetGlobal "m"
+  0016 3:47 ToPropertyKey
+  0017 3:46 Closure 1
+  0018 3:46 DefineComputedMethod
+  0019 3:61 GetGlobal "g"
+  0020 3:61 ToPropertyKey
+  0021 3:56 Closure 2
+  0022 3:56 DefineComputedGetter
+  0023 3:86 GetGlobal "s"
+  0024 3:86 ToPropertyKey
+  0025 3:81 Closure 3
+  0026 3:81 DefineComputedSetter
+  0027 3:1 PutGlobalRef "x"
+  0028 3:1 StoreCompletion
+  0029 0:0 LoadCompletion
+  0030 0:0 Return
+
+function 0 expression "" length 0 locals 0
+  0000 3:30 Undefined
+  0001 3:30 Return
+
+function 1 method "" length 0 locals 0
+  0000 3:46 Undefined
+  0001 3:46 Return
+
+function 2 getter "" length 0 locals 0
+  0000 3:75 Number 0
+  0001 3:68 Return
+  0002 3:56 Undefined
+  0003 3:56 Return
+
+function 3 setter "" length 1 locals 1
+  params local 0
+  0000 3:81 Undefined
+  0001 3:81 Return
