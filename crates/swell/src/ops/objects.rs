@@ -191,13 +191,6 @@ impl<H: Host> Agent<H> {
 
     /// Invoke ( V, P [ , argumentsList ] ) (`#sec-invoke`): the method `key` of `value`, a
     /// primitive included, called with `value` as the this value.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Object.prototype.toLocaleString, Array.prototype.toLocaleString: story:object-integrity-and-prototype-methods, story:array-search-and-copy-methods"
-        )
-    )]
     pub(crate) fn invoke(&mut self, value: Value, key: Key, args: &[Value]) -> Completion<Value> {
         // 2. Let func be ? GetV(V, P). Nothing runs between it and the Call, which holds func,
         // V and the arguments in its activation.

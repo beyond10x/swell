@@ -69,10 +69,6 @@ impl<H: Host> Agent<H> {
     }
 
     /// SameValueZero (`#sec-samevaluezero`).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "Array.prototype.includes: story:harness-builtins")
-    )]
     pub(crate) fn same_value_zero(&mut self, x: Value, y: Value) -> Completion<bool> {
         match (x, y) {
             (Value::Number(x), Value::Number(y)) => Ok((x.is_nan() && y.is_nan()) || x == y),
