@@ -10,13 +10,13 @@
 //! also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{TestHost, agent_with, global, limits, object, realm, stack_with_room};
 use support::script::{Outcome, define_function, eval, eval_text, parse};
 use support::stack::{
     BUILTINS_REENTRY, FULL_REENTRY, THROUGH_BUILTINS, deepest, is_range_error_of, on_bounded_stack,
-    parse_deep, reach_through, reenter, remember, stack_limits,
+    parse_deep, reach_through, reenter, remember, stack_limits, test_path,
 };
 use swell::{
     AgentState, Brand, Completion, Cx, GlobalObjects, HookCx, HostCall, HostObjectSpec,
@@ -128,7 +128,7 @@ fn reach_through_host_function() {
 fn host_17_deepest_reentry_parses_at_full_nesting() {
     let stack = stack_with_room(stack_limits(host_17_reentry()));
     on_bounded_stack(
-        "host_17_deepest_reentry_parses_at_full_nesting",
+        test_path!("host_17_deepest_reentry_parses_at_full_nesting"),
         stack,
         reach_through_host_function,
     )
@@ -173,7 +173,7 @@ fn reach_through_builtins() {
 fn min_stack_bytes_is_enough_through_builtins() {
     let stack = stack_with_room(stack_limits(builtins_reentry()));
     on_bounded_stack(
-        "min_stack_bytes_is_enough_through_builtins",
+        test_path!("min_stack_bytes_is_enough_through_builtins"),
         stack,
         reach_through_builtins,
     )

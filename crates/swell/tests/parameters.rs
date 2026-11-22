@@ -12,7 +12,7 @@
 //! or a destructuring pattern.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{agent, limits, realm};
 use support::script::{Outcome, eval_text, run, run_both};

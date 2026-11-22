@@ -9,11 +9,11 @@
 //! as code units (`cx.to_utf16`). Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{TestHost, agent_with, global, limits, object, realm, stack_with_room};
 use support::script::show_thrown;
-use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits};
+use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
 use swell::{Agent, AgentState, Limits, Outcome as HostOutcome, Realm, Root, Termination, Value};
 
 /// What a call of a URI function answered.
@@ -568,7 +568,7 @@ fn reach_through_encode_uri() {
 fn to_string_of_the_argument_reaches_the_reentry_limit_on_the_promised_stack() {
     let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
     on_bounded_stack(
-        "to_string_of_the_argument_reaches_the_reentry_limit_on_the_promised_stack",
+        test_path!("to_string_of_the_argument_reaches_the_reentry_limit_on_the_promised_stack"),
         stack,
         reach_through_encode_uri,
     )

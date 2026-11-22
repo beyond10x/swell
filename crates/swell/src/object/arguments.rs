@@ -83,26 +83,32 @@ impl<H: Host> Agent<H> {
     ) -> Completion<ObjectRef> {
         let count = u32::try_from(args.len()).unwrap_or(u32::MAX);
         self.charge_steps(u64::from(count))?;
-        let map = match &mapping {
-            Some(mapping) => self.parameter_map(mapping, args.len())?,
-            None => None,
+        // The map's slots are charged when the map is made; the record owns those bytes once it
+        // is stored, and the sweep that frees it credits them.
+        let (map, owned) = match &mapping {
+            Some(mapping) => match self.parameter_map(mapping, args.len())? {
+                Some((map, owned)) => (Some(map), owned),
+                None => (None, 0),
+            },
+            None => (None, 0),
         };
-        let owned = map.as_ref().map_or(0, |map| {
-            u64::try_from(
-                map.slots
-                    .capacity()
-                    .saturating_mul(size_of::<Option<u32>>()),
-            )
-            .unwrap_or(u64::MAX)
-        });
-        let prototype = self.intrinsic(realm, Intrinsic::ObjectPrototype)?;
+        let prototype = match self.intrinsic(realm, Intrinsic::ObjectPrototype) {
+            Ok(prototype) => prototype,
+            Err(abrupt) => {
+                self.heap.accounting.credit(owned);
+                return Err(abrupt);
+            }
+        };
         let record = ObjectRecord::new(
             Some(prototype),
             ObjectKind::Arguments(ArgumentsObject { map }),
         );
-        let object = match self.heap.new_object(record, owned) {
+        let object = match self.heap.new_object_charged(record, owned) {
             Ok(object) => object,
-            Err(_) => return Err(self.terminate(Termination::MemoryBudget)),
+            Err(_) => {
+                self.heap.accounting.credit(owned);
+                return Err(self.terminate(Termination::MemoryBudget));
+            }
         };
         // The object is new and extensible: each CreateDataPropertyOrThrow and
         // DefinePropertyOrThrow adds the property.
@@ -151,12 +157,16 @@ impl<H: Host> Agent<H> {
     /// parameter to the first, each name not mapped yet and whose index is below the number of
     /// arguments is mapped; parameters of one name have one slot, so a name is mapped once
     /// whatever its index (a later parameter of the name past the arguments leaves the earlier
-    /// ones unmapped). `None` when no index is mapped. A step per parameter.
+    /// ones unmapped). `None` when no index is mapped. A step per parameter. The map's `slots`
+    /// and the `seen` list of the walk are charged before they are reserved; `seen` is credited
+    /// when it drops, and the map answers with the bytes of `slots`, which stay charged.
     fn parameter_map(
         &mut self,
         mapping: &Mapping<'_>,
         arguments: usize,
-    ) -> Completion<Option<ParameterMap>> {
+    ) -> Completion<Option<(ParameterMap, u64)>> {
+        #[cfg(test)]
+        MAP_READINGS.with(|readings| readings.set([self.heap.accounting.used(), 0]));
         let mapped = arguments.min(mapping.params.len());
         if mapped == 0 {
             return Ok(None);
@@ -176,29 +186,32 @@ impl<H: Host> Agent<H> {
                     .saturating_add(1),
             );
         }
-        let bytes = mapped
-            .saturating_mul(size_of::<Option<u32>>())
-            .saturating_add(width.saturating_mul(size_of::<bool>()));
-        if self
-            .heap
-            .accounting
-            .check(u64::try_from(bytes).unwrap_or(u64::MAX))
-            .is_err()
-        {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
+        let slot_bytes =
+            u64::try_from(mapped.saturating_mul(size_of::<Option<u32>>())).unwrap_or(u64::MAX);
+        let seen_bytes = u64::try_from(width.saturating_mul(size_of::<bool>())).unwrap_or(u64::MAX);
+        let bytes = slot_bytes.saturating_add(seen_bytes);
+        self.charge_bytes(bytes)?;
         let mut slots = Vec::new();
         let mut seen = Vec::new();
         if slots.try_reserve_exact(mapped).is_err() || seen.try_reserve_exact(width).is_err() {
+            self.heap.accounting.credit(bytes);
             return Err(self.terminate(Termination::MemoryBudget));
+        }
+        #[cfg(test)]
+        {
+            let used = self.heap.accounting.used();
+            MAP_READINGS.with(|readings| readings.set([readings.get()[0], used]));
+            MAPS_RESERVED.with(|reserved| reserved.set(reserved.get().saturating_add(1)));
         }
         slots.resize(mapped, None);
         seen.resize(width, false);
         for (index, param) in mapping.params.iter().enumerate().rev() {
             let ParamSlot::Env(slot) = *param else {
+                self.heap.accounting.credit(bytes);
                 return Err(self.fault());
             };
             let Some(taken) = usize::try_from(slot).ok().and_then(|s| seen.get_mut(s)) else {
+                self.heap.accounting.credit(bytes);
                 return Err(self.fault());
             };
             if *taken {
@@ -209,7 +222,9 @@ impl<H: Host> Agent<H> {
                 *entry = Some(slot);
             }
         }
-        Ok(Some(ParameterMap { env, slots }))
+        drop(seen);
+        self.heap.accounting.credit(seen_bytes);
+        Ok(Some((ParameterMap { env, slots }, slot_bytes)))
     }
 
     /// The binding `key` is mapped to in the parameter map of `object`, if any
@@ -304,5 +319,183 @@ impl<H: Host> Agent<H> {
             self.unmap(object, key)?;
         }
         Ok(deleted)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// `accounting.used()` at the entry of the last `parameter_map` and, once its `slots` and
+    /// `seen` are reserved, after that (0 until then), in the counting build of the tests; a
+    /// test resets it before it reads it.
+    static MAP_READINGS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0, 0]) };
+    /// The parameter maps reserved, in the counting build of the tests; a test resets it before
+    /// it reads it.
+    static MAPS_RESERVED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAP_READINGS, MAPS_RESERVED};
+    use crate::host::agent::Agent;
+    use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, limits};
+    use crate::host::outcome::HostError;
+    use crate::value::{Root, Value};
+    use crate::{Outcome, Parsed, Realm, Source, Termination};
+
+    /// The number of parameters of `f` and of arguments of its call.
+    const PARAMETERS: u32 = 1_000;
+
+    /// The bytes of the parameter map of the call of `f` at least: `slots`, one entry per
+    /// mapped index, and `seen`, one entry per environment slot up to the highest a parameter
+    /// has, at least one per parameter.
+    fn map_bytes() -> u64 {
+        u64::from(PARAMETERS) * (size_of::<Option<u32>>() + size_of::<bool>()) as u64
+    }
+
+    /// An agent with no step budget to speak of and a memory budget of what its realm holds
+    /// plus 256 MiB, in which a script declared the non-strict function `f` of 1,000
+    /// parameters that answers `arguments.length`, with the roots of a call of `f` from Rust
+    /// with 1,000 Numbers.
+    struct Prepared {
+        agent: Agent<NoHooks>,
+        realm: Realm,
+        function: Root,
+        this: Root,
+        args: Vec<Root>,
+        roomy_limit: u64,
+    }
+
+    impl Prepared {
+        /// The agent, with the call run once and the heap collected after it.
+        fn new() -> Prepared {
+            let names: Vec<String> = (0..PARAMETERS).map(|i| format!("p{i}")).collect();
+            let source = format!(
+                "function f({}) {{ return arguments.length; }} f",
+                names.join(", ")
+            );
+            let mut limits = limits();
+            limits.steps_per_entry = u64::MAX;
+            limits.memory_bytes = 1 << 30;
+            let (mut agent, realm) = agent_with_realm_and(limits);
+            let roomy_limit = agent.heap.bytes() + (1 << 28);
+            agent.heap.accounting.set_limit(roomy_limit);
+            let script = match agent.parse_script(&realm, Source::Utf8(&source), None) {
+                Ok(Parsed::Parsed(script)) => script,
+                other => panic!("the declaration did not parse: {other:?}"),
+            };
+            let function = match agent.evaluate_script(&script) {
+                Ok(Outcome::Normal(function)) => function,
+                other => panic!("the declaration answered {other:?}"),
+            };
+            let this = agent.heap.roots.add(Value::Undefined);
+            let args = (0..PARAMETERS)
+                .map(|i| agent.heap.roots.add(Value::Number(f64::from(i))))
+                .collect();
+            let mut prepared = Prepared {
+                agent,
+                realm,
+                function,
+                this,
+                args,
+                roomy_limit,
+            };
+            prepared.answers_the_count();
+            assert!(prepared.agent.collect().is_ok());
+            prepared
+        }
+
+        /// `f` called with the 1,000 Numbers.
+        fn call(&mut self) -> Result<Outcome<Root>, HostError> {
+            let args: Vec<&Root> = self.args.iter().collect();
+            self.agent
+                .call(&self.realm, &self.function, &self.this, &args)
+        }
+
+        /// The call answers 1,000.
+        fn answers_the_count(&mut self) {
+            let outcome = self.call();
+            let Ok(Outcome::Normal(answer)) = outcome else {
+                panic!("{outcome:?}");
+            };
+            assert_eq!(
+                self.agent.heap.roots.get(&answer),
+                Ok(Value::Number(f64::from(PARAMETERS)))
+            );
+        }
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (storage is charged before it is allocated),
+    /// and CreateMappedArgumentsObject (`#sec-createmappedargumentsobject`), steps 15 to 19, the
+    /// parameter map: the call of [`Prepared`] reads the ledger at the entry of the map's
+    /// making and once its two lists are reserved, and the second reading holds their bytes
+    /// on top of the first. After a collection the reading is the one before the call.
+    #[test]
+    fn the_parameter_map_is_charged_while_it_is_held() {
+        let mut prepared = Prepared::new();
+        let before = prepared.agent.heap_bytes().unwrap();
+        MAP_READINGS.with(|readings| readings.set([0, 0]));
+        prepared.answers_the_count();
+        let [first, second] = MAP_READINGS.with(std::cell::Cell::get);
+        assert!(
+            second >= first + map_bytes(),
+            "{second} once the map is reserved, {first} before, {} the map's bytes at least",
+            map_bytes()
+        );
+        assert!(prepared.agent.collect().is_ok());
+        assert_eq!(
+            prepared.agent.heap_bytes().unwrap(),
+            before,
+            "after the call"
+        );
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (storage is charged before it is allocated),
+    /// and CreateMappedArgumentsObject: the call of [`Prepared`] under a budget of the reading
+    /// recorded at the entry of the map's making on a first run, on an agent made the same
+    /// way, plus half the map's bytes, ends in `Terminated(MemoryBudget)` at that entry with no
+    /// map reserved. With the budget raised the call answers 1,000 and reserves one map, and
+    /// after a collection the reading is the one before.
+    #[test]
+    fn the_parameter_map_is_not_made_past_the_memory_budget() {
+        let mut first_run = Prepared::new();
+        MAP_READINGS.with(|readings| readings.set([0, 0]));
+        first_run.answers_the_count();
+        let [entry, _] = MAP_READINGS.with(std::cell::Cell::get);
+        drop(first_run);
+        let mut prepared = Prepared::new();
+        let before = prepared.agent.heap_bytes().unwrap();
+        prepared
+            .agent
+            .heap
+            .accounting
+            .set_limit(entry + map_bytes() / 2);
+        MAP_READINGS.with(|readings| readings.set([0, 0]));
+        MAPS_RESERVED.with(|reserved| reserved.set(0));
+        let outcome = prepared.call();
+        assert!(
+            matches!(outcome, Ok(Outcome::Terminated(Termination::MemoryBudget))),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            MAP_READINGS.with(std::cell::Cell::get)[0],
+            entry,
+            "the map's making was entered at another reading"
+        );
+        assert_eq!(
+            MAPS_RESERVED.with(std::cell::Cell::get),
+            0,
+            "a map reserved past the memory budget"
+        );
+        drop(outcome);
+        let roomy_limit = prepared.roomy_limit;
+        prepared.agent.heap.accounting.set_limit(roomy_limit);
+        prepared.answers_the_count();
+        assert_eq!(MAPS_RESERVED.with(std::cell::Cell::get), 1);
+        assert!(prepared.agent.collect().is_ok());
+        assert_eq!(
+            prepared.agent.heap_bytes().unwrap(),
+            before,
+            "after the call"
+        );
     }
 }

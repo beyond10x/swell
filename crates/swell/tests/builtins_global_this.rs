@@ -7,7 +7,7 @@
 //! `globalThis` answers that object. Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{TestHost, agent, global, object, realm};
 use support::script::{Outcome, eval, eval_text, run_both};

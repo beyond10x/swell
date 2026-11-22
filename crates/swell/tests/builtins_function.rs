@@ -8,12 +8,13 @@
 //! with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{
     TestHost, agent, agent_with, data, get, get_object, global, is_error_of, key, limits, object,
     realm, string, text, thrown,
 };
+use support::stack::{TestPath, test_path};
 use swell::{Completion, Cx, HostCall, ObjectRef, Outcome, Value};
 
 /// How a recorded value reads: a String by its text, a Number by its value, an object by its
@@ -324,7 +325,7 @@ const STACK_BYTES: usize = 256 * 1024;
 /// Runs `body` on a thread of [`STACK_BYTES`] in a child process that runs only the test
 /// `test`. A stack overflow aborts the process, which no test can catch in its own process; in
 /// the child it fails this test alone, with the child's output.
-fn on_small_stack(test: &str, body: fn()) {
+fn on_small_stack(test: TestPath, body: fn()) {
     let done = format!("{STACK_CHILD}: {test} done");
     if std::env::var_os(STACK_CHILD).is_some() {
         std::thread::Builder::new()
@@ -338,7 +339,7 @@ fn on_small_stack(test: &str, body: fn()) {
     }
     let exe = std::env::current_exe().unwrap();
     let out = std::process::Command::new(exe)
-        .args([test, "--exact", "--nocapture", "--test-threads=1"])
+        .args(["--exact", test.as_str(), "--nocapture", "--test-threads=1"])
         .env(STACK_CHILD, "1")
         .output()
         .unwrap();
@@ -385,7 +386,8 @@ fn links() -> u32 {
 /// ("bound " and the empty String) instead of growing by six code units a link.
 #[test]
 fn bound_chain_of_100000_links_needs_no_rust_stack() {
-    on_small_stack("bound_chain_of_100000_links_needs_no_rust_stack", || {
+    let test = test_path!("bound_chain_of_100000_links_needs_no_rust_stack");
+    on_small_stack(test, || {
         let mut limits = limits();
         limits.memory_bytes = 512 * 1024 * 1024;
         let mut agent = agent_with(limits).unwrap();

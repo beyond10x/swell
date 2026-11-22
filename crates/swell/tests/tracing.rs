@@ -5,7 +5,7 @@
 //! `collect-every-safe-point`, where every instruction boundary collects.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{agent, agent_with, limits, realm};
 use support::script::{Outcome, eval, eval_text, parse};

@@ -4,7 +4,7 @@
 //! (HOST-158, slice 11). The five required hooks have no default to test.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{TestHost, agent, realm};
 use swell::{

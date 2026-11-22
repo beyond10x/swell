@@ -3,37 +3,71 @@ version: '3'
 set: [pipefail]
 
 tasks:
-  test-binaries-check:
-    desc: Fail, naming each, when a test executable of the workspace has a section whose name starts with .debug_.
+  test-main:
+    desc: Write tests/main.rs, the one integration-test binary, of every crate with tests from the files of its tests/ directory.
     summary: |
-      The test builds carry no debug information (the organization's rule "Tests stay fast";
-      story test-builds-carry-no-debug-information). .cargo/config.toml builds the dev profile,
-      and the test profile that inherits it, with debug = false and strip = "debuginfo"; this
-      check shows it on every test executable. A step of check right after build.
+      Write tests/main.rs of every crate under GATE_CRATES (default crates) that has a file
+      *.rs in tests/: "sh taskfiles/test-main.sh write", which says what the file holds (a
+      generated first line, then "mod <name>;" for each tests/<name>.rs and for support, in
+      byte order). Run it after adding, removing or renaming a file under tests/, and on a
+      merge conflict in a tests/main.rs; the file is never edited by hand. Builds nothing.
+      Prints "test-main: wrote <file>" for each file it changed and a count line.
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    vars:
+      GATE_CRATES: '{{.GATE_CRATES | default "crates"}}'
+    env:
+      GATE_CRATES: '{{.GATE_CRATES}}'
+    cmds:
+      - sh taskfiles/test-main.sh write
 
-      Reads the test executables from GATE_TEST_BUILD_JSON, a file of cargo's JSON messages.
-      When that is not given, it runs "cargo test --locked --workspace --no-run
+  test-binaries-check:
+    desc: Fail, naming each, when a crate's tests are not one generated integration-test binary, when a package has more than one, or when a test executable has a section whose name starts with .debug_.
+    summary: |
+      Each crate has one integration-test binary, tests/main.rs, generated from its test files
+      (the organization's rule "Tests stay fast": one integration-test binary per crate; story
+      one-integration-test-binary-per-crate), and the test builds carry no debug information
+      (story test-builds-carry-no-debug-information). A step of check right after build.
+
+      First the layout check, "sh taskfiles/test-main.sh check" over GATE_CRATES (default
+      crates): it fails, naming the file, on a tests/main.rs that differs from its generation,
+      a crate with tests whose [package] lacks autotests = false, one without exactly one
+      [[test]] named main, and a module named lib, doc or as a binary target of the package
+      (taskfiles/test-main.sh says which lines it prints). Its failure is reported at the end,
+      after the checks below, so that one run names every problem.
+
+      Then it reads the test executables from GATE_TEST_BUILD_JSON, a file of cargo's JSON
+      messages. When that is not given, it runs "cargo test --locked --workspace --no-run
       --message-format=json" with RUSTFLAGS -D warnings, the flags of the step build, so that
       it reuses what build made and builds nothing after it, into .out/test-binaries/build.json
       (its log .out/test-binaries/build.log, printed when the build fails). A test executable is
       a message with reason compiler-artifact, .profile.test true and an executable (jq); their
-      list is written beside the file of messages as <file>.executables. It runs
-      taskfiles/no-debug-sections.sh on all of them (readelf -S on each; its lines go to
-      <file>.sections.log), prints the lines
-      of the binaries with debug sections, and names each as "test-binaries-check: <binary> has
-      a .debug_ section". It fails when one has such a section, when the file holds no test
-      executable (a check that reads nothing fails), when it is not cargo's JSON, and when the
-      build fails. When it passes it prints "test-binaries-check: <n> test executables, none
-      with a .debug_ section". The planted script
-      tests/gate/test-binaries-check-refuses-a-test-binary-with-debug-sections.sh holds it.
+      list is written beside the file of messages as <file>.executables. An integration-test
+      binary is one whose target kind is test; the package is read from its package_id. A
+      package with more than one is named as "test-binaries-check: package <name> has <n>
+      integration-test binaries: <targets>". Then it runs taskfiles/no-debug-sections.sh on
+      every test executable (readelf -S on each; its lines go to <file>.sections.log), prints
+      the lines of the binaries with debug sections, and names each as "test-binaries-check:
+      <binary> has a .debug_ section". It fails when the layout check fails, when a package has
+      more than one integration-test binary, when an executable has a debug section, when the
+      file holds no test executable (a check that reads nothing fails), when it is not cargo's
+      JSON, and when the build fails. When it passes it prints "test-binaries-check: <n> test
+      executables, <k> integration-test binaries in <k> packages, none with a .debug_ section".
+      The planted scripts tests/gate/test-binaries-check-refuses-a-test-binary-with-debug-sections.sh,
+      tests/gate/test-binaries-check-refuses-a-second-test-binary.sh and
+      tests/gate/test-binaries-check-refuses-a-main-rs-that-is-not-generated.sh hold it.
     dir: '{{.TASKFILE_DIR}}/..'
     silent: true
-    env:
-      RUSTFLAGS: -D warnings
     vars:
       GATE_TEST_BUILD_JSON: '{{.GATE_TEST_BUILD_JSON | default ""}}'
+      GATE_CRATES: '{{.GATE_CRATES | default "crates"}}'
+    env:
+      RUSTFLAGS: -D warnings
+      GATE_CRATES: '{{.GATE_CRATES}}'
     cmds:
       - |
+        layout=0
+        sh taskfiles/test-main.sh check || layout=1
         json={{shellQuote .GATE_TEST_BUILD_JSON}}
         if [ -z "$json" ]; then
           mkdir -p .out/test-binaries
@@ -55,6 +89,22 @@ tasks:
           echo "test-binaries-check: no test executable among the messages of $json"
           exit 1
         fi
+        jq -r '
+          select(.reason == "compiler-artifact" and .profile.test == true and .executable != null and (.target.kind | index("test")))
+          | (.package_id | split("#") | (if (.[1] | contains("@")) then (.[1] | split("@") | .[0]) else (.[0] | split("/") | last) end)) as $package
+          | [$package, .target.name] | @tsv
+        ' "$json" | LC_ALL=C sort -u > "$json.integration" ||
+          { echo "test-binaries-check: cannot read the integration-test targets of $json"; exit 1; }
+        count=0
+        if ! LC_ALL=C awk -F '\t' '
+          { n[$1]++; names[$1] = names[$1] (n[$1] > 1 ? ", " : "") $2 }
+          END {
+            for (p in n) if (n[p] > 1) { printf "test-binaries-check: package %s has %d integration-test binaries: %s\n", p, n[p], names[p]; bad = 1 }
+            exit bad
+          }
+        ' "$json.integration" | LC_ALL=C sort; then count=1; fi
+        packages=$(cut -f 1 "$json.integration" | LC_ALL=C sort -u | grep -c . || true)
+        binaries=$(grep -c . "$json.integration" || true)
         nl=$(printf '\nx')
         nl=${nl%x}
         set -f
@@ -69,6 +119,12 @@ tasks:
           sed -n 's/^stack-profiles: \(.*\) has debug sections$/test-binaries-check: \1 has a .debug_ section/p' "$sections"
           bad=$(grep -c ' has debug sections$' "$sections" || true)
           echo "test-binaries-check: $bad of $n test executables with a .debug_ section, or not read ($sections)"
-          exit 1
         fi
-        echo "test-binaries-check: $n test executables, none with a .debug_ section"
+        if [ "$count" -ne 0 ]; then
+          echo "test-binaries-check: $binaries integration-test binaries in $packages packages; the form is one per package, tests/main.rs (taskfiles/test-main.sh)"
+        fi
+        if [ "$layout" -ne 0 ]; then
+          echo "test-binaries-check: the test layout differs from its generation (taskfiles/test-main.sh check, above)"
+        fi
+        if [ "$status" -ne 0 ] || [ "$count" -ne 0 ] || [ "$layout" -ne 0 ]; then exit 1; fi
+        echo "test-binaries-check: $n test executables, $binaries integration-test binaries in $packages packages, none with a .debug_ section"

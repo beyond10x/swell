@@ -16,14 +16,14 @@
 //! `constructor` of an Array. Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{
     TestHost, agent, agent_with, get, get_object, global, key, limits, object, realm,
     stack_with_room, text,
 };
 use support::script::{Outcome, eval_text, run_both};
-use support::stack::{FULL_REENTRY, on_bounded_stack, reach_through, stack_limits};
+use support::stack::{FULL_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
 use swell::{Agent, AgentState, Cx, ObjectRef, Realm, Termination, Value};
 
 /// Both modes of `source` answer `expected`, a normal completion as `show` writes it.
@@ -527,7 +527,7 @@ fn the_same_enumeration_twice_spends_the_same_steps() {
 fn assign_getter_and_setter_reach_the_reentry_limit_on_the_promised_stack() {
     let stack = stack_with_room(stack_limits(ASSIGN_REENTRY));
     on_bounded_stack(
-        "assign_getter_and_setter_reach_the_reentry_limit_on_the_promised_stack",
+        test_path!("assign_getter_and_setter_reach_the_reentry_limit_on_the_promised_stack"),
         stack,
         || {
             for through in [

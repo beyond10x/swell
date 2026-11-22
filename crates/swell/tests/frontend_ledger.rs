@@ -7,7 +7,7 @@
 //! `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{limits, seeds};
 use swell::{

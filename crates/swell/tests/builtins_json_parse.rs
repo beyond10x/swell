@@ -10,14 +10,14 @@
 //! `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{
     TestHost, agent, agent_with, get, get_object, global, is_error_of, key, limits, object, realm,
     stack_with_room, text, thrown,
 };
 use support::script::{Outcome, eval, eval_text, run_both};
-use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits};
+use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
 use swell::{Abrupt, Completion, Cx, HostCall, Limits, ObjectRef, PropertyKey, Termination, Value};
 
 /// `JSON.parse(args)` through `cx.call`.
@@ -359,7 +359,7 @@ const PARSE_ROOM: u64 = 1 << 20;
 #[test]
 fn parse_of_100000_nested_brackets_ends_in_a_result_or_the_memory_budget() {
     on_bounded_stack(
-        "parse_of_100000_nested_brackets_ends_in_a_result_or_the_memory_budget",
+        test_path!("parse_of_100000_nested_brackets_ends_in_a_result_or_the_memory_budget"),
         stack_with_room(limits()),
         || {
             assert_eq!(parse_nested(limits(), DEPTH, None), Ok(()));
@@ -599,7 +599,7 @@ fn roomy_limits() -> Limits {
 #[test]
 fn reviver_on_100000_nested_arrays_ends_in_a_result_or_a_budget() {
     on_bounded_stack(
-        "reviver_on_100000_nested_arrays_ends_in_a_result_or_a_budget",
+        test_path!("reviver_on_100000_nested_arrays_ends_in_a_result_or_a_budget"),
         stack_with_room(limits()),
         || {
             assert_eq!(
@@ -617,7 +617,7 @@ fn reviver_on_100000_nested_arrays_ends_in_a_result_or_a_budget() {
 #[test]
 fn reviver_on_100000_nested_arrays_under_1_mib_ends_in_the_memory_budget() {
     on_bounded_stack(
-        "reviver_on_100000_nested_arrays_under_1_mib_ends_in_the_memory_budget",
+        test_path!("reviver_on_100000_nested_arrays_under_1_mib_ends_in_the_memory_budget"),
         stack_with_room(limits()),
         || {
             let mut small = roomy_limits();
@@ -844,7 +844,7 @@ fn what_parse_holds_survives_a_collection_in_the_reviver() {
 #[test]
 fn reviver_reaches_the_reentry_limit_on_the_promised_stack() {
     on_bounded_stack(
-        "reviver_reaches_the_reentry_limit_on_the_promised_stack",
+        test_path!("reviver_reaches_the_reentry_limit_on_the_promised_stack"),
         stack_with_room(stack_limits(BUILTINS_REENTRY)),
         || reach_through("JSON.parse(\"[0]\", f)", BUILTINS_REENTRY),
     )

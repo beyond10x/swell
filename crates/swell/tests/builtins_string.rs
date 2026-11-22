@@ -7,7 +7,7 @@
 //! and copy it (`story:string-builtins-charge-before-they-copy`), each called by the host.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{
     TestHost, agent, data, get, get_object, global, is_error_of, key, object, realm, string, text,

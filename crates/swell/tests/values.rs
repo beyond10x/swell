@@ -2,7 +2,7 @@
 //! decision 5): the exact UTF-16 conversion of Web IDL's `DOMString`, the lossy one of its
 //! `USVString`, and a `&str` taken without loss.
 
-mod support;
+use crate::support;
 
 use swell::HostError;
 

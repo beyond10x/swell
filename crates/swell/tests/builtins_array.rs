@@ -11,7 +11,7 @@
 //! code. Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{
     TestHost, agent, agent_with, get, get_object, global, is_error_of, key, limits, object, realm,

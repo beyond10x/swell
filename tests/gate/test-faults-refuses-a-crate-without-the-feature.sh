@@ -14,9 +14,11 @@
 # The planted workspace has one member, crates/swell, as test-collect-refuses-a-crate-without-
 # the-feature.sh builds it: its root manifest is the real one's [workspace.package],
 # [workspace.lints] and [profile] sections under its own [workspace]; its crates/swell/Cargo.toml
-# is the real one's [package] and [lints] sections, without dependencies, targets or features.
-# Its Cargo.lock is made for it (cargo generate-lockfile --offline). Its lib.rs is one function,
-# and its tests/faults.rs one passing test. The task runs in the planted workspace (task -d),
+# is the real one's [package], [[test]] and [lints] sections, without dependencies or features:
+# its one test binary is tests/main.rs, as for the real crate, and the step names the test by its
+# filter. Its Cargo.lock is made for it (cargo generate-lockfile --offline). Its lib.rs is one
+# function, its tests/faults.rs one passing test, and its tests/main.rs is written by
+# taskfiles/test-main.sh ("mod faults;"). The task runs in the planted workspace (task -d),
 # with the real taskfiles/fault-injection.yml and taskfiles/nextest.yml and the real
 # .config/nextest.toml.
 
@@ -49,9 +51,10 @@ cp clippy.toml "$dir/clippy.toml" || fail "cannot copy clippy.toml"
   awk '/^\[/ { keep = ($0 == "[workspace.package]" || $0 ~ /^\[workspace\.lints[].]/ || $0 ~ /^\[profile[].]/) } keep' Cargo.toml
 } > "$dir/Cargo.toml" || fail "cannot write the planted Cargo.toml"
 manifest=$dir/crates/swell/Cargo.toml
-awk '/^\[/ { keep = ($0 == "[package]" || $0 ~ /^\[lints[].]/) } keep' crates/swell/Cargo.toml > "$manifest.without" ||
+awk '/^\[/ { keep = ($0 == "[package]" || $0 == "[[test]]" || $0 ~ /^\[lints[].]/) } keep' crates/swell/Cargo.toml > "$manifest.without" ||
   fail "cannot write the planted crates/swell/Cargo.toml"
 grep -qx '\[package\]' "$manifest.without" || fail "crates/swell/Cargo.toml has no [package] section"
+grep -qx '\[\[test\]\]' "$manifest.without" || fail "crates/swell/Cargo.toml has no [[test]] section"
 if grep -q 'fault-injection' "$manifest.without"; then
   fail "the planted manifest names the feature already ($manifest.without)"
 fi
@@ -88,6 +91,10 @@ fn injected() {
 EOF
 cp "$manifest.with" "$manifest" || fail "cannot plant the manifest with the feature"
 cp "$faults.passing" "$faults" || fail "cannot plant the passing test"
+GATE_CRATES=$dir/crates sh taskfiles/test-main.sh write > "$dir/test-main.log" 2>&1 ||
+  fail "taskfiles/test-main.sh write failed on the planted crate (log: $dir/test-main.log)"
+grep -qx 'mod faults;' "$dir/crates/swell/tests/main.rs" ||
+  fail "the planted tests/main.rs does not declare the module faults ($dir/crates/swell/tests/main.rs)"
 (cd "$dir" && cargo generate-lockfile --offline) > "$dir/lock.log" 2>&1 ||
   fail "cannot make a Cargo.lock for the planted workspace (log: $dir/lock.log)"
 

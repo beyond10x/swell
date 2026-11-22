@@ -18,13 +18,13 @@
 //! `collect-every-safe-point`.
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{
     agent, agent_with, get, get_object, global, key, limits, object, realm, stack_with_room,
 };
 use support::script::{Outcome, eval_text, run_both};
-use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits};
+use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
 use swell::{Termination, Value};
 
 /// `source` answers the String `expected` in sloppy and in strict code.
@@ -735,7 +735,7 @@ fn reach_through_define_properties_and_to_locale_string() {
 fn define_properties_getter_reaches_the_reentry_limit_on_the_promised_stack() {
     let stack = stack_with_room(stack_limits(builtins_reentry()));
     on_bounded_stack(
-        "define_properties_getter_reaches_the_reentry_limit_on_the_promised_stack",
+        test_path!("define_properties_getter_reaches_the_reentry_limit_on_the_promised_stack"),
         stack,
         reach_through_define_properties_and_to_locale_string,
     )

@@ -144,13 +144,16 @@ pub(crate) fn call<H: Host>(
     args: &[Value],
 ) -> Completion<Value> {
     let realm = agent.function_parts(function)?.realm;
-    let entered = agent.enter_code(Some(Activation {
-        callee: function,
-        this,
-        args: args.to_vec(),
-        new_target: None,
-        realm: Some(realm),
-    }))?;
+    let entered = agent.enter_code(Some((
+        Activation {
+            callee: function,
+            this,
+            args: Vec::new(),
+            new_target: None,
+            realm: Some(realm),
+        },
+        args,
+    )))?;
     let result = agent.call_function(function, this, args, None);
     agent.leave_code(entered);
     result
@@ -167,13 +170,16 @@ pub(crate) fn construct<H: Host>(
     new_target: ObjectRef,
 ) -> Completion<Value> {
     let realm = agent.function_parts(function)?.realm;
-    let entered = agent.enter_code(Some(Activation {
-        callee: function,
-        this: Value::Undefined,
-        args: args.to_vec(),
-        new_target: Some(new_target),
-        realm: Some(realm),
-    }))?;
+    let entered = agent.enter_code(Some((
+        Activation {
+            callee: function,
+            this: Value::Undefined,
+            args: Vec::new(),
+            new_target: Some(new_target),
+            realm: Some(realm),
+        },
+        args,
+    )))?;
     let result = agent.construct_function(function, args, new_target);
     agent.leave_code(entered);
     result
@@ -257,7 +263,7 @@ impl<H: Host> Agent<H> {
         let binds = template.binds_parameters;
         let parameter_environment = template.parameter_environment;
         let environment = captured > 0 || template.eval_environment || parameter_environment;
-        let params = template.params.clone();
+        let params = &template.params;
         let arguments = template.arguments;
 
         // An arrow function has no [[Construct]] and binds no `this` (OrdinaryCallBindThis,
@@ -316,9 +322,9 @@ impl<H: Host> Agent<H> {
         // FunctionDeclarationInstantiation, step 22: each argument in its parameter's slot; for
         // a list that is not simple each parameter uninitialized until its code binds it.
         let stored = if binds {
-            self.uninitialize_parameters(&params, env, &mut slots)
+            self.uninitialize_parameters(params, env, &mut slots)
         } else {
-            self.bind_parameters(&params, args, env, &mut slots)
+            self.bind_parameters(params, args, env, &mut slots)
         };
         if !stored {
             self.heap.accounting.credit(charged);
@@ -327,10 +333,7 @@ impl<H: Host> Agent<H> {
 
         // Steps 15 to 22: the arguments object, once the parameters hold their values.
         if let Some(arguments) = arguments {
-            let mapping = arguments.mapped.then_some(Mapping {
-                env,
-                params: &params,
-            });
+            let mapping = arguments.mapped.then_some(Mapping { env, params });
             let made = self.instantiate_arguments(
                 function,
                 args,
@@ -597,5 +600,177 @@ impl<H: Host> Agent<H> {
             self.engine_object(function)?.kind,
             ObjectKind::EcmascriptFunction(_)
         ))
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The argument values copied for the activation of a call from Rust ([`call`] and
+    /// [`construct`]), counted where [`Agent::enter_code`] copies them, in the counting build of
+    /// the tests; a test resets it before it reads it.
+    pub(crate) static CALL_ARGUMENTS_COPIED: std::cell::Cell<u64> =
+        const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CALL_ARGUMENTS_COPIED;
+    use crate::host::agent::Agent;
+    use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, enter, limits};
+    use crate::object::property::Key;
+    use crate::value::{Root, Value};
+    use crate::{Outcome, Parsed, Realm, Script, Source, Termination};
+
+    /// The number of arguments of the calls of these tests.
+    const N: u32 = 100_000;
+
+    /// `source` parsed in `realm`.
+    fn parse(agent: &mut Agent<NoHooks>, realm: &Realm, source: &str) -> Script {
+        match agent.parse_script(realm, Source::Utf8(source), None) {
+            Ok(Parsed::Parsed(script)) => script,
+            other => panic!("{source} did not parse: {other:?}"),
+        }
+    }
+
+    /// An agent with no step budget to speak of and a memory budget of what its realm holds
+    /// plus 256 MiB, which that limit is, whose global `list` is an Array of the Numbers 0 to
+    /// `count - 1`, made from Rust, after `setup` ran in it normally.
+    fn roomy_after(count: u32, setup: &str) -> (Agent<NoHooks>, Realm, u64) {
+        let mut limits = limits();
+        limits.steps_per_entry = u64::MAX;
+        limits.memory_bytes = 1 << 30;
+        let (mut agent, realm) = agent_with_realm_and(limits);
+        let roomy_limit = agent.heap.bytes() + (1 << 28);
+        agent.heap.accounting.set_limit(roomy_limit);
+        enter(&mut agent, &realm);
+        let list = agent.array_create(0.0, None).unwrap();
+        for i in 0..count {
+            assert_eq!(
+                agent.create_data_property(list, Key::Index(i), Value::Number(f64::from(i))),
+                Ok(true)
+            );
+        }
+        let global = agent.global_object(&realm).unwrap();
+        let Ok(Value::Object(global)) = agent.heap.roots.get(&global) else {
+            panic!("the global object");
+        };
+        let key = agent.name_key("list").unwrap();
+        assert_eq!(
+            agent.create_data_property(global, key, Value::Object(list)),
+            Ok(true)
+        );
+        let script = parse(&mut agent, &realm, setup);
+        let outcome = agent.evaluate_script(&script);
+        assert!(matches!(outcome, Ok(Outcome::Normal(_))), "{outcome:?}");
+        (agent, realm, roomy_limit)
+    }
+
+    /// The value `root` holds.
+    fn value(agent: &Agent<NoHooks>, root: &Root) -> Value {
+        match agent.heap.roots.get(root) {
+            Ok(value) => value,
+            Err(error) => panic!("the root answered {error:?}"),
+        }
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (storage is charged before it is allocated and
+    /// credited where its holder drops it), and [[Call]] of an ECMAScript function
+    /// (`#sec-ecmascript-function-objects-call-thisargument-argumentslist`, step 2, the push of
+    /// calleeContext): `function f() {}` bound with 100,000 arguments through
+    /// `Function.prototype.bind.apply` and called as `b()` by a script, whose run loop has no
+    /// builtin between it and the call, so the call records its arguments in an activation.
+    /// Under a budget of the reading after a collection plus the gathered list's bytes plus
+    /// half as much again the script ends in `Terminated(MemoryBudget)` before an argument is
+    /// copied. With the budget raised it answers normally and copies each argument once, and
+    /// after a collection the reading is the one before.
+    #[test]
+    fn the_arguments_a_call_records_are_charged_before_they_are_copied() {
+        let setup = "function f() {} var b = Function.prototype.bind.apply(f, list);";
+        let (mut agent, realm, roomy_limit) = roomy_after(N + 1, setup);
+        let script = parse(&mut agent, &realm, "b()");
+        assert!(agent.collect().is_ok());
+        let before = agent.heap_bytes().unwrap();
+        let list = u64::from(N) * size_of::<Value>() as u64;
+        agent.heap.accounting.set_limit(before + list + list / 2);
+        CALL_ARGUMENTS_COPIED.with(|copied| copied.set(0));
+        let outcome = agent.evaluate_script(&script);
+        assert!(
+            matches!(outcome, Ok(Outcome::Terminated(Termination::MemoryBudget))),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            CALL_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            0,
+            "arguments copied before the memory budget ended the run"
+        );
+        agent.heap.accounting.set_limit(roomy_limit);
+        let outcome = agent.evaluate_script(&script);
+        assert!(matches!(outcome, Ok(Outcome::Normal(_))), "{outcome:?}");
+        drop(outcome);
+        assert_eq!(
+            CALL_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            u64::from(N)
+        );
+        assert!(agent.collect().is_ok());
+        assert_eq!(agent.heap_bytes().unwrap(), before, "after the call");
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" (what is not kept is not copied), and
+    /// `Function.prototype.apply` (`#sec-function.prototype.apply`): `f.apply(null, list)` with
+    /// 100,000 values under a roomy budget answers `undefined`, and the call of `f`, reached
+    /// from the builtin's activation, which records the call, copies none of its arguments.
+    #[test]
+    fn a_call_that_records_nothing_copies_nothing() {
+        let (mut agent, realm, _) = roomy_after(N, "function f() {}");
+        let script = parse(&mut agent, &realm, "f.apply(null, list)");
+        CALL_ARGUMENTS_COPIED.with(|copied| copied.set(0));
+        let outcome = agent.evaluate_script(&script);
+        let Ok(Outcome::Normal(answer)) = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert_eq!(value(&agent, &answer), Value::Undefined);
+        assert_eq!(
+            CALL_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            0,
+            "arguments copied for a call that records none"
+        );
+    }
+
+    /// `docs/design/engine.md`, "Memory budget" and "Collector" (a credit does not lower the
+    /// bytes counted since the last collection, so a transient charge brings a collection
+    /// forward): 12,500 calls by a script of a function bound with eight arguments, each call
+    /// recording its eight arguments in an activation, 100,000 values charged in all, under a
+    /// roomy budget run at most one more collection per `MIN_TRIGGER_BYTES` of the arguments
+    /// the activations charge than the collections counted on the base of the change, which
+    /// charged nothing for them: 5 there, 7 with the charge. Not with the feature
+    /// `collect-every-safe-point`, where every safe point collects.
+    #[cfg(not(feature = "collect-every-safe-point"))]
+    #[test]
+    fn a_loop_of_bound_calls_collects_within_its_bound() {
+        use crate::heap::{COLLECTIONS, MIN_TRIGGER_BYTES};
+        const ON_THE_BASE: u64 = 5;
+        const SOURCE: &str = "function f() {} var b8 = f.bind(null, 1, 2, 3, 4, 5, 6, 7, 8); \
+            for (var i = 0; i < 12500; i++) b8(); i";
+        let (mut agent, realm, _) = roomy_after(0, "");
+        let script = parse(&mut agent, &realm, SOURCE);
+        COLLECTIONS.with(|collections| collections.set(0));
+        CALL_ARGUMENTS_COPIED.with(|copied| copied.set(0));
+        let outcome = agent.evaluate_script(&script);
+        let Ok(Outcome::Normal(answer)) = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert_eq!(value(&agent, &answer), Value::Number(12_500.0));
+        assert_eq!(
+            CALL_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            u64::from(N),
+            "the values the activations recorded"
+        );
+        let collections = COLLECTIONS.with(std::cell::Cell::get);
+        let charged = u64::from(N) * size_of::<Value>() as u64;
+        let bound = ON_THE_BASE + charged.div_ceil(MIN_TRIGGER_BYTES);
+        assert!(
+            collections <= bound,
+            "{collections} collections, at most {bound}"
+        );
     }
 }

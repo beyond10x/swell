@@ -6,7 +6,7 @@
 //! `object::ordinary::tests`).
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{TestHost, agent, data, get, key, realm, string, text};
 use swell::{Abrupt, Completion, Cx, HostCall, ObjectRef, Outcome, PropertyDescriptor, Value};

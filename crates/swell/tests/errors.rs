@@ -8,7 +8,7 @@
 //! engine error and of a host object made with an `error_kind` (decision 15).
 #![cfg(test)]
 
-mod support;
+use crate::support;
 
 use support::host::{
     TestHost, agent, agent_with, data, get, get_object, global, key, limits, object, realm, string,
