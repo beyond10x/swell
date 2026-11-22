@@ -70,13 +70,6 @@ pub(crate) fn units_of(text: &str) -> Vec<u16> {
 }
 
 /// The Record CodePointAt answers (`#sec-codepointat`).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Encode, Decode, codePointAt, isWellFormed, toWellFormed: story:global-this-uri-functions-and-is-error, story:string-access-and-search-methods"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CodePoint {
     /// [[CodePoint]].
@@ -90,13 +83,6 @@ pub(crate) struct CodePoint {
 /// CodePointAt ( string, position ) (`#sec-codepointat`): the code point of `string` that
 /// starts at the code unit at `position`. `None` where step 2's assertion (position < size)
 /// does not hold. Touches no heap.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Encode, Decode, codePointAt, isWellFormed, toWellFormed: story:global-this-uri-functions-and-is-error, story:string-access-and-search-methods"
-    )
-)]
 pub(crate) fn code_point_at(string: &[u16], position: usize) -> Option<CodePoint> {
     // A leading surrogate is 0xD800 to 0xDBFF, a trailing one 0xDC00 to 0xDFFF (6.1.4).
     let is_leading_surrogate = |unit: u16| (0xD800..=0xDBFF).contains(&unit);
@@ -144,26 +130,12 @@ pub(crate) fn code_point_at(string: &[u16], position: usize) -> Option<CodePoint
 }
 
 /// The code units of a code point, as UTF16EncodeCodePoint answers them: one or two.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Encode, Decode, fromCodePoint, toWellFormed: story:global-this-uri-functions-and-is-error, story:string-access-and-search-methods"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct EncodedCodePoint {
     units: [u16; 2],
     count: usize,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Encode, Decode, fromCodePoint, toWellFormed: story:global-this-uri-functions-and-is-error, story:string-access-and-search-methods"
-    )
-)]
 impl EncodedCodePoint {
     /// The code units, one or two.
     pub(crate) fn units(&self) -> &[u16] {
@@ -173,13 +145,6 @@ impl EncodedCodePoint {
 
 /// UTF16EncodeCodePoint ( cp ) (`#sec-utf16encodecodepoint`): the code units of `code_point`.
 /// `None` where step 1's assertion (0 ≤ cp ≤ 0x10FFFF) does not hold. Touches no heap.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Encode, Decode, fromCodePoint, toWellFormed: story:global-this-uri-functions-and-is-error, story:string-access-and-search-methods"
-    )
-)]
 pub(crate) fn utf16_encode_code_point(code_point: u32) -> Option<EncodedCodePoint> {
     // 1. Assert: 0 ≤ cp ≤ 0x10FFFF.
     if code_point > 0x10FFFF {

@@ -2,13 +2,17 @@
 //! InstallErrorCause (20.5.8.1), `Error.prototype` with `constructor`, `message`, `name` and
 //! `toString` (20.5.3), and the six NativeError constructors and prototypes of 20.5.5 and 20.5.6;
 //! with the errors the engine itself throws. Written by `story:object-model-and-realms`.
+//! `Error.isError` (20.5.2.1, `#sec-error.iserror`), defined on `Error` after the keys above
+//! (`length`, `name`, `prototype`), is `story:global-this-uri-functions-and-is-error`.
 //!
-//! `Error.isError` and `Error.captureStackTrace` are not in this part.
+//! `Error.captureStackTrace` and `Error.prototype.stack` are not in the pinned draft.
 
+use crate::builtins::object::argument;
 use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion};
 use crate::host::{ErrorKind, Host};
+use crate::object::ObjectKind;
 use crate::object::builtin_function::{Behaviour, BuiltinId};
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Descriptor, Property};
@@ -69,6 +73,18 @@ impl<H: Host> Agent<H> {
                     false,
                 )?;
                 self.define_builtin_property(prototype, "toString", Value::Object(to_string))?;
+                // `Error.isError` (`#sec-error.iserror`): a built-in function of length 1, not a
+                // constructor, { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]:
+                // true } (clause 18), after "prototype" on %Error%.
+                let is_error = self.create_builtin_function(
+                    Behaviour::Builtin(BuiltinId::ErrorIsError),
+                    1,
+                    "isError",
+                    realm,
+                    Some(function_prototype),
+                    false,
+                )?;
+                self.define_builtin_property(constructor, "isError", Value::Object(is_error))?;
                 error = Some(pair);
             }
             made.push(pair);
@@ -164,6 +180,21 @@ impl<H: Host> Agent<H> {
             self.create_non_enumerable_data_property_or_throw(error, key, cause)?;
         }
         Ok(())
+    }
+
+    /// `Error.isError ( arg )` (`#sec-error.iserror`). [[ErrorData]] is the data of an ordinary
+    /// object of any realm, so an error of another realm answers true as well.
+    pub(crate) fn error_is_error(&mut self, args: &[Value]) -> Completion<Value> {
+        // 1. If arg is not an Object, return false.
+        let Value::Object(object) = argument(args, 0) else {
+            return Ok(Value::Boolean(false));
+        };
+        // 2. If arg does not have an [[ErrorData]] internal slot, return false. 3. Return true.
+        let has_error_data = matches!(
+            &self.engine_object(object)?.kind,
+            ObjectKind::Ordinary(ordinary) if matches!(ordinary.data, OrdinaryData::Error)
+        );
+        Ok(Value::Boolean(has_error_data))
     }
 
     /// `Error.prototype.toString ( )` (`#sec-error.prototype.tostring`).

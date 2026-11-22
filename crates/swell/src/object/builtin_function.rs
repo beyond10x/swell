@@ -41,6 +41,8 @@ pub(crate) enum BuiltinId {
     ErrorConstructor(ErrorKind),
     /// `Error.prototype.toString` (20.5.3.4).
     ErrorPrototypeToString,
+    /// `Error.isError` (20.5.2.1), `story:global-this-uri-functions-and-is-error`.
+    ErrorIsError,
     /// The builtins of `story:harness-builtins`, each module of `builtins/` with its own ids.
     Object(crate::builtins::object::ObjectBuiltin),
     Function(crate::builtins::function::FunctionBuiltin),
@@ -310,6 +312,7 @@ impl<H: Host> Agent<H> {
                 self.error_constructor(kind, function, args, new_target)
             }
             BuiltinId::ErrorPrototypeToString => self.error_prototype_to_string(this),
+            BuiltinId::ErrorIsError => self.error_is_error(args),
             BuiltinId::Object(id) => self.run_object_builtin(id, function, this, args, new_target),
             BuiltinId::Function(id) => {
                 self.run_function_builtin(id, function, this, args, new_target)

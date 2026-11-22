@@ -4,9 +4,11 @@
 //! (`story:object-model-and-realms`), and `Array`, `Object`, `String`, `JSON` and `Math` of 19.3
 //! and 19.4 (`story:harness-builtins`), and `isFinite`, `isNaN`, `Boolean` and `Number` of 19.2
 //! and 19.3, taken early by slice 2 (`story:number-boolean-and-global-functions-early`), and
-//! `eval` and `Function` of 19.2 and 19.3 (`story:eval-and-function-constructor`). The
-//! global object itself is made by InitializeHostDefinedRealm or given by the host's setup
-//! closure (`realm/mod.rs`).
+//! `eval` and `Function` of 19.2 and 19.3 (`story:eval-and-function-constructor`), and the
+//! value property `globalThis` (`#sec-globalthis`) and the four URI functions of 19.2.6
+//! (`#sec-uri-handling-functions`), defined after all of those
+//! (`story:global-this-uri-functions-and-is-error`). The global object itself is made by
+//! InitializeHostDefinedRealm or given by the host's setup closure (`realm/mod.rs`).
 
 use super::intrinsics::Intrinsic;
 use crate::heap::arena::Handle;
@@ -63,6 +65,35 @@ impl<H: Host> Agent<H> {
             ("Number", Intrinsic::Number),
             ("eval", Intrinsic::Eval),
             ("Function", Intrinsic::Function),
+        ] {
+            let value = self.intrinsic(realm, which)?;
+            let key = self.name_key(name)?;
+            self.define_property_or_throw(
+                global,
+                key,
+                Descriptor::data(Value::Object(value), true, false, true),
+            )?;
+        }
+        // `#sec-globalthis`: "The initial value of the "globalThis" property of the global
+        // object in a Realm Record realm is realm.[[GlobalEnv]].[[GlobalThisValue]]", the global
+        // `this` value SetRealmGlobalObject recorded (`#sec-setrealmglobalobject`); { [[Writable]]:
+        // true, [[Enumerable]]: false, [[Configurable]]: true }.
+        let Some(this) = self.realm_record(realm)?.global_this else {
+            return Err(self.fault());
+        };
+        let key = self.name_key("globalThis")?;
+        self.define_property_or_throw(
+            global,
+            key,
+            Descriptor::data(Value::Object(this), true, false, true),
+        )?;
+        // The function properties of 19.2.6 in the order of the clause (19.2.6.1 to 19.2.6.4),
+        // each { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true } (clause 18).
+        for (name, which) in [
+            ("decodeURI", Intrinsic::DecodeUri),
+            ("decodeURIComponent", Intrinsic::DecodeUriComponent),
+            ("encodeURI", Intrinsic::EncodeUri),
+            ("encodeURIComponent", Intrinsic::EncodeUriComponent),
         ] {
             let value = self.intrinsic(realm, which)?;
             let key = self.name_key(name)?;
