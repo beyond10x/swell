@@ -516,23 +516,51 @@ fn eval_past_reentry_depth_throws_a_range_error() {
     );
 }
 
+/// The step budget of [`ends_in_step_budget`]: 100,000 steps; 10,000 in the gate with the
+/// collector at every safe point, where every step collects, and 100,000 there too in the lane
+/// `slow` (`SWELL_FULL_COUNTS=1`). The loop in eval code never ends, so every budget ends it
+/// the same way, in `Terminated(StepBudget)`.
+fn step_budget() -> u64 {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        10_000
+    } else {
+        100_000
+    }
+}
+
+/// `source`, an endless loop in eval code, ends the run in `Terminated(StepBudget)` at the budget
+/// [`step_budget`] gives.
+fn ends_in_step_budget(source: &str) {
+    let mut limits = limits();
+    limits.steps_per_entry = step_budget();
+    assert_eq!(
+        run(limits, source),
+        Outcome::Terminated(Termination::StepBudget),
+        "{source}"
+    );
+}
+
 /// The step budget through `eval`: an endless loop in eval code, direct or indirect, ends the
-/// run in `Terminated(StepBudget)`.
+/// run in `Terminated(StepBudget)`; here direct eval at the top level. The indirect eval and the
+/// direct eval in a function are the two tests after it, each in a process of its own under
+/// cargo-nextest (in the mode collect-every-safe-point each of the three takes seconds).
 #[test]
 fn step_budget_ends_an_endless_eval() {
-    for source in [
-        "eval(\"while (true) {}\");",
-        "(0, eval)(\"for (;;) {}\");",
-        "function f() { eval(\"do {} while (true)\"); } f();",
-    ] {
-        let mut limits = limits();
-        limits.steps_per_entry = 100_000;
-        assert_eq!(
-            run(limits, source),
-            Outcome::Terminated(Termination::StepBudget),
-            "{source}"
-        );
-    }
+    ends_in_step_budget("eval(\"while (true) {}\");");
+}
+
+/// The step budget through an indirect `eval` ([`step_budget_ends_an_endless_eval`]).
+#[test]
+fn step_budget_ends_an_endless_indirect_eval() {
+    ends_in_step_budget("(0, eval)(\"for (;;) {}\");");
+}
+
+/// The step budget through a direct `eval` in a function ([`step_budget_ends_an_endless_eval`]).
+#[test]
+fn step_budget_ends_an_endless_eval_in_a_function() {
+    ends_in_step_budget("function f() { eval(\"do {} while (true)\"); } f();");
 }
 
 /// The bytes an agent with `limits` holds after `create_realm`, collected.

@@ -133,6 +133,9 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   SHA-256 sums. The generated tables are committed and checked against a regeneration.
 - `conformance/test262/`: `features.txt` (every feature, `run` or `exclude`), `sections.txt`
   (ECMA-262 sections, their test262 paths and omissions), `expected.txt` (the gate's counts).
+- `website/`: the documentation site (`docs/` its pages, `src/` its landing page and
+  components, `data/status.json` its numbers, written by `task site-data`). `docs/img/`: the
+  logo's lockup for `README.md`.
 - test262 is never vendored: it is fetched by commit into `.cache/test262/<commit>/` and checked
   against its tree hash and a SHA-256 of `git ls-tree -r` (decision 11).
 
@@ -274,8 +277,19 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   `.github/workflows/check.yml` (runs `task check` on a push to `main` and on a pull request;
   it installs the Rust toolchain, go-task and `ess` by pinned release assets, and the gate
   fetches test262 by its pin) and `shared-gates.yml` (the organization's shared source gates,
-  as surf has it). No `b10x.docs.yaml`, no documentation site workflow, and no release
-  workflow while a release holds no binary.
+  as surf has it). No release workflow while a release holds no binary.
+- **The documentation site** is `website/` (Docusaurus on the organization's docs-system),
+  to be served at https://beyond10x.github.io/swell/. It types no number: `task site-data`
+  writes `website/data/status.json` from the committed files of the gate, and
+  `task site-data-check` fails when that file differs from what they give, so a change of
+  `conformance/test262/expected.txt`, `conformance/slices-delivered.txt`,
+  `conformance/host/requirements.txt`, `conformance/test262/moves.tsv`, the design's slice
+  table, the workspace version or `Cargo.lock` is committed together with a new
+  `status.json`. The logo is `website/static/img/logo.svg` (and `logo-dark.svg`), the lockup
+  for the head of `README.md` is `docs/img/swell-logo.svg` (and `-dark.svg`): hand-written
+  SVG. The two workflows that build and publish the site, and the Pages setting, are added
+  by the session that decides for the operator; until its first run has ended with success
+  the address above serves nothing.
 - **A release** is an annotated tag by the bot, named as the workspace version, on a green
   commit of `main`, and a GitHub Release whose notes are a short summary (a lead sentence,
   `**Breaking**`, `**Changed**` with at most five bullets, at most 900 characters) that ends
@@ -372,6 +386,27 @@ session coordinates; this section is its procedure, taken from how surf is run
   revised; a design author starts when the decomposition names the change it needs, not after
   the panel; and review, design and a gate repair run side by side, not in a row. A unit that
   starts before its story is on `main` reads the story from a file in its scratch directory.
+- **A red time line under load goes to the forge.** The gate's last line fails when its test
+  steps ran over 120 s of wall time, and it prints the load and the core count the run had.
+  Measured on 2026-11-22: the steps cost 172 to 183 CPU seconds in every run and took 166.9 s
+  at load 24 to 30, 183.0 s at load 32 to 38 and 307.4 s at load 42 to 62, on 2 to 5 cores of
+  the shared pool. The operator, 2026-11-22 05:47 CET, to the question what the gate does
+  then: "A: forge judges". The rule is unchanged. When `gate-time test-steps` is the only red
+  line of a local run and the load it prints is above the core count, the commit is handed
+  to the session that publishes with the line quoted, and the forge's run judges the budget.
+  A forge run over 120 s is a budget defect: it gets a story and is fixed before the next
+  feature, and nothing else of the batch is published until then. Any other red line holds
+  the commit as before.
+- **A merged wave branch is compiled before a unit is based on it.** On 2026-11-22 the twelfth
+  unit of slice 3 was merged on its own report into a branch that had moved since its base:
+  the merge applied without a conflict and the crate did not compile, because two units had
+  each defined `Agent::to_clamped_index`. The unit that closes the slice was opened on that
+  commit, waited for its first full run in the pool and stopped at the compile error. So: after the merge of a unit whose base
+  is not the head of the wave branch, `cargo check --locked --workspace --all-targets` runs
+  on the merged commit in the check tree (one pool job, in the background), and no unit is
+  opened on the branch and nothing is reported as merged and working before it exits 0. The
+  combined test run of the merged branch stays what it was: a later check of several units
+  at once.
 - **Quota is shared with surf's session.** Prefer fewer, longer units to many short ones, and
   keep every unit resumable (a brief file, a worktree, a report form): a sub-agent cut off by a
   rate limit is resumed with its context on the same model, never restarted.

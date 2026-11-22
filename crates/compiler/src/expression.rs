@@ -518,6 +518,38 @@ impl<'a> Compiler<'a> {
                     .map_err(|_| CompileError::TooMany("arguments"))?;
                 t.push(emit(Instruction::New(n)));
             }
+            // `#sec-template-literals-runtime-semantics-evaluation`: the TV of each template
+            // string and the value of each substitution through ToString, in source order,
+            // concatenated as they come (`Add` of two Strings). An empty string adds nothing and
+            // is left out; a template of empty strings alone is the empty String.
+            Expr::Template {
+                strings,
+                substitutions,
+            } => {
+                if strings.len() != substitutions.len().saturating_add(1) {
+                    return Err(malformed("a template literal"));
+                }
+                let mut started = false;
+                for (i, string) in strings.iter().enumerate() {
+                    if let Some(e) = i.checked_sub(1).and_then(|s| substitutions.get(s)) {
+                        t.push(Task::Expr(*e));
+                        t.push(emit(Instruction::ToString));
+                        if started {
+                            t.push(emit(Instruction::Add));
+                        }
+                        started = true;
+                    }
+                    let last = i + 1 == strings.len();
+                    if !string.cooked.is_empty() || (last && !started) {
+                        let k = self.constants.string(&string.cooked)?;
+                        t.push(emit(Instruction::String(k)));
+                        if started {
+                            t.push(emit(Instruction::Add));
+                        }
+                        started = true;
+                    }
+                }
+            }
         }
         Ok(t)
     }

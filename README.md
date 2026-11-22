@@ -1,6 +1,12 @@
-# swell
+<div align="center">
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/swell-logo-dark.svg"><img alt="swell" src="docs/img/swell-logo.svg" width="320"></picture>
 
 **An ECMAScript (JavaScript) engine written from scratch in Rust.**
+
+[Docs](https://beyond10x.github.io/swell/) · [Releases](https://github.com/beyond10x/swell/releases) · [Changelog](CHANGELOG.md)
+</div>
+
+# swell
 
 swell runs JavaScript. It parses a script, compiles it to bytecode and interprets it. Modules
 are the eleventh of its nineteen delivery slices and are not parsed yet. It is written to be

@@ -271,6 +271,7 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::AssignConstLocal { slot, name } => format!("AssignConstLocal {slot} {}", s(name)),
         I::AssignConstEnv { hops, slot } => format!("AssignConstEnv {hops} {slot}"),
         I::InitGlobal(k) => format!("InitGlobal {}", s(k)),
+        I::ToString => "ToString".to_string(),
         other => format!("{other:?}"),
     }
 }

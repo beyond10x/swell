@@ -7,21 +7,30 @@
 //! (`#sec-keywords-and-reserved-words`: a name written with an escape is never a keyword),
 //! punctuators (`#sec-punctuators`), numeric literals with their separators
 //! (`#sec-literals-numeric-literals`), string literals with every escape
-//! (`#sec-literals-string-literals`) and, when the parser asks for the `InputElementRegExp` goal,
-//! regular expression literals (`#sec-literals-regular-expression-literals`).
+//! (`#sec-literals-string-literals`), the template tokens `NoSubstitutionTemplate` and
+//! `TemplateHead` and, when the parser asks for the `InputElementTemplateTail` goal at the `}`
+//! that ends a substitution, `TemplateMiddle` and `TemplateTail`
+//! (`#sec-template-literal-lexical-components`), each with its TV and TRV, and, when the parser
+//! asks for the `InputElementRegExp` goal, regular expression literals
+//! (`#sec-literals-regular-expression-literals`).
 //!
 //! Refused here, each with the slice that brings it: an identifier with a code point outside
 //! ASCII, written or through a `\u` escape (5, a recorded omission of `sec-names-and-keywords`),
-//! template literals (6), private names (8), BigInt literals (12) and the HTML-like comments of
-//! Annex B (`#sec-html-like-comments`, 18).
+//! private names (8), BigInt literals (12) and the HTML-like comments of Annex B
+//! (`#sec-html-like-comments`, 18).
 //!
 //! The lexer runs once over the source and every loop advances by at least one code unit, so its
-//! work is linear in the length of the source. It runs before any script does; the step and
-//! memory budgets of `docs/design/engine.md` decision 3 count work done for a running script.
+//! work is linear in the length of the source; a part lexed again at the parser's request (a
+//! regular expression literal, the characters of a template after a `}`) was lexed before only
+//! as the one punctuator at its start. It runs before any script does; the step and memory
+//! budgets of `docs/design/engine.md` decision 3 count work done for a running script.
 
-use crate::ast::{NumberForm, NumberLiteral, RegExpLiteral, StringLiteral};
+use crate::ast::{NumberForm, NumberLiteral, RegExpLiteral, StringLiteral, TemplateString};
 use crate::error::SyntaxError;
-use crate::token::{Keyword, Punct, Token, TokenKind};
+use crate::token::{Keyword, Punct, TemplatePart, Token, TokenKind};
+
+/// A template token with no closing `` ` `` or `${` before the end of the source.
+const UNTERMINATED_TEMPLATE: &str = "unterminated template literal";
 
 /// `#!` anywhere but at the very start of the source (`#sec-hashbang`).
 const HASHBANG_NOT_AT_START: &str = "hashbang comment not at the start of the source";
@@ -100,6 +109,24 @@ fn push_code_point(out: &mut Vec<u16>, cp: u32) {
         out.push(u16::try_from(0xD800 + (v >> 10)).unwrap_or(0xFFFD));
         out.push(u16::try_from(0xDC00 + (v & 0x3FF)).unwrap_or(0xFFFD));
     }
+}
+
+/// The TRV of template characters (`#sec-static-semantics-trv`): their source text, with each
+/// `<CR><LF>` and each `<CR>` a `<LF>`.
+fn trv(units: &[u16]) -> Vec<u16> {
+    let mut raw = Vec::with_capacity(units.len());
+    let mut rest = units.iter().copied().peekable();
+    while let Some(u) = rest.next() {
+        if u == CR {
+            if rest.peek() == Some(&LF) {
+                rest.next();
+            }
+            raw.push(LF);
+        } else {
+            raw.push(u);
+        }
+    }
+    raw
 }
 
 pub(crate) struct Lexer<'a> {
@@ -256,7 +283,7 @@ impl<'a> Lexer<'a> {
             return self.string(c).map(TokenKind::String);
         }
         if c == ascii(b'`') {
-            return Err(self.refused("template literal", 6));
+            return self.template();
         }
         if c == ascii(b'#') {
             return Err(if self.ahead(1) == Some(ascii(b'!')) {
@@ -651,6 +678,165 @@ impl<'a> Lexer<'a> {
             newline_before: token.newline_before,
             escaped: false,
         })
+    }
+
+    /// The `NoSubstitutionTemplate` or `TemplateHead` whose `` ` `` is at the current position
+    /// (`#sec-template-literal-lexical-components`).
+    fn template(&mut self) -> Result<TokenKind, SyntaxError> {
+        let (line, column) = (self.line, self.column());
+        self.pos += 1;
+        let (part, substitution) = self.template_characters(line, column)?;
+        Ok(if substitution {
+            TokenKind::TemplateHead(part)
+        } else {
+            TokenKind::NoSubstitutionTemplate(part)
+        })
+    }
+
+    /// The token `token`, the `}` that ends a substitution, lexed again in the
+    /// `InputElementTemplateTail` goal: a `TemplateMiddle` or a `TemplateTail`
+    /// (`TemplateSubstitutionTail`, `#sec-template-literal-lexical-components`). The lexer goes
+    /// back to the `}` also when it has lexed the token after it.
+    pub(crate) fn rescan_template(&mut self, token: &Token) -> Result<Token, SyntaxError> {
+        self.pos = token.start as usize + 1;
+        self.line = token.line;
+        self.line_start = (token.start as usize + 1).saturating_sub(token.column as usize);
+        let (part, substitution) = self.template_characters(token.line, token.column)?;
+        Ok(Token {
+            kind: if substitution {
+                TokenKind::TemplateMiddle(part)
+            } else {
+                TokenKind::TemplateTail(part)
+            },
+            start: token.start,
+            end: Lexer::offset(self.pos),
+            line: token.line,
+            column: token.column,
+            newline_before: token.newline_before,
+            escaped: false,
+        })
+    }
+
+    /// The `TemplateCharacters` after the `` ` `` or `}` that opens a template token at `line`
+    /// and `column`, and its closing `` ` `` (false) or `${` (true), consumed: their TV
+    /// (`#sec-static-semantics-tv`: an escape is its SV, a `LineContinuation` nothing, a
+    /// `LineTerminatorSequence` its TRV), their TRV (`#sec-static-semantics-trv`) and where the
+    /// first NotEscapeSequence is.
+    fn template_characters(
+        &mut self,
+        line: u32,
+        column: u32,
+    ) -> Result<(Box<TemplatePart>, bool), SyntaxError> {
+        let body_start = self.pos;
+        let mut cooked = Vec::new();
+        let mut not_escape = None;
+        let substitution = loop {
+            let Some(c) = self.cur() else {
+                return Err(SyntaxError::new(UNTERMINATED_TEMPLATE, line, column));
+            };
+            match c {
+                0x60 => break false,
+                0x24 if self.ahead(1) == Some(ascii(b'{')) => break true,
+                0x5C => {
+                    let at = (self.line, self.column());
+                    self.pos += 1;
+                    if !self.template_escape(&mut cooked) && not_escape.is_none() {
+                        not_escape = Some(at);
+                    }
+                }
+                // `LineTerminatorSequence`: the TRV of `<CR>` and of `<CR><LF>` is `<LF>`.
+                c if is_line_terminator(c) => {
+                    cooked.push(if c == CR { LF } else { c });
+                    self.line_terminator();
+                }
+                _ => {
+                    cooked.push(c);
+                    self.pos += 1;
+                }
+            }
+        };
+        let raw = trv(self.src.get(body_start..self.pos).unwrap_or(&[]));
+        self.pos += if substitution { 2 } else { 1 };
+        Ok((
+            Box::new(TemplatePart {
+                string: TemplateString { cooked, raw },
+                not_escape,
+            }),
+            substitution,
+        ))
+    }
+
+    /// The `TemplateEscapeSequence` or `LineContinuation` after a `\` in a template, its TV
+    /// appended to `cooked`; false for a `NotEscapeSequence`, whose TV is undefined. A
+    /// `NotEscapeSequence` is never longer than what the characters after the `\` read as
+    /// `TemplateCharacter`s, so only the character after the `\` is consumed then: the TRV is
+    /// the source text either way.
+    fn template_escape(&mut self, cooked: &mut Vec<u16>) -> bool {
+        let Some(c) = self.cur() else {
+            // The end of the source: the caller finds the template unterminated.
+            return true;
+        };
+        if is_line_terminator(c) {
+            self.line_terminator();
+            return true;
+        }
+        self.pos += 1;
+        match c {
+            0x62 => cooked.push(0x08),
+            0x66 => cooked.push(0x0C),
+            0x6E => cooked.push(0x0A),
+            0x72 => cooked.push(0x0D),
+            0x74 => cooked.push(0x09),
+            0x76 => cooked.push(0x0B),
+            // `0 [lookahead ∉ DecimalDigit]`; before a digit, `0 DecimalDigit` and every other
+            // `DecimalDigit` are NotEscapeSequences: no legacy octal escape in a template.
+            0x30 if !self.cur().is_some_and(is_decimal) => cooked.push(0),
+            0x30..=0x39 => return false,
+            0x78 => match (
+                self.cur().and_then(hex_value),
+                self.ahead(1).and_then(hex_value),
+            ) {
+                (Some(hi), Some(lo)) => {
+                    self.pos += 2;
+                    cooked.push(u16::try_from(hi * 16 + lo).unwrap_or(0xFFFD));
+                }
+                _ => return false,
+            },
+            0x75 => match self.template_unicode_escape() {
+                Some(cp) => push_code_point(cooked, cp),
+                None => return false,
+            },
+            // `NonEscapeCharacter` and the `SingleEscapeCharacter`s that stand for themselves.
+            _ => cooked.push(c),
+        }
+        true
+    }
+
+    /// The `UnicodeEscapeSequence` after `\u` in a template, consumed; `None`, with nothing
+    /// consumed, where the characters are a `NotEscapeSequence` (no four hexadecimal digits, no
+    /// `}`, or a `NotCodePoint`).
+    fn template_unicode_escape(&mut self) -> Option<u32> {
+        if self.cur() == Some(ascii(b'{')) {
+            let mut at = self.pos + 1;
+            let mut cp: u32 = 0;
+            let mut digits = 0;
+            while let Some(d) = self.unit(at).and_then(hex_value) {
+                cp = cp.saturating_mul(16).saturating_add(d);
+                digits += 1;
+                at += 1;
+            }
+            if digits == 0 || cp > 0x10_FFFF || self.unit(at) != Some(ascii(b'}')) {
+                return None;
+            }
+            self.pos = at + 1;
+            return Some(cp);
+        }
+        let mut cp = 0;
+        for i in 0..4 {
+            cp = cp * 16 + self.ahead(i).and_then(hex_value)?;
+        }
+        self.pos += 4;
+        Some(cp)
     }
 
     /// The longest `Punctuator` at the current position, consumed.

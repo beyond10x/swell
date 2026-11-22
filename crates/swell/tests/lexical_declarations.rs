@@ -99,6 +99,24 @@ fn a_hoisted_function_sees_the_lexical_bindings_of_its_function_body() {
     );
 }
 
+/// `#sec-template-literals-runtime-semantics-evaluation`: a substitution of a template literal
+/// is an expression like any other, so it reads the block-scoped binding of its own scope, in a
+/// local slot or captured, and before the declaration ran it throws the `ReferenceError` of the
+/// temporal dead zone.
+#[test]
+fn a_template_substitution_sees_block_bindings_and_their_dead_zone() {
+    both(
+        "let a = 1; { let a = 2; const b = `${a}-${(function () { return a; })()}`; b; }",
+        &normal("\"2-2\""),
+    );
+    both("{ `${x}`; let x = 1; }", &thrown("ReferenceError"));
+    both(
+        "function f() { return `${y}`; } var r = []; try { f(); } catch (e) { r.push(e.name); } \
+         let y = 3; r.push(f()); r.join()",
+        &normal("\"ReferenceError,3\""),
+    );
+}
+
 /// `#sec-declarative-environment-records-setmutablebinding-n-v-s`, steps 2 and 5: every
 /// assignment to a `const` binding throws a `TypeError`, in strict and in non-strict code,
 /// through its slot and through a lookup by name; before its declaration the `ReferenceError` of

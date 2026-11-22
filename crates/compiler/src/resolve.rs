@@ -876,6 +876,10 @@ impl<'a> Resolver<'a> {
                 children.push(Walk::Expr(*callee));
                 children.extend(arguments.iter().flatten().map(|e| Walk::Expr(*e)));
             }
+            // The substitutions of a template, whose names resolve as any expression's.
+            Expr::Template { substitutions, .. } => {
+                children.extend(substitutions.iter().map(|e| Walk::Expr(*e)));
+            }
         }
         self.work.extend(children.into_iter().rev());
         Ok(())

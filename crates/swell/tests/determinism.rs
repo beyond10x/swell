@@ -298,9 +298,21 @@ const CORPUS: &[&str] = &[
 
 /// The limits of the corpus: small enough that the endless scripts reach their budgets fast,
 /// also with the collector run at every safe point (`fib(15)` takes about 27,000 steps).
+///
+/// The gate's run with the collector at every safe point has 10,000 steps per entry, where 40,000
+/// took 8.7 s a run on a loaded machine, most of it in the two endless loops and `fib(15)`; the
+/// lane `slow` (`SWELL_FULL_COUNTS=1`) runs 40,000 there too. With 10,000 `fib(15)` ends in the
+/// step budget rather than printing 610, and every outcome the test asserts is still reached:
+/// the endless loops end in the step budget, the others where they end with 40,000.
 fn corpus_limits() -> Limits {
     let mut limits = limits();
-    limits.steps_per_entry = 40_000;
+    limits.steps_per_entry = if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        10_000
+    } else {
+        40_000
+    };
     limits.memory_bytes = 256 * 1024;
     limits.frame_depth = 200;
     limits.reentry_depth = 20;
@@ -424,10 +436,13 @@ const CHILD: &str = "SWELL_DETERMINISM_CHILD";
 const BEGIN: &str = "--- determinism transcript begin ---";
 const END: &str = "--- determinism transcript end ---";
 
-/// The transcript a child process printed.
-fn child_transcript() -> String {
+/// A child process that runs the corpus and prints its transcript, started and not waited for:
+/// the two children of the test run beside each other and beside the test's own two agents,
+/// each in a process of its own, so that the test takes the time of one of the three runs rather
+/// than of all of them.
+fn spawn_child() -> std::process::Child {
     let exe = std::env::current_exe().unwrap();
-    let out = std::process::Command::new(exe)
+    std::process::Command::new(exe)
         .args([
             "host_133_same_calls_same_hooks_same_outcomes",
             "--exact",
@@ -435,8 +450,15 @@ fn child_transcript() -> String {
             "--test-threads=1",
         ])
         .env(CHILD, "1")
-        .output()
-        .unwrap();
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap()
+}
+
+/// The transcript a child process of [`spawn_child`] printed, once it ended.
+fn child_transcript(child: std::process::Child) -> String {
+    let out = child.wait_with_output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(
         out.status.success(),
@@ -472,6 +494,7 @@ fn host_133_same_calls_same_hooks_same_outcomes() {
         println!("{BEGIN}\n{a}\n{END}");
         return;
     }
+    let children = [spawn_child(), spawn_child()];
     let (a, b) = two_agents_interleaved();
     assert_eq!(a, b, "two agents in one process");
     let lines: Vec<&str> = a.lines().collect();
@@ -492,8 +515,7 @@ fn host_133_same_calls_same_hooks_same_outcomes() {
             "the corpus reaches {expected:?}:\n{a}"
         );
     }
-    let first = child_transcript();
-    let second = child_transcript();
+    let [first, second] = children.map(child_transcript);
     assert_eq!(first, second, "two processes");
     assert_eq!(first, a, "a process and this one");
 }

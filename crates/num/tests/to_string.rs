@@ -23,6 +23,18 @@ use swell_num::literal::string_to_number_trimmed;
 use swell_num::siphash::siphash24;
 use swell_num::to_string::{number_to_string, number_to_string_radix};
 
+/// Whether the tests of drawn bit patterns run their full counts. The lane `slow` sets
+/// `SWELL_FULL_COUNTS=1`; the gate runs a tenth of each count, the first patterns of the same
+/// draw, and every radix and every edge as the full count does.
+fn full_counts() -> bool {
+    std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+}
+
+/// `full` under [`full_counts`], else a tenth of it.
+fn count(full: usize) -> usize {
+    if full_counts() { full } else { full / 10 }
+}
+
 #[test]
 fn number_to_string_layouts() {
     let cases: [(f64, &str); 32] = [
@@ -125,13 +137,32 @@ fn exact_tie(x: f64, ours: &(String, i32), rust: &(String, i32)) -> bool {
     matches!((left, right), (Some(l), Some(r)) if l == r)
 }
 
+/// The first 200,000 finite bit patterns drawn with the key, written and read back; checked by
+/// two tests, this one for the first 100,000 and `to_string_then_parse_round_trips_from_100000`
+/// for the others, so that each runs in a process of its own under cargo-nextest. The gate
+/// checks the first tenth of each half ([`count`]); the lane `slow` all of it.
 #[test]
 fn to_string_then_parse_round_trips() {
+    round_trips(0..100_000);
+}
+
+/// The finite patterns 100,000 to 199,999 of [`to_string_then_parse_round_trips`].
+#[test]
+fn to_string_then_parse_round_trips_from_100000() {
+    round_trips(100_000..200_000);
+}
+
+/// [`to_string_then_parse_round_trips`] for the finite patterns at the indices `part`, the first
+/// [`count`] of them.
+fn round_trips(part: std::ops::Range<u32>) {
+    let len = u32::try_from(count((part.end - part.start) as usize)).unwrap();
+    let part = part.start..part.start + len;
     let key = *b"swell to_string\0";
     let mut finite = 0u32;
+    let mut checked = 0u32;
     let mut drawn = 0u64;
     let mut ties = 0u32;
-    while finite < 200_000 {
+    while finite < part.end {
         let bits = siphash24(&key, &drawn.to_le_bytes());
         drawn += 1;
         let x = f64::from_bits(bits);
@@ -139,6 +170,10 @@ fn to_string_then_parse_round_trips() {
             continue;
         }
         finite += 1;
+        if !part.contains(&(finite - 1)) {
+            continue;
+        }
+        checked += 1;
         let text = number_to_string(x);
         let back = string_to_number_trimmed(text.as_bytes());
         let expected = if x == 0.0 { 0.0 } else { x };
@@ -162,9 +197,12 @@ fn to_string_then_parse_round_trips() {
             ties += 1;
         }
     }
-    assert_eq!(finite, 200_000);
+    assert_eq!(finite, part.end);
+    assert_eq!(checked, part.end - part.start);
     println!(
-        "to_string_then_parse_round_trips: {finite} finite, {drawn} drawn, {ties} exact tie(s) resolved to the even digit"
+        "to_string_then_parse_round_trips, finite patterns {} to {}: {checked} checked, {drawn} drawn, {ties} exact tie(s) resolved to the even digit",
+        part.start,
+        part.end - 1
     );
 }
 
@@ -202,11 +240,15 @@ const EDGES: [f64; 12] = [
 /// `number_to_string_radix(x, 10)` is `Some(number_to_string(x))` on the 200,000 bit patterns
 /// `to_string_then_parse_round_trips` draws, and on the edges; a radix outside 2 to 36 has no
 /// result.
+///
+/// The 200,000 patterns are checked by four tests of 50,000 each, this one and the three
+/// `radix_ten_entry_is_unchanged_from_<n>` after it, so that each runs in a process of its own
+/// under cargo-nextest; this one checks the edges and the radices outside 2 to 36 too. The gate
+/// checks the first tenth of each part ([`count`]); the lane `slow` all of it.
 #[test]
 fn radix_ten_entry_is_unchanged() {
-    let key = *b"swell to_string\0";
-    let values = drawn_finite(&key, 200_000);
-    for &x in values.iter().chain(EDGES.iter()) {
+    radix_ten_entry_on(0..50_000);
+    for &x in &EDGES {
         assert_eq!(
             number_to_string_radix(x, 10),
             Some(number_to_string(x)),
@@ -220,6 +262,41 @@ fn radix_ten_entry_is_unchanged() {
     for radix in [0, 1, 37, 100, u32::MAX] {
         assert_eq!(number_to_string_radix(1.0, radix), None, "radix {radix}");
     }
+}
+
+/// `number_to_string_radix(x, 10)` is `Some(number_to_string(x))` for the drawn patterns of
+/// `radix_ten_entry_is_unchanged` at the indices `part` of the 200,000, the first [`count`] of
+/// them.
+fn radix_ten_entry_on(part: std::ops::Range<usize>) {
+    let part = part.start..part.start + count(part.end - part.start);
+    let key = *b"swell to_string\0";
+    let values = drawn_finite(&key, part.end);
+    for &x in &values[part] {
+        assert_eq!(
+            number_to_string_radix(x, 10),
+            Some(number_to_string(x)),
+            "bits {:#018x}",
+            x.to_bits()
+        );
+    }
+}
+
+/// Patterns 50,000 to 99,999 of [`radix_ten_entry_is_unchanged`].
+#[test]
+fn radix_ten_entry_is_unchanged_from_50000() {
+    radix_ten_entry_on(50_000..100_000);
+}
+
+/// Patterns 100,000 to 149,999 of [`radix_ten_entry_is_unchanged`].
+#[test]
+fn radix_ten_entry_is_unchanged_from_100000() {
+    radix_ten_entry_on(100_000..150_000);
+}
+
+/// Patterns 150,000 to 199,999 of [`radix_ten_entry_is_unchanged`].
+#[test]
+fn radix_ten_entry_is_unchanged_from_150000() {
+    radix_ten_entry_on(150_000..200_000);
 }
 
 /// x as f × 2^e with f a positive integer below 2^53, for a finite x other than ±0, and
@@ -284,11 +361,12 @@ fn bits_written_out(x: f64, w: u32) -> String {
 }
 
 /// In the radices 2, 4, 8, 16 and 32 the result is the bits of x written out
-/// ([`bits_written_out`]), on 10,000 drawn bit patterns and the edges.
+/// ([`bits_written_out`]), on 10,000 drawn bit patterns and the edges; the gate on the first
+/// 1,000 of them and the edges ([`count`]), the lane `slow` on all.
 #[test]
 fn power_of_two_radices_are_exact() {
     let key = *b"swell radix bits";
-    let values = drawn_finite(&key, 10_000);
+    let values = drawn_finite(&key, count(10_000));
     for w in 1..=5u32 {
         let radix = 1u32 << w;
         for &x in values.iter().chain(EDGES.iter()) {
@@ -626,12 +704,60 @@ fn check_shortest(x: f64, radix: u32, text: &str) {
 /// For each radix from 2 to 36, on 10,000 drawn bit patterns and the edges, the digits read
 /// back as x exactly and no shorter digit string does ([`check_shortest`]); NaN, the zeros and
 /// the infinities are written as in every radix.
+///
+/// The 35 radices are checked by seven tests of five radices each, this one (2 to 6) and the six
+/// `every_radix_reads_back_<from>_to_<to>` after it, so that each runs in a process of its own
+/// under cargo-nextest.
 #[test]
 fn every_radix_reads_back() {
+    reads_back_in(2..=6);
+}
+
+/// Radices 7 to 11 of [`every_radix_reads_back`].
+#[test]
+fn every_radix_reads_back_7_to_11() {
+    reads_back_in(7..=11);
+}
+
+/// Radices 12 to 16 of [`every_radix_reads_back`].
+#[test]
+fn every_radix_reads_back_12_to_16() {
+    reads_back_in(12..=16);
+}
+
+/// Radices 17 to 21 of [`every_radix_reads_back`].
+#[test]
+fn every_radix_reads_back_17_to_21() {
+    reads_back_in(17..=21);
+}
+
+/// Radices 22 to 26 of [`every_radix_reads_back`].
+#[test]
+fn every_radix_reads_back_22_to_26() {
+    reads_back_in(22..=26);
+}
+
+/// Radices 27 to 31 of [`every_radix_reads_back`].
+#[test]
+fn every_radix_reads_back_27_to_31() {
+    reads_back_in(27..=31);
+}
+
+/// Radices 32 to 36 of [`every_radix_reads_back`].
+#[test]
+fn every_radix_reads_back_32_to_36() {
+    reads_back_in(32..=36);
+}
+
+/// [`every_radix_reads_back`] for the radices of `radices`.
+/// The gate checks the first 1,000 drawn patterns in each radix and every edge ([`count`]), the
+/// lane `slow` all 10,000.
+fn reads_back_in(radices: std::ops::RangeInclusive<u32>) {
     let key = *b"swell radix test";
-    let values = drawn_finite(&key, 10_000);
+    let values = drawn_finite(&key, count(10_000));
     let mut checked = 0u32;
-    for radix in 2..=36u32 {
+    let (first, last) = (*radices.start(), *radices.end());
+    for radix in radices {
         for &x in values.iter().chain(EDGES.iter()) {
             if x == 0.0 {
                 continue;
@@ -655,7 +781,7 @@ fn every_radix_reads_back() {
             Some("-Infinity")
         );
     }
-    println!("every_radix_reads_back: {checked} result(s) checked");
+    println!("every_radix_reads_back, radices {first} to {last}: {checked} result(s) checked");
 }
 
 /// The layout of steps 6 to 12 in a radix other than 10: the clause's examples worked out by

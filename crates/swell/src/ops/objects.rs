@@ -20,13 +20,6 @@ use crate::object::property::{Descriptor, Key, Property, Slot};
 use crate::value::{ObjectRef, Value};
 
 /// The level of SetIntegrityLevel and TestIntegrityLevel.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Object.seal, Object.freeze, Object.isSealed, Object.isFrozen, JSON.rawJSON: story:object-integrity-and-prototype-methods, story:json-parse-and-raw-json"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum IntegrityLevel {
     Sealed,
@@ -34,13 +27,6 @@ pub(crate) enum IntegrityLevel {
 }
 
 /// The kind of EnumerableOwnProperties.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Object.keys, Object.values, Object.entries: story:object-enumeration-and-copy-methods"
-    )
-)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PropertyKind {
     Key,
@@ -191,13 +177,6 @@ impl<H: Host> Agent<H> {
 
     /// Invoke ( V, P [ , argumentsList ] ) (`#sec-invoke`): the method `key` of `value`, a
     /// primitive included, called with `value` as the this value.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Object.prototype.toLocaleString, Array.prototype.toLocaleString: story:object-integrity-and-prototype-methods, story:array-search-and-copy-methods"
-        )
-    )]
     pub(crate) fn invoke(&mut self, value: Value, key: Key, args: &[Value]) -> Completion<Value> {
         // 2. Let func be ? GetV(V, P). Nothing runs between it and the Call, which holds func,
         // V and the arguments in its activation.
@@ -234,13 +213,6 @@ impl<H: Host> Agent<H> {
     /// SetIntegrityLevel ( O, level ) (`#sec-setintegritylevel`), for every object the base has
     /// (ordinary, Array, String and arguments exotic objects, functions): a step per key, the
     /// list of keys charged to the memory budget and kept while it runs.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Object.seal, Object.freeze, JSON.rawJSON: story:object-integrity-and-prototype-methods, story:json-parse-and-raw-json"
-        )
-    )]
     pub(crate) fn set_integrity_level(
         &mut self,
         object: ObjectRef,
@@ -304,13 +276,6 @@ impl<H: Host> Agent<H> {
     /// TestIntegrityLevel ( O, level ) (`#sec-testintegritylevel`), for every object the base
     /// has: a step per key, the list of keys charged to the memory budget and kept while it
     /// runs.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Object.isSealed, Object.isFrozen: story:object-integrity-and-prototype-methods"
-        )
-    )]
     pub(crate) fn test_integrity_level(
         &mut self,
         object: ObjectRef,
@@ -397,13 +362,6 @@ impl<H: Host> Agent<H> {
     /// deleted is skipped. A step per key; the own keys and the results are kept on the kept
     /// stack across each Get, and stay kept until the caller releases to the mark it took
     /// before the call.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Object.keys, Object.values, Object.entries: story:object-enumeration-and-copy-methods"
-        )
-    )]
     pub(crate) fn enumerable_own_properties(
         &mut self,
         object: ObjectRef,

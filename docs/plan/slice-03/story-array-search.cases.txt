@@ -507,6 +507,5 @@ test/built-ins/Array/prototype/with/property-descriptor.js
 test/built-ins/Function/property-order.js
 test/built-ins/Function/prototype/property-order.js
 test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-52.js
-test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-2.js
 test/built-ins/Object/property-order.js
 test/built-ins/ThrowTypeError/property-order.js

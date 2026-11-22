@@ -1,10 +1,12 @@
 #!/bin/sh
 # Planted defect of taskfiles/test262.yml: conformance/test262/features.txt without the line of a
-# feature that cases of the pinned checkout name. `task test262` must exit non-zero, name the
+# feature that cases of the checkout name. `task test262` must exit non-zero, name the
 # feature as unlisted and as declared by test262 but not listed. The unchanged copy passes first.
-# The defect is on the counting side, so every run of the task counts the real pinned checkout
+# The defect is on the counting side, so every run of the task counts a small checkout of its own
 # with TEST262_RUN=none (no case is run; every run case is counted failed), against that mode's
 # expected file, made here from the task's own lines.
+# The checkout is made by tests/gate/fixtures/test262-checkout.sh (a case under each path of
+# sections.txt, one naming generators), with a copy of the design whose slice lines are its own.
 # Run from the repository root: sh tests/gate/test262-refuses-a-feature-missing-from-the-list.sh
 # The same output from task, cargo and ess on any machine: no colour, and no "::error" line
 # that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
@@ -22,14 +24,11 @@ fail() {
 }
 
 export TEST262_RUN=none
-: > "$dir/empty.txt"
-if task -d . test262 TEST262_EXPECTED="$dir/empty.txt" TEST262_OUT="$dir/mode" > "$dir/mode.out" 2>&1; then
-  fail "task test262 exited 0 against an empty expected file ($dir/mode.out)"
-fi
-grep -q '^test262 total ' "$dir/mode/lines.txt" || fail "task test262 printed no total line ($dir/mode.out)"
-cp "$dir/mode/lines.txt" "$dir/expected.txt" || fail "cannot copy $dir/mode/lines.txt"
+. tests/gate/fixtures/test262-checkout.sh
+test262_checkout "$dir"
+cp "$dir/checkout-lines.txt" "$dir/expected.txt" || fail "cannot copy $dir/checkout-lines.txt"
 cp conformance/test262/features.txt "$dir/features.txt" || fail "cannot copy features.txt"
-task -d . test262 TEST262_FEATURES="$dir/features.txt" TEST262_EXPECTED="$dir/expected.txt" \
+task -d . test262 $checkout_vars TEST262_DESIGN="$checkout_design" TEST262_FEATURES="$dir/features.txt" TEST262_EXPECTED="$dir/expected.txt" \
   TEST262_OUT="$dir/base" > "$dir/base.out" 2>&1 ||
   fail "task test262 on the unchanged features.txt exited non-zero ($dir/base.out)"
 grep -q '^test262: [0-9]* lines equal ' "$dir/base.out" ||
@@ -37,7 +36,7 @@ grep -q '^test262: [0-9]* lines equal ' "$dir/base.out" ||
 
 grep -qx "run $feature" "$dir/features.txt" || fail "features.txt has no line \"run $feature\""
 grep -vx "run $feature" "$dir/features.txt" > "$dir/planted-features.txt"
-if task -d . test262 TEST262_FEATURES="$dir/planted-features.txt" TEST262_EXPECTED="$dir/expected.txt" \
+if task -d . test262 $checkout_vars TEST262_DESIGN="$checkout_design" TEST262_FEATURES="$dir/planted-features.txt" TEST262_EXPECTED="$dir/expected.txt" \
   TEST262_OUT="$dir/planted" > "$dir/planted.out" 2>&1; then
   fail "task test262 exited 0 with $feature missing from features.txt ($dir/planted.out)"
 fi

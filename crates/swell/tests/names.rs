@@ -56,12 +56,26 @@ fn lookup_by_name_charges_a_step_per_record() {
     );
 }
 
+/// `full` steps of a step budget, or a tenth of them in the gate with the collector at every
+/// safe point, where every step collects; the lane `slow` (`SWELL_FULL_COUNTS=1`) runs `full`
+/// there too. The scripts given such a budget loop or recurse without end, so every budget
+/// ends them in the same way.
+fn steps_in_the_collect_gate(full: u64) -> u64 {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        full / 10
+    } else {
+        full
+    }
+}
+
 /// `step_budget_ends_a_loop_of_lookups_by_name`: a loop that reads and writes a name through a
 /// `with` statement forever ends in `Terminated(StepBudget)`, with `last_entry_steps()` at most
 /// the budget; so does a single read through more records than the budget has steps.
 #[test]
 fn step_budget_ends_a_loop_of_lookups_by_name() {
-    for steps in [10_u64, 1_000, 100_000] {
+    for steps in [10_u64, 1_000, steps_in_the_collect_gate(100_000)] {
         let mut limits = limits();
         limits.steps_per_entry = steps;
         let mut agent = agent_with(limits).unwrap();

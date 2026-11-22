@@ -182,6 +182,11 @@ has no use of its own in these scripts and comes before 10 because async functio
 suspended frames (the design, section 12). The design's slice table and its counts do not
 change; only the order of delivery does, and it is decided again at each boundary.
 
+How surf takes swell, as the deciding session said on 2026-11-22: as a git dependency on a
+release tag (surf's `epic:scripts-in-a-page`, a draft there). Seven requirements surf needs
+from the host interface come as a list when that epic is accepted; until then nothing of the
+host interface is ordered by surf.
+
 Not measured: the inline and linked scripts of the 101 test files themselves (the listing of
 the repository at that commit was cut off at 61,341 entries), and which paths of the harness
 run. Objects of the DOM and of the host are surf's side.

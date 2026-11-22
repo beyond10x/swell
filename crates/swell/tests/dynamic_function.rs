@@ -186,22 +186,45 @@ fn function_past_reentry_depth_throws_a_range_error() {
     );
 }
 
+/// The step budget of [`ends_in_step_budget`]: 100,000 steps; 10,000 in the gate with the
+/// collector at every safe point, where every step collects, and 100,000 there too in the lane
+/// `slow` (`SWELL_FULL_COUNTS=1`). The loop of the function body never ends, so every budget
+/// ends it the same way, in `Terminated(StepBudget)`.
+fn step_budget() -> u64 {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        10_000
+    } else {
+        100_000
+    }
+}
+
+/// `source`, a dynamic function whose body loops forever, ends the run in
+/// `Terminated(StepBudget)` at the budget [`step_budget`] gives.
+fn ends_in_step_budget(source: &str) {
+    let mut limits = limits();
+    limits.steps_per_entry = step_budget();
+    assert_eq!(
+        run(limits, source),
+        Outcome::Terminated(Termination::StepBudget),
+        "{source}"
+    );
+}
+
 /// The step budget through `Function`: a dynamic function whose body loops forever ends the run
-/// in `Terminated(StepBudget)`.
+/// in `Terminated(StepBudget)`; here `Function` called. The test after it constructs one with
+/// `new`, in a process of its own under cargo-nextest (in the mode collect-every-safe-point each
+/// takes seconds).
 #[test]
 fn step_budget_ends_an_endless_dynamic_function() {
-    for source in [
-        "Function(\"while (true) {}\")();",
-        "new Function(\"a\", \"for (;;) { a++; }\")(0);",
-    ] {
-        let mut limits = limits();
-        limits.steps_per_entry = 100_000;
-        assert_eq!(
-            run(limits, source),
-            Outcome::Terminated(Termination::StepBudget),
-            "{source}"
-        );
-    }
+    ends_in_step_budget("Function(\"while (true) {}\")();");
+}
+
+/// The step budget through `new Function` ([`step_budget_ends_an_endless_dynamic_function`]).
+#[test]
+fn step_budget_ends_an_endless_constructed_dynamic_function() {
+    ends_in_step_budget("new Function(\"a\", \"for (;;) { a++; }\")(0);");
 }
 
 /// The bytes an agent with `limits` holds after `create_realm`, collected.

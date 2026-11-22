@@ -8,10 +8,12 @@
 #    printed counts change, against the unchanged expected file: `task test262` must exit non-zero
 #    and print "line(s) differ from".
 # The unchanged copies pass first.
-# Both defects are on the counting side, so every run of the task counts the real pinned checkout
+# Both defects are on the counting side, so every run of the task counts a small checkout of its own
 # with TEST262_RUN=none (no case is run; every run case is counted failed), and the expected file
 # is that mode's, made here from the task's own lines; the gate's own `task test262` checks
 # conformance/test262/expected.txt with the cases run.
+# The checkout is made by tests/gate/fixtures/test262-checkout.sh (a case under each path of
+# sections.txt, one naming generators), with a copy of the design whose slice lines are its own.
 # Run from the repository root: sh tests/gate/test262-refuses-a-count-that-differs-from-expected.sh
 # The same output from task, cargo and ess on any machine: no colour, and no "::error" line
 # that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
@@ -29,14 +31,11 @@ fail() {
 }
 
 export TEST262_RUN=none
-: > "$dir/empty.txt"
-if task -d . test262 TEST262_EXPECTED="$dir/empty.txt" TEST262_OUT="$dir/mode" > "$dir/mode.out" 2>&1; then
-  fail "task test262 exited 0 against an empty expected file ($dir/mode.out)"
-fi
-grep -q '^test262 total ' "$dir/mode/lines.txt" || fail "task test262 printed no total line ($dir/mode.out)"
-cp "$dir/mode/lines.txt" "$dir/expected.txt" || fail "cannot copy $dir/mode/lines.txt"
+. tests/gate/fixtures/test262-checkout.sh
+test262_checkout "$dir"
+cp "$dir/checkout-lines.txt" "$dir/expected.txt" || fail "cannot copy $dir/checkout-lines.txt"
 cp conformance/test262/features.txt "$dir/features.txt" || fail "cannot copy features.txt"
-task -d . test262 TEST262_EXPECTED="$dir/expected.txt" TEST262_FEATURES="$dir/features.txt" \
+task -d . test262 $checkout_vars TEST262_DESIGN="$checkout_design" TEST262_EXPECTED="$dir/expected.txt" TEST262_FEATURES="$dir/features.txt" \
   TEST262_OUT="$dir/base" > "$dir/base.out" 2>&1 ||
   fail "task test262 on the unchanged files exited non-zero ($dir/base.out)"
 grep -qF "lines equal $dir/expected.txt" "$dir/base.out" ||
@@ -47,7 +46,7 @@ changed=$(printf '%s\n' "$total" | awk '{ $3 = $3 + 1; print }')
 awk -v total="$total" -v changed="$changed" '$0 == total { $0 = changed } { print }' \
   "$dir/expected.txt" > "$dir/planted-expected.txt"
 cmp -s "$dir/expected.txt" "$dir/planted-expected.txt" && fail "the planted expected file equals expected.txt"
-if task -d . test262 TEST262_EXPECTED="$dir/planted-expected.txt" TEST262_OUT="$dir/planted-file" \
+if task -d . test262 $checkout_vars TEST262_DESIGN="$checkout_design" TEST262_EXPECTED="$dir/planted-expected.txt" TEST262_OUT="$dir/planted-file" \
   > "$dir/planted-file.out" 2>&1; then
   fail "task test262 exited 0 with a changed count in the expected file ($dir/planted-file.out)"
 fi
@@ -61,7 +60,7 @@ grep -qxF "test262: 1 line(s) differ from $dir/planted-expected.txt" "$dir/plant
 grep -qx "run $feature" "$dir/features.txt" || fail "features.txt has no line \"run $feature\""
 awk -v feature="$feature" '$0 == "run " feature { $0 = "exclude " feature " planted decision-1" } { print }' \
   "$dir/features.txt" > "$dir/planted-features.txt"
-if task -d . test262 TEST262_EXPECTED="$dir/expected.txt" TEST262_FEATURES="$dir/planted-features.txt" \
+if task -d . test262 $checkout_vars TEST262_DESIGN="$checkout_design" TEST262_EXPECTED="$dir/expected.txt" TEST262_FEATURES="$dir/planted-features.txt" \
   TEST262_OUT="$dir/planted-output" > "$dir/planted-output.out" 2>&1; then
   fail "task test262 exited 0 with changed printed counts ($dir/planted-output.out)"
 fi

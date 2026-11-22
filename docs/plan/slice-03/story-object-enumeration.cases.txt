@@ -33,8 +33,6 @@ test/built-ins/Object/getOwnPropertyDescriptors/primitive-booleans.js
 test/built-ins/Object/getOwnPropertyDescriptors/primitive-strings.js
 test/built-ins/Object/getOwnPropertyDescriptors/tamper-with-global-object.js
 test/built-ins/Object/getOwnPropertyDescriptors/tamper-with-object-keys.js
-test/built-ins/Object/getOwnPropertySymbols/length.js
-test/built-ins/Object/getOwnPropertySymbols/name.js
 test/built-ins/Object/hasOwn/descriptor.js
 test/built-ins/Object/hasOwn/hasown.js
 test/built-ins/Object/hasOwn/hasown_nonexistent.js
