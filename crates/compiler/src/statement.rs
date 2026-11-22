@@ -37,7 +37,9 @@
 //! a record of its bindings that live in one ([`Instruction::PushLexicalEnv`]) and its checked
 //! local slots set uninitialized ([`Instruction::Uninitialize`]); it is left by `PopEnv` when it
 //! made a record, and by every `break`, `continue`, `return` and throw through it as a `catch`
-//! clause's record is. A declaration initializes its binding: the store into the slot, or
+//! clause's record is. The functions a block or a `case` block declares are made at its entry,
+//! before its first statement ([`Compiler::block_functions`]). A declaration initializes its
+//! binding: the store into the slot, or
 //! [`Instruction::InitGlobal`] for a name of the script's top level
 //! (`#sec-let-and-const-declarations-runtime-semantics-evaluation`). A `for (let ...)` whose
 //! head has a record copies it before the first test and before each update
@@ -130,6 +132,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
             // `#sec-block-runtime-semantics-evaluation`, with BlockDeclarationInstantiation.
             Stmt::Block(list) => {
                 let record = self.enter_scope(ScopeKey::Block(id), span, &mut t)?;
+                self.block_functions(list, &mut t)?;
                 t.extend(list.iter().map(|s| Task::Stmt(*s)))?;
                 leave_scope(record, span, &mut t)?;
             }
@@ -141,8 +144,9 @@ impl<'a, 'm> Compiler<'a, 'm> {
             Stmt::Var(_, declarators) => self.declarators(id, declarators, &mut t)?,
             // `#sec-empty-statement-runtime-semantics-evaluation`,
             // `#sec-debugger-statement-runtime-semantics-evaluation` (no debugging facility), and a
-            // function declaration, which FunctionDeclarationInstantiation or
-            // GlobalDeclarationInstantiation instantiates
+            // function declaration, which FunctionDeclarationInstantiation,
+            // GlobalDeclarationInstantiation, EvalDeclarationInstantiation or, in a block, the
+            // entry of the block ([`Compiler::block_functions`]) instantiates
             // (`#sec-function-definitions-runtime-semantics-evaluation`).
             Stmt::Empty | Stmt::Debugger | Stmt::FunctionDeclaration(_) => {}
             // `#sec-expression-statement-runtime-semantics-evaluation`.
@@ -364,6 +368,9 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 labels.extend(cases.iter().map(|_| self.label()))?;
                 t.push(Task::Expr(*discriminant))?;
                 let record = self.enter_scope(ScopeKey::Case(id), span, &mut t)?;
+                for case in cases {
+                    self.block_functions(&case.body, &mut t)?;
+                }
                 let mut default = None;
                 for (case, label) in cases.iter().zip(labels.as_slice()) {
                     match case.test {
@@ -502,6 +509,38 @@ impl<'a, 'm> Compiler<'a, 'm> {
             t.push(Task::Emit(Instruction::Uninitialize(n), span))?;
         }
         Ok(record)
+    }
+
+    /// BlockDeclarationInstantiation, step 3.d (`#sec-blockdeclarationinstantiation`), after
+    /// [`Compiler::enter_scope`]: each function the statement list `list` declares, in source
+    /// order, made by the closure instruction in the scope just entered, its record (if any) the
+    /// function's [[Environment]], and stored in its binding (InitializeBinding), before the
+    /// scope's first statement (decision 3, "Function declarations in a block", item 1). The
+    /// declaration itself compiles to nothing.
+    fn block_functions(
+        &mut self,
+        list: &[StmtId],
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let ast = self.ast;
+        for &s in list {
+            let Some(Stmt::FunctionDeclaration(f)) = ast.stmt(s).map(|n| &n.stmt) else {
+                continue;
+            };
+            let span = ast
+                .function(*f)
+                .map(|x| x.span)
+                .ok_or_else(|| malformed("a function index"))?;
+            let store = match self.binding(Site::Declaration(*f))? {
+                Binding::Local(n) => Instruction::SetLocal(n),
+                Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
+                _ => return Err(malformed("a block function's binding")),
+            };
+            t.push(Task::Emit(Instruction::Closure(f.0), span))?;
+            t.push(Task::Emit(store, span))?;
+            t.push(Task::Emit(Instruction::Pop, span))?;
+        }
+        Ok(())
     }
 
     /// The entry of the scope of the top level of the body of function `id`, before its
@@ -663,6 +702,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
             }))?;
         }
         let record = self.enter_scope(ScopeKey::Try(id), span, t)?;
+        self.block_functions(block, t)?;
         t.extend(block.iter().map(|s| Task::Stmt(*s)))?;
         leave_scope(record, span, t)?;
         let catch_end = if catch {
@@ -726,6 +766,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
             };
             self.reset_completion(span, t)?;
             let record = self.enter_scope(ScopeKey::Catch(id), span, t)?;
+            self.block_functions(&h.body, t)?;
             t.extend(h.body.iter().map(|s| Task::Stmt(*s)))?;
             leave_scope(record, span, t)?;
             leave_scope(names, span, t)?;
@@ -757,6 +798,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 // value it kept.
                 self.reset_completion(span, t)?;
                 let record = self.enter_scope(ScopeKey::Finally(id), span, t)?;
+                self.block_functions(list, t)?;
                 t.extend(list.iter().map(|s| Task::Stmt(*s)))?;
                 leave_scope(record, span, t)?;
                 if self.script {

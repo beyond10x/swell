@@ -1,0 +1,14 @@
+script locals 1
+  0000 2:8 Closure 0
+  0001 2:8 SetLocal 0
+  0002 2:8 Pop
+  0003 2:3 Undefined
+  0004 2:3 GetLocal 0
+  0005 2:3 Call 0
+  0006 2:3 StoreCompletion
+  0007 0:0 LoadCompletion
+  0008 0:0 Return
+
+function 0 declaration "f" length 0 locals 0
+  0000 2:8 Undefined
+  0001 2:8 Return

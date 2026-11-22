@@ -65,7 +65,12 @@
 //!
 //! The lexical names in scope are a stack of frames, each made as the walk enters the statement
 //! list (or the head) that declares them; a `var` or a top-level function declaration is checked
-//! against the frames of its own function. The errors are sorted into source order at the end.
+//! against the frames of its own function. The frame of a block, a `case` block and a `try`,
+//! `catch` or `finally` block holds its function declarations beside its `let` and `const` ones
+//! (LexicallyDeclaredNames, `#sec-block-static-semantics-early-errors`,
+//! `#sec-switch-statement-static-semantics-early-errors`), in strict and non-strict code alike:
+//! the duplicate declarations Annex B allows in non-strict code (B.3.2.4) wait for slice 18.
+//! The errors are sorted into source order at the end.
 //!
 //! The parser reports the early errors it meets as it reads: a name written with an escape that
 //! spells a reserved word ([`escaped_keyword`], `#sec-identifiers-static-semantics-early-errors`)
@@ -176,8 +181,12 @@ pub(crate) fn check(ast: &Ast, body: &[StmtId], strict: bool, m: &Meter<'_>) -> 
 /// Where the names of a frame of lexical names come from.
 #[derive(Clone, Copy)]
 enum Names<'a> {
-    /// The `let` and `const` declarations of a statement list.
+    /// The `let` and `const` declarations of the top level of a script or a function body,
+    /// where a function declaration is var scoped.
     List(&'a [StmtId]),
+    /// The `let`, `const` and function declarations of a block, or of a `try`, `catch` or
+    /// `finally` block (`#sec-block-static-semantics-lexicallydeclarednames`).
+    Block(&'a [StmtId]),
     /// Those of the clauses of a `case` block, taken together.
     Cases(&'a [SwitchCase]),
     /// The declarators of a `for` head.
@@ -246,13 +255,18 @@ impl<'a, 'm> Checker<'a, 'm> {
         match names {
             Names::List(list) => {
                 for &s in list {
-                    self.frame_statement(&mut frame, s, others, what);
+                    self.frame_statement(&mut frame, s, others, what, false);
+                }
+            }
+            Names::Block(list) => {
+                for &s in list {
+                    self.frame_statement(&mut frame, s, others, what, true);
                 }
             }
             Names::Cases(cases) => {
                 for c in cases {
                     for &s in &c.body {
-                        self.frame_statement(&mut frame, s, others, what);
+                        self.frame_statement(&mut frame, s, others, what, true);
                     }
                 }
             }
@@ -272,17 +286,25 @@ impl<'a, 'm> Checker<'a, 'm> {
         frame
     }
 
-    /// The names the statement `s` binds when it is a `let` or `const` declaration, into
-    /// `frame`.
+    /// The names the statement `s` binds when it is a `let` or `const` declaration, or, with
+    /// `functions`, a function declaration of a block or a `case` block, into `frame`.
     fn frame_statement(
         &mut self,
         frame: &mut BTreeSet<String>,
         s: StmtId,
         others: &[BindingTarget],
         what: &str,
+        functions: bool,
     ) {
         let ast = self.ast;
-        let Some(Stmt::Var(kind, declarators)) = ast.stmt(s).map(|n| &n.stmt) else {
+        let statement = ast.stmt(s).map(|n| &n.stmt);
+        if let Some(Stmt::FunctionDeclaration(f)) = statement {
+            if functions && let Some(name) = ast.function(*f).and_then(|x| x.name.as_ref()) {
+                self.frame_name(frame, name, others, what);
+            }
+            return;
+        }
+        let Some(Stmt::Var(kind, declarators)) = statement else {
             return;
         };
         if !kind.is_lexical() {
@@ -372,6 +394,14 @@ impl<'a, 'm> Checker<'a, 'm> {
         }
     }
 
+    /// Whether the statement being checked stands at the top level of the script or of the
+    /// current function's body: the frame of that body is the current function's only one. Every
+    /// block, `case` block, `try`, `catch` and `finally` block pushes a frame of its own, empty or
+    /// not, before its statements are walked, and no other place admits a function declaration.
+    fn at_top_level(&self) -> bool {
+        self.lexical.len() == self.lexical_base.saturating_add(1)
+    }
+
     /// A name a declaration of kind `kind` binds.
     fn declared(&mut self, kind: DeclKind, name: &Name) {
         if kind.is_lexical() && name.name == "let" {
@@ -393,7 +423,7 @@ impl<'a, 'm> Checker<'a, 'm> {
             return false;
         };
         let names = match &node.stmt {
-            Stmt::Block(body) => Names::List(body),
+            Stmt::Block(body) => Names::Block(body),
             Stmt::Switch { cases, .. } => Names::Cases(cases),
             Stmt::For {
                 init: Some(ForInit::Var(kind, declarators)),
@@ -408,9 +438,9 @@ impl<'a, 'm> Checker<'a, 'm> {
                 handler,
                 finalizer,
             } => {
-                let block_frame = self.frame(Names::List(block), &[], "");
+                let block_frame = self.frame(Names::Block(block), &[], "");
                 if let Some(list) = finalizer {
-                    let frame = self.frame(Names::List(list), &[], "");
+                    let frame = self.frame(Names::Block(list), &[], "");
                     self.push_list(stack, list, frame);
                 }
                 if let Some(h) = handler {
@@ -423,7 +453,7 @@ impl<'a, 'm> Checker<'a, 'm> {
                         self.push_step(stack, Step::PopLexical);
                     }
                     let param: &[BindingTarget] = h.param.as_slice();
-                    let frame = self.frame(Names::List(&h.body), param, "the catch parameter");
+                    let frame = self.frame(Names::Block(&h.body), param, "the catch parameter");
                     self.push_list(stack, &h.body, frame);
                     if let Some(target) = pattern {
                         if let Some(e) = target.pattern() {
@@ -717,10 +747,12 @@ impl<'a, 'm> Checker<'a, 'm> {
                     }
                 }
             },
-            // A function declaration reaches the walk only at the top level of a body, where it
-            // is var scoped.
+            // A function declaration at the top level of a body is var scoped; one in a block or
+            // a `case` block is a name of that block's frame, checked as the frame was made.
             Stmt::FunctionDeclaration(f) => {
-                if let Some(name) = self.ast.function(*f).and_then(|x| x.name.as_ref()) {
+                if self.at_top_level()
+                    && let Some(name) = self.ast.function(*f).and_then(|x| x.name.as_ref())
+                {
                     self.var_name(name);
                 }
             }
