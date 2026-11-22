@@ -163,8 +163,8 @@ HOST-162 test swell::eval::host_162_a_stale_or_foreign_handle_from_either_hook_f
 HOST-163 test swell::eval_stack::host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting
 HOST-164 test swell::eval::host_164_refusals_counts_every_refusal_caught_or_not
 HOST-165 pending slice 3
-HOST-166 pending slice 6
-HOST-167 pending slice 6
+HOST-166 test swell::interrupt::host_166_a_pending_interrupt_ends_parse_script_before_the_parse
+HOST-167 test swell::interrupt::host_167_an_interrupt_set_in_a_host_function_ends_its_cx_parse_script
 HOST-168 pending slice 6
 HOST-169 pending slice 6
 HOST-170 pending slice 6

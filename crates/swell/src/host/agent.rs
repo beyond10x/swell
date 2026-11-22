@@ -436,10 +436,12 @@ impl<H: Host> Agent<H> {
 
     /// ParseScript (`#sec-parse-script`, decision 8) of `source` in `realm`, whose
     /// [[HostDefined]] is `host_defined`: a `Script`, or the parse errors as `SyntaxError`
-    /// objects of `realm` (`script.rs`). It runs no code, calls no hook, spends no step and
-    /// reads no interrupt; it is an outermost entry that spends none, so `last_entry_steps()`
-    /// then reads 0. Over the memory budget it answers `Terminated(MemoryBudget)`. `realm` is
-    /// checked first. A safe point.
+    /// objects of `realm` (`script.rs`). It runs no code, calls no hook and spends no step; it is
+    /// an outermost entry that spends none, so `last_entry_steps()` then reads 0. It reads the
+    /// interrupt flag at its start, after the safe point, as every outermost entry does
+    /// (decision 12): a set flag is cleared and the call answers `Terminated(Interrupted)` before
+    /// the source is copied. Over the memory budget it answers `Terminated(MemoryBudget)`.
+    /// `realm` is checked first. A safe point.
     pub fn parse_script(
         &mut self,
         realm: &Realm,
@@ -453,6 +455,10 @@ impl<H: Host> Agent<H> {
         if self.safe_point().is_err() {
             self.fault();
             return Ok(Parsed::Terminated(Termination::EngineFault));
+        }
+        if self.check_interrupt().is_err() {
+            self.end_entry();
+            return Ok(Parsed::Terminated(Termination::Interrupted));
         }
         let answer = self.in_entry_realm(realm, |agent| {
             agent.parse_script_in(realm, source, host_defined)

@@ -751,8 +751,11 @@ impl<H: Host> Cx<'_, H> {
 
     /// ParseScript (`#sec-parse-script`) of `source` in `realm` (decision 8, over scoped
     /// handles): the script as a `ScriptRef` valid until the outermost entry ends, or the parse
-    /// errors as roots of `SyntaxError` objects of `realm`. It runs no code, spends no step and
-    /// reads no interrupt; a run already terminated answers its termination.
+    /// errors as roots of `SyntaxError` objects of `realm`. It runs no code and spends no step; a
+    /// run already terminated answers its termination. It reads the interrupt flag at its start,
+    /// before the source is copied: a set flag is cleared and ends the run in
+    /// `Terminated(Interrupted)`, sticky until the outermost entry ends, and the call answers
+    /// `Parsed::Terminated(Interrupted)`.
     pub fn parse_script(
         &mut self,
         realm: RealmRef,
@@ -762,7 +765,7 @@ impl<H: Host> Cx<'_, H> {
         let agent = &mut *self.agent;
         agent.alive()?;
         agent.host_realm(realm.handle).map_err(host_error)?;
-        if let Err(abrupt) = agent.running() {
+        if let Err(abrupt) = agent.running().and_then(|()| agent.check_interrupt()) {
             return Ok(Parsed::Terminated(crate::script::parse_termination(abrupt)));
         }
         Ok(

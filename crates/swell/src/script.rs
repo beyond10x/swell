@@ -12,7 +12,8 @@
 //! one `SyntaxError` naming the bound, an implementation limit like `parser_nesting`;
 //! `CompileError::Tree` (a tree the parser cannot produce) is a broken engine invariant and ends
 //! the call in `Terminated(EngineFault)`. ParseScript runs no code, calls no hook, spends no step
-//! and reads no interrupt.
+//! and reads no interrupt itself: `parse_script` and `cx.parse_script` read the flag before they
+//! call it (HOST-166, HOST-167).
 //!
 //! The record owns the compiled code and the atoms of its String constants, of their property
 //! keys and of its functions' names; the code and the record are charged to the memory budget
