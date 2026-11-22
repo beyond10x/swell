@@ -30,6 +30,7 @@
 //! Root site of the collector: [`trace_roots`] (the frame stack: operand stacks, locals,
 //! environments, function and realm of each frame).
 
+mod array_patterns;
 mod arrow;
 pub(crate) mod budget;
 pub(crate) mod dispatch;
@@ -39,6 +40,7 @@ mod lexical;
 mod object_literal;
 mod parameters;
 mod patterns;
+mod spread;
 mod template;
 
 use frame::{Entry, Frame, entry_bytes};

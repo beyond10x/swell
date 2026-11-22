@@ -519,6 +519,9 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "computed_key" => ("x = ", "{[", "0", "]: 0}", ";"),
         "object_spread" => ("x = ", "{...", "0", "}", ";"),
         "block_function" => ("", "{ function f() {", "", "} }", ""),
+        "array_pattern" => ("var ", "[", "a", "]", " = o;"),
+        "array_assignment_pattern" => ("", "[", "a", "]", " = o;"),
+        "spread" => ("", "[...", "a", "]", ";"),
         _ => return None,
     };
     let mut source = units(before);
@@ -529,7 +532,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 46] = [
+const NESTING_KINDS: [&str; 49] = [
     "array",
     "paren",
     "block",
@@ -576,6 +579,9 @@ const NESTING_KINDS: [&str; 46] = [
     "computed_key",
     "object_spread",
     "block_function",
+    "array_pattern",
+    "array_assignment_pattern",
+    "spread",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict

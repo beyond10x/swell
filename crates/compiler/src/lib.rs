@@ -605,6 +605,12 @@ impl<'a, 'm> Compiler<'a, 'm> {
         self.next_key
     }
 
+    /// Appends the handler `h`, its labels bound by the end of the body, to the table of the
+    /// body, the growth charged first: inner handlers come first, as their tasks end first.
+    pub(crate) fn handler(&mut self, h: Handler) -> Result<(), CompileError> {
+        Ok(self.m.push(&mut self.handlers, h)?)
+    }
+
     pub(crate) fn string(&mut self, s: &str) -> Result<u32, CompileError> {
         self.constants.string_str(s, self.m)
     }
@@ -785,17 +791,14 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     items,
                     envs,
                 } => {
-                    self.m.push(
-                        &mut self.handlers,
-                        Handler {
-                            kind,
-                            start,
-                            end,
-                            target,
-                            items,
-                            envs,
-                        },
-                    )?;
+                    self.handler(Handler {
+                        kind,
+                        start,
+                        end,
+                        target,
+                        items,
+                        envs,
+                    })?;
                     continue;
                 }
             };

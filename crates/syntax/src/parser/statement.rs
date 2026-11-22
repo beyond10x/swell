@@ -16,10 +16,9 @@
 //! and `export` (11), and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
 //! `for (var a = 0 in o)` (18); the `var` binding and the duplicate declarations Annex B gives
 //! a function declaration in a block of non-strict code (B.3.2) wait for slice 18 too, so that
-//! such code parses and answers as strict code does until then; an array pattern keeps the
-//! refusal of its own part (6). An object binding pattern
-//! (`#sec-destructuring-binding-patterns`) stands where a declarator, a for-in or for-of head or
-//! a `catch` clause binds a name. Labelled statements and labelled `break` and `continue`
+//! such code parses and answers as strict code does until then. An object or array binding
+//! pattern (`#sec-destructuring-binding-patterns`) stands where a declarator, a for-in or for-of
+//! head or a `catch` clause binds a name. Labelled statements and labelled `break` and `continue`
 //! (`#sec-labelled-statements`), a `catch` without a parameter (`#sec-try-statement`) and
 //! automatic semicolon insertion (`#sec-rules-of-automatic-semicolon-insertion`) are slice 2's.
 //!
@@ -416,8 +415,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// A `BindingIdentifier` or a `LabelIdentifier`; a name written with an escape may not spell a
-    /// reserved word. A binding pattern where no object pattern is read (an array pattern, a
-    /// pattern after `...`) is refused (slice 6).
+    /// reserved word. Where a binding pattern may stand it is read first
+    /// ([`Parser::pattern_literal`]).
     #[inline(never)]
     pub(super) fn binding_identifier(&mut self) -> R<Name> {
         self.check_escaped_keyword()?;
@@ -431,9 +430,6 @@ impl<'a, 'm> Parser<'a, 'm> {
                     name,
                     span: self.finish(span),
                 })
-            }
-            TokenKind::Punct(Punct::LBracket) | TokenKind::Punct(Punct::LBrace) => {
-                self.refuse("destructuring pattern", 6)
             }
             _ => self.unexpected(),
         }
@@ -508,11 +504,14 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.push_declarator(id, pattern)
     }
 
-    /// The object literal a binding pattern at the current `{` covers, read; `None` at any
-    /// other token.
+    /// The object or array literal a binding pattern at the current `{` or `[` covers, read;
+    /// `None` at any other token.
     pub(super) fn pattern_literal(&mut self) -> R<Option<ExprId>> {
         if self.is(Punct::LBrace) {
             return Ok(Some(self.object()?));
+        }
+        if self.is(Punct::LBracket) {
+            return Ok(Some(self.array()?));
         }
         Ok(None)
     }
@@ -543,10 +542,10 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.charged(pushed)
     }
 
-    /// The `BindingIdentifier` at the current token, or the ObjectBindingPattern
-    /// (`#sec-destructuring-binding-patterns`) whose object literal `pattern` was read
-    /// ([`Parser::pattern_literal`]), read again with its names bound as `kind` says
-    /// ([`Parser::reread_as_pattern`]). An array pattern keeps the refusal of its story.
+    /// The `BindingIdentifier` at the current token, or the ObjectBindingPattern or
+    /// ArrayBindingPattern (`#sec-destructuring-binding-patterns`) whose literal `pattern` was
+    /// read ([`Parser::pattern_literal`]), read again with its names bound as `kind` says
+    /// ([`Parser::reread_as_pattern`]).
     #[inline(never)]
     pub(super) fn binding_target(
         &mut self,
