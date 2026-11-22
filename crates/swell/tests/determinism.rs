@@ -298,8 +298,9 @@ const CORPUS: &[&str] = &[
 
 /// The limits of the corpus: small enough that the endless scripts reach their budgets fast
 /// (`fib(15)` takes about 27,000 steps). In the default mode they are 40,000 steps per entry,
-/// 256 KiB, a `frame_depth` of 200 and a `string_length` of 4,096, in the gate and in the lane
-/// `slow` (`SWELL_FULL_COUNTS=1`) alike.
+/// the realm's charge ([`realm_charge`]) plus [`DEFAULT_ROOM`], 208 KiB, a `frame_depth` of 200
+/// and a `string_length` of 4,096, in the gate and in the lane `slow` (`SWELL_FULL_COUNTS=1`)
+/// alike.
 ///
 /// The full count is these default-mode limits in the default mode and the collect mode's own
 /// limits in the collect mode, in the gate and the lane `slow` alike, because a collection at
@@ -333,7 +334,6 @@ const CORPUS: &[&str] = &[
 fn corpus_limits() -> Limits {
     let mut limits = limits();
     limits.steps_per_entry = 40_000;
-    limits.memory_bytes = 256 * 1024;
     limits.frame_depth = 200;
     limits.reentry_depth = 20;
     limits.string_length = 1 << 12;
@@ -342,6 +342,8 @@ fn corpus_limits() -> Limits {
         limits.frame_depth = 30;
         limits.string_length = 1 << 8;
         limits.memory_bytes = realm_charge(limits) + COLLECT_ROOM;
+    } else {
+        limits.memory_bytes = realm_charge(limits) + DEFAULT_ROOM;
     }
     limits
 }
@@ -349,6 +351,26 @@ fn corpus_limits() -> Limits {
 /// The room of the memory budget above [`realm_charge`] with the feature
 /// `collect-every-safe-point` ([`corpus_limits`]).
 const COLLECT_ROOM: u64 = 64 * 1024;
+
+/// The room of the memory budget above [`realm_charge`] in the default mode
+/// ([`corpus_limits`]).
+///
+/// Measured on `cc41ae6` in the default mode, where no collection runs inside an entry under
+/// these budgets: the realm's charge is 172,603 bytes, so the budget is 385,595. Every outcome
+/// the test asserts is reached: the endless loop and `fib(15)` as with any budget (the step
+/// budget at 40,000 steps; normal at 26,649), `deep()` at `frame_depth` in 803 steps, which needs
+/// a budget of at least 256,924 (below it `deep()` ends in the memory budget), the doubling
+/// string at `string_length` in 8,314 steps (198,978 bytes), and the loop that keeps its objects
+/// in the memory budget, which it reaches with any budget up to 1,571,155 (from 1,571,156 it runs
+/// into the step budget at 40,000 steps). That loop starts from 193,579 bytes; at step 5,899 the
+/// objects arena doubles from 512 to 1,024 slots and the charge would go from 333,332 to 437,780
+/// bytes (104,448 more, 204 per slot). The budget refuses that doubling: it is 52,263 bytes above
+/// the charge before it and 52,185 below the charge after it; any budget from 333,332 to 437,779
+/// ends the loop at that step. The doubling before it (256 to 512 slots, 52,224 bytes) ends the
+/// loop at step 1,547 for budgets from 217,620 to 269,843, and the one after it (1,024 to 2,048
+/// slots) ends it at step 14,603 from a budget between 560,000 and 570,000. The 256 KiB this
+/// budget replaces lay 5,220 bytes above `deep()`'s need.
+const DEFAULT_ROOM: u64 = 208 * 1024;
 
 /// What the heap of a corpus agent is charged once its realm is made and its host functions are
 /// defined: an agent of its own under `corpus` with the memory budget of the test limits. Every
