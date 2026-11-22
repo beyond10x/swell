@@ -12,6 +12,7 @@ mod builtins_function;
 mod builtins_function_source;
 mod builtins_global;
 mod builtins_global_this;
+mod builtins_iterators;
 mod builtins_json;
 mod builtins_json_parse;
 mod builtins_math;
