@@ -455,8 +455,17 @@ impl<H: Host> Agent<H> {
             return Ok(false);
         }
         // Step 17: delete each index from the old length down to the new one, the highest
-        // first; the first that is not deleted stops it.
-        let stop = self.truncate_elements(array, new_length)?;
+        // first; the first that is not deleted stops it. A termination ends it before anything
+        // is deleted, and the old length goes back, so that the length is never below an index
+        // the Array still has (`docs/design/engine.md`, "Iterators held by a builtin").
+        let stop = match self.truncate_elements(array, new_length) {
+            Ok(stop) => stop,
+            Err(Abrupt::Terminated(termination)) => {
+                self.restore_length(array, length_key, old_length)?;
+                return Err(Abrupt::Terminated(termination));
+            }
+            Err(abrupt) => return Err(abrupt),
+        };
         if let Some(index) = stop {
             new_length_descriptor.value = Some(Value::Number(f64::from(index) + 1.0));
             if !new_writable {
@@ -475,6 +484,24 @@ impl<H: Host> Agent<H> {
         Ok(true)
     }
 
+    /// Put `old_length` back as the value of the length of `array` after a termination ended
+    /// [`Agent::truncate_elements`], through the same define as step 15 of ArraySetLength. The
+    /// property exists and its [[Writable]] was true, so only its value changes: no property is
+    /// added, and no step and no byte is charged.
+    fn restore_length(
+        &mut self,
+        array: ObjectRef,
+        length_key: Key,
+        old_length: f64,
+    ) -> Completion<()> {
+        let old = Descriptor {
+            value: Some(Value::Number(old_length)),
+            ..Descriptor::default()
+        };
+        self.ordinary_define_own_property(array, length_key, old)?;
+        Ok(())
+    }
+
     /// The deletions of step 17 of ArraySetLength: every element at `new_length` or above, the
     /// highest first, until one is not deleted, whose index is answered. Deleting an element
     /// runs no code and only a non-configurable one refuses, and every such one lives in the
@@ -484,7 +511,9 @@ impl<H: Host> Agent<H> {
     /// and, for a list above the small size, per entry of the list the search visits. The last
     /// is the list's length, charged before the search; the others depend on the stop the
     /// search finds and are charged after it, before anything is deleted. A list of at most
-    /// [`SMALL`] entries is searched first and charged once.
+    /// [`SMALL`] entries is searched first and charged once. Every charge, of steps and of
+    /// bytes, comes before the first change of the Array, so a termination leaves every element
+    /// in place and [`Agent::array_set_length`] puts the old length back.
     ///
     /// The index keys the search finds at `new_length` or above are gathered for the deletions
     /// in a list with room for every entry of the property list, its bytes charged to the
@@ -1093,11 +1122,10 @@ mod tests {
     /// keys in their lists (10,001 entries with `"length"`; a list of `u32` for all of them takes
     /// 40,004 bytes). Under a budget of the reading after the setup plus half of that,
     /// `a.length = 0` ends in `Terminated(MemoryBudget)` before the walk visits an entry; the
-    /// next script `c.length` answers 12,000, and after a collection the reading is the one
-    /// before. (`a` keeps the length 0 that step 15 wrote before step 17 ended, with its index
-    /// keys.) A step budget that ends `b.length = 0` after the list was charged leaves the
-    /// charged reading where it was; with a roomy budget `c.length = 0` raises the high-water
-    /// mark by at least the list and, done, leaves the reading where it was.
+    /// next scripts `a.length` and `c.length` answer 12,000, and after a collection the reading
+    /// is the one before. A step budget that ends `b.length = 0` after the list was charged
+    /// leaves the charged reading where it was; with a roomy budget `c.length = 0` raises the
+    /// high-water mark by at least the list and, done, leaves the reading where it was.
     #[test]
     fn the_list_of_deleted_keys_is_charged_before_it_is_made() {
         const N: u32 = 10_000;
@@ -1117,6 +1145,7 @@ mod tests {
             array
         });
         let shorten = parsed(&mut agent, &realm, "a.length = 0");
+        let read_a = parsed(&mut agent, &realm, "a.length");
         let read = parsed(&mut agent, &realm, "c.length");
         let list = u64::from(N + 1) * size_of::<u32>() as u64;
         let roomy_limit = agent.heap.bytes() + (1 << 28);
@@ -1134,6 +1163,11 @@ mod tests {
             "entries the walk visited before the memory budget ended the run"
         );
         agent.heap.accounting.set_limit(roomy_limit);
+        assert_eq!(
+            run(&mut agent, &realm, &read_a),
+            Ok(Some(f64::from(2_000 + N))),
+            "the length of a after the memory budget"
+        );
         assert_eq!(
             run(&mut agent, &realm, &read),
             Ok(Some(f64::from(2_000 + N)))
@@ -1161,5 +1195,95 @@ mod tests {
         let rise = agent.heap.accounting.high_water() - charged;
         assert!(rise >= list, "the high-water mark rose by {rise} < {list}");
         assert_eq!(agent.heap.accounting.used(), charged, "after a normal end");
+    }
+
+    /// ArraySetLength (`#sec-arraysetlength`) and the invariant of an Array exotic object that
+    /// every array index is below its `length` (`#sec-array-exotic-objects`): a termination that
+    /// ends the deletions of step 17 puts the old length back (`docs/design/engine.md`,
+    /// "Iterators held by a builtin"). `a`, `b`, `c` and `d` hold the dense elements 0 to 2 and
+    /// 10,000 index keys from 2,000 up. The step budgets are a measured reading plus a stated
+    /// room: `S`, the steps of `d.length = 0`; `L`, the list's length (10,001 entries with
+    /// `"length"`), charged before the search; `R`, the steps charged after the search,
+    /// 3 + 10,000 (the dense positions passed and the keys removed, no stop). `a.length = 0`
+    /// with `S - R - L / 2` steps ends at the charge of the list's length, `b.length = 0` with
+    /// `S - R / 2` steps at the charge after the search; each keeps its length 12,000 and its
+    /// 10,004 own property names, each `"length"` or an index below the length (with
+    /// `"length"` taken out, `Math.max` of the names is below it, and `NaN` for a name that is
+    /// no number). With a roomy budget `c.length = 0` completes and leaves `"length"` alone.
+    #[test]
+    fn a_terminated_truncation_leaves_the_array_as_it_was() {
+        const N: u32 = 10_000;
+        let (mut agent, realm) = roomy();
+        enter(&mut agent, &realm);
+        let global = agent.global_object(&realm).unwrap();
+        let Ok(Value::Object(global)) = agent.heap.roots.get(&global) else {
+            panic!("the global object");
+        };
+        let [a, ..] = ["a", "b", "c", "d"].map(|name| {
+            let array = listed_array(&mut agent, N, false);
+            let key = agent.name_key(name).unwrap();
+            assert_eq!(
+                agent.create_data_property(global, key, Value::Object(array)),
+                Ok(true)
+            );
+            array
+        });
+        let list_entries = agent.engine_object(a).unwrap().properties.len() as u64;
+        assert_eq!(list_entries, u64::from(N) + 1, "L, the list's length");
+        let after_search = 3 + u64::from(N);
+        let whole = entry_steps(&mut agent, &realm, "d.length = 0");
+        assert!(whole > after_search + list_entries, "S = {whole}");
+
+        let shorten_a = parsed(&mut agent, &realm, "a.length = 0");
+        let shorten_b = parsed(&mut agent, &realm, "b.length = 0");
+        agent.limits.steps_per_entry = whole - after_search - list_entries / 2;
+        assert_eq!(
+            run(&mut agent, &realm, &shorten_a),
+            Err(Termination::StepBudget),
+            "at the charge of the list's length"
+        );
+        agent.limits.steps_per_entry = whole - after_search / 2;
+        assert_eq!(
+            run(&mut agent, &realm, &shorten_b),
+            Err(Termination::StepBudget),
+            "at the charge after the search"
+        );
+
+        agent.limits.steps_per_entry = u64::MAX;
+        for name in ["a", "b"] {
+            let answer = |agent: &mut Agent<NoHooks>, source: &str| {
+                let script = parsed(agent, &realm, source);
+                run(agent, &realm, &script)
+            };
+            assert_eq!(
+                answer(&mut agent, &format!("{name}.length")),
+                Ok(Some(f64::from(2_000 + N))),
+                "the length of {name}"
+            );
+            assert_eq!(
+                answer(
+                    &mut agent,
+                    &format!("Object.getOwnPropertyNames({name}).length")
+                ),
+                Ok(Some(f64::from(N + 4))),
+                "the own property names of {name}"
+            );
+            // Without a loop of the script's own: under `collect-every-safe-point` each
+            // instruction collects, and a loop over 10,004 names ran past 60 s.
+            let below = format!(
+                "var names = Object.getOwnPropertyNames({name}); \
+                 names.splice(names.indexOf('length'), 1); \
+                 Math.max.apply(null, names) < {name}.length ? 1 : 0"
+            );
+            assert_eq!(
+                answer(&mut agent, &below),
+                Ok(Some(1.0)),
+                "every name of {name} is \"length\" or an index below the length"
+            );
+        }
+        let shorten_c = parsed(&mut agent, &realm, "c.length = 0");
+        assert_eq!(run(&mut agent, &realm, &shorten_c), Ok(Some(0.0)));
+        let names_c = parsed(&mut agent, &realm, "Object.getOwnPropertyNames(c).length");
+        assert_eq!(run(&mut agent, &realm, &names_c), Ok(Some(1.0)));
     }
 }
