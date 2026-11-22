@@ -2,7 +2,10 @@
 //! `docs/design/host-interface.md`, decision 3, HOST-145): `std`'s `HashMap` with the SipHash of
 //! `swell-num` keyed by `Seeds::hash_key` and by nothing else, never `std`'s default hasher,
 //! which reads the operating system's random source. The key decides only which keys collide;
-//! no order the script can observe comes from a map's iteration.
+//! no order the script can observe comes from a map's iteration. The atom table and the index
+//! maps of property lists and of the bindings eval code adds (`object/property.rs`) are such
+//! maps; the latter take the heap's hasher (`Heap::hasher`) and charge their table by
+//! [`KeyedMap::table_bytes_for`] before it is made.
 
 use std::borrow::Borrow;
 use std::collections::HashMap;
@@ -53,9 +56,77 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
     }
 
     /// The number of entries.
-    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.map.len()
+    }
+
+    /// An empty map whose hasher is `hasher`, the one the heap keeps (`Heap::hasher`, keyed by
+    /// `hash_key`).
+    pub(crate) fn with_hasher(hasher: SipBuildHasher) -> KeyedMap<K, V> {
+        KeyedMap {
+            map: HashMap::with_hasher(hasher),
+        }
+    }
+
+    /// Room for `additional` more entries, through `try_reserve`: a refusal of the allocator
+    /// is `OverBudget`, not an abort. The caller charged the table's growth first.
+    pub(crate) fn reserve(&mut self, additional: usize) -> Result<(), OverBudget> {
+        self.map.try_reserve(additional).map_err(|_| OverBudget)
+    }
+
+    /// Remove the entry of `key` and answer its value.
+    pub(crate) fn remove<Q>(&mut self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.map.remove(key)
+    }
+
+    /// Remove every entry; the table keeps its room.
+    pub(crate) fn clear(&mut self) {
+        self.map.clear();
+    }
+
+    /// The bytes of the table of a map with room for `capacity` entries, charged before the
+    /// table is made: the layout of `std`'s map, a slot of an entry and a control byte per
+    /// bucket and a group of 16 control bytes more, with a power of two of buckets at most
+    /// seven eighths full (four buckets below 4 entries, eight below 8).
+    pub(crate) fn table_bytes_for(capacity: usize) -> u64 {
+        let buckets = if capacity == 0 {
+            0
+        } else if capacity < 4 {
+            4
+        } else if capacity < 8 {
+            8
+        } else {
+            (capacity.saturating_mul(8) / 7).next_power_of_two()
+        };
+        Self::bytes_of_buckets(buckets)
+    }
+
+    /// The bytes of the table the map has now, by the same layout: its room answers its
+    /// buckets (`capacity` is the buckets less one below 8, seven eighths of them above).
+    pub(crate) fn table_bytes(&self) -> u64 {
+        let capacity = self.map.capacity();
+        let buckets = match capacity {
+            0 => 0,
+            1..8 => capacity.saturating_add(1),
+            _ => (capacity / 7).saturating_mul(8),
+        };
+        Self::bytes_of_buckets(buckets)
+    }
+
+    /// The bytes of a table of `buckets` buckets.
+    fn bytes_of_buckets(buckets: usize) -> u64 {
+        if buckets == 0 {
+            return 0;
+        }
+        let slots = buckets
+            .saturating_mul(size_of::<(K, V)>())
+            .next_multiple_of(16);
+        let bytes = slots.saturating_add(buckets).saturating_add(16);
+        u64::try_from(bytes).unwrap_or(u64::MAX)
     }
 }
 
@@ -158,5 +229,36 @@ mod tests {
             map.get(&"key 17".encode_utf16().collect::<Vec<u16>>()),
             None
         );
+    }
+
+    /// The bytes charged for a table before it is made are those of the table the map then
+    /// has, for every room the lists of the engine ask (4 doubling to 2^17), and a removal
+    /// keeps the others and the table's room.
+    #[test]
+    fn the_table_charged_is_the_table_made() {
+        for shift in 2..18 {
+            let wanted = 1usize << shift;
+            let mut map: KeyedMap<u32, u32> = KeyedMap::new(&[0; 16]);
+            assert_eq!(map.table_bytes(), 0);
+            map.reserve(wanted).unwrap();
+            assert_eq!(
+                map.table_bytes(),
+                KeyedMap::<u32, u32>::table_bytes_for(wanted),
+                "room {wanted}"
+            );
+        }
+        let mut map: KeyedMap<u32, u32> = KeyedMap::new(&[0; 16]);
+        map.reserve(16).unwrap();
+        let bytes = map.table_bytes();
+        for i in 0..16 {
+            assert_eq!(map.insert(i, i), Ok(None));
+        }
+        assert_eq!(map.remove(&3), Some(3));
+        assert_eq!(map.remove(&3), None);
+        assert_eq!(map.len(), 15);
+        assert_eq!(map.get(&4), Some(&4));
+        map.clear();
+        assert_eq!(map.len(), 0);
+        assert_eq!(map.table_bytes(), bytes);
     }
 }

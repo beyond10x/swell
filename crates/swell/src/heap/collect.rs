@@ -271,11 +271,12 @@ mod tests {
     use crate::object::builtin_function::BuiltinFunction;
     use crate::object::ecmascript_function::EcmascriptFunction;
     use crate::object::ordinary::Ordinary;
+    use crate::object::property::{Key, Property};
     use crate::object::string::StringObject;
     use crate::object::{ObjectKind, ObjectRecord};
     use crate::realm::RealmRecord;
     use crate::script::ScriptRecord;
-    use crate::value::StringRef;
+    use crate::value::{StringRef, Value};
     use crate::{Agent, Limits, Seeds};
 
     /// The root sites, in the order the mark phase calls them.
@@ -310,7 +311,8 @@ mod tests {
 
     /// A counting build of the mark phase over a heap that holds one record of every kind
     /// calls each root site once, in order, each kind trace function once, and the common
-    /// object record once per object.
+    /// object record once per object. Its Array holds a dense element and a sparse one, each the
+    /// only path to a String, so both storages are traced (the String site runs three times).
     #[test]
     fn mark_phase_calls_every_site_of_the_layout() {
         let limits = Limits {
@@ -330,10 +332,16 @@ mod tests {
 
         let heap = &mut agent.heap;
         let string = heap.strings.allocate(HeapString::for_test(), 0).unwrap();
+        // Reached only through the dense and the sparse element of the Array.
+        let dense = heap.strings.allocate(HeapString::for_test(), 0).unwrap();
+        let sparse = heap.strings.allocate(HeapString::for_test(), 0).unwrap();
         let symbol = heap.symbols.allocate(SymbolRecord::for_test(), 0).unwrap();
         let kinds = [
             ObjectKind::Ordinary(Ordinary::for_test()),
-            ObjectKind::Array(Array::for_test()),
+            ObjectKind::Array(Array::for_test_with(vec![
+                None,
+                Some(Value::String(StringRef { handle: dense })),
+            ])),
             ObjectKind::String(StringObject::for_test(StringRef { handle: string })),
             ObjectKind::Arguments(ArgumentsObject::for_test()),
             ObjectKind::BuiltinFunction(BuiltinFunction::for_test()),
@@ -349,6 +357,14 @@ mod tests {
                     .unwrap()
             })
             .collect();
+        let array = heap.objects.get_mut(objects[1]).unwrap();
+        let element = Property::data(
+            Value::String(StringRef { handle: sparse }),
+            false,
+            true,
+            true,
+        );
+        array.properties.push(Key::Index(5_000), element).unwrap();
         let realm = heap.realms.allocate(RealmRecord::for_test(), 0).unwrap();
         let environment = heap
             .environments
@@ -377,17 +393,21 @@ mod tests {
             "the root sites, in order"
         );
         let count = |site: &str| calls.iter().filter(|call| **call == site).count();
+        let strings = "heap/string.rs HeapString::trace";
         for site in ROOT_SITES.iter().chain(&KIND_SITES) {
-            assert_eq!(count(site), 1, "{site}: {calls:#?}");
+            let once = if *site == strings { 3 } else { 1 };
+            assert_eq!(count(site), once, "{site}: {calls:#?}");
         }
         assert_eq!(count(OBJECT_SITE), objects.len());
         assert_eq!(
             calls.len(),
-            ROOT_SITES.len() + KIND_SITES.len() + objects.len(),
+            ROOT_SITES.len() + KIND_SITES.len() + 2 + objects.len(),
             "{calls:#?}"
         );
 
         assert!(marks.is_marked(Item::String(string)));
+        assert!(marks.is_marked(Item::String(dense)), "the dense element");
+        assert!(marks.is_marked(Item::String(sparse)), "the sparse element");
         assert!(marks.is_marked(Item::Symbol(symbol)));
         for &object in &objects {
             assert!(marks.is_marked(Item::Object(object)));
