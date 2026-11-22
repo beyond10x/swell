@@ -1349,16 +1349,16 @@ first pass, not that it will; the runner gives the real numbers.
 | 1 | `harness` | 31 | 62 |
 | 2 | `language-core` | 4,259 | 7,543 |
 | 3 | `builtins-core` | 7,011 | 13,829 |
-| 4 | `numbers-and-dates` | 1,516 | 2,992 |
-| 5 | `regexp` | 2,394 | 4,783 |
-| 6 | `bindings-and-iteration` | 4,436 | 8,413 |
-| 7 | `generators` | 1,476 | 2,823 |
-| 8 | `classes` | 6,292 | 12,491 |
-| 9 | `collections-proxy-reflect` | 1,768 | 3,507 |
-| 10 | `promises-and-async` | 6,651 | 12,987 |
+| 4 | `numbers-and-dates` | 1,521 | 3,002 |
+| 5 | `regexp` | 2,398 | 4,791 |
+| 6 | `bindings-and-iteration` | 4,300 | 8,153 |
+| 7 | `generators` | 1,492 | 2,843 |
+| 8 | `classes` | 6,371 | 12,649 |
+| 9 | `collections-proxy-reflect` | 1,772 | 3,515 |
+| 10 | `promises-and-async` | 6,659 | 13,003 |
 | 11 | `modules` | 1,281 | 1,833 |
-| 12 | `bigint` | 320 | 640 |
-| 13 | `binary-data` | 3,058 | 6,072 |
+| 12 | `bigint` | 338 | 676 |
+| 13 | `binary-data` | 3,060 | 6,076 |
 | 14 | `shared-memory` | 598 | 1,192 |
 | 15 | `iterator-helpers-and-resources` | 1,094 | 2,170 |
 | 16 | `weak-references` | 82 | 164 |
@@ -1395,6 +1395,15 @@ slice `03`): `03 7011 13829`, the slice line of `slot task test262` on the code 
 Every moved case goes to a slice from 4 to 13, so slices 1 to 19 still hold 44,931 cases and
 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
 
+Slice 6 had 4,436 cases and 8,413 runs by its rules (its `feature` lines and the lines of the
+closes of slices 1 to 3 that gave it cases). 4,300 cases and 8,153 runs are what slice 6 counts:
+136 cases that need a later slice move by the lines of the paragraph "Slice 6's cases that need
+a later slice", and 393 cases that need slice 4 or 5 stay in it, as that paragraph says.
+Measured on 2026-11-23 with the same check (`awk -f slices.awk` over this block and the
+inventory's `meta.tsv`, counting slice `06`): `06 4300 8153`. Every moved case goes to a slice
+from 4 to 13, so slices 1 to 19 still hold 44,931 cases and 85,794 runs and the 22 lines still
+sum to 53,801 and 103,360.
+
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
 1. `harness`: lexer, parser and compile step for the ES5 grammar with strict mode (the runner
@@ -1423,8 +1432,8 @@ What each slice builds, and the directories it raises most (paths under `test/`,
    `String` 252, `literals` 240.
 6. `bindings-and-iteration`: `let`, `const`, destructuring, spread, arrows, templates,
    `Symbol`, iterators, `for-of`; from slice 3, `Array.from`, `Object.fromEntries`,
-   `Object.groupBy` and the Array iterator methods `keys`, `values` and `entries`. `statements/for-of` 584, `expressions/assignment` 335,
-   `expressions/arrow-function` 310.
+   `Object.groupBy` and the Array iterator methods `keys`, `values` and `entries`. `statements/for-of` 575, `expressions/assignment` 342,
+   `expressions/arrow-function` 302.
 7. `generators`: frames saved in objects. `expressions/object` 303, `expressions/generators`
    288, `statements/generators` 266.
 8. `classes`: classes, `super`, `new.target`, private names, static blocks. `statements/class`
@@ -1731,6 +1740,54 @@ stopped passing during the slice and are not moved, since they are in their slic
 five of slice 6 that call a `String` method with `Symbol()` and two of slice 18 that compare
 `trimLeft` with `trimStart` and `trimRight` with `trimEnd`.
 
+**Slice 6's cases that need a later slice.** Measured at the close of slice 6 (2026-11-23,
+`story:slice-06-conformance-close`), with the run lines of the runner on the code of the slice
+(`slot task test262`): 529 of the 4,436 cases of slice 6 fail, each in every one of its runs, and
+none on a part of slice 6 (no run ends on a refusal that names slice 6 or on a missing `Symbol`).
+136 of them move to a later slice, each a line of `conformance/test262/moves.tsv` with kind
+`part` and a token of `conformance/test262/later-parts.tsv` as its evidence, held by
+`test262-moves-check`: 111 lines are new, with `from` 6, or 1 for the two harness cases slice
+1's close gave to slice 6 before the list existed (`test/harness/nativeFunctionMatcher.js` and
+`wellKnownIntrinsicObjects.js`); 25 are lines of cases moved to slice 6 earlier, which keep their
+`from` and get the new `to` and evidence. The block gains 83 lines: one for the directory
+`test/language/computed-property-names/class/`, whose 29 cases all move to slice 8, and 82 for a
+single file; 25 lines change their slice: 23 for a single file and the one-case directories
+`test/built-ins/Function/prototype/arguments/` and `caller/`. The groups, by target slice (lines
+of the list):
+
+- to slice 4, 5: `Date` 2 (`Boolean/prototype/toString/S15.6.4.2_A2_T3` and
+  `valueOf/S15.6.4.3_A2_T3`), `Math.pow` 2 (the two `nan-equivalence-define-own-property-`
+  cases of `Object/internals/DefineOwnProperty/`, through `nans.js`), `**` 1
+  (`expressions/exponentiation/int32_min-exponent`);
+- to slice 5, 4: a regular expression literal of `nativeFunctionMatcher.js` 2 (the harness case
+  and `Function/prototype/toString/bound-function`), `RegExp` 1
+  (`Function/prototype/toString/symbol-named-builtins`), `String.prototype.split` 1
+  (`JSON/stringify/value-string-escape-ascii`);
+- to slice 7, 16: generator methods 13 (the 12 `eval-code/direct/gen-meth-` cases and
+  `Function/prototype/toString/generator-method`), generator functions and `yield` 3;
+- to slice 8, 79: `class` 74 (the 29 cases of `computed-property-names/class/`, 36
+  `*-init-fn-name-class` cases of the destructuring directories, 9 others), `super` 3,
+  `new.target` 2;
+- to slice 9, 4: `Proxy`;
+- to slice 10, 8: async functions 7 (3 of them the cases that include
+  `wellKnownIntrinsicObjects.js`, whose sources it compiles with `Function` and whose refused
+  async and generator functions are counted refusals), `Promise` 1;
+- to slice 12, 18: a BigInt literal 12 (`4n` in the ten `RegExp/prototype/*/this-val-non-obj`
+  cases, `0n` in two cases of `expressions/assignment/destructuring/`), `BigInt` 6 (the
+  `cstm-*-on-bigint-primitive` cases of the `String` methods);
+- to slice 13, 2: the typed arrays (`Array/prototype/concat/` `_large-typed-array` and
+  `_small-typed-array`).
+
+The counts sum to the 136 lines this change adds to or changes in the list. 393 failing cases
+(784 runs) need slice 4 or 5 and no later slice: 326 slice 5 (`RegExp` and the `String` methods
+that use it: `RegExp/prototype/Symbol.*` 218, `String/prototype` 76, `RegExpStringIteratorPrototype`
+17, the rest of `RegExp` 12, 3 others) and 67 slice 4 (`Date` 59, `Number` 5, `**` 3). Each
+carries a `feature` of slice 6 (`Symbol` or a well-known symbol, a computed property name or
+destructuring), and the block gives a case the highest slice among its lines, so no line can
+give it slice 4 or 5, and `test262-moves-check` refuses a line whose `to` is not greater than
+its `from`. They stay in slice 6, counted failed: neither the block nor the check has a rule for
+a slice delivered after a slice of a higher number (slice 6 before 4 and 5).
+
 ```swell-slices
 dir test/harness/ 1
 dir test/harness/asyncHelpers-asyncTest-func-throws-sync.js 3
@@ -1772,9 +1829,9 @@ dir test/harness/compare-array-samevalue.js 6
 dir test/harness/compare-array-sparse.js 6
 dir test/harness/asyncHelpers-asyncTest-rejects-non-callable.js 6
 dir test/harness/asyncHelpers-asyncTest-return-not-thenable.js 6
-dir test/harness/nativeFunctionMatcher.js 6
+dir test/harness/nativeFunctionMatcher.js 5
 dir test/harness/promiseHelper.js 6
-dir test/harness/wellKnownIntrinsicObjects.js 6
+dir test/harness/wellKnownIntrinsicObjects.js 10
 dir test/harness/deepEqual-array.js 9
 dir test/harness/deepEqual-circular.js 9
 dir test/harness/deepEqual-deep.js 9
@@ -1994,18 +2051,18 @@ dir test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-argument
 dir test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-var-bind-declare-arguments.js 7
 dir test/language/eval-code/direct/gen-func-expr-nameless-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 7
 dir test/language/eval-code/direct/gen-func-expr-nameless-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 7
-dir test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 6
-dir test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments.js 6
-dir test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 6
-dir test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments.js 6
-dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 6
-dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments.js 6
-dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 6
-dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js 6
-dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 6
-dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments.js 6
-dir test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 6
-dir test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 6
+dir test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments.js 7
+dir test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js 7
+dir test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js 7
 dir test/language/eval-code/direct/meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js 6
 dir test/language/eval-code/direct/meth-a-following-parameter-is-named-arguments-declare-arguments.js 6
 dir test/language/eval-code/direct/meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js 6
@@ -2151,7 +2208,7 @@ dir test/language/expressions/delete/delete-unresolvable-base-object-reference-t
 dir test/language/expressions/delete/super-property-topropertykey.js 8
 dir test/language/expressions/delete/super-property-uninitialized-this.js 8
 dir test/language/expressions/exponentiation/applying-the-exp-operator_A10.js 4
-dir test/language/expressions/exponentiation/int32_min-exponent.js 6
+dir test/language/expressions/exponentiation/int32_min-exponent.js 4
 dir test/language/expressions/function/arguments-with-arguments-fn.js 6
 dir test/language/expressions/function/arguments-with-arguments-lex.js 6
 dir test/language/expressions/function/dflt-params-trailing-comma.js 6
@@ -2864,12 +2921,12 @@ dir test/built-ins/Boolean/S9.2_A6_T1.js 4
 dir test/built-ins/Boolean/prototype/S15.6.3.1_A3.js 6
 dir test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T1.js 6
 dir test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T2.js 6
-dir test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T3.js 6
+dir test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T3.js 4
 dir test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T4.js 6
 dir test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T5.js 6
 dir test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T1.js 6
 dir test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T2.js 6
-dir test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T3.js 6
+dir test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T3.js 4
 dir test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T4.js 6
 dir test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T5.js 6
 dir test/built-ins/Error/cause_abrupt.js 9
@@ -2883,16 +2940,16 @@ dir test/built-ins/Function/prototype/apply/argarray-not-object-realm.js 6
 dir test/built-ins/Function/prototype/apply/argarray-not-object.js 6
 dir test/built-ins/Function/prototype/apply/this-not-callable-realm.js 5
 dir test/built-ins/Function/prototype/apply/this-not-callable.js 5
-dir test/built-ins/Function/prototype/arguments/ 6
+dir test/built-ins/Function/prototype/arguments/ 10
 dir test/built-ins/Function/prototype/bind/15.3.4.5-2-9.js 4
 dir test/built-ins/Function/prototype/bind/S15.3.4.5_A16.js 5
 dir test/built-ins/Function/prototype/bind/S15.3.4.5_A5.js 4
 dir test/built-ins/Function/prototype/call/S15.3.4.4_A16.js 5
 dir test/built-ins/Function/prototype/caller-arguments/ 6
-dir test/built-ins/Function/prototype/caller/ 6
+dir test/built-ins/Function/prototype/caller/ 10
 dir test/built-ins/Function/prototype/toString/Function.js 6
 dir test/built-ins/Function/prototype/toString/arrow-function.js 6
-dir test/built-ins/Function/prototype/toString/bound-function.js 6
+dir test/built-ins/Function/prototype/toString/bound-function.js 5
 dir test/built-ins/Function/prototype/toString/class-declaration-complex-heritage.js 8
 dir test/built-ins/Function/prototype/toString/class-declaration-explicit-ctor.js 8
 dir test/built-ins/Function/prototype/toString/class-declaration-implicit-ctor.js 8
@@ -2903,7 +2960,7 @@ dir test/built-ins/Function/prototype/toString/function-declaration.js 6
 dir test/built-ins/Function/prototype/toString/function-expression.js 6
 dir test/built-ins/Function/prototype/toString/generator-function-declaration.js 7
 dir test/built-ins/Function/prototype/toString/generator-function-expression.js 7
-dir test/built-ins/Function/prototype/toString/generator-method.js 6
+dir test/built-ins/Function/prototype/toString/generator-method.js 7
 dir test/built-ins/Function/prototype/toString/getter-class-expression-static.js 8
 dir test/built-ins/Function/prototype/toString/getter-class-expression.js 8
 dir test/built-ins/Function/prototype/toString/getter-class-statement-static.js 8
@@ -2923,7 +2980,7 @@ dir test/built-ins/Function/prototype/toString/setter-class-expression.js 8
 dir test/built-ins/Function/prototype/toString/setter-class-statement-static.js 8
 dir test/built-ins/Function/prototype/toString/setter-class-statement.js 8
 dir test/built-ins/Function/prototype/toString/setter-object.js 6
-dir test/built-ins/Function/prototype/toString/symbol-named-builtins.js 6
+dir test/built-ins/Function/prototype/toString/symbol-named-builtins.js 5
 dir test/built-ins/Function/prototype/toString/unicode.js 6
 dir test/built-ins/JSON/isRawJSON/basic.js 6
 dir test/built-ins/JSON/parse/reviver-call-args-after-forward-modification.js 6
@@ -2934,7 +2991,7 @@ dir test/built-ins/JSON/parse/reviver-forward-modifies-object.js 6
 dir test/built-ins/JSON/rawJSON/illegal-empty-and-start-end-chars.js 6
 dir test/built-ins/JSON/rawJSON/invalid-JSON-text.js 6
 dir test/built-ins/JSON/rawJSON/returns-expected-object.js 6
-dir test/built-ins/JSON/stringify/value-string-escape-ascii.js 6
+dir test/built-ins/JSON/stringify/value-string-escape-ascii.js 5
 dir test/built-ins/JSON/stringify/value-tojson-not-function.js 5
 dir test/built-ins/Object/S15.2.2.1_A2_T5.js 4
 dir test/built-ins/Object/assign/assignment-to-readonly-property-of-target-must-throw-a-typeerror-exception.js 6
@@ -3155,8 +3212,8 @@ dir test/built-ins/Object/internals/DefineOwnProperty/consistent-value-function-
 dir test/built-ins/Object/internals/DefineOwnProperty/consistent-value-function-caller.js 9
 dir test/built-ins/Object/internals/DefineOwnProperty/consistent-value-regexp-dollar1.js 9
 dir test/built-ins/Object/internals/DefineOwnProperty/consistent-writable-regexp-dollar1.js 9
-dir test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reassign.js 6
-dir test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reconfigure.js 6
+dir test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reassign.js 4
+dir test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reconfigure.js 4
 dir test/built-ins/Object/isExtensible/15.2.3.13-2-10.js 5
 dir test/built-ins/Object/isExtensible/15.2.3.13-2-19.js 4
 dir test/built-ins/Object/isExtensible/15.2.3.13-2-20.js 5
@@ -3271,6 +3328,89 @@ dir test/built-ins/isFinite/return-true-for-valid-finite-numbers.js 4
 dir test/built-ins/isNaN/S15.1.2.4_A2.7.js 6
 dir test/built-ins/isNaN/return-false-not-nan-numbers.js 4
 dir test/built-ins/isNaN/return-true-nan.js 4
+dir test/built-ins/Array/prototype/concat/Array.prototype.concat_large-typed-array.js 13
+dir test/built-ins/Array/prototype/concat/Array.prototype.concat_small-typed-array.js 13
+dir test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species-custom-ctor-poisoned-throws.js 8
+dir test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species-custom-ctor.js 8
+dir test/built-ins/Array/prototype/splice/create-species-length-exceeding-integer-limit.js 9
+dir test/built-ins/Object/keys/proxy-keys.js 9
+dir test/built-ins/RegExp/prototype/dotAll/this-val-non-obj.js 12
+dir test/built-ins/RegExp/prototype/flags/this-val-non-obj.js 12
+dir test/built-ins/RegExp/prototype/global/this-val-non-obj.js 12
+dir test/built-ins/RegExp/prototype/hasIndices/this-val-non-obj.js 12
+dir test/built-ins/RegExp/prototype/ignoreCase/this-val-non-obj.js 12
+dir test/built-ins/RegExp/prototype/multiline/this-val-non-obj.js 12
+dir test/built-ins/RegExp/prototype/source/this-val-non-obj.js 12
+dir test/built-ins/RegExp/prototype/sticky/this-val-non-obj.js 12
+dir test/built-ins/RegExp/prototype/unicode/this-val-non-obj.js 12
+dir test/built-ins/RegExp/prototype/unicodeSets/this-val-non-obj.js 12
+dir test/built-ins/String/prototype/match/cstm-matcher-on-bigint-primitive.js 12
+dir test/built-ins/String/prototype/matchAll/cstm-matchall-on-bigint-primitive.js 12
+dir test/built-ins/String/prototype/replace/cstm-replace-on-bigint-primitive.js 12
+dir test/built-ins/String/prototype/replaceAll/cstm-replaceall-on-bigint-primitive.js 12
+dir test/built-ins/String/prototype/search/cstm-search-on-bigint-primitive.js 12
+dir test/built-ins/String/prototype/split/cstm-split-on-bigint-primitive.js 12
+dir test/built-ins/Symbol/prototype/description/this-val-non-symbol.js 9
+dir test/built-ins/Symbol/species/builtin-getter-name.js 10
+dir test/built-ins/Symbol/species/subclassing.js 8
+dir test/language/computed-property-names/class/ 8
+dir test/language/computed-property-names/object/accessor/getter-super.js 8
+dir test/language/computed-property-names/object/accessor/setter-super.js 8
+dir test/language/computed-property-names/object/method/generator.js 7
+dir test/language/computed-property-names/object/method/super.js 8
+dir test/language/computed-property-names/to-name-side-effects/class.js 8
+dir test/language/computed-property-names/to-name-side-effects/numbers-class.js 8
+dir test/language/destructuring/binding/syntax/destructuring-array-parameters-function-arguments-length.js 10
+dir test/language/destructuring/binding/syntax/destructuring-object-parameters-function-arguments-length.js 10
+dir test/language/expressions/arrow-function/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/arrow-function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/arrow-function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/arrow-function/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/arrow-function/lexical-super-call-from-within-constructor.js 8
+dir test/language/expressions/arrow-function/lexical-super-property-from-within-constructor.js 8
+dir test/language/expressions/arrow-function/lexical-super-property.js 8
+dir test/language/expressions/arrow-function/lexical-supercall-from-immediately-invoked-arrow.js 8
+dir test/language/expressions/assignment/destructuring/default-expr-throws-iterator-return-is-not-callable.js 12
+dir test/language/expressions/assignment/destructuring/target-assign-throws-iterator-return-is-not-callable.js 12
+dir test/language/expressions/function/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/function/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/object/cpn-obj-lit-computed-property-name-from-async-arrow-function-expression.js 10
+dir test/language/expressions/object/cpn-obj-lit-computed-property-name-from-generator-function-declaration.js 7
+dir test/language/expressions/object/cpn-obj-lit-computed-property-name-from-yield-expression.js 7
+dir test/language/expressions/object/dstr/meth-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/meth-dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/meth-dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/meth-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/rest-parameters/with-new-target.js 8
+dir test/language/statements/const/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/const/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-of/decl-cls.js 8
+dir test/language/statements/for-of/dstr/const-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-of/dstr/const-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-of/dstr/let-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-of/dstr/let-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-of/dstr/var-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-of/dstr/var-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-of/head-lhs-async-invalid.js 10
+dir test/language/statements/for-of/iterator-next-result-type.js 9
+dir test/language/statements/for/dstr/const-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for/dstr/const-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for/dstr/let-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for/dstr/let-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for/dstr/var-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for/dstr/var-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/function/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/function/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/let/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/let/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/try/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/try/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/variable/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/variable/dstr/obj-ptrn-id-init-fn-name-class.js 8
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
@@ -3736,16 +3876,16 @@ Its output on this document:
 01 31 62
 02 4259 7543
 03 7011 13829
-04 1516 2992
-05 2394 4783
-06 4436 8413
-07 1476 2823
-08 6292 12491
-09 1768 3507
-10 6651 12987
+04 1521 3002
+05 2398 4791
+06 4300 8153
+07 1492 2843
+08 6371 12649
+09 1772 3515
+10 6659 13003
 11 1281 1833
-12 320 640
-13 3058 6072
+12 338 676
+13 3060 6076
 14 598 1192
 15 1094 2170
 16 82 164

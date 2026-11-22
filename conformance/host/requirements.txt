@@ -153,7 +153,7 @@ HOST-152 test swell::eval_stack::host_152_deepest_reentry_evals_at_full_nesting
 HOST-153 pending slice 11
 HOST-154 pending slice 14
 HOST-155 test swell::builtins_global_this::host_155_global_this_is_the_setup_this_object
-HOST-156 pending slice 6
+HOST-156 test swell::lexical_declarations::host_156_evaluating_a_let_script_twice_throws_a_syntax_error
 HOST-157 pending slice 11
 HOST-158 pending slice 11
 HOST-159 pending slice 11

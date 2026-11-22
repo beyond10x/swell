@@ -94,4 +94,8 @@ path sec-applystringornumericbinaryoperator test/language/expressions/addition/
 omit sec-applystringornumericbinaryoperator string-length-limit decision-3
 section sec-arguments-exotic-objects
 path sec-arguments-exotic-objects test/language/arguments-object/
-omit sec-arguments-exotic-objects symbol-iterator-property section-12-slice-6
+section sec-block-level-function-declarations-web-legacy-compatibility-semantics
+path sec-block-level-function-declarations-web-legacy-compatibility-semantics test/annexB/language/function-code/
+path sec-block-level-function-declarations-web-legacy-compatibility-semantics test/annexB/language/global-code/
+path sec-block-level-function-declarations-web-legacy-compatibility-semantics test/annexB/language/eval-code/
+omit sec-block-level-function-declarations-web-legacy-compatibility-semantics var-binding-of-block-functions section-12-slice-18

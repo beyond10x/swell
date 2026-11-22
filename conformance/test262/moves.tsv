@@ -35,7 +35,9 @@ test/built-ins/Array/prototype/at/returns-item-relative-index.js	3	6	part	let
 test/built-ins/Array/prototype/at/returns-item.js	3	6	part	let
 test/built-ins/Array/prototype/at/returns-undefined-for-holes-in-sparse-arrays.js	3	6	part	let
 test/built-ins/Array/prototype/at/returns-undefined-for-out-of-range-index.js	3	6	part	let
+test/built-ins/Array/prototype/concat/Array.prototype.concat_large-typed-array.js	6	13	part	Uint8Array
 test/built-ins/Array/prototype/concat/Array.prototype.concat_non-array.js	3	8	part	class
+test/built-ins/Array/prototype/concat/Array.prototype.concat_small-typed-array.js	6	13	part	Uint8Array
 test/built-ins/Array/prototype/entries/iteration-mutable.js	3	6	part	array.entries()
 test/built-ins/Array/prototype/entries/iteration.js	3	6	part	array.entries()
 test/built-ins/Array/prototype/entries/length.js	3	6	part	Array.prototype.entries
@@ -71,6 +73,8 @@ test/built-ins/Array/prototype/flatMap/array-like-objects.js	3	6	part	[10000]: 7
 test/built-ins/Array/prototype/flatMap/call-with-boolean.js	3	6	part	=>
 test/built-ins/Array/prototype/flatMap/mapperfunction-throws.js	3	6	part	=>
 test/built-ins/Array/prototype/flatMap/proxy-access-count.js	3	9	part	Proxy
+test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species-custom-ctor-poisoned-throws.js	6	8	part	new.target
+test/built-ins/Array/prototype/flatMap/this-value-ctor-object-species-custom-ctor.js	6	8	part	new.target
 test/built-ins/Array/prototype/forEach/15.4.4.18-1-11.js	3	4	part	Date
 test/built-ins/Array/prototype/forEach/15.4.4.18-1-12.js	3	5	part	RegExp
 test/built-ins/Array/prototype/forEach/15.4.4.18-5-15.js	3	4	part	Date
@@ -161,6 +165,7 @@ test/built-ins/Array/prototype/sort/stability-5-elements.js	3	6	part	const
 test/built-ins/Array/prototype/sort/stability-513-elements.js	3	6	part	const
 test/built-ins/Array/prototype/splice/clamps-length-to-integer-limit.js	3	4	feature	exponentiation
 test/built-ins/Array/prototype/splice/create-non-array-invalid-len.js	3	4	part	Math.pow
+test/built-ins/Array/prototype/splice/create-species-length-exceeding-integer-limit.js	6	9	part	Proxy
 test/built-ins/Array/prototype/splice/length-and-deleteCount-exceeding-integer-limit.js	3	4	feature	exponentiation
 test/built-ins/Array/prototype/splice/length-exceeding-integer-limit-shrink-array.js	3	4	feature	exponentiation
 test/built-ins/Array/prototype/splice/length-near-integer-limit-grow-array.js	3	4	feature	exponentiation
@@ -206,12 +211,12 @@ test/built-ins/Boolean/S9.2_A6_T1.js	3	4	part	Date
 test/built-ins/Boolean/prototype/S15.6.3.1_A3.js	3	6	part	=>
 test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T1.js	3	6	part	=>
 test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T2.js	3	6	part	=>
-test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T3.js	3	6	part	=>
+test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T3.js	3	4	part	Date
 test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T4.js	3	6	part	=>
 test/built-ins/Boolean/prototype/toString/S15.6.4.2_A2_T5.js	3	6	part	=>
 test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T1.js	3	6	part	=>
 test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T2.js	3	6	part	=>
-test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T3.js	3	6	part	=>
+test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T3.js	3	4	part	Date
 test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T4.js	3	6	part	=>
 test/built-ins/Boolean/prototype/valueOf/S15.6.4.3_A2_T5.js	3	6	part	=>
 test/built-ins/Error/cause_abrupt.js	3	9	part	Proxy
@@ -225,16 +230,16 @@ test/built-ins/Function/prototype/apply/argarray-not-object-realm.js	3	6	part	Sy
 test/built-ins/Function/prototype/apply/argarray-not-object.js	3	6	part	Symbol
 test/built-ins/Function/prototype/apply/this-not-callable-realm.js	3	5	part	/re/
 test/built-ins/Function/prototype/apply/this-not-callable.js	3	5	part	/re/
-test/built-ins/Function/prototype/arguments/prop-desc.js	3	6	part	const
+test/built-ins/Function/prototype/arguments/prop-desc.js	3	10	part	async
 test/built-ins/Function/prototype/bind/15.3.4.5-2-9.js	3	4	part	Date
 test/built-ins/Function/prototype/bind/S15.3.4.5_A16.js	3	5	part	(/x/)
 test/built-ins/Function/prototype/bind/S15.3.4.5_A5.js	3	4	part	Date
 test/built-ins/Function/prototype/call/S15.3.4.4_A16.js	3	5	part	(/x/)
 test/built-ins/Function/prototype/caller-arguments/accessor-properties.js	3	6	part	const
-test/built-ins/Function/prototype/caller/prop-desc.js	3	6	part	const
+test/built-ins/Function/prototype/caller/prop-desc.js	3	10	part	async
 test/built-ins/Function/prototype/toString/Function.js	3	6	part	let
 test/built-ins/Function/prototype/toString/arrow-function.js	3	6	part	let
-test/built-ins/Function/prototype/toString/bound-function.js	3	6	part	const
+test/built-ins/Function/prototype/toString/bound-function.js	3	5	part	/\w/.test(
 test/built-ins/Function/prototype/toString/class-declaration-complex-heritage.js	3	8	part	class
 test/built-ins/Function/prototype/toString/class-declaration-explicit-ctor.js	3	8	part	class
 test/built-ins/Function/prototype/toString/class-declaration-implicit-ctor.js	3	8	part	class
@@ -245,7 +250,7 @@ test/built-ins/Function/prototype/toString/function-declaration.js	3	6	part	cons
 test/built-ins/Function/prototype/toString/function-expression.js	3	6	part	let
 test/built-ins/Function/prototype/toString/generator-function-declaration.js	3	7	part	function *
 test/built-ins/Function/prototype/toString/generator-function-expression.js	3	7	part	function *
-test/built-ins/Function/prototype/toString/generator-method.js	3	6	part	let
+test/built-ins/Function/prototype/toString/generator-method.js	3	7	part	{ * f
 test/built-ins/Function/prototype/toString/getter-class-expression-static.js	3	8	part	class
 test/built-ins/Function/prototype/toString/getter-class-expression.js	3	8	part	class
 test/built-ins/Function/prototype/toString/getter-class-statement-static.js	3	8	part	class
@@ -265,7 +270,7 @@ test/built-ins/Function/prototype/toString/setter-class-expression.js	3	8	part	c
 test/built-ins/Function/prototype/toString/setter-class-statement-static.js	3	8	part	class
 test/built-ins/Function/prototype/toString/setter-class-statement.js	3	8	part	class
 test/built-ins/Function/prototype/toString/setter-object.js	3	6	part	let
-test/built-ins/Function/prototype/toString/symbol-named-builtins.js	3	6	part	Symbol
+test/built-ins/Function/prototype/toString/symbol-named-builtins.js	3	5	part	RegExp
 test/built-ins/Function/prototype/toString/unicode.js	3	6	part	const
 test/built-ins/JSON/isRawJSON/basic.js	3	6	part	const
 test/built-ins/JSON/parse/reviver-call-args-after-forward-modification.js	3	6	part	let
@@ -276,7 +281,7 @@ test/built-ins/JSON/parse/reviver-forward-modifies-object.js	3	6	part	let
 test/built-ins/JSON/rawJSON/illegal-empty-and-start-end-chars.js	3	6	part	const
 test/built-ins/JSON/rawJSON/invalid-JSON-text.js	3	6	part	=>
 test/built-ins/JSON/rawJSON/returns-expected-object.js	3	6	part	Object.getOwnPropertySymbols
-test/built-ins/JSON/stringify/value-string-escape-ascii.js	3	6	part	`
+test/built-ins/JSON/stringify/value-string-escape-ascii.js	3	5	part	.split
 test/built-ins/JSON/stringify/value-tojson-not-function.js	3	5	part	/re/
 test/built-ins/Object/S15.2.2.1_A2_T5.js	3	4	part	Date
 test/built-ins/Object/assign/assignment-to-readonly-property-of-target-must-throw-a-typeerror-exception.js	3	6	part	=>
@@ -520,8 +525,8 @@ test/built-ins/Object/internals/DefineOwnProperty/consistent-value-function-argu
 test/built-ins/Object/internals/DefineOwnProperty/consistent-value-function-caller.js	3	9	part	Reflect
 test/built-ins/Object/internals/DefineOwnProperty/consistent-value-regexp-dollar1.js	3	9	part	Reflect
 test/built-ins/Object/internals/DefineOwnProperty/consistent-writable-regexp-dollar1.js	3	9	part	Reflect
-test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reassign.js	3	6	part	`
-test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reconfigure.js	3	6	part	`
+test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reassign.js	3	4	part	Math.pow
+test/built-ins/Object/internals/DefineOwnProperty/nan-equivalence-define-own-property-reconfigure.js	3	4	part	Math.pow
 test/built-ins/Object/isExtensible/15.2.3.13-2-10.js	3	5	part	RegExp
 test/built-ins/Object/isExtensible/15.2.3.13-2-19.js	3	4	part	Date
 test/built-ins/Object/isExtensible/15.2.3.13-2-20.js	3	5	part	RegExp
@@ -535,6 +540,7 @@ test/built-ins/Object/isSealed/15.2.3.11-4-16.js	3	4	part	Date
 test/built-ins/Object/isSealed/15.2.3.11-4-17.js	3	5	part	RegExp
 test/built-ins/Object/isSealed/15.2.3.11-4-18.js	3	5	part	RegExp
 test/built-ins/Object/keys/15.2.3.14-6-5.js	3	4	part	Date
+test/built-ins/Object/keys/proxy-keys.js	6	9	part	Proxy
 test/built-ins/Object/preventExtensions/15.2.3.10-3-18.js	3	4	part	Date
 test/built-ins/Object/preventExtensions/15.2.3.10-3-19.js	3	5	part	RegExp
 test/built-ins/Object/preventExtensions/15.2.3.10-3-8.js	3	4	part	Date
@@ -577,6 +583,16 @@ test/built-ins/Object/seal/seal-weakset.js	3	9	part	WeakSet
 test/built-ins/Object/seal/throws-when-false.js	3	9	part	Proxy
 test/built-ins/Object/values/order-after-define-property.js	3	9	part	Proxy
 test/built-ins/Object/values/primitive-numbers.js	3	4	part	Math.PI
+test/built-ins/RegExp/prototype/dotAll/this-val-non-obj.js	6	12	part	4n
+test/built-ins/RegExp/prototype/flags/this-val-non-obj.js	6	12	part	4n
+test/built-ins/RegExp/prototype/global/this-val-non-obj.js	6	12	part	4n
+test/built-ins/RegExp/prototype/hasIndices/this-val-non-obj.js	6	12	part	4n
+test/built-ins/RegExp/prototype/ignoreCase/this-val-non-obj.js	6	12	part	4n
+test/built-ins/RegExp/prototype/multiline/this-val-non-obj.js	6	12	part	4n
+test/built-ins/RegExp/prototype/source/this-val-non-obj.js	6	12	part	4n
+test/built-ins/RegExp/prototype/sticky/this-val-non-obj.js	6	12	part	4n
+test/built-ins/RegExp/prototype/unicode/this-val-non-obj.js	6	12	part	4n
+test/built-ins/RegExp/prototype/unicodeSets/this-val-non-obj.js	6	12	part	4n
 test/built-ins/String/15.5.5.5.2-3-5.js	3	4	part	Math.pow
 test/built-ins/String/15.5.5.5.2-3-8.js	3	4	part	Math.pow
 test/built-ins/String/prototype/at/index-argument-tointeger.js	3	6	part	let
@@ -592,6 +608,8 @@ test/built-ins/String/prototype/includes/searchstring-is-regexp-throws.js	3	5	pa
 test/built-ins/String/prototype/isWellFormed/to-string-primitive.js	3	12	part	BigInt
 test/built-ins/String/prototype/localeCompare/15.5.4.9_3.js	3	5	part	"未定义"
 test/built-ins/String/prototype/localeCompare/15.5.4.9_CE.js	3	5	part	"o\u0308"
+test/built-ins/String/prototype/match/cstm-matcher-on-bigint-primitive.js	6	12	part	BigInt
+test/built-ins/String/prototype/matchAll/cstm-matchall-on-bigint-primitive.js	6	12	part	BigInt
 test/built-ins/String/prototype/normalize/form-is-not-valid-throws.js	3	5	part	.normalize
 test/built-ins/String/prototype/normalize/length.js	3	5	part	.normalize
 test/built-ins/String/prototype/normalize/name.js	3	5	part	.normalize
@@ -603,6 +621,10 @@ test/built-ins/String/prototype/normalize/return-normalized-string-using-default
 test/built-ins/String/prototype/normalize/return-normalized-string.js	3	5	part	.normalize
 test/built-ins/String/prototype/normalize/this-is-null-throws.js	3	5	part	String.prototype.normalize.call(null)
 test/built-ins/String/prototype/normalize/this-is-undefined-throws.js	3	5	part	String.prototype.normalize.call(undefined)
+test/built-ins/String/prototype/replace/cstm-replace-on-bigint-primitive.js	6	12	part	BigInt
+test/built-ins/String/prototype/replaceAll/cstm-replaceall-on-bigint-primitive.js	6	12	part	BigInt
+test/built-ins/String/prototype/search/cstm-search-on-bigint-primitive.js	6	12	part	BigInt
+test/built-ins/String/prototype/split/cstm-split-on-bigint-primitive.js	6	12	part	BigInt
 test/built-ins/String/prototype/startsWith/searchstring-is-regexp-throws.js	3	5	part	/./
 test/built-ins/String/prototype/substring/S15.5.4.15_A3_T9.js	3	4	part	Math.PI
 test/built-ins/String/prototype/toLocaleLowerCase/Final_Sigma_U180E.js	3	5	part	"A\u180E\u03A3"
@@ -633,6 +655,9 @@ test/built-ins/String/raw/return-the-string-value-from-template.js	3	6	part	`
 test/built-ins/String/raw/special-characters.js	3	6	part	`
 test/built-ins/String/raw/template-substitutions-are-appended-on-same-index.js	3	6	part	`
 test/built-ins/String/raw/zero-literal-segments.js	3	6	part	`
+test/built-ins/Symbol/prototype/description/this-val-non-symbol.js	6	9	part	Proxy
+test/built-ins/Symbol/species/builtin-getter-name.js	6	10	part	Promise
+test/built-ins/Symbol/species/subclassing.js	6	8	part	class
 test/built-ins/ThrowTypeError/unique-per-realm-non-simple.js	3	6	part	function nonSimple(a = 0)
 test/built-ins/global/S10.2.3_A1.1_T2.js	3	4	part	parseInt
 test/built-ins/global/S10.2.3_A1.1_T3.js	3	5	part	RegExp
@@ -647,6 +672,8 @@ test/built-ins/isNaN/S15.1.2.4_A2.7.js	3	6	part	=>
 test/built-ins/isNaN/return-false-not-nan-numbers.js	3	4	part	Math.pow
 test/built-ins/isNaN/return-true-nan.js	3	4	part	Math.pow
 test/harness/asyncHelpers-asyncTest-func-throws-sync.js	2	3	part	globalThis
+test/harness/nativeFunctionMatcher.js	1	5	part	/\w/.test(
+test/harness/wellKnownIntrinsicObjects.js	1	10	part	async
 test/language/arguments-object/cls-decl-meth-args-trailing-comma-multiple.js	2	8	part	class
 test/language/arguments-object/cls-decl-meth-args-trailing-comma-null.js	2	8	part	class
 test/language/arguments-object/cls-decl-meth-args-trailing-comma-single-args.js	2	8	part	class
@@ -756,6 +783,43 @@ test/language/block-scope/syntax/redeclaration/var-redeclaration-attempt-after-l
 test/language/comments/S7.4_A5.js	2	3	part	String.fromCharCode
 test/language/comments/S7.4_A6.js	2	3	part	String.fromCharCode
 test/language/comments/hashbang/function-constructor.js	2	10	part	async
+test/language/computed-property-names/class/accessor/getter-duplicates.js	6	8	part	class
+test/language/computed-property-names/class/accessor/getter.js	6	8	part	class
+test/language/computed-property-names/class/accessor/setter-duplicates.js	6	8	part	class
+test/language/computed-property-names/class/accessor/setter.js	6	8	part	class
+test/language/computed-property-names/class/method/constructor-can-be-generator.js	6	8	part	class
+test/language/computed-property-names/class/method/constructor-can-be-getter.js	6	8	part	class
+test/language/computed-property-names/class/method/constructor-can-be-setter.js	6	8	part	class
+test/language/computed-property-names/class/method/constructor-duplicate-1.js	6	8	part	class
+test/language/computed-property-names/class/method/constructor-duplicate-2.js	6	8	part	class
+test/language/computed-property-names/class/method/constructor-duplicate-3.js	6	8	part	class
+test/language/computed-property-names/class/method/constructor.js	6	8	part	class
+test/language/computed-property-names/class/method/generator.js	6	8	part	class
+test/language/computed-property-names/class/method/number.js	6	8	part	class
+test/language/computed-property-names/class/method/string.js	6	8	part	class
+test/language/computed-property-names/class/method/symbol.js	6	8	part	class
+test/language/computed-property-names/class/static/generator-constructor.js	6	8	part	class
+test/language/computed-property-names/class/static/generator-prototype.js	6	8	part	class
+test/language/computed-property-names/class/static/getter-constructor.js	6	8	part	class
+test/language/computed-property-names/class/static/getter-prototype.js	6	8	part	class
+test/language/computed-property-names/class/static/method-constructor.js	6	8	part	class
+test/language/computed-property-names/class/static/method-number-order.js	6	8	part	class
+test/language/computed-property-names/class/static/method-number.js	6	8	part	class
+test/language/computed-property-names/class/static/method-prototype.js	6	8	part	class
+test/language/computed-property-names/class/static/method-string-order.js	6	8	part	class
+test/language/computed-property-names/class/static/method-string.js	6	8	part	class
+test/language/computed-property-names/class/static/method-symbol-order.js	6	8	part	class
+test/language/computed-property-names/class/static/method-symbol.js	6	8	part	class
+test/language/computed-property-names/class/static/setter-constructor.js	6	8	part	class
+test/language/computed-property-names/class/static/setter-prototype.js	6	8	part	class
+test/language/computed-property-names/object/accessor/getter-super.js	6	8	part	super
+test/language/computed-property-names/object/accessor/setter-super.js	6	8	part	super
+test/language/computed-property-names/object/method/generator.js	6	7	part	yield
+test/language/computed-property-names/object/method/super.js	6	8	part	super
+test/language/computed-property-names/to-name-side-effects/class.js	6	8	part	class
+test/language/computed-property-names/to-name-side-effects/numbers-class.js	6	8	part	class
+test/language/destructuring/binding/syntax/destructuring-array-parameters-function-arguments-length.js	6	10	part	async
+test/language/destructuring/binding/syntax/destructuring-object-parameters-function-arguments-length.js	6	10	part	async
 test/language/eval-code/direct/arrow-fn-a-following-parameter-is-named-arguments-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js	2	6	part	const
 test/language/eval-code/direct/arrow-fn-a-following-parameter-is-named-arguments-arrow-func-declare-arguments-assign.js	2	6	part	const
 test/language/eval-code/direct/arrow-fn-a-preceding-parameter-is-named-arguments-arrow-func-declare-arguments-assign-incl-def-param-arrow-arguments.js	2	6	part	const
@@ -879,18 +943,18 @@ test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-va
 test/language/eval-code/direct/gen-func-expr-nameless-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	7	part	function *
 test/language/eval-code/direct/gen-func-expr-nameless-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	7	part	function *
 test/language/eval-code/direct/gen-func-expr-nameless-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	7	part	function *
-test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	let
-test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments.js	2	6	part	let
-test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	let
-test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	6	part	let
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	6	part	let
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	6	part	let
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	6	part	let
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	6	part	let
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	6	part	let
-test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	6	part	let
-test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	6	part	let
-test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	6	part	let
+test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	7	part	{ * f
+test/language/eval-code/direct/gen-meth-a-following-parameter-is-named-arguments-declare-arguments.js	2	7	part	{ * f
+test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	7	part	{ * f
+test/language/eval-code/direct/gen-meth-a-preceding-parameter-is-named-arguments-declare-arguments.js	2	7	part	{ * f
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments-and-assign.js	2	7	part	{ * f
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-func-decl-declare-arguments.js	2	7	part	{ * f
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments-and-assign.js	2	7	part	{ * f
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-lex-bind-declare-arguments.js	2	7	part	{ * f
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments-and-assign.js	2	7	part	{ * f
+test/language/eval-code/direct/gen-meth-fn-body-cntns-arguments-var-bind-declare-arguments.js	2	7	part	{ * f
+test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments-and-assign.js	2	7	part	{ * f
+test/language/eval-code/direct/gen-meth-no-pre-existing-arguments-bindings-are-present-declare-arguments.js	2	7	part	{ * f
 test/language/eval-code/direct/meth-a-following-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	let
 test/language/eval-code/direct/meth-a-following-parameter-is-named-arguments-declare-arguments.js	2	6	part	let
 test/language/eval-code/direct/meth-a-preceding-parameter-is-named-arguments-declare-arguments-and-assign.js	2	6	part	let
@@ -921,6 +985,14 @@ test/language/expressions/array/spread-mult-literal.js	2	6	part	...
 test/language/expressions/array/spread-sngl-empty.js	2	6	part	...
 test/language/expressions/array/spread-sngl-expr.js	2	6	part	...
 test/language/expressions/array/spread-sngl-literal.js	2	6	part	...
+test/language/expressions/arrow-function/dstr/ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/expressions/arrow-function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/expressions/arrow-function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
+test/language/expressions/arrow-function/dstr/obj-ptrn-id-init-fn-name-class.js	6	8	part	class
+test/language/expressions/arrow-function/lexical-super-call-from-within-constructor.js	6	8	part	class
+test/language/expressions/arrow-function/lexical-super-property-from-within-constructor.js	6	8	part	class
+test/language/expressions/arrow-function/lexical-super-property.js	6	8	part	class
+test/language/expressions/arrow-function/lexical-supercall-from-immediately-invoked-arrow.js	6	8	part	class
 test/language/expressions/assignment/11.13.1-3-s.js	2	3	part	Object.preventExtensions
 test/language/expressions/assignment/11.13.1-4-28gs.js	2	4	part	Math.PI
 test/language/expressions/assignment/11.13.1-4-29gs.js	2	4	part	Math.PI
@@ -929,11 +1001,11 @@ test/language/expressions/assignment/S8.12.4_A1.js	2	4	part	Math.E
 test/language/expressions/assignment/assignment-operator-calls-putvalue-lref--rval--1.js	2	6	part	=>
 test/language/expressions/assignment/assignment-operator-calls-putvalue-lref--rval-.js	2	6	part	=>
 test/language/expressions/assignment/destructuring/default-expr-throws-iterator-return-get-throws.js	2	6	part	Symbol
-test/language/expressions/assignment/destructuring/default-expr-throws-iterator-return-is-not-callable.js	2	6	part	Symbol
+test/language/expressions/assignment/destructuring/default-expr-throws-iterator-return-is-not-callable.js	2	12	part	0n
 test/language/expressions/assignment/destructuring/keyed-destructuring-property-reference-target-evaluation-order.js	2	6	part	({[sourceKey()]:
 test/language/expressions/assignment/destructuring/obj-prop-__proto__dup.js	2	6	part	{ __proto__: x, __proto__: y } =
 test/language/expressions/assignment/destructuring/target-assign-throws-iterator-return-get-throws.js	2	6	part	Symbol
-test/language/expressions/assignment/destructuring/target-assign-throws-iterator-return-is-not-callable.js	2	6	part	Symbol
+test/language/expressions/assignment/destructuring/target-assign-throws-iterator-return-is-not-callable.js	2	12	part	0n
 test/language/expressions/assignment/fn-name-arrow.js	2	6	part	=>
 test/language/expressions/assignment/target-super-computed-reference-null.js	2	8	part	class
 test/language/expressions/assignment/target-super-computed-reference.js	2	8	part	class
@@ -1082,10 +1154,14 @@ test/language/expressions/exponentiation/exp-operator-syntax-error-plus-unary-ex
 test/language/expressions/exponentiation/exp-operator-syntax-error-typeof-unary-expression-base.js	2	4	feature	exponentiation
 test/language/expressions/exponentiation/exp-operator-syntax-error-void-unary-expression-base.js	2	4	feature	exponentiation
 test/language/expressions/exponentiation/exp-operator.js	2	4	feature	exponentiation
-test/language/expressions/exponentiation/int32_min-exponent.js	2	6	part	const
+test/language/expressions/exponentiation/int32_min-exponent.js	2	4	part	**
 test/language/expressions/function/arguments-with-arguments-fn.js	2	6	part	(x = args = arguments)
 test/language/expressions/function/arguments-with-arguments-lex.js	2	6	part	(x = args = arguments)
 test/language/expressions/function/dflt-params-trailing-comma.js	2	6	part	, b = 39,)
+test/language/expressions/function/dstr/ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/expressions/function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/expressions/function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
+test/language/expressions/function/dstr/obj-ptrn-id-init-fn-name-class.js	6	8	part	class
 test/language/expressions/function/early-body-super-call.js	2	8	part	super
 test/language/expressions/function/early-body-super-prop.js	2	8	part	super
 test/language/expressions/function/early-params-super-call.js	2	8	part	super
@@ -1163,6 +1239,13 @@ test/language/expressions/object/accessor-name-literal-string-unicode-escape.js	
 test/language/expressions/object/computed-property-evaluation-order.js	2	6	part	[++counter]:
 test/language/expressions/object/computed-property-name-topropertykey-before-value-evaluation.js	2	6	part	[key]: value
 test/language/expressions/object/cover-initialized-name.js	2	6	part	({ a = 1 })
+test/language/expressions/object/cpn-obj-lit-computed-property-name-from-async-arrow-function-expression.js	6	10	part	async
+test/language/expressions/object/cpn-obj-lit-computed-property-name-from-generator-function-declaration.js	6	7	part	function *
+test/language/expressions/object/cpn-obj-lit-computed-property-name-from-yield-expression.js	6	7	part	function *
+test/language/expressions/object/dstr/meth-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/expressions/object/dstr/meth-dflt-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/expressions/object/dstr/meth-dflt-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
+test/language/expressions/object/dstr/meth-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
 test/language/expressions/object/getter-super-prop.js	2	8	part	super
 test/language/expressions/object/identifier-shorthand-invalid-computed-name.js	2	6	part	({[x]})
 test/language/expressions/object/method-definition/early-errors-object-async-method-duplicate-parameters.js	2	10	part	async
@@ -1401,6 +1484,7 @@ test/language/literals/string/S7.8.4_A6.1_T1.js	2	3	part	String.fromCharCode
 test/language/literals/string/S7.8.4_A6.3_T1.js	2	3	part	String.fromCharCode
 test/language/literals/string/S7.8.4_A7.1_T1.js	2	3	part	String.fromCharCode
 test/language/literals/string/S7.8.4_A7.3_T1.js	2	3	part	String.fromCharCode
+test/language/rest-parameters/with-new-target.js	6	8	part	class
 test/language/source-text/6.1.js	2	3	part	.charCodeAt
 test/language/statementList/block-let-declaration.js	2	6	part	let
 test/language/statementList/block-regexp-literal-flags.js	2	5	part	}/1/
@@ -1427,6 +1511,8 @@ test/language/statements/break/S12.8_A4_T3.js	2	6	part	function IN_DO_FUNC(){} }
 test/language/statements/break/S12.8_A5_T1.js	2	6	part	function IN_DO_FUNC(){} } while
 test/language/statements/break/S12.8_A5_T2.js	2	6	part	function IN_DO_FUNC(){} } while
 test/language/statements/break/S12.8_A5_T3.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/const/dstr/ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/const/dstr/obj-ptrn-id-init-fn-name-class.js	6	8	part	class
 test/language/statements/continue/S12.7_A5_T1.js	2	6	part	function IN_DO_FUNC(){} } while
 test/language/statements/continue/S12.7_A5_T2.js	2	6	part	function IN_DO_FUNC(){} } while
 test/language/statements/continue/S12.7_A5_T3.js	2	6	part	function IN_DO_FUNC(){} } while
@@ -1470,10 +1556,25 @@ test/language/statements/for-in/let-identifier-with-newline.js	2	6	part	let
 test/language/statements/for-in/order-enumerable-shadowed.js	2	3	part	Object.create
 test/language/statements/for-in/order-property-on-prototype.js	2	3	part	Object.setPrototypeOf
 test/language/statements/for-in/scope-head-var-none.js	2	6	part	let
+test/language/statements/for-of/decl-cls.js	6	8	part	class
+test/language/statements/for-of/dstr/const-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/for-of/dstr/const-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/for-of/dstr/let-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/for-of/dstr/let-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/for-of/dstr/var-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/for-of/dstr/var-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/for-of/head-lhs-async-invalid.js	6	10	part	async
+test/language/statements/for-of/iterator-next-result-type.js	6	9	part	Proxy
 test/language/statements/for/S12.6.3_A8_T3.js	2	6	part	for({index=0;
 test/language/statements/for/decl-cls.js	2	8	part	class
 test/language/statements/for/decl-const.js	2	6	part	const
 test/language/statements/for/decl-let.js	2	6	part	let
+test/language/statements/for/dstr/const-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/for/dstr/const-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/for/dstr/let-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/for/dstr/let-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/for/dstr/var-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/for/dstr/var-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
 test/language/statements/for/head-const-bound-names-in-stmt.js	2	6	part	const
 test/language/statements/for/head-const-fresh-binding-per-iteration.js	2	6	part	let
 test/language/statements/for/head-init-async-of.js	2	10	part	async
@@ -1496,6 +1597,10 @@ test/language/statements/function/S13_A18.js	2	4	part	Math.sin
 test/language/statements/function/arguments-with-arguments-fn.js	2	6	part	(x = args = arguments)
 test/language/statements/function/arguments-with-arguments-lex.js	2	6	part	(x = args = arguments)
 test/language/statements/function/dflt-params-trailing-comma.js	2	6	part	, b = 39,)
+test/language/statements/function/dstr/ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/function/dstr/obj-ptrn-id-init-fn-name-class.js	6	8	part	class
 test/language/statements/function/early-body-super-call.js	2	8	part	super
 test/language/statements/function/early-body-super-prop.js	2	8	part	super
 test/language/statements/function/early-params-super-call.js	2	8	part	super
@@ -1533,6 +1638,8 @@ test/language/statements/labeled/decl-let.js	2	6	part	let
 test/language/statements/labeled/let-array-with-newline.js	2	6	part	let
 test/language/statements/labeled/let-block-with-newline.js	2	6	part	let
 test/language/statements/labeled/let-identifier-with-newline.js	2	6	part	let
+test/language/statements/let/dstr/ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/let/dstr/obj-ptrn-id-init-fn-name-class.js	6	8	part	class
 test/language/statements/return/S12.9_A4.js	2	4	part	Math.PI
 test/language/statements/switch/S12.11_A1_T4.js	2	4	part	parseInt
 test/language/statements/switch/scope-lex-async-function.js	2	10	part	async
@@ -1567,11 +1674,15 @@ test/language/statements/switch/syntax/redeclaration/var-name-redeclaration-atte
 test/language/statements/throw/S12.13_A3_T4.js	2	3	part	.concat
 test/language/statements/try/S12.14_A17.js	2	4	part	Math.LN2
 test/language/statements/try/S12.14_A18_T7.js	2	3	part	.concat
+test/language/statements/try/dstr/ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/try/dstr/obj-ptrn-id-init-fn-name-class.js	6	8	part	class
 test/language/statements/try/early-catch-duplicates.js	2	6	part	catch ([x,
 test/language/statements/try/early-catch-function.js	2	6	part	catch (e) { function e(){}
 test/language/statements/try/optional-catch-binding-lexical.js	2	6	part	let
 test/language/statements/try/scope-catch-param-lex-open.js	2	6	part	catch ([x,
 test/language/statements/try/scope-catch-param-var-none.js	2	6	part	`
+test/language/statements/variable/dstr/ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
+test/language/statements/variable/dstr/obj-ptrn-id-init-fn-name-class.js	6	8	part	class
 test/language/statements/variable/fn-name-arrow.js	2	6	part	=>
 test/language/statements/while/S12.6.2_A8.js	2	5	part	.split
 test/language/statements/while/decl-cls.js	2	8	part	class
