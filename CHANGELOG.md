@@ -48,7 +48,10 @@ pass. Every number below is from the gate on the wave branch of slice 3
   made the arrow, and an arrow has no [[Construct]] and no `prototype`. Default parameters and
   rest parameters, in functions, arrows and the `Function` constructor: a default is evaluated
   only for `undefined`, and a parameter read or written before its initializer has run throws
-  a `ReferenceError` that names it.
+  a `ReferenceError` that names it. Object destructuring in declarations, parameters,
+  assignments, `for` heads and `catch`, with shorthand names, renamed targets, nested object
+  patterns and defaults; a rest property, a computed name and array patterns are refused by
+  name until their stories.
 
 ### Changed
 
