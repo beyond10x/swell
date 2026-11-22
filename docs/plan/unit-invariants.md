@@ -12,6 +12,11 @@ report and does not work around it.
   step "alone" asked for all 17 slots on 2026-11-22; its job stood first in the queue for 13
   minutes and held 54 jobs of other sessions behind it. Nothing is measured alone on this
   machine: measure in an ordinary job and report CPU seconds and the load beside wall seconds.
+- A job in the pool that runs longer than 10 minutes is killed (a rule of the organization
+  since 2026-11-22; the wait in the queue does not count; the kill shows as `cancelled`). A
+  job that needs longer names its time with a leading `timeout`, at most one hour:
+  `slot timeout 1800 task test262`. A killed job is not started again unchanged: split it,
+  shorten it, or name its time. A script that builds and tests nothing stays off the pool.
 - No third-party crate, as a dependency or a development dependency. A `Cargo.toml` holds path
   dependencies on crates of this repository and nothing else. The one exception is a separate
   workspace of tooling that the brief names.

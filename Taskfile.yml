@@ -39,15 +39,32 @@ includes:
     taskfile: taskfiles/host-requirements.yml
     flatten: true
     optional: true
+  nextest:
+    taskfile: taskfiles/nextest.yml
+    flatten: true
+    optional: true
 
 tasks:
   check:
     desc: The one gate. Every check, in order; the first that fails stops it.
+    summary: |
+      The one gate. Every check, in order; the first that fails stops it.
+
+      The test steps are the steps after clippy. After each of them the gate prints
+      "gate-time <step> <seconds>", the wall time since the end of the step before, and after
+      the last "gate-time test-steps <sum> of 120", the organization's budget for them ("Tests
+      stay fast"); the gate fails when the sum is over it (GATE_TIME_BUDGET, default 120; task
+      gate-time-sum), naming the sum and the three slowest steps. A step's seconds are the time
+      it ran inside the gate's pool job: a wait for a slot comes before the job starts and is
+      not in them, and inside the job cargo and task run directly. The full test262 run is not a step of the
+      gate: it is the lane slow (task slow), and test262-check compares the digest of its
+      sources in its place.
     cmds:
       - task: gate-vars
       - task: python-check
       - task: forbid-unsafe-check
       - task: lock-check
+      - task: nextest-check
       - task: test262-fetch
       - task: unicode-data-check
       - task: unicode-tables-check
@@ -56,13 +73,195 @@ tasks:
       - task: host-requirements-check
       - task: build
       - task: clippy
+      - task: gate-time-start
       - task: test
+      - task: gate-time
+        vars: {STEP: test}
+      - task: test-doc
+      - task: gate-time
+        vars: {STEP: test-doc}
       - task: test-collect
+      - task: gate-time
+        vars: {STEP: test-collect}
       - task: test-faults
+      - task: gate-time
+        vars: {STEP: test-faults}
       - task: conform-engine
-      - task: test262
+      - task: gate-time
+        vars: {STEP: conform-engine}
+      - task: test262-check
+      - task: gate-time
+        vars: {STEP: test262-check}
       - task: test262-moves-check
+      - task: gate-time
+        vars: {STEP: test262-moves-check}
       - task: gate-selftest
+      - task: gate-time
+        vars: {STEP: gate-selftest}
+      - task: gate-time-sum
+
+  slow:
+    desc: The lane slow. The full runs the gate does not make; the forge runs it when a source of the expected file changed.
+    summary: |
+      The lane slow: the full runs the gate does not make, each compared with the committed file
+      the gate reads in their place, or the full counts of tests the gate runs a part of. Two:
+      slow-test262, the full test262 run compared byte for byte with
+      conformance/test262/expected.txt, and the digest of its sources checked against
+      conformance/test262/expected.digest; and slow-tests, the tests with a gate count at their
+      full counts. The workflow .github/workflows/slow.yml runs it on a push to main and on a
+      pull request that changes a source of the digest, the expected file or the digest file.
+      Prints "slow-time <part> <seconds>" after each part.
+    silent: true
+    cmds:
+      - task: gate-vars
+      - task: gate-time-start
+      - task: slow-test262
+      - task: gate-time
+        vars: {STEP: slow-test262, LABEL: slow-time}
+      - task: slow-tests
+      - task: gate-time
+        vars: {STEP: slow-tests, LABEL: slow-time}
+
+  slow-tests:
+    desc: The lane slow's part of the tests. Run, at their full counts (SWELL_FULL_COUNTS=1), the test binaries whose gate count is a part, in both modes of swell.
+    summary: |
+      The lane slow's part of the tests. A test whose iteration count is large for a reason other
+      than its subject runs a part of it in the gate and the whole when SWELL_FULL_COUNTS is 1
+      (story gate-test-steps-within-budget, point 3; each such test says how its gate count
+      reaches what the full count does). This task finds those test binaries itself, every
+      crates/<crate>/tests/<name>.rs that reads SWELL_FULL_COUNTS, and runs them through
+      cargo-nextest with SWELL_FULL_COUNTS=1, then those of swell again with the feature
+      collect-every-safe-point, so that a test that takes the variable up runs here with nothing
+      to edit. Prints "slow-tests: <b> test binaries: <p> passed, <f> failed, <i> ignored" and
+      the same after "slow-tests collect-every-safe-point: ", each with its ten slowest.
+    silent: true
+    env:
+      RUSTFLAGS: -D warnings
+    cmds:
+      - mkdir -p .out
+      - |
+        all=""
+        swell=""
+        for f in $(grep -l SWELL_FULL_COUNTS crates/*/tests/*.rs | LC_ALL=C sort); do
+          dir=${f%/tests/*}
+          stem=${f##*/}
+          stem=${stem%.rs}
+          pkg=$(awk -F '"' '/^name *=/ { print $2; exit }' "$dir/Cargo.toml")
+          all="$all${all:+ | }binary_id($pkg::$stem)"
+          if [ "$pkg" = swell ]; then swell="$swell${swell:+ | }binary_id($pkg::$stem)"; fi
+        done
+        if [ -z "$all" ]; then echo "slow-tests: no test reads SWELL_FULL_COUNTS"; exit 1; fi
+        echo "$all" > .out/slow-tests.filter
+        echo "$swell" > .out/slow-tests-collect.filter
+        status=0
+        SWELL_FULL_COUNTS=1 cargo nextest run --workspace --locked --profile default -E "$all" > .out/slow-tests.log 2>&1 || status=$?
+        echo "$status" > .out/slow-tests.status
+      - task: nextest-report
+        vars: {STEP: slow-tests, PREFIX: 'slow-tests: ', LOG: .out/slow-tests.log, STATUS: .out/slow-tests.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}
+      - |
+        swell=$(cat .out/slow-tests-collect.filter)
+        if [ -z "$swell" ]; then echo "slow-tests collect-every-safe-point: no test binary of swell reads SWELL_FULL_COUNTS"; exit 0; fi
+        status=0
+        SWELL_FULL_COUNTS=1 cargo nextest run --locked -p swell --features collect-every-safe-point --profile default -E "$swell" > .out/slow-tests-collect.log 2>&1 || status=$?
+        echo "$status" > .out/slow-tests-collect.status
+      - task: nextest-report
+        vars: {STEP: slow-tests-collect, PREFIX: 'slow-tests collect-every-safe-point: ', LOG: .out/slow-tests-collect.log, STATUS: .out/slow-tests-collect.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}
+
+  gate-time-start:
+    desc: Internal. Start the clock of the gate's test steps, and note the CPU seconds of the processes this task process has waited for.
+    summary: |
+      Internal. Starts the clock of the gate's test steps (.out/gate-time/mark) and writes to
+      .out/gate-time/cpu the PID of this task process and the CPU time, user and system, of
+      every process it has waited for: fields cutime and cstime of /proc/<pid>/stat, in clock
+      ticks. A child counts there once it has ended and been waited for, with the children it
+      waited for in turn, so cargo, cargo-nextest, rustc and every test process are counted.
+      gate-time-sum reads it again in the same task process; where /proc is missing the file
+      holds the PID alone.
+    silent: true
+    cmds:
+      - mkdir -p .out/gate-time
+      - date +%s.%N > .out/gate-time/mark
+      - ': > .out/gate-time/steps'
+      - |
+        pid=$(sh -c 'echo $PPID')
+        ticks=$(awk '{ sub(/^.*\) /, ""); print $14 + $15 }' "/proc/$pid/stat" 2>/dev/null)
+        echo "$pid $ticks" > .out/gate-time/cpu
+
+  gate-time:
+    desc: Internal. Print "gate-time <STEP> <seconds>", the wall time since the last mark, and set the mark.
+    summary: |
+      Internal, called by check after each test step. Prints "<LABEL> <STEP> <seconds>" (LABEL
+      default gate-time), the wall time since the mark that gate-time-start or the last
+      gate-time set, with one decimal, adds it to .out/gate-time/steps and sets the mark.
+      The time is of the steps as they run inside the gate's pool job: a wait for a slot of the
+      build pool is before the job starts and is not in it.
+    silent: true
+    vars:
+      LABEL: '{{.LABEL | default "gate-time"}}'
+    cmds:
+      - |
+        now=$(date +%s.%N)
+        mark=$(cat .out/gate-time/mark 2>/dev/null) || { echo "gate-time: no mark; gate-time-start runs first"; exit 1; }
+        line=$(awk -v a="$mark" -v b="$now" -v step='{{.STEP}}' -v label='{{.LABEL}}' 'BEGIN { printf "%s %s %.1f\n", label, step, b - a }')
+        echo "$line"
+        echo "$line" >> .out/gate-time/steps
+        echo "$now" > .out/gate-time/mark
+
+  gate-time-sum:
+    desc: Internal. Print "gate-time test-steps <sum> of <budget>", the sum of the gate-time lines of this run, and fail when it is over GATE_TIME_BUDGET (default 120).
+    summary: |
+      Internal, the last step of check. Sums the gate-time lines of .out/gate-time/steps and
+      prints "gate-time test-steps <sum> of <budget>", the budget GATE_TIME_BUDGET (default
+      120 s, the organization's budget for the test steps, "Tests stay fast"). When the sum is
+      over the budget it fails with "gate-time: the test steps ran <sum> s, over the budget of
+      <budget> s; the slowest: <step> <s>, <step> <s>, <step> <s>". A planted script sets a small
+      budget to show it; nothing raises it. No timed step fails too.
+      The seconds are the wall time of each step's run: the whole gate is one job of the pool,
+      so time spent in the pool's queue lies before the first mark; the machine's load slows a
+      step, so the sum line ends with the load at its end, ", load <1-minute load average> on
+      <cores> cores" from /proc/loadavg and nproc where they exist (left out where not). Before
+      the load it prints ", cpu <seconds>", the CPU time, user and system, of the processes of
+      the test steps: what the task process has waited for since gate-time-start (fields
+      cutime and cstime of /proc/<pid>/stat, divided by getconf CLK_TCK), cargo, cargo-nextest
+      and the test processes with their children included. It is left out when gate-time-start
+      ran in another task process (a separate task call) or /proc is missing. Neither the CPU
+      seconds nor the load changes whether the gate fails: only the wall time does.
+    silent: true
+    vars:
+      GATE_TIME_BUDGET: '{{.GATE_TIME_BUDGET | default "120"}}'
+    cmds:
+      - |
+        load=""
+        avg=$(cut -d ' ' -f 1 /proc/loadavg 2>/dev/null)
+        cores=$(nproc 2>/dev/null)
+        if [ -n "$avg" ] && [ -n "$cores" ]; then load=", load $avg on $cores cores"; fi
+        cpu=""
+        pid=$(sh -c 'echo $PPID')
+        if read -r pid0 ticks0 < .out/gate-time/cpu 2>/dev/null && [ "$pid" = "$pid0" ] && [ -n "$ticks0" ]; then
+          ticks=$(awk '{ sub(/^.*\) /, ""); print $14 + $15 }' "/proc/$pid/stat" 2>/dev/null)
+          hz=$(getconf CLK_TCK 2>/dev/null)
+          if [ -n "$ticks" ] && [ -n "$hz" ]; then
+            cpu=$(awk -v a="$ticks0" -v b="$ticks" -v hz="$hz" 'BEGIN { printf ", cpu %.1f", (b - a) / hz }')
+          fi
+        fi
+        awk -v budget='{{.GATE_TIME_BUDGET}}' -v cputext="$cpu" -v loadtext="$load" '
+          $1 == "gate-time" { s += $3; n++; step[n] = $2; secs[n] = $3 + 0 }
+          END {
+            if (!n) { print "gate-time: no step was timed"; exit 1 }
+            printf "gate-time test-steps %.1f of %s%s%s\n", s, budget, cputext, loadtext
+            if (budget !~ /^[0-9]+(\.[0-9]+)?$/) { print "gate-time: GATE_TIME_BUDGET " budget " is not a number of seconds"; exit 1 }
+            if (sprintf("%.1f", s) + 0 <= budget + 0) exit 0
+            line = ""
+            for (k = 1; k <= 3 && k <= n; k++) {
+              best = 0
+              for (i = 1; i <= n; i++) if (!(i in used) && (best == 0 || secs[i] > secs[best])) best = i
+              used[best] = 1
+              line = line (k > 1 ? ", " : "") step[best] " " sprintf("%.1f", secs[best])
+            }
+            printf "gate-time: the test steps ran %.1f s, over the budget of %s s; the slowest: %s\n", s, budget, line
+            exit 1
+          }
+        ' .out/gate-time/steps
 
   gate-vars:
     desc: Print, on one line, every gate variable that has a value before the checks run; a redirected run shows in its own output.
@@ -84,8 +283,9 @@ tasks:
         SPEC_REFUSALS_MAX SPEC_OUT SPEC_SYNTHESIZE_LOG SPEC_CONFORM_LOG
         ESS_SUITE ESS_UNSUPPORTED_MAX
         HOST_REQ_DOC HOST_REQ_LIST HOST_REQ_SPEC HOST_REQ_DELIVERED HOST_REQ_TEST_LIST
-        TEST262_DESIGN TEST262_FEATURES TEST262_SECTIONS TEST262_EXPECTED TEST262_OUT TEST262_WORKERS TEST262_RUN
+        TEST262_DESIGN TEST262_FEATURES TEST262_SECTIONS TEST262_EXPECTED TEST262_DIGEST TEST262_OUT TEST262_WORKERS TEST262_RUN
         TEST262_MOVES TEST262_LATER_PARTS
+        GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_SELFTEST_DIR GATE_SELFTEST_JOBS
     silent: true
     cmds:
       - |
@@ -223,13 +423,17 @@ tasks:
       - tail -n 1 .out/clippy.log
 
   test:
-    desc: Run every test of the workspace with warnings denied, and print the summed counts.
+    desc: Run every test of the workspace but the doc tests through cargo-nextest with warnings denied, and print the summed counts and the ten slowest tests.
     summary: |
-      Run every test of the workspace with warnings denied, and print the summed counts.
+      Run every test of the workspace but the doc tests (the step test-doc runs them) through
+      cargo-nextest with warnings denied, and print the summed counts and the ten slowest tests.
 
-      The log is .out/test.log. The line printed sums its "test result:" lines as
-      "<n> test suites: <p> passed, <f> failed, <i> ignored". A run that prints no
-      "test result:" line fails.
+      Runs "cargo nextest run --workspace --locked --profile default": every test in a process
+      of its own, terminated at 60 s and counted failed (.config/nextest.toml; nextest-check
+      holds it). The log is .out/test.log. The line printed is "<b> test binaries: <p> passed,
+      <f> failed, <i> ignored" (the task nextest-report), then ten lines "gate-slowest test
+      <seconds> <binary> <test>". It fails when a test fails or nextest does, and when no test
+      ran.
     env:
       RUSTFLAGS: -D warnings
     silent: true
@@ -237,61 +441,144 @@ tasks:
       - mkdir -p .out
       - |
         status=0
-        cargo test --workspace --locked > .out/test.log 2>&1 || status=$?
-        if [ "$status" -ne 0 ]; then cat .out/test.log; fi
-        awk -v status="$status" '
-          /^test result: / {
-            suites++
-            for (i = 1; i < NF; i++) {
-              count = $i
-              gsub(/[^0-9]/, "", count)
-              if ($(i + 1) ~ /^passed/) passed += count
-              if ($(i + 1) ~ /^failed/) failed += count
-              if ($(i + 1) ~ /^ignored/) ignored += count
+        cargo nextest run --workspace --locked --profile default > .out/test.log 2>&1 || status=$?
+        echo "$status" > .out/test.status
+      - task: nextest-report
+        vars: {STEP: test, PREFIX: '', LOG: .out/test.log, STATUS: .out/test.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}
+
+  test-doc:
+    desc: Run the doc tests of the workspace, and those of swell with the collector run at every safe point, with warnings denied, and print the summed counts.
+    summary: |
+      Run the doc tests of the workspace, which cargo-nextest does not run, and those of swell
+      with the feature collect-every-safe-point (the doc tests of the step test-collect), with
+      warnings denied, and print the summed counts.
+
+      Runs "cargo test --workspace --locked --doc" into .out/test-doc.log and "cargo test
+      --locked -p swell --features collect-every-safe-point --doc" into
+      .out/test-doc-collect.log; a log is printed when its cargo fails. The lines printed sum the
+      "test result:" lines of each as "test-doc: <n> test suites: <p> passed, <f> failed, <i>
+      ignored" and "test-doc collect-every-safe-point: <n> test suites: ...". It fails when
+      cargo fails, a test fails, or a run prints no "test result:" line.
+    env:
+      RUSTFLAGS: -D warnings
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        bad=0
+        for mode in default collect; do
+          if [ "$mode" = default ]; then
+            log=.out/test-doc.log; label=test-doc
+            status=0; cargo test --workspace --locked --doc > "$log" 2>&1 || status=$?
+          else
+            log=.out/test-doc-collect.log; label="test-doc collect-every-safe-point"
+            status=0; cargo test --locked -p swell --features collect-every-safe-point --doc > "$log" 2>&1 || status=$?
+          fi
+          if [ "$status" -ne 0 ]; then cat "$log"; fi
+          awk -v status="$status" -v label="$label" '
+            /^test result: / {
+              suites++
+              for (i = 1; i < NF; i++) {
+                count = $i
+                gsub(/[^0-9]/, "", count)
+                if ($(i + 1) ~ /^passed/) passed += count
+                if ($(i + 1) ~ /^failed/) failed += count
+                if ($(i + 1) ~ /^ignored/) ignored += count
+              }
             }
-          }
-          END {
-            print suites+0 " test suites: " passed+0 " passed, " failed+0 " failed, " ignored+0 " ignored"
-            if (status != 0 || failed > 0 || suites == 0) exit 1
-          }
-        ' .out/test.log
+            END {
+              print label ": " suites+0 " test suites: " passed+0 " passed, " failed+0 " failed, " ignored+0 " ignored"
+              if (status != 0 || failed > 0 || suites == 0) exit 1
+            }
+          ' "$log" || bad=1
+        done
+        exit "$bad"
 
   gate-selftest:
-    desc: Run every planted-defect script of tests/gate/ and fail when one does not refuse its defect.
+    desc: Run every planted-defect script of tests/gate/ in the environment of the forge's runner and fail when one does not refuse its defect or writes colour.
     summary: |
-      Run every planted-defect script of tests/gate/ and fail when one does not refuse its defect.
+      Run every planted-defect script of tests/gate/ in the environment of the forge's runner
+      and fail when one does not refuse its defect or writes colour.
 
-      Each tests/gate/<name>.sh runs with sh from the root, in byte order of the names, and
-      works under .out/gate-tests/<name>/. It passes when it exits 0 and its last line is
-      "<name>: ok". Its output goes to .out/gate-tests/<name>.log. A passing script prints its
-      last line. A failing one prints "<name>: failed, exit <n>; the last 20 lines of <log>:"
-      and those lines, each after "  | ", with every control byte written as \ooo and a
-      backslash as \\, so that a CI log shows the reason and nothing in it is interpreted.
-      The scripts run without colour and without the variables of a GitHub Actions runner
-      (CI, GITHUB_ACTIONS, FORCE_COLOR and CLICOLOR_FORCE unset; NO_COLOR=1,
-      CARGO_TERM_COLOR=never): there go-task colours its messages and adds a "::error" line
-      to a failing task's output, and cargo colours its own. Each script sets the same itself,
-      so that it passes when run alone; gate-selftest-is-colour-proof checks that. No script at
-      all fails too. The last line is "gate-selftest: <p> passed, <f> failed", also written to
-      .out/gate-selftest.log.
+      Each GATE_SELFTEST_DIR/<name>.sh (default tests/gate) runs with sh from the root and
+      works under .out/gate-tests/<name>/. They run GATE_SELFTEST_JOBS at a time (default 4: most
+      of them wait on files and on cargo's one lock of target/ rather than on a CPU, and four keep
+      a runner of four CPUs busy without crowding it), taken in byte order of the names; each
+      writes its own log, and the results are printed afterwards in that order, each whole.
+      GATE_SELFTEST_DIR is not
+      put in the scripts' environment: go-task lets a variable of the environment win over a
+      task's env, so a script that runs gate-selftest on a directory of its own would get
+      tests/gate again and run itself without end. It passes when it exits 0,
+      its last line is "<name>: ok", and neither its output nor a *.log or *.out file of its
+      directory (target/ and .git/ left out) holds an escape byte or a "::error" line. Its
+      output goes to .out/gate-tests/<name>.log. A passing script prints its last line. A
+      failing one prints "<name>: failed, exit <n>; the last 20 lines of <log>:" and those
+      lines, each after "  | ", with every control byte written as \ooo and a backslash as \\,
+      so that a CI log shows the reason and nothing in it is interpreted; one that passes with
+      colour or an annotation in its logs prints "<name>: passes, but its logs hold an escape
+      byte or a ::error line: <files>" and counts as failed.
+      The scripts run in the environment of a CI runner on GitHub Actions, whatever the caller
+      has set (CI=true, GITHUB_ACTIONS=true, CARGO_TERM_COLOR=always, FORCE_COLOR=1,
+      CLICOLOR_FORCE=1, NO_COLOR unset; CARGO_INCREMENTAL as the caller has it, so that a script
+      builds against target/ as the rest of the gate does): there go-task colours its messages and
+      adds a "::error" line to a failing task's output, and cargo colours its own. So each
+      script must turn both off itself, and does it in its first lines; each script runs once,
+      and this is the check that it is colour-proof (gate-selftest-is-colour-proof shows that
+      the environment does colour task's output and that a script that does not turn it off is
+      refused). No script at all fails too. The last line is "gate-selftest: <p> passed, <f>
+      failed", also written to .out/gate-selftest.log.
     silent: true
+    vars:
+      GATE_SELFTEST_DIR: '{{.GATE_SELFTEST_DIR | default "tests/gate"}}'
+      GATE_SELFTEST_JOBS: '{{.GATE_SELFTEST_JOBS | default "4"}}'
     cmds:
       - mkdir -p .out/gate-tests
       - |
-        unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE
-        export NO_COLOR=1 CARGO_TERM_COLOR=never
+        GATE_SELFTEST_DIR={{shellQuote .GATE_SELFTEST_DIR}}
+        unset NO_COLOR
+        export CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always FORCE_COLOR=1 CLICOLOR_FORCE=1
+        esc=$(printf '\033')
         passed=0
         failed=0
-        scripts=$(find tests/gate -maxdepth 1 -type f -name '*.sh' | LC_ALL=C sort)
+        scripts=$(find "$GATE_SELFTEST_DIR" -maxdepth 1 -type f -name '*.sh' | LC_ALL=C sort)
+        jobs={{shellQuote .GATE_SELFTEST_JOBS}}
+        case "$jobs" in ''|*[!0-9]*|0) echo "gate-selftest: GATE_SELFTEST_JOBS $jobs is not a positive number"; exit 1 ;; esac
+        running=0
         for script in $scripts; do
           name=${script##*/}
           name=${name%.sh}
           log=.out/gate-tests/$name.log
-          status=0
-          sh "$script" > "$log" 2>&1 || status=$?
+          rm -f "$log.status"
+          ( status=0; sh "$script" > "$log" 2>&1 || status=$?; echo "$status" > "$log.status" ) &
+          running=$((running + 1))
+          if [ "$running" -ge "$jobs" ]; then wait; running=0; fi
+        done
+        wait
+        for script in $scripts; do
+          name=${script##*/}
+          name=${name%.sh}
+          log=.out/gate-tests/$name.log
+          status=$(cat "$log.status" 2>/dev/null) || status=
+          [ -n "$status" ] || status=1
           if [ "$status" -eq 0 ] && [ "$(tail -n 1 "$log")" = "$name: ok" ]; then
-            passed=$((passed + 1))
-            tail -n 1 "$log"
+            marked=$(
+              {
+                echo "$log"
+                if [ -d ".out/gate-tests/$name" ]; then
+                  find ".out/gate-tests/$name" \( -name target -o -name .git \) -prune -o -type f \
+                    \( -name '*.log' -o -name '*.out' \) -print | LC_ALL=C sort
+                fi
+              } | while read -r file; do
+                if grep -q "$esc" "$file" || grep -q '^::error ' "$file"; then echo "$file"; fi
+              done
+            )
+            if [ -n "$marked" ]; then
+              failed=$((failed + 1))
+              echo "$name: passes, but its logs hold an escape byte or a ::error line:" $marked
+            else
+              passed=$((passed + 1))
+              tail -n 1 "$log"
+            fi
           else
             failed=$((failed + 1))
             echo "$name: failed, exit $status; the last 20 lines of $log:"
@@ -313,6 +600,6 @@ tasks:
             '
           fi
         done
-        if [ $((passed + failed)) -eq 0 ]; then echo "gate-selftest: no script under tests/gate"; fi
+        if [ $((passed + failed)) -eq 0 ]; then echo "gate-selftest: no script under $GATE_SELFTEST_DIR"; fi
         echo "gate-selftest: $passed passed, $failed failed" | tee .out/gate-selftest.log
         test "$((passed + failed))" -gt 0 && test "$failed" -eq 0

@@ -3,7 +3,8 @@
 # conformance/test262/moves.tsv in which one line of kind "part" names as its evidence a token of
 # conformance/test262/later-parts.tsv of the same slice that the case does not hold, and a copy
 # in which one line moves its case into slice 2. `task test262-moves-check` must exit non-zero on
-# each and name the path of the planted line. The unchanged copy passes first.
+# each and name the path of the planted line. The unchanged lines pass first. The copies hold
+# the two lines they plant in, the first of the list and the planted one, not the whole list.
 # The planted evidence is the first token of later-parts.tsv with the line's target slice that
 # `grep -F` finds nowhere in the case, taken from the first "part" line whose case includes no
 # harness file (so the case file is all the task may read for it). A third copy has one line
@@ -35,12 +36,6 @@ checkout=$cache/$commit
 [ -s "$moves" ] || fail "no $moves"
 [ -s "$parts" ] || fail "no $parts"
 
-cp "$moves" "$dir/moves.tsv" || fail "cannot copy $moves"
-task -d . test262-moves-check TEST262_CACHE="$cache" TEST262_DESIGN="$design" TEST262_MOVES="$dir/moves.tsv" > "$dir/base.out" 2>&1 ||
-  fail "task test262-moves-check on the unchanged copy exited non-zero ($dir/base.out)"
-grep -q '^test262-moves: [0-9]* case(s) moved, ' "$dir/base.out" ||
-  fail "task test262-moves-check on the unchanged copy printed no summary line ($dir/base.out)"
-
 tab=$(printf '\t')
 line=0
 planted=""
@@ -57,17 +52,27 @@ while IFS="$tab" read -r path from to kind evidence; do
   fi
 done < "$moves"
 [ -n "$planted" ] || fail "no part line of $moves whose case lacks a token of its slice"
-awk -F'\t' -v OFS='\t' -v n="$line" -v tok="$tok" 'NR == n { $5 = tok } { print }' "$moves" > "$dir/planted-evidence.tsv"
-cmp -s "$moves" "$dir/planted-evidence.tsv" && fail "the planted evidence copy equals $moves"
+
+# The task checks each line on its own; the smallest input that shows both refusals is the
+# first line of the list and the planted one, in the order of the list (the gate's own step
+# test262-moves-check checks the whole list).
+awk -v n="$line" 'NR == 1 || NR == n' "$moves" > "$dir/moves.tsv" || fail "cannot copy $moves"
+task -d . test262-moves-check TEST262_CACHE="$cache" TEST262_DESIGN="$design" TEST262_MOVES="$dir/moves.tsv" > "$dir/base.out" 2>&1 ||
+  fail "task test262-moves-check on the unchanged lines exited non-zero ($dir/base.out)"
+grep -q '^test262-moves: [0-9]* case(s) moved, ' "$dir/base.out" ||
+  fail "task test262-moves-check on the unchanged lines printed no summary line ($dir/base.out)"
+
+awk -F'\t' -v OFS='\t' -v path="$planted" -v tok="$tok" '$1 == path { $5 = tok } { print }' "$dir/moves.tsv" > "$dir/planted-evidence.tsv"
+cmp -s "$dir/moves.tsv" "$dir/planted-evidence.tsv" && fail "the planted evidence copy equals the unchanged lines"
 if task -d . test262-moves-check TEST262_CACHE="$cache" TEST262_DESIGN="$design" TEST262_MOVES="$dir/planted-evidence.tsv" > "$dir/planted-evidence.out" 2>&1; then
   fail "task test262-moves-check exited 0 with evidence \"$tok\" that $planted does not hold ($dir/planted-evidence.out)"
 fi
 grep -qF ": $planted: " "$dir/planted-evidence.out" ||
   fail "task test262-moves-check did not name $planted ($dir/planted-evidence.out)"
 
-first=$(awk -F'\t' 'NR == 1 { print $1 }' "$moves")
-awk -F'\t' -v OFS='\t' 'NR == 1 { $3 = 2 } { print }' "$moves" > "$dir/planted-to-2.tsv"
-cmp -s "$moves" "$dir/planted-to-2.tsv" && fail "the planted slice 2 copy equals $moves"
+first=$(awk -F'\t' 'NR == 1 { print $1 }' "$dir/moves.tsv")
+awk -F'\t' -v OFS='\t' 'NR == 1 { $3 = 2 } { print }' "$dir/moves.tsv" > "$dir/planted-to-2.tsv"
+cmp -s "$dir/moves.tsv" "$dir/planted-to-2.tsv" && fail "the planted slice 2 copy equals the unchanged lines"
 if task -d . test262-moves-check TEST262_CACHE="$cache" TEST262_DESIGN="$design" TEST262_MOVES="$dir/planted-to-2.tsv" > "$dir/planted-to-2.out" 2>&1; then
   fail "task test262-moves-check exited 0 with a line that moves $first into slice 2 ($dir/planted-to-2.out)"
 fi

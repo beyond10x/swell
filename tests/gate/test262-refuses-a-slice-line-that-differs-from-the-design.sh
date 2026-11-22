@@ -4,9 +4,11 @@
 # differ from the design: `task test262` must exit non-zero and say so, printing the line on both
 # sides. The unchanged copy passes first.
 # The defect is on the counting side (fields 2 to 4 of a slice line do not depend on any run), so
-# every run of the task counts the real pinned checkout with TEST262_RUN=none (no case is run;
+# every run of the task counts a small checkout of its own with TEST262_RUN=none (no case is run;
 # every run case is counted failed), against that mode's expected file, made here from the
 # task's own lines.
+# The checkout is made by tests/gate/fixtures/test262-checkout.sh (a case under each path of
+# sections.txt, one naming generators), with a copy of the design whose slice lines are its own.
 # Run from the repository root: sh tests/gate/test262-refuses-a-slice-line-that-differs-from-the-design.sh
 # The same output from task, cargo and ess on any machine: no colour, and no "::error" line
 # that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
@@ -23,15 +25,12 @@ fail() {
 }
 
 export TEST262_RUN=none
-: > "$dir/empty.txt"
-if task -d . test262 TEST262_EXPECTED="$dir/empty.txt" TEST262_OUT="$dir/mode" > "$dir/mode.out" 2>&1; then
-  fail "task test262 exited 0 against an empty expected file ($dir/mode.out)"
-fi
-grep -q '^test262 total ' "$dir/mode/lines.txt" || fail "task test262 printed no total line ($dir/mode.out)"
-cp "$dir/mode/lines.txt" "$dir/expected.txt" || fail "cannot copy $dir/mode/lines.txt"
+. tests/gate/fixtures/test262-checkout.sh
+test262_checkout "$dir"
+cp "$dir/checkout-lines.txt" "$dir/expected.txt" || fail "cannot copy $dir/checkout-lines.txt"
 export TEST262_EXPECTED="$dir/expected.txt"
-cp docs/design/engine.md "$dir/engine.md" || fail "cannot copy docs/design/engine.md"
-task -d . test262 TEST262_DESIGN="$dir/engine.md" TEST262_OUT="$dir/base" > "$dir/base.out" 2>&1 ||
+cp "$checkout_design" "$dir/engine.md" || fail "cannot copy $checkout_design"
+task -d . test262 $checkout_vars TEST262_DESIGN="$dir/engine.md" TEST262_OUT="$dir/base" > "$dir/base.out" 2>&1 ||
   fail "task test262 on the unchanged design exited non-zero ($dir/base.out)"
 grep -q '^test262: [0-9]* slice lines equal the design$' "$dir/base.out" ||
   fail "task test262 on the unchanged design did not say the slice lines equal it ($dir/base.out)"
@@ -45,7 +44,7 @@ old=$(cat "$dir/planted-line.txt")
 [ -n "$old" ] || fail "no slice line after \"Its output on this document:\" in the design"
 cmp -s "$dir/engine.md" "$dir/planted-engine.md" && fail "the planted design equals the design"
 
-if task -d . test262 TEST262_DESIGN="$dir/planted-engine.md" TEST262_OUT="$dir/planted" > "$dir/planted.out" 2>&1; then
+if task -d . test262 $checkout_vars TEST262_DESIGN="$dir/planted-engine.md" TEST262_OUT="$dir/planted" > "$dir/planted.out" 2>&1; then
   fail "task test262 exited 0 with a changed slice line in the design ($dir/planted.out)"
 fi
 grep -qF "test262: the slice lines differ from $dir/planted-engine.md" "$dir/planted.out" ||

@@ -17,12 +17,72 @@ fn collect(agent: &mut swell::Agent<support::host::TestHost>) {
 }
 
 /// The iterations of a garbage loop: enough to pass the collection threshold (1 MiB) several
-/// times in the default build, and few where every safe point collects.
-const GARBAGE: u32 = if cfg!(feature = "collect-every-safe-point") {
-    20
-} else {
-    100_000
-};
+/// times in the default build, and few where every safe point collects. In the default build
+/// the lane `slow` (`SWELL_FULL_COUNTS=1`) runs 100,000 and the gate 20,000;
+/// [`garbage_passes_the_threshold_and_the_budget`] checks that this is still enough.
+fn garbage() -> u32 {
+    if cfg!(feature = "collect-every-safe-point") {
+        20
+    } else if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
+        100_000
+    } else {
+        20_000
+    }
+}
+
+/// The bytes one array of the garbage loop is charged: the heap after `garbage(400)` less the
+/// heap after `garbage(200)`, each run from a collection, so that no collection runs inside it
+/// and the scripts, of equal length, cancel out; divided by the 200 arrays more.
+fn array_bytes() -> u64 {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    assert!(matches!(
+        eval(
+            &mut agent,
+            &realm,
+            "function garbage(n) { var i = 0; while (i < n) { [i, i, i, i]; i++; } return n; }",
+        ),
+        HostOutcome::Normal(_)
+    ));
+    let mut grown = Vec::new();
+    for n in [200, 400] {
+        collect(&mut agent);
+        let before = agent.heap_bytes().unwrap();
+        assert_eq!(
+            eval_text(&mut agent, &realm, &format!("garbage({n});")),
+            Outcome::Normal(n.to_string())
+        );
+        grown.push(agent.heap_bytes().unwrap().saturating_sub(before));
+    }
+    grown[1].saturating_sub(grown[0]) / 200
+}
+
+/// In the default build one garbage loop of [`garbage`] iterations allocates more than twice
+/// the collection threshold, and the three of
+/// [`operand_stack_and_local_values_survive_collect`] more than its memory budget, so that the
+/// run completes only if collections ran during each loop, at the gate's count as at the full
+/// one.
+#[test]
+fn garbage_passes_the_threshold_and_the_budget() {
+    if cfg!(feature = "collect-every-safe-point") {
+        return;
+    }
+    let per_array = array_bytes();
+    let per_loop = u64::from(garbage()) * per_array;
+    println!(
+        "garbage: {} arrays of {per_array} bytes, {per_loop} bytes a loop",
+        garbage()
+    );
+    assert!(per_loop > 2 * (1 << 20), "{per_loop} bytes a loop");
+    assert!(
+        3 * per_loop > MEMORY_BYTES,
+        "{} bytes in three loops",
+        3 * per_loop
+    );
+}
+
+/// The memory budget of [`operand_stack_and_local_values_survive_collect`].
+const MEMORY_BYTES: u64 = 4 * 1024 * 1024;
 
 /// `closure_environment_survives_collect`: an object reachable only through the environment a
 /// returned closure captured is read after collections. The trace of environment records
@@ -57,24 +117,26 @@ fn closure_environment_survives_collect() {
 /// slot are read after the collections at the safe points between. The root site of the frame
 /// stack (`interp/mod.rs`).
 ///
-/// The memory budget, 4 MiB, is smaller than the garbage the default build allocates (100,000
-/// arrays of four elements), so the run completes only if collections ran during it.
+/// The memory budget, 4 MiB, is smaller than the garbage the default build allocates (three
+/// loops of [`garbage`] arrays of four elements), so the run completes only if collections ran
+/// during it.
 #[test]
 fn operand_stack_and_local_values_survive_collect() {
     let mut limits = limits();
-    limits.memory_bytes = 4 * 1024 * 1024;
+    limits.memory_bytes = MEMORY_BYTES;
     limits.steps_per_entry = 100_000_000;
     let mut agent = agent_with(limits).unwrap();
     let realm = realm(&mut agent);
+    let garbage = garbage();
     let source = format!(
         "function garbage(n) {{ var i = 0; while (i < n) {{ [i, i, i, i]; i++; }} return n; }} \
          function pair(a, b) {{ return a.v + b; }} \
-         function local() {{ var kept = {{ v: 2 }}; garbage({GARBAGE}); return kept.v; }} \
-         pair({{ v: 1 }}, garbage({GARBAGE})) + local() + garbage({GARBAGE});"
+         function local() {{ var kept = {{ v: 2 }}; garbage({garbage}); return kept.v; }} \
+         pair({{ v: 1 }}, garbage({garbage})) + local() + garbage({garbage});"
     );
     assert_eq!(
         eval_text(&mut agent, &realm, &source),
-        Outcome::Normal((3 + 2 * GARBAGE).to_string())
+        Outcome::Normal((3 + 2 * garbage).to_string())
     );
     assert_eq!(agent.state(), AgentState::Alive);
 }

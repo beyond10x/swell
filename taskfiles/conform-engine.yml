@@ -15,10 +15,13 @@ tasks:
       Reads ESS_SUITE (default .out/suite.json), which the task suite of taskfiles/spec.yml
       writes; it has no deps entry, so that the file runs alone, and a missing suite fails with
       "conform-engine: <file> missing; run task suite first". First it runs the tests of the
-      crate with RUSTFLAGS="-D warnings" (cargo test --locked --manifest-path
-      conformance/ess/Cargo.toml, ESS_SUITE passed on to them as an absolute path) into
-      .out/conform-engine-test.log, printed when cargo fails, and checks that the planted-defect
-      test a_target_whose_interrupt_does_nothing_fails_a_scenario ran and passed. Then it runs
+      crate through cargo-nextest with RUSTFLAGS="-D warnings" (cargo nextest run --locked
+      --manifest-path conformance/ess/Cargo.toml --profile default --config-file
+      .config/nextest.toml: a test is terminated at 60 s; ESS_SUITE passed on to them as an
+      absolute path) into .out/conform-engine-test.log, prints their summed counts and slowest
+      tests as the task test does ("conform-engine: <b> test binaries: ..." and "gate-slowest
+      conform-engine ..."; the log is printed when nextest fails), and checks that the
+      planted-defect test a_target_whose_interrupt_does_nothing_fails_a_scenario ran and passed. Then it runs
       the suite with the binary swell-conformance, writing the ess-conformance-report/2 to
       .out/conform-engine.json and its output to .out/conform-engine.log, and prints the runner
       summary line "<n> scenarios: <p> passed, <f> failed, <e> error, <u> unsupported". It
@@ -42,13 +45,18 @@ tasks:
           *) suite="$PWD/$suite" ;;
         esac
         status=0
-        ESS_SUITE="$suite" cargo test --locked --manifest-path conformance/ess/Cargo.toml > .out/conform-engine-test.log 2>&1 || status=$?
-        if [ "$status" -ne 0 ]; then
-          cat .out/conform-engine-test.log
-          echo "conform-engine: cargo test of conformance/ess failed, exit $status"
-          exit 1
-        fi
-        if ! grep -qx 'test a_target_whose_interrupt_does_nothing_fails_a_scenario \.\.\. ok' .out/conform-engine-test.log; then
+        ESS_SUITE="$suite" cargo nextest run --locked --manifest-path conformance/ess/Cargo.toml --profile default \
+          --config-file .config/nextest.toml > .out/conform-engine-test.log 2>&1 || status=$?
+        echo "$status" > .out/conform-engine-test.status
+      - task: nextest-report
+        vars: {STEP: conform-engine, PREFIX: 'conform-engine: ', LOG: .out/conform-engine-test.log, STATUS: .out/conform-engine-test.status, JUNIT: conformance/ess/target/nextest/default/junit.xml, MIN_PASSED: '1'}
+      - |
+        suite='{{.ESS_SUITE}}'
+        case "$suite" in
+          /*) ;;
+          *) suite="$PWD/$suite" ;;
+        esac
+        if ! grep -qE '^ *PASS \[ *[0-9.]+s\] .*swell-conformance::planted_defect a_target_whose_interrupt_does_nothing_fails_a_scenario$' .out/conform-engine-test.log; then
           echo "conform-engine: the planted-defect test a_target_whose_interrupt_does_nothing_fails_a_scenario did not run and pass; see .out/conform-engine-test.log"
           exit 1
         fi

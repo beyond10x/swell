@@ -1,6 +1,8 @@
 version: '3'
 
 vars:
+  ESS_PIN:
+    sh: awk '$1 == "requires:" && $2 == "ess" { print $3 }' spec/ess-inputs.yaml
   SPEC_REFUSALS_MAX: '{{.SPEC_REFUSALS_MAX | default 41}}'
   SPEC_OUT: '{{.SPEC_OUT | default ".out"}}'
   SPEC_SYNTHESIZE_LOG: '{{.SPEC_SYNTHESIZE_LOG | default (printf "%s/synthesize.log" .SPEC_OUT)}}'
@@ -10,6 +12,7 @@ tasks:
   validate:
     desc: Validate the host interface specification under spec/; a warning fails it.
     silent: true
+    env: {ESS_TOOLCHAIN: '{{.ESS_PIN}}'}
     cmds:
       - mkdir -p '{{.SPEC_OUT}}'
       - ess --strict-requires specify validate --path spec > '{{.SPEC_OUT}}/validate.log' 2>&1 || { cat '{{.SPEC_OUT}}/validate.log'; exit 1; }
@@ -19,6 +22,7 @@ tasks:
   suite:
     desc: Synthesize the conformance suite with the authored scenarios; more refusals than SPEC_REFUSALS_MAX fail it.
     silent: true
+    env: {ESS_TOOLCHAIN: '{{.ESS_PIN}}'}
     cmds:
       - mkdir -p '{{.SPEC_OUT}}'
       - ess verify conform synthesize --path spec --scenarios spec --out '{{.SPEC_OUT}}/suite.json' > '{{.SPEC_OUT}}/synthesize.log' 2>&1 || { cat '{{.SPEC_OUT}}/synthesize.log'; exit 1; }
@@ -41,6 +45,7 @@ tasks:
   conform:
     desc: Run the suite against the interpreter built into ess; every scenario must pass.
     silent: true
+    env: {ESS_TOOLCHAIN: '{{.ESS_PIN}}'}
     deps: [suite]
     cmds:
       - ess verify conform run --path spec --suite '{{.SPEC_OUT}}/suite.json' --target interpreted --report-format 2 --report-out '{{.SPEC_OUT}}/report.json' > '{{.SPEC_OUT}}/conform.log' 2>&1 || { grep -E '^  (failed|error) ' '{{.SPEC_OUT}}/conform.log' || true; tail -n 1 '{{.SPEC_OUT}}/conform.log'; exit 1; }

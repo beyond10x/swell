@@ -1,0 +1,334 @@
+/* swell site: the engine figure and the status views, on the shared docs-system tokens only.
+   Colours come from the tokens, so both themes keep the contrast the tokens are validated for.
+   Three weights of line: 1px (hairlines, ports, tracks), 1.5px (the frames and the connectors),
+   3px (the path of a script). One accent, the product hue: the path of a script and what is
+   delivered or passes. Nothing moves. */
+
+.sw-sr {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* The engine figure                                                                           */
+
+.sw-fig {
+  --sw-accent: var(--b10x-product-hue, var(--b10x-color-accent));
+  --sw-strong: var(--b10x-color-heading);
+  --sw-line: var(--b10x-color-line);
+  --sw-hair: var(--b10x-color-hairline, var(--b10x-color-line));
+  --sw-panel: var(--b10x-color-panel, var(--b10x-color-surface));
+  --sw-ground: var(--b10x-color-surface-muted);
+  --sw-gap: 8px;
+  --sw-spine-x: 22px;      /* the path of a script, from the left edge of the host's content */
+  --sw-agent-pad: 44px;    /* where the stages start inside the engine box */
+  --sw-reach: 24px;        /* the length of a connector across the boundary */
+  container-type: inline-size;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--sw-hair);
+  border-radius: 14px;
+  background: var(--sw-panel);
+  box-shadow: var(--b10x-card-shadow, none);
+  color: var(--b10x-color-text);
+  font: 400 13px/1.45 var(--b10x-font-sans);
+}
+.sw-fig p { margin: 0; }
+.sw-fig ul, .sw-fig ol { margin: 0; padding: 0; list-style: none; }
+.sw-fig li { margin: 0; }
+.sw-fig code {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sw-strong);
+  font: 500 0.94em/1.35 var(--b10x-font-mono);
+  overflow-wrap: anywhere;
+}
+
+.sw-fig__kicker,
+.sw-host__label,
+.sw-port__title,
+.sw-measure__label {
+  color: var(--b10x-color-muted);
+  font: 650 10.5px/1.3 var(--b10x-font-sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.sw-fig__kicker { margin-bottom: 12px !important; }
+
+/* The host: everything from outside lives here. */
+.sw-host {
+  padding: 12px;
+  border: 1.5px solid var(--sw-line);
+  border-radius: 12px;
+  background: var(--sw-ground);
+}
+.sw-host__label { margin-bottom: 10px !important; }
+
+/* The ports: what crosses the boundary, each with a connector that reaches across it. */
+.sw-ports { display: grid; gap: var(--sw-gap); }
+.sw-ports--in { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.1fr) minmax(0, 1fr); }
+.sw-ports--out { grid-template-columns: minmax(0, 1fr); margin-top: var(--sw-reach) !important; }
+.sw-port {
+  position: relative;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--sw-line);
+  border-radius: 8px;
+  background: var(--sw-panel);
+}
+.sw-port__title { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; margin-bottom: 4px !important; }
+.sw-port__dir { color: var(--sw-strong); }
+.sw-port__name { color: var(--b10x-color-muted); }
+.sw-port__body { color: var(--sw-strong); }
+.sw-port__note { margin-top: 3px !important; color: var(--b10x-color-muted); font-size: 12px; }
+.sw-port__list li { padding-block: 1px; color: var(--sw-strong); }
+.sw-fig--full .sw-port__hook { display: block; color: var(--b10x-color-muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.sw-fig--full .sw-port__hook code { color: inherit; }
+
+/* Connectors: an inbound one hangs from the port into the engine box, an outbound one rises
+   from the engine box into the port. The arrowhead sits at the end that receives. */
+.sw-ports--in .sw-port::after,
+.sw-ports--out .sw-port::before {
+  position: absolute;
+  inline-size: 0;
+  block-size: var(--sw-reach);
+  border-inline-start: 1.5px solid var(--sw-strong);
+  content: '';
+}
+.sw-ports--in .sw-port::after { inset-block-start: 100%; inset-inline-start: calc(var(--sw-spine-x) - 1px - 0.75px); }
+.sw-ports--out .sw-port::before { inset-block-end: 100%; inset-inline-start: calc(var(--sw-spine-x) - 1px - 0.75px); }
+.sw-ports--in .sw-port::before {
+  position: absolute;
+  inset-block-start: calc(100% + var(--sw-reach) - 7px);
+  inset-inline-start: calc(var(--sw-spine-x) - 1px - 5px);
+  inline-size: 0;
+  block-size: 0;
+  border-inline: 5px solid transparent;
+  border-block-start: 7px solid var(--sw-strong);
+  content: '';
+  z-index: 1;
+}
+.sw-ports--out .sw-port::after {
+  position: absolute;
+  inset-block-start: -8px;
+  inset-inline-start: calc(var(--sw-spine-x) - 1px - 5px);
+  inline-size: 0;
+  block-size: 0;
+  border-inline: 5px solid transparent;
+  border-block-start: 7px solid var(--sw-accent);
+  content: '';
+}
+/* The ports of the script's own path take the accent and the heavy line. */
+.sw-port--spine { border-color: var(--sw-accent); }
+.sw-ports--in .sw-port--spine::after,
+.sw-ports--out .sw-port--spine::before { border-inline-start: 3px solid var(--sw-accent); inset-inline-start: calc(var(--sw-spine-x) - 1px - 1.5px); }
+.sw-ports--in .sw-port--spine::before { border-block-start-color: var(--sw-accent); }
+
+/* The engine: one agent, the boundary drawn as its frame. */
+.sw-agent {
+  position: relative;
+  margin-top: var(--sw-reach);
+  padding: 12px 12px 14px var(--sw-agent-pad);
+  border: 1.5px solid var(--sw-strong);
+  border-radius: 10px;
+  background: var(--sw-panel);
+}
+.sw-agent::before {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: calc(var(--sw-spine-x) - 1.5px - 1.5px);
+  inline-size: 3px;
+  background: var(--sw-accent);
+  content: '';
+}
+.sw-agent__label { color: var(--sw-strong); font-weight: 600; }
+.sw-agent__label code { font-weight: 600; }
+.sw-agent__note { margin-top: 1px !important; color: var(--b10x-color-muted); font-size: 12px; }
+
+.sw-path { display: grid; gap: 12px; margin-top: 12px !important; }
+.sw-stage { position: relative; }
+.sw-stage::before {
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-start: calc(var(--sw-spine-x) - 1.5px - var(--sw-agent-pad) - 6px);
+  inline-size: 12px;
+  block-size: 12px;
+  border: 3px solid var(--sw-panel);
+  border-radius: 50%;
+  background: var(--sw-accent);
+  box-sizing: border-box;
+  box-shadow: 0 0 0 1px var(--sw-accent);
+  content: '';
+}
+.sw-stage__head { display: flex; flex-wrap: wrap; gap: 0 10px; align-items: baseline; }
+.sw-stage__crate { font-size: 13.5px !important; font-weight: 600 !important; }
+.sw-stage__role { color: var(--b10x-color-text); }
+.sw-stage__note { margin-top: 3px !important; color: var(--b10x-color-muted); font-size: 12px; }
+.sw-stage__note--end { margin-top: 8px !important; }
+
+.sw-parts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px !important; }
+.sw-parts li {
+  display: grid;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 1px solid var(--sw-hair);
+  border-radius: 6px;
+  background: var(--sw-ground);
+  font-size: 12px;
+}
+.sw-parts strong { color: var(--sw-strong); font-weight: 600; }
+.sw-parts span { color: var(--b10x-color-muted); line-height: 1.35; }
+
+.sw-meters { display: grid; gap: 6px; margin-top: 10px !important; }
+.sw-meter {
+  display: grid;
+  grid-template-columns: 58px minmax(48px, 1fr) auto;
+  gap: 4px 10px;
+  align-items: center;
+}
+.sw-fig--full .sw-meter { grid-template-columns: 148px minmax(64px, 1fr) 196px; }
+.sw-meter__name { color: var(--sw-strong); font-size: 12px; font-weight: 600; }
+.sw-meter__field { display: block; font-weight: 400; }
+.sw-meter__field code { color: var(--b10x-color-muted); font-size: 11.5px; }
+.sw-meter__track {
+  position: relative;
+  display: block;
+  block-size: 10px;
+  border: 1px solid var(--sw-line);
+  border-inline-end: 0;
+  border-radius: 3px 0 0 3px;
+  background: repeating-linear-gradient(90deg, transparent 0 9px, var(--sw-hair) 9px 10px);
+}
+.sw-meter__fill { position: absolute; inset: 0; display: block; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--sw-accent) 42%, transparent)); }
+.sw-meter__stop { position: absolute; inset-block: -4px; inset-inline-end: 0; display: block; inline-size: 0; border-inline-end: 1.5px solid var(--sw-strong); }
+.sw-meter__ends { color: var(--b10x-color-text); font-size: 12px; white-space: nowrap; }
+.sw-outcome { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.sw-outcome__arms { color: var(--b10x-color-muted); }
+
+/* The three absences. */
+.sw-absences { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sw-gap); margin-top: 12px !important; }
+.sw-absences li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 2px 8px;
+  align-content: start;
+  padding: 9px 10px;
+  border: 1px solid var(--sw-hair);
+  border-radius: 8px;
+}
+.sw-fig__glyph { grid-row: 1; margin-top: 1px; color: var(--sw-strong); }
+.sw-absences__title { grid-column: 2; color: var(--sw-strong); font-weight: 600; }
+.sw-absences__proof { grid-column: 1 / -1; color: var(--b10x-color-text); font-size: 12px; }
+.sw-absences__source { grid-column: 1 / -1; color: var(--b10x-color-muted); font-size: 11.5px; }
+
+/* The measure: delivered slices and test262 passes, the missing part drawn as plainly as the rest. */
+.sw-measure { display: grid; gap: 12px; margin-top: 12px !important; padding: 12px 10px 4px; border-top: 1px solid var(--sw-hair); }
+.sw-measure__row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr) 112px;
+  gap: 4px 10px;
+  align-items: center;
+}
+.sw-measure__value { color: var(--b10x-color-text); font-size: 12px; text-align: end; white-space: nowrap; }
+.sw-measure__value strong { color: var(--sw-strong); font-weight: 650; font-variant-numeric: tabular-nums; }
+.sw-measure__legend { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 2px 14px; color: var(--b10x-color-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.sw-measure__legend > span { display: inline-flex; align-items: center; gap: 5px; }
+
+.sw-slices { display: grid; grid-template-columns: repeat(19, minmax(0, 1fr)); gap: 3px; }
+.sw-slices li { block-size: 16px; border: 1px solid var(--sw-line); border-radius: 2px; }
+.sw-slices li.is-delivered { border-color: var(--sw-accent); background: var(--sw-accent); }
+
+.sw-pass { display: flex; block-size: 16px; overflow: hidden; border: 1px solid var(--sw-line); border-radius: 2px; }
+.sw-pass__passed { display: block; background: var(--sw-accent); }
+.sw-pass__failed { display: block; border-inline-start: 1px solid var(--sw-line); background: repeating-linear-gradient(135deg, transparent 0 4px, var(--sw-line) 4px 5px); }
+.sw-swatch { display: inline-block; inline-size: 12px; block-size: 10px; border: 1px solid var(--sw-line); border-radius: 2px; }
+.sw-swatch--passed { border-color: var(--sw-accent); background: var(--sw-accent); }
+.sw-swatch--failed { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--sw-line) 3px 4px); }
+
+.sw-fig__caption { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--sw-hair); color: var(--b10x-color-muted); font-size: 12px; }
+
+/* The full figure, on the architecture page, is wider: more room for names. */
+.sw-fig--full { font-size: 14px; }
+.sw-fig--full .sw-ports--in { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) minmax(0, 1.2fr); }
+.sw-fig--full .sw-parts li, .sw-fig--full .sw-port__note, .sw-fig--full .sw-stage__note { font-size: 12.5px; }
+
+/* A narrow column: the ports keep their row, the rest stacks. */
+@container (max-width: 520px) {
+  .sw-meter, .sw-fig--full .sw-meter { grid-template-columns: 58px minmax(0, 1fr); }
+  .sw-fig--full .sw-meter { grid-template-columns: 76px minmax(0, 1fr); }
+  .sw-meter__ends { grid-column: 2; white-space: normal; }
+  .sw-meter__field { display: none; }
+  .sw-absences { grid-template-columns: minmax(0, 1fr); }
+  .sw-absences li { grid-template-columns: 16px minmax(0, 1fr); }
+  .sw-absences__proof, .sw-absences__source { grid-column: 2; }
+  .sw-measure__row { grid-template-columns: minmax(0, 1fr) auto; }
+  .sw-measure__label { grid-column: 1 / -1; }
+  .sw-slices, .sw-pass { grid-column: 1; }
+  .sw-measure__legend { grid-column: 1 / -1; }
+}
+@container (max-width: 400px) {
+  .sw-fig { font-size: 12.5px; }
+  .sw-ports--in { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) minmax(0, 1fr); gap: 6px; }
+  .sw-port { padding: 7px 7px 8px; }
+  .sw-port__title { letter-spacing: 0.08em; }
+  .sw-parts { grid-template-columns: minmax(0, 1fr); }
+  .sw-parts li { grid-template-columns: 64px minmax(0, 1fr); gap: 8px; }
+  .sw-meter, .sw-fig--full .sw-meter { grid-template-columns: 50px minmax(0, 1fr); column-gap: 8px; }
+  .sw-meter__ends { font-size: 11px; white-space: nowrap; }
+  .sw-meter__arrow { display: none; }
+  .sw-fig--full .sw-meter { grid-template-columns: 64px minmax(0, 1fr); }
+  .sw-fig--full .sw-meter__ends { white-space: normal; }
+  .sw-meter__ends code { white-space: nowrap; }
+  .sw-fig--full .sw-ports--in { grid-template-columns: minmax(0, 1fr); }
+  .sw-fig--full .sw-ports--in .sw-port--spine { order: 1; }
+  .sw-fig--full .sw-ports--in .sw-port:not(.sw-port--spine)::before,
+  .sw-fig--full .sw-ports--in .sw-port:not(.sw-port--spine)::after { display: none; }
+  .sw-host { padding: 10px; }
+}
+@media (max-width: 400px) { .sw-fig { padding: 12px; } }
+
+/* ------------------------------------------------------------------------------------------ */
+/* The slice bar of the status page                                                            */
+
+.sw-slicebar { --sw-accent: var(--b10x-product-hue, var(--b10x-color-accent)); --sw-line: var(--b10x-color-line); margin: 1.5rem 0 2rem; }
+.sw-slicebar__bar { display: flex; gap: 2px; margin: 0; padding: 0; list-style: none; block-size: 28px; }
+.sw-slicebar__bar li {
+  position: relative;
+  min-inline-size: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--sw-line);
+  border-radius: 2px;
+  background: repeating-linear-gradient(135deg, transparent 0 4px, var(--sw-line) 4px 5px);
+}
+.sw-slicebar__bar li.is-delivered { border: 1.5px solid var(--b10x-color-heading); }
+.sw-slicebar__fill { position: absolute; inset-block: 0; inset-inline-start: 0; display: block; background: var(--sw-accent); }
+.sw-slicebar__legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0.6rem 0 0; color: var(--b10x-color-muted); font-size: 0.82rem; }
+.sw-slicebar__legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.sw-slicebar .sw-swatch { display: inline-block; inline-size: 14px; block-size: 11px; border: 1px solid var(--sw-line); border-radius: 2px; }
+.sw-slicebar .sw-swatch--passed { border-color: var(--sw-accent); background: var(--sw-accent); }
+.sw-slicebar .sw-swatch--failed { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--sw-line) 3px 4px); }
+.sw-slicebar .sw-swatch--delivered { border: 1.5px solid var(--b10x-color-heading); }
+.sw-slicebar__caption { margin-top: 0.4rem; color: var(--b10x-color-muted); font-size: 0.82rem; }
+
+.sw-pending { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 1.5rem; padding: 0; list-style: none; }
+.sw-pending li { display: inline-flex; gap: 8px; align-items: baseline; margin: 0; padding: 3px 10px; border: 1px solid var(--b10x-color-line); border-radius: 999px; font-size: 0.85rem; }
+.sw-pending__slice { color: var(--b10x-color-muted); }
+.sw-pending strong { color: var(--b10x-color-heading); font-variant-numeric: tabular-nums; }
+
+/* The engine figure inside a documentation page. */
+.markdown .sw-fig { margin-block: 1.5rem 2rem; }
+.markdown .sw-fig p { font-size: inherit; }
+
+/* Code in the landing sections keeps its line: `#![forbid(unsafe_code)]` is not split at `#!`. */
+.b10x-product p code { white-space: nowrap; }
+
+/* swell's own mark in the navbar, in place of the shared letter tile (mark '' in the config). */
+.navbar .navbar__brand .navbar__logo { display: flex; flex: none; align-items: center; block-size: 2rem; margin-right: 0; }
+.navbar .navbar__brand .navbar__logo img { block-size: 2rem; inline-size: 2rem; }
