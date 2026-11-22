@@ -7,13 +7,19 @@ mod support;
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Instant;
 
 use support::host::TestHost;
-use support::script::{Outcome as Shown, define_function, eval_text};
+use support::script::{Outcome as Shown, define_function, eval_text, nothing};
 use swell::{
     Abrupt, Agent, AgentState, Brand, Completion, Cx, GlobalObjects, HookCx, HostCall, HostData,
-    HostError, HostIntrinsic, HostObjectSpec, ObjectRef, Outcome, Parsed, PropertyKey, Prototype,
-    RealmRef, Root, Source, SymbolRef, Termination, Tracer, Value, WellKnownSymbol,
+    HostError, HostIntrinsic, HostObjectSpec, ObjectRef, Outcome, Parsed, PropertyDescriptor,
+    PropertyKey, Prototype, Realm, RealmRef, Root, Source, SymbolRef, Termination, Tracer, Value,
+    WellKnownSymbol,
+};
+use swell::{
+    BINDINGS_REALM_HEAP_BYTES, HOST_FUNCTION_LIVE_BYTES, HOST_OBJECT_LIVE_BYTES,
+    PROPERTY_LIVE_BYTES,
 };
 
 const NODE: Brand = Brand(1);
@@ -796,4 +802,727 @@ fn a_dom_exception_reaches_error_prototype() {
         ),
         Shown::Normal("true".to_string())
     );
+}
+
+/// The bytes of the host data of HOST-186.
+const PAGE: usize = 4_096;
+
+/// Host data of 4,096 bytes.
+struct Page {
+    _bytes: [u8; PAGE],
+}
+
+impl HostData for Page {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+/// The names of the members of a realm of bindings, of 4 to 32 code units: the name at index `i`
+/// has `4 + i`.
+const NAMES: [&str; 29] = [
+    "item",
+    "focus",
+    "append",
+    "replace",
+    "contains",
+    "normalize",
+    "appendData",
+    "insertAfter",
+    "getAttribute",
+    "querySelector",
+    "hasAttributeNS",
+    "removeAttribute",
+    "addEventListener",
+    "getAttributeNames",
+    "isDefaultNamespace",
+    "removeEventListener",
+    "getElementsByTagName",
+    "getBoundingClientRect",
+    "getElementsByClassName",
+    "compareDocumentPosition",
+    "requestFullscreenOptions",
+    "dispatchEventToListeners2",
+    "createDocumentFragmentNode",
+    "insertAdjacentElementBefore",
+    "insertAdjacentElementsBefore",
+    "requestPointerLockWithOptions",
+    "createProcessingInstructionNow",
+    "lookupNamespaceURIForPrefixNode",
+    "requestAnimationFrameCallbackIds",
+];
+
+/// The definitions of new properties on one host object that HOST-186 amortizes a definition
+/// over.
+const DEFINITIONS: u64 = 300;
+
+/// A name as long as `NAMES[i % 29]`, its last two code units the decimal of `i / 29`: a
+/// different name for every `i` below 2,900.
+fn numbered_name(i: usize) -> String {
+    let base = NAMES[i % NAMES.len()];
+    format!("{}{:02}", &base[..base.len() - 2], i / NAMES.len())
+}
+
+/// A full collection, which must complete normally.
+fn collect(agent: &mut Agent<TestHost>) {
+    assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+}
+
+/// What `live_bytes()` rose by over `f`, run in a `with_cx` of `realm` after a `collect` (so that
+/// the collection at the safe point of the `with_cx` frees nothing in the collect mode), with
+/// what `f` answered.
+fn live_rise<R>(
+    agent: &mut Agent<TestHost>,
+    realm: &Realm,
+    f: impl FnOnce(&mut Cx<'_, TestHost>) -> R,
+) -> (u64, R) {
+    collect(agent);
+    let before = agent.live_bytes().unwrap();
+    let answer = agent.with_cx(realm, f).unwrap();
+    let after = agent.live_bytes().unwrap();
+    let rise = after
+        .checked_sub(before)
+        .unwrap_or_else(|| panic!("live_bytes() fell from {before} to {after}"));
+    (rise, answer)
+}
+
+/// A root of a new host function of `realm` named `name`, of length 0, answering `undefined`,
+/// holding `data`.
+fn host_function(
+    cx: &mut Cx<'_, TestHost>,
+    realm: &Realm,
+    name: &str,
+    data: Option<Box<dyn HostData>>,
+) -> Root {
+    let realm = cx.realm_ref(realm).unwrap();
+    let function = cx
+        .new_host_function(realm, name, 0, nothing, false, data)
+        .unwrap()
+        .unwrap();
+    cx.root(Value::Object(function)).unwrap()
+}
+
+/// A root of a new host object of brand `NODE` holding `data`, on no prototype.
+fn host_object(cx: &mut Cx<'_, TestHost>, data: Option<Box<dyn HostData>>) -> Root {
+    let object = cx.new_host_object(spec(NODE, data)).unwrap().unwrap();
+    cx.root(Value::Object(object)).unwrap()
+}
+
+/// Define 300 new properties on `object` by the keys `numbered_name(0)` to
+/// `numbered_name(299)`, of 4 to 32 code units: each even one a data property holding its index,
+/// each odd one an accessor whose getter is `getter`.
+fn define_300(cx: &mut Cx<'_, TestHost>, object: ObjectRef, getter: ObjectRef) {
+    for i in 0..300 {
+        let key = support::host::key(cx, &numbered_name(i));
+        let descriptor = if i % 2 == 0 {
+            support::host::data(Value::Number(i as f64), true, true, true)
+        } else {
+            PropertyDescriptor {
+                get: Some(Value::Object(getter)),
+                enumerable: Some(true),
+                configurable: Some(true),
+                ..PropertyDescriptor::default()
+            }
+        };
+        cx.define_property_or_throw(object, key, descriptor)
+            .unwrap()
+            .unwrap();
+    }
+}
+
+/// The rises of `live_bytes()` the per-item ceilings are stated on, each in a `with_cx` of its
+/// own in `realm`: a host function with a name of 32 code units and no data, a host object with
+/// no data, and 300 definitions of new properties on that host object (`define_300`, the getter
+/// that host function); with the roots that keep them.
+struct ItemRises {
+    function: u64,
+    object: u64,
+    definitions: u64,
+    roots: Vec<Root>,
+}
+
+fn item_rises(agent: &mut Agent<TestHost>, realm: &Realm) -> ItemRises {
+    let name = numbered_name(NAMES.len() - 1);
+    assert_eq!(name.len(), 32, "{name}");
+    let (function, function_root) =
+        live_rise(agent, realm, |cx| host_function(cx, realm, &name, None));
+    let (object, object_root) = live_rise(agent, realm, |cx| host_object(cx, None));
+    let (definitions, ()) = live_rise(agent, realm, |cx| {
+        let object = support::host::object(cx, &object_root);
+        let getter = support::host::object(cx, &function_root);
+        define_300(cx, object, getter);
+    });
+    ItemRises {
+        function,
+        object,
+        definitions,
+        roots: vec![function_root, object_root],
+    }
+}
+
+/// HOST-186: after a realm's setup, a host function with a name of 32 code units and data of
+/// 4,096 bytes raises `live_bytes()` by at least 4,096 (its data's box is charged with it, and
+/// the box of its steps) and at most `HOST_FUNCTION_LIVE_BYTES` + 4,096, and each further one of
+/// the same name length and type by the same amount; a host object with that data by at most
+/// `HOST_OBJECT_LIVE_BYTES` + 4,096; a host function and a host object with no data by at most
+/// their ceilings, and 300 definitions of new properties on one host object by at most 300 ×
+/// `PROPERTY_LIVE_BYTES`. Once the host dropped them and `collect` ran twice, `live_bytes()`
+/// reads its value from before them.
+#[test]
+fn host_186_a_host_function_charges_every_byte() {
+    let started = Instant::now();
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    collect(&mut agent);
+    let before = agent.live_bytes().unwrap();
+    let page = u64::try_from(size_of::<Page>()).unwrap();
+
+    let mut rises = Vec::new();
+    let mut roots = Vec::new();
+    for j in 0..3 {
+        let name = numbered_name(NAMES.len() - 1 + NAMES.len() * j);
+        assert_eq!(name.len(), 32, "{name}");
+        let (rise, root) = live_rise(&mut agent, &realm, |cx| {
+            host_function(
+                cx,
+                &realm,
+                &name,
+                Some(Box::new(Page { _bytes: [0; PAGE] })),
+            )
+        });
+        rises.push(rise);
+        roots.push(root);
+    }
+    assert!(
+        rises[0] >= page,
+        "a host function with {page} bytes of data raised live_bytes() by {}",
+        rises[0]
+    );
+    assert!(
+        rises[0] <= HOST_FUNCTION_LIVE_BYTES + page,
+        "a host function with {page} bytes of data raised live_bytes() by {}, over \
+         HOST_FUNCTION_LIVE_BYTES ({HOST_FUNCTION_LIVE_BYTES}) + {page}",
+        rises[0]
+    );
+    assert_eq!(
+        rises,
+        vec![rises[0]; 3],
+        "each further function of the same name length and type"
+    );
+
+    let (paged_object, root) = live_rise(&mut agent, &realm, |cx| {
+        host_object(cx, Some(Box::new(Page { _bytes: [0; PAGE] })))
+    });
+    roots.push(root);
+    assert!(paged_object >= page, "{paged_object}");
+    assert!(
+        paged_object <= HOST_OBJECT_LIVE_BYTES + page,
+        "a host object with {page} bytes of data raised live_bytes() by {paged_object}, over \
+         HOST_OBJECT_LIVE_BYTES ({HOST_OBJECT_LIVE_BYTES}) + {page}"
+    );
+
+    let items = item_rises(&mut agent, &realm);
+    assert!(
+        items.function <= HOST_FUNCTION_LIVE_BYTES,
+        "a host function: {} over {HOST_FUNCTION_LIVE_BYTES}",
+        items.function
+    );
+    assert!(
+        items.object <= HOST_OBJECT_LIVE_BYTES,
+        "a host object: {} over {HOST_OBJECT_LIVE_BYTES}",
+        items.object
+    );
+    assert!(
+        items.definitions <= DEFINITIONS * PROPERTY_LIVE_BYTES,
+        "{DEFINITIONS} definitions: {} over {DEFINITIONS} × {PROPERTY_LIVE_BYTES}",
+        items.definitions
+    );
+    println!(
+        "host_186: a host function with {page} bytes of data {}, a host object with them \
+         {paged_object}, a host function {}, a host object {}, {DEFINITIONS} definitions {}",
+        rises[0], items.function, items.object, items.definitions
+    );
+
+    drop(roots);
+    drop(items.roots);
+    collect(&mut agent);
+    collect(&mut agent);
+    assert_eq!(
+        agent.live_bytes().unwrap(),
+        before,
+        "live_bytes() once the host dropped them and collect ran twice"
+    );
+    println!("host_186: {} ms", started.elapsed().as_millis());
+}
+
+/// A guard of the steps sentence of decision 14: for k of 1, 2 and 10, a chain of k host objects
+/// (the first on no prototype, each next given the one before by `set_prototype_of`) and a fresh
+/// host object `t`; a `with_cx` whose last call is `set_prototype_of(t, Some(last))` answering
+/// `Ok(Ok(true))` leaves `last_entry_steps()` at k, and setting the same prototype again leaves
+/// it at 0.
+#[test]
+fn set_prototype_of_spends_a_step_per_object_of_the_new_chain() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    for k in [1u64, 2, 10] {
+        let (t, last) = agent
+            .with_cx(&realm, |cx| {
+                let mut last = cx.new_host_object(spec(NODE, None)).unwrap().unwrap();
+                for _ in 1..k {
+                    let next = cx.new_host_object(spec(NODE, None)).unwrap().unwrap();
+                    assert!(matches!(
+                        cx.set_prototype_of(next, Some(last)).unwrap(),
+                        Ok(true)
+                    ));
+                    last = next;
+                }
+                let t = cx.new_host_object(spec(OTHER, None)).unwrap().unwrap();
+                let roots = (
+                    cx.root(Value::Object(t)).unwrap(),
+                    cx.root(Value::Object(last)).unwrap(),
+                );
+                assert!(matches!(
+                    cx.set_prototype_of(t, Some(last)).unwrap(),
+                    Ok(true)
+                ));
+                roots
+            })
+            .unwrap();
+        assert_eq!(agent.last_entry_steps().unwrap(), k, "a chain of {k}");
+
+        agent
+            .with_cx(&realm, |cx| {
+                let t = support::host::object(cx, &t);
+                let last = support::host::object(cx, &last);
+                assert!(matches!(
+                    cx.set_prototype_of(t, Some(last)).unwrap(),
+                    Ok(true)
+                ));
+            })
+            .unwrap();
+        assert_eq!(
+            agent.last_entry_steps().unwrap(),
+            0,
+            "the same prototype again, a chain of {k}"
+        );
+    }
+}
+
+/// The interface objects of a realm of bindings, and the index of each one's parent interface.
+const INTERFACES: [&str; 13] = [
+    "EventTarget",
+    "Node",
+    "CharacterData",
+    "Text",
+    "Comment",
+    "Element",
+    "HTMLElement",
+    "HTMLDivElement",
+    "HTMLSpanElement",
+    "Document",
+    "HTMLDocument",
+    "DocumentFragment",
+    "ShadowRoot",
+];
+const PARENTS: [Option<usize>; 13] = [
+    None,
+    Some(0),
+    Some(1),
+    Some(2),
+    Some(2),
+    Some(1),
+    Some(5),
+    Some(6),
+    Some(6),
+    Some(1),
+    Some(9),
+    Some(1),
+    Some(11),
+];
+
+/// The member functions, the other host objects, and the definitions on the other host objects
+/// of a realm of bindings.
+const MEMBERS: usize = 287;
+const OTHERS: usize = 27;
+const OTHER_DEFINITIONS: usize = 273;
+
+/// The indexes of the host functions of a realm of bindings that HOST-187 binds as globals.
+const BOUND: [usize; 3] = [0, 150, 299];
+
+/// The interface objects on the chain that starts at interface `i`: it and its ancestors.
+fn interfaces_on_chain(i: usize) -> u64 {
+    let mut count = 1;
+    let mut parent = PARENTS[i];
+    while let Some(next) = parent {
+        count += 1;
+        parent = PARENTS[next];
+    }
+    count
+}
+
+/// A realm of bindings and what its build read.
+struct Bindings {
+    realm: Realm,
+    global: Root,
+    /// The 300 host functions: the 13 interface objects, then the 287 members.
+    functions: Vec<Root>,
+    /// The 40 host objects: the 13 interface prototype objects, then the 27 others.
+    _objects: Vec<Root>,
+    /// `heap_bytes()` after `create_realm`, before the first `with_cx`.
+    heap_before: u64,
+    /// `heap_bytes()` once the last definition was made.
+    heap_after: u64,
+}
+
+/// Build a realm of 300 host functions and 40 host objects with 600 definitions, the size of a
+/// browser's generated bindings, asserting the steps of HOST-187 on the way. The setup closure
+/// makes the global, a host object on `%Object.prototype%`. A first `with_cx` defines the
+/// global's `@@toStringTag` (the baseline of `last_entry_steps()`, 0 after it); then one
+/// `with_cx` per kind of call: the 40 host objects (each interface prototype object on its
+/// parent's, the root one and the 27 others on `%Object.prototype%`), the 300 host functions,
+/// the 12 `set_prototype_of` that give each interface object but the first its parent, and the
+/// other 599 definitions (each member on an interface prototype object as a data property or the
+/// getter of an accessor, each interface's `prototype`, each prototype's `constructor`, each
+/// interface as a global, and 273 data properties on the others).
+fn build_bindings(agent: &mut Agent<TestHost>) -> Bindings {
+    let mut setup = |cx: &mut HookCx<'_, TestHost>, realm: RealmRef| -> Completion<GlobalObjects> {
+        let global = cx
+            .new_host_object(on(Prototype::ObjectPrototypeOf(realm), OTHER))
+            .unwrap()?;
+        Ok(GlobalObjects { global, this: None })
+    };
+    let Outcome::Normal(realm) = agent.create_realm(Some(&mut setup), None).unwrap() else {
+        panic!("create_realm did not answer Normal");
+    };
+    let heap_before = agent.heap_bytes().unwrap();
+    let global_root = support::host::global(agent, &realm);
+    let steps = |agent: &Agent<TestHost>| agent.last_entry_steps().unwrap();
+
+    agent
+        .with_cx(&realm, |cx| {
+            let global = support::host::object(cx, &global_root);
+            let tag = cx.well_known_symbol(WellKnownSymbol::ToStringTag).unwrap();
+            let window = support::host::string(cx, "Window");
+            let descriptor = support::host::data(window, false, false, true);
+            cx.define_property_or_throw(global, PropertyKey::Symbol(tag), descriptor)
+                .unwrap()
+                .unwrap();
+        })
+        .unwrap();
+    let baseline = steps(agent);
+    assert_eq!(baseline, 0, "after a define_property_or_throw");
+
+    let objects = agent
+        .with_cx(&realm, |cx| {
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            let mut made: Vec<ObjectRef> = Vec::new();
+            for parent in PARENTS {
+                let prototype = match parent {
+                    Some(parent) => Prototype::Object(made[parent]),
+                    None => Prototype::ObjectPrototypeOf(realm_ref),
+                };
+                made.push(cx.new_host_object(on(prototype, NODE)).unwrap().unwrap());
+            }
+            for _ in 0..OTHERS {
+                let prototype = Prototype::ObjectPrototypeOf(realm_ref);
+                made.push(cx.new_host_object(on(prototype, OTHER)).unwrap().unwrap());
+            }
+            made.into_iter()
+                .map(|object| cx.root(Value::Object(object)).unwrap())
+                .collect::<Vec<_>>()
+        })
+        .unwrap();
+    assert_eq!(objects.len(), 40);
+    assert_eq!(steps(agent), baseline, "a with_cx of only new_host_object");
+
+    let functions = agent
+        .with_cx(&realm, |cx| {
+            let realm_ref = cx.realm_ref(&realm).unwrap();
+            let mut roots = Vec::new();
+            for name in INTERFACES {
+                let made = cx
+                    .new_host_function(realm_ref, name, 0, nothing, true, None)
+                    .unwrap()
+                    .unwrap();
+                roots.push(cx.root(Value::Object(made)).unwrap());
+            }
+            for member in 0..MEMBERS {
+                let name = NAMES[member % NAMES.len()];
+                let length = u32::try_from(member % 3).unwrap();
+                let made = cx
+                    .new_host_function(realm_ref, name, length, nothing, false, None)
+                    .unwrap()
+                    .unwrap();
+                roots.push(cx.root(Value::Object(made)).unwrap());
+            }
+            roots
+        })
+        .unwrap();
+    assert_eq!(functions.len(), 300);
+    assert_eq!(
+        steps(agent),
+        baseline,
+        "a with_cx of only new_host_function"
+    );
+
+    agent
+        .with_cx(&realm, |cx| {
+            for (interface, parent) in PARENTS.into_iter().enumerate() {
+                let Some(parent) = parent else { continue };
+                let object = support::host::object(cx, &functions[interface]);
+                let parent = support::host::object(cx, &functions[parent]);
+                assert!(matches!(
+                    cx.set_prototype_of(object, Some(parent)).unwrap(),
+                    Ok(true)
+                ));
+            }
+        })
+        .unwrap();
+    // The new prototype of the last call, `DocumentFragment`: its interfaces, then
+    // `%Function.prototype%` and `%Object.prototype%`.
+    let last_parent = PARENTS[INTERFACES.len() - 1].unwrap();
+    assert_eq!(
+        steps(agent),
+        interfaces_on_chain(last_parent) + 2,
+        "set_prototype_of spends one step per object of the new prototype's chain"
+    );
+
+    agent
+        .with_cx(&realm, |cx| {
+            let global = support::host::object(cx, &global_root);
+            let names: Vec<PropertyKey> = NAMES
+                .iter()
+                .map(|name| support::host::key(cx, name))
+                .collect();
+            let prototype_key = support::host::key(cx, "prototype");
+            let constructor_key = support::host::key(cx, "constructor");
+            for member in 0..MEMBERS {
+                let holder = support::host::object(cx, &objects[member % INTERFACES.len()]);
+                let function = Value::Object(support::host::object(
+                    cx,
+                    &functions[INTERFACES.len() + member],
+                ));
+                let descriptor = if member % 2 == 0 {
+                    support::host::data(function, true, true, true)
+                } else {
+                    PropertyDescriptor {
+                        get: Some(function),
+                        enumerable: Some(true),
+                        configurable: Some(true),
+                        ..PropertyDescriptor::default()
+                    }
+                };
+                cx.define_property_or_throw(holder, names[member % NAMES.len()], descriptor)
+                    .unwrap()
+                    .unwrap();
+            }
+            for (i, name) in INTERFACES.into_iter().enumerate() {
+                let interface = support::host::object(cx, &functions[i]);
+                let prototype = support::host::object(cx, &objects[i]);
+                let descriptor = support::host::data(Value::Object(prototype), false, false, false);
+                cx.define_property_or_throw(interface, prototype_key, descriptor)
+                    .unwrap()
+                    .unwrap();
+                define(cx, prototype, constructor_key, Value::Object(interface));
+                let key = support::host::key(cx, name);
+                define(cx, global, key, Value::Object(interface));
+            }
+            for j in 0..OTHER_DEFINITIONS {
+                let holder = support::host::object(cx, &objects[INTERFACES.len() + j % OTHERS]);
+                let key = support::host::key(cx, &numbered_name(j));
+                let descriptor = support::host::data(Value::Number(j as f64), false, true, false);
+                cx.define_property_or_throw(holder, key, descriptor)
+                    .unwrap()
+                    .unwrap();
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        steps(agent),
+        0,
+        "definitions that do not compact, by keys of at most 32 code units"
+    );
+    let heap_after = agent.heap_bytes().unwrap();
+
+    Bindings {
+        realm,
+        global: global_root,
+        functions,
+        _objects: objects,
+        heap_before,
+        heap_after,
+    }
+}
+
+/// The steps the script `source` spent in `realm`; its value must be `undefined`.
+fn steps_of(agent: &mut Agent<TestHost>, realm: &Realm, source: &str) -> u64 {
+    match support::script::eval(agent, realm, source) {
+        Outcome::Normal(value) => {
+            let shown = agent.with_cx(realm, |cx| cx.get(&value).unwrap()).unwrap();
+            assert_eq!(shown, Value::Undefined, "{source}");
+        }
+        other => panic!("{source} answered {other:?}"),
+    }
+    agent.last_entry_steps().unwrap()
+}
+
+/// What the scripts of HOST-187 spent in a realm of bindings and where they left `heap_bytes()`.
+struct ScriptSteps {
+    /// The steps of `f0()`, `f150()` and `f299()`.
+    host: Vec<u64>,
+    /// The steps of `g()`.
+    script: u64,
+    /// `heap_bytes()` after the scripts.
+    heap_after: u64,
+}
+
+/// Bind three host functions of `bindings` as the globals `f0`, `f150` and `f299`, declare
+/// `function g() {}` by a script, and run the scripts `f0()`, `f150()`, `f299()` and `g()`.
+fn run_scripts(agent: &mut Agent<TestHost>, bindings: &Bindings) -> ScriptSteps {
+    agent
+        .with_cx(&bindings.realm, |cx| {
+            let global = support::host::object(cx, &bindings.global);
+            for index in BOUND {
+                let function = support::host::object(cx, &bindings.functions[index]);
+                let key = support::host::key(cx, &format!("f{index}"));
+                define(cx, global, key, Value::Object(function));
+            }
+        })
+        .unwrap();
+    steps_of(agent, &bindings.realm, "function g() {}");
+    let host = BOUND
+        .iter()
+        .map(|index| steps_of(agent, &bindings.realm, &format!("f{index}()")))
+        .collect();
+    let script = steps_of(agent, &bindings.realm, "g()");
+    ScriptSteps {
+        host,
+        script,
+        heap_after: agent.heap_bytes().unwrap(),
+    }
+}
+
+/// HOST-187: a realm of 300 host functions and 40 host objects with 600 definitions, built in
+/// this test's own body (`build_bindings`, which asserts the steps of the `with_cx` calls),
+/// raises `heap_bytes()` from its reading after `create_realm` by at most
+/// `BINDINGS_REALM_HEAP_BYTES`. Bound after that reading as the globals `f0`, `f150` and `f299`,
+/// three of its host functions make the scripts `f0()`, `f150()` and `f299()` spend the same
+/// steps, 2 fewer than the script `g()` of `function g() {}`. Once its roots are dropped and
+/// `collect` ran twice, `live_bytes()` reads its value from before `create_realm`, and the same
+/// realm built again, with the same bindings and scripts, leaves `heap_bytes()` at most where
+/// the first build left it. They are compared after the scripts because the first build's
+/// scripts make the agent's first script record, which grows the empty arena of script records
+/// to 16 slots of 76 bytes, 1,216 bytes that stay charged as an arena's capacity does, so the
+/// second build's reading before its scripts is 1,216 above the first's. It prints the measured rises of the four ceilings of
+/// `host/limits.rs` in one line, the per-item ones measured in an agent of their own.
+#[test]
+fn host_187_a_realm_of_300_host_functions_and_40_host_objects() {
+    let started = Instant::now();
+    let mut items_agent = support::host::agent().unwrap();
+    let items_realm = support::host::realm(&mut items_agent);
+    let items = item_rises(&mut items_agent, &items_realm);
+
+    let mut agent = support::host::agent().unwrap();
+    collect(&mut agent);
+    let live_before = agent.live_bytes().unwrap();
+
+    let first = build_bindings(&mut agent);
+    let realm_rise = first.heap_after - first.heap_before;
+    println!(
+        "host-ceilings measured: HOST_FUNCTION_LIVE_BYTES {} HOST_OBJECT_LIVE_BYTES {} \
+         PROPERTY_LIVE_BYTES {} BINDINGS_REALM_HEAP_BYTES {realm_rise}",
+        items.function,
+        items.object,
+        items.definitions.div_ceil(DEFINITIONS)
+    );
+    assert!(
+        realm_rise <= BINDINGS_REALM_HEAP_BYTES,
+        "the realm raised heap_bytes() by {realm_rise}, over {BINDINGS_REALM_HEAP_BYTES}"
+    );
+
+    let steps = run_scripts(&mut agent, &first);
+    assert_eq!(steps.host, vec![steps.host[0]; 3], "f0(), f150(), f299()");
+    assert_eq!(
+        steps.script,
+        steps.host[0] + 2,
+        "g() against f0(): the call of a script function adds a step and runs the two \
+         instructions of its empty body; the call of a host function adds one step"
+    );
+
+    let first_heap_after = first.heap_after;
+    drop(first);
+    collect(&mut agent);
+    collect(&mut agent);
+    assert_eq!(
+        agent.live_bytes().unwrap(),
+        live_before,
+        "live_bytes() once the realm's roots were dropped and collect ran twice"
+    );
+
+    let second = build_bindings(&mut agent);
+    let second_steps = run_scripts(&mut agent, &second);
+    assert!(
+        second_steps.heap_after <= steps.heap_after,
+        "the second build left heap_bytes() at {}, the first at {}",
+        second_steps.heap_after,
+        steps.heap_after
+    );
+    println!(
+        "host_187: f0() {} steps, g() {}; heap_bytes() after the build {} and {}, after the \
+         scripts {} and {}; {} ms",
+        steps.host[0],
+        steps.script,
+        first_heap_after,
+        second.heap_after,
+        steps.heap_after,
+        second_steps.heap_after,
+        started.elapsed().as_millis()
+    );
+}
+
+/// The values `text` writes as "`name` = <value>", each read as the digits after it
+/// (a comma between them allowed); `None` where no digit follows.
+fn quoted_values(text: &str, name: &str) -> Vec<Option<u64>> {
+    let marker = format!("`{name}` = ");
+    text.match_indices(&marker)
+        .map(|(at, _)| {
+            let digits: String = text[at + marker.len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == ',')
+                .filter(char::is_ascii_digit)
+                .collect();
+            digits.parse().ok()
+        })
+        .collect()
+}
+
+/// The design quotes each ceiling of `host/limits.rs` as "`NAME` = <value>" with the constant's
+/// value, so that the document cannot state another number: the file `HOST_INTERFACE_DOC` names,
+/// by default `docs/design/host-interface.md` of the workspace.
+#[test]
+fn the_design_quotes_the_ceilings_of_the_engine() {
+    let path = match std::env::var_os("HOST_INTERFACE_DOC") {
+        Some(path) => std::path::PathBuf::from(path),
+        None => std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/design/host-interface.md"),
+    };
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    for (name, value) in [
+        ("HOST_FUNCTION_LIVE_BYTES", HOST_FUNCTION_LIVE_BYTES),
+        ("HOST_OBJECT_LIVE_BYTES", HOST_OBJECT_LIVE_BYTES),
+        ("PROPERTY_LIVE_BYTES", PROPERTY_LIVE_BYTES),
+        ("BINDINGS_REALM_HEAP_BYTES", BINDINGS_REALM_HEAP_BYTES),
+    ] {
+        let quoted = quoted_values(&text, name);
+        assert!(
+            !quoted.is_empty(),
+            "{} quotes no \"`{name}` = <value>\"",
+            path.display()
+        );
+        assert_eq!(
+            quoted,
+            vec![Some(value); quoted.len()],
+            "{} quotes `{name}` as another value than {value}",
+            path.display()
+        );
+    }
 }

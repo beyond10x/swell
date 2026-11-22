@@ -70,6 +70,30 @@ impl Limits {
     }
 }
 
+/// The most a host function with a name of at most 32 code units raises `live_bytes()` by, its
+/// host data's size apart (`docs/design/host-interface.md`, decision 14; HOST-186): its record
+/// with its slot, the boxes of its steps and of its data, its name String and its `length` and
+/// `name` properties. The rise `tests/host_objects.rs` measures plus an eighth, rounded up to a
+/// multiple of 64. A release that raises it names it under the changelog's "Host interface".
+pub const HOST_FUNCTION_LIVE_BYTES: u64 = 576;
+
+/// The most a host object raises `live_bytes()` by, its host data's size apart (decision 15;
+/// HOST-186): its record with its slot. What the data owns behind its box is the host's to
+/// charge (`charge_host_bytes`). Measured and rounded as [`HOST_FUNCTION_LIVE_BYTES`].
+pub const HOST_OBJECT_LIVE_BYTES: u64 = 256;
+
+/// The most one definition of a new data or accessor property raises `live_bytes()` by,
+/// amortized over 300 definitions on one object by keys of 4 to 32 code units (decision 14;
+/// HOST-186): the growth of the property list and its index map, and the key's String. Measured
+/// and rounded as [`HOST_FUNCTION_LIVE_BYTES`].
+pub const PROPERTY_LIVE_BYTES: u64 = 448;
+
+/// The most a realm of 300 host functions and 40 host objects with 600 definitions raises
+/// `heap_bytes()` by from its reading after `create_realm`, the growth of the arenas included
+/// (decision 14; HOST-187): the size of a browser's generated bindings. Measured and rounded as
+/// [`HOST_FUNCTION_LIVE_BYTES`].
+pub const BINDINGS_REALM_HEAP_BYTES: u64 = 381_696;
+
 /// The two seeds of an agent (decision 3), and the only randomness the engine has.
 /// `Agent::new` is the only function of the interface that takes them (HOST-146).
 #[derive(Clone, Copy)]
