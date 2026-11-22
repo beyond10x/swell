@@ -4,16 +4,18 @@ set: [pipefail]
 
 tasks:
   build-stack-profiles:
-    desc: Build the two stack test binaries of swell in the release profile and in the profile stack-nodebug (dev without debug information).
+    desc: Build the two stack test binaries of swell in the release profile and in the profile stack-debug (dev with full debug information).
     summary: |
       Build the two stack test binaries of swell, tests/limits_scripts.rs and tests/eval_stack.rs,
       in the two profiles whose frames the dev build of the gate does not show: release, and
-      stack-nodebug, the dev profile without debug information (.cargo/config.toml sets both, with
-      debug = false and strip = "debuginfo", whatever a user's own cargo configuration says).
-      A step of the lane slow (task slow), before test-stack-profiles: outside the gate and its
-      test budget of 120 s.
+      stack-debug, the dev profile with full debug information, cargo's default for a dev build
+      and so an embedder's, whose frames are the largest measured (.cargo/config.toml sets both
+      whatever a user's own cargo configuration says: release with debug = false and strip =
+      "debuginfo", stack-debug with debug = true and strip = "none"; the dev profile of the gate
+      has debug = false). A step of the lane slow (task slow), before test-stack-profiles:
+      outside the gate and its test budget of 120 s.
 
-      Runs, for <profile> release and stack-nodebug, "cargo nextest run --locked -p swell
+      Runs, for <profile> release and stack-debug, "cargo nextest run --locked --color never -p swell
       --cargo-profile <profile> --test limits_scripts --test eval_stack --no-run", with no
       RUSTFLAGS of its own, so that the release build of swell is the one cargo run --release of
       taskfiles/test262.yml builds. The log is .out/build-stack-profiles-<profile>.log; it is
@@ -24,9 +26,9 @@ tasks:
     cmds:
       - mkdir -p .out
       - |
-        for profile in release stack-nodebug; do
+        for profile in release stack-debug; do
           log=.out/build-stack-profiles-$profile.log
-          if ! cargo nextest run --locked -p swell --cargo-profile "$profile" --test limits_scripts --test eval_stack --no-run > "$log" 2>&1; then
+          if ! cargo nextest run --locked --color never -p swell --cargo-profile "$profile" --test limits_scripts --test eval_stack --no-run > "$log" 2>&1; then
             cat "$log"
             echo "build-stack-profiles: the build of the stack test binaries in the profile $profile failed"
             exit 1
@@ -36,31 +38,37 @@ tasks:
         done
 
   test-stack-profiles:
-    desc: Run the four stack tests of HOST-17, HOST-152, HOST-163 and the builtins in the release profile and in stack-nodebug, and refuse a binary of theirs with debug sections.
+    desc: Run the four stack tests of HOST-17, HOST-152, HOST-163 and the builtins in the release profile and in stack-debug, refuse a release binary of theirs with debug sections and a stack-debug one without.
     summary: |
       Run the four tests that say Limits::min_stack_bytes() is enough (HOST-17
       host_17_deepest_reentry_parses_at_full_nesting and min_stack_bytes_is_enough_through_builtins
       of tests/limits_scripts.rs, HOST-152 host_152_deepest_reentry_evals_at_full_nesting and
       HOST-163 host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting
-      of tests/eval_stack.rs) in the release profile and in stack-nodebug, the dev profile
-      without debug information; the step test runs them in the dev profile with it. Each runs
-      its subject in a child process on seven eighths of min_stack_bytes(), so a frame that is
-      larger in one of these profiles fails here. A step of the lane slow, which prints its
-      slow-time line.
+      of tests/eval_stack.rs) in the release profile and in stack-debug, the dev profile with
+      full debug information; the step test runs them in the dev profile without it. The promise
+      is so shown in three builds: dev without debug information, dev with full debug
+      information (the largest frames, an embedder's default) and release. Each runs its subject
+      in a child process on seven eighths of min_stack_bytes(), so a frame that is larger in one
+      of these profiles fails here. A step of the lane slow, which prints its slow-time line.
 
-      Runs, for <profile> release and stack-nodebug, "cargo nextest run --locked -p swell
+      Runs, for <profile> release and stack-debug, "cargo nextest run --locked --color never -p swell
       --cargo-profile <profile> --profile default --test limits_scripts --test eval_stack -E
       <the four tests by name>": every test in a process of its own, terminated at 60 s and
-      counted failed (.config/nextest.toml). The log is .out/test-stack-profiles-<profile>.log;
+      counted failed (.config/nextest.toml); without colour, since awk reads its lines and the
+      runner's CARGO_TERM_COLOR=always puts escape bytes into them. The log is .out/test-stack-profiles-<profile>.log;
       it is printed when the run fails. Prints "test-stack-profiles <profile>: <b> test
       binaries: <p> passed, <f> failed, <s> skipped" from nextest's own lines (skipped: the other
       tests of the two binaries), then a line "gate-slowest test-stack-profiles-<profile>
       <seconds> <binary> <test>" for each test run, slowest first. Then it reads the paths of the
-      two binaries from "cargo nextest list --list-type binaries-only" and runs
-      taskfiles/no-debug-sections.sh on them, which prints a line per binary. It fails when
+      two binaries from "cargo nextest list --list-type binaries-only". For release it runs
+      taskfiles/no-debug-sections.sh on them, which prints a line per binary; for stack-debug,
+      whose binaries have debug sections by design, it prints "stack-profiles: <binary>: <n>
+      debug sections (stack-debug, full debug information)" from readelf -S -W. It fails when
       nextest fails, when not exactly 4 tests passed in a profile, when a profile does not have
-      exactly two binaries, and when a binary has a section whose name starts with .debug_
-      ("stack-profiles: <binary> has debug sections").
+      exactly two binaries, when a release binary has a section whose name starts with .debug_
+      ("stack-profiles: <binary> has debug sections"), and when a stack-debug binary has none
+      ("stack-profiles: <binary> has no debug section; stack-debug builds with full debug
+      information").
     dir: '{{.TASKFILE_DIR}}/..'
     silent: true
     vars:
@@ -72,10 +80,10 @@ tasks:
     cmds:
       - mkdir -p .out
       - |
-        for profile in release stack-nodebug; do
+        for profile in release stack-debug; do
           log=.out/test-stack-profiles-$profile.log
           status=0
-          cargo nextest run --locked -p swell --cargo-profile "$profile" --profile default --test limits_scripts --test eval_stack -E {{shellQuote .STACK_TESTS}} > "$log" 2>&1 || status=$?
+          cargo nextest run --locked --color never -p swell --cargo-profile "$profile" --profile default --test limits_scripts --test eval_stack -E {{shellQuote .STACK_TESTS}} > "$log" 2>&1 || status=$?
           if ! LC_ALL=C awk -v status="$status" -v profile="$profile" '
             /^ *Starting [0-9]+ tests? across [0-9]+ binar/ {
               for (i = 1; i <= NF; i++) if ($i == "across") binaries = $(i + 1)
@@ -106,7 +114,7 @@ tasks:
               n = NF; printf "%s %s %s\n", t, $(n - 1), $n
             }
           ' "$log" | LC_ALL=C sort -k1,1gr -k2,2 -k3,3 | awk -v profile="$profile" '{ printf "gate-slowest test-stack-profiles-%s %.2f %s %s\n", profile, $1, $2, $3 }'
-          binaries=$(cargo nextest list --locked -p swell --cargo-profile "$profile" --test limits_scripts --test eval_stack --list-type binaries-only --message-format json-pretty 2> "$log.list" | LC_ALL=C awk -F '"' '$2 == "binary-path" { print $4 }') || { cat "$log.list"; echo "test-stack-profiles: cargo nextest list failed in the profile $profile"; exit 1; }
+          binaries=$(cargo nextest list --locked --color never -p swell --cargo-profile "$profile" --test limits_scripts --test eval_stack --list-type binaries-only --message-format json-pretty 2> "$log.list" | LC_ALL=C awk -F '"' '$2 == "binary-path" { print $4 }') || { cat "$log.list"; echo "test-stack-profiles: cargo nextest list failed in the profile $profile"; exit 1; }
           count=$(printf '%s\n' "$binaries" | grep -c . || true)
           if [ "$count" -ne 2 ]; then
             cat "$log.list"
@@ -118,8 +126,19 @@ tasks:
           set -f
           old_ifs=$IFS
           IFS=$nl
-          # shellcheck disable=SC2086
-          sh taskfiles/no-debug-sections.sh $binaries || exit 1
+          if [ "$profile" = release ]; then
+            # shellcheck disable=SC2086
+            sh taskfiles/no-debug-sections.sh $binaries || exit 1
+          else
+            for binary in $binaries; do
+              debug=$(LC_ALL=C readelf -S -W "$binary" | grep -c ' \.debug_' || true)
+              if [ "$debug" -eq 0 ]; then
+                echo "stack-profiles: $binary has no debug section; stack-debug builds with full debug information"
+                exit 1
+              fi
+              echo "stack-profiles: $binary: $debug debug sections (stack-debug, full debug information)"
+            done
+          fi
           IFS=$old_ifs
           set +f
         done

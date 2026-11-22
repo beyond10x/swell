@@ -241,11 +241,13 @@ tasks:
       knows, and where it is written:
         - the compiler: rust-toolchain.toml, for the root and conformance/ess alike
           (toolchain-check fails on another rustc, and on a workflow that names a version);
-        - the debug information of the dev profile: .cargo/config.toml sets debug = true, as
-          the forge builds; a cargo config file wins over the manifest, and the repository's
-          wins over a developer's own in the cargo home, so the setting stays in the
-          repository's config file (the stack tests' frames depend on it, AGENTS.md "Commands
-          and the gate");
+        - the debug information of the dev profile: .cargo/config.toml sets debug = false and
+          strip = "debuginfo", for the forge and here alike; a cargo config file wins over the
+          manifest, and the repository's wins over a developer's own in the cargo home, so the
+          setting stays in the repository's config file (the stack tests' frames depend on it,
+          AGENTS.md "Commands and the gate"; test-binaries-check shows it on every test
+          executable); the stack tests' run with full debug information, cargo's default for a
+          dev build, is the profile stack-debug (taskfiles/stack-profiles.yml);
         - the environment: CI, GITHUB_ACTIONS, CARGO_TERM_COLOR, CARGO_INCREMENTAL, here
           (GATE_RUNNER_ENV; runner-env-check holds it equal to the workflow). Variables a
           developer's shell has beyond them (a GATE_ variable, NO_COLOR) are not cleared; the

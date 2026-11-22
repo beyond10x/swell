@@ -1,11 +1,12 @@
 [profile.dev]
-debug = true
+debug = false
+strip = "debuginfo"
 
 [profile.release]
 debug = false
 strip = "debuginfo"
 
-[profile.stack-nodebug]
+[profile.stack-debug]
 inherits = "dev"
-debug = false
-strip = "debuginfo"
+debug = true
+strip = "none"

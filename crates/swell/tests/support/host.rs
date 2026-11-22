@@ -82,11 +82,14 @@ pub fn limits() -> Limits {
 /// re-entry on that path (14 %) fails the first test (through builtins) while the promise still
 /// holds, in the gate run here before the push, not first on the forge with the promise
 /// broken. An eighth, not the whole fifth: the fifth is for another compiler's frames, and a
-/// test that failed at the measured need would fail on the first byte of growth. This holds
-/// because the build here is the forge's: the repository's `.cargo/config.toml` builds the dev
-/// profile with full debug information whatever a user's own configuration says. A build with
-/// line tables only had frames about 5 % smaller, measured at `4c921d3` (29,855 against 31,314
-/// bytes per re-entry), and passed where the forge's build failed.
+/// test that failed at the measured need would fail on the first byte of growth. The build here
+/// is the forge's because both read the repository's `.cargo/config.toml`, which builds the dev
+/// profile without debug information (`debug = false`) whatever a user's own configuration
+/// says; a build with line tables only had frames about 5 % smaller, measured at `4c921d3`
+/// (29,855 against 31,314 bytes per re-entry), and passed where the forge's build failed. The
+/// frames without debug information are smaller than with it, so the 1,560 bytes of growth
+/// above are the margin of the build with full debug information, cargo's default for a dev
+/// build: the profile `stack-debug` runs the stack tests in it (`taskfiles/stack-profiles.yml`).
 pub fn stack_with_room(limits: Limits) -> usize {
     limits.min_stack_bytes() / 8 * 7
 }
