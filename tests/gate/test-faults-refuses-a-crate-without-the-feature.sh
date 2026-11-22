@@ -1,8 +1,12 @@
 #!/bin/sh
-# The task test-faults refuses a crates/swell whose manifest has no feature fault-injection, so
-# that it cannot pass by running nothing with the switch; the same crate with the feature passes
-# it first, so the refusal comes from the missing feature. With the feature and its one test
-# ignored, the task refuses too: no test passed.
+# The gate refuses a crates/swell whose manifest has no feature fault-injection, so that it
+# cannot pass by running nothing with the switch; the same crate with the feature passes first,
+# so the refusal comes from the missing feature. The gate builds the step's binary in its build
+# phase (task build-faults, before gate-time-start), so the refusal comes there: build-faults
+# fails, naming the feature and "build-faults: cargo nextest run --no-run failed, exit <n>". The
+# step test-faults run alone on that crate fails too, with "test-faults: read no "Starting <n>
+# tests across <b> binaries" line ...: nothing to count" and no count line. With the feature and
+# its one test ignored, the task refuses too: no test passed.
 # Run from the repository root: sh tests/gate/test-faults-refuses-a-crate-without-the-feature.sh
 # Works only under .out/gate-tests/<name>/, which is also its cargo target directory's parent;
 # prints "<name>: ok" or "<name>: FAIL <why>".
@@ -87,7 +91,12 @@ cp "$faults.passing" "$faults" || fail "cannot plant the passing test"
 (cd "$dir" && cargo generate-lockfile --offline) > "$dir/lock.log" 2>&1 ||
   fail "cannot make a Cargo.lock for the planted workspace (log: $dir/lock.log)"
 
-# With the feature the planted crate passes the task, which prints its counts.
+# With the feature the planted crate passes the build task of the gate's build phase,
+# build-faults, and then the step, which compiles nothing and prints its counts.
+task -d "$dir" -t "$taskfile" build-faults > "$dir/build-with.log" 2>&1 ||
+  fail "the task build-faults refused the planted crate with the feature (log: $dir/build-with.log)"
+grep -q '^build-faults: Finished ' "$dir/build-with.log" ||
+  fail "the task build-faults did not print cargo's Finished line (log: $dir/build-with.log)"
 task -d "$dir" -t "$taskfile" test-faults > "$dir/with.log" 2>&1 ||
   fail "the task refused the planted crate with the feature (log: $dir/with.log)"
 grep -qxF 'test-faults: 1 test binaries: 1 passed, 0 failed, 0 ignored' "$dir/with.log" ||
@@ -95,21 +104,36 @@ grep -qxF 'test-faults: 1 test binaries: 1 passed, 0 failed, 0 ignored' "$dir/wi
 
 # With the feature and the test ignored the task fails: no test passed.
 cp "$faults.ignored" "$faults" || fail "cannot plant the ignored test"
+task -d "$dir" -t "$taskfile" build-faults > "$dir/build-ignored.log" 2>&1 ||
+  fail "the task build-faults refused the planted crate with the ignored test (log: $dir/build-ignored.log)"
 if task -d "$dir" -t "$taskfile" test-faults > "$dir/ignored.log" 2>&1; then
   fail "the task accepted a run in which no test passed (log: $dir/ignored.log)"
 fi
 grep -qxF 'test-faults: 1 test binaries: 0 passed, 0 failed, 1 ignored' "$dir/ignored.log" ||
   fail "the task did not print the counts of the ignored run (log: $dir/ignored.log)"
 
-# Without the feature the task fails, naming the feature.
+# Without the feature the gate refuses the crate in its build phase: build-faults fails,
+# naming the feature. The step run alone on that crate (no build phase before it) fails too,
+# and does not pass as a run of no tests: nextest builds nothing, and the report says it read
+# no "Starting" line, prints no count and fails.
 cp "$faults.passing" "$faults" || fail "cannot plant the passing test again"
 cp "$manifest.without" "$manifest" || fail "cannot plant the manifest without the feature"
+if task -d "$dir" -t "$taskfile" build-faults > "$dir/build-without.log" 2>&1; then
+  fail "the task build-faults accepted a crates/swell without the feature fault-injection (log: $dir/build-without.log)"
+fi
+grep -qF 'fault-injection' "$dir/build-without.log" ||
+  fail "the task build-faults failed without naming the feature (log: $dir/build-without.log)"
+grep -qE '^build-faults: cargo nextest run --no-run failed, exit [1-9][0-9]*$' "$dir/build-without.log" ||
+  fail "the task build-faults did not say that its build failed (log: $dir/build-without.log)"
 if task -d "$dir" -t "$taskfile" test-faults > "$dir/without.log" 2>&1; then
   fail "the task accepted a crates/swell without the feature fault-injection (log: $dir/without.log)"
 fi
 grep -qF 'fault-injection' "$dir/without.log" ||
   fail "the task failed without naming the feature (log: $dir/without.log)"
-grep -qxF 'test-faults: 0 test binaries: 0 passed, 0 failed, 0 ignored' "$dir/without.log" ||
-  fail "the task did not print that no test ran (log: $dir/without.log)"
+grep -qF 'test-faults: read no "Starting <n> tests across <b> binaries" line with a binary in .out/test-faults.log (' "$dir/without.log" ||
+  fail "the task did not say that it read no Starting line (log: $dir/without.log)"
+if grep -q 'test binaries:' "$dir/without.log"; then
+  fail "the task printed a count for a run that built nothing (log: $dir/without.log)"
+fi
 
 echo "$name: ok"

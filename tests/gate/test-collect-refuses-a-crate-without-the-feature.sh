@@ -1,7 +1,11 @@
 #!/bin/sh
-# The task test-collect refuses a crates/swell whose manifest has no feature
-# collect-every-safe-point, so that it cannot pass by running nothing in that mode; the same
-# crate with the feature passes it first, so the refusal comes from the missing feature.
+# The gate refuses a crates/swell whose manifest has no feature collect-every-safe-point, so
+# that it cannot pass by running nothing in that mode; the same crate with the feature passes
+# first, so the refusal comes from the missing feature. The gate builds the step's binaries in
+# its build phase (task build-collect, before gate-time-start), so the refusal comes there:
+# build-collect fails, naming the feature and "build-collect: cargo nextest run --no-run failed,
+# exit <n>". The step test-collect run alone on that crate fails too, with "test-collect: read
+# no "Starting <n> tests across <b> binaries" line ...: nothing to count" and no count line.
 # Run from the repository root: sh tests/gate/test-collect-refuses-a-crate-without-the-feature.sh
 # Works only under .out/gate-tests/<name>/, which is also its cargo target directory's parent;
 # prints "<name>: ok" or "<name>: FAIL <why>".
@@ -74,20 +78,38 @@ cp "$manifest.with" "$manifest" || fail "cannot plant the manifest with the feat
 (cd "$dir" && cargo generate-lockfile --offline) > "$dir/lock.log" 2>&1 ||
   fail "cannot make a Cargo.lock for the planted workspace (log: $dir/lock.log)"
 
-# With the feature the planted crate passes the task, which prints its counts.
+# With the feature the planted crate passes the build task of the gate's build phase,
+# build-collect, and then the step, which compiles nothing and prints its counts.
+task -d "$dir" -t "$taskfile" build-collect > "$dir/build-with.log" 2>&1 ||
+  fail "the task build-collect refused the planted crate with the feature (log: $dir/build-with.log)"
+grep -q '^build-collect: Finished ' "$dir/build-with.log" ||
+  fail "the task build-collect did not print cargo's Finished line (log: $dir/build-with.log)"
 task -d "$dir" -t "$taskfile" test-collect > "$dir/with.log" 2>&1 ||
   fail "the task refused the planted crate with the feature (log: $dir/with.log)"
 grep -qxF 'test-collect: 1 test binaries: 1 passed, 0 failed, 0 ignored' "$dir/with.log" ||
   fail "the task did not print the counts of the planted crate (log: $dir/with.log)"
 
-# Without it the task fails, naming the feature.
+# Without it the gate refuses the crate in its build phase: build-collect fails, naming the
+# feature. The step run alone on that crate (no build phase before it) fails too, and does not
+# pass as a run of no tests: nextest builds nothing, and the report says it read no
+# "Starting" line, prints no count and fails.
 cp "$manifest.without" "$manifest" || fail "cannot plant the manifest without the feature"
+if task -d "$dir" -t "$taskfile" build-collect > "$dir/build-without.log" 2>&1; then
+  fail "the task build-collect accepted a crates/swell without the feature collect-every-safe-point (log: $dir/build-without.log)"
+fi
+grep -qF 'collect-every-safe-point' "$dir/build-without.log" ||
+  fail "the task build-collect failed without naming the feature (log: $dir/build-without.log)"
+grep -qE '^build-collect: cargo nextest run --no-run failed, exit [1-9][0-9]*$' "$dir/build-without.log" ||
+  fail "the task build-collect did not say that its build failed (log: $dir/build-without.log)"
 if task -d "$dir" -t "$taskfile" test-collect > "$dir/without.log" 2>&1; then
   fail "the task accepted a crates/swell without the feature collect-every-safe-point (log: $dir/without.log)"
 fi
 grep -qF 'collect-every-safe-point' "$dir/without.log" ||
   fail "the task failed without naming the feature (log: $dir/without.log)"
-grep -qxF 'test-collect: 0 test binaries: 0 passed, 0 failed, 0 ignored' "$dir/without.log" ||
-  fail "the task did not print that no test ran (log: $dir/without.log)"
+grep -qF 'test-collect: read no "Starting <n> tests across <b> binaries" line with a binary in .out/test-collect.log (' "$dir/without.log" ||
+  fail "the task did not say that it read no Starting line (log: $dir/without.log)"
+if grep -q 'test binaries:' "$dir/without.log"; then
+  fail "the task printed a count for a run that built nothing (log: $dir/without.log)"
+fi
 
 echo "$name: ok"
