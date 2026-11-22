@@ -718,11 +718,23 @@ The mechanism:
 
 **The step budget.** One unit per bytecode instruction, plus units charged by builtins in
 proportion to their work: per element for array, typed array and collection loops, per code unit
-for string operations, per matcher step for regular expressions (decision 7), per limb operation
-for `BigInt`, per node for `JSON.parse`, per code unit of eval code before its parse, and per
-pass of a sort of n property keys, n before the pass. Eval code: PerformEval charges one step per
+for string operations (a comparison of two Strings and a String made a property key: per code
+unit past 32, charged before the units are read), per matcher step for regular expressions
+(decision 7), per limb operation for `BigInt`, per code unit of its text and per value for
+`JSON.parse` and `JSON.rawJSON`, per code unit of eval code before its parse, and per
+pass of a sort of n property keys, n before the pass; plus what a host function charges for its
+own work with `cx.charge_steps` (`host-interface.md`, section 14). Eval code: PerformEval charges one step per
 code unit of the eval String before it copies it; CreateDynamicFunction charges one per code
-unit it copies into its source text and nothing more; `parse_script` charges none. The counter
+unit it copies into its source text and nothing more; `parse_script` charges none. Strings,
+added on 2026-11-22: a String operation charges its code units before it reads or copies them,
+and compares in place, with no copy; a comparison or a key of up to 32 code units costs what it
+did, and a longer one a step per code unit past 32. The replacer list of `JSON.stringify` keeps
+no copy of its items: each item is compared in place with every item already listed, a step per
+comparison and the steps of the comparison. `JSON.parse` and `JSON.rawJSON` charge a step per
+code unit of their text before they copy it, and the parser charges nothing for reading it, so
+a text parsed to its end costs what it did and one that fails early has paid for its whole text;
+the parser's step per value is charged in batches of a bounded size, which counts as in
+proportion. The counter
 is decremented where the unit is spent and
 checked at every backward jump, every call and return, every re-entry, and inside every builtin
 loop. At zero the run ends with the outcome `Terminated(StepBudget)`: no `catch` or `finally`
@@ -833,8 +845,11 @@ charges the bytes before the growth: an arena's slots by capacity when it grows,
 collector's workspace for them ("Collector"); the atom table's buckets (`heap/string.rs`,
 `Atoms`) by capacity when the table grows; string units, property and element capacity and
 `BigInt` limbs; and the frontend's, the source's copy, the parser's tree, the compile step's
-scratch and the bytecode, each by capacity as it grows. A sweep credits what a freed record
-owns, and what an atom entry it drops owns; an arena's capacity and the atom table's stay
+scratch and the bytecode, each by capacity as it grows; and the bytes the host charges for what
+it holds for the agent outside the heap (`charge_host_bytes`, `host-interface.md` section 14,
+added on 2026-11-22). A sweep credits what a freed record owns, and what an atom entry it drops
+owns, and after it the agent credits the host's charges whose `HostBytes` were dropped (with the
+host data that held them, or by the host); an arena's capacity and the atom table's stay
 charged while the agent lives, since neither shrinks and a freed slot or bucket is used again. A temporary structure (the frontend's tree and scratch, a list
 of property keys, the key list of a `for`-`in` enumerator) is credited when it drops, and the
 code's charge passes to its script record when the record is made. A growth charged by capacity
@@ -871,7 +886,9 @@ heap holds own, the fixed size of each one's slot included, and what the atom ta
 own; it leaves out free slots and the table's empty buckets. After a collection these are the
 live records. It is at most
 `heap_bytes()`, it falls by everything a sweep frees, and the collection threshold follows it
-("Collector").
+("Collector"). Both readings count the bytes the host charged with `charge_host_bytes` while it
+holds their `HostBytes` (added on 2026-11-22); a dropped `HostBytes` is credited after the next
+sweep or at the host's next charge, or at once by `Agent::credit_host_bytes`, which empties it.
 
 **Source text.** Added on 2026-11-21 for slice 3. The source text of a script, of eval code
 and of a dynamic function stays alive as long as a function made from it, and is charged to
