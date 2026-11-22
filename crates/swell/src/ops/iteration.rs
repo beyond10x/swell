@@ -22,9 +22,12 @@
 //! - IteratorClose is given a normal or a throw completion; a termination passes up untouched,
 //!   with no call of `return`, since no code runs after it (item 4).
 //!
-//! The readers of an iterator come with later stories of slice 6 (`for`-`of`, array patterns,
-//! spread, `Array.from`): until `story:for-of-statement` calls them, the record and the
-//! operations they call are used by the tests of this file alone.
+//! The readers of an iterator that call these operations today are the instructions of the
+//! `for`-`of` statement (`interp/for_of.rs`, `story:for-of-statement`) and the builtins
+//! `Array.from` (`builtins/array/from.rs`), `Object.fromEntries` and `Object.groupBy`
+//! (`builtins/object/from_entries.rs`, `story:array-from-and-object-from-entries`). Array
+//! patterns and spread come with a later story of slice 6
+//! (`story:array-destructuring-and-spread`).
 
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion};
