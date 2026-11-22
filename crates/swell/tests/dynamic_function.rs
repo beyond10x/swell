@@ -186,15 +186,22 @@ fn function_past_reentry_depth_throws_a_range_error() {
     );
 }
 
-/// The step budget of [`ends_in_step_budget`]: 100,000 steps; 10,000 in the gate with the
-/// collector at every safe point, where every step collects, and 100,000 there too in the lane
-/// `slow` (`SWELL_FULL_COUNTS=1`). The loop of the function body never ends, so every budget
-/// ends it the same way, in `Terminated(StepBudget)`.
-fn step_budget() -> u64 {
-    if cfg!(feature = "collect-every-safe-point")
+/// Whether this run is the gate's with the collector at every safe point: the feature
+/// `collect-every-safe-point`, without `SWELL_FULL_COUNTS=1` (which the lane `slow` sets).
+fn in_the_collect_gate() -> bool {
+    cfg!(feature = "collect-every-safe-point")
         && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-    {
-        10_000
+}
+
+/// The step budget of [`ends_in_step_budget`]: 100,000 steps; 2,000 in the gate with the
+/// collector at every safe point, where every step collects, and 100,000 there too in the lane
+/// `slow` (`SWELL_FULL_COUNTS=1`). With 10,000 the two tests took 16.3 and 10.6 s in that mode
+/// at a load of 100 to 110 on 17 cores (cargo-nextest). The loop of the function body never
+/// ends, and the function is made in far fewer than 2,000 steps, so every budget ends it the
+/// same way, in `Terminated(StepBudget)`.
+fn step_budget() -> u64 {
+    if in_the_collect_gate() {
+        2_000
     } else {
         100_000
     }
@@ -265,13 +272,24 @@ fn memory_budget_ends_a_dynamic_function_whose_code_does_not_fit() {
     );
 }
 
+/// The `frame_depth` of [`dynamic_function_recursion_ends_in_a_range_error`]: 500, the full
+/// count, which the lane `slow` (`SWELL_FULL_COUNTS=1`) runs in both modes; 100 in the gate
+/// with the collector at every safe point, where every step collects and every collection
+/// traces every frame, so the cost grows with the square of the depth (500 took 26.2 s there at
+/// a load of 100 to 110 on 17 cores, cargo-nextest). At 100 the frames of 50 calls of `g` and
+/// 50 dynamic functions are live across those collections and the depth still throws the
+/// `RangeError`; the default mode shows at 500 that no Rust call is made per level.
+fn dynamic_frame_depth() -> u32 {
+    if in_the_collect_gate() { 100 } else { 500 }
+}
+
 /// `frame_depth` through `Function`: a function that makes a dynamic function calling it again
-/// pushes a frame for each call, with no Rust recursion, until `frame_depth` throws a
-/// `RangeError`.
+/// pushes a frame for each call, with no Rust recursion, until `frame_depth`
+/// ([`dynamic_frame_depth`]) throws a `RangeError`, after `frame_depth / 2` calls of `g`.
 #[test]
 fn dynamic_function_recursion_ends_in_a_range_error() {
     let mut limits = limits();
-    limits.frame_depth = 500;
+    limits.frame_depth = dynamic_frame_depth();
     assert_eq!(
         run(limits, "function g() { Function(\"g()\")(); } g();"),
         Outcome::Throw("RangeError".to_string())
@@ -281,7 +299,7 @@ fn dynamic_function_recursion_ends_in_a_range_error() {
             limits,
             "var n = 0; function g() { n++; Function(\"g()\")(); } try { g(); } catch (e) { n; }"
         ),
-        Outcome::Normal("250".to_string())
+        Outcome::Normal((limits.frame_depth / 2).to_string())
     );
 }
 

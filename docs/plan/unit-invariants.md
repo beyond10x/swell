@@ -14,7 +14,7 @@ report and does not work around it.
   machine: measure in an ordinary job and report CPU seconds and the load beside wall seconds.
 - A job in the pool that runs longer than 10 minutes is killed (a rule of the organization
   since 2026-11-22; the wait in the queue does not count; the daemon ends it). A job that
-  needs longer names its time, at most one hour: `slot --timeout 30m task test262`, or
+  needs longer names its time, at most 30 minutes (a longer value counts as 30 minutes; a job that needs more is split): `slot --timeout 30m task test262`, or
   `SLOT_TIMEOUT=30m cargo nextest run ...` for a cargo call the shim wraps. A wrapped
   `timeout` extends nothing since slot 0.22.0: `slot timeout 1800 ...` ends at 10 minutes
   with exit 124, so where a story still writes that form, run `slot --timeout 30m ...`. A
@@ -72,8 +72,13 @@ report and does not work around it.
   path (write `$HOME`), no machine name.
 - Anything that runs longer than about 30 seconds runs in the background. Every process a unit
   starts is stopped before it reports, checked with `kill -0`.
-- The gate for a unit is package-scoped (`cargo test -p <package>`, or `slot task <name>` where
-  the brief says so). The whole gate, `slot task check`, runs once on the wave branch.
+- The gate for a unit is package-scoped (`cargo nextest run -p <package>`, or `slot task <name>`
+  where the brief says so). The whole gate, `slot task check`, runs once on the wave branch.
+  A unit that changes what a script evaluates to (a builtin, the parser, the compiler, the
+  interpreter) also runs `cargo nextest run --locked -p swell-test262`: its tests run the
+  engine over a fixture tree and state counts. The twelve builtin units of slice 3 ran the
+  package `swell` only; one count of that package went stale and the wave's gate found it
+  (`an_unknown_rule_kind_fails_the_run`, 2026-11-22).
 - A report quotes each suite's own summary line and starts with these six lines:
 
   ```

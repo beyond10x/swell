@@ -516,15 +516,22 @@ fn eval_past_reentry_depth_throws_a_range_error() {
     );
 }
 
-/// The step budget of [`ends_in_step_budget`]: 100,000 steps; 10,000 in the gate with the
-/// collector at every safe point, where every step collects, and 100,000 there too in the lane
-/// `slow` (`SWELL_FULL_COUNTS=1`). The loop in eval code never ends, so every budget ends it
-/// the same way, in `Terminated(StepBudget)`.
-fn step_budget() -> u64 {
-    if cfg!(feature = "collect-every-safe-point")
+/// Whether this run is the gate's with the collector at every safe point: the feature
+/// `collect-every-safe-point`, without `SWELL_FULL_COUNTS=1` (which the lane `slow` sets).
+fn in_the_collect_gate() -> bool {
+    cfg!(feature = "collect-every-safe-point")
         && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-    {
-        10_000
+}
+
+/// The step budget of [`ends_in_step_budget`]: 100,000 steps; 2,000 in the gate with the
+/// collector at every safe point, where every step collects, and 100,000 there too in the lane
+/// `slow` (`SWELL_FULL_COUNTS=1`). With 10,000 the three tests took 17.9 to 25.2 s in that
+/// mode at a load of 100 to 110 on 17 cores (cargo-nextest). The loop in eval code never ends,
+/// and the eval code is compiled in far fewer than 2,000 steps, so every budget ends it the
+/// same way, in `Terminated(StepBudget)`.
+fn step_budget() -> u64 {
+    if in_the_collect_gate() {
+        2_000
     } else {
         100_000
     }
@@ -612,12 +619,24 @@ fn memory_budget_ends_an_eval_whose_code_does_not_fit() {
     }
 }
 
+/// The `frame_depth` of [`eval_recursion_ends_in_a_range_error`]: 500, the full count, which
+/// the lane `slow` (`SWELL_FULL_COUNTS=1`) runs in both modes; 100 in the gate with the
+/// collector at every safe point, where every step collects and every collection traces every
+/// frame, so the cost grows with the square of the depth (500 took 29.8 s there at a load of
+/// 100 to 110 on 17 cores, cargo-nextest). At 100 the frames of 50 calls and 50 eval codes are
+/// live across those collections and the depth still throws the `RangeError`; the default
+/// mode shows at 500 that no Rust call is made per level.
+fn eval_frame_depth() -> u32 {
+    if in_the_collect_gate() { 100 } else { 500 }
+}
+
 /// `frame_depth` through `eval`: `function f() { eval("f()"); } f()` pushes a frame for each
-/// call and each eval code, with no Rust recursion, until `frame_depth` throws a `RangeError`.
+/// call and each eval code, with no Rust recursion, until `frame_depth` ([`eval_frame_depth`])
+/// throws a `RangeError`, after `frame_depth / 2` calls.
 #[test]
 fn eval_recursion_ends_in_a_range_error() {
     let mut limits = limits();
-    limits.frame_depth = 500;
+    limits.frame_depth = eval_frame_depth();
     assert_eq!(
         run(limits, "function f() { eval(\"f()\"); } f();"),
         Outcome::Throw("RangeError".to_string())
@@ -627,6 +646,6 @@ fn eval_recursion_ends_in_a_range_error() {
             limits,
             "var n = 0; function f() { n++; eval(\"f()\"); } try { f(); } catch (e) { n; }"
         ),
-        Outcome::Normal("250".to_string())
+        Outcome::Normal((limits.frame_depth / 2).to_string())
     );
 }

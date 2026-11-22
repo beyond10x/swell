@@ -64,7 +64,7 @@ deciding session's, from a checkout of the repository:
 3. **Gate.** One commit by the bot holds steps 1 and 2. Run the gate on it as the forge's
    runner does and compare its lines with the changelog section:
 
-       slot --timeout 1h task check-runner
+       slot --timeout 30m task check-runner
 
    The gate does not run test262 in full; it compares the digest of the run's sources with
    `conformance/test262/expected.digest`. The version change is a source: run

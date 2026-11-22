@@ -179,10 +179,14 @@ macro_rules! language_parts {
 // edit here, and `the_parts_cover_every_script` shows each is in exactly one part. Thirteen
 // parts: in the collect mode the scripts took 38 s together (166 scripts, at a load of 43 on 20
 // cores), 0.23 s a script; 250 such scripts take 57 s, under 5 s a part in 13. A prime, so
-// that two scripts share a part only when they stand 13 apart. Three scripts take 10 to 12 s
-// each in that mode (both runs: `function-recursion.js`, `try-completion-finally-abrupt.js`,
-// `try-completion-try-and-catch-abrupt.js`); the part of each takes that long, which no number
-// of parts shortens.
+// that two scripts share a part only when they stand 13 apart. A script costs its part the
+// whole of its time, which no number of parts shortens: three scripts took 10 to 12 s each in
+// that mode and made their parts take 43 to 60 s at a load of 100 to 110 on 17 cores
+// (cargo-nextest), so `function-recursion.js` computes `fib(10)` rather than `fib(15)`, and the
+// two scripts of the completion value of a `try` statement left by `break` or `continue` are
+// one script per statement (`try-completion-finally-abrupt-*.js`,
+// `try-completion-try-and-catch-abrupt-*.js`), whose names stand next to each other and so
+// land in different parts.
 language_parts!(
     language_scripts_answer_their_expected_outcome = 0,
     language_scripts_answer_their_expected_outcome_part_2 = 1,

@@ -378,10 +378,27 @@ fn sort_puts_undefined_last_and_holes_after_it() {
     );
 }
 
+/// The elements of the arrays the lying comparators of
+/// [`sort_with_a_comparator_that_throws_or_lies_ends`] sort: 40, the full count, in the default
+/// mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`); 12 in the gate with the feature
+/// `collect-every-safe-point`, where every comparator call collects (with 40 the test took
+/// 22.1 s there at a load of 100 to 110 on 17 cores, cargo-nextest). The sort is a merge sort
+/// bottom up from runs of one, so 12 elements still take it through four passes, with every
+/// lie answered in each.
+fn lying_sort_elements() -> u32 {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        12
+    } else {
+        40
+    }
+}
+
 /// `#sec-sortindexedproperties`, step 4: a comparator that throws ends the sort in its throw
 /// before anything is written; one that answers inconsistently (in turn negative, zero and
 /// positive, NaN, an object with a `valueOf`) or changes the array while it runs ends the sort
-/// with the elements it had, in some order.
+/// with the elements it had, in some order ([`lying_sort_elements`] of them).
 #[test]
 fn sort_with_a_comparator_that_throws_or_lies_ends() {
     both_answer(
@@ -391,27 +408,31 @@ fn sort_with_a_comparator_that_throws_or_lies_ends() {
          [caught, c, a.join(\"\")].join();",
         "\"stop,3,54321\"",
     );
+    let n = lying_sort_elements();
+    let last = n - 1;
     both_answer(
-        "function permutation(s) {\n\
-           var seen = [], count = 0;\n\
-           for (var i = 0; i < 40; i++) if (!seen[s[i]]) { seen[s[i]] = true; count++; }\n\
-           return count === 40 && seen.length === 40;\n\
-         }\n\
-         var r = [];\n\
-         var c = 0;\n\
-         var lies = [\n\
-           function () { return (c++ % 3) - 1; },\n\
-           function () { return NaN; },\n\
-           function () { return { valueOf: function () { return c++ % 2 ? 1 : -1; } }; },\n\
-           function (x, y) { a.push(x); return y - x; }\n\
-         ];\n\
-         for (var k = 0; k < lies.length; k++) {\n\
-           var a = [];\n\
-           for (var i = 0; i < 40; i++) a.push(i);\n\
-           a.sort(lies[k]);\n\
-           r.push(permutation(a) && (k === 3 ? a.length > 40 && a[0] === 39 : a.length === 40));\n\
-         }\n\
-         r.join();",
+        &format!(
+            "function permutation(s) {{\n\
+               var seen = [], count = 0;\n\
+               for (var i = 0; i < {n}; i++) if (!seen[s[i]]) {{ seen[s[i]] = true; count++; }}\n\
+               return count === {n} && seen.length === {n};\n\
+             }}\n\
+             var r = [];\n\
+             var c = 0;\n\
+             var lies = [\n\
+               function () {{ return (c++ % 3) - 1; }},\n\
+               function () {{ return NaN; }},\n\
+               function () {{ return {{ valueOf: function () {{ return c++ % 2 ? 1 : -1; }} }}; }},\n\
+               function (x, y) {{ a.push(x); return y - x; }}\n\
+             ];\n\
+             for (var k = 0; k < lies.length; k++) {{\n\
+               var a = [];\n\
+               for (var i = 0; i < {n}; i++) a.push(i);\n\
+               a.sort(lies[k]);\n\
+               r.push(permutation(a) && (k === 3 ? a.length > {n} && a[0] === {last} : a.length === {n}));\n\
+             }}\n\
+             r.join();"
+        ),
         "\"true,true,true,true\"",
     );
 }

@@ -762,25 +762,40 @@ const CALLS: [(&str, &str); 14] = [
     ("flatMap", ", p"),
 ];
 
-/// The step budget of [`a_walk_of_2_32_minus_1_indices_ends_in_the_step_budget`]: 10,000 in
-/// the default mode; with the feature `collect-every-safe-point`, 1,000, which ends every walk
-/// the same way. Each predicate call of FindViaPredicate passes safe points, and a collection at
-/// each of them made the test take 40.9 s in that mode with 10,000 (1.3 s in the default one,
-/// cargo-nextest, measured).
+/// The full step budget of [`a_walk_of_2_32_minus_1_indices_ends_in_the_step_budget`]: 10,000
+/// in the default mode; with the feature `collect-every-safe-point`, 1,000, which ends every
+/// walk the same way. Each predicate call of FindViaPredicate passes safe points, and a
+/// collection at each of them made the test take 40.9 s in that mode with 10,000 (1.3 s in the
+/// default one, cargo-nextest, measured). The gate's budget is [`walk_steps`].
 const WALK_STEPS: u64 = if cfg!(feature = "collect-every-safe-point") {
     1_000
 } else {
     10_000
 };
 
+/// The step budget of the walks: [`WALK_STEPS`] in the default mode and in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`); 200 in the gate with the feature `collect-every-safe-point`, where
+/// the 42 walks of 1,000 steps took 18.1 s at a load of 100 to 110 on 17 cores (cargo-nextest).
+/// 200 steps still start every walk over its 2^32 - 1 or 2^53 - 1 indices, a step each (and
+/// a predicate call each for the `find` methods), and end it the same way, in the step budget.
+fn walk_steps() -> u64 {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        200
+    } else {
+        WALK_STEPS
+    }
+}
+
 /// Each walk loops over every index below the length, a step each (decision 2): over an
 /// array-like whose "length" is 2^32 - 1 or 2^53 - 1 and over an Array of length 2^32 - 1, all
 /// without elements, each of the twelve methods (`reduce` and `reduceRight` with and without an
-/// initial value) ends in `Terminated(StepBudget)` under a budget of [`WALK_STEPS`] steps, not
+/// initial value) ends in `Terminated(StepBudget)` under a budget of [`walk_steps`] steps, not
 /// in a hang, and the agent stays `Alive` and answers the next script.
 #[test]
 fn a_walk_of_2_32_minus_1_indices_ends_in_the_step_budget() {
-    let (mut agent, realm) = agent_and_realm(|limits| limits.steps_per_entry = WALK_STEPS);
+    let (mut agent, realm) = agent_and_realm(|limits| limits.steps_per_entry = walk_steps());
     assert_eq!(
         eval_text(
             &mut agent,

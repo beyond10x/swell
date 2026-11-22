@@ -325,13 +325,16 @@ fn host_22_zero_string_length_throws_on_concatenation() {
     assert!(is_range_error_of(&mut agent, &realm, outcome));
 }
 
-/// `full` steps of a step budget, or a tenth of them in the gate with the collector at every
+/// `full` steps of a step budget, or a fiftieth of them in the gate with the collector at every
 /// safe point, where every step collects; the lane `slow` (`SWELL_FULL_COUNTS=1`) runs `full`
 /// there too. The scripts given such a budget loop or recurse without end, so every budget
-/// ends them in the same way.
+/// ends them in the same way. With a tenth, 10,000 of 100,000,
+/// [`catching_the_depth_error_and_recursing_again_ends_in_step_budget`] took 22.5 s in that
+/// mode at a load of 100 to 110 on 17 cores (cargo-nextest); its 2,000 steps still reach the
+/// `RangeError` at `frame_depth` 20, which takes a few hundred.
 fn steps_in_the_collect_gate(full: u64) -> u64 {
     if in_the_collect_gate() {
-        full / 10
+        full / 50
     } else {
         full
     }
