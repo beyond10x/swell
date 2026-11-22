@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:for-of-statement
 kind: story
-status: active
+status: implemented
 title: 'for-of statements: head and body evaluation, per-iteration bindings, IteratorClose on every abrupt exit'
 summary: Lifts 10 of the 12 for-of statements of surf's harness (the other two have an array pattern in the head); 257 failing cases of slice 6 on its list; IteratorClose compiled as a finally.
 relations:
@@ -54,10 +54,11 @@ scope:
   path: crates/syntax/tests/sources/refused/for-of-var.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/for-of.js
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T00:38:41Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:38:42Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T22:03:59Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

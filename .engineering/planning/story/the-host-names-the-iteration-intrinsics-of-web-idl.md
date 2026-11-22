@@ -2,17 +2,18 @@
 format: aep.planning-md/3
 id: story:the-host-names-the-iteration-intrinsics-of-web-idl
 kind: story
-status: active
+status: implemented
 title: The closed list gains @@iterator and %Array.prototype.values%, entries, keys and forEach, which Web IDL gives an interface with an indexed getter and a value iterator
 summary: Five entries more in HostIntrinsic and WellKnownSymbol once slice 6 has made them; three new intrinsic slots of the realm record the original Array methods.
 relations:
 - depends_on: story:the-host-names-a-closed-list-of-intrinsics-and-symbols
 - depends_on: story:symbol-constructor-and-well-known-symbols
 - depends_on: story:iterator-protocol-and-array-string-iterators
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:48:27Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T06:48:28Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-22T22:03:58Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 Waits for: `story:the-host-names-a-closed-list-of-intrinsics-and-symbols` (the enumerations and
 the reads), and two stories of slice 6 (`docs/plan/waves.md`, "Slice 6"):

@@ -219,7 +219,20 @@ pub struct PatternProperty {
     pub span: Span,
 }
 
-/// A name a binding pattern binds: the name, and the pattern node and property index of its
+/// A `BindingElement` or an `AssignmentElement` of an array pattern
+/// (`#sec-destructuring-binding-patterns`, `#sec-destructuring-assignment`), or its rest element
+/// (`BindingRestElement`, `AssignmentRestElement`), which has no default: its target and its
+/// default.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PatternElement {
+    pub target: PatternTarget,
+    /// The `Initializer`, evaluated when the element's value is `undefined`.
+    pub default: Option<ExprId>,
+    pub span: Span,
+}
+
+/// A name a binding pattern binds: the name, and the pattern node and property index (of an
+/// object pattern) or element index (of an array pattern, elisions counted) of its
 /// `BindingIdentifier`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoundName {
@@ -382,6 +395,22 @@ pub enum Expr {
         kind: PatternKind,
         rest: bool,
     },
+    /// An ArrayBindingPattern or an ArrayAssignmentPattern, its elements in source order, `None`
+    /// an elision. It destructures the value its context gives it through the value's iterator,
+    /// as an object pattern does by keys. With `rest`, the last of `elements` is the
+    /// BindingRestElement or AssignmentRestElement `... target`.
+    ArrayPattern {
+        elements: Vec<Option<PatternElement>>,
+        kind: PatternKind,
+        rest: bool,
+    },
+    /// `... AssignmentExpression`: a SpreadElement of an array literal
+    /// (`#sec-array-initializer`) or an argument of a call or `new` (`#sec-argument-lists`),
+    /// where alone it stands. Its span ends after the `,` that follows it, when one does: read
+    /// again as the rest element of an array pattern, which no comma may follow, that tells it
+    /// from the last element. The parenthesized rest element of an arrow's parameters that is
+    /// a pattern, `(...[a]) =>`, is one too, its span starting at the `...`.
+    Spread(ExprId),
     /// A tagged template, `MemberExpression TemplateLiteral` or `CallExpression TemplateLiteral`
     /// (`#sec-tagged-templates`): the tag, the template strings in source order, one more than
     /// the substitutions, and the substitutions.
@@ -930,6 +959,12 @@ impl HeapBytes for PatternProperty {
     }
 }
 
+impl HeapBytes for PatternElement {
+    fn heap_bytes(&self) -> usize {
+        self.target.heap_bytes()
+    }
+}
+
 impl HeapBytes for BoundName {
     fn heap_bytes(&self) -> usize {
         self.name.heap_bytes()
@@ -960,7 +995,8 @@ impl HeapBytes for Expr {
             | Expr::Assign { .. }
             | Expr::Index { .. }
             | Expr::OptionalChain(_)
-            | Expr::OptionalIndex { .. } => 0,
+            | Expr::OptionalIndex { .. }
+            | Expr::Spread(_) => 0,
             Expr::Identifier(name) => name.heap_bytes(),
             Expr::Number(n) => n.heap_bytes(),
             Expr::String(s) => s.heap_bytes(),
@@ -982,6 +1018,7 @@ impl HeapBytes for Expr {
                 .heap_bytes()
                 .saturating_add(substitutions.heap_bytes()),
             Expr::ObjectPattern { properties, .. } => properties.heap_bytes(),
+            Expr::ArrayPattern { elements, .. } => elements.heap_bytes(),
             Expr::TaggedTemplate {
                 strings,
                 substitutions,
@@ -1160,6 +1197,17 @@ impl Expr {
                     }
                 }
             }
+            Expr::ArrayPattern { elements, .. } => {
+                for p in elements.iter().flatten() {
+                    if let PatternTarget::Expr(e) = p.target {
+                        f(Child::Expr(e));
+                    }
+                    if let Some(e) = p.default {
+                        f(Child::Expr(e));
+                    }
+                }
+            }
+            Expr::Spread(e) => f(Child::Expr(*e)),
             Expr::Function(id) => f(Child::Function(*id)),
             Expr::Unary { operand, .. } | Expr::Update { operand, .. } => f(Child::Expr(*operand)),
             Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {

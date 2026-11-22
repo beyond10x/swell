@@ -1,0 +1,44 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 2 locals 3
+  params local 0, local 1
+  0000 2:28 NewArray
+  0001 2:29 Number 0
+  0002 2:29 DefineIndex 0
+  0003 2:35 GetLocal 0
+  0004 2:35 SpreadArray
+  0005 2:40 ArrayGrow 1
+  0006 2:40 Number 1
+  0007 2:40 ArrayAppend
+  0008 2:24 SetLocal 2
+  0009 2:24 Pop
+  0010 2:44 GetLocal 1
+  0011 2:44 Dup
+  0012 2:44 GetNamed "m"
+  0013 2:44 NewArray
+  0014 2:51 GetLocal 0
+  0015 2:51 SpreadArray
+  0016 2:54 Number 2
+  0017 2:54 ArrayAppend
+  0018 2:44 CallSpread
+  0019 2:44 Pop
+  0020 2:58 Undefined
+  0021 2:58 GetGlobal "f"
+  0022 2:58 NewArray
+  0023 2:63 GetLocal 0
+  0024 2:63 SpreadArray
+  0025 2:58 CallSpread
+  0026 2:58 Pop
+  0027 2:78 GetLocal 1
+  0028 2:74 NewArray
+  0029 2:80 Number 1
+  0030 2:80 ArrayAppend
+  0031 2:86 GetLocal 0
+  0032 2:86 SpreadArray
+  0033 2:74 NewSpread
+  0034 2:67 Return
+  0035 2:1 Undefined
+  0036 2:1 Return

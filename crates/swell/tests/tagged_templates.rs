@@ -217,6 +217,25 @@ fn new_applies_the_tag_before_it_constructs() {
     );
 }
 
+/// A tagged template where the grammar of spread and array patterns meets it: a tag that is the
+/// result of a call with a spread argument, given an Array literal with a spread as its
+/// substitution, and a substitution that is an arrow with an array pattern as its parameter.
+#[test]
+fn a_spread_and_an_array_pattern_meet_a_tagged_template() {
+    let spread = "var a = [1, 2];\n\
+         var b = [3, 4];\n\
+         function f(p, q) {\n\
+           return function (s, v) { return s.raw[0] + p + q + v.length + v[1] + arguments.length; };\n\
+         }\n\
+         f(...a)`x${[...b]}`;";
+    let answer = Outcome::Normal("\"x12242\"".to_string());
+    assert_eq!(run_both(spread), (answer.clone(), answer));
+    let pattern = "function t(s, g) { return s.length + \":\" + g([7, 8]); }\n\
+         t`${([p]) => p}`;";
+    let answer = Outcome::Normal("\"2:7\"".to_string());
+    assert_eq!(run_both(pattern), (answer.clone(), answer));
+}
+
 /// The script of the charge tests: a site evaluated `n` times in a loop, its object kept in `t`
 /// (for `n` 0 the site is never evaluated and `t` is `undefined`).
 fn site_loop(n: u32) -> String {

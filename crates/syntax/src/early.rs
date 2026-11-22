@@ -111,6 +111,17 @@ pub(crate) const REST_PROPERTY_INITIALIZER: &str = "a rest property may not have
 /// (`#sec-destructuring-assignment-static-semantics-early-errors`).
 pub(crate) const REST_PROPERTY_PATTERN: &str = "the target of a rest property may not be a pattern";
 
+/// The message of a rest element `... target` of an array pattern that is not its last element,
+/// or that a comma follows: ArrayBindingPattern and ArrayAssignmentPattern have a rest element
+/// only last and without a comma after it (`#sec-destructuring-binding-patterns`,
+/// `#sec-destructuring-assignment`).
+pub(crate) const REST_ELEMENT_NOT_LAST: &str =
+    "a rest element must be the last element of its pattern";
+
+/// The message of a rest element `... target = value` of an array pattern: a BindingRestElement
+/// and an AssignmentRestElement have no Initializer.
+pub(crate) const REST_ELEMENT_INITIALIZER: &str = "a rest element may not have an initializer";
+
 /// The message of a `with` statement in strict mode code.
 pub(crate) const WITH_IN_STRICT: &str = "with statement in strict mode code";
 
@@ -738,12 +749,9 @@ impl<'a, 'm> Checker<'a, 'm> {
                         self.declared(*kind, name);
                     }
                 }
-                // An ObjectAssignmentPattern is checked as the expression it is.
+                // An assignment pattern is checked as the expression it is.
                 ForInTarget::Expression(e) => {
-                    if !matches!(
-                        self.ast.expr(*e).map(|n| &n.expr),
-                        Some(Expr::ObjectPattern { .. })
-                    ) {
+                    if !self.is_pattern(*e) {
                         self.target(*e);
                     }
                 }
@@ -884,10 +892,16 @@ impl<'a, 'm> Checker<'a, 'm> {
                 for p in properties {
                     self.property_key(&p.key, p.span);
                     if let (PatternKind::Assignment, PatternTarget::Expr(t)) = (kind, &p.target)
-                        && !matches!(
-                            self.ast.expr(*t).map(|n| &n.expr),
-                            Some(Expr::ObjectPattern { .. })
-                        )
+                        && !self.is_pattern(*t)
+                    {
+                        self.target(*t);
+                    }
+                }
+            }
+            Expr::ArrayPattern { elements, kind, .. } => {
+                for p in elements.iter().flatten() {
+                    if let (PatternKind::Assignment, PatternTarget::Expr(t)) = (kind, &p.target)
+                        && !self.is_pattern(*t)
                     {
                         self.target(*t);
                     }
@@ -911,12 +925,7 @@ impl<'a, 'm> Checker<'a, 'm> {
             }
             Expr::Update { operand, .. } => self.target(*operand),
             // A pattern's targets are checked with the pattern.
-            Expr::Assign { target, .. }
-                if !matches!(
-                    self.ast.expr(*target).map(|n| &n.expr),
-                    Some(Expr::ObjectPattern { .. })
-                ) =>
-            {
+            Expr::Assign { target, .. } if !self.is_pattern(*target) => {
                 self.target(*target);
             }
             // A NotEscapeSequence of a tagged template is no early error: the rule of
@@ -924,6 +933,14 @@ impl<'a, 'm> Checker<'a, 'm> {
             Expr::TaggedTemplate { .. } => {}
             _ => {}
         }
+    }
+
+    /// Whether `e` is an object or array pattern.
+    fn is_pattern(&self, e: ExprId) -> bool {
+        matches!(
+            self.ast.expr(e).map(|n| &n.expr),
+            Some(Expr::ObjectPattern { .. } | Expr::ArrayPattern { .. })
+        )
     }
 
     /// The function's name and parameters, checked with its own strictness.

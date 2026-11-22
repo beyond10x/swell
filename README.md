@@ -17,7 +17,7 @@ can use it.
 ## State
 
 swell runs scripts of the ES5 grammar in both modes, under a step budget and a memory budget.
-Its gate holds the test262 counts: 13,575 of the 44,812 cases that run pass (30.2 %), measured on 2026-11-22.
+Its gate holds the test262 counts: 14,998 of the 44,812 cases that run pass (33.4 %), measured on 2026-11-22.
 The first three of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |
@@ -34,7 +34,7 @@ What exists, measured on 2026-11-22:
   built, how it is measured, and the order in which it is delivered.
 - The host interface, specified before its code:
   [`docs/design/host-interface.md`](docs/design/host-interface.md) has 190 numbered
-  requirements, and 108 of them have a test. An ESS model under [`spec/`](spec/) has 58
+  requirements, and 109 of them have a test. An ESS model under [`spec/`](spec/) has 58
   scenarios. All 58 pass on ESS's interpreter. The gate runs them against the engine too, and
   14 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
@@ -64,9 +64,10 @@ the pinned test262 harness before the engine's answer is judged;
 [the design, section 12](docs/design/engine.md#12-delivery-order) states it.
 
 In work is slice 6 of nineteen, bindings and iteration. `let` and `const`, template literals
-without a tag, arrow functions, default and rest parameters and object destructuring run
-today; array destructuring, `Symbol`, iterators and `for`-`of` are next. Of its 4,436 cases
-1,364 pass. The slices are taken in the order the first user, a browser, needs them:
+without a tag, arrow functions, default and rest parameters, object destructuring, computed
+property names, object spread, `Symbol`, the iterator protocol, `for`-`of`, function
+declarations in blocks and `Array.from` run today; array destructuring, spread in arrays and
+calls, and tagged templates are next. Of its 4,436 cases 2,528 pass. The slices are taken in the order the first user, a browser, needs them:
 6, 5, 7, 10, 4, 9.
 
 ## What swell is
