@@ -372,7 +372,7 @@ impl<H: Host> Agent<H> {
         let length = self.string_length(string)?;
         // 5. Let k be ? ToAbsoluteIndex(index, len).
         let k = self.with_string_kept(string, |agent| {
-            agent.to_absolute_index(argument(args, 0), length)
+            agent.to_absolute_index(argument(args, 0), length as f64)
         })?;
         // 6. If k < 0 or k ≥ len, return undefined.
         if k < 0.0 || k >= length as f64 {
@@ -642,11 +642,11 @@ impl<H: Host> Agent<H> {
         let length = self.string_length(string)?;
         let (from, to) = self.with_string_kept(string, |agent| {
             // 5. Let from be ? ToClampedIndex(start, len).
-            let from = agent.to_clamped_index(argument(args, 0), length)?;
+            let from = agent.to_clamped_string_index(argument(args, 0), length)?;
             // 6. If end is undefined, let to be len; else let to be ? ToClampedIndex(end, len).
             let to = match argument(args, 1) {
                 Value::Undefined => length,
-                end => agent.to_clamped_index(end, length)?,
+                end => agent.to_clamped_string_index(end, length)?,
             };
             Ok((from, to))
         })?;
