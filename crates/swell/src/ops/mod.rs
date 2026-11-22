@@ -2,9 +2,11 @@
 //! of the operators (13): type conversion (`conversion`, 7.1), testing and comparison
 //! (`testing`, 7.2), operations on objects (`objects`, 7.3) and the operators (`operators`).
 //! Each is a method of the agent, since any of them may run code. Written by
-//! `story:object-model-and-realms`.
+//! `story:object-model-and-realms`. Operations on iterator objects (`iteration`, 7.4) are
+//! `story:iterator-protocol-and-array-string-iterators`.
 
 pub(crate) mod conversion;
+pub(crate) mod iteration;
 pub(crate) mod objects;
 pub(crate) mod operators;
 pub(crate) mod testing;

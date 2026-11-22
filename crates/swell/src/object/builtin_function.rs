@@ -60,6 +60,9 @@ pub(crate) enum BuiltinId {
     Global(crate::builtins::global::GlobalBuiltin),
     /// The builtins of `Symbol` (`story:symbol-constructor-and-well-known-symbols`).
     Symbol(crate::builtins::symbol::SymbolBuiltin),
+    /// The builtins of the iterator objects
+    /// (`story:iterator-protocol-and-array-string-iterators`).
+    Iterator(crate::builtins::iterator::IteratorBuiltin),
 }
 
 /// What a built-in function does when called.
@@ -424,6 +427,9 @@ impl<H: Host> Agent<H> {
             }
             BuiltinId::Global(id) => self.run_global_builtin(id, function, this, args, new_target),
             BuiltinId::Symbol(id) => self.run_symbol_builtin(id, function, this, args, new_target),
+            BuiltinId::Iterator(id) => {
+                self.run_iterator_builtin(id, function, this, args, new_target)
+            }
         }
     }
 

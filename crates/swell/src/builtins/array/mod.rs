@@ -4,7 +4,11 @@
 //! (`#sec-array.prototype.constructor`), `.join` (`#sec-array.prototype.join`) with
 //! JoinIndexedProperties (`#sec-joinindexedproperties`), `.push` (`#sec-array.prototype.push`)
 //! and `.map` (`#sec-array.prototype.map`) with ArraySpeciesCreate (`#sec-arrayspeciescreate`).
-//! Written by `story:harness-builtins`. Slice 2 takes `.toString`
+//! Written by `story:harness-builtins`. `.entries`, `.keys`, `.values` and
+//! `[@@iterator]` (`#sec-array.prototype.entries`, `#sec-array.prototype.keys`,
+//! `#sec-array.prototype.values`, `#sec-array.prototype-%symbol.iterator%`) are
+//! `story:iterator-protocol-and-array-string-iterators`, their steps in `builtins/iterator.rs`.
+//! Slice 2 takes `.toString`
 //! (`#sec-array.prototype.tostring`) early (`docs/design/engine.md`, section 12, "A part before
 //! its slice"); the other members are slice 3, in the group modules beside this file
 //! (`story:builtin-group-modules`): `iteration.rs` (`story:array-iteration-methods`),
@@ -22,6 +26,7 @@ pub(crate) mod iteration;
 pub(crate) mod mutation;
 pub(crate) mod search;
 
+use crate::builtins::iterator::ArrayIterationKind;
 use crate::builtins::object::argument;
 use crate::builtins::string::{StringBuilder, units_of};
 use crate::host::agent::Agent;
@@ -50,6 +55,12 @@ pub(crate) enum ArrayBuiltin {
     Push,
     /// `Array.prototype.toString ( )` (23.1.3.36), taken early by slice 2.
     ToString,
+    /// `Array.prototype.entries ( )` (23.1.3.5), `keys ( )` (23.1.3.19) and `values ( )`
+    /// (23.1.3.38), which is also `Array.prototype [ %Symbol.iterator% ]` (23.1.3.40)
+    /// (`story:iterator-protocol-and-array-string-iterators`, `builtins/iterator.rs`).
+    Entries,
+    Keys,
+    Values,
     /// A builtin of the group `iteration.rs`.
     Iteration(iteration::IterationBuiltin),
     /// A builtin of the group `search.rs`.
@@ -114,14 +125,27 @@ impl<H: Host> Agent<H> {
             ("map", 1, ArrayBuiltin::Map),
             ("push", 1, ArrayBuiltin::Push),
             ("toString", 0, ArrayBuiltin::ToString),
+            ("entries", 0, ArrayBuiltin::Entries),
+            ("keys", 0, ArrayBuiltin::Keys),
+            ("values", 0, ArrayBuiltin::Values),
         ] {
-            self.define_builtin_method(
+            let method = self.define_builtin_method(
                 making,
                 array_prototype,
                 name,
                 length,
                 BuiltinId::Array(id),
             )?;
+            // 23.1.3.40: the initial value of the %Symbol.iterator% property is
+            // %Array.prototype.values%, { [[Writable]]: true, [[Enumerable]]: false,
+            // [[Configurable]]: true } (clause 18).
+            if id == ArrayBuiltin::Values {
+                self.add_property(
+                    array_prototype,
+                    Key::Symbol(making.symbols.iterator),
+                    Property::data(Value::Object(method), true, false, true),
+                )?;
+            }
         }
         for (object, on_prototype) in [(constructor, false), (array_prototype, true)] {
             self.define_group_methods(
@@ -180,6 +204,9 @@ impl<H: Host> Agent<H> {
             ArrayBuiltin::Map => self.array_map(this, args),
             ArrayBuiltin::Push => self.array_push(this, args),
             ArrayBuiltin::ToString => self.array_to_string(this),
+            ArrayBuiltin::Entries => self.array_iterator_of(this, ArrayIterationKind::KeyValue),
+            ArrayBuiltin::Keys => self.array_iterator_of(this, ArrayIterationKind::Key),
+            ArrayBuiltin::Values => self.array_iterator_of(this, ArrayIterationKind::Value),
             ArrayBuiltin::Iteration(id) => {
                 self.run_array_iteration_builtin(id, function, this, args, new_target)
             }
@@ -561,7 +588,17 @@ mod tests {
         check_group_keys(
             &mut agent,
             prototype,
-            &["length", "constructor", "join", "map", "push", "toString"],
+            &[
+                "length",
+                "constructor",
+                "join",
+                "map",
+                "push",
+                "toString",
+                "entries",
+                "keys",
+                "values",
+            ],
             &prototype_groups,
             &[],
         );

@@ -7,8 +7,9 @@
 //! properties, `valueOf` and `toString` in `number`, all of `Boolean` in `boolean`, `isNaN` and
 //! `isFinite` in `global`, and `String.prototype.toString` and `valueOf` in `string`. Slice 6
 //! adds `symbol` (`story:symbol-constructor-and-well-known-symbols`), whose constructor and
-//! prototype CreateIntrinsics makes (`realm/intrinsics.rs`). Later
-//! slices add their files here.
+//! prototype CreateIntrinsics makes (`realm/intrinsics.rs`), and `iterator`
+//! (`story:iterator-protocol-and-array-string-iterators`): `%Iterator.prototype%` and the
+//! Array and String Iterators. Later slices add their files here.
 //!
 //! `array`, `object` and `string` are directories (`story:builtin-group-modules`): `mod.rs`
 //! holds the constructor and the builtins of the base, and each group of builtins a story of
@@ -30,6 +31,7 @@ pub(crate) mod boolean;
 pub(crate) mod error;
 pub(crate) mod function;
 pub(crate) mod global;
+pub(crate) mod iterator;
 pub(crate) mod json;
 pub(crate) mod math;
 pub(crate) mod number;
