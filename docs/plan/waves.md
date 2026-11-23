@@ -286,6 +286,38 @@ have, `story:matcher-work-bounded-by-its-steps` and
 regular expressions of the consumer answer and 1,667 cases pass. Open: property escapes of
 order 4 and `regexp-match-all-and-escape` of order 5, both being built, and the orders 5 to 8.
 
+## Slice 7, `generators`
+
+`epic:slice-07-generators`, next after slice 5 by the order above, and planned while the last
+stories of slice 5 were built: slice 10 holds the consumer's next gap (one `async` function
+with two `await`) and builds on the suspended frame of this slice's second story. Decomposed
+on 2026-11-23 into six stories, read by the four plan critics in two rounds
+(`review-result:slice-07-round-1-*`: 15 findings with 2 blockers on a first draft of one story,
+which was then cut in two; `review-result:slice-07-round-2-*`: 17 findings with 3 blockers on
+the six stories, 16 applied) and by two of them a third time for the three stories that had a
+blocker (`review-result:slice-07-round-3-*`: 2 findings, both applied). Measured on the code of
+release `0.7.0` with `matchAll`: 1,491 cases and 2,841 runs, 6 cases pass
+(`test262-slice 07 1491 2841 0 0 1491 6 1485 0`). The lists the stories read are under
+[`slice-07/`](slice-07/): the scan of the 1,485 failing cases by what they need, the case list
+of five stories and the two lists of the close. The design text they build on is the group of
+paragraphs "Suspended frames" in decision 3 with the matching sentences of decision 4
+(`eb1164e`): what of a frame moves, who holds and traces it, its charge and its credit,
+`frame_depth`, steps and terminations across entries, the result of a frame and re-entry.
+
+| order | stories | what it brings | cases of its list |
+|---|---|---|---|
+| 1 | `generator-syntax-and-early-errors` | `function*` and `yield` parse with their early errors; a script with a generator and no early error still ends on the counted refusal of slice 7 | 115 |
+| 2 | `generator-functions-and-suspended-frames` | generators run: the frame moves, boxed, into the generator object and back; `next`, `return`, `throw`; `HOST-73` | 978 |
+| 3 | `generator-function-constructor`, `yield-star-delegation` | `GeneratorFunction` from source text through the host's hook; `yield*` in the loop of the delegating frame | 21 and 49 |
+| 4 | `generator-methods-in-object-literals` | generator methods of object literals and their early errors | 280 |
+| 5 | `slice-07-conformance-close` | 40 cases that need `class` or `super` moved to slice 8; the 2 cases that need both `yield*` and methods; passing cases of later slices taken in by rule lines | 42 |
+
+A decomposition of slice 10 can start when order 2 is merged. The close runs after
+`slice-05-conformance-close`: both write section 12 of the design, `moves.tsv`,
+`later-parts.tsv` and `expected.txt`.
+
+**Delivered so far.** Nothing; order 1 is being built.
+
 ## What later slices take over
 
 Findings of delivered waves that belong to a slice not yet decomposed. The decomposition of
