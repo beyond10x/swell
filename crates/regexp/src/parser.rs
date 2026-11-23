@@ -745,13 +745,60 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
         })
     }
 
-    /// `\p{` or `\P{` under `u` is refused; `\p` or `\P` without `{` is an error there.
-    fn property(&self, start: usize) -> ParseError {
-        if self.is(1, b'{') {
-            error(ErrorKind::Refused(Refusal::PropertyEscape), start)
-        } else {
-            error(ErrorKind::InvalidEscape, start)
+    /// `\p{...}` or `\P{...}` under `u`, the parser at the `p` or `P` past the `\` at `start`
+    /// (CharacterClassEscape :: `p{` UnicodePropertyValueExpression `}`): the escape, read past.
+    /// The expression is `UnicodePropertyName=UnicodePropertyValue` or
+    /// LoneUnicodePropertyNameOrValue, each a run of ASCII letters, digits and `_`, looked up as
+    /// written (`#sec-runtime-semantics-unicodematchproperty-p`): a name or value that is no name
+    /// or alias ECMA-262 admits, a binary property with a value, and any other text between the
+    /// braces are the early error, as `\p` or `\P` without `{` is an invalid escape. The lookup is
+    /// a binary search of sorted names, linear in the name.
+    fn property(&mut self, start: usize) -> Result<ClassEscape, ParseError> {
+        let negated = self.is(0, b'P');
+        if !self.is(1, b'{') {
+            return Err(error(ErrorKind::InvalidEscape, start));
         }
+        let name_len = self.property_characters(2)?;
+        let name_start = self.pos.saturating_add(2);
+        let name_end = name_start.saturating_add(name_len);
+        let name = self.src.get(name_start..name_end).unwrap_or(&[]);
+        let (property, len) = if self.is(name_len.saturating_add(2), b'=') {
+            let value_len = self.property_characters(name_len.saturating_add(3))?;
+            let value_start = name_end.saturating_add(1);
+            let value = self
+                .src
+                .get(value_start..value_start.saturating_add(value_len))
+                .unwrap_or(&[]);
+            (
+                swell_unicode::property_value(name, value),
+                name_len.saturating_add(value_len).saturating_add(3),
+            )
+        } else {
+            (
+                swell_unicode::lone_property(name),
+                name_len.saturating_add(2),
+            )
+        };
+        let Some(property) = property.filter(|_| self.is(len, b'}')) else {
+            return Err(error(ErrorKind::InvalidPropertyName, start));
+        };
+        self.bump(len.saturating_add(1))?;
+        Ok(ClassEscape::Property { property, negated })
+    }
+
+    /// The count of ASCII letters, digits and `_` (UnicodePropertyValueCharacter) from `offset`
+    /// past the position; nothing is read past.
+    fn property_characters(&mut self, offset: usize) -> Result<usize, ParseError> {
+        let mut len = 0usize;
+        while self
+            .at(offset.saturating_add(len))
+            .and_then(ascii)
+            .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            len += 1;
+            self.m.read(1)?;
+        }
+        Ok(len)
     }
 
     /// `\` AtomEscape (and, without `u`, the `\` of ExtendedAtom :: `\` [lookahead = c]).
@@ -767,7 +814,10 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
             return self.node(Node::Escape(escape));
         }
         match b {
-            Some(b'p' | b'P') if self.unicode => Err(self.property(start)),
+            Some(b'p' | b'P') if self.unicode => {
+                let escape = self.property(start)?;
+                self.node(Node::Escape(escape))
+            }
             Some(b'1'..=b'9') => {
                 let (n, len) = self.decimal(0)?;
                 if self.unicode || n <= self.precount {
@@ -1040,7 +1090,7 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
                 self.bump(1)?;
                 Ok(ClassAtom::Character(u32::from(b'-')))
             }
-            Some(b'p' | b'P') if self.unicode => Err(self.property(start)),
+            Some(b'p' | b'P') if self.unicode => Ok(ClassAtom::Escape(self.property(start)?)),
             Some(b'B') if self.unicode => Err(error(ErrorKind::InvalidEscape, start)),
             Some(b'k') if self.unicode || self.named => Err(error(ErrorKind::InvalidEscape, start)),
             _ => Ok(ClassAtom::Character(self.character_escape(start, true)?)),

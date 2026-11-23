@@ -39,7 +39,10 @@ fn significant(digits: &[u16]) -> &[u16] {
     digits.get(zeros..).unwrap_or(&[])
 }
 
-/// One end of a class range: a character, or a class escape (IsCharacterClass true).
+/// One end of a class range: a character, or a class escape (IsCharacterClass true), a property
+/// escape `\p{...}` or `\P{...}` among them. The early errors of a property escape itself (a name
+/// or a value ECMA-262 does not admit, a binary property with a value) are checked where the
+/// parser reads it, since they need only its text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ClassAtom {
     Character(u32),

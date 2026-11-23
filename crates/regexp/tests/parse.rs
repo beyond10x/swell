@@ -45,6 +45,8 @@ fn escape(e: ClassEscape) -> &'static str {
         ClassEscape::NotSpace => "\\S",
         ClassEscape::Word => "\\w",
         ClassEscape::NotWord => "\\W",
+        ClassEscape::Property { negated: false, .. } => "\\p{..}",
+        ClassEscape::Property { negated: true, .. } => "\\P{..}",
     }
 }
 

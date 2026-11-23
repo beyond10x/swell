@@ -73,7 +73,7 @@ pub enum Look {
     NotBehind,
 }
 
-/// `\d \D \s \S \w \W` (CharacterClassEscape).
+/// `\d \D \s \S \w \W` and, under `u`, `\p{...}` and `\P{...}` (CharacterClassEscape).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClassEscape {
     Digit,
@@ -82,6 +82,12 @@ pub enum ClassEscape {
     NotSpace,
     Word,
     NotWord,
+    /// `\p{...}` (`negated` false) or `\P{...}`: the code points of `property`, or the rest
+    /// (`#sec-compiletocharset`, CharacterClassEscape :: `p{` and `P{`).
+    Property {
+        property: swell_unicode::Property,
+        negated: bool,
+    },
 }
 
 /// A quantifier: `*` is `{0,}`, `+` `{1,}`, `?` `{0,1}`; `max` is `None` for no bound. A count

@@ -139,16 +139,20 @@ fn an_invalid_pattern_in_eval_code_throws_a_syntax_error() {
     assert_eq!(agent.refusals(), 0, "a grammar error is no refusal");
 }
 
-/// The three parts of the pattern grammar a later story of slice 5 brings, the flag `v`, a
-/// property escape and a group name outside ASCII, are each a refused parse: `parse_script`
-/// answers the refusal alone, `<construct> is not supported before slice 5`, and `refusals()`
-/// moves by 1 (HOST-164); through `eval` the refusal is a `SyntaxError` the script catches,
-/// counted too.
+/// The two parts of the pattern grammar a later story of slice 5 brings, the flag `v` and a
+/// group name outside ASCII, are each a refused parse: `parse_script` answers the refusal alone,
+/// `<construct> is not supported before slice 5`, and `refusals()` moves by 1 (HOST-164);
+/// through `eval` the refusal is a `SyntaxError` the script catches, counted too. A property
+/// escape under `u` parses and moves nothing.
 #[test]
 fn a_refused_pattern_of_a_literal_is_counted_as_a_refused_parse() {
+    assert_eq!(parse_errors("x = /\\p{L}/u;"), (None, 0));
+    assert_eq!(
+        parse_errors("x = /\\P{Script=Greek}[\\p{Lu}]/u;"),
+        (None, 0)
+    );
     for (source, construct) in [
         ("x = /[a]/v;", "class set expressions of the v flag"),
-        ("x = /\\p{Lu}/u;", "property escape"),
         ("x = /(?<\u{e9}>a)/;", "group name outside ASCII"),
         ("x = /(?<\\u{e9}>a)/u;", "group name outside ASCII"),
     ] {

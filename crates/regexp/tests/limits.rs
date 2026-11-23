@@ -386,6 +386,12 @@ fn families() -> Vec<Family> {
             format!("[{}]", "a-z".repeat(k))
         }),
         ("classes", "u", false, |k| "[^a-z\\d_-]".repeat(k)),
+        (
+            "property escapes, outside a class and in one",
+            "u",
+            false,
+            |k| "\\p{L}\\P{sc=Greek}[\\p{scx=Latin}\\P{Changes_When_NFKC_Casefolded}a-z]".repeat(k),
+        ),
         ("braced quantifiers", "u", false, |k| "a{1,2}".repeat(k)),
         (
             "the digits of a braced quantifier left open, without u",

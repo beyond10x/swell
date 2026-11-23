@@ -17,10 +17,13 @@
 //!   RegExpBuiltinExec over the start indices, against a [`Subject`] read in place; the
 //!   [`Captures`] in code unit indices, or no match, or the stop of the budget.
 //!
+//! A property escape `\p{...}` or `\P{...}` under `u` names a property of `swell-unicode`
+//! ([`ClassEscape::Property`]); a name or a value ECMA-262 does not admit is an early error.
+//!
 //! Refused until the later stories of slice 5, each with the message `<construct> is not
-//! supported before slice 5`: the flag `v`, a property escape `\p{...}` or `\P{...}`, and a
-//! group name with a code point outside ASCII ([`Refusal`]), which ParsePattern refuses; and
-//! the flag `i` or a modifier `i` ([`CompileRefusal`]), which CompilePattern refuses.
+//! supported before slice 5`: the flag `v` and a group name with a code point outside ASCII
+//! ([`Refusal`]), which ParsePattern refuses; and the flag `i` or a modifier `i`
+//! ([`CompileRefusal`]), which CompilePattern refuses.
 
 mod ast;
 mod budget;

@@ -7,3 +7,8 @@ crates/unicode/src/tables/case_ignorable.rs case_ignorable ucd/DerivedCoreProper
 crates/unicode/src/tables/decompositions.rs decompositions ucd/UnicodeData.txt
 crates/unicode/src/tables/combining_class.rs combining_class ucd/UnicodeData.txt
 crates/unicode/src/tables/compositions.rs compositions ucd/UnicodeData.txt ucd/CompositionExclusions.txt ucd/DerivedNormalizationProps.txt
+crates/unicode/src/tables/general_category.rs general_category ucd/extracted/DerivedGeneralCategory.txt
+crates/unicode/src/tables/script.rs script ucd/Scripts.txt ucd/PropertyValueAliases.txt
+crates/unicode/src/tables/script_extensions.rs script_extensions ucd/ScriptExtensions.txt ucd/PropertyValueAliases.txt
+crates/unicode/src/tables/binary_properties.rs binary_properties ucd/PropertyAliases.txt ucd/PropList.txt ucd/DerivedCoreProperties.txt ucd/extracted/DerivedBinaryProperties.txt ucd/emoji/emoji-data.txt ucd/DerivedNormalizationProps.txt
+crates/unicode/src/tables/property_names.rs property_names ucd/PropertyAliases.txt ucd/PropertyValueAliases.txt ucd/extracted/DerivedGeneralCategory.txt

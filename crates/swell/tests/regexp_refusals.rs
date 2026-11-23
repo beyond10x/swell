@@ -3,10 +3,10 @@
 //! 12, the third form; `docs/design/host-interface.md`, decision 13, "A refusal raised by
 //! `RegExp`", HOST-191). Each story that lifts a refusal changes its line here to the answer
 //! HOST-191 gives once slice 5 is delivered: `story:regexp-case-insensitive-matching-and-modifiers`
-//! for `i`, `story:regexp-v-flag-class-sets-and-properties-of-strings` for `v`,
-//! `story:regexp-property-escapes-and-property-tables` for a property escape and
-//! `story:identifiers-and-group-names-outside-ascii` for a group name outside ASCII. Run also
-//! with the feature `collect-every-safe-point`.
+//! for `i`, `story:regexp-v-flag-class-sets-and-properties-of-strings` for `v` and
+//! `story:identifiers-and-group-names-outside-ascii` for a group name outside ASCII;
+//! `story:regexp-property-escapes-and-property-tables` lifted the refusal of a property escape.
+//! Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
 use crate::support;
@@ -28,11 +28,12 @@ fn throws(construction: &str, message: &str) -> String {
 }
 
 /// HOST-191: on a new agent, `new RegExp("a", "i")`, the literal `/a/i` evaluated, `new
-/// RegExp("a", "v")`, `new RegExp("\\p{L}", "u")` and `new RegExp("(?<\\u{e9}>a)")` each throw a
-/// `SyntaxError` with the exact message of the refusal and no position after it, caught by the
-/// script, and move `refusals()` by 1; `new RegExp("(")`, `new RegExp("a", "gg")` and `new
-/// RegExp("a", "g").test("a")` leave the count unchanged, and so does an error of ToString of
-/// the pattern, which is thrown instead of the refusal.
+/// RegExp("a", "v")` and `new RegExp("(?<\\u{e9}>a)")` each throw a `SyntaxError` with the exact
+/// message of the refusal and no position after it, caught by the script, and move `refusals()`
+/// by 1; `new RegExp("(")`, `new RegExp("a", "gg")`, `new RegExp("a", "g").test("a")` and `new
+/// RegExp("\\p{L}", "u").test("a")`, a property escape answered once its story landed, leave the
+/// count unchanged, and so does an error of ToString of the pattern, which is thrown instead of
+/// the refusal.
 #[test]
 fn host_191_regexp_counts_its_refusals_of_slice_5() {
     let mut agent = agent_with(limits()).unwrap();
@@ -48,16 +49,11 @@ fn host_191_regexp_counts_its_refusals_of_slice_5() {
             3,
         ),
         (
-            r#"new RegExp("\\p{L}", "u")"#,
-            "property escape is not supported before slice 5",
-            4,
-        ),
-        (
             r#"new RegExp("(?<\\u{e9}>a)")"#,
             "group name outside ASCII is not supported before slice 5",
-            5,
+            4,
         ),
-        (r#"new RegExp("(?i:a)")"#, case, 6),
+        (r#"new RegExp("(?i:a)")"#, case, 5),
     ] {
         assert_eq!(
             eval_text(&mut agent, &realm, &throws(construction, message)),
@@ -70,6 +66,7 @@ fn host_191_regexp_counts_its_refusals_of_slice_5() {
         r#"try { new RegExp("("); false; } catch (e) { e instanceof SyntaxError; }"#,
         r#"try { new RegExp("a", "gg"); false; } catch (e) { e instanceof SyntaxError; }"#,
         r#"new RegExp("a", "g").test("a")"#,
+        r#"new RegExp("\\p{L}", "u").test("a")"#,
         r#"var t = { toString: function () { throw 7; } };
            try { new RegExp(t, "i"); false; } catch (e) { e === 7; }"#,
         r#"try { new RegExp("a", "ii"); false; } catch (e) { e instanceof SyntaxError &&
@@ -78,11 +75,11 @@ fn host_191_regexp_counts_its_refusals_of_slice_5() {
              e.message === "unterminated group"; }"#,
     ] {
         assert_eq!(eval_text(&mut agent, &realm, script), yes(), "{script}");
-        assert_eq!(agent.refusals(), 6, "{script}");
+        assert_eq!(agent.refusals(), 5, "{script}");
     }
     assert_eq!(
         eval_text(&mut agent, &realm, "new RegExp(\"a\", \"i\");"),
         Outcome::Throw("SyntaxError".to_string())
     );
-    assert_eq!(agent.refusals(), 7, "uncaught");
+    assert_eq!(agent.refusals(), 6, "uncaught");
 }

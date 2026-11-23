@@ -2,8 +2,11 @@
 //! A renderer gets the sources of its line, in the order of the line, and returns the whole
 //! text of its table file.
 
+use std::collections::BTreeMap;
+
 use crate::case::{self, Simple};
 use crate::normalize;
+use crate::property;
 use crate::render::{self, Source};
 use crate::ucd::Ucd;
 
@@ -22,6 +25,11 @@ pub(crate) fn renderer(name: &str) -> Option<Renderer> {
         "decompositions" => Some(decompositions),
         "combining_class" => Some(combining_class),
         "compositions" => Some(compositions),
+        "general_category" => Some(general_category),
+        "script" => Some(script),
+        "script_extensions" => Some(script_extensions),
+        "binary_properties" => Some(binary_properties),
+        "property_names" => Some(property_names),
         _ => None,
     }
 }
@@ -277,5 +285,303 @@ fn compositions(ucd: &mut Ucd, sources: &[Source]) -> Result<String, String> {
         "(u32, u32, u32)",
         &rows,
     ));
+    Ok(text)
+}
+
+/// The values of General_Category of `ucd/extracted/DerivedGeneralCategory.txt`, one constant of
+/// ranges each, and the constant `VALUES` of all of them in the order of the bits of a mask.
+fn general_category(ucd: &mut Ucd, sources: &[Source]) -> Result<String, String> {
+    let source = one_source("general_category", sources)?;
+    let categories = property::categories(ucd, &source.path)?;
+    let mut text = render::head(sources);
+    text.push_str(
+        "//! The values of General_Category of `DerivedGeneralCategory.txt`, which the property\n\
+         //! escapes read (`#sec-runtime-semantics-unicodematchpropertyvalue-p-v`). Every code point\n\
+         //! has one of them, `Cn` where no other; the groups (`L`, `LC`, `M`, `N`, `P`, `S`, `Z`\n\
+         //! and `C`) are unions of these, made at run time.\n",
+    );
+    for (name, ranges) in &categories {
+        text.push_str(&format!(
+            "\n/// The code points of `{name}`: sorted, disjoint inclusive ranges.\n"
+        ));
+        text.push_str(&property::ranges(&name.to_ascii_uppercase(), ranges));
+    }
+    let items: Vec<String> = categories
+        .iter()
+        .map(|(name, _)| name.to_ascii_uppercase())
+        .collect();
+    text.push_str(
+        "\n/// Every value, sorted by its short name: bit `i` of a mask of values of\n\
+         /// `property_names::CATEGORIES` is `VALUES[i]`.\n",
+    );
+    text.push_str(&property::short_items("VALUES", "&[(u32, u32)]", &items));
+    Ok(text)
+}
+
+/// The values of Script of `ucd/Scripts.txt`, in the order of the `sc` lines of
+/// `ucd/PropertyValueAliases.txt`, one constant of ranges each, and the constant `VALUES` of all
+/// of them in that order.
+fn script(ucd: &mut Ucd, sources: &[Source]) -> Result<String, String> {
+    let [scripts, aliases] = sources else {
+        return Err(format!(
+            "the renderer script reads two sources (Scripts.txt, PropertyValueAliases.txt), not {}",
+            sources.len()
+        ));
+    };
+    let values = property::values(ucd, &aliases.path, "sc")?;
+    let ranges = property::scripts(ucd, &scripts.path, &values)?;
+    let mut text = render::head(sources);
+    text.push_str(
+        "//! The values of Script of `Scripts.txt`, which the property escapes read\n\
+         //! (`#sec-runtime-semantics-unicodematchpropertyvalue-p-v`), in the order of the lines of\n\
+         //! Script in `PropertyValueAliases.txt`. `Zzzz` (`Unknown`), which `Scripts.txt` does not\n\
+         //! list, is every code point it gives no script; `Hrkt` (`Katakana_Or_Hiragana`) has no\n\
+         //! code point.\n",
+    );
+    for (value, ranges) in values.iter().zip(&ranges) {
+        text.push_str(&format!(
+            "\n/// The code points of `{}` (`{}`): sorted, disjoint inclusive ranges.\n",
+            value.short(),
+            value.long()
+        ));
+        text.push_str(&property::ranges(
+            &value.short().to_ascii_uppercase(),
+            ranges,
+        ));
+    }
+    let items: Vec<String> = values
+        .iter()
+        .map(|value| value.short().to_ascii_uppercase())
+        .collect();
+    text.push_str(
+        "\n/// Every value, in the order of `PropertyValueAliases.txt`: the number of a script in\n\
+         /// `property_names::SCRIPTS` and `script_extensions::LISTS` is its index here.\n",
+    );
+    text.push_str(&property::short_items("VALUES", "&[(u32, u32)]", &items));
+    Ok(text)
+}
+
+/// The sets of Script_Extensions of `ucd/ScriptExtensions.txt`, as the constants `RANGES` and
+/// `LISTS`, a script by its number in the order of the `sc` lines of
+/// `ucd/PropertyValueAliases.txt`.
+fn script_extensions(ucd: &mut Ucd, sources: &[Source]) -> Result<String, String> {
+    let [extensions, aliases] = sources else {
+        return Err(format!(
+            "the renderer script_extensions reads two sources (ScriptExtensions.txt, \
+             PropertyValueAliases.txt), not {}",
+            sources.len()
+        ));
+    };
+    let values = property::values(ucd, &aliases.path, "sc")?;
+    let rows = property::script_extensions(ucd, &extensions.path, &values)?;
+    let mut lists: Vec<u8> = Vec::new();
+    let mut starts: BTreeMap<Vec<u8>, usize> = BTreeMap::new();
+    let mut lines = Vec::with_capacity(rows.len());
+    for (first, last, list) in &rows {
+        let start = match starts.get(list) {
+            Some(start) => *start,
+            None => {
+                let start = lists.len();
+                lists.extend_from_slice(list);
+                starts.insert(list.clone(), start);
+                start
+            }
+        };
+        lines.push(format!(
+            "    ({}, {}, {start}, {}),\n",
+            normalize::hex(*first),
+            normalize::hex(*last),
+            list.len()
+        ));
+    }
+    let mut text = render::head(sources);
+    text.push_str(
+        "//! The values of Script_Extensions of `ScriptExtensions.txt`, which the property escapes\n\
+         //! read (`#sec-runtime-semantics-unicodematchpropertyvalue-p-v`). A code point this file\n\
+         //! does not list has the extensions `{Script}`, its own script alone; the rule is applied\n\
+         //! at run time.\n\
+         \n\
+         /// The code points the file lists: sorted, disjoint inclusive ranges\n\
+         /// `(first, last, start, len)`, the scripts of each the `len` numbers from `start` of\n\
+         /// `LISTS`.\n",
+    );
+    text.push_str(&normalize::constant(
+        "RANGES",
+        "(u32, u32, u16, u8)",
+        &lines,
+    ));
+    let items: Vec<String> = lists.iter().map(u8::to_string).collect();
+    text.push_str(
+        "\n/// The lists of scripts of `RANGES`, each sorted, a script by its index in\n\
+         /// `script::VALUES`.\n",
+    );
+    text.push_str(&property::short_items("LISTS", "u8", &items));
+    Ok(text)
+}
+
+/// The binary properties of ECMA-262's table that the data files hold, one constant of ranges
+/// each from the first source that has it (after `ucd/PropertyAliases.txt`, against which every
+/// name and alias of the table is checked), and the constant `VALUES` of all of them in the
+/// order of the table.
+fn binary_properties(ucd: &mut Ucd, sources: &[Source]) -> Result<String, String> {
+    let [aliases, data @ ..] = sources else {
+        return Err(
+            "the renderer binary_properties reads PropertyAliases.txt and the files of \
+                    the properties"
+                .to_string(),
+        );
+    };
+    if data.is_empty() {
+        return Err("the renderer binary_properties reads no file of properties".to_string());
+    }
+    property::check_property_aliases(ucd, &aliases.path)?;
+    let paths: Vec<&str> = data.iter().map(|source| source.path.as_str()).collect();
+    let properties = property::binary_properties(ucd, &paths)?;
+    let mut text = render::head(sources);
+    text.push_str(
+        "//! The binary properties of ECMA-262's table (`#table-binary-unicode-properties`) that\n\
+         //! the data files hold, which the property escapes read\n\
+         //! (`#sec-runtime-semantics-unicodematchproperty-p`). `Any`, `ASCII` and `Assigned` are\n\
+         //! made at run time; `Cased` and `Case_Ignorable` are the tables of the case mappings.\n",
+    );
+    for (name, ranges) in &properties {
+        text.push_str(&format!(
+            "\n/// The code points of `{name}`: sorted, disjoint inclusive ranges.\n"
+        ));
+        text.push_str(&property::ranges(&name.to_ascii_uppercase(), ranges));
+    }
+    let rows: Vec<String> = property::binary_order()
+        .iter()
+        .map(|name| format!("    {},\n", property::binary_constant(name)))
+        .collect();
+    text.push_str(
+        "\n/// Every binary property of the table that a data file holds, in the order of the\n\
+         /// table: the number of a property in `property_names::BINARY` is its index here.\n",
+    );
+    text.push_str(&normalize::constant("VALUES", "&[(u32, u32)]", &rows));
+    Ok(text)
+}
+
+/// The names and aliases of the properties of ECMA-262's two tables and of the values of
+/// General_Category and Script, as the constants `PROPERTIES`, `CATEGORIES`, `SCRIPTS` and
+/// `BINARY`, each sorted by name, from `ucd/PropertyAliases.txt` (the check of the tables'
+/// aliases), `ucd/PropertyValueAliases.txt` and `ucd/extracted/DerivedGeneralCategory.txt` (the
+/// order of the values of General_Category).
+fn property_names(ucd: &mut Ucd, sources: &[Source]) -> Result<String, String> {
+    let [aliases, value_aliases, general] = sources else {
+        return Err(format!(
+            "the renderer property_names reads three sources (PropertyAliases.txt, \
+             PropertyValueAliases.txt, DerivedGeneralCategory.txt), not {}",
+            sources.len()
+        ));
+    };
+    property::check_property_aliases(ucd, &aliases.path)?;
+    let categories: Vec<String> = property::categories(ucd, &general.path)?
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    let gc = property::values(ucd, &value_aliases.path, "gc")?;
+    let sc = property::values(ucd, &value_aliases.path, "sc")?;
+
+    let mut properties: Vec<(String, String)> = Vec::new();
+    for (number, (name, names)) in property::NON_BINARY.iter().enumerate() {
+        for name in std::iter::once(name).chain(names.iter()) {
+            properties.push(((*name).to_owned(), number.to_string()));
+        }
+    }
+    let categories: Vec<(String, String)> = property::category_masks(&categories, &gc)?
+        .into_iter()
+        .map(|(name, mask)| (name, format!("{mask:#010X}")))
+        .collect();
+    let mut scripts: Vec<(String, String)> = Vec::new();
+    for (number, value) in sc.iter().enumerate() {
+        for name in &value.names {
+            scripts.push((name.clone(), number.to_string()));
+        }
+    }
+    let order = property::binary_order();
+    let mut binary: Vec<(String, String)> = Vec::new();
+    for (name, names) in property::BINARY {
+        let number = match order.iter().position(|other| other == name) {
+            Some(at) => at,
+            None => {
+                order.len()
+                    + property::RUN_TIME
+                        .iter()
+                        .position(|other| other == name)
+                        .unwrap_or_default()
+            }
+        };
+        for name in std::iter::once(name).chain(names.iter()) {
+            binary.push(((*name).to_owned(), number.to_string()));
+        }
+    }
+    for (name, _) in &binary {
+        if categories.iter().any(|(other, _)| other == name) {
+            return Err(format!(
+                "{name} is both a binary property and a value of General_Category"
+            ));
+        }
+    }
+    let constant =
+        |name: &str, row: &str, mut list: Vec<(String, String)>| -> Result<String, String> {
+            // A line may give one name twice (`sc ; Ahom ; Ahom`): one row; one name for two values
+            // is an error.
+            list.sort();
+            list.dedup();
+            if let Some(pair) = list
+                .windows(2)
+                .find(|pair| matches!(pair, [a, b] if a.0 == b.0))
+            {
+                return Err(format!(
+                    "{name}: the name {} twice",
+                    pair.first()
+                        .map(|(name, _)| name.as_str())
+                        .unwrap_or_default()
+                ));
+            }
+            let rows: Vec<String> = list
+                .iter()
+                .map(|(name, value)| format!("    ({name:?}, {value}),\n"))
+                .collect();
+            Ok(normalize::constant(name, row, &rows))
+        };
+    let mut text = render::head(sources);
+    text.push_str(
+        "//! The names and aliases a property escape may give\n\
+         //! (`#sec-patterns-static-semantics-early-errors`,\n\
+         //! `#sec-runtime-semantics-unicodematchproperty-p`,\n\
+         //! `#sec-runtime-semantics-unicodematchpropertyvalue-p-v`): those of ECMA-262's tables of\n\
+         //! properties (`#table-nonbinary-unicode-properties`, `#table-binary-unicode-properties`),\n\
+         //! and every value and alias of General_Category and Script in `PropertyValueAliases.txt`.\n\
+         //! Each list is sorted by name, as bytes, for a binary search; a name matches only as\n\
+         //! written (no loose matching).\n\
+         \n\
+         /// The non-binary properties and the number of each: `0` General_Category, `1` Script,\n\
+         /// `2` Script_Extensions.\n",
+    );
+    text.push_str(&constant("PROPERTIES", "(&str, u8)", properties)?);
+    text.push_str(
+        "\n/// The values of General_Category and their aliases, each with its mask: bit `i` is the\n\
+         /// value `general_category::VALUES[i]`, and a group has the bits of its members.\n",
+    );
+    text.push_str(&constant("CATEGORIES", "(&str, u32)", categories)?);
+    text.push_str(
+        "\n/// The values of Script and Script_Extensions and their aliases, each with the index of\n\
+         /// its script in `script::VALUES`.\n",
+    );
+    text.push_str(&constant("SCRIPTS", "(&str, u8)", scripts)?);
+    text.push_str(
+        "\n/// The binary properties and their aliases, each with its number: the index of its\n\
+         /// ranges in `binary_properties::VALUES`, or one of [`ANY`], [`ASCII`] and [`ASSIGNED`].\n",
+    );
+    text.push_str(&constant("BINARY", "(&str, u8)", binary)?);
+    for (offset, name) in property::RUN_TIME.iter().enumerate() {
+        text.push_str(&format!(
+            "\n/// The number of `{name}`, made at run time.\npub(crate) const {}: u8 = {};\n",
+            name.to_ascii_uppercase(),
+            order.len() + offset
+        ));
+    }
     Ok(text)
 }

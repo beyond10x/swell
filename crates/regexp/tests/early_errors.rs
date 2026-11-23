@@ -1,12 +1,12 @@
 //! The early errors of a pattern (`#sec-patterns-static-semantics-early-errors` and
 //! `#sec-patterns-static-semantics-early-errors-annexb`), each with a pattern that hits it and
-//! one beside it that does not; the flags of `#sec-regexpinitialize`; and the three refusals of
-//! slice 5 (`docs/design/engine.md`, decision 7, "Refusals until the later stories of slice
-//! 5").
+//! one beside it that does not; the flags of `#sec-regexpinitialize`; and the two refusals of
+//! the parser in slice 5 (`docs/design/engine.md`, decision 7, "Refusals until the later stories
+//! of slice 5").
 //!
 //! Not held here: CountLeftCapturingParensWithin ≥ 2^32 - 1 (a pattern of more than 2^32
-//! parentheses), and the early errors of property escapes and of the flag `v`, which the
-//! parser refuses until their stories.
+//! parentheses), the early errors of property escapes, which `property_escapes.rs` holds, and
+//! those of the flag `v`, which the parser refuses until its story.
 
 use swell_regexp::{
     ErrorKind, Flags, ParseError, Pattern, PatternError, Refusal, Unlimited, parse_pattern,
@@ -289,17 +289,13 @@ fn flags_are_d_g_i_m_s_u_v_y_each_once_and_not_u_with_v() {
 }
 
 #[test]
-fn the_v_flag_a_property_escape_and_a_group_name_outside_ascii_are_refusals_of_slice_5() {
+fn the_v_flag_and_a_group_name_outside_ascii_are_refusals_of_slice_5() {
     let sets = "class set expressions of the v flag is not supported before slice 5";
-    let property = "property escape is not supported before slice 5";
     let name = "group name outside ASCII is not supported before slice 5";
     for (pattern, flags, refusal, message, offset) in [
         ("a", "v", Refusal::SetsFlag, sets, 0),
         ("[a&&b]", "gv", Refusal::SetsFlag, sets, 0),
         ("a{2,1}", "v", Refusal::SetsFlag, sets, 0),
-        ("\\p{L}", "u", Refusal::PropertyEscape, property, 0),
-        ("a\\P{Lu}", "u", Refusal::PropertyEscape, property, 1),
-        ("[a\\p{L}]", "u", Refusal::PropertyEscape, property, 2),
         ("(?<é>a)", "", Refusal::GroupNameOutsideAscii, name, 3),
         ("(?<aé>a)", "u", Refusal::GroupNameOutsideAscii, name, 4),
         ("(?<\\u00E9>a)", "", Refusal::GroupNameOutsideAscii, name, 3),
@@ -345,8 +341,12 @@ fn the_v_flag_a_property_escape_and_a_group_name_outside_ascii_are_refusals_of_s
         assert_eq!(e.message(), message, "/{pattern}/{flags}");
         assert_eq!(e.offset, offset, "/{pattern}/{flags}");
     }
-    // Without `u` `\p` is an identity escape, and nothing is refused.
-    assert!(parse("\\p{L}", "").is_ok());
+    // A property escape is no refusal: it parses under `u`, and without `u` `\p` is an identity
+    // escape.
+    for pattern in ["\\p{L}", "a\\P{Lu}", "[a\\p{L}]"] {
+        assert!(parse(pattern, "u").is_ok(), "/{pattern}/u");
+        assert!(parse(pattern, "").is_ok(), "/{pattern}/");
+    }
     // The grammar errors and the nesting limit are no refusals.
     assert!(!error("(", "").is_refusal());
     assert_eq!(error("(", "").message(), "unterminated group");

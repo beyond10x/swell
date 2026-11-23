@@ -21,8 +21,6 @@ use crate::budget::Stop;
 pub enum Refusal {
     /// The flag `v` (`story:regexp-v-flag-class-sets-and-properties-of-strings`).
     SetsFlag,
-    /// `\p{...}` or `\P{...}` (`story:regexp-property-escapes-and-property-tables`).
-    PropertyEscape,
     /// A group name with a code point outside ASCII, written or escaped
     /// (`story:identifiers-and-group-names-outside-ascii`).
     GroupNameOutsideAscii,
@@ -33,7 +31,6 @@ impl Refusal {
     pub fn construct(self) -> &'static str {
         match self {
             Refusal::SetsFlag => "class set expressions of the v flag",
-            Refusal::PropertyEscape => "property escape",
             Refusal::GroupNameOutsideAscii => "group name outside ASCII",
         }
     }
@@ -79,6 +76,10 @@ pub enum ErrorKind {
     RangeOutOfOrder,
     /// A class escape at an end of a class range under `u`.
     ClassEscapeInRange,
+    /// `\p{...}` or `\P{...}` whose text is no UnicodePropertyValueExpression, or names a
+    /// property or a value ECMA-262 does not admit (`#sec-patterns-static-semantics-early-errors`,
+    /// UnicodePropertyValueExpression).
+    InvalidPropertyName,
     /// A backreference past the count of capturing groups.
     BackreferencePastGroups,
     /// `\k<name>` where no group has that name.
@@ -150,6 +151,7 @@ impl fmt::Display for PatternError {
             ErrorKind::InvalidNamedReference => "invalid named reference",
             ErrorKind::RangeOutOfOrder => "range out of order in character class",
             ErrorKind::ClassEscapeInRange => "a class escape at an end of a class range",
+            ErrorKind::InvalidPropertyName => "invalid property name",
             ErrorKind::BackreferencePastGroups => "a backreference past the capturing groups",
             ErrorKind::UnknownGroupName => "a reference to a group name no group has",
             ErrorKind::DuplicateGroupName => "duplicate capture group name",

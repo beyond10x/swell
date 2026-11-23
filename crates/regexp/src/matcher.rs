@@ -21,7 +21,10 @@
 //! the entries above its barrier and the barrier), and one per code unit a backreference
 //! compares, charged before the comparison. The clearing of a quantified atom's captures runs
 //! one step per group of its range, and a named backreference one per group of its name, each
-//! its instruction's step the first and the rest charged before it reads a slot; a try writes
+//! its instruction's step the first and the rest charged before it reads a slot; a class one
+//! step per property escape it holds, its instruction's step the first and the rest charged
+//! before it tests the character, each property a bounded number of binary searches over a table
+//! of `swell-unicode` (at most seven, for the group `P` of General_Category); a try writes
 //! one slot, since a try that failed undid its changes entry by entry. No number of the
 //! pattern multiplies the work of a step. They are taken by grants of at most
 //! [`MAX_GRANT`], a further grant asked when one is spent; a match that ends with a match, no
@@ -601,8 +604,12 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
             Inst::Class { class, back } => {
                 let program = self.program;
                 let set = program.classes.get(class as usize);
+                // One step per property escape of the class, this instruction's the first,
+                // charged before the test: each is a bounded number of binary searches.
+                let properties = set.map_or(0, |set| set.properties_len);
+                self.steps(properties.saturating_sub(1) as usize)?;
                 self.read(pos, back)
-                    .filter(|&(c, _)| set.is_some_and(|set| set.contains(&program.ranges, c)))
+                    .filter(|&(c, _)| set.is_some_and(|set| set.contains(program, c)))
                     .map(|(_, to)| (next, to))
             }
             Inst::LineStart { multiline } => {
