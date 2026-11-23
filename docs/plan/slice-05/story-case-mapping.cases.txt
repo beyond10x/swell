@@ -1,0 +1,12 @@
+test/built-ins/String/prototype/toLocaleLowerCase/Final_Sigma_U180E.js
+test/built-ins/String/prototype/toLocaleLowerCase/special_casing.js
+test/built-ins/String/prototype/toLocaleLowerCase/special_casing_conditional.js
+test/built-ins/String/prototype/toLocaleLowerCase/supplementary_plane.js
+test/built-ins/String/prototype/toLocaleUpperCase/special_casing.js
+test/built-ins/String/prototype/toLocaleUpperCase/supplementary_plane.js
+test/built-ins/String/prototype/toLowerCase/Final_Sigma_U180E.js
+test/built-ins/String/prototype/toLowerCase/special_casing.js
+test/built-ins/String/prototype/toLowerCase/special_casing_conditional.js
+test/built-ins/String/prototype/toLowerCase/supplementary_plane.js
+test/built-ins/String/prototype/toUpperCase/special_casing.js
+test/built-ins/String/prototype/toUpperCase/supplementary_plane.js

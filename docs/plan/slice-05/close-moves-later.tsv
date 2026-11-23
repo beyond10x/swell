@@ -1,0 +1,17 @@
+test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-1.js	4	parseInt
+test/built-ins/RegExp/match-indices/indices-array-non-unicode-match.js	4	Date
+test/built-ins/RegExp/match-indices/indices-array-unicode-match.js	4	Date
+test/built-ins/RegExp/named-groups/groups-object-subclass-sans.js	8	parse: refused: SyntaxError: class is not supported before slice 8 (18:1)
+test/built-ins/RegExp/named-groups/groups-object-subclass.js	8	parse: refused: SyntaxError: class is not supported before slice 8 (18:1)
+test/built-ins/RegExp/prototype/Symbol.replace/coerce-lastindex.js	4	Math.pow
+test/built-ins/RegExp/prototype/Symbol.split/species-ctor-species-non-ctor.js	4	Date
+test/built-ins/String/prototype/split/call-split-1-math-pow-2-32-1-instance-is-number.js	4	Math.pow
+test/built-ins/String/prototype/split/separator-number-limit-math-pow-2-32-1-instance-is-number.js	4	Math.pow
+test/built-ins/String/prototype/split/separator-undef-limit-custom.js	4	parse: refused: SyntaxError: exponentiation operator is not supported before sli
+test/built-ins/String/prototype/split/separator-undef-limit-zero.js	4	parse: refused: SyntaxError: exponentiation operator is not supported before sli
+test/built-ins/global/S10.2.3_A1.1_T3.js	4	Date
+test/built-ins/global/S10.2.3_A1.2_T3.js	4	Date
+test/built-ins/global/S10.2.3_A1.3_T3.js	4	Date
+test/built-ins/global/global-object.js	4	Date
+test/language/expressions/typeof/built-in-exotic-objects-no-call.js	4	Date
+test/language/expressions/typeof/native-call.js	4	Date
