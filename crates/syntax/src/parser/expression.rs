@@ -18,9 +18,10 @@
 //! its spread element last as the rest element; a spread element stands in an array literal and
 //! among the arguments of a call or `new` (`#sec-argument-lists`). Slice 7 adds the
 //! YieldExpression (`#sec-generator-function-definitions`) at the level of an
-//! `AssignmentExpression` where [Yield] is set; elsewhere `yield` is an identifier.
+//! `AssignmentExpression` where [Yield] is set; elsewhere `yield` is an identifier; and the
+//! generator methods of object literals (GeneratorMethod).
 //!
-//! Refused, each with its slice: `**` and `**=` (4), generator methods (7), `class`, `super`,
+//! Refused, each with its slice: `**` and `**=` (4), `class`, `super`,
 //! `new.target` (8), `async` functions and
 //! `await` (10), `import.meta` and dynamic `import` (11).
 //!
@@ -1447,6 +1448,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         let start = self.start();
         match self.accessor_kind()? {
             Some(kind) => self.accessor_rest(object, kind, start)?,
+            None if self.is(Punct::Star) => self.generator_method(object, start)?,
             None if self.is(Punct::Ellipsis) => self.spread_property(object, start)?,
             None => self.value_property_rest(object, start)?,
         }
@@ -1455,13 +1457,12 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// Whether the property at the current token is a getter or setter: `get` or `set`, written
-    /// without an escape, followed by a property name or a computed one. Refuses generator and
-    /// `async` methods.
+    /// without an escape, followed by a property name or a computed one. Refuses `async`
+    /// methods.
     #[inline(never)]
     fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
         let plain = !self.tok.escaped;
         let word = match &self.tok.kind {
-            TokenKind::Punct(Punct::Star) => return self.refuse("generator method", 7),
             TokenKind::Name(n) if plain && n == "get" => FunctionKind::Getter,
             TokenKind::Name(n) if plain && n == "set" => FunctionKind::Setter,
             TokenKind::Name(n) if plain && n == "async" => {
@@ -1538,6 +1539,49 @@ impl<'a, 'm> Parser<'a, 'm> {
             Property {
                 key,
                 value,
+                span: start,
+            },
+        )?;
+        Ok(id)
+    }
+
+    /// `MethodDefinition : GeneratorMethod`, `* ClassElementName ( UniqueFormalParameters[+Yield,
+    /// ~Await] ) { GeneratorBody }` (`#sec-generator-function-definitions`), at its `*`,
+    /// appended to `object`. The name is read with the [Yield] of the code around the literal
+    /// (`ClassElementName[?Yield, ?Await]`), so in a generator a `yield` in a computed name is a
+    /// YieldExpression of that generator; the parameters and the body are those of a method
+    /// whose `generator` is set, which [`Parser::function_rest`] reads with [Yield] set.
+    fn generator_method(&mut self, object: ExprId, start: Span) -> R<()> {
+        self.enter()?;
+        self.advance()?;
+        let computed = self.computed_name()?;
+        let id = self.generator_method_head(object, start, computed)?;
+        self.function_rest(id)?;
+        self.property_end(object);
+        self.leave();
+        Ok(())
+    }
+
+    /// The `ClassElementName` of a generator method, a `PropertyName` (a `PrivateIdentifier`
+    /// stands only in a class): numbers its function, a method whose `generator` is set, and
+    /// appends the property.
+    #[inline(never)]
+    fn generator_method_head(
+        &mut self,
+        object: ExprId,
+        start: Span,
+        computed: Option<ExprId>,
+    ) -> R<FunctionId> {
+        let key = self.key_or(computed)?;
+        let id = self.begin_function(FunctionKind::Method, start, None);
+        if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {
+            f.generator = true;
+        }
+        self.push_property(
+            object,
+            Property {
+                key,
+                value: PropertyValue::Method(id),
                 span: start,
             },
         )?;
