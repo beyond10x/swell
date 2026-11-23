@@ -1338,24 +1338,48 @@ first.
 ## 12. Delivery order
 
 Each slice ends with the gate green and the expected file raised. A case is counted in the first
-slice after which it can pass: the highest slice among its directory, its features and its flags,
-by the rules in the block below (each line `dir <prefix> <slice>`, `feature <name> <slice>`,
+slice after which it can pass: the slice delivered last among its directory, its features and its
+flags, by the rules in the block below (each line `dir <prefix> <slice>`, `feature <name> <slice>`,
 `flag <name> <slice>` or `exclude <feature> <reason>`; the longest matching prefix wins; a feature
-without a line sets no slice). Since 18,673 cases name no feature, the counts say when a case can
-first pass, not that it will; the runner gives the real numbers.
+without a line sets no slice; the one line `order delivery <slice>,<slice>,...` names every
+numbered slice once, in the order of delivery). Since 18,673 cases name no feature, the counts say
+when a case can first pass, not that it will; the runner gives the real numbers.
+
+**The order of delivery.** Added on 2026-11-23, at the close of slice 6. The slices are not
+delivered in the order of their numbers: after slice 3 the order is 6, 5, 7, 10, 4, 9, by what
+the first consumer needs first (`docs/plan/waves.md`, "The order after slice 3"), then 8, 11 and
+12 to 21 as numbered. The block names it in one line, `order delivery
+1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21`, and a case is counted in the slice
+delivered last among the slices of its lines: a case of `test/built-ins/RegExp/` (slice 5) that
+uses `Symbol` (slice 6) can first pass after slice 5, and one of `test/built-ins/Date/` (slice 4)
+that uses `Promise` (slice 10) after slice 4. While the numbers were the order, the highest number
+was that slice; once slice 6 came before 4 and 5 it was not, and 393 failing cases of slice 6 that
+need only slice 4 or 5 could not leave it. The runner, `slices.awk` below and
+`test262-moves-check` read the order from the block and compare two slices by their place in it;
+the runner fails on a block without the line, with a slice named twice, or with a rule line of a
+slice the line does not name, and the check refuses a line of `conformance/test262/moves.tsv`
+whose `to` is not delivered after its `from`. Measured on 2026-11-23 with the check under "How the
+counts were made", this block counted once by the highest number and once by the order: 3,214
+cases are in another slice, and slices 1 to 3 keep every case. 75 go from slice 6 to 4 and 327
+from 6 to 5 (7 of them by a line of their own, in the paragraph "Slice 6's cases that need a
+later slice"; the others by the lines the block had), 1 from 5 to 4, 1 from 7 to 4, 30 from 9
+to 8, 2,743 from 10 to 8 (classes with `async`) and 37 from 10 to 9. The counts of the slices
+not yet delivered say where a case is counted under this order; when the order of those slices
+changes, their counts move with it, and the delivered slices, which stay first in the order,
+keep theirs.
 
 | slice | name | cases | runs |
 |---|---|---|---|
 | 1 | `harness` | 31 | 62 |
 | 2 | `language-core` | 4,259 | 7,543 |
 | 3 | `builtins-core` | 7,011 | 13,829 |
-| 4 | `numbers-and-dates` | 1,521 | 3,002 |
-| 5 | `regexp` | 2,398 | 4,791 |
-| 6 | `bindings-and-iteration` | 4,300 | 8,153 |
-| 7 | `generators` | 1,492 | 2,843 |
-| 8 | `classes` | 6,371 | 12,649 |
-| 9 | `collections-proxy-reflect` | 1,772 | 3,515 |
-| 10 | `promises-and-async` | 6,659 | 13,003 |
+| 4 | `numbers-and-dates` | 1,598 | 3,156 |
+| 5 | `regexp` | 2,724 | 5,441 |
+| 6 | `bindings-and-iteration` | 3,898 | 7,351 |
+| 7 | `generators` | 1,491 | 2,841 |
+| 8 | `classes` | 9,144 | 18,139 |
+| 9 | `collections-proxy-reflect` | 1,779 | 3,529 |
+| 10 | `promises-and-async` | 3,879 | 7,499 |
 | 11 | `modules` | 1,281 | 1,833 |
 | 12 | `bigint` | 338 | 676 |
 | 13 | `binary-data` | 3,060 | 6,076 |
@@ -1396,13 +1420,13 @@ Every moved case goes to a slice from 4 to 13, so slices 1 to 19 still hold 44,9
 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
 
 Slice 6 had 4,436 cases and 8,413 runs by its rules (its `feature` lines and the lines of the
-closes of slices 1 to 3 that gave it cases). 4,300 cases and 8,153 runs are what slice 6 counts:
+closes of slices 1 to 3 that gave it cases). 3,898 cases and 7,351 runs are what slice 6 counts:
 136 cases that need a later slice move by the lines of the paragraph "Slice 6's cases that need
-a later slice", and 393 cases that need slice 4 or 5 stay in it, as that paragraph says.
-Measured on 2026-11-23 with the same check (`awk -f slices.awk` over this block and the
-inventory's `meta.tsv`, counting slice `06`): `06 4300 8153`. Every moved case goes to a slice
-from 4 to 13, so slices 1 to 19 still hold 44,931 cases and 85,794 runs and the 22 lines still
-sum to 53,801 and 103,360.
+a later slice", and 402 cases that need slice 4 or 5 (75 and 327) go there by the order of
+delivery, 7 of them with a line of their own, as that paragraph says. Measured on 2026-11-23 with the same check (`awk -f slices.awk`
+over this block and the inventory's `meta.tsv`, counting slice `06`): `06 3898 7351` (`06 4300
+8153` before the order of delivery). Every moved case goes to a slice from 4 to 13, so slices 1
+to 19 still hold 44,931 cases and 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
 
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
@@ -1497,9 +1521,10 @@ insertion and the builtins called):
 
 The rules are prefixes and the longest wins, so each file's line beats `dir test/harness/ 1`.
 Within slices 1 to 19 the
-order is that of dependencies: nothing can be counted before slice 1, slices 2 to 5 are the
+numbers follow dependencies: nothing can be counted before slice 1, slices 2 to 5 are the
 language and library of ES5, 6 to 8 the syntax most later tests are written in (4,916 cases carry
-`class`), 10 needs 7's suspended frames, and 13 needs 12 for `BigInt64Array`.
+`class`), 10 needs 7's suspended frames, and 13 needs 12 for `BigInt64Array`. The order of
+delivery ("The order of delivery" above) keeps the last two: 7 before 10, 12 before 13.
 
 **A part before its slice.** Added on 2026-11-21, when the slice epics were drafted and the
 order of section 12 was read against the crate graph of decision 2: `swell-syntax` depends on
@@ -1779,16 +1804,28 @@ of the list):
   `_small-typed-array`).
 
 The counts sum to the 136 lines this change adds to or changes in the list. 393 failing cases
-(784 runs) need slice 4 or 5 and no later slice: 326 slice 5 (`RegExp` and the `String` methods
-that use it: `RegExp/prototype/Symbol.*` 218, `String/prototype` 76, `RegExpStringIteratorPrototype`
-17, the rest of `RegExp` 12, 3 others) and 67 slice 4 (`Date` 59, `Number` 5, `**` 3). Each
-carries a `feature` of slice 6 (`Symbol` or a well-known symbol, a computed property name or
-destructuring), and the block gives a case the highest slice among its lines, so no line can
-give it slice 4 or 5, and `test262-moves-check` refuses a line whose `to` is not greater than
-its `from`. They stay in slice 6, counted failed: neither the block nor the check has a rule for
-a slice delivered after a slice of a higher number (slice 6 before 4 and 5).
+(784 runs) need slice 4 or 5 and no later slice. Each carries a `feature` of slice 6 (`Symbol`
+or a well-known symbol, a computed property name or destructuring), and while the block gave a
+case the highest slice among its lines they stayed in slice 6, counted failed. Under the order
+of delivery ("The order of delivery" above; slices 4 and 5 are delivered after 6) they leave it:
+325 go to slice 5 (`RegExp` and the `String` methods that use it: `RegExp/prototype/Symbol.*`
+211, `String/prototype` 76, the rest of `RegExp` 19, `RegExpStringIteratorPrototype` 17, 2
+others) and 68 to slice 4 (`Date` 60, `Number` 5, `**` 3); one case that needs both,
+`Object/prototype/toString/symbol-tag-override-instances` (`new Date(0)` and `/./`), goes to 4,
+which is delivered after 5. 386 of them get their slice from the lines the block had (their
+directory, or `feature exponentiation 4`). 7 are in a directory of slice 3 or 6 and get a line
+`dir <file> <slice>` of the block and a line of `conformance/test262/moves.tsv` with `from` 6
+and kind `part`, its evidence found in the case: to slice 5, `RegExp`
+(`Array/prototype/concat/Array.prototype.concat_spreadable-reg-exp`), `/a/g`
+(`Array/prototype/sort/comparefn-nonfunction-call-throws`) and `/./` (the
+`return-abrupt-from-searchstring-regexp-test` cases of `String/prototype/endsWith`, `includes`
+and `startsWith`); to slice 4, `Date` (`symbol-tag-override-instances` and
+`Symbol/prototype/Symbol.toPrimitive/removed-symbol-wrapper-ordinary-toprimitive`). With them 9
+cases that pass leave slice 6 by their directory, 7 to slice 4 (`Math/Symbol.toStringTag` and 6
+of `Number`) and 2 to slice 5 (two of `String/prototype/normalize`), counted passed there.
 
 ```swell-slices
+order delivery 1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21
 dir test/harness/ 1
 dir test/harness/asyncHelpers-asyncTest-func-throws-sync.js 3
 dir test/harness/propertyhelper-verifyconfigurable-configurable.js 2
@@ -3411,6 +3448,13 @@ dir test/language/statements/try/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
 dir test/language/statements/try/dstr/obj-ptrn-id-init-fn-name-class.js 8
 dir test/language/statements/variable/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
 dir test/language/statements/variable/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/built-ins/Array/prototype/concat/Array.prototype.concat_spreadable-reg-exp.js 5
+dir test/built-ins/Array/prototype/sort/comparefn-nonfunction-call-throws.js 5
+dir test/built-ins/Object/prototype/toString/symbol-tag-override-instances.js 4
+dir test/built-ins/String/prototype/endsWith/return-abrupt-from-searchstring-regexp-test.js 5
+dir test/built-ins/String/prototype/includes/return-abrupt-from-searchstring-regexp-test.js 5
+dir test/built-ins/String/prototype/startsWith/return-abrupt-from-searchstring-regexp-test.js 5
+dir test/built-ins/Symbol/prototype/Symbol.toPrimitive/removed-symbol-wrapper-ordinary-toprimitive.js 4
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
@@ -3835,14 +3879,17 @@ END { flush() }
 ```awk
 # Usage: awk -f slices.awk <rules> <meta.tsv>
 # Rules, one per line: "dir <prefix> <slice>", "feature <name> <slice>",
-# "flag <name> <slice>", "exclude <feature> <reason>". A case's slice is the highest
-# slice among its longest matching directory prefix, its features and its flags; a case
-# with an excluded feature gets "x-<reason>". Prints: slice, path, flags (tab-separated).
+# "flag <name> <slice>", "exclude <feature> <reason>", and "order delivery <s>,<s>,...",
+# the numbered slices in the order they are delivered. A case's slice is the slice
+# delivered last among its longest matching directory prefix, its features and its flags;
+# a case with an excluded feature gets "x-<reason>". Prints: slice, path, flags
+# (tab-separated).
 FNR == NR {
   if ($1 == "dir") dir[$2] = $3 + 0
   else if ($1 == "feature") feat[$2] = $3 + 0
   else if ($1 == "flag") flag[$2] = $3 + 0
   else if ($1 == "exclude") excl[$2] = $3
+  else if ($1 == "order") { n = split($3, o, ","); for (i = 1; i <= n; i++) at[o[i] + 0] = i }
   next
 }
 {
@@ -3852,10 +3899,10 @@ FNR == NR {
   n = split(f[3], fs, ",")
   for (i = 1; i <= n; i++) {
     if (fs[i] in excl) ex = "x-" excl[fs[i]]
-    else if ((fs[i] in feat) && feat[fs[i]] > slice) slice = feat[fs[i]]
+    else if ((fs[i] in feat) && at[feat[fs[i]]] > at[slice]) slice = feat[fs[i]]
   }
   n = split(f[2], gs, ",")
-  for (i = 1; i <= n; i++) if ((gs[i] in flag) && flag[gs[i]] > slice) slice = flag[gs[i]]
+  for (i = 1; i <= n; i++) if ((gs[i] in flag) && at[flag[gs[i]]] > at[slice]) slice = flag[gs[i]]
   printf "%s\t%s\t%s\n", (ex != "" ? ex : sprintf("%02d", slice)), path, f[2]
 }
 ```
@@ -3876,13 +3923,13 @@ Its output on this document:
 01 31 62
 02 4259 7543
 03 7011 13829
-04 1521 3002
-05 2398 4791
-06 4300 8153
-07 1492 2843
-08 6371 12649
-09 1772 3515
-10 6659 13003
+04 1598 3156
+05 2724 5441
+06 3898 7351
+07 1491 2841
+08 9144 18139
+09 1779 3529
+10 3879 7499
 11 1281 1833
 12 338 676
 13 3060 6076

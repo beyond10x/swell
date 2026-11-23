@@ -3,6 +3,7 @@
 Written for these tests. It holds one `swell-slices` block with every line kind the runner reads.
 
 ```swell-slices
+order delivery 1,2,3,4,7,10,14,21
 dir test/harness/ 1
 dir test/language/ 2
 dir test/built-ins/ 3
