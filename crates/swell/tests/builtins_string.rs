@@ -616,8 +616,8 @@ fn ascii_units(length: usize) -> Vec<u16> {
 
 /// A String of 1,000 code units with a surrogate pair at 255 and 256, where a range of 256
 /// units of QuoteJSONString would end between its units, a lone leading surrogate at 511, a
-/// lone trailing one at 767 and U+00E9 between: the case methods and `localeCompare` refuse it
-/// before slice 5.
+/// lone trailing one at 767 and U+00E9 between: `localeCompare` refuses it before its story of
+/// slice 5.
 fn other_units() -> Vec<u16> {
     let mut units = ascii_units(1_000);
     units[255] = 0xD83D;
@@ -902,10 +902,10 @@ const RECORDED: &[(&str, &str, u64)] = &[
     ("trim u1000", "997:37c7f971ef012894", 1998),
     ("trimStart u1000", "999:246eb02f9faf5734", 2000),
     ("trimEnd u1000", "998:b957afce36728d0a", 1999),
-    ("toLowerCase u1000", "throw SyntaxError", 1001),
-    ("toUpperCase u1000", "throw SyntaxError", 1001),
-    ("toLocaleLowerCase u1000", "throw SyntaxError", 1001),
-    ("toLocaleUpperCase u1000", "throw SyntaxError", 1001),
+    ("toLowerCase u1000", "1000:096689fc19a3a81a", 2001),
+    ("toUpperCase u1000", "1000:8efc88564c07005a", 2001),
+    ("toLocaleLowerCase u1000", "1000:096689fc19a3a81a", 2001),
+    ("toLocaleUpperCase u1000", "1000:8efc88564c07005a", 2001),
     ("localeCompare u1000", "throw SyntaxError", 1003),
     ("localeCompare this u1000", "throw SyntaxError", 1003),
     ("Error name u1000", "1003:8c5212807280fff7", 1004),

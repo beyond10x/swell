@@ -7,8 +7,10 @@
 //! `#sec-string.prototype.touppercase`, `#sec-string.prototype.tolocalelowercase`,
 //! `#sec-string.prototype.tolocaleuppercase`) and the trims (`#sec-string.prototype.trim`,
 //! `#sec-string.prototype.trimend`, `#sec-string.prototype.trimstart`) with TrimString
-//! (`#sec-trimstring`). Before slice 5 the case methods and `localeCompare` refuse a String with a
-//! code unit of 0x80 or above (`docs/design/engine.md`, section 12, "A part before its slice";
+//! (`#sec-trimstring`). The case methods map every code point by the case tables of
+//! `swell-unicode` (`story:case-mapping-tables-and-string-case-methods`); before its story of
+//! slice 5 `localeCompare` refuses a String with a code unit of 0x80 or above
+//! (`docs/design/engine.md`, section 12, "A part before its slice";
 //! `docs/design/host-interface.md`, section 13, "A refusal raised by a builtin method", `HOST-165`).
 //! A String made longer than `string_length` is a `RangeError` (`HOST-21`).
 //!
@@ -422,44 +424,163 @@ fn case_methods_map_the_26_letters_and_keep_every_other_ascii_unit() {
     assert_eq!(agent.refusals(), 0);
 }
 
-/// The message of the refusal of the case methods (`host-interface.md`, section 13).
-const CASE_REFUSAL: &str = "case mapping outside ASCII is not supported before slice 5";
+/// The four case methods outside ASCII (`#sec-string.prototype.tolowercase`,
+/// `#sec-string.prototype.touppercase`): the String read as code points (StringToCodePoints,
+/// `#sec-stringtocodepoints`), each mapped by the full mappings of `SpecialCasing.txt` that need
+/// no language, else by `UnicodeData.txt`; U+03A3 lowercased to U+03C2 where `Final_Sigma`
+/// holds (Unicode chapter 3, table 3-17: a cased letter before it after any case-ignorable
+/// code points, and no cased letter after it after any case-ignorable ones), else to U+03C3; a
+/// supplementary-plane letter mapped as one code point; a lone surrogate kept. The locale
+/// methods answer the same.
+#[test]
+fn case_methods_map_outside_ascii() {
+    all_true(&[
+        // U+0130 to i and U+0307; U+00DF to SS; the ligature U+FB03 to FFI.
+        "\"\\u0130\".toLowerCase() === \"i\\u0307\" && \"\\u0130\".toLowerCase().length === 2 &&\n\
+         \"\\u00df\".toUpperCase() === \"SS\" && \"\\u00df\".toLowerCase() === \"\\u00df\" &&\n\
+         \"\\ufb03\".toUpperCase() === \"FFI\" && \"\\u0390\".toUpperCase() === \"\\u0399\\u0308\\u0301\" &&\n\
+         \"\\u00e9\\u00c9\".toUpperCase() === \"\\u00c9\\u00c9\" && \"\\u00e9\\u00c9\".toLowerCase() === \"\\u00e9\\u00e9\"",
+        // Final_Sigma.
+        "\"\\u0391\\u03a3\".toLowerCase() === \"\\u03b1\\u03c2\" && \"\\u03a3\".toLowerCase() === \"\\u03c3\" &&\n\
+         \"\\u0391\\u03a3\\u0391\".toLowerCase() === \"\\u03b1\\u03c3\\u03b1\" &&\n\
+         \"\\u0391.\\u03a3\".toLowerCase() === \"\\u03b1.\\u03c2\" &&\n\
+         \"\\u0391\\u03a3.\\u0391\".toLowerCase() === \"\\u03b1\\u03c3.\\u03b1\" &&\n\
+         \"\\u0391\\u03a3\\u180e\".toLowerCase() === \"\\u03b1\\u03c2\\u180e\" &&\n\
+         \"\\u0345\\u03a3\".toLowerCase() === \"\\u0345\\u03c3\" &&\n\
+         \"\\u0391\\u0345\\u03a3\".toLowerCase() === \"\\u03b1\\u0345\\u03c2\" &&\n\
+         \"\\ud835\\udca2\\u03a3\".toLowerCase() === \"\\ud835\\udca2\\u03c2\" &&\n\
+         \"\\u0391\\u03a3\\ud835\\udca2\".toLowerCase() === \"\\u03b1\\u03c3\\ud835\\udca2\" &&\n\
+         \"\\u0391\\u03a3 \\u03a3\".toLowerCase() === \"\\u03b1\\u03c2 \\u03c3\" &&\n\
+         \"\\u0391\\u03a3\".toUpperCase() === \"\\u0391\\u03a3\" && \"\\u03c2\".toUpperCase() === \"\\u03a3\"",
+        // A supplementary-plane letter, and lone surrogates of both kinds.
+        "\"\\ud801\\udc00\".toLowerCase() === \"\\ud801\\udc28\" &&\n\
+         \"\\ud801\\udc28\".toUpperCase() === \"\\ud801\\udc00\" &&\n\
+         \"\\ud800a\\udc00b\\ud800\".toUpperCase() === \"\\ud800A\\udc00B\\ud800\" &&\n\
+         \"\\udc00\\ud801\".toLowerCase() === \"\\udc00\\ud801\" &&\n\
+         \"\\ud801\\udc00\".toLowerCase().length === 2",
+        // The locale methods, whose arguments have no meaning.
+        "\"\\u0130\".toLocaleLowerCase() === \"i\\u0307\" && \"\\u00df\".toLocaleUpperCase() === \"SS\" &&\n\
+         \"\\u0391\\u03a3\".toLocaleLowerCase(\"el\") === \"\\u03b1\\u03c2\" &&\n\
+         \"I\".toLocaleLowerCase(\"tr\") === \"i\" && \"i\".toLocaleUpperCase(\"tr\") === \"I\"",
+    ]);
+}
+
+/// A case method whose result would be longer than `string_length` throws a `RangeError` of
+/// the realm (`HOST-21`): with `string_length` 20, `"ß".repeat(11)` maps to 22 code units in
+/// upper case and `"İ".repeat(11)` to 22 in lower case; 20 units are made.
+#[test]
+fn a_case_method_past_string_length_throws_a_range_error() {
+    let mut limits = limits();
+    limits.string_length = 20;
+    assert_eq!(
+        run(
+            limits,
+            "var r = [];\n\
+             try { \"\\u00df\".repeat(11).toUpperCase(); } catch (e) { r.push(Object.getPrototypeOf(e) === RangeError.prototype); }\n\
+             try { \"\\u0130\".repeat(11).toLowerCase(); } catch (e) { r.push(e instanceof RangeError); }\n\
+             try { \"\\u00df\".repeat(11).toLocaleUpperCase(); } catch (e) { r.push(e instanceof RangeError); }\n\
+             try { \"\\u0130\".repeat(11).toLocaleLowerCase(); } catch (e) { r.push(e instanceof RangeError); }\n\
+             r.join() === \"true,true,true,true\" && \"\\u00df\".repeat(10).toUpperCase().length === 20 &&\n\
+               \"\\u00df\".repeat(20).toLowerCase().length === 20"
+        ),
+        yes()
+    );
+}
+
+/// A case method charges a step per code unit it reads and a step per code unit it writes:
+/// `ß` is read as one unit and written as two, a supplementary-plane letter as two and two;
+/// the step budget ends a case method that cannot pay them.
+#[test]
+fn a_case_method_charges_each_code_unit() {
+    // The extra steps of `n` = 2,000 over `n` = 1,000, the repeat's copy among them.
+    let extra = |template: &str| {
+        steps_of(&template.replace("N", "2000")) - steps_of(&template.replace("N", "1000"))
+    };
+    // Copy 1 unit, read 1, write 2.
+    assert_eq!(extra("\"\\u00df\".repeat(N).toUpperCase();"), 4_000);
+    assert_eq!(extra("\"\\u0130\".repeat(N).toLocaleLowerCase();"), 4_000);
+    // Copy 1, read 1, write 1.
+    assert_eq!(extra("\"\\u00e9\".repeat(N).toUpperCase();"), 3_000);
+    // Copy 2, read 2, write 2: a surrogate pair, and Final_Sigma.
+    assert_eq!(extra("\"\\ud801\\udc00\".repeat(N).toLowerCase();"), 6_000);
+    assert_eq!(extra("\"\\u0391\\u03a3\".repeat(N).toLowerCase();"), 6_000);
+    // With 1,000 steps: 150 + 150 + 300 are paid, 400 + 400 + 800 are not.
+    let mut limits = limits();
+    limits.steps_per_entry = 1_000;
+    let (mut agent, realm) = agent_and_realm(limits);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "\"\\u00df\".repeat(150).toUpperCase().length;"
+        ),
+        Outcome::Normal("300".to_string())
+    );
+    for method in ["toUpperCase", "toLocaleUpperCase"] {
+        assert_eq!(
+            eval_text(
+                &mut agent,
+                &realm,
+                &format!("\"\\u00df\".repeat(400).{method}();")
+            ),
+            Outcome::Terminated(Termination::StepBudget),
+            "{method}"
+        );
+        assert!(agent.last_entry_steps().unwrap() <= 1_000);
+    }
+}
 
 /// The message of the refusal of `localeCompare`.
 const COMPARE_REFUSAL: &str = "comparison outside ASCII is not supported before slice 5";
 
-/// `HOST-165`: on a new agent, each of the four case methods on `"é"` and `localeCompare` with
-/// `"é"` as the this value and as `that` throws a `SyntaxError` the script catches, with the
-/// exact message, and `refusals()` moves by 1 each time; the prototype of the error is
-/// `%SyntaxError.prototype%` of the method's realm, also when the method of another realm is
-/// called; `swell_syntax::message_kind` reads the message as a refusal of slice 5; an uncaught
-/// refusal is counted too; the ASCII calls, a code unit of 0x7F, and a `toString` that throws
-/// (whose value is thrown instead) leave the count unchanged.
+/// `HOST-165`, the case methods as slice 5 delivers them and `localeCompare` before its story:
+/// on a new agent, each of the four case methods on `"é"` answers the standard's String (`"é"`
+/// or `"É"`) and `refusals()` stays unchanged, as for a code unit of 0x80, a surrogate pair, a
+/// `toString` that answers `"\u00ff"`, an uncaught call and the method of another realm;
+/// `localeCompare` with `"é"` as the this value and as `that` throws a `SyntaxError` the script
+/// catches, with the exact message, and `refusals()` moves by 1 each time; the prototype of the
+/// error is `%SyntaxError.prototype%` of the method's realm, also when the method of another
+/// realm is called; `swell_syntax::message_kind` reads the message as a refusal of slice 5; the
+/// ASCII calls, a code unit of 0x7F, and a `toString` that throws (whose value is thrown
+/// instead) leave the count unchanged.
 #[test]
 fn host_165_case_methods_and_locale_compare_refuse_a_unit_outside_ascii() {
     let (mut agent, realm) = agent_and_realm(limits());
     let other_realm = support::host::realm(&mut agent);
     assert_eq!(agent.refusals(), 0);
     let mut count = 0;
+    // The case methods answer, and the count stays.
+    for (method, mapped) in [
+        ("toLowerCase", "é"),
+        ("toUpperCase", "É"),
+        ("toLocaleLowerCase", "é"),
+        ("toLocaleUpperCase", "É"),
+    ] {
+        let source = format!("\"é\".{method}() === \"{mapped}\"");
+        assert_eq!(eval_text(&mut agent, &realm, &source), yes(), "{source}");
+        assert_eq!(agent.refusals(), 0, "{source}");
+    }
+    for (source, expected) in [
+        ("\"\\u0080\".toLowerCase();", "\"\u{80}\""),
+        ("\"a\\ud83d\\ude00\".toUpperCase();", "\"A\u{1F600}\""),
+        (
+            "String.prototype.toLocaleUpperCase.call({ toString: function () { return \"\\u00ff\"; } });",
+            "\"\u{178}\"",
+        ),
+        ("\"\\u00c9\".toLocaleLowerCase();", "\"é\""),
+    ] {
+        assert_eq!(
+            eval_text(&mut agent, &realm, source),
+            Outcome::Normal(expected.to_string()),
+            "{source}"
+        );
+        assert_eq!(agent.refusals(), 0, "{source}");
+    }
     let mut refused = |agent: &mut Agent<_>, source: &str, expected: Outcome| {
         assert_eq!(eval_text(agent, &realm, source), expected, "{source}");
         count += 1;
         assert_eq!(agent.refusals(), count, "{source}");
     };
-    for method in [
-        "toLowerCase",
-        "toUpperCase",
-        "toLocaleLowerCase",
-        "toLocaleUpperCase",
-    ] {
-        refused(
-            &mut agent,
-            &format!(
-                "try {{ \"é\".{method}(); false }} catch (e) {{ e instanceof SyntaxError && e.message === \"{CASE_REFUSAL}\" }}"
-            ),
-            yes(),
-        );
-    }
     for call in ["\"a\".localeCompare(\"é\")", "\"é\".localeCompare(\"a\")"] {
         refused(
             &mut agent,
@@ -469,34 +590,19 @@ fn host_165_case_methods_and_locale_compare_refuse_a_unit_outside_ascii() {
             yes(),
         );
     }
-    // The prototype of the error, the message with nothing after it, and its kind.
-    let case_message = Outcome::Normal(format!("\"{CASE_REFUSAL}\""));
-    for source in [
-        "try { \"\\u0080\".toLowerCase(); } catch (e) { Object.getPrototypeOf(e) === SyntaxError.prototype && e.message; }",
-        "try { \"a\\ud83d\\ude00\".toUpperCase(); } catch (e) { Object.getPrototypeOf(e) === SyntaxError.prototype && e.message; }",
-        "try { String.prototype.toLocaleUpperCase.call({ toString: function () { return \"\\u00ff\"; } }); } catch (e) { e.message; }",
-    ] {
-        refused(&mut agent, source, case_message.clone());
-    }
+    // The message with nothing after it, and its kind.
     refused(
         &mut agent,
         "try { \"a\".localeCompare({ toString: function () { return \"\\u0100\"; } }); } catch (e) { e.message; }",
         Outcome::Normal(format!("\"{COMPARE_REFUSAL}\"")),
     );
-    for message in [CASE_REFUSAL, COMPARE_REFUSAL] {
-        assert_eq!(
-            swell_syntax::message_kind(message),
-            swell_syntax::MessageKind::Refusal { slice: 5 },
-            "{message}"
-        );
-    }
-    // Uncaught: the run throws the SyntaxError, counted all the same.
-    refused(
-        &mut agent,
-        "\"\\u00e9\".toLocaleLowerCase();",
-        Outcome::Throw("SyntaxError".to_string()),
+    assert_eq!(
+        swell_syntax::message_kind(COMPARE_REFUSAL),
+        swell_syntax::MessageKind::Refusal { slice: 5 },
+        "{COMPARE_REFUSAL}"
     );
-    // The methods of another realm throw an error of their own realm.
+    // The methods of another realm: `localeCompare` throws an error of its own realm, and
+    // `toLowerCase` answers.
     let global_root = global(&mut agent, &realm);
     let other_global_root = global(&mut agent, &other_realm);
     agent
@@ -518,21 +624,17 @@ fn host_165_case_methods_and_locale_compare_refuse_a_unit_outside_ascii() {
             }
         })
         .unwrap();
-    for call in [
-        "otherStringPrototype.toLowerCase.call(\"\\u00e9\")",
-        "otherStringPrototype.localeCompare.call(\"a\", \"\\u00e9\")",
-    ] {
-        refused(
-            &mut agent,
-            &format!(
-                "try {{ {call}; false }} catch (e) {{\n\
-                   Object.getPrototypeOf(e) === OtherSyntaxError.prototype &&\n\
-                   OtherSyntaxError.prototype !== SyntaxError.prototype && !(e instanceof SyntaxError)\n\
-                 }}"
-            ),
-            yes(),
-        );
-    }
+    refused(
+        &mut agent,
+        "try { otherStringPrototype.localeCompare.call(\"a\", \"\\u00e9\"); false } catch (e) {\n\
+           Object.getPrototypeOf(e) === OtherSyntaxError.prototype &&\n\
+           OtherSyntaxError.prototype !== SyntaxError.prototype && !(e instanceof SyntaxError)\n\
+         }",
+        yes(),
+    );
+    let source = "otherStringPrototype.toUpperCase.call(\"\\u00e9\") === \"\\u00c9\"";
+    assert_eq!(eval_text(&mut agent, &realm, source), yes(), "{source}");
+    assert_eq!(agent.refusals(), count, "{source}");
     // Not refused: the ASCII calls of the requirement, a unit of 0x7F, and a ToString that
     // throws before the refusal would be reached.
     for source in [

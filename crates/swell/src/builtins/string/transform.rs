@@ -15,30 +15,35 @@
 //! `toLowerCase` and `toUpperCase`, and the arguments ECMA-402 gives a meaning (those of the
 //! locale case methods, the second and third of `localeCompare`) are not read.
 //!
-//! Before slice 5, which brings the tables of `swell-unicode`, the four case methods and
-//! `localeCompare` answer a String whose code units are all below 0x80 as the standard does and
-//! refuse any other (`docs/design/engine.md`, section 12, "A part before its slice", the third
-//! form; `docs/design/host-interface.md`, section 13, "A refusal raised by a builtin method"):
-//! below 0x80 the locale-insensitive case mappings of the Unicode Character Database are those of
-//! the 26 letters (52 entries of `UnicodeData.txt`; the entries of `SpecialCasing.txt` below 0x80
-//! are all conditioned on a language), and two Strings of such code units are canonically
-//! equivalent only when they are equal, so their order of code units is the consistent total
-//! order `localeCompare` asks for. The refusal comes after RequireObjectCoercible and ToString
-//! (of the this value and, for `localeCompare`, of `that`), so an error of those steps is thrown
-//! instead; it is a `SyntaxError` of the method's realm (the current realm while a built-in
-//! function runs) with the exact message of the design, and the agent counts it
-//! ([`Agent::refusals`]).
+//! The four case methods map every code point of a String by the case tables of
+//! `swell-unicode` (the locale-insensitive mappings of `UnicodeData.txt` and `SpecialCasing.txt`,
+//! with the context `Final_Sigma`). Before its story of slice 5, which brings the normalization
+//! tables, `localeCompare` answers two Strings whose code units are all below 0x80 as the
+//! standard does and refuses any other (`docs/design/engine.md`, section 12, "A part before its
+//! slice", the third form; `docs/design/host-interface.md`, section 13, "A refusal raised by a
+//! builtin method"): two Strings of such code units are canonically equivalent only when they
+//! are equal, so their order of code units is the consistent total order `localeCompare` asks
+//! for. The refusal comes after RequireObjectCoercible and ToString of the this value and of
+//! `that`, so an error of those steps is thrown instead; it is a `SyntaxError` of the method's
+//! realm (the current realm while a built-in function runs) with the exact message of the
+//! design, and the agent counts it ([`Agent::refusals`]).
 //!
 //! Limits: a result whose length is known before it is built (`repeat`, the pads) is asked of
 //! `string_length` and of the memory budget as a whole before a unit is copied, so a result above
 //! `string_length` is a `RangeError` at once (`docs/design/host-interface.md`, section 2,
 //! `HOST-21`) and one the memory budget cannot hold ends the run in `Terminated(MemoryBudget)`.
-//! Steps: a step per code unit copied into a result ([`StringBuilder`]); the trims, the case
-//! methods and `localeCompare` also a step per code unit of each String they read, charged
-//! before the read.
+//! A case method's result, whose length is known only as it is built, grows through
+//! [`StringBuilder`]: past `string_length` a `RangeError`, and the memory budget asked before the
+//! buffer grows. Steps: a step per code unit copied or written into a result
+//! ([`StringBuilder`]); the trims, the case methods and `localeCompare` also a step per code
+//! unit of each String they read, charged before the read.
+
+use swell_unicode::{
+    CaseMapping, final_sigma_lowercase, is_case_ignorable, is_cased, to_lowercase, to_uppercase,
+};
 
 use crate::builtins::object::argument;
-use crate::builtins::string::StringBuilder;
+use crate::builtins::string::{StringBuilder, code_point_at, utf16_encode_code_point};
 use crate::builtins::{Method, SymbolData};
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion};
@@ -98,9 +103,6 @@ pub(crate) fn prototype_symbol_data<H: Host>() -> [SymbolData<H>; 0] {
     []
 }
 
-/// The message of the refusal of the four case methods before slice 5.
-const CASE_REFUSAL: &str = "case mapping outside ASCII is not supported before slice 5";
-
 /// The message of the refusal of `localeCompare` before slice 5.
 const COMPARE_REFUSAL: &str = "comparison outside ASCII is not supported before slice 5";
 
@@ -131,21 +133,42 @@ fn count(units: usize) -> u64 {
     u64::try_from(units).unwrap_or(u64::MAX)
 }
 
-/// Whether every code unit of `units` is below 0x80: a String the methods of slice 3 that need
-/// the tables of slice 5 answer.
+/// Whether every code unit of `units` is below 0x80: a String `localeCompare` answers before
+/// its story of slice 5.
 fn is_ascii(units: &[u16]) -> bool {
     units.iter().all(|&unit| unit < 0x80)
 }
 
-/// `unit`, below 0x80, mapped to `case`: the locale-insensitive case mapping of the Unicode
-/// Character Database, which below 0x80 maps A to Z (0x41 to 0x5A) and a to z (0x61 to 0x7A),
-/// 0x20 apart, and keeps every other unit.
-fn ascii_case(unit: u16, case: Case) -> u16 {
-    match case {
-        Case::Lower if (0x41..=0x5A).contains(&unit) => unit + 0x20,
-        Case::Upper if (0x61..=0x7A).contains(&unit) => unit - 0x20,
-        _ => unit,
+/// Whether a cased code point follows the code unit at `from` of `units`, after any
+/// case-ignorable code points: the context `Final_Sigma` holds after a code point when none
+/// does (Unicode chapter 3, table 3-17, "After C"). A case-ignorable code point is passed over
+/// whether it is cased or not. Asked for each U+03A3 a lowercase meets, it stops at the first
+/// code point that is not case-ignorable, U+03A3 among them, so its calls on one String read
+/// each code unit at most once more: the step per code unit read pays for them.
+fn cased_after(units: &[u16], from: usize) -> bool {
+    let mut position = from;
+    while let Some(point) = code_point_at(units, position) {
+        if !is_case_ignorable(point.code_point) {
+            return is_cased(point.code_point);
+        }
+        position += point.code_unit_count;
     }
+    false
+}
+
+/// The code units of `mapping`, by UTF16EncodeCodePoint (`#sec-utf16encodecodepoint`): at most
+/// six for its at most three code points. `None` for a code point above U+10FFFF, which no
+/// mapping holds.
+fn mapping_units(mapping: &CaseMapping) -> Option<([u16; 6], usize)> {
+    let mut units = [0; 6];
+    let mut length = 0;
+    for &point in mapping.as_slice() {
+        for &unit in utf16_encode_code_point(point)?.units() {
+            *units.get_mut(length)? = unit;
+            length += 1;
+        }
+    }
+    Some((units, length))
 }
 
 impl<H: Host> Agent<H> {
@@ -198,6 +221,9 @@ impl<H: Host> Agent<H> {
 
     /// The refusal of a method that needs the tables of slice 5 (`host-interface.md`, section
     /// 13): counted, then a `SyntaxError` of the current realm, the method's, with `message`.
+    /// The one that remains is that of `localeCompare`, until
+    /// `story:normalization-tables-normalize-and-locale-compare`; the case methods have their
+    /// tables.
     fn refuse_before_slice_5(&mut self, message: &str) -> Abrupt {
         self.count_refusal(message);
         self.throw_error(ErrorKind::SyntaxError, message)
@@ -432,23 +458,57 @@ impl<H: Host> Agent<H> {
     /// `#sec-string.prototype.touppercase`) and the locale methods, which answer the same
     /// without ECMA-402 (`#sec-string.prototype.tolocalelowercase`,
     /// `#sec-string.prototype.tolocaleuppercase`), for `case`; `method` names the method in a
-    /// TypeError. A String with a code unit of 0x80 or above is refused before slice 5.
+    /// TypeError. A step per code unit of S before S is read.
     fn string_case_method(&mut self, this: Value, case: Case, method: &str) -> Completion<Value> {
         // 1. Let O be the this value. 2. Perform ? RequireObjectCoercible(O). 3. Let S be ?
         // ToString(O).
         let string = self.this_string(this, method)?;
         let units = self.charged_units(string)?;
-        if !is_ascii(&units) {
-            return Err(self.refuse_before_slice_5(CASE_REFUSAL));
-        }
-        // 4. Let sText be StringToCodePoints(S): below 0x80 a code unit is its code point. 5.
-        // Let lowerText be toLowercase(sText) (toUppercase for `toUpperCase`), according to the
-        // Unicode Default Case Conversion algorithm. 6. Let L be CodePointsToString(lowerText).
-        let mapped: Vec<u16> = units.iter().map(|&unit| ascii_case(unit, case)).collect();
         let mut builder = StringBuilder::new();
-        self.append_units(&mut builder, &mapped)?;
+        self.append_case_mapped(&mut builder, &units, case)?;
         // 7. Return L.
         Ok(Value::String(self.finish_string(builder)?))
+    }
+
+    /// Steps 4 to 6 of `String.prototype.toLowerCase` (`#sec-string.prototype.tolowercase`),
+    /// and of `toUpperCase` for [`Case::Upper`], on the code units of S into `builder`. 4. Let
+    /// sText be StringToCodePoints(S) (`#sec-stringtocodepoints`): each code point read by
+    /// CodePointAt, a lone surrogate as itself. 5. Let lowerText be toLowercase(sText)
+    /// (toUppercase), according to the Unicode Default Case Conversion algorithm: each code
+    /// point by its full mapping in `swell-unicode`, and U+03A3 in lower case by its context
+    /// `Final_Sigma` (Unicode chapter 3, table 3-17): before it a cased code point after any
+    /// case-ignorable ones, after it none. 6. Let L be CodePointsToString(lowerText): the units
+    /// of each mapping appended as it is made, through [`Agent::append_units`] (a step per unit
+    /// written, a `RangeError` past `string_length`, the memory budget before the buffer grows).
+    fn append_case_mapped(
+        &mut self,
+        builder: &mut StringBuilder,
+        units: &[u16],
+        case: Case,
+    ) -> Completion<()> {
+        let mut position = 0;
+        // Whether the last code point before `position` that is not case-ignorable is cased:
+        // "Before C" of `Final_Sigma`.
+        let mut cased_before = false;
+        while let Some(point) = code_point_at(units, position) {
+            let c = point.code_point;
+            let next = position + point.code_unit_count;
+            let mapping = match case {
+                Case::Lower => final_sigma_lowercase(c)
+                    .filter(|_| cased_before && !cased_after(units, next))
+                    .unwrap_or_else(|| to_lowercase(c)),
+                Case::Upper => to_uppercase(c),
+            };
+            let Some((mapped, length)) = mapping_units(&mapping) else {
+                return Err(self.fault());
+            };
+            self.append_units(builder, mapped.get(..length).unwrap_or(&[]))?;
+            if case == Case::Lower && !is_case_ignorable(c) {
+                cased_before = is_cased(c);
+            }
+            position = next;
+        }
+        Ok(())
     }
 
     /// `String.prototype.localeCompare ( that [ , reserved1 [ , reserved2 ] ] )`
