@@ -109,25 +109,38 @@ fn own_keys_keep_their_order_past_the_small_size() {
 
 /// EvalDeclarationInstantiation (`#sec-evaldeclarationinstantiation`, steps 17 and 18): the
 /// bindings non-strict direct `eval` adds to a function's record, 100 of them, past the small
-/// size, are each found by name, deletable, and a deleted one is not found again.
+/// size, are each found by name, deletable, and a deleted one is not found again. With the
+/// feature `collect-every-safe-point` 20 of them, in the gate and in the lane `slow` alike:
+/// still past the small size of 8, while every instruction of the 40 calls of `eval`
+/// collects. At 100 it took 1.11 CPU seconds alone in that mode (0.04 in the default mode,
+/// measured on 2026-11-23).
 #[test]
 fn eval_added_bindings_are_found_past_the_small_size() {
     let mut agent = agent_with(limits()).unwrap();
     let realm = realm(&mut agent);
-    let script = "function f() {
-            for (var i = 0; i < 100; i++) eval('var x' + i + ' = ' + i);
+    let n: u32 = if cfg!(feature = "collect-every-safe-point") {
+        20
+    } else {
+        100
+    };
+    let script = format!(
+        "function f() {{
+            for (var i = 0; i < {n}; i++) eval('var x' + i + ' = ' + i);
             var s = 0;
-            for (var i = 0; i < 100; i++) s += eval('x' + i);
+            for (var i = 0; i < {n}; i++) s += eval('x' + i);
             var deleted = delete x5;
             eval('var x5 = 500');
             var again = x5;
             delete x7;
-            return s + ',' + deleted + ',' + again + ',' + typeof x7 + ',' + x99;
-        }
-        f()";
+            return s + ',' + deleted + ',' + again + ',' + typeof x7 + ',' + x{last};
+        }}
+        f()",
+        last = n - 1
+    );
+    let sum = n * (n - 1) / 2;
     assert_eq!(
-        eval_text(&mut agent, &realm, script),
-        Outcome::Normal("\"4950,true,500,undefined,99\"".to_string())
+        eval_text(&mut agent, &realm, &script),
+        Outcome::Normal(format!("\"{sum},true,500,undefined,{}\"", n - 1))
     );
 }
 

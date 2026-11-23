@@ -687,11 +687,18 @@ fn charged_as_read(text: &str) {
 }
 
 /// The statements of [`many_for_of_statements_are_charged_as_they_are_read`]: 10,000, the full
-/// count, in the default mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`); 1,000 in the gate
-/// with the feature `collect-every-safe-point`, whose build is slower. The test runs no script,
-/// so the feature changes nothing it checks.
+/// count, in the lane `slow` (`SWELL_FULL_COUNTS=1`); 1,000 in the gate, in either mode. The
+/// test runs no script, so the feature `collect-every-safe-point` changes nothing it checks;
+/// at 10,000 it took 0.90 CPU seconds alone in the default mode (measured on 2026-11-23).
+/// 1,000 statements still grow every list of the parse and the compile step past its first
+/// capacity many times over, and each assertion compares the ledger with what the lists hold
+/// at that size (a list that grew uncharged leaves the ledger below it at any size).
 fn statements() -> usize {
-    if gate_count() { 1_000 } else { 10_000 }
+    if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
+        10_000
+    } else {
+        1_000
+    }
 }
 
 /// The frontend's ledger over a script of [`statements`] `for`-`of` statements in a row inside

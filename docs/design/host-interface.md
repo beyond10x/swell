@@ -1453,7 +1453,7 @@ function's record is charged before it is made with the boxes of its steps and o
 the sweep that frees the function credits them. A host function costs at most
 `HOST_FUNCTION_LIVE_BYTES` = 576 bytes of `live_bytes()` plus its data, a property definition
 `PROPERTY_LIVE_BYTES` = 448; a realm of 300 host functions and 40 host objects with 600
-definitions raises `heap_bytes()` by at most `BINDINGS_REALM_HEAP_BYTES` = 381,696, arena growth
+definitions raises `heap_bytes()` by at most `BINDINGS_REALM_HEAP_BYTES` = 506,112, arena growth
 included (a host object: decision 15). Each is a public constant of `host/limits.rs`; a test
 compares the values written here with the constants. Each value is the rise the test
 `tests/host_objects.rs` measures plus an eighth, rounded up to a multiple of 64, as the

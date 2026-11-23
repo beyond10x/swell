@@ -3,32 +3,55 @@
 //! Unicode data (design, decision 8). It is tooling: it reads and writes files, and nothing that
 //! ships depends on it.
 //!
-//! - `swell-unicode-gen [--root <dir>]`: writes every table under `<dir>` (default `.`, the root
-//!   of the repository).
-//! - `swell-unicode-gen --check [--root <dir>]`: writes nothing; prints
-//!   `unicode-tables: <n> table(s) equal the generator output` and exits 0 when every committed
-//!   table is what it would write, and names each one that differs and exits 1 otherwise.
+//! - `swell-unicode-gen [--root <dir>]`: writes every table of the list under `<dir>` (default
+//!   `.`, the root of the repository).
+//! - `swell-unicode-gen --check [--root <dir>]`: writes nothing. It first compares the digest
+//!   lines of each committed table with `data/unicode/17.0.0/SOURCE` and names each table whose
+//!   digest differs; then it renders every table in memory and names each one that differs from
+//!   its committed file, or has none. It exits 1 when it named one, and otherwise prints
+//!   `unicode-tables: <n> table(s) equal the generator output`, `<n>` the number of lines of the
+//!   list, and exits 0.
 //!
-//! Either exits 2 when it cannot do its work: a wrong argument, a data file it cannot read, a line
-//! it cannot parse, a data file of another Unicode version, or a table that would be empty.
+//! The list is `crates/unicode-gen/tables.txt`: one line per table, its fields separated by one
+//! space: the path of the table under the root, the name of its renderer (`tables.rs`), and
+//! each source as a path under `data/unicode/17.0.0/`. Each table starts with the head
+//! `render::head` writes: the generator, the sources, and one line
+//! `// Source: <path> sha256 <hex>` per source, the digest as `SOURCE` gives it.
 //!
-//! The one table so far is `crates/unicode/src/tables/zs.rs`, General_Category `Zs`, from
-//! `ucd/extracted/DerivedGeneralCategory.txt`, written as sorted, disjoint inclusive ranges.
+//! Either exits 2 when it cannot do its work: a wrong argument, a line of `SOURCE` or of the
+//! list it cannot read, a source that `SOURCE` does not list, a renderer it does not know, a
+//! data file it cannot read, a line it cannot parse, a data file of another Unicode version, or
+//! a table that would be empty.
 
+mod render;
+mod tables;
+mod ucd;
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
-/// The Unicode version of the data the tables are written from.
-const UNICODE_VERSION: &str = "17.0.0";
+use render::Source;
+use ucd::{DATA_DIR, Ucd};
 
-/// The data file of `Zs`, relative to the root.
-const GENERAL_CATEGORY: &str = "data/unicode/17.0.0/ucd/extracted/DerivedGeneralCategory.txt";
-
-/// The table of `Zs`, relative to the root.
-const ZS_TABLE: &str = "crates/unicode/src/tables/zs.rs";
+/// The list of tables, relative to the root.
+const LIST: &str = "crates/unicode-gen/tables.txt";
 
 const USAGE: &str = "usage: swell-unicode-gen [--check] [--root <dir>]";
+
+/// The command that writes the tables, named when a check fails.
+const WRITE: &str = "run `cargo run -p swell-unicode-gen` to write it";
+
+/// One line of the list.
+struct Entry {
+    /// The number of its line in the list, from 1.
+    line: usize,
+    /// The path of the table under the root.
+    table: String,
+    renderer: tables::Renderer,
+    sources: Vec<Source>,
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -53,111 +76,188 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         }
     }
 
-    let tables = [(ZS_TABLE, zs_table(&root)?)];
+    let digests = read_source(&root)?;
+    let entries = read_list(&root, &digests)?;
     if check {
-        let mut differ = 0;
-        for (path, text) in &tables {
-            let committed = fs::read_to_string(root.join(path)).unwrap_or_default();
-            if committed != *text {
+        return check_tables(&root, &entries);
+    }
+    let texts = render_all(&root, &entries)?;
+    for (entry, text) in entries.iter().zip(&texts) {
+        let target = root.join(&entry.table);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+        fs::write(&target, text).map_err(|e| format!("{}: {e}", target.display()))?;
+    }
+    println!("unicode-tables: wrote {} table(s)", entries.len());
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The digests before the texts: a table whose digest lines differ from `SOURCE` is named
+/// before any table is rendered.
+fn check_tables(root: &Path, entries: &[Entry]) -> Result<ExitCode, String> {
+    let mut differ = 0;
+    for entry in entries {
+        // A table with no committed file is named by the comparison of the texts.
+        let Ok(committed) = fs::read_to_string(root.join(&entry.table)) else {
+            continue;
+        };
+        let named: Vec<&str> = committed
+            .lines()
+            .skip(1)
+            .take_while(|line| line.starts_with("// Source: "))
+            .collect();
+        let expected: Vec<String> = entry.sources.iter().map(render::source_line).collect();
+        if named != expected {
+            println!(
+                "unicode-tables: {} names a digest of its sources that differs from \
+                 {DATA_DIR}/SOURCE; {WRITE}",
+                entry.table
+            );
+            differ += 1;
+        }
+    }
+    if differ > 0 {
+        println!(
+            "unicode-tables: {differ} of {} table(s) name a digest that differs from {DATA_DIR}/SOURCE",
+            entries.len()
+        );
+        return Ok(ExitCode::from(1));
+    }
+
+    let texts = render_all(root, entries)?;
+    for (entry, text) in entries.iter().zip(&texts) {
+        match fs::read_to_string(root.join(&entry.table)) {
+            Ok(committed) if committed == *text => {}
+            Ok(_) => {
                 println!(
-                    "unicode-tables: {path} differs from the generator output; \
-                     run `cargo run -p swell-unicode-gen` to write it"
+                    "unicode-tables: {} differs from the generator output; {WRITE}",
+                    entry.table
+                );
+                differ += 1;
+            }
+            Err(e) => {
+                println!(
+                    "unicode-tables: {} has no committed file ({e}); {WRITE}",
+                    entry.table
                 );
                 differ += 1;
             }
         }
-        if differ > 0 {
-            println!(
-                "unicode-tables: {differ} of {} table(s) differ from the generator output",
-                tables.len()
-            );
-            return Ok(ExitCode::from(1));
-        }
+    }
+    if differ > 0 {
         println!(
-            "unicode-tables: {} table(s) equal the generator output",
-            tables.len()
+            "unicode-tables: {differ} of {} table(s) differ from the generator output",
+            entries.len()
         );
-        return Ok(ExitCode::SUCCESS);
+        return Ok(ExitCode::from(1));
     }
-    for (path, text) in &tables {
-        let target = root.join(path);
-        fs::write(&target, text).map_err(|e| format!("{}: {e}", target.display()))?;
-    }
-    println!("unicode-tables: wrote {} table(s)", tables.len());
+    println!(
+        "unicode-tables: {} table(s) equal the generator output",
+        entries.len()
+    );
     Ok(ExitCode::SUCCESS)
 }
 
-/// The text of `zs.rs`.
-fn zs_table(root: &Path) -> Result<String, String> {
-    let ranges = general_category(root, "Zs")?;
-    let mut text = format!(
-        "// Generated by swell-unicode-gen from {GENERAL_CATEGORY} (Unicode {UNICODE_VERSION}); \
-         do not edit.\n"
-    );
-    text.push_str(
-        "//! General_Category `Space_Separator` (`Zs`), which `WhiteSpace` admits through `USP`\n\
-         //! (`#sec-white-space`).\n\
-         \n\
-         /// The code points of `Zs`: sorted, disjoint inclusive ranges `(first, last)`.\n\
-         pub(crate) const ZS: &[(u32, u32)] = &[\n",
-    );
-    for (first, last) in ranges {
-        text.push_str(&format!("    ({first:#06X}, {last:#06X}),\n"));
-    }
-    text.push_str("];\n");
-    Ok(text)
+/// The text of every table of the list, in the order of the list; the data is read once.
+fn render_all(root: &Path, entries: &[Entry]) -> Result<Vec<String>, String> {
+    let mut ucd = Ucd::new(root);
+    entries
+        .iter()
+        .map(|entry| {
+            (entry.renderer)(&mut ucd, &entry.sources).map_err(|e| {
+                format!(
+                    "{}:{}: {}: {e}",
+                    root.join(LIST).display(),
+                    entry.line,
+                    entry.table
+                )
+            })
+        })
+        .collect()
 }
 
-/// The code points of General_Category `category` in `DerivedGeneralCategory.txt`, merged into
-/// sorted, disjoint inclusive ranges.
-fn general_category(root: &Path, category: &str) -> Result<Vec<(u32, u32)>, String> {
-    let path = root.join(GENERAL_CATEGORY);
-    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let header = format!("# DerivedGeneralCategory-{UNICODE_VERSION}.txt");
-    if text.lines().next() != Some(header.as_str()) {
-        return Err(format!(
-            "{}: the first line is not {header:?}",
-            path.display()
-        ));
-    }
-    let mut ranges = Vec::new();
-    for (number, line) in text.lines().enumerate() {
-        let data = line.split('#').next().unwrap_or_default().trim();
-        if data.is_empty() {
-            continue;
-        }
-        let bad = || {
-            format!(
-                "{}:{}: not <code points> ; <category>",
-                path.display(),
-                number + 1
-            )
+/// The SHA-256 of each path of `data/unicode/17.0.0/SOURCE`, from its lines
+/// `<sha256> <path> <address>`.
+fn read_source(root: &Path) -> Result<BTreeMap<String, String>, String> {
+    let path = root.join(DATA_DIR).join("SOURCE");
+    let name = path.display();
+    let text = fs::read_to_string(&path).map_err(|e| format!("{name}: {e}"))?;
+    let mut digests = BTreeMap::new();
+    for (index, line) in text.lines().enumerate() {
+        let fields: Vec<&str> = line.split(' ').collect();
+        let [digest, source, _address] = fields.as_slice() else {
+            return Err(format!(
+                "{name}:{}: not <sha256> <path> <address>",
+                index + 1
+            ));
         };
-        let (points, value) = data.split_once(';').ok_or_else(bad)?;
-        if value.trim() != category {
-            continue;
+        if digest.len() != 64 || !digest.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')) {
+            return Err(format!("{name}:{}: not a SHA-256: {digest:?}", index + 1));
         }
-        let points = points.trim();
-        let (first, last) = points.split_once("..").unwrap_or((points, points));
-        let first = u32::from_str_radix(first, 16).map_err(|_| bad())?;
-        let last = u32::from_str_radix(last, 16).map_err(|_| bad())?;
-        if first > last || last > 0x10FFFF {
-            return Err(bad());
+        digests.insert((*source).to_owned(), (*digest).to_owned());
+    }
+    Ok(digests)
+}
+
+/// The lines of the list, each source with the digest `SOURCE` gives it.
+fn read_list(root: &Path, digests: &BTreeMap<String, String>) -> Result<Vec<Entry>, String> {
+    let path = root.join(LIST);
+    let name = path.display();
+    let text = fs::read_to_string(&path).map_err(|e| format!("{name}: {e}"))?;
+    let mut entries = Vec::new();
+    let mut seen = BTreeSet::new();
+    for (index, line) in text.lines().enumerate() {
+        let number = index + 1;
+        let fields: Vec<&str> = line.split(' ').collect();
+        let [table, renderer, sources @ ..] = fields.as_slice() else {
+            return Err(format!(
+                "{name}:{number}: not <table> <renderer> <source> ..."
+            ));
+        };
+        if sources.is_empty() || fields.iter().any(|field| field.is_empty()) {
+            return Err(format!(
+                "{name}:{number}: not <table> <renderer> <source> ..., \
+                 the fields separated by one space"
+            ));
         }
-        ranges.push((first, last));
-    }
-    if ranges.is_empty() {
-        return Err(format!("{}: no code point of {category}", path.display()));
-    }
-    ranges.sort_unstable();
-    let mut merged: Vec<(u32, u32)> = Vec::with_capacity(ranges.len());
-    for (first, last) in ranges {
-        match merged.last_mut() {
-            Some(previous) if first <= previous.1.saturating_add(1) => {
-                previous.1 = previous.1.max(last);
-            }
-            _ => merged.push((first, last)),
+        if Path::new(table)
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
+        {
+            return Err(format!(
+                "{name}:{number}: the table {table:?} is not a path under the root"
+            ));
         }
+        if !seen.insert(*table) {
+            return Err(format!(
+                "{name}:{number}: the table {table} is on an earlier line"
+            ));
+        }
+        let renderer = tables::renderer(renderer).ok_or_else(|| {
+            format!("{name}:{number}: the generator has no renderer {renderer:?}")
+        })?;
+        let sources = sources
+            .iter()
+            .map(|source| {
+                let digest = digests.get(*source).ok_or_else(|| {
+                    format!("{name}:{number}: {DATA_DIR}/SOURCE does not list the source {source}")
+                })?;
+                Ok(Source {
+                    path: (*source).to_owned(),
+                    digest: digest.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        entries.push(Entry {
+            line: number,
+            table: (*table).to_owned(),
+            renderer,
+            sources,
+        });
     }
-    Ok(merged)
+    if entries.is_empty() {
+        return Err(format!("{name}: the list names no table"));
+    }
+    Ok(entries)
 }

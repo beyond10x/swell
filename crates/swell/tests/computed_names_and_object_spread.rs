@@ -409,18 +409,29 @@ fn charged_as_read(text: &str) {
     assert_eq!(ledger.held, held, "the compile step credited its scratch");
 }
 
-/// The properties of [`many_computed_keys_and_spreads_are_charged_as_they_are_read`]: 10,000 in
-/// both modes. The test runs no script, so the feature `collect-every-safe-point` changes
-/// nothing it does; its parses and compiles took 1.2 CPU seconds in the default mode.
-const LITERAL_PROPERTIES: usize = 10_000;
+/// The properties of [`many_computed_keys_and_spreads_are_charged_as_they_are_read`]: 10,000,
+/// the full count, in the lane `slow` (`SWELL_FULL_COUNTS=1`); 1,000 in the gate, in either
+/// mode. The test runs no script, so the feature `collect-every-safe-point` changes nothing it
+/// does; at 10,000 its parses and compiles took 1.19 CPU seconds alone in each mode (measured
+/// on 2026-11-23). 1,000 properties still grow every list of the parse and the compile step
+/// past its first capacity many times over, as the large pattern of `object_patterns.rs` does
+/// at its gate count, and each assertion compares the ledger with what the lists hold at that
+/// size (a list that grew uncharged leaves the ledger below it at any size).
+fn literal_properties() -> usize {
+    if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
+        10_000
+    } else {
+        1_000
+    }
+}
 
-/// The frontend's ledger over an object literal of [`LITERAL_PROPERTIES`] computed keys, one of
+/// The frontend's ledger over an object literal of [`literal_properties`] computed keys, one of
 /// as many spreads, and a pattern of as many computed keys with a rest property, as a `var`
 /// declaration and an assignment pattern (read first as an object literal): the tree, the key
 /// expressions and the code are charged as they grow.
 #[test]
 fn many_computed_keys_and_spreads_are_charged_as_they_are_read() {
-    let n = LITERAL_PROPERTIES;
+    let n = literal_properties();
     let keys: Vec<String> = (0..n).map(|i| format!("[\"k{i}\"]: {i}")).collect();
     let spreads: Vec<String> = (0..n).map(|i| format!("...o{}", i % 10)).collect();
     let pattern: Vec<String> = (0..n).map(|i| format!("[\"k{i}\"]: p{i} = {i}")).collect();

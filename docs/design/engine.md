@@ -1208,15 +1208,28 @@ comparison. `last_entry_steps()` counts exactly these for a match, beside the st
 instructions and builtins around it. Example: the compiler emits `/a/` as two instructions, the
 code unit `a` and the end of the match; `/a/.exec("ba")` spends 5 steps of the matcher: index 0
 tried (1), the code unit fails (1) with nothing to backtrack, index 1 tried (1), the code unit
-(1), the end of the match (1). A pattern parsed at run time (`RegExp`, a literal's evaluation,
-the `String` methods that make a RegExp) costs one step per code unit of the pattern, charged
-by RegExpInitialize before ParsePattern, as PerformEval charges eval code; the parser and the
-compiler charge no step of their own. Their work is linear in that length: a bounded number of
-nodes per code unit and of instructions per node (a quantifier `{n,m}` is a counter, not n
-copies; the clearing of the captures of a quantified atom names a range of capture numbers,
-since the groups inside an atom are numbered one after the other), but for the sort of a
-class's ranges, n log n for n ranges. Both poll the interrupt at least once per 4,096 code
-units read and per 4,096 nodes visited.
+(1), the end of the match (1). A step stands for a bounded amount of work: no number of the
+pattern (its groups, quantifiers, lookarounds, ranges or names) multiplies the work of one. A
+try writes one capture, the start of the match, whatever the number of groups: the first try
+finds every capture unset as the search made them, charged by their bytes, and a try that
+fails has taken every entry of its backtrack stack, one step each, and so undone every change
+it made. The instruction that clears the captures of a quantified atom at each iteration
+spends one step per group of its range, its own step the first of them, charged before it
+reads a capture; a named backreference whose name n groups have spends n steps the same way,
+beside the code units it compares. Example: `/(?:a|(b)(c))*/.exec("a")` clears its two groups
+twice, at the iteration that matches `a` and at the one that fails, and spends 20 steps, 2 of
+them for the second group of each clearing. The test of a class is a binary search over its
+ranges, which are sorted, disjoint and apart, so at most 557,056 of them and at most 20
+probes. A pattern parsed at run time (`RegExp`, a literal's evaluation, the `String` methods
+that make a RegExp) costs one step per code unit of the pattern, charged by RegExpInitialize
+before ParsePattern, as PerformEval charges eval code; the parser and the compiler charge no
+step of their own. Their work is linear in that length: a bounded number of nodes per code
+unit and of instructions per node (a quantifier `{n,m}` is a counter, not n copies; the
+clearing of the captures of a quantified atom names a range of capture numbers, since the
+groups inside an atom are numbered one after the other), but for the sort of a class's ranges,
+n log n for n ranges, and the sort of the group names with the search of a named
+backreference's name among them, n log n and log n comparisons for n names. Both poll the
+interrupt at least once per 4,096 code units read and per 4,096 nodes visited.
 
 The mechanism: the matcher takes its steps by grants of at most 4,096 before it runs them. It
 runs each unit of work against what it was granted and asks for the next grant when that is

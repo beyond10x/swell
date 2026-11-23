@@ -26,6 +26,7 @@
 //! unit it copies, so the copy is part of the step budget.
 
 pub(crate) mod access;
+pub(crate) mod replace;
 pub(crate) mod transform;
 
 use crate::builtins::object::argument;
@@ -57,6 +58,8 @@ pub(crate) enum StringBuiltin {
     Access(access::AccessBuiltin),
     /// A builtin of the group `transform.rs`.
     Transform(transform::TransformBuiltin),
+    /// A builtin of the group `replace.rs`.
+    Replace(replace::ReplaceBuiltin),
 }
 
 /// The code units of a String being built.
@@ -264,7 +267,7 @@ impl<H: Host> Agent<H> {
     /// `%String%` (22.1.1) with `String.prototype.constructor`, `indexOf`, `toString` and
     /// `valueOf`; then the methods of each group on both, and the groups' data properties
     /// keyed by a well-known symbol on `%String.prototype%`, the groups in the order `access`,
-    /// `transform`.
+    /// `transform`, `replace`.
     pub(crate) fn create_string_constructor(
         &mut self,
         making: Making,
@@ -324,6 +327,16 @@ impl<H: Host> Agent<H> {
                 },
                 |id| BuiltinId::String(StringBuiltin::Transform(id)),
             )?;
+            self.define_group_methods(
+                making,
+                object,
+                if on_prototype {
+                    replace::PROTOTYPE_METHODS
+                } else {
+                    replace::CONSTRUCTOR_METHODS
+                },
+                |id| BuiltinId::String(StringBuiltin::Replace(id)),
+            )?;
         }
         self.define_symbol_data(making, string_prototype, &access::prototype_symbol_data())?;
         self.define_symbol_data(
@@ -331,6 +344,7 @@ impl<H: Host> Agent<H> {
             string_prototype,
             &transform::prototype_symbol_data(),
         )?;
+        self.define_symbol_data(making, string_prototype, &replace::prototype_symbol_data())?;
         Ok(constructor)
     }
 
@@ -360,6 +374,9 @@ impl<H: Host> Agent<H> {
             }
             StringBuiltin::Transform(id) => {
                 self.run_string_transform_builtin(id, function, this, args, new_target)
+            }
+            StringBuiltin::Replace(id) => {
+                self.run_string_replace_builtin(id, function, this, args, new_target)
             }
         }
     }
@@ -519,7 +536,7 @@ impl<H: Host> Agent<H> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CodePoint, StringBuilder, StringBuiltin, access, code_point_at, transform,
+        CodePoint, StringBuilder, StringBuiltin, access, code_point_at, replace, transform,
         utf16_encode_code_point,
     };
     use crate::builtins::group_testing::{GroupMethod, check_group_keys, group_methods};
@@ -531,9 +548,9 @@ mod tests {
     use crate::value::Value;
 
     /// The order of keys of `String` and `String.prototype` (`story:builtin-group-modules`):
-    /// the keys of the base in the base's order, then the keys of the groups `access` and
-    /// `transform`, and nothing else, each a method of its group that runs through its
-    /// function object.
+    /// the keys of the base in the base's order, then the keys of the groups `access`,
+    /// `transform` and `replace`, and nothing else, each a method of its group that runs
+    /// through its function object.
     #[test]
     fn every_group_module_installs_and_runs_through_its_constructor() {
         let (mut agent, realm) = agent_with_realm();
@@ -548,6 +565,9 @@ mod tests {
             group_methods(transform::CONSTRUCTOR_METHODS, |i| {
                 BuiltinId::String(StringBuiltin::Transform(i))
             }),
+            group_methods(replace::CONSTRUCTOR_METHODS, |i| {
+                BuiltinId::String(StringBuiltin::Replace(i))
+            }),
         ]
         .concat();
         let prototype_groups: Vec<GroupMethod> = [
@@ -556,6 +576,9 @@ mod tests {
             }),
             group_methods(transform::PROTOTYPE_METHODS, |i| {
                 BuiltinId::String(StringBuiltin::Transform(i))
+            }),
+            group_methods(replace::PROTOTYPE_METHODS, |i| {
+                BuiltinId::String(StringBuiltin::Replace(i))
             }),
         ]
         .concat();
