@@ -24,12 +24,12 @@ These are the limits of release <Num at="version" />, from the [changelog](https
 
 ## The builtins
 
-The core library exists: `Object`, `Function`, `Array`, `String`, `Error`, `JSON`, `globalThis` and the URI functions, and with slice 6 `Symbol`, the Array and String iterators, `Array.from`, `Object.fromEntries` and `Object.groupBy`. Regular expressions run since release 0.6.0: the literal, `RegExp`, `exec` and `test`, with `replace`, `replaceAll` and `split` of `String` for a String pattern. The case methods, `normalize` and `localeCompare` take every String. A part of a regular expression that is not built yet is refused with a counted `SyntaxError`.
+The core library exists: `Object`, `Function`, `Array`, `String`, `Error`, `JSON`, `globalThis` and the URI functions, and with slice 6 `Symbol`, the Array and String iterators, `Array.from`, `Object.fromEntries` and `Object.groupBy`. Regular expressions run since release 0.6.0: the literal, `RegExp`, `exec` and `test`. Since release 0.7.0 `match` and `search` exist, and `replace`, `replaceAll` and `split` of `String` take a regular expression. The case methods, `normalize` and `localeCompare` take every String. A part of a regular expression that is not built yet is refused with a counted `SyntaxError`.
 
 | missing | brought by |
 |---|---|
 | `Date`, `parseInt`, `parseFloat`, the rest of `Number`, all of `Math` but `max` | slice 4, `numbers-and-dates` |
-| `String.prototype.match`, `matchAll` and `search`; `replace`, `replaceAll` and `split` given a regular expression; `RegExp.escape` | the rest of slice 5, `regexp` |
+| `String.prototype.matchAll` and `RegExp.escape` | the rest of slice 5, `regexp` |
 | `Map`, `Set`, `WeakMap`, `WeakSet`, `Proxy`, `Reflect` | slice 9 |
 | `Promise` | slice 10 |
 | `BigInt` | slice 12 |
