@@ -41,5 +41,5 @@ pub use compile::{CompileError, CompileRefusal, compile_pattern};
 pub use error::{ErrorKind, ParseError, PatternError, Refusal};
 pub use flags::Flags;
 pub use matcher::{Captures, Found, Subject, match_at, search, search_slot_visits};
-pub use parser::parse_pattern;
+pub use parser::{parse_name_visits, parse_pattern};
 pub use program::Program;

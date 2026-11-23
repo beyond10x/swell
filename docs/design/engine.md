@@ -1227,9 +1227,11 @@ step of their own. Their work is linear in that length: a bounded number of node
 unit and of instructions per node (a quantifier `{n,m}` is a counter, not n copies; the
 clearing of the captures of a quantified atom names a range of capture numbers, since the
 groups inside an atom are numbered one after the other), but for the sort of a class's ranges,
-n log n for n ranges, and the sort of the group names with the search of a named
-backreference's name among them, n log n and log n comparisons for n names. Both poll the
-interrupt at least once per 4,096 code units read and per 4,096 nodes visited.
+n log n for n ranges, the sort of the group names with the search of a named backreference's
+name among them, n log n and log n comparisons for n names, and the check of a duplicate group
+name, a union-find over the levels of the parse with path compression, at most n log n level
+visits for n levels. Both poll the interrupt at least once per 4,096 code units read and per
+4,096 nodes visited.
 
 The mechanism: the matcher takes its steps by grants of at most 4,096 before it runs them. It
 runs each unit of work against what it was granted and asks for the next grant when that is

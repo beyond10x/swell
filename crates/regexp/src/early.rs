@@ -12,7 +12,9 @@
 //! union-find over the levels of the parse (the pattern and every group): a closed level is
 //! joined to the level that held it, with the index of the alternative it lay in, and the
 //! nearest open level of a declaration is the nearest common Disjunction of it and the next.
-//! The work is near linear in the pattern, and no step of it recurses.
+//! The path is compressed at each search, so the levels walked are at most n log n for n
+//! levels (`docs/design/engine.md`, decision 7, "What one step of the matcher is"), and no step
+//! of it recurses.
 
 use std::collections::BTreeMap;
 
@@ -102,6 +104,9 @@ pub(crate) struct Names {
     current: Vec<u32>,
     /// Per name, the level and the alternative of its last declaration.
     last: BTreeMap<Vec<u8>, (u32, u32)>,
+    /// The names declared or looked up and the levels [`Names::find`] walked, for the tests of
+    /// the cost model (`parse_name_visits`).
+    visits: u64,
 }
 
 impl Names {
@@ -112,6 +117,7 @@ impl Names {
             alternative: Vec::new(),
             current: Vec::new(),
             last: BTreeMap::new(),
+            visits: 0,
         };
         names.push(m, 0)?;
         Ok(names)
@@ -157,12 +163,14 @@ impl Names {
     /// The nearest open level that holds `level`, and the alternative of it that holds
     /// `level`, or `None` when `level` is open itself. The path is compressed on the way.
     fn find(&mut self, level: u32) -> Option<(u32, u32)> {
+        self.visit();
         if self.parent_of(level) == level {
             return None;
         }
         let mut below = level;
         let mut at = self.parent_of(level);
         while self.parent_of(at) != at {
+            self.visit();
             below = at;
             at = self.parent_of(at);
         }
@@ -170,6 +178,7 @@ impl Names {
         let index = self.alternative.get(below as usize).copied().unwrap_or(0);
         let mut node = level;
         while self.parent_of(node) != root && self.parent_of(node) != node {
+            self.visit();
             let next = self.parent_of(node);
             if let Some(parent) = self.parent.get_mut(node as usize) {
                 *parent = root;
@@ -190,6 +199,7 @@ impl Names {
         name: &[u8],
         level: u32,
     ) -> Result<bool, Stop> {
+        self.visit();
         let here = (level, self.current_of(level));
         if let Some(&(earlier, at)) = self.last.get(name) {
             let (open, index) = self.find(earlier).unwrap_or((earlier, at));
@@ -207,12 +217,18 @@ impl Names {
     }
 
     /// Whether some group has the name `name` (GroupSpecifiersThatMatch is not empty).
-    pub(crate) fn has(&self, name: &[u8]) -> bool {
+    pub(crate) fn has(&mut self, name: &[u8]) -> bool {
+        self.visit();
         self.last.contains_key(name)
     }
 
-    /// Drop the names and credit them.
+    fn visit(&mut self) {
+        self.visits = self.visits.saturating_add(1);
+    }
+
+    /// Drop the names and credit them; their visits are added to the meter's.
     pub(crate) fn release(self, m: &mut Meter<'_>) {
+        m.add_name_visits(self.visits);
         m.release(self.parent);
         m.release(self.alternative);
         m.release(self.current);

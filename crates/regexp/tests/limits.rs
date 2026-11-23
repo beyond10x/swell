@@ -2,10 +2,11 @@
 //! its work", "What one step of the matcher is" and "No Rust recursion in the parser and the
 //! compiler of a pattern"): the nesting limit counted from zero, no recursion on a small
 //! stack, every growth charged and credited, no step asked for, a refused charge and an
-//! interrupt that stop the parse with everything credited.
+//! interrupt that stop the parse with everything credited, and work linear in the pattern.
 
 use swell_regexp::{
-    Budget, Flags, MAX_GRANT, POLL_INTERVAL, ParseError, Pattern, Stop, Unlimited, parse_pattern,
+    Budget, Flags, MAX_GRANT, POLL_INTERVAL, ParseError, Pattern, Stop, Unlimited,
+    parse_name_visits, parse_pattern,
 };
 
 #[cfg(test)]
@@ -309,4 +310,144 @@ fn an_interrupt_stops_the_parse_within_4096_code_units() {
         parse_pattern(&source, flags(""), 1000, &mut budget).err(),
         Some(ParseError::Stopped(Stop::Interrupted))
     );
+}
+
+/// The work of one parse as the crate shows it: the polls of a counting budget (one before the
+/// pattern is read, then one per 4,096 code units read and per 4,096 nodes made or visited),
+/// the bytes it charged, and the visits of the group-name check (`parse_name_visits`: a name
+/// declared or looked up, a level its union-find walked). Nothing is held after it.
+#[cfg(test)]
+fn work_of(family: &str, pattern: &[u16], f: &str) -> [usize; 3] {
+    let mut budget = Recording::default();
+    let visits = parse_name_visits(pattern, flags(f), u32::MAX, &mut budget)
+        .unwrap_or_else(|e| panic!("{family}: {e:?}"));
+    assert_eq!(budget.held(), 0, "{family}");
+    let visits = usize::try_from(visits).expect("a count");
+    [budget.polls, budget.charged, visits]
+}
+
+/// A family of patterns: what it repeats, its flags, whether it has group names, and its
+/// pattern for a count k, which grows in proportion to k.
+#[cfg(test)]
+type Family = (&'static str, &'static str, bool, fn(usize) -> String);
+
+/// The families of the constructs where a pattern parser is commonly quadratic.
+#[cfg(test)]
+fn families() -> Vec<Family> {
+    vec![
+        ("a name declared in two alternatives", "u", true, |k| {
+            (0..k)
+                .map(|i| format!("(?:(?<g{i:06}>a)|(?<g{i:06}>b))"))
+                .collect()
+        }),
+        (
+            "names declared again past a deep closed nesting",
+            "u",
+            true,
+            |k| {
+                let names: String = (0..k).map(|i| format!("(?<g{i:06}>a)")).collect();
+                format!("(?:{}{names}{}|{names})", "(".repeat(k), ")".repeat(k))
+            },
+        ),
+        ("a group and a name of its own referenced", "u", true, |k| {
+            (0..k)
+                .map(|i| format!("(?<g{i:06}>a)\\k<g{i:06}>"))
+                .collect()
+        }),
+        ("named backreferences", "u", true, |k| {
+            format!("(?<g>a){}", "\\k<g>".repeat(k))
+        }),
+        (
+            "named backreferences before the group, without u",
+            "",
+            true,
+            |k| format!("{}(?<g>a)", "\\k<g>".repeat(k)),
+        ),
+        ("a long name and its backreferences", "u", true, |k| {
+            let name = "n".repeat(500);
+            format!("(?<{name}>a){}", format!("\\k<{name}>").repeat(k))
+        }),
+        ("groups and decimal escapes, without u", "", false, |k| {
+            format!("{}{}", "(a)".repeat(k), "\\1".repeat(k))
+        }),
+        (
+            "decimal escapes past the groups, without u",
+            "",
+            false,
+            |k| "\\8\\18\\400".repeat(k),
+        ),
+        ("decimal escapes and a group, with u", "u", false, |k| {
+            format!("{}(a)", "\\1".repeat(k))
+        }),
+        ("the digits after a backslash, without u", "", false, |k| {
+            format!("\\{}", "1".repeat(k))
+        }),
+        ("the ranges of one class", "u", false, |k| {
+            format!("[{}]", "a-z".repeat(k))
+        }),
+        ("classes", "u", false, |k| "[^a-z\\d_-]".repeat(k)),
+        ("braced quantifiers", "u", false, |k| "a{1,2}".repeat(k)),
+        (
+            "the digits of a braced quantifier left open, without u",
+            "",
+            false,
+            |k| format!("a{{1,{}", "2".repeat(k)),
+        ),
+        (
+            "braces that start no quantifier, without u",
+            "",
+            false,
+            |k| "a{1,2".repeat(k),
+        ),
+        ("nesting", "u", false, |k| {
+            format!("{}a{}", "(".repeat(k), ")".repeat(k))
+        }),
+        (
+            "nesting of every kind of level, without u",
+            "",
+            false,
+            |k| {
+                let open = ["(", "(?:", "(?=", "(?<!", "(?i:", "(?-s:"];
+                let opened: String = open.iter().cycle().take(k).copied().collect();
+                format!("{opened}a{}", ")".repeat(k))
+            },
+        ),
+        ("alternatives", "", false, |k| "a|".repeat(k)),
+        ("lookarounds and modifier groups", "", false, |k| {
+            "(?i-ms:a)(?<=b)(?<!c)(?=d)".repeat(k)
+        }),
+    ]
+}
+
+#[test]
+fn the_parse_is_linear_in_the_pattern() {
+    // Each family at a count k of about 12,000 code units and at 4k: the pattern grows 4 times,
+    // and each measure of the work grows between 3 and 5 times, within 2 for the polls, which
+    // are whole (the vectors grow by doubling). A parse that does work per earlier name, group,
+    // reference, digit or level for one of them grows a measure about 16 times.
+    const UNITS: usize = 12_000;
+    for (family, f, named, pattern) in families() {
+        let len = |k: usize| pattern(k).encode_utf16().count();
+        let growth = len(2) - len(1);
+        let k = UNITS.saturating_sub(len(1)) / growth + 1;
+        let (small, large) = (units(&pattern(k)), units(&pattern(4 * k)));
+        let sizes = (small.len(), large.len());
+        assert!(
+            3 * sizes.0 <= sizes.1 && sizes.1 <= 5 * sizes.0,
+            "{family}: {sizes:?}"
+        );
+        let (a, b) = (work_of(family, &small, f), work_of(family, &large, f));
+        for (what, (a, b)) in ["polls", "bytes charged", "name visits"]
+            .into_iter()
+            .zip(a.into_iter().zip(b))
+        {
+            assert!(
+                3 * a <= b + 2 && b <= 5 * a + 2,
+                "{family}: {what} {a} at {} code units and {b} at {}",
+                sizes.0,
+                sizes.1
+            );
+        }
+        assert_eq!(a[2] > 0, named, "{family}: name visits {}", a[2]);
+    }
 }
