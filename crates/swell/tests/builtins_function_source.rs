@@ -504,13 +504,26 @@ fn apply_steps(length: u32) -> u64 {
 }
 
 /// CreateListFromArrayLike is a loop a script runs: a step per element (`AGENTS.md`, "Rules"),
-/// so 100 elements more cost 100 steps more. (Small: with the feature `collect-every-safe-point`
-/// the loop that makes the elements collects at every instruction; 1,000 and 2,000 took 7.2 s
-/// there, measured.)
+/// so n elements more cost n steps more: 100 and 200 elements in the default mode, 10 and 20
+/// with the feature `collect-every-safe-point` (the file has no full count), where the loop
+/// that makes the elements collects at every instruction; a list that charged no step per
+/// element costs both the same at any length. (1,000 and 2,000 took 7.2 s there, measured;
+/// 100 and 200 took 1.13 CPU seconds alone, against 0.02 in the default mode, measured on
+/// 2026-11-23.)
 #[test]
 fn apply_charges_a_step_per_element() {
-    let (one, two) = (apply_steps(100), apply_steps(200));
-    assert_eq!(two - one, 100, "{one} steps for 100, {two} for 200");
+    let n = if cfg!(feature = "collect-every-safe-point") {
+        10
+    } else {
+        100
+    };
+    let (one, two) = (apply_steps(n), apply_steps(2 * n));
+    assert_eq!(
+        two - one,
+        u64::from(n),
+        "{one} steps for {n}, {two} for {}",
+        2 * n
+    );
 }
 
 /// A length of 2^53 (ToLength makes it 2^53 - 1, and so it does of `Infinity`) ends in a budget,

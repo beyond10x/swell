@@ -348,18 +348,20 @@ fn charged_as_read(text: &str) {
     assert_eq!(ledger.held, held, "the compile step credited its scratch");
 }
 
-/// Whether a test takes its gate count: with the feature `collect-every-safe-point`, unless
-/// `SWELL_FULL_COUNTS=1` (the lane `slow`) asks for the full one.
-fn gate_count() -> bool {
-    cfg!(feature = "collect-every-safe-point")
-        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-}
-
 /// The elements of [`a_large_pattern_and_spread_are_charged_as_they_are_read`]: 10,000, the
-/// full count, in the default mode and in the lane `slow`; 1,000 in the gate with the feature
-/// `collect-every-safe-point`, whose build is slower. The test runs no script.
+/// full count, in the lane `slow` (`SWELL_FULL_COUNTS=1`); 1,000 in the gate, in either mode.
+/// The test runs no script, so the feature `collect-every-safe-point` changes nothing it
+/// checks; at 10,000 it took 0.59 CPU seconds alone in the default mode (measured on
+/// 2026-11-23). 1,000 elements still grow every list of the parse and the compile step past
+/// its first capacity many times over, and each assertion compares the ledger with what the
+/// lists hold at that size (a list that grew uncharged leaves the ledger below it at any
+/// size).
 fn elements() -> usize {
-    if gate_count() { 1_000 } else { 10_000 }
+    if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
+        10_000
+    } else {
+        1_000
+    }
 }
 
 /// The frontend's ledger over one script of an array binding pattern, an array assignment

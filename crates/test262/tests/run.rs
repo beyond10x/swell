@@ -569,31 +569,27 @@ fn assert_eval_script_passes(lines: &[RunLine], name: &str) {
     );
 }
 
+/// The five cases of the eval-script tree, from one count of the tree: `$262.evalScript`
+/// declares in the global scope, throws the first `SyntaxError`, answers the completion value,
+/// and fails the run on a refusal and on the nesting limit inside it. These were five tests,
+/// each counting the same tree again (0.95 CPU seconds each, measured on 2026-11-23); the
+/// tree is counted once and every assertion of the five is made on that count, and a failure
+/// names the case (the path in its message). The five: `eval_script_declares_in_the_global_scope`,
+/// `eval_script_throws_the_first_syntax_error`, `eval_script_answers_the_completion_value`,
+/// `a_refusal_inside_eval_script_fails_the_run` and
+/// `the_nesting_limit_inside_eval_script_fails_the_run`.
 #[test]
-fn eval_script_declares_in_the_global_scope() -> TestResult {
-    let (_, lines) = counted_eval_script("declares")?;
+fn eval_script_cases_declare_throw_answer_and_fail_on_a_refusal_and_the_nesting_limit() -> TestResult
+{
+    let (printed, lines) = counted_eval_script("cases")?;
+    // eval_script_declares_in_the_global_scope
     assert_eval_script_passes(&lines, "declares-a-global.js");
-    Ok(())
-}
-
-#[test]
-fn eval_script_throws_the_first_syntax_error() -> TestResult {
-    let (_, lines) = counted_eval_script("syntax-error")?;
+    // eval_script_throws_the_first_syntax_error
     assert_eval_script_passes(&lines, "throws-the-syntax-error.js");
-    Ok(())
-}
-
-#[test]
-fn eval_script_answers_the_completion_value() -> TestResult {
-    let (_, lines) = counted_eval_script("completion")?;
+    // eval_script_answers_the_completion_value
     assert_eval_script_passes(&lines, "answers-the-completion.js");
-    Ok(())
-}
-
-#[test]
-fn a_refusal_inside_eval_script_fails_the_run() -> TestResult {
-    let (printed, lines) = counted_eval_script("refusal-inside")?;
-    // Three cases pass; refusal-fails-the-run.js and nesting-fails-the-run.js catch the
+    // a_refusal_inside_eval_script_fails_the_run:
+    // three cases pass; refusal-fails-the-run.js and nesting-fails-the-run.js catch the
     // SyntaxError they name and fail.
     assert_line(&printed, "test262 language/eval-script 5 0 0 5 3 2 0");
     let runs = runs_of(&lines, "test/language/eval-script/refusal-fails-the-run.js");
@@ -612,6 +608,19 @@ fn a_refusal_inside_eval_script_fails_the_run() -> TestResult {
     // The two runs of refusal-fails-the-run.js are counted as refused, and not the two of
     // nesting-fails-the-run.js: the nesting limit is not a refusal.
     assert_eq!(printed.errors("test262-refused"), ["test262-refused 2"]);
+    // the_nesting_limit_inside_eval_script_fails_the_run:
+    // the case nests 2000 parentheses, past the runner's limit.
+    assert_eq!(run::LIMITS.parser_nesting, 1_000);
+    let runs = runs_of(&lines, "test/language/eval-script/nesting-fails-the-run.js");
+    assert_eq!(runs.len(), 2, "{lines:?}");
+    for line in runs {
+        assert_eq!(field(line, 5), "Failed", "{line:?}");
+        assert!(
+            field(line, 6)
+                .starts_with("evalScript: nesting: nesting deeper than parser_nesting (1000)"),
+            "{line:?}"
+        );
+    }
     Ok(())
 }
 
@@ -683,23 +692,5 @@ fn counted_refusals_are_counted_refused() -> TestResult {
     assert_line(&printed, "test262 language/dynamic-refusal 4 0 0 4 1 3 0");
     // Three cases, two runs each, every run counted refused once.
     assert_eq!(printed.errors("test262-refused"), ["test262-refused 6"]);
-    Ok(())
-}
-
-#[test]
-fn the_nesting_limit_inside_eval_script_fails_the_run() -> TestResult {
-    // The case nests 2000 parentheses, past the runner's limit.
-    assert_eq!(run::LIMITS.parser_nesting, 1_000);
-    let (_, lines) = counted_eval_script("nesting-inside")?;
-    let runs = runs_of(&lines, "test/language/eval-script/nesting-fails-the-run.js");
-    assert_eq!(runs.len(), 2, "{lines:?}");
-    for line in runs {
-        assert_eq!(field(line, 5), "Failed", "{line:?}");
-        assert!(
-            field(line, 6)
-                .starts_with("evalScript: nesting: nesting deeper than parser_nesting (1000)"),
-            "{line:?}"
-        );
-    }
     Ok(())
 }
