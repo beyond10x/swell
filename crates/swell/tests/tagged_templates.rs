@@ -43,6 +43,21 @@ fn gate_count(full: u32, collect: u32) -> u32 {
     }
 }
 
+/// A count of a test whose claim shows at its gate count where every instruction collects:
+/// `default` in the default mode and `collect` with the feature `collect-every-safe-point`, in
+/// the gate and in the lane `slow` (`SWELL_FULL_COUNTS=1`) alike. The lane's bound is 2.5 CPU
+/// seconds alone at the full count in either mode (`AGENTS.md`, "Commands and the gate"); in
+/// that mode each instruction marks the whole heap, so a loop costs about a hundred times what
+/// it costs in the default mode, and a test whose heap grows with its count costs more than in
+/// proportion to it.
+fn mode_count(default: u32, collect: u32) -> u32 {
+    if cfg!(feature = "collect-every-safe-point") {
+        collect
+    } else {
+        default
+    }
+}
+
 /// The root of what `source` completes with in `realm`, which must complete normally.
 fn value_of(agent: &mut Agent<TestHost>, realm: &Realm, source: &str) -> Root {
     match eval(agent, realm, source) {
@@ -260,12 +275,23 @@ fn heap_after(source: &str) -> (Outcome, u64) {
 
 /// Decision 4, "Template objects", item 4: the two Arrays are made at the first evaluation of a
 /// site and a later evaluation allocates nothing. `heap_bytes()` after a collection, with the
-/// object kept: a site evaluated 10,000 times (100 in the collect mode, 10,000 at the full count)
-/// holds over the site evaluated once less than the bytes of one template object, which is
-/// what the site evaluated once holds over the site never evaluated.
+/// object kept: a site evaluated 10,000 times holds over the site evaluated once less than the
+/// bytes of one template object, which is what the site evaluated once holds over the site
+/// never evaluated (672 bytes, measured).
+///
+/// The count ([`mode_count`]): 10,000 evaluations in the default mode, gate and lane alike
+/// (0.26 to 0.46 CPU seconds alone); 100 with the feature `collect-every-safe-point`, gate and
+/// lane alike. 10,000 took 32.4 to 34.3 CPU seconds alone in that mode at the full count, and
+/// the lane's collect half killed the test at 60 s at a load of 155; 100 take 0.35 to 0.51
+/// (measured on 2026-11-23, this unit's runs at loads of 18 to 129). What 100 still show: an
+/// evaluation that kept an allocation of its own of the size of a template object would hold
+/// 99 × 672 = 66,528 bytes over one evaluation, 99 times the bound of the assertion (the site
+/// evaluated 100 times holds 4 bytes over it, 10,000 times 8). A larger count adds nothing in
+/// that mode: what an evaluation kept shows from the second evaluation on, and what it dropped
+/// is freed at the next instruction at any count.
 #[test]
 fn a_template_object_is_charged_once_per_site() {
-    let n = gate_count(10_000, 100);
+    let n = mode_count(10_000, 100);
     let (none_outcome, none) = heap_after(&site_loop(0));
     let (one_outcome, one) = heap_after(&site_loop(1));
     let (many_outcome, many) = heap_after(&site_loop(n));
@@ -419,14 +445,24 @@ fn many_sites(n: u32) -> String {
 }
 
 /// Decision 4, "Template objects", item 4: each template object is charged as any Array when
-/// its site is first evaluated. 1,000 sites (100 in the collect mode, 1,000 at the full count),
-/// each the site of one eval code, their objects kept: under a memory budget of the reading of
-/// none of them, measured on an agent with the test limits, plus a room of half what the 1,000
-/// added to it, the script ends in `Terminated(MemoryBudget)`, never in a hang, while the
-/// script of none completes under the same budget.
+/// its site is first evaluated. 1,000 sites, each the site of one eval code, their objects
+/// kept: under a memory budget of the reading of none of them, measured on an agent with the
+/// test limits, plus a room of half what the 1,000 added to it, the script ends in
+/// `Terminated(MemoryBudget)`, never in a hang, while the script of none completes under the
+/// same budget.
+///
+/// The count ([`mode_count`]): 1,000 sites in the default mode, gate and lane alike (0.35 to
+/// 0.69 CPU seconds alone; the reading of none 191,253 bytes, the 1,000 add 1,737,682, the
+/// room 868,841); 100 with the feature `collect-every-safe-point`, gate and lane alike. 1,000
+/// took 30.9 to 43.4 CPU seconds alone in that mode at the full count, where every instruction
+/// marks a heap that grows with the kept objects, and the lane's collect half killed the test
+/// at 60 s at a load of 155; 100 take 0.94 to 1.44 (measured on 2026-11-23, this unit's runs
+/// at loads of 18 to 129). What 100 still show: the budget is still a measured reading plus a
+/// room of half what the sites add (the 100 add 145,936 bytes, the room 72,968), the script of
+/// 100 sites passes it and ends at it, and the script of none completes under it.
 #[test]
 fn many_sites_end_at_the_memory_budget() {
-    let n = gate_count(1_000, 100);
+    let n = mode_count(1_000, 100);
     let (none_outcome, none) = heap_after(&many_sites(0));
     let (kept_outcome, kept) = heap_after(&many_sites(n));
     assert_eq!(none_outcome, Outcome::Normal("0".to_string()));
