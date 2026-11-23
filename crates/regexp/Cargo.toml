@@ -1,0 +1,19 @@
+[package]
+name = "swell-regexp"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+autotests = false
+
+[dependencies]
+swell-unicode = { path = "../unicode" }
+
+[[test]]
+name = "main"
+path = "tests/main.rs"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
