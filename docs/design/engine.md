@@ -986,14 +986,33 @@ the rule first and then the mechanism.
 step budget, whatever it runs. Its steps start at 0 and it reads the interrupt before it spends
 one, as every outermost entry does (`host-interface.md`, decisions 2 and 12). Every entry it
 takes off the queue, a promise job or a host microtask, spends from that one counter: one step
-for taking it off, charged after the entry left the queue and before anything of it runs; then
-what it runs, the steps of every call it makes and every instruction those calls run. Every
+for taking it off, charged while the entry is still first in the queue, so that a step budget or
+an interrupt that refuses the step leaves it there, unrun and whole; then what it runs, the steps
+of every call it makes and every instruction those calls run. An entry is therefore either
+still queued or has started; none is lost between two jobs (changed on 2026-11-23 from a step
+charged after the entry left the queue, which lost the entry whose step was refused). Every
 promise job queued while it runs (HostEnqueuePromiseJob, `sec-hostenqueuepromisejob`) costs one
 step more, charged before its record is made, so TriggerPromiseReactions over n reactions
 (`sec-triggerpromisereactions`) spends n steps, and PerformPromiseThen on a settled promise
 (`sec-performpromisethen`) one; a promise job queued by an entry outside a checkpoint costs that
-entry the same step. `last_entry_steps()` after the checkpoint reads the sum, at most
-`steps_per_entry` (HOST-193).
+entry the same step. `last_entry_steps()` after `perform_microtask_checkpoint()` reads the steps
+of the whole checkpoint: every step of taking an entry off and everything the entries ran, at
+most `steps_per_entry`, the same whether the checkpoint answered `Normal` or a termination (the
+step a termination refused is not spent). After a checkpoint that found the queue empty it reads
+0, since the checkpoint is an outermost entry whose count starts at 0 and that spent none
+(HOST-193); a nested checkpoint that returned at once (HOST-81) spends no step and adds 0 to the
+entry around it. So a host that sums `last_entry_steps()` after each entry, scripts and
+checkpoints alike, counts every step once (HOST-197).
+
+The interrupt ends a running checkpoint as it ends a running script, with
+`Terminated(Interrupted)`, at three places: at the start, where `begin` reads the flag before the
+first entry is taken off, so a flag set before the checkpoint starts ends it with nothing taken
+off and `last_entry_steps()` 0, as it ends any entry that starts (`host-interface.md` decision
+12); before each entry is taken off, where `charge_steps` reads the flag before it spends the
+step of that entry, so a flag set between two jobs ends the checkpoint with the next entry still
+first in the queue; and while a job runs, at every place decision 3 checks the step budget, so a
+flag set from another thread while a job loops ends that job, which is not run again. The flag
+is cleared when it ends the checkpoint (HOST-198).
 
 The bound of the whole checkpoint: each entry it takes off costs at least one step, so one
 checkpoint takes at most `steps_per_entry` entries off the queue, whatever its jobs queue. A job
@@ -1005,11 +1024,15 @@ bounded amount of work here too: taking an entry off moves one record of fixed s
 most two hooks beside the job; queueing a promise job makes one record of fixed size.
 
 A termination of one job, `Terminated(StepBudget)`, `Terminated(MemoryBudget)` or
-`Terminated(Interrupted)` alike, ends the whole checkpoint. The entry taken off last is not run
-again, also when the step refused was the one for taking it off, so that nothing of it ran; the
-entries behind it stay queued in their order; ClearKeptObjects is not performed; the checkpoint
-answers `Terminated(reason)`, and the next one starts afresh with the first entry left
-(`host-interface.md` section 10, HOST-77). A promise job whose `host_prepare_to_run_job` was
+`Terminated(Interrupted)` alike, ends the whole checkpoint. The entry that was running is not
+run again; an entry whose step of taking off was refused was not taken off and is still first;
+the entries behind stay queued in their order, and the promise jobs among them stay charged;
+ClearKeptObjects is not performed; the checkpoint answers `Terminated(reason)`, and the next one
+runs the entries left from the first, under its own budget, as every outermost entry has
+(`host-interface.md` section 10, HOST-77, HOST-199). Nothing is dropped behind the host's back:
+the engine does not empty the queue at a termination, since HTML stops a script without
+clearing the event loop's microtask queue and only the host knows whether the page goes on; a
+host that does not want the entries left run calls `Agent::clear_microtasks` (below). A promise job whose `host_prepare_to_run_job` was
 called gets its `host_clean_up_after_job` on every way out, after a termination with `Ok(())`,
 so the host's two steps around a job stay paired; the reason is the checkpoint's outcome.
 `Terminated(EngineFault)` faults the agent, and the queue never runs again. What the host reads
@@ -1041,9 +1064,9 @@ running checkpoint until it returns, on every path. `begin` sets `steps` to 0 an
 interrupt only when no builtin runs and that flag is clear, so every `Cx` call a host microtask
 makes, and the call of a handler, is a nested entry that spends from the checkpoint
 (`host-interface.md` decision 2: "An entry made by host code that runs inside another entry (a
-host function, a hook, a host microtask) is nested"). The loop takes the first entry off,
-charges its step with `charge_steps`, which reads the interrupt, puts the values of a promise
-job on the kept stack before it calls a hook or code ("Queued jobs", decision 4), runs it, and
+host function, a hook, a host microtask) is nested"). The loop charges the step of the first
+entry with `charge_steps`, which reads the interrupt before it spends, then takes the entry off,
+puts the values of a promise job on the kept stack before it calls a hook or code ("Queued jobs", decision 4), runs it, and
 comes to a safe point before the next entry, where a collection may run. A host microtask runs
 with its realm as the realm of the entry, a promise job with its realm, or with the realm current
 at its enqueue when its realm is null. `Cx::perform_microtask_checkpoint` runs the same loop:
@@ -1054,6 +1077,26 @@ and runs nothing (HOST-81). Rejected: a step budget per job (the text of decisio
 2026-11-23: a job that queues a job would never let the checkpoint end); steps for code alone
 and none for taking an entry off (a host microtask that queues another and runs no code would
 never end the checkpoint).
+
+Emptying the queue is the host's call. Added on 2026-11-23. `Agent::clear_microtasks` drops
+every queued entry, promise jobs and host microtasks alike, credits what the promise jobs among
+them were charged, and answers how many entries it dropped (HOST-200), so that a page whose jobs
+flood the queue cannot spend the budgets of the entries that come after it. It runs no script,
+calls no hook and spends no step; a host microtask it drops is dropped unrun as a Rust value,
+which is the host's own code and not a callback of the engine. No job runs, so no
+`host_prepare_to_run_job` or `host_clean_up_after_job` is called for any of them. A promise whose
+reaction job it dropped stays pending for good, as after a termination: the derived promise of a
+`then` whose job was dropped is never settled, a promise whose resolve-thenable job was dropped
+is already resolved and so never settles, and an `async` function whose resumption was dropped
+is never resumed ("`async` functions on suspended frames" below, item 5). It is refused inside a running checkpoint by its type: it
+takes `&mut Agent`, which no code inside an entry holds, and `Cx` and `HookCx` have no such
+method; a job that dropped the entries behind it would change the order of the checkpoint that
+runs it, which HTML's checkpoint never does. Rejected: a no-op answer inside a checkpoint (a call
+that answers 0 with entries queued would mislead the host). Dropping the agent with entries
+still queued frees them with it and calls nothing of the host: no hook, no job and no
+microtask runs. A host function called from a job may settle a promise, through a resolve
+function it holds; the reaction job that queues runs in the same checkpoint, behind every entry
+already queued, in the one order of the queue (HOST-78, HOST-79).
 
 **`async` functions on suspended frames.** Added on 2026-11-23 for slice 10. What a script sees,
 the standard's: an `async` function runs in its call until its first `await` and returns its
@@ -1173,11 +1216,12 @@ where an item below says otherwise. Each item states the rule first and then the
      credited by `resume_frame`.
    - an activation suspended at an `await` when an entry ends, the one that made it or a later
      one, keeps its state, its frame and its charge. Its reaction stays in the awaited promise, or
-     its job in the queue behind the job that ended, and a later checkpoint resumes it as if the
-     termination had not happened. Except when its job is the one the checkpoint took off last:
-     then the step of taking it off, or a check of the resumption before the move (the step of
-     the resumption, the interrupt), was refused; the reaction is spent, the activation is never
+     its job in the queue, also when the step of taking that job off was the one refused, and a
+     later checkpoint resumes it as if the termination had not happened. Except when its job had
+     started and a check of the resumption before the move (the step of the call or of the
+     resumption, the interrupt) was refused: the reaction is spent, the activation is never
      resumed, its promise stays pending, and it is freed with its frame once nothing reaches it.
+     The same holds when `Agent::clear_microtasks` drops its job.
 
    Nothing credited stays charged, and nothing charged is credited twice, by the order of item 5
    of "Suspended frames": a suspension sets the state and moves the frame into the activation
@@ -1308,7 +1352,8 @@ script or module when it was queued, which the job makes active again as the dra
 ("scriptOrModule is the active script or module at the time of job's invocation",
 `sec-hostenqueuepromisejob`). A host microtask's entry holds its realm and its `Microtask<H>`.
 A promise job's entry is charged by its size with `charge_bytes` before it is stored, and
-credited when the checkpoint takes it off; the checkpoint then puts the job's values on the kept
+credited when the checkpoint takes it off or `Agent::clear_microtasks` drops it; an entry a
+terminated checkpoint left queued stays charged. The checkpoint puts the job's values on the kept
 stack (`object/builtin_function.rs`, `Agent::keep`), where a running builtin keeps what it needs
 across a call into code, before it calls a hook or code. The queue is a root: its site,
 `host/jobs.rs trace_roots`, called from the root site of `host/agent.rs`, reports every value
@@ -1860,7 +1905,7 @@ section differ.** This section is the first description; the first ESS model of 
 with nine places where it is unclear or silent, and that document answers them from the text of
 ECMA-262 and HTML, as 19 decisions and numbered requirements (`HOST-<n>`): 165 on 2026-11-21
 (corrected that day from 135, the count when the document was written), 171 on 2026-11-22
-with the six of resource accounting, 190 the same day with the host interface of the first consumer, 191 on 2026-11-23 with the refusals `RegExp` raises, and 196 the same day with five of slice 10's jobs and `async` functions (HOST-192 to HOST-196), the count `task host-requirements-check` prints. The eleven places where it departs from this document (3 and 4 no longer since 2026-11-23, when "Entry points" and "Jobs" below were corrected to say what that document says):
+with the six of resource accounting, 190 the same day with the host interface of the first consumer, 191 on 2026-11-23 with the refusals `RegExp` raises, and 200 the same day with nine of slice 10's jobs and `async` functions (HOST-192 to HOST-200), the count `task host-requirements-check` prints. The eleven places where it departs from this document (3 and 4 no longer since 2026-11-23, when "Entry points" and "Jobs" below were corrected to say what that document says):
 
 1. Each entry point has a result type of its own instead of one `Outcome`; misuse answers
    `Err(HostError)`, never a panic.
@@ -1938,7 +1983,23 @@ from its one step budget (decision 3, "The microtask checkpoint is one entry"). 
 microtask is queued with the realm it runs in: `Agent::queue_microtask` takes one and checks it
 first, answering `Err(StaleHandle)` for a stale or released realm and `Err(ForeignHandle)` for a
 realm of another agent, with nothing queued, and `Cx::queue_microtask` uses the current realm of
-its caller (HOST-192; HOST-31 and HOST-45 for every call that takes a realm). Generic, timeout and
+its caller (HOST-192; HOST-31 and HOST-45 for every call that takes a realm). Added on
+2026-11-23 for the first embedder, each stated in decision 3, "The microtask checkpoint is one
+entry": `last_entry_steps()` after `perform_microtask_checkpoint()` reads the steps of the whole
+checkpoint, every entry taken off and everything the jobs ran, also when it ended in a
+termination; 0 after one that found the queue empty; and a nested checkpoint that returned at
+once adds nothing (HOST-197). The interrupt ends a running checkpoint with
+`Terminated(Interrupted)` at its start, before any entry is taken off, so a flag set before the
+checkpoint ends it there; before each entry is taken off, leaving that entry queued; and while a
+job runs, wherever the step budget is checked (HOST-198). A checkpoint that did not empty the
+queue, ended by the step budget, the interrupt or the memory budget, leaves every entry it did
+not start queued in its order and charged, and the next checkpoint runs them under its own
+budget (HOST-199); the engine drops none of them, and the host empties the queue with
+`Agent::clear_microtasks`, which runs no script and calls no hook, credits what the dropped
+promise jobs were charged and answers how many entries it dropped; a promise whose reaction it
+dropped stays pending for good (HOST-200). Dropping the agent with entries queued frees them and
+calls nothing of the host. A host function called from a job may settle a promise, and the
+reaction that queues runs in the same checkpoint, behind the entries already queued. Generic, timeout and
 FinalizationRegistry cleanup jobs are handed to the host as `Job` tokens, and the host runs
 each with `run_job` when it chooses, one entry each. Corrected on 2026-11-23: this paragraph
 said that the host runs generic and timeout jobs "through `call`", and "Entry points" above
