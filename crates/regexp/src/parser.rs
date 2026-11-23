@@ -37,6 +37,31 @@ pub fn parse_pattern(
     nesting_limit: u32,
     budget: &mut dyn Budget,
 ) -> Result<Pattern, ParseError> {
+    parse_counted(pattern, flags, nesting_limit, budget).map(|(tree, _)| tree)
+}
+
+/// For the tests of the cost model (`docs/design/engine.md`, decision 7, "What one step of the
+/// matcher is"): the parse of [`parse_pattern`], the tree released to `budget`, answering the
+/// count of visits of the group-name check: each name declared or looked up, and each level
+/// the union-find of the duplicate check walked.
+#[doc(hidden)]
+pub fn parse_name_visits(
+    pattern: &[u16],
+    flags: Flags,
+    nesting_limit: u32,
+    budget: &mut dyn Budget,
+) -> Result<u64, ParseError> {
+    let (tree, visits) = parse_counted(pattern, flags, nesting_limit, budget)?;
+    tree.release(budget);
+    Ok(visits)
+}
+
+fn parse_counted(
+    pattern: &[u16],
+    flags: Flags,
+    nesting_limit: u32,
+    budget: &mut dyn Budget,
+) -> Result<(Pattern, u64), ParseError> {
     if flags.unicode_sets() {
         return Err(ParseError::Pattern(PatternError::new(
             ErrorKind::Refused(Refusal::SetsFlag),
@@ -48,7 +73,7 @@ pub fn parse_pattern(
     match (parsed, m.stopped()) {
         (Ok(mut tree), None) => {
             tree.charged = m.held();
-            Ok(tree)
+            Ok((tree, m.name_visits()))
         }
         (Ok(tree), Some(stop)) => {
             drop(tree);
@@ -227,6 +252,13 @@ fn index32(n: usize) -> Result<u32, ParseError> {
 
 fn error(kind: ErrorKind, offset: usize) -> ParseError {
     ParseError::Pattern(PatternError::new(kind, offset))
+}
+
+/// The bytes of the group name `name` in `text`, the names of a parse.
+fn name_text(text: &[u8], name: Name) -> &[u8] {
+    let start = name.start as usize;
+    text.get(start..start.saturating_add(name.len as usize))
+        .unwrap_or(&[])
 }
 
 impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
@@ -498,11 +530,7 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
                     self.bump(2)?;
                     let name = self.group_name(start)?;
                     let number = self.next_group(start)?;
-                    let from = name.start as usize;
-                    let text = self
-                        .text
-                        .get(from..from.saturating_add(name.len as usize))
-                        .unwrap_or(&[]);
+                    let text = name_text(&self.text, name);
                     if !self.declared.declare(self.m, text, outer)? {
                         return Err(error(ErrorKind::DuplicateGroupName, start));
                     }
@@ -532,13 +560,6 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
         };
         self.m.push(&mut self.levels, level)?;
         Ok(())
-    }
-
-    fn name_text(&self, name: Name) -> &[u8] {
-        let start = name.start as usize;
-        self.text
-            .get(start..start.saturating_add(name.len as usize))
-            .unwrap_or(&[])
     }
 
     /// The number of the next capturing group; 2^32 - 1 groups are an error
@@ -1037,7 +1058,9 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
                 Some(Reference::Number(n, at)) if n > self.groups => {
                     return Err(error(ErrorKind::BackreferencePastGroups, at));
                 }
-                Some(Reference::Name(name, at)) if !self.declared.has(self.name_text(name)) => {
+                Some(Reference::Name(name, at))
+                    if !self.declared.has(name_text(&self.text, name)) =>
+                {
                     return Err(error(ErrorKind::UnknownGroupName, at));
                 }
                 _ => {}
