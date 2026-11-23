@@ -3,6 +3,9 @@
 
 pub(crate) mod case_ignorable;
 pub(crate) mod cased;
+pub(crate) mod combining_class;
+pub(crate) mod compositions;
+pub(crate) mod decompositions;
 pub(crate) mod lowercase;
 pub(crate) mod special_casing;
 pub(crate) mod uppercase;

@@ -1,7 +1,9 @@
 //! The transform and compare methods of `String.prototype` (ECMA-262 22.1.3,
 //! `#sec-properties-of-the-string-prototype-object`), the group of
 //! `story:string-transform-and-compare-methods`: `localeCompare`
-//! (`#sec-string.prototype.localecompare`), `padEnd` (`#sec-string.prototype.padend`), `padStart`
+//! (`#sec-string.prototype.localecompare`), `normalize` (`#sec-string.prototype.normalize`,
+//! `story:normalization-tables-normalize-and-locale-compare`), `padEnd`
+//! (`#sec-string.prototype.padend`), `padStart`
 //! (`#sec-string.prototype.padstart`) with StringPaddingBuiltinsImpl
 //! (`#sec-stringpaddingbuiltinsimpl`) and StringPad (`#sec-stringpad`), `repeat`
 //! (`#sec-string.prototype.repeat`), `toLocaleLowerCase` (`#sec-string.prototype.tolocalelowercase`),
@@ -17,16 +19,19 @@
 //!
 //! The four case methods map every code point of a String by the case tables of
 //! `swell-unicode` (the locale-insensitive mappings of `UnicodeData.txt` and `SpecialCasing.txt`,
-//! with the context `Final_Sigma`). Before its story of slice 5, which brings the normalization
-//! tables, `localeCompare` answers two Strings whose code units are all below 0x80 as the
-//! standard does and refuses any other (`docs/design/engine.md`, section 12, "A part before its
-//! slice", the third form; `docs/design/host-interface.md`, section 13, "A refusal raised by a
-//! builtin method"): two Strings of such code units are canonically equivalent only when they
-//! are equal, so their order of code units is the consistent total order `localeCompare` asks
-//! for. The refusal comes after RequireObjectCoercible and ToString of the this value and of
-//! `that`, so an error of those steps is thrown instead; it is a `SyntaxError` of the method's
-//! realm (the current realm while a built-in function runs) with the exact message of the
-//! design, and the agent counts it ([`Agent::refusals`]).
+//! with the context `Final_Sigma`). `normalize` makes the four forms of UAX #15 by the
+//! normalization tables of `swell-unicode`, and `localeCompare` orders two Strings by the code
+//! units of their NFC forms (`docs/design/engine.md`, decision 5, "The order `localeCompare`
+//! gives"). No method of the group refuses an input: the refusals of slice 3 (section 12, "A part
+//! before its slice") are gone.
+//!
+//! The normalization of `normalize` and `localeCompare` is made in buffers of the method, not
+//! in Strings of the heap: the full decomposition as code points, and for `localeCompare` the
+//! NFC form of each String as code units. Each buffer grows by doubling its room, at least 16,
+//! and the bytes of the room are charged to the memory budget before it grows (a form can be
+//! longer than its String, so nothing is charged ahead); the method credits every byte when it
+//! returns, by an answer, a throw or a stop. `string_length` does not bound these buffers;
+//! `normalize` writes its result through [`StringBuilder`], which it bounds.
 //!
 //! Limits: a result whose length is known before it is built (`repeat`, the pads) is asked of
 //! `string_length` and of the memory budget as a whole before a unit is copied, so a result above
@@ -35,11 +40,14 @@
 //! A case method's result, whose length is known only as it is built, grows through
 //! [`StringBuilder`]: past `string_length` a `RangeError`, and the memory budget asked before the
 //! buffer grows. Steps: a step per code unit copied or written into a result
-//! ([`StringBuilder`]); the trims, the case methods and `localeCompare` also a step per code
-//! unit of each String they read, charged before the read.
+//! ([`StringBuilder`]); the trims, the case methods, `normalize` and `localeCompare` also a step
+//! per code unit of each String they read, charged before the read; `normalize` and
+//! `localeCompare` a step per code unit written into a buffer of the normalization, charged
+//! before it is written (the comparison of two forms charges nothing more).
 
 use swell_unicode::{
-    CaseMapping, final_sigma_lowercase, is_case_ignorable, is_cased, to_lowercase, to_uppercase,
+    Buffer, CaseMapping, Form, FormBuffer, Stop, decompose, final_sigma_lowercase,
+    is_case_ignorable, is_cased, reorder_and_compose, to_lowercase, to_uppercase,
 };
 
 use crate::builtins::object::argument;
@@ -56,6 +64,8 @@ use crate::value::{ObjectRef, StringRef, Value};
 pub(crate) enum TransformBuiltin {
     /// `String.prototype.localeCompare ( that [ , reserved1 [ , reserved2 ] ] )` (22.1.3.12).
     LocaleCompare,
+    /// `String.prototype.normalize ( [ form ] )` (22.1.3.15).
+    Normalize,
     /// `String.prototype.padEnd ( maxLength [ , fillString ] )` (22.1.3.16).
     PadEnd,
     /// `String.prototype.padStart ( maxLength [ , fillString ] )` (22.1.3.17).
@@ -85,6 +95,7 @@ pub(crate) const CONSTRUCTOR_METHODS: &[Method<TransformBuiltin>] = &[];
 /// with the "length" its clause heading gives (the required parameters, clause 18).
 pub(crate) const PROTOTYPE_METHODS: &[Method<TransformBuiltin>] = &[
     ("localeCompare", 1, TransformBuiltin::LocaleCompare),
+    ("normalize", 0, TransformBuiltin::Normalize),
     ("padEnd", 1, TransformBuiltin::PadEnd),
     ("padStart", 1, TransformBuiltin::PadStart),
     ("repeat", 1, TransformBuiltin::Repeat),
@@ -102,9 +113,6 @@ pub(crate) const PROTOTYPE_METHODS: &[Method<TransformBuiltin>] = &[
 pub(crate) fn prototype_symbol_data<H: Host>() -> [SymbolData<H>; 0] {
     []
 }
-
-/// The message of the refusal of `localeCompare` before slice 5.
-const COMPARE_REFUSAL: &str = "comparison outside ASCII is not supported before slice 5";
 
 /// The placement of StringPad (`#sec-stringpad`).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -131,12 +139,6 @@ enum Case {
 /// A number of code units or steps as a `u64`.
 fn count(units: usize) -> u64 {
     u64::try_from(units).unwrap_or(u64::MAX)
-}
-
-/// Whether every code unit of `units` is below 0x80: a String `localeCompare` answers before
-/// its story of slice 5.
-fn is_ascii(units: &[u16]) -> bool {
-    units.iter().all(|&unit| unit < 0x80)
 }
 
 /// Whether a cased code point follows the code unit at `from` of `units`, after any
@@ -185,6 +187,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Value> {
         match id {
             TransformBuiltin::LocaleCompare => self.string_locale_compare(this, args),
+            TransformBuiltin::Normalize => self.string_normalize(this, args),
             TransformBuiltin::PadEnd => {
                 self.string_padding_method(this, args, Placement::End, "String.prototype.padEnd")
             }
@@ -217,16 +220,6 @@ impl<H: Host> Agent<H> {
                 self.trim_string(this, Trim::Start, "String.prototype.trimStart")
             }
         }
-    }
-
-    /// The refusal of a method that needs the tables of slice 5 (`host-interface.md`, section
-    /// 13): counted, then a `SyntaxError` of the current realm, the method's, with `message`.
-    /// The one that remains is that of `localeCompare`, until
-    /// `story:normalization-tables-normalize-and-locale-compare`; the case methods have their
-    /// tables.
-    fn refuse_before_slice_5(&mut self, message: &str) -> Abrupt {
-        self.count_refusal(message);
-        self.throw_error(ErrorKind::SyntaxError, message)
     }
 
     /// An empty builder for a result of `length` code units, asked of both limits before a unit
@@ -512,8 +505,9 @@ impl<H: Host> Agent<H> {
     }
 
     /// `String.prototype.localeCompare ( that [ , reserved1 [ , reserved2 ] ] )`
-    /// (`#sec-string.prototype.localecompare`): -1, +0 or 1 by the order of code units of two
-    /// Strings of code units below 0x80; with any other code unit refused before slice 5.
+    /// (`#sec-string.prototype.localecompare`): -1, +0 or 1 as the NFC form of S is ordered
+    /// before, equal to or after that of thatValue by code units (`docs/design/engine.md`,
+    /// decision 5). The buffers of the forms are credited on every way out.
     fn string_locale_compare(&mut self, this: Value, args: &[Value]) -> Completion<Value> {
         // 1. Let O be the this value. 2. Perform ? RequireObjectCoercible(O). 3. Let S be ?
         // ToString(O).
@@ -525,16 +519,301 @@ impl<H: Host> Agent<H> {
         let that = that?;
         let units = self.charged_units(string)?;
         let that_units = self.charged_units(that)?;
-        if !is_ascii(&units) || !is_ascii(&that_units) {
-            return Err(self.refuse_before_slice_5(COMPARE_REFUSAL));
-        }
-        // Negative when S is ordered before thatValue, positive when after, zero otherwise:
-        // the order of code units, a String before each longer String that starts with it.
-        Ok(Value::Number(match units.cmp(&that_units) {
+        let mut charged = 0;
+        let order = self.compare_nfc_forms(&units, &that_units, &mut charged);
+        self.heap.accounting.credit(charged);
+        // Negative when S is ordered before thatValue, positive when after, zero otherwise: the
+        // order of the code units of the forms, a String before each longer String that
+        // starts with it.
+        Ok(Value::Number(match order? {
             std::cmp::Ordering::Less => -1.0,
             std::cmp::Ordering::Equal => 0.0,
             std::cmp::Ordering::Greater => 1.0,
         }))
+    }
+
+    /// The order of the NFC forms of `units` and `that_units` by code units, each form made in a
+    /// buffer of the method; `charged` is raised by every byte the buffers are charged. Not
+    /// inlined: its buffers are not in the frame of `localeCompare` while ToString of `that`
+    /// runs code.
+    #[inline(never)]
+    fn compare_nfc_forms(
+        &mut self,
+        units: &[u16],
+        that_units: &[u16],
+        charged: &mut u64,
+    ) -> Completion<std::cmp::Ordering> {
+        // The decomposition of S, then of thatValue, in one buffer.
+        let mut points = Vec::new();
+        let mut form = Vec::new();
+        let mut that_form = Vec::new();
+        self.nfc_units(units, &mut points, &mut form, charged)?;
+        self.nfc_units(that_units, &mut points, &mut that_form, charged)?;
+        Ok(form.cmp(&that_form))
+    }
+
+    /// The NFC form of `units` into `form`, by its full decomposition in `points`: a step per
+    /// code unit written into each, the room of each charged before it grows and added to
+    /// `charged`.
+    fn nfc_units(
+        &mut self,
+        units: &[u16],
+        points: &mut Vec<u32>,
+        form: &mut Vec<u16>,
+        charged: &mut u64,
+    ) -> Completion<()> {
+        self.decompose_units(Form::Nfc, units, points, charged)?;
+        let mut out = UnitBuffer {
+            agent: self,
+            units: form,
+            charged,
+        };
+        let done = reorder_and_compose(Form::Nfc, points, &mut out);
+        self.normalized(done)
+    }
+
+    /// `String.prototype.normalize ( [ form ] )` (`#sec-string.prototype.normalize`).
+    fn string_normalize(&mut self, this: Value, args: &[Value]) -> Completion<Value> {
+        // 1. Let thisValue be the this value. 2. Perform ? RequireObjectCoercible(thisValue).
+        // 3. Let string be ? ToString(thisValue).
+        let string = self.this_string(this, "String.prototype.normalize")?;
+        // 4. Set form to ? ValidateStringOption(form, coerce, « "NFC", "NFD", "NFKC", "NFKD" »,
+        // "NFC"). It may run code; string is kept.
+        let keep = self.keep(Value::String(string));
+        let form = self.normalization_form(argument(args, 0));
+        self.release(keep);
+        let form = form?;
+        // 5. Let normal be the String value that is the result of normalizing string into the
+        // normalization form named by form as specified in the latest Unicode Standard,
+        // Normalization Forms. 6. Return normal.
+        let units = self.charged_units(string)?;
+        let mut charged = 0;
+        let normal = self.normalized_string(form, &units, &mut charged);
+        self.heap.accounting.credit(charged);
+        Ok(Value::String(normal?))
+    }
+
+    /// ValidateStringOption ( value, coerce, « "NFC", "NFD", "NFKC", "NFKD" », "NFC" )
+    /// (`#sec-validatestringoption`), the form of `normalize`: "NFC" for undefined, else ToString
+    /// of `value`, which must be one of the four names, or a `RangeError` (coerce). A String
+    /// of another length than 3 or 4 is no name and is not read; one of 3 or 4 is read without
+    /// a step.
+    fn normalization_form(&mut self, value: Value) -> Completion<Form> {
+        // 1. If value is undefined, then return defaultValue.
+        if matches!(value, Value::Undefined) {
+            return Ok(Form::Nfc);
+        }
+        // 3. Set value to ? ToString(value).
+        let name = self.to_string(value)?;
+        let length = self.string_length(name)?;
+        let units = if length == 3 || length == 4 {
+            self.string_units_in(name, 0, length)?
+        } else {
+            Vec::new()
+        };
+        // 4. If allowedValues does not contain value, throw a RangeError exception (coerce).
+        // 5. Return value.
+        match units.as_slice() {
+            [0x4E, 0x46, 0x43] => Ok(Form::Nfc),
+            [0x4E, 0x46, 0x44] => Ok(Form::Nfd),
+            [0x4E, 0x46, 0x4B, 0x43] => Ok(Form::Nfkc),
+            [0x4E, 0x46, 0x4B, 0x44] => Ok(Form::Nfkd),
+            _ => Err(self.throw_error(
+                ErrorKind::RangeError,
+                "the form of String.prototype.normalize is not \"NFC\", \"NFD\", \"NFKC\" or \"NFKD\"",
+            )),
+        }
+    }
+
+    /// `units` in `form` as a String of the heap: the decomposition in a buffer of the method,
+    /// then the form written through [`StringBuilder`], a step per code unit and bounded by
+    /// `string_length`; `charged` is raised by every byte the buffer is charged. Not inlined, as
+    /// [`Agent::compare_nfc_forms`].
+    #[inline(never)]
+    fn normalized_string(
+        &mut self,
+        form: Form,
+        units: &[u16],
+        charged: &mut u64,
+    ) -> Completion<StringRef> {
+        let mut points = Vec::new();
+        self.decompose_units(form, units, &mut points, charged)?;
+        let mut builder = StringBuilder::new();
+        let mut out = BuilderBuffer {
+            agent: self,
+            builder: &mut builder,
+        };
+        let done = reorder_and_compose(form, &points, &mut out);
+        self.normalized(done)?;
+        self.finish_string(builder)
+    }
+
+    /// The full decomposition of the code points of `units` (StringToCodePoints,
+    /// `#sec-stringtocodepoints`: a lone surrogate as itself) for `form`, into `points`, emptied
+    /// first: a step per code unit written and the room charged before it grows.
+    fn decompose_units(
+        &mut self,
+        form: Form,
+        units: &[u16],
+        points: &mut Vec<u32>,
+        charged: &mut u64,
+    ) -> Completion<()> {
+        points.clear();
+        let mut position = 0;
+        let input = std::iter::from_fn(|| {
+            let point = code_point_at(units, position)?;
+            position += point.code_unit_count;
+            Some(point.code_point)
+        });
+        let mut out = PointBuffer {
+            agent: self,
+            points,
+            charged,
+        };
+        let done = decompose(form, input, &mut out);
+        self.normalized(done)
+    }
+
+    /// The completion of a pass of the normalization: a stop of a buffer is its abrupt
+    /// completion; a decomposition deeper than the tables say is a broken invariant.
+    fn normalized(&mut self, done: Result<(), Stop<Abrupt>>) -> Completion<()> {
+        match done {
+            Ok(()) => Ok(()),
+            Err(Stop::Buffer(abrupt)) => Err(abrupt),
+            Err(Stop::TooDeep) => Err(self.fault()),
+        }
+    }
+
+    /// Room for one more item in `list`, a buffer of the normalization: when it is full, its
+    /// room doubles, at least to [`MIN_ROOM`], the bytes charged to the memory budget before it
+    /// is reserved and added to `charged`; over the budget the run ends in
+    /// `Terminated(MemoryBudget)`.
+    fn room_for_one<T>(&mut self, list: &mut Vec<T>, charged: &mut u64) -> Completion<()> {
+        let capacity = list.capacity();
+        if list.len() < capacity {
+            return Ok(());
+        }
+        let wanted = capacity.saturating_mul(2).max(MIN_ROOM);
+        let bytes = count(wanted - capacity).saturating_mul(count(size_of::<T>()));
+        self.charge_bytes(bytes)?;
+        *charged = charged.saturating_add(bytes);
+        let length = list.len();
+        if list.try_reserve_exact(wanted - length).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        Ok(())
+    }
+}
+
+/// The least room a buffer of the normalization grows to, in items.
+const MIN_ROOM: usize = 16;
+
+/// The buffer of the full decomposition: code points, a step per code unit each stands for,
+/// charged before it is written, and its room charged before it grows.
+struct PointBuffer<'a, H: Host> {
+    agent: &'a mut Agent<H>,
+    points: &'a mut Vec<u32>,
+    charged: &'a mut u64,
+}
+
+impl<H: Host> Buffer for PointBuffer<'_, H> {
+    type Error = Abrupt;
+
+    fn push(&mut self, point: u32) -> Completion<()> {
+        let Some(units) = utf16_encode_code_point(point) else {
+            return Err(self.agent.fault());
+        };
+        self.agent.charge_steps(count(units.units().len()))?;
+        self.agent.room_for_one(self.points, self.charged)?;
+        self.points.push(point);
+        Ok(())
+    }
+}
+
+/// The buffer of the NFC form of `localeCompare`: code units, a step per code unit charged
+/// before it is written, and the room charged before it grows. Not a String: `string_length`
+/// does not bound it.
+struct UnitBuffer<'a, H: Host> {
+    agent: &'a mut Agent<H>,
+    units: &'a mut Vec<u16>,
+    charged: &'a mut u64,
+}
+
+impl<H: Host> Buffer for UnitBuffer<'_, H> {
+    type Error = Abrupt;
+
+    fn push(&mut self, point: u32) -> Completion<()> {
+        let Some(encoded) = utf16_encode_code_point(point) else {
+            return Err(self.agent.fault());
+        };
+        self.agent.charge_steps(count(encoded.units().len()))?;
+        for &unit in encoded.units() {
+            self.agent.room_for_one(self.units, self.charged)?;
+            self.units.push(unit);
+        }
+        Ok(())
+    }
+}
+
+impl<H: Host> FormBuffer for UnitBuffer<'_, H> {
+    fn position(&self) -> usize {
+        self.units.len()
+    }
+
+    fn replace(&mut self, position: usize, old: u32, new: u32) -> Completion<()> {
+        replace_units(self.agent, self.units, position, old, new)
+    }
+}
+
+/// The buffer of the result of `normalize`: the builder of a String, through
+/// [`Agent::append_units`] (a step per code unit, a `RangeError` past `string_length`, the memory
+/// budget before it grows).
+struct BuilderBuffer<'a, H: Host> {
+    agent: &'a mut Agent<H>,
+    builder: &'a mut StringBuilder,
+}
+
+impl<H: Host> Buffer for BuilderBuffer<'_, H> {
+    type Error = Abrupt;
+
+    fn push(&mut self, point: u32) -> Completion<()> {
+        let Some(encoded) = utf16_encode_code_point(point) else {
+            return Err(self.agent.fault());
+        };
+        self.agent.append_units(self.builder, encoded.units())
+    }
+}
+
+impl<H: Host> FormBuffer for BuilderBuffer<'_, H> {
+    fn position(&self) -> usize {
+        self.builder.units.len()
+    }
+
+    fn replace(&mut self, position: usize, old: u32, new: u32) -> Completion<()> {
+        replace_units(self.agent, &mut self.builder.units, position, old, new)
+    }
+}
+
+/// Replace the code units of `old` at `position` of `units` by those of `new`, a composite of
+/// as many code units (the tables hold to that); anything else is a broken invariant.
+fn replace_units<H: Host>(
+    agent: &mut Agent<H>,
+    units: &mut [u16],
+    position: usize,
+    old: u32,
+    new: u32,
+) -> Completion<()> {
+    let (Some(old), Some(new)) = (utf16_encode_code_point(old), utf16_encode_code_point(new))
+    else {
+        return Err(agent.fault());
+    };
+    let end = position.saturating_add(old.units().len());
+    match units.get_mut(position..end) {
+        Some(slot) if slot.len() == new.units().len() && slot == old.units() => {
+            slot.copy_from_slice(new.units());
+            Ok(())
+        }
+        _ => Err(agent.fault()),
     }
 }
 
