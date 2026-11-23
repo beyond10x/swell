@@ -429,6 +429,10 @@ impl<H: Host> Agent<H> {
             I::YieldReturn(items) => self.yield_return(items),
             I::GeneratorReturn(slot) => self.generator_return(slot),
             I::GeneratorDone(slot) => self.generator_done(slot),
+            // ---- `yield*` (`interp/yield_star.rs`) ----
+            I::DelegateStep(target) => self.delegate_step(target),
+            I::JumpIfDelegateDone(target) => self.jump_if_delegate_done(target),
+            I::DelegateYield(slot) => self.delegate_yield(slot),
         }
     }
 

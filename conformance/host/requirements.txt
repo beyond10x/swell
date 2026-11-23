@@ -198,3 +198,11 @@ HOST-197 test swell::jobs::host_197_last_entry_steps_reads_the_whole_checkpoint
 HOST-198 pending slice 10
 HOST-199 pending slice 10
 HOST-200 pending slice 10
+HOST-201 pending slice 10
+HOST-202 pending slice 10
+HOST-203 pending slice 10
+HOST-204 pending slice 10
+HOST-205 pending slice 10
+HOST-206 pending slice 10
+HOST-207 pending slice 10
+HOST-208 pending slice 10

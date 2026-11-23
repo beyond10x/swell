@@ -302,6 +302,11 @@ impl<V> KeyedList<V> {
         self.at_mut(position)
     }
 
+    /// The first entry, if it holds one.
+    pub(crate) fn first(&self) -> Option<&(Key, V)> {
+        self.entries.first()?.as_ref()
+    }
+
     /// The value at `position`, which [`KeyedList::position`] answered.
     pub(crate) fn at(&self, position: usize) -> Option<&V> {
         self.entries.get(position)?.as_ref().map(|(_, value)| value)
@@ -578,6 +583,11 @@ fn merge(left: &[u32], right: &[u32], out: &mut [u32], compared: &mut u64) {
 pub(crate) type Properties = KeyedList<Property>;
 
 impl KeyedList<Property> {
+    /// Whether the list ever held an array index; false means it holds none now.
+    pub(crate) fn may_hold_index(&self) -> bool {
+        self.last_index.is_some()
+    }
+
     /// The array indices of the list, in creation order.
     pub(crate) fn listed_indices(&self) -> impl Iterator<Item = u32> + '_ {
         self.iter().filter_map(|(key, _)| match key {

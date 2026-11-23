@@ -20,6 +20,8 @@
 //! budget before it is made and credited when the Array is freed (`Grown`, `object/mod.rs`); a
 //! walk over it (the keys, a truncation) charges a step per position it visits, holes included.
 
+use std::cmp::Ordering;
+
 use super::ordinary::applied_property;
 use super::property::{Descriptor, Key, Property, SMALL, Slot};
 use super::{KeyList, ListedIndices, ObjectKind};
@@ -113,6 +115,9 @@ fn is_dense_element(property: &Property) -> bool {
 
 /// 2^32 - 1, the largest length.
 const MAX_LENGTH: f64 = 4_294_967_295.0;
+
+/// The code units of `"length"`.
+const LENGTH_UNITS: [u16; 6] = [0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68];
 
 impl<H: Host> Agent<H> {
     /// ArrayCreate (`#sec-arraycreate`), with `%Array.prototype%` of the current realm when
@@ -247,6 +252,113 @@ impl<H: Host> Agent<H> {
             self.ordinary_define_own_property(array, length_key, new_length)?;
         }
         Ok(true)
+    }
+
+    /// The value and [[Writable]] of the `"length"` of `array`, read where ArrayCreate put it:
+    /// the first entry of its list, which it stays, since it is not configurable (no deletion
+    /// removes it) and a compaction keeps the order. `None` when that entry is not it.
+    fn head_length(&self, array: ObjectRef) -> Option<(f64, bool)> {
+        let record = self.heap.objects.get(array.handle).ok()?;
+        let (Key::String(name), property) = record.properties.first()? else {
+            return None;
+        };
+        let Slot::Data {
+            value: Value::Number(length),
+            writable,
+        } = property.slot
+        else {
+            return None;
+        };
+        let name = self.heap.strings.get(name.handle).ok()?;
+        (name.cmp_units(&LENGTH_UNITS) == Ordering::Equal).then_some((length, writable))
+    }
+
+    /// OrdinarySet (`#sec-ordinaryset`) of `value` at `index` on `array`, its own receiver,
+    /// when the answer is known without the general path; `None` leaves the store to it.
+    ///
+    /// - An element of the dense part is a data property { [[Writable]]: true } of the Array
+    ///   itself: OrdinarySet finds it first, charges no step, and the define of its [[Value]]
+    ///   stores it in place.
+    /// - At a hole or the end of the dense part of an extensible Array whose `"length"` is
+    ///   writable and whose list never held an index: when no object of its chain can hold the
+    ///   index (none is a String or an arguments exotic object, no list of one ever held an
+    ///   index, an Array has no dense element; every other kind, a generator object included,
+    ///   has ordinary methods), OrdinarySet passes to every prototype, a step
+    ///   each, and ends in CreateDataProperty on the Array, which stores the element dense, its
+    ///   growth charged first ([`Agent::store_dense`]), and raises the length past it.
+    pub(crate) fn array_set_index(
+        &mut self,
+        array: ObjectRef,
+        index: u32,
+        value: Value,
+    ) -> Completion<Option<bool>> {
+        let Ok(position) = usize::try_from(index) else {
+            return Ok(None);
+        };
+        let record = self.engine_object_mut(array)?;
+        let ObjectKind::Array(storage) = &mut record.kind else {
+            return Ok(None);
+        };
+        #[cfg(test)]
+        if storage.sparse {
+            return Ok(None);
+        }
+        if let Some(slot) = storage.elements.get_mut(position)
+            && slot.is_some()
+        {
+            *slot = Some(value);
+            return Ok(Some(true));
+        }
+        if position > storage.elements.len()
+            || !record.extensible
+            || record.properties.may_hold_index()
+        {
+            return Ok(None);
+        }
+        let Some((length, true)) = self.head_length(array) else {
+            return Ok(None);
+        };
+        let mut hops: u64 = 0;
+        let mut next = self.engine_object(array)?.prototype;
+        while let Some(object) = next {
+            let record = self.engine_object(object)?;
+            let plain = match &record.kind {
+                // Exotic [[GetOwnProperty]] for indices: the String's code units, the
+                // arguments object's mapped parameters.
+                ObjectKind::String(_) | ObjectKind::Arguments(_) => false,
+                // Its dense elements are not in its list.
+                ObjectKind::Array(storage) => storage.elements.is_empty(),
+                // Ordinary [[GetOwnProperty]], [[DefineOwnProperty]] and [[Set]]: its list
+                // holds every property it has. A generator object's methods are all ordinary
+                // (`#sec-properties-of-generator-instances`; `object/generator.rs`).
+                ObjectKind::Ordinary(_)
+                | ObjectKind::BuiltinFunction(_)
+                | ObjectKind::BoundFunction(_)
+                | ObjectKind::EcmascriptFunction(_)
+                | ObjectKind::Host(_)
+                | ObjectKind::RegExp(_)
+                | ObjectKind::Generator(_) => true,
+            };
+            if !plain || record.properties.may_hold_index() {
+                return Ok(None);
+            }
+            hops += 1;
+            next = record.prototype;
+        }
+        for _ in 0..hops {
+            self.charge_steps(1)?;
+        }
+        self.store_dense(array, index, value)?;
+        let raised = f64::from(index) + 1.0;
+        if raised > length
+            && let Some(Property {
+                slot: Slot::Data { value, .. },
+                ..
+            }) = self.engine_object_mut(array)?.properties.at_mut(0)
+        {
+            *value = Value::Number(raised);
+        }
+        Ok(Some(true))
     }
 
     /// OrdinaryDefineOwnProperty (`#sec-ordinarydefineownproperty`) of the element `index` over
@@ -748,6 +860,39 @@ mod tests {
         assert!(agent.heap.bytes() > made);
         assert!(agent.collect().is_ok());
         assert_eq!(agent.heap.bytes(), empty);
+    }
+
+    /// The memory budget (`docs/design/engine.md`, "Memory budget"): a Set at the end of the
+    /// dense part, the Array its own receiver, charges the growth of the storage before it is
+    /// made. An Array of 4 elements, which fill its first room, under a budget of what the
+    /// agent holds: `a[4] = 4` ends in `Terminated(MemoryBudget)` with nothing charged, and the
+    /// Array keeps its elements, its room and its length; with room the store is made. The
+    /// defect it holds: a store at the end that grows the storage without its charge.
+    #[test]
+    fn a_set_at_the_end_charges_the_growth_before_it_is_made() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        let array = agent.array_create(0.0, None).unwrap();
+        let length = agent.name_key("length").unwrap();
+        for i in 0..4 {
+            assert_eq!(agent.set(array, Key::Index(i), number(i), true), Ok(true));
+        }
+        assert_eq!(agent.dense_capacity(array), Ok(4));
+        let held = agent.heap.bytes();
+        agent.heap.accounting.set_limit(held);
+        assert_eq!(
+            agent.set(array, Key::Index(4), number(4), true),
+            Err(Abrupt::Terminated(Termination::MemoryBudget))
+        );
+        assert_eq!(agent.heap.bytes(), held);
+        agent.termination = None;
+        agent.heap.accounting.set_limit(held + (1 << 20));
+        assert_eq!(agent.get(array, length), Ok(number(4)));
+        assert_eq!(agent.get_own_property(array, Key::Index(4)), Ok(None));
+        assert_eq!(agent.dense_capacity(array), Ok(4));
+        assert_eq!(agent.set(array, Key::Index(4), number(4), true), Ok(true));
+        assert_eq!(agent.get(array, length), Ok(number(5)));
+        assert_eq!(agent.dense_capacity(array), Ok(8));
     }
 
     /// The state the integrity operations make (`#sec-setintegritylevel`): an Array made

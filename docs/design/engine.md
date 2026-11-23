@@ -1227,6 +1227,263 @@ where an item below says otherwise. Each item states the rule first and then the
    of "Suspended frames": a suspension sets the state and moves the frame into the activation
    before it hands its value over, and a resumption moves the frame out only after its checks.
 
+**Async generators on suspended frames.** Added on 2026-11-23 for slice 10. What a script sees,
+the standard's: an async generator object (`sec-asyncgenerator-objects`,
+`sec-properties-of-asyncgenerator-intances`) holds a queue of requests, each a completion and a
+promise capability (`sec-asyncgeneratorrequest-records`); `next`, `return` and `throw`
+(`sec-asyncgenerator-prototype-next`, `sec-asyncgenerator-prototype-return`,
+`sec-asyncgenerator-prototype-throw`) each make a promise, queue a request
+(`sec-asyncgeneratorenqueue`) and resume the generator at once only when it is suspended at its
+start or at a `yield` (`sec-asyncgeneratorresume`); a `yield` awaits its operand, settles the
+request at the head and goes on without suspending while requests are queued
+(`sec-asyncgeneratoryield`, `sec-asyncgeneratorcompletestep`,
+`sec-asyncgeneratorunwrapyieldresumption`); the end of the body settles the head and drains the
+rest, waiting on the value of each `return` it meets (`sec-asyncgeneratorstart`,
+`sec-asyncgeneratordrainqueue`, `sec-asyncgeneratorawaitreturn`). What a host sees: the items
+below. Items 1 to 6 of "Suspended frames" hold for an async generator as they are written for a
+generator, and items 3 and 4 of "`async` functions on suspended frames" for each of its `await`s,
+except where an item below says otherwise. Each item states the rule first and then the
+mechanism.
+
+1. The holder, and who keeps it alive. An async generator, with its frame, its queue and every
+   value only they hold, stays alive exactly as long as something that can resume it or settle
+   one of its requests is reachable: its object, held by a script or a host; while its frame
+   runs, that frame; while it is suspended at an `await`, the two functions of that `await`,
+   through the reactions of the awaited promise or their job in the queue; while it waits on the
+   value of a `return` (AsyncGeneratorAwaitReturn), the two functions made there, the same way. A
+   queued request keeps nothing alive: the object holds the queue, and the promise of a request
+   holds no reference to the generator. So `collect()` frees a generator suspended at an `await`
+   of a promise nothing else reaches, with its frame and its queued requests, also while a script
+   holds the promises of those requests, which then stay pending. The mechanism: the holder of
+   item 2 of "Suspended frames" is the async generator object, `ObjectKind::AsyncGenerator`
+   (`object/async_generator.rs`), whose kind holds the state ([[AsyncGeneratorState]]:
+   suspended-start, suspended-yield, executing, draining-queue, completed), the frame in a box
+   with the guard of the credit queue beside it, as a generator's, the number of its current
+   wait (an `await`, or the wait of a `return`), and the queue in a box; [[GeneratorBrand]] is
+   empty for every async generator of the slice and is not held. The frame is in the box while
+   the generator is suspended at its start, at a `yield` or at an `await` (its state is then
+   executing, as the draft keeps it), and on the frame stack while it runs; the code keeps the
+   object in a local slot it reserves, as a generator's does. The two functions of an `await`
+   and of the wait of a `return` are built-in functions with slots (decision 4) that hold the
+   object and the number of that wait; called while the generator waits at that number, the
+   first resumes it with the value (`TAG_NORMAL`) and the second with the reason (`TAG_THROW`),
+   or, for the wait of a `return`, settles the head and drains as the draft's closures do;
+   called at any other time they do nothing and return `undefined`, as item 3 of "`async`
+   functions on suspended frames" states. The kind site traces the frame and every value of
+   every request (the completion's value, the capability's promise and its two functions); no
+   request is a root. The record of every object stays at 200 bytes (the test of
+   `object/generator.rs`).
+2. The queue's charge and its bound. Every request costs the memory budget from the call that
+   queues it until the collection that frees the generator. The mechanism: the queue is a
+   `VecDeque` of entries of one fixed size (the completion's tag and value, the capability's
+   promise and two functions) in the kind's box; its capacity grows by the engine's own
+   doubling with `try_reserve_exact`, is charged before it grows and is recorded in the object's
+   `Grown` (`object/mod.rs`), so the sweep that frees the object credits it; a growth the budget
+   refuses ends the run in `Terminated(MemoryBudget)` with nothing queued. Settling a request
+   credits nothing: the capacity, at most the most requests queued at once, stays charged while
+   the object lives. The bound on the queue is the memory budget, and no count: each request is
+   made by a call that spends a step and makes a promise with its two resolving functions, so a
+   script that queues requests without end (`for (;;) g.next();` on a generator suspended at an
+   `await` of a promise that never settles) ends in `Terminated(MemoryBudget)` or
+   `Terminated(StepBudget)`, whichever budget it spends first, and the promises of the requests
+   are charged as objects besides. Rejected: a limit on the count (a limit with an outcome of its
+   own for what the memory budget already bounds); charging each request when it is queued and
+   crediting it when it is settled (two operations of the accounting per request, for bytes the
+   capacity already counts).
+3. Steps. A call of `next`, `return` or `throw` spends the step of a builtin call; validating,
+   making its promise and queueing its request is bounded work within it. A call that resumes
+   the generator (suspended at its start or at a `yield`) also spends the step of the resumption
+   (item 5 of "Suspended frames"), and the instructions the generator runs are steps of the entry
+   that resumed it. A `yield` spends the step of its instruction beside its `await`; settling
+   the request at the head, or taking the next request and going on without suspending, is
+   bounded work within it. The drain, which settles requests without running the generator,
+   spends one step for each request it settles, before it takes that request off, so draining r
+   requests spends r steps, and the wait of a `return` it meets is an `await` (item 4 of
+   "`async` functions on suspended frames"). So a step stands for a bounded amount of work when a
+   script queues requests without end: a request costs a step to queue and a step, or the `yield`
+   that answers it, to settle.
+4. Depth. A resumption by `next`, `return` or `throw` is checked as a generator's (item 4 of
+   "Suspended frames"; one re-entry, item 6): `frame_depth`, its step, `reentry_depth` and the
+   interrupt, before the request is queued and before the state changes. A refusal there exists
+   only for an implementation limit the draft does not have, so the order differs from the
+   draft's (AsyncGeneratorEnqueue before AsyncGeneratorResume) nowhere a script can see. The
+   `RangeError` of "Depth bounds" there rejects the promise of the call, which the call answers,
+   since no step of the draft's `next`, `return` or `throw` after AsyncGeneratorValidate throws;
+   nothing is queued, and the generator stays suspended with its state and frame, to be resumed
+   once the stack is lower. A resumption by a job (a function of an `await` or of the wait of a
+   `return`) is checked as item 4 of "`async` functions on suspended frames" states. A generator
+   suspended at its start, at a `yield` or at an `await` takes no `frame_depth`.
+5. Termination. A termination, `Terminated(StepBudget)`, `Terminated(MemoryBudget)` or
+   `Terminated(Interrupted)` alike, enters no handler: no `finally` around a `yield` or an `await`
+   runs, the handler around the body that settles the head request with the body's completion
+   (AsyncGeneratorStart's closure) does not run, and no drain starts (`host-interface.md`,
+   section 10):
+   - a generator whose frame is on the frame stack at the termination, running or below a frame
+     it called, in the call of `next`, `return` or `throw` that resumed it or in a job that
+     resumed it, stays executing and holds no frame; its frame is dropped with the others and its
+     charge credited (`drop_frames`). The request at the head and every request behind it keep
+     their promises pending for good: a function of its last `await` does nothing (item 1), and
+     `next`, `return` and `throw` of an executing generator only queue ("Assert: state is either
+     executing or draining-queue.", `sec-asyncgenerator-prototype-next`). So every later call of
+     them queues a request whose promise stays pending, charged as item 2 states, until nothing
+     reaches the generator. Here it differs from a generator, whose `next` throws: the draft gives
+     an executing async generator no answer but to queue. Where the memory budget refuses a growth
+     makes no difference, its own queue's included.
+   - a generator suspended at its start or at a `yield` when an entry ends, the one that made it
+     or a later one, keeps its state, its frame, its charge and its queue (empty, by the draft's
+     invariant); a later entry resumes it as if the termination had not happened.
+   - a generator suspended at an `await`, or waiting on the value of a `return`, when an entry
+     ends keeps its state, its frame (it has none while it waits on a `return`), its charge and its
+     queue, and its reaction stays in the awaited promise or its job in the queue; a later
+     checkpoint resumes it, and the requests queued meanwhile are answered in order. Except when
+     its job had started and a check before the move was refused, or `Agent::clear_microtasks`
+     dropped that job: the reaction is spent, nothing resumes the generator, and every request
+     queued then or later keeps its promise pending for good, as in the first case.
+   - a drain that a termination ends (its step for a request refused, or a termination inside the
+     resolving of a request, which reads `then` of an iterator result and so can run a getter of
+     `Object.prototype`) leaves the state draining-queue and the requests it did not settle
+     queued, their promises pending for good: nothing drains the queue again, and later requests
+     only queue.
+
+   Nothing credited stays charged, and nothing charged is credited twice, by the order of item 5
+   of "Suspended frames". Rejected: settling the queued requests with a rejection once a
+   termination left the generator without a frame (a state and an order of settling the draft
+   does not have, decided by the engine while no code of the generator runs).
+6. `yield*` in an async generator (the async branch of YieldExpression : `yield *`
+   AssignmentExpression, `sec-generator-function-definitions-runtime-semantics-evaluation`). The
+   draft calls the inner iterator's method synchronously and awaits its result: "Let innerResult
+   be ? Call(iteratorRecord.[[NextMethod]], iteratorRecord.[[Iterator]], « received.[[Value]]
+   »)." and then "If generatorKind is async, set innerResult to ? Await(innerResult).", and the
+   inner async generator's `next` resumes it at once when it is suspended at its start or at a
+   `yield` (AsyncGeneratorResume). So a `next` given to the outermost of a chain of n delegating
+   async generators runs the n levels one inside the other, in that call, until the innermost
+   suspends at the `await` of its `yield` or of its code; only then does each level, from the
+   innermost out, get the promise of its request and await it. The answers settle afterwards, one
+   job per level, from the innermost out. A delegation that waits for a job before it calls the
+   inner `next` would run the inner generator's code after the code that follows the outer
+   `next` call, an order a script sees. The rule: the n levels of the call nest on the frame
+   stack, as the levels of a generator's `yield*` do, and take no Rust frame and no re-entry
+   per level. The mechanism, the one of the paragraph on `yield*` of "Suspended frames": when the
+   [[NextMethod]] is `%AsyncGeneratorPrototype%.next` of any realm of the agent and the iterator
+   is an async generator object (for a received throw or return, when the method GetMethod finds
+   is `%AsyncGeneratorPrototype%.throw` or `.return`), the instruction does what that builtin
+   does (its promise, AsyncGeneratorValidate with a rejection, and, when the inner generator is
+   suspended at its start or at a `yield`, the checks of item 4 and the move of a resumption, then
+   the request queued), and the inner frame runs above the delegating one on the same run loop.
+   When the inner frame leaves the stack (it suspends at an `await` or a `yield`, or its body
+   ends), the value it hands to the frame below is the promise of that request, which the
+   delegating frame awaits as the draft says. An inner generator that executes, drains or has
+   completed is not resumed: the instruction queues the request or settles it as the builtin
+   does and hands its promise over at once. Any other async iterator (an object of a script, an
+   Async-from-Sync Iterator object) is called as the step of a `for await` calls `next`, a
+   re-entry that returns before the delegating frame awaits.
+   What bounds a chain: while a `next` runs through it, the n levels hold n frames on the frame
+   stack, counted against `frame_depth`, and no re-entry; past `frame_depth`, the check of item 4
+   at the level that would push rejects that level's request with the `RangeError` of "Depth
+   bounds", which the delegating frame's `await` throws at its `yield*`, and the throw leaves
+   each level outward as the draft gives it, so the outermost request is rejected with that
+   `RangeError` after the checkpoint. Between two `next` calls each level is suspended and takes
+   neither depth; its frame, the functions and reactions of its `await` and its queued request
+   are charged (items 1 and 2), so the number of levels is bounded by `frame_depth` and the
+   memory budget. Each job of the settling resumes one level and returns before the next job
+   runs: one re-entry at a time, whatever n. Steps: a `next` through n levels spends, per level,
+   at least 4 and at most 20 steps more than through one: the step of the resumption and the
+   instructions of one turn of the delegation loop in the call, and the job's step, the step of
+   the call of the `await`'s function and the step of the resumption (item 4 of "`async`
+   functions on suspended frames"), the step of the promise job queued, and the `yield` that
+   settles the level's request in the settling. So a `next` through 101 levels spends between
+   400 and 2,000 steps more than one through 1 level, which a test reads with
+   `last_entry_steps()` over the script and the checkpoint.
+
+**A built-in async function.** Added on 2026-11-23 for slice 10. What a script sees, the
+standard's: a built-in function whose [[Async]] is true runs its steps as an `async` function
+runs its body (BuiltinCallOrConstruct, `sec-builtincallorconstruct`, which calls
+AsyncFunctionStart with a closure of the steps): the call answers a promise once the steps reach
+their first Await or their end, and each Await suspends the steps until a job of the awaited
+promise continues them; the execution context has the function's [[Realm]] and a null
+ScriptOrModule. `Array.fromAsync` is one ("This async function performs the following steps
+when called:", `sec-array.fromasync`); `AsyncDisposableStack.prototype.disposeAsync` of slice 15
+is the next. What a host sees: each Await of such a builtin is an `await` of item 3 of "`async`
+functions on suspended frames": two built-in functions made, `host_make_job_callback` called
+twice, and a job that calls `host_prepare_to_run_job` with the builtin's realm,
+`host_call_job_callback` once and `host_clean_up_after_job`, so a host cannot tell it from an
+`await` in a script. Each item states the rule first and then the mechanism.
+
+1. The holder, and its charge. A builtin suspended at an Await, with the values its steps hold
+   (for `Array.fromAsync`: the Iterator Record or the array-like and its length, the array, k,
+   the mapper, thisArg and the promise of the call), stays alive exactly as long as something
+   that will continue it is reachable, as an `async` function's activation does (item 1 of
+   "`async` functions on suspended frames"), and costs a fixed size while it waits: its
+   activation and the box of its state, the two functions of its Await with their boxes, and two
+   reactions; no frame, since its steps run in Rust. The mechanism: an internal kind of object,
+   `ObjectKind::AsyncBuiltinActivation` (`object/async_builtin.rs`), with a null [[Prototype]],
+   which no instruction and no read hands to a script or a host. Its kind holds the state
+   (running, suspended at an Await with the number of that suspension, completed), the
+   capability of the call, and a box with the builtin's own state: which builtin, the step it
+   reached, and its values, one variant of fixed size per builtin. The box is charged with the
+   record when it is made (`Heap::new_object` with those owned bytes, as for a built-in function
+   with slots, decision 4) and credited by the sweep that frees the record; the array and what
+   it grows are charged as any array. The kind site traces every value of the box and of the
+   capability; no value of it is a root. While its steps run, the activation is on the kept
+   stack (`Agent::keep`), where a running builtin keeps what it needs across a call into code;
+   while it is suspended, the two functions of its Await hold it in their slots, the reactions of
+   the awaited promise hold the functions, and the promise, or the queue once it settled, holds
+   the reactions.
+2. Steps and depth. The call spends the step of a builtin call and runs the steps to the first
+   Await in it. A continuation costs what an `await`'s resumption costs (item 4 of "`async`
+   functions on suspended frames"): the step of taking the job off, the step of the call of the
+   function the job calls and one step for the continuation, so 3 steps before the next of its
+   steps runs. Each continuation runs the builtin's steps from one Await to the next, or to the
+   end: bounded work beside the calls it makes into code, each of which spends the steps of the
+   code it runs. Every turn of both loops of `Array.fromAsync` awaits at least once, so no
+   continuation loops, and an array-like of length 10^9 costs at least 3 steps per element. A
+   continuation takes no frame and no re-entry of its own, so no depth is checked for it; each
+   call it makes into code (`next`, the mapper, a getter, a constructor) is a re-entry counted
+   against `reentry_depth`, as any call from a builtin is, and returns before the continuation
+   does. A `RangeError` of a depth bound there is a throw completion of the call, which the
+   builtin's steps handle as the draft's (IfAbruptCloseAsyncIterator for `Array.fromAsync`,
+   `sec-ifabruptcloseasynciterator`), and the interrupt is read at the continuation's step.
+3. Termination. A termination, `Terminated(StepBudget)`, `Terminated(MemoryBudget)` or
+   `Terminated(Interrupted)` alike, runs none of the builtin's steps: no AsyncIteratorClose, no
+   rejection of its promise (`host-interface.md`, section 10):
+   - a builtin whose steps run at the termination, in its call or in a continuation, or below a
+     call they made into code, stays running, and its promise stays pending for good: a later call
+     of a function of its last Await does nothing, as in item 3 of "`async` functions on
+     suspended frames", so nothing continues it; the iterator it read is not closed, and the array
+     keeps the elements defined so far. It costs its activation alone until nothing reaches it.
+   - a builtin suspended at an Await when an entry ends keeps its state, and its reaction stays
+     in the awaited promise or its job in the queue; a later checkpoint continues it as if the
+     termination had not happened. Except when its job had started and a check of the
+     continuation (the step of the call or of the continuation, the interrupt) was refused, or
+     `Agent::clear_microtasks` dropped the job: the reaction is spent, and its promise stays
+     pending for good.
+
+   Rejected: the steps written as script source compiled into each realm (a second text of the
+   draft's steps; its frames would count against `frame_depth`, its instructions would spend
+   steps no other builtin spends, and its functions could be reached through a stack of frames
+   or `Function.prototype.toString`); a Rust `async fn` (the values a compiler-made future holds
+   across an `.await` are invisible to the collector, so they would have to be roots, and a
+   builtin waiting on a promise nothing reaches would live as long as its roots); a kind per
+   builtin (a site to trace and a site to charge for each).
+
+**The Async-from-Sync Iterator.** Added on 2026-11-23 for slice 10. What a script sees, the
+standard's: CreateAsyncFromSyncIterator wraps a sync Iterator Record in an object that is never
+directly accessible to ECMAScript code (`sec-createasyncfromsynciterator`,
+`sec-async-from-sync-iterator-objects`), and the `next`, `return` and `throw` of
+`%AsyncFromSyncIteratorPrototype%` (`sec-%asyncfromsynciteratorprototype%-object`) call the
+sync iterator's method at once and settle their promise through PerformPromiseThen of the value
+wrapped by PromiseResolve with a capability (AsyncFromSyncIteratorContinuation,
+`sec-asyncfromsynciteratorcontinuation`). None of their steps Awaits, so nothing of them waits
+for a job and they need no activation: they use only built-in functions with slots (decision 4).
+The unwrap function holds `done` in its slot (`sec-async-from-sync-iterator-value-unwrap-functions`),
+the function that closes the sync iterator holds its Iterator Record, and the object holds
+[[SyncIteratorRecord]] in a box of its kind, `ObjectKind::AsyncFromSyncIterator`, charged with
+the record as owned bytes and traced at its kind site, as a built-in function's slots are. What a
+host sees is the draft's: `host_make_job_callback` for each callable handler PerformPromiseThen
+gets (one or two), and a reaction job per settlement. A call of one of these methods spends the
+step of a builtin call; the call of the sync iterator's method is a re-entry as any call from a
+builtin, and a sync generator resumed by it is resumed from Rust (item 6 of "Suspended frames").
+
 ## 4. Values and the heap without unsafe code
 
 **Value.** A Rust enum: `Undefined`, `Null`, `Boolean`, `Number(f64)`, and `String`, `Symbol`,
@@ -1428,8 +1685,12 @@ for a Symbol `Symbol.for` did not make (`sec-symbol.for`, `sec-symbol.keyfor`, `
 The registry is the agent's, the append-only [[GlobalSymbolRegistry]] of its Agent Record
 (`sec-agents`, `sec-globalsymbolregistry-records`): every realm of the agent gets the same Symbol
 for a key. The well-known symbols (`sec-well-known-symbols`) are agent values as well
-(`realm/mod.rs`), twelve in slice 6 (`Symbol.asyncIterator` comes with slice 10), and none of them
-is in the registry. A Symbol is never converted to a String or a Number implicitly: ToString and
+(`realm/mod.rs`), twelve in slice 6 and thirteen from slice 10, whose story of `for await` adds
+`Symbol.asyncIterator` (`sec-symbol.asynciterator`), made with the agent as the other twelve are
+(corrected on 2026-11-23 from "twelve in slice 6 (`Symbol.asyncIterator` comes with slice 10)");
+none of them is in the registry. A host names it as it names the others, with
+`well_known_symbol(WellKnownSymbol::AsyncIterator)` (`host-interface.md` decision 7, "The closed
+list", HOST-203). A Symbol is never converted to a String or a Number implicitly: ToString and
 ToNumber of it throw a `TypeError` (`sec-tostring`, `sec-tonumber`), and so do `"" + s`,
 `` `${s}` ``, `+s`, `s < 1` and every builtin that passes it to them or to an operation built on
 them (ToIntegerOrInfinity, ToLength, ToNumeric). ToPropertyKey takes it as it is, a property key;
@@ -1905,7 +2166,7 @@ section differ.** This section is the first description; the first ESS model of 
 with nine places where it is unclear or silent, and that document answers them from the text of
 ECMA-262 and HTML, as 19 decisions and numbered requirements (`HOST-<n>`): 165 on 2026-11-21
 (corrected that day from 135, the count when the document was written), 171 on 2026-11-22
-with the six of resource accounting, 190 the same day with the host interface of the first consumer, 191 on 2026-11-23 with the refusals `RegExp` raises, and 200 the same day with nine of slice 10's jobs and `async` functions (HOST-192 to HOST-200), the count `task host-requirements-check` prints. The eleven places where it departs from this document (3 and 4 no longer since 2026-11-23, when "Entry points" and "Jobs" below were corrected to say what that document says):
+with the six of resource accounting, 190 the same day with the host interface of the first consumer, 191 on 2026-11-23 with the refusals `RegExp` raises, 200 the same day with nine of slice 10's jobs and `async` functions (HOST-192 to HOST-200), and 208 the same day with eight of slice 10's later waves (HOST-201 to HOST-208: the kind of an AggregateError, `Symbol.asyncIterator`, async generators, built-in async functions), the count `task host-requirements-check` prints. The eleven places where it departs from this document (3 and 4 no longer since 2026-11-23, when "Entry points" and "Jobs" below were corrected to say what that document says):
 
 1. Each entry point has a result type of its own instead of one `Outcome`; misuse answers
    `Err(HostError)`, never a panic.
@@ -2065,8 +2326,12 @@ The model is held by a conformance runner over a thin adapter to the hand-writte
 as surf's `conformance/` is, in a Cargo workspace of its own (the one place a third-party crate
 is allowed, because `ess-conformance` brings some). The engine's code is not generated from ESS:
 the host interface is an in-process library interface, and what ESS 0.97.4 generates is
-components with ports (surf `AGENTS.md`, "Layout"), not a library interface. Not checked: how well
-ESS states an in-process library interface; the first slice finds out.
+components with ports (surf `AGENTS.md`, "Layout"), not a library interface. How well ESS states
+an in-process library interface was measured by the first slice (`host-interface-model.md`,
+corrected on 2026-11-23 from "Not checked: ...; the first slice finds out."): ESS 0.96.0 let the
+model state its commands, outcomes and lifecycles, its generated code is "not usable for an
+in-process library interface", and what it could not state is listed there as 51 markers, each
+carried by a `HOST-<n>` requirement or named an ESS limit.
 
 What is not put into ESS: the language's semantics (values, objects, the 2,300 distinct section
 numbers of the draft, counted with `grep -o 'secnum>[^<]*' ecma262.html | sort -u | wc -l`).
@@ -4668,11 +4933,12 @@ works for both.
 - Whether ECMA-262 words an allowance for a `RangeError` when a `BigInt` result is too large, or
   for an implementation limit on pattern nesting.
 - The licence text of the Unicode data, and where the 17.0.0 emoji sequence files are published.
-- The Rust stack one re-entry needs (the size of `Value` is measured: 16 bytes, held by the
-  test `value_is_16_bytes` of `crates/swell`), the time test262
-  takes, and every speed cost: no code exists.
+- The time test262 takes and every speed cost, in this document's text. Corrected on 2026-11-23
+  from "The Rust stack one re-entry needs ...: no code exists.": the Rust stack is measured
+  (`STACK_BYTES_PER_REENTRY`, 14 KiB per re-entry, and `Limits::min_stack_bytes()`, decision 9,
+  "The Rust stack"), and so is the size of `Value` (16 bytes, held by the test
+  `value_is_16_bytes` of `crates/swell`).
 - The published ES2026 edition was not read.
-- How well ESS states an in-process library interface.
 
 ## How the counts were made
 

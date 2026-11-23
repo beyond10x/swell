@@ -12,7 +12,7 @@ interpreter and the builtins the test262 harness calls exist. **Slice 1 is deliv
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
 (the other 44 need a later slice and say so). 113 of 191 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate holds the test262 counts: 18,155 of the 44,812 run cases pass (2026-11-23, release `0.7.0`; 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
+gate holds the test262 counts: 20,229 of the 44,812 run cases pass (2026-11-23, release `0.8.0`; 18,155 in `0.7.0`, 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
 "Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
@@ -48,12 +48,17 @@ brought the crate `swell-regexp` (the pattern parser, the compiler, the backtrac
 under the budgets), regular expression literals, `RegExp` with `exec` and `test`, `replace`,
 `replaceAll` and `split` of `String`, and the case methods, `normalize` and `localeCompare`
 for every String; its second wave (`docs/plan/slice-05-wave-2.md`) the methods keyed by `@@match`, `@@replace`, `@@search` and
-`@@split` with `String.prototype.match` and `search` (release `0.7.0`): 1,667 of its 2,724
-cases pass
-(`test262-slice 05 2724 5441 0 0 2724 1667 1057 0`), and no host requirement is pending for
-it. Six of its fifteen stories are open: property escapes, identifiers and group names
-outside ASCII,
-`matchAll` and `RegExp.escape`, the flags `i` and `v`, and the close.
+`@@split` with `String.prototype.match` and `search` (release `0.7.0`); after it `matchAll` and
+`RegExp.escape`, property escapes, the flag `i`, and identifiers and group names outside ASCII
+(release `0.8.0`): 2,523 of its 2,724 cases pass
+(`test262-slice 05 2724 5441 0 0 2724 2523 201 0`), and no host requirement is pending for
+it. Two of its fifteen stories are open: the flag `v` and the close. Slice 7, `generators`
+(`epic:slice-07-generators`), is in work beside it: generator syntax, generators on suspended
+frames, `%GeneratorFunction%` and `yield*` are in release `0.8.0`, and 1,168 of its 1,491 cases
+pass (`test262-slice 07 1491 2841 0 0 1491 1168 323 0`); generator methods of object literals
+and the close are open. Slice 10, `promises-and-async` (`epic:slice-10-promises-and-async`), is
+accepted in seventeen stories (`docs/plan/waves.md`, "Slice 10, `promises-and-async`"), and its
+first order is being built; 31 host requirements are pending for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
@@ -202,7 +207,10 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   sources (`crates/*/src`, the manifests and the lock file, `.cargo/config.toml`, the
   toolchain file, `taskfiles/test262.yml`, the files of `conformance/test262/` the run reads)
   with `conformance/test262/expected.digest`. A change of a source runs the full run
-  (`slot --timeout 30m task test262-expected`), which writes `expected.txt` and the digest;
+  (`slot --timeout 30m task test262-expected`), which writes `expected.txt` and the digest; where
+  the run does not fit one pool job, it is made in parts, each a job of its own
+  (`slot --timeout 30m task test262-part TEST262_PART=<k>/<n>` for each k), and counted from
+  their files (`slot task test262-expected TEST262_FROM_PARTS=.out/test262/parts`);
   the lane `slow` (`task slow`, `.github/workflows/slow.yml`) makes the full run on the forge
   and compares bytes. A release waits for a green lane `slow` on its commit.
 - A heavy test has a gate count and a full count: `SWELL_FULL_COUNTS=1` gives the full one,

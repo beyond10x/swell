@@ -1,0 +1,8 @@
+test/annexB/language/expressions/yield/star-iterable-return-emulates-undefined-throws-when-called.js
+test/annexB/language/expressions/yield/star-iterable-throw-emulates-undefined-throws-when-called.js
+test/language/expressions/generators/yield-star-before-newline.js
+test/language/statements/for-of/yield-star-from-catch.js
+test/language/statements/for-of/yield-star-from-finally.js
+test/language/statements/for-of/yield-star-from-try.js
+test/language/statements/for-of/yield-star.js
+test/language/statements/generators/yield-star-before-newline.js

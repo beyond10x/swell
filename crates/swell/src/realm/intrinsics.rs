@@ -23,7 +23,9 @@
 //! `%GeneratorFunction.prototype%` and `%GeneratorPrototype%` (27.3.3 and 27.5.1,
 //! `#sec-properties-of-the-generatorfunction-prototype-object`,
 //! `#sec-properties-of-generator-prototype`), written by
-//! `story:generator-functions-and-suspended-frames`. The other constructors and methods are later slices.
+//! `story:generator-functions-and-suspended-frames`; `%GeneratorFunction%` (27.6.1,
+//! `#sec-generatorfunction-constructor`), written by `story:generator-function-constructor`,
+//! which is no property of the global object. The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
 //! first need no root until the realm record holds them all.
@@ -125,6 +127,16 @@ pub(crate) enum Intrinsic {
     GeneratorFunctionPrototype,
     /// `%GeneratorPrototype%` (27.5.1).
     GeneratorPrototype,
+    /// `%GeneratorFunction%` (27.6.1), `story:generator-function-constructor`. The realm holds
+    /// it; no operation asks for it by name, its constructor being the active function.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "%GeneratorFunction% by name: the tests of the intrinsics"
+        )
+    )]
+    GeneratorFunction,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -180,6 +192,7 @@ pub(crate) struct Intrinsics {
     regexp_prototype: ObjectRef,
     regexp_string_iterator_prototype: ObjectRef,
     generator_prototypes: crate::builtins::generator::GeneratorPrototypes,
+    generator_function: ObjectRef,
 }
 
 impl Intrinsics {
@@ -225,6 +238,7 @@ impl Intrinsics {
             Intrinsic::RegExpStringIteratorPrototype => self.regexp_string_iterator_prototype,
             Intrinsic::GeneratorFunctionPrototype => self.generator_prototypes.function_prototype,
             Intrinsic::GeneratorPrototype => self.generator_prototypes.prototype,
+            Intrinsic::GeneratorFunction => self.generator_function,
         }
     }
 
@@ -281,6 +295,7 @@ impl Intrinsics {
             self.regexp_string_iterator_prototype,
             self.generator_prototypes.function_prototype,
             self.generator_prototypes.prototype,
+            self.generator_function,
         ] {
             mark.object(object);
         }
@@ -457,6 +472,11 @@ impl<H: Host> Agent<H> {
             self.create_regexp_string_iterator_prototype(making, iterator_prototypes.iterator)?;
         let generator_prototypes =
             self.create_generator_prototypes(making, iterator_prototypes.iterator)?;
+        let generator_function = self.create_generator_function_constructor(
+            making,
+            function,
+            generator_prototypes.function_prototype,
+        )?;
         // %Array.prototype.values% (23.1.3.38), %Array.prototype.entries% (23.1.3.5),
         // %Array.prototype.keys% (23.1.3.19) and %Array.prototype.forEach% (23.1.3.15): the
         // methods `create_array_constructor` has defined on %Array.prototype%, read before any
@@ -498,6 +518,7 @@ impl<H: Host> Agent<H> {
             regexp_prototype,
             regexp_string_iterator_prototype,
             generator_prototypes,
+            generator_function,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {
@@ -622,6 +643,36 @@ mod tests {
         assert_eq!(
             agent.call_value(Value::Object(function_prototype), Value::Null, &[]),
             Ok(Value::Undefined)
+        );
+    }
+
+    /// `%GeneratorFunction%` (`#sec-properties-of-the-generatorfunction-constructor`) has the
+    /// [[Prototype]] `%Function%`, its `prototype` is `%GeneratorFunction.prototype%`, and it is
+    /// the `constructor` of that object (`#sec-generatorfunction.prototype.constructor`).
+    #[test]
+    fn generator_function_is_the_constructor_of_its_prototype() {
+        let (mut agent, realm) = agent_with_realm();
+        let realm = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let generator_function = agent
+            .intrinsic(realm, Intrinsic::GeneratorFunction)
+            .unwrap();
+        let function = agent.intrinsic(realm, Intrinsic::Function).unwrap();
+        let prototype = agent
+            .intrinsic(realm, Intrinsic::GeneratorFunctionPrototype)
+            .unwrap();
+        assert_eq!(
+            agent.get_prototype_of(generator_function),
+            Ok(Some(function))
+        );
+        let key = agent.name_key("prototype").unwrap();
+        assert_eq!(
+            agent.get(generator_function, key),
+            Ok(Value::Object(prototype))
+        );
+        let key = agent.name_key("constructor").unwrap();
+        assert_eq!(
+            agent.get(prototype, key),
+            Ok(Value::Object(generator_function))
         );
     }
 }

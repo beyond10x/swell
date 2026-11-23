@@ -415,7 +415,11 @@ pub struct Module(Root);
 #[derive(Clone, Copy, PartialEq, Eq)] pub struct ModuleRef { /* as ObjectRef */ }
 
 pub enum Source<'s> { Utf8(&'s str), Utf16(&'s [u16]) }
-pub enum ErrorKind { Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, UriError }
+#[non_exhaustive]   // from slice 10 ("The kind of an AggregateError, and kinds to come")
+pub enum ErrorKind { Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, UriError,
+    // with slice 10's story of the statics of `Promise` (HOST-201, HOST-202):
+    AggregateError,
+}
 
 impl<H: Host> Agent<H> {
     pub fn duplicate(&mut self, root: &Root) -> Result<Root, HostError>;
@@ -445,6 +449,67 @@ from `&self`, a breaking change of the interface. Handing a value out to a scope
 nothing to either budget and changes neither `heap_bytes()` nor `live_bytes()`: the scope's list
 is the agent's storage for the host's own calls, as the root table is, it grows by one entry per
 value handed out and ends with the scope.
+
+**The kind of an AggregateError, and kinds to come.** Added on 2026-11-23 for slice 10. What a
+host sees:
+
+- `ErrorKind` has the variant `AggregateError` from slice 10, and carries `#[non_exhaustive]`
+  from the same release. An embedder whose `match` over `ErrorKind` has no wildcard arm stops
+  compiling with that release, once: the attribute obliges a wildcard arm in every crate but
+  swell, so the next kind, `SuppressedError` (`ecma262:sec-suppressederror-objects`, slice 15
+  of `engine.md` section 12), and any later one is no break. An embedder that matches with a
+  wildcard arm, or reads `ErrorKind::name`, compiles unchanged.
+- `error_summary` (decision 13) of an AggregateError, made by a script
+  (`ecma262:sec-aggregate-error`) or by the engine (the rejection of `Promise.any`,
+  `ecma262:sec-performpromiseany`), answers kind `AggregateError` and its own message, as for
+  every kind: the kind the constructor recorded, whatever the prototype. Its `errors` are an own
+  data property ("Perform ! DefinePropertyOrThrow(obj, "errors", ...)",
+  `ecma262:sec-aggregate-error`), not a part of the kind or of [[ErrorData]] ("The only
+  specified use of [[ErrorData]] is by Object.prototype.toString (20.1.3.6) and Error.isError
+  (20.5.2.1)", `ecma262:sec-properties-of-aggregate-error-instances`): `error_summary` does not
+  read them, and the host reads them as any property, with `cx.get` (decision 14), which runs
+  code where a script made `errors` an accessor.
+- `new_error(realm, ErrorKind::AggregateError, message)` makes, without running code, the object
+  `new AggregateError([], message)` makes in that realm: its [[Prototype]] is the realm's
+  `%AggregateError.prototype%`, it has the own `message` `new_error` gives every kind, and an own
+  `errors`, writable, configurable and not enumerable, holding a new empty Array of that realm
+  (CreateArrayFromList of an empty List, `ecma262:sec-createarrayfromlist`). It charges the two
+  objects. A host that needs elements in `errors` defines them on that Array, or constructs
+  the realm's `AggregateError` with `construct`, which runs the steps with an iterable. A host
+  object made with `error_kind: Some(ErrorKind::AggregateError)` (decision 15) gets [[ErrorData]]
+  of that kind and no `errors`.
+- `ErrorKind::ALL` keeps its seven entries and its type, `[ErrorKind; 7]`: `Error` and the six
+  NativeError kinds (`ecma262:sec-error-constructor`,
+  `ecma262:sec-native-error-types-used-in-this-standard`), whose constructors take `(message,
+  options)` and which the realm makes from one template in that order (`realm/global_object.rs`,
+  `builtins/error.rs`, `realm/intrinsics.rs`). AggregateError's constructor takes `(errors,
+  message, options)` (`ecma262:sec-aggregate-error-constructor`) and is made by a step of its
+  own after them, so `ALL` does not hold it. Its doc comment, "Every kind, `Error` first",
+  becomes "`Error` and the six NativeError kinds, `Error` first"; a doc comment changes nothing
+  of the interface.
+
+The rule: **an enum of the interface whose variants follow a list of the draft or of Web IDL
+that grows is `#[non_exhaustive]`**: `ErrorKind`, `HostIntrinsic` and `WellKnownSymbol`
+(decision 15). A variant added to such an enum is no break and is named under
+`### Host interface` as any added name ("How the gate holds this document"). A variant added to
+an enum without the attribute is a break: the release that carries it lists it under the notes'
+`**Breaking**`, beside the removed and changed names `docs/releasing.md` lists there. The release
+that carries `ErrorKind::AggregateError` names, under `### Host interface`, `ErrorKind` (its
+attribute `non_exhaustive` added, a changed name), `ErrorKind::AggregateError`, `HOST-201` and
+`HOST-202`, and lists `ErrorKind` under `**Breaking**`.
+
+Rejected: reading an AggregateError as `ErrorKind::Error`, with `%AggregateError%` an intrinsic
+of the realm alone. It avoids the break of this release only to need it at `SuppressedError`;
+`error_summary` would answer a kind no constructor recorded, against decision 13's "the kind
+recorded by the constructor that made the object"; and a host could tell an AggregateError from
+an Error only by reading `name` or the prototype, which can run code. Rejected too: `ALL` with
+eight entries (its type changes, a second changed name, and the realm's loop would make
+AggregateError from the NativeError template); `ALL` as `&'static [ErrorKind]` (a break of its
+own, for a list no host needs to grow).
+
+**HOST-201** (ecma262:sec-properties-of-aggregate-error-instances) After the script `throw new AggregateError([new TypeError("t")], "m")` answered `Throw`, `error_summary` of its root answers kind `AggregateError` and message `[0x6D]`, also when the script set the error's prototype to `null` before the throw; the rejection reason of the promise the script `Promise.any([])` answers, read with `promise_state` with no checkpoint between (PerformPromiseAny rejects it at once), answers kind `AggregateError` and message `None`; `ErrorKind::AggregateError.name()` answers `"AggregateError"`, and `ErrorKind::ALL` holds seven kinds and not `AggregateError`. [slice 10]
+
+**HOST-202** (swell:D4) `new_error(realm, ErrorKind::AggregateError, "m")` runs no code and answers an object for which the script `e instanceof AggregateError && Object.getPrototypeOf(e) === AggregateError.prototype && Array.isArray(e.errors) && e.errors.length === 0 && e.message === "m" && !Object.prototype.propertyIsEnumerable.call(e, "errors")`, run in that realm with `e` a global holding it, answers `true`, and `error_summary` of it answers kind `AggregateError`. [slice 10]
 
 **HOST-28** (swell:D4) An object held only by a `Root` survives `collect`, and the root then reads the same object. [slice 1]
 
@@ -670,11 +735,19 @@ every realm.
 | `HostIntrinsic::ArrayPrototypeEntries`, `%Array.prototype.entries%` | "If definition has a value iterator, then: Perform ! CreateDataPropertyOrThrow(target, "entries", %Array.prototype.entries%)." (`webidl:define-the-iteration-methods`) | HOST-185, as above |
 | `HostIntrinsic::ArrayPrototypeKeys`, `%Array.prototype.keys%` | the same step for "keys" (`webidl:define-the-iteration-methods`) | HOST-185, as above |
 | `HostIntrinsic::ArrayPrototypeForEach`, `%Array.prototype.forEach%` | the same step for "forEach" (`webidl:define-the-iteration-methods`) | HOST-185, as above |
+| `WellKnownSymbol::AsyncIterator`, `%Symbol.asyncIterator%` | "Asynchronously iterable declarations": "Perform DefineMethodProperty(target, %Symbol.asyncIterator%, F, false)." (`webidl:define-the-asynchronous-iteration-methods`) | HOST-203, with slice 10's story of `for await` |
 
-The first five are made by the realm today. The last five come with slice 6: `%Symbol.iterator%`
+The first five are made by the realm today. The next five come with slice 6: `%Symbol.iterator%`
 with the story of the `Symbol` constructor and the well-known symbols, `%Array.prototype.values%`
 with the story of the iterator protocol, and `entries`, `keys` and `forEach` as intrinsics of the
-realm recorded where their builtins are installed, so that each is the original function.
+realm recorded where their builtins are installed, so that each is the original function. The
+eleventh, `%Symbol.asyncIterator%`, added on 2026-11-23, comes with slice 10's story of
+`for await` (`engine.md` decision 4, "Symbols": the thirteenth well-known symbol, made with the
+agent as the other twelve are). The host reads it as it reads the others: `well_known_symbol`
+answers the agent's Symbol, the same in every realm, with no code, no hook, no step and no
+allocation. The variant is no break, since `WellKnownSymbol` is `#[non_exhaustive]` (decision 4,
+"The kind of an AggregateError, and kinds to come"); the changelog names
+`WellKnownSymbol::AsyncIterator` and `HOST-203`.
 
 Rejected: a host-made global passed in before the call (its prototype could not come from the
 realm's own intrinsics); an explicit `destroy_realm` (objects of a destroyed realm reachable
@@ -737,6 +810,8 @@ which realm it got).
 **HOST-184** (webidl:interface-prototype-object) A host object whose own `@@toStringTag` data property, defined with `well_known_symbol(ToStringTag)`, is `"Node"` makes the script `Object.prototype.toString.call(n)` answer `"[object Node]"`; one with an own `@@unscopables` object whose `before` is `true` makes `with (n) { before }` read the outer binding; the symbols are the same in two realms of the agent. [slice 6]
 
 **HOST-185** (webidl:define-the-iteration-methods) A host object `list` with indexed own data properties `0` and `1` holding the host objects `a` and `b`, a `length` of 2, and own data properties `@@iterator`, `entries`, `keys`, `values` and `forEach` defined from `well_known_symbol(Iterator)` and the four intrinsics, makes the script `var r = [], it = list[Symbol.iterator](); r.push(it.next().value === a, it.next().value === b, it.next().done); var e = list.entries().next().value; r.push(e[0] === 0 && e[1] === a, list.keys().next().value === 0, list.values().next().value === a); list.forEach(function (n, i) { r.push(n === (i ? b : a)); }); r.join()` answer `"true,true,true,true,true,true,true,true"` (no `for`-`of`, which a later story of slice 6 brings), also after a script replaced `Array.prototype.values`, `entries`, `keys` and `forEach` before the host defined them; `intrinsic(realm, ArrayPrototypeValues)` answers the same object as `Array.prototype[Symbol.iterator]` read before that script. [slice 6]
+
+**HOST-203** (webidl:define-the-asynchronous-iteration-methods) In the setup closure and in `with_cx` of each of two realms of the agent, `well_known_symbol(AsyncIterator)` answers the same Symbol, for which the script `s === Symbol.asyncIterator && s.description === "Symbol.asyncIterator" && Symbol.keyFor(s) === undefined`, run in either realm with `s` a global holding it, answers `true`; a host object whose own `@@asyncIterator` method, defined with it, answers an object with a `next` method that answers `{ value: 1, done: false }` and then `{ done: true }`, makes the script `(async function () { var r = []; for await (var x of o) r.push(x); return r.join(); })()` answer a promise fulfilled with `"1"` after a checkpoint; the read spends no step (`last_entry_steps()` unchanged). [slice 10]
 
 ## 8. Scripts
 
@@ -889,7 +964,16 @@ step of the draft meets a state its assertions exclude.
   stays pending for good, since nothing can resume it (HOST-195); one suspended at an `await`
   keeps its frame and a later checkpoint resumes it, unless its job had started and a check of
   its resumption was refused, or `clear_microtasks` dropped its job: its reaction is then spent
-  and leaves its promise pending.
+  and leaves its promise pending. Added the same day for the later waves of slice 10 (`engine.md`
+  decision 3, "Async generators on suspended frames", item 5, and "A built-in async function",
+  item 3): an async generator whose frame was on the stack loses its frame (credited), runs no
+  `finally`, and the promises of its queued requests stay pending for good, as do those of the
+  requests later `next`, `return` and `throw` queue, since an executing async generator only
+  queues (HOST-204); one suspended at its start, at a `yield` or at an `await` keeps its frame
+  and queue and is resumed later, its queued requests answered in order (HOST-205); a drain a
+  termination ended leaves the requests it did not settle pending for good. A built-in async
+  function (`Array.fromAsync`) whose steps ran leaves its promise pending for good and closes no
+  iterator; one suspended at an Await is continued by a later checkpoint (HOST-208).
 - **Module evaluation.** Every module on the evaluation stack (status `evaluating`) stays
   `evaluating` and is marked terminated; `evaluate_module` of any module whose graph reaches a
   marked module answers `Err(ModuleTerminated)`. Left unmarked, the next Evaluate would meet
@@ -965,6 +1049,14 @@ entry and does not count on what the run left.
 **HOST-77** (html:perform-a-microtask-checkpoint) When the third of five queued jobs ends the checkpoint in `Terminated(StepBudget)`, the first two have run, the third never runs again, and the next checkpoint runs the fourth and fifth in order. [slice 10]
 
 **HOST-195** (swell:D10) The script `(async function () { await null; for (;;) {} })()` answers `Normal` with a promise; the next `perform_microtask_checkpoint` answers `Terminated(StepBudget)`, and `promise_state` of that promise reads `Pending` after it and after a later checkpoint, which answers `Normal` with both counts 0. [slice 10]
+
+**HOST-204** (swell:D10) The script `var g = (async function* () { try { await null; for (;;) {} } finally { globalThis.f = 1; } })(); [g.next(), g.next()]` answers `Normal` with an array of two promises; the next `perform_microtask_checkpoint` answers `Terminated(StepBudget)`; `promise_state` of both reads `Pending` after it and after a later checkpoint, which answers `Normal` with both counts 0; the script `typeof f` then answers `"undefined"`; and the script `g.next()` answers `Normal` with a promise whose `promise_state` reads `Pending` after a further checkpoint. [slice 10]
+
+**HOST-205** (swell:D10) An async generator suspended when an entry ends keeps its frame and its queue: after the script `var res; var g = (async function* () { var x = yield await new Promise(function (r) { res = r; }); yield x; })(); var p = g.next(), q = g.next(7); 0` and a checkpoint, the script `for (;;) {}` ends in `Terminated(StepBudget)`; the script `res(5)` and the next checkpoint then fulfil p with `{ value: 5, done: false }` and q with `{ value: 7, done: false }`, read through `promise_state` and `cx.get`. [slice 10]
+
+**HOST-206** (swell:D4) Requests queued on an async generator are charged until the generator is freed, and bounded by the memory budget alone: after the script `var g = (async function* () { await new Promise(function () {}); })(); g.next(); for (var i = 0; i < 1000; i++) g.next(); 0`, `heap_bytes()` exceeds its reading before the loop by at least 1,000 times 64 bytes; after the script `g = null` one `collect()` gives at least that back; and with `steps_per_entry` 10^9 the script `var h = (async function* () { await new Promise(function () {}); })(); h.next(); for (;;) h.next();` ends in `Terminated(MemoryBudget)`. [slice 10]
+
+**HOST-208** (swell:D10) A built-in async function cut by a termination leaves its promise pending for good: the script `var p = Array.fromAsync({ length: 2, 0: 0, get 1() { for (;;) {} } }); p` answers `Normal` with the promise p; the next checkpoint answers `Terminated(StepBudget)`; `promise_state` of p reads `Pending` after it and after a later checkpoint, which answers `Normal` with both counts 0. And the script `var q = Array.fromAsync({ length: 1, 0: new Promise(function (r) { globalThis.res = r; }) }); q`, then the script `for (;;) {}`, which ends in `Terminated(StepBudget)`, then the script `res(3)` and a checkpoint fulfil q with an array whose element 0 is 3. [slice 10]
 
 ## 11. Jobs and the microtask checkpoint
 
@@ -1174,6 +1266,8 @@ that implements either hook can.
 **HOST-200** (swell:D11) `Agent::clear_microtasks` empties the queue without running anything: after the script `var p = Promise.resolve().then(function () { return 1; }); p`, which answers `Normal` with the promise p, `clear_microtasks` answers `Ok(1)` and calls no hook, `pending_microtasks()` then reads 0 and `heap_bytes()` less than before the call, the next checkpoint answers `Normal` with both counts 0, and `promise_state` of p reads `Pending`; `Cx` and `HookCx` have no `clear_microtasks`, which a `compile_fail` test holds. [slice 10]
 
 **HOST-194** (ecma262:await) The script `(async function () { await 1; })()` calls `host_make_job_callback` twice, with two distinct functions, and the checkpoint after it runs one promise job, for which the engine calls `host_prepare_to_run_job` with the script's realm, then `host_call_job_callback` once, with the first of those two functions and the value `host_make_job_callback` returned for it, then `host_clean_up_after_job` with `Ok(())`. [slice 10]
+
+**HOST-207** (ecma262:sec-builtincallorconstruct) An Await of a built-in async function goes through the hooks of an `await`: the script `A.fromAsync({ length: 1, 0: 1 })`, run in the second of two realms with the global `A` holding the first realm's `Array`, calls `host_make_job_callback` twice, with two distinct functions, and the checkpoint after it runs one promise job, for which the engine calls `host_prepare_to_run_job` with the first realm (the builtin's), then `host_call_job_callback` once, with the first of those two functions and the value `host_make_job_callback` returned for it, then `host_clean_up_after_job` with `Ok(())`; the promise is then fulfilled with an array of the first realm whose element 0 is 1, and `last_entry_steps()` of the checkpoint reads at least 3. [slice 10]
 
 ## 12. Interrupting
 
@@ -1668,6 +1762,8 @@ pub enum WellKnownSymbol {
     ToStringTag, Unscopables,
     // with slice 6's `Symbol` story (HOST-185):
     Iterator,
+    // with slice 10's `for await` story (HOST-203):
+    AsyncIterator,
 }
 impl<'a, H: Host> Cx<'a, H> {   // also on HookCx
     pub fn new_host_object(&mut self, spec: HostObjectSpec<H>) -> Result<Completion<ObjectRef>, HostError>;
@@ -2044,7 +2140,6 @@ table in `host-interface-model.md` gives each marker's first words.
 
 ## Not checked
 
-- `min_stack_bytes` and the Rust stack one re-entry needs: no code exists; slice 1 measures it.
 - The generator `swell-num` uses for `Math.random`, and so how much of the 32-byte seed it uses.
 - HTML 7.2.3 (`WindowProxy`) and `Location`, on `nav-history-apis.html`, were not read here.
 - Whether the draft's text allows the `RangeError`s of decision 2 for strings, BigInts and
