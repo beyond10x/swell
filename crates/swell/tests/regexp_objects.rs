@@ -467,7 +467,9 @@ fn the_constructs_of_the_consumer_table_evaluate() {
 /// IsRegExp (`#sec-isregexp`), step 4, and `Object.prototype.toString`
 /// (`#sec-object.prototype.tostring`), step 13, read [[RegExpMatcher]]: a RegExp is a regular
 /// expression to `startsWith`, `endsWith`, `includes` and `replaceAll`, unless its own
-/// `@@match` says otherwise, and its builtinTag is `RegExp`; `%RegExp.prototype%` has neither.
+/// `@@match` says otherwise, and its builtinTag is `RegExp`; `%RegExp.prototype%` has no
+/// [[RegExpMatcher]] and its builtinTag is `Object`, but it is a regular expression to IsRegExp,
+/// whose step 3 finds its `@@match` callable, so `startsWith` given it throws a `TypeError`.
 #[test]
 fn is_reg_exp_and_object_to_string_see_a_regexp() {
     all_true(&[r#"var thrown = 0;
@@ -477,8 +479,8 @@ fn is_reg_exp_and_object_to_string_see_a_regexp() {
            try { "a".replaceAll(/a/, "b"); } catch (e) { if (e instanceof TypeError) thrown++; }
            var r = /a/;
            r[Symbol.match] = false;
-           thrown === 4 && "/a/".startsWith(r) && "x/a/".endsWith(r) && "x/a/x".includes(r) &&
-             "/a/".startsWith(RegExp.prototype) === false &&
+           try { "/a/".startsWith(RegExp.prototype); } catch (e) { if (e instanceof TypeError) thrown++; }
+           thrown === 5 && "/a/".startsWith(r) && "x/a/".endsWith(r) && "x/a/x".includes(r) &&
              Object.prototype.toString.call(/a/) === "[object RegExp]" &&
              Object.prototype.toString.call(RegExp.prototype) === "[object Object]" &&
              String(Object.prototype.toString.call(new RegExp("b", "g"))) === "[object RegExp]""#]);
@@ -514,61 +516,6 @@ fn host_143_a_pattern_past_parser_nesting_throws_a_catchable_syntax_error() {
     );
     assert_eq!(eval_text(&mut agent, &realm, &script), yes());
     assert_eq!(agent.refusals(), 0);
-}
-
-/// Until `story:regexp-symbol-methods-and-string-match-search` (`docs/design/engine.md`,
-/// decision 7, "Refusals until the later stories of slice 5"; section 12, the third form):
-/// `RegExp.prototype[@@replace]` and `[@@split]` are methods named `[Symbol.replace]` and
-/// `[Symbol.split]` of length 2 that answer every call past the first steps of their clauses
-/// with a `SyntaxError` whose message names the method, counted by `refusals()`, also when
-/// `String.prototype.replace`, `replaceAll` or `split` makes the call; a this value that is no
-/// object (a `TypeError`) and an error of ToString of the String are thrown instead and not
-/// counted.
-#[test]
-fn replace_and_split_given_a_regexp_are_counted_refusals_until_their_symbol_methods() {
-    let (mut agent, realm) = agent_and_realm(limits());
-    let replace = "RegExp.prototype[Symbol.replace] is not supported before slice 5";
-    let split = "RegExp.prototype[Symbol.split] is not supported before slice 5";
-    for (source, message, counted) in [
-        (
-            r#"RegExp.prototype[Symbol.replace].call(/a/, "a", "b")"#,
-            replace,
-            1,
-        ),
-        (r#"RegExp.prototype[Symbol.split].call(/a/, "a")"#, split, 2),
-        (r#""a".replace(/a/, "b")"#, replace, 3),
-        (r#""a".replaceAll(/a/g, "b")"#, replace, 4),
-        (r#""a".split(/a/)"#, split, 5),
-    ] {
-        let script = format!(
-            "try {{ {source}; \"no error\"; }} catch (e) {{ (e instanceof SyntaxError) + \": \" + e.message; }}"
-        );
-        assert_eq!(
-            eval_text(&mut agent, &realm, &script),
-            Outcome::Normal(format!("\"true: {message}\"")),
-            "{source}"
-        );
-        assert_eq!(agent.refusals(), counted, "{source}");
-    }
-    for source in [
-        "RegExp.prototype[Symbol.replace].call(1, \"a\")",
-        "RegExp.prototype[Symbol.split].call(\"x\", \"a\")",
-    ] {
-        let script = format!("try {{ {source}; false; }} catch (e) {{ e instanceof TypeError; }}");
-        assert_eq!(eval_text(&mut agent, &realm, &script), yes(), "{source}");
-    }
-    for symbol in ["replace", "split"] {
-        let script = format!(
-            "var thrower = {{ toString: function () {{ throw 7; }} }};\n\
-             var d = Object.getOwnPropertyDescriptor(RegExp.prototype, Symbol.{symbol});\n\
-             var caught;\n\
-             try {{ d.value.call(/a/, thrower); }} catch (e) {{ caught = e; }}\n\
-             caught === 7 && d.value.name === \"[Symbol.{symbol}]\" && d.value.length === 2 &&\n\
-               d.writable === true && d.enumerable === false && d.configurable === true"
-        );
-        assert_eq!(eval_text(&mut agent, &realm, &script), yes(), "{symbol}");
-    }
-    assert_eq!(agent.refusals(), 5);
 }
 
 /// The acceptance 5 of `epic:slice-05-regexp` (`docs/design/engine.md`, decision 7, "What one

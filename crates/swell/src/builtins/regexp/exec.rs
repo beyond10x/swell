@@ -483,10 +483,6 @@ impl<H: Host> Agent<H> {
     }
 
     /// AdvanceStringIndex ( S, index, unicode ) (`#sec-advancestringindex`).
-    #[expect(
-        dead_code,
-        reason = "AdvanceStringIndex of @@match and @@replace: story:regexp-symbol-methods-and-string-match-search"
-    )]
     pub(crate) fn advance_string_index(
         &mut self,
         string: StringRef,

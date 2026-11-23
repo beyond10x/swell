@@ -10,6 +10,17 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Added
+
+- `String.prototype.match` and `search`, and the methods of `RegExp.prototype` keyed by
+  `Symbol.match`, `Symbol.replace`, `Symbol.search` and `Symbol.split`: `replace`,
+  `replaceAll` and `split` of `String` take a regular expression, with the replacement
+  patterns of named and numbered groups, a function as the replacement, the flags `g` and
+  `y`, and a species constructor for the splitter. A regular expression method spends, beside
+  the steps of its matches, 11 steps per match of a global `replace` and 7 per match of a
+  global `match` or per piece of `split`. 18,155 of the 44,812 selected test262 cases pass
+  (17,775 in 0.6.0), 1,667 of the 2,724 of the fifth slice (1,327).
+
 ## [0.6.0] - 2026-11-23
 
 Regular expressions run: the literal, `RegExp`, `exec` and `test`, on the new crate

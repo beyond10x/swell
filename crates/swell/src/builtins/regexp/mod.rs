@@ -25,17 +25,14 @@
 //! RegExpAlloc's object is made after the parse and compile step, once the program exists: the
 //! steps between (the conversions and the parse) cannot see it, so the order is not observable.
 //!
-//! `RegExp.prototype [ %Symbol.replace% ]` and `[ %Symbol.split% ]` answer every call with the
-//! counted refusal of a part before its slice (`docs/design/engine.md`, section 12, the third
-//! form) until `story:regexp-symbol-methods-and-string-match-search` gives them their clauses,
-//! so that `replace`, `replaceAll` and `split` of `String.prototype` given a RegExp never answer
-//! from ToString of the RegExp: after ToString of the String argument, a `SyntaxError` of the
-//! current realm whose message is `RegExp.prototype[Symbol.replace] is not supported before
-//! slice 5` (or `[Symbol.split]`). The methods keyed by `@@match`, `@@matchAll` and `@@search`
-//! come with their stories.
+//! The methods keyed by `%Symbol.match%`, `%Symbol.replace%`, `%Symbol.search%` and
+//! `%Symbol.split%` (`regexp/symbol.rs`) are `story:regexp-symbol-methods-and-string-match-search`,
+//! defined here in the order of 22.2.6 under the keys of their symbols; the one keyed by
+//! `%Symbol.matchAll%` comes with its story.
 
 mod budget;
 mod exec;
+mod symbol;
 
 use swell_regexp::{CompileError, Flags, ParseError, PatternError, Program, Stop};
 use swell_regexp::{compile_pattern, parse_pattern};
@@ -71,11 +68,15 @@ pub(crate) enum RegExpBuiltin {
     /// The getters of one flag each (22.2.6.3, 22.2.6.5 to 22.2.6.7, 22.2.6.10, 22.2.6.15,
     /// 22.2.6.18, 22.2.6.19).
     HasFlag(FlagGetter),
-    /// `RegExp.prototype [ %Symbol.replace% ]` (22.2.6.11), refused before its story.
+    /// `RegExp.prototype [ %Symbol.match% ] ( string )` (22.2.6.8).
+    Match,
+    /// `RegExp.prototype [ %Symbol.replace% ] ( string, replaceValue )` (22.2.6.11).
     Replace,
+    /// `RegExp.prototype [ %Symbol.search% ] ( string )` (22.2.6.12).
+    Search,
     /// `get RegExp.prototype.source` (22.2.6.13).
     Source,
-    /// `RegExp.prototype [ %Symbol.split% ]` (22.2.6.14), refused before its story.
+    /// `RegExp.prototype [ %Symbol.split% ] ( string, limit )` (22.2.6.14).
     Split,
     /// `RegExp.prototype.test ( S )` (22.2.6.16).
     Test,
@@ -127,28 +128,30 @@ impl FlagGetter {
 }
 
 /// The properties of `%RegExp.prototype%` after `constructor`, in the order of 22.2.6 (the
-/// methods keyed by `@@match`, `@@matchAll` and `@@search` come with their stories).
+/// method keyed by `@@matchAll` comes with its story).
 enum PrototypeProperty {
     /// A method: its name, its "length" and its steps.
     Method(&'static str, u32, RegExpBuiltin),
     /// An accessor whose set accessor function is undefined: its name and its getter's steps.
     Getter(&'static str, RegExpBuiltin),
-    /// A method keyed by a well-known symbol: the symbol's name in the method's name, and its
-    /// steps; "length" 2.
-    SymbolMethod(&'static str, RegExpBuiltin),
+    /// A method keyed by a well-known symbol: the symbol's name in the method's name, its
+    /// "length" and its steps.
+    SymbolMethod(&'static str, u32, RegExpBuiltin),
 }
 
-const PROTOTYPE_PROPERTIES: [PrototypeProperty; 15] = [
+const PROTOTYPE_PROPERTIES: [PrototypeProperty; 17] = [
     PrototypeProperty::Method("exec", 1, RegExpBuiltin::Exec),
     PrototypeProperty::Getter("dotAll", RegExpBuiltin::HasFlag(FlagGetter::DotAll)),
     PrototypeProperty::Getter("flags", RegExpBuiltin::Flags),
     PrototypeProperty::Getter("global", RegExpBuiltin::HasFlag(FlagGetter::Global)),
     PrototypeProperty::Getter("hasIndices", RegExpBuiltin::HasFlag(FlagGetter::HasIndices)),
     PrototypeProperty::Getter("ignoreCase", RegExpBuiltin::HasFlag(FlagGetter::IgnoreCase)),
+    PrototypeProperty::SymbolMethod("match", 1, RegExpBuiltin::Match),
     PrototypeProperty::Getter("multiline", RegExpBuiltin::HasFlag(FlagGetter::Multiline)),
-    PrototypeProperty::SymbolMethod("replace", RegExpBuiltin::Replace),
+    PrototypeProperty::SymbolMethod("replace", 2, RegExpBuiltin::Replace),
+    PrototypeProperty::SymbolMethod("search", 1, RegExpBuiltin::Search),
     PrototypeProperty::Getter("source", RegExpBuiltin::Source),
-    PrototypeProperty::SymbolMethod("split", RegExpBuiltin::Split),
+    PrototypeProperty::SymbolMethod("split", 2, RegExpBuiltin::Split),
     PrototypeProperty::Getter("sticky", RegExpBuiltin::HasFlag(FlagGetter::Sticky)),
     PrototypeProperty::Method("test", 1, RegExpBuiltin::Test),
     PrototypeProperty::Method("toString", 0, RegExpBuiltin::ToString),
@@ -288,16 +291,17 @@ impl<H: Host> Agent<H> {
                     let key = self.name_key(name)?;
                     self.add_property(prototype, key, getter_property(getter))?;
                 }
-                PrototypeProperty::SymbolMethod(name, id) => {
-                    let symbol = if id == RegExpBuiltin::Replace {
-                        making.symbols.replace
-                    } else {
-                        making.symbols.split
+                PrototypeProperty::SymbolMethod(name, length, id) => {
+                    let symbol = match id {
+                        RegExpBuiltin::Match => making.symbols.r#match,
+                        RegExpBuiltin::Replace => making.symbols.replace,
+                        RegExpBuiltin::Search => making.symbols.search,
+                        _ => making.symbols.split,
                     };
                     let method = self.create_builtin(
                         making,
                         &format!("[Symbol.{name}]"),
-                        2,
+                        length,
                         BuiltinId::RegExp(id),
                     )?;
                     self.add_property(
@@ -327,13 +331,11 @@ impl<H: Host> Agent<H> {
             RegExpBuiltin::Exec => self.regexp_prototype_exec(this, args),
             RegExpBuiltin::Flags => self.regexp_prototype_flags(this),
             RegExpBuiltin::HasFlag(flag) => self.regexp_has_flag(this, flag),
-            RegExpBuiltin::Replace => {
-                self.regexp_symbol_method_refused(this, args, "RegExp.prototype[Symbol.replace]")
-            }
+            RegExpBuiltin::Match => self.regexp_symbol_match(this, args),
+            RegExpBuiltin::Replace => self.regexp_symbol_replace(this, args),
+            RegExpBuiltin::Search => self.regexp_symbol_search(this, args),
             RegExpBuiltin::Source => self.regexp_prototype_source(this),
-            RegExpBuiltin::Split => {
-                self.regexp_symbol_method_refused(this, args, "RegExp.prototype[Symbol.split]")
-            }
+            RegExpBuiltin::Split => self.regexp_symbol_split(this, args),
             RegExpBuiltin::Test => self.regexp_prototype_test(this, args),
             RegExpBuiltin::ToString => self.regexp_prototype_to_string(this),
         }
@@ -774,25 +776,6 @@ impl<H: Host> Agent<H> {
         self.append_str(&mut builder, "/")?;
         self.append_string(&mut builder, flags)?;
         Ok(Value::String(self.finish_string(builder)?))
-    }
-
-    /// `RegExp.prototype [ %Symbol.replace% ]` and `[ %Symbol.split% ]` before their story: the
-    /// first steps of their clauses (1. Let rx be the this value. 2. If rx is not an Object,
-    /// throw a TypeError exception. 3. Let S be ? ToString(string)), then the counted refusal
-    /// of `method` (section 12, the third form).
-    fn regexp_symbol_method_refused(
-        &mut self,
-        this: Value,
-        args: &[Value],
-        method: &str,
-    ) -> Completion<Value> {
-        if !matches!(this, Value::Object(_)) {
-            return Err(self.regexp_this_not_object(method));
-        }
-        self.to_string(argument(args, 0))?;
-        let message = format!("{method} is not supported before slice 5");
-        self.count_refusal(&message);
-        Err(self.throw_error(ErrorKind::SyntaxError, &message))
     }
 }
 

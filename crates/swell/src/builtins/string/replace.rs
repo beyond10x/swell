@@ -8,9 +8,9 @@
 //! An Object given as the pattern (`searchValue`, `separator`) is handed to its method keyed
 //! by `%Symbol.replace%` or `%Symbol.split%` when it has one, as the first steps of the clauses
 //! say; a primitive is never looked up, so a method on its prototype is not read.
-//! `%RegExp.prototype%` has both methods; until
-//! `story:regexp-symbol-methods-and-string-match-search` each answers with the counted refusal
-//! of slice 5, and a method of a script's own object answers. `replaceAll` checks the `flags`
+//! `%RegExp.prototype%` has both methods (`builtins/regexp/symbol.rs`,
+//! `story:regexp-symbol-methods-and-string-match-search`), and a method of a script's own object
+//! answers the same way. `replaceAll` checks the `flags`
 //! of an Object that IsRegExp (`#sec-isregexp`) takes for a RegExp before it looks up the
 //! method.
 //!
@@ -491,13 +491,6 @@ impl<H: Host> Agent<H> {
     /// runs: a Get of namedCaptures and ToString of what it answers may run code. The String
     /// paths of this file append its steps to their result ([`Agent::append_substitution`]);
     /// `RegExp.prototype[@@replace]` calls this.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "RegExp.prototype[@@replace]: story:regexp-symbol-methods-and-string-match-search"
-        )
-    )]
     pub(crate) fn get_substitution(
         &mut self,
         substitution: &Substitution<'_>,
