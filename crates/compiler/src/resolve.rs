@@ -1226,7 +1226,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
                     children.push(Walk::Expr(default));
                 }
             }
-            Expr::Spread(e) => children.push(Walk::Expr(*e)),
+            Expr::Spread(e) | Expr::Await(e) => children.push(Walk::Expr(*e)),
             Expr::Yield { argument, .. } => {
                 children.extend(argument.iter().map(|e| Walk::Expr(*e)))
             }

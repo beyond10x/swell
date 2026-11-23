@@ -15,6 +15,11 @@ Every number below comes from the gate, `task check`, on the released commit.
 - Generator methods of object literals, `{ *g() {} }`, with their early errors, the fifth
   story of the seventh slice. A `yield` in the computed name of one belongs to the generator
   around the literal.
+- The parser reads `async` function declarations, expressions and arrow functions with
+  their early errors, and `await` where the grammar's [Await] is set. No such function runs
+  yet: a source with one is refused with a `SyntaxError` that names the tenth slice, after
+  its grammar errors and early errors, which now come first. `async function*`, `for await`
+  and the `async` method of an object literal keep refusals of their own.
 - The microtask queue of the agent and its checkpoint, the first story of the tenth slice. A
   host queues a microtask with the realm it runs in; a checkpoint runs every entry in the
   order it was queued, under the step budget of one entry, and spends one step for each

@@ -12,7 +12,9 @@
 //! A function declaration stands at the top of a body, where it is var scoped, and in a block, a
 //! `case` clause and a `try`, `catch` or `finally` block, where it is lexically scoped to that
 //! statement list (`#sec-block`, `#sec-switch-statement`), in strict and non-strict code.
-//! Refused are the declarations of later slices: `class` (8), `async function` (10), `import`
+//! An `async` function declaration (slice 10) stands where a function declaration does, and
+//! the refusal of slice 10 is held back to the end of the parse (`parser/function.rs`).
+//! Refused are the declarations of later slices: `class` (8), `import`
 //! and `export` (11), and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
 //! `for (var a = 0 in o)` (18); the `var` binding and the duplicate declarations Annex B gives
 //! a function declaration in a block of non-strict code (B.3.2) wait for slice 18 too, so that
@@ -258,11 +260,22 @@ impl<'a, 'm> Parser<'a, 'm> {
                         _ => Ok(Parser::expression_statement),
                     };
                 }
+                // `async [no LineTerminator here] function` starts an AsyncFunctionDeclaration
+                // where a declaration stands, and no ExpressionStatement anywhere
+                // (`#sec-expression-statement`); Annex B admits a plain FunctionDeclaration only.
                 if is_async
                     && next.kind == TokenKind::Keyword(Keyword::Function)
                     && !next.newline_before
                 {
-                    return self.refuse("async function", 10);
+                    return match place {
+                        Place::Body | Place::Block => Ok(Parser::function_declaration_statement),
+                        Place::Labelled | Place::LabelledInStatement => {
+                            self.fail_here("labelled async function declaration")
+                        }
+                        Place::IfClause | Place::Statement => {
+                            self.fail_here("async function declaration as the body of a statement")
+                        }
+                    };
                 }
                 Parser::expression_statement
             }
@@ -666,7 +679,7 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// `for (;;)`, `for-in` and `for-of` (`#sec-for-statement`,
     /// `#sec-for-in-and-for-of-statements`); the head declares with `var`, `let` or `const`;
-    /// `for await` is refused.
+    /// `for await` is refused where [Await] is set, and elsewhere no `for` statement.
     fn for_statement(&mut self) -> R<StmtId> {
         self.enter()?;
         let start = self.start();
@@ -693,13 +706,13 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// `for (` and what stands before the first `;`, `in` or `of`, recorded as the `init` of
     /// `id`. The target of a for-of may not start with the token `let`
-    /// (`for ( [lookahead ∉ { let, async of }] LeftHandSideExpression of ...`); `async of` stays
-    /// refused with `async` (slice 10).
+    /// (`for ( [lookahead ∉ { let, async of }] LeftHandSideExpression of ...`); `async of` there
+    /// reads as the head of an `async` arrow function whose `=>` is missing.
     fn for_head(&mut self, id: StmtId) -> R<()> {
         self.enter()?;
         self.advance()?;
-        if self.is_name("await") {
-            return self.refuse("await expression", 10);
+        if self.awaits && self.is_name("await") {
+            return self.refuse("for await", 10);
         }
         self.expect(Punct::LParen)?;
         if self.for_head_declares()? {

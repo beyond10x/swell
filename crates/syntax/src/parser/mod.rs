@@ -77,10 +77,19 @@ pub(crate) struct Parser<'a, 'm> {
     /// innermost last: saved as a function opens and put back as it closes, here and never in a
     /// recursive frame; the growth charged first.
     outer_yields: Vec<bool>,
-    /// The refusal of a construct whose parse goes on, held back to the end of the parse: the
-    /// first `yield*` of the source (slice 7), at its `*`. The parse answers it only
-    /// when it ends without a grammar error and without an early error (`lib.rs`,
-    /// `analyse_parsed`).
+    /// The [Await] parameter of the grammar at the current position: set in the parameters and
+    /// the body of an `async` function or arrow function, cleared in those of every other
+    /// function but in the parameters of an arrow function, which keep the one around them
+    /// (`#sec-async-function-definitions`, `#sec-async-arrow-function-definitions`). Kept beside
+    /// [Yield] in the same way.
+    awaits: bool,
+    /// The [Await] of the code around each function whose parameters or body the parser is in,
+    /// beside `outer_yields`, saved and put back with it; the growth charged first.
+    outer_awaits: Vec<bool>,
+    /// The refusal of a construct whose parse goes on, held back to the end of the parse: that
+    /// of the first `async` function or arrow function of the source (slice 10), at its `async`.
+    /// The parse answers it only when it ends without a grammar error and without an early error
+    /// (`lib.rs`, `analyse_parsed`).
     held: Option<SyntaxError>,
     /// The operator stack of the binary expression parser, shared by its nested calls.
     operators: Vec<expression::Pending>,
@@ -308,6 +317,8 @@ impl<'a, 'm> Parser<'a, 'm> {
             functions: 0,
             yields: false,
             outer_yields: Vec::new(),
+            awaits: false,
+            outer_awaits: Vec::new(),
             held: None,
             operators: Vec::new(),
             prefixes: Vec::new(),
@@ -327,6 +338,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         m.release(std::mem::take(&mut self.operators));
         m.release(std::mem::take(&mut self.prefixes));
         m.release(std::mem::take(&mut self.outer_yields));
+        m.release(std::mem::take(&mut self.outer_awaits));
         m.credit(self.tok.kind.heap_bytes());
         self.tok.kind = TokenKind::Eof;
         if let Some(peeked) = self.peeked.take() {
