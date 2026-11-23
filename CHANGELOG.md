@@ -17,6 +17,13 @@ Every number below comes from the gate, `task check`, on the released commit.
   an object keys by `@@replace` or `@@split`. 16,567 of the 44,812 selected test262 cases pass
   (16,412 in 0.5.0), 198 of the 2,724 of the fifth slice (52).
 
+### Changed
+
+- The test steps of the gate cost about 270 CPU seconds, from about 300: tests of twelve files take a
+  gate count, with the full count in the lane `slow`, five tests of the test262 runner that
+  counted one fixture tree are one test, and `gate-selftest` starts the next planted script
+  when one ends.
+
 ### Host interface
 
 - `BINDINGS_REALM_HEAP_BYTES` (changed): 506,112, from 381,696. A realm of 300 host functions and
