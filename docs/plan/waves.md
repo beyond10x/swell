@@ -306,17 +306,20 @@ paragraphs "Suspended frames" in decision 3 with the matching sentences of decis
 
 | order | stories | what it brings | cases of its list |
 |---|---|---|---|
-| 1 | `generator-syntax-and-early-errors` | `function*` and `yield` parse with their early errors; a script with a generator and no early error still ends on the counted refusal of slice 7 | 115 |
+| 1 | `generator-syntax-and-early-errors` | `function*` and `yield` parse with their early errors; a script with a generator and no early error still ends on the counted refusal of slice 7 | 114 |
 | 2 | `generator-functions-and-suspended-frames` | generators run: the frame moves, boxed, into the generator object and back; `next`, `return`, `throw`; `HOST-73` | 978 |
 | 3 | `generator-function-constructor`, `yield-star-delegation` | `GeneratorFunction` from source text through the host's hook; `yield*` in the loop of the delegating frame | 21 and 49 |
-| 4 | `generator-methods-in-object-literals` | generator methods of object literals and their early errors | 280 |
+| 4 | `generator-methods-in-object-literals` | generator methods of object literals and their early errors | 281 |
 | 5 | `slice-07-conformance-close` | 40 cases that need `class` or `super` moved to slice 8; the 2 cases that need both `yield*` and methods; passing cases of later slices taken in by rule lines | 42 |
 
 A decomposition of slice 10 can start when order 2 is merged. The close runs after
 `slice-05-conformance-close`: both write section 12 of the design, `moves.tsv`,
 `later-parts.tsv` and `expected.txt`.
 
-**Delivered so far.** Nothing; order 1 is being built.
+**Delivered so far.** Order 1 is merged on the wave branch of slice 5 (2026-11-23, not yet
+released): 123 of the 1,491 cases pass (`test262-slice 07 1491 2841 0 0 1491 123 1368 0`).
+One case of its list, `expressions/object/prop-def-invalid-star-prefix.js`, ends on the
+refusal of a generator method and went to the list of order 4. Order 2 is being built.
 
 ## What later slices take over
 

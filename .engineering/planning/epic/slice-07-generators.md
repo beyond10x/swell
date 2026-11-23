@@ -7,7 +7,7 @@ title: 'Slice 7, generators: frames saved in generator objects'
 summary: 'Generators, with frames saved in objects and resumed: 1,491 cases and 2,841 runs.'
 relations:
 - depends_on: epic:slice-06-bindings-and-iteration
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T11:15:31Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T11:15:31Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
@@ -58,8 +58,8 @@ the paragraphs "Suspended frames"), 4 (the collector's roots and the accounting)
   of release `0.7.0` with `matchAll`: 6 cases pass, 1,485 fail). The count is by the order of
   delivery: a case is counted in the slice delivered last among the slices it needs.
 - The 1,485 failing cases by the story that makes them pass (`docs/plan/slice-07/`, with the scan
-  and its command in `scan.awk`): 115 negative parse cases, 978 cases of generators that run, 49 of
-  `yield*`, 280 of generator methods, 21 of the constructor, 2 that need both `yield*` and methods,
+  and its command in `scan.awk`): 114 negative parse cases, 978 cases of generators that run, 49 of
+  `yield*`, 281 of generator methods (one of them a negative parse case that needs the grammar of methods), 21 of the constructor, 2 that need both `yield*` and methods,
   and 40 that need `class` or `super` and move to slice 8 at the close.
 - Directories the design names for it (paths under `test/`, cases): `expressions/object` 303,
   `expressions/generators` 288, `statements/generators` 266.

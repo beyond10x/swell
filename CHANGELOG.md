@@ -17,6 +17,23 @@ Every number below comes from the gate, `task check`, on the released commit.
   matcher; `RegExp.escape` spends 2 steps per code unit it copies and 3 per code unit it
   escapes. 18,238 of the 44,812 selected test262 cases pass (18,155 in 0.7.0), 1,746 of the
   2,724 of the fifth slice (1,667).
+- Unicode property escapes in a regular expression with the flag `u`: `\p{...}` and
+  `\P{...}` with a General_Category value, `Script=` and `Script_Extensions=` with a script,
+  and the binary properties, each by its name or an alias as written. A name or value the
+  standard does not list is the `SyntaxError` "invalid property name". A class spends one
+  step per property escape it holds, and a test of one property is at most seven binary
+  searches of a table, so a step of the matcher still stands for a bounded amount of work.
+  580 more test262 cases pass with them: 2,326 of the 2,724 of the fifth slice.
+
+### Changed
+
+- A source with a generator function (`function*`) is still refused, with the same message
+  at the `*` of its first generator, but the refusal no longer stops the parse: `function*`
+  and `yield` are read, and a source that also has a grammar error or an early error ends on
+  that error. The early errors of `yield` are reported: `yield` as an identifier in a
+  generator, a `yield` expression in the parameters of a generator, a generator declaration
+  as the body of a statement. 123 of the 1,491 test262 cases of the seventh slice pass (6 in
+  0.7.0), and 18,935 of the 44,812 selected cases.
 
 ## [0.7.0] - 2026-11-23
 
