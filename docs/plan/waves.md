@@ -321,6 +321,42 @@ released): 123 of the 1,491 cases pass (`test262-slice 07 1491 2841 0 0 1491 123
 One case of its list, `expressions/object/prop-def-invalid-star-prefix.js`, ends on the
 refusal of a generator method and went to the list of order 4. Order 2 is being built.
 
+## Slice 10, `promises-and-async`
+
+`epic:slice-10-promises-and-async`, next after slice 7 by the order above, and planned on the
+day generators ran: the suspended frame it builds on is the second story of slice 7, and the
+first consumer's next gap is here, one `async` function with two `await` on promises of the
+host (`fetch_json` of its test harness), in an embedder that drains the queue after each
+script. Decomposed on 2026-11-23 into seventeen stories. The four of the first wave were read
+by the four plan critics (`review-result:slice-10-round-1-*`: 13 findings, none a blocker, all
+applied) and are accepted; the other thirteen are drafts until their reading. Measured on the
+last full run before generators ran: 3,879 cases and 7,499 runs, 13 cases pass
+(`test262-slice 10 3879 7499 0 0 3879 13 3866 0`); 2,748 of its cases carry the flag `async`,
+and none of those passes before the runner drains the queue. The lists the stories read are
+under [`slice-10/`](slice-10/): the scans of the failing cases by what they need, a case list
+per story, two guard lists of passing cases, the lists of the close, and two scripts for a
+unit (`part.sh` copies a story's cases into a part of the checkout for a run of the runner,
+`check.sh` checks the run's lines against the base). The design text they build on is in
+decisions 3, 4 and 9 and in the host interface (`1479d2f`, `90ccbf5`): the checkpoint as one
+outermost entry under one step budget, what is charged for a queued job, the realm of a host
+microtask, the activation of an `async` function as the holder of its suspended frame,
+`await` through the host's job-callback hooks, terminations, and nine requirements
+(`HOST-192` to `HOST-200`), four of them asked for by the first embedder: what
+`last_entry_steps()` reads after a checkpoint, where the interrupt ends one, what stays
+queued, and a call that empties the queue.
+
+| order | stories | what it brings |
+|---|---|---|
+| 1 | `job-queue-and-microtask-checkpoint`, `async-function-syntax-and-early-errors` | the queue, the checkpoint and its bound, host microtasks, the runner's handling of `async` cases; `async` and `await` parsed with their early errors, the refusal held behind them |
+| 2 | `promise-constructor-then-and-jobs` | `Promise`, its resolving functions, `then`, `catch`, the reaction jobs |
+| 3 | `async-functions-and-await` | `async` functions run on a suspended frame; with it the consumer's function runs to its end |
+| 4 | `promise-statics-finally-and-aggregate-error`, `promise-rejection-tracker-and-promise-reads`, `async-methods-in-object-literals`, `async-function-constructor`, `for-await-and-async-from-sync-iterator`, `async-generator-syntax-and-early-errors` | the statics and `finally`; the rejection tracker; async methods (needs the generator methods of slice 7); the `AsyncFunction` constructor (needs the `GeneratorFunction` constructor); `for await`; async generator syntax |
+| 5 | `async-generators-and-their-request-queue`, `ess-target-checkpoint-and-promise-hooks` | async generators; the executable specification's target for the checkpoint |
+| 6 | `yield-star-in-async-generators`, `async-generator-methods-in-object-literals`, `async-generator-function-constructor`, `array-from-async` | `yield*` in an async generator (needs `yield*` of slice 7); its methods and constructor; `Array.fromAsync` |
+| 7 | `slice-10-conformance-close` | 138 cases moved to later slices; after `slice-07-conformance-close` |
+
+**Delivered so far.** Nothing; order 1 is being built.
+
 ## What later slices take over
 
 Findings of delivered waves that belong to a slice not yet decomposed. The decomposition of

@@ -27,6 +27,10 @@
 #   guard-async-token.cases.txt, the cases with a passing run in the base run whose text has the word async or
 #   await (the guard of the parser's change of story:async-function-syntax-and-early-errors):
 #     LC_ALL=C awk -F'\t' '$5 == "Passed" { print $3 }' <runs.tsv> | LC_ALL=C sort -u | sed "s|^|<checkout>/|" | xargs grep -lE '\b(async|await)\b' | sed "s|^<checkout>/||" | LC_ALL=C sort
+#   guard-promise.cases.txt, the cases whose every run passes in the base run under the directories of the
+#   global object, the builtin function objects, the well-known symbols and @@toStringTag (the guard of
+#   story:promise-constructor-then-and-jobs):
+#     LC_ALL=C awk -F'\t' '{ n[$3]++; if ($5 == "Passed") p[$3]++ } END { for (k in n) if (p[k] == n[k]) print k }' <runs.tsv> | LC_ALL=C sort | LC_ALL=C awk '/^test\/(built-ins\/global|language\/global-code|built-ins\/Object\/prototype\/toString|built-ins\/Function\/prototype\/(bind|call|apply|toString)|built-ins\/Symbol|built-ins\/Object\/getOwnPropertyNames)\//'
 function slurp(f,   s, save) { save = RS; RS = "^$"; s = ""; if ((getline s < f) <= 0) s = ""; close(f); RS = save; return s }
 BEGIN { FS = "\t"; OFS = "\t"
   while ((getline line < meta) > 0) { split(line, m, "\t"); inc[m[1]] = m[6] }
