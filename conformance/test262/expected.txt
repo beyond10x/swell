@@ -223,16 +223,16 @@ test262 total 53801 8982 7 44812 16412 28399 1
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
-test262-slice 04 1516 2992 0 0 1516 254 1262 0
-test262-slice 05 2394 4783 0 0 2394 50 2344 0
-test262-slice 06 4436 8413 0 0 4436 3907 529 0
-test262-slice 07 1476 2823 0 0 1476 6 1470 0
-test262-slice 08 6292 12491 0 0 6292 3 6289 0
-test262-slice 09 1768 3507 0 0 1768 131 1637 0
-test262-slice 10 6651 12987 0 0 6651 13 6638 0
+test262-slice 04 1521 3002 0 0 1521 254 1267 0
+test262-slice 05 2398 4791 0 0 2398 50 2348 0
+test262-slice 06 4300 8153 0 0 4300 3907 393 0
+test262-slice 07 1492 2843 0 0 1492 6 1486 0
+test262-slice 08 6371 12649 0 0 6371 3 6368 0
+test262-slice 09 1772 3515 0 0 1772 131 1641 0
+test262-slice 10 6659 13003 0 0 6659 13 6646 0
 test262-slice 11 1281 1833 0 0 1281 16 1265 0
-test262-slice 12 320 640 0 0 320 39 281 0
-test262-slice 13 3058 6072 0 0 3058 0 3058 0
+test262-slice 12 338 676 0 0 338 39 299 0
+test262-slice 13 3060 6076 0 0 3060 0 3060 0
 test262-slice 14 598 1192 112 7 479 0 479 0
 test262-slice 15 1094 2170 0 0 1094 39 1055 0
 test262-slice 16 82 164 0 0 82 0 82 0
@@ -283,4 +283,5 @@ test262-section sec-performeval incomplete 347 177 1
 test262-section sec-createdynamicfunction incomplete 509 402 1
 test262-section sec-ecmascript-function-objects-call-thisargument-argumentslist incomplete 92 84 1
 test262-section sec-applystringornumericbinaryoperator incomplete 48 41 1
-test262-section sec-arguments-exotic-objects incomplete 263 106 1
+test262-section sec-arguments-exotic-objects incomplete 263 106 0
+test262-section sec-block-level-function-declarations-web-legacy-compatibility-semantics incomplete 781 146 1
