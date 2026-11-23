@@ -73,3 +73,4 @@ mod template_literals;
 mod termination;
 mod tracing;
 mod values;
+mod yield_star;

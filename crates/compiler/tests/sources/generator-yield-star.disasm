@@ -1,0 +1,37 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 3 generator
+  params local 0
+  0000 2:1 GeneratorStart 2
+  0001 2:1 EndFinally
+  0002 3:18 GetLocal 0
+  0003 3:11 GetIterator
+  0004 3:11 Undefined
+  0005 3:11 Tag 0
+  0006 3:11 DelegateStep 0014
+  0007 3:11 JumpIfDelegateDone 0014
+  0008 3:11 DelegateYield 2
+  0009 3:11 LoopJump 0006
+  0010 3:11 Bury 2
+  0011 3:11 Bury 2
+  0012 3:11 Pop
+  0013 3:11 EndFinally
+  0014 3:11 JumpIfTag 0 0019
+  0015 3:11 Pop
+  0016 3:11 YieldReturn 0
+  0017 3:11 Tag 2
+  0018 3:11 Jump 0024
+  0019 3:7 SetLocal 1
+  0020 3:7 Pop
+  0021 2:1 Undefined
+  0022 2:1 Tag 2
+  0023 2:1 Jump 0024
+  0024 2:1 GeneratorDone 2
+  0025 2:1 JumpIfTag 2 0027
+  0026 2:1 EndFinally
+  0027 2:1 GeneratorReturn 2
+  pattern 0004..0010 -> 0010 items 0 envs 0
+  finally 0002..0024 -> 0024 items 0 envs 0

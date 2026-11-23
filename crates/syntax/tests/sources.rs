@@ -605,19 +605,11 @@ fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec
 }
 
 /// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
-/// nesting error alone (`Some(false)`), or fail otherwise (`None`). A source whose one error is
-/// the refusal of slice 7 parsed: that refusal comes only after the whole parse and the early
-/// errors (`story:yield-star-delegation` takes this arm out again).
+/// nesting error alone (`Some(false)`), or fail otherwise (`None`).
 fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     let source = nested(kind, n)?;
     match parse_through(entry, &source, limit) {
         Ok(_) => Some(true),
-        Err(e)
-            if e.len() == 1
-                && message_kind(&e.first()?.message) == (MessageKind::Refusal { slice: 7 }) =>
-        {
-            Some(true)
-        }
         Err(e) if e.len() == 1 && e.first()?.message.contains("parser_nesting") => Some(false),
         Err(_) => None,
     }

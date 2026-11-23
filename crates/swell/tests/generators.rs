@@ -763,15 +763,6 @@ fn refusal_is_counted(source: &str, text: &str) {
     assert_eq!(agent.refusals(), before + 1);
 }
 
-/// `yield *` keeps a refusal of its own until the story of `yield*`, counted.
-#[test]
-fn the_refusal_of_yield_star_is_counted() {
-    refusal_is_counted(
-        "function* g() { yield* [1]; }",
-        "yield* is not supported before slice 7 (1:22)",
-    );
-}
-
 /// A generator method keeps a refusal of its own until the story of generator methods,
 /// counted.
 #[test]
