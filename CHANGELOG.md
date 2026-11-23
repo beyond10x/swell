@@ -10,20 +10,25 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-23
+
+Generator functions run, and a regular expression takes the flag `i`, Unicode property escapes
+and group names outside ASCII: four of the six stories of the seventh delivery slice and
+thirteen of the fifteen of the fifth are delivered. 20,229 of the 44,812 selected test262
+cases pass (18,155 in 0.7.0).
+
 ### Added
 
 - `String.prototype.matchAll`, `RegExp.prototype[Symbol.matchAll]` with its iterator, and
   `RegExp.escape`. Each match the iterator gives spends 9 steps beside the steps of the
   matcher; `RegExp.escape` spends 2 steps per code unit it copies and 3 per code unit it
-  escapes. 18,238 of the 44,812 selected test262 cases pass (18,155 in 0.7.0), 1,746 of the
-  2,724 of the fifth slice (1,667).
+  escapes.
 - Unicode property escapes in a regular expression with the flag `u`: `\p{...}` and
   `\P{...}` with a General_Category value, `Script=` and `Script_Extensions=` with a script,
   and the binary properties, each by its name or an alias as written. A name or value the
   standard does not list is the `SyntaxError` "invalid property name". A class spends one
   step per property escape it holds, and a test of one property is at most seven binary
   searches of a table, so a step of the matcher still stands for a bounded amount of work.
-  580 more test262 cases pass with them: 2,326 of the 2,724 of the fifth slice.
 - Case-insensitive matching in a regular expression: the flag `i` and the modifiers
   `(?i:...)` and `(?-i:...)`. Under `u` or `v` a character matches by its simple case
   folding, under neither by the uppercase mapping of its code unit. A character, each code
@@ -38,8 +43,82 @@ Every number below comes from the gate, `task check`, on the released commit.
   patterns. A suspended generator holds its frame in its object: the frame's bytes stay
   charged to the memory budget until the generator completes or is collected, a suspended
   generator takes none of the depth bound of calls, and the steps it runs are charged to
-  the entry that resumes it. `yield*` and generator methods of object literals are still
-  refused.
+  the entry that resumes it. Generator methods of object literals are still refused.
+- `yield*` delegates to an iterator. When the iterator is a generator object with the
+  `next`, `throw` and `return` of `%GeneratorPrototype%`, the delegating frame resumes the
+  inner frame itself: a chain of n delegating generators holds n frames, counted against
+  the depth bound of frames, and takes no re-entry per level; a `next` through 101 levels
+  spends 500 steps more than through one, 5 per level. Any other iterator is called as a
+  step of `for`-`of` calls it.
+- `%GeneratorFunction%`, the constructor a script reaches as
+  `Object.getPrototypeOf(function* () {}).constructor`: called or constructed, it makes a
+  generator function from source text by the steps of the `Function` constructor, with the
+  same host hook (`host_ensure_can_compile_strings`, compilation type `Function`) and the
+  same charges for the source text and its parses.
+
+### Changed
+
+- A store to an Array at a Number index (`a[i] = v`) no longer makes the text of the index
+  and a property key from it. A loop of 1,114,112 such stores took 2.313 CPU seconds in a
+  release build and takes 0.830, 35.9 %; the steps a script is charged are the same. The
+  full test262 run, which the gate's digest stands for, took 598 s in one job with this
+  change (1,599 s before).
+- The full test262 run can be made in parts, each a pool job, and counted from their files to
+  the lines the whole run prints: `task test262-part TEST262_PART=<k>/<n>` and
+  `TEST262_FROM_PARTS` of `task test262`, `test262-expected` and `slow-test262`.
+
+### Host interface
+
+- `HOST-191` (changed): of the parts of a regular expression it names as refused and
+  counted, the flag `v` is left; the flag `i`, a property escape and a group name outside
+  ASCII run.
+- `HOST-192`, `HOST-193`, `HOST-194`, `HOST-195`, `HOST-196`, `HOST-197`, `HOST-198`,
+  `HOST-199` and `HOST-200` (new, pending for the tenth slice, held by no test yet): the
+  microtask checkpoint as one outermost entry under one step budget, the realm of a host
+  microtask, what `last_entry_steps()` reads after a checkpoint, where the interrupt ends
+  one, what stays queued after a termination, a call that empties the queue, and the hooks
+  an `await` calls. No function they name exists in this release.
+- `HOST-201`, `HOST-202`, `HOST-203`, `HOST-204`, `HOST-205`, `HOST-206`, `HOST-207` and
+  `HOST-208` (new, pending for the tenth slice, held by no test yet): the kind of an
+  AggregateError and how a host reads its `errors`, `Symbol.asyncIterator` as a well-known
+  symbol, the request queue of an async generator under the memory budget and what a
+  termination leaves of it, and what a built-in async function spends and leaves. `HOST-201`
+  says that `ErrorKind` gets the variant `AggregateError` and `#[non_exhaustive]` in the
+  release that brings `Promise.any`: a `match` on `ErrorKind` without a wildcard arm will
+  not compile from that release on.
+
+### Limits of this release
+
+- Not in the language yet: in a regular expression the flag `v` with its class sets and
+  properties of strings, refused with a `SyntaxError` the agent counts (`HOST-191`);
+  generator methods of object literals; the operator `**`; and of what came
+  after ES5 everything but the sixth slice and generator functions: template literals with
+  and without a tag, `let` and `const`, arrow functions, default and rest parameters,
+  object and array destructuring, spread, computed property names, `for`-`of` and function
+  declarations in blocks (without the web-compatibility semantics of Annex B.3.2). Classes,
+  promises, async functions and modules are refused with a `SyntaxError` that names the
+  delivery slice that brings them. [`docs/design/engine.md`](docs/design/engine.md),
+  section 12, lists the nineteen delivery slices, what each brings and the order they are
+  delivered in.
+- The builtins end at the core library, what the sixth slice adds to it, of the fifth slice
+  `RegExp` with `exec`, `test`, its methods keyed by a well-known symbol and
+  `RegExp.escape`, and of the seventh the generator objects with `%GeneratorFunction%`.
+  `Map`, `Set`, `Promise`, `Reflect`, `Proxy`, `Date`, `parseInt`, `parseFloat` and all of
+  `Math` but `max` do not exist.
+- test262: 20,229 of the 44,812 cases the gate's digest stands for pass, 45.1 %. The
+  line reads `test262 total 53801 8982 7 44812 20229 24581 2`: 53,801 cases exist, 8,982 are excluded by recorded decision, 7
+  do not apply, 44,812 run, 20,229 pass, 24,581 fail, two end at the memory budget. The
+  first, second and sixth delivery slices pass all their cases in all their runs, and the
+  third all but one (`test262-slice 01 31 62 0 0 31 31 0 0`,
+  `test262-slice 02 4259 7543 0 0 4259 4259 0 0`,
+  `test262-slice 03 7011 13829 0 0 7011 7010 1 0`,
+  `test262-slice 06 3898 7351 0 0 3898 3898 0 0`). Of the fifth, which is in work, 2,523 of
+  2,724 cases pass (`test262-slice 05 2724 5441 0 0 2724 2523 201 0`), and of the seventh, in work too, 1,168 of 1,491
+  (`test262-slice 07 1491 2841 0 0 1491 1168 323 0`). A refusal never counts as a pass, also when the script catches it.
+- No binary, no command line, and the crates are not on a package registry. To use the
+  library, depend on the repository at the tag:
+  `swell = { git = "https://github.com/beyond10x/swell", tag = "0.8.0" }`.
+- Measured on x86_64 Linux with rustc 1.99.1 only.
 
 ## [0.7.0] - 2026-11-23
 
@@ -757,7 +836,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.7.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.8.0...HEAD
+[0.8.0]: https://github.com/beyond10x/swell/releases/tag/0.8.0
 [0.7.0]: https://github.com/beyond10x/swell/releases/tag/0.7.0
 [0.6.0]: https://github.com/beyond10x/swell/releases/tag/0.6.0
 [0.5.0]: https://github.com/beyond10x/swell/releases/tag/0.5.0
