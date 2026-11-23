@@ -1,0 +1,13 @@
+file	line	flags	constructs	call	lifted-by
+resources/testharness.js	581	-	anchors, identity escapes, \s, a non-capturing group, { and } as pattern characters (Annex B), captures, alternation	String.prototype.match, line 581	regexp-symbol-methods-and-string-match-search
+resources/testharness.js	584	-	a class of \u escapes	RegExp.prototype.test, line 584	regexp-objects-exec-and-literals
+resources/testharness.js	587	-	anchors, captures, a negated class, a quantified group	String.prototype.replace with $1, line 587	regexp-symbol-methods-and-string-match-search
+resources/testharness.js	3651	g	\n	String.prototype.replace with a String, line 3651	regexp-symbol-methods-and-string-match-search
+resources/testharness.js	4013	g	captures, classes of surrogate ranges, a negative lookahead, alternation, ^ in a group	String.prototype.replace with a function, line 4012	regexp-symbol-methods-and-string-match-search
+resources/testharness.js	4433	g	\s	String.prototype.replace with the empty String, line 4433	regexp-symbol-methods-and-string-match-search
+resources/testharness.js	4558	g	\w, \d, identity escapes, a negated class, an optional non-capturing group	String.prototype.replace with a String, line 4558	regexp-symbol-methods-and-string-match-search
+resources/testharness.js	4660	g	identity escapes of $ { }, a capture, a negated class	String.prototype.split, line 4664	regexp-symbol-methods-and-string-match-search
+resources/testharness.js	4816	g	a class of escaped syntax characters	String.prototype.replace with $&, line 4816	regexp-symbol-methods-and-string-match-search
+resources/testharness.js	5004	-	anchors, a capture, an empty alternative, identity escapes	String.prototype.match, line 5004	regexp-symbol-methods-and-string-match-search
+html/syntax/parsing/resources/template.js	68	g	{ and } as pattern characters (Annex B), a capture, a negated class	String.prototype.split, line 71	regexp-symbol-methods-and-string-match-search
+html/syntax/parsing/resources/test.js	251	g	a class of \x escapes	String.prototype.replace with an arrow function, line 251	regexp-symbol-methods-and-string-match-search
