@@ -1041,6 +1041,48 @@ At the host boundary there are two conversions: exact (`Vec<u16>` or `&[u16]`) a
 `String`, replacing each lone surrogate with U+FFFD. These are Web IDL's `DOMString` and
 `USVString` (3.2.10, 3.2.12). From the host, a `&str` is converted to units without loss.
 
+**The order `localeCompare` gives: the NFC forms of the two Strings compared by code units.**
+Added on 2026-11-23 for slice 5. What a script sees: `S.localeCompare(T)`
+(`sec-string.prototype.localecompare`), after RequireObjectCoercible and ToString of the this
+value and of `that`, answers -1, +0 or 1 as NFC(S) is ordered before, equal to or after NFC(T)
+by their code units, a String before each longer String that starts with it: the order `<`
+gives two Strings (`sec-islessthan`), applied to their NFC forms (UAX #15, as `normalize("NFC")`
+makes them, `sec-string.prototype.normalize`). Two Strings answer +0 exactly when they are
+canonically equivalent, since canonically equivalent Strings have one NFC form: the five pairs
+of the clause's Note 2 (`"Å".localeCompare("Å")` and the others) answer +0, and so
+does a String compared with itself. Compatibility equivalents stay apart (`"ﬁ"` and `"fi"`
+do not answer +0), as the clause recommends. A lone surrogate is a code point with no
+decomposition and combining class 0, so it stays in place in the form. For a String of code
+units below 0x80 the form is the String, so the answers of slice 3 stay. The order is not a
+locale's collation: `"a".localeCompare("B")` answers 1 (0x61 after 0x42) and
+`"é".localeCompare("f")` answers 1, where a locale's collation would put both first; the
+engine has no host locale, and ECMA-402 is open item A. The answer for two Strings is fixed by
+the Unicode version decision 8 pins (open item C): a change of the pin can change it where the
+new version gives a code point of either String another decomposition, combining class or
+composition exclusion, and nothing else of a release changes it.
+
+Why this meets the clause: the clause leaves the comparison to the implementation and asks for
+"a consistent comparator defining a total ordering on the set of all Strings" that returns +0
+for "distinguishable Strings that are canonically equivalent". The order of code units over the
+NFC forms is a total order on the classes of canonical equivalence, its sign flips when the two
+Strings are swapped, and it is transitive; "intended to correspond with a sort order ... of the
+host environment's current locale" is an intent, and this host offers no locale. Rejected: the
+NFD forms (as consistent, but a longer form for precomposed text, which is most text); NFKC or
+NFKD (they honour compatibility equivalence, which the clause recommends against); the Unicode
+Collation Algorithm with its default table (a locale-like order from a table that is not
+vendored, which belongs to ECMA-402, open item A).
+
+Cost. Steps: one per code unit of each String, charged before it is read, as now; and one per
+code unit written into the buffers of the normalization (the full canonical decomposition and
+the composed form), charged before it is written; the comparison of the two forms reads no more
+units than were written and charges nothing more. Bytes: the normalized forms are made in
+buffers of the method, not as Strings of the heap; each buffer grows by capacity with the
+engine's doubling and is charged before it grows (a form can be longer than its String, so its
+size is not charged ahead), and every byte is credited when the method returns, on every way
+out: an answer, a throw and a stop. Past the step budget the entry ends in
+`Terminated(StepBudget)`, past the memory budget in `Terminated(MemoryBudget)`; `string_length`
+does not bound the forms, since they are not Strings.
+
 ## 6. Numbers
 
 - **`Number::toString`** (6.1.6.1.20) is written here for every radix 2 to 36, with an exact
@@ -1302,6 +1344,26 @@ A conformance run in which the count moved fails (decision 11), so no case that 
 `SyntaxError` from `RegExp` passes on a refusal. A grammar error of a pattern and the nesting
 limit are not refusals and are not counted. This is the third form of section 12, "A part before
 its slice", for RegExpInitialize, with this set; once slice 5 is delivered it refuses nothing.
+
+Two methods of `%RegExp.prototype%` refuse every call until the story that brings them (added on
+2026-11-23 for slice 5): `RegExp.prototype [ %Symbol.replace% ]` and `RegExp.prototype [
+%Symbol.split% ]` (`sec-regexp.prototype-%symbol.replace%`, `sec-regexp.prototype-%symbol.split%`).
+What a script sees: `String.prototype.replace`, `replaceAll` and `split` given a RegExp hand it to
+these methods, as their clauses do, and never answer from ToString of the RegExp as if it were a
+String. Each method runs the first steps of its clause (a `TypeError` when the this value is not
+an Object, then ToString of `string`), so an error those steps throw is thrown instead and is not
+counted; every call that passes them throws a `SyntaxError` of the current realm whose message is
+exactly `RegExp.prototype[Symbol.replace] is not supported before slice 5` or
+`RegExp.prototype[Symbol.split] is not supported before slice 5`, with no position after it, which
+the agent counts before it throws (`Agent::count_refusal`), caught or not, as it counts the
+refusals of RegExpInitialize (`host-interface.md`, decision 13, "A refusal raised by `RegExp`",
+HOST-191). The mechanism: `story:regexp-objects-exec-and-literals` defines the two as builtins
+keyed by `%Symbol.replace%` and `%Symbol.split%`, named `[Symbol.replace]` and `[Symbol.split]`
+with `length` 2 as their clauses give, and `story:regexp-symbol-methods-and-string-match-search`
+defines the methods of the clauses under the same keys in their place, so the property keeps its
+key and attributes and only a call tells the two apart. This is the third form of section 12 for
+these two methods, with the set the first steps of their clauses answer; once that story lands
+they refuse nothing.
 
 ## 8. Unicode data
 
@@ -1577,6 +1639,41 @@ not yet delivered say where a case is counted under this order; when the order o
 changes, their counts move with it, and the delivered slices, which stay first in the order,
 keep theirs.
 
+**A case that comes into a slice from one delivered later.** Added on 2026-11-23 for slice 5.
+What the counts show: a case that the block counts in a slice delivered after the slice being
+closed, and that passes on the code of the slice being closed because it needs nothing of a
+later slice, is counted in the slice being closed, and the slice it leaves loses it; the sums of the table do not change. A
+delivered slice takes no case this way, so it keeps its counts. First use: at the close of slice
+5, 18 cases (36 runs) of the pattern grammar of B.1.2 under `test/annexB/`, which the line `dir
+test/annexB/ 18` counts in slice 18 and which pass with the grammar slice 5 builds (decision 7).
+The rule:
+
+1. Such a case gets a rule line of the block naming the slice that takes it: `dir <file>
+   <slice>`, or `dir <directory>/ <slice>` when every case of the directory is one. The line is
+   longer than the line that gave the case its slice, so the longest prefix wins; it takes the
+   case only when no `feature` or `flag` line of the case names a slice delivered after the one
+   it names, since the case is counted in the slice delivered last among the slices of its lines.
+2. The paragraph of the slice that takes it ("Slice <n>'s cases that need a later slice", at its
+   close) states the lines with their count by directory and the slice each case leaves, and the
+   rows of both slices in the table and in the block after "Its output on this document:" move
+   by it.
+3. It gets no line of `conformance/test262/moves.tsv`. That list records only moves to a slice
+   delivered after the one the case leaves, each with the evidence of the later part the case
+   needs, and `test262-moves-check` refuses a line whose `to` is not delivered after its `from`;
+   a case that comes into an earlier slice needs no later part, and its evidence is that it
+   passes.
+4. What keeps such a line honest: the case passes in every one of its runs on the commit that
+   adds the line. No check of the gate shows that. `test262-check` compares a digest of the
+   sources and prints the committed lines; `test262-moves-check` reads the lines of the list
+   alone; the full run (`test262-expected`, the lane `slow`) compares the counts it prints with
+   `conformance/test262/expected.txt`, which holds what passed per slice and directory, not what
+   must pass, and no case by name. So the acceptance of the close shows it, on the run lines of
+   its full run: every run of each such case counted in the slice that takes it and `Passed`
+   (for slice 5, check (4) of `story:slice-05-conformance-close` over
+   `docs/plan/slice-05/close-annexb-to-5.tsv`). After the close the line of that slice in the
+   expected file, with no failed run, makes a later failure of one of these cases visible: the
+   change that causes it writes that line again with a failed run.
+
 | slice | name | cases | runs |
 |---|---|---|---|
 | 1 | `harness` | 31 | 62 |
@@ -1813,7 +1910,8 @@ from `swell-unicode`. The rule:
   refused parse, caught or not (`host-interface.md`, decision 13). `normalize`
   (`sec-string.prototype.normalize`) does not exist before slice 5: `String.prototype` has no
   property `normalize`. Slice 5 brings the tables and removes both refusals; from then the five
-  methods refuse no input. The cases of slice 3 these methods cannot pass (a String outside
+  methods refuse no input, and `localeCompare` orders every String by decision 5, "The order
+  `localeCompare` gives". The cases of slice 3 these methods cannot pass (a String outside
   ASCII in the case or a harness file it includes) move to slice 5 by rule lines when slice 3
   measures them. White space is not among these gaps: `story:syntax-es5-and-strict` accepts
   every `Zs` code point in slice 1 with the table of `story:num-and-unicode-early-parts`.
@@ -1842,7 +1940,16 @@ from `swell-unicode`. The rule:
   RegExp, answers every pattern and flags but the four parts of decision 7, "Refusals until
   the later stories of slice 5" (the flag `v`, a property escape, a group name outside ASCII,
   the flag or modifier `i`), and refuses those with the counted refusal naming slice 5, each
-  until the story of slice 5 that brings it.
+  until the story of slice 5 that brings it. Named on 2026-11-23 for slice 5 as well:
+  `RegExp.prototype [ %Symbol.replace% ]` and `RegExp.prototype [ %Symbol.split% ]`
+  (`sec-regexp.prototype-%symbol.replace%`, `sec-regexp.prototype-%symbol.split%`), whose set is
+  the calls the first steps of their clauses end (a `TypeError` for a this value that is not an
+  Object, an error of ToString of `string`), and which refuse every other call with the counted
+  refusal whose message names the method, `RegExp.prototype[Symbol.replace] is not supported
+  before slice 5` or `RegExp.prototype[Symbol.split] is not supported before slice 5`, until
+  `story:regexp-symbol-methods-and-string-match-search` replaces them with the methods of their
+  clauses (decision 7, "Refusals until the later stories of slice 5"; HOST-191 counts the
+  refusals of `RegExp`).
 - A refusal is a `SyntaxError`, but not the one a `negative: parse` case names: the runner
   reads the kind of a parse error from its message (`swell_syntax::message_kind`), and a run
   that a refusal or the nesting limit ends, in a harness file or in the case, fails whatever the
