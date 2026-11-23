@@ -15,35 +15,29 @@ These are the limits of release <Num at="version" />, from the [changelog](https
 |---|---|
 | regular expression literals | slice 5, `regexp` |
 | identifiers outside ASCII | slice 5, with the Unicode tables |
-| `let`, `const`, destructuring, spread, arrow functions, templates, `Symbol`, `for-of` | slice 6, `bindings-and-iteration` |
 | generators | slice 7, `generators` |
 | classes, `super`, private names | slice 8, `classes` |
 | promises, async functions, `for await` | slice 10, `promises-and-async` |
 | modules, dynamic `import`, `import.meta` | slice 11, `modules` |
 | the operator `**` | slice 4, which brings the deterministic `pow` |
+| the web-compatibility semantics of function declarations in blocks (Annex B.3.2) | slice 18, `annex-b` |
 
 ## The builtins
 
-Most methods of the builtins are missing. Of `Array`, `isArray`, `join`, `map`, `push` and `toString` exist. `Function.prototype.apply`, `JSON.parse`, `parseInt`, `Date`, `RegExp` and all of `Math` but `max` do not.
+The core library exists: `Object`, `Function`, `Array`, `String`, `Error`, `JSON`, `globalThis` and the URI functions, and with slice 6 `Symbol`, the Array and String iterators, `Array.from`, `Object.fromEntries` and `Object.groupBy`. A String method that needs the Unicode tables of a later slice refuses a code unit outside ASCII.
 
 | missing | brought by |
 |---|---|
-| the core library: `Object`, `Array`, `String`, `Error`, `JSON`, the rest of `Function` | slice 3, `builtins-core` |
-| `Math`, `Date`, `parseInt`, `parseFloat`, the rest of `Number` | slice 4, `numbers-and-dates` |
+| `Date`, `parseInt`, `parseFloat`, the rest of `Number`, all of `Math` but `max` | slice 4, `numbers-and-dates` |
 | `RegExp` and the string methods that use it | slice 5, `regexp` |
 | `Map`, `Set`, `WeakMap`, `WeakSet`, `Proxy`, `Reflect` | slice 9 |
+| `Promise` | slice 10 |
 | `BigInt` | slice 12 |
 | `ArrayBuffer`, typed arrays, `DataView` | slice 13 |
 
 ## The measure
 
-<Num at="test262.passed" /> of the <Num at="test262.run" /> test262 cases the gate runs pass, <Num at="test262.passed_percent" /> %. <Num at="test262.excluded" /> more are excluded by recorded decision. The first two slices pass all their cases in all their runs. The [status](status.md) page has the counts per slice.
-
-## The engine
-
-A property is found by a scan of its object's property list. The comparisons of that scan are not charged to the step budget, so a script with large objects runs longer than its step count says. The slice that builds the design's index map covers it, slice 3 at the latest.
-
-A run that fills a large memory budget with small objects is slow in a debug build. Where the time goes is to be measured before the builtins of slice 3 depend on it.
+<Num at="test262.passed" /> of the <Num at="test262.run" /> test262 cases the gate runs pass, <Num at="test262.passed_percent" /> %. <Num at="test262.excluded" /> more are excluded by recorded decision. Slices 1, 2 and 6 pass all their cases in all their runs, and slice 3 all but one. The [status](status.md) page has the counts per slice.
 
 ## The host interface
 
