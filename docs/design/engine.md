@@ -1360,25 +1360,23 @@ A conformance run in which the count moved fails (decision 11), so no case that 
 limit are not refusals and are not counted. This is the third form of section 12, "A part before
 its slice", for RegExpInitialize, with this set; once slice 5 is delivered it refuses nothing.
 
-Two methods of `%RegExp.prototype%` refuse every call until the story that brings them (added on
-2026-11-23 for slice 5): `RegExp.prototype [ %Symbol.replace% ]` and `RegExp.prototype [
-%Symbol.split% ]` (`sec-regexp.prototype-%symbol.replace%`, `sec-regexp.prototype-%symbol.split%`).
-What a script sees: `String.prototype.replace`, `replaceAll` and `split` given a RegExp hand it to
-these methods, as their clauses do, and never answer from ToString of the RegExp as if it were a
-String. Each method runs the first steps of its clause (a `TypeError` when the this value is not
-an Object, then ToString of `string`), so an error those steps throw is thrown instead and is not
-counted; every call that passes them throws a `SyntaxError` of the current realm whose message is
-exactly `RegExp.prototype[Symbol.replace] is not supported before slice 5` or
-`RegExp.prototype[Symbol.split] is not supported before slice 5`, with no position after it, which
-the agent counts before it throws (`Agent::count_refusal`), caught or not, as it counts the
-refusals of RegExpInitialize (`host-interface.md`, decision 13, "A refusal raised by `RegExp`",
-HOST-191). The mechanism: `story:regexp-objects-exec-and-literals` defines the two as builtins
-keyed by `%Symbol.replace%` and `%Symbol.split%`, named `[Symbol.replace]` and `[Symbol.split]`
-with `length` 2 as their clauses give, and `story:regexp-symbol-methods-and-string-match-search`
-defines the methods of the clauses under the same keys in their place, so the property keeps its
-key and attributes and only a call tells the two apart. This is the third form of section 12 for
-these two methods, with the set the first steps of their clauses answer; once that story lands
-they refuse nothing.
+The four methods of `%RegExp.prototype%` keyed by `%Symbol.match%`, `%Symbol.replace%`,
+`%Symbol.search%` and `%Symbol.split%` (`sec-regexp.prototype-%symbol.match%`,
+`sec-regexp.prototype-%symbol.replace%`, `sec-regexp.prototype-%symbol.search%`,
+`sec-regexp.prototype-%symbol.split%`) are the methods of their clauses and refuse no call
+(added on 2026-11-23 for slice 5). What a script sees: `String.prototype.replace`, `replaceAll`
+and `split` given a RegExp hand it to these methods and answer through them, as their clauses
+do, and never answer from ToString of the RegExp as if it were a String; `match` and `search`
+given an Object hand it to its method keyed by `%Symbol.match%` or `%Symbol.search%`, and given
+anything else make a RegExp by RegExpCreate and call that method. The mechanism:
+`story:regexp-objects-exec-and-literals` defined `[%Symbol.replace%]` and `[%Symbol.split%]` as
+builtins that refused every call past the first steps of their clauses with a counted refusal,
+and `story:regexp-symbol-methods-and-string-match-search` defines the methods of the clauses
+under the same keys in their place, named `[Symbol.replace]` and `[Symbol.split]` with `length`
+2 as their clauses give, so the property keeps its key and attributes. What `refusals()` still
+counts for `RegExp` are the refusals of RegExpInitialize above (`host-interface.md`, decision
+13, "A refusal raised by `RegExp`", HOST-191): the flags `i` and `v`, a property escape and a
+group name outside ASCII.
 
 ## 8. Unicode data
 
@@ -1955,16 +1953,14 @@ from `swell-unicode`. The rule:
   RegExp, answers every pattern and flags but the four parts of decision 7, "Refusals until
   the later stories of slice 5" (the flag `v`, a property escape, a group name outside ASCII,
   the flag or modifier `i`), and refuses those with the counted refusal naming slice 5, each
-  until the story of slice 5 that brings it. Named on 2026-11-23 for slice 5 as well:
-  `RegExp.prototype [ %Symbol.replace% ]` and `RegExp.prototype [ %Symbol.split% ]`
-  (`sec-regexp.prototype-%symbol.replace%`, `sec-regexp.prototype-%symbol.split%`), whose set is
-  the calls the first steps of their clauses end (a `TypeError` for a this value that is not an
-  Object, an error of ToString of `string`), and which refuse every other call with the counted
-  refusal whose message names the method, `RegExp.prototype[Symbol.replace] is not supported
-  before slice 5` or `RegExp.prototype[Symbol.split] is not supported before slice 5`, until
-  `story:regexp-symbol-methods-and-string-match-search` replaces them with the methods of their
-  clauses (decision 7, "Refusals until the later stories of slice 5"; HOST-191 counts the
-  refusals of `RegExp`).
+  until the story of slice 5 that brings it. Named on 2026-11-23 for slice 5 as well, and no
+  longer in this form: `RegExp.prototype [ %Symbol.replace% ]` and `RegExp.prototype [
+  %Symbol.split% ]` (`sec-regexp.prototype-%symbol.replace%`,
+  `sec-regexp.prototype-%symbol.split%`), which refused every call past the first steps of their
+  clauses with the counted refusal naming the method until
+  `story:regexp-symbol-methods-and-string-match-search` replaced them with the methods of their
+  clauses, which answer every call (decision 7, "Refusals until the later stories of slice 5";
+  HOST-191 counts the refusals of `RegExp`).
 - A refusal is a `SyntaxError`, but not the one a `negative: parse` case names: the runner
   reads the kind of a parse error from its message (`swell_syntax::message_kind`), and a run
   that a refusal or the nesting limit ends, in a harness file or in the case, fails whatever the

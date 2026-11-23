@@ -7,7 +7,9 @@
 //! slice 3 share: CreateDataPropertyOrThrow (`#sec-createdatapropertyorthrow`, from the
 //! interpreter), SetIntegrityLevel (`#sec-setintegritylevel`), TestIntegrityLevel
 //! (`#sec-testintegritylevel`), Invoke (`#sec-invoke`) and EnumerableOwnProperties
-//! (`#sec-enumerableownproperties`, from `builtins/json.rs`).
+//! (`#sec-enumerableownproperties`, from `builtins/json.rs`);
+//! `story:regexp-symbol-methods-and-string-match-search` SpeciesConstructor
+//! (`#sec-speciesconstructor`, for `RegExp.prototype[@@split]`).
 //!
 //! Each list of keys these operations hold is charged to the memory budget before it exists
 //! and credited when it drops, on every way out, and the room it takes on the kept stack is
@@ -177,6 +179,47 @@ impl<H: Host> Agent<H> {
         let function = self.get_v(value, key)?;
         // 3. Return ? Call(func, V, argumentsList).
         self.call_value(function, value, args)
+    }
+
+    /// SpeciesConstructor ( O, defaultConstructor ) (`#sec-speciesconstructor`), written by
+    /// `story:regexp-symbol-methods-and-string-match-search` for `RegExp.prototype[@@split]`:
+    /// the constructor `@@species` of the `constructor` of `object` names, or `default`. The
+    /// Get of `@@species` may run code, so the `constructor` read is kept across it.
+    pub(crate) fn species_constructor(
+        &mut self,
+        object: ObjectRef,
+        default: ObjectRef,
+    ) -> Completion<ObjectRef> {
+        // 1. Let C be ? Get(O, "constructor").
+        let key = self.name_key("constructor")?;
+        let constructor = match self.get(object, key)? {
+            // 2. If C is undefined, return defaultConstructor.
+            Value::Undefined => return Ok(default),
+            Value::Object(constructor) => constructor,
+            // 3. If C is not an Object, throw a TypeError exception.
+            _ => {
+                return Err(self.throw_error(
+                    ErrorKind::TypeError,
+                    "the constructor of the object is not an object",
+                ));
+            }
+        };
+        // 4. Let S be ? Get(C, %Symbol.species%). The well-known symbols live while a realm
+        // does, and a builtin runs in one.
+        let Some(symbols) = self.well_known() else {
+            return Err(self.fault());
+        };
+        let mark = self.keep(Value::Object(constructor));
+        let species = self.get(constructor, Key::Symbol(symbols.species));
+        self.release(mark);
+        match species? {
+            // 5. If S is either undefined or null, return defaultConstructor.
+            Value::Undefined | Value::Null => Ok(default),
+            // 6. If IsConstructor(S) is true, return S.
+            Value::Object(species) if self.has_construct(species)? => Ok(species),
+            // 7. Throw a TypeError exception.
+            _ => Err(self.throw_error(ErrorKind::TypeError, "the species is not a constructor")),
+        }
     }
 
     /// The own keys of `object` by [[OwnPropertyKeys]], which charged them, kept on the kept
@@ -2147,6 +2190,65 @@ mod tests {
                 held.last(),
                 "heap_bytes() after each run {held:?}"
             );
+        }
+    }
+
+    /// SpeciesConstructor (`#sec-speciesconstructor`): the default for an object without
+    /// `constructor` and for a `constructor` whose `@@species` is absent, undefined or null; the
+    /// species when it is a constructor; a TypeError for a `constructor` that is neither
+    /// undefined nor an Object and for a species that is not a constructor.
+    #[test]
+    fn species_constructor_answers_the_species_or_the_default() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        let handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let default = agent.intrinsic(handle, Intrinsic::RegExp).unwrap();
+        let species = function(&mut agent, &realm, constructor);
+        let species_key = Key::Symbol(agent.well_known().unwrap().species);
+        let constructor_key = agent.name_key("constructor").unwrap();
+        let new_object = |agent: &mut Agent<NoHooks>| {
+            let made = agent
+                .ordinary_object_create(None, OrdinaryData::Plain)
+                .unwrap();
+            agent.keep(Value::Object(made));
+            made
+        };
+        let holder = new_object(&mut agent);
+        let c = new_object(&mut agent);
+        let plain = new_object(&mut agent);
+        assert_eq!(agent.species_constructor(holder, default), Ok(default));
+        for (value, answer) in [
+            (Value::Undefined, Some(default)),
+            (Value::Object(c), Some(default)),
+            (Value::Number(1.0), None),
+        ] {
+            assert_eq!(
+                agent.create_data_property(holder, constructor_key, value),
+                Ok(true)
+            );
+            let found = agent.species_constructor(holder, default);
+            match answer {
+                Some(answer) => assert_eq!(found, Ok(answer), "{value:?}"),
+                None => assert!(matches!(found, Err(Abrupt::Throw(_))), "{value:?}"),
+            }
+        }
+        assert_eq!(
+            agent.create_data_property(holder, constructor_key, Value::Object(c)),
+            Ok(true)
+        );
+        for (value, answer) in [
+            (Value::Undefined, Some(default)),
+            (Value::Null, Some(default)),
+            (Value::Object(species), Some(species)),
+            (Value::Object(plain), None),
+            (Value::Boolean(true), None),
+        ] {
+            assert_eq!(agent.create_data_property(c, species_key, value), Ok(true));
+            let found = agent.species_constructor(holder, default);
+            match answer {
+                Some(answer) => assert_eq!(found, Ok(answer), "{value:?}"),
+                None => assert!(matches!(found, Err(Abrupt::Throw(_))), "{value:?}"),
+            }
         }
     }
 }
