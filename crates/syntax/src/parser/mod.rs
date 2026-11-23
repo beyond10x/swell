@@ -41,11 +41,12 @@ pub(crate) type R<T> = Result<T, Stop>;
 
 /// What a parse produced: the tree, the statements of the script and whether its code is strict
 /// (its directive prologue holds a Use Strict Directive, or, for eval code, the caller is
-/// strict).
+/// strict), and the refusal the parse held back to its end ([`Parser::held`]), or none.
 pub(crate) struct Parsed {
     pub ast: Ast,
     pub body: Vec<StmtId>,
     pub strict: bool,
+    pub held: Option<SyntaxError>,
 }
 
 pub(crate) struct Parser<'a, 'm> {
@@ -67,6 +68,20 @@ pub(crate) struct Parser<'a, 'm> {
     strict: bool,
     /// How many function bodies enclose the current position.
     functions: u32,
+    /// The [Yield] parameter of the grammar at the current position: set in the parameters and
+    /// the body of a generator, cleared in those of every other function but in the parameters
+    /// of an arrow function, which keep the one around them (`#sec-generator-function-definitions`,
+    /// `#sec-arrow-function-definitions`).
+    yields: bool,
+    /// The [Yield] of the code around each function whose parameters or body the parser is in,
+    /// innermost last: saved as a function opens and put back as it closes, here and never in a
+    /// recursive frame; the growth charged first.
+    outer_yields: Vec<bool>,
+    /// The refusal of a construct whose parse goes on, held back to the end of the parse: the
+    /// first generator function of the source (slice 7), at its `*`. The parse answers it only
+    /// when it ends without a grammar error and without an early error (`lib.rs`,
+    /// `analyse_parsed`).
+    held: Option<SyntaxError>,
     /// The operator stack of the binary expression parser, shared by its nested calls.
     operators: Vec<expression::Pending>,
     /// The prefix operators of the unary expression parser waiting for their operand, shared by
@@ -97,6 +112,7 @@ pub(crate) fn parse_eval(
             ast: parser.finish_parse(),
             body,
             strict: strict || use_strict,
+            held: parser.held.take(),
         }),
         Err(Stop) => Err(parser.into_error()),
     }
@@ -167,6 +183,7 @@ pub(crate) fn parse_dynamic_function(
                         ast: whole.finish_parse(),
                         body,
                         strict: false,
+                        held: whole.held.take(),
                     })
                 }
                 Err(_) => Err(stopped()),
@@ -255,6 +272,9 @@ impl<'a, 'm> Parser<'a, 'm> {
             error: None,
             strict: false,
             functions: 0,
+            yields: false,
+            outer_yields: Vec::new(),
+            held: None,
             operators: Vec::new(),
             prefixes: Vec::new(),
         }
@@ -272,6 +292,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         let m = self.m;
         m.release(std::mem::take(&mut self.operators));
         m.release(std::mem::take(&mut self.prefixes));
+        m.release(std::mem::take(&mut self.outer_yields));
         m.credit(self.tok.kind.heap_bytes());
         self.tok.kind = TokenKind::Eof;
         if let Some(peeked) = self.peeked.take() {

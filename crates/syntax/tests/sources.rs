@@ -514,6 +514,9 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "array_assignment_pattern" => ("", "[", "a", "]", " = o;"),
         "spread" => ("", "[...", "a", "]", ";"),
         "tagged_template" => ("x = ", "t`${", "0", "}`", ";"),
+        "generator_expression" => ("x = ", "function* (){ return ", "0", "; }", ";"),
+        "yield" => ("function* g(){ ", "yield ", "0;", "", " }"),
+        "yield_star" => ("function* g(){ ", "yield* ", "0;", "", " }"),
         _ => return None,
     };
     let mut source = units(before);
@@ -524,7 +527,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 50] = [
+const NESTING_KINDS: [&str; 53] = [
     "array",
     "paren",
     "block",
@@ -575,6 +578,9 @@ const NESTING_KINDS: [&str; 50] = [
     "array_assignment_pattern",
     "spread",
     "tagged_template",
+    "generator_expression",
+    "yield",
+    "yield_star",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict
@@ -599,11 +605,19 @@ fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec
 }
 
 /// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
-/// nesting error alone (`Some(false)`), or fail otherwise (`None`).
+/// nesting error alone (`Some(false)`), or fail otherwise (`None`). A source whose one error is
+/// the refusal of slice 7 parsed: that refusal comes only after the whole parse and the early
+/// errors (`story:yield-star-delegation` takes this arm out again).
 fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     let source = nested(kind, n)?;
     match parse_through(entry, &source, limit) {
         Ok(_) => Some(true),
+        Err(e)
+            if e.len() == 1
+                && message_kind(&e.first()?.message) == (MessageKind::Refusal { slice: 7 }) =>
+        {
+            Some(true)
+        }
         Err(e) if e.len() == 1 && e.first()?.message.contains("parser_nesting") => Some(false),
         Err(_) => None,
     }

@@ -663,6 +663,9 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     u32::try_from(strings.len()).map_err(|_| CompileError::TooMany("arguments"))?;
                 t.push(emit(Instruction::Call(n)))?;
             }
+            // A YieldExpression stands only in a generator, and the parse of a source with a
+            // generator ends on the refusal of slice 7: never a parsed script.
+            Expr::Yield { .. } => return Err(malformed("a yield expression")),
         }
         Ok(t)
     }

@@ -146,7 +146,9 @@ impl Failure {
 /// Parses `source`, UTF-16 code units (a UTF-8 source is converted by the caller), as a
 /// `Script`: the tree, or every `SyntaxError` the parse found, at least one. A grammar error or a
 /// refusal stops the parse and is the only error; the early errors of a source that parses are
-/// all reported, in source order.
+/// all reported, in source order. The refusal of a generator function (slice 7) does not stop
+/// the parse: it comes after the whole parse and the early errors, the only error of a source
+/// that has neither a grammar error nor an early error, at the `*` of its first generator.
 pub fn parse_script(source: &[u16], options: ParseOptions) -> Result<Script, Vec<SyntaxError>> {
     parse_script_with(source, options, &mut Unlimited).map_err(Failure::into_errors)
 }
@@ -268,6 +270,11 @@ fn analyse_parsed(
     let errors = early::check(&ast, &parsed.body, parsed.strict, max_nesting, meter);
     if !errors.is_empty() {
         return Err(Failure::Errors(errors));
+    }
+    // A refusal held back to the end of the parse is the one error of a source with no early
+    // error ("A part before its slice").
+    if let Some(refusal) = parsed.held {
+        return Err(Failure::Errors(vec![refusal]));
     }
     let scope = scope::analyse(&mut ast, &parsed.body, meter);
     Ok(Script {

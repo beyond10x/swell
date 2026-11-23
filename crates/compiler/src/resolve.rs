@@ -1217,6 +1217,9 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 }
             }
             Expr::Spread(e) => children.push(Walk::Expr(*e)),
+            Expr::Yield { argument, .. } => {
+                children.extend(argument.iter().map(|e| Walk::Expr(*e)))
+            }
             Expr::Function(f) => children.push(Walk::Function(*f)),
             Expr::Unary { operand, .. } | Expr::Update { operand, .. } => {
                 children.push(Walk::Expr(*operand));

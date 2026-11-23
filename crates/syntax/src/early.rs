@@ -46,6 +46,16 @@
 //!   `ArrowFormalParameters` of an arrow function hold no name twice, in any code; a parameter
 //!   that the body declares lexically, and `eval` and `arguments` as parameters in strict code,
 //!   are checked as for every function;
+//! - `#sec-generator-function-definitions-static-semantics-early-errors` and
+//!   `#sec-arrow-function-definitions-static-semantics-early-errors`: the FormalParameters of a
+//!   generator and the ArrowParameters of an arrow function contain no YieldExpression (Contains,
+//!   which looks into no nested function); a generator's other early errors are those of every
+//!   function above;
+//! - `#sec-identifiers-static-semantics-early-errors`: `yield` is no BindingIdentifier,
+//!   IdentifierReference or LabelIdentifier where the grammar's [Yield] is set (the parameters
+//!   and the body of a generator and the parameters of an arrow function inside them, not the
+//!   body of that arrow function), nor the name of a GeneratorExpression; the walk tracks
+//!   [Yield] as it tracks strictness;
 //! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`:
 //!   IsValidRegularExpressionLiteral, the flags and then ParsePattern of `swell-regexp` with
 //!   them and the limit `parser_nesting`, charged to the meter of the parse ([`crate::regexp`]);
@@ -85,7 +95,7 @@
 use std::collections::BTreeSet;
 
 use crate::ast::{
-    Ast, BindingTarget, Child, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId,
+    Ast, BindingTarget, Child, DeclKind, Expr, ExprId, ForInTarget, ForInit, Function, FunctionId,
     FunctionKind, Name, NumberForm, NumberLiteral, PatternKind, PatternTarget, PropertyKey,
     PropertyValue, RegExpLiteral, Span, Stmt, StmtId, StringLiteral, SwitchCase, UnaryOp,
     VarDeclarator,
@@ -140,6 +150,20 @@ pub(crate) fn escaped_keyword(name: &str) -> String {
     format!("keyword {name} must not contain escaped characters")
 }
 
+/// The message of `yield` as a BindingIdentifier, IdentifierReference or LabelIdentifier where
+/// [Yield] is set, or as the name of a GeneratorExpression
+/// (`#sec-identifiers-static-semantics-early-errors`).
+const YIELD_IDENTIFIER: &str = "yield may not be an identifier in a generator function";
+
+/// The message of a YieldExpression in the FormalParameters of a generator
+/// (`#sec-generator-function-definitions-static-semantics-early-errors`).
+const YIELD_IN_GENERATOR_PARAMETERS: &str =
+    "yield expression in the parameters of a generator function";
+
+/// The message of a YieldExpression in the ArrowParameters of an arrow function
+/// (`#sec-arrow-function-definitions-static-semantics-early-errors`).
+const YIELD_IN_ARROW_PARAMETERS: &str = "yield expression in the parameters of an arrow function";
+
 /// The identifiers strict mode code reserves (`#sec-identifiers-static-semantics-early-errors`).
 const STRICT_RESERVED: [&str; 9] = [
     "implements",
@@ -176,6 +200,8 @@ pub(crate) fn check(
         max_nesting,
         errors: Vec::new(),
         strict,
+        yields: false,
+        parameters: None,
         loops: 0,
         breakables: 0,
         labels: Vec::new(),
@@ -247,10 +273,19 @@ enum Step {
     /// Puts back the context a statement or a function changed, once its children are walked.
     Restore {
         strict: bool,
+        yields: bool,
+        parameters: Option<&'static str>,
         loops: u32,
         breakables: u32,
         label_base: usize,
         lexical_base: usize,
+    },
+    /// Sets the [Yield] of what follows, and whether it is the parameters of a function, with
+    /// the message of a YieldExpression there: between the parameters and the body of a
+    /// function.
+    Context {
+        yields: bool,
+        parameters: Option<&'static str>,
     },
     /// Drops the label of a labelled statement, once its body is walked.
     PopLabel,
@@ -276,6 +311,11 @@ struct Checker<'a, 'm> {
     max_nesting: u32,
     errors: Vec<SyntaxError>,
     strict: bool,
+    /// The [Yield] parameter of the grammar at the current position.
+    yields: bool,
+    /// Inside the parameters of a function (not of a function nested in them): the message of a
+    /// YieldExpression there; `None` elsewhere.
+    parameters: Option<&'static str>,
     /// Loops around the current position inside the current function.
     loops: u32,
     /// Loops and `switch` statements around the current position inside the current function.
@@ -539,8 +579,12 @@ impl<'a, 'm> Checker<'a, 'm> {
         );
     }
 
-    /// A `BindingIdentifier` in code of the current strictness.
+    /// A `BindingIdentifier` in code of the current strictness and [Yield].
     fn binding(&mut self, name: &Name) {
+        if self.yields && name.name == "yield" {
+            self.error(YIELD_IDENTIFIER, name.span);
+            return;
+        }
         if !self.strict {
             return;
         }
@@ -672,6 +716,8 @@ impl<'a, 'm> Checker<'a, 'm> {
                 Step::Node(node) => node,
                 Step::Restore {
                     strict,
+                    yields,
+                    parameters,
                     loops,
                     breakables,
                     label_base,
@@ -679,6 +725,11 @@ impl<'a, 'm> Checker<'a, 'm> {
                 } => {
                     (self.strict, self.loops, self.breakables) = (strict, loops, breakables);
                     (self.label_base, self.lexical_base) = (label_base, lexical_base);
+                    (self.yields, self.parameters) = (yields, parameters);
+                    continue;
+                }
+                Step::Context { yields, parameters } => {
+                    (self.yields, self.parameters) = (yields, parameters);
                     continue;
                 }
                 Step::PopLabel => {
@@ -703,6 +754,8 @@ impl<'a, 'm> Checker<'a, 'm> {
             }
             let restore = Step::Restore {
                 strict: self.strict,
+                yields: self.yields,
+                parameters: self.parameters,
                 loops: self.loops,
                 breakables: self.breakables,
                 label_base: self.label_base,
@@ -725,22 +778,28 @@ impl<'a, 'm> Checker<'a, 'm> {
                 }
                 Child::Expr(id) => self.check_expr(id),
                 // A function is walked with its own strictness, outside every loop, `switch` and
-                // label, with the lexical names of its body as its only frame.
+                // label, with the lexical names of its body as its only frame, and with the
+                // [Yield] of its parameters and then of its body.
                 Child::Function(id) => {
                     let ast = self.ast;
                     let Some(f) = ast.function(id) else {
                         continue;
                     };
                     self.push_step(&mut stack, restore);
+                    let outer = self.yields;
                     self.strict = f.strict;
                     self.loops = 0;
                     self.breakables = 0;
                     self.label_base = self.labels.len();
-                    self.check_function(id);
+                    self.check_function(id, outer);
                     self.lexical_base = self.lexical.len();
                     let frame = self.frame(Names::List(&f.body), &f.params, "a parameter");
                     self.push_step(&mut stack, Step::PopLexical);
                     self.push_frame(frame);
+                    if self.push_function(f, outer, &mut stack).is_err() {
+                        break;
+                    }
+                    continue;
                 }
             }
             if self
@@ -752,6 +811,52 @@ impl<'a, 'm> Checker<'a, 'm> {
             }
         }
         m.release(stack);
+    }
+
+    /// Pushes the parameters and the body of the function `f`, inside code whose [Yield] is
+    /// `outer`, so that popping gives: the [Yield] of its parameters (a generator's own, or for
+    /// an arrow function `outer`, `#sec-arrow-function-definitions`) with the message of a
+    /// YieldExpression there, the pattern and the initializer of each parameter in source order,
+    /// the [Yield] of its body (a generator's own; cleared in an arrow function's), then the
+    /// statements of the body. The growth of the stack is charged first.
+    fn push_function(
+        &self,
+        f: &'a Function,
+        outer: bool,
+        stack: &mut Vec<Step>,
+    ) -> Result<(), crate::ledger::Stop> {
+        let (parameters, body, message) = if f.kind == FunctionKind::Arrow {
+            (outer, false, YIELD_IN_ARROW_PARAMETERS)
+        } else {
+            (f.generator, f.generator, YIELD_IN_GENERATOR_PARAMETERS)
+        };
+        let count = f
+            .initializers
+            .iter()
+            .flatten()
+            .count()
+            .saturating_add(f.params.iter().filter_map(BindingTarget::pattern).count())
+            .saturating_add(f.body.len())
+            .saturating_add(2);
+        self.m.grow_by(stack, count)?;
+        stack.extend(f.body.iter().rev().map(|s| Step::Node(Child::Stmt(*s))));
+        stack.push(Step::Context {
+            yields: body,
+            parameters: None,
+        });
+        for (i, p) in f.params.iter().enumerate().rev() {
+            if let Some(e) = f.initializer(i) {
+                stack.push(Step::Node(Child::Expr(e)));
+            }
+            if let Some(e) = p.pattern() {
+                stack.push(Step::Node(Child::Expr(e)));
+            }
+        }
+        stack.push(Step::Context {
+            yields: parameters,
+            parameters: Some(message),
+        });
+        Ok(())
     }
 
     /// The early errors of the statement `id` itself; returns how many loops and how many
@@ -876,7 +981,9 @@ impl<'a, 'm> Checker<'a, 'm> {
         let Some(Stmt::Labelled { label, body }) = self.ast.stmt(id).map(|n| &n.stmt) else {
             return false;
         };
-        if self.strict && STRICT_RESERVED.contains(&label.name.as_str()) {
+        if self.yields && label.name == "yield" {
+            self.error(YIELD_IDENTIFIER, label.span);
+        } else if self.strict && STRICT_RESERVED.contains(&label.name.as_str()) {
             self.reserved(&label.name, label.span);
         }
         if self.find_label(&label.name).is_some() {
@@ -906,8 +1013,17 @@ impl<'a, 'm> Checker<'a, 'm> {
         let span = node.span;
         match &node.expr {
             Expr::Identifier(n) => {
-                if self.strict && STRICT_RESERVED.contains(&n.as_str()) {
+                if self.yields && n == "yield" {
+                    self.error(YIELD_IDENTIFIER, span);
+                } else if self.strict && STRICT_RESERVED.contains(&n.as_str()) {
                     self.reserved(n, span);
+                }
+            }
+            // Contains YieldExpression of the parameters around it, which the walk does not
+            // look for inside a nested function.
+            Expr::Yield { .. } => {
+                if let Some(message) = self.parameters {
+                    self.error(message, span);
                 }
             }
             Expr::Number(n) => self.number(n, span),
@@ -990,14 +1106,25 @@ impl<'a, 'm> Checker<'a, 'm> {
         )
     }
 
-    /// The function's name and parameters, checked with its own strictness.
-    fn check_function(&mut self, id: FunctionId) {
+    /// The function's name and parameters, checked with its own strictness, inside code whose
+    /// [Yield] is `outer`: the name of a declaration with `outer` (`BindingIdentifier[?Yield]`),
+    /// that of an expression with the function's own (`[+Yield]` for a GeneratorExpression,
+    /// `[~Yield]` for a FunctionExpression); the parameters with the function's own, or for an
+    /// arrow function with `outer`.
+    fn check_function(&mut self, id: FunctionId, outer: bool) {
         let Some(f) = self.ast.function(id) else {
             return;
         };
+        let arrow = f.kind == FunctionKind::Arrow;
         if let Some(name) = &f.name {
+            self.yields = if f.kind == FunctionKind::Expression {
+                f.generator
+            } else {
+                outer
+            };
             self.binding(name);
         }
+        self.yields = if arrow { outer } else { f.generator };
         // The names seen, each entry charged when it is inserted and all credited at the end.
         let entry = map_entry_bytes::<&str, ()>();
         let mut seen = BTreeSet::new();

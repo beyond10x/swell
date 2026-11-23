@@ -186,6 +186,18 @@ impl<'a, 'm> Parser<'a, 'm> {
                 Keyword::Debugger => Parser::debugger_statement,
                 Keyword::Function => match place {
                     Place::Body | Place::Block => Parser::function_declaration_statement,
+                    // A generator declaration stands only where a declaration does, in every
+                    // mode: Annex B (`#sec-functiondeclarations-in-ifstatement-statement-clauses`,
+                    // `#sec-labelled-function-declarations`) admits a plain FunctionDeclaration
+                    // only.
+                    _ if self.peek()?.kind == TokenKind::Punct(Punct::Star) => {
+                        return self.fail_here(match place {
+                            Place::Labelled | Place::LabelledInStatement => {
+                                "labelled generator declaration"
+                            }
+                            _ => "generator declaration as the body of a statement",
+                        });
+                    }
                     Place::IfClause if !self.strict => {
                         return self.refuse("function declaration as an if clause", 18);
                     }
