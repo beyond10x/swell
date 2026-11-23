@@ -2,17 +2,18 @@
 format: aep.planning-md/3
 id: epic:slice-05-regexp
 kind: epic
-status: draft
+status: active
 title: 'Slice 5, regexp: the regular expression engine and RegExp'
 summary: 'swell-regexp, swell-unicode, RegExp and the string methods that use it: 2,118 cases and 4,234 runs.'
-relations:
-- depends_on: epic:slice-04-numbers-and-dates
-revision: 1
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T03:25:08Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-23T03:25:08Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
 ---
 ## Context
 
 Slice 5 of 19, `regexp` (`docs/design/engine.md`, section 12). It needs slices 1 to 3: the engine and
-the `String` builtins whose methods call `RegExp`; slice 4 precedes it in the order of dependencies.
+the `String` builtins whose methods call `RegExp`; it is delivered before slice 4 (the order of delivery is 6, 5, 7, 10, 4, 9), needs nothing of it, and at its close moves 15 cases that use `Date`, `Math.pow`, `parseInt` or `**` to slice 4.
 It builds `swell-regexp` and `swell-unicode` and the library that uses them: `RegExp` and the string
 methods `match`, `matchAll`, `replace`, `replaceAll`, `search`, `split`. After slice 5 a script with
 no DOM can use regular expressions (section 12, "For surf"). Governing decisions
@@ -29,31 +30,32 @@ no DOM can use regular expressions (section 12, "For surf"). Governing decisions
   (B.1.2).
 - Case folding: simple case folding from `CaseFolding.txt` under `u` and `v`, and `toUppercase` under
   neither (22.2.2.7.3 `Canonicalize`).
-- Pattern nesting is bounded at parse and reported as a `RangeError` (decision 3).
+- Pattern nesting is bounded at parse and reported as a `SyntaxError` that names `parser_nesting` (decision 3; `HOST-142`, `HOST-143`).
 - Regular expression literals checked by `swell-regexp` from `swell-syntax` (decision 2).
 - `swell-unicode` and the tool `swell-unicode-gen` (decision 8): data files vendored under
   `data/unicode/<version>/` with a `SOURCE` file of addresses and SHA-256 sums; tables written to
-  `crates/unicode/src/tables/*.rs` and committed; the gate regenerates them into `.out/` and fails
-  on any difference. Tables for `ID_Start`, `ID_Continue`, white space, `toUpperCase` and
+  `crates/unicode/src/tables/*.rs` and committed; the gate renders them in memory and fails
+  on any difference with the committed files. Tables for `ID_Start`, `ID_Continue`, white space, `toUpperCase` and
   `toLowerCase`, case folding, normalization, property escapes (names and values) and properties of
   strings, each from the file decision 8 names. The version is 17.0.0 (open item C(a), standing per
   `AGENTS.md`); every section that depends on it carries the deviation as an omission.
 - `RegExp`, `RegExpStringIteratorPrototype` and the six string methods.
 
-### Open, to be settled by this epic's first story
+### Settled since this epic was written
 
-- Where the 17.0.0 emoji sequence files for properties of strings are published ("not checked",
-  decision 8), and the text of the Unicode data licence ("not checked").
-- Whether ECMA-262's wording on implementation limits allows the `RangeError` for pattern nesting
-  ("not checked", decision 3).
-- Which of `toUpperCase`, `toLowerCase` and `normalize` (slice 3's `String`) use these tables, and
-  how they run before slice 5 (decision 8 puts the tables here).
-- How B.1.2 (decision 7, in this slice) and slice 18 ("Annex B") divide the Annex B regular
-  expression cases between them.
-
+- The emoji sequence files of 17.0.0 and the text of the Unicode data licence are vendored
+  (`data/unicode/17.0.0/SOURCE`, `LICENSE`).
+- A pattern nested past the limit is a `SyntaxError` that names `parser_nesting`, in a literal
+  and through the constructor (decision 3; `HOST-142`, `HOST-143`), not a `RangeError`.
+- `toUpperCase`, `toLowerCase`, `localeCompare` and `normalize` refuse a code unit outside ASCII
+  until their stories of this slice land (`HOST-165`; the design, section 12, item 5).
+- The Annex B cases are divided at the conformance close: the 18 cases of the pattern grammar
+  under `test/annexB/` come to slice 5 by rule lines of the block, and `RegExp.prototype.compile`
+  stays in slice 18 (`story:slice-05-conformance-close`; the design, section 12, after "The
+  order of delivery").
 ## Counts
 
-- Slice 5 (`regexp`): 2,118 cases, 4,234 runs (section 12 table).
+- Slice 5 (`regexp`): 2,724 cases and 5,441 runs, 52 cases pass (`test262-slice 05 2724 5441 0 0 2724 52 2672 0`, 2026-11-23, counted by the order of delivery; 2,118 and 4,234 when this epic was written, before the closes of slices 1 to 3 and 6 moved cases here).
 - Directories the design names for it (paths under `test/`, cases): `RegExp` 1,626, `String` 252,
   `literals` 240. Inventory: `built-ins/RegExp` 1,879 cases in all slices; the 469 files under
   `built-ins/RegExp/property-escapes/generated/` say `Unicode v17.0.0`; `regexp-unicode-property-escapes`
@@ -88,7 +90,7 @@ Source: `docs/design/engine.md`, section 12 and the output under 'How the counts
 - An automaton for patterns without backreferences and look-around: rejected for now, a measured
   optimisation later (decision 7).
 - `Symbol.match`, `Symbol.replace`, `Symbol.search`, `Symbol.split`, `Symbol.matchAll` as
-  well-known symbols: slice 6 (the `feature` lines); a case that needs them is counted there.
+  well-known symbols were delivered with slice 6; a case that needs them and `RegExp` is counted here, by the order of delivery.
 - Annex B beyond the pattern grammar: slice 18.
 - ECMA-402 (`Intl`): slice 21 (open item A).
 - `Temporal` (slice 20), other stage 3 features, concurrent agents.
@@ -111,10 +113,29 @@ Source: `docs/design/engine.md`, section 12 and the output under 'How the counts
 
 `slot task check` exits 0 on `main`, and in that run:
 
-1. The conformance runner's line for slice 5 reads 2,118 cases and 4,234 runs that exist, and every run of the slice passes; no case of the slice is counted as failed or as ended by a budget.
+1. The conformance runner's line for slice 5 reads `test262-slice 05 <c> <r> 0 0 <c> <c> 0 0` with the cases and runs the design's table states for the slice after its close, and every run of the slice passes; no case of the slice is counted as failed or as ended by a budget.
 2. No pass count of an earlier slice or of any directory line in `conformance/test262/expected.txt` is lower than before the slice.
 3. `conformance/test262/expected.txt` is committed with the lines of that run, and `AGENTS.md` and `README.md` carry the gate's numbers.
 4. A case of this slice that is found to need a later slice is moved by a rule line in the `swell-slices` block of the design with its reason, in the same change that moves the counts of both slices; none is skipped silently.
 5. `/(a+)+$/` matched against 10,000 `a` characters followed by `!` ends with `Terminated(StepBudget)`, never in a hang (decision 7).
-6. A pattern nested deeper than the host's pattern nesting limit is reported as a `RangeError` at parse, with no Rust stack overflow (decision 3).
-7. The gate regenerates the `swell-unicode` tables from the vendored data into `.out/` and fails on any difference from the committed tables; every vendored data file has its address and SHA-256 in `SOURCE` (decision 8).
+6. A pattern nested deeper than the parser's nesting limit is reported as a `SyntaxError` at parse, in a literal and through the constructor, with no Rust stack overflow (decision 3; `HOST-142`, `HOST-143`).
+7. The gate renders the `swell-unicode` tables from the vendored data in memory and fails on any difference from the committed tables; every vendored data file has its address and SHA-256 in `SOURCE` (decision 8).
+
+## Stories
+
+Decomposed on 2026-11-23 into fifteen stories, each read by the four plan critics
+(`review-result:slice-05-*`: 9 findings on the first six, 16 on the other nine with 6 blockers,
+all applied; the six stories with a blocker were read a second time). The first six make the
+twelve regular expression literals of the first consumer's test harness evaluate and its calls
+answer (`docs/plan/slice-05/consumer-regexps.tsv`). In the order of their dependencies:
+
+1. `regexp-crate-and-pattern-parser`, `string-replace-replace-all-and-split`,
+   `unicode-gen-table-list-and-source-digests`
+2. `regexp-compiler-and-backtracking-matcher`, `regexp-literal-early-errors`,
+   `case-mapping-tables-and-string-case-methods`
+3. `regexp-objects-exec-and-literals`, `normalization-tables-normalize-and-locale-compare`
+4. `regexp-symbol-methods-and-string-match-search`, `regexp-property-escapes-and-property-tables`
+5. `identifiers-and-group-names-outside-ascii`, `regexp-match-all-and-escape`
+6. `regexp-case-insensitive-matching-and-modifiers`
+7. `regexp-v-flag-class-sets-and-properties-of-strings`
+8. `slice-05-conformance-close`
