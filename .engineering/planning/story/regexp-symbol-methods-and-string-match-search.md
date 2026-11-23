@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:regexp-symbol-methods-and-string-match-search
 kind: story
-status: active
+status: implemented
 title: 'The methods of RegExp keyed by @@match, @@replace, @@search and @@split, and String.prototype.match and search: every regular expression of the consumer harness runs'
 summary: 413 failing cases (822 runs) on its list; rows 1 and 3 to 12 of the consumer table, shown by a test that runs the engine; the refusing @@replace and @@split of the objects story replaced; SpeciesConstructor.
 relations:
@@ -30,10 +30,11 @@ scope:
   path: crates/swell/tests/regexp_objects.rs
 - confidence: cited
   path: crates/swell/tests/regexp_symbol_methods.rs
-revision: 16
+revision: 17
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T02:45:38Z", actor: "human:operator", revision: 15, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T02:45:38Z", actor: "human:operator", revision: 16, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T09:21:41Z", actor: "human:operator", revision: 17, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

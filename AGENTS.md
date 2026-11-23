@@ -459,7 +459,10 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   (https://github.com/beyond10x/swell/releases/tag/0.5.0); `0.6.0`, 2026-11-23, tagged on
   `6e9c3f4`, the first wave of slice 5, on the decision "cut 0.6.0 together with the wave" of
   the session that decides for the operator
-  (https://github.com/beyond10x/swell/releases/tag/0.6.0). After a release
+  (https://github.com/beyond10x/swell/releases/tag/0.6.0); `0.7.0`, 2026-11-23, tagged on
+  `e0bb1ec`, the second wave of slice 5, with which the regular expressions of the first
+  consumer's harness answer, on the decision "cut 0.7.0 now" of the session that decides for
+  the operator (https://github.com/beyond10x/swell/releases/tag/0.7.0). After a release
   `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of
