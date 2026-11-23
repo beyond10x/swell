@@ -372,13 +372,24 @@ fn of_constructs_its_this_value() {
     );
 }
 
-/// The budget of 10,000 steps the searches below are ended by.
-const SEARCH_STEPS: u64 = 10_000;
+/// The step budget the searches below are ended by: 10,000, the full count, in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`); 1,000 in the gate, in either mode. At 10,000 the 25 entries took 0.56
+/// CPU seconds alone in the default mode and 0.70 with the feature `collect-every-safe-point`
+/// (measured on 2026-11-23). 1,000 steps still start every search over its 2^32 - 1 or
+/// 2^53 - 1 indices, a step each, and end it the same way, in the step budget; a search that
+/// charged no step ends in none at any budget.
+fn search_steps() -> u64 {
+    if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
+        10_000
+    } else {
+        1_000
+    }
+}
 
 /// Each method loops over indices with a step per index (decision 2): over an Array of length
 /// 2^32 - 1 that is all holes, and over an array-like of length 2^53 - 1, each ends in
-/// `Terminated(StepBudget)` with a budget of 10,000 steps, in sloppy and in strict code; the
-/// next entry runs afresh.
+/// `Terminated(StepBudget)` with a budget of [`search_steps`] steps, in sloppy and in strict
+/// code; the next entry runs afresh.
 #[test]
 fn a_search_of_2_32_minus_1_indices_ends_in_the_step_budget() {
     let calls = [
@@ -396,7 +407,7 @@ fn a_search_of_2_32_minus_1_indices_ends_in_the_step_budget() {
         "Array.prototype.includes.call(o, 1)",
     ];
     let mut limits = limits();
-    limits.steps_per_entry = SEARCH_STEPS;
+    limits.steps_per_entry = search_steps();
     for call in calls {
         for prologue in ["", "\"use strict\";\n"] {
             let source = format!(
@@ -443,37 +454,53 @@ fn steps_of(
     agent.last_entry_steps().unwrap()
 }
 
+/// The length of the short Array of [`each_search_charges_a_step_per_index`]; the long one has
+/// twice as many. 100 in the default mode; 10 with the feature `collect-every-safe-point` (the
+/// file has no full count), where the test shows the same step per index on 10 and 20
+/// elements while every instruction collects (a call that charges none still spends the same
+/// steps on both). At 100 it took 1.78 CPU seconds alone in that mode (0.04 in the
+/// default mode, measured on 2026-11-23).
+const SEARCH_LENGTH: u64 = if cfg!(feature = "collect-every-safe-point") {
+    10
+} else {
+    100
+};
+
 /// Each loop charges one step per index (decision 2), and the Get of an own element, the
 /// comparison of two Numbers and the definition of an element of a new Array charge none: a
-/// call over an Array of 200 own elements spends 100 steps more than the same call over one of
-/// 100 (the answers are made Strings of the same length for both, so the concatenation that
-/// makes them, a step per code unit, costs both the same). `toLocaleString` also appends the
-/// separator, a step for its one code unit (`append_units`), so 200 more; `at` reads one
-/// index, so the same.
+/// call over an Array of 2 × [`SEARCH_LENGTH`] own elements spends [`SEARCH_LENGTH`] steps
+/// more than the same call over one of [`SEARCH_LENGTH`] (the answers are made Strings of the
+/// same length for both, so the concatenation that makes them, a step per code unit, costs
+/// both the same). `toLocaleString` also appends the separator, a step for its one code unit
+/// (`append_units`), so twice as many more; `at` reads one index, so the same.
 #[test]
 fn each_search_charges_a_step_per_index() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
+    let (short_length, long_length) = (SEARCH_LENGTH.to_string(), (2 * SEARCH_LENGTH).to_string());
+    assert_eq!(short_length.len(), long_length.len());
     assert_eq!(
         eval_text(
             &mut agent,
             &realm,
-            "var small = [], large = [], nulls = [], more = []; \
-             for (var i = 0; i < 100; i++) { small.push(0); nulls.push(null); } \
-             for (var i = 0; i < 200; i++) { large.push(0); more.push(null); } \
-             large.length;"
+            &format!(
+                "var small = [], large = [], nulls = [], more = []; \
+                 for (var i = 0; i < {short_length}; i++) {{ small.push(0); nulls.push(null); }} \
+                 for (var i = 0; i < {long_length}; i++) {{ large.push(0); more.push(null); }} \
+                 large.length;"
+            )
         ),
-        Outcome::Normal("200".to_string())
+        Outcome::Normal(long_length.clone())
     );
     let calls = [
-        ("indexOf(1)", "-1", 100),
-        ("lastIndexOf(1)", "-1", 100),
-        ("includes(1)", "false", 100),
-        ("slice().length", "", 100),
-        ("concat().length", "", 100),
-        ("with(0, 1).length", "", 100),
-        ("toReversed().length", "", 100),
-        ("toSpliced(0, 0).length", "", 100),
+        ("indexOf(1)", "-1", SEARCH_LENGTH),
+        ("lastIndexOf(1)", "-1", SEARCH_LENGTH),
+        ("includes(1)", "false", SEARCH_LENGTH),
+        ("slice().length", "", SEARCH_LENGTH),
+        ("concat().length", "", SEARCH_LENGTH),
+        ("with(0, 1).length", "", SEARCH_LENGTH),
+        ("toReversed().length", "", SEARCH_LENGTH),
+        ("toSpliced(0, 0).length", "", SEARCH_LENGTH),
         ("at(-1)", "0", 0),
     ];
     for (call, answer, extra) in calls {
@@ -481,13 +508,21 @@ fn each_search_charges_a_step_per_index() {
             &mut agent,
             &realm,
             &format!("small.{call} + \"\";"),
-            if answer.is_empty() { "100" } else { answer },
+            if answer.is_empty() {
+                &short_length
+            } else {
+                answer
+            },
         );
         let long = steps_of(
             &mut agent,
             &realm,
             &format!("large.{call} + \"\";"),
-            if answer.is_empty() { "200" } else { answer },
+            if answer.is_empty() {
+                &long_length
+            } else {
+                answer
+            },
         );
         assert_eq!(long - short, extra, "{call}: {short} and {long} steps");
     }
@@ -507,7 +542,7 @@ fn each_search_charges_a_step_per_index() {
     );
     assert_eq!(
         long - short,
-        200,
+        2 * SEARCH_LENGTH,
         "toLocaleString: {short} and {long} steps"
     );
 }

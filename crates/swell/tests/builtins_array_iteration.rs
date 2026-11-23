@@ -773,18 +773,21 @@ const WALK_STEPS: u64 = if cfg!(feature = "collect-every-safe-point") {
     10_000
 };
 
-/// The step budget of the walks: [`WALK_STEPS`] in the default mode and in the lane `slow`
-/// (`SWELL_FULL_COUNTS=1`); 200 in the gate with the feature `collect-every-safe-point`, where
-/// the 42 walks of 1,000 steps took 18.1 s at a load of 100 to 110 on 17 cores (cargo-nextest).
-/// 200 steps still start every walk over its 2^32 - 1 or 2^53 - 1 indices, a step each (and
-/// a predicate call each for the `find` methods), and end it the same way, in the step budget.
+/// The step budget of the walks: [`WALK_STEPS`] in the lane `slow` (`SWELL_FULL_COUNTS=1`);
+/// in the gate 1,000 in the default mode and 200 with the feature `collect-every-safe-point`,
+/// where the 42 walks of 1,000 steps took 18.1 s at a load of 100 to 110 on 17 cores
+/// (cargo-nextest); in the default mode the 42 walks of 10,000 steps took 0.63 CPU seconds
+/// alone (measured on 2026-11-23). 200 steps still start every walk over its 2^32 - 1 or
+/// 2^53 - 1 indices, a step each (and a predicate call each for the `find` methods), and end
+/// it the same way, in the step budget; a walk that charged no step ends in none at any
+/// budget.
 fn walk_steps() -> u64 {
-    if cfg!(feature = "collect-every-safe-point")
-        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
-    {
+    if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
+        WALK_STEPS
+    } else if cfg!(feature = "collect-every-safe-point") {
         200
     } else {
-        WALK_STEPS
+        1_000
     }
 }
 
@@ -836,8 +839,11 @@ fn steps_of(agent: &mut Agent<TestHost>, realm: &Realm, source: &str) -> u64 {
 }
 
 /// A step per index (decision 2), measured with `last_entry_steps()` over N indices: 1,000 in
-/// the default mode; with the feature `collect-every-safe-point`, 100, since the callbacks pass
-/// safe points that each collect (11.6 s in that mode with 1,000, cargo-nextest, measured). A
+/// the default mode; with the feature `collect-every-safe-point`, 10, in the gate and in the
+/// lane `slow` alike, since the callbacks pass safe points that each collect (11.6 s in that
+/// mode with 1,000, cargo-nextest, measured; 0.83 CPU seconds alone with 100, measured on
+/// 2026-11-23), and the differences below are exact at any N: a walk that charged no step per
+/// index, or no step for its HasProperty or its Get, misses them by N. A
 /// lookup of a key an object does not have charges a step for the prototype it passes
 /// (OrdinaryHasProperty and OrdinaryGet in `src/object/ordinary.rs`), one for an array-like
 /// whose prototype is `%Object.prototype%`. So for each method that skips holes (and `reduce`
@@ -850,7 +856,7 @@ fn steps_of(agent: &mut Agent<TestHost>, realm: &Realm, source: &str) -> u64 {
 #[test]
 fn each_walk_charges_a_step_per_index() {
     const N: u64 = if cfg!(feature = "collect-every-safe-point") {
-        100
+        10
     } else {
         1_000
     };
