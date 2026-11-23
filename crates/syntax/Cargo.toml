@@ -10,6 +10,7 @@ name = "main"
 path = "tests/main.rs"
 
 [dependencies]
+swell-regexp = { path = "../regexp" }
 swell-unicode = { path = "../unicode" }
 
 [lints.clippy]

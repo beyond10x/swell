@@ -473,6 +473,11 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         let labels: String = (0..n).map(|i| format!("l{i}: ")).collect();
         return Some(units(&format!("{labels};")));
     }
+    // The innermost literal of `regexp_inside`: a pattern of 100 nested groups with a class and
+    // an escape, which the early errors parse with ParsePattern (`docs/design/engine.md`,
+    // decision 7, "No Rust recursion in the parser and the compiler of a pattern"). Its nesting
+    // counts from zero against the limit, so at the limit 10 it is the nesting error.
+    let regexp = format!("/a{}[/]b\\/{}/gi", "(".repeat(100), ")".repeat(100));
     let (before, open, middle, close, after) = match kind {
         "array" => ("", "[", "", "]", ";"),
         "paren" => ("", "(", "0", ")", ";"),
@@ -503,7 +508,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "catch" => ("", "try {} catch (e) {", "", "}", ""),
         "switch" => ("", "switch (a) { case 0: ", "", "}", ""),
         "string_inside" => ("x = ", "(", "\"a\\u{1F600}\\x41\\101\"", ")", ";"),
-        "regexp_inside" => ("x = ", "(", "/a[/]b\\//gi", ")", ";"),
+        "regexp_inside" => ("x = ", "(", regexp.as_str(), ")", ";"),
         "optional_chain" => ("x = a", "?.b", ";", "", ""),
         "optional_index" => ("x = ", "a?.[", "0", "]", ";"),
         "optional_call" => ("x = ", "f?.(", "0", ")", ";"),

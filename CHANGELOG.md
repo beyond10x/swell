@@ -16,6 +16,11 @@ Every number below comes from the gate, `task check`, on the released commit.
   at: the replacement patterns of GetSubstitution, a function as the replacement, and a method
   an object keys by `@@replace` or `@@split`. 16,567 of the 44,812 selected test262 cases pass
   (16,412 in 0.5.0), 198 of the 2,724 of the fifth slice (52).
+- The pattern of a regular expression literal is checked when its script is parsed, by the
+  grammar of the modes `u` and `v` and of Annex B.1.2 with neither: a pattern with an error
+  is a `SyntaxError` of the script at the line and column of the literal, and a pattern
+  nested past `parser_nesting` is a `SyntaxError` that names the limit (`HOST-142`).
+  Evaluating a literal still waits for the `RegExp` objects of this slice.
 
 ### Changed
 
