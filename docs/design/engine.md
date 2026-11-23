@@ -1521,15 +1521,16 @@ so a literal at the limit inside a script at the limit would need the bound twic
 `min_stack_bytes()` would double for every host.
 
 **Refusals until the later stories of slice 5.** Added on 2026-11-23 for slice 5. Until the
-story that brings each, the engine refuses three parts of the pattern grammar and the flags: the
+story that brings each, the engine refuses two parts of the pattern grammar and the flags: the
 flag `v` (`class set expressions of the v flag`) and a group name with a code point outside
 ASCII, written or escaped
-(`group name outside ASCII`), which ParsePattern refuses; and the flag `i` or a modifier `i`
-(`case-insensitive matching`), which CompilePattern refuses. The message is exactly `<construct>
+(`group name outside ASCII`), which ParsePattern refuses. CompilePattern refuses nothing: the
+flag `i` and a modifier `i` are matched since
+`story:regexp-case-insensitive-matching-and-modifiers`. The message is exactly `<construct>
 is not supported before slice 5`, which `swell_syntax::message_kind` reads as a refusal. In a
-literal the first two are refusals of the parse, counted as any refused parse (HOST-164). At
+literal both are refusals of the parse, counted as any refused parse (HOST-164). At
 run time, in RegExpInitialize (`sec-regexpinitialize`: the constructor, RegExpCreate of the
-`String` methods that make a RegExp, and the evaluation of a literal with `i`), a refusal is a
+`String` methods that make a RegExp, and the evaluation of a literal), a refusal is a
 `SyntaxError` of the current realm with that message and no position after it, which the agent
 counts before it throws (`Agent::count_refusal`), caught or not (`host-interface.md`, decision
 13, HOST-191). It comes after the steps the clause gives before the parse (ToString of the
@@ -1554,7 +1555,7 @@ and `story:regexp-symbol-methods-and-string-match-search` defines the methods of
 under the same keys in their place, named `[Symbol.replace]` and `[Symbol.split]` with `length`
 2 as their clauses give, so the property keeps its key and attributes. What `refusals()` still
 counts for `RegExp` are the refusals of RegExpInitialize above (`host-interface.md`, decision
-13, "A refusal raised by `RegExp`", HOST-191): the flags `i` and `v` and a
+13, "A refusal raised by `RegExp`", HOST-191): the flag `v` and a
 group name outside ASCII.
 
 ## 8. Unicode data

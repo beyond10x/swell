@@ -2,6 +2,7 @@
 //! the generator and run `cargo run -p swell-unicode-gen`.
 
 pub(crate) mod binary_properties;
+pub(crate) mod case_folding;
 pub(crate) mod case_ignorable;
 pub(crate) mod cased;
 pub(crate) mod combining_class;

@@ -3,14 +3,14 @@
 //! every instruction and every point of the semantics, the forms of B.1.2
 //! (`#sec-regular-expressions-patterns`), the positions in code units, the two stored forms of a
 //! subject, the search of RegExpBuiltinExec (`#sec-regexpbuiltinexec`) with AdvanceStringIndex
-//! (`#sec-advancestringindex`), and the refusal of the flag `i` until its story.
+//! (`#sec-advancestringindex`). The flag `i` and the modifier `i` are `case_insensitive.rs`.
 //!
 //! An expected answer is written as the captures in order, group 0 first, each `start..end` in
 //! code units or `-` when unset, or `no` for no match.
 
 use swell_regexp::{
-    Budget, CompileError, Flags, MAX_GRANT, ParseError, Program, Stop, Subject, Unlimited,
-    compile_pattern, parse_pattern, search,
+    Budget, Flags, MAX_GRANT, Program, Stop, Subject, Unlimited, compile_pattern, parse_pattern,
+    search,
 };
 
 #[cfg(test)]
@@ -519,42 +519,4 @@ fn sticky_search_tries_one_index_and_unicode_search_steps_over_a_pair() {
             .expect("no stop")
             .is_none()
     );
-}
-
-#[test]
-fn case_insensitive_matching_is_a_refusal_of_slice_5() {
-    let compile = |pattern: &str, flags: &str| {
-        let flags = Flags::parse(&units(flags)).expect("the flags");
-        let tree = parse_pattern(&units(pattern), flags, 1000, &mut Unlimited)?;
-        Ok::<_, ParseError>(compile_pattern(&tree, &mut Unlimited))
-    };
-    for (pattern, flags) in [
-        ("a", "i"),
-        ("(?i:a)", ""),
-        ("x(?i:a)", "u"),
-        ("(?-i:a)", ""),
-    ] {
-        match compile(pattern, flags) {
-            Ok(Err(error @ CompileError::Refused(_))) => {
-                assert_eq!(
-                    error.message(),
-                    "case-insensitive matching is not supported before slice 5",
-                    "/{pattern}/{flags}"
-                );
-                assert!(error.is_refusal());
-            }
-            other => panic!("/{pattern}/{flags}: {other:?}"),
-        }
-    }
-    // An early error comes first: the parse answers it before the compile step runs.
-    match compile("(?i-i:a)", "") {
-        Err(ParseError::Pattern(e)) => {
-            assert_eq!(e.message(), "a modifier both added and removed");
-        }
-        other => panic!("(?i-i:a): {other:?}"),
-    }
-    assert!(matches!(compile("a(", "i"), Err(ParseError::Pattern(_))));
-    // The modifiers m and s alone are compiled.
-    assert!(matches!(compile("(?ms-:a)", ""), Ok(Ok(_))));
-    assert!(matches!(compile("(?-ms:a)", "ms"), Ok(Ok(_))));
 }

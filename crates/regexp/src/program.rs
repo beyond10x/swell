@@ -17,6 +17,7 @@ use swell_unicode::Property;
 
 use crate::ast::Name;
 use crate::budget::{Budget, capacity_bytes};
+use crate::canonicalize::equivalents;
 use crate::flags::Flags;
 
 /// The value of a jump target or a register not yet known while the program is compiled.
@@ -36,6 +37,11 @@ pub(crate) enum Inst {
     /// Under `u`, the code point `point` (a surrogate pair is one code point, a lone surrogate
     /// one code unit). Moves past it; fails otherwise.
     Point { point: u32, back: bool },
+    /// Under `i` (the flag or a modifier), a character whose canonical value
+    /// (`canonicalize.rs`) is `canonical`: a code unit without `u`, a code point under `u`.
+    /// Moves past it; fails otherwise. A character with no other of its canonical value is
+    /// [`Inst::Unit`] or [`Inst::Point`] under `i` too.
+    Fold { canonical: u32, back: bool },
     /// `.`: any character but a LineTerminator, or any character with `dot_all`
     /// (`#sec-compileatom`, Atom :: `.`).
     Any { dot_all: bool, back: bool },
@@ -46,8 +52,10 @@ pub(crate) enum Inst {
     /// `$`: the position is the subject's end, or with `multiline` precedes a LineTerminator.
     LineEnd { multiline: bool },
     /// `\b` (`negated` false) or `\B`: whether the characters on the two sides of the position
-    /// differ in IsWordChar (`#sec-runtime-semantics-iswordchar-abstract-operation`).
-    WordBoundary { negated: bool },
+    /// differ in IsWordChar (`#sec-runtime-semantics-iswordchar-abstract-operation`). `fold`
+    /// under `u` or `v` with `i`, where WordCharacters holds U+017F and U+212A too
+    /// (`#sec-wordcharacters`).
+    WordBoundary { negated: bool, fold: bool },
     /// A choice: pushes an entry that resumes `second` at the position, and goes on at
     /// `first`. Alternatives in order, and the two orders of a quantifier.
     Split { first: u32, second: u32 },
@@ -80,11 +88,17 @@ pub(crate) enum Inst {
     /// on at `head`.
     RepeatTail { counter: u32, min: u32, head: u32 },
     /// `\n`: the code units the group captured, read at the position in the direction; an
-    /// unset group matches the empty String (`#sec-backreference-matcher`).
-    Backref { group: u32, back: bool },
+    /// unset group matches the empty String (`#sec-backreference-matcher`). Under `i`
+    /// (`fold`) the canonical values of the characters are compared.
+    Backref { group: u32, back: bool, fold: bool },
     /// `\k<name>` of a name several groups have: the groups `len` from `start` of
     /// [`Program::named`]; the one of them that is set, or the empty String.
-    NamedBackref { start: u32, len: u32, back: bool },
+    NamedBackref {
+        start: u32,
+        len: u32,
+        back: bool,
+        fold: bool,
+    },
     /// The entry of a lookaround: records the height of the backtrack stack in the register
     /// `look`, and pushes a barrier entry with the position; a negative lookaround's barrier
     /// goes on at `end` when its body fails.
@@ -102,7 +116,8 @@ pub(crate) enum Inst {
 /// A class: the ranges `len` from `start` of [`Program::ranges`], sorted and disjoint, with
 /// `\s` and `\S` as two predicates beside them, and the property escapes `properties_len` from
 /// `properties` of [`Program::properties`], each tested by a bounded number of binary searches
-/// over a table of `swell-unicode` and none copied into the program; `negated` for `[^...]`.
+/// over a table of `swell-unicode` and none copied into the program; `negated` for `[^...]`;
+/// `fold` under `i` (the flag or a modifier).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ClassSet {
     pub(crate) start: u32,
@@ -112,12 +127,28 @@ pub(crate) struct ClassSet {
     pub(crate) negated: bool,
     pub(crate) space: bool,
     pub(crate) not_space: bool,
+    pub(crate) fold: bool,
 }
 
 impl ClassSet {
-    /// Whether the character `c` is in the class: a binary search of its ranges, and one test
-    /// per property escape until one holds.
+    /// Whether the character `c` is in the class
+    /// (`#sec-runtime-semantics-charactersetmatcher-abstract-operation`): whether one of its
+    /// items holds `c`, or under `i` (`fold`) one of the characters of the canonical value of
+    /// `c` ([`equivalents`], at most `swell_unicode::MOST_CASE_FOLD_EQUIVALENTS`), and then
+    /// `negated` applied. No closure of the class is built: the ranges, `\s`, `\S` and each
+    /// property escape are tested against those characters when the class is run.
     pub(crate) fn contains(&self, program: &Program, c: u32) -> bool {
+        let found = if self.fold {
+            equivalents(c, program.flags.either_unicode()).any(|e| self.holds(program, e))
+        } else {
+            self.holds(program, c)
+        };
+        found != self.negated
+    }
+
+    /// Whether an item of the class holds `c`: a binary search of its ranges, and one test per
+    /// property escape until one holds.
+    fn holds(&self, program: &Program, c: u32) -> bool {
         let start = self.start as usize;
         let own = program
             .ranges
@@ -134,14 +165,13 @@ impl ClassSet {
                 }
             })
             .is_ok();
-        let found = in_ranges
+        in_ranges
             || (self.space && is_space(c))
             || (self.not_space && !is_space(c))
             || self
                 .properties_of(program)
                 .iter()
-                .any(|&(property, negated)| property.contains(c) != negated);
-        found != self.negated
+                .any(|&(property, negated)| property.contains(c) != negated)
     }
 
     /// The property escapes of the class, each with `true` for `\P{...}`.
@@ -167,10 +197,13 @@ pub(crate) fn is_line_terminator(c: u32) -> bool {
     matches!(c, 0x0A | 0x0D | 0x2028 | 0x2029)
 }
 
-/// A character of WordCharacters without the flag `i` (`#sec-wordcharacters`): the 63 of
-/// `[A-Za-z0-9_]`.
-pub(crate) fn is_word(c: u32) -> bool {
+/// A character of WordCharacters (`#sec-wordcharacters`): the 63 of `[A-Za-z0-9_]`, and with
+/// `fold` (under `u` or `v` with `i`) U+017F and U+212A, whose simple case foldings are `s`
+/// and `k`. Without `u` and `v` Canonicalize maps no character of 128 or above into ASCII,
+/// so `i` adds none there.
+pub(crate) fn is_word(c: u32, fold: bool) -> bool {
     matches!(c, 0x30..=0x39 | 0x41..=0x5A | 0x5F | 0x61..=0x7A)
+        || (fold && matches!(c, 0x017F | 0x212A))
 }
 
 /// The program of a pattern.
