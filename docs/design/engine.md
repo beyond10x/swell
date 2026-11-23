@@ -1403,8 +1403,8 @@ generator is build tooling and never ships; the tables it writes do.
 section differ.** This section is the first description; the first ESS model of it came back
 with nine places where it is unclear or silent, and that document answers them from the text of
 ECMA-262 and HTML, as 19 decisions and numbered requirements (`HOST-<n>`): 165 on 2026-11-21
-(corrected that day from 135, the count when the document was written), and 171 on 2026-11-22
-with the six of resource accounting, the count `task host-requirements-check` prints. The eleven places where it departs from this document:
+(corrected that day from 135, the count when the document was written), 171 on 2026-11-22
+with the six of resource accounting, 190 the same day with the host interface of the first consumer, and 191 on 2026-11-23 with the refusals `RegExp` raises, the count `task host-requirements-check` prints. The eleven places where it departs from this document:
 
 1. Each entry point has a result type of its own instead of one `Outcome`; misuse answers
    `Err(HostError)`, never a panic.

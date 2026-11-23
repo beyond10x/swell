@@ -10,6 +10,11 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Host interface
+
+- `HOST-191` (new): a refusal that `RegExp` raises at run time for a part of the fifth slice
+  that is not built yet is counted by the agent, like a refusal of the parser.
+
 ## [0.5.0] - 2026-11-23
 
 The sixth delivery slice is delivered: `Symbol`, the iterator protocol, `for`-`of`, array

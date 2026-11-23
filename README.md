@@ -37,7 +37,7 @@ What exists, measured on 2026-11-23:
 - The design, [`docs/design/engine.md`](docs/design/engine.md): what swell targets, how it is
   built, how it is measured, and the order in which it is delivered.
 - The host interface, specified before its code:
-  [`docs/design/host-interface.md`](docs/design/host-interface.md) has 190 numbered
+  [`docs/design/host-interface.md`](docs/design/host-interface.md) has 191 numbered
   requirements, and 110 of them have a test. An ESS model under [`spec/`](spec/) has 58
   scenarios. All 58 pass on ESS's interpreter. The gate runs them against the engine too, and
   14 pass there.

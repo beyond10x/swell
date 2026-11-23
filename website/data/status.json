@@ -386,13 +386,13 @@
     }
   ],
   "host_requirements": {
-    "total": 190,
+    "total": 191,
     "test": 110,
-    "pending": 80,
+    "pending": 81,
     "omitted": 0,
     "pending_by_slice": [
       {"slice": 4, "count": 9},
-      {"slice": 5, "count": 2},
+      {"slice": 5, "count": 3},
       {"slice": 7, "count": 1},
       {"slice": 8, "count": 1},
       {"slice": 9, "count": 5},
