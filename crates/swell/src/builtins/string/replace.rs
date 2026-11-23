@@ -7,10 +7,12 @@
 //!
 //! An Object given as the pattern (`searchValue`, `separator`) is handed to its method keyed
 //! by `%Symbol.replace%` or `%Symbol.split%` when it has one, as the first steps of the clauses
-//! say; a primitive is never looked up, so a method on its prototype is not read. Without
-//! `RegExp` (the later stories of slice 5) no object of the engine has such a method, so a
-//! method of a script's own object answers. `replaceAll` checks the `flags` of an Object that
-//! IsRegExp (`#sec-isregexp`) takes for a RegExp before it looks up the method.
+//! say; a primitive is never looked up, so a method on its prototype is not read.
+//! `%RegExp.prototype%` has both methods; until
+//! `story:regexp-symbol-methods-and-string-match-search` each answers with the counted refusal
+//! of slice 5, and a method of a script's own object answers. `replaceAll` checks the `flags`
+//! of an Object that IsRegExp (`#sec-isregexp`) takes for a RegExp before it looks up the
+//! method.
 //!
 //! The budgets (`docs/design/engine.md`, decisions 3 and 5): the code units of the String, of
 //! the pattern and of a replacement template are read with [`Agent::read_units`], a step per
