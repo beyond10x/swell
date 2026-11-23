@@ -10,6 +10,14 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Added
+
+- `String.prototype.matchAll`, `RegExp.prototype[Symbol.matchAll]` with its iterator, and
+  `RegExp.escape`. Each match the iterator gives spends 9 steps beside the steps of the
+  matcher; `RegExp.escape` spends 2 steps per code unit it copies and 3 per code unit it
+  escapes. 18,238 of the 44,812 selected test262 cases pass (18,155 in 0.7.0), 1,746 of the
+  2,724 of the fifth slice (1,667).
+
 ## [0.7.0] - 2026-11-23
 
 `String.prototype.match` and `search` exist, and `replace`, `replaceAll` and `split` take a
