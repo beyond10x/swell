@@ -12,10 +12,16 @@
 //! `CompositionExclusions.txt` and `DerivedNormalizationProps.txt` with the four forms of UAX
 //! #15 ([`Form`], [`normalize`], [`decompose`], [`reorder_and_compose`]), for
 //! `String.prototype.normalize` (`#sec-string.prototype.normalize`) and the order of
-//! `localeCompare` (`#sec-string.prototype.localecompare`).
+//! `localeCompare` (`#sec-string.prototype.localecompare`); and the property tables of
+//! General_Category, Script, Script_Extensions and the binary properties of ECMA-262's table,
+//! with their names and aliases ([`Property`], [`lone_property`], [`property_value`]), for the
+//! property escapes `\p{...}` and `\P{...}` of `swell-regexp`
+//! (`#sec-runtime-semantics-unicodematchproperty-p`), and [`is_id_start`] and
+//! [`is_id_continue`] for identifiers (`#sec-names-and-keywords`).
 
 mod case;
 mod normalize;
+mod property;
 mod tables;
 
 pub use case::{
@@ -24,6 +30,9 @@ pub use case::{
 pub use normalize::{
     Buffer, Form, FormBuffer, Stop, canonical_combining_class, decompose, decomposition, normalize,
     primary_composite, reorder_and_compose,
+};
+pub use property::{
+    Property, PropertyRanges, is_id_continue, is_id_start, lone_property, property_value,
 };
 
 /// Whether `c` has the General_Category `Space_Separator` (`Zs`), the code points `WhiteSpace`

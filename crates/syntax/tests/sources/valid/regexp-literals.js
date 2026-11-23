@@ -30,3 +30,4 @@ x = /(?i:a)(?m-s:b)(?-i:c)/;
 x = /\u{1F600}[\u{1F600}-\u{1F64F}]\u{10FFFF}/u;
 x = /😀A\x41\cJ\0\//u;
 x = /[\-\]]\k<n>(?<n>.)/u;
+x = /\p{Lu}\P{Script=Greek}[\p{L}\P{N}]/u;

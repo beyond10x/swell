@@ -1,7 +1,7 @@
 //! The program CompilePattern (`#sec-compilepattern`) makes of a pattern's tree, and the
 //! matcher runs (`docs/design/engine.md`, decision 7): one vector of instructions, with the
-//! ranges of the classes, the group numbers a named backreference names and the group names
-//! in vectors beside it. Every vector was charged through the [`Budget`] before it grew;
+//! ranges and the property escapes of the classes, the group numbers a named backreference
+//! names and the group names in vectors beside it. Every vector was charged through the [`Budget`] before it grew;
 //! [`Program::heap_bytes`] is what the budget holds for the program, and [`Program::release`]
 //! drops it and credits that.
 //!
@@ -12,6 +12,8 @@
 //! backtrack stack when it was entered); and the backtrack stack, whose entries resume an
 //! instruction at a position or restore a slot or a counter. Each instruction below says what
 //! it does to that state; one that fails hands control to the backtrack stack.
+
+use swell_unicode::Property;
 
 use crate::ast::Name;
 use crate::budget::{Budget, capacity_bytes};
@@ -98,21 +100,27 @@ pub(crate) enum Inst {
 }
 
 /// A class: the ranges `len` from `start` of [`Program::ranges`], sorted and disjoint, with
-/// `\s` and `\S` as two predicates beside them; `negated` for `[^...]`.
+/// `\s` and `\S` as two predicates beside them, and the property escapes `properties_len` from
+/// `properties` of [`Program::properties`], each tested by a bounded number of binary searches
+/// over a table of `swell-unicode` and none copied into the program; `negated` for `[^...]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ClassSet {
     pub(crate) start: u32,
     pub(crate) len: u32,
+    pub(crate) properties: u32,
+    pub(crate) properties_len: u32,
     pub(crate) negated: bool,
     pub(crate) space: bool,
     pub(crate) not_space: bool,
 }
 
 impl ClassSet {
-    /// Whether the character `c` is in the class.
-    pub(crate) fn contains(&self, ranges: &[(u32, u32)], c: u32) -> bool {
+    /// Whether the character `c` is in the class: a binary search of its ranges, and one test
+    /// per property escape until one holds.
+    pub(crate) fn contains(&self, program: &Program, c: u32) -> bool {
         let start = self.start as usize;
-        let own = ranges
+        let own = program
+            .ranges
             .get(start..start.saturating_add(self.len as usize))
             .unwrap_or(&[]);
         let in_ranges = own
@@ -126,8 +134,23 @@ impl ClassSet {
                 }
             })
             .is_ok();
-        let found = in_ranges || (self.space && is_space(c)) || (self.not_space && !is_space(c));
+        let found = in_ranges
+            || (self.space && is_space(c))
+            || (self.not_space && !is_space(c))
+            || self
+                .properties_of(program)
+                .iter()
+                .any(|&(property, negated)| property.contains(c) != negated);
         found != self.negated
+    }
+
+    /// The property escapes of the class, each with `true` for `\P{...}`.
+    pub(crate) fn properties_of<'p>(&self, program: &'p Program) -> &'p [(Property, bool)] {
+        let start = self.properties as usize;
+        program
+            .properties
+            .get(start..start.saturating_add(self.properties_len as usize))
+            .unwrap_or(&[])
     }
 }
 
@@ -156,6 +179,7 @@ pub struct Program {
     pub(crate) code: Vec<Inst>,
     pub(crate) ranges: Vec<(u32, u32)>,
     pub(crate) classes: Vec<ClassSet>,
+    pub(crate) properties: Vec<(Property, bool)>,
     pub(crate) named: Vec<u32>,
     pub(crate) names: Vec<(u32, Name)>,
     pub(crate) text: Vec<u8>,
@@ -211,6 +235,7 @@ impl Program {
         capacity_bytes(&self.code)
             .saturating_add(capacity_bytes(&self.ranges))
             .saturating_add(capacity_bytes(&self.classes))
+            .saturating_add(capacity_bytes(&self.properties))
             .saturating_add(capacity_bytes(&self.named))
             .saturating_add(capacity_bytes(&self.names))
             .saturating_add(capacity_bytes(&self.text))

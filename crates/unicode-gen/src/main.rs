@@ -25,6 +25,7 @@
 
 mod case;
 mod normalize;
+mod property;
 mod render;
 mod tables;
 mod ucd;

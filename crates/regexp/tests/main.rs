@@ -4,3 +4,4 @@ mod early_errors;
 mod limits;
 mod matcher;
 mod parse;
+mod property_escapes;

@@ -14,7 +14,9 @@
 //!
 //! `\d`, `\w` and `\b` are those of `#sec-compiletocharset` and
 //! `#sec-runtime-semantics-iswordchar-abstract-operation` without the flag `i`; `\s` is
-//! WhiteSpace and LineTerminator. The modifiers `m` and `s` of `(?ms-ms:...)` set the mode of
+//! WhiteSpace and LineTerminator. A property escape `\p{...}` is the property `swell-unicode`
+//! gives its name, and `\P{...}` its complement; the class names it and the matcher tests it
+//! against the tables of `swell-unicode`, so no range of a table is copied into the program. The modifiers `m` and `s` of `(?ms-ms:...)` set the mode of
 //! their atoms (`#sec-updatemodifiers`).
 //!
 //! Refused until `story:regexp-case-insensitive-matching-and-modifiers` (decision 7, "Refusals
@@ -25,6 +27,8 @@
 //! error answers the early error.
 
 use std::fmt;
+
+use swell_unicode::Property;
 
 use crate::ast::{Assertion, ClassEscape, ClassItem, List, Look, Name, Node, NodeId, Pattern};
 use crate::budget::{Budget, Meter, Stop};
@@ -196,6 +200,7 @@ fn build(pattern: &Pattern, m: &mut Meter<'_>) -> Result<Program, CompileError> 
         code: Vec::new(),
         ranges: Vec::new(),
         classes: Vec::new(),
+        properties: Vec::new(),
         named: Vec::new(),
         spans: Vec::new(),
         tasks: Vec::new(),
@@ -209,6 +214,7 @@ fn build(pattern: &Pattern, m: &mut Meter<'_>) -> Result<Program, CompileError> 
         code,
         ranges,
         classes,
+        properties,
         named,
         spans,
         tasks,
@@ -229,6 +235,7 @@ fn build(pattern: &Pattern, m: &mut Meter<'_>) -> Result<Program, CompileError> 
         code,
         ranges,
         classes,
+        properties,
         named,
         names,
         text,
@@ -247,6 +254,7 @@ struct Compiler<'p, 'm, 'b> {
     code: Vec<Inst>,
     ranges: Vec<(u32, u32)>,
     classes: Vec<ClassSet>,
+    properties: Vec<(Property, bool)>,
     named: Vec<u32>,
     spans: Vec<Span>,
     tasks: Vec<Task>,
@@ -601,12 +609,18 @@ impl Compiler<'_, '_, '_> {
     }
 
     /// A class of `items` (`#sec-compiletocharset`): its ranges sorted and joined where they
-    /// meet, n log n for n ranges; `\s` and `\S` as predicates beside them. Its number.
+    /// meet, n log n for n ranges; `\s` and `\S` as predicates beside them; and each property
+    /// escape, `\p{...}` or its complement `\P{...}`, as its property and a flag, tested against
+    /// the tables of `swell-unicode` when the class is run and never copied into the program.
+    /// Its number.
     fn class(&mut self, negated: bool, items: &[ClassItem]) -> Result<u32, Stop> {
         let start = self.ranges.len();
+        let first_property = self.properties.len();
         let mut set = ClassSet {
             start: index32(start)?,
             len: 0,
+            properties: index32(first_property)?,
+            properties_len: 0,
             negated,
             space: false,
             not_space: false,
@@ -618,6 +632,9 @@ impl Compiler<'_, '_, '_> {
                 ClassItem::Range(a, b) => self.range(a, b)?,
                 ClassItem::Escape(ClassEscape::Space) => set.space = true,
                 ClassItem::Escape(ClassEscape::NotSpace) => set.not_space = true,
+                ClassItem::Escape(ClassEscape::Property { property, negated }) => {
+                    self.m.push(&mut self.properties, (property, negated))?;
+                }
                 ClassItem::Escape(escape) => {
                     for &(a, b) in escape_ranges(escape) {
                         self.range(a, b)?;
@@ -645,6 +662,7 @@ impl Compiler<'_, '_, '_> {
         }
         self.ranges.truncate(start.saturating_add(kept));
         set.len = index32(kept)?;
+        set.properties_len = index32(self.properties.len().saturating_sub(first_property))?;
         let number = index32(self.classes.len())?;
         self.m.push(&mut self.classes, set)?;
         Ok(number)
@@ -673,6 +691,6 @@ fn escape_ranges(escape: ClassEscape) -> &'static [(u32, u32)] {
         ClassEscape::NotDigit => NOT_DIGIT,
         ClassEscape::Word => WORD,
         ClassEscape::NotWord => NOT_WORD,
-        ClassEscape::Space | ClassEscape::NotSpace => &[],
+        ClassEscape::Space | ClassEscape::NotSpace | ClassEscape::Property { .. } => &[],
     }
 }
