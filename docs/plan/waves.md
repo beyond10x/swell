@@ -199,13 +199,24 @@ run. Objects of the DOM and of the host are surf's side.
 
 ## Slice 6, `bindings-and-iteration`
 
-Delivered so far, in the second batch ([the record](second-batch.md), 2026-11-22): template
-literals, `let` and `const`, arrow functions, default and rest parameters and object
+**Delivered on 2026-11-23.** In the second batch ([the record](second-batch.md), 2026-11-22):
+template literals, `let` and `const`, arrow functions, default and rest parameters and object
 destructuring, the first five of its stories, with the stories on resource accounting and on
-the host interface that the first consumer asked for. 1,364 of the slice's 4,436 cases pass
-(`test262-slice 06 4436 8413 0 0 4436 1364 3072 0`). Next by the order of the decomposition:
-computed names and object spread, block function declarations, `Symbol`, iterators, `for`-`of`,
-array destructuring, tagged templates, the close.
+the host interface that the first consumer asked for; 1,364 of the slice's 4,436 cases passed
+then (`test262-slice 06 4436 8413 0 0 4436 1364 3072 0`, release `0.4.0`). In wave 2
+([the record](slice-06-wave-2.md), 2026-11-22 and 23): `Symbol`, computed names and object
+spread, the iterator protocol, block function declarations, `for`-`of`, `Array.from`, array
+destructuring and spread, tagged templates, and the close. Every case the slice counts
+passes in every run (`test262-slice 06 3898 7351 0 0 3898 3898 0 0`). The close moved 143
+cases to later slices with evidence, and it added the order of delivery to the block of the
+design (`story:a-case-counts-in-the-slice-delivered-last`): a case is counted in the slice
+delivered last among the slices it needs, so 402 cases that need slice 4 or 5 beside a part
+of slice 6 are counted there.
+
+**The order after slice 6**: 5, 7, 10, 4, 9, unchanged. Measured on 2026-11-22 by the
+acceptance of `story:array-destructuring-and-spread`: the consumer's two scripts parse with
+no refusal of slice 6; the regular expression literals of slice 5 (12) and one `async`
+function with two `await` of slice 10 remain.
 
 `epic:slice-06-bindings-and-iteration`, next after slice 3 by the order above. Decomposed on
 2026-11-22 into fifteen stories in two parts (accepted, `active`), each part read once by the

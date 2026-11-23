@@ -10,7 +10,7 @@ and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the byteco
 interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
 6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
-(the other 44 need a later slice and say so). 109 of 190 host requirements have a test.
+(the other 44 need a later slice and say so). 110 of 190 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
 gate holds the test262 counts: 16,412 of the 44,812 run cases pass (2026-11-23, wave `s6-2` of slice 6; 13,575 in release `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
@@ -31,14 +31,23 @@ documentation site and the three gate runs): 7,010 of its 7,011 cases pass
 `test/built-ins/String/prop-desc.js`, fails in the pinned harness before the engine's answer
 is judged; `docs/design/engine.md`, section 12, "Slice 3's cases that need a later slice",
 states it, and every other document points there and carries the count
-(`task:slice-03-harness-case-measured-at-the-next-pin`). Next is slice 6,
-`bindings-and-iteration` (`epic:slice-06-bindings-and-iteration`): the order after slice 3 is
+(`task:slice-03-harness-case-measured-at-the-next-pin`). **Slice 6 is delivered**,
+`bindings-and-iteration` (`epic:slice-06-bindings-and-iteration`), fourteen feature stories and
+the close on 2026-11-22 and 2026-11-23 (`docs/plan/second-batch.md`: template literals, `let`
+and `const`, arrow functions, default and rest parameters, object destructuring;
+`docs/plan/slice-06-wave-2.md`: `Symbol`, computed names with object spread and rest, the
+iterator protocol, block functions, `for`-`of`, `Array.from`, array patterns and spread, tagged
+templates, the close with 143 cases moved to later slices with evidence, and the order of
+delivery in the block): all 3,898 cases of slice 6 pass in all 7,351 runs
+(`test262-slice 06 3898 7351 0 0 3898 3898 0 0`), and no host requirement is pending for it.
+The slices are not delivered in the order of their numbers: after slice 3 the order is
 6, 5, 7, 10, 4, 9, by what the first consumer needs first (`docs/plan/waves.md`, "The order
-after slice 3").
+after slice 3"), and it is decided again at each boundary. Next is slice 5, `regexp`
+(`epic:slice-05-regexp`).
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
-per directory, per slice and per ECMA-262 section and compares its 286 lines
+per directory, per slice and per ECMA-262 section and compares its 287 lines
 with `conformance/test262/expected.txt`. The numbers
 are under "The gate's numbers".
 The operator accepted the design on 2026-11-21. Its four open questions stand at the option the
@@ -606,4 +615,10 @@ session coordinates; this section is its procedure, taken from how surf is run
   `conformance/test262/later-parts.tsv` found in the case or its includes, or a feature the
   block names), and the gate task `test262-moves-check` refuses a line without it. A case that
   fails on a part of its own slice is never moved: its owner fixes it
-  (`docs/plan/slice-02-wave-4.md`).
+  (`docs/plan/slice-02-wave-4.md`). A case is counted in the slice delivered last among the
+  slices of its lines: the block's line `order delivery
+  1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21` names the order, the runner fails on
+  a block without it, and `test262-moves-check` refuses a line whose `to` is not delivered
+  after its `from` (design, section 12, "The order of delivery"). When the order of the
+  slices not yet delivered changes, that line changes in the same commit and their counts
+  move with it; the delivered slices stay first and keep theirs.

@@ -16,37 +16,41 @@ can use it.
 
 ## State
 
-swell runs scripts of the ES5 grammar in both modes, under a step budget and a memory budget.
+swell runs scripts of the ES5 grammar and of the bindings and iteration of ES2015 in both
+modes, under a step budget and a memory budget.
 Its gate holds the test262 counts: 16,412 of the 44,812 cases that run pass (36.6 %), measured on 2026-11-23.
-The first three of nineteen delivery slices are delivered:
+Four of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |
 |---|---|---|
 | 1 | the test262 harness itself | 31, every one passes |
 | 2 | the ES5-level language with `with`, `arguments`, `eval` and the global `Function` | 4,259, every one passes |
 | 3 | the core library: `Object`, `Function`, `Array`, `String`, `JSON`, `globalThis`, the URI functions | 7,010 of 7,011 pass |
+| 6 | bindings and iteration: `let`, `const`, templates, arrow functions, destructuring, spread, `Symbol`, iterators, `for`-`of` | 3,898, every one passes |
 
 A delivered slice passes the test262 cases it holds, but for an exception the design states.
+The slices are not delivered in the order of their numbers, and a case is counted in the slice
+delivered last among the parts it needs: a `RegExp` case that uses `Symbol` counts in slice 5.
 
-What exists, measured on 2026-11-22:
+What exists, measured on 2026-11-23:
 
 - The design, [`docs/design/engine.md`](docs/design/engine.md): what swell targets, how it is
   built, how it is measured, and the order in which it is delivered.
 - The host interface, specified before its code:
   [`docs/design/host-interface.md`](docs/design/host-interface.md) has 190 numbered
-  requirements, and 109 of them have a test. An ESS model under [`spec/`](spec/) has 58
+  requirements, and 110 of them have a test. An ESS model under [`spec/`](spec/) has 58
   scenarios. All 58 pass on ESS's interpreter. The gate runs them against the engine too, and
   14 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
-  pinned by checksum, both specifications checked, and 64 planted defects that the gate must
+  pinned by checksum, both specifications checked, and 65 planted defects that the gate must
   refuse. Its test steps have a budget of 120 seconds and a test is ended at 60.
 - The test262 runner, `swell-test262`. It reads all 53,801 cases, excludes 8,982 by recorded
   decision and runs the rest in both modes under budgets. It counts them per directory, per
-  delivery slice and per section of ECMA-262 (41). Its 286 lines are compared
+  delivery slice and per section of ECMA-262 (42). Its 287 lines are compared
   with a committed file on every run.
 - Refusals. A construct the parser does not have yet is refused, and a refusal never counts
   as a pass, also when the script catches its `SyntaxError`. The engine counts its refusals:
-  41,572 of the 85,556 runs meet one.
+  36,178 of the 85,556 runs meet one.
 - The first parts of the engine:
 
   | part | crate |
@@ -63,13 +67,13 @@ The one case of slice 3 that does not pass, `test/built-ins/String/prop-desc.js`
 the pinned test262 harness before the engine's answer is judged;
 [the design, section 12](docs/design/engine.md#12-delivery-order) states it.
 
-In work is slice 6 of nineteen, bindings and iteration. `let` and `const`, template literals
-with and without a tag, arrow functions, default and rest parameters, object and array
-destructuring, computed property names, spread in objects, arrays and calls, `Symbol`, the
-iterator protocol, `for`-`of`, function declarations in blocks and `Array.from` run today;
-what is left is the close of the slice, which moves the cases that need a later slice. Of
-its 4,436 cases 3,907 pass. The slices are taken in the order the first user, a browser, needs them:
-6, 5, 7, 10, 4, 9.
+Slice 6, bindings and iteration, was delivered on 2026-11-23: `let` and `const`, template
+literals with and without a tag, arrow functions, default and rest parameters, object and
+array destructuring, computed property names, spread in objects, arrays and calls, `Symbol`,
+the iterator protocol, `for`-`of`, function declarations in blocks and `Array.from`. All
+3,898 of its cases pass in all 7,351 runs; 402 cases that also need slice 4 or 5 are counted
+there. Next is slice 5, regular expressions. The slices are taken in the order the first
+user, a browser, needs them: 6, 5, 7, 10, 4, 9.
 
 ## What swell is
 

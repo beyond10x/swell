@@ -26,16 +26,27 @@ Every number below comes from the gate, `task check`, on the released commit.
   iterator when it ends before the iterator does. Spread in array literals and in the
   arguments of a call, an optional call and `new`. Tagged templates: a site answers the same
   frozen template object at every evaluation, with its `raw` strings, and the object is
-  freed with the code that holds the site. With these every feature story of the slice is
-  delivered; the cases of the slice that need a later slice are moved at its close.
+  freed with the code that holds the site.
+- The sixth delivery slice, `bindings-and-iteration`, is delivered: every case it counts
+  passes in every run (`test262-slice 06 3898 7351 0 0 3898 3898 0 0`; 1,364 of 4,436 in
+  0.4.0). 143 cases that need a later slice moved there, each with its evidence in
+  `conformance/test262/moves.tsv`.
 - test262 after these: `test262 total 53801 8982 7 44812 16412 28399 1`, 16,412 of the 44,812
-  cases that run pass (36.6 %; 13,575 in 0.4.0). The sixth slice passes 3,907 of its 4,436
-  cases (`test262-slice 06 4436 8413 0 0 4436 3907 529 0`; 1,364 in 0.4.0).
-- The host interface: 190 numbered requirements, 109 of them with a test
-  (`host-requirements: 190 requirement(s), 190 line(s): 109 test, 81 pending`; 108 in 0.4.0).
+  cases that run pass (36.6 %; 13,575 in 0.4.0). `test262-refused 36178` of the 85,556 runs
+  meet a refusal (41,572 in 0.4.0).
+- The host interface: 190 numbered requirements, 110 of them with a test
+  (`host-requirements: 190 requirement(s), 190 line(s): 110 test, 80 pending`; 108 in 0.4.0).
+  None is pending for a delivered slice.
 
 ### Changed
 
+- A test262 case is counted in the slice delivered last among the slices it needs, by the
+  order of delivery the design's block names (1, 2, 3, 6, 5, 7, 10, 4, 9, 8, 11 to 21), and
+  no longer in the slice with the highest number. The slices are not delivered in the order
+  of their numbers, so a `RegExp` case that uses `Symbol` can first pass after slice 5, not
+  after slice 6. Slice 4 counts 1,598 cases, slice 5 2,724, slice 6 3,898, slice 8 9,144 and
+  slice 10 3,879 (1,516, 2,394, 4,436, 6,292 and 6,651 in 0.4.0, where the moves of the
+  close also count). No run changed its outcome through the rule.
 - The heaviest tests are lighter, so that none is near the 60 s limit of a test when the
   machine is loaded: no test of the gate takes over 1.5 CPU seconds alone in the default mode,
   and none of the lane `slow` over 2.5 at its full count, but for one test of determinism
