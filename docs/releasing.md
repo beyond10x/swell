@@ -68,7 +68,9 @@ deciding session's, from a checkout of the repository:
 
    The gate does not run test262 in full; it compares the digest of the run's sources with
    `conformance/test262/expected.digest`. The version change is a source: run
-   `slot --timeout 30m task test262-expected` on the commit first, and
+   `slot --timeout 30m task test262-expected` on the commit first (or, where the run does not
+   fit one pool job, `slot --timeout 30m task test262-part TEST262_PART=<k>/<n>` for each part
+   and then `slot task test262-expected TEST262_FROM_PARTS=.out/test262/parts`), and
    `slot --local task site-data`, and commit the files they write with steps 1 and 2.
 
 4. **Notes.** Write the notes file, `.out/release-<version>-notes.md`, in the form the

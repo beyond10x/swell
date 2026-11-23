@@ -202,7 +202,10 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   sources (`crates/*/src`, the manifests and the lock file, `.cargo/config.toml`, the
   toolchain file, `taskfiles/test262.yml`, the files of `conformance/test262/` the run reads)
   with `conformance/test262/expected.digest`. A change of a source runs the full run
-  (`slot --timeout 30m task test262-expected`), which writes `expected.txt` and the digest;
+  (`slot --timeout 30m task test262-expected`), which writes `expected.txt` and the digest; where
+  the run does not fit one pool job, it is made in parts, each a job of its own
+  (`slot --timeout 30m task test262-part TEST262_PART=<k>/<n>` for each k), and counted from
+  their files (`slot task test262-expected TEST262_FROM_PARTS=.out/test262/parts`);
   the lane `slow` (`task slow`, `.github/workflows/slow.yml`) makes the full run on the forge
   and compares bytes. A release waits for a green lane `slow` on its commit.
 - A heavy test has a gate count and a full count: `SWELL_FULL_COUNTS=1` gives the full one,
