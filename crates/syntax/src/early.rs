@@ -56,6 +56,19 @@
 //!   and the body of a generator and the parameters of an arrow function inside them, not the
 //!   body of that arrow function), nor the name of a GeneratorExpression; the walk tracks
 //!   [Yield] as it tracks strictness;
+//! - `#sec-async-function-definitions-static-semantics-early-errors`,
+//!   `#sec-async-arrow-function-definitions-static-semantics-early-errors` and
+//!   `#sec-arrow-function-definitions-static-semantics-early-errors`: the FormalParameters of an
+//!   `async` function and the ArrowParameters of an arrow function contain no AwaitExpression,
+//!   and the head of an `async` arrow function no YieldExpression either; the other early errors
+//!   of an `async` function or arrow function are those of every function or arrow function
+//!   above;
+//! - `#sec-identifiers-static-semantics-early-errors`: `await` is no BindingIdentifier,
+//!   IdentifierReference or LabelIdentifier where the grammar's [Await] is set (the parameters
+//!   and the body of an `async` function or arrow function, and the parameters of an arrow
+//!   function inside them), nor the name of an AsyncFunctionExpression; the walk tracks [Await]
+//!   beside [Yield];
+//! - `#sec-static-semantics-assignmenttargettype`: an AwaitExpression is no assignment target;
 //! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`:
 //!   IsValidRegularExpressionLiteral, the flags and then ParsePattern of `swell-regexp` with
 //!   them and the limit `parser_nesting`, charged to the meter of the parse ([`crate::regexp`]);
@@ -164,6 +177,22 @@ const YIELD_IN_GENERATOR_PARAMETERS: &str =
 /// (`#sec-arrow-function-definitions-static-semantics-early-errors`).
 const YIELD_IN_ARROW_PARAMETERS: &str = "yield expression in the parameters of an arrow function";
 
+/// The message of `await` as a BindingIdentifier, IdentifierReference or LabelIdentifier where
+/// [Await] is set, or as the name of an AsyncFunctionExpression
+/// (`#sec-identifiers-static-semantics-early-errors`).
+const AWAIT_IDENTIFIER: &str = "await may not be an identifier in an async function";
+
+/// The message of an AwaitExpression in the FormalParameters of an `async` function
+/// (`#sec-async-function-definitions-static-semantics-early-errors`). Its text does not say
+/// "await expression", the text of the refusal of the base, so a search of the runs for that
+/// refusal finds none of these early errors.
+const AWAIT_IN_ASYNC_PARAMETERS: &str = "await in the parameters of an async function";
+
+/// The message of an AwaitExpression in the ArrowParameters of an arrow function or the head of
+/// an `async` arrow function (`#sec-arrow-function-definitions-static-semantics-early-errors`,
+/// `#sec-async-arrow-function-definitions-static-semantics-early-errors`).
+const AWAIT_IN_ARROW_PARAMETERS: &str = "await in the parameters of an arrow function";
+
 /// The identifiers strict mode code reserves (`#sec-identifiers-static-semantics-early-errors`).
 const STRICT_RESERVED: [&str; 9] = [
     "implements",
@@ -201,6 +230,7 @@ pub(crate) fn check(
         errors: Vec::new(),
         strict,
         yields: false,
+        awaits: false,
         parameters: None,
         loops: 0,
         breakables: 0,
@@ -274,18 +304,20 @@ enum Step {
     Restore {
         strict: bool,
         yields: bool,
-        parameters: Option<&'static str>,
+        awaits: bool,
+        parameters: Option<Messages>,
         loops: u32,
         breakables: u32,
         label_base: usize,
         lexical_base: usize,
     },
-    /// Sets the [Yield] of what follows, and whether it is the parameters of a function, with
-    /// the message of a YieldExpression there: between the parameters and the body of a
-    /// function.
+    /// Sets the [Yield] and [Await] of what follows, and whether it is the parameters of a
+    /// function, with the messages of a YieldExpression and an AwaitExpression there: between
+    /// the parameters and the body of a function.
     Context {
         yields: bool,
-        parameters: Option<&'static str>,
+        awaits: bool,
+        parameters: Option<Messages>,
     },
     /// Drops the label of a labelled statement, once its body is walked.
     PopLabel,
@@ -294,6 +326,9 @@ enum Step {
     /// Drops the innermost frame of lexical names, once the statements it covers are walked.
     PopLexical,
 }
+
+/// The messages of a YieldExpression and of an AwaitExpression in the parameters of a function.
+type Messages = (&'static str, &'static str);
 
 impl HeapBytes for Step {
     fn heap_bytes(&self) -> usize {
@@ -313,9 +348,11 @@ struct Checker<'a, 'm> {
     strict: bool,
     /// The [Yield] parameter of the grammar at the current position.
     yields: bool,
-    /// Inside the parameters of a function (not of a function nested in them): the message of a
-    /// YieldExpression there; `None` elsewhere.
-    parameters: Option<&'static str>,
+    /// The [Await] parameter of the grammar at the current position.
+    awaits: bool,
+    /// Inside the parameters of a function (not of a function nested in them): the messages of
+    /// a YieldExpression and an AwaitExpression there; `None` elsewhere.
+    parameters: Option<Messages>,
     /// Loops around the current position inside the current function.
     loops: u32,
     /// Loops and `switch` statements around the current position inside the current function.
@@ -579,10 +616,14 @@ impl<'a, 'm> Checker<'a, 'm> {
         );
     }
 
-    /// A `BindingIdentifier` in code of the current strictness and [Yield].
+    /// A `BindingIdentifier` in code of the current strictness, [Yield] and [Await].
     fn binding(&mut self, name: &Name) {
         if self.yields && name.name == "yield" {
             self.error(YIELD_IDENTIFIER, name.span);
+            return;
+        }
+        if self.awaits && name.name == "await" {
+            self.error(AWAIT_IDENTIFIER, name.span);
             return;
         }
         if !self.strict {
@@ -717,6 +758,7 @@ impl<'a, 'm> Checker<'a, 'm> {
                 Step::Restore {
                     strict,
                     yields,
+                    awaits,
                     parameters,
                     loops,
                     breakables,
@@ -725,11 +767,15 @@ impl<'a, 'm> Checker<'a, 'm> {
                 } => {
                     (self.strict, self.loops, self.breakables) = (strict, loops, breakables);
                     (self.label_base, self.lexical_base) = (label_base, lexical_base);
-                    (self.yields, self.parameters) = (yields, parameters);
+                    (self.yields, self.awaits, self.parameters) = (yields, awaits, parameters);
                     continue;
                 }
-                Step::Context { yields, parameters } => {
-                    (self.yields, self.parameters) = (yields, parameters);
+                Step::Context {
+                    yields,
+                    awaits,
+                    parameters,
+                } => {
+                    (self.yields, self.awaits, self.parameters) = (yields, awaits, parameters);
                     continue;
                 }
                 Step::PopLabel => {
@@ -755,6 +801,7 @@ impl<'a, 'm> Checker<'a, 'm> {
             let restore = Step::Restore {
                 strict: self.strict,
                 yields: self.yields,
+                awaits: self.awaits,
                 parameters: self.parameters,
                 loops: self.loops,
                 breakables: self.breakables,
@@ -779,14 +826,14 @@ impl<'a, 'm> Checker<'a, 'm> {
                 Child::Expr(id) => self.check_expr(id),
                 // A function is walked with its own strictness, outside every loop, `switch` and
                 // label, with the lexical names of its body as its only frame, and with the
-                // [Yield] of its parameters and then of its body.
+                // [Yield] and [Await] of its parameters and then of its body.
                 Child::Function(id) => {
                     let ast = self.ast;
                     let Some(f) = ast.function(id) else {
                         continue;
                     };
                     self.push_step(&mut stack, restore);
-                    let outer = self.yields;
+                    let outer = (self.yields, self.awaits);
                     self.strict = f.strict;
                     self.loops = 0;
                     self.breakables = 0;
@@ -813,22 +860,25 @@ impl<'a, 'm> Checker<'a, 'm> {
         m.release(stack);
     }
 
-    /// Pushes the parameters and the body of the function `f`, inside code whose [Yield] is
-    /// `outer`, so that popping gives: the [Yield] of its parameters (a generator's own, or for
-    /// an arrow function `outer`, `#sec-arrow-function-definitions`) with the message of a
-    /// YieldExpression there, the pattern and the initializer of each parameter in source order,
-    /// the [Yield] of its body (a generator's own; cleared in an arrow function's), then the
+    /// Pushes the parameters and the body of the function `f`, inside code whose [Yield] and
+    /// [Await] are `outer`, so that popping gives: the [Yield] and [Await] of its parameters
+    /// ([`Checker::parameter_context`]) with the messages of a YieldExpression and an
+    /// AwaitExpression there, the pattern and the initializer of each parameter in source order,
+    /// the [Yield] and [Await] of its body (a generator's [Yield] and an `async` function's
+    /// [Await]; in an arrow function's body [Yield] cleared and [Await] its own,
+    /// `#sec-arrow-function-definitions`, `#sec-async-arrow-function-definitions`), then the
     /// statements of the body. The growth of the stack is charged first.
     fn push_function(
         &self,
         f: &'a Function,
-        outer: bool,
+        outer: (bool, bool),
         stack: &mut Vec<Step>,
     ) -> Result<(), crate::ledger::Stop> {
-        let (parameters, body, message) = if f.kind == FunctionKind::Arrow {
-            (outer, false, YIELD_IN_ARROW_PARAMETERS)
+        let (yields, awaits) = Checker::parameter_context(f, outer);
+        let message = if f.kind == FunctionKind::Arrow {
+            (YIELD_IN_ARROW_PARAMETERS, AWAIT_IN_ARROW_PARAMETERS)
         } else {
-            (f.generator, f.generator, YIELD_IN_GENERATOR_PARAMETERS)
+            (YIELD_IN_GENERATOR_PARAMETERS, AWAIT_IN_ASYNC_PARAMETERS)
         };
         let count = f
             .initializers
@@ -841,7 +891,8 @@ impl<'a, 'm> Checker<'a, 'm> {
         self.m.grow_by(stack, count)?;
         stack.extend(f.body.iter().rev().map(|s| Step::Node(Child::Stmt(*s))));
         stack.push(Step::Context {
-            yields: body,
+            yields: f.generator,
+            awaits: f.asynchronous,
             parameters: None,
         });
         for (i, p) in f.params.iter().enumerate().rev() {
@@ -853,10 +904,26 @@ impl<'a, 'm> Checker<'a, 'm> {
             }
         }
         stack.push(Step::Context {
-            yields: parameters,
+            yields,
+            awaits,
             parameters: Some(message),
         });
         Ok(())
+    }
+
+    /// The [Yield] and [Await] of the parameters of the function `f` inside code whose [Yield]
+    /// and [Await] are `outer`: a generator's [Yield] and an `async` function's [Await], each
+    /// cleared for every other function; for an arrow function those around it
+    /// (`ArrowParameters[?Yield, ?Await]`), but [Await] set for an `async` one
+    /// (`AsyncArrowBindingIdentifier[?Yield]` with `BindingIdentifier[?Yield, +Await]`,
+    /// `CoverCallExpressionAndAsyncArrowHead[?Yield, ?Await]` refined as
+    /// `ArrowFormalParameters[~Yield, +Await]`, whose YieldExpression is an early error).
+    fn parameter_context(f: &Function, outer: (bool, bool)) -> (bool, bool) {
+        if f.kind == FunctionKind::Arrow {
+            (outer.0, outer.1 || f.asynchronous)
+        } else {
+            (f.generator, f.asynchronous)
+        }
     }
 
     /// The early errors of the statement `id` itself; returns how many loops and how many
@@ -983,6 +1050,8 @@ impl<'a, 'm> Checker<'a, 'm> {
         };
         if self.yields && label.name == "yield" {
             self.error(YIELD_IDENTIFIER, label.span);
+        } else if self.awaits && label.name == "await" {
+            self.error(AWAIT_IDENTIFIER, label.span);
         } else if self.strict && STRICT_RESERVED.contains(&label.name.as_str()) {
             self.reserved(&label.name, label.span);
         }
@@ -1015,14 +1084,21 @@ impl<'a, 'm> Checker<'a, 'm> {
             Expr::Identifier(n) => {
                 if self.yields && n == "yield" {
                     self.error(YIELD_IDENTIFIER, span);
+                } else if self.awaits && n == "await" {
+                    self.error(AWAIT_IDENTIFIER, span);
                 } else if self.strict && STRICT_RESERVED.contains(&n.as_str()) {
                     self.reserved(n, span);
                 }
             }
-            // Contains YieldExpression of the parameters around it, which the walk does not
-            // look for inside a nested function.
+            // Contains YieldExpression and Contains AwaitExpression of the parameters around it,
+            // which the walk does not look for inside a nested function.
             Expr::Yield { .. } => {
-                if let Some(message) = self.parameters {
+                if let Some((message, _)) = self.parameters {
+                    self.error(message, span);
+                }
+            }
+            Expr::Await(_) => {
+                if let Some((_, message)) = self.parameters {
                     self.error(message, span);
                 }
             }
@@ -1107,24 +1183,24 @@ impl<'a, 'm> Checker<'a, 'm> {
     }
 
     /// The function's name and parameters, checked with its own strictness, inside code whose
-    /// [Yield] is `outer`: the name of a declaration with `outer` (`BindingIdentifier[?Yield]`),
-    /// that of an expression with the function's own (`[+Yield]` for a GeneratorExpression,
-    /// `[~Yield]` for a FunctionExpression); the parameters with the function's own, or for an
-    /// arrow function with `outer`.
-    fn check_function(&mut self, id: FunctionId, outer: bool) {
+    /// [Yield] and [Await] are `outer`: the name of a declaration with `outer`
+    /// (`BindingIdentifier[?Yield, ?Await]`), that of an expression with the function's own
+    /// (`[+Yield]` for a GeneratorExpression, `[+Await]` for an AsyncFunctionExpression, each
+    /// cleared for a FunctionExpression); the parameters with those of
+    /// [`Checker::parameter_context`].
+    fn check_function(&mut self, id: FunctionId, outer: (bool, bool)) {
         let Some(f) = self.ast.function(id) else {
             return;
         };
-        let arrow = f.kind == FunctionKind::Arrow;
         if let Some(name) = &f.name {
-            self.yields = if f.kind == FunctionKind::Expression {
-                f.generator
+            (self.yields, self.awaits) = if f.kind == FunctionKind::Expression {
+                (f.generator, f.asynchronous)
             } else {
                 outer
             };
             self.binding(name);
         }
-        self.yields = if arrow { outer } else { f.generator };
+        (self.yields, self.awaits) = Checker::parameter_context(f, outer);
         // The names seen, each entry charged when it is inserted and all credited at the end.
         let entry = map_entry_bytes::<&str, ()>();
         let mut seen = BTreeSet::new();

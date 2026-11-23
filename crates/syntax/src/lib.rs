@@ -147,9 +147,11 @@ impl Failure {
 /// Parses `source`, UTF-16 code units (a UTF-8 source is converted by the caller), as a
 /// `Script`: the tree, or every `SyntaxError` the parse found, at least one. A grammar error or a
 /// refusal stops the parse and is the only error; the early errors of a source that parses are
-/// all reported, in source order. The refusal of a generator function (slice 7) does not stop
-/// the parse: it comes after the whole parse and the early errors, the only error of a source
-/// that has neither a grammar error nor an early error, at the `*` of its first generator.
+/// all reported, in source order. The refusals held back to the end of the parse are `yield*`
+/// (slice 7) and `async function` (slice 10): neither stops the parse, and the first of the
+/// source comes after the whole parse and the early errors, the only error of a source that has
+/// neither a grammar error nor an early error, at the `*` of its first `yield*` or the `async`
+/// of its first `async` function or arrow function.
 pub fn parse_script(source: &[u16], options: ParseOptions) -> Result<Script, Vec<SyntaxError>> {
     parse_script_with(source, options, &mut Unlimited).map_err(Failure::into_errors)
 }

@@ -235,6 +235,83 @@ fn refused_sources_name_their_slice() {
     println!("refused: {} file(s)", files.len());
 }
 
+/// The refusal of slice 10 (`async function`) does not stop the parse: a source with an `async`
+/// function or arrow function and no other error ends on it alone, at the `async` of the first
+/// one of the source, through each entry; a refusal held for `yield*` earlier in the source
+/// comes first; an early error or a grammar error anywhere ends the source on that error
+/// instead (`#sec-async-function-definitions`, `docs/design/engine.md`, section 12, "A part
+/// before its slice").
+#[test]
+fn the_refusal_of_slice_10_comes_after_the_whole_parse() {
+    let refusal = "async function is not supported before slice 10".to_string();
+    let at = |text: &str| {
+        let errors = parse(text)
+            .err()
+            .unwrap_or_else(|| panic!("{text:?} parsed"));
+        assert_eq!(errors.len(), 1, "{text:?}: {errors:?}");
+        (errors[0].message.clone(), errors[0].line, errors[0].column)
+    };
+    assert_eq!(at("async function f() {}"), (refusal.clone(), 1, 1));
+    assert_eq!(at("x;\n  y = async (a) => a;"), (refusal.clone(), 2, 7));
+    assert_eq!(
+        at("y = async a => async function () {};"),
+        (refusal.clone(), 1, 5)
+    );
+    // The head of an `async` arrow function is read before its `async` holds the refusal; the
+    // first `async` of the source is still the one named.
+    assert_eq!(
+        at("y = async (a = async function () {}) => a;"),
+        (refusal.clone(), 1, 5)
+    );
+    assert_eq!(
+        at("function* g() { yield* a; }\nasync function f() {}"),
+        ("yield* is not supported before slice 7".to_string(), 1, 22)
+    );
+    for (text, message) in [
+        (
+            "async function f() {}\nlet a; let a;",
+            "duplicate lexical declaration of a",
+        ),
+        (
+            "async function f(await) {}",
+            "await may not be an identifier in an async function",
+        ),
+        ("async function f() {}\n)", "unexpected token )"),
+        ("async function f() { await; }", "unexpected token ;"),
+    ] {
+        assert_eq!(
+            messages(&parse(text).err().unwrap()),
+            vec![message.to_string()]
+        );
+    }
+    let options = ParseOptions { max_nesting: LIMIT };
+    let errors = parse_eval(&units("async x => x"), true, options)
+        .err()
+        .unwrap();
+    assert_eq!(messages(&errors), vec![refusal.clone()]);
+    let errors = parse_dynamic_function(&units("a"), &units("return async () => a;"), options)
+        .err()
+        .unwrap();
+    assert_eq!(messages(&errors), vec![refusal]);
+    // `await` is an identifier outside an `async` function, and `async` one wherever no `async`
+    // function or arrow function starts.
+    for text in [
+        "await;",
+        "var await = async;",
+        "async\nfunction f() {}",
+        "async(1);",
+        "f = async => async;",
+        "function* g() { await: yield; }",
+        "async function f() { function g() { var await; } }",
+    ] {
+        let parsed = parse(text);
+        let refused = parsed.as_ref().err().is_some_and(|e| {
+            e.len() == 1 && e[0].message == "async function is not supported before slice 10"
+        });
+        assert!(parsed.is_ok() || refused, "{text:?}: {parsed:?}");
+    }
+}
+
 /// A hashbang comment (`#sec-hashbang`) is a comment at the very start of a source only: it
 /// may run to the end of the input, it holds no line terminator of its own, and after anything
 /// else, white space included, `#!` is an error.
@@ -517,6 +594,9 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "generator_expression" => ("x = ", "function* (){ return ", "0", "; }", ";"),
         "yield" => ("function* g(){ ", "yield ", "0;", "", " }"),
         "yield_star" => ("function* g(){ ", "yield* ", "0;", "", " }"),
+        "async_function_expression" => ("x = ", "async function (){ return ", "0", "; }", ";"),
+        "async_arrow" => ("x = ", "async x => ", "0", "", ";"),
+        "await" => ("async function f(){ ", "await ", "0;", "", " }"),
         _ => return None,
     };
     let mut source = units(before);
@@ -527,7 +607,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 53] = [
+const NESTING_KINDS: [&str; 56] = [
     "array",
     "paren",
     "block",
@@ -581,6 +661,9 @@ const NESTING_KINDS: [&str; 53] = [
     "generator_expression",
     "yield",
     "yield_star",
+    "async_function_expression",
+    "async_arrow",
+    "await",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict
@@ -607,7 +690,9 @@ fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec
 /// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
 /// nesting error alone (`Some(false)`), or fail otherwise (`None`). A source whose one error is
 /// the refusal of slice 7 parsed: that refusal comes only after the whole parse and the early
-/// errors (`story:yield-star-delegation` takes this arm out again).
+/// errors (`story:yield-star-delegation` takes this arm out again). So did a source whose one
+/// error is the refusal of slice 10, held back the same way (`story:async-functions-and-await`
+/// takes that arm out).
 fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     let source = nested(kind, n)?;
     match parse_through(entry, &source, limit) {
@@ -615,6 +700,12 @@ fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
         Err(e)
             if e.len() == 1
                 && message_kind(&e.first()?.message) == (MessageKind::Refusal { slice: 7 }) =>
+        {
+            Some(true)
+        }
+        Err(e)
+            if e.len() == 1
+                && message_kind(&e.first()?.message) == (MessageKind::Refusal { slice: 10 }) =>
         {
             Some(true)
         }

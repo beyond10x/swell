@@ -6,11 +6,13 @@
 //! The parameters are a list of `BindingIdentifier`s and binding patterns
 //! (`#sec-destructuring-binding-patterns`), each with an optional `Initializer`, the last
 //! possibly a `FunctionRestParameter` of either, with a trailing comma allowed after a
-//! parameter that is no rest parameter (`#sec-parameter-lists`); `async` arrows (10) are
-//! refused. A generator is parsed whole, its parameters and body with [Yield] set, and the
-//! refusal of slice 7 at its `*` is held back to the end of the parse ([`Parser::held`]); the
-//! parameters and body of every other function clear [Yield], but the parameters of an arrow
-//! function, which keep the [Yield] around them. A
+//! parameter that is no rest parameter (`#sec-parameter-lists`). A generator is parsed whole,
+//! its parameters and body with [Yield] set; the parameters and body of every other function
+//! clear [Yield], but the parameters of an arrow function, which keep the [Yield] around them.
+//! An `async` function or arrow function (slice 10, `#sec-async-function-definitions`,
+//! `#sec-async-arrow-function-definitions`) is parsed whole the same way with [Await], and the
+//! refusal of slice 10 at its `async` is held back to the end of the parse ([`Parser::held`]);
+//! `async function*` is refused at its `*`. A
 //! function's code is strict mode code when the code around it is or when its body starts with
 //! a Use Strict Directive (`#sec-strict-mode-code`); the parser tracks that while it reads the
 //! body, and the early errors that depend on it are checked afterwards (`src/early.rs`).
@@ -20,10 +22,12 @@ use crate::ast::{
     AssignOp, BindingTarget, Child, Expr, ExprId, ExprNode, Function, FunctionId, FunctionKind,
     Name, PatternKind, Scope, Span, Stmt, StmtId,
 };
+use crate::error::SyntaxError;
 use crate::token::{Keyword, Punct};
 
 impl<'a, 'm> Parser<'a, 'm> {
-    /// `FunctionDeclaration` at the current `function`.
+    /// `FunctionDeclaration` at the current `function`, or `AsyncFunctionDeclaration` at the
+    /// current `async`.
     pub(super) fn function_declaration(&mut self) -> R<FunctionId> {
         self.enter()?;
         let id = self.function_head(FunctionKind::Declaration)?;
@@ -32,7 +36,8 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(id)
     }
 
-    /// `FunctionExpression` at the current `function`.
+    /// `FunctionExpression` at the current `function`, or `AsyncFunctionExpression` at the
+    /// current `async`.
     pub(super) fn function_expression(&mut self) -> R<FunctionId> {
         self.enter()?;
         let id = self.function_head(FunctionKind::Expression)?;
@@ -41,16 +46,32 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(id)
     }
 
-    /// `function`, the `*` of a generator and the name: numbers the function, so functions are
-    /// numbered in source order. The name is read with the [Yield] around it; that it is no
-    /// `yield` where [Yield] is set, or in a GeneratorExpression (`BindingIdentifier[+Yield]`),
-    /// is an early error (`src/early.rs`).
+    /// The `async` of an `async` function (its caller saw no line terminator between it and
+    /// `function`), `function`, the `*` of a generator and the name: numbers the function, so
+    /// functions are numbered in source order, its span starting at its first token. The name
+    /// is read with the [Yield] and [Await] around it; that it is no `yield` where [Yield] is
+    /// set, no `await` where [Await] is set, or either in a GeneratorExpression or an
+    /// AsyncFunctionExpression (`BindingIdentifier[+Yield]`, `BindingIdentifier[~Yield, +Await]`)
+    /// is an early error (`src/early.rs`). The first `async` of the source holds the refusal of
+    /// slice 10 back to the end of the parse; `async function*` is refused at its `*`.
     #[inline(never)]
     fn function_head(&mut self, kind: FunctionKind) -> R<FunctionId> {
         let span = self.start();
+        let asynchronous = self.is_name("async");
+        if asynchronous {
+            if self.held.is_none() {
+                let refusal =
+                    SyntaxError::refused("async function", 10, self.tok.line, self.tok.column);
+                self.held = Some(refusal);
+            }
+            self.advance()?;
+        }
         self.expect_keyword(Keyword::Function)?;
         let generator = self.is(Punct::Star);
         if generator {
+            if asynchronous {
+                return self.refuse("async generator function", 10);
+            }
             self.advance()?;
         }
         let name = if kind == FunctionKind::Expression && self.is(Punct::LParen) {
@@ -61,6 +82,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         let id = self.begin_function(kind, span, name);
         if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {
             f.generator = generator;
+            f.asynchronous = asynchronous;
         }
         Ok(id)
     }
@@ -76,6 +98,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             kind,
             name,
             generator: false,
+            asynchronous: false,
             params: Vec::new(),
             initializers: Vec::new(),
             rest: false,
@@ -104,31 +127,39 @@ impl<'a, 'm> Parser<'a, 'm> {
             .ast
             .function(id)
             .map_or(FunctionKind::Expression, |f| f.kind);
-        self.open_yield(id)?;
+        self.open_context(id)?;
         self.parameters(id, kind)?;
         self.expect(Punct::LBrace)?;
         self.functions += 1;
         Ok(self.strict)
     }
 
-    /// Saves the [Yield] around the function `id` and sets its own for its parameters and body:
-    /// set for a generator, cleared for every other function that reads its parameters here
-    /// (`#sec-generator-function-definitions`, `#sec-function-definitions`,
-    /// `#sec-method-definitions`). [`Parser::function_end`] puts the saved one back.
+    /// Saves the [Yield] and [Await] around the function `id` and sets its own for its
+    /// parameters and body: [Yield] set for a generator, [Await] for an `async` function, each
+    /// cleared for every other function that reads its parameters here
+    /// (`#sec-generator-function-definitions`, `#sec-async-function-definitions`,
+    /// `#sec-function-definitions`, `#sec-method-definitions`). [`Parser::function_end`] puts the
+    /// saved ones back.
     #[inline(never)]
-    fn open_yield(&mut self, id: FunctionId) -> R<()> {
-        let generator = self.ast.function(id).is_some_and(|f| f.generator);
-        self.save_yield(generator)
+    fn open_context(&mut self, id: FunctionId) -> R<()> {
+        let (generator, asynchronous) = self
+            .ast
+            .function(id)
+            .map_or((false, false), |f| (f.generator, f.asynchronous));
+        self.save_context(generator, asynchronous)
     }
 
-    /// Saves the current [Yield] on the parser's list and sets `yields`, the growth of the list
-    /// charged first.
+    /// Saves the current [Yield] and [Await] on the parser's lists and sets `yields` and
+    /// `awaits`, the growth of each list charged first.
     #[inline(never)]
-    fn save_yield(&mut self, yields: bool) -> R<()> {
+    fn save_context(&mut self, yields: bool, awaits: bool) -> R<()> {
         let m = self.m;
         let pushed = m.push(&mut self.outer_yields, self.yields);
         self.charged(pushed)?;
+        let pushed = m.push(&mut self.outer_awaits, self.awaits);
+        self.charged(pushed)?;
         self.yields = yields;
+        self.awaits = awaits;
         Ok(())
     }
 
@@ -147,7 +178,7 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// Records the body of function `id`, which ends at the previous token, with its
     /// strictness, span and depth; the code after it has the strictness `outer` again, and the
-    /// [Yield] saved as the function opened.
+    /// [Yield] and [Await] saved as the function opened.
     #[inline(never)]
     fn function_end(
         &mut self,
@@ -159,6 +190,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.strict = outer;
         if let Some(yields) = self.outer_yields.pop() {
             self.yields = yields;
+        }
+        if let Some(awaits) = self.outer_awaits.pop() {
+            self.awaits = awaits;
         }
         let mut deepest = 0;
         for s in &body {
@@ -391,13 +425,17 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// The parameters of the arrow function whose `=>` is the current token, from the operand
-    /// `left`; consumes the `=>` and numbers the function, its span starting at `start`.
+    /// `left`; consumes the `=>` and numbers the function, its span starting at `start`. An
+    /// `async` arrow function ([`Parser::is_async_head`]) holds the refusal of slice 10 at its
+    /// `async` back to the end of the parse, unless one of the source before it is held already:
+    /// its parameters were read before it, and a refusal they hold stands after its `async`.
     #[inline(never)]
     fn arrow_head(&mut self, left: ExprId, start: Span) -> R<FunctionId> {
         if self.tok.newline_before {
             return self.fail_here(LINE_TERMINATOR_BEFORE_ARROW);
         }
-        let (params, initializers, rest) = self.arrow_parameters(left, start)?;
+        let asynchronous = self.is_async_head(left, start);
+        let (params, initializers, rest) = self.arrow_parameters(left, asynchronous)?;
         self.advance()?;
         let id = self.begin_function(FunctionKind::Arrow, start, None);
         match self.ast.functions.get_mut(id.0 as usize) {
@@ -405,13 +443,88 @@ impl<'a, 'm> Parser<'a, 'm> {
                 f.params = params;
                 f.initializers = initializers;
                 f.rest = rest;
+                f.asynchronous = asynchronous;
             }
             None => {
                 self.m.release(params);
                 self.m.release(initializers);
             }
         }
+        if asynchronous
+            && self
+                .held
+                .as_ref()
+                .is_none_or(|h| (h.line, h.column) > (start.line, start.column))
+        {
+            let refusal = SyntaxError::refused("async function", 10, start.line, start.column);
+            self.held = Some(refusal);
+        }
         Ok(id)
+    }
+
+    /// Whether the operand `left` before `=>`, whose `AssignmentExpression` started at `start`,
+    /// is the head of an `async` arrow function (`#sec-async-arrow-function-definitions`): a
+    /// `BindingIdentifier` after `async` ([`Parser::async_arrow_parameter`] read it, so the
+    /// operand starts after `start`), or a call of `async` written without an escape (five code
+    /// units), neither in parentheses, with no line terminator between `async` and the `(` of
+    /// its arguments (`CoverCallExpressionAndAsyncArrowHead`, refined as `AsyncArrowHead`).
+    fn is_async_head(&self, left: ExprId, start: Span) -> bool {
+        let Some(node) = self.expr_node(left) else {
+            return false;
+        };
+        if node.parenthesized {
+            return false;
+        }
+        match &node.expr {
+            Expr::Identifier(_) => node.span.start != start.start,
+            Expr::Call { callee, .. } => self.expr_node(*callee).is_some_and(|c| {
+                !c.parenthesized
+                    && matches!(&c.expr, Expr::Identifier(n) if n == "async")
+                    && c.span.end.saturating_sub(c.span.start) == 5
+                    && self.first_outside_comments(c.span.end, node.span.end, b'(') == Some(false)
+            }),
+            _ => false,
+        }
+    }
+
+    /// Whether the code unit `unit` stands in the source from `from` to `to` outside a comment,
+    /// a gap between two tokens the parser read (white space and comments) and the punctuator
+    /// `unit`: at its first place there, `Some(true)` when a line terminator
+    /// (`#sec-line-terminators`, one inside a comment included) comes before it and
+    /// `Some(false)` when none does; `None` when it stands nowhere there.
+    fn first_outside_comments(&self, from: u32, to: u32, unit: u8) -> Option<bool> {
+        let text = self.src.get(from as usize..to as usize)?;
+        let is_line_terminator = |c: u16| matches!(c, 0x000A | 0x000D | 0x2028 | 0x2029);
+        let (slash, star) = (u16::from(b'/'), u16::from(b'*'));
+        let mut newline = false;
+        let mut i = 0;
+        while let Some(&c) = text.get(i) {
+            let next = text.get(i + 1).copied();
+            if c == u16::from(unit) {
+                return Some(newline);
+            }
+            if c == slash && next == Some(star) {
+                i += 2;
+                while let Some(&c) = text.get(i) {
+                    if c == star && text.get(i + 1) == Some(&slash) {
+                        break;
+                    }
+                    newline |= is_line_terminator(c);
+                    i += 1;
+                }
+                i += 2;
+                continue;
+            }
+            if c == slash && next == Some(slash) {
+                while text.get(i).is_some_and(|&c| !is_line_terminator(c)) {
+                    i += 1;
+                }
+                continue;
+            }
+            newline |= is_line_terminator(c);
+            i += 1;
+        }
+        None
     }
 
     /// `ArrowParameters` from the operand `left` before `=>`: a `BindingIdentifier` (an
@@ -421,16 +534,19 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// refinement): an identifier, an object or array literal read again as a binding pattern,
     /// or an assignment with `=` to either (a parameter with its initializer), or a comma
     /// expression of those, none in parentheses of its own, the last one possibly the rest
-    /// element the cover read ([`Parser::cover_rest`]); or the empty list of `()`. `async`
-    /// before parentheses is an async arrow, refused.
+    /// element the cover read ([`Parser::cover_rest`]); or the empty list of `()`. For an
+    /// `async` arrow function (`asynchronous`, [`Parser::is_async_head`]) the identifier after
+    /// `async`, or the arguments of the call of `async` read the same way as
+    /// `ArrowFormalParameters[~Yield, +Await]` ([`Parser::async_arguments`]), the call and its
+    /// callee being the first reading too.
     /// The names move from the expression's nodes into the list; with no initializer and no
     /// pattern the nodes of the first reading are dropped and what they own credited, otherwise
     /// they stay in the arena, unreferenced but by the initializers' and the patterns' own, and
-    /// the list of the comma expression is credited. Answers the names, the
+    /// the list of the comma expression or of the arguments is credited. Answers the names, the
     /// initializers (empty when there is none) and whether the last name is a rest parameter;
     /// the growth of each list is charged first.
     #[inline(never)]
-    fn arrow_parameters(&mut self, left: ExprId, start: Span) -> R<ArrowParameters> {
+    fn arrow_parameters(&mut self, left: ExprId, asynchronous: bool) -> R<ArrowParameters> {
         let elements = match self.expr_node(left) {
             Some(n) => match &n.expr {
                 Expr::Identifier(_) => Some(1),
@@ -440,26 +556,31 @@ impl<'a, 'm> Parser<'a, 'm> {
                 } if n.parenthesized => Some(1),
                 Expr::Sequence(list) if n.parenthesized => Some(list.len()),
                 Expr::Object(_) | Expr::Array(_) | Expr::Spread(_) if n.parenthesized => Some(1),
+                Expr::Call { arguments, .. } if asynchronous => Some(arguments.len()),
                 _ => None,
             },
             None => return self.unexpected(),
         };
         let Some(elements) = elements else {
-            return self.arrow_refusal(left, start);
+            return self.unexpected();
         };
-        let mut mark = left;
+        let mut mark = if asynchronous {
+            self.async_arguments(left)?
+        } else {
+            left
+        };
         let mut defaults = false;
         let mut patterns = false;
         for i in 0..elements {
             let e = self.arrow_element(left, i);
             mark = mark.min(e);
             // `left` itself is in no parentheses or in the one pair of the cover; an operand of
-            // the cover's comma expression is in none.
+            // the cover's comma expression and an argument are in none.
             let (element, bare) = self.expr_node(e).map_or((Element::Other, false), |n| {
                 (self.element(n), !n.parenthesized)
             });
             if element == Element::Other || !(bare || e == left) {
-                return self.arrow_refusal(e, start);
+                return self.unexpected();
             }
             defaults |= matches!(element, Element::Default | Element::PatternDefault);
             patterns |= matches!(element, Element::Pattern | Element::PatternDefault);
@@ -508,7 +629,13 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
         if defaults || patterns {
             let m = self.m;
-            if let Some(Expr::Sequence(list)) = self.expr_mut(left) {
+            if let Some(
+                Expr::Sequence(list)
+                | Expr::Call {
+                    arguments: list, ..
+                },
+            ) = self.expr_mut(left)
+            {
                 m.release(std::mem::take(list));
             }
         } else {
@@ -517,10 +644,57 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok((params, initializers, rest))
     }
 
+    /// The arguments of the operand `left` before the `=>` of an `async` arrow function, when it
+    /// is the call of `async`, read as `ArrowFormalParameters`: a spread argument is the
+    /// `FunctionRestParameter`, so it stands last, with no comma after it, and spreads a
+    /// `BindingIdentifier` or a literal a `BindingPattern` covers, neither in parentheses nor
+    /// with an initializer (`#sec-async-arrow-function-definitions`, `AsyncArrowHead`;
+    /// `#sec-function-definitions`). Answers the first node of the first reading: the callee
+    /// `async` of the call, or `left` itself.
+    #[inline(never)]
+    fn async_arguments(&mut self, left: ExprId) -> R<ExprId> {
+        let Some(Expr::Call { callee, arguments }) = self.expr_node(left).map(|n| &n.expr) else {
+            return Ok(left);
+        };
+        let call_end = self.expr_span(left).end;
+        let last = arguments.len().saturating_sub(1);
+        let misplaced = arguments.iter().enumerate().find_map(|(i, &a)| {
+            let node = self.expr_node(a)?;
+            let Expr::Spread(target) = &node.expr else {
+                return None;
+            };
+            let binds = self.expr_node(*target).is_some_and(|t| {
+                !t.parenthesized
+                    && matches!(
+                        t.expr,
+                        Expr::Identifier(_) | Expr::Object(_) | Expr::Array(_)
+                    )
+            });
+            let comma = self
+                .first_outside_comments(node.span.end, call_end, b',')
+                .is_some();
+            (i != last || !binds || comma).then_some(node.span)
+        });
+        let callee = *callee;
+        if let Some(span) = misplaced {
+            return self.fail_at(REST_NOT_LAST, span);
+        }
+        Ok(callee)
+    }
+
     /// What the element node `n` of an operand before `=>` is as a parameter.
     fn element(&self, n: &ExprNode) -> Element {
         match &n.expr {
             Expr::Identifier(_) => Element::Name,
+            // The spread of an identifier, the rest parameter among the arguments of the call
+            // of `async` before an `async` arrow function's `=>` ([`Parser::async_arguments`]).
+            Expr::Spread(target)
+                if self
+                    .expr_node(*target)
+                    .is_some_and(|t| matches!(t.expr, Expr::Identifier(_))) =>
+            {
+                Element::Name
+            }
             // A spread is the cover's rest element of a pattern ([`Parser::cover_rest`]).
             Expr::Object(_) | Expr::Array(_) | Expr::Spread(_) => Element::Pattern,
             Expr::Assign {
@@ -558,32 +732,17 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// The `i`th element of the operand `left` read as parameters: `left` itself, or the `i`th
-    /// operand of the comma expression it is.
+    /// operand of the comma expression it is, or the `i`th argument of the call of `async` it
+    /// is.
     fn arrow_element(&self, left: ExprId, i: usize) -> ExprId {
         match self.expr_node(left).map(|n| &n.expr) {
-            Some(Expr::Sequence(list)) => list.get(i).copied().unwrap_or(left),
+            Some(
+                Expr::Sequence(list)
+                | Expr::Call {
+                    arguments: list, ..
+                },
+            ) => list.get(i).copied().unwrap_or(left),
             _ => left,
-        }
-    }
-
-    /// The error of the element `e` of an operand before `=>` that is no `ArrowParameters`:
-    /// the refusal a later story lifts (`async function` for a call of `async`), or the `=>`
-    /// unexpected.
-    #[inline(never)]
-    fn arrow_refusal<T>(&mut self, e: ExprId, start: Span) -> R<T> {
-        let Some(node) = self.expr_node(e) else {
-            return self.unexpected();
-        };
-        match &node.expr {
-            Expr::Call { callee, .. }
-                if !node.parenthesized
-                    && self.expr_node(*callee).is_some_and(|c| {
-                        !c.parenthesized && matches!(&c.expr, Expr::Identifier(n) if n == "async")
-                    }) =>
-            {
-                self.refuse_at("async function", 10, start)
-            }
-            _ => self.unexpected(),
         }
     }
 
@@ -604,10 +763,12 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// `FunctionBody` in braces, whose directive prologue may make the function strict, or an
     /// `ExpressionBody`, an `AssignmentExpression` with `in` as the context allows, held as one
     /// `return` statement. Either has [Yield] cleared (`ConciseBody`, `ExpressionBody[?In,
-    /// ~Await]` of `AssignmentExpression[?In, ~Yield, ?Await]`, `FunctionBody[~Yield, ~Await]`).
+    /// ~Await]` of `AssignmentExpression[?In, ~Yield, ?Await]`, `FunctionBody[~Yield, ~Await]`),
+    /// and [Await] set for an `async` arrow function and cleared for every other
+    /// (`AsyncConciseBody`, `ExpressionBody[?In, +Await]`, `AsyncFunctionBody`).
     fn arrow_body(&mut self, id: FunctionId, no_in: bool) -> R<()> {
         self.enter()?;
-        self.save_yield(false)?;
+        self.open_arrow_body(id)?;
         let outer = self.strict;
         if self.is(Punct::LBrace) {
             self.advance()?;
@@ -620,6 +781,15 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
         self.leave();
         Ok(())
+    }
+
+    /// Saves the [Yield] and [Await] around the body of the arrow function `id` and sets its
+    /// own: [Yield] cleared, [Await] set when it is an `async` arrow function. Not inlined, so
+    /// that the look at the function stays out of the frame of [`Parser::arrow_body`].
+    #[inline(never)]
+    fn open_arrow_body(&mut self, id: FunctionId) -> R<()> {
+        let asynchronous = self.ast.function(id).is_some_and(|f| f.asynchronous);
+        self.save_context(false, asynchronous)
     }
 
     /// The body of the arrow function `id` from its `ExpressionBody` `e`: one `return`
@@ -675,4 +845,84 @@ enum Element {
     PatternDefault,
     /// Anything else, no parameter.
     Other,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{Expr, ExprId, FunctionKind};
+    use crate::ledger::{Counting, HeapBytes, Meter};
+
+    /// The parser's tree of `async` functions and arrow functions, which no entry answers while
+    /// the refusal of slice 10 stands: each function is `asynchronous` and its span, its source
+    /// text (`#sec-function.prototype.tostring`), starts at its `async`; an `await` in one is an
+    /// AwaitExpression; the parse holds the refusal at the first `async` of the source; and what
+    /// the ledger holds after the parse is the tree's capacity, so the first reading of each
+    /// arrow function's head, the call of `async` and its arguments, was credited.
+    #[test]
+    fn async_functions_start_at_async_and_hold_the_refusal_of_slice_10() {
+        let text = "x = 1;\n\
+                    var f = async function g(a) { return await a; }, \
+                    h = async (b, ...c) => b, i = async d => await d;\n\
+                    async function j() { var k = async (e = 0, { m }) => e; }";
+        let source: Vec<u16> = text.encode_utf16().collect();
+        let mut ledger = Counting::default();
+        let meter = Meter::new(&mut ledger);
+        let parsed = match super::super::parse(&source, 1_000, &meter) {
+            Ok(parsed) => parsed,
+            Err(error) => panic!("{error:?}"),
+        };
+        let functions = parsed.ast.functions();
+        let texts: Vec<String> = functions
+            .iter()
+            .map(|f| String::from_utf16_lossy(&source[f.span.start as usize..f.span.end as usize]))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                "async function g(a) { return await a; }",
+                "async (b, ...c) => b",
+                "async d => await d",
+                "async function j() { var k = async (e = 0, { m }) => e; }",
+                "async (e = 0, { m }) => e",
+            ]
+        );
+        let kinds: Vec<FunctionKind> = functions.iter().map(|f| f.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                FunctionKind::Expression,
+                FunctionKind::Arrow,
+                FunctionKind::Arrow,
+                FunctionKind::Declaration,
+                FunctionKind::Arrow,
+            ]
+        );
+        assert!(functions.iter().all(|f| f.asynchronous && !f.generator));
+        let names: Vec<&str> = functions[1]
+            .parameter_names()
+            .map(|n| n.name.as_str())
+            .collect();
+        assert_eq!(names, ["b", "c"]);
+        assert!(functions[1].rest && functions[1].initializers.is_empty());
+        assert_eq!(functions[4].params.len(), 2);
+        assert!(functions[4].initializers[0].is_some() && functions[4].initializers[1].is_none());
+        let awaits = (0..)
+            .map_while(|i| parsed.ast.expr(ExprId(i)))
+            .filter(|n| matches!(n.expr, Expr::Await(_)))
+            .count();
+        assert_eq!(awaits, 2);
+        let held = parsed
+            .held
+            .as_ref()
+            .map(|e| (e.message.as_str(), e.line, e.column));
+        assert_eq!(
+            held,
+            Some(("async function is not supported before slice 10", 2, 9))
+        );
+        let tree = parsed
+            .ast
+            .heap_bytes()
+            .saturating_add(parsed.body.heap_bytes());
+        assert_eq!(meter.held(), tree, "held against the tree");
+    }
 }

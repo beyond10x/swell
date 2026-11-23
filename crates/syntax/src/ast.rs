@@ -426,6 +426,10 @@ pub enum Expr {
         argument: Option<ExprId>,
         delegate: bool,
     },
+    /// An AwaitExpression (`#sec-async-function-definitions`), `await UnaryExpression`, where
+    /// the grammar's [Await] is set: in the parameters or the body of an `async` function or
+    /// arrow function.
+    Await(ExprId),
 }
 
 /// One template string of a `TemplateLiteral` (`#sec-templatestring`), as UTF-16 code units:
@@ -670,7 +674,8 @@ pub struct Scope {
 
 /// A `FunctionDeclaration`, `FunctionExpression`, an accessor or method of an object literal, or
 /// an `ArrowFunction`; a `GeneratorDeclaration` or `GeneratorExpression` is a declaration or an
-/// expression with `generator`.
+/// expression with `generator`, an `AsyncFunctionDeclaration`, `AsyncFunctionExpression` or
+/// `AsyncArrowFunction` one with `asynchronous`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Function {
     pub kind: FunctionKind,
@@ -678,6 +683,11 @@ pub struct Function {
     /// Whether the function is a generator (`function*`, `#sec-generator-function-definitions`):
     /// its parameters and body have the [Yield] parameter of the grammar.
     pub generator: bool,
+    /// Whether the function is an `async` function or arrow function
+    /// (`#sec-async-function-definitions`, `#sec-async-arrow-function-definitions`): its
+    /// parameters and body have the [Await] parameter of the grammar, and its span starts at
+    /// its `async`.
+    pub asynchronous: bool,
     /// The FormalParameters, one per parameter in order, each a `BindingIdentifier` or an
     /// ObjectBindingPattern, the rest parameter last (`#sec-function-definitions`).
     pub params: Vec<BindingTarget>,
@@ -1008,7 +1018,8 @@ impl HeapBytes for Expr {
             | Expr::OptionalChain(_)
             | Expr::OptionalIndex { .. }
             | Expr::Spread(_)
-            | Expr::Yield { .. } => 0,
+            | Expr::Yield { .. }
+            | Expr::Await(_) => 0,
             Expr::Identifier(name) => name.heap_bytes(),
             Expr::Number(n) => n.heap_bytes(),
             Expr::String(s) => s.heap_bytes(),
@@ -1219,7 +1230,7 @@ impl Expr {
                     }
                 }
             }
-            Expr::Spread(e) => f(Child::Expr(*e)),
+            Expr::Spread(e) | Expr::Await(e) => f(Child::Expr(*e)),
             Expr::Yield { argument, .. } => {
                 if let Some(e) = argument {
                     f(Child::Expr(*e));

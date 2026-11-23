@@ -670,6 +670,9 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 delegate: false,
             } => self.yield_expression(*argument, span, &mut t)?,
             Expr::Yield { delegate: true, .. } => return Err(malformed("a yield* expression")),
+            // An AwaitExpression stands only in an `async` function, and the parse of a source
+            // with one ends on the refusal of slice 10: never a parsed script.
+            Expr::Await(_) => return Err(malformed("an await expression")),
         }
         Ok(t)
     }
