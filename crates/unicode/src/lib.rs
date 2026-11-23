@@ -4,9 +4,18 @@
 //! and checked against a regeneration by the gate (`task unicode-tables-check`).
 //!
 //! Slice 1 takes one table early (design, section 12, "A part before its slice"): `Zs`, for
-//! `WhiteSpace` (`#sec-white-space`). Slice 5 adds the others beside it.
+//! `WhiteSpace` (`#sec-white-space`). Slice 5 adds the others beside it: the case tables of
+//! `UnicodeData.txt`, `SpecialCasing.txt` and `DerivedCoreProperties.txt` and their lookups
+//! ([`to_lowercase`], [`to_uppercase`], [`final_sigma_lowercase`], [`is_cased`],
+//! [`is_case_ignorable`]), for the case methods of `String.prototype`
+//! (`#sec-string.prototype.tolowercase`).
 
+mod case;
 mod tables;
+
+pub use case::{
+    CaseMapping, final_sigma_lowercase, is_case_ignorable, is_cased, to_lowercase, to_uppercase,
+};
 
 /// Whether `c` has the General_Category `Space_Separator` (`Zs`), the code points `WhiteSpace`
 /// admits through `USP` (`#sec-white-space`). Any `u32` may be asked; a value above U+10FFFF is
