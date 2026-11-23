@@ -276,6 +276,14 @@ Ahead of them, by the organization's rule that a test step over its budget is fi
 next feature: `story:gate-test-steps-cost-half` (the gate's test steps cost about 300 CPU
 seconds and passed their 120 s of wall time in one of five runs on 2026-11-23).
 
+**Delivered so far.** [Wave 1](slice-05-wave-1.md), 2026-11-23, release `0.6.0`: the orders 1
+to 3 of the table, `story:gate-test-steps-cost-half` (about 270 CPU seconds; the 150 of its
+goal are not met, and the floor is stated in the story), and two stories the plan did not
+have, `story:matcher-work-bounded-by-its-steps` and
+`story:pattern-parser-work-linear-in-its-pattern`: 1,327 of the 2,724 cases of the slice pass
+(`test262-slice 05 2724 5441 0 0 2724 1327 1397 0`). The orders 4 to 8 are open; the two
+stories of order 4 are being built.
+
 ## What later slices take over
 
 Findings of delivered waves that belong to a slice not yet decomposed. The decomposition of
