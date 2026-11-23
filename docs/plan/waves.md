@@ -281,8 +281,10 @@ to 3 of the table, `story:gate-test-steps-cost-half` (about 270 CPU seconds; the
 goal are not met, and the floor is stated in the story), and two stories the plan did not
 have, `story:matcher-work-bounded-by-its-steps` and
 `story:pattern-parser-work-linear-in-its-pattern`: 1,327 of the 2,724 cases of the slice pass
-(`test262-slice 05 2724 5441 0 0 2724 1327 1397 0`). The orders 4 to 8 are open; the two
-stories of order 4 are being built.
+(`test262-slice 05 2724 5441 0 0 2724 1327 1397 0`). [Wave 2](slice-05-wave-2.md), release
+`0.7.0`: `regexp-symbol-methods-and-string-match-search` of order 4, with which all twelve
+regular expressions of the consumer answer and 1,667 cases pass. Open: property escapes of
+order 4 and `regexp-match-all-and-escape` of order 5, both being built, and the orders 5 to 8.
 
 ## What later slices take over
 

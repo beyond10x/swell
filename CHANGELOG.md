@@ -65,6 +65,11 @@ stories of the fifth delivery slice.
   this commit; none is pending for the four delivered slices or for the fifth. 14 of the 58
   scenarios of the interface's model pass on the engine, and the other 44 name what they
   wait for. The interface will change before 1.0.
+- The engine's own tests: `17 test binaries: 1104 passed, 0 failed, 1 ignored`, the tests of
+  the engine crate in the mode that collects garbage at every safe point
+  (`test-collect: 2 test binaries: 864 passed, 0 failed, 1 ignored`), and the test of an
+  injected engine fault (`test-faults: 1 test binaries: 1 passed, 0 failed, 695 ignored`; the
+  695 are the tests that step's filter leaves out).
 - No binary, no command line, and the crates are not on a package registry. To use the
   library, depend on the repository at the tag:
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.7.0" }`.
