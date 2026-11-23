@@ -16,7 +16,9 @@
 //! (`#sec-destructuring-binding-patterns`); a `CoverInitializedName` stands only there. An array
 //! literal is read again the same way, as an ArrayAssignmentPattern or an ArrayBindingPattern,
 //! its spread element last as the rest element; a spread element stands in an array literal and
-//! among the arguments of a call or `new` (`#sec-argument-lists`).
+//! among the arguments of a call or `new` (`#sec-argument-lists`). Slice 7 adds the
+//! YieldExpression (`#sec-generator-function-definitions`) at the level of an
+//! `AssignmentExpression` where [Yield] is set; elsewhere `yield` is an identifier.
 //!
 //! Refused, each with its slice: `**` and `**=` (4), generator methods (7), `class`, `super`,
 //! `new.target` (8), `async` functions and
@@ -215,8 +217,12 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// `AssignmentExpression` (`#sec-assignment-operators`), with the conditional operator
-    /// (`#sec-conditional-operator`).
+    /// (`#sec-conditional-operator`); where [Yield] is set, a `yield` written without an escape
+    /// is a YieldExpression ([`Parser::yield_expression`]).
     pub(super) fn assignment(&mut self, no_in: bool) -> R<ExprId> {
+        if self.at_yield() {
+            return self.yield_expression(no_in);
+        }
         self.enter()?;
         let start = self.start();
         let left = self.binary(no_in)?;
@@ -228,6 +234,99 @@ impl<'a, 'm> Parser<'a, 'm> {
         };
         self.leave();
         Ok(e)
+    }
+
+    /// Whether the current token begins a YieldExpression: `yield` written without an escape
+    /// where [Yield] is set. Not inlined, so that the comparison of the name stays out of the
+    /// frame of [`Parser::assignment`], which every nesting of an expression holds.
+    #[inline(never)]
+    fn at_yield(&self) -> bool {
+        self.yields && self.is_name("yield")
+    }
+
+    /// `YieldExpression[In, Await]` (`#sec-generator-function-definitions`) at the current
+    /// `yield`: `yield` alone when a line terminator follows it or the next token cannot begin
+    /// an `AssignmentExpression`, `yield AssignmentExpression[?In, +Yield, ?Await]`, or, with no
+    /// line terminator before the `*`, `yield * AssignmentExpression[?In, +Yield, ?Await]`.
+    ///
+    /// [`Parser::assignment`] hands the `yield` over before its own entry of the depth counter,
+    /// so that the test stays out of its frame, which every nesting of an expression holds; this
+    /// function enters the counter twice, once for the `AssignmentExpression` it stands as and
+    /// once for itself, and so a nesting of `yield` takes two levels, as the frames of the two
+    /// functions on its path do.
+    #[inline(never)]
+    fn yield_expression(&mut self, no_in: bool) -> R<ExprId> {
+        self.enter()?;
+        self.enter()?;
+        let start = self.start();
+        self.advance()?;
+        let delegate = self.yield_delegate()?;
+        let argument = if delegate || self.starts_yield_operand() {
+            Some(self.assignment(no_in)?)
+        } else {
+            None
+        };
+        let e = self.make(Expr::Yield { argument, delegate }, start)?;
+        self.leave();
+        self.leave();
+        Ok(e)
+    }
+
+    /// Whether the token after `yield` is the `*` of `yield *`, on the same line; consumes it.
+    #[inline(never)]
+    fn yield_delegate(&mut self) -> R<bool> {
+        if !self.tok.newline_before && self.is(Punct::Star) {
+            self.advance()?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Whether the current token, after `yield`, is on the same line and can begin an
+    /// `AssignmentExpression`: then it is the operand of the YieldExpression. A `/` or `/=` there
+    /// begins a regular expression literal ([`Parser::primary`] reads it again).
+    fn starts_yield_operand(&self) -> bool {
+        if self.tok.newline_before {
+            return false;
+        }
+        match &self.tok.kind {
+            TokenKind::Name(_)
+            | TokenKind::Number(_)
+            | TokenKind::String(_)
+            | TokenKind::RegExp(_)
+            | TokenKind::NoSubstitutionTemplate(_)
+            | TokenKind::TemplateHead(_) => true,
+            TokenKind::Keyword(k) => matches!(
+                k,
+                Keyword::This
+                    | Keyword::Function
+                    | Keyword::Class
+                    | Keyword::New
+                    | Keyword::Typeof
+                    | Keyword::Void
+                    | Keyword::Delete
+                    | Keyword::Null
+                    | Keyword::True
+                    | Keyword::False
+                    | Keyword::Super
+                    | Keyword::Import
+            ),
+            TokenKind::Punct(p) => matches!(
+                p,
+                Punct::LParen
+                    | Punct::LBracket
+                    | Punct::LBrace
+                    | Punct::Plus
+                    | Punct::Minus
+                    | Punct::Bang
+                    | Punct::Tilde
+                    | Punct::PlusPlus
+                    | Punct::MinusMinus
+                    | Punct::Slash
+                    | Punct::SlashEq
+            ),
+            TokenKind::Eof | TokenKind::TemplateMiddle(_) | TokenKind::TemplateTail(_) => false,
+        }
     }
 
     /// What follows the operand `left` of an assignment expression; refuses `**=`. An object or

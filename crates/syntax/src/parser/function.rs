@@ -1,12 +1,16 @@
 //! Function definitions (15.2, `#sec-function-definitions`), arrow functions (15.3,
-//! `#sec-arrow-function-definitions`) and the accessors and plain methods of object literals
-//! (`#sec-method-definitions`).
+//! `#sec-arrow-function-definitions`), the accessors and plain methods of object literals
+//! (`#sec-method-definitions`) and generator declarations and expressions (15.5,
+//! `#sec-generator-function-definitions`).
 //!
 //! The parameters are a list of `BindingIdentifier`s and binding patterns
 //! (`#sec-destructuring-binding-patterns`), each with an optional `Initializer`, the last
 //! possibly a `FunctionRestParameter` of either, with a trailing comma allowed after a
-//! parameter that is no rest parameter (`#sec-parameter-lists`); generators (7) and `async`
-//! arrows (10) are refused. A
+//! parameter that is no rest parameter (`#sec-parameter-lists`); `async` arrows (10) are
+//! refused. A generator is parsed whole, its parameters and body with [Yield] set, and the
+//! refusal of slice 7 at its `*` is held back to the end of the parse ([`Parser::held`]); the
+//! parameters and body of every other function clear [Yield], but the parameters of an arrow
+//! function, which keep the [Yield] around them. A
 //! function's code is strict mode code when the code around it is or when its body starts with
 //! a Use Strict Directive (`#sec-strict-mode-code`); the parser tracks that while it reads the
 //! body, and the early errors that depend on it are checked afterwards (`src/early.rs`).
@@ -16,6 +20,7 @@ use crate::ast::{
     AssignOp, BindingTarget, Child, Expr, ExprId, ExprNode, Function, FunctionId, FunctionKind,
     Name, PatternKind, Scope, Span, Stmt, StmtId,
 };
+use crate::error::SyntaxError;
 use crate::token::{Keyword, Punct};
 
 impl<'a, 'm> Parser<'a, 'm> {
@@ -37,19 +42,34 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(id)
     }
 
-    /// `function` and the name: numbers the function, so functions are numbered in source order.
+    /// `function`, the `*` of a generator and the name: numbers the function, so functions are
+    /// numbered in source order. The name is read with the [Yield] around it; that it is no
+    /// `yield` where [Yield] is set, or in a GeneratorExpression (`BindingIdentifier[+Yield]`),
+    /// is an early error (`src/early.rs`). The first `*` of the source holds the refusal of
+    /// slice 7 back to the end of the parse.
+    #[inline(never)]
     fn function_head(&mut self, kind: FunctionKind) -> R<FunctionId> {
         let span = self.start();
         self.expect_keyword(Keyword::Function)?;
-        if self.is(Punct::Star) {
-            return self.refuse("generator function", 7);
+        let generator = self.is(Punct::Star);
+        if generator {
+            if self.held.is_none() {
+                let refusal =
+                    SyntaxError::refused("generator function", 7, self.tok.line, self.tok.column);
+                self.held = Some(refusal);
+            }
+            self.advance()?;
         }
         let name = if kind == FunctionKind::Expression && self.is(Punct::LParen) {
             None
         } else {
             Some(self.binding_identifier()?)
         };
-        Ok(self.begin_function(kind, span, name))
+        let id = self.begin_function(kind, span, name);
+        if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {
+            f.generator = generator;
+        }
+        Ok(id)
     }
 
     /// Numbers a function whose first token is at `span`.
@@ -62,6 +82,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.reserve_function(Function {
             kind,
             name,
+            generator: false,
             params: Vec::new(),
             initializers: Vec::new(),
             rest: false,
@@ -90,10 +111,32 @@ impl<'a, 'm> Parser<'a, 'm> {
             .ast
             .function(id)
             .map_or(FunctionKind::Expression, |f| f.kind);
+        self.open_yield(id)?;
         self.parameters(id, kind)?;
         self.expect(Punct::LBrace)?;
         self.functions += 1;
         Ok(self.strict)
+    }
+
+    /// Saves the [Yield] around the function `id` and sets its own for its parameters and body:
+    /// set for a generator, cleared for every other function that reads its parameters here
+    /// (`#sec-generator-function-definitions`, `#sec-function-definitions`,
+    /// `#sec-method-definitions`). [`Parser::function_end`] puts the saved one back.
+    #[inline(never)]
+    fn open_yield(&mut self, id: FunctionId) -> R<()> {
+        let generator = self.ast.function(id).is_some_and(|f| f.generator);
+        self.save_yield(generator)
+    }
+
+    /// Saves the current [Yield] on the parser's list and sets `yields`, the growth of the list
+    /// charged first.
+    #[inline(never)]
+    fn save_yield(&mut self, yields: bool) -> R<()> {
+        let m = self.m;
+        let pushed = m.push(&mut self.outer_yields, self.yields);
+        self.charged(pushed)?;
+        self.yields = yields;
+        Ok(())
     }
 
     /// Reads the `}` of function `id` and records its body, strictness, span and depth.
@@ -110,7 +153,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// Records the body of function `id`, which ends at the previous token, with its
-    /// strictness, span and depth; the code after it has the strictness `outer` again.
+    /// strictness, span and depth; the code after it has the strictness `outer` again, and the
+    /// [Yield] saved as the function opened.
     #[inline(never)]
     fn function_end(
         &mut self,
@@ -120,6 +164,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         use_strict: bool,
     ) -> R<()> {
         self.strict = outer;
+        if let Some(yields) = self.outer_yields.pop() {
+            self.yields = yields;
+        }
         let mut deepest = 0;
         for s in &body {
             deepest = deepest.max(self.ast.depth(Child::Stmt(*s)));
@@ -563,9 +610,11 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// The `ConciseBody` of the arrow function `id` (`#sec-arrow-function-definitions`): a
     /// `FunctionBody` in braces, whose directive prologue may make the function strict, or an
     /// `ExpressionBody`, an `AssignmentExpression` with `in` as the context allows, held as one
-    /// `return` statement.
+    /// `return` statement. Either has [Yield] cleared (`ConciseBody`, `ExpressionBody[?In,
+    /// ~Await]` of `AssignmentExpression[?In, ~Yield, ?Await]`, `FunctionBody[~Yield, ~Await]`).
     fn arrow_body(&mut self, id: FunctionId, no_in: bool) -> R<()> {
         self.enter()?;
+        self.save_yield(false)?;
         let outer = self.strict;
         if self.is(Punct::LBrace) {
             self.advance()?;

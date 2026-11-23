@@ -419,6 +419,13 @@ pub enum Expr {
         strings: Vec<TaggedString>,
         substitutions: Vec<ExprId>,
     },
+    /// A YieldExpression (`#sec-generator-function-definitions`) in the parameters or the body
+    /// of a generator: `yield` with its operand or none, and with `delegate` `yield *` with its
+    /// operand, which it always has.
+    Yield {
+        argument: Option<ExprId>,
+        delegate: bool,
+    },
 }
 
 /// One template string of a `TemplateLiteral` (`#sec-templatestring`), as UTF-16 code units:
@@ -662,11 +669,15 @@ pub struct Scope {
 }
 
 /// A `FunctionDeclaration`, `FunctionExpression`, an accessor or method of an object literal, or
-/// an `ArrowFunction`.
+/// an `ArrowFunction`; a `GeneratorDeclaration` or `GeneratorExpression` is a declaration or an
+/// expression with `generator`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Function {
     pub kind: FunctionKind,
     pub name: Option<Name>,
+    /// Whether the function is a generator (`function*`, `#sec-generator-function-definitions`):
+    /// its parameters and body have the [Yield] parameter of the grammar.
+    pub generator: bool,
     /// The FormalParameters, one per parameter in order, each a `BindingIdentifier` or an
     /// ObjectBindingPattern, the rest parameter last (`#sec-function-definitions`).
     pub params: Vec<BindingTarget>,
@@ -996,7 +1007,8 @@ impl HeapBytes for Expr {
             | Expr::Index { .. }
             | Expr::OptionalChain(_)
             | Expr::OptionalIndex { .. }
-            | Expr::Spread(_) => 0,
+            | Expr::Spread(_)
+            | Expr::Yield { .. } => 0,
             Expr::Identifier(name) => name.heap_bytes(),
             Expr::Number(n) => n.heap_bytes(),
             Expr::String(s) => s.heap_bytes(),
@@ -1208,6 +1220,11 @@ impl Expr {
                 }
             }
             Expr::Spread(e) => f(Child::Expr(*e)),
+            Expr::Yield { argument, .. } => {
+                if let Some(e) = argument {
+                    f(Child::Expr(*e));
+                }
+            }
             Expr::Function(id) => f(Child::Function(*id)),
             Expr::Unary { operand, .. } | Expr::Update { operand, .. } => f(Child::Expr(*operand)),
             Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
