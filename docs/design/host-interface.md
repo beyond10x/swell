@@ -708,7 +708,10 @@ onto the execution context stack", `ecma262:sec-initializehostdefinedrealm`), `p
 realm given, `evaluate_script` the script's ("Set the Realm of scriptContext to
 scriptRecord.[[Realm]]", `ecma262:sec-runtime-semantics-scriptevaluation`),
 `load_requested_modules`, `link` and `evaluate_module` the module's [[Realm]],
-`finish_loading_imported_module` the referrer's, `run_job` the job's. `HookCx` needs none: each of
+`finish_loading_imported_module` the referrer's, `run_job` the job's, and
+`perform_microtask_checkpoint` that of each job it runs while the job runs: a promise job's
+realm, or the realm current when it was queued if its realm is null, and a host microtask's the
+realm it was queued with (decision 11, "A host microtask's realm"; added on 2026-11-23). `HookCx` needs none: each of
 its methods that makes an object names the realm or the prototype. A `Realm` is a root, so the
 answer depends on no collection and no creation order, an agent with no realm cannot reach a call
 that needs one, and a stale or foreign `Realm` answers `Err(StaleHandle)` or `Err(ForeignHandle)`
@@ -880,7 +883,12 @@ step of the draft meets a state its assertions exclude.
 - **Generators and async functions.** A generator that was executing stays `executing`, so a
   later `next` throws: "If state is executing, throw a TypeError exception."
   (`ecma262:sec-generatorvalidate`). An async function or generator cut mid-step leaves its
-  promise pending.
+  promise pending. Added on 2026-11-23 for slice 10 (`engine.md` decision 3, "`async` functions
+  on suspended frames", item 5): an `async` function whose frame was on the stack, in its call or
+  in the job that resumed it, loses its frame (credited), runs no `finally`, and its promise
+  stays pending for good, since nothing can resume it (HOST-195); one suspended at an `await`
+  keeps its frame and a later checkpoint resumes it, unless its job was the one the checkpoint
+  took off last, whose reaction is then spent and leaves its promise pending.
 - **Module evaluation.** Every module on the evaluation stack (status `evaluating`) stays
   `evaluating` and is marked terminated; `evaluate_module` of any module whose graph reaches a
   marked module answers `Err(ModuleTerminated)`. Left unmarked, the next Evaluate would meet
@@ -902,7 +910,10 @@ step of the draft meets a state its assertions exclude.
 - **The microtask checkpoint.** The job that was running was dequeued ("Let oldestMicrotask be
   the result of dequeuing from the event loop's microtask queue", `html:perform-a-microtask-checkpoint`)
   and is not run again; the jobs before it ran; the jobs after it stay queued, in order;
-  ClearKeptObjects is not performed; the next checkpoint starts afresh.
+  ClearKeptObjects is not performed; the next checkpoint starts afresh. Added on 2026-11-23:
+  this holds also when the step refused was the one for taking the job off, so that nothing of
+  it ran, and a promise job whose `host_prepare_to_run_job` was called gets its
+  `host_clean_up_after_job` with `Ok(())` (decision 11, "The checkpoint is one entry").
 - **The interrupt flag** is cleared when it ends a run (decision 12).
 
 Rejected: rolling the heap back (no algorithm for it, and HTML says the script ceases, not
@@ -949,6 +960,8 @@ entry and does not count on what the run left.
 
 **HOST-77** (html:perform-a-microtask-checkpoint) When the third of five queued jobs ends the checkpoint in `Terminated(StepBudget)`, the first two have run, the third never runs again, and the next checkpoint runs the fourth and fifth in order. [slice 10]
 
+**HOST-195** (swell:D10) The script `(async function () { await null; for (;;) {} })()` answers `Normal` with a promise; the next `perform_microtask_checkpoint` answers `Terminated(StepBudget)`, and `promise_state` of that promise reads `Pending` after it and after a later checkpoint, which answers `Normal` with both counts 0. [slice 10]
+
 ## 11. Jobs and the microtask checkpoint
 
 **Promise jobs stay in the agent, in one FIFO microtask queue that also takes host microtasks,
@@ -970,7 +983,7 @@ Why:
   order; a promise queue in the agent beside a host queue would not.
 - One budget per checkpoint: `function f() { Promise.resolve().then(f); } f();` queues a new
   job from each job, each far under any per-job budget; with a budget per job, as decision 9
-  has it, the checkpoint never returns and the host hangs (`AGENTS.md`: "Hostile input must
+  had it until 2026-11-23, the checkpoint never returns and the host hangs (`AGENTS.md`: "Hostile input must
   never hang, crash or exhaust the host").
 - HTML's steps around a promise job ("If job settings is not null, then prepare to run script
   with job settings. ... Let result be job(). ... If result is an abrupt completion, then
@@ -988,8 +1001,8 @@ Why:
 - A checkpoint called while a checkpoint runs returns at once with nothing run: "If the event
   loop's performing a microtask checkpoint is true, then return." (`html:perform-a-microtask-checkpoint`).
 
-Rejected: running jobs through `call` (decision 9's text); a budget per promise job (decision 9's
-"each with the budget"); a promise queue held by the host (the engine could not bound a
+Rejected: running jobs through `call` (decision 9's text until 2026-11-23); a budget per promise
+job (decision 9's "each with the budget", likewise); a promise queue held by the host (the engine could not bound a
 checkpoint, and the host would keep two queues in one order).
 
 ```rust
@@ -1005,10 +1018,12 @@ pub struct CheckpointReport { pub promise_jobs: u64, pub host_microtasks: u64 }
 
 impl<H: Host> Agent<H> {
     pub fn run_job(&mut self, job: Job) -> Result<Outcome<()>, HostError>;
-    pub fn queue_microtask(&mut self, task: Microtask<H>) -> Result<(), HostError>;
+    /// `realm` is the current realm of the microtask while it runs; it is checked first.
+    pub fn queue_microtask(&mut self, realm: &Realm, task: Microtask<H>) -> Result<(), HostError>;
     pub fn perform_microtask_checkpoint(&mut self) -> Result<Outcome<CheckpointReport>, HostError>;
 }
 impl<'a, H: Host> Cx<'a, H> {   // no run_job: a job runs only when no code runs (9.5)
+    /// Queued with the current realm of this `Cx` (decision 7).
     pub fn queue_microtask(&mut self, task: Microtask<H>) -> Result<(), HostError>;
     pub fn perform_microtask_checkpoint(&mut self) -> Completion<CheckpointReport>;
 }
@@ -1029,6 +1044,57 @@ fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Self>, job
 performs its "host-defined steps for reporting the error" (`ecma262:sec-weakref-host-hooks`).
 A dropped `Job` releases its roots. The test262 runner answers `host_enqueue_timeout_job` by
 running the job when the queue is otherwise empty (`engine.md` decision 11).
+
+**A host microtask's realm.** Added on 2026-11-23 for slice 10. A host microtask runs with a
+realm, as every entry does (decision 7): the realm it was queued with is the current realm of
+every call it makes through its `Cx` while it runs. `Agent::queue_microtask` takes that realm
+and checks it first, as `Agent::call` does: a stale or released one answers
+`Err(StaleHandle)`, one of another agent `Err(ForeignHandle)`, and nothing is queued.
+`Cx::queue_microtask` takes the current realm of its `Cx`: inside a host function that
+function's [[Realm]], inside `with_cx` the realm `with_cx` took, inside a host microtask that
+microtask's (HOST-192). Neither call runs code, spends a step or calls a hook; no hook is called
+around a host microtask, whose own code does what the host needs before and after it. The
+queue holds the realm while the microtask is queued. Rejected: a microtask with no realm (a
+`Cx` call in it would have no current realm, which decision 7 excludes); the realm the
+checkpoint was called in (`Agent::perform_microtask_checkpoint` takes none, and one host
+microtask may need another realm than the next).
+
+**The checkpoint is one entry.** Added on 2026-11-23 for slice 10, the rule of `engine.md`
+decision 3, "The microtask checkpoint is one entry". `perform_microtask_checkpoint` is one
+outermost entry: its steps start at 0, and every entry it takes off the queue spends from them,
+one step for taking it off and then what it runs; every promise job queued costs a step more.
+So a checkpoint takes at most `steps_per_entry` entries off the queue, and a job that queues a
+job without end ends it in `Terminated(StepBudget)` (HOST-80). `Cx::perform_microtask_checkpoint`
+inside a host function runs inside the running entry and spends its steps (HOST-193). A
+termination of one job ends the checkpoint with the jobs behind it queued (section 10, HOST-77);
+`host_clean_up_after_job` is called for every promise job whose `host_prepare_to_run_job` was
+called, after a termination with `Ok(())`, and the checkpoint's outcome carries the reason.
+After it the host reads `last_entry_steps()` and `pending_microtasks()`; `Normal` with its
+`CheckpointReport` comes only once the queue is empty (HOST-79, HOST-148). One budget, but a
+scope per job (section 4): a value handed out to host code while a job runs, to a host
+microtask, a hook or a host function the job calls, is valid until that job ends, and the
+`ScriptRef`s `cx.parse_script` handed out in it are held until then; after it, a handle the host
+kept with no `Root` keeps nothing alive, and a collection later in the same checkpoint, or a
+`collect()` after it, frees its record once nothing else reaches it, after which the handle
+answers `Err(StaleHandle)` (HOST-196, as HOST-178 for `with_cx`). A checkpoint therefore holds
+what the running job was handed, not what every job touched.
+
+**What a queued job costs.** Added on 2026-11-23 for slice 10 (`engine.md` decision 4, "Queued
+jobs"). A promise job is charged to the memory budget while it is queued and credited when a
+checkpoint takes it off; everything it holds is traced through the queue, a root. A host
+microtask is not charged: its closure is the host's own storage, bounded by the host's calls,
+and holds the engine values it needs in `Root`s; dropping the agent drops it unrun.
+
+**The hooks of an `await`.** Added on 2026-11-23 for slice 10 (`engine.md` decision 3, "`async`
+functions on suspended frames", item 3). An `await` makes the two functions of the draft's Await
+and hands them to PerformPromiseThen, so the host sees what it sees for a `then`: two calls of
+`host_make_job_callback` per `await`, and for the job that resumes the function
+`host_prepare_to_run_job` with the function's realm, one call of `host_call_job_callback` with one
+of the two functions and the value made for it, and `host_clean_up_after_job` (HOST-194). A
+function of an `await` resumes the activation only while it is suspended at that `await`; called
+at any other time, by a host that kept it, it does nothing and returns `undefined`. Rejected: an
+`await` with no functions and no job-callback hooks, which no script can tell apart but a host
+that implements either hook can.
 
 **HOST-78** (ecma262:sec-hostenqueuepromisejob) Promise jobs and host microtasks run in the order they were queued: a script that queues `then` callbacks a and c with a host microtask b queued between them through a host function records the order a, b, c. [slice 10]
 
@@ -1055,6 +1121,14 @@ running the job when the queue is otherwise empty (`engine.md` decision 11).
 **HOST-89** (html:perform-a-microtask-checkpoint) A `WeakRef` whose target was returned by `deref()` in a job keeps that target through `collect` until the checkpoint that ran the job returns, and the first `collect` after it frees the target when nothing else reaches it. [slice 16]
 
 **HOST-148** (swell:D11) The host can tell which checkpoint spent its budget: with `steps_per_entry` N, a checkpoint after a script that queued three `then` callbacks answers `Normal(CheckpointReport)` with `promise_jobs` 3; the script `function f() { Promise.resolve().then(f); } f();` then answers `Normal`; and the next `perform_microtask_checkpoint` answers `Terminated(StepBudget)` with `last_entry_steps()` at most N. [slice 10]
+
+**HOST-192** (swell:D11) A host microtask runs in the realm it was queued with: one queued by `Agent::queue_microtask` with the second of two realms that calls a value that is not callable through `cx.call` gets a `TypeError` whose prototype is the second realm's `%TypeError.prototype%`; one queued by `cx.queue_microtask` in a host function of the second realm called from a script of the first gets the same; and `Agent::queue_microtask` with a released realm answers `Err(HostError::StaleHandle)`, and with a realm of another agent `Err(HostError::ForeignHandle)`, each queueing nothing (`pending_microtasks()` unchanged). [slice 10]
+
+**HOST-193** (swell:D11) A checkpoint is one outermost entry and spends one step for each entry it takes off the queue: with k host microtasks queued that make no call, `perform_microtask_checkpoint` answers `Normal` with `host_microtasks` k and `last_entry_steps()` then reads k; with nothing queued it answers `Normal` with both counts 0 and `last_entry_steps()` 0; and a script that calls a host function which queues three such microtasks and then calls `cx.perform_microtask_checkpoint` reads, in `last_entry_steps()` after the script, at least 3 steps more than the same script whose host function queues none. [slice 10]
+
+**HOST-196** (swell:D4) A checkpoint holds what a job was handed only until that job ends: of three host microtasks queued in one checkpoint, the first makes a host object with `cx.new_host_object` and the host keeps it as an `ObjectRef` with no root, the second calls through `cx.call` a function whose allocations start a collection, and the third then gets `Err(HostError::StaleHandle)` from `brand` of the kept handle, the checkpoint answering `Normal` with `host_microtasks` 3 and `state()` reading `Alive`. [slice 10]
+
+**HOST-194** (ecma262:await) The script `(async function () { await 1; })()` calls `host_make_job_callback` twice, with two distinct functions, and the checkpoint after it runs one promise job, for which the engine calls `host_prepare_to_run_job` with the script's realm, then `host_call_job_callback` once, with the first of those two functions and the value `host_make_job_callback` returned for it, then `host_clean_up_after_job` with `Ok(())`. [slice 10]
 
 ## 12. Interrupting
 
@@ -1787,9 +1861,10 @@ The coordinator changes these in `engine.md`, which this unit does not edit:
 2. Decision 9, "After EngineFault the agent answers every call with EngineFault": it answers
    `Err(HostError::Faulted)`; the interrupt handle is not a call (decisions 6, 12).
 3. Decision 9, `perform_microtask_checkpoint` "each with the budget": one budget for the whole
-   checkpoint (decision 11).
+   checkpoint (decision 11). Changed in `engine.md` on 2026-11-23.
 4. Decision 9, "Generic and timeout jobs are handed to the host, which runs them through
-   `call`": through `run_job`; cleanup jobs likewise (decision 11).
+   `call`": through `run_job`; cleanup jobs likewise (decision 11). Changed in `engine.md` on
+   2026-11-23.
 5. Decision 9, "the host later calls `finish_loading_imported_module` with the module's source
    or an error": with a `Module` the host parsed, or a thrown value (decision 9).
 6. Decision 9, "a hash and random seed" and "random bytes" from the trait: two seeds, no
