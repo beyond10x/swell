@@ -63,6 +63,8 @@ pub(crate) enum BuiltinId {
     /// The builtins of the iterator objects
     /// (`story:iterator-protocol-and-array-string-iterators`).
     Iterator(crate::builtins::iterator::IteratorBuiltin),
+    /// The builtins of `RegExp` (`story:regexp-objects-exec-and-literals`).
+    RegExp(crate::builtins::regexp::RegExpBuiltin),
 }
 
 /// What a built-in function does when called.
@@ -430,6 +432,7 @@ impl<H: Host> Agent<H> {
             BuiltinId::Iterator(id) => {
                 self.run_iterator_builtin(id, function, this, args, new_target)
             }
+            BuiltinId::RegExp(id) => self.run_regexp_builtin(id, function, this, args, new_target),
         }
     }
 

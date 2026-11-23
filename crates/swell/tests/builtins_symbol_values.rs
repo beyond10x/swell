@@ -457,7 +457,7 @@ fn places_per_function() -> usize {
 /// key (144 functions on the base of `story:symbol-values-in-core-builtins`) is called with a
 /// Symbol as `this` and with a Symbol as its first, second and third argument (`this` the
 /// object that holds it, 0 before the Symbol), 576 calls (288 at the gate count of
-/// [`places_per_function`]), and each call answers or throws a TypeError, but for the seven
+/// [`places_per_function`]), and each call answers or throws a TypeError, but for the twelve
 /// calls below whose clauses throw another error before or without the Symbol: no termination,
 /// and the agent stays alive.
 #[test]
@@ -508,15 +508,21 @@ fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error() {
         })
         .unwrap();
     assert_eq!(agent.state(), AgentState::Alive, "{found:#?}");
-    // The other errors the clauses give, none of them from the Symbol: `JSON.parse` and
+    // The other errors the clauses give, none of them from the Symbol: `RegExp` with the flags
+    // 0, whose ToString "0" is no flag, so the SyntaxError of RegExpInitialize comes before any
+    // Symbol is read (`#sec-regexpinitialize`, steps 5 and 6); `JSON.parse` and
     // `JSON.rawJSON` with no argument parse ToString(undefined), "undefined", which is no JSON
     // text (`#sec-json.parse`, step 2; `#sec-json.rawjson`, step 4); `with` of a Symbol `this`
     // reads the length 0 of its Symbol object, and the index 0 is not below it
     // (`#sec-array.prototype.with`, step 7); `normalize` of `String.prototype` with the form 0,
     // whose ToString "0" is no form name, so the RangeError of the form comes before any Symbol
     // is read (`#sec-string.prototype.normalize`, step 4; `#sec-validatestringoption`); `toString`
-    // of `Number.prototype` with the radix 0 (`#sec-number.prototype.tostring`, step 4).
+    // of `Number.prototype` with the radix 0 (`#sec-number.prototype.tostring`, step 4); and
+    // `[Symbol.replace]` and `[Symbol.split]` of `RegExp.prototype` with the String "0", the
+    // counted refusal of the two methods until
+    // `story:regexp-symbol-methods-and-string-match-search`, which removes them with the methods.
     let expected: Vec<&str> = [
+        ("global.RegExp (argument 3): SyntaxError", 4),
         ("global.JSON.parse (this): SyntaxError", 1),
         ("global.JSON.rawJSON (this): SyntaxError", 1),
         ("global.Array.prototype.with (this): RangeError", 1),
@@ -534,6 +540,22 @@ fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error() {
         ),
         (
             "global.Number.prototype.toString (argument 3): RangeError",
+            4,
+        ),
+        (
+            "global.RegExp.prototype[Symbol(Symbol.replace)] (argument 2): SyntaxError",
+            3,
+        ),
+        (
+            "global.RegExp.prototype[Symbol(Symbol.replace)] (argument 3): SyntaxError",
+            4,
+        ),
+        (
+            "global.RegExp.prototype[Symbol(Symbol.split)] (argument 2): SyntaxError",
+            3,
+        ),
+        (
+            "global.RegExp.prototype[Symbol(Symbol.split)] (argument 3): SyntaxError",
             4,
         ),
     ]

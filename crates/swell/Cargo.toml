@@ -12,6 +12,7 @@ path = "tests/main.rs"
 [dependencies]
 swell-compiler = { path = "../compiler" }
 swell-num = { path = "../num" }
+swell-regexp = { path = "../regexp" }
 swell-syntax = { path = "../syntax" }
 swell-unicode = { path = "../unicode" }
 

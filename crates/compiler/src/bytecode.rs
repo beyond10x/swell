@@ -202,6 +202,15 @@ pub enum Instruction {
     NewObject,
     /// `[] -> [a]`: ArrayCreate(0).
     NewArray,
+    /// `[] -> [r]`: a regular expression literal
+    /// (`#sec-regular-expression-literals-runtime-semantics-evaluation`): RegExpCreate of the
+    /// String constants `strings[body]` and `strings[flags]`, its BodyText and FlagText as
+    /// written, in the current realm; the pattern is parsed and compiled again at each
+    /// evaluation, a step per code unit of the body charged before the parse.
+    NewRegExp {
+        body: u32,
+        flags: u32,
+    },
     /// `[o, v] -> [o]`: CreateDataPropertyOrThrow(o, `strings[k]`, v)
     /// (`#sec-object-initializer-runtime-semantics-propertydefinitionevaluation`).
     DefineField(u32),
@@ -603,6 +612,7 @@ impl Instruction {
             | Instruction::DeleteIndex
             | Instruction::NewObject
             | Instruction::NewArray
+            | Instruction::NewRegExp { .. }
             | Instruction::DefineField(_)
             | Instruction::DefineGetter(_)
             | Instruction::DefineSetter(_)

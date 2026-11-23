@@ -40,6 +40,7 @@ mod lexical;
 mod object_literal;
 mod parameters;
 mod patterns;
+mod regexp;
 mod spread;
 mod template;
 mod templates;

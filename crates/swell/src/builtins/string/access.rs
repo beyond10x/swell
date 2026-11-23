@@ -12,8 +12,9 @@
 //! (`#sec-stringlastindexof`), `slice` (`#sec-string.prototype.slice`), `startsWith`
 //! (`#sec-string.prototype.startswith`), `substring` (`#sec-string.prototype.substring`) and
 //! `toWellFormed` (`#sec-string.prototype.towellformed`); and the operations IsRegExp
-//! (`#sec-isregexp`) and IsStringWellFormedUnicode (`#sec-isstringwellformedunicode`), which no
-//! other file of the base has. The keys follow those of `mod.rs`, in the order of the clauses.
+//! (`#sec-isregexp`, whose step 4 reads the kind of a RegExp object, `object/regexp.rs`) and
+//! IsStringWellFormedUnicode (`#sec-isstringwellformedunicode`), which no other file of the base
+//! has. The keys follow those of `mod.rs`, in the order of the clauses.
 //!
 //! The budgets (`docs/design/engine.md`, decisions 3 and 5): every String a method makes is
 //! built by [`StringBuilder`], so it is bounded by `string_length` and its copy is charged a
@@ -232,9 +233,11 @@ impl<H: Host> Agent<H> {
         if !matches!(matcher, Value::Undefined) {
             return self.to_boolean(matcher);
         }
-        // 4. If arg has a [[RegExpMatcher]] internal slot, return true: no object has one before
-        // RegExp (slice 5). 5. Return false.
-        Ok(false)
+        // 4. If arg has a [[RegExpMatcher]] internal slot, return true. 5. Return false.
+        Ok(matches!(
+            self.engine_object(object)?.kind,
+            crate::object::ObjectKind::RegExp(_)
+        ))
     }
 
     /// Steps 4 to 6 of `endsWith`, `includes` and `startsWith`, for the method `method`: "Let

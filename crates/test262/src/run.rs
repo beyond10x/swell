@@ -474,8 +474,9 @@ fn attempt(
         None => (end, false),
     };
     // So does every refusal the engine counted while the scripts ran (decision 11,
-    // "Refusals"; `host-interface.md` section 13): `eval`, `Function`, `$262.evalScript` or a
-    // regular expression literal, caught by the case or not.
+    // "Refusals"; `host-interface.md` section 13): `eval`, `Function`, `$262.evalScript`, or
+    // `RegExp` and a regular expression literal of a construct a later story of slice 5 brings,
+    // caught by the case or not.
     let counted = before.map_or(0, |before| agent.refusals().saturating_sub(before));
     let end = if counted > 0 {
         End::counted_refusal(end, counted, marked)

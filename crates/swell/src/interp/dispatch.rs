@@ -184,7 +184,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// The String constant `index` of the running frame's code.
-    fn constant_string(&mut self, index: u32) -> Completion<StringRef> {
+    pub(super) fn constant_string(&mut self, index: u32) -> Completion<StringRef> {
         let position = usize::try_from(index).unwrap_or(usize::MAX);
         let found = self.top_frame()?.compiled.strings.get(position).copied();
         match found {
@@ -295,6 +295,7 @@ impl<H: Host> Agent<H> {
             // ---- literals ----
             I::NewObject => self.new_object_literal(),
             I::NewArray => self.new_array_literal(),
+            I::NewRegExp { body, flags } => self.new_regexp(body, flags),
             I::DefineField(index) => self.define_field(index),
             I::DefineGetter(index) => self.define_accessor(index, true),
             I::DefineSetter(index) => self.define_accessor(index, false),
@@ -962,7 +963,7 @@ impl<H: Host> Agent<H> {
         Err(Abrupt::Throw(value))
     }
 
-    /// `ThrowSyntaxError(k)`; a refusal (the regular expression literal before slice 5) is
+    /// `ThrowSyntaxError(k)`; a refusal of a later slice is
     /// counted ([`Agent::refusals`]).
     fn throw_syntax_error(&mut self, index: u32) -> Completion<Flow> {
         let message = self.constant_text(index);

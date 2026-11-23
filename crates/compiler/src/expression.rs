@@ -24,7 +24,6 @@
 //! value under a handler of its own ([`HandlerKind::Pattern`]).
 
 use swell_num::literal::numeric_literal;
-use swell_syntax::REGEXP_REFUSAL;
 use swell_syntax::ast::{
     AssignOp, BinaryOp, Expr, ExprId, FunctionKind, LogicalOp, PatternElement, PatternKind,
     PatternProperty, PatternTarget, Property, PropertyKey, PropertyValue, Span, UnaryOp, UpdateOp,
@@ -278,10 +277,12 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 t.push(emit(Instruction::Number(self.number(value)?)))?;
             }
             Expr::String(s) => t.push(emit(Instruction::String(self.string_units(&s.value)?)))?,
-            Expr::RegExp(_) => {
-                t.push(emit(Instruction::ThrowSyntaxError(
-                    self.string(REGEXP_REFUSAL)?,
-                )))?;
+            // `#sec-regular-expression-literals-runtime-semantics-evaluation`: RegExpCreate of
+            // the BodyText and the FlagText, as written, at each evaluation.
+            Expr::RegExp(literal) => {
+                let body = self.string_units(&literal.body)?;
+                let flags = self.string_units(&literal.flags)?;
+                t.push(emit(Instruction::NewRegExp { body, flags }))?;
             }
             // `#sec-array-initializer-runtime-semantics-evaluation` and ArrayAccumulation
             // (`#sec-runtime-semantics-arrayaccumulation`): a run of elisions sets the length to

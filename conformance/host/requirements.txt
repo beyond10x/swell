@@ -140,7 +140,7 @@ HOST-139 test swell::eval::host_139_direct_eval_past_parser_nesting_throws_a_cat
 HOST-140 test swell::eval::host_140_indirect_eval_past_parser_nesting_throws_a_syntax_error
 HOST-141 test swell::dynamic_function::host_141_function_past_parser_nesting_throws_a_catchable_syntax_error
 HOST-142 test swell::regexp_literal_limits::host_142_a_literal_past_parser_nesting_is_a_parse_error_naming_it
-HOST-143 pending slice 5
+HOST-143 test swell::regexp_objects::host_143_a_pattern_past_parser_nesting_throws_a_catchable_syntax_error
 HOST-144 pending slice 4
 HOST-145 test swell::lib::heap::map::tests::host_145_hash_is_keyed_by_hash_key_alone
 HOST-146 test swell::source_scan::host_146_only_agent_new_takes_seeds
@@ -188,4 +188,4 @@ HOST-187 test swell::host_objects::host_187_a_realm_of_300_host_functions_and_40
 HOST-188 test swell::termination::host_188_calls_that_take_no_memory_answer_with_a_room_of_0
 HOST-189 test swell::termination::host_189_190_one_runs_after_a_memory_budget_termination_once_the_host_made_room
 HOST-190 test swell::termination::host_189_190_one_runs_after_a_memory_budget_termination_once_the_host_made_room
-HOST-191 pending slice 5
+HOST-191 test swell::regexp_refusals::host_191_regexp_counts_its_refusals_of_slice_5

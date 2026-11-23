@@ -4,6 +4,8 @@
 //! the record with [[Prototype]], the kinds, and the collector's kind site with its host object
 //! arm; `story:object-model-and-realms` adds [[Extensible]], the properties, the internal methods
 //! and their dispatch arms, and one marking arm per kind beside them.
+//! `story:regexp-objects-exec-and-literals` adds the RegExp kind (`object/regexp.rs`), which owns
+//! the program of its pattern.
 //!
 //! Every kind but the Array, String and arguments exotic objects uses the ordinary internal
 //! methods (`object/ordinary.rs`); host objects too, until the overrides of slice 9. [[Call]] and
@@ -34,6 +36,7 @@ pub(crate) mod builtin_function;
 pub(crate) mod ecmascript_function;
 pub(crate) mod ordinary;
 pub(crate) mod property;
+pub(crate) mod regexp;
 pub(crate) mod string;
 
 use std::cell::Cell;
@@ -51,6 +54,7 @@ use builtin_function::BuiltinFunction;
 use ecmascript_function::EcmascriptFunction;
 use ordinary::Ordinary;
 use property::{Descriptor, Key, Properties, Property, Room, sort_indices};
+use regexp::RegExpObject;
 use string::StringObject;
 
 /// The bytes of a list of `count` property keys: what every list of keys is charged.
@@ -174,6 +178,8 @@ pub(crate) enum ObjectKind {
     EcmascriptFunction(EcmascriptFunction),
     /// A host object (`docs/design/host-interface.md`, decision 15).
     Host(HostObject),
+    /// A RegExp object (22.2.7), `story:regexp-objects-exec-and-literals`.
+    RegExp(RegExpObject),
 }
 
 /// Which kind an object is, for the dispatch.
@@ -188,6 +194,7 @@ pub(crate) enum KindTag {
     BoundFunction,
     EcmascriptFunction,
     Host,
+    RegExp,
 }
 
 impl ObjectRecord {
@@ -219,6 +226,7 @@ impl ObjectRecord {
             ObjectKind::BoundFunction(function) => function.trace(mark),
             ObjectKind::EcmascriptFunction(function) => function.trace(mark),
             ObjectKind::Host(host) => host.trace(mark),
+            ObjectKind::RegExp(regexp) => regexp.trace(mark),
         }
     }
 
@@ -236,6 +244,7 @@ impl ObjectRecord {
             ObjectKind::BoundFunction(_) => KindTag::BoundFunction,
             ObjectKind::EcmascriptFunction(_) => KindTag::EcmascriptFunction,
             ObjectKind::Host(_) => KindTag::Host,
+            ObjectKind::RegExp(_) => KindTag::RegExp,
         }
     }
 }

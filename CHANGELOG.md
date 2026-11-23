@@ -12,15 +12,24 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- Regular expressions: the literal, evaluated to a new object each time, and `RegExp` with
+  `exec`, `test`, `toString`, `lastIndex` and the accessors `flags`, `source`, `global`,
+  `hasIndices`, `ignoreCase`, `multiline`, `dotAll`, `sticky`, `unicode` and `unicodeSets`;
+  named groups, lookbehind, match indices, the flags `d`, `g`, `m`, `s`, `u` and `y` and the
+  modifiers `m` and `s`. The new crate `swell-regexp` parses a pattern, compiles it and
+  matches it by backtracking with an explicit stack; a match spends the steps and the memory
+  of its entry, so `/(a+)+$/` against a long run of `a` ends at the step budget. Not yet
+  built, each a counted `SyntaxError` (`HOST-191`): the flags `i` and `v`, a property escape
+  and a group name outside ASCII; `replace`, `replaceAll` and `split` given a regular
+  expression; `match`, `matchAll` and `search` are missing. 17,775 of the 44,812 selected
+  test262 cases pass (16,412 in 0.5.0), 1,327 of the 2,724 of the fifth slice (52).
 - `String.prototype.replace`, `replaceAll` and `split` with a String to search for or to split
   at: the replacement patterns of GetSubstitution, a function as the replacement, and a method
-  an object keys by `@@replace` or `@@split`. 16,567 of the 44,812 selected test262 cases pass
-  (16,412 in 0.5.0), 198 of the 2,724 of the fifth slice (52).
+  an object keys by `@@replace` or `@@split`.
 - The pattern of a regular expression literal is checked when its script is parsed, by the
   grammar of the modes `u` and `v` and of Annex B.1.2 with neither: a pattern with an error
   is a `SyntaxError` of the script at the line and column of the literal, and a pattern
   nested past `parser_nesting` is a `SyntaxError` that names the limit (`HOST-142`).
-  Evaluating a literal still waits for the `RegExp` objects of this slice.
 - `toLowerCase`, `toUpperCase`, `toLocaleLowerCase` and `toLocaleUpperCase` map every String:
   the unconditional mappings of `SpecialCasing.txt`, the simple mappings of `UnicodeData.txt`
   and Final_Sigma, from five tables generated from the vendored Unicode 17.0.0 data. A case

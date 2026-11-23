@@ -66,8 +66,8 @@ pub struct StringLiteral {
 }
 
 /// A regular expression literal (`#sec-literals-regular-expression-literals`): its `BodyText`
-/// and `FlagText`. Before slice 5 its pattern is not parsed; evaluating it throws a
-/// `SyntaxError` (a recorded omission of `sec-literals-regular-expression-literals`).
+/// and `FlagText`. Its pattern is checked at parse (`early.rs`); each evaluation makes a new
+/// RegExp of the two (`#sec-regular-expression-literals-runtime-semantics-evaluation`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RegExpLiteral {
     pub body: Vec<u16>,

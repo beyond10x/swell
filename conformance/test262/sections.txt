@@ -76,7 +76,6 @@ path sec-names-and-keywords test/language/identifiers/
 omit sec-names-and-keywords identifiers-outside-ascii section-12-part-before-its-slice
 section sec-literals-regular-expression-literals
 path sec-literals-regular-expression-literals test/language/literals/regexp/
-omit sec-literals-regular-expression-literals regexp-literals section-12-part-before-its-slice
 section sec-parse-script
 path sec-parse-script test/language/global-code/
 omit sec-parse-script parser-nesting-limit decision-3
