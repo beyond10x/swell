@@ -1521,14 +1521,14 @@ so a literal at the limit inside a script at the limit would need the bound twic
 `min_stack_bytes()` would double for every host.
 
 **Refusals until the later stories of slice 5.** Added on 2026-11-23 for slice 5. Until the
-story that brings each, the engine refuses two parts of the pattern grammar and the flags: the
-flag `v` (`class set expressions of the v flag`) and a group name with a code point outside
-ASCII, written or escaped
-(`group name outside ASCII`), which ParsePattern refuses. CompilePattern refuses nothing: the
+story that brings it, the engine refuses one part of the pattern grammar and the flags: the
+flag `v` (`class set expressions of the v flag`), which ParsePattern refuses. A group name with a
+code point outside ASCII, written or escaped, was refused (`group name outside ASCII`) until
+`story:identifiers-and-group-names-outside-ascii`. CompilePattern refuses nothing: the
 flag `i` and a modifier `i` are matched since
 `story:regexp-case-insensitive-matching-and-modifiers`. The message is exactly `<construct>
 is not supported before slice 5`, which `swell_syntax::message_kind` reads as a refusal. In a
-literal both are refusals of the parse, counted as any refused parse (HOST-164). At
+literal the flag `v` is a refusal of the parse, counted as any refused parse (HOST-164). At
 run time, in RegExpInitialize (`sec-regexpinitialize`: the constructor, RegExpCreate of the
 `String` methods that make a RegExp, and the evaluation of a literal), a refusal is a
 `SyntaxError` of the current realm with that message and no position after it, which the agent
@@ -1555,8 +1555,7 @@ and `story:regexp-symbol-methods-and-string-match-search` defines the methods of
 under the same keys in their place, named `[Symbol.replace]` and `[Symbol.split]` with `length`
 2 as their clauses give, so the property keeps its key and attributes. What `refusals()` still
 counts for `RegExp` are the refusals of RegExpInitialize above (`host-interface.md`, decision
-13, "A refusal raised by `RegExp`", HOST-191): the flag `v` and a
-group name outside ASCII.
+13, "A refusal raised by `RegExp`", HOST-191): the flag `v`.
 
 ## 8. Unicode data
 
@@ -2079,7 +2078,8 @@ from `swell-unicode`. The rule:
 - Where the early part cannot be complete without a later slice's data or engine, the gap is a
   recorded omission the gate reads (`conformance/test262/sections.txt`), and the engine refuses
   the input with a defined outcome instead of guessing: before slice 5, an identifier character
-  outside ASCII is a `SyntaxError`, a regular expression
+  outside ASCII was a `SyntaxError` (until `story:identifiers-and-group-names-outside-ascii`), a
+  regular expression
   literal is lexed to its end and evaluating it throws a `SyntaxError`, and the `String` methods
   that need the Unicode tables of slice 5 answer what they can and refuse the rest, as follows
   (decided on 2026-11-21 for slice 3). The four case methods `toLowerCase`, `toUpperCase`,
@@ -2130,9 +2130,9 @@ from `swell-unicode`. The rule:
   only for a method this section names with its set; any other method has the first two forms
   only. Named on 2026-11-23 for slice 5: RegExpInitialize (`sec-regexpinitialize`), and so the
   `RegExp` constructor, the evaluation of a literal and the `String` methods that make a
-  RegExp, answers every pattern and flags but the three parts of decision 7, "Refusals until
-  the later stories of slice 5" (the flag `v`, a group name outside ASCII,
-  the flag or modifier `i`), and refuses those with the counted refusal naming slice 5, each
+  RegExp, answers every pattern and flags but the parts of decision 7, "Refusals until the later
+  stories of slice 5" (the flag `v`; the flag or modifier `i` and a group name outside ASCII
+  until their stories), and refuses those with the counted refusal naming slice 5, each
   until the story of slice 5 that brings it. Named on 2026-11-23 for slice 5 as well, and no
   longer in this form: `RegExp.prototype [ %Symbol.replace% ]` and `RegExp.prototype [
   %Symbol.split% ]` (`sec-regexp.prototype-%symbol.replace%`,

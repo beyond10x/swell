@@ -2,6 +2,7 @@
 mod budgets;
 mod case_insensitive;
 mod early_errors;
+mod group_names;
 mod limits;
 mod matcher;
 mod parse;
