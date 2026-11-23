@@ -271,6 +271,7 @@ test/language/expressions/object/method-definition/yield-as-yield-operand.js
 test/language/expressions/object/method-definition/yield-newline.js
 test/language/expressions/object/method-definition/yield-return.js
 test/language/expressions/object/method-definition/yield-weak-binding.js
+test/language/expressions/object/prop-def-invalid-star-prefix.js
 test/language/expressions/object/scope-gen-meth-body-lex-distinct.js
 test/language/expressions/object/scope-gen-meth-param-elem-var-close.js
 test/language/expressions/object/scope-gen-meth-param-elem-var-open.js

@@ -19,15 +19,15 @@
     ]
   },
   "test262": {
-    "line": "test262 total 53801 8982 7 44812 18238 26572 2",
+    "line": "test262 total 53801 8982 7 44812 18935 25875 2",
     "exist": 53801,
     "excluded": 8982,
     "not_applicable": 7,
     "run": 44812,
-    "passed": 18238,
-    "failed": 26572,
+    "passed": 18935,
+    "failed": 25875,
     "budget": 2,
-    "passed_percent": "40.6"
+    "passed_percent": "42.2"
   },
   "delivery_slices": 19,
   "delivered": [1, 2, 3, 6],
@@ -102,16 +102,16 @@
       "name": "regexp",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 05 2724 5441 0 0 2724 1746 978 0",
+      "line": "test262-slice 05 2724 5441 0 0 2724 2326 398 0",
       "cases": 2724,
       "runs": 5441,
       "excluded": 0,
       "not_applicable": 0,
       "run": 2724,
-      "passed": 1746,
-      "failed": 978,
+      "passed": 2326,
+      "failed": 398,
       "budget": 0,
-      "passed_percent": "64.0"
+      "passed_percent": "85.3"
     },
     {
       "slice": "06",
@@ -134,16 +134,16 @@
       "name": "generators",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 07 1491 2841 0 0 1491 6 1485 0",
+      "line": "test262-slice 07 1491 2841 0 0 1491 123 1368 0",
       "cases": 1491,
       "runs": 2841,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1491,
-      "passed": 6,
-      "failed": 1485,
+      "passed": 123,
+      "failed": 1368,
       "budget": 0,
-      "passed_percent": "0.4"
+      "passed_percent": "8.2"
     },
     {
       "slice": "08",

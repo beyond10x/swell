@@ -57,7 +57,6 @@ test/language/expressions/generators/yield-as-parameter.js
 test/language/expressions/generators/yield-identifier-spread-strict.js
 test/language/expressions/generators/yield-identifier-strict.js
 test/language/expressions/generators/yield-weak-binding.js
-test/language/expressions/object/prop-def-invalid-star-prefix.js
 test/language/expressions/postfix-decrement/target-cover-yieldexpr.js
 test/language/expressions/postfix-increment/target-cover-yieldexpr.js
 test/language/expressions/prefix-decrement/target-cover-yieldexpr.js
