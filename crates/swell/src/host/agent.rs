@@ -266,8 +266,8 @@ impl<H: Host> Agent<H> {
     /// How many refusals of a later slice's construct the agent raised (`host-interface.md`,
     /// section 13, "A count of refusals"): every `SyntaxError` whose message
     /// `swell_syntax::message_kind` reads as a refusal, raised by a parse through
-    /// `parse_script`, `eval` or `Function` or by an instruction (a regular expression literal
-    /// before slice 5), caught by the script or not. The nesting limit and every other
+    /// `parse_script`, `eval` or `Function` or by a builtin (RegExpInitialize, of the
+    /// constructor or of a regular expression literal), caught by the script or not. The nesting limit and every other
     /// `SyntaxError` are not counted. It starts at 0, is never reset, saturates, and is read in
     /// every state of the agent, `Faulted` included. A read: it runs no code, calls no hook and
     /// spends no step.

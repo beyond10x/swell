@@ -261,20 +261,6 @@ fn hashbang_comment_only_at_the_start() {
     }
 }
 
-/// The message a regular expression literal throws before slice 5 is a refusal of slice 5 as
-/// [`message_kind`] reads it (`docs/design/engine.md`, decision 11, "Refusals").
-#[test]
-fn message_kind_reads_the_regular_expression_literal_refusal() {
-    assert_eq!(
-        swell_syntax::REGEXP_REFUSAL,
-        "regular expression literal is not supported before slice 5"
-    );
-    assert_eq!(
-        message_kind(swell_syntax::REGEXP_REFUSAL),
-        MessageKind::Refusal { slice: 5 }
-    );
-}
-
 /// `message_kind` tells the three kinds of message apart from the text alone, as a host reads it
 /// from a `SyntaxError` object: every refusal under `refused/` is a refusal of the slice its
 /// header names, every message of a source under `early-errors/` is a grammar or early error,

@@ -15,14 +15,13 @@
 //! analysis marks ([`Scope::contains_direct_eval`]). Every construct of a later slice is refused
 //! with a `SyntaxError` that names the slice: `<construct> is not supported before slice <n>`
 //! ("A part before its slice"), which [`message_kind`] tells from a grammar or early error and
-//! from the nesting limit by the message alone. Two of those refusals fall inside sections whose
-//! cases are counted in slice 2 and are recorded as omissions in
+//! from the nesting limit by the message alone. One of those refusals falls inside a section
+//! whose cases are counted in slice 2 and is recorded as an omission in
 //! `conformance/test262/sections.txt`: an identifier with a code point outside ASCII, written or
-//! escaped (slice 5, `sec-names-and-keywords`), and the evaluation of a regular expression
-//! literal ([`REGEXP_REFUSAL`]): the literal is lexed to its end, its pattern is checked at parse
-//! by ParsePattern of `swell-regexp` (an error of the pattern is an early error, [`regexp`]), and
-//! it is kept as a node whose evaluation still throws a `SyntaxError`
-//! (`sec-literals-regular-expression-literals`).
+//! escaped (slice 5, `sec-names-and-keywords`). A regular expression literal is lexed to its end,
+//! its pattern is checked at parse by ParsePattern of `swell-regexp` (an error of the pattern is
+//! an early error, [`regexp`]), and it is kept as a node of its body and flags, which the engine
+//! makes a RegExp of at each evaluation (`sec-literals-regular-expression-literals`).
 //!
 //! The parser's depth is bounded by [`ParseOptions::max_nesting`], the host's `parser_nesting`
 //! (`docs/design/host-interface.md`), and the Rust stack a parse takes by
@@ -56,7 +55,7 @@ mod scope;
 mod token;
 
 pub use ast::Scope;
-pub use error::{MessageKind, REGEXP_REFUSAL, SyntaxError, message_kind};
+pub use error::{MessageKind, SyntaxError, message_kind};
 pub use ledger::{Ledger, Stop, Unlimited};
 
 use ast::{Ast, StmtId};

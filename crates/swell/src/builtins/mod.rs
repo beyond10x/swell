@@ -9,14 +9,18 @@
 //! adds `symbol` (`story:symbol-constructor-and-well-known-symbols`), whose constructor and
 //! prototype CreateIntrinsics makes (`realm/intrinsics.rs`), and `iterator`
 //! (`story:iterator-protocol-and-array-string-iterators`): `%Iterator.prototype%` and the
-//! Array and String Iterators. Later slices add their files here.
+//! Array and String Iterators. Slice 5 adds `regexp` (`story:regexp-objects-exec-and-literals`),
+//! a directory: `regexp/mod.rs` holds the constructor and `%RegExp.prototype%`, `regexp/exec.rs`
+//! RegExpExec and RegExpBuiltinExec with `exec` and `test`, and `regexp/budget.rs` the budget of
+//! `swell-regexp` over the agent. Later slices add their files here.
 //!
 //! `array`, `object` and `string` are directories (`story:builtin-group-modules`): `mod.rs`
 //! holds the constructor and the builtins of the base, and each group of builtins a story of
 //! slice 3 delivers has a file of its own beside it (`array/iteration.rs`, `array/search.rs`,
 //! `array/mutation.rs`, `object/integrity.rs`, `object/enumeration.rs`, `string/access.rs`,
-//! `string/transform.rs`). A group file holds the id type of its builtins, the lists of the
-//! methods it defines on the constructor and on the prototype ([`Method`]), the data
+//! `string/transform.rs`; and `string/replace.rs` of slice 5). A group file holds the id type of
+//! its builtins, the lists of the methods it defines on the constructor and on the prototype
+//! ([`Method`]), the data
 //! properties keyed by a well-known symbol it defines on the prototype ([`SymbolData`]) and
 //! the function that runs one of its builtins; `mod.rs` reads the lists after its own
 //! properties and calls the run function, so a builtin of a group is one variant, one entry of
@@ -36,6 +40,7 @@ pub(crate) mod json;
 pub(crate) mod math;
 pub(crate) mod number;
 pub(crate) mod object;
+pub(crate) mod regexp;
 pub(crate) mod string;
 pub(crate) mod symbol;
 

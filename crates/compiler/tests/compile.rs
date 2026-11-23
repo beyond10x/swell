@@ -596,26 +596,38 @@ fn arguments_objects_are_made_where_the_code_references_them() {
     assert_eq!(strict.params, [Slot::Local(0)]);
 }
 
+/// `#sec-regular-expression-literals-runtime-semantics-evaluation` (`docs/design/engine.md`,
+/// decision 7, "A regular expression literal: checked at parse time, compiled at each
+/// evaluation", rule 2): a literal compiles to one instruction that makes a RegExp from two
+/// String constants, its body and its flags as written, and to nothing that throws.
 #[test]
-fn regexp_literal_compiles_to_its_syntax_error_throw() {
-    let code = compile("x = /a(b)c/gi;").unwrap();
-    let throws: Vec<String> = code
+fn a_regexp_literal_compiles_to_one_creation_of_its_body_and_flags() {
+    let code = compile("x = /a(b)c/gi; y = /\\//;").unwrap();
+    let made: Vec<(String, String)> = code
         .instructions
         .iter()
         .filter_map(|i| match i {
-            Instruction::ThrowSyntaxError(k) => Some(string(&code, *k)),
+            Instruction::NewRegExp { body, flags } => {
+                Some((string(&code, *body), string(&code, *flags)))
+            }
             _ => None,
         })
         .collect();
     assert_eq!(
-        throws,
-        vec!["regular expression literal is not supported before slice 5".to_string()]
+        made,
+        vec![
+            ("a(b)c".to_string(), "gi".to_string()),
+            ("\\/".to_string(), String::new())
+        ]
     );
-    // No value of the literal is produced: no constant holds its pattern or flags.
-    for k in 0..code.strings.len() as u32 {
-        let s = string(&code, k);
-        assert!(!s.contains("a(b)c") && s != "gi", "{s:?}");
-    }
+    assert!(
+        !code
+            .instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::ThrowSyntaxError(_))),
+        "{:?}",
+        code.instructions
+    );
 }
 
 /// How many direct-eval calls `instructions` hold.

@@ -6,9 +6,9 @@
 //! and `toWellFormed` of `String.prototype` (`#sec-string.prototype.at` and the others). One
 //! test per builtin for its property and its steps, the bounds of each (the `string_length`
 //! limit, a step per code unit, the step budget) and the stack test through the conversions of
-//! an argument. A property keyed by `@@match` needs a well-known symbol, which no script obtains
-//! before `Symbol` (slice 6) and the host interface does not hand out, so the case of IsRegExp
-//! answering true is a unit test of `builtins/string/access.rs`.
+//! an argument. The case of IsRegExp answering true by a property keyed by `@@match` is a unit
+//! test of `builtins/string/access.rs`; a RegExp object, which IsRegExp takes by its slot, is
+//! tested in `regexp_objects.rs` (`is_reg_exp_and_object_to_string_see_a_regexp`).
 //!
 //! The scripts call no builtin another story of the wave delivers: a long String comes from the
 //! host interface, a result is compared by `===` with a literal or read through `join`. Run also
@@ -337,8 +337,8 @@ fn includes_starts_with_and_ends_with_search_from_a_position() {
 }
 
 /// `#sec-isregexp` in `includes`, `startsWith` and `endsWith`: an object whose `@@match` is
-/// undefined (every object a script can make before slice 6) is no RegExp, so it is converted
-/// by ToString; the this value is converted first, then the search String, then the position.
+/// undefined and that has no [[RegExpMatcher]] (a plain object, an Array) is no RegExp, so it is
+/// converted by ToString; the this value is converted first, then the search String, then the position.
 /// IsRegExp answering true (a `TypeError`) is the unit test of the same name in
 /// `builtins/string/access.rs`.
 #[test]

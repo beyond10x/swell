@@ -19,12 +19,6 @@ use std::fmt;
 /// What stands between the construct and the slice in a refusal.
 const REFUSED: &str = " is not supported before slice ";
 
-/// The message of the `SyntaxError` a regular expression literal throws when it is evaluated
-/// before slice 5 (`docs/design/engine.md`, "A part before its slice";
-/// `sec-literals-regular-expression-literals` records the omission): a refusal of slice 5 in the
-/// form [`message_kind`] reads.
-pub const REGEXP_REFUSAL: &str = "regular expression literal is not supported before slice 5";
-
 /// What stands before the limit, which a `)` follows, in the error of the nesting limit.
 const NESTING: &str = "nesting deeper than parser_nesting (";
 

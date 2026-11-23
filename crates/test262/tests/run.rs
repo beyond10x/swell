@@ -663,13 +663,6 @@ fn a_refusal_caught_inside_function_fails_the_run() -> TestResult {
 }
 
 #[test]
-fn a_regular_expression_literal_refusal_caught_at_run_time_fails_the_run() -> TestResult {
-    let (_, lines) = counted_dynamic_refusal("regexp-literal-caught")?;
-    assert_counted_refusal(&lines, "regexp-literal-caught.js");
-    Ok(())
-}
-
-#[test]
 fn a_grammar_error_caught_inside_eval_passes() -> TestResult {
     let (_, lines) = counted_dynamic_refusal("grammar-error-caught")?;
     let path = "test/language/dynamic-refusal/grammar-error-caught-in-eval.js";
@@ -688,9 +681,9 @@ fn a_grammar_error_caught_inside_eval_passes() -> TestResult {
 #[test]
 fn counted_refusals_are_counted_refused() -> TestResult {
     let (printed, _) = counted_dynamic_refusal("refused-count")?;
-    // Four cases: the grammar error passes, the three counted refusals fail.
-    assert_line(&printed, "test262 language/dynamic-refusal 4 0 0 4 1 3 0");
-    // Three cases, two runs each, every run counted refused once.
-    assert_eq!(printed.errors("test262-refused"), ["test262-refused 6"]);
+    // Three cases: the grammar error passes, the two counted refusals fail.
+    assert_line(&printed, "test262 language/dynamic-refusal 3 0 0 3 1 2 0");
+    // Two cases, two runs each, every run counted refused once.
+    assert_eq!(printed.errors("test262-refused"), ["test262-refused 4"]);
     Ok(())
 }

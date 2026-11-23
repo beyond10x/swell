@@ -291,6 +291,7 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::ForInNext(t) => format!("ForInNext {t:04}"),
         I::IteratorStep(t) => format!("IteratorStep {t:04}"),
         I::ThrowSyntaxError(k) => format!("ThrowSyntaxError {}", s(k)),
+        I::NewRegExp { body, flags } => format!("NewRegExp {} {}", s(body), s(flags)),
         I::PushEnv(n) => format!("PushEnv {n}"),
         I::PushNamedEnv(t) => format!("PushNamedEnv {t} {}", names(t)),
         I::Tag(n) => format!("Tag {n}"),

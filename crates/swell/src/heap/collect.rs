@@ -317,6 +317,7 @@ mod tests {
     use crate::object::ecmascript_function::EcmascriptFunction;
     use crate::object::ordinary::Ordinary;
     use crate::object::property::{Key, Property};
+    use crate::object::regexp::RegExpObject;
     use crate::object::string::StringObject;
     use crate::object::{ObjectKind, ObjectRecord};
     use crate::realm::RealmRecord;
@@ -336,7 +337,7 @@ mod tests {
 
     /// The trace function of each kind of the layout but the common object record, which is
     /// called once per object.
-    const KIND_SITES: [&str; 14] = [
+    const KIND_SITES: [&str; 15] = [
         "heap/string.rs HeapString::trace",
         "heap/mod.rs SymbolRecord::trace",
         "host/host_object.rs HostObject::trace",
@@ -347,6 +348,7 @@ mod tests {
         "object/builtin_function.rs BuiltinFunction::trace",
         "object/bound_function.rs BoundFunction::trace",
         "object/ecmascript_function.rs EcmascriptFunction::trace",
+        "object/regexp.rs RegExpObject::trace",
         "realm/mod.rs RealmRecord::trace",
         "env/global.rs RealmGlobalEnv::trace",
         "env/mod.rs EnvironmentRecord::trace",
@@ -394,6 +396,7 @@ mod tests {
             ObjectKind::BoundFunction(BoundFunction::for_test()),
             ObjectKind::EcmascriptFunction(EcmascriptFunction::for_test()),
             ObjectKind::Host(HostObject::for_test()),
+            ObjectKind::RegExp(RegExpObject::for_test(StringRef { handle: string })),
         ];
         let objects: Vec<_> = kinds
             .into_iter()
