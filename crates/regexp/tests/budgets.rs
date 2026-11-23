@@ -7,7 +7,7 @@
 
 use swell_regexp::{
     Budget, CompileError, Flags, MAX_GRANT, Pattern, Program, Stop, Subject, Unlimited,
-    compile_pattern, match_at, parse_pattern, search,
+    compile_pattern, match_at, parse_pattern, search, search_slot_visits,
 };
 
 #[cfg(test)]
@@ -465,6 +465,108 @@ fn the_compiler_and_the_matcher_use_no_rust_recursion() {
         .expect("a match");
         assert_eq!(found.captures.get(0), Some(0..1_000_000));
     });
+}
+
+/// The steps a search of `program` in `subject` from 0 spends, the slots of the captures it
+/// visits in a scan or writes (`search_slot_visits`), and the range of group 0 it found.
+#[cfg(test)]
+fn work_of(program: &Program, subject: &[u16]) -> (u64, u64, Option<std::ops::Range<usize>>) {
+    let mut budget = Recording::default();
+    let found = search(program, Subject::Utf16(subject), 0, &mut budget).expect("no stop");
+    assert_eq!(budget.held(), 0);
+    let visits =
+        search_slot_visits(program, Subject::Utf16(subject), 0, &mut Unlimited).expect("no stop");
+    (
+        budget.spent(),
+        visits,
+        found.and_then(|f| f.captures.get(0)),
+    )
+}
+
+#[test]
+fn a_try_does_no_work_per_group_it_does_not_charge() {
+    // `x` then n groups that never take part, searched over 1,000 start indices that fail at
+    // their first instruction: each try is its step and the code unit's, whatever n is, and
+    // writes one slot (the start of group 0); the slots a try changed are put back by the
+    // entries the backtrack stack takes, one step each.
+    let subject = units(&"b".repeat(1000));
+    let one = work_of(&program("x(a)", ""), &subject);
+    let many = work_of(&program(&format!("x{}", "(a)".repeat(2000)), ""), &subject);
+    assert_eq!(one, (2 * 1001, 1001, None));
+    assert_eq!(many, one);
+    // Groups that take part in a try that fails are unset in the next: by a lookahead that
+    // keeps its captures, by a negative one that undoes them, and by an alternative.
+    for (pattern, subject) in [
+        ("(a)x|b", "ab"),
+        ("(?=(a))x|b", "ab"),
+        ("(?!(a)c)(a)x|b", "aab"),
+        ("(?:(a)|(c))+x|b", "acab"),
+    ] {
+        let program = program(pattern, "");
+        let found = search(&program, Subject::Utf16(&units(subject)), 0, &mut Unlimited)
+            .expect("no stop")
+            .expect("a match");
+        let unset = found.captures.iter().skip(1).all(|group| group.is_none());
+        assert!(unset, "/{pattern}/ in {subject}: {:?}", found.captures);
+        let (steps, visits, _) = work_of(&program, &units(subject));
+        assert!(
+            visits <= 4 * steps,
+            "/{pattern}/: {visits} visits, {steps} steps"
+        );
+    }
+}
+
+#[test]
+fn the_clearing_of_a_quantified_atom_is_charged_per_group_of_its_range() {
+    // An atom with n groups in an alternative that is never taken, repeated over 1,000 code
+    // units: its clearing is one step per group of its range (its instruction's step the
+    // first of them) at each of the 1,001 times it runs, the last where the atom fails.
+    let subject = units(&"a".repeat(1000));
+    let atom = |n: usize| program(&format!("(?:a|x{})*", "(y)".repeat(n)), "");
+    let (one, one_visits, whole) = work_of(&atom(1), &subject);
+    assert_eq!(whole, Some(0..1000));
+    let (many, many_visits, whole) = work_of(&atom(2000), &subject);
+    assert_eq!(whole, Some(0..1000));
+    assert_eq!(many - one, 1999 * 1001, "{one} and {many} steps");
+    assert!(one_visits <= 4 * one, "{one_visits} visits, {one} steps");
+    assert!(
+        many_visits <= 4 * many,
+        "{many_visits} visits, {many} steps"
+    );
+    // The example of the design: `/(?:a|(b)(c))*/` in "a" spends 20 steps, 18 of them as
+    // before and 2 for the second group of each of its two clearings.
+    assert_eq!(work_of(&program("(?:a|(b)(c))*", ""), &units("a")).0, 20);
+    // The steps are charged before the scan: a budget that ends inside a clearing stops the
+    // match with exactly its steps spent.
+    let program = atom(2000);
+    for steps in [10, 2000, 4097, many - 1] {
+        let mut budget = Recording::with_steps(steps);
+        let got = search(&program, Subject::Utf16(&subject), 0, &mut budget);
+        assert_eq!(got.err(), Some(Stop::StepBudget), "{steps} steps");
+        assert_eq!(budget.spent(), steps);
+        assert_eq!(budget.asked_after_refusal, 0);
+        assert_eq!(budget.held(), 0);
+    }
+}
+
+#[test]
+fn a_named_backreference_is_charged_per_group_of_its_name() {
+    // `\k<n>` of a name n groups have, none of them set: one step per group of its name (its
+    // instruction's step the first of them), beside the same pattern without it.
+    let subject = units("b");
+    let cost = |n: usize| {
+        let groups = vec!["(?<n>a)"; n].join("|");
+        let without = work_of(&program(&format!("(?:{groups})?b"), ""), &subject);
+        let with = work_of(&program(&format!("(?:{groups})?\\k<n>b"), ""), &subject);
+        assert_eq!(
+            (without.2.clone(), with.2.clone()),
+            (Some(0..1), Some(0..1))
+        );
+        assert!(with.1 <= 4 * with.0, "{} visits, {} steps", with.1, with.0);
+        with.0 - without.0
+    };
+    assert_eq!(cost(2), 2);
+    assert_eq!(cost(2000), 2000);
 }
 
 #[test]

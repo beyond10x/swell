@@ -40,6 +40,6 @@ pub use budget::{Budget, MAX_GRANT, POLL_INTERVAL, Stop, Unlimited};
 pub use compile::{CompileError, CompileRefusal, compile_pattern};
 pub use error::{ErrorKind, ParseError, PatternError, Refusal};
 pub use flags::Flags;
-pub use matcher::{Captures, Found, Subject, match_at, search};
+pub use matcher::{Captures, Found, Subject, match_at, search, search_slot_visits};
 pub use parser::parse_pattern;
 pub use program::Program;

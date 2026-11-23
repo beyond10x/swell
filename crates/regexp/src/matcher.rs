@@ -19,7 +19,11 @@
 //! Steps (decision 7, "What one step of the matcher is"): one per start index tried, one per
 //! instruction run, one per entry taken from the backtrack stack (a lookaround's exit takes
 //! the entries above its barrier and the barrier), and one per code unit a backreference
-//! compares, charged before the comparison. They are taken by grants of at most
+//! compares, charged before the comparison. The clearing of a quantified atom's captures runs
+//! one step per group of its range, and a named backreference one per group of its name, each
+//! its instruction's step the first and the rest charged before it reads a slot; a try writes
+//! one slot, since a try that failed undid its changes entry by entry. No number of the
+//! pattern multiplies the work of a step. They are taken by grants of at most
 //! [`MAX_GRANT`], a further grant asked when one is spent; a match that ends with a match, no
 //! match or a refused charge returns what it was granted and did not run, so the steps
 //! charged are the units run and the interrupt, which every grant reads, is read at least once
@@ -151,6 +155,25 @@ pub fn search(
     machine.finish(result)
 }
 
+/// For the tests of the cost model (`docs/design/engine.md`, decision 7, "What one step of the
+/// matcher is"): the search of [`search`], answering the count of capture slots it read in a
+/// scan or wrote. The first fill of the slots, charged by bytes, is not counted.
+#[doc(hidden)]
+pub fn search_slot_visits(
+    program: &Program,
+    subject: Subject<'_>,
+    start: usize,
+    budget: &mut dyn Budget,
+) -> Result<u64, Stop> {
+    if start > subject.len() {
+        return Ok(0);
+    }
+    let mut machine = Machine::new(program, subject, budget);
+    let result = machine.prepare().and_then(|()| machine.search(start));
+    let visits = machine.visits;
+    machine.finish(result.map(|_| visits))
+}
+
 /// The iterations a quantifier's loop has run, and the position the current one started at.
 #[derive(Clone, Copy, Debug)]
 struct Counter {
@@ -198,6 +221,7 @@ struct Machine<'p, 's, 'b> {
     counters: Vec<Counter>,
     looks: Vec<usize>,
     stack: Vec<Entry>,
+    visits: u64,
 }
 
 impl<'p, 's, 'b> Machine<'p, 's, 'b> {
@@ -217,7 +241,13 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
             counters: Vec::new(),
             looks: Vec::new(),
             stack: Vec::new(),
+            visits: 0,
         }
+    }
+
+    /// `n` capture slots read in a scan or written.
+    fn visit(&mut self, n: usize) {
+        self.visits = self.visits.saturating_add(n as u64);
     }
 
     // ----- the budget -----
@@ -392,7 +422,11 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
     /// One try at `at`: whether it matched.
     fn attempt(&mut self, at: usize) -> Result<bool, Stop> {
         self.step()?;
-        self.slots.fill(UNSET);
+        // Every slot but the start of group 0 is unset here, so the try writes that one slot
+        // whatever the number of groups: the first try finds the slots as `prepare` made them,
+        // and a try that failed took every entry of the backtrack stack, one step each, and so
+        // undid every change it made to a slot or a counter.
+        self.visit(1);
         if let Some(start) = self.slots.first_mut() {
             *start = at;
         }
@@ -402,9 +436,11 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
         loop {
             self.step()?;
             let Some(&inst) = self.program.code.get(pc as usize) else {
+                self.unwind()?;
                 return Ok(false);
             };
             if inst == Inst::Match {
+                self.visit(1);
                 if let Some(end) = self.slots.get_mut(1) {
                     *end = pos;
                 }
@@ -445,10 +481,21 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
         Ok(None)
     }
 
+    /// Take every entry of the backtrack stack, one step each charged first, and undo its
+    /// change: the end of a try that fails without the stack emptied.
+    fn unwind(&mut self) -> Result<(), Stop> {
+        self.steps(self.stack.len())?;
+        while let Some(entry) = self.stack.pop() {
+            self.restore(entry);
+        }
+        Ok(())
+    }
+
     /// Undo the change an entry records; an entry that resumes nothing does nothing.
     fn restore(&mut self, entry: Entry) {
         match entry {
             Entry::Capture { slot, old } => {
+                self.visit(1);
                 if let Some(value) = self.slots.get_mut(slot as usize) {
                     *value = old;
                 }
@@ -503,6 +550,7 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
     fn set_slot(&mut self, slot: u32, value: usize) -> Result<(), Stop> {
         let old = self.slot(slot as usize);
         self.push(Entry::Capture { slot, old })?;
+        self.visit(1);
         if let Some(s) = self.slots.get_mut(slot as usize) {
             *s = value;
         }
@@ -590,12 +638,22 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
                 Some((next, pos))
             }
             Inst::Clear { first, last } => {
+                // One step per group of the range, this instruction's the first, charged
+                // before the scan of its two slots each.
+                self.steps(last.saturating_sub(first) as usize)?;
                 let from = (first as usize).saturating_mul(2);
-                let to = (last as usize).saturating_mul(2).saturating_add(1);
-                for slot in from..=to.min(self.slots.len().saturating_sub(1)) {
-                    if self.slot(slot) != UNSET {
-                        self.set_slot(slot as u32, UNSET)?;
-                    }
+                let to = (last as usize).saturating_mul(2).saturating_add(2);
+                let end = to.min(self.slots.len());
+                self.visit(end.saturating_sub(from));
+                let mut slot = from;
+                while let Some(found) = self
+                    .slots
+                    .get(slot..end)
+                    .and_then(|slots| slots.iter().position(|&value| value != UNSET))
+                {
+                    let set = slot.saturating_add(found);
+                    self.set_slot(set as u32, UNSET)?;
+                    slot = set.saturating_add(1);
                 }
                 Some((next, pos))
             }
@@ -652,11 +710,18 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
                     .named
                     .get(first..first.saturating_add(len as usize))
                     .unwrap_or(&[]);
-                let set = groups.iter().copied().find(|&group| {
+                // One step per group of the name, this instruction's the first, charged before
+                // the search for the one that is set.
+                self.steps(groups.len().saturating_sub(1))?;
+                let set = groups.iter().position(|&group| {
                     let slot = (group as usize).saturating_mul(2);
                     self.slot(slot) != UNSET && self.slot(slot.saturating_add(1)) != UNSET
                 });
-                match set {
+                self.visit(
+                    set.map_or(groups.len(), |i| i.saturating_add(1))
+                        .saturating_mul(2),
+                );
+                match set.and_then(|i| groups.get(i).copied()) {
                     Some(group) => self.backreference(group, back, pc, pos)?,
                     None => Some((next, pos)),
                 }
