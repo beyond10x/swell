@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:array-from-async
 kind: story
-status: draft
+status: active
 title: Array.fromAsync awaits its input, its mapper and its elements
 summary: 'Array.fromAsync as a built-in async function: its steps in an AsyncBuiltinActivation the functions of each await hold, no re-entry of its own per continuation; HOST-207 and HOST-208; 73 cases.'
 relations:
@@ -33,7 +33,10 @@ scope:
   path: crates/swell/tests/main.rs
 - confidence: cited
   path: website/data/status.json
-revision: 15
+revision: 17
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T19:58:16Z", actor: "human:operator", revision: 16, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-23T19:58:16Z", actor: "human:operator", revision: 17, executor: "agent:coordinator"}
 ---
 ## Context
 

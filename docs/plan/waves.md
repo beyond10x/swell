@@ -331,7 +331,7 @@ after each script. Decomposed on 2026-11-23 into seventeen stories. The four of 
 wave were read by the four plan critics (`review-result:slice-10-round-1-*`: 13 findings,
 none a blocker, all applied) and are accepted; the other thirteen were read in two sets
 (`review-result:slice-10-later-{a,b}-*`: 69 findings, one blocker) and revised on the design
-text of `3648bf6`, and are drafts until their next reading. Measured on the last full run before
+text of `3648bf6`, read again (`review-result:slice-10-later-r2-*`: three warnings, applied) and accepted. Measured on the last full run before
 generators ran: 3,879 cases and 7,499 runs, 13 cases pass (`test262-slice 10 3879 7499 0 0
 3879 13 3866 0`); 2,748 of its cases carry the flag `async`, and none of those passes before
 the runner drains the queue. The lists the stories read are under [`slice-10/`](slice-10/):

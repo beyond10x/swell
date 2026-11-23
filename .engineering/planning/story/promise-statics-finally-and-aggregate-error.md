@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:promise-statics-finally-and-aggregate-error
 kind: story
-status: draft
+status: active
 title: Promise.all, allSettled, any, race, withResolvers, try, finally and AggregateError
 summary: The statics of Promise with their element functions as builtin closures, finally, and AggregateError with its own ErrorKind variant and non_exhaustive ErrorKind; HOST-201 and HOST-202; 424 cases.
 relations:
@@ -37,7 +37,10 @@ scope:
   path: crates/swell/tests/promise_statics.rs
 - confidence: cited
   path: website/data/status.json
-revision: 15
+revision: 17
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T19:58:12Z", actor: "human:operator", revision: 16, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-23T19:58:12Z", actor: "human:operator", revision: 17, executor: "agent:coordinator"}
 ---
 ## Context
 

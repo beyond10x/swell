@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:async-generator-methods-in-object-literals
 kind: story
-status: draft
+status: active
 title: Async generator methods of object literals and their early errors
 summary: async *m() {} parses, compiles and runs as an async generator with a home object; 250 cases, 38 of them negative.
 relations:
@@ -35,7 +35,10 @@ scope:
   path: crates/syntax/tests/sources/refused/async-generator-method.js
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/async-generator-method.js
-revision: 14
+revision: 16
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T19:58:15Z", actor: "human:operator", revision: 15, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-23T19:58:15Z", actor: "human:operator", revision: 16, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -7,7 +7,7 @@ title: 'Slice 10, promises-and-async: jobs, Promise, async functions'
 summary: 'The job queue, Promise, async functions and generators, for await: 3,879 cases and 7,499 runs.'
 relations:
 - depends_on: epic:slice-07-generators
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T18:19:56Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T18:19:57Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
@@ -55,9 +55,10 @@ and decision 11 of `docs/design/host-interface.md`.
   `Test262:AsyncTestFailure:` or when the queue is empty without either. No timer is needed.
 - Generic and timeout jobs are handed to the host, which runs each with `run_job`, one entry
   each, when it chooses (decision 9); slice 14 (`Atomics.waitAsync`) is the first to use them.
-- The 23 requirements of the host interface pending for slice 10 each get a test (`HOST-46`,
-  `HOST-77` to `HOST-84`, `HOST-100`, `HOST-101`, `HOST-121`, `HOST-148`, `HOST-149`, `HOST-192`
-  to `HOST-200`).
+- The 31 requirements of the host interface pending for slice 10 on `3648bf6`, as
+  `grep -c 'pending slice 10$' conformance/host/requirements.txt` counts them, the first
+  `HOST-46` and the last `HOST-208`, each get a test (`HOST-46`, `HOST-77` to `HOST-84`,
+  `HOST-100`, `HOST-101`, `HOST-121`, `HOST-148`, `HOST-149`, `HOST-192` to `HOST-208`).
 
 ### What the first reading of the epic left open, and where it is settled
 
@@ -158,11 +159,11 @@ In the order of their dependencies:
 1. `job-queue-and-microtask-checkpoint`, `async-function-syntax-and-early-errors`
 2. `promise-constructor-then-and-jobs`
 3. `async-functions-and-await` (with it the first consumer's function runs)
-4. `promise-statics-finally-and-aggregate-error`,
-   `promise-rejection-tracker-and-promise-reads`, `async-methods-in-object-literals`,
+4. `promise-rejection-tracker-and-promise-reads`, `async-methods-in-object-literals`,
    `async-function-constructor`, `for-await-and-async-from-sync-iterator`,
    `async-generator-syntax-and-early-errors`
-5. `async-generators-and-their-request-queue`, `ess-target-checkpoint-and-promise-hooks`
-6. `yield-star-in-async-generators`, `async-generator-methods-in-object-literals`,
+5. `promise-statics-finally-and-aggregate-error`, `ess-target-checkpoint-and-promise-hooks`
+6. `async-generators-and-their-request-queue`
+7. `yield-star-in-async-generators`, `async-generator-methods-in-object-literals`,
    `async-generator-function-constructor`, `array-from-async`
-7. `slice-10-conformance-close` (after `slice-07-conformance-close`)
+8. `slice-10-conformance-close` (after `slice-07-conformance-close`)

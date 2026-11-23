@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:async-generators-and-their-request-queue
 kind: story
-status: draft
+status: active
 title: 'Async generators run: the request queue, yield and await on the suspended frame, and %AsyncGeneratorPrototype%'
 summary: Async generator objects with their frame and request queue in boxes, the queue charged by capacity until the sweep, AsyncGeneratorStart, yield, await, next, return and throw with the drain of the queue; yield* held back; HOST-204 to HOST-206; 1,124 cases.
 relations:
@@ -81,7 +81,10 @@ scope:
   path: crates/syntax/tests/sources/valid/async-generator.js
 - confidence: cited
   path: website/data/status.json
-revision: 34
+revision: 36
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T19:58:14Z", actor: "human:operator", revision: 35, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-23T19:58:14Z", actor: "human:operator", revision: 36, executor: "agent:coordinator"}
 ---
 ## Context
 

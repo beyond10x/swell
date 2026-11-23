@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:for-await-and-async-from-sync-iterator
 kind: story
-status: draft
+status: active
 title: for await, the async iterator protocol, %AsyncFromSyncIteratorPrototype%, %AsyncIteratorPrototype% and Symbol.asyncIterator
 summary: for-await-of in async functions with AsyncIteratorClose, GetIterator with kind async, CreateAsyncFromSyncIterator and the thirteenth well-known symbol, WellKnownSymbol::AsyncIterator for the host (HOST-203); 420 cases.
 relations:
@@ -69,7 +69,10 @@ scope:
   path: crates/syntax/tests/sources/valid/for-await.js
 - confidence: cited
   path: website/data/status.json
-revision: 29
+revision: 31
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T19:58:13Z", actor: "human:operator", revision: 30, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-23T19:58:13Z", actor: "human:operator", revision: 31, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:promise-rejection-tracker-and-promise-reads
 kind: story
-status: draft
+status: active
 title: 'The rejection tracker and the host reads of a promise: HOST-46, HOST-100, HOST-101 and HOST-121'
 summary: RejectPromise and PerformPromiseThen call host_promise_rejection_tracker; promise_state, promise_is_handled and mark_promise_as_handled on Agent, Cx and HookCx; no test262 list, a guard part.
 relations:
@@ -30,7 +30,10 @@ scope:
   path: crates/swell/tests/promise_reads.rs
 - confidence: cited
   path: website/data/status.json
-revision: 12
+revision: 14
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T19:58:12Z", actor: "human:operator", revision: 13, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-23T19:58:12Z", actor: "human:operator", revision: 14, executor: "agent:coordinator"}
 ---
 ## Context
 

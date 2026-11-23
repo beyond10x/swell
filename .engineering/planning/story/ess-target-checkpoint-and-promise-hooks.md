@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-target-checkpoint-and-promise-hooks
 kind: story
-status: draft
+status: active
 title: The ESS target runs the microtask checkpoint and awaits the promise-job and rejection hooks
 summary: The conformance target supports PerformMicrotaskCheckpoint, HostEnqueuePromiseJob and HostPromiseRejectionTracker, the model gets the four declarations the slice text leaves incomplete, two scenarios, and the gate floor moves.
 relations:
@@ -23,7 +23,10 @@ scope:
   path: spec/scenarios/rejection-is-tracked-then-handled.yaml
 - confidence: cited
   path: taskfiles/conform-engine.yml
-revision: 9
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T19:58:14Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-23T19:58:15Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 ---
 ## Context
 

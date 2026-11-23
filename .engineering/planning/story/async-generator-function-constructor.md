@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:async-generator-function-constructor
 kind: story
-status: draft
+status: active
 title: '%AsyncGeneratorFunction% makes async generators from source text through CreateDynamicFunction and the host hook'
 summary: The kind async generator of CreateDynamicFunction, %AsyncGeneratorFunction% and the constructor of its prototype; 23 cases.
 relations:
@@ -29,7 +29,10 @@ scope:
   path: crates/syntax/src/parser/function.rs
 - confidence: cited
   path: crates/syntax/src/parser/mod.rs
-revision: 12
+revision: 14
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T19:58:16Z", actor: "human:operator", revision: 13, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-23T19:58:16Z", actor: "human:operator", revision: 14, executor: "agent:coordinator"}
 ---
 ## Context
 
