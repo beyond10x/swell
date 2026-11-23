@@ -231,15 +231,22 @@ a case with an excluded feature.
   functions, date arithmetic (day, month, year from a time value), the keyed hash and the
   random generator. Depends on nothing.
 - `swell-regexp`: the regular expression parser, its early errors, the compiler and the matcher
-  over UTF-16 (decision 7). Depends on `swell-unicode`.
+  over UTF-16 (decision 7). Depends on `swell-unicode` and nothing else: it names no type of
+  `swell-syntax` or `swell` and takes its budget from its caller (decision 7, "How
+  `swell-regexp` charges its work").
 - `swell-syntax`: lexer; parser with cover grammars, early errors, strict mode, automatic
   semicolon insertion, and regular expression literals checked by `swell-regexp`; the syntax
-  tree; scope analysis. Depends on `swell-unicode`, `swell-num`, `swell-regexp`.
+  tree; scope analysis. Depends on `swell-unicode` and, from `story:regexp-literal-early-errors`
+  of slice 5, `swell-regexp`. It does not depend on `swell-num` (corrected on 2026-11-23): the
+  lexer keeps a numeric literal as its text, and the compile step converts it.
 - `swell-compiler`: the bytecode format and the compile step from the analysed tree. Depends on
-  `swell-syntax`.
+  `swell-syntax` and `swell-num`: the value of a numeric literal
+  (`swell_num::literal::numeric_literal`) and a number written as a property key
+  (`swell_num::to_string::number_to_string`).
 - `swell`: the engine and its public host interface: values, heap and collector, interpreter,
   realms, jobs, modules, and the builtins, one module per ECMA-262 clause (19 to 28, then
-  Annex B). Depends on all of the above.
+  Annex B). Depends on `swell-compiler`, `swell-syntax`, `swell-num` and `swell-unicode`, and,
+  from `story:regexp-objects-exec-and-literals` of slice 5, `swell-regexp`: all of the above.
 - `swell-cli`: the binary `swell`, a command-line host (decision 9). Depends on `swell`.
 - `swell-test262`: the binary `swell-test262`, the conformance runner (decision 11). Depends on
   `swell`.
@@ -251,7 +258,8 @@ under `crates/` as a member, and the root `Cargo.lock` lists seven packages): th
 crates `swell-unicode`, `swell-num`, `swell-syntax`, `swell-compiler` and `swell`, and the two
 binary crates `swell-test262` and `swell-unicode-gen`. `swell-regexp` and `swell-cli` are not
 created yet: a crate is created in the first slice that needs any part of it (section 12, "A
-part before its slice"), which for `swell-regexp` is slice 5.
+part before its slice"), which for `swell-regexp` is slice 5: its first story,
+`story:regexp-crate-and-pattern-parser`, creates it, and eight of the nine exist from then.
 
 Why: each crate below `swell` holds no heap value and can be tested and fuzzed alone (the parser
 on source text, the matcher on a pattern and a string, the number code on bit patterns), and the
@@ -723,7 +731,8 @@ The mechanism:
 proportion to their work: per element for array, typed array and collection loops, per code unit
 for string operations (a comparison of two Strings and a String made a property key: per code
 unit past 32, charged before the units are read), per matcher step for regular expressions
-(decision 7), per limb operation for `BigInt`, per code unit of its text and per value for
+and per code unit of a pattern before its parse at run time (decision 7, "What one step of
+the matcher is"), per limb operation for `BigInt`, per code unit of its text and per value for
 `JSON.parse` and `JSON.rawJSON`, per code unit of eval code before its parse, and per
 pass of a sort of n property keys, n before the pass; plus what a host function charges for its
 own work with `cx.charge_steps` (`host-interface.md`, section 14). Eval code: PerformEval charges one step per
@@ -783,10 +792,13 @@ collector frees it.
 - `JSON.stringify`, `toString` chains, `Proxy` trap chains: each step that calls script is a
   re-entry, bounded as one.
 - Regular expressions: the matcher is a loop with an explicit backtrack stack, bounded by the
-  step budget. A pattern's own nesting counts against `parser_nesting`, from zero at the start
-  of the pattern, and passing it is the same `SyntaxError` naming `parser_nesting`
-  (`host-interface.md`, decision 2): an early error of the script or module for a literal,
-  thrown by the `RegExp` constructor at run time, never a `RangeError` (HOST-142, HOST-143).
+  step budget, its stacks by the memory budget; the parser and the compiler of a pattern are
+  loops with explicit stacks too, and none of the three recurses in Rust (decision 7, "No Rust
+  recursion in the parser and the compiler of a pattern"). A pattern's own nesting counts
+  against `parser_nesting`, from zero at the start of the pattern, and passing it is the same
+  `SyntaxError` naming `parser_nesting` (`host-interface.md`, decision 2): an early error of
+  the script or module for a literal, thrown by the `RegExp` constructor at run time, never a
+  `RangeError` (HOST-142, HOST-143).
 
 A `RangeError` for depth is what the script sees, and the script can catch it; a script that
 catches it and recurses again ends at the step budget, which it cannot catch.
@@ -1098,12 +1110,208 @@ Folding (scf(codePoint)) definitions in the file CaseFolding.txt"), and `toUpper
 (22.2.2.7.3 `Canonicalize`). All tables come from `swell-unicode` (decision 8). `legacy-regexp`
 (`RegExp.$1` and friends) is stage 3 and excluded.
 
+**How `swell-regexp` charges its work.** Added on 2026-11-23 for slice 5. What a host sees: the
+parse, the compile step and the match of a pattern spend the step budget and the memory budget
+of the entry and read its interrupt, as every loop of decision 3 does. A match that passes the
+step budget ends the entry in `Terminated(StepBudget)`, one whose stacks pass the memory budget
+in `Terminated(MemoryBudget)`, and one that reads the interrupt in `Terminated(Interrupted)`; no
+`catch` or `finally` block runs, and nothing the match charged stays charged. The check of a
+literal at parse time charges the parse's memory, reads its interrupt and spends no step
+(`Parsed::Terminated(...)` on a stop, as any parse).
+
+The mechanism:
+
+1. The crate sits below `swell-syntax` and `swell` and names neither, so it takes its budget
+   from its caller through a trait of its own (`crates/regexp/src/budget.rs`) with five
+   operations: charge bytes before the growth they pay for, or refuse and charge nothing;
+   credit bytes charged before; grant steps, asked for 1 to 4,096 at a time, which spends and
+   answers the smaller of the number asked and the steps left, at least 1, or refuses when no
+   step is left, and reads the interrupt first; return steps granted and not run; and poll the
+   interrupt. A refusal is a stop of the crate: over the memory budget, over the step budget,
+   or interrupted. After a stop the crate credits everything it holds and answers the stop,
+   never an error of the pattern. A type that charges nothing and never stops, as
+   `swell_syntax::Unlimited`, is for tests and tools. Growth is by capacity, as `Meter::grow`
+   does (`crates/syntax/src/ledger.rs`): a vector doubles to at least 4 elements with
+   `try_reserve_exact`, and a refusal of the allocator is a refused charge.
+2. Two callers implement it. `swell-syntax`, for the literal its early errors check, over the
+   `Meter` of the parse (decision 4, "Memory budget": the frontend's one ledger): a charge and a
+   credit go to the meter, a poll reads the interrupt through it, and a grant is answered in
+   full and counted nowhere, since a parse spends no step and ParsePattern asks for none.
+   `swell`, for `RegExp` and its matching, over the agent: bytes to the accounting, steps to
+   the counter `steps_per_entry` bounds (a grant is never more than the steps left, so the
+   refused grant is the step that would pass the budget, as for `Agent::step`; a return lowers
+   the counter by what was not run), the interrupt flag read and cleared. It borrows the
+   accounting, the step counter and the flag apart from the arena of Strings, so the matcher
+   reads its subject in place while it charges, and the builtin ends the entry with the stop's
+   termination when the crate answers one.
+3. Positions are code unit indices, in every mode, `u` and `v` included. The subject is the
+   code units of a String, read in place in either stored form of decision 5 and never copied
+   for a match; the start index a caller passes and every position a match answers (the start
+   and end of each capture, group 0 the match) count UTF-16 code units, as `lastIndex`, `index`
+   and `indices` do (`sec-regexpbuiltinexec`, `sec-advancestringindex`). Under `u` and `v` the
+   matcher reads a code point at a code unit position (a surrogate pair is two units and one
+   code point, a lone surrogate one unit) and moves by its length, and a search moves from one
+   try to the next by AdvanceStringIndex's amount. The draft's matcher indexes a list of code
+   points and converts its end with GetStringIndex (`sec-getstringindex`); this one indexes the
+   code units, so no side converts anything. A start index on the second unit of a pair under
+   `u` or `v` starts the first try at the pair's first unit (the character "obtained from
+   element lastIndex of string"), and the caller keeps its `lastIndex` for `index`, as the
+   clause does.
+
+**What one step of the matcher is.** Added on 2026-11-23 for slice 5, the cost model in the
+form of "The step budget" (decision 3). A match spends one step per start index its search
+tries (a sticky search tries one), one per instruction it runs, one per entry it takes from
+the backtrack stack, and one per code unit a backreference compares, charged before the
+comparison. `last_entry_steps()` counts exactly these for a match, beside the steps of the
+instructions and builtins around it. Example: the compiler emits `/a/` as two instructions, the
+code unit `a` and the end of the match; `/a/.exec("ba")` spends 5 steps of the matcher: index 0
+tried (1), the code unit fails (1) with nothing to backtrack, index 1 tried (1), the code unit
+(1), the end of the match (1). A pattern parsed at run time (`RegExp`, a literal's evaluation,
+the `String` methods that make a RegExp) costs one step per code unit of the pattern, charged
+by RegExpInitialize before ParsePattern, as PerformEval charges eval code; the parser and the
+compiler charge no step of their own. Their work is linear in that length: a bounded number of
+nodes per code unit and of instructions per node (a quantifier `{n,m}` is a counter, not n
+copies; the clearing of the captures of a quantified atom names a range of capture numbers,
+since the groups inside an atom are numbered one after the other), but for the sort of a
+class's ranges, n log n for n ranges. Both poll the interrupt at least once per 4,096 code
+units read and per 4,096 nodes visited.
+
+The mechanism: the matcher takes its steps by grants of at most 4,096 before it runs them. It
+runs each unit of work against what it was granted and asks for the next grant when that is
+spent; a backreference that needs more than is left takes further grants first. When the match
+ends with a match or with no match, it returns what it was granted and did not run, so the
+steps charged are the units run, and the interrupt is read at least once per 4,096 of them. A
+grant smaller than asked means the budget is nearly spent; the refused grant after it stops
+the match with `last_entry_steps()` equal to `steps_per_entry`. The backtrack stack, the
+captures and the counters grow by capacity, each growth charged before it is made, so the
+backtrack stack is charged before it grows, and every byte is credited on every way out of the
+match: a match, no match and a stop. The match array, its `groups` and its `indices` are
+charged as any Array and object when RegExpBuiltinExec builds them from the positions.
+
+**Where a RegExp object keeps its program.** Added on 2026-11-23 for slice 5. What a script
+sees, the standard's (`sec-properties-of-regexp-instances`): [[OriginalSource]] and
+[[OriginalFlags]] through `source` and `flags`, and [[RegExpMatcher]] with [[RegExpRecord]]
+through `exec` and the methods built on it; nothing of the program itself. What a host sees:
+`heap_bytes()` holds the program's bytes while the object lives, and the `collect()` that frees
+the object gives them back.
+
+The mechanism:
+
+1. A RegExp instance is an ordinary object whose slots `OrdinaryData` cannot hold, since that
+   is `Copy` and a program is not. It is a kind of object of its own, `ObjectKind::RegExp`, as
+   an Array keeps its elements and an ECMAScript function its code in theirs (`object/mod.rs`):
+   the record holds [[OriginalSource]] and [[OriginalFlags]] as two String handles, and the
+   program as a box of its own: the instructions, the flags of [[RegExpRecord]], the number of
+   capturing groups and their names. Its tag for the dispatch is a `KindTag` of its own that
+   every internal method takes by its ordinary arm. Kind site of the collector: the two
+   Strings; the program holds no handle. Not kept: [[LegacyFeaturesEnabled]] and the [[Realm]]
+   of RegExpAlloc, which only `legacy-regexp` (excluded) and `RegExp.prototype.compile` read.
+   Rejected: a variant of `OrdinaryData` that holds a handle into an arena of programs, a
+   seventh arena with its two sites of the collector for a record that one object names.
+2. Charges. The compile step charges the program through the trait as it grows; when the
+   object is stored that charge becomes the bytes the record owns (`Heap::new_object_charged`,
+   as a script record takes its code's charge), and the sweep that frees the record credits
+   it, never earlier. A compile that stops or refuses credits what it charged. The two Strings
+   are charged as any String: those of a literal are String constants of its code, kept by its
+   script record, and are not copied; the constructor's are the results of ToString.
+3. Two objects never share a program, also when they come from one literal (the next
+   paragraph).
+4. What `RegExp.prototype.compile` (B.2.4.1, `sec-regexp.prototype.compile`, slice 18) needs:
+   RegExpInitialize on an object that exists, so the three slots of the record are replaced in
+   place, the new program charged before it is made and the old one credited when it is
+   replaced, with the bytes the record owns changed by the difference.
+
+**A regular expression literal: checked at parse time, compiled at each evaluation.** Added on
+2026-11-23 for slice 5. What a script sees, the standard's: a pattern that is not valid with its
+flags is an early error of the script, the module, the eval code or the body given to `Function`
+(`sec-primary-expression-regular-expression-literals-static-semantics-early-errors`), and each
+evaluation of a literal makes a new RegExp object by RegExpCreate of its body and flags
+(`sec-regular-expression-literals-runtime-semantics-evaluation`): an object of its own, with its
+own `lastIndex` at 0, also in a loop and from every closure of one code. The program is not
+observable: whether two objects share one, and whether it was compiled at parse time or at the
+evaluation, no script can tell; only the steps and the bytes differ.
+
+The rule:
+
+1. At parse time the early errors run ParsePattern of the body with the flags and the limit
+   `parser_nesting`, and drop the tree and credit it as soon as the check ends; the code keeps
+   the body and the flags as two String constants and nothing else of the pattern.
+2. Each evaluation is one instruction that runs RegExpCreate in the realm of the running code:
+   RegExpAlloc, then RegExpInitialize of the two constants, which parses and compiles the
+   pattern again. It pays the instruction's step, one step per code unit of the body before the
+   parse, and the property operations of RegExpAlloc and RegExpInitialize (`lastIndex`); and
+   the bytes of an object record with one property and of the program, linear in the body's
+   length. A literal of L code units evaluated n times in a loop pays n × (L + 1) steps and
+   those operations, and makes n programs, which the collector frees with their objects. The
+   parse at the evaluation meets no error of the pattern, since the text, the flags and the
+   limit are those of the check; it can meet a refusal of the compile step (`i`, "Refusals
+   until the later stories of slice 5" below), where the standard's `! RegExpCreate` cannot
+   throw, and a stop of the budget.
+3. Why not one per site, as the template objects are ("Template objects.", decision 4): a
+   template object's identity per site is what the standard asks and a script reads, so it is
+   kept in the script record; a program's is not, so the standard's steps are followed as they
+   are. A program per site would add an entry per literal to the script record, a program
+   shared by objects whose charge outlives either owner, and a second form of the slot that
+   `RegExp.prototype.compile` must replace for one object only. Rejected for now: one program
+   per site in the script record, shared by its objects. It changes no answer, only steps and
+   bytes, and comes as a measured optimisation: the steps and the bytes per evaluation of a
+   literal in a loop, before and after.
+
+**No Rust recursion in the parser and the compiler of a pattern.** Added on 2026-11-23 for
+slice 5. What a script and a host see: a pattern nested deeper than `parser_nesting` is the
+`SyntaxError` whose message is `nesting deeper than parser_nesting (<limit>)`: for a literal an
+early error (through the host `Parsed::Errors`, HOST-142; through `eval` and `Function` a
+`SyntaxError` the script catches, as HOST-139 and HOST-141 hold for the script's own nesting),
+through `RegExp` a `SyntaxError` of its realm that the script catches (HOST-143). It is not a
+refusal and is not counted. A pattern within the limit parses and compiles without a stack
+overflow on every thread that holds `Limits::min_stack_bytes()`, and nothing ends in a
+`RangeError`.
+
+The mechanism: loops with explicit stacks, not recursion counted against the limit. The parser
+keeps the open levels on a stack of its own, one entry per open group (capturing, named or not
+capturing), lookaround and modifier group, and under `v` per nested class, charged through the
+trait before it grows; the level that would pass `parser_nesting`, counted from zero at the
+start of the pattern, is the error. The tree's nodes live in vectors and name their children
+by index, as the script's tree does, so dropping it does not recurse; the compile step walks
+it with a worklist, and the program is one vector of instructions. The frames of ParsePattern
+and CompilePattern therefore do not grow with the pattern: `STACK_BYTES_PER_LEVEL` and
+`STACK_BYTES_FIXED` of `swell-syntax` and `Limits::min_stack_bytes()` stay as they are. The kind
+`regexp_inside` of `every_nesting_kind_fits_the_stack_bound` (`crates/syntax/tests/sources.rs`)
+holds it at parse time, with a pattern of 100 nested groups, a class and an escape as its
+innermost literal, measured on top of the deepest nest of the script; the crate's own test
+parses, compiles and matches 10,000 levels on a thread of 64 KiB. Rejected: recursion counted
+against the limit with its frames inside the stack bound. A pattern counts its levels from zero,
+so a literal at the limit inside a script at the limit would need the bound twice, and
+`min_stack_bytes()` would double for every host.
+
+**Refusals until the later stories of slice 5.** Added on 2026-11-23 for slice 5. Until the
+story that brings each, the engine refuses four parts of the pattern grammar and the flags: the
+flag `v` (`class set expressions of the v flag`), a property escape `\p{...}` or `\P{...}`
+(`property escape`) and a group name with a code point outside ASCII, written or escaped
+(`group name outside ASCII`), which ParsePattern refuses; and the flag `i` or a modifier `i`
+(`case-insensitive matching`), which CompilePattern refuses. The message is exactly `<construct>
+is not supported before slice 5`, which `swell_syntax::message_kind` reads as a refusal. In a
+literal the first three are refusals of the parse, counted as any refused parse (HOST-164). At
+run time, in RegExpInitialize (`sec-regexpinitialize`: the constructor, RegExpCreate of the
+`String` methods that make a RegExp, and the evaluation of a literal with `i`), a refusal is a
+`SyntaxError` of the current realm with that message and no position after it, which the agent
+counts before it throws (`Agent::count_refusal`), caught or not (`host-interface.md`, decision
+13, HOST-191). It comes after the steps the clause gives before the parse (ToString of the
+pattern and the flags, the check of the flags), so an error those steps throw is thrown instead.
+A conformance run in which the count moved fails (decision 11), so no case that expects a
+`SyntaxError` from `RegExp` passes on a refusal. A grammar error of a pattern and the nesting
+limit are not refusals and are not counted. This is the third form of section 12, "A part before
+its slice", for RegExpInitialize, with this set; once slice 5 is delivered it refuses nothing.
+
 ## 8. Unicode data
 
 **Pinned to one Unicode version for every table; the data files are vendored under
 `data/unicode/<version>/` with a `SOURCE` file holding each file's address and SHA-256; the tool
 `swell-unicode-gen` writes `crates/unicode/src/tables/*.rs`, which are committed, and the gate
-regenerates them into `.out/` and fails on any difference.** The version is open item C (17.0.0
+renders them again in memory and fails on any difference.** Corrected on 2026-11-23 from "regenerates
+them into `.out/`": the gate's `unicode-tables-check` (`taskfiles/unicode-tables.yml`) runs
+`swell-unicode-gen --check`, which reads the vendored data, renders every table in memory,
+compares it with the committed file and writes no table; only its log goes to `.out/`. The version is open item C (17.0.0
 recommended, the version test262 is written for).
 
 What the engine needs, and from which file:
@@ -1291,8 +1499,9 @@ first.
   (`swell_syntax::message_kind`), and a run that a refusal or the nesting limit ends, in a
   harness file or in the case, fails whatever the case's `negative` says (decided in wave 5 of
   slice 1). A refusal the script catches (through `eval`, `Function`, `$262.evalScript`, a
-  regular expression literal evaluated before slice 5, or a `String` method given a code unit
-  outside ASCII before slice 5, section 12) does not end the run, so the runner also
+  regular expression literal evaluated before slice 5, a `String` method given a code unit
+  outside ASCII before slice 5, section 12, or `RegExp` given a pattern or flags the engine
+  does not take yet, decision 7) does not end the run, so the runner also
   reads the agent's count of refusals (`Agent::refusals`, `host-interface.md` decision 13)
   after each run, every run having an agent of its own, and fails every run in which the count
   moved, whatever the case's `negative` and outcome say.
@@ -1528,7 +1737,9 @@ delivery ("The order of delivery" above) keeps the last two: 7 before 10, 12 bef
 
 **A part before its slice.** Added on 2026-11-21, when the slice epics were drafted and the
 order of section 12 was read against the crate graph of decision 2: `swell-syntax` depends on
-`swell-unicode`, `swell-num` and `swell-regexp`, which section 12 builds in slices 4 and 5; the
+`swell-unicode` and `swell-regexp`, and `swell-compiler` on `swell-num` (corrected on
+2026-11-23: `swell-syntax` was said to depend on `swell-num` too), which section 12 builds in
+slices 4 and 5; the
 heap of slice 1 needs the keyed hash of `swell-num`; `ToString` of a Number is needed from
 slice 1 and `Number::toString` is slice 4; slice 3's `String` needs case mapping and `normalize`
 from `swell-unicode`. The rule:
@@ -1626,7 +1837,12 @@ from `swell-unicode`. The rule:
   it. The third form is allowed only where the answer for every input of that set is the
   standard's and every other input ends in the counted refusal, never in a guessed answer, and
   only for a method this section names with its set; any other method has the first two forms
-  only.
+  only. Named on 2026-11-23 for slice 5: RegExpInitialize (`sec-regexpinitialize`), and so the
+  `RegExp` constructor, the evaluation of a literal and the `String` methods that make a
+  RegExp, answers every pattern and flags but the four parts of decision 7, "Refusals until
+  the later stories of slice 5" (the flag `v`, a property escape, a group name outside ASCII,
+  the flag or modifier `i`), and refuses those with the counted refusal naming slice 5, each
+  until the story of slice 5 that brings it.
 - A refusal is a `SyntaxError`, but not the one a `negative: parse` case names: the runner
   reads the kind of a parse error from its message (`swell_syntax::message_kind`), and a run
   that a refusal or the nesting limit ends, in a harness file or in the case, fails whatever the
@@ -1634,7 +1850,7 @@ from `swell-unicode`. The rule:
   share of the checkout a later slice's parser still declines stays visible (53,564 of 85,556
   runs at slice 1). Before this rule, 3,011 negative parse cases of slices 2 to 18 were counted
   passed on a refusal. A refusal the script catches (through `eval` or `Function`, of a
-  regular expression literal, or of a `String` method of the third form) is counted by the agent (`Agent::refusals`, `host-interface.md`
+  regular expression literal, or of a `String` method or of `RegExp` in the third form) is counted by the agent (`Agent::refusals`, `host-interface.md`
   decision 13), and the runner fails every run in which that count moved (decision 11).
 
 **For surf.** A script that touches no DOM and uses only ES5 can run after slice 4, and with

@@ -188,3 +188,4 @@ HOST-187 test swell::host_objects::host_187_a_realm_of_300_host_functions_and_40
 HOST-188 test swell::termination::host_188_calls_that_take_no_memory_answer_with_a_room_of_0
 HOST-189 test swell::termination::host_189_190_one_runs_after_a_memory_budget_termination_once_the_host_made_room
 HOST-190 test swell::termination::host_189_190_one_runs_after_a_memory_budget_termination_once_the_host_made_room
+HOST-191 pending slice 5

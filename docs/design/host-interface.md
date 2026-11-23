@@ -1231,8 +1231,9 @@ to that slice (`engine.md` section 12, "A part before its slice": the message
 `<construct> is not supported before slice <n>`, which `swell_syntax::message_kind` reads as a
 refusal). It raises one while parsing, through
 `parse_script`, `parse_module`, `eval` or `Function`, and while running: a regular expression
-literal evaluated before slice 5, and a `String` method given a code unit outside ASCII before
-slice 5 (below). Through `eval`, `Function` or a literal a script can catch
+literal evaluated before slice 5, a `String` method given a code unit outside ASCII before
+slice 5, and `RegExp` given a pattern or flags the engine does not take yet (both below).
+Through `eval`, `Function`, a literal or `RegExp` a script can catch
 that error, and a host that measures conformance cannot then tell a refusal from a
 `SyntaxError` of the language. So the agent counts every refusal it raises, whatever entry or
 instruction raised it and whether or not the script catches it, and `refusals()` reads the
@@ -1261,6 +1262,26 @@ throws before the method reaches its refusal is not a refusal and is not counted
 is delivered the five methods refuse no input, and the count stays 0 for every input of them.
 HOST-164 names the refusals of a parse and of a regular expression literal only; HOST-165
 holds these.
+
+**A refusal raised by `RegExp`.** Added on 2026-11-23 for slice 5. Until the story of slice 5
+that brings each, RegExpInitialize (`ecma262:sec-regexpinitialize`), which the `RegExp`
+constructor, the evaluation of a literal and the `String` methods that make a RegExp run,
+refuses four parts of the pattern grammar and the flags (`engine.md` decision 7, "Refusals
+until the later stories of slice 5"; section 12, the third form): the flag `v`, a property
+escape, a group name with a code point outside ASCII, and the flag `i` or a modifier `i`. That
+refusal is raised while running and is counted like a refused parse. The script sees a
+`SyntaxError` object of the current realm whose `message` is exactly `class set expressions of
+the v flag is not supported before slice 5`, `property escape is not supported before slice 5`,
+`group name outside ASCII is not supported before slice 5` or `case-insensitive matching is not
+supported before slice 5`, with no position after it; each such throw moves `refusals()` by 1,
+caught or not. An error that ToString of the pattern or the flags or the check of the flags
+throws before the parse, a grammar error of the pattern and the nesting limit are not refusals
+and are not counted. In a literal the first three are refusals of the parse (HOST-164); `i` is
+refused when the literal is evaluated, since the parse checks the pattern and the compile step
+refuses `i`. Once slice 5 is delivered `RegExp` refuses no input, and the count stays 0 for
+every pattern and flags.
+
+**HOST-191** (swell:D13) Before slice 5 is delivered, on a new agent, the script `try { new RegExp("a", "i"); false } catch (e) { e instanceof SyntaxError && e.message === "case-insensitive matching is not supported before slice 5" }` answers `Normal(true)` and `refusals()` then reads 1; the same script with `/a/i` in place of the construction answers `Normal(true)` and moves the count by 1 more, and so does `try { new RegExp("a", "v"); false } catch (e) { e instanceof SyntaxError && e.message === "class set expressions of the v flag is not supported before slice 5" }`; `try { new RegExp("("); false } catch (e) { e instanceof SyntaxError }`, `try { new RegExp("a", "gg"); false } catch (e) { e instanceof SyntaxError }` and `new RegExp("a", "g").test("a")` each answer `Normal(true)` with the count unchanged; and once slice 5 is delivered, `new RegExp("a", "i").test("A")` and `/a/i.test("A")` answer `Normal(true)` with the count unchanged. [slice 5]
 
 **HOST-97** (ecma262:sec-cyclic-module-records) `module_status` reads `New` after `parse_module`, `Unlinked` after the graph's last load finished, `Linked` after `link`, and `Evaluated` or `EvaluatingAsync` after `evaluate_module`, for a graph of three modules. [slice 11]
 
