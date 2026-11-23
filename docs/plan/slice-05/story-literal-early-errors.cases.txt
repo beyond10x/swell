@@ -1,4 +1,6 @@
+test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-i.js
 test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-m.js
+test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-multi-duplicate.js
 test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-s-escape.js
 test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-s.js
 test/language/literals/regexp/early-err-arithmetic-modifiers-both-empty.js
@@ -22,7 +24,9 @@ test/language/literals/regexp/early-err-arithmetic-modifiers-other-code-point-y.
 test/language/literals/regexp/early-err-arithmetic-modifiers-other-code-point-zwj.js
 test/language/literals/regexp/early-err-arithmetic-modifiers-other-code-point-zwnbsp.js
 test/language/literals/regexp/early-err-arithmetic-modifiers-other-code-point-zwnj.js
+test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-i.js
 test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-m.js
+test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-multi-duplicate.js
 test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-s-escape.js
 test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-s.js
 test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-code-point-repeat-i-1.js

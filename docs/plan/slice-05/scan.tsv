@@ -1714,10 +1714,10 @@ test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-affects-backreferences.js	
 test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-affects-characterClasses.js	case-insensitive	(?i:
 test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-affects-characterEscapes.js	case-insensitive	(?i:
 test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-affects-slash-lower-b.js	case-insensitive	(?i:
-test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-affects-slash-lower-p.js	property-escapes	\p{
+test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-affects-slash-lower-p.js	case-insensitive	(?i:
 test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-affects-slash-lower-w.js	case-insensitive	(?i:
 test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-affects-slash-upper-b.js	case-insensitive	(?i:
-test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-affects-slash-upper-p.js	property-escapes	\p{
+test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-affects-slash-upper-p.js	case-insensitive	(?i:
 test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-affects-slash-upper-w.js	case-insensitive	(?i:
 test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-does-not-affect-alternatives-outside.js	case-insensitive	(?i:
 test/built-ins/RegExp/regexp-modifiers/add-ignoreCase-does-not-affect-dotAll-flag.js	case-insensitive	(?i:
@@ -1752,10 +1752,10 @@ test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-affects-backreferences.
 test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-affects-characterClasses.js	case-insensitive	c/i;
 test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-affects-characterEscapes.js	case-insensitive	b/i;
 test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-affects-slash-lower-b.js	case-insensitive	)/ui;
-test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-affects-slash-lower-p.js	property-escapes	\p{
+test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-affects-slash-lower-p.js	case-insensitive	)/ui;
 test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-affects-slash-lower-w.js	case-insensitive	)/ui;
 test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-affects-slash-upper-b.js	case-insensitive	)/ui;
-test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-affects-slash-upper-p.js	property-escapes	\p{
+test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-affects-slash-upper-p.js	case-insensitive	)/ui;
 test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-affects-slash-upper-w.js	case-insensitive	)/ui;
 test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-does-not-affect-alternatives-outside.js	case-insensitive	e/i;
 test/built-ins/RegExp/regexp-modifiers/remove-ignoreCase-does-not-affect-dotAll-flag.js	case-insensitive	)/i;
@@ -1775,9 +1775,9 @@ test/built-ins/RegExp/regexp-modifiers/syntax/valid/add-modifiers-when-set-as-fl
 test/built-ins/RegExp/regexp-modifiers/syntax/valid/remove-modifiers-when-nested.js	case-insensitive	(?-ims:
 test/built-ins/RegExp/regexp-modifiers/syntax/valid/remove-modifiers-when-not-set-as-flags.js	case-insensitive	(?-ims:
 test/built-ins/RegExp/regexp-modifiers/syntax/valid/remove-modifiers-when-set-as-flags.js	case-insensitive	)/i;
-test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-i.js	case-insensitive	(?i-i:
+test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-i.js	objects-exec	threw Test262Error: RegExp("(?i-i:a)", ""):  Expected a Synt
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-m.js	objects-exec	threw Test262Error: RegExp("(?m-m:a)", ""):  Expected a Synt
-test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-multi-duplicate.js	case-insensitive	(?ims-m:
+test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-multi-duplicate.js	objects-exec	threw Test262Error: RegExp("(?ims-m:a)", ""):  Expected a Sy
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-s-escape.js	objects-exec	threw Test262Error: RegExp("(?s-s:a)", ""):  Expected a Synt
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-s.js	objects-exec	threw Test262Error: RegExp("(?s-s:a)", ""):  Expected a Synt
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-both-empty.js	objects-exec	threw Test262Error: RegExp("(?-:a)", ""):  Expected a Syntax
@@ -1798,9 +1798,9 @@ test/built-ins/RegExp/syntax-err-arithmetic-modifiers-other-code-point-y.js	obje
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-other-code-point-zwj.js	objects-exec	threw Test262Error: RegExp("(?-s‍:a)", ""):  Expected a Sy
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-other-code-point-zwnbsp.js	objects-exec	threw Test262Error: RegExp("(?-s﻿:a)", ""):  Expected a Sy
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-other-code-point-zwnj.js	objects-exec	threw Test262Error: RegExp("(?-s‌:a)", ""):  Expected a Sy
-test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-i.js	case-insensitive	(?i-i:
+test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-i.js	objects-exec	threw Test262Error: RegExp("(?i-i:a)", ""):  Expected a Synt
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-m.js	objects-exec	threw Test262Error: RegExp("(?m-m:a)", ""):  Expected a Synt
-test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-multi-duplicate.js	case-insensitive	(?m-ims:
+test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-multi-duplicate.js	objects-exec	threw Test262Error: RegExp("(?m-ims:a)", ""):  Expected a Sy
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-s-escape.js	objects-exec	threw Test262Error: RegExp("(?s-s:a)", ""):  Expected a Synt
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-s.js	objects-exec	threw Test262Error: RegExp("(?s-s:a)", ""):  Expected a Synt
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-code-point-repeat-i-1.js	objects-exec	threw Test262Error: RegExp("(?ii-:a)", ""):  Expected a Synt
@@ -2118,11 +2118,11 @@ test/built-ins/String/prototype/replaceAll/cstm-replaceall-on-string-primitive.j
 test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x0024.js	string-replace-split	no regular expression
 test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x0026.js	string-replace-split	no regular expression
 test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x0027.js	string-replace-split	no regular expression
-test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x003C.js	string-replace-split	no regular expression
+test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x003C.js	symbol-methods	@@match, @@replace, @@search or @@split
 test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x0060.js	string-replace-split	no regular expression
 test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024.js	string-replace-split	no regular expression
-test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024N.js	string-replace-split	no regular expression
-test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024NN.js	string-replace-split	no regular expression
+test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024N.js	symbol-methods	@@match, @@replace, @@search or @@split
+test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024NN.js	symbol-methods	@@match, @@replace, @@search or @@split
 test/built-ins/String/prototype/replaceAll/length.js	string-replace-split	no regular expression
 test/built-ins/String/prototype/replaceAll/name.js	string-replace-split	no regular expression
 test/built-ins/String/prototype/replaceAll/replaceAll.js	string-replace-split	no regular expression
@@ -2312,19 +2312,19 @@ test/built-ins/String/prototype/split/valueOf-is-called-for-limit-argument.js	st
 test/built-ins/String/prototype/startsWith/return-abrupt-from-searchstring-regexp-test.js	objects-exec	counted refusal: 1 refusal(s)
 test/built-ins/String/prototype/startsWith/searchstring-is-regexp-throws.js	objects-exec	counted refusal: 1 refusal(s)
 test/built-ins/String/prototype/toLocaleLowerCase/Final_Sigma_U180E.js	case-mapping	case methods
-test/built-ins/String/prototype/toLocaleLowerCase/S15.5.4.17_A1_T14.js	case-mapping	case methods
+test/built-ins/String/prototype/toLocaleLowerCase/S15.5.4.17_A1_T14.js	objects-exec	threw ReferenceError: RegExp is not defined
 test/built-ins/String/prototype/toLocaleLowerCase/special_casing.js	case-mapping	case methods
 test/built-ins/String/prototype/toLocaleLowerCase/special_casing_conditional.js	case-mapping	case methods
 test/built-ins/String/prototype/toLocaleLowerCase/supplementary_plane.js	case-mapping	case methods
-test/built-ins/String/prototype/toLocaleUpperCase/S15.5.4.19_A1_T14.js	case-mapping	case methods
+test/built-ins/String/prototype/toLocaleUpperCase/S15.5.4.19_A1_T14.js	objects-exec	threw ReferenceError: RegExp is not defined
 test/built-ins/String/prototype/toLocaleUpperCase/special_casing.js	case-mapping	case methods
 test/built-ins/String/prototype/toLocaleUpperCase/supplementary_plane.js	case-mapping	case methods
 test/built-ins/String/prototype/toLowerCase/Final_Sigma_U180E.js	case-mapping	case methods
-test/built-ins/String/prototype/toLowerCase/S15.5.4.16_A1_T14.js	case-mapping	case methods
+test/built-ins/String/prototype/toLowerCase/S15.5.4.16_A1_T14.js	objects-exec	threw ReferenceError: RegExp is not defined
 test/built-ins/String/prototype/toLowerCase/special_casing.js	case-mapping	case methods
 test/built-ins/String/prototype/toLowerCase/special_casing_conditional.js	case-mapping	case methods
 test/built-ins/String/prototype/toLowerCase/supplementary_plane.js	case-mapping	case methods
-test/built-ins/String/prototype/toUpperCase/S15.5.4.18_A1_T14.js	case-mapping	case methods
+test/built-ins/String/prototype/toUpperCase/S15.5.4.18_A1_T14.js	objects-exec	threw ReferenceError: RegExp is not defined
 test/built-ins/String/prototype/toUpperCase/special_casing.js	case-mapping	case methods
 test/built-ins/String/prototype/toUpperCase/supplementary_plane.js	case-mapping	case methods
 test/built-ins/String/prototype/trim/15.5.4.20-2-49.js	objects-exec	threw ReferenceError: RegExp is not defined
@@ -2444,9 +2444,9 @@ test/language/literals/regexp/S7.8.5_A3.1_T5.js	objects-exec	counted refusal: 1 
 test/language/literals/regexp/S7.8.5_A3.1_T6.js	case-insensitive	)/mig;
 test/language/literals/regexp/S7.8.5_A4.1.js	objects-exec	counted refusal: 1 refusal(s)
 test/language/literals/regexp/S7.8.5_A4.2.js	objects-exec	counted refusal: 1 refusal(s)
-test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-i.js	case-insensitive	(?i-i:
+test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-i.js	literal-early-errors	negative parse
 test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-m.js	literal-early-errors	negative parse
-test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-multi-duplicate.js	case-insensitive	(?ims-m:
+test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-multi-duplicate.js	literal-early-errors	negative parse
 test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-s-escape.js	literal-early-errors	negative parse
 test/language/literals/regexp/early-err-arithmetic-modifiers-add-remove-s.js	literal-early-errors	negative parse
 test/language/literals/regexp/early-err-arithmetic-modifiers-both-empty.js	literal-early-errors	negative parse
@@ -2470,9 +2470,9 @@ test/language/literals/regexp/early-err-arithmetic-modifiers-other-code-point-y.
 test/language/literals/regexp/early-err-arithmetic-modifiers-other-code-point-zwj.js	literal-early-errors	negative parse
 test/language/literals/regexp/early-err-arithmetic-modifiers-other-code-point-zwnbsp.js	literal-early-errors	negative parse
 test/language/literals/regexp/early-err-arithmetic-modifiers-other-code-point-zwnj.js	literal-early-errors	negative parse
-test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-i.js	case-insensitive	(?i-i:
+test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-i.js	literal-early-errors	negative parse
 test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-m.js	literal-early-errors	negative parse
-test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-multi-duplicate.js	case-insensitive	(?m-ims:
+test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-multi-duplicate.js	literal-early-errors	negative parse
 test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-s-escape.js	literal-early-errors	negative parse
 test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-add-remove-s.js	literal-early-errors	negative parse
 test/language/literals/regexp/early-err-arithmetic-modifiers-reverse-code-point-repeat-i-1.js	literal-early-errors	negative parse

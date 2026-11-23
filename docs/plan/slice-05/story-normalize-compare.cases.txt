@@ -1,0 +1,11 @@
+test/built-ins/String/prototype/localeCompare/15.5.4.9_3.js
+test/built-ins/String/prototype/localeCompare/15.5.4.9_CE.js
+test/built-ins/String/prototype/normalize/form-is-not-valid-throws.js
+test/built-ins/String/prototype/normalize/length.js
+test/built-ins/String/prototype/normalize/name.js
+test/built-ins/String/prototype/normalize/normalize.js
+test/built-ins/String/prototype/normalize/return-abrupt-from-form.js
+test/built-ins/String/prototype/normalize/return-abrupt-from-this.js
+test/built-ins/String/prototype/normalize/return-normalized-string-from-coerced-form.js
+test/built-ins/String/prototype/normalize/return-normalized-string-using-default-parameter.js
+test/built-ins/String/prototype/normalize/return-normalized-string.js

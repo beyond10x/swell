@@ -767,7 +767,9 @@ test/built-ins/RegExp/regexp-modifiers/remove-multiline-does-not-affect-alternat
 test/built-ins/RegExp/regexp-modifiers/remove-multiline-does-not-affect-dotAll-flag.js
 test/built-ins/RegExp/regexp-modifiers/remove-multiline-does-not-affect-multiline-property.js
 test/built-ins/RegExp/regexp-modifiers/remove-multiline.js
+test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-i.js
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-m.js
+test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-multi-duplicate.js
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-s-escape.js
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-add-remove-s.js
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-both-empty.js
@@ -788,7 +790,9 @@ test/built-ins/RegExp/syntax-err-arithmetic-modifiers-other-code-point-y.js
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-other-code-point-zwj.js
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-other-code-point-zwnbsp.js
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-other-code-point-zwnj.js
+test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-i.js
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-m.js
+test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-multi-duplicate.js
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-s-escape.js
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-add-remove-s.js
 test/built-ins/RegExp/syntax-err-arithmetic-modifiers-reverse-code-point-repeat-i-1.js
@@ -845,6 +849,10 @@ test/built-ins/String/prototype/replaceAll/searchValue-replacer-call-abrupt.js
 test/built-ins/String/prototype/replaceAll/searchValue-replacer-method-abrupt.js
 test/built-ins/String/prototype/startsWith/return-abrupt-from-searchstring-regexp-test.js
 test/built-ins/String/prototype/startsWith/searchstring-is-regexp-throws.js
+test/built-ins/String/prototype/toLocaleLowerCase/S15.5.4.17_A1_T14.js
+test/built-ins/String/prototype/toLocaleUpperCase/S15.5.4.19_A1_T14.js
+test/built-ins/String/prototype/toLowerCase/S15.5.4.16_A1_T14.js
+test/built-ins/String/prototype/toUpperCase/S15.5.4.18_A1_T14.js
 test/built-ins/String/prototype/trim/15.5.4.20-2-49.js
 test/language/expressions/delete/11.4.1-5-a-28-s.js
 test/language/expressions/delete/S11.4.1_A5.js

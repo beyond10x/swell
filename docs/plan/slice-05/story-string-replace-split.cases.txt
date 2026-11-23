@@ -27,11 +27,8 @@ test/built-ins/String/prototype/replaceAll/cstm-replaceall-on-string-primitive.j
 test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x0024.js
 test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x0026.js
 test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x0027.js
-test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x003C.js
 test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024-0x0060.js
 test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024.js
-test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024N.js
-test/built-ins/String/prototype/replaceAll/getSubstitution-0x0024NN.js
 test/built-ins/String/prototype/replaceAll/length.js
 test/built-ins/String/prototype/replaceAll/name.js
 test/built-ins/String/prototype/replaceAll/replaceAll.js
