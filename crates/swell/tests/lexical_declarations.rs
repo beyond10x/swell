@@ -353,23 +353,35 @@ fn delete_of_a_lexical_binding_answers_false_and_checks_nothing() {
     }
 }
 
-/// The loop of [`the_per_iteration_record_is_charged`]: `N` closures kept in an array, each over
-/// the loop's binding, declared with `kind`.
+/// The loop of [`the_per_iteration_record_is_charged`]: [`iterations`] closures kept in an
+/// array, each over the loop's binding, declared with `kind`.
 fn kept_closures(kind: &str) -> String {
+    let n = iterations();
     format!(
-        "var fs = []; for ({kind} i = 0; i < {N}; i++) {{ fs[i] = function () {{ return i; }}; }} \
+        "var fs = []; for ({kind} i = 0; i < {n}; i++) {{ fs[i] = function () {{ return i; }}; }} \
          fs.length"
     )
 }
 
-/// The iterations of [`the_per_iteration_record_is_charged`]: 4,000; 50 with the feature
-/// `collect-every-safe-point`, where every instruction collects the whole heap, so the loop's
-/// cost grows with the square of its length.
-const N: u32 = if cfg!(feature = "collect-every-safe-point") {
-    50
-} else {
-    4_000
-};
+/// The iterations of [`the_per_iteration_record_is_charged`]: 4,000, the full count, in the
+/// default mode's lane `slow` (`SWELL_FULL_COUNTS=1`); 500 in the default mode's gate; 50
+/// with the feature `collect-every-safe-point`, in the gate and in the lane alike, where every
+/// instruction collects the whole heap, so the loop's cost grows with the square of its
+/// length. At 4,000 the test took 1.00 CPU seconds alone in the default mode (measured on
+/// 2026-11-23). The budget is a reading of the two loops at the same count and half their
+/// difference, so it scales with the count: 500 records of more than 32 bytes each still
+/// put the `let` loop past it and leave the `var` loop under it, and a record that was not
+/// charged leaves both loops with the same bytes, which the assertion of more than 32 bytes a
+/// record refuses at any count, as the collect mode's 50 show.
+fn iterations() -> u32 {
+    if cfg!(feature = "collect-every-safe-point") {
+        50
+    } else if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
+        4_000
+    } else {
+        500
+    }
+}
 
 /// The bytes an agent with `limits` holds after `source` ran in a fresh realm, collected.
 fn bytes_after(limits: swell::Limits, source: &str) -> (Outcome, u64) {
@@ -389,13 +401,14 @@ fn bytes_after(limits: swell::Limits, source: &str) -> (Outcome, u64) {
 fn the_per_iteration_record_is_charged() {
     let (var_outcome, var_bytes) = bytes_after(limits(), &kept_closures("var"));
     let (let_outcome, let_bytes) = bytes_after(limits(), &kept_closures("let"));
-    let count = normal(&N.to_string());
+    let n = iterations();
+    let count = normal(&n.to_string());
     assert_eq!(var_outcome, count);
     assert_eq!(let_outcome, count);
-    println!("n {N}, var loop {var_bytes} bytes, let loop {let_bytes} bytes");
+    println!("n {n}, var loop {var_bytes} bytes, let loop {let_bytes} bytes");
     // A record per iteration is more than 32 bytes.
     assert!(
-        let_bytes > var_bytes + u64::from(N) * 32,
+        let_bytes > var_bytes + u64::from(n) * 32,
         "{let_bytes} against {var_bytes}"
     );
     let mut bounded = limits();

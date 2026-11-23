@@ -33,16 +33,6 @@ fn full_counts() -> bool {
     std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
 }
 
-/// A count of the gate: `full` in the default mode and at the full count, `collect` with the
-/// feature `collect-every-safe-point`, where every instruction collects.
-fn gate_count(full: u32, collect: u32) -> u32 {
-    if cfg!(feature = "collect-every-safe-point") && !full_counts() {
-        collect
-    } else {
-        full
-    }
-}
-
 /// A count of a test whose claim shows at its gate count where every instruction collects:
 /// `default` in the default mode and `collect` with the feature `collect-every-safe-point`, in
 /// the gate and in the lane `slow` (`SWELL_FULL_COUNTS=1`) alike. The lane's bound is 2.5 CPU
@@ -71,15 +61,18 @@ fn value_of(agent: &mut Agent<TestHost>, realm: &Realm, source: &str) -> Root {
 /// a site gives the same object, from a function called many times and from each closure made
 /// from one function in a loop; `eval` of one String twice and the `Function` constructor of
 /// one text twice parse two sites, so they give two objects, while one function made by
-/// `Function` gives one.
+/// `Function` gives one. The function is called 100 times in the default mode and 10 times
+/// with the feature `collect-every-safe-point` (`mode_count`, the lane `slow` alike), where
+/// every instruction between two calls collects, so the object of the site outlives as many
+/// collections as at 100. At 100 it took 1.28 CPU seconds alone in that mode (0.03 in the
+/// default mode, measured on 2026-11-23).
 #[test]
 fn a_site_gives_the_same_template_object_on_each_evaluation() {
-    both(
-        "function tag(s) { return s; }\n\
+    let source = "function tag(s) { return s; }\n\
          function site() { return tag`a${0}b`; }\n\
          var first = site();\n\
          var same = true;\n\
-         for (var i = 0; i < 100; i++) { if (site() !== first) same = false; }\n\
+         for (var i = 0; i < CALLS; i++) { if (site() !== first) same = false; }\n\
          var closures = [];\n\
          for (var j = 0; j < 3; j++) closures.push(function () { return tag`c`; });\n\
          var c0 = closures[0]();\n\
@@ -90,8 +83,8 @@ fn a_site_gives_the_same_template_object_on_each_evaluation() {
          same && first.length === 2 && closures[1]() === c0 && closures[2]() === c0\n\
            && loop[0] === loop[1] && loop[1] === loop[2]\n\
            && eval(\"tag`e`\") !== eval(\"tag`e`\")\n\
-           && g(tag) === g(tag) && g(tag) !== h(tag);",
-    );
+           && g(tag) === g(tag) && g(tag) !== h(tag);";
+    both(&source.replace("CALLS", &mode_count(100, 10).to_string()));
 }
 
 /// `#sec-gettemplateobject`, step 3: the key is the site, not its text: two sites with the same
@@ -572,14 +565,19 @@ impl swell_syntax::Ledger for HighWater {
     }
 }
 
-/// The frontend's ledger over a source of 10,000 tagged templates (1,000 in the collect mode,
-/// whose build is slower; 10,000 at the full count), each with a substitution and a
+/// The frontend's ledger over a source of 1,000 tagged templates in the gate, in either mode
+/// (10,000 at the full count, the lane `slow`), each with a substitution and a
 /// NotEscapeSequence, in the script and in a function: when the parse returns the ledger holds
 /// exactly what the tree holds by capacity, and while the compile step runs its high-water
 /// mark covers the tree and the code with its site table, after which it holds exactly both.
+/// The test runs no script, so the feature `collect-every-safe-point` changes nothing it
+/// checks; at 10,000 it took 0.67 CPU seconds alone in the default mode (measured on
+/// 2026-11-23). 1,000 sites still grow every list of the parse, the compile step and the site
+/// table past its first capacity many times over, and each assertion compares the ledger
+/// with what the lists hold at that size.
 #[test]
 fn many_tagged_templates_are_charged_as_they_are_read() {
-    let n = gate_count(10_000, 1_000);
+    let n = if full_counts() { 10_000 } else { 1_000 };
     let sites: Vec<String> = (0..n).map(|i| format!("tag`a${{{i}}}\\xg`;")).collect();
     let text = format!(
         "{}\nfunction f() {{ {} }}",

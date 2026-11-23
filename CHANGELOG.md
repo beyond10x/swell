@@ -10,8 +10,31 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Added
+
+- `String.prototype.replace`, `replaceAll` and `split` with a String to search for or to split
+  at: the replacement patterns of GetSubstitution, a function as the replacement, and a method
+  an object keys by `@@replace` or `@@split`. 16,567 of the 44,812 selected test262 cases pass
+  (16,412 in 0.5.0), 198 of the 2,724 of the fifth slice (52).
+- The pattern of a regular expression literal is checked when its script is parsed, by the
+  grammar of the modes `u` and `v` and of Annex B.1.2 with neither: a pattern with an error
+  is a `SyntaxError` of the script at the line and column of the literal, and a pattern
+  nested past `parser_nesting` is a `SyntaxError` that names the limit (`HOST-142`).
+  Evaluating a literal still waits for the `RegExp` objects of this slice.
+
+### Changed
+
+- The test steps of the gate cost about 270 CPU seconds, from about 300: tests of twelve files take a
+  gate count, with the full count in the lane `slow`, five tests of the test262 runner that
+  counted one fixture tree are one test, and `gate-selftest` starts the next planted script
+  when one ends.
+
 ### Host interface
 
+- `BINDINGS_REALM_HEAP_BYTES` (changed): 506,112, from 381,696. A realm of 300 host functions and
+  40 host objects raises `heap_bytes()` by 449,848 since `String.prototype` has `replace`,
+  `replaceAll` and `split`: an arena grows once more inside the window `HOST-187` measures. A
+  host that sizes its memory budget by this ceiling raises it.
 - `HOST-191` (new): a refusal that `RegExp` raises at run time for a part of the fifth slice
   that is not built yet is counted by the agent, like a refusal of the parser.
 

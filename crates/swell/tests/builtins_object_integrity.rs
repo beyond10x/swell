@@ -504,12 +504,25 @@ fn is_prototype_of_charges_a_step_per_object() {
     assert!(far >= near + 1_000, "far {far}, near {near}");
 }
 
+/// The smaller of the two key counts of [`freeze_charges_a_step_per_key`]: 10 in the default
+/// mode, 2 with the feature `collect-every-safe-point`, in the gate and in the lane `slow`
+/// alike, where the test shows the same step per key on 2 and 20 keys while every instruction
+/// collects; a call that charged no step per key still spends the same on both. At 10 and 100
+/// it took 1.67 CPU seconds alone in that mode (0.04 in the default mode, measured on
+/// 2026-11-23).
+const FEW_KEYS: u64 = if cfg!(feature = "collect-every-safe-point") {
+    2
+} else {
+    10
+};
+
 /// `Object.freeze`, `Object.seal`, `Object.isFrozen` and `Object.isSealed` are charged a step
 /// per own key on top of the steps of [[OwnPropertyKeys]] (`#sec-setintegritylevel`,
 /// `#sec-testintegritylevel`), so the cost over an empty object grows with the keys: at least
-/// two steps per key, and the same per key for 10 and for 100 keys.
+/// two steps per key, and the same per key for [`FEW_KEYS`] and for ten times as many keys.
 #[test]
 fn freeze_charges_a_step_per_key() {
+    let (few, many) = (FEW_KEYS, 10 * FEW_KEYS);
     // A test answers true only after it has read every key, so it reads objects frozen or
     // sealed before; the empty one is then not extensible, so it answers true too.
     for (call, prepare, answer) in [
@@ -532,8 +545,10 @@ fn freeze_charges_a_step_per_key() {
             eval_text(
                 &mut agent,
                 &realm,
-                "function make(n) { var o = {}; for (var i = 0; i < n; i++) o[\"k\" + i] = i; return o; }\n\
-                 var a = make(0), b = make(10), c = make(100); 0;"
+                &format!(
+                    "function make(n) {{ var o = {{}}; for (var i = 0; i < n; i++) o[\"k\" + i] = i; return o; }}\n\
+                     var a = make(0), b = make({few}), c = make({many}); 0;"
+                )
             ),
             Outcome::Normal("0".to_string())
         );
@@ -542,11 +557,18 @@ fn freeze_charges_a_step_per_key() {
             Outcome::Normal("0".to_string())
         );
         let empty = steps_of(&mut agent, &realm, &format!("{call}(a);"), answer);
-        let ten = steps_of(&mut agent, &realm, &format!("{call}(b);"), answer);
-        let hundred = steps_of(&mut agent, &realm, &format!("{call}(c);"), answer);
-        let (d10, d100) = (ten - empty, hundred - empty);
-        assert!(d10 >= 20, "{call}: 10 keys cost {d10} steps more");
-        assert_eq!(d100, 10 * d10, "{call}: 10 keys {d10}, 100 keys {d100}");
+        let at_few = steps_of(&mut agent, &realm, &format!("{call}(b);"), answer);
+        let at_many = steps_of(&mut agent, &realm, &format!("{call}(c);"), answer);
+        let (d_few, d_many) = (at_few - empty, at_many - empty);
+        assert!(
+            d_few >= 2 * few,
+            "{call}: {few} keys cost {d_few} steps more"
+        );
+        assert_eq!(
+            d_many,
+            10 * d_few,
+            "{call}: {few} keys {d_few}, {many} keys {d_many}"
+        );
     }
 }
 

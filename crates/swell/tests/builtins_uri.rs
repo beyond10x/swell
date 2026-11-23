@@ -169,6 +169,14 @@ const ROUND_TRIP_STEPS: u64 = 16_384;
 /// 65,536 in 64: the seventeen tests below pass all 1,112,064 scalar values, 1,086 Strings and
 /// 4,344 calls. One test per plane, since one test of all of them took 17.49 s in a debug build
 /// (measured; `AGENTS.md` of the folder that holds the repository, "Tests stay fast").
+///
+/// With the feature `collect-every-safe-point` each plane takes every [`CHUNK_STRIDE`]th String
+/// of 1,024 (the file has no full count, and the lane `slow` does not run it): there the test
+/// shows that the four
+/// functions keep the Strings of a call across the collections of its safe points, which every
+/// String of a plane shows alike; that every scalar value round trips is what the default mode
+/// shows, and it keeps every String. In that mode the seventeen tests took 9.4 CPU seconds
+/// together, each run alone (0.53 to 0.60 a plane, measured on 2026-11-23).
 fn every_code_point_of_a_plane_round_trips(plane: u32) {
     let mut limits = limits();
     limits.steps_per_entry = ROUND_TRIP_STEPS;
@@ -183,8 +191,9 @@ fn every_code_point_of_a_plane_round_trips(plane: u32) {
         (0x10000, 64)
     };
     assert_eq!(scalars.len(), count);
+    let expected_strings = usize::div_ceil(expected_strings, CHUNK_STRIDE);
     let mut strings = 0;
-    for chunk in scalars.chunks(1_024) {
+    for chunk in scalars.chunks(1_024).step_by(CHUNK_STRIDE) {
         strings += 1;
         let text: String = chunk.iter().collect();
         let source = units(&text);
@@ -208,6 +217,16 @@ fn every_code_point_of_a_plane_round_trips(plane: u32) {
     }
     assert_eq!(strings, expected_strings);
 }
+
+/// Which Strings of 1,024 code points of a plane [`every_code_point_of_a_plane_round_trips`]
+/// passes: each of them in the default mode, and with the feature `collect-every-safe-point`
+/// the first of each 16, 4 a plane (in plane 0 the first, from U+0000, holds the code points of
+/// one and of two octets, the others those of three; in the other planes every one has four).
+const CHUNK_STRIDE: usize = if cfg!(feature = "collect-every-safe-point") {
+    16
+} else {
+    1
+};
 
 /// One test per plane, each over [`every_code_point_of_a_plane_round_trips`].
 macro_rules! round_trip_planes {

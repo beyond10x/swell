@@ -139,7 +139,7 @@ HOST-138 pending slice 11
 HOST-139 test swell::eval::host_139_direct_eval_past_parser_nesting_throws_a_catchable_syntax_error
 HOST-140 test swell::eval::host_140_indirect_eval_past_parser_nesting_throws_a_syntax_error
 HOST-141 test swell::dynamic_function::host_141_function_past_parser_nesting_throws_a_catchable_syntax_error
-HOST-142 pending slice 5
+HOST-142 test swell::regexp_literal_limits::host_142_a_literal_past_parser_nesting_is_a_parse_error_naming_it
 HOST-143 pending slice 5
 HOST-144 pending slice 4
 HOST-145 test swell::lib::heap::map::tests::host_145_hash_is_keyed_by_hash_key_alone

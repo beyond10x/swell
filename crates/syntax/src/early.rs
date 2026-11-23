@@ -46,9 +46,12 @@
 //!   `ArrowFormalParameters` of an arrow function hold no name twice, in any code; a parameter
 //!   that the body declares lexically, and `eval` and `arguments` as parameters in strict code,
 //!   are checked as for every function;
-//! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`: the
-//!   flags of IsValidRegularExpressionLiteral. Its pattern is not parsed before slice 5 (a
-//!   recorded omission of `sec-literals-regular-expression-literals`);
+//! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`:
+//!   IsValidRegularExpressionLiteral, the flags and then ParsePattern of `swell-regexp` with
+//!   them and the limit `parser_nesting`, charged to the meter of the parse ([`crate::regexp`]);
+//!   an error of the pattern is an early error of the literal, and a part of the pattern grammar
+//!   a later story of slice 5 brings is the refusal of the parse, the only error it answers
+//!   (`docs/design/engine.md`, decision 7, "Refusals until the later stories of slice 5");
 //! - `#sec-let-and-const-declarations-static-semantics-early-errors`: a `let` or `const`
 //!   declaration binds no name `let` and no name twice, and a `const` one has an initializer
 //!   outside a for-in or for-of head;
@@ -87,8 +90,9 @@ use crate::ast::{
     PropertyValue, RegExpLiteral, Span, Stmt, StmtId, StringLiteral, SwitchCase, UnaryOp,
     VarDeclarator,
 };
-use crate::error::SyntaxError;
+use crate::error::{MessageKind, SyntaxError, message_kind};
 use crate::ledger::{HeapBytes, Meter, map_entry_bytes};
+use crate::regexp::PatternBudget;
 
 /// The message of a `CoverInitializedName` (`a = 1` in an object literal) in a literal that is
 /// not read again as a pattern (`#sec-object-initializer-static-semantics-early-errors`).
@@ -149,17 +153,27 @@ const STRICT_RESERVED: [&str; 9] = [
     "yield",
 ];
 
-/// The early errors of the script `body` of `ast`, strict when `strict`, in source order.
+/// The early errors of the script `body` of `ast`, strict when `strict`, in source order; the
+/// pattern of a regular expression literal is parsed with the nesting limit `max_nesting`.
+/// When a pattern is refused, the first refusal in source order is the only error.
 ///
 /// Every structure of the walk is charged to `m` before it grows and credited when it is
 /// dropped: the frames of lexical names (an entry each, [`crate::ledger::map_entry_bytes`], and
-/// the bytes of each name), the labels, the stack of pending work and the errors (a message is
-/// charged by its capacity once it is formatted). The walk calls [`Meter::visit`] for every
-/// node and ends at the first stop; the entry then answers the stop.
-pub(crate) fn check(ast: &Ast, body: &[StmtId], strict: bool, m: &Meter<'_>) -> Vec<SyntaxError> {
+/// the bytes of each name), the labels, the stack of pending work, the tree of each pattern
+/// (until its check ends) and the errors (a message is charged by its capacity once it is
+/// formatted). The walk calls [`Meter::visit`] for every node and ends at the first stop; the
+/// entry then answers the stop.
+pub(crate) fn check(
+    ast: &Ast,
+    body: &[StmtId],
+    strict: bool,
+    max_nesting: u32,
+    m: &Meter<'_>,
+) -> Vec<SyntaxError> {
     let mut checker = Checker {
         ast,
         m,
+        max_nesting,
         errors: Vec::new(),
         strict,
         loops: 0,
@@ -186,7 +200,27 @@ pub(crate) fn check(ast: &Ast, body: &[StmtId], strict: bool, m: &Meter<'_>) -> 
         found.sort_by_key(|e| (e.line, e.column));
         m.credit(scratch);
     }
-    found
+    only_the_refusal(found, m)
+}
+
+/// `errors` as the parse answers them: a refusal stops a parse and is its only error (`lib.rs`,
+/// "A part before its slice"), so when a pattern was refused the first refusal is kept and
+/// every other error is dropped, its message credited.
+fn only_the_refusal(mut errors: Vec<SyntaxError>, m: &Meter<'_>) -> Vec<SyntaxError> {
+    let refused = |e: &SyntaxError| matches!(message_kind(&e.message), MessageKind::Refusal { .. });
+    let Some(first) = errors.iter().position(refused) else {
+        return errors;
+    };
+    let mut index = 0;
+    errors.retain(|e| {
+        let keep = index == first;
+        index += 1;
+        if !keep {
+            m.credit(e.message.capacity());
+        }
+        keep
+    });
+    errors
 }
 
 /// Where the names of a frame of lexical names come from.
@@ -238,6 +272,8 @@ impl HeapBytes for Step {
 struct Checker<'a, 'm> {
     ast: &'a Ast,
     m: &'a Meter<'m>,
+    /// The host's `parser_nesting`, the nesting limit of a literal's pattern.
+    max_nesting: u32,
     errors: Vec<SyntaxError>,
     strict: bool,
     /// Loops around the current position inside the current function.
@@ -572,26 +608,37 @@ impl<'a, 'm> Checker<'a, 'm> {
         }
     }
 
-    /// The flags of IsValidRegularExpressionLiteral
+    /// IsValidRegularExpressionLiteral
     /// (`#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`):
-    /// only `d g i m s u v y`, each once, and not `u` with `v` (ParsePattern refuses that pair).
+    /// the flags are only `d g i m s u v y`, each once, and not `u` with `v`; then ParsePattern
+    /// (`#sec-parsepattern`) of the body with the flags (the `u` and `v` modes, and the grammar
+    /// of B.1.2 with neither) and the limit `parser_nesting`, charged to the meter of the parse
+    /// (`docs/design/engine.md`, decision 7, "A regular expression literal: checked at parse
+    /// time, compiled at each evaluation", rule 1). An error of the pattern is an early error at
+    /// the literal's line and column with the message of `swell-regexp`: a grammar or early error,
+    /// the nesting limit, or a refusal of slice 5, which [`only_the_refusal`] makes the only
+    /// error. The tree is dropped and credited as soon as the check ends; a stop of the meter
+    /// stops the walk at its next node.
     fn regexp(&mut self, r: &RegExpLiteral, span: Span) {
-        let mut seen = Vec::new();
-        let mut valid = true;
-        for &f in &r.flags {
-            if !b"dgimsuvy".iter().any(|&c| u16::from(c) == f) || seen.contains(&f) {
-                valid = false;
-            }
-            if self.m.push(&mut seen, f).is_err() {
-                break;
-            }
-        }
-        if seen.contains(&u16::from(b'u')) && seen.contains(&u16::from(b'v')) {
-            valid = false;
-        }
-        self.m.release(seen);
-        if !valid {
+        let Ok(flags) = swell_regexp::Flags::parse(&r.flags) else {
             self.error("invalid regular expression flags", span);
+            return;
+        };
+        let mut budget = PatternBudget::new(self.m);
+        match swell_regexp::parse_pattern(&r.body, flags, self.max_nesting, &mut budget) {
+            Ok(tree) => tree.release(&mut budget),
+            Err(swell_regexp::ParseError::Pattern(error)) => self.error(error.message(), span),
+            Err(swell_regexp::ParseError::Stopped(_)) => {
+                if self.m.check().is_ok() {
+                    // The crate stopped without a stop of the meter: the allocator refused a
+                    // growth the crate had charged for. The meter records that as a refusal of
+                    // its own: a reservation of 2^63 bytes, past what a vector may hold, which a
+                    // ledger refuses or the allocator does, credited at once either way.
+                    let _ = self
+                        .m
+                        .with_capacity::<u8>((isize::MAX as usize).saturating_add(1));
+                }
+            }
         }
     }
 

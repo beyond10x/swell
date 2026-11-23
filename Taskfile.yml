@@ -600,8 +600,10 @@ tasks:
       Each GATE_SELFTEST_DIR/<name>.sh (default tests/gate) runs with sh from the root and
       works under .out/gate-tests/<name>/. They run GATE_SELFTEST_JOBS at a time (default 4: most
       of them wait on files and on cargo's one lock of target/ rather than on a CPU, and four keep
-      a runner of four CPUs busy without crowding it), taken in byte order of the names; each
-      writes its own log, and the results are printed afterwards in that order, each whole.
+      a runner of four CPUs busy without crowding it), taken in byte order of the names through
+      xargs -P, which starts the next script as soon as one ends (not four, then the next four
+      once the slowest of them has ended); each writes its own log, and the results are printed
+      afterwards in that order, each whole.
       GATE_SELFTEST_DIR is not
       put in the scripts' environment: go-task lets a variable of the environment win over a
       task's env, so a script that runs gate-selftest on a directory of its own would get
@@ -624,6 +626,11 @@ tasks:
       the environment does colour task's output and that a script that does not turn it off is
       refused). No script at all fails too. The last line is "gate-selftest: <p> passed, <f>
       failed", also written to .out/gate-selftest.log.
+      Most scripts start go-task several times, each a short process that reads the task
+      files and ends; they run with GOGC=off and GOMEMLIMIT=1GiB, so that the Go runtime
+      of each collects only if its heap nears 1 GiB rather than while it starts: the 65
+      scripts took 36.9 CPU seconds so, against 43.0 with the runtime's default, run one
+      after another (measured on 2026-11-23). Nothing a script checks reads these variables.
     silent: true
     vars:
       GATE_SELFTEST_DIR: '{{.GATE_SELFTEST_DIR | default "tests/gate"}}'
@@ -634,23 +641,25 @@ tasks:
         GATE_SELFTEST_DIR={{shellQuote .GATE_SELFTEST_DIR}}
         unset NO_COLOR
         export CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always FORCE_COLOR=1 CLICOLOR_FORCE=1
+        export GOGC=off GOMEMLIMIT=1GiB
         esc=$(printf '\033')
         passed=0
         failed=0
         scripts=$(find "$GATE_SELFTEST_DIR" -maxdepth 1 -type f -name '*.sh' | LC_ALL=C sort)
         jobs={{shellQuote .GATE_SELFTEST_JOBS}}
         case "$jobs" in ''|*[!0-9]*|0) echo "gate-selftest: GATE_SELFTEST_JOBS $jobs is not a positive number"; exit 1 ;; esac
-        running=0
         for script in $scripts; do
           name=${script##*/}
+          rm -f ".out/gate-tests/${name%.sh}.log.status"
+        done
+        printf '%s\n' $scripts | xargs -r -P "$jobs" -n 1 sh -c '
+          name=${1##*/}
           name=${name%.sh}
           log=.out/gate-tests/$name.log
-          rm -f "$log.status"
-          ( status=0; sh "$script" > "$log" 2>&1 || status=$?; echo "$status" > "$log.status" ) &
-          running=$((running + 1))
-          if [ "$running" -ge "$jobs" ]; then wait; running=0; fi
-        done
-        wait
+          status=0
+          sh "$1" > "$log" 2>&1 || status=$?
+          echo "$status" > "$log.status"
+        ' gate-selftest-job || :
         for script in $scripts; do
           name=${script##*/}
           name=${name%.sh}

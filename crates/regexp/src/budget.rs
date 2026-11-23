@@ -104,6 +104,7 @@ pub(crate) struct Meter<'b> {
     stop: Option<Stop>,
     reads: usize,
     visits: usize,
+    name_visits: u64,
 }
 
 impl<'b> Meter<'b> {
@@ -114,7 +115,19 @@ impl<'b> Meter<'b> {
             stop: None,
             reads: 0,
             visits: 0,
+            name_visits: 0,
         }
+    }
+
+    /// The visits of the group-name check of the parses that finished, for
+    /// `parse_name_visits`.
+    pub(crate) fn name_visits(&self) -> u64 {
+        self.name_visits
+    }
+
+    /// `visits` more of the group-name check.
+    pub(crate) fn add_name_visits(&mut self, visits: u64) {
+        self.name_visits = self.name_visits.saturating_add(visits);
     }
 
     /// What the parse holds charged.
