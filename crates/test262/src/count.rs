@@ -61,8 +61,8 @@ pub struct Case {
 
 /// The outcome of one run of a case of the checkout at `checkout`, run on the engine as decision
 /// 11 states ([`run`]): a fresh agent and realm, `$262` and `print`, `assert.js` and `sta.js`
-/// (not for `raw`), the `includes:` in order, then the case, judged by its `negative`.
-/// `doneprintHandle.js` and the `async` judgement come with slice 10.
+/// (not for `raw`), `doneprintHandle.js` for an `async` case, the `includes:` in order, then the
+/// case, judged by its `negative` and, for an `async` case, by what `$DONE` printed.
 pub fn run_outcome(checkout: &Path, case: &Case, run: Run) -> Outcome {
     match run::run_all(checkout, &[(case, run)], NonZeroUsize::MIN, &run::LIMITS) {
         Ok(ran) => ran.first().map_or(Outcome::Failed, |ran| ran.outcome),

@@ -48,6 +48,7 @@ mod generators;
 mod hooks;
 mod host_objects;
 mod interrupt;
+mod jobs;
 mod language;
 mod lexical_declarations;
 mod limits_scripts;

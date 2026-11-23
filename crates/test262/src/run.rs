@@ -9,9 +9,12 @@
 //!
 //! Each harness file and the case are separate scripts of one realm, evaluated in that order;
 //! every script is parsed before the first one runs, so a case that does not parse runs nothing.
-//! `async` cases are run like any other until slice 10 brings `doneprintHandle.js` and the job
-//! queue: `$DONE` is not defined, so they fail. A module run fails without running until slice
-//! 11.
+//! A case with the flag `async` gets `doneprintHandle.js` after `sta.js` (not for `raw`); after
+//! the case completed normally the runner performs a microtask checkpoint, its steps the run's,
+//! and judges the run by what `print` received: the first line that is
+//! `Test262:AsyncTestComplete` or starts with `Test262:AsyncTestFailure:` passes or fails it,
+//! and with neither it fails with `async: the queue is empty and $DONE was not called`. A module
+//! run fails without running until slice 11.
 //!
 //! A parse error is a `SyntaxError` whatever its cause, and the engine's parser gives it for three
 //! causes: an error ECMA-262 asks for, a construct of a later slice it refuses, and its nesting
@@ -241,11 +244,18 @@ impl<'p> Worker<'p> {
             Err(detail) => return Ran::ended(End::failed(detail), 0),
         };
         let negative = Negative::of(case);
+        let asynchronous = case.meta.has_flag("async");
         // `createRealm` takes realms made before the run; with too few, the run is made again
         // with twice as many. The memory budget bounds how many a run can make.
         let mut realms = 0usize;
         loop {
-            match attempt(&harness, &text, &negative, realms, &self.limits) {
+            match attempt(
+                &harness,
+                &text,
+                (&negative, asynchronous),
+                realms,
+                &self.limits,
+            ) {
                 Attempt::Done(ran) => return ran,
                 Attempt::MoreRealms => realms = realms.saturating_mul(2).max(1),
             }
@@ -258,6 +268,9 @@ impl<'p> Worker<'p> {
         let mut names: Vec<&str> = Vec::new();
         if run != Run::Raw {
             names.extend(["assert.js", "sta.js"]);
+            if case.meta.has_flag("async") {
+                names.push("doneprintHandle.js");
+            }
             names.extend(case.meta.include_list());
         }
         let mut harness = Vec::with_capacity(names.len());
@@ -429,10 +442,11 @@ enum Attempt {
     MoreRealms,
 }
 
+/// `judged` is the case's `negative` and whether it has the flag `async`.
 fn attempt(
     harness: &[(String, Rc<str>)],
     text: &str,
-    negative: &Negative<'_>,
+    judged: (&Negative<'_>, bool),
     realms: usize,
     limits: &Limits,
 ) -> Attempt {
@@ -460,7 +474,7 @@ fn attempt(
         &mut agent,
         &realm,
         (harness, text),
-        negative,
+        judged,
         &mut steps,
         &mut before,
     );
@@ -495,12 +509,13 @@ fn setup_failed(error: SetupError) -> End {
 
 /// Parses every harness file and the case, then evaluates them in order. `before` is the
 /// engine's count of refusals once every script parsed, read before the first one runs; it stays
-/// `None` for a run that evaluates nothing.
+/// `None` for a run that evaluates nothing. A case with the flag `async` (`asynchronous`) that
+/// completed normally is judged by [`judge_async`].
 fn run_scripts(
     agent: &mut Agent<RunnerHost>,
     realm: &Realm,
     (harness, text): (&[(String, Rc<str>)], &str),
-    negative: &Negative<'_>,
+    (negative, asynchronous): (&Negative<'_>, bool),
     steps: &mut u64,
     before: &mut Option<u64>,
 ) -> End {
@@ -568,6 +583,7 @@ fn run_scripts(
         (Ok(Evaluated::Normal(_)), Negative::Runtime(kind)) => End::failed(format!(
             "the case completed; a {kind} was expected at runtime"
         )),
+        (Ok(Evaluated::Normal(_)), _) if asynchronous => judge_async(agent, steps),
         (Ok(Evaluated::Normal(_)), _) => End::passed(""),
         (Ok(Evaluated::Throw(thrown)), _) => {
             let error = describe(agent, realm, &thrown);
@@ -580,6 +596,32 @@ fn run_scripts(
         }
         (Ok(Evaluated::Terminated(termination)), _) => End::terminated(termination, "case"),
         (Err(error), _) => End::failed(format!("host error {error:?}")),
+    }
+}
+
+/// The end of an `async` case that completed normally (design, decision 11, the bullet `async`;
+/// test262 `INTERPRETING.md`): one microtask checkpoint, its steps added to `steps`, then the
+/// first line `print` received that is `Test262:AsyncTestComplete` (passed) or starts with
+/// `Test262:AsyncTestFailure:` (failed, the line its cause); with neither, the run failed. A
+/// termination of the checkpoint ends the run as a budget ends one.
+fn judge_async(agent: &mut Agent<RunnerHost>, steps: &mut u64) -> End {
+    let checkpoint = agent.perform_microtask_checkpoint();
+    *steps = steps.saturating_add(agent.last_entry_steps().unwrap_or(0));
+    match checkpoint {
+        Ok(Evaluated::Normal(_)) => {}
+        Ok(Evaluated::Throw(_)) => return End::failed("checkpoint: threw"),
+        Ok(Evaluated::Terminated(termination)) => {
+            return End::terminated(termination, "checkpoint");
+        }
+        Err(error) => return End::failed(format!("checkpoint: host error {error:?}")),
+    }
+    let done = agent.host().printed.iter().find(|line| {
+        *line == "Test262:AsyncTestComplete" || line.starts_with("Test262:AsyncTestFailure:")
+    });
+    match done {
+        Some(line) if line == "Test262:AsyncTestComplete" => End::passed(""),
+        Some(line) => End::failed(line.clone()),
+        None => End::failed("async: the queue is empty and $DONE was not called"),
     }
 }
 
