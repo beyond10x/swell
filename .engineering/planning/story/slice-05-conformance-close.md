@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slice-05-conformance-close
 kind: story
-status: draft
+status: active
 title: 'Every run of slice 5 passes: the cases that need a later slice move by rule lines, and the Annex B grammar cases count in slice 5'
 summary: 17 cases (34 runs) move to slices 4 and 8 by the estimate, 18 Annex B cases (36 runs) of the pattern grammar come to slice 5 by rule lines, compile stays in 18; sections.txt lines 23 and 76 and the omissions of slice 5; expected.txt.
 relations:
@@ -21,7 +21,10 @@ scope:
   path: conformance/test262/sections.txt
 - confidence: cited
   path: docs/design/engine.md
-revision: 3
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T03:24:26Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-23T03:24:27Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 ---
 ## Context
 

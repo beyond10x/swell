@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:case-mapping-tables-and-string-case-methods
 kind: story
-status: draft
+status: active
 title: The case tables of swell-unicode and the four case methods of String outside ASCII
 summary: 12 failing cases (24 runs); toLowerCase, toUpperCase and the locale pair by UnicodeData and SpecialCasing with Final_Sigma; HOST-165's case part; the uppercase mapping the i story reads.
 relations:
@@ -47,7 +47,10 @@ scope:
   path: crates/unicode/tests/case.rs
 - confidence: cited
   path: crates/unicode/tests/main.rs
-revision: 4
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T03:24:21Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-23T03:24:21Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 ---
 ## Context
 
