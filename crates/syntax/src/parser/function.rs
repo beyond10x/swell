@@ -7,8 +7,7 @@
 //! (`#sec-destructuring-binding-patterns`), each with an optional `Initializer`, the last
 //! possibly a `FunctionRestParameter` of either, with a trailing comma allowed after a
 //! parameter that is no rest parameter (`#sec-parameter-lists`); `async` arrows (10) are
-//! refused. A generator is parsed whole, its parameters and body with [Yield] set, and the
-//! refusal of slice 7 at its `*` is held back to the end of the parse ([`Parser::held`]); the
+//! refused. A generator is parsed whole, its parameters and body with [Yield] set; the
 //! parameters and body of every other function clear [Yield], but the parameters of an arrow
 //! function, which keep the [Yield] around them. A
 //! function's code is strict mode code when the code around it is or when its body starts with
@@ -242,10 +241,11 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// The parameter text of CreateDynamicFunction (`#sec-createdynamicfunction`, step 16) alone,
-    /// the whole source as `FormalParameters[~Yield, ~Await]`: the parameters, a trailing comma
-    /// allowed, to the end of the input, read into a function of this parse that the answer
-    /// drops. An empty text is the empty list; any other text enters the nesting bound once, as
-    /// a script does.
+    /// the whole source as `FormalParameters[~Yield, ~Await]`, or `FormalParameters[+Yield,
+    /// ~Await]` for kind generator, whose caller sets [Yield] first: the parameters, a trailing
+    /// comma allowed, to the end of the input, read into a function of this parse that the
+    /// answer drops. An empty text is the empty list; any other text enters the nesting bound
+    /// once, as a script does.
     pub(super) fn formal_parameters_text(&mut self) -> R<()> {
         if self.src.is_empty() {
             return Ok(());
@@ -263,8 +263,9 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// The body text of CreateDynamicFunction (step 17) alone, the whole source as
-    /// `FunctionBody[~Yield, ~Await]`: the statements of a function body to the end of the input,
-    /// where `return` may stand and a `}` may not.
+    /// `FunctionBody[~Yield, ~Await]`, or `GeneratorBody` for kind generator, whose caller sets
+    /// [Yield] first: the statements of a function body to the end of the input, where `return`
+    /// may stand and a `}` may not.
     pub(super) fn function_body_text(&mut self) -> R<()> {
         self.enter()?;
         self.advance()?;
@@ -278,10 +279,12 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(())
     }
 
-    /// The source text of CreateDynamicFunction (step 19) as a `FunctionExpression` and nothing
-    /// after it: the function, its own name taken off (the name "anonymous" is given, not
-    /// bound), then an expression statement holding it, made without a depth check, so that the
-    /// function is admitted exactly when the same expression standing alone would be.
+    /// The source text of CreateDynamicFunction (step 19) as a `FunctionExpression`, or as a
+    /// `GeneratorExpression` when it starts `function*` (kind generator: the `*` is read as a
+    /// generator's), and nothing after it: the function, its own name taken off (the name
+    /// "anonymous" is given, not bound), then an expression statement holding it, made without
+    /// a depth check, so that the function is admitted exactly when the same expression
+    /// standing alone would be.
     pub(super) fn dynamic_function_text(&mut self) -> R<StmtId> {
         self.enter()?;
         self.advance()?;

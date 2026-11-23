@@ -66,6 +66,9 @@ pub(crate) enum BuiltinId {
     /// The builtins of the generator objects
     /// (`story:generator-functions-and-suspended-frames`).
     Generator(crate::builtins::generator::GeneratorBuiltin),
+    /// `GeneratorFunction ( ...paramArgs, bodyArg )` (27.6.1.1),
+    /// `story:generator-function-constructor`.
+    GeneratorFunction,
     /// The builtins of `RegExp` (`story:regexp-objects-exec-and-literals`).
     RegExp(crate::builtins::regexp::RegExpBuiltin),
 }
@@ -439,6 +442,7 @@ impl<H: Host> Agent<H> {
             BuiltinId::Generator(id) => {
                 self.run_generator_builtin(id, function, this, args, new_target)
             }
+            BuiltinId::GeneratorFunction => self.generator_function(function, args, new_target),
         }
     }
 
