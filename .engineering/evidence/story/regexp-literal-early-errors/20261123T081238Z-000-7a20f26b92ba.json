@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-23T08:12:38Z",
+  "actor": "human:operator",
+  "artifact": "story:regexp-literal-early-errors",
+  "kind": "story",
+  "revision": 21,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "check and the lane slow on the forge, commit 6e9c3f4",
+    "reference": "https://github.com/beyond10x/swell/actions/runs/45133096603"
+  }
+}

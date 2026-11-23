@@ -17,8 +17,8 @@ can use it.
 ## State
 
 swell runs scripts of the ES5 grammar and of the bindings and iteration of ES2015 in both
-modes, under a step budget and a memory budget.
-Its gate holds the test262 counts: 16,412 of the 44,812 cases that run pass (36.6 %), measured on 2026-11-23.
+modes, with regular expressions, under a step budget and a memory budget.
+Its gate holds the test262 counts: 18,155 of the 44,812 cases that run pass (40.5 %), measured on 2026-11-23.
 Four of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |
@@ -38,7 +38,7 @@ What exists, measured on 2026-11-23:
   built, how it is measured, and the order in which it is delivered.
 - The host interface, specified before its code:
   [`docs/design/host-interface.md`](docs/design/host-interface.md) has 191 numbered
-  requirements, and 110 of them have a test. An ESS model under [`spec/`](spec/) has 58
+  requirements, and 113 of them have a test. An ESS model under [`spec/`](spec/) has 58
   scenarios. All 58 pass on ESS's interpreter. The gate runs them against the engine too, and
   14 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
@@ -72,7 +72,9 @@ literals with and without a tag, arrow functions, default and rest parameters, o
 array destructuring, computed property names, spread in objects, arrays and calls, `Symbol`,
 the iterator protocol, `for`-`of`, function declarations in blocks and `Array.from`. All
 3,898 of its cases pass in all 7,351 runs; 402 cases that also need slice 4 or 5 are counted
-there. Next is slice 5, regular expressions. The slices are taken in the order the first
+there. Slice 5, regular expressions, is in work: literals, `RegExp`, `exec`, `test`, `match`,
+`search`, and `replace` and `split` with a regular expression run, and
+1,667 of its 2,724 cases pass. The slices are taken in the order the first
 user, a browser, needs them: 6, 5, 7, 10, 4, 9.
 
 ## What swell is

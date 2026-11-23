@@ -5,7 +5,8 @@
 //! ([[SymbolData]], `story:symbol-constructor-and-well-known-symbols`), the Error objects
 //! ([[ErrorData]]), the raw JSON objects ([[IsRawJSON]], `story:json-parse-and-raw-json`), the
 //! Array Iterators and String Iterators (`story:iterator-protocol-and-array-string-iterators`,
-//! `builtins/iterator.rs`) and `%Object.prototype%`, an immutable prototype exotic object
+//! `builtins/iterator.rs`), the RegExp String Iterators (`story:regexp-match-all-and-escape`,
+//! `builtins/regexp/match_all.rs`) and `%Object.prototype%`, an immutable prototype exotic object
 //! (10.4.7) whose other methods are ordinary. Written by `story:object-model-and-realms`.
 //!
 //! A walk up the prototype chain is a loop, never a Rust recursion, and charges one step per
@@ -56,6 +57,17 @@ pub(crate) enum OrdinaryData {
         iterated: Option<StringRef>,
         position: usize,
     },
+    /// The slots of a RegExp String Iterator (`#sec-createregexpstringiterator`, Table 69,
+    /// `story:regexp-match-all-and-escape`, `builtins/regexp/match_all.rs`):
+    /// [[IteratingRegExp]] and [[IteratedString]], which the iterator keeps alive, [[Global]],
+    /// [[Unicode]] and [[Done]].
+    RegExpStringIterator {
+        regexp: ObjectRef,
+        string: StringRef,
+        global: bool,
+        unicode: bool,
+        done: bool,
+    },
 }
 
 /// The slots of an ordinary object beyond the common record.
@@ -69,8 +81,9 @@ impl Ordinary {
         Ordinary { data }
     }
 
-    /// Kind site of the collector: [[SymbolData]], and what an Array Iterator and a String
-    /// Iterator iterate; the other slots hold no handle.
+    /// Kind site of the collector: [[SymbolData]], what an Array Iterator and a String Iterator
+    /// iterate, and the RegExp and the String of a RegExp String Iterator; the other slots hold
+    /// no handle.
     pub(crate) fn trace(&self, mark: &mut Mark) {
         mark.count("object/ordinary.rs Ordinary::trace");
         match self.data {
@@ -83,6 +96,10 @@ impl Ordinary {
                 iterated: Some(string),
                 ..
             } => mark.value(Value::String(string)),
+            OrdinaryData::RegExpStringIterator { regexp, string, .. } => {
+                mark.object(regexp);
+                mark.value(Value::String(string));
+            }
             _ => {}
         }
     }

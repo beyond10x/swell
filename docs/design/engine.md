@@ -281,8 +281,10 @@ not on the Rust stack.**
 - Bytecode against walking the tree: bytecode. A tree walker recurses in Rust for every call, so a
   generator could only be suspended by keeping the Rust stack alive (a thread, or unsafe stack
   switching), which the rules exclude. With frames as data (instruction index, operand stack,
-  local slots, environment, handler table), `yield` and `await` move the frame into the generator
-  or async function object and resume moves it back. Rejected: the tree walker.
+  local slots, the environments the frame pushed; the handler table stays with the code the
+  frame runs), `yield` and `await` move the frame into the object that holds the suspended
+  activation (a generator object, the activation of an async function) and a resumption moves it
+  back ("Suspended frames" below). Rejected: the tree walker.
 - Stack against register machine: stack machine. The compile step is simpler and has fewer ways
   to be wrong, which matters more first than speed; the speed difference is not measured here.
   Rejected for now: a register machine; revisit with a measurement.
@@ -772,9 +774,10 @@ object's [[OwnPropertyKeys]] as above before it collects that object's keys, and
 bytes of the list and of its set of visited keys before each grows. The set of visited keys is
 credited when EnumerateObjectProperties returns, on every way out of the call; the enumerator
 holds the charge of the list alone and credits it when the loop ends, on every way out of it, a
-throw and a termination included. For later slices: a frame that is suspended (a generator, an
-async function) keeps the charges it holds and credits them when it runs to its end or when the
-collector frees it.
+throw and a termination included. A frame that is suspended (a generator; an async function
+from slice 10) keeps the charges it holds, which move with it, until its generator completes,
+a termination drops it while it runs, or the sweep that frees the object holding it credits them
+("Suspended frames" below, item 3).
 
 **Depth bounds,** each a limit the host sets, each ending in an outcome:
 
@@ -786,6 +789,8 @@ collector frees it.
 - Scope analysis and the compile step walk only trees the parser accepted, so the parser's bound
   holds for them.
 - ECMAScript calls: frames on the engine stack, counted. Exceeded: a `RangeError` in the script.
+  A suspended frame is not on that stack and is not counted; a resumption is counted as a call
+  ("Suspended frames" below, item 4).
 - Re-entry from Rust into the interpreter: counted with the frames, and separately against a
   limit derived from the Rust stack the host guarantees (decision 9). Exceeded: a `RangeError`.
 - `JSON.parse`: a loop with an explicit stack, bounded by the memory budget.
@@ -802,6 +807,177 @@ collector frees it.
 
 A `RangeError` for depth is what the script sees, and the script can catch it; a script that
 catches it and recurses again ends at the step budget, which it cannot catch.
+
+**Suspended frames.** Added on 2026-11-23 for slice 7, written so that slice 10 uses it as it
+is. What a script sees, the standard's: a generator's code runs in an execution context of its
+own, which `yield` suspends and a resumption runs again where it stopped, with its bindings, its
+operand values and the statements around the `yield` as they were (GeneratorStart,
+`sec-generatorstart`; GeneratorYield, `sec-generatoryield`; GeneratorResume,
+`sec-generatorresume`; GeneratorResumeAbrupt, `sec-generatorresumeabrupt`; RunSuspendedContext
+and RunCallerContext, `sec-runsuspendedcontext`, `sec-runcallercontext`); the context is the
+generator's [[GeneratorContext]] (`sec-properties-of-generator-instances`). Slice 10's Await
+(`await`) suspends and resumes the context of an `async` function and of an async generator the
+same way. What a host sees: the budgets, bounds and states of the items below. Each item states
+the rule first and then the mechanism.
+
+1. What moves. Nothing of a frame is copied or lost across a suspension: its local slots, its
+   operand values (a `for`-`of` record among them, item 1 of "The iterator of `for`-`of`" above),
+   the environments it pushed (a block's record, a `with` object, a record of an iteration) and
+   its position are at the resumption what they were at the `yield`. The mechanism: a suspended
+   frame is the whole `Frame` value of `interp/frame.rs`: instruction index, operand stack,
+   local slots (with the arguments a parameter list that is not simple keeps), LexicalEnvironment
+   and VariableEnvironment with `pushed_envs`, `this`, function, realm, script, completion
+   value, `constructed` and `charged`. It moves by value, its vectors by their pointers, so a
+   suspension and a resumption do the same work whatever the number of locals or the depth of the
+   operand stack. The handler table does not move: it belongs to the compiled code
+   (`Frame::handlers`, read through `compiled` and `template`), which the frame holds by its
+   `Rc<Compiled>`, and code does not change after its compile step, so the table stays valid
+   through the saved instruction index and `unwind` reads it after a resumption as before the
+   suspension.
+2. Where it lives and who traces it. A suspended generator and everything its frame holds stay
+   alive exactly as long as the generator object is reachable, across entries: `collect()` frees
+   neither while it is reachable and frees both, with every value only the frame held, once it is
+   not. The mechanism: a suspended frame is held by exactly one object of the heap, its holder:
+   the object through which every resumption of that activation goes, whose kind has a slot for
+   one suspended frame. In slice 7 the holder is the generator object, its [[GeneratorContext]];
+   in slice 10 it is the async generator object and, for an `async` function, the object through
+   which the jobs of its `await` resume the activation, which that slice names. Nothing else
+   holds a suspended frame: not the frame stack, no root, no Rust local across a safe point. The
+   collector traces it at the holder's kind site with `Frame::trace`, not as a root, so a
+   suspended generator that nothing references is garbage with its frame; the frame traces its
+   function, script and realm, so the code it runs, with its source text and template objects
+   (decision 4), lives as long as it does. The frame lies in a box in the holder's kind, so that
+   the record of every object keeps its size. While the generator runs, its frame is on the frame
+   stack and the holder's slot is empty: the frame stack, a root, traces the frame, and the frame
+   keeps its generator object alive through the local slot its code reserves for the object. At
+   every safe point a frame is in exactly one of the two places.
+3. Its charge. A generator costs the memory budget its object and its frame while it holds the
+   frame. The frame is charged once, by the call that makes it, and credited once: when the
+   generator completes, when an abrupt completion given before its start completes it, when a
+   termination drops the frame while it runs, or by the collection whose sweep frees its holder
+   while the frame is suspended. A suspension and a resumption charge and credit nothing beyond
+   the growth of the operand stack, charged as any growth. The mechanism: the frame's charge,
+   its `charged` (`frame_bytes()`, the fixed size of `Frame`, and 16 bytes per local slot and per
+   kept argument, both charged by `make_frame`; `entry_bytes()` per entry of the operand stack's
+   capacity, charged by `push_entry` as it grows; the key list of each enumerator and the box of
+   each Iterator Record on that stack), moves with the frame. The box in the holder is the
+   frame's fixed part, which `frame_bytes()` counts wherever the frame is, on the frame stack or
+   in its holder. Beside the box the holder keeps a guard of the agent's credit queue in the form
+   of `Grown` (`object/mod.rs`), part of the object's record and so of its slot: while a frame is
+   in the box, dropping the record adds that frame's `charged` to the queue, which the agent
+   credits after the sweep in the same collection (`Agent::collect_now`). Taking the frame out
+   takes its charge with it, so the guard holds nothing while the frame runs, and `pop_frame` or
+   `drop_frames` credit it there: a frame's charge is in one place at a time and is credited
+   once. What a generator that is never resumed costs, as a test reads it: from the call that
+   makes it until the collection that frees it, its object's slot and its frame's `charged`, at
+   least `frame_bytes()` + 16 × L bytes for a generator function with L local slots; so with
+   L = 200 `heap_bytes()` after the call exceeds the reading before it by at least 3,200, and
+   one `collect()` after the last reference to the generator is dropped gives at least 3,200
+   back. A script that keeps N such generators reachable holds N times that and ends in
+   `Terminated(MemoryBudget)` once the room is spent, as one that keeps N arrays does. Rejected:
+   crediting the frame at a suspension and charging it again at a resumption, which would let a
+   resumption end in `Terminated(MemoryBudget)` with nothing allocated and spend two operations
+   of the accounting on every `yield`; and counting it in the bytes the holder's slot owns
+   (`new_object_charged`), which the arena fixes when the record is stored while a frame's
+   charge grows with its operand stack and leaves with every resumption.
+4. `frame_depth`. A suspended generator takes no place against `frame_depth`: a script may hold
+   any number of them, bounded by the memory budget alone. A resumption counts as a call: with
+   `frame_depth` D and D frames on the stack, `next`, `return` and `throw` of a suspended-yield
+   generator, and `next` of a suspended-start one, throw the `RangeError` of "Depth bounds" in
+   the current realm, and the generator stays suspended with its state and its frame, to be
+   resumed once the stack is lower. An abrupt completion given to a suspended-start generator
+   (GeneratorResumeAbrupt, step 2) and a call on a completed one push no frame and are not
+   checked. The mechanism: the resumption runs `check_frame_depth` before it changes the
+   generator, as `call_function` does before it makes a frame.
+5. Steps and budgets across entries. A resumption spends the step of a call, beside the step of
+   the call of `next`, `return` or `throw` itself, and the instructions the generator runs until
+   it suspends or ends are steps of the entry that runs them, the one that resumed it, whichever
+   entry made the generator: the generator's code is charged as code of the resuming entry, and
+   nothing is charged to an entry that has ended. The step budget and the interrupt are read at a
+   resumption as at a call, and at a suspension as at a return ("The step budget"). A
+   termination, `Terminated(StepBudget)`, `Terminated(MemoryBudget)` or `Terminated(Interrupted)`
+   alike, enters no handler, so no `finally` around a `yield` runs and neither does the mark of
+   completion of item 6:
+   - a generator whose frame is on the frame stack at the termination, running or below a frame
+     it called, stays `executing` and holds no frame; its frame is dropped with the others and its
+     charge credited (`drop_frames`), and every later `next`, `return` and `throw` of it throws
+     the `TypeError` of GeneratorValidate ("If state is executing, throw a TypeError exception.",
+     `sec-generatorvalidate`, step 6), in every later entry: it never completes, and costs its
+     object alone (`host-interface.md`, section 10, "Generators and async functions"; HOST-73
+     holds it for the step budget);
+   - a generator that is suspended when the entry ends, the entry that made it or a later one,
+     keeps its state (suspended-start or suspended-yield), its frame and its charge; no `finally`
+     of it ran, and a later entry resumes it as if the termination had not happened.
+
+   Nothing credited stays charged: the frames a termination drops are credited at once, and the
+   holder of a frame that was running holds no charge, so no sweep credits it again. The order
+   that fixes which of the two a generator is in: a resumption checks `frame_depth`, spends its
+   step, and checks `reentry_depth` and the interrupt before it sets the state to `executing`
+   (GeneratorResume, step 5) and moves the frame out, so a refusal there leaves it suspended with
+   its frame; from that move on a termination leaves it `executing`, a growth of the operand
+   stack refused when the resumption value is pushed included. A suspension sets the state
+   (suspended-start, suspended-yield) and moves the frame into the holder before it hands its
+   value over, so a termination while the value is handed over leaves the generator suspended.
+6. The result and re-entry. The resumer gets the standard's values: at a `yield` an iterator
+   result `{ value, done: false }` (Yield, `sec-yield`; CreateIteratorResultObject,
+   `sec-createiterresultobject`), at the end of the body `{ value, done: true }` with the
+   returned value or `undefined`, and a throw that leaves the body as a throw, the generator
+   completed in both cases (GeneratorStart). The mechanism: the generator's own code makes the
+   result and marks the generator completed, and nothing is added to `return_from_frame`,
+   `unwind` or `run` beyond handing a suspension's value over. The yield instruction makes the
+   result object and suspends. The return instruction of a generator template, emitted at the
+   end of the body and as the last instruction of `exit_return`, marks the generator completed,
+   makes the result object and returns it as any return does, so `return_from_frame` pops the
+   frame and credits it. The body lies in a `finally` of the existing kind whose block marks the
+   generator completed, so a throw that leaves the body completes it on its way out, and `unwind`
+   drops the frame as it drops any. A suspension hands its value over as a return does: as the
+   answer of `run` when the frame is the base frame of the running loop, otherwise on the operand
+   stack of the frame below, whose realm becomes the current realm. A resumption puts the
+   received value and its tag (`TAG_NORMAL`, `TAG_THROW`, `TAG_RETURN`) on the frame's operand
+   stack, and the code after the suspension point dispatches on the tag as the end of a `finally`
+   does: a `return` given to a suspended generator leaves through every `finally` around the
+   `yield`, a throw goes to the handlers around it.
+
+   Re-entry. A resumption from Rust (`next`, `return` and `throw` of `%GeneratorPrototype%`, and
+   through them the step of a `for`-`of`, a spread, an array pattern, IteratorClose and a host's
+   `call`) runs the frame in a run loop of its own nested in the builtin's activation: one
+   re-entry, counted against `reentry_depth` as any call from a builtin is (item 2 of "Iterators
+   held by a builtin"), on the Rust stack of one re-entry. `STACK_BYTES_PER_REENTRY`
+   (`host/limits.rs`) stays 14 KiB: a resumption path that needs more is taken apart as the run
+   loop was (`AGENTS.md`, "Commands and the gate"), not paid for by the constant. A generator
+   whose code resumes another nests one re-entry per level and ends at `reentry_depth` with a
+   `RangeError`.
+
+   `yield*`, the second wave of the slice (YieldExpression : `yield *` AssignmentExpression,
+   `sec-generator-function-definitions-runtime-semantics-evaluation`). A delegating frame
+   resumes the generator it delegates to by an instruction on its own run loop: when the
+   [[NextMethod]] of its Iterator Record is `%GeneratorPrototype%.next` of any realm of the agent
+   and the iterator is a generator object (for a received throw or return, when the method
+   GetMethod finds, `sec-getmethod`, is `%GeneratorPrototype%.throw` or
+   `%GeneratorPrototype%.return`), the instruction does what that builtin does (GeneratorValidate
+   with the `TypeError` of the builtin's realm, then the checks and the move of a resumption
+   above) and the inner frame runs above the delegating one; its suspension hands
+   the inner result over to the frame below by the rule above, and the delegating frame reads
+   `done` (IteratorComplete, `sec-iteratorcomplete`) and yields that result object as it is
+   (GeneratorYield(innerResult)). Any other iterator is called as the step of a `for`-`of` calls
+   `next`, a re-entry. A chain of n generators each delegating to the next therefore holds n
+   frames on the frame stack while the innermost runs, counted against `frame_depth` (past it,
+   the `RangeError` of item 4, thrown at the `yield*` that would push), and takes no Rust frame
+   and no re-entry per level. Each level spends, per `next`, at least 2 and at most 10 steps:
+   the step of its resumption and the instructions of one turn of its delegation loop (the
+   resumption, the test of `done`, the yield, the dispatch on the tag, the jump back); so a
+   `next` through 101 levels spends between 200 and 1,000 steps more than one through 1 level,
+   which a test reads with `last_entry_steps()`. `return` and `throw` through a chain spend the
+   same per level, with the Get of the method.
+
+   A step stands for a bounded amount of work on these paths too (decision 7, "What one step of
+   the matcher is", states the rule for the matcher): a suspension and a resumption move one
+   value of fixed size and set one state; GeneratorValidate reads two slots; the yield and
+   return instructions make one object of two properties; a level of delegation reads one
+   property and moves one frame. None of them walks the locals, the operand stack, the
+   environments or the chain: a `return` given to a suspended generator runs its `finally` blocks
+   as code, a step per instruction, a chain of n levels spends steps in proportion to n, and only
+   the collector walks a suspended frame, as it walks every record, spending no step.
 
 ## 4. Values and the heap without unsafe code
 
@@ -832,7 +1008,9 @@ source, which is ambient authority, and a fixed key lets a hostile script choose
 
 **Collector.** Precise, stop-the-world mark and sweep over the arenas. Roots: the frame stack and
 its operand stacks, the job queue, the realms and their intrinsics, the module map, the kept-objects
-list of 9.10, the GlobalSymbolRegistry ("Symbols" below), and the host's root table. A builtin
+list of 9.10, the GlobalSymbolRegistry ("Symbols" below), and the host's root table. A
+suspended frame is no root: the kind site of the object that holds it traces it, so it lives as
+long as that object (decision 3, "Suspended frames", item 2). A builtin
 that can call script keeps every value it still needs in slots of its own frame on the engine
 stack, which the collector scans; a Rust local holding a handle across a call into script is a
 bug, found by a test mode that collects at every safe point and by the generation check.
@@ -863,8 +1041,9 @@ collector's workspace for them ("Collector"); the atom table's buckets (`heap/st
 scratch and the bytecode, each by capacity as it grows; and the bytes the host charges for what
 it holds for the agent outside the heap (`charge_host_bytes`, `host-interface.md` section 14,
 added on 2026-11-22). A sweep credits what a freed record owns, and what an atom entry it drops
-owns, and after it the agent credits the host's charges whose `HostBytes` were dropped (with the
-host data that held them, or by the host); an arena's capacity and the atom table's stay
+owns, and after it the agent credits the charge of each suspended frame a freed record held
+(through the credit queue, decision 3, "Suspended frames", item 3) and the host's charges
+whose `HostBytes` were dropped (with the host data that held them, or by the host); an arena's capacity and the atom table's stay
 charged while the agent lives, since neither shrinks and a freed slot or bucket is used again. A temporary structure (the frontend's tree and scratch, a list
 of property keys, the key list of a `for`-`in` enumerator) is credited when it drops, and the
 code's charge passes to its script record when the record is made. A growth charged by capacity
@@ -901,8 +1080,8 @@ Two readings. `heap_bytes()` reads what the accounting has charged, the number `
 bounds: the arenas' capacity with the collector's workspace, the atom table's capacity, what the
 records own, and what a running step holds charged. `live_bytes()` reads what the records the
 heap holds own, the fixed size of each one's slot included, and what the atom table's entries
-own; it leaves out free slots and the table's empty buckets. After a collection these are the
-live records. It is at most
+own; it leaves out free slots and the table's empty buckets. A suspended frame counts in both
+readings as part of what its holder owns. After a collection these are the live records. It is at most
 `heap_bytes()`, it falls by everything a sweep frees, and the collection threshold follows it
 ("Collector"). Both readings count the bytes the host charged with `charge_host_bytes` while it
 holds their `HostBytes` (added on 2026-11-22); a dropped `HostBytes` is credited after the next
@@ -1360,25 +1539,23 @@ A conformance run in which the count moved fails (decision 11), so no case that 
 limit are not refusals and are not counted. This is the third form of section 12, "A part before
 its slice", for RegExpInitialize, with this set; once slice 5 is delivered it refuses nothing.
 
-Two methods of `%RegExp.prototype%` refuse every call until the story that brings them (added on
-2026-11-23 for slice 5): `RegExp.prototype [ %Symbol.replace% ]` and `RegExp.prototype [
-%Symbol.split% ]` (`sec-regexp.prototype-%symbol.replace%`, `sec-regexp.prototype-%symbol.split%`).
-What a script sees: `String.prototype.replace`, `replaceAll` and `split` given a RegExp hand it to
-these methods, as their clauses do, and never answer from ToString of the RegExp as if it were a
-String. Each method runs the first steps of its clause (a `TypeError` when the this value is not
-an Object, then ToString of `string`), so an error those steps throw is thrown instead and is not
-counted; every call that passes them throws a `SyntaxError` of the current realm whose message is
-exactly `RegExp.prototype[Symbol.replace] is not supported before slice 5` or
-`RegExp.prototype[Symbol.split] is not supported before slice 5`, with no position after it, which
-the agent counts before it throws (`Agent::count_refusal`), caught or not, as it counts the
-refusals of RegExpInitialize (`host-interface.md`, decision 13, "A refusal raised by `RegExp`",
-HOST-191). The mechanism: `story:regexp-objects-exec-and-literals` defines the two as builtins
-keyed by `%Symbol.replace%` and `%Symbol.split%`, named `[Symbol.replace]` and `[Symbol.split]`
-with `length` 2 as their clauses give, and `story:regexp-symbol-methods-and-string-match-search`
-defines the methods of the clauses under the same keys in their place, so the property keeps its
-key and attributes and only a call tells the two apart. This is the third form of section 12 for
-these two methods, with the set the first steps of their clauses answer; once that story lands
-they refuse nothing.
+The four methods of `%RegExp.prototype%` keyed by `%Symbol.match%`, `%Symbol.replace%`,
+`%Symbol.search%` and `%Symbol.split%` (`sec-regexp.prototype-%symbol.match%`,
+`sec-regexp.prototype-%symbol.replace%`, `sec-regexp.prototype-%symbol.search%`,
+`sec-regexp.prototype-%symbol.split%`) are the methods of their clauses and refuse no call
+(added on 2026-11-23 for slice 5). What a script sees: `String.prototype.replace`, `replaceAll`
+and `split` given a RegExp hand it to these methods and answer through them, as their clauses
+do, and never answer from ToString of the RegExp as if it were a String; `match` and `search`
+given an Object hand it to its method keyed by `%Symbol.match%` or `%Symbol.search%`, and given
+anything else make a RegExp by RegExpCreate and call that method. The mechanism:
+`story:regexp-objects-exec-and-literals` defined `[%Symbol.replace%]` and `[%Symbol.split%]` as
+builtins that refused every call past the first steps of their clauses with a counted refusal,
+and `story:regexp-symbol-methods-and-string-match-search` defines the methods of the clauses
+under the same keys in their place, named `[Symbol.replace]` and `[Symbol.split]` with `length`
+2 as their clauses give, so the property keeps its key and attributes. What `refusals()` still
+counts for `RegExp` are the refusals of RegExpInitialize above (`host-interface.md`, decision
+13, "A refusal raised by `RegExp`", HOST-191): the flags `i` and `v`, a property escape and a
+group name outside ASCII.
 
 ## 8. Unicode data
 
@@ -1955,16 +2132,14 @@ from `swell-unicode`. The rule:
   RegExp, answers every pattern and flags but the four parts of decision 7, "Refusals until
   the later stories of slice 5" (the flag `v`, a property escape, a group name outside ASCII,
   the flag or modifier `i`), and refuses those with the counted refusal naming slice 5, each
-  until the story of slice 5 that brings it. Named on 2026-11-23 for slice 5 as well:
-  `RegExp.prototype [ %Symbol.replace% ]` and `RegExp.prototype [ %Symbol.split% ]`
-  (`sec-regexp.prototype-%symbol.replace%`, `sec-regexp.prototype-%symbol.split%`), whose set is
-  the calls the first steps of their clauses end (a `TypeError` for a this value that is not an
-  Object, an error of ToString of `string`), and which refuse every other call with the counted
-  refusal whose message names the method, `RegExp.prototype[Symbol.replace] is not supported
-  before slice 5` or `RegExp.prototype[Symbol.split] is not supported before slice 5`, until
-  `story:regexp-symbol-methods-and-string-match-search` replaces them with the methods of their
-  clauses (decision 7, "Refusals until the later stories of slice 5"; HOST-191 counts the
-  refusals of `RegExp`).
+  until the story of slice 5 that brings it. Named on 2026-11-23 for slice 5 as well, and no
+  longer in this form: `RegExp.prototype [ %Symbol.replace% ]` and `RegExp.prototype [
+  %Symbol.split% ]` (`sec-regexp.prototype-%symbol.replace%`,
+  `sec-regexp.prototype-%symbol.split%`), which refused every call past the first steps of their
+  clauses with the counted refusal naming the method until
+  `story:regexp-symbol-methods-and-string-match-search` replaced them with the methods of their
+  clauses, which answer every call (decision 7, "Refusals until the later stories of slice 5";
+  HOST-191 counts the refusals of `RegExp`).
 - A refusal is a `SyntaxError`, but not the one a `negative: parse` case names: the runner
   reads the kind of a parse error from its message (`swell_syntax::message_kind`), and a run
   that a refusal or the nesting limit ends, in a harness file or in the case, fails whatever the

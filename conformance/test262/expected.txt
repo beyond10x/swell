@@ -1,4 +1,4 @@
-test262 annexB/built-ins 241 26 0 215 9 206 0
+test262 annexB/built-ins 241 26 0 215 10 205 0
 test262 annexB/language 845 0 0 845 177 668 0
 test262 built-ins/AbstractModuleSource 8 8 0 0 0 0 0
 test262 built-ins/AggregateError 25 0 0 25 0 25 0
@@ -19,7 +19,7 @@ test262 built-ins/Date 610 8 0 602 0 602 0
 test262 built-ins/DisposableStack 93 0 0 93 0 93 0
 test262 built-ins/Error 93 35 0 58 53 5 0
 test262 built-ins/FinalizationRegistry 47 0 0 47 0 47 0
-test262 built-ins/Function 509 0 0 509 407 102 0
+test262 built-ins/Function 509 0 0 509 408 101 0
 test262 built-ins/GeneratorFunction 23 0 0 23 0 23 0
 test262 built-ins/GeneratorPrototype 61 0 0 61 0 61 0
 test262 built-ins/Infinity 6 0 0 6 6 0 0
@@ -31,17 +31,17 @@ test262 built-ins/Math 327 0 0 327 13 314 0
 test262 built-ins/NaN 6 0 0 6 6 0 0
 test262 built-ins/NativeErrors 94 0 0 94 82 12 0
 test262 built-ins/Number 340 0 0 340 250 90 0
-test262 built-ins/Object 3411 0 0 3411 3084 327 0
+test262 built-ins/Object 3411 0 0 3411 3086 325 0
 test262 built-ins/Promise 732 89 0 643 0 643 0
 test262 built-ins/Proxy 311 0 0 311 0 311 0
 test262 built-ins/Reflect 153 0 0 153 0 153 0
-test262 built-ins/RegExp 1879 0 0 1879 766 1113 0
-test262 built-ins/RegExpStringIteratorPrototype 17 0 0 17 0 17 0
+test262 built-ins/RegExp 1879 0 0 1879 1010 869 0
+test262 built-ins/RegExpStringIteratorPrototype 17 0 0 17 17 0 0
 test262 built-ins/Set 383 0 0 383 0 383 0
 test262 built-ins/SetIteratorPrototype 11 0 0 11 0 11 0
 test262 built-ins/ShadowRealm 64 64 0 0 0 0 0
 test262 built-ins/SharedArrayBuffer 104 0 0 104 0 104 0
-test262 built-ins/String 1223 0 0 1223 1029 194 0
+test262 built-ins/String 1223 0 0 1223 1190 33 0
 test262 built-ins/StringIteratorPrototype 7 0 0 7 7 0 0
 test262 built-ins/SuppressedError 22 0 0 22 0 22 0
 test262 built-ins/Symbol 98 0 0 98 88 10 0
@@ -171,7 +171,7 @@ test262 language/identifiers 268 0 0 268 129 139 0
 test262 language/import 129 113 0 16 0 16 0
 test262 language/keywords 25 0 0 25 25 0 0
 test262 language/line-terminators 41 0 0 41 39 2 0
-test262 language/literals 536 0 0 536 498 38 0
+test262 language/literals 536 0 0 536 499 37 0
 test262 language/module-code 599 4 0 595 0 595 0
 test262 language/punctuators 11 0 0 11 11 0 0
 test262 language/reserved-words 27 0 0 27 26 1 0
@@ -212,23 +212,23 @@ test262 language/white-space 67 0 0 67 64 3 0
 test262 staging 4 0 0 4 0 4 0
 test262 staging/Temporal 2 2 0 0 0 0 0
 test262 staging/Uint8Array 1 0 0 1 0 1 0
-test262 staging/built-ins 8 0 0 8 1 7 0
+test262 staging/built-ins 8 0 0 8 5 3 0
 test262 staging/decorators 7 7 0 0 0 0 0
 test262 staging/explicit-resource-management 53 0 0 53 1 52 0
 test262 staging/set-methods 3 0 0 3 0 3 0
-test262 staging/sm 1406 2 0 1404 543 860 1
+test262 staging/sm 1406 2 0 1404 575 827 2
 test262 staging/source-phase-imports 2 2 0 0 0 0 0
 test262 staging/top-level-await 1 0 0 1 0 1 0
-test262 total 53801 8982 7 44812 17775 27036 1
+test262 total 53801 8982 7 44812 18238 26572 2
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
 test262-slice 04 1598 3156 0 0 1598 261 1337 0
-test262-slice 05 2724 5441 0 0 2724 1327 1397 0
+test262-slice 05 2724 5441 0 0 2724 1746 978 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
 test262-slice 07 1491 2841 0 0 1491 6 1485 0
 test262-slice 08 9144 18139 0 0 9144 3 9141 0
-test262-slice 09 1779 3529 0 0 1779 142 1637 0
+test262-slice 09 1779 3529 0 0 1779 149 1630 0
 test262-slice 10 3879 7499 0 0 3879 13 3866 0
 test262-slice 11 1281 1833 0 0 1281 16 1265 0
 test262-slice 12 338 676 0 0 338 39 299 0
@@ -237,14 +237,14 @@ test262-slice 14 598 1192 112 7 479 0 479 0
 test262-slice 15 1094 2170 0 0 1094 39 1055 0
 test262-slice 16 82 164 0 0 82 0 82 0
 test262-slice 17 35 35 0 0 35 0 35 0
-test262-slice 18 1155 1492 0 0 1155 186 969 0
-test262-slice 19 1474 2766 0 0 1474 545 928 1
+test262-slice 18 1155 1492 0 0 1155 187 968 0
+test262-slice 19 1474 2766 0 0 1474 581 891 2
 test262-slice 20 4617 9234 4617 0 0 0 0 0
 test262-slice 21 1662 3324 1662 0 0 0 0 0
 test262-slice x-stage3 2591 5008 2591 0 0 0 0 0
 test262-errors 0
-test262-section sec-object-objects incomplete 3411 3084 0
-test262-section sec-function-objects incomplete 509 407 0
+test262-section sec-object-objects incomplete 3411 3086 0
+test262-section sec-function-objects incomplete 509 408 0
 test262-section sec-boolean-objects incomplete 51 46 0
 test262-section sec-symbol-objects incomplete 98 88 0
 test262-section sec-error-objects incomplete 93 53 0
@@ -252,8 +252,8 @@ test262-section sec-number-objects incomplete 340 250 0
 test262-section sec-bigint-objects incomplete 77 0 0
 test262-section sec-math-object incomplete 327 13 0
 test262-section sec-date-objects incomplete 610 0 0
-test262-section sec-string-objects incomplete 1223 1029 3
-test262-section sec-regexp-regular-expression-objects incomplete 1879 766 1
+test262-section sec-string-objects incomplete 1223 1190 3
+test262-section sec-regexp-regular-expression-objects incomplete 1879 1010 1
 test262-section sec-array-objects incomplete 3083 2796 1
 test262-section sec-typedarray-objects incomplete 1453 0 0
 test262-section sec-uint8array incomplete 70 0 0
@@ -277,10 +277,10 @@ test262-section sec-async-function-objects incomplete 18 1 0
 test262-section sec-reflect-object incomplete 153 0 0
 test262-section sec-proxy-objects incomplete 311 0 0
 test262-section sec-names-and-keywords incomplete 268 129 1
-test262-section sec-literals-regular-expression-literals incomplete 240 222 0
+test262-section sec-literals-regular-expression-literals incomplete 240 223 0
 test262-section sec-parse-script incomplete 42 24 1
 test262-section sec-performeval incomplete 347 177 1
-test262-section sec-createdynamicfunction incomplete 509 407 1
+test262-section sec-createdynamicfunction incomplete 509 408 1
 test262-section sec-ecmascript-function-objects-call-thisargument-argumentslist incomplete 92 84 1
 test262-section sec-applystringornumericbinaryoperator incomplete 48 41 1
 test262-section sec-arguments-exotic-objects incomplete 263 106 0

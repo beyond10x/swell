@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:regexp-literal-early-errors
 kind: story
-status: active
+status: implemented
 title: 'A regular expression literal is checked by swell-regexp at parse: its pattern errors are early errors, and HOST-142'
 summary: 154 negative cases of literals/regexp (308 runs) on its list; the consumer's 12 literals pass the new early errors; HOST-142 closed; the pattern charged to the meter of the parse, a grant answered in full and counted nowhere.
 relations:
@@ -41,10 +41,11 @@ scope:
   path: crates/syntax/tests/sources/valid/regexp-literals.js
 - confidence: cited
   path: website/data/status.json
-revision: 21
+revision: 22
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T02:45:37Z", actor: "human:operator", revision: 20, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T02:45:38Z", actor: "human:operator", revision: 21, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T08:12:42Z", actor: "human:operator", revision: 22, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:unicode-gen-table-list-and-source-digests
 kind: story
-status: active
+status: implemented
 title: 'swell-unicode-gen: every table one entry of a list, with shared readers and writers and the digest of each source in the table'
 summary: 'The prefactor of the six table stories of slice 5: no new table, no case lifted; the check of the generator timed before and after (0.008 to 0.017 s wall, 0.00 s CPU on 98df839).'
 relations:
@@ -22,10 +22,11 @@ scope:
   path: crates/unicode-gen/tests/check.rs
 - confidence: cited
   path: crates/unicode/src/tables/zs.rs
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T03:24:20Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T03:24:20Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T08:12:39Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

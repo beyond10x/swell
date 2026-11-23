@@ -1,0 +1,2 @@
+test/language/expressions/object/method-definition/yield-star-after-newline.js
+test/language/expressions/object/method-definition/yield-star-before-newline.js

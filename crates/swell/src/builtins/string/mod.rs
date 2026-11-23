@@ -14,8 +14,11 @@
 //! finds its String. The other methods are slice 3, the ones that need Unicode tables slice 5;
 //! those of slice 3 are in the group modules beside this file (`story:builtin-group-modules`):
 //! `access.rs` (`story:string-access-and-search-methods`) and `transform.rs`
-//! (`story:string-transform-and-compare-methods`). Their keys follow the keys of this file on
-//! `%String%` and `%String.prototype%`, in that order of the groups. Every method of
+//! (`story:string-transform-and-compare-methods`); those of slice 5 in `replace.rs`
+//! (`story:string-replace-replace-all-and-split`) and `pattern.rs`, `match` and `search`
+//! (`story:regexp-symbol-methods-and-string-match-search`) and `matchAll`
+//! (`story:regexp-match-all-and-escape`). Their keys follow the keys of this
+//! file on `%String%` and `%String.prototype%`, in that order of the groups. Every method of
 //! `String.prototype` but `toString` and `valueOf` starts with [`Agent::this_string`]. This
 //! file also has CodePointAt (`#sec-codepointat`) and UTF16EncodeCodePoint
 //! (`#sec-utf16encodecodepoint`), functions of code units.
@@ -26,6 +29,7 @@
 //! unit it copies, so the copy is part of the step budget.
 
 pub(crate) mod access;
+pub(crate) mod pattern;
 pub(crate) mod replace;
 pub(crate) mod transform;
 
@@ -60,6 +64,8 @@ pub(crate) enum StringBuiltin {
     Transform(transform::TransformBuiltin),
     /// A builtin of the group `replace.rs`.
     Replace(replace::ReplaceBuiltin),
+    /// A builtin of the group `pattern.rs`.
+    Pattern(pattern::PatternBuiltin),
 }
 
 /// The code units of a String being built.
@@ -267,7 +273,7 @@ impl<H: Host> Agent<H> {
     /// `%String%` (22.1.1) with `String.prototype.constructor`, `indexOf`, `toString` and
     /// `valueOf`; then the methods of each group on both, and the groups' data properties
     /// keyed by a well-known symbol on `%String.prototype%`, the groups in the order `access`,
-    /// `transform`, `replace`.
+    /// `transform`, `replace`, `pattern`.
     pub(crate) fn create_string_constructor(
         &mut self,
         making: Making,
@@ -337,6 +343,16 @@ impl<H: Host> Agent<H> {
                 },
                 |id| BuiltinId::String(StringBuiltin::Replace(id)),
             )?;
+            self.define_group_methods(
+                making,
+                object,
+                if on_prototype {
+                    pattern::PROTOTYPE_METHODS
+                } else {
+                    pattern::CONSTRUCTOR_METHODS
+                },
+                |id| BuiltinId::String(StringBuiltin::Pattern(id)),
+            )?;
         }
         self.define_symbol_data(making, string_prototype, &access::prototype_symbol_data())?;
         self.define_symbol_data(
@@ -345,6 +361,7 @@ impl<H: Host> Agent<H> {
             &transform::prototype_symbol_data(),
         )?;
         self.define_symbol_data(making, string_prototype, &replace::prototype_symbol_data())?;
+        self.define_symbol_data(making, string_prototype, &pattern::prototype_symbol_data())?;
         Ok(constructor)
     }
 
@@ -377,6 +394,9 @@ impl<H: Host> Agent<H> {
             }
             StringBuiltin::Replace(id) => {
                 self.run_string_replace_builtin(id, function, this, args, new_target)
+            }
+            StringBuiltin::Pattern(id) => {
+                self.run_string_pattern_builtin(id, function, this, args, new_target)
             }
         }
     }
@@ -536,8 +556,8 @@ impl<H: Host> Agent<H> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CodePoint, StringBuilder, StringBuiltin, access, code_point_at, replace, transform,
-        utf16_encode_code_point,
+        CodePoint, StringBuilder, StringBuiltin, access, code_point_at, pattern, replace,
+        transform, utf16_encode_code_point,
     };
     use crate::builtins::group_testing::{GroupMethod, check_group_keys, group_methods};
     use crate::host::Termination;
@@ -549,8 +569,8 @@ mod tests {
 
     /// The order of keys of `String` and `String.prototype` (`story:builtin-group-modules`):
     /// the keys of the base in the base's order, then the keys of the groups `access`,
-    /// `transform` and `replace`, and nothing else, each a method of its group that runs
-    /// through its function object.
+    /// `transform`, `replace` and `pattern`, and nothing else, each a method of its group that
+    /// runs through its function object.
     #[test]
     fn every_group_module_installs_and_runs_through_its_constructor() {
         let (mut agent, realm) = agent_with_realm();
@@ -568,6 +588,9 @@ mod tests {
             group_methods(replace::CONSTRUCTOR_METHODS, |i| {
                 BuiltinId::String(StringBuiltin::Replace(i))
             }),
+            group_methods(pattern::CONSTRUCTOR_METHODS, |i| {
+                BuiltinId::String(StringBuiltin::Pattern(i))
+            }),
         ]
         .concat();
         let prototype_groups: Vec<GroupMethod> = [
@@ -579,6 +602,9 @@ mod tests {
             }),
             group_methods(replace::PROTOTYPE_METHODS, |i| {
                 BuiltinId::String(StringBuiltin::Replace(i))
+            }),
+            group_methods(pattern::PROTOTYPE_METHODS, |i| {
+                BuiltinId::String(StringBuiltin::Pattern(i))
             }),
         ]
         .concat();

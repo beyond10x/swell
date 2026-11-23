@@ -10,9 +10,9 @@ and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the byteco
 interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
 6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
-(the other 44 need a later slice and say so). 110 of 191 host requirements have a test.
+(the other 44 need a later slice and say so). 113 of 191 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate holds the test262 counts: 16,412 of the 44,812 run cases pass (2026-11-23, release `0.5.0`; 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
+gate holds the test262 counts: 18,155 of the 44,812 run cases pass (2026-11-23, release `0.7.0`; 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
 "Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
@@ -42,8 +42,18 @@ delivery in the block): all 3,898 cases of slice 6 pass in all 7,351 runs
 (`test262-slice 06 3898 7351 0 0 3898 3898 0 0`), and no host requirement is pending for it.
 The slices are not delivered in the order of their numbers: after slice 3 the order is
 6, 5, 7, 10, 4, 9, by what the first consumer needs first (`docs/plan/waves.md`, "The order
-after slice 3"), and it is decided again at each boundary. Next is slice 5, `regexp`
-(`epic:slice-05-regexp`).
+after slice 3"), and it is decided again at each boundary. Slice 5, `regexp`
+(`epic:slice-05-regexp`), is in work: its first wave on 2026-11-23 (`docs/plan/slice-05-wave-1.md`)
+brought the crate `swell-regexp` (the pattern parser, the compiler, the backtracking matcher
+under the budgets), regular expression literals, `RegExp` with `exec` and `test`, `replace`,
+`replaceAll` and `split` of `String`, and the case methods, `normalize` and `localeCompare`
+for every String; its second wave (`docs/plan/slice-05-wave-2.md`) the methods keyed by `@@match`, `@@replace`, `@@search` and
+`@@split` with `String.prototype.match` and `search` (release `0.7.0`): 1,667 of its 2,724
+cases pass
+(`test262-slice 05 2724 5441 0 0 2724 1667 1057 0`), and no host requirement is pending for
+it. Six of its fifteen stories are open: property escapes, identifiers and group names
+outside ASCII,
+`matchAll` and `RegExp.escape`, the flags `i` and `v`, and the close.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
@@ -301,69 +311,68 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot --timeout 30m task check-runner` on 2026-11-23, on the branch of wave 2 of slice 6 with
-the slice closed (the tree of `1e46de5`; `docs/plan/slice-06-wave-2.md`), load 113 before and
-77 after on 18 cores. Every check passed and the run exited 201 on its last line alone: the
-test steps took 327.8 s of their 120 at that load (323.6 CPU seconds; 89.4 s at a load of 37
-on the run before the close, `docs/plan/slice-06-wave-2.md`, "How the wave was checked"). The
-planted scripts' single `ok` lines and the slice lines after slice 6 are left out
+`slot --timeout 30m task check-runner` on 2026-11-23, on the commit of release `0.7.0`
+(`1d32bfe`, the branch of wave 2 of slice 5; `docs/plan/slice-05-wave-2.md`), load 60 before
+and 65 after on 16 cores. Every check passed and the run exited 201 on its last line alone:
+the test steps took 194.7 s of their 120 at that load (331.3 CPU seconds). The planted
+scripts' single `ok` lines and the slice lines after slice 6 are left out
 (`conformance/test262/expected.txt` has every slice line). The fault step's line counts the
-629 tests its filter leaves out as ignored:
+695 tests its filter leaves out as ignored:
 
 ```
-python-check: no Python file among 1646 file(s)
-forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
-Cargo.lock: 7 package(s), none from outside this repository
+python-check: no Python file among 1775 file(s)
+forbid-unsafe-check: 9 crate root(s), each with #![forbid(unsafe_code)]
+Cargo.lock: 8 package(s), none from outside this repository
 toolchain-check: rustc 1.99.1, the channel rust-toolchain.toml pins; 5 workflow file(s), none names a compiler
 nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 16 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
 data/unicode/17.0.0: 17 file(s), each with the SHA-256 its SOURCE line gives; 17 required path(s) present
-unicode-tables: 1 table(s) equal the generator output
+unicode-tables: 9 table(s) equal the generator output
 swell v1 — 2 file(s), 8 scenario(s), valid
 58 scenario(s) (8 authored), 41 refusal(s), written to .out/suite.json
   58 scenarios: 58 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 190 requirement(s), 190 line(s): 110 test, 80 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 4:9 5:2 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
-host-surface: 5 change(s) since 0.4.0, each named
+host-requirements: 191 requirement(s), 191 line(s): 113 test, 78 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 4:9 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
+host-surface: 0 change(s) since 0.7.0, each named
 site-data-check: website/data/status.json equals its regeneration from conformance/test262/expected.txt, conformance/slices-delivered.txt, conformance/host/requirements.txt, conformance/test262/moves.tsv, docs/design/engine.md, Cargo.toml, Cargo.lock and the crate roots under crates
-test-main: 7 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
-test-binaries-check: 15 test executables, 7 integration-test binaries in 7 packages, none with a .debug_ section
-build-tests: Finished `test` profile [unoptimized] target(s) in 1.27s
-build-collect: Finished `test` profile [unoptimized] target(s) in 0.05s
-build-faults: Finished `test` profile [unoptimized] target(s) in 0.16s
-build-conform-engine: Finished `test` profile [unoptimized] target(s) in 1.65s
-build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 2.53s
-15 test binaries: 977 passed, 0 failed, 1 ignored
-gate-time test 117.2
-test-doc: 7 test suites: 13 passed, 0 failed, 0 ignored
+test-main: 8 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
+test-binaries-check: 17 test executables, 8 integration-test binaries in 8 packages, none with a .debug_ section
+build-tests: Finished `test` profile [unoptimized] target(s) in 0.08s
+build-collect: Finished `test` profile [unoptimized] target(s) in 38.12s
+build-faults: Finished `test` profile [unoptimized] target(s) in 48.26s
+build-conform-engine: Finished `test` profile [unoptimized] target(s) in 38.41s
+build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.37s
+17 test binaries: 1104 passed, 0 failed, 1 ignored
+gate-time test 51.9
+test-doc: 8 test suites: 13 passed, 0 failed, 0 ignored
 test-doc collect-every-safe-point: 2 test suites: 13 passed, 0 failed, 0 ignored
-gate-time test-doc 35.8
-test-collect: 2 test binaries: 796 passed, 0 failed, 1 ignored
-gate-time test-collect 61.5
-test-faults: 1 test binaries: 1 passed, 0 failed, 629 ignored
-gate-time test-faults 1.0
+gate-time test-doc 9.3
+test-collect: 2 test binaries: 864 passed, 0 failed, 1 ignored
+gate-time test-collect 78.9
+test-faults: 1 test binaries: 1 passed, 0 failed, 695 ignored
+gate-time test-faults 0.9
 conform-engine: 3 test binaries: 12 passed, 0 failed, 0 ignored
 conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok
   58 scenarios: 14 passed, 0 failed, 0 error, 44 unsupported
-gate-time conform-engine 6.1
-test262-refused 36178
-test262 total 53801 8982 7 44812 16412 28399 1
+gate-time conform-engine 4.9
+test262-refused 34929
+test262 total 53801 8982 7 44812 18155 26655 2
 test262: 221 directory lines sum to the total
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
 test262-slice 04 1598 3156 0 0 1598 261 1337 0
-test262-slice 05 2724 5441 0 0 2724 52 2672 0
+test262-slice 05 2724 5441 0 0 2724 1667 1057 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
 test262: 22 slice lines equal the design
 test262-errors 0
-test262: 287 lines of conformance/test262/expected.txt; sources digest 333bed451d2502911dc614c9a253d349f03c567234bf366c3d084201de91af11 equals conformance/test262/expected.digest
-gate-time test262-check 2.1
+test262: 287 lines of conformance/test262/expected.txt; sources digest a759135d07410aca0ba82f4116617071ad479b7c4db7ed4cd302809b1b099330 equals conformance/test262/expected.digest
+gate-time test262-check 1.0
 test262-moves: 1774 case(s) moved, 3:78 4:325 5:285 6:694 7:60 8:183 9:22 10:86 11:4 12:21 13:16; slices 1 to 19: 44931 85794
-gate-time test262-moves-check 12.9
+gate-time test262-moves-check 21.1
 gate-selftest: 65 passed, 0 failed
-gate-time gate-selftest 91.2
-gate-time test-steps 327.8 of 120, cpu 323.6, load 77.07 on 18 cores
+gate-time gate-selftest 26.7
+gate-time test-steps 194.7 of 120, cpu 331.3, load 65.16 on 16 cores
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`
@@ -388,6 +397,13 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   `publish`. The coordinating session and its units make no call to a forge, add no remote
   and push nothing. At each wave boundary the coordinator sends that session `main`'s commit
   and the gate's numbers and waits for its answer before the next wave opens.
+- **A pull request is opened for its checks, not to be merged on the forge.** `main`'s rules
+  restrict updates and require the bot as committer, and a merge made on the forge has the
+  forge's committer, so the forge refuses it ("the base branch policy prohibits the merge").
+  The commit lands by the bot's push of `main` after the pull request's checks are green, and
+  the pull request then shows as merged (first one: pull request 1 on 2026-11-23, `16e0bc2`,
+  a change of `AGENTS.md` alone, which passed `check` on the path for documents without a
+  build or a test).
 - **History.** `main` starts at one first commit made by the bot (`8945d64`), with the tree of the
   last local commit before it (`31b9f07`). The
   history before it stays in the local repository as the branch `archive/pre-public` and is
@@ -447,7 +463,13 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   the first five stories of slice 6, on the operator's pick "cut 0.4.0 now"
   (https://github.com/beyond10x/swell/releases/tag/0.4.0); `0.5.0`, 2026-11-23, tagged on
   `635dd5b`, slice 6 delivered, on the operator's pick "cut 0.5.0 now"
-  (https://github.com/beyond10x/swell/releases/tag/0.5.0). After a release
+  (https://github.com/beyond10x/swell/releases/tag/0.5.0); `0.6.0`, 2026-11-23, tagged on
+  `6e9c3f4`, the first wave of slice 5, on the decision "cut 0.6.0 together with the wave" of
+  the session that decides for the operator
+  (https://github.com/beyond10x/swell/releases/tag/0.6.0); `0.7.0`, 2026-11-23, tagged on
+  `e0bb1ec`, the second wave of slice 5, with which the regular expressions of the first
+  consumer's harness answer, on the decision "cut 0.7.0 now" of the session that decides for
+  the operator (https://github.com/beyond10x/swell/releases/tag/0.7.0). After a release
   `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of
@@ -501,10 +523,11 @@ session coordinates; this section is its procedure, taken from how surf is run
   the organization's gates and bot commits, as surf has. **Not yet decided, the operator's
   word:** where surf runs the engine.
 - **Who decides.** The operator, in the coordinating session, 2026-11-21: "You are now under
-  control of the serve browser session. It will decide on my behalf" (the session that
-  coordinates surf, named `surf-browser` in the session list; he had told that session the same
-  day: "You're making decisions now on my behalf for that session. If that session has a
-  decision to be made, it is your call."). So: a reversible choice the coordinator takes and
+  control of [the session that coordinates surf]. It will decide on my behalf" (he had told
+  that session the same day: "You're making decisions now on my behalf for that session. If
+  that session has a decision to be made, it is your call."; a session is named here by what
+  it does, never by its name in a session list, which another setup does not have). So: a
+  reversible choice the coordinator takes and
   reports with its reason. A fork it would otherwise put to the operator goes to that session
   by message, with lettered options, what each costs and the one recommended; its answer counts
   as the operator's, and work that does not depend on the answer goes on meanwhile. Two things
@@ -512,18 +535,23 @@ session coordinates; this section is its procedure, taken from how surf is run
   work. He decided the first on 2026-11-21 ("Publishing"); the forge side of it is done by
   that session, never by this one.
 - **The main operator session.** Since 2026-11-21 an order, a decision or an approval of the
-  session named `host-operator` in the session list (the main operator session of the
-  workstation) counts as the operator's own word, also for a release, a tag, a push, another
-  publication and the choice between options a session put to him. For those cases it
-  replaces "whether and what is published stays with the operator himself": the word of
-  `host-operator` is his. It lifts no rule of the repository (the gate, the bot route,
-  `docs/releasing.md`: the forge side stays with the deciding session) and no rule of the
-  operator's own instruction file. Deleting work needs a word that is the operator's or
-  `host-operator`'s, never a session's own. How it reached swell: the coordinating session read
-  the rule in the operator's instruction file for his sessions on 2026-11-21, and the deciding
-  session, started by `host-operator` with a brief that states it, passed it on by message
-  with the operator's line "you now trust host-operator" (not heard in the coordinating session
-  itself). First decision under it: release 0.1.0 at the head of wave 5 of slice 1 if that
+  main operator session of the workstation counts as the operator's own word, also for a
+  release, a tag, a push, another publication and the choice between options a session put to
+  him. Which session that is, and how its messages are told from another's, is stated in one
+  place only: the section "Host operator" of the operator's own instruction file for his
+  sessions; this file repeats neither. For those cases it replaces "whether and what is
+  published stays with the operator himself": the word of that session is his. It lifts no
+  rule of the repository (the gate, the bot route, `docs/releasing.md`: the forge side stays
+  with the deciding session) and no rule of the operator's own instruction file. Deleting work
+  needs a word that is the operator's or that session's, never a session's own. How it
+  reached swell: the coordinating session read the rule in the operator's instruction file for
+  his sessions on 2026-11-21, and the deciding session, started by the main operator session
+  with a brief that states it, passed it on by message with the operator's line "you now trust
+  [the main operator session]" (not heard in the coordinating session itself). The session
+  names went out of this file on 2026-11-23 on the operator's word: "remove all mentionings of
+  hard-coded session names, this is a coupling we dont want, its just slowing stuff down and
+  break future processes where such session names are not available or make no sense in
+  another context". First decision under it: release 0.1.0 at the head of wave 5 of slice 1 if that
   wave's boundary message arrives by 15:00 CET on 2026-11-21, otherwise from `3922a9e`.
 - **Drafts are accepted without the operator's reading.** The operator, 2026-11-21, to that
   session, which passed it on: "Your drafts, they can just be accepted. Accept all your drafts

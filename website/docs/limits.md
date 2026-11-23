@@ -13,8 +13,8 @@ These are the limits of release <Num at="version" />, from the [changelog](https
 
 | missing | brought by |
 |---|---|
-| regular expression literals | slice 5, `regexp` |
-| identifiers outside ASCII | slice 5, with the Unicode tables |
+| in a regular expression: the flags `i` and `v`, property escapes and group names outside ASCII | the rest of slice 5, `regexp` |
+| identifiers outside ASCII | the rest of slice 5, with the Unicode tables |
 | generators | slice 7, `generators` |
 | classes, `super`, private names | slice 8, `classes` |
 | promises, async functions, `for await` | slice 10, `promises-and-async` |
@@ -24,12 +24,12 @@ These are the limits of release <Num at="version" />, from the [changelog](https
 
 ## The builtins
 
-The core library exists: `Object`, `Function`, `Array`, `String`, `Error`, `JSON`, `globalThis` and the URI functions, and with slice 6 `Symbol`, the Array and String iterators, `Array.from`, `Object.fromEntries` and `Object.groupBy`. A String method that needs the Unicode tables of a later slice refuses a code unit outside ASCII.
+The core library exists: `Object`, `Function`, `Array`, `String`, `Error`, `JSON`, `globalThis` and the URI functions, and with slice 6 `Symbol`, the Array and String iterators, `Array.from`, `Object.fromEntries` and `Object.groupBy`. Regular expressions run since release 0.6.0: the literal, `RegExp`, `exec` and `test`. Since release 0.7.0 `match` and `search` exist, and `replace`, `replaceAll` and `split` of `String` take a regular expression. The case methods, `normalize` and `localeCompare` take every String. A part of a regular expression that is not built yet is refused with a counted `SyntaxError`.
 
 | missing | brought by |
 |---|---|
 | `Date`, `parseInt`, `parseFloat`, the rest of `Number`, all of `Math` but `max` | slice 4, `numbers-and-dates` |
-| `RegExp` and the string methods that use it | slice 5, `regexp` |
+| `String.prototype.matchAll` and `RegExp.escape` | the rest of slice 5, `regexp` |
 | `Map`, `Set`, `WeakMap`, `WeakSet`, `Proxy`, `Reflect` | slice 9 |
 | `Promise` | slice 10 |
 | `BigInt` | slice 12 |
