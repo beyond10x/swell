@@ -283,8 +283,12 @@ have, `story:matcher-work-bounded-by-its-steps` and
 `story:pattern-parser-work-linear-in-its-pattern`: 1,327 of the 2,724 cases of the slice pass
 (`test262-slice 05 2724 5441 0 0 2724 1327 1397 0`). [Wave 2](slice-05-wave-2.md), release
 `0.7.0`: `regexp-symbol-methods-and-string-match-search` of order 4, with which all twelve
-regular expressions of the consumer answer and 1,667 cases pass. Open: property escapes of
-order 4 and `regexp-match-all-and-escape` of order 5, both being built, and the orders 5 to 8.
+regular expressions of the consumer answer and 1,667 cases pass. [Wave 3](slice-05-wave-3.md),
+release `0.8.0`: `regexp-match-all-and-escape`, `regexp-property-escapes-and-property-tables`,
+`regexp-case-insensitive-matching-and-modifiers` and
+`identifiers-and-group-names-outside-ascii`, with which 2,523 cases pass
+(`test262-slice 05 2724 5441 0 0 2724 2523 201 0`). Open: the flag `v`, being built, and the
+close.
 
 ## Slice 7, `generators`
 
@@ -316,10 +320,12 @@ A decomposition of slice 10 can start when order 2 is merged. The close runs aft
 `slice-05-conformance-close`: both write section 12 of the design, `moves.tsv`,
 `later-parts.tsv` and `expected.txt`.
 
-**Delivered so far.** Order 1 is merged on the wave branch of slice 5 (2026-11-23, not yet
-released): 123 of the 1,491 cases pass (`test262-slice 07 1491 2841 0 0 1491 123 1368 0`).
-One case of its list, `expressions/object/prop-def-invalid-star-prefix.js`, ends on the
-refusal of a generator method and went to the list of order 4. Order 2 is being built.
+**Delivered so far.** The orders 1 to 3, built on the wave branch of slice 5 ([its wave 3](slice-05-wave-3.md), release `0.8.0`): generator
+syntax, generators on suspended frames, `%GeneratorFunction%` and `yield*`; 1,168 of the
+1,491 cases pass (`test262-slice 07 1491 2841 0 0 1491 1168 323 0`). One case of the list of
+order 1, `expressions/object/prop-def-invalid-star-prefix.js`, ends on the refusal of a
+generator method and went to the list of order 4 (281 cases). Open: order 4, generator
+methods of object literals, being built, and the close.
 
 ## Slice 10, `promises-and-async`
 
