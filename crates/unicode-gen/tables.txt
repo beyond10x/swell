@@ -2,6 +2,7 @@ crates/unicode/src/tables/zs.rs zs ucd/extracted/DerivedGeneralCategory.txt
 crates/unicode/src/tables/lowercase.rs lowercase ucd/UnicodeData.txt
 crates/unicode/src/tables/uppercase.rs uppercase ucd/UnicodeData.txt
 crates/unicode/src/tables/special_casing.rs special_casing ucd/SpecialCasing.txt
+crates/unicode/src/tables/case_folding.rs case_folding ucd/CaseFolding.txt
 crates/unicode/src/tables/cased.rs cased ucd/DerivedCoreProperties.txt
 crates/unicode/src/tables/case_ignorable.rs case_ignorable ucd/DerivedCoreProperties.txt
 crates/unicode/src/tables/decompositions.rs decompositions ucd/UnicodeData.txt

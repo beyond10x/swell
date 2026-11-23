@@ -1266,19 +1266,17 @@ holds these.
 **A refusal raised by `RegExp`.** Added on 2026-11-23 for slice 5. Until the story of slice 5
 that brings each, RegExpInitialize (`ecma262:sec-regexpinitialize`), which the `RegExp`
 constructor, the evaluation of a literal and the `String` methods that make a RegExp run,
-refuses three parts of the pattern grammar and the flags (`engine.md` decision 7, "Refusals
-until the later stories of slice 5"; section 12, the third form): the flag `v`, a group name
-with a code point outside ASCII, and the flag `i` or a modifier `i`. That
+refuses two parts of the pattern grammar and the flags (`engine.md` decision 7, "Refusals
+until the later stories of slice 5"; section 12, the third form): the flag `v` and a group name
+with a code point outside ASCII; the flag `i` and a modifier `i` are refused no more since
+`story:regexp-case-insensitive-matching-and-modifiers`. That
 refusal is raised while running and is counted like a refused parse. The script sees a
 `SyntaxError` object of the current realm whose `message` is exactly `class set expressions of
-the v flag is not supported before slice 5`,
-`group name outside ASCII is not supported before slice 5` or `case-insensitive matching is not
-supported before slice 5`, with no position after it; each such throw moves `refusals()` by 1,
-caught or not. An error that ToString of the pattern or the flags or the check of the flags
+the v flag is not supported before slice 5` or
+`group name outside ASCII is not supported before slice 5`, with no position after it; each
+such throw moves `refusals()` by 1, caught or not. An error that ToString of the pattern or the flags or the check of the flags
 throws before the parse, a grammar error of the pattern and the nesting limit are not refusals
-and are not counted. In a literal the first three are refusals of the parse (HOST-164); `i` is
-refused when the literal is evaluated, since the parse checks the pattern and the compile step
-refuses `i`. The methods of `%RegExp.prototype%` keyed by `%Symbol.match%`, `%Symbol.replace%`,
+and are not counted. In a literal both are refusals of the parse (HOST-164). The methods of `%RegExp.prototype%` keyed by `%Symbol.match%`, `%Symbol.replace%`,
 `%Symbol.search%` and `%Symbol.split%` (`ecma262:sec-regexp.prototype-%symbol.match%`,
 `ecma262:sec-regexp.prototype-%symbol.replace%`, `ecma262:sec-regexp.prototype-%symbol.search%`,
 `ecma262:sec-regexp.prototype-%symbol.split%`; `engine.md` decision 7, the same paragraph) refuse

@@ -20,6 +20,7 @@ pub(crate) fn renderer(name: &str) -> Option<Renderer> {
         "lowercase" => Some(lowercase),
         "uppercase" => Some(uppercase),
         "special_casing" => Some(special_casing),
+        "case_folding" => Some(case_folding),
         "cased" => Some(cased),
         "case_ignorable" => Some(case_ignorable),
         "decompositions" => Some(decompositions),
@@ -122,6 +123,47 @@ fn special_casing(ucd: &mut Ucd, sources: &[Source]) -> Result<String, String> {
          /// table 3-17), sorted by code point.\n",
     );
     text.push_str(&render::mappings("FINAL_SIGMA", &special.final_sigma)?);
+    Ok(text)
+}
+
+/// The simple case folding of `ucd/CaseFolding.txt` (status `C` and `S`), as the constants
+/// `FOLDING`, `BY_FOLDING` and `LARGEST_GROUP`.
+fn case_folding(ucd: &mut Ucd, sources: &[Source]) -> Result<String, String> {
+    let source = one_source("case_folding", sources)?;
+    let pairs = crate::case_folding::simple_case_folding(ucd, &source.path)?;
+    let (grouped, largest) = crate::case_folding::by_folding(&pairs);
+    let mut text = render::head(sources);
+    text.push_str(
+        "//! The simple case folding of `CaseFolding.txt`, its lines of status `C` and `S`, which\n\
+         //! Canonicalize reads under the flags `u` and `v` with `i`\n\
+         //! (`#sec-runtime-semantics-canonicalize-ch`). The lines of status `F` and `T` are not\n\
+         //! written. A folding is its own folding and has as many UTF-16 code units as its code\n\
+         //! point.\n\
+         \n\
+         /// Each code point with a simple case folding and that folding, sorted by code point.\n",
+    );
+    text.push_str(&render::pairs("FOLDING", &pairs)?);
+    text.push_str(
+        "\n\
+         /// The pairs of `FOLDING` as `(folding, code point)`, sorted by folding and then by code\n\
+         /// point: the code points of one folding next to each other, the folding not among them.\n",
+    );
+    let rows: Vec<String> = grouped
+        .iter()
+        .map(|(folding, point)| {
+            format!(
+                "    ({}, {}),\n",
+                normalize::hex(*folding),
+                normalize::hex(*point)
+            )
+        })
+        .collect();
+    text.push_str(&normalize::constant("BY_FOLDING", "(u32, u32)", &rows));
+    text.push_str(&format!(
+        "\n\
+         /// The most code points of one folding, the folding itself counted.\n\
+         pub(crate) const LARGEST_GROUP: usize = {largest};\n"
+    ));
     Ok(text)
 }
 

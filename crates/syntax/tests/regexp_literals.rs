@@ -168,9 +168,8 @@ fn a_literal_spends_no_step_at_parse() {
 }
 
 /// `/(?i-i:a)/` adds and removes `i`: an early error of the pattern
-/// (`#sec-patterns-static-semantics-early-errors`), which the parse answers, not the refusal of
-/// `i` that only the compile step makes ("Refusals until the later stories of slice 5"). A
-/// literal with the flag `i` or a modifier `i` and no error parses.
+/// (`#sec-patterns-static-semantics-early-errors`), which the parse answers before the compile
+/// step runs. A literal with the flag `i` or a modifier `i` and no error parses.
 #[test]
 fn a_literal_with_i_and_an_early_error_is_the_early_error() {
     let errors = parse_script(&literal("(?i-i:a)", ""), OPTIONS).unwrap_err();

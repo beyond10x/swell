@@ -8,7 +8,9 @@
 //! `UnicodeData.txt`, `SpecialCasing.txt` and `DerivedCoreProperties.txt` and their lookups
 //! ([`to_lowercase`], [`to_uppercase`], [`final_sigma_lowercase`], [`is_cased`],
 //! [`is_case_ignorable`]), for the case methods of `String.prototype`
-//! (`#sec-string.prototype.tolowercase`); and the normalization tables of `UnicodeData.txt`,
+//! (`#sec-string.prototype.tolowercase`); and the simple case folding of `CaseFolding.txt`
+//! ([`simple_case_fold`], [`simple_case_fold_equivalents`]), for Canonicalize of `swell-regexp`
+//! under `i` (`#sec-runtime-semantics-canonicalize-ch`); and the normalization tables of `UnicodeData.txt`,
 //! `CompositionExclusions.txt` and `DerivedNormalizationProps.txt` with the four forms of UAX
 //! #15 ([`Form`], [`normalize`], [`decompose`], [`reorder_and_compose`]), for
 //! `String.prototype.normalize` (`#sec-string.prototype.normalize`) and the order of
@@ -25,7 +27,9 @@ mod property;
 mod tables;
 
 pub use case::{
-    CaseMapping, final_sigma_lowercase, is_case_ignorable, is_cased, to_lowercase, to_uppercase,
+    CaseFoldEquivalents, CaseMapping, MOST_CASE_FOLD_EQUIVALENTS, final_sigma_lowercase,
+    is_case_ignorable, is_cased, simple_case_fold, simple_case_fold_equivalents, to_lowercase,
+    to_uppercase,
 };
 pub use normalize::{
     Buffer, Form, FormBuffer, Stop, canonical_combining_class, decompose, decomposition, normalize,

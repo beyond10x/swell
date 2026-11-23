@@ -422,6 +422,12 @@ fn families() -> Vec<Family> {
         ("lookarounds and modifier groups", "", false, |k| {
             "(?i-ms:a)(?<=b)(?<!c)(?=d)".repeat(k)
         }),
+        (
+            "classes of wide ranges, characters and backreferences under i",
+            "iu",
+            false,
+            |k| "(?-i:[\\x80-\\uffff]k)[^a-z\\w\\p{Lu}](s)\\1".repeat(k),
+        ),
     ]
 }
 
