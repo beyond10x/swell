@@ -12,6 +12,9 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- Generator methods of object literals, `{ *g() {} }`, with their early errors, the fifth
+  story of the seventh slice. A `yield` in the computed name of one belongs to the generator
+  around the literal.
 - The microtask queue of the agent and its checkpoint, the first story of the tenth slice. A
   host queues a microtask with the realm it runs in; a checkpoint runs every entry in the
   order it was queued, under the step budget of one entry, and spends one step for each

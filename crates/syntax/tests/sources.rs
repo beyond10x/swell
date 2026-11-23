@@ -517,6 +517,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "generator_expression" => ("x = ", "function* (){ return ", "0", "; }", ";"),
         "yield" => ("function* g(){ ", "yield ", "0;", "", " }"),
         "yield_star" => ("function* g(){ ", "yield* ", "0;", "", " }"),
+        "generator_method" => ("x = ", "{*m(){ return ", "0", "; }}", ";"),
         _ => return None,
     };
     let mut source = units(before);
@@ -527,7 +528,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 53] = [
+const NESTING_KINDS: [&str; 54] = [
     "array",
     "paren",
     "block",
@@ -581,6 +582,7 @@ const NESTING_KINDS: [&str; 53] = [
     "generator_expression",
     "yield",
     "yield_star",
+    "generator_method",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict
