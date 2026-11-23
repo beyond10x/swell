@@ -363,6 +363,26 @@ fn families() -> Vec<Family> {
             true,
             |k| format!("{}(?<g>a)", "\\k<g>".repeat(k)),
         ),
+        (
+            "names outside ASCII, written and escaped, in two alternatives",
+            "u",
+            true,
+            |k| {
+                (0..k)
+                    .map(|i| format!("(?:(?<é{i:06}>a)|(?<\\u{{e9}}{i:06}>b))"))
+                    .collect()
+            },
+        ),
+        (
+            "names outside ASCII and their escaped references, without u",
+            "",
+            true,
+            |k| {
+                (0..k)
+                    .map(|i| format!("(?<𝒜π{i:06}>a)\\k<\\uD835\\uDC9C\\u03C0{i:06}>"))
+                    .collect()
+            },
+        ),
         ("a long name and its backreferences", "u", true, |k| {
             let name = "n".repeat(500);
             format!("(?<{name}>a){}", format!("\\k<{name}>").repeat(k))

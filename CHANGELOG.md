@@ -24,16 +24,22 @@ Every number below comes from the gate, `task check`, on the released commit.
   step per property escape it holds, and a test of one property is at most seven binary
   searches of a table, so a step of the matcher still stands for a bounded amount of work.
   580 more test262 cases pass with them: 2,326 of the 2,724 of the fifth slice.
-
-### Changed
-
-- A source with a generator function (`function*`) is still refused, with the same message
-  at the `*` of its first generator, but the refusal no longer stops the parse: `function*`
-  and `yield` are read, and a source that also has a grammar error or an early error ends on
-  that error. The early errors of `yield` are reported: `yield` as an identifier in a
-  generator, a `yield` expression in the parameters of a generator, a generator declaration
-  as the body of a statement. 123 of the 1,491 test262 cases of the seventh slice pass (6 in
-  0.7.0), and 18,935 of the 44,812 selected cases.
+- Case-insensitive matching in a regular expression: the flag `i` and the modifiers
+  `(?i:...)` and `(?-i:...)`. Under `u` or `v` a character matches by its simple case
+  folding, under neither by the uppercase mapping of its code unit. A character, each code
+  unit a backreference compares and a class cost at most four lookups more than without
+  `i`; no pattern costs more to compile for it.
+- Identifiers with code points outside ASCII (`café`, `π`, `\u{e9}`), by `ID_Start` and
+  `ID_Continue` of Unicode 17, and names of regular expression groups written the same way
+  (`(?<é>a)`). A code point outside ASCII costs one binary search of a table; ASCII source
+  costs what it did.
+- Generator functions run: `function*` declarations and expressions, `yield`, and generator
+  objects with `next`, `return` and `throw`, usable in `for`-`of`, spread and array
+  patterns. A suspended generator holds its frame in its object: the frame's bytes stay
+  charged to the memory budget until the generator completes or is collected, a suspended
+  generator takes none of the depth bound of calls, and the steps it runs are charged to
+  the entry that resumes it. `yield*` and generator methods of object literals are still
+  refused.
 
 ## [0.7.0] - 2026-11-23
 

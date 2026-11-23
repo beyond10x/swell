@@ -170,6 +170,24 @@ fn pair(lead: u32, trail: u32) -> u32 {
     0x10000 + ((lead - 0xD800) << 10) + (trail - 0xDC00)
 }
 
+/// IdentifierStartChar (`#sec-names-and-keywords`): `$`, `_` or a code point with `ID_Start`.
+/// ASCII is decided without the table; outside it, one binary search of the table.
+fn is_identifier_start(c: u32) -> bool {
+    match u8::try_from(c).ok().filter(u8::is_ascii) {
+        Some(b) => b.is_ascii_alphabetic() || b == b'$' || b == b'_',
+        None => swell_unicode::is_id_start(c),
+    }
+}
+
+/// IdentifierPartChar (`#sec-names-and-keywords`): `$`, U+200C, U+200D or a code point with
+/// `ID_Continue`, which holds `_` and the digits. ASCII is decided without the table.
+fn is_identifier_part(c: u32) -> bool {
+    match u8::try_from(c).ok().filter(u8::is_ascii) {
+        Some(b) => b.is_ascii_alphanumeric() || b == b'$' || b == b'_',
+        None => matches!(c, 0x200C | 0x200D) || swell_unicode::is_id_continue(c),
+    }
+}
+
 /// SyntaxCharacter (`#prod-SyntaxCharacter`).
 fn is_syntax_character(b: u8) -> bool {
     matches!(
@@ -968,8 +986,13 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
         })
     }
 
-    /// RegExpIdentifierName and its `>`, the parser past the `<`: the name, kept in the tree.
-    /// A code point outside ASCII, written or escaped, is refused.
+    /// RegExpIdentifierName (`#prod-RegExpIdentifierName`) and its `>`, the parser past the
+    /// `<`: the name, kept in the tree as the UTF-8 text of its code points, so that two names
+    /// compare by their code points. Each code point is read once, written (a surrogate pair one
+    /// code point, in both modes) or as `\` RegExpUnicodeEscapeSequence[+UnicodeMode], and
+    /// tested once: an IdentifierStartChar first and an IdentifierPartChar after, or the early
+    /// error (`#sec-patterns-static-semantics-early-errors`, RegExpIdentifierStart and
+    /// RegExpIdentifierPart).
     fn group_name(&mut self, start: usize) -> Result<Name, ParseError> {
         let name_start = self.text.len();
         loop {
@@ -999,19 +1022,18 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
             } else {
                 self.read_code_point()?
             };
-            let Some(b) = u8::try_from(c).ok().filter(u8::is_ascii) else {
-                return Err(error(
-                    ErrorKind::Refused(Refusal::GroupNameOutsideAscii),
-                    at,
-                ));
+            let valid = if self.text.len() == name_start {
+                is_identifier_start(c)
+            } else {
+                is_identifier_part(c)
             };
-            let first = self.text.len() == name_start;
-            let valid =
-                b.is_ascii_alphabetic() || b == b'$' || b == b'_' || (!first && b.is_ascii_digit());
-            if !valid {
+            let Some(c) = char::from_u32(c).filter(|_| valid) else {
                 return Err(error(ErrorKind::InvalidGroupName, at));
+            };
+            let mut bytes = [0u8; 4];
+            for &b in c.encode_utf8(&mut bytes).as_bytes() {
+                self.m.push(&mut self.text, b)?;
             }
-            self.m.push(&mut self.text, b)?;
         }
         Ok(Name {
             start: index32(name_start)?,

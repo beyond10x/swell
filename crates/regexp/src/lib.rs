@@ -24,9 +24,8 @@
 //! ([`ClassEscape::Property`]); a name or a value ECMA-262 does not admit is an early error.
 //!
 //! Refused until the later stories of slice 5, each with the message `<construct> is not
-//! supported before slice 5`: the flag `v` and a group name with a code point outside ASCII
-//! ([`Refusal`]), which ParsePattern refuses. CompilePattern refuses nothing
-//! ([`CompileRefusal`] has no value).
+//! supported before slice 5`: the flag `v` ([`Refusal`]), which ParsePattern refuses.
+//! CompilePattern refuses nothing ([`CompileRefusal`] has no value).
 
 mod ast;
 mod budget;
