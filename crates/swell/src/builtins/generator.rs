@@ -17,20 +17,29 @@
 //! `interp/suspend.rs` (`docs/design/engine.md`, decision 3, "Suspended frames", items 4 to
 //! 6): the checks of a call, then the frame moved back onto the frame stack
 //! ([`Agent::take_generator_frame`] sets the state `executing`), then a run loop of its own,
-//! one re-entry. The `constructor` of `%GeneratorFunction.prototype%`, `%GeneratorFunction%`,
-//! is the story of the constructor.
+//! one re-entry.
+//!
+//! `%GeneratorFunction%` (`#sec-generatorfunction-constructor`,
+//! `#sec-properties-of-the-generatorfunction-constructor`) with its `prototype`
+//! (`#sec-generatorfunction.prototype`), and the `constructor` of
+//! `%GeneratorFunction.prototype%` (`#sec-generatorfunction.prototype.constructor`), written by
+//! `story:generator-function-constructor`: called or constructed, `GeneratorFunction ( ...
+//! paramArgs, bodyArg )` (`#sec-generatorfunction`) is CreateDynamicFunction of kind
+//! `generator` (`dynamic_code.rs`). It is no property of the global object: a script reaches it
+//! as the `constructor` of the [[Prototype]] of a generator function.
 //!
 //! The this value of `next`, `return` and `throw` is validated with an empty brand:
 //! [[GeneratorBrand]] is empty for every generator of this slice.
 
 use swell_compiler::bytecode::{TAG_NORMAL, TAG_RETURN, TAG_THROW};
 
+use crate::dynamic_code::DynamicFunctionKind;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion};
 use crate::host::{ErrorKind, Host};
 use crate::interp::suspend::SuspendedFrame;
 use crate::object::ObjectKind;
-use crate::object::builtin_function::BuiltinId;
+use crate::object::builtin_function::{Behaviour, BuiltinId};
 use crate::object::generator::GeneratorState;
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::Property;
@@ -111,6 +120,59 @@ impl<H: Host> Agent<H> {
             function_prototype,
             prototype,
         })
+    }
+
+    /// `%GeneratorFunction%`, a constructor whose [[Prototype]] is `function`, `%Function%`,
+    /// with "length" 1, "name" "GeneratorFunction" and `prototype` holding `function_prototype`,
+    /// `%GeneratorFunction.prototype%`, { [[Writable]]: false, [[Enumerable]]: false,
+    /// [[Configurable]]: false }; and the `constructor` of `%GeneratorFunction.prototype%`,
+    /// holding it, { [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: true }.
+    pub(crate) fn create_generator_function_constructor(
+        &mut self,
+        making: Making,
+        function: ObjectRef,
+        function_prototype: ObjectRef,
+    ) -> Completion<ObjectRef> {
+        let constructor = self.create_builtin_function(
+            Behaviour::Builtin(BuiltinId::GeneratorFunction),
+            1,
+            "GeneratorFunction",
+            making.realm,
+            Some(function),
+            true,
+        )?;
+        let prototype_key = self.name_key("prototype")?;
+        self.add_property(
+            constructor,
+            prototype_key,
+            Property::data(Value::Object(function_prototype), false, false, false),
+        )?;
+        let constructor_key = self.name_key("constructor")?;
+        self.add_property(
+            function_prototype,
+            constructor_key,
+            Property::data(Value::Object(constructor), false, false, true),
+        )?;
+        Ok(constructor)
+    }
+
+    /// `GeneratorFunction ( ...paramArgs, bodyArg )` (`#sec-generatorfunction`), called or
+    /// constructed: the active function `function`, `bodyArg` the last argument or the empty
+    /// String, then CreateDynamicFunction(function, NewTarget, generator, paramArgs, bodyArg).
+    pub(crate) fn generator_function(
+        &mut self,
+        function: ObjectRef,
+        args: &[Value],
+        new_target: Option<ObjectRef>,
+    ) -> Completion<Value> {
+        let (params, body) = match args.split_last() {
+            Some((body, params)) => (params, Some(*body)),
+            None => (args, None),
+        };
+        let new_target = new_target.unwrap_or(function);
+        let made =
+            self.create_dynamic_function(new_target, DynamicFunctionKind::Generator, params, body)?;
+        Ok(Value::Object(made))
     }
 
     /// The steps of the builtins of this module: GeneratorResume or GeneratorResumeAbrupt with
