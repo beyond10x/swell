@@ -200,6 +200,28 @@ pub fn host_4_hook_cx_cannot_call_construct_or_evaluate_a_script() {}
 #[cfg(doctest)]
 pub fn host_5_agent_call_inside_a_host_function() {}
 
+/// HOST-149: `HookCx` has no method that performs a microtask checkpoint (decision 1; decision
+/// 11: a hook runs no code, and a checkpoint runs the jobs queued). A checkpoint through a
+/// `HookCx` does not compile:
+///
+/// ```compile_fail,E0599
+/// use swell::{Host, HookCx};
+/// fn hook<H: Host>(cx: &mut HookCx<'_, H>) {
+///     let _ = cx.perform_microtask_checkpoint();
+/// }
+/// ```
+///
+/// and the same checkpoint through a `Cx` compiles:
+///
+/// ```
+/// use swell::{Host, Cx};
+/// fn hook<H: Host>(cx: &mut Cx<'_, H>) {
+///     let _ = cx.perform_microtask_checkpoint();
+/// }
+/// ```
+#[cfg(doctest)]
+pub fn host_149_hook_cx_cannot_perform_a_microtask_checkpoint() {}
+
 /// HOST-170: `get` of `Cx` and `HookCx` takes `&mut self`, since the value it reads is handed
 /// out to the running scope (section 4). A read through a shared `&HookCx` does not compile:
 ///

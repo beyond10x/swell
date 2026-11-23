@@ -10,6 +10,28 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Added
+
+- The microtask queue of the agent and its checkpoint, the first story of the tenth slice. A
+  host queues a microtask with the realm it runs in; a checkpoint runs every entry in the
+  order it was queued, under the step budget of one entry, and spends one step for each
+  entry it takes off. A checkpoint asked for inside a checkpoint returns at once. A
+  termination leaves the entries behind it queued. No promise job exists yet: `Promise` is
+  not defined.
+- The test262 runner runs a case with the flag `async`: it performs a checkpoint after the
+  script and decides the case by the first line `Test262:AsyncTestComplete` or
+  `Test262:AsyncTestFailure:` the script prints.
+
+### Host interface
+
+- New: `Agent::queue_microtask`, `Agent::perform_microtask_checkpoint`,
+  `Cx::queue_microtask`, `Cx::perform_microtask_checkpoint`, of the agent
+  `pending_microtasks` and `clear_microtasks`, the type `Microtask` and the struct
+  `CheckpointReport` with its fields `CheckpointReport::promise_jobs` and
+  `CheckpointReport::host_microtasks`.
+- `HOST-77`, `HOST-79`, `HOST-81`, `HOST-149`, `HOST-192`, `HOST-193`, `HOST-196` and
+  `HOST-197` have a test.
+
 ## [0.8.0] - 2026-11-23
 
 Generator functions run, and a regular expression takes the flag `i`, Unicode property escapes

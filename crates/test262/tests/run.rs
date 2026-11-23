@@ -8,6 +8,8 @@
 //! parser refuses or nests too deep, and one early error the ES5 grammar has.
 //! `tests/fixtures/eval-script/` holds the cases of `$262.evalScript`: three that pass, and two
 //! that catch the `SyntaxError` of a refusal or of the nesting limit inside it and fail.
+//! `tests/fixtures/async/` holds three cases with the flag `async`, judged by what `$DONE` of its
+//! own `doneprintHandle.js` prints, and one without the flag that prints the failure line.
 //!
 //! With `--runs <file>` the runner writes one line per run to the file, `test262-run`, the slice,
 //! the path, the mode, the outcome and the detail, separated by tabs; the tests read it from
@@ -675,6 +677,80 @@ fn a_grammar_error_caught_inside_eval_passes() -> TestResult {
         [("non-strict", "Passed", ""), ("strict", "Passed", "")],
         "{path}"
     );
+    Ok(())
+}
+
+/// The run lines of the async tree, from one count of the tree written to the runs file `file`;
+/// the tree's directory line is checked first.
+fn async_lines(file: &str) -> Result<Vec<RunLine>, Box<dyn Error>> {
+    let (printed, lines) = counted_runs("async", file, &[])?;
+    // complete.js and not-async.js pass; failure.js and no-done.js fail.
+    assert_line(&printed, "test262 language/async 4 0 0 4 2 2 0");
+    Ok(lines)
+}
+
+/// The runs of the case `name` of the async tree, as (mode, outcome, detail).
+fn async_runs(lines: &[RunLine], name: &str) -> Vec<(String, String, String)> {
+    let path = format!("test/language/async/{name}");
+    runs_of(lines, &path)
+        .iter()
+        .map(|l| {
+            (
+                field(l, 4).to_string(),
+                field(l, 5).to_string(),
+                field(l, 6).to_string(),
+            )
+        })
+        .collect()
+}
+
+/// Two runs of one outcome and detail, non-strict first.
+fn both_runs(outcome: &str, detail: &str) -> Vec<(String, String, String)> {
+    ["non-strict", "strict"]
+        .iter()
+        .map(|mode| (mode.to_string(), outcome.to_string(), detail.to_string()))
+        .collect()
+}
+
+/// An `async` case gets `doneprintHandle.js` after `sta.js`; after the case the runner performs
+/// a microtask checkpoint and the run passes when `print` received `Test262:AsyncTestComplete`
+/// (design, decision 11, the bullet "`async`"; test262 `INTERPRETING.md`).
+#[test]
+fn an_async_case_passes_when_done_prints_complete() -> TestResult {
+    let lines = async_lines("async-complete")?;
+    assert_eq!(async_runs(&lines, "complete.js"), both_runs("Passed", ""));
+    Ok(())
+}
+
+/// An `async` case fails with the line `$DONE` printed when that line starts with
+/// `Test262:AsyncTestFailure:`, and with the cause `async: the queue is empty and $DONE was not
+/// called` when the queue is empty and neither line was printed.
+#[test]
+fn an_async_case_fails_on_the_failure_line_and_when_done_is_not_called() -> TestResult {
+    let lines = async_lines("async-failure")?;
+    assert_eq!(
+        async_runs(&lines, "failure.js"),
+        both_runs(
+            "Failed",
+            "Test262:AsyncTestFailure:Test262Error: Test262Error: x"
+        )
+    );
+    assert_eq!(
+        async_runs(&lines, "no-done.js"),
+        both_runs(
+            "Failed",
+            "async: the queue is empty and $DONE was not called"
+        )
+    );
+    Ok(())
+}
+
+/// A case without the flag `async` has no checkpoint and no judgement by what `print` received:
+/// it prints the failure line of an `async` case and passes, since it completes normally.
+#[test]
+fn a_case_without_the_flag_has_no_async_judgement() -> TestResult {
+    let lines = async_lines("async-not-async")?;
+    assert_eq!(async_runs(&lines, "not-async.js"), both_runs("Passed", ""));
     Ok(())
 }
 

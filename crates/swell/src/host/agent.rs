@@ -23,9 +23,15 @@
 //! `story:host-interface-hardening`.
 //!
 //! Root site of the collector: [`trace_roots`] reports the values handed to host code in the
-//! running `with_cx`, host function and hook scopes, and the scripts handed out as `ScriptRef`s.
+//! running `with_cx`, host function and hook scopes, the scripts handed out as `ScriptRef`s,
+//! and, through `host/jobs.rs`, what the microtask queue holds.
+//!
+//! The calls of the microtask queue (decision 11), `queue_microtask`, `pending_microtasks`,
+//! `clear_microtasks` and `perform_microtask_checkpoint`, are written by
+//! `story:job-queue-and-microtask-checkpoint`; the queue and its loop are `host/jobs.rs`.
 
 use std::cell::Cell;
+use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -34,6 +40,7 @@ use swell_compiler::bytecode::Instruction;
 use super::hooks::HostDefined;
 use super::host_bytes::HostBytes;
 use super::interrupt::InterruptHandle;
+use super::jobs::{CheckpointReport, Entry, Microtask};
 use super::limits::{CreateError, Limits, Seeds};
 use super::outcome::{
     Abrupt, CollectReport, Completion, ErrorSite, ErrorSummary, HostError, Outcome, Parsed,
@@ -189,6 +196,12 @@ pub struct Agent<H: Host> {
     pub(crate) syntax_error_at: Option<(u32, u32)>,
     /// The site the last outermost entry answered ([`Agent::last_entry_error_site`]).
     pub(crate) error_site: Option<SiteRecord>,
+    /// The microtask queue, one FIFO order for every entry (decision 11, `host/jobs.rs`).
+    pub(crate) microtasks: VecDeque<Entry<H>>,
+    /// A checkpoint runs: every `Cx` call is a nested entry of it, and a checkpoint asked for
+    /// inside it answers at once ("performing a microtask checkpoint",
+    /// `html:perform-a-microtask-checkpoint`).
+    pub(crate) checkpointing: bool,
     /// Test only: how many site records were written.
     #[cfg(test)]
     pub(crate) site_records: u64,
@@ -256,6 +269,8 @@ impl<H: Host> Agent<H> {
             throw_sites: 0,
             syntax_error_at: None,
             error_site: None,
+            microtasks: VecDeque::new(),
+            checkpointing: false,
             #[cfg(test)]
             site_records: 0,
             #[cfg(feature = "fault-injection")]
@@ -655,6 +670,73 @@ impl<H: Host> Agent<H> {
         Ok(self.script_record_host_defined(handle))
     }
 
+    /// Queue the host microtask `task` behind every queued entry (decision 11, "A host
+    /// microtask's realm"): `realm` is its current realm while it runs, and is checked first: a
+    /// stale or released one answers `Err(StaleHandle)`, one of another agent
+    /// `Err(ForeignHandle)`, and nothing is queued (HOST-192). It runs no code, spends no step and
+    /// calls no hook; the queue holds the realm until the microtask is taken off. A host
+    /// microtask is the host's storage and is not charged to the memory budget.
+    pub fn queue_microtask(&mut self, realm: &Realm, task: Microtask<H>) -> Result<(), HostError> {
+        self.alive()?;
+        let realm = self.live_realm(realm)?;
+        self.enqueue_microtask(realm, task)
+    }
+
+    /// How many entries the microtask queue holds (section 13). A read: it changes nothing,
+    /// runs no code, calls no hook and spends no step.
+    pub fn pending_microtasks(&self) -> Result<usize, HostError> {
+        self.alive()?;
+        Ok(self.microtasks.len())
+    }
+
+    /// Drop every queued entry unrun and answer how many (decision 11, "Steps, the interrupt and
+    /// what a checkpoint leaves"; `engine.md`, decision 3, "Emptying the queue is the host's
+    /// call"): a host microtask is dropped as a Rust value, its closure never called. It runs no
+    /// script, calls no hook and spends no step, so `last_entry_steps()` reads what it read. It
+    /// takes `&mut Agent`, which no code inside an entry holds: a job cannot drop the entries
+    /// behind it.
+    pub fn clear_microtasks(&mut self) -> Result<usize, HostError> {
+        self.alive()?;
+        Ok(self.drop_microtasks())
+    }
+
+    /// HTML's microtask checkpoint (`html:perform-a-microtask-checkpoint`; decision 11, "The
+    /// checkpoint is one entry"), as one outermost entry with one step budget: a safe point, the
+    /// step counter from 0 and the interrupt read before a step is spent (`begin`); then, while
+    /// the queue is not empty, one step for the first entry, charged while it is still first,
+    /// then that entry taken off and run, each in a scope of its own (`host/jobs.rs`). It
+    /// answers `Normal` with the count of each kind once the queue is empty (HOST-79); a
+    /// termination of any entry, `StepBudget`, `MemoryBudget` or `Interrupted`, ends the whole
+    /// checkpoint with that reason: the entry that was running is not run again, and every entry
+    /// not started stays queued in its order for the next checkpoint (section 10, HOST-77). The
+    /// interrupt ends it at its start, before each entry is taken off and while an entry runs,
+    /// and is cleared. `last_entry_steps()` then reads the steps of the whole checkpoint, at most
+    /// `steps_per_entry`, 0 when it found the queue empty (HOST-193, HOST-197).
+    /// `Terminated(EngineFault)` faults the agent, and its queue never runs again.
+    pub fn perform_microtask_checkpoint(&mut self) -> Result<Outcome<CheckpointReport>, HostError> {
+        self.alive()?;
+        self.termination = None;
+        self.clear_error_sites();
+        if self.safe_point().is_err() {
+            self.fault();
+            return Ok(Outcome::Terminated(Termination::EngineFault));
+        }
+        let start = self.scope.len();
+        let completion = self.begin().and_then(|()| self.checkpoint());
+        self.scope.truncate(start);
+        let outcome = match completion {
+            Ok(report) => Outcome::Normal(report),
+            Err(Abrupt::Terminated(termination)) => Outcome::Terminated(termination),
+            // The loop answers no throw: an entry's throw stays inside the entry.
+            Err(Abrupt::Throw(_)) => {
+                self.fault();
+                Outcome::Terminated(Termination::EngineFault)
+            }
+        };
+        self.end_entry();
+        Ok(outcome)
+    }
+
     /// Whether the value `value` holds is an object with [[ErrorData]], with the kind the
     /// constructor that made it recorded (or the host's `HostObjectSpec::error_kind`) and its
     /// own "message" when that is a data property holding a String, its code units exact
@@ -777,11 +859,13 @@ impl<H: Host> Agent<H> {
     }
 
     /// The start of a `Cx` operation that may run code or spend steps: the sticky termination;
-    /// when no builtin runs, it is an outermost entry, whose step counter starts at 0 and which
-    /// a set interrupt flag ends before it spends a step (decision 12).
+    /// when no builtin runs and no checkpoint runs, it is an outermost entry, whose step counter
+    /// starts at 0 and which a set interrupt flag ends before it spends a step (decision 12).
+    /// Inside a checkpoint every call of an entry is nested and spends from the checkpoint
+    /// (`engine.md`, decision 3, "The microtask checkpoint is one entry").
     pub(crate) fn begin(&mut self) -> Completion<()> {
         self.running()?;
-        if self.activations.is_empty() {
+        if self.activations.is_empty() && !self.checkpointing {
             self.steps = 0;
             if self.interrupt.is_set() {
                 self.interrupt.clear();
@@ -873,8 +957,9 @@ impl<H: Host> Agent<H> {
     }
 }
 
-/// Root site of the collector: the values handed to host code in the running scopes, and the
-/// scripts handed out as `ScriptRef`s in the running outermost entry.
+/// Root site of the collector: the values handed to host code in the running scopes, the
+/// scripts handed out as `ScriptRef`s in the running outermost entry, and what the microtask
+/// queue holds (`host/jobs.rs`).
 pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
     mark.count("host/agent.rs trace_roots");
     for &value in &agent.scope {
@@ -883,4 +968,5 @@ pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
     for &script in &agent.scoped_scripts {
         mark.push(Item::Script(script));
     }
+    super::jobs::trace_roots(agent, mark);
 }

@@ -760,6 +760,7 @@ fn agent_entries_refuse_foreign(
     let steps = agent.last_entry_steps().unwrap();
     let ran = Rc::new(Cell::new(false));
     let flag = Rc::clone(&ran);
+    let queued = Rc::clone(&ran);
     let foreign = Err(HostError::ForeignHandle);
     let undefined = agent
         .with_cx(realm, |cx| cx.root(Value::Undefined).unwrap())
@@ -819,10 +820,18 @@ fn agent_entries_refuse_foreign(
             "script_host_defined",
             shape(agent.script_host_defined(other_script)),
         ),
+        (
+            "queue_microtask",
+            shape(agent.queue_microtask(
+                other_realm,
+                Box::new(move |_cx: &mut Cx<'_, Recorder>| queued.set(true)),
+            )),
+        ),
     ];
     for (name, answer) in &answers {
         assert_eq!(*answer, foreign, "Agent::{name}");
     }
+    assert_eq!(agent.pending_microtasks(), Ok(0), "nothing was queued");
     let scoped = agent
         .with_cx(realm, |cx| {
             vec![
@@ -836,7 +845,10 @@ fn agent_entries_refuse_foreign(
         assert_eq!(*answer, foreign, "Cx::{name}");
     }
     drop(undefined);
-    assert!(!ran.get(), "the closure of with_cx did not run");
+    assert!(
+        !ran.get(),
+        "the closure of with_cx and the microtask did not run"
+    );
     assert_eq!(agent.host().host_fn, 0, "no function ran");
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert_eq!(agent.heap_bytes(), Ok(bytes));
@@ -906,12 +918,21 @@ fn host_48_a_faulted_agent_answers_faulted_everywhere() {
     let good = good(&mut agent, &realm);
     let script = parse(&mut agent, &realm, "counted();");
     define(&mut agent, &realm, "counted", counted);
+    // A microtask queued before the fault: the queue of a faulted agent never runs.
+    let queued_before = Rc::new(Cell::new(false));
+    let early = Rc::clone(&queued_before);
+    agent
+        .queue_microtask(
+            &realm,
+            Box::new(move |_cx: &mut Cx<'_, Recorder>| early.set(true)),
+        )
+        .unwrap();
     fault(&mut agent, &realm);
     assert_eq!(agent.state(), AgentState::Faulted);
     let calls_before = agent.host().host_fn;
 
     let ran = Rc::new(Cell::new(0));
-    let (flag, setup_flag) = (Rc::clone(&ran), Rc::clone(&ran));
+    let (flag, setup_flag, queued) = (Rc::clone(&ran), Rc::clone(&ran), Rc::clone(&ran));
     let mut setup =
         move |_cx: &mut HookCx<'_, Recorder>, _realm: RealmRef| -> Completion<GlobalObjects> {
             setup_flag.set(setup_flag.get() + 1);
@@ -954,11 +975,28 @@ fn host_48_a_faulted_agent_answers_faulted_everywhere() {
         ("last_entry_steps", shape(agent.last_entry_steps())),
         ("heap_bytes", shape(agent.heap_bytes())),
         ("collect", shape(agent.collect())),
+        (
+            "queue_microtask",
+            shape(agent.queue_microtask(
+                &realm,
+                Box::new(move |_cx: &mut Cx<'_, Recorder>| queued.set(1)),
+            )),
+        ),
+        ("pending_microtasks", shape(agent.pending_microtasks())),
+        ("clear_microtasks", shape(agent.clear_microtasks())),
+        (
+            "perform_microtask_checkpoint",
+            shape(agent.perform_microtask_checkpoint()),
+        ),
     ];
     for (name, answer) in &answers {
         assert_eq!(*answer, faulted, "{name}");
     }
     assert_eq!(ran.get(), 0, "no closure of the host ran");
+    assert!(
+        !queued_before.get(),
+        "the microtask queued before the fault did not run"
+    );
     assert_eq!(agent.host().host_fn, calls_before, "no host function ran");
     assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
     assert_eq!(agent.state(), AgentState::Faulted);
@@ -996,12 +1034,13 @@ fn reads(agent: &mut Agent<Recorder>, realm: &Realm, script: &Script, root: &Roo
         })
         .unwrap();
     format!(
-        "{:?} {:?} {:?} {:?} {:?} {scoped:?}",
+        "{:?} {:?} {:?} {:?} {:?} {:?} {scoped:?}",
         agent.state(),
         agent.heap_bytes(),
         agent.last_entry_steps(),
         agent.realm_host_defined(realm).map(|d| d.is_some()),
         agent.script_host_defined(script).map(|d| d.is_some()),
+        agent.pending_microtasks(),
     )
 }
 
@@ -1036,6 +1075,10 @@ fn host_102_reads_change_nothing_and_call_no_hook() {
         agent.evaluate_script(&script),
         Ok(Outcome::Normal(_))
     ));
+    // A microtask queued, so that `pending_microtasks` reads 1 and must keep reading it.
+    agent
+        .queue_microtask(&realm, Box::new(|_cx: &mut Cx<'_, Recorder>| {}))
+        .unwrap();
     let steps = agent.last_entry_steps().unwrap();
     assert!(steps > 0);
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
@@ -1043,6 +1086,7 @@ fn host_102_reads_change_nothing_and_call_no_hook() {
     let live = agent.live_bytes().unwrap();
 
     let first = reads(&mut agent, &realm, &script, &root);
+    assert!(first.contains(" Ok(1) "), "{first}");
     for _ in 0..3 {
         assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
         assert_eq!(reads(&mut agent, &realm, &script, &root), first);
