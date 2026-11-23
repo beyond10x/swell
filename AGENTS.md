@@ -12,7 +12,7 @@ interpreter and the builtins the test262 harness calls exist. **Slice 1 is deliv
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
 (the other 44 need a later slice and say so). 110 of 191 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate holds the test262 counts: 16,412 of the 44,812 run cases pass (2026-11-23, wave `s6-2` of slice 6; 13,575 in release `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
+gate holds the test262 counts: 16,412 of the 44,812 run cases pass (2026-11-23, release `0.5.0`; 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
 "Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
@@ -436,7 +436,9 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   (https://github.com/beyond10x/swell/releases/tag/0.3.0); `0.4.0`, 2026-11-22, tagged on
   `20797bf`, `main` with the resource accounting, the host interface of the second batch and
   the first five stories of slice 6, on the operator's pick "cut 0.4.0 now"
-  (https://github.com/beyond10x/swell/releases/tag/0.4.0). After a release
+  (https://github.com/beyond10x/swell/releases/tag/0.4.0); `0.5.0`, 2026-11-23, tagged on
+  `635dd5b`, slice 6 delivered, on the operator's pick "cut 0.5.0 now"
+  (https://github.com/beyond10x/swell/releases/tag/0.5.0). After a release
   `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of
