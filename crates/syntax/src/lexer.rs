@@ -2,8 +2,9 @@
 //!
 //! It reads a hashbang comment at the very start of the source (`#sec-hashbang`), white space
 //! (`#sec-white-space`, `USP` through `swell_unicode::is_space_separator`), line terminators
-//! (`#sec-line-terminators`), comments (`#sec-comments`), ASCII identifier names, with `\u`
-//! escapes whose code point is ASCII (`#sec-identifier-names`), and reserved words
+//! (`#sec-line-terminators`), comments (`#sec-comments`), identifier names by `ID_Start` and
+//! `ID_Continue` (`#sec-names-and-keywords`, through `swell_unicode::is_id_start` and
+//! `is_id_continue`), written or with `\u` escapes (`#sec-identifier-names`), and reserved words
 //! (`#sec-keywords-and-reserved-words`: a name written with an escape is never a keyword),
 //! punctuators (`#sec-punctuators`), numeric literals with their separators
 //! (`#sec-literals-numeric-literals`), string literals with every escape
@@ -14,10 +15,8 @@
 //! asks for the `InputElementRegExp` goal, regular expression literals
 //! (`#sec-literals-regular-expression-literals`).
 //!
-//! Refused here, each with the slice that brings it: an identifier with a code point outside
-//! ASCII, written or through a `\u` escape (5, a recorded omission of `sec-names-and-keywords`),
-//! private names (8), BigInt literals (12) and the HTML-like comments of Annex B
-//! (`#sec-html-like-comments`, 18).
+//! Refused here, each with the slice that brings it: private names (8), BigInt literals (12) and
+//! the HTML-like comments of Annex B (`#sec-html-like-comments`, 18).
 //!
 //! The lexer runs once over the source and every loop advances by at least one code unit, so its
 //! work is linear in the length of the source; a part lexed again at the parser's request (a
@@ -69,6 +68,24 @@ fn is_ascii_id_start(c: u16) -> bool {
 
 fn is_ascii_id_part(c: u16) -> bool {
     is_ascii_id_start(c) || is_decimal(c)
+}
+
+/// IdentifierStartChar (`#sec-names-and-keywords`): `$`, `_` or a code point with `ID_Start`
+/// (UAX #31). ASCII is decided without the table; outside it, one binary search of the table.
+fn is_id_start(cp: u32) -> bool {
+    match u16::try_from(cp) {
+        Ok(c) if c < 0x80 => is_ascii_id_start(c),
+        _ => swell_unicode::is_id_start(cp),
+    }
+}
+
+/// IdentifierPartChar (`#sec-names-and-keywords`): `$`, U+200C, U+200D or a code point with
+/// `ID_Continue`, which holds `_` and the digits. ASCII is decided without the table.
+fn is_id_part(cp: u32) -> bool {
+    match u16::try_from(cp) {
+        Ok(c) if c < 0x80 => is_ascii_id_part(c),
+        _ => matches!(cp, 0x200C | 0x200D) || swell_unicode::is_id_continue(cp),
+    }
 }
 
 fn is_decimal(c: u16) -> bool {
@@ -186,6 +203,26 @@ impl<'a, 'm> Lexer<'a, 'm> {
         self.unit(self.pos.saturating_add(n))
     }
 
+    /// The code point at `at` and the code units it spans: a surrogate pair is one code point
+    /// (`#sec-source-text`, `#sec-utf16decodesurrogatepair`), a lone surrogate itself.
+    fn code_point_at(&self, at: usize) -> Option<(u32, usize)> {
+        let first = u32::from(self.unit(at)?);
+        if (0xD800..=0xDBFF).contains(&first)
+            && let Some(second) = self.unit(at.saturating_add(1)).map(u32::from)
+            && (0xDC00..=0xDFFF).contains(&second)
+        {
+            return Some((0x1_0000 + ((first - 0xD800) << 10) + (second - 0xDC00), 2));
+        }
+        Some((first, 1))
+    }
+
+    /// Whether a code point outside ASCII with `ID_Start` is at `at`, which starts an
+    /// identifier; read only where the code unit there is not ASCII.
+    fn id_start_outside_ascii_at(&self, at: usize) -> bool {
+        self.code_point_at(at)
+            .is_some_and(|(cp, _)| cp >= 0x80 && swell_unicode::is_id_start(cp))
+    }
+
     fn column(&self) -> u32 {
         u32::try_from(self.pos.saturating_sub(self.line_start) + 1).unwrap_or(u32::MAX)
     }
@@ -291,7 +328,11 @@ impl<'a, 'm> Lexer<'a, 'm> {
         let mut escaped = false;
         let kind = match self.cur() {
             None => TokenKind::Eof,
-            Some(c) if is_ascii_id_start(c) || c == ascii(b'\\') => {
+            Some(c)
+                if is_ascii_id_start(c)
+                    || c == ascii(b'\\')
+                    || (c >= 0x80 && self.id_start_outside_ascii_at(self.pos)) =>
+            {
                 let (kind, with_escape) = self.identifier_name()?;
                 escaped = with_escape;
                 kind
@@ -322,16 +363,21 @@ impl<'a, 'm> Lexer<'a, 'm> {
         if c == ascii(b'#') {
             return Err(if self.ahead(1) == Some(ascii(b'!')) {
                 self.error(HASHBANG_NOT_AT_START)
-            } else if self.ahead(1).is_some_and(is_ascii_id_start) {
+            } else if self.ahead(1).is_some_and(is_ascii_id_start)
+                || self.id_start_outside_ascii_at(self.pos.saturating_add(1))
+            {
                 self.refused("private name", 8)
             } else {
                 self.error("unexpected character #")
             });
         }
         if c >= 0x80 {
-            // White space and line terminators are skipped already; what remains outside ASCII
-            // can only start an identifier, whose tables are slice 5's.
-            return Err(self.refused("identifier with a code point outside ASCII", 5));
+            // White space, line terminators and the start of an identifier are read already;
+            // no other token starts outside ASCII.
+            let cp = self
+                .code_point_at(self.pos)
+                .map_or(u32::from(c), |(cp, _)| cp);
+            return Err(self.error(format!("unexpected character U+{cp:04X}")));
         }
         match self.punctuator(c) {
             Some(p) => Ok(TokenKind::Punct(p)),
@@ -339,12 +385,14 @@ impl<'a, 'm> Lexer<'a, 'm> {
         }
     }
 
-    /// An `IdentifierName` (`#sec-identifier-names`) at the current position: ASCII code points
-    /// and `\ UnicodeEscapeSequence`s, each of whose code point must be one the place allows
-    /// (`#sec-identifier-names-static-semantics-early-errors`: an `IdentifierStartChar` first,
-    /// an `IdentifierPartChar` after). Answers the token and whether an escape was among it: a
-    /// name with an escape is a [`TokenKind::Name`] whatever its StringValue, never a keyword.
-    /// A code point outside ASCII, written or escaped, is refused (slice 5's tables).
+    /// An `IdentifierName` (`#sec-identifier-names`) at the current position, whose first code
+    /// point the caller found to start one: code points and `\ UnicodeEscapeSequence`s, each of
+    /// whose code point must be one the place allows (`#sec-names-and-keywords`,
+    /// `#sec-identifier-names-static-semantics-early-errors`: an `IdentifierStartChar` first, an
+    /// `IdentifierPartChar` after; an escape is checked alone, so two escapes of a surrogate pair
+    /// are two lone surrogates). A written code point that is no `IdentifierPartChar` ends the
+    /// name. Answers the token and whether an escape was among it: a name with an escape is a
+    /// [`TokenKind::Name`] whatever its StringValue, never a keyword.
     fn identifier_name(&mut self) -> Result<(TokenKind, bool), SyntaxError> {
         let mut name = String::new();
         let mut escaped = false;
@@ -363,33 +411,35 @@ impl<'a, 'm> Lexer<'a, 'm> {
                     }
                     self.pos += 2;
                     let cp = self.unicode_escape()?;
-                    if cp >= 0x80 {
-                        return Err(SyntaxError::refused(
-                            "identifier with a \\u escape outside ASCII",
-                            5,
-                            line,
-                            column,
-                        ));
-                    }
-                    let unit = u16::try_from(cp).unwrap_or(0);
                     let allowed = if name.is_empty() {
-                        is_ascii_id_start(unit)
+                        is_id_start(cp)
                     } else {
-                        is_ascii_id_part(unit)
+                        is_id_part(cp)
                     };
-                    if !allowed {
+                    let Some(c) = char::from_u32(cp).filter(|_| allowed) else {
                         return Err(SyntaxError::new(
                             format!("the escape \\u{{{cp:X}}} is no identifier code point here"),
                             line,
                             column,
                         ));
-                    }
-                    let c = char::from(u8::try_from(cp).unwrap_or(b'?'));
+                    };
                     Lexer::charged(self.m.push_char(&mut name, c))?;
                     escaped = true;
                 }
-                Some(c) if c >= 0x80 && !is_white_space(c) && !is_line_terminator(c) => {
-                    return Err(self.refused("identifier with a code point outside ASCII", 5));
+                Some(c) if c >= 0x80 => {
+                    let Some((cp, len)) = self.code_point_at(self.pos) else {
+                        break;
+                    };
+                    let allowed = if name.is_empty() {
+                        is_id_start(cp)
+                    } else {
+                        is_id_part(cp)
+                    };
+                    let Some(c) = char::from_u32(cp).filter(|_| allowed) else {
+                        break;
+                    };
+                    Lexer::charged(self.m.push_char(&mut name, c))?;
+                    self.pos += len;
                 }
                 _ => break,
             }
@@ -492,6 +542,7 @@ impl<'a, 'm> Lexer<'a, 'm> {
         if self
             .cur()
             .is_some_and(|c| is_ascii_id_start(c) || is_decimal(c) || c == 0x5C)
+            || self.id_start_outside_ascii_at(self.pos)
         {
             return Err(self.error("identifier start immediately after a numeric literal"));
         }
@@ -698,16 +749,14 @@ impl<'a, 'm> Lexer<'a, 'm> {
         }
         let body_end = self.pos - 1;
         let flags_start = self.pos;
-        while self.cur().is_some_and(is_ascii_id_part) {
-            self.pos += 1;
-            self.tick()?;
-        }
-        if let Some(c) = self.cur()
-            && c >= 0x80
-            && !is_white_space(c)
-            && !is_line_terminator(c)
+        // `RegularExpressionFlags :: RegularExpressionFlags IdentifierPartChar`: a flag outside
+        // ASCII is read here and is the early error of an unknown flag.
+        while let Some((_, len)) = self
+            .code_point_at(self.pos)
+            .filter(|&(cp, _)| is_id_part(cp))
         {
-            return Err(self.refused("identifier with a code point outside ASCII", 5));
+            self.pos += len;
+            self.tick()?;
         }
         let body = Lexer::charged(
             self.m

@@ -21,9 +21,6 @@ use crate::budget::Stop;
 pub enum Refusal {
     /// The flag `v` (`story:regexp-v-flag-class-sets-and-properties-of-strings`).
     SetsFlag,
-    /// A group name with a code point outside ASCII, written or escaped
-    /// (`story:identifiers-and-group-names-outside-ascii`).
-    GroupNameOutsideAscii,
 }
 
 impl Refusal {
@@ -31,7 +28,6 @@ impl Refusal {
     pub fn construct(self) -> &'static str {
         match self {
             Refusal::SetsFlag => "class set expressions of the v flag",
-            Refusal::GroupNameOutsideAscii => "group name outside ASCII",
         }
     }
 }

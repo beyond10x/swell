@@ -48,7 +48,8 @@ impl List {
     }
 }
 
-/// A group name: ASCII text kept in the tree (`#sec-static-semantics-capturinggroupname`).
+/// A group name: the UTF-8 text of its code points kept in the tree
+/// (`#sec-static-semantics-capturinggroupname`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Name {
     pub(crate) start: u32,

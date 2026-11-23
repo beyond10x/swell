@@ -1,8 +1,8 @@
 //! The early errors of a pattern (`#sec-patterns-static-semantics-early-errors` and
 //! `#sec-patterns-static-semantics-early-errors-annexb`), each with a pattern that hits it and
-//! one beside it that does not; the flags of `#sec-regexpinitialize`; and the two refusals of
-//! the parser in slice 5 (`docs/design/engine.md`, decision 7, "Refusals until the later stories
-//! of slice 5").
+//! one beside it that does not; the flags of `#sec-regexpinitialize`; and the refusal of the
+//! parser in slice 5, the flag `v` (`docs/design/engine.md`, decision 7, "Refusals until the
+//! later stories of slice 5").
 //!
 //! Not held here: CountLeftCapturingParensWithin ≥ 2^32 - 1 (a pattern of more than 2^32
 //! parentheses), the early errors of property escapes, which `property_escapes.rs` holds, and
@@ -289,51 +289,12 @@ fn flags_are_d_g_i_m_s_u_v_y_each_once_and_not_u_with_v() {
 }
 
 #[test]
-fn the_v_flag_and_a_group_name_outside_ascii_are_refusals_of_slice_5() {
+fn the_v_flag_is_a_refusal_of_slice_5() {
     let sets = "class set expressions of the v flag is not supported before slice 5";
-    let name = "group name outside ASCII is not supported before slice 5";
     for (pattern, flags, refusal, message, offset) in [
         ("a", "v", Refusal::SetsFlag, sets, 0),
         ("[a&&b]", "gv", Refusal::SetsFlag, sets, 0),
         ("a{2,1}", "v", Refusal::SetsFlag, sets, 0),
-        ("(?<é>a)", "", Refusal::GroupNameOutsideAscii, name, 3),
-        ("(?<aé>a)", "u", Refusal::GroupNameOutsideAscii, name, 4),
-        ("(?<\\u00E9>a)", "", Refusal::GroupNameOutsideAscii, name, 3),
-        (
-            "(?<a\\u{10000}>a)",
-            "u",
-            Refusal::GroupNameOutsideAscii,
-            name,
-            4,
-        ),
-        (
-            "(?<\\uD835\\uDC9C>a)",
-            "",
-            Refusal::GroupNameOutsideAscii,
-            name,
-            3,
-        ),
-        (
-            "(?<\u{1D49C}>a)",
-            "",
-            Refusal::GroupNameOutsideAscii,
-            name,
-            3,
-        ),
-        (
-            "(?<\u{1D49C}>a)",
-            "u",
-            Refusal::GroupNameOutsideAscii,
-            name,
-            3,
-        ),
-        (
-            "(?<a>x)\\k<é>",
-            "",
-            Refusal::GroupNameOutsideAscii,
-            name,
-            10,
-        ),
     ] {
         let e = error(pattern, flags);
         assert_eq!(e.kind, ErrorKind::Refused(refusal), "/{pattern}/{flags}");
@@ -341,6 +302,22 @@ fn the_v_flag_and_a_group_name_outside_ascii_are_refusals_of_slice_5() {
         assert_eq!(e.message(), message, "/{pattern}/{flags}");
         assert_eq!(e.offset, offset, "/{pattern}/{flags}");
     }
+    // A group name outside ASCII is no refusal (`group_names.rs`): it parses, and a reference
+    // to a name no group has is the early error.
+    for (pattern, flags) in [
+        ("(?<é>a)", ""),
+        ("(?<aé>a)", "u"),
+        ("(?<\\u00E9>a)", ""),
+        ("(?<a\\u{10000}>a)", "u"),
+        ("(?<\\uD835\\uDC9C>a)", ""),
+        ("(?<\u{1D49C}>a)", ""),
+        ("(?<\u{1D49C}>a)", "u"),
+    ] {
+        assert!(parse(pattern, flags).is_ok(), "/{pattern}/{flags}");
+    }
+    let e = error("(?<a>x)\\k<é>", "");
+    assert_eq!((e.kind, e.offset), (ErrorKind::UnknownGroupName, 7));
+    assert!(!e.is_refusal());
     // A property escape is no refusal: it parses under `u`, and without `u` `\p` is an identity
     // escape.
     for pattern in ["\\p{L}", "a\\P{Lu}", "[a\\p{L}]"] {

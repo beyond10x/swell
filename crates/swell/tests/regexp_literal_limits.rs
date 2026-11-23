@@ -139,11 +139,11 @@ fn an_invalid_pattern_in_eval_code_throws_a_syntax_error() {
     assert_eq!(agent.refusals(), 0, "a grammar error is no refusal");
 }
 
-/// The two parts of the pattern grammar a later story of slice 5 brings, the flag `v` and a
-/// group name outside ASCII, are each a refused parse: `parse_script` answers the refusal alone,
-/// `<construct> is not supported before slice 5`, and `refusals()` moves by 1 (HOST-164);
-/// through `eval` the refusal is a `SyntaxError` the script catches, counted too. A property
-/// escape under `u` parses and moves nothing.
+/// The part of the pattern grammar a later story of slice 5 brings, the flag `v`, is a refused
+/// parse: `parse_script` answers the refusal alone, `<construct> is not supported before slice
+/// 5`, and `refusals()` moves by 1 (HOST-164); through `eval` the refusal is a `SyntaxError` the
+/// script catches, counted too. A property escape under `u` and a group name outside ASCII parse
+/// and move nothing.
 #[test]
 fn a_refused_pattern_of_a_literal_is_counted_as_a_refused_parse() {
     assert_eq!(parse_errors("x = /\\p{L}/u;"), (None, 0));
@@ -151,22 +151,18 @@ fn a_refused_pattern_of_a_literal_is_counted_as_a_refused_parse() {
         parse_errors("x = /\\P{Script=Greek}[\\p{Lu}]/u;"),
         (None, 0)
     );
-    for (source, construct) in [
-        ("x = /[a]/v;", "class set expressions of the v flag"),
-        ("x = /(?<\u{e9}>a)/;", "group name outside ASCII"),
-        ("x = /(?<\\u{e9}>a)/u;", "group name outside ASCII"),
-    ] {
-        assert_eq!(
-            parse_errors(source),
-            (
-                Some(vec![format!(
-                    "{construct} is not supported before slice 5 (1:5)"
-                )]),
-                1
-            ),
-            "{source}"
-        );
-    }
+    assert_eq!(parse_errors("x = /(?<\u{e9}>a)/;"), (None, 0));
+    assert_eq!(parse_errors("x = /(?<\\u{e9}>a)\\k<\u{e9}>/u;"), (None, 0));
+    assert_eq!(
+        parse_errors("x = /[a]/v;"),
+        (
+            Some(vec![
+                "class set expressions of the v flag is not supported before slice 5 (1:5)"
+                    .to_string()
+            ]),
+            1
+        )
+    );
     let mut agent = agent_with(limits()).unwrap();
     let realm = realm(&mut agent);
     let source = "try { eval(\"/[a]/v\"); } catch (e) { e.name + \": \" + e.message; }";
