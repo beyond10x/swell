@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:regexp-objects-exec-and-literals
 kind: story
-status: active
+status: implemented
 title: 'RegExp objects: the constructor, exec, test, the flag getters, and one new object per evaluation of a literal'
 summary: 927 failing cases (1,853 runs) on its list; a literal of each of the consumer's 12 constructs evaluates and its calls of test answer; HOST-143, HOST-191 and acceptance 5 of the epic; replace and split given a RegExp refused until the symbol story; the literal refusal and the fixtures that hold it go.
 relations:
@@ -98,10 +98,11 @@ scope:
   path: crates/test262/tests/run.rs
 - confidence: cited
   path: website/data/status.json
-revision: 53
+revision: 54
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T02:45:38Z", actor: "human:operator", revision: 52, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T02:45:38Z", actor: "human:operator", revision: 53, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T08:12:44Z", actor: "human:operator", revision: 54, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

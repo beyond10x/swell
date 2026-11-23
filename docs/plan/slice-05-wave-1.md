@@ -6,7 +6,7 @@ verified, committed and merged. The source of every line below is a commit messa
 (`git log --first-parent 635dd5b..wave/s5-1`). Before:
 [wave 2 of slice 6](slice-06-wave-2.md). The plan of the slice is in
 [`waves.md`](waves.md), "Slice 5, `regexp`": fifteen stories in eight steps. This wave holds
-the first three steps, seven stories of the fifteen, and three stories that were not in the
+the first three steps, eight stories of the fifteen, and three stories that were not in the
 plan. Release `0.6.0` was cut on this wave (`4eaf524`), on the decision "cut 0.6.0 together
 with the wave" of the session that decides for the operator.
 
@@ -158,6 +158,13 @@ story (`7b90e3d`): `String.prototype.match` and `search` (2: `Object/getOwnPrope
   missing rows of one test were found only at the join.
 - The coordinator wrote a commit message for the regenerated expected file before reading
   the two cases it names; the message was corrected before the merge.
+- The coordinator wrote "seven of its fifteen stories delivered" into the lead of the
+  changelog section of `0.6.0`, into this record and into `AGENTS.md`; the wave holds eight
+  stories of the plan (three, three and two in the orders 1 to 3). The tag `0.6.0` carries
+  the wrong count in `CHANGELOG.md`; `main` is corrected by the commit after the release.
+  The release notes do not state the count.
+- The coordinator ran `git fetch origin` in the wave tree once after the release, a call to
+  the forge that is the publishing session's.
 
 ## How the wave was checked
 

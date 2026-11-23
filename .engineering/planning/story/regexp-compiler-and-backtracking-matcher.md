@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:regexp-compiler-and-backtracking-matcher
 kind: story
-status: active
+status: implemented
 title: 'swell-regexp: the compiler and the backtracking matcher with an explicit stack, every step and every growth charged'
 summary: CompilePattern and the matcher of 22.2.2 with and without u, in the crate alone; positions are code unit indices over the subject in place; a match charges exactly its steps; (a+)+$ ends at the step budget; the flag i refused until its story.
 relations:
@@ -23,10 +23,11 @@ scope:
   path: crates/regexp/tests/main.rs
 - confidence: cited
   path: crates/regexp/tests/matcher.rs
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T02:45:38Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T02:45:38Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T08:12:41Z", actor: "human:operator", revision: 13, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -49,7 +49,7 @@ under the budgets), regular expression literals, `RegExp` with `exec` and `test`
 `replaceAll` and `split` of `String`, and the case methods, `normalize` and `localeCompare`
 for every String: 1,327 of its 2,724 cases pass
 (`test262-slice 05 2724 5441 0 0 2724 1327 1397 0`), and no host requirement is pending for
-it. Eight of its fifteen stories are open: the methods keyed by `@@match`, `@@replace`,
+it. Seven of its fifteen stories are open: the methods keyed by `@@match`, `@@replace`,
 `@@search` and `@@split`, property escapes, identifiers and group names outside ASCII,
 `matchAll` and `RegExp.escape`, the flags `i` and `v`, and the close.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
@@ -454,7 +454,10 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   the first five stories of slice 6, on the operator's pick "cut 0.4.0 now"
   (https://github.com/beyond10x/swell/releases/tag/0.4.0); `0.5.0`, 2026-11-23, tagged on
   `635dd5b`, slice 6 delivered, on the operator's pick "cut 0.5.0 now"
-  (https://github.com/beyond10x/swell/releases/tag/0.5.0). After a release
+  (https://github.com/beyond10x/swell/releases/tag/0.5.0); `0.6.0`, 2026-11-23, tagged on
+  `6e9c3f4`, the first wave of slice 5, on the decision "cut 0.6.0 together with the wave" of
+  the session that decides for the operator
+  (https://github.com/beyond10x/swell/releases/tag/0.6.0). After a release
   `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of

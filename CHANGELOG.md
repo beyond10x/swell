@@ -15,7 +15,7 @@ Every number below comes from the gate, `task check`, on the released commit.
 Regular expressions run: the literal, `RegExp`, `exec` and `test`, on the new crate
 `swell-regexp`, whose matcher spends the step and memory budgets of its entry. The case
 methods, `normalize` and `localeCompare` of `String` take every String. The fifth delivery
-slice is in work, with seven of its fifteen stories delivered.
+slice is in work, with eight of its fifteen stories delivered.
 
 ### Added
 

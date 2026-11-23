@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:normalization-tables-normalize-and-locale-compare
 kind: story
-status: active
+status: implemented
 title: The normalization tables, String.prototype.normalize, and localeCompare outside ASCII
 summary: '11 failing cases (22 runs); NFC, NFD, NFKC and NFKD of UAX #15; localeCompare by the NFC forms; the last refusal of a String method goes; HOST-165 in its delivered form.'
 relations:
@@ -39,10 +39,11 @@ scope:
   path: crates/unicode/tests/main.rs
 - confidence: cited
   path: crates/unicode/tests/normalize.rs
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T03:24:21Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T03:24:21Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T08:12:43Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
