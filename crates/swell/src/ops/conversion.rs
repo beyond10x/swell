@@ -11,6 +11,7 @@
 //! terminators of 12.3) and parses the rest with `swell-num`; Number::toString is `swell-num`'s.
 //! The trim charges a step per code unit it reads.
 
+use crate::builtins::array::ARRAY_INDEX_END;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host, PreferredType};
@@ -18,6 +19,9 @@ use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Key, array_index};
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, StringRef, Value};
+
+/// The code units of a property name [`Agent::name_key`] encodes on the stack.
+const NAME_UNITS: usize = 64;
 
 /// Whether `unit` is a `StrWhiteSpaceChar` (`#sec-tonumber-applied-to-the-string-type`):
 /// `WhiteSpace` (12.2: TAB, VT, FF, ZWNBSP and every `Zs` code point) or `LineTerminator` (12.3:
@@ -329,8 +333,19 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// ToPropertyKey (`#sec-topropertykey`).
+    /// ToPropertyKey (`#sec-topropertykey`). A Number that is an array index, an integral Number
+    /// from +0 to 2^32 - 2 or -0 (whose ToString is "0"), is the key [`Agent::key_from_string`]
+    /// makes of its ToString, made without the String: ToPrimitive and ToString of a Number run
+    /// no code and charge no step, and that String has at most 10 code units, for which
+    /// `key_from_string` charges none.
     pub(crate) fn to_property_key(&mut self, value: Value) -> Completion<Key> {
+        if let Value::Number(number) = value
+            && (0.0..ARRAY_INDEX_END).contains(&number)
+            && number.trunc() == number
+        {
+            // A non-negative integer below 2^32 - 1, which the cast keeps exactly; -0 is 0.
+            return Ok(Key::Index(number as u32));
+        }
         let key = self.to_primitive(value, Some(PreferredType::String))?;
         if let Value::Symbol(symbol) = key {
             return Ok(Key::Symbol(symbol));
@@ -375,10 +390,23 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// The key of the property name `name`.
+    /// The key of the property name `name`. A name of at most [`NAME_UNITS`] code units, every
+    /// name the engine itself writes, is encoded into a buffer on the stack, so that it
+    /// allocates nothing; a longer one into a vector. Not inlined, so that the buffer is in no
+    /// caller's frame.
+    #[inline(never)]
     pub(crate) fn name_key(&mut self, name: &str) -> Completion<Key> {
-        let units: Vec<u16> = name.encode_utf16().collect();
-        self.key_from_units(&units)
+        let mut buffer = [0u16; NAME_UNITS];
+        let mut count = 0;
+        for unit in name.encode_utf16() {
+            let Some(slot) = buffer.get_mut(count) else {
+                let units: Vec<u16> = name.encode_utf16().collect();
+                return self.key_from_units(&units);
+            };
+            *slot = unit;
+            count += 1;
+        }
+        self.key_from_units(buffer.get(..count).unwrap_or_default())
     }
 
     /// The value of a key: a String or a Symbol. An array index is made a String again.
@@ -420,8 +448,110 @@ impl<H: Host> Agent<H> {
 #[cfg(test)]
 mod tests {
     use super::{clamp_index, number_to_int32, number_to_uint32};
+    use crate::heap::STRINGS_MADE;
     use crate::host::hooks::test_host::{agent_with_realm, enter};
+    use crate::object::property::Key;
     use crate::value::Value;
+    use crate::{Outcome, Parsed, Source};
+
+    /// The String records the heap stored since the count was reset.
+    fn strings_made() -> u64 {
+        STRINGS_MADE.with(std::cell::Cell::get)
+    }
+
+    /// ToPropertyKey (`#sec-topropertykey`) of a Number: an integral Number from +0 to
+    /// 2^32 - 2, and -0, whose ToString is "0", is the array index its ToString names, and no
+    /// String is made for it; every other Number is the atom of its ToString.
+    #[test]
+    fn a_number_that_is_an_array_index_is_its_key_without_a_string() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        for (number, index) in [
+            (0.0, 0),
+            (-0.0, 0),
+            (7.0, 7),
+            (4_294_967_294.0, 4_294_967_294),
+        ] {
+            STRINGS_MADE.with(|made| made.set(0));
+            assert_eq!(
+                agent.to_property_key(Value::Number(number)),
+                Ok(Key::Index(index)),
+                "{number}"
+            );
+            assert_eq!(strings_made(), 0, "Strings made for the key of {number}");
+        }
+        for (number, text) in [
+            (4_294_967_295.0, "4294967295"),
+            (4_294_967_296.0, "4294967296"),
+            (-1.0, "-1"),
+            (1.5, "1.5"),
+            (-0.5, "-0.5"),
+            (1e21, "1e+21"),
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
+        ] {
+            let expected = agent.name_key(text).unwrap();
+            assert_eq!(
+                agent.to_property_key(Value::Number(number)),
+                Ok(expected),
+                "{number}"
+            );
+        }
+    }
+
+    /// `name_key` answers the key `key_from_string` makes of a String of the same code units on
+    /// both sides of its buffer on the stack (`NAME_UNITS`, 64): names of 63, 64 and 65 code
+    /// units, of 32 and 33 code points outside the Basic Multilingual Plane (64 and 66 code
+    /// units), and an array index.
+    #[test]
+    fn name_key_answers_alike_on_both_sides_of_its_buffer() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        for name in [
+            "x".repeat(63),
+            "y".repeat(64),
+            "z".repeat(65),
+            "\u{1F600}".repeat(32),
+            "\u{1F601}".repeat(33),
+            "12".to_string(),
+        ] {
+            let string = agent.new_string_str(&name).unwrap();
+            let expected = agent.key_from_string(string).unwrap();
+            assert_eq!(agent.name_key(&name), Ok(expected), "{name}");
+        }
+    }
+
+    /// The loop of `story:an-index-store-does-not-go-through-text`: `a[i] = i` for n = 8 and
+    /// for 4n iterations stores the same number of Strings, none per store, read from the
+    /// heap's count of the String records it stored (`STRINGS_MADE`) around each run. On its
+    /// base the loops stored n and 4n Strings. n is small for the mode with a collection at
+    /// every safe point, where 64 and 256 took 4.1 s at a load of 77.
+    #[test]
+    fn a_store_loop_makes_no_string_per_store() {
+        const N: u32 = 8;
+        let (mut agent, realm) = agent_with_realm();
+        let mut run = |source: &str| {
+            let Ok(Parsed::Parsed(script)) = agent.parse_script(&realm, Source::Utf8(source), None)
+            else {
+                panic!("{source} did not parse");
+            };
+            STRINGS_MADE.with(|made| made.set(0));
+            let outcome = agent.evaluate_script(&script);
+            assert!(
+                matches!(outcome, Ok(Outcome::Normal(_))),
+                "{source}: {outcome:?}"
+            );
+            strings_made()
+        };
+        run("function f(n) { var a = []; for (var i = 0; i < n; i++) a[i] = i; return a.length; }");
+        let made = [run(&format!("f({N})")), run(&format!("f({})", 4 * N))];
+        assert_eq!(
+            made,
+            [0, 0],
+            "Strings stored by the loops of n and 4n stores"
+        );
+    }
 
     /// ToUint16 (`#sec-touint16`) with ToFixedSizeInteger (`#sec-tofixedsizeinteger`):
     /// ToIntegerOrInfinity, then modulo 2^16; NaN and the infinities are 0.
