@@ -12,7 +12,10 @@
 //!   the [`Stop`] of the budget with everything credited.
 //!
 //! - [`compile_pattern`]: CompilePattern (`#sec-compilepattern`) of the tree to a [`Program`],
-//!   or the refusal of the flag `i` ([`CompileError`]), or the stop of the budget.
+//!   or the stop of the budget ([`CompileError`]).
+//! - [`canonicalize`]: Canonicalize (`#sec-runtime-semantics-canonicalize-ch`) of a character
+//!   under the flag `i` or a modifier `i`: the simple case folding of `CaseFolding.txt` under
+//!   `u` or `v`, the uppercase mapping of the code unit under neither.
 //! - [`match_at`] and [`search`]: the matcher of 22.2.2 from one start index, and the search of
 //!   RegExpBuiltinExec over the start indices, against a [`Subject`] read in place; the
 //!   [`Captures`] in code unit indices, or no match, or the stop of the budget.
@@ -22,11 +25,12 @@
 //!
 //! Refused until the later stories of slice 5, each with the message `<construct> is not
 //! supported before slice 5`: the flag `v` and a group name with a code point outside ASCII
-//! ([`Refusal`]), which ParsePattern refuses; and the flag `i` or a modifier `i`
-//! ([`CompileRefusal`]), which CompilePattern refuses.
+//! ([`Refusal`]), which ParsePattern refuses. CompilePattern refuses nothing
+//! ([`CompileRefusal`] has no value).
 
 mod ast;
 mod budget;
+mod canonicalize;
 mod compile;
 mod early;
 mod error;
@@ -40,6 +44,7 @@ pub use ast::{
     Quantifier,
 };
 pub use budget::{Budget, MAX_GRANT, POLL_INTERVAL, Stop, Unlimited};
+pub use canonicalize::canonicalize;
 pub use compile::{CompileError, CompileRefusal, compile_pattern};
 pub use error::{ErrorKind, ParseError, PatternError, Refusal};
 pub use flags::Flags;

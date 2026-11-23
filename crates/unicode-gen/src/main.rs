@@ -24,6 +24,7 @@
 //! a table that would be empty.
 
 mod case;
+mod case_folding;
 mod normalize;
 mod property;
 mod render;

@@ -13,18 +13,21 @@
 //! polls the interrupt at least once per 4,096 nodes and class items it visits.
 //!
 //! `\d`, `\w` and `\b` are those of `#sec-compiletocharset` and
-//! `#sec-runtime-semantics-iswordchar-abstract-operation` without the flag `i`; `\s` is
+//! `#sec-runtime-semantics-iswordchar-abstract-operation`, with WordCharacters
+//! (`#sec-wordcharacters`) holding U+017F and U+212A too under `u` or `v` with `i`; `\s` is
 //! WhiteSpace and LineTerminator. A property escape `\p{...}` is the property `swell-unicode`
 //! gives its name, and `\P{...}` its complement; the class names it and the matcher tests it
-//! against the tables of `swell-unicode`, so no range of a table is copied into the program. The modifiers `m` and `s` of `(?ms-ms:...)` set the mode of
-//! their atoms (`#sec-updatemodifiers`).
+//! against the tables of `swell-unicode`, so no range of a table is copied into the program.
+//! The modifiers `i`, `m` and `s` of `(?ims-ims:...)` set the mode of their atoms
+//! (`#sec-updatemodifiers`).
 //!
-//! Refused until `story:regexp-case-insensitive-matching-and-modifiers` (decision 7, "Refusals
-//! until the later stories of slice 5"): the flag `i` and a modifier group that names `i` in
-//! either of its lists, with the message `case-insensitive matching is not supported before
-//! slice 5`. Canonicalize (`#sec-runtime-semantics-canonicalize-ch`) needs the tables of case
-//! mapping and of case folding. The refusal comes after the parse, so a pattern with an early
-//! error answers the early error.
+//! Under `i` (the flag, or a modifier around the atom; `#sec-compilepattern`) a character with
+//! another of its canonical value (Canonicalize, `canonicalize.rs`) is [`Inst::Fold`] of that
+//! value, a class and a backreference are marked to compare canonical values, and `\b` and
+//! `\B` under `u` or `v` read the WordCharacters of `i`. A class under `i` is compiled as
+//! without it: its ranges and property escapes are tested against the characters of the
+//! canonical value of a character when the class is run, so the compile step builds no
+//! closure and its work stays linear in the pattern, also for many classes of wide ranges.
 
 use std::fmt;
 
@@ -32,29 +35,27 @@ use swell_unicode::Property;
 
 use crate::ast::{Assertion, ClassEscape, ClassItem, List, Look, Name, Node, NodeId, Pattern};
 use crate::budget::{Budget, Meter, Stop};
+use crate::canonicalize::{canonicalize, has_no_other_case};
 use crate::program::{ClassSet, Inst, MAX_CODE_POINT, Program, UNPATCHED};
 
-/// A construct CompilePattern refuses until the story that brings it.
+/// A construct CompilePattern refuses until the story that brings it: none since
+/// `story:regexp-case-insensitive-matching-and-modifiers` brought the flag `i` and the
+/// modifier `i`, so no value of this type exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CompileRefusal {
-    /// The flag `i` or a modifier `i`
-    /// (`story:regexp-case-insensitive-matching-and-modifiers`).
-    CaseInsensitive,
-}
+pub enum CompileRefusal {}
 
 impl CompileRefusal {
     /// The construct the message names.
     pub fn construct(self) -> &'static str {
-        match self {
-            CompileRefusal::CaseInsensitive => "case-insensitive matching",
-        }
+        match self {}
     }
 }
 
 /// Why CompilePattern answered no program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompileError {
-    /// A construct refused until a later story of slice 5; nothing is charged.
+    /// A construct refused until a later story of slice 5; nothing is charged. CompilePattern
+    /// refuses none at present ([`CompileRefusal`]).
     Refused(CompileRefusal),
     /// The budget stopped the compile step; everything it charged is credited.
     Stopped(Stop),
@@ -76,9 +77,7 @@ impl CompileError {
 impl fmt::Display for CompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CompileError::Refused(refusal) => {
-                write!(f, "{} is not supported before slice 5", refusal.construct())
-            }
+            CompileError::Refused(refusal) => match *refusal {},
             CompileError::Stopped(stop) => write!(f, "the compile step stopped: {stop:?}"),
         }
     }
@@ -90,8 +89,8 @@ impl From<Stop> for CompileError {
     }
 }
 
-/// CompilePattern of `pattern`, every growth charged to `budget`: the program, the refusal of
-/// the flag `i`, or the stop of the budget with everything credited.
+/// CompilePattern of `pattern`, every growth charged to `budget`: the program, or the stop of
+/// the budget with everything credited.
 pub fn compile_pattern(
     pattern: &Pattern,
     budget: &mut dyn Budget,
@@ -115,10 +114,11 @@ pub fn compile_pattern(
     }
 }
 
-/// The mode an atom is compiled in: `m` and `s` as the flags and the modifier groups around it
-/// set them, and the direction.
+/// The mode an atom is compiled in: `i`, `m` and `s` as the flags and the modifier groups
+/// around it set them, and the direction.
 #[derive(Clone, Copy)]
 struct Mode {
+    ignore_case: bool,
     multiline: bool,
     dot_all: bool,
     back: bool,
@@ -182,17 +182,6 @@ fn index32(n: usize) -> Result<u32, Stop> {
 
 fn build(pattern: &Pattern, m: &mut Meter<'_>) -> Result<Program, CompileError> {
     let flags = pattern.flags;
-    if flags.ignore_case() {
-        return Err(CompileError::Refused(CompileRefusal::CaseInsensitive));
-    }
-    for node in &pattern.nodes {
-        m.visit()?;
-        if let Node::Modified { add, remove, .. } = node
-            && (add.ignore_case() || remove.ignore_case())
-        {
-            return Err(CompileError::Refused(CompileRefusal::CaseInsensitive));
-        }
-    }
     let mut c = Compiler {
         pattern,
         m,
@@ -269,6 +258,7 @@ impl Compiler<'_, '_, '_> {
         self.names()?;
         let flags = self.pattern.flags;
         let mode = Mode {
+            ignore_case: flags.ignore_case(),
             multiline: flags.multiline(),
             dot_all: flags.dot_all(),
             back: false,
@@ -416,8 +406,14 @@ impl Compiler<'_, '_, '_> {
                     Assertion::End => Inst::LineEnd {
                         multiline: mode.multiline,
                     },
-                    Assertion::WordBoundary => Inst::WordBoundary { negated: false },
-                    Assertion::NotWordBoundary => Inst::WordBoundary { negated: true },
+                    Assertion::WordBoundary => Inst::WordBoundary {
+                        negated: false,
+                        fold: self.unicode && mode.ignore_case,
+                    },
+                    Assertion::NotWordBoundary => Inst::WordBoundary {
+                        negated: true,
+                        fold: self.unicode && mode.ignore_case,
+                    },
                 })?;
             }
             Node::Look { look, body } => {
@@ -474,6 +470,10 @@ impl Compiler<'_, '_, '_> {
             Node::Character(c) => {
                 let one_unit = !self.unicode || (c <= 0xFFFF && !(0xD800..=0xDFFF).contains(&c));
                 let inst = match u16::try_from(c) {
+                    _ if mode.ignore_case && !has_no_other_case(c, self.unicode) => Inst::Fold {
+                        canonical: canonicalize(c, self.unicode),
+                        back,
+                    },
                     Ok(unit) if one_unit => Inst::Unit { unit, back },
                     _ => Inst::Point { point: c, back },
                 };
@@ -486,12 +486,12 @@ impl Compiler<'_, '_, '_> {
                 })?;
             }
             Node::Escape(escape) => {
-                let class = self.class(false, &[ClassItem::Escape(escape)])?;
+                let class = self.class(false, &[ClassItem::Escape(escape)], mode.ignore_case)?;
                 self.emit(Inst::Class { class, back })?;
             }
             Node::Class { negated, items } => {
                 let pattern = self.pattern;
-                let class = self.class(negated, pattern.class_items(items))?;
+                let class = self.class(negated, pattern.class_items(items), mode.ignore_case)?;
                 self.emit(Inst::Class { class, back })?;
             }
             Node::Group { number, body, .. } => {
@@ -506,6 +506,7 @@ impl Compiler<'_, '_, '_> {
             Node::NonCapturing { body } => self.push(Task::Node(body, mode))?,
             Node::Modified { add, remove, body } => {
                 let inner = Mode {
+                    ignore_case: (mode.ignore_case || add.ignore_case()) && !remove.ignore_case(),
                     multiline: (mode.multiline || add.multiline()) && !remove.multiline(),
                     dot_all: (mode.dot_all || add.dot_all()) && !remove.dot_all(),
                     back,
@@ -513,9 +514,15 @@ impl Compiler<'_, '_, '_> {
                 self.push(Task::Node(body, inner))?;
             }
             Node::Backreference(group) => {
-                self.emit(Inst::Backref { group, back })?;
+                self.emit(Inst::Backref {
+                    group,
+                    back,
+                    fold: mode.ignore_case,
+                })?;
             }
-            Node::NamedBackreference(name) => self.named_backreference(name, back)?,
+            Node::NamedBackreference(name) => {
+                self.named_backreference(name, back, mode.ignore_case)?;
+            }
         }
         Ok(())
     }
@@ -584,7 +591,7 @@ impl Compiler<'_, '_, '_> {
     }
 
     /// `\k<name>`: the groups of the name, one [`Inst::Backref`] when there is one.
-    fn named_backreference(&mut self, name: Name, back: bool) -> Result<(), Stop> {
+    fn named_backreference(&mut self, name: Name, back: bool, fold: bool) -> Result<(), Stop> {
         let pattern = self.pattern;
         let text = pattern.name(name);
         let first = self
@@ -597,13 +604,14 @@ impl Compiler<'_, '_, '_> {
         if len == 1
             && let Some(&group) = self.named.get(first)
         {
-            self.emit(Inst::Backref { group, back })?;
+            self.emit(Inst::Backref { group, back, fold })?;
             return Ok(());
         }
         self.emit(Inst::NamedBackref {
             start: index32(first)?,
             len: index32(len)?,
             back,
+            fold,
         })?;
         Ok(())
     }
@@ -612,8 +620,9 @@ impl Compiler<'_, '_, '_> {
     /// meet, n log n for n ranges; `\s` and `\S` as predicates beside them; and each property
     /// escape, `\p{...}` or its complement `\P{...}`, as its property and a flag, tested against
     /// the tables of `swell-unicode` when the class is run and never copied into the program.
-    /// Its number.
-    fn class(&mut self, negated: bool, items: &[ClassItem]) -> Result<u32, Stop> {
+    /// Under `i` (`fold`) the class is marked to test the characters of a canonical value, and
+    /// `\w` and `\W` under `u` or `v` take the WordCharacters of `i`. Its number.
+    fn class(&mut self, negated: bool, items: &[ClassItem], fold: bool) -> Result<u32, Stop> {
         let start = self.ranges.len();
         let first_property = self.properties.len();
         let mut set = ClassSet {
@@ -624,6 +633,7 @@ impl Compiler<'_, '_, '_> {
             negated,
             space: false,
             not_space: false,
+            fold,
         };
         for &item in items {
             self.m.visit()?;
@@ -636,7 +646,7 @@ impl Compiler<'_, '_, '_> {
                     self.m.push(&mut self.properties, (property, negated))?;
                 }
                 ClassItem::Escape(escape) => {
-                    for &(a, b) in escape_ranges(escape) {
+                    for &(a, b) in escape_ranges(escape, self.unicode && fold) {
                         self.range(a, b)?;
                     }
                 }
@@ -674,8 +684,10 @@ impl Compiler<'_, '_, '_> {
 }
 
 /// The ranges of `\d`, `\D`, `\w` and `\W` (`#sec-compiletocharset`, CharacterClassEscape),
-/// the complements up to U+10FFFF; `\s` and `\S` are predicates of the class.
-fn escape_ranges(escape: ClassEscape) -> &'static [(u32, u32)] {
+/// the complements up to U+10FFFF; `\s` and `\S` are predicates of the class. With `fold`
+/// (under `u` or `v` with `i`) WordCharacters holds U+017F and U+212A too
+/// (`#sec-wordcharacters`), and `\W`, its complement, neither.
+fn escape_ranges(escape: ClassEscape, fold: bool) -> &'static [(u32, u32)] {
     const DIGIT: &[(u32, u32)] = &[(0x30, 0x39)];
     const NOT_DIGIT: &[(u32, u32)] = &[(0, 0x2F), (0x3A, MAX_CODE_POINT)];
     const WORD: &[(u32, u32)] = &[(0x30, 0x39), (0x41, 0x5A), (0x5F, 0x5F), (0x61, 0x7A)];
@@ -686,10 +698,29 @@ fn escape_ranges(escape: ClassEscape) -> &'static [(u32, u32)] {
         (0x60, 0x60),
         (0x7B, MAX_CODE_POINT),
     ];
+    const WORD_FOLDED: &[(u32, u32)] = &[
+        (0x30, 0x39),
+        (0x41, 0x5A),
+        (0x5F, 0x5F),
+        (0x61, 0x7A),
+        (0x017F, 0x017F),
+        (0x212A, 0x212A),
+    ];
+    const NOT_WORD_FOLDED: &[(u32, u32)] = &[
+        (0, 0x2F),
+        (0x3A, 0x40),
+        (0x5B, 0x5E),
+        (0x60, 0x60),
+        (0x7B, 0x017E),
+        (0x0180, 0x2129),
+        (0x212B, MAX_CODE_POINT),
+    ];
     match escape {
         ClassEscape::Digit => DIGIT,
         ClassEscape::NotDigit => NOT_DIGIT,
+        ClassEscape::Word if fold => WORD_FOLDED,
         ClassEscape::Word => WORD,
+        ClassEscape::NotWord if fold => NOT_WORD_FOLDED,
         ClassEscape::NotWord => NOT_WORD,
         ClassEscape::Space | ClassEscape::NotSpace | ClassEscape::Property { .. } => &[],
     }

@@ -591,4 +591,37 @@ fn the_compile_step_is_linear() {
             tree.nodes().len()
         );
     }
+    // Under i a class is compiled as without it, and its ranges are tested against the
+    // characters of a canonical value when it is run: k classes of wide ranges cost k times
+    // one, not k times the table of case folding. At k and 4k the instructions, the bytes
+    // charged and the polls grow between 3 and 5 times, and the instructions are those
+    // without i.
+    let work = |k: usize, flags: &str| {
+        let pattern = "[\\x80-\\uffff][^\\w\\d]k(?-i:x)(s)\\1\\b".repeat(k);
+        let tree = tree(&units(&pattern), flags, 1000);
+        let mut budget = Recording::default();
+        let program = compile_pattern(&tree, &mut budget).expect("the program");
+        let work = [program.len(), budget.charged, budget.polls];
+        program.release(&mut budget);
+        assert_eq!(budget.held(), 0);
+        assert_eq!(budget.grants, 0);
+        work
+    };
+    for flags in ["i", "iu"] {
+        let (small, large) = (work(1000, flags), work(4000, flags));
+        println!(
+            "compile under /{flags}: instructions, bytes charged, polls {small:?} at k 1,000 and \
+             {large:?} at k 4,000"
+        );
+        for (what, (a, b)) in ["instructions", "bytes charged", "polls"]
+            .into_iter()
+            .zip(small.into_iter().zip(large))
+        {
+            assert!(
+                3 * a <= b + 2 && b <= 5 * a + 2,
+                "/{flags}: {what} {a} at 1,000 and {b} at 4,000"
+            );
+        }
+        assert_eq!(small[0], work(1000, &flags.replace('i', ""))[0], "/{flags}");
+    }
 }

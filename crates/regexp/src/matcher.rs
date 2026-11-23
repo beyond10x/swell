@@ -25,8 +25,15 @@
 //! step per property escape it holds, its instruction's step the first and the rest charged
 //! before it tests the character, each property a bounded number of binary searches over a table
 //! of `swell-unicode` (at most seven, for the group `P` of General_Category); a try writes
-//! one slot, since a try that failed undid its changes entry by entry. No number of the
-//! pattern multiplies the work of a step. They are taken by grants of at most
+//! one slot, since a try that failed undid its changes entry by entry. Under `i` a character
+//! and each code unit a backreference compares take one lookup of a canonical value
+//! (`canonicalize.rs`; without `u` and `v` the uppercase mapping, two binary searches), and a
+//! class tests the characters of the canonical value of the character read, at most
+//! `swell_unicode::MOST_CASE_FOLD_EQUIVALENTS` (4 on the pinned data) found by three binary
+//! searches (and without `u` and `v` one lookup of the uppercase mapping each), so one test
+//! of a class under `i` is at most four times its test without `i`: its ranges, `\s`, `\S`
+//! and its property escapes, each property still one step. No number of the pattern
+//! multiplies the work of a step. They are taken by grants of at most
 //! [`MAX_GRANT`], a further grant asked when one is spent; a match that ends with a match, no
 //! match or a refused charge returns what it was granted and did not run, so the steps
 //! charged are the units run and the interrupt, which every grant reads, is read at least once
@@ -40,6 +47,7 @@
 use std::ops::Range;
 
 use crate::budget::{Budget, MAX_GRANT, Stop};
+use crate::canonicalize::canonicalize;
 use crate::program::{Inst, Program, is_line_terminator, is_word};
 
 /// The code units of a String in one of its two stored forms: Latin-1 bytes, each one code
@@ -539,11 +547,12 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
         Some((u32::from(unit), pos + 1))
     }
 
-    /// IsWordChar of the code unit at `index`; none outside the subject.
-    fn word_at(&self, index: Option<usize>) -> bool {
+    /// IsWordChar of the code unit at `index`, with the WordCharacters of `i` under `u` or `v`
+    /// where `fold`; none outside the subject. Every word character is a single code unit.
+    fn word_at(&self, index: Option<usize>, fold: bool) -> bool {
         index
             .and_then(|i| self.subject.unit(i))
-            .is_some_and(|unit| is_word(u32::from(unit)))
+            .is_some_and(|unit| is_word(u32::from(unit), fold))
     }
 
     fn slot(&self, slot: usize) -> usize {
@@ -597,6 +606,10 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
                 .read(pos, back)
                 .filter(|&(c, _)| c == point)
                 .map(|(_, to)| (next, to)),
+            Inst::Fold { canonical, back } => self
+                .read(pos, back)
+                .filter(|&(c, _)| canonicalize(c, self.unicode) == canonical)
+                .map(|(_, to)| (next, to)),
             Inst::Any { dot_all, back } => self
                 .read(pos, back)
                 .filter(|&(c, _)| dot_all || !is_line_terminator(c))
@@ -630,9 +643,9 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
                             .is_some_and(|u| is_line_terminator(u32::from(u))));
                 at_end.then_some((next, pos))
             }
-            Inst::WordBoundary { negated } => {
-                let a = self.word_at(pos.checked_sub(1));
-                let b = self.word_at(Some(pos));
+            Inst::WordBoundary { negated, fold } => {
+                let a = self.word_at(pos.checked_sub(1), fold);
+                let b = self.word_at(Some(pos), fold);
                 ((a != b) != negated).then_some((next, pos))
             }
             Inst::Split { first, second } => {
@@ -709,8 +722,15 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
                     Some((head, pos))
                 }
             }
-            Inst::Backref { group, back } => self.backreference(group, back, pc, pos)?,
-            Inst::NamedBackref { start, len, back } => {
+            Inst::Backref { group, back, fold } => {
+                self.backreference(group, back, fold, pc, pos)?
+            }
+            Inst::NamedBackref {
+                start,
+                len,
+                back,
+                fold,
+            } => {
                 let program = self.program;
                 let first = start as usize;
                 let groups = program
@@ -729,7 +749,7 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
                         .saturating_mul(2),
                 );
                 match set.and_then(|i| groups.get(i).copied()) {
-                    Some(group) => self.backreference(group, back, pc, pos)?,
+                    Some(group) => self.backreference(group, back, fold, pc, pos)?,
                     None => Some((next, pos)),
                 }
             }
@@ -756,9 +776,17 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
 
     /// BackreferenceMatcher (`#sec-backreference-matcher`) of `group` at `pos`: an unset
     /// group matches the empty String; otherwise its code units are compared, one step each
-    /// charged before the comparison. Under `u` the end the comparison reaches must not split
-    /// a surrogate pair, since the clause compares code points.
-    fn backreference(&mut self, group: u32, back: bool, pc: u32, pos: usize) -> Result<Next, Stop> {
+    /// charged before the comparison; under `i` (`fold`) their canonical values are compared.
+    /// Under `u` the end the comparison reaches must not split a surrogate pair, since the
+    /// clause compares code points.
+    fn backreference(
+        &mut self,
+        group: u32,
+        back: bool,
+        fold: bool,
+        pc: u32,
+        pos: usize,
+    ) -> Result<Next, Stop> {
         let next = pc.saturating_add(1);
         let slot = (group as usize).saturating_mul(2);
         let (start, end) = (self.slot(slot), self.slot(slot.saturating_add(1)));
@@ -778,7 +806,11 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
             pos
         };
         self.steps(n)?;
-        let same = (0..n).all(|i| self.subject.unit(start + i) == self.subject.unit(from + i));
+        let same = if fold {
+            self.same_canonical(start, from, n)
+        } else {
+            (0..n).all(|i| self.subject.unit(start + i) == self.subject.unit(from + i))
+        };
         if !same {
             return Ok(None);
         }
@@ -787,6 +819,45 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
             return Ok(None);
         }
         Ok(Some((next, to)))
+    }
+
+    /// Whether the `n` code units from `a` and the `n` from `b` have the same canonical values
+    /// (Canonicalize under `i`): code unit by code unit without `u`, and under `u` code point
+    /// by code point, a pair read whole where both its units lie among the `n`. A character
+    /// equal to its counterpart takes no lookup, another one lookup each. A code point and its
+    /// simple case folding have as many code units, so a pair never matches a single unit.
+    fn same_canonical(&self, a: usize, b: usize, n: usize) -> bool {
+        let mut i = 0;
+        while i < n {
+            let (Some((x, width)), Some((y, other))) = (
+                self.character_within(a + i, a + n),
+                self.character_within(b + i, b + n),
+            ) else {
+                return false;
+            };
+            if width != other
+                || (x != y && canonicalize(x, self.unicode) != canonicalize(y, self.unicode))
+            {
+                return false;
+            }
+            i += width;
+        }
+        true
+    }
+
+    /// The character at `index` read forward no further than `end`, and its count of code
+    /// units: a code point under `u` (a pair whose two units lie before `end`), a code unit
+    /// without.
+    fn character_within(&self, index: usize, end: usize) -> Option<(u32, usize)> {
+        let unit = self.subject.unit(index)?;
+        if self.unicode
+            && is_lead(unit)
+            && index + 1 < end
+            && let Some(trail) = self.subject.unit(index + 1).filter(|&u| is_trail(u))
+        {
+            return Some((pair(unit, trail), 2));
+        }
+        Some((u32::from(unit), 1))
     }
 
     /// Whether `index` lies between the two units of a surrogate pair.

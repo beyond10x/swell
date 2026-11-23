@@ -1,7 +1,9 @@
 //! The case tables of `swell-unicode` and their lookups: the full mappings `to_lowercase` and
 //! `to_uppercase` (`SpecialCasing.txt` first, the simple mapping of `UnicodeData.txt` else),
 //! the lowercase mapping in the context `Final_Sigma`, and the properties `Cased` and
-//! `Case_Ignorable` that context reads (Unicode chapter 3, section 3.13, table 3-17).
+//! `Case_Ignorable` that context reads (Unicode chapter 3, section 3.13, table 3-17); and the
+//! simple case folding of `CaseFolding.txt` with the code points of one folding, which
+//! Canonicalize of a regular expression reads under `u` and `i`.
 //!
 //! The rows a test reads are the committed table files, taken into the test as text: what the
 //! generator wrote is what the lookups answer.
@@ -16,9 +18,11 @@
 #![cfg(test)]
 
 use swell_unicode::{
-    final_sigma_lowercase, is_case_ignorable, is_cased, to_lowercase, to_uppercase,
+    MOST_CASE_FOLD_EQUIVALENTS, final_sigma_lowercase, is_case_ignorable, is_cased,
+    simple_case_fold, simple_case_fold_equivalents, to_lowercase, to_uppercase,
 };
 
+const CASE_FOLDING: &str = include_str!("../src/tables/case_folding.rs");
 const LOWERCASE: &str = include_str!("../src/tables/lowercase.rs");
 const UPPERCASE: &str = include_str!("../src/tables/uppercase.rs");
 const SPECIAL_CASING: &str = include_str!("../src/tables/special_casing.rs");
@@ -278,4 +282,69 @@ fn the_tables_are_sorted_and_disjoint() {
             assert!(!member(last + 1), "{name} {:04X}", last + 1);
         }
     }
+}
+
+/// The simple case folding of `CaseFolding.txt`: its lines of status `C` and `S`, 1,512 on the
+/// vendored data (`awk -F'; ' '$2 == "C" || $2 == "S"' CaseFolding.txt | wc -l`). Every row is
+/// what `simple_case_fold` answers and every other code point folds to itself; the code points
+/// of one folding are what `simple_case_fold_equivalents` answers, the folding first, at most
+/// `MOST_CASE_FOLD_EQUIVALENTS` of them, the number the table states.
+#[test]
+fn simple_case_folding_follows_its_table() {
+    let folding = pairs(CASE_FOLDING, "FOLDING");
+    assert_eq!(folding.len(), 1512);
+    assert!(folding.windows(2).all(|w| w[0].0 < w[1].0));
+    let mut grouped: Vec<(u32, u32)> = folding.iter().map(|&(point, f)| (f, point)).collect();
+    grouped.sort_unstable();
+    assert_eq!(pairs(CASE_FOLDING, "BY_FOLDING"), grouped);
+    // Every key lies below U+20000: each code point up to there, and values past the last.
+    assert!(folding.iter().all(|&(point, _)| point < 0x20000));
+    for point in (0..0x20000).chain([0x10FFFF, 0x110000, u32::MAX]) {
+        let row = folding.binary_search_by_key(&point, |&(key, _)| key);
+        let expected = row.map_or(point, |at| folding[at].1);
+        assert_eq!(simple_case_fold(point), expected, "{point:04X}");
+    }
+    // A folding is its own folding, and a code point and its folding have one length in UTF-16.
+    let mut largest = 1;
+    for &(point, f) in &folding {
+        assert_eq!(simple_case_fold(f), f, "{point:04X}");
+        assert_eq!(point > 0xFFFF, f > 0xFFFF, "{point:04X}");
+        let group: Vec<u32> = simple_case_fold_equivalents(point).collect();
+        let others: Vec<u32> = grouped
+            .iter()
+            .filter(|&&(key, _)| key == f)
+            .map(|&(_, other)| other)
+            .collect();
+        assert_eq!(group.first(), Some(&f), "{point:04X}");
+        assert_eq!(group[1..], others[..], "{point:04X}");
+        assert_eq!(simple_case_fold_equivalents(f).collect::<Vec<_>>(), group);
+        largest = largest.max(group.len());
+    }
+    assert_eq!(largest, MOST_CASE_FOLD_EQUIVALENTS);
+    assert_eq!(MOST_CASE_FOLD_EQUIVALENTS, 4);
+    assert!(CASE_FOLDING.contains("pub(crate) const LARGEST_GROUP: usize = 4;\n"));
+    // Rows the regular expressions read: ASCII, the long s and the Kelvin sign into ASCII, the
+    // capital sharp s, the final sigma, a supplementary plane; no simple folding for U+0130
+    // (its lines are of status F and T) nor for ß.
+    for (point, f) in [
+        (0x0041, 0x0061),
+        (0x0061, 0x0061),
+        (0x017F, 0x0073),
+        (0x212A, 0x006B),
+        (0x1E9E, 0x00DF),
+        (0x00DF, 0x00DF),
+        (0x0130, 0x0130),
+        (0x0131, 0x0131),
+        (0x03C2, 0x03C3),
+        (0x10400, 0x10428),
+        (0x0030, 0x0030),
+    ] {
+        assert_eq!(simple_case_fold(point), f, "{point:04X}");
+    }
+    let group = |point: u32| simple_case_fold_equivalents(point).collect::<Vec<_>>();
+    assert_eq!(group(0x212A), [0x006B, 0x004B, 0x212A]);
+    assert_eq!(group(0x0073), [0x0073, 0x0053, 0x017F]);
+    assert_eq!(group(0x03F4), [0x03B8, 0x0398, 0x03D1, 0x03F4]);
+    assert_eq!(group(0x0030), [0x0030]);
+    assert_eq!(group(0x110000), [0x110000]);
 }
