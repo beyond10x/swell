@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:array-destructuring-and-spread
 kind: story
-status: active
+status: implemented
 title: Array patterns, rest elements and spread in array literals, calls and new
 summary: 'Lifts the 3 array patterns and 1 spread of surf''s harness: after it testharness.js and test.js parse with no refusal of slice 6, checked by the acceptance; 1,382 failing cases of slice 6 on its list.'
 relations:
@@ -69,10 +69,11 @@ scope:
   path: crates/syntax/tests/sources/refused/spread-in-array.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/spread-in-call.js
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T00:38:42Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:38:42Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T02:42:38Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

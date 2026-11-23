@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-23T02:42:00Z",
+  "actor": "human:operator",
+  "artifact": "story:slice-06-conformance-close",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "check and the lane slow on the forge, commit 4e71892",
+    "reference": "https://github.com/beyond10x/swell/actions/runs/45100509643"
+  }
+}

@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: epic:slice-06-bindings-and-iteration
 kind: epic
-status: active
+status: implemented
 title: 'Slice 6, bindings-and-iteration: let, destructuring, iterators'
 summary: 'let, const, destructuring, spread, arrows, templates, Symbol, iterators and for-of: 3,701 cases and 7,130 runs.'
 relations:
 - depends_on: epic:slice-03-builtins-core
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T00:38:43Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:38:43Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T02:42:49Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

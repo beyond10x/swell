@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tagged-templates
 kind: story
-status: active
+status: implemented
 title: 'Tagged templates: GetTemplateObject and the template objects a realm keeps per site'
 summary: 50 failing cases of slice 6 on its list; template objects kept with the script record and freed with the code, as decision 4 gives them.
 relations:
@@ -51,10 +51,11 @@ scope:
   path: crates/syntax/tests/sources.rs
 - confidence: cited
   path: crates/syntax/tests/sources/refused/tagged-template.js
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T00:38:42Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:38:42Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T02:42:39Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

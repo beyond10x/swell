@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:a-case-counts-in-the-slice-delivered-last
 kind: story
-status: active
+status: implemented
 title: A case counts in the slice delivered last among its slices
 summary: The swell-slices block names the order of delivery (1, 2, 3, 6, 5, 7, 10, 4, 9, 8, 11 to 21); the runner, slices.awk and test262-moves-check compare slices by their place in it, so the 393 cases of slice 6 that need only slice 4 or 5 leave slice 6 and it reads every run passed.
 relations:
 - decomposes: epic:slice-06-bindings-and-iteration
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T01:05:11Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T01:05:11Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T02:42:39Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 
 ## Context

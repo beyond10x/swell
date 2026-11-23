@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:tagged-template-tests-under-the-lane-bound
 kind: story
-status: active
+status: implemented
 title: Two tagged-template tests stay under the lane's bound in the collect mode
 summary: The template-object charge test and the memory-budget test of tagged_templates take their gate count of 100 also in the lane's collect half, where 10,000 evaluations and 1,000 sites took 32 to 43 CPU seconds alone and were killed at 60 s; the default mode keeps its counts.
 relations:
 - decomposes: epic:slice-06-bindings-and-iteration
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T01:32:29Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T01:32:29Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T02:42:40Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 
 ## Context

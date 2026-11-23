@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slice-06-conformance-close
 kind: story
-status: active
+status: implemented
 title: 'Every run of slice 6 passes: the cases that need a later slice move by rule lines with their evidence'
 summary: About 657 failing cases move to slices 4 to 18 by the estimate, each with its evidence in moves.tsv and none failing on a part of slice 6; the design counts, HOST-156's line, the omissions of slice 6 and expected.txt in the same change.
 relations:
@@ -24,10 +24,11 @@ scope:
   path: conformance/test262/sections.txt
 - confidence: cited
   path: docs/design/engine.md
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T00:38:43Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:38:43Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T02:42:39Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
