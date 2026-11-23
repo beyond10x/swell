@@ -5,7 +5,8 @@ The branch `wave/s6-2` over `main` at `3cec594` (the second batch), 2026-11-22 1
 verified, committed and merged. The source of every line below is a commit message
 (`git log --first-parent 3cec594..wave/s6-2`). Before: [the second batch](second-batch.md),
 which holds the first five stories of the slice. Release `0.4.0` was cut from `main` inside
-this wave (`20797bf`, 2026-11-22), after the first three merges below reached `main`.
+this wave (`20797bf`, 2026-11-22). Of this wave it holds the parser stack fix (`50cbc75`) and the
+ESS pins (`3500398`) and no feature story: the stories below reached `main` after it.
 
 ## What the wave delivered
 

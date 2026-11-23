@@ -15,7 +15,7 @@ swell is for a Rust program that runs JavaScript it does not trust and must stay
 
 ## Where it stands
 
-swell runs scripts of the ES5 grammar, in strict and non-strict mode. <Num at="delivered_count" /> of <Num at="delivery_slices" /> delivery slices are delivered, and <Num at="test262.passed" /> of the <Num at="test262.run" /> test262 cases it runs pass. Most of the standard library and the language after ES5 are missing. Release <Num at="version" /> is a library with no binary and no command line.
+swell runs scripts of the ES5 grammar and of the bindings and iteration of ES2015 (`let`, `const`, arrow functions, destructuring, spread, `Symbol`, `for`-`of`), in strict and non-strict mode. <Num at="delivered_count" /> of <Num at="delivery_slices" /> delivery slices are delivered, and <Num at="test262.passed" /> of the <Num at="test262.run" /> test262 cases it runs pass. Regular expressions, classes, generators, promises, modules and much of the standard library are missing. Release <Num at="version" /> is a library with no binary and no command line.
 
 ## Where next
 

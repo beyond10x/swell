@@ -10,9 +10,15 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-23
+
+The sixth delivery slice is delivered: `Symbol`, the iterator protocol, `for`-`of`, array
+patterns, spread, computed property names and tagged templates run, and every test262 case
+the slice counts passes.
+
 ### Added
 
-- More of the sixth delivery slice. The `Symbol` builtin: the constructor, `Symbol.for` and
+- The rest of the sixth delivery slice. The `Symbol` builtin: the constructor, `Symbol.for` and
   `Symbol.keyFor`, `Symbol.prototype`, twelve well-known symbols and
   `Object.getOwnPropertySymbols`. Computed property names, object spread and object rest. The
   iterator protocol with the Array and String iterators: `Array.prototype.entries`, `keys`
@@ -64,6 +70,46 @@ Every number below comes from the gate, `task check`, on the released commit.
 - `HostIntrinsic::ArrayPrototypeValues`, `HostIntrinsic::ArrayPrototypeEntries`,
   `HostIntrinsic::ArrayPrototypeKeys`, `HostIntrinsic::ArrayPrototypeForEach` and
   `WellKnownSymbol::Iterator` (new): what Web IDL gives an iterable interface (`HOST-185`).
+
+### Limits of this release
+
+- Not in the language yet: regular expression literals, identifiers outside ASCII, the
+  operator `**`, and of what came after ES5 everything but the sixth slice: template
+  literals with and without a tag, `let` and `const`, arrow functions, default and rest
+  parameters, object and array destructuring, spread, computed property names, `for`-`of`
+  and function declarations in blocks (without the web-compatibility semantics of Annex
+  B.3.2). Classes, generators, promises, async functions and modules are refused with a
+  `SyntaxError` that names the delivery slice that brings them.
+  [`docs/design/engine.md`](docs/design/engine.md), section 12, lists the nineteen delivery
+  slices, what each brings and the order they are delivered in.
+- The builtins end at the core library and what the sixth slice adds to it: `Symbol`, the
+  Array and String iterators, `Array.from`, `Object.fromEntries` and `Object.groupBy`. `Map`,
+  `Set`, `Promise`, `Reflect`, `Proxy`, `Date`, `RegExp`, `parseInt`, `parseFloat` and all of
+  `Math` but `max` do not exist. A String method that needs the Unicode tables of a later
+  slice refuses a code unit outside ASCII (`HOST-165`).
+- test262: 16,412 of the 44,812 cases the gate's digest stands for pass, 36.6 %. The line
+  reads `test262 total 53801 8982 7 44812 16412 28399 1`: 53,801 cases exist, 8,982 are
+  excluded by recorded decision, 7 do not apply, 44,812 run, 16,412 pass, 28,399 fail, one
+  ends at the memory budget. The first, second and sixth delivery slices pass all their
+  cases in all their runs, and the third all but one
+  (`test262-slice 01 31 62 0 0 31 31 0 0`, `test262-slice 02 4259 7543 0 0 4259 4259 0 0`,
+  `test262-slice 03 7011 13829 0 0 7011 7010 1 0`,
+  `test262-slice 06 3898 7351 0 0 3898 3898 0 0`). A refusal never counts as a pass, also
+  when the script catches it.
+- The host interface: 110 of its 190 numbered requirements
+  ([`docs/design/host-interface.md`](docs/design/host-interface.md)) are held by a test in
+  this commit; none is pending for the four delivered slices. 14 of the 58 scenarios of the
+  interface's model pass on the engine, and the other 44 name what they wait for. The
+  interface will change before 1.0.
+- The engine's own tests: `15 test binaries: 977 passed, 0 failed, 1 ignored`, the tests of
+  the engine crate in the mode that collects garbage at every safe point
+  (`test-collect: 2 test binaries: 796 passed, 0 failed, 1 ignored`), and the test of an
+  injected engine fault (`test-faults: 1 test binaries: 1 passed, 0 failed, 629 ignored`; the
+  629 are the tests that step's filter leaves out).
+- No binary, no command line, and the crates are not on a package registry. To use the
+  library, depend on the repository at the tag:
+  `swell = { git = "https://github.com/beyond10x/swell", tag = "0.5.0" }`.
+- Measured on x86_64 Linux with rustc 1.99.1 only.
 
 ## [0.4.0] - 2026-11-22
 
@@ -520,7 +566,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.4.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.5.0...HEAD
+[0.5.0]: https://github.com/beyond10x/swell/releases/tag/0.5.0
 [0.4.0]: https://github.com/beyond10x/swell/releases/tag/0.4.0
 [0.3.0]: https://github.com/beyond10x/swell/releases/tag/0.3.0
 [0.2.0]: https://github.com/beyond10x/swell/releases/tag/0.2.0
