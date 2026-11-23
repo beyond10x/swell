@@ -24,8 +24,8 @@
 //! consumed by instructions of this set only: the reference of a global name
 //! ([`Instruction::ResolveGlobal`]), the reference of a name looked up at run time
 //! ([`Instruction::ResolveName`]), the enumerator of a for-in statement
-//! ([`Instruction::ForInStart`]), the Iterator Record of a for-of statement or an array pattern
-//! ([`Instruction::GetIterator`]) and the tag of a completion record ([`Instruction::Tag`]).
+//! ([`Instruction::ForInStart`]), the Iterator Record of a for-of statement, an array pattern
+//! or a `yield*` ([`Instruction::GetIterator`]) and the tag of a completion record ([`Instruction::Tag`]).
 //!
 //! # Completion records
 //!
@@ -592,6 +592,31 @@ pub enum Instruction {
     /// around the body of a generator template, which a throw leaving the body runs
     /// (GeneratorStart, step 4.g).
     GeneratorDone(u32),
+    /// `[i, v, tag] -> [i, k, r]`, or `[v, k]` and a jump to `t`, after this one: a step of the
+    /// loop of `yield*` (`#sec-generator-function-definitions-runtime-semantics-evaluation`,
+    /// YieldExpression : `yield *` AssignmentExpression, step 8) on the Iterator Record `i`
+    /// with the received completion, its value `v` and its tag: for [`TAG_NORMAL`] the call of
+    /// [[NextMethod]] with `v`; for [`TAG_THROW`] the call of GetMethod(iterator, "throw")
+    /// (`#sec-getmethod`) with `v`, or, when it is `undefined`, IteratorClose
+    /// (`#sec-iteratorclose`) with a normal completion and a `TypeError`; for [`TAG_RETURN`]
+    /// the call of GetMethod(iterator, "return") with `v`, or, when it is `undefined`, the jump
+    /// with `v` and `k` [`TAG_RETURN`]. `r` is the result of the call and `k` the tag the
+    /// `yield*` completes with once `r` is done: [`TAG_RETURN`] after a return completion,
+    /// [`TAG_NORMAL`] otherwise. A generator object whose method is the one of
+    /// `%GeneratorPrototype%` of any realm is resumed with no call: its frame runs above this
+    /// one and hands `r` over as it suspends or returns (`docs/design/engine.md`, decision 3,
+    /// "Suspended frames", item 6).
+    DelegateStep(u32),
+    /// `[i, k, r] -> [i, k, r]`, or `[v, k]` and a jump to `t`, after this one, when the inner
+    /// result `r` is done: a `TypeError` when `r` is not an Object, then IteratorComplete(r)
+    /// (`#sec-iteratorcomplete`); when it is true, `v` is IteratorValue(r)
+    /// (`#sec-iteratorvalue`) and the record `i` is dropped.
+    JumpIfDelegateDone(u32),
+    /// `[i, k, r] -> [i, v, tag]` across a suspension: GeneratorYield(r) (`#sec-generatoryield`)
+    /// by the generator in local slot `s` with the inner result `r` as it is, no new result
+    /// object; the resumption puts the received value and its tag above the record, as at
+    /// [`Instruction::Yield`].
+    DelegateYield(u32),
 }
 
 impl Instruction {
@@ -605,7 +630,9 @@ impl Instruction {
             | Instruction::CaseJump(t)
             | Instruction::ForInNext(t)
             | Instruction::IteratorStep(t)
-            | Instruction::JumpIfTag { target: t, .. } => Some(t),
+            | Instruction::JumpIfTag { target: t, .. }
+            | Instruction::DelegateStep(t)
+            | Instruction::JumpIfDelegateDone(t) => Some(t),
             Instruction::Undefined
             | Instruction::Null
             | Instruction::True
@@ -717,7 +744,8 @@ impl Instruction {
             | Instruction::Yield(_)
             | Instruction::YieldReturn(_)
             | Instruction::GeneratorReturn(_)
-            | Instruction::GeneratorDone(_) => None,
+            | Instruction::GeneratorDone(_)
+            | Instruction::DelegateYield(_) => None,
             Instruction::Argument(_)
             | Instruction::RestArguments(_)
             | Instruction::PushVarEnv(_) => None,
@@ -756,6 +784,8 @@ impl Instruction {
             Instruction::IteratorStep(_) => Instruction::IteratorStep(t),
             Instruction::JumpIfTag { tag, .. } => Instruction::JumpIfTag { tag, target: t },
             Instruction::JumpIfNotUndefined(_) => Instruction::JumpIfNotUndefined(t),
+            Instruction::DelegateStep(_) => Instruction::DelegateStep(t),
+            Instruction::JumpIfDelegateDone(_) => Instruction::JumpIfDelegateDone(t),
             other => other,
         }
     }
@@ -774,7 +804,8 @@ pub enum HandlerKind {
     /// handler a temporary of an expression may stand under (the compiler counts the entries of
     /// statements alone); then as [`HandlerKind::Finally`]. Its target closes the record, drops
     /// it and throws again (`docs/design/engine.md`, decision 3, item 5 of "The iterator of
-    /// `for`-`of`, of an array pattern and of a spread").
+    /// `for`-`of`, of an array pattern and of a spread"). The loop of a `yield*` has one too,
+    /// whose target drops its record without closing it and throws again.
     Pattern,
 }
 

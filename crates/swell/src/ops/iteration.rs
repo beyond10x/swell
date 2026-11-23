@@ -125,8 +125,9 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// IteratorComplete ( iteratorResult ) (`#sec-iteratorcomplete`).
-    fn iterator_complete(&mut self, result: ObjectRef) -> Completion<bool> {
+    /// IteratorComplete ( iteratorResult ) (`#sec-iteratorcomplete`); the test of `done` of the
+    /// loop of `yield*` (`interp/yield_star.rs`) calls it too.
+    pub(crate) fn iterator_complete(&mut self, result: ObjectRef) -> Completion<bool> {
         // 1. Return ToBoolean(? Get(iteratorResult, "done")).
         let key = self.name_key("done")?;
         let done = self.get(result, key)?;
