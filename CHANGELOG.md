@@ -10,6 +10,13 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-23
+
+Regular expressions run: the literal, `RegExp`, `exec` and `test`, on the new crate
+`swell-regexp`, whose matcher spends the step and memory budgets of its entry. The case
+methods, `normalize` and `localeCompare` of `String` take every String. The fifth delivery
+slice is in work, with seven of its fifteen stories delivered.
+
 ### Added
 
 - Regular expressions: the literal, evaluated to a new object each time, and `RegExp` with
@@ -55,6 +62,43 @@ Every number below comes from the gate, `task check`, on the released commit.
   host that sizes its memory budget by this ceiling raises it.
 - `HOST-191` (new): a refusal that `RegExp` raises at run time for a part of the fifth slice
   that is not built yet is counted by the agent, like a refusal of the parser.
+
+### Limits of this release
+
+- Not in the language yet: in a regular expression the flags `i` and `v`, a property escape
+  and a group name outside ASCII, each refused with a `SyntaxError` the agent counts
+  (`HOST-191`); identifiers outside ASCII; the operator `**`; and of what came after ES5
+  everything but the sixth slice: template literals with and without a tag, `let` and
+  `const`, arrow functions, default and rest parameters, object and array destructuring,
+  spread, computed property names, `for`-`of` and function declarations in blocks (without
+  the web-compatibility semantics of Annex B.3.2). Classes, generators, promises, async
+  functions and modules are refused with a `SyntaxError` that names the delivery slice that
+  brings them. [`docs/design/engine.md`](docs/design/engine.md), section 12, lists the
+  nineteen delivery slices, what each brings and the order they are delivered in.
+- The builtins end at the core library, what the sixth slice adds to it, and of the fifth
+  slice `RegExp` with `exec` and `test`. `String.prototype.match`, `matchAll` and `search` do
+  not exist, and `replace`, `replaceAll` and `split` given a regular expression end in a
+  counted refusal. `Map`, `Set`, `Promise`, `Reflect`, `Proxy`, `Date`, `parseInt`,
+  `parseFloat` and all of `Math` but `max` do not exist.
+- test262: 17,775 of the 44,812 cases the gate's digest stands for pass, 39.7 %. The line
+  reads `test262 total 53801 8982 7 44812 17775 27036 1`: 53,801 cases exist, 8,982 are
+  excluded by recorded decision, 7 do not apply, 44,812 run, 17,775 pass, 27,036 fail, one
+  ends at the memory budget. The first, second and sixth delivery slices pass all their
+  cases in all their runs, and the third all but one
+  (`test262-slice 01 31 62 0 0 31 31 0 0`, `test262-slice 02 4259 7543 0 0 4259 4259 0 0`,
+  `test262-slice 03 7011 13829 0 0 7011 7010 1 0`,
+  `test262-slice 06 3898 7351 0 0 3898 3898 0 0`). Of the fifth, which is in work, 1,327 of
+  2,724 cases pass (`test262-slice 05 2724 5441 0 0 2724 1327 1397 0`). A refusal never
+  counts as a pass, also when the script catches it.
+- The host interface: 113 of its 191 numbered requirements
+  ([`docs/design/host-interface.md`](docs/design/host-interface.md)) are held by a test in
+  this commit; none is pending for the four delivered slices or for the fifth. 14 of the 58
+  scenarios of the interface's model pass on the engine, and the other 44 name what they
+  wait for. The interface will change before 1.0.
+- No binary, no command line, and the crates are not on a package registry. To use the
+  library, depend on the repository at the tag:
+  `swell = { git = "https://github.com/beyond10x/swell", tag = "0.6.0" }`.
+- Measured on x86_64 Linux with rustc 1.99.1 only.
 
 ## [0.5.0] - 2026-11-23
 
@@ -612,7 +656,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.5.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/beyond10x/swell/releases/tag/0.6.0
 [0.5.0]: https://github.com/beyond10x/swell/releases/tag/0.5.0
 [0.4.0]: https://github.com/beyond10x/swell/releases/tag/0.4.0
 [0.3.0]: https://github.com/beyond10x/swell/releases/tag/0.3.0
