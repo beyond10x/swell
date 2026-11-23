@@ -92,7 +92,7 @@ pub const PROPERTY_LIVE_BYTES: u64 = 448;
 /// `heap_bytes()` by from its reading after `create_realm`, the growth of the arenas included
 /// (decision 14; HOST-187): the size of a browser's generated bindings. Measured and rounded as
 /// [`HOST_FUNCTION_LIVE_BYTES`].
-pub const BINDINGS_REALM_HEAP_BYTES: u64 = 381_696;
+pub const BINDINGS_REALM_HEAP_BYTES: u64 = 506_112;
 
 /// The two seeds of an agent (decision 3), and the only randomness the engine has.
 /// `Agent::new` is the only function of the interface that takes them (HOST-146).
