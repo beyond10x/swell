@@ -56,6 +56,7 @@ mod objects;
 mod parameters;
 mod property_index;
 mod realms;
+mod regexp_literal_limits;
 mod scripts;
 mod source_scan;
 mod spread;

@@ -12,7 +12,7 @@
       {"name": "swell-compiler", "dependencies": ["swell-num", "swell-syntax"]},
       {"name": "swell-num", "dependencies": []},
       {"name": "swell-regexp", "dependencies": ["swell-unicode"]},
-      {"name": "swell-syntax", "dependencies": ["swell-unicode"]},
+      {"name": "swell-syntax", "dependencies": ["swell-regexp", "swell-unicode"]},
       {"name": "swell-test262", "dependencies": ["swell", "swell-syntax"]},
       {"name": "swell-unicode", "dependencies": []},
       {"name": "swell-unicode-gen", "dependencies": []}
@@ -388,12 +388,12 @@
   ],
   "host_requirements": {
     "total": 191,
-    "test": 110,
-    "pending": 81,
+    "test": 111,
+    "pending": 80,
     "omitted": 0,
     "pending_by_slice": [
       {"slice": 4, "count": 9},
-      {"slice": 5, "count": 3},
+      {"slice": 5, "count": 2},
       {"slice": 7, "count": 1},
       {"slice": 8, "count": 1},
       {"slice": 9, "count": 5},

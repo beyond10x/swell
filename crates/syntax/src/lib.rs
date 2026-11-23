@@ -18,9 +18,11 @@
 //! from the nesting limit by the message alone. Two of those refusals fall inside sections whose
 //! cases are counted in slice 2 and are recorded as omissions in
 //! `conformance/test262/sections.txt`: an identifier with a code point outside ASCII, written or
-//! escaped (slice 5, `sec-names-and-keywords`), and a regular expression literal
-//! ([`REGEXP_REFUSAL`]), which is lexed to its end and kept as a node, its pattern unparsed, so
-//! that evaluating it throws a `SyntaxError` (`sec-literals-regular-expression-literals`).
+//! escaped (slice 5, `sec-names-and-keywords`), and the evaluation of a regular expression
+//! literal ([`REGEXP_REFUSAL`]): the literal is lexed to its end, its pattern is checked at parse
+//! by ParsePattern of `swell-regexp` (an error of the pattern is an early error, [`regexp`]), and
+//! it is kept as a node whose evaluation still throws a `SyntaxError`
+//! (`sec-literals-regular-expression-literals`).
 //!
 //! The parser's depth is bounded by [`ParseOptions::max_nesting`], the host's `parser_nesting`
 //! (`docs/design/host-interface.md`), and the Rust stack a parse takes by
@@ -31,7 +33,8 @@
 //! their children by index, so dropping it does not recurse.
 //!
 //! Modules: [`error`], `token` and `lexer` (clause 12), [`ast`], `parser` (clauses 13 to 15),
-//! `early` (the early errors), `scope` (directives, strictness, declared and referenced names)
+//! `early` (the early errors) with [`regexp`] (the budget of the pattern of a literal), `scope`
+//! (directives, strictness, declared and referenced names)
 //! and [`ledger`], the one trait every growth of the frontend is charged through before it is
 //! made (`docs/design/engine.md`, decision 4, "Memory budget"). Each entry has a charged form
 //! ([`parse_script_with`], [`parse_eval_with`], [`parse_dynamic_function_with`]) that takes a
@@ -48,6 +51,7 @@ pub mod error;
 pub mod ledger;
 mod lexer;
 mod parser;
+pub mod regexp;
 mod scope;
 mod token;
 
@@ -156,7 +160,7 @@ pub fn parse_script_with(
 ) -> Result<Script, Failure> {
     let meter = Meter::new(ledger);
     let parsed = parser::parse(source, options.max_nesting, &meter);
-    analysed(parsed, &meter)
+    analysed(parsed, options.max_nesting, &meter)
 }
 
 /// Parses `source` as the eval code of PerformEval (`#sec-performeval`, steps 9 to 11):
@@ -189,7 +193,7 @@ pub fn parse_eval_with(
 ) -> Result<Script, Failure> {
     let meter = Meter::new(ledger);
     let parsed = parser::parse_eval(source, options.max_nesting, strict_caller, &meter);
-    analysed(parsed, &meter)
+    analysed(parsed, options.max_nesting, &meter)
 }
 
 /// Parses the parts of CreateDynamicFunction (`#sec-createdynamicfunction`) for kind `normal`
@@ -226,17 +230,18 @@ pub fn parse_dynamic_function_with(
 ) -> Result<Script, Failure> {
     let meter = Meter::new(ledger);
     let parsed = parser::parse_dynamic_function(parameters, body, options.max_nesting, &meter);
-    analysed(parsed, &meter)
+    analysed(parsed, options.max_nesting, &meter)
 }
 
 /// The early errors and the scope analysis of what a parse produced. A stop of the meter wins
 /// over every other answer; on errors or a stop everything the meter holds is credited.
 fn analysed(
     parsed: Result<parser::Parsed, SyntaxError>,
+    max_nesting: u32,
     meter: &Meter<'_>,
 ) -> Result<Script, Failure> {
     let answer = match parsed {
-        Ok(parsed) => analyse_parsed(parsed, meter),
+        Ok(parsed) => analyse_parsed(parsed, max_nesting, meter),
         Err(error) => Err(Failure::Errors(vec![error])),
     };
     let answer = match (answer, meter.stopped()) {
@@ -255,9 +260,13 @@ fn analysed(
     }
 }
 
-fn analyse_parsed(parsed: parser::Parsed, meter: &Meter<'_>) -> Result<Script, Failure> {
+fn analyse_parsed(
+    parsed: parser::Parsed,
+    max_nesting: u32,
+    meter: &Meter<'_>,
+) -> Result<Script, Failure> {
     let mut ast = parsed.ast;
-    let errors = early::check(&ast, &parsed.body, parsed.strict, meter);
+    let errors = early::check(&ast, &parsed.body, parsed.strict, max_nesting, meter);
     if !errors.is_empty() {
         return Err(Failure::Errors(errors));
     }
