@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "swell"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "swell-compiler",
  "swell-num",
@@ -14,7 +14,7 @@ dependencies = [
 
 [[package]]
 name = "swell-compiler"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "swell-num",
  "swell-syntax",
@@ -22,18 +22,18 @@ dependencies = [
 
 [[package]]
 name = "swell-num"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "swell-syntax"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "swell-unicode",
 ]
 
 [[package]]
 name = "swell-test262"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "swell",
  "swell-syntax",
@@ -41,8 +41,8 @@ dependencies = [
 
 [[package]]
 name = "swell-unicode"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "swell-unicode-gen"
-version = "0.4.0"
+version = "0.5.0"

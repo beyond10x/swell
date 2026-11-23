@@ -1,4 +1,4 @@
-# swell 0.4.0
+# swell 0.5.0
 ALL pub const ALL: [ErrorKind; 7] = [ErrorKind::Error, ErrorKind::EvalError, ErrorKind::RangeError, ErrorKind::ReferenceError, ErrorKind::SyntaxError, ErrorKind::TypeError, ErrorKind::UriError]
 Abrupt #[derive(Clone, Copy, Debug, PartialEq)] pub enum Abrupt
 Abrupt::Terminated Terminated(Termination)
@@ -280,6 +280,10 @@ HostError::StaleHandle StaleHandle
 HostError::WrongKind WrongKind { expected: ValueKind }
 HostFn pub type HostFn<H> = fn(cx: &mut Cx<'_, H>, call: HostCall<'_>) -> Completion<Value>
 HostIntrinsic #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub enum HostIntrinsic
+HostIntrinsic::ArrayPrototypeEntries ArrayPrototypeEntries
+HostIntrinsic::ArrayPrototypeForEach ArrayPrototypeForEach
+HostIntrinsic::ArrayPrototypeKeys ArrayPrototypeKeys
+HostIntrinsic::ArrayPrototypeValues ArrayPrototypeValues
 HostIntrinsic::ErrorPrototype ErrorPrototype
 HostIntrinsic::FunctionPrototype FunctionPrototype
 HostIntrinsic::ObjectPrototype ObjectPrototype
@@ -399,6 +403,7 @@ ValueKind::Object Object
 ValueKind::Promise Promise
 ValueKind::String String
 WellKnownSymbol #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] #[non_exhaustive] pub enum WellKnownSymbol
+WellKnownSymbol::Iterator Iterator
 WellKnownSymbol::ToStringTag ToStringTag
 WellKnownSymbol::Unscopables Unscopables
 attributes pub fn attributes(&self) -> &[ImportAttribute]
