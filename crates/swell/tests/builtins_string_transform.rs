@@ -7,10 +7,14 @@
 //! `#sec-string.prototype.touppercase`, `#sec-string.prototype.tolocalelowercase`,
 //! `#sec-string.prototype.tolocaleuppercase`) and the trims (`#sec-string.prototype.trim`,
 //! `#sec-string.prototype.trimend`, `#sec-string.prototype.trimstart`) with TrimString
-//! (`#sec-trimstring`). Before slice 5 the case methods and `localeCompare` refuse a String with a
-//! code unit of 0x80 or above (`docs/design/engine.md`, section 12, "A part before its slice";
-//! `docs/design/host-interface.md`, section 13, "A refusal raised by a builtin method", `HOST-165`).
-//! A String made longer than `string_length` is a `RangeError` (`HOST-21`).
+//! (`#sec-trimstring`), and `normalize` (`#sec-string.prototype.normalize`). The case methods
+//! map every code point by the case tables of `swell-unicode`
+//! (`story:case-mapping-tables-and-string-case-methods`); `normalize` makes the four forms of
+//! UAX #15 by its normalization tables, and `localeCompare` orders every String by the code
+//! units of its NFC form (`story:normalization-tables-normalize-and-locale-compare`;
+//! `docs/design/engine.md`, decision 5, "The order `localeCompare` gives"): no method of the
+//! group refuses an input (`HOST-165`). A String made longer than `string_length` is a
+//! `RangeError` (`HOST-21`).
 //!
 //! The scripts call no builtin another story of the wave delivers: a code unit is written as a
 //! `\u` escape in a literal, a result is compared by `===` with a literal and by `length`, and a
@@ -20,7 +24,7 @@
 use crate::support;
 
 use support::host::{agent_with, get_object, global, key, limits, object, realm, stack_with_room};
-use support::script::{Outcome, eval, eval_text, run, run_both};
+use support::script::{Outcome, describe, eval, eval_text, parse, run, run_both};
 use support::stack::{
     BUILTINS_REENTRY, is_range_error_of, on_bounded_stack, reach_through, stack_limits, test_path,
 };
@@ -422,81 +426,177 @@ fn case_methods_map_the_26_letters_and_keep_every_other_ascii_unit() {
     assert_eq!(agent.refusals(), 0);
 }
 
-/// The message of the refusal of the case methods (`host-interface.md`, section 13).
-const CASE_REFUSAL: &str = "case mapping outside ASCII is not supported before slice 5";
+/// The four case methods outside ASCII (`#sec-string.prototype.tolowercase`,
+/// `#sec-string.prototype.touppercase`): the String read as code points (StringToCodePoints,
+/// `#sec-stringtocodepoints`), each mapped by the full mappings of `SpecialCasing.txt` that need
+/// no language, else by `UnicodeData.txt`; U+03A3 lowercased to U+03C2 where `Final_Sigma`
+/// holds (Unicode chapter 3, table 3-17: a cased letter before it after any case-ignorable
+/// code points, and no cased letter after it after any case-ignorable ones), else to U+03C3; a
+/// supplementary-plane letter mapped as one code point; a lone surrogate kept. The locale
+/// methods answer the same.
+#[test]
+fn case_methods_map_outside_ascii() {
+    all_true(&[
+        // U+0130 to i and U+0307; U+00DF to SS; the ligature U+FB03 to FFI.
+        "\"\\u0130\".toLowerCase() === \"i\\u0307\" && \"\\u0130\".toLowerCase().length === 2 &&\n\
+         \"\\u00df\".toUpperCase() === \"SS\" && \"\\u00df\".toLowerCase() === \"\\u00df\" &&\n\
+         \"\\ufb03\".toUpperCase() === \"FFI\" && \"\\u0390\".toUpperCase() === \"\\u0399\\u0308\\u0301\" &&\n\
+         \"\\u00e9\\u00c9\".toUpperCase() === \"\\u00c9\\u00c9\" && \"\\u00e9\\u00c9\".toLowerCase() === \"\\u00e9\\u00e9\"",
+        // Final_Sigma.
+        "\"\\u0391\\u03a3\".toLowerCase() === \"\\u03b1\\u03c2\" && \"\\u03a3\".toLowerCase() === \"\\u03c3\" &&\n\
+         \"\\u0391\\u03a3\\u0391\".toLowerCase() === \"\\u03b1\\u03c3\\u03b1\" &&\n\
+         \"\\u0391.\\u03a3\".toLowerCase() === \"\\u03b1.\\u03c2\" &&\n\
+         \"\\u0391\\u03a3.\\u0391\".toLowerCase() === \"\\u03b1\\u03c3.\\u03b1\" &&\n\
+         \"\\u0391\\u03a3\\u180e\".toLowerCase() === \"\\u03b1\\u03c2\\u180e\" &&\n\
+         \"\\u0345\\u03a3\".toLowerCase() === \"\\u0345\\u03c3\" &&\n\
+         \"\\u0391\\u0345\\u03a3\".toLowerCase() === \"\\u03b1\\u0345\\u03c2\" &&\n\
+         \"\\ud835\\udca2\\u03a3\".toLowerCase() === \"\\ud835\\udca2\\u03c2\" &&\n\
+         \"\\u0391\\u03a3\\ud835\\udca2\".toLowerCase() === \"\\u03b1\\u03c3\\ud835\\udca2\" &&\n\
+         \"\\u0391\\u03a3 \\u03a3\".toLowerCase() === \"\\u03b1\\u03c2 \\u03c3\" &&\n\
+         \"\\u0391\\u03a3\".toUpperCase() === \"\\u0391\\u03a3\" && \"\\u03c2\".toUpperCase() === \"\\u03a3\"",
+        // A supplementary-plane letter, and lone surrogates of both kinds.
+        "\"\\ud801\\udc00\".toLowerCase() === \"\\ud801\\udc28\" &&\n\
+         \"\\ud801\\udc28\".toUpperCase() === \"\\ud801\\udc00\" &&\n\
+         \"\\ud800a\\udc00b\\ud800\".toUpperCase() === \"\\ud800A\\udc00B\\ud800\" &&\n\
+         \"\\udc00\\ud801\".toLowerCase() === \"\\udc00\\ud801\" &&\n\
+         \"\\ud801\\udc00\".toLowerCase().length === 2",
+        // The locale methods, whose arguments have no meaning.
+        "\"\\u0130\".toLocaleLowerCase() === \"i\\u0307\" && \"\\u00df\".toLocaleUpperCase() === \"SS\" &&\n\
+         \"\\u0391\\u03a3\".toLocaleLowerCase(\"el\") === \"\\u03b1\\u03c2\" &&\n\
+         \"I\".toLocaleLowerCase(\"tr\") === \"i\" && \"i\".toLocaleUpperCase(\"tr\") === \"I\"",
+    ]);
+}
 
-/// The message of the refusal of `localeCompare`.
-const COMPARE_REFUSAL: &str = "comparison outside ASCII is not supported before slice 5";
+/// A case method whose result would be longer than `string_length` throws a `RangeError` of
+/// the realm (`HOST-21`): with `string_length` 20, `"ß".repeat(11)` maps to 22 code units in
+/// upper case and `"İ".repeat(11)` to 22 in lower case; 20 units are made.
+#[test]
+fn a_case_method_past_string_length_throws_a_range_error() {
+    let mut limits = limits();
+    limits.string_length = 20;
+    assert_eq!(
+        run(
+            limits,
+            "var r = [];\n\
+             try { \"\\u00df\".repeat(11).toUpperCase(); } catch (e) { r.push(Object.getPrototypeOf(e) === RangeError.prototype); }\n\
+             try { \"\\u0130\".repeat(11).toLowerCase(); } catch (e) { r.push(e instanceof RangeError); }\n\
+             try { \"\\u00df\".repeat(11).toLocaleUpperCase(); } catch (e) { r.push(e instanceof RangeError); }\n\
+             try { \"\\u0130\".repeat(11).toLocaleLowerCase(); } catch (e) { r.push(e instanceof RangeError); }\n\
+             r.join() === \"true,true,true,true\" && \"\\u00df\".repeat(10).toUpperCase().length === 20 &&\n\
+               \"\\u00df\".repeat(20).toLowerCase().length === 20"
+        ),
+        yes()
+    );
+}
 
-/// `HOST-165`: on a new agent, each of the four case methods on `"é"` and `localeCompare` with
-/// `"é"` as the this value and as `that` throws a `SyntaxError` the script catches, with the
-/// exact message, and `refusals()` moves by 1 each time; the prototype of the error is
-/// `%SyntaxError.prototype%` of the method's realm, also when the method of another realm is
-/// called; `swell_syntax::message_kind` reads the message as a refusal of slice 5; an uncaught
-/// refusal is counted too; the ASCII calls, a code unit of 0x7F, and a `toString` that throws
-/// (whose value is thrown instead) leave the count unchanged.
+/// A case method charges a step per code unit it reads and a step per code unit it writes:
+/// `ß` is read as one unit and written as two, a supplementary-plane letter as two and two;
+/// the step budget ends a case method that cannot pay them.
+#[test]
+fn a_case_method_charges_each_code_unit() {
+    // The extra steps of `n` = 2,000 over `n` = 1,000, the repeat's copy among them.
+    let extra = |template: &str| {
+        steps_of(&template.replace("N", "2000")) - steps_of(&template.replace("N", "1000"))
+    };
+    // Copy 1 unit, read 1, write 2.
+    assert_eq!(extra("\"\\u00df\".repeat(N).toUpperCase();"), 4_000);
+    assert_eq!(extra("\"\\u0130\".repeat(N).toLocaleLowerCase();"), 4_000);
+    // Copy 1, read 1, write 1.
+    assert_eq!(extra("\"\\u00e9\".repeat(N).toUpperCase();"), 3_000);
+    // Copy 2, read 2, write 2: a surrogate pair, and Final_Sigma.
+    assert_eq!(extra("\"\\ud801\\udc00\".repeat(N).toLowerCase();"), 6_000);
+    assert_eq!(extra("\"\\u0391\\u03a3\".repeat(N).toLowerCase();"), 6_000);
+    // With 1,000 steps: 150 + 150 + 300 are paid, 400 + 400 + 800 are not.
+    let mut limits = limits();
+    limits.steps_per_entry = 1_000;
+    let (mut agent, realm) = agent_and_realm(limits);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "\"\\u00df\".repeat(150).toUpperCase().length;"
+        ),
+        Outcome::Normal("300".to_string())
+    );
+    for method in ["toUpperCase", "toLocaleUpperCase"] {
+        assert_eq!(
+            eval_text(
+                &mut agent,
+                &realm,
+                &format!("\"\\u00df\".repeat(400).{method}();")
+            ),
+            Outcome::Terminated(Termination::StepBudget),
+            "{method}"
+        );
+        assert!(agent.last_entry_steps().unwrap() <= 1_000);
+    }
+}
+
+/// `HOST-165` as slice 5 delivers it: on a new agent, each of the four case methods on `"é"`
+/// answers the standard's String (`"é"` or `"É"`) and `refusals()` stays unchanged, as for a
+/// code unit of 0x80, a surrogate pair, a `toString` that answers U+00FF, an uncaught call and
+/// the method of another realm; `localeCompare` with `"é"` as `that` and as the this value
+/// answers -1 and 1 (`docs/design/engine.md`, decision 5, "The order `localeCompare` gives":
+/// 0x61 before 0xE9), as for a `toString` that answers U+0100 and the method of another realm,
+/// and the count stays unchanged; the ASCII calls, a code unit of 0x7F, and a `toString` that
+/// throws (whose value is thrown) leave it unchanged too.
 #[test]
 fn host_165_case_methods_and_locale_compare_refuse_a_unit_outside_ascii() {
     let (mut agent, realm) = agent_and_realm(limits());
     let other_realm = support::host::realm(&mut agent);
     assert_eq!(agent.refusals(), 0);
-    let mut count = 0;
-    let mut refused = |agent: &mut Agent<_>, source: &str, expected: Outcome| {
-        assert_eq!(eval_text(agent, &realm, source), expected, "{source}");
-        count += 1;
-        assert_eq!(agent.refusals(), count, "{source}");
-    };
-    for method in [
-        "toLowerCase",
-        "toUpperCase",
-        "toLocaleLowerCase",
-        "toLocaleUpperCase",
+    // The case methods answer, and the count stays.
+    for (method, mapped) in [
+        ("toLowerCase", "é"),
+        ("toUpperCase", "É"),
+        ("toLocaleLowerCase", "é"),
+        ("toLocaleUpperCase", "É"),
     ] {
-        refused(
-            &mut agent,
-            &format!(
-                "try {{ \"é\".{method}(); false }} catch (e) {{ e instanceof SyntaxError && e.message === \"{CASE_REFUSAL}\" }}"
-            ),
-            yes(),
-        );
+        let source = format!("\"é\".{method}() === \"{mapped}\"");
+        assert_eq!(eval_text(&mut agent, &realm, &source), yes(), "{source}");
+        assert_eq!(agent.refusals(), 0, "{source}");
     }
-    for call in ["\"a\".localeCompare(\"é\")", "\"é\".localeCompare(\"a\")"] {
-        refused(
-            &mut agent,
-            &format!(
-                "try {{ {call}; false }} catch (e) {{ e instanceof SyntaxError && e.message === \"{COMPARE_REFUSAL}\" }}"
-            ),
-            yes(),
-        );
-    }
-    // The prototype of the error, the message with nothing after it, and its kind.
-    let case_message = Outcome::Normal(format!("\"{CASE_REFUSAL}\""));
-    for source in [
-        "try { \"\\u0080\".toLowerCase(); } catch (e) { Object.getPrototypeOf(e) === SyntaxError.prototype && e.message; }",
-        "try { \"a\\ud83d\\ude00\".toUpperCase(); } catch (e) { Object.getPrototypeOf(e) === SyntaxError.prototype && e.message; }",
-        "try { String.prototype.toLocaleUpperCase.call({ toString: function () { return \"\\u00ff\"; } }); } catch (e) { e.message; }",
+    for (source, expected) in [
+        ("\"\\u0080\".toLowerCase();", "\"\u{80}\""),
+        ("\"a\\ud83d\\ude00\".toUpperCase();", "\"A\u{1F600}\""),
+        (
+            "String.prototype.toLocaleUpperCase.call({ toString: function () { return \"\\u00ff\"; } });",
+            "\"\u{178}\"",
+        ),
+        ("\"\\u00c9\".toLocaleLowerCase();", "\"é\""),
     ] {
-        refused(&mut agent, source, case_message.clone());
-    }
-    refused(
-        &mut agent,
-        "try { \"a\".localeCompare({ toString: function () { return \"\\u0100\"; } }); } catch (e) { e.message; }",
-        Outcome::Normal(format!("\"{COMPARE_REFUSAL}\"")),
-    );
-    for message in [CASE_REFUSAL, COMPARE_REFUSAL] {
         assert_eq!(
-            swell_syntax::message_kind(message),
-            swell_syntax::MessageKind::Refusal { slice: 5 },
-            "{message}"
+            eval_text(&mut agent, &realm, source),
+            Outcome::Normal(expected.to_string()),
+            "{source}"
+        );
+        assert_eq!(agent.refusals(), 0, "{source}");
+    }
+    let answers = |agent: &mut Agent<_>, source: &str, expected: Outcome| {
+        assert_eq!(eval_text(agent, &realm, source), expected, "{source}");
+        assert_eq!(agent.refusals(), 0, "{source}");
+    };
+    // `localeCompare` answers a Number, and the count stays.
+    for (call, answer) in [
+        ("\"a\".localeCompare(\"é\")", "-1"),
+        ("\"é\".localeCompare(\"a\")", "1"),
+        (
+            "\"a\".localeCompare({ toString: function () { return \"\\u0100\"; } })",
+            "-1",
+        ),
+    ] {
+        answers(
+            &mut agent,
+            &format!("{call};"),
+            Outcome::Normal(answer.to_string()),
+        );
+        answers(
+            &mut agent,
+            &format!("try {{ typeof {call} === \"number\" }} catch (e) {{ false }}"),
+            yes(),
         );
     }
-    // Uncaught: the run throws the SyntaxError, counted all the same.
-    refused(
-        &mut agent,
-        "\"\\u00e9\".toLocaleLowerCase();",
-        Outcome::Throw("SyntaxError".to_string()),
-    );
-    // The methods of another realm throw an error of their own realm.
+    // The methods of another realm: `localeCompare` and `toLowerCase` answer.
     let global_root = global(&mut agent, &realm);
     let other_global_root = global(&mut agent, &other_realm);
     agent
@@ -518,31 +618,26 @@ fn host_165_case_methods_and_locale_compare_refuse_a_unit_outside_ascii() {
             }
         })
         .unwrap();
-    for call in [
-        "otherStringPrototype.toLowerCase.call(\"\\u00e9\")",
-        "otherStringPrototype.localeCompare.call(\"a\", \"\\u00e9\")",
-    ] {
-        refused(
-            &mut agent,
-            &format!(
-                "try {{ {call}; false }} catch (e) {{\n\
-                   Object.getPrototypeOf(e) === OtherSyntaxError.prototype &&\n\
-                   OtherSyntaxError.prototype !== SyntaxError.prototype && !(e instanceof SyntaxError)\n\
-                 }}"
-            ),
-            yes(),
-        );
-    }
-    // Not refused: the ASCII calls of the requirement, a unit of 0x7F, and a ToString that
-    // throws before the refusal would be reached.
+    answers(
+        &mut agent,
+        "OtherSyntaxError.prototype !== SyntaxError.prototype &&\n\
+         otherStringPrototype.localeCompare.call(\"a\", \"\\u00e9\") === -1 &&\n\
+         otherStringPrototype.localeCompare.call(\"\\u00e9\", \"a\") === 1",
+        yes(),
+    );
+    answers(
+        &mut agent,
+        "otherStringPrototype.toUpperCase.call(\"\\u00e9\") === \"\\u00c9\"",
+        yes(),
+    );
+    // The ASCII calls of the requirement, a unit of 0x7F, and a ToString that throws.
     for source in [
         "\"AbC\".toLowerCase() === \"abc\" && \"AbC\".toUpperCase() === \"ABC\" && \"a\".localeCompare(\"b\") < 0",
         "\"\\u007f\".toLowerCase() === \"\\u007f\" && \"\\u007f\".localeCompare(\"\\u007f\") === 0",
         "try { String.prototype.toLowerCase.call({ toString: function () { throw 1; } }); } catch (e) { e === 1 }",
         "try { \"\\u00e9\".localeCompare({ toString: function () { throw 1; } }); } catch (e) { e === 1 }",
     ] {
-        assert_eq!(eval_text(&mut agent, &realm, source), yes(), "{source}");
-        assert_eq!(agent.refusals(), count, "{source}");
+        answers(&mut agent, source, yes());
     }
 }
 
@@ -567,7 +662,9 @@ fn locale_compare_orders_ascii_strings_by_code_unit() {
 /// Steps per code unit: `repeat` and `padStart` charge a step per code unit they copy; the
 /// trims, the case methods and `localeCompare` a step per code unit they read, every unit of
 /// each String; the trims and the case methods a step per code unit they copy into the
-/// result as well, and a trim that removes nothing copies nothing.
+/// result as well, and a trim that removes nothing copies nothing; `localeCompare` a step per
+/// code unit it writes into the decomposition and the composed form of each String
+/// (`docs/design/engine.md`, decision 5).
 #[test]
 fn repeat_and_trim_charge_a_step_per_code_unit() {
     // The extra steps of `n` = 2,000 over `n` = 1,000.
@@ -585,8 +682,9 @@ fn repeat_and_trim_charge_a_step_per_code_unit() {
     assert_eq!(extra("\"x \".repeat(N).trimEnd();"), 6_000);
     // Read and copy each unit.
     assert_eq!(extra("\"Ab\".repeat(N).toLowerCase();"), 6_000);
-    // Read the units of both Strings.
-    assert_eq!(extra("var s = \"a\".repeat(N); s.localeCompare(s);"), 3_000);
+    // Read the units of both Strings, and write each into its decomposition and its composed
+    // form: 1,000 copied, 2,000 read, 2,000 decomposed, 2,000 composed.
+    assert_eq!(extra("var s = \"a\".repeat(N); s.localeCompare(s);"), 7_000);
 }
 
 /// A `repeat` is ended by the step budget: with `steps_per_entry` 1,000, `"x".repeat(900)` is
@@ -665,4 +763,305 @@ fn range_errors_are_of_the_realm() {
         ),
         yes()
     );
+}
+
+/// `#sec-string.prototype.normalize`: a method of length 0; the String in the form ValidateStringOption
+/// (`#sec-validatestringoption`) gives, `"NFC"` when `form` is undefined, else ToString of
+/// `form`, which must be `"NFC"`, `"NFD"`, `"NFKC"` or `"NFKD"` (a `RangeError` of the realm
+/// for any other String); ToString of the this value before ToString of `form`, and an error of
+/// the first thrown before the second runs.
+#[test]
+fn normalize_answers_the_four_forms_and_throws_a_range_error_for_another() {
+    check_method("normalize", 0);
+    all_true(&[
+        // UAX #15, figure 6: the four forms of U+1E9B U+0323.
+        "var s = \"\\u1e9b\\u0323\";\n\
+         s.normalize() === \"\\u1e9b\\u0323\" && s.normalize(\"NFC\") === \"\\u1e9b\\u0323\" &&\n\
+         s.normalize(undefined) === \"\\u1e9b\\u0323\" && s.normalize(\"NFD\") === \"\\u017f\\u0323\\u0307\" &&\n\
+         s.normalize(\"NFKC\") === \"\\u1e69\" && s.normalize(\"NFKD\") === \"s\\u0323\\u0307\"",
+        // Composed and decomposed Latin, Hangul, a singleton, an exclusion, a ligature.
+        "\"\\u00c5\".normalize(\"NFD\") === \"A\\u030a\" && \"A\\u030a\".normalize() === \"\\u00c5\" &&\n\
+         \"\\u212b\".normalize() === \"\\u00c5\" && \"\\uac01\".normalize(\"NFD\") === \"\\u1100\\u1161\\u11a8\" &&\n\
+         \"\\u1100\\u1161\\u11a8\".normalize() === \"\\uac01\" && \"\\u0958\".normalize() === \"\\u0915\\u093c\" &&\n\
+         \"\\ufb01\".normalize() === \"\\ufb01\" && \"\\ufb01\".normalize(\"NFKD\") === \"fi\" &&\n\
+         \"\\ufb01\".normalize(\"NFKC\") === \"fi\" && \"abc\".normalize(\"NFKD\") === \"abc\" && \"\".normalize() === \"\"",
+        // A supplementary-plane composite that is excluded, and lone surrogates in place.
+        "\"\\ud834\\udd5e\".normalize() === \"\\ud834\\udd57\\ud834\\udd65\" &&\n\
+         \"\\ud800\\u0301\\udc00\".normalize(\"NFD\") === \"\\ud800\\u0301\\udc00\" &&\n\
+         \"e\\ud800\\u0301\".normalize() === \"e\\ud800\\u0301\" && \"\\ud800e\\u0301\".normalize() === \"\\ud800\\u00e9\"",
+        // ToString of the this value and of form, in that order; a form of another String.
+        "var log = \"\";\n\
+         var r = String.prototype.normalize.call(\n\
+           { toString: function () { log += \"this\"; return \"\\u00e9\"; } },\n\
+           { toString: function () { log += \",form\"; return \"NFD\"; } });\n\
+         log === \"this,form\" && r === \"e\\u0301\" && String.prototype.normalize.call(12) === \"12\"",
+        "var log = \"\";\n\
+         try {\n\
+           String.prototype.normalize.call({ toString: function () { throw 7; } },\n\
+             { toString: function () { log += \"form\"; return \"NFC\"; } });\n\
+         } catch (e) { log += e; }\n\
+         log === \"7\"",
+        "var refused = function (form) {\n\
+           try { \"a\".normalize(form); return false; }\n\
+           catch (e) { return Object.getPrototypeOf(e) === RangeError.prototype; }\n\
+         };\n\
+         refused(\"nfc\") && refused(\"NFC \") && refused(\"\") && refused(\"NFX\") && refused(null) &&\n\
+         refused(\"NFKCD\") && refused(\"N\") && refused(1) && !refused(\"NFKD\") && !refused(undefined)",
+    ]);
+}
+
+/// `#sec-string.prototype.localecompare`, which must answer +0 for canonically equivalent
+/// Strings: the five pairs of the clause's Note 2, in both orders, `"\u00e9"` and `"e\u0301"`,
+/// the pairs of `15.5.4.9_CE.js` of test262 in its spirit (marks out of canonical order, a
+/// Hangul syllable and its jamo), and a String with itself, all answer +0
+/// (`docs/design/engine.md`, decision 5); compatibility equivalents stay apart: `"\ufb01"` and
+/// `"fi"` do not.
+#[test]
+fn locale_compare_answers_zero_exactly_for_canonically_equivalent_strings() {
+    let pairs = [
+        ("\\u212b", "A\\u030a"),
+        ("\\u2126", "\\u03a9"),
+        ("\\u1e69", "s\\u0307\\u0323"),
+        ("\\u1e0b\\u0323", "\\u1e0d\\u0307"),
+        ("\\u1100\\u1161", "\\uac00"),
+        ("\\u00e9", "e\\u0301"),
+        ("a\\u0308\\u0323", "a\\u0323\\u0308"),
+        ("\\u1111\\u1171\\u11b6", "\\ud4db"),
+        ("u\\u031b\\u0323", "\\u1ef1"),
+        ("\\ud834\\udd5e", "\\ud834\\udd57\\ud834\\udd65"),
+    ];
+    for (a, b) in pairs {
+        all_true(&[&format!(
+            "1 / \"{a}\".localeCompare(\"{b}\") === Infinity && 1 / \"{b}\".localeCompare(\"{a}\") === Infinity &&\n\
+             1 / \"{a}\".localeCompare(\"{a}\") === Infinity && 1 / \"{b}\".localeCompare(\"{b}\") === Infinity"
+        )]);
+    }
+    all_true(&[
+        "\"\\ufb01\".localeCompare(\"fi\") !== 0 && \"fi\".localeCompare(\"\\ufb01\") !== 0 &&\n\
+         \"\\u2460\".localeCompare(\"1\") !== 0 && \"\\u00e9\".localeCompare(\"e\") !== 0",
+    ]);
+}
+
+/// `#sec-string.prototype.localecompare` by decision 5: -1, +0 or 1 as the NFC form of the this
+/// value is ordered before, equal to or after that of `that` by code units (not code points: a
+/// supplementary code point, whose first unit is below 0xDC00, comes before U+FFFF), a String
+/// before each longer String that starts with it, and the sign flips when the two are swapped.
+#[test]
+fn locale_compare_orders_the_nfc_forms_by_code_units() {
+    all_true(&[
+        "\"a\".localeCompare(\"B\") === 1 && \"B\".localeCompare(\"a\") === -1 &&\n\
+         \"\\u00e9\".localeCompare(\"f\") === 1 && \"f\".localeCompare(\"\\u00e9\") === -1",
+        "\"e\\u0301\".localeCompare(\"\\u00e9a\") === -1 && \"\\u00e9a\".localeCompare(\"e\\u0301\") === 1 &&\n\
+         \"\\u00e9\".localeCompare(\"e\\u0301\\u0301\") === -1 && \"e\\u0301\\u0301\".localeCompare(\"\\u00e9\") === 1",
+        "\"\\ud800\\udc00\".localeCompare(\"\\uffff\") === -1 && \"\\uffff\".localeCompare(\"\\ud800\\udc00\") === 1 &&\n\
+         \"\\u00e9\".localeCompare(\"\\u0100\") === -1 && \"\\u0100\".localeCompare(\"\\u00e9\") === 1",
+        "\"A\\u030a\".localeCompare(\"\\u00c5b\") === -1 && \"\\u00c5b\".localeCompare(\"A\\u030a\") === 1 &&\n\
+         \"\".localeCompare(\"\\u0301\") === -1 && \"\\u0301\".localeCompare(\"\") === 1",
+    ]);
+}
+
+/// A lone surrogate is a code point with no decomposition and class 0 (decision 5): it stays in
+/// place in the NFC form, a mark after it stays after it and is not reordered across it, and a
+/// starter after it composes with the marks that follow.
+#[test]
+fn locale_compare_keeps_a_lone_surrogate_in_place() {
+    all_true(&[
+        "1 / \"\\ud800\".localeCompare(\"\\ud800\") === Infinity && 1 / \"\\udc00\\u0301\".localeCompare(\"\\udc00\\u0301\") === Infinity &&\n\
+         1 / \"\\ud800e\\u0301\".localeCompare(\"\\ud800\\u00e9\") === Infinity",
+        "\"e\\ud800\\u0301\".localeCompare(\"\\u00e9\\ud800\") === -1 && \"\\u00e9\\ud800\".localeCompare(\"e\\ud800\\u0301\") === 1 &&\n\
+         \"\\u0301\\ud800\\u0316\".localeCompare(\"\\u0316\\ud800\\u0301\") === -1 &&\n\
+         \"\\udc00\".localeCompare(\"\\ud800\") === 1 && \"\\ud800\".localeCompare(\"\\udc00\") === -1 &&\n\
+         \"\\ud800\".localeCompare(\"\\ud800\\udc00\") === -1",
+    ]);
+}
+
+/// The steps of `localeCompare` (decision 5): a step per code unit of each String read, and a
+/// step per code unit written into the buffers, the full canonical decomposition and the
+/// composed form of each String; the comparison costs nothing more. `"\u00e9"` and `"e\u0301"`:
+/// 1 + 2 read, 2 + 2 decomposed, 1 + 1 composed, 9 in all over `"".localeCompare("")`; U+1D15E,
+/// excluded from composition, is read as 2 units and written as 4 and 4; `"Ab"` with itself 4,
+/// 4 and 4. With `n` = 2,000 over 1,000 copies of each, the repeats copy 1,000 and 2,000 more.
+#[test]
+fn locale_compare_charges_a_step_per_unit_read_and_written() {
+    let base = steps_of("\"\".localeCompare(\"\");");
+    for (source, steps) in [
+        ("\"\\u00e9\".localeCompare(\"e\\u0301\");", 9),
+        ("\"e\\u0301\".localeCompare(\"\\u00e9\");", 9),
+        ("\"\\ud834\\udd5e\".localeCompare(\"\");", 10),
+        ("\"Ab\".localeCompare(\"Ab\");", 12),
+    ] {
+        assert_eq!(steps_of(source) - base, steps, "{source}");
+    }
+    let extra = |template: &str| {
+        steps_of(&template.replace("N", "2000")) - steps_of(&template.replace("N", "1000"))
+    };
+    // Copy 3,000; read 3,000; decompose 4,000; compose 2,000.
+    assert_eq!(
+        extra("var s = \"\\u00e9\".repeat(N), t = \"e\\u0301\".repeat(N); s.localeCompare(t);"),
+        12_000
+    );
+}
+
+/// The bytes the agent holds after a collection, with nothing of the last entry kept.
+fn settled(agent: &mut Agent<support::host::TestHost>) -> u64 {
+    agent.collect().unwrap();
+    agent.heap_bytes().unwrap()
+}
+
+/// The buffers of `localeCompare` are not Strings of the heap; they are charged to the memory
+/// budget before they grow and credited when the method returns, on every way out (decision 5):
+/// after an answer, a throw of ToString of `that`, a stop at the step budget and a stop at the
+/// memory budget, each run three times on Strings of 5,000 and 10,000 code units, the heap holds
+/// what it held before the call, once collected; the script is parsed once, before the first
+/// reading. The budgets: 38,000 steps, which the units read (15,000) and the two forms of the
+/// this value (15,000) fit and the decomposition of `that` (10,000) does not; and the bytes
+/// held before the call plus 40,000, which the decomposition of the this value (10,000 code
+/// points in a room of 16,384, 65,536 bytes) does not fit.
+#[test]
+fn locale_compare_credits_its_buffers_on_every_way_out() {
+    const SETUP: &str = "var a = \"\\u00e9\".repeat(5000), b = \"e\\u0301\".repeat(5000);";
+    let mut measure = support::host::agent().unwrap();
+    let measure_realm = support::host::realm(&mut measure);
+    assert!(matches!(
+        eval(&mut measure, &measure_realm, SETUP),
+        HostOutcome::Normal(_)
+    ));
+    let held = settled(&mut measure);
+    let mut steps = limits();
+    steps.steps_per_entry = 38_000;
+    let mut memory = limits();
+    memory.memory_bytes = held + 40_000;
+    for (limits, source, expected) in [
+        (
+            limits(),
+            "a.localeCompare(b);",
+            Outcome::Normal("0".to_string()),
+        ),
+        (
+            limits(),
+            "a.localeCompare({ toString: function () { throw 1; } });",
+            Outcome::Throw("1".to_string()),
+        ),
+        (
+            steps,
+            "a.localeCompare(b);",
+            Outcome::Terminated(Termination::StepBudget),
+        ),
+        (
+            memory,
+            "a.localeCompare(b);",
+            Outcome::Terminated(Termination::MemoryBudget),
+        ),
+    ] {
+        let (mut agent, realm) = agent_and_realm(limits);
+        assert!(matches!(
+            eval(&mut agent, &realm, SETUP),
+            HostOutcome::Normal(_)
+        ));
+        let script = parse(&mut agent, &realm, source);
+        let before = settled(&mut agent);
+        for run in 0..3 {
+            let outcome = agent.evaluate_script(&script).unwrap();
+            assert_eq!(
+                describe(&mut agent, &realm, outcome),
+                expected,
+                "{source} {run}"
+            );
+            assert_eq!(settled(&mut agent), before, "{source} {run}: {expected:?}");
+        }
+    }
+}
+
+/// The forms of `localeCompare` are not Strings, so `string_length` does not bound them: with
+/// `string_length` 20, a String of 20 code units of U+0344, whose NFC form is 40 code units
+/// (U+0308 U+0301 each), compares as a Number, and `normalize` of it throws the `RangeError`.
+#[test]
+fn locale_compare_past_string_length_answers() {
+    let mut limits = limits();
+    limits.string_length = 20;
+    assert_eq!(
+        run(
+            limits,
+            "var s = \"\\u0344\".repeat(20);\n\
+             var r;\n\
+             try { s.normalize(); r = false; } catch (e) { r = e instanceof RangeError; }\n\
+             r && 1 / s.localeCompare(s) === Infinity && s.localeCompare(\"\\u0308\\u0301\") === 1 &&\n\
+               \"\\u0308\\u0301\".localeCompare(s) === -1 && s.localeCompare(\"\\u0344\") === 1"
+        ),
+        yes()
+    );
+}
+
+/// `normalize` writes its result as a String of the heap, bounded by `string_length`
+/// (`HOST-21`): with `string_length` 20, a form of more than 20 code units is a `RangeError` of
+/// the realm, one of 20 is made; the decomposition it makes on the way is not a String, so the
+/// NFC of 20 units of U+00E9, decomposed to 40, is made.
+#[test]
+fn normalize_past_string_length_throws_a_range_error() {
+    let mut limits = limits();
+    limits.string_length = 20;
+    assert_eq!(
+        run(
+            limits,
+            "var r = [];\n\
+             var refused = function (s, form) {\n\
+               try { s.normalize(form); return false; }\n\
+               catch (e) { return Object.getPrototypeOf(e) === RangeError.prototype; }\n\
+             };\n\
+             r.push(refused(\"\\u0344\".repeat(11), \"NFD\"), refused(\"\\u0344\".repeat(11), \"NFC\"));\n\
+             r.push(refused(\"\\u00e9\".repeat(11), \"NFD\"), refused(\"\\ufdfa\\ufdfa\", \"NFKD\"));\n\
+             r.push(refused(\"\\u00e9\".repeat(20), \"NFC\"), refused(\"\\ufdfa\", \"NFKC\"));\n\
+             r[0] && r[1] && r[2] && r[3] && r[4] === false && r[5] === false &&\n\
+               \"\\u0344\".repeat(10).normalize().length === 20 &&\n\
+               \"\\u00e9\".repeat(20).normalize().length === 20 &&\n\
+               \"\\u00e9\".repeat(10).normalize(\"NFD\").length === 20 && \"\\ufdfa\".normalize(\"NFKD\").length === 18"
+        ),
+        yes()
+    );
+}
+
+/// `normalize` charges as `localeCompare` does, and writes its result through the builder of
+/// Strings: a step per code unit of the String read, a step per code unit written into the
+/// decomposition, and a step per code unit of the result; `form` is compared with the four
+/// names and charges nothing. `"\u00e9"` in NFD: 1, 2 and 2, in NFC 1, 2 and 1; `"e\u0301"` in
+/// NFC: 2, 2 and 1; U+FB01 in NFKD: 1, 2 and 2. With 1,000 steps, the 900 of 150 copies of
+/// `"\u00e9"` in NFD are paid and the 1,200 of 200 are not.
+#[test]
+fn normalize_charges_each_code_unit() {
+    for (source, steps) in [
+        ("\"\\u00e9\".normalize(\"NFD\");", 5),
+        ("\"\\u00e9\".normalize(\"NFC\");", 4),
+        ("\"e\\u0301\".normalize(\"NFC\");", 5),
+        ("\"\\ufb01\".normalize(\"NFKD\");", 5),
+        ("\"\\ufb01\".normalize(\"NFKC\");", 5),
+        ("\"Ab\".normalize(\"NFKC\");", 6),
+    ] {
+        let form = if source.contains("NFK") {
+            "\"NFKD\""
+        } else {
+            "\"NFD\""
+        };
+        let base = steps_of(&format!("\"\".normalize({form});"));
+        assert_eq!(steps_of(source) - base, steps, "{source}");
+    }
+    let mut limits = limits();
+    limits.steps_per_entry = 1_000;
+    let (mut agent, realm) = agent_and_realm(limits);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "\"\\u00e9\".repeat(150).normalize(\"NFD\").length;"
+        ),
+        Outcome::Normal("300".to_string())
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "\"\\u00e9\".repeat(200).normalize(\"NFD\");"
+        ),
+        Outcome::Terminated(Termination::StepBudget)
+    );
+    assert!(agent.last_entry_steps().unwrap() <= 1_000);
 }

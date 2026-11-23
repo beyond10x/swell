@@ -33,12 +33,80 @@ pub(crate) fn head(sources: &[Source]) -> String {
     text
 }
 
-/// The constant `name` of `ranges`, sorted, disjoint inclusive ranges `(first, last)`.
-pub(crate) fn ranges(name: &str, ranges: &[(u32, u32)]) -> String {
-    let mut text = format!("pub(crate) const {name}: &[(u32, u32)] = &[\n");
-    for (first, last) in ranges {
-        text.push_str(&format!("    ({first:#06X}, {last:#06X}),\n"));
+/// The widest array literal rustfmt keeps on one line (its `array_width`, 60 of a line of 100).
+const ARRAY_WIDTH: usize = 60;
+
+/// The widest line rustfmt writes (its `max_width`).
+const MAX_WIDTH: usize = 100;
+
+/// The constant `name` of type `&[<row>]` with `rows`, written as rustfmt writes it: on one
+/// line where the array literal and the line fit its widths, else one row per line.
+fn constant(name: &str, row: &str, rows: &[String]) -> String {
+    let head = format!("pub(crate) const {name}: &[{row}] = &");
+    let array = format!("[{}]", rows.join(", "));
+    let line = format!("{head}{array};\n");
+    if array.len() <= ARRAY_WIDTH && line.trim_end().len() <= MAX_WIDTH {
+        return line;
+    }
+    let mut text = format!("{head}[\n");
+    for row in rows {
+        text.push_str("    ");
+        text.push_str(row);
+        text.push_str(",\n");
     }
     text.push_str("];\n");
     text
+}
+
+/// An error when a key of `keys` is not above the key before it.
+fn ascending(name: &str, keys: impl Iterator<Item = u32>) -> Result<(), String> {
+    let mut previous: Option<u32> = None;
+    for key in keys {
+        if previous.is_some_and(|previous| previous >= key) {
+            return Err(format!(
+                "{name}: the key {key:04X} is not above the key before it"
+            ));
+        }
+        previous = Some(key);
+    }
+    Ok(())
+}
+
+/// The constant `name` of `pairs` `(key, value)`, sorted by key; a key that is not above the
+/// key before it is an error.
+pub(crate) fn pairs(name: &str, pairs: &[(u32, u32)]) -> Result<String, String> {
+    ascending(name, pairs.iter().map(|(key, _)| *key))?;
+    let rows: Vec<String> = pairs
+        .iter()
+        .map(|(key, value)| format!("({key:#06X}, {value:#06X})"))
+        .collect();
+    Ok(constant(name, "(u32, u32)", &rows))
+}
+
+/// The constant `name` of `mappings` `(key, code points)`, sorted by key, each key mapped to one
+/// to three code points; a key that is not above the key before it, or a mapping of no or of
+/// more than three code points, is an error.
+pub(crate) fn mappings(name: &str, mappings: &[(u32, Vec<u32>)]) -> Result<String, String> {
+    ascending(name, mappings.iter().map(|(key, _)| *key))?;
+    let mut rows = Vec::with_capacity(mappings.len());
+    for (key, points) in mappings {
+        if !(1..=3).contains(&points.len()) {
+            return Err(format!(
+                "{name}: {key:04X} maps to {} code points, not one to three",
+                points.len()
+            ));
+        }
+        let points: Vec<String> = points.iter().map(|point| format!("{point:#06X}")).collect();
+        rows.push(format!("({key:#06X}, &[{}])", points.join(", ")));
+    }
+    Ok(constant(name, "(u32, &[u32])", &rows))
+}
+
+/// The constant `name` of `ranges`, sorted, disjoint inclusive ranges `(first, last)`.
+pub(crate) fn ranges(name: &str, ranges: &[(u32, u32)]) -> String {
+    let rows: Vec<String> = ranges
+        .iter()
+        .map(|(first, last)| format!("({first:#06X}, {last:#06X})"))
+        .collect();
+    constant(name, "(u32, u32)", &rows)
 }

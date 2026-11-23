@@ -21,6 +21,15 @@ Every number below comes from the gate, `task check`, on the released commit.
   is a `SyntaxError` of the script at the line and column of the literal, and a pattern
   nested past `parser_nesting` is a `SyntaxError` that names the limit (`HOST-142`).
   Evaluating a literal still waits for the `RegExp` objects of this slice.
+- `toLowerCase`, `toUpperCase`, `toLocaleLowerCase` and `toLocaleUpperCase` map every String:
+  the unconditional mappings of `SpecialCasing.txt`, the simple mappings of `UnicodeData.txt`
+  and Final_Sigma, from five tables generated from the vendored Unicode 17.0.0 data. A case
+  method charges a step per code unit read and per code unit written.
+- `String.prototype.normalize` with the forms NFC, NFD, NFKC and NFKD of Unicode 17.0.0, and
+  `localeCompare` for every String: it orders two Strings by the code units of their NFC
+  forms and answers `+0` for canonically equivalent Strings. `localeCompare` costs three
+  steps per code unit, not one. No method of `String.prototype` refuses a String outside
+  ASCII any more.
 
 ### Changed
 
