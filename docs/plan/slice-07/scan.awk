@@ -14,7 +14,15 @@
 # built-ins/GeneratorFunction/ but its prototype/, or the constructor of a generator function read
 # from its text), yield-star (yield followed by *), methods (a generator method of an object literal:
 # * then a name, a computed name, a string or a number, then "(", after "{" or ","); a case with two or
-# more flags takes the key cross; a case with none takes generators (the first story of the slice).
+# more flags takes the key cross; a case with none takes generators (the first two stories of the slice).
+# The lists of the stories, each sorted (LC_ALL=C sort), read from scan.tsv (path, key, evidence) and meta.tsv:
+#   story-generator-syntax.cases.txt, the key generators whose negative phase (field 4 of meta.tsv) is parse:
+#     LC_ALL=C awk -F'\t' 'NR == FNR { if ($2 == "generators") w[$1] = 1; next } ($1 in w) && $4 == "parse" { print $1 }' docs/plan/slice-07/scan.tsv .cache/inventory/meta.tsv
+#   story-generators.cases.txt, the rest of the key generators:
+#     LC_ALL=C awk -F'\t' 'NR == FNR { if ($4 == "parse") neg[$1] = 1; next } $2 == "generators" && !($1 in neg) { print $1 }' .cache/inventory/meta.tsv docs/plan/slice-07/scan.tsv
+#   one list per other key, LC_ALL=C awk -F'\t' -v k=<key> '$2 == k { print $1 }' docs/plan/slice-07/scan.tsv: yield-star to
+#   story-yield-star.cases.txt, methods to story-generator-methods.cases.txt, function-constructor to
+#   story-generator-function-constructor.cases.txt, cross to close-cross.cases.txt, "later 8" to close-later-8.cases.txt.
 function slurp(f,   s, save) { save = RS; RS = "^$"; s = ""; if ((getline s < f) <= 0) s = ""; close(f); RS = save; return s }
 BEGIN { FS = "\t"; OFS = "\t"
   while ((getline line < meta) > 0) { split(line, m, "\t"); inc[m[1]] = m[6] } }
