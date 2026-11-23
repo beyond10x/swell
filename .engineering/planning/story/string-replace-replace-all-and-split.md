@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:string-replace-replace-all-and-split
 kind: story
-status: active
+status: implemented
 title: 'String.prototype.replace, replaceAll and split: the String paths, the hand-over to @@replace and @@split, and GetSubstitution'
 summary: 89 failing cases of slice 5 (176 runs) on its list; the consumer's 8 calls of split with a String; GetSubstitution with its own tests for the RegExp story; runs beside the crate story and the generator prefactor.
 relations:
@@ -20,10 +20,11 @@ scope:
   path: crates/swell/tests/language/builtin-string-split.js
 - confidence: cited
   path: crates/swell/tests/main.rs
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T02:45:37Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T02:45:37Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T08:12:41Z", actor: "human:operator", revision: 12, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

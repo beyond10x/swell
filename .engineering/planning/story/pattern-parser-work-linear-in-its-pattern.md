@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:pattern-parser-work-linear-in-its-pattern
 kind: story
-status: active
+status: implemented
 title: The work of the pattern parser is linear in the pattern it is charged for
 summary: Every loop of ParsePattern and its early errors was read and none breaks the rule; a test now holds the parse linear over 19 pattern families at two sizes through the polls and charges of a counting budget and a doc-hidden count of the visits of the group-name check, and the design names the one bound that is not linear, the union-find of the duplicate-name check, at most n log n.
 relations:
 - decomposes: epic:slice-05-regexp
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T05:07:46Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T05:07:46Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T08:12:42Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 
 ## Context

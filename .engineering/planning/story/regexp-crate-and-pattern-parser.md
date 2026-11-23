@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:regexp-crate-and-pattern-parser
 kind: story
-status: active
+status: implemented
 title: 'swell-regexp: the crate and the pattern parser, with and without u and in the grammar of Annex B, with the early errors of 22.2.1 and B.1.2'
 summary: Creates swell-regexp (lock, status.json; no gate file names a crate) with ParsePattern, its early errors, the nesting limit counted from zero, no Rust recursion, and the charging trait the rest of the slice uses; lifts none of the consumer's 12 literals by itself.
 relations:
@@ -36,10 +36,11 @@ scope:
   path: crates/regexp/tests/parse.rs
 - confidence: cited
   path: website/data/status.json
-revision: 18
+revision: 19
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T02:45:37Z", actor: "human:operator", revision: 17, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T02:45:37Z", actor: "human:operator", revision: 18, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T08:12:39Z", actor: "human:operator", revision: 19, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

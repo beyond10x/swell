@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:matcher-work-bounded-by-its-steps
 kind: story
-status: active
+status: implemented
 title: The work of the matcher is bounded by the steps it charges
 summary: A try of the search wrote every capture slot of the pattern for one step, and the clearing of a quantified atom's captures and a named backreference scanned every group of their range or name for one step; a try now writes one slot, since a failed try has undone its changes entry by entry, and the clearing and the named backreference charge one step per group before they read a slot.
 relations:
 - decomposes: epic:slice-05-regexp
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T04:45:17Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T04:45:17Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T08:12:42Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 
 ## Context

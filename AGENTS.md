@@ -10,9 +10,9 @@ and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the byteco
 interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
 6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
-(the other 44 need a later slice and say so). 110 of 191 host requirements have a test.
+(the other 44 need a later slice and say so). 113 of 191 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate holds the test262 counts: 16,412 of the 44,812 run cases pass (2026-11-23, release `0.5.0`; 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
+gate holds the test262 counts: 17,775 of the 44,812 run cases pass (2026-11-23, release `0.6.0`; 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
 "Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
@@ -42,8 +42,16 @@ delivery in the block): all 3,898 cases of slice 6 pass in all 7,351 runs
 (`test262-slice 06 3898 7351 0 0 3898 3898 0 0`), and no host requirement is pending for it.
 The slices are not delivered in the order of their numbers: after slice 3 the order is
 6, 5, 7, 10, 4, 9, by what the first consumer needs first (`docs/plan/waves.md`, "The order
-after slice 3"), and it is decided again at each boundary. Next is slice 5, `regexp`
-(`epic:slice-05-regexp`).
+after slice 3"), and it is decided again at each boundary. Slice 5, `regexp`
+(`epic:slice-05-regexp`), is in work: its first wave on 2026-11-23 (`docs/plan/slice-05-wave-1.md`)
+brought the crate `swell-regexp` (the pattern parser, the compiler, the backtracking matcher
+under the budgets), regular expression literals, `RegExp` with `exec` and `test`, `replace`,
+`replaceAll` and `split` of `String`, and the case methods, `normalize` and `localeCompare`
+for every String: 1,327 of its 2,724 cases pass
+(`test262-slice 05 2724 5441 0 0 2724 1327 1397 0`), and no host requirement is pending for
+it. Seven of its fifteen stories are open: the methods keyed by `@@match`, `@@replace`,
+`@@search` and `@@split`, property escapes, identifiers and group names outside ASCII,
+`matchAll` and `RegExp.escape`, the flags `i` and `v`, and the close.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
@@ -301,69 +309,68 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot --timeout 30m task check-runner` on 2026-11-23, on the branch of wave 2 of slice 6 with
-the slice closed (the tree of `1e46de5`; `docs/plan/slice-06-wave-2.md`), load 113 before and
-77 after on 18 cores. Every check passed and the run exited 201 on its last line alone: the
-test steps took 327.8 s of their 120 at that load (323.6 CPU seconds; 89.4 s at a load of 37
-on the run before the close, `docs/plan/slice-06-wave-2.md`, "How the wave was checked"). The
-planted scripts' single `ok` lines and the slice lines after slice 6 are left out
+`slot --timeout 30m task check-runner` on 2026-11-23, on the commit of release `0.6.0`
+(`4eaf524`, the branch of wave 1 of slice 5; `docs/plan/slice-05-wave-1.md`), load 60 before
+and 53 after on 16 cores. Every check passed and the run exited 201 on its last line alone:
+the test steps took 210.7 s of their 120 at that load (317.6 CPU seconds). The planted
+scripts' single `ok` lines and the slice lines after slice 6 are left out
 (`conformance/test262/expected.txt` has every slice line). The fault step's line counts the
-629 tests its filter leaves out as ignored:
+679 tests its filter leaves out as ignored:
 
 ```
-python-check: no Python file among 1646 file(s)
-forbid-unsafe-check: 8 crate root(s), each with #![forbid(unsafe_code)]
-Cargo.lock: 7 package(s), none from outside this repository
+python-check: no Python file among 1758 file(s)
+forbid-unsafe-check: 9 crate root(s), each with #![forbid(unsafe_code)]
+Cargo.lock: 8 package(s), none from outside this repository
 toolchain-check: rustc 1.99.1, the channel rust-toolchain.toml pins; 5 workflow file(s), none names a compiler
 nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 16 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
 data/unicode/17.0.0: 17 file(s), each with the SHA-256 its SOURCE line gives; 17 required path(s) present
-unicode-tables: 1 table(s) equal the generator output
+unicode-tables: 9 table(s) equal the generator output
 swell v1 — 2 file(s), 8 scenario(s), valid
 58 scenario(s) (8 authored), 41 refusal(s), written to .out/suite.json
   58 scenarios: 58 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 190 requirement(s), 190 line(s): 110 test, 80 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 4:9 5:2 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
-host-surface: 5 change(s) since 0.4.0, each named
+host-requirements: 191 requirement(s), 191 line(s): 113 test, 78 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 4:9 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
+host-surface: 0 change(s) since 0.6.0, each named
 site-data-check: website/data/status.json equals its regeneration from conformance/test262/expected.txt, conformance/slices-delivered.txt, conformance/host/requirements.txt, conformance/test262/moves.tsv, docs/design/engine.md, Cargo.toml, Cargo.lock and the crate roots under crates
-test-main: 7 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
-test-binaries-check: 15 test executables, 7 integration-test binaries in 7 packages, none with a .debug_ section
-build-tests: Finished `test` profile [unoptimized] target(s) in 1.27s
-build-collect: Finished `test` profile [unoptimized] target(s) in 0.05s
-build-faults: Finished `test` profile [unoptimized] target(s) in 0.16s
-build-conform-engine: Finished `test` profile [unoptimized] target(s) in 1.65s
-build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 2.53s
-15 test binaries: 977 passed, 0 failed, 1 ignored
-gate-time test 117.2
-test-doc: 7 test suites: 13 passed, 0 failed, 0 ignored
+test-main: 8 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
+test-binaries-check: 17 test executables, 8 integration-test binaries in 8 packages, none with a .debug_ section
+build-tests: Finished `test` profile [unoptimized] target(s) in 0.01s
+build-collect: Finished `test` profile [unoptimized] target(s) in 34.75s
+build-faults: Finished `test` profile [unoptimized] target(s) in 55.87s
+build-conform-engine: Finished `test` profile [unoptimized] target(s) in 49.85s
+build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.99s
+17 test binaries: 1087 passed, 0 failed, 1 ignored
+gate-time test 90.5
+test-doc: 8 test suites: 13 passed, 0 failed, 0 ignored
 test-doc collect-every-safe-point: 2 test suites: 13 passed, 0 failed, 0 ignored
-gate-time test-doc 35.8
-test-collect: 2 test binaries: 796 passed, 0 failed, 1 ignored
-gate-time test-collect 61.5
-test-faults: 1 test binaries: 1 passed, 0 failed, 629 ignored
-gate-time test-faults 1.0
+gate-time test-doc 19.9
+test-collect: 2 test binaries: 847 passed, 0 failed, 1 ignored
+gate-time test-collect 66.8
+test-faults: 1 test binaries: 1 passed, 0 failed, 679 ignored
+gate-time test-faults 0.7
 conform-engine: 3 test binaries: 12 passed, 0 failed, 0 ignored
 conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok
   58 scenarios: 14 passed, 0 failed, 0 error, 44 unsupported
-gate-time conform-engine 6.1
-test262-refused 36178
-test262 total 53801 8982 7 44812 16412 28399 1
+gate-time conform-engine 5.5
+test262-refused 35308
+test262 total 53801 8982 7 44812 17775 27036 1
 test262: 221 directory lines sum to the total
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
 test262-slice 04 1598 3156 0 0 1598 261 1337 0
-test262-slice 05 2724 5441 0 0 2724 52 2672 0
+test262-slice 05 2724 5441 0 0 2724 1327 1397 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
 test262: 22 slice lines equal the design
 test262-errors 0
-test262: 287 lines of conformance/test262/expected.txt; sources digest 333bed451d2502911dc614c9a253d349f03c567234bf366c3d084201de91af11 equals conformance/test262/expected.digest
-gate-time test262-check 2.1
+test262: 287 lines of conformance/test262/expected.txt; sources digest 21203088f5d22908541f75a2f5b4dc8a6ea3310c1d879ec2560614cd67249304 equals conformance/test262/expected.digest
+gate-time test262-check 0.5
 test262-moves: 1774 case(s) moved, 3:78 4:325 5:285 6:694 7:60 8:183 9:22 10:86 11:4 12:21 13:16; slices 1 to 19: 44931 85794
-gate-time test262-moves-check 12.9
+gate-time test262-moves-check 7.9
 gate-selftest: 65 passed, 0 failed
-gate-time gate-selftest 91.2
-gate-time test-steps 327.8 of 120, cpu 323.6, load 77.07 on 18 cores
+gate-time gate-selftest 18.9
+gate-time test-steps 210.7 of 120, cpu 317.6, load 53.47 on 16 cores
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`
@@ -447,7 +454,10 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   the first five stories of slice 6, on the operator's pick "cut 0.4.0 now"
   (https://github.com/beyond10x/swell/releases/tag/0.4.0); `0.5.0`, 2026-11-23, tagged on
   `635dd5b`, slice 6 delivered, on the operator's pick "cut 0.5.0 now"
-  (https://github.com/beyond10x/swell/releases/tag/0.5.0). After a release
+  (https://github.com/beyond10x/swell/releases/tag/0.5.0); `0.6.0`, 2026-11-23, tagged on
+  `6e9c3f4`, the first wave of slice 5, on the decision "cut 0.6.0 together with the wave" of
+  the session that decides for the operator
+  (https://github.com/beyond10x/swell/releases/tag/0.6.0). After a release
   `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of

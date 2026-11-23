@@ -1,4 +1,4 @@
-# swell 0.5.0
+# swell 0.6.0
 ALL pub const ALL: [ErrorKind; 7] = [ErrorKind::Error, ErrorKind::EvalError, ErrorKind::RangeError, ErrorKind::ReferenceError, ErrorKind::SyntaxError, ErrorKind::TypeError, ErrorKind::UriError]
 Abrupt #[derive(Clone, Copy, Debug, PartialEq)] pub enum Abrupt
 Abrupt::Terminated Terminated(Termination)
@@ -15,7 +15,7 @@ Agent::parse_script pub fn parse_script(&mut self, realm: &Realm, source: Source
 AgentState #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum AgentState
 AgentState::Alive Alive
 AgentState::Faulted Faulted
-BINDINGS_REALM_HEAP_BYTES pub const BINDINGS_REALM_HEAP_BYTES: u64 = 381_696
+BINDINGS_REALM_HEAP_BYTES pub const BINDINGS_REALM_HEAP_BYTES: u64 = 506_112
 BigIntRef #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct BigIntRef
 Brand #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct Brand(pub u32)
 CollectReport #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub struct CollectReport
@@ -167,6 +167,7 @@ HOST-188 f9494b2565f5f53037a641d41bf1f020f348ba1e76cac1543a4a7b2d42bae09f
 HOST-189 0b22020b8fa65ae62bb8eb567e5e1c49444d16a9432c53743aa35df30e926ed6
 HOST-19 75b6d6a5883befe3c7d7ca6f90331d6319edf12c6bbfd46a05f9b29495b70db3
 HOST-190 695dbff033ee9e1f87e44a6cc4c67b9c0bf7ae35cd5066d10f1a8095ac12f63b
+HOST-191 aee6e962bc34aa19708e6654505490f2c7c31ff53c86601297e1a41421715c90
 HOST-2 382b52faa3b8527c2c65e8a028a9206f99ef5ec685434c57157135f64b6a53ed
 HOST-20 991e8f3d2ae0435180893a18f448210e522443bad335bcaf3063881b00e8509e
 HOST-21 8bb3774249df5511733c1b6e6f23638203f67e089c60ef8c485746766c1a609d

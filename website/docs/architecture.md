@@ -18,9 +18,9 @@ The workspace holds these crates today, read from `Cargo.lock` with their depend
 
 <Crates />
 
-`swell` is the engine and its public host interface. `swell-syntax` is the lexer and the parser, `swell-compiler` the bytecode format and the compile step. `swell-num` parses and prints numbers and holds the keyed hash. `swell-test262` is the conformance runner, and `swell-unicode-gen` writes the Unicode tables of `swell-unicode` and does not ship.
+`swell` is the engine and its public host interface. `swell-syntax` is the lexer and the parser, `swell-compiler` the bytecode format and the compile step. `swell-regexp` parses a regular expression, compiles it to a program and matches it by backtracking with an explicit stack, charged to the budgets of its caller. `swell-num` parses and prints numbers and holds the keyed hash. `swell-test262` is the conformance runner, and `swell-unicode-gen` writes the Unicode tables of `swell-unicode` and does not ship.
 
-The design plans two more crates: `swell-regexp` for regular expressions and `swell-cli`, a command-line host. A crate is created in the first slice that needs a part of it, with that part only. A crate below `swell` holds no heap value, so it can be tested and fuzzed alone. The builtins stay inside `swell` because they read and write the heap. The dependency graph has no cycle ([design, section 2](https://github.com/beyond10x/swell/blob/main/docs/design/engine.md#2-crates-and-what-depends-on-what)).
+The design plans one more crate: `swell-cli`, a command-line host. A crate is created in the first slice that needs a part of it, with that part only. A crate below `swell` holds no heap value, so it can be tested and fuzzed alone. The builtins stay inside `swell` because they read and write the heap. The dependency graph has no cycle ([design, section 2](https://github.com/beyond10x/swell/blob/main/docs/design/engine.md#2-crates-and-what-depends-on-what)).
 
 ## The path of a script
 

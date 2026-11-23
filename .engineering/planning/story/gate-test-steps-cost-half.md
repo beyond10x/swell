@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:gate-test-steps-cost-half
 kind: story
-status: active
+status: implemented
 title: The gate's test steps cost less CPU time, and what halving them needs
 summary: Measured per step, per test in both modes and per planted script; the tests whose count is not their property get gate counts, five identical runs of one fixture tree become one test, the planted scripts run as a rolling pool with the Go runtime's collector off, and the one change that halves the cost, an optimized build of the collect mode, is measured and left to a decision.
 relations:
 - decomposes: epic:foundation
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T04:00:43Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T04:00:43Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-23T08:12:40Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:coordinator"}
 ---
 
 ## Context
