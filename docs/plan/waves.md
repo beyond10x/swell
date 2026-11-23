@@ -244,6 +244,38 @@ The chain is long because the stories write the same files of the parser and the
 each edge says which. The design text they build on is in decisions 3 and 4 (`0458ebd`,
 `aec8a36`).
 
+## Slice 5, `regexp`
+
+`epic:slice-05-regexp`, next after slice 6 by the order above. Decomposed on 2026-11-23 into
+fifteen stories (accepted, `active`), read by the four plan critics in two parts
+(`review-result:slice-05-*`: 9 findings on the first six stories, none a blocker; 16 on the
+other nine, 6 of them blockers, all applied, and the six stories with a blocker read a second
+time). Measured on release `0.5.0`: 2,724 cases and 5,441 runs, 52 cases pass
+(`test262-slice 05 2724 5441 0 0 2724 52 2672 0`). The lists the stories read are under
+[`slice-05/`](slice-05/): the scan of the failing cases by what they need, the case list of
+eleven stories, the table of the consumer's twelve regular expressions, and the two lists of
+the close. The design text they build on is in decisions 2, 5, 7 and 8 and in section 12
+(`eacc828` and its second part): how `swell-regexp` charges its work, one step of the matcher,
+where a RegExp object keeps its program, a literal compiled at each evaluation, no recursion
+in the pattern parser and compiler, the counted refusals of `RegExp` (`HOST-191`), the order
+`localeCompare` gives outside ASCII, and a case that comes into a slice delivered before the
+slice of its directory.
+
+| order | stories | what it brings | lifts of the consumer's 12 regular expressions |
+|---|---|---|---|
+| 1 | `regexp-crate-and-pattern-parser`, `string-replace-replace-all-and-split`, `unicode-gen-table-list-and-source-digests` | the crate `swell-regexp` with the pattern parser; `replace`, `replaceAll` and `split` for a String pattern; the generator's table list | none; the 8 `split` calls with a String |
+| 2 | `regexp-compiler-and-backtracking-matcher`, `regexp-literal-early-errors`, `case-mapping-tables-and-string-case-methods` | the matcher under budgets; a literal checked at parse time (`HOST-142`); the case methods outside ASCII | all 12 pass the early errors |
+| 3 | `regexp-objects-exec-and-literals`, `normalization-tables-normalize-and-locale-compare` | `RegExp`, `exec`, `test`, the literal evaluated (`HOST-143`, `HOST-191`); `normalize` and `localeCompare` | all 12 evaluate; the `test` call and both `new RegExp` calls answer |
+| 4 | `regexp-symbol-methods-and-string-match-search`, `regexp-property-escapes-and-property-tables` | `Symbol.match`, `replace`, `search`, `split` and the String methods with a RegExp; `\p{...}` | the other 11 calls: the harness's regular expressions all run |
+| 5 | `identifiers-and-group-names-outside-ascii`, `regexp-match-all-and-escape` | `ID_Start` and `ID_Continue` in identifiers and group names; `matchAll`, `RegExp.escape` | none |
+| 6 | `regexp-case-insensitive-matching-and-modifiers` | the flag `i` and modifiers | none |
+| 7 | `regexp-v-flag-class-sets-and-properties-of-strings` | the flag `v` | none |
+| 8 | `slice-05-conformance-close` | 17 cases moved to later slices, 18 Annex B grammar cases taken into slice 5 | none |
+
+Ahead of them, by the organization's rule that a test step over its budget is fixed before the
+next feature: `story:gate-test-steps-cost-half` (the gate's test steps cost about 300 CPU
+seconds and passed their 120 s of wall time in one of five runs on 2026-11-23).
+
 ## What later slices take over
 
 Findings of delivered waves that belong to a slice not yet decomposed. The decomposition of
