@@ -507,6 +507,48 @@ fn a_case_that_throws_is_counted_failed() -> TestResult {
 }
 
 #[test]
+fn a_block_without_an_order_of_delivery_fails_the_run() -> TestResult {
+    // design-no-order.md is design.md without its order line. The runner does not fall back to
+    // the slices' numbers: it prints the problem and exits 1. No case runs (--run none).
+    let count = |design: &str| {
+        runner(&[
+            "count",
+            "--test262",
+            &fixture("tree"),
+            "--design",
+            &fixture(design),
+            "--features",
+            &fixture("features.txt"),
+            "--run",
+            "none",
+        ])
+    };
+    let with_order = count("design.md")?;
+    assert_eq!(
+        with_order.code,
+        Some(0),
+        "{}{}",
+        with_order.stdout,
+        with_order.stderr
+    );
+    let printed = count("design-no-order.md")?;
+    assert_eq!(
+        printed.code,
+        Some(1),
+        "{}{}",
+        printed.stdout,
+        printed.stderr
+    );
+    assert!(
+        printed
+            .has("swell-slices: the block has no order line (order delivery <slice>,<slice>,...)"),
+        "{}",
+        printed.stdout
+    );
+    Ok(())
+}
+
+#[test]
 fn an_unknown_rule_kind_fails_the_run() -> TestResult {
     let printed = count_with("tree", "design-unknown-kind.md", "features.txt")?;
     assert_eq!(
