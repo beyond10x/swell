@@ -41,7 +41,7 @@ test262 built-ins/Set 383 0 0 383 0 383 0
 test262 built-ins/SetIteratorPrototype 11 0 0 11 0 11 0
 test262 built-ins/ShadowRealm 64 64 0 0 0 0 0
 test262 built-ins/SharedArrayBuffer 104 0 0 104 0 104 0
-test262 built-ins/String 1223 0 0 1223 983 240 0
+test262 built-ins/String 1223 0 0 1223 995 228 0
 test262 built-ins/StringIteratorPrototype 7 0 0 7 7 0 0
 test262 built-ins/SuppressedError 22 0 0 22 0 22 0
 test262 built-ins/Symbol 98 0 0 98 88 10 0
@@ -216,15 +216,15 @@ test262 staging/built-ins 8 0 0 8 1 7 0
 test262 staging/decorators 7 7 0 0 0 0 0
 test262 staging/explicit-resource-management 53 0 0 53 1 52 0
 test262 staging/set-methods 3 0 0 3 0 3 0
-test262 staging/sm 1406 2 0 1404 490 913 1
+test262 staging/sm 1406 2 0 1404 492 911 1
 test262 staging/source-phase-imports 2 2 0 0 0 0 0
 test262 staging/top-level-await 1 0 0 1 0 1 0
-test262 total 53801 8982 7 44812 16735 28076 1
+test262 total 53801 8982 7 44812 16749 28062 1
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
 test262-slice 04 1598 3156 0 0 1598 261 1337 0
-test262-slice 05 2724 5441 0 0 2724 365 2359 0
+test262-slice 05 2724 5441 0 0 2724 377 2347 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
 test262-slice 07 1491 2841 0 0 1491 6 1485 0
 test262-slice 08 9144 18139 0 0 9144 3 9141 0
@@ -238,7 +238,7 @@ test262-slice 15 1094 2170 0 0 1094 39 1055 0
 test262-slice 16 82 164 0 0 82 0 82 0
 test262-slice 17 35 35 0 0 35 0 35 0
 test262-slice 18 1155 1492 0 0 1155 169 986 0
-test262-slice 19 1474 2766 0 0 1474 492 981 1
+test262-slice 19 1474 2766 0 0 1474 494 979 1
 test262-slice 20 4617 9234 4617 0 0 0 0 0
 test262-slice 21 1662 3324 1662 0 0 0 0 0
 test262-slice x-stage3 2591 5008 2591 0 0 0 0 0
@@ -252,7 +252,7 @@ test262-section sec-number-objects incomplete 340 250 0
 test262-section sec-bigint-objects incomplete 77 0 0
 test262-section sec-math-object incomplete 327 13 0
 test262-section sec-date-objects incomplete 610 0 0
-test262-section sec-string-objects incomplete 1223 983 3
+test262-section sec-string-objects incomplete 1223 995 3
 test262-section sec-regexp-regular-expression-objects incomplete 1879 13 1
 test262-section sec-array-objects incomplete 3083 2769 1
 test262-section sec-typedarray-objects incomplete 1453 0 0
