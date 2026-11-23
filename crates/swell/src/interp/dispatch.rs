@@ -28,34 +28,35 @@ use crate::value::{ObjectRef, StringRef, Value};
 
 /// What an instruction asks of the loop; the other files of the interpreter that hold the work
 /// of an instruction answer it too.
-pub(super) enum Flow {
+pub(crate) enum Flow {
     /// Go on with the running frame's next instruction (which may be a frame just pushed).
     Next,
     /// The running frame returns this value.
     Return(Value),
+    /// The running frame was suspended into its holder (`interp/suspend.rs`), and this value is
+    /// handed over as a return hands its value over.
+    Suspend(Value),
 }
 
 impl<H: Host> Agent<H> {
-    /// Run the frame stack until the frame at index `base` returns, and answer its value; a
-    /// throw no handler of those frames catches, or a termination, is the answer instead, with
-    /// the frames above `base` dropped.
+    /// Run the frame stack until the frame at index `base` returns or is suspended
+    /// (`interp/suspend.rs`), and answer its value; a throw no handler of those frames catches,
+    /// or a termination, is the answer instead, with the frames above `base` dropped.
     pub(crate) fn run(&mut self, base: usize) -> Completion<Value> {
         loop {
             let flow = match self.safe_point() {
                 Ok(()) => self.step().and_then(|()| self.execute_next()),
                 Err(_) => Err(self.fault()),
             };
-            match flow {
-                Ok(Flow::Next) => {}
-                Ok(Flow::Return(value)) => match self.return_from_frame(base, value) {
-                    Ok(Some(value)) => return Ok(value),
-                    Ok(None) => {}
-                    Err(abrupt) => {
-                        if let Some(answer) = self.unwind(base, abrupt) {
-                            return answer;
-                        }
-                    }
-                },
+            let handed = match flow {
+                Ok(Flow::Next) => continue,
+                Ok(Flow::Return(value)) => self.return_from_frame(base, value),
+                Ok(Flow::Suspend(value)) => self.hand_over(base, value),
+                Err(abrupt) => Err(abrupt),
+            };
+            match handed {
+                Ok(Some(value)) => return Ok(value),
+                Ok(None) => {}
                 Err(abrupt) => {
                     if let Some(answer) = self.unwind(base, abrupt) {
                         return answer;
@@ -422,6 +423,12 @@ impl<H: Host> Agent<H> {
             I::ToString => self.substitution_to_string(),
             // ---- tagged templates (`interp/templates.rs`) ----
             I::TemplateObject(site) => self.template_object(site),
+            // ---- generators (`interp/generator.rs`) ----
+            I::GeneratorStart(slot) => self.generator_start(slot),
+            I::Yield(slot) => self.yield_instruction(slot),
+            I::YieldReturn(items) => self.yield_return(items),
+            I::GeneratorReturn(slot) => self.generator_return(slot),
+            I::GeneratorDone(slot) => self.generator_done(slot),
         }
     }
 

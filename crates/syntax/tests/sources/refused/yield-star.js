@@ -1,4 +1,4 @@
-// sec-generator-function-definitions: refused "generator function is not supported before slice 7"
+// sec-generator-function-definitions: refused "yield* is not supported before slice 7"
 var g = function* () {
   yield* h();
   yield *

@@ -217,6 +217,9 @@ pub(crate) struct FunctionInfo {
     /// `var` scope of its body: the names of its slots, in slot order (empty when only the
     /// bindings a direct `eval` adds will live there).
     pub var_env: Option<Vec<String>>,
+    /// Of a generator function: the local slot its code reserves for its generator object, the
+    /// last of `locals` ("Suspended frames", item 2, `docs/design/engine.md`).
+    pub generator_slot: Option<u32>,
 }
 
 pub(crate) struct Resolution {
@@ -437,6 +440,13 @@ fn resolve_with(
         let id = FunctionId(u32::try_from(i).map_err(|_| CompileError::TooMany("functions"))?);
         let mut info = r.function_info(id, &sites)?;
         info.locals = frames.get(&Some(id)).copied().unwrap_or(0);
+        if script.ast.function(id).is_some_and(|f| f.generator) {
+            info.generator_slot = Some(info.locals);
+            info.locals = info
+                .locals
+                .checked_add(1)
+                .ok_or(CompileError::TooMany("local slots"))?;
+        }
         info.given_name = r.given_names.remove(&id);
         functions.push(info);
     }

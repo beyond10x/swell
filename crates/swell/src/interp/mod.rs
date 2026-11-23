@@ -28,7 +28,8 @@
 //! when the loop returns.
 //!
 //! Root site of the collector: [`trace_roots`] (the frame stack: operand stacks, locals,
-//! environments, function and realm of each frame).
+//! environments, function and realm of each frame). A suspended frame (`interp/suspend.rs`) is
+//! off the frame stack and no root: the kind site of the object that holds it traces it.
 
 mod array_patterns;
 mod arrow;
@@ -36,12 +37,14 @@ pub(crate) mod budget;
 pub(crate) mod dispatch;
 mod for_of;
 pub(crate) mod frame;
+mod generator;
 mod lexical;
 mod object_literal;
 mod parameters;
 mod patterns;
 mod regexp;
 mod spread;
+pub(crate) mod suspend;
 mod template;
 mod templates;
 

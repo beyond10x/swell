@@ -34,6 +34,7 @@ pub(crate) mod array;
 pub(crate) mod bound_function;
 pub(crate) mod builtin_function;
 pub(crate) mod ecmascript_function;
+pub(crate) mod generator;
 pub(crate) mod ordinary;
 pub(crate) mod property;
 pub(crate) mod regexp;
@@ -52,6 +53,7 @@ use array::Array;
 use bound_function::BoundFunction;
 use builtin_function::BuiltinFunction;
 use ecmascript_function::EcmascriptFunction;
+use generator::Generator;
 use ordinary::Ordinary;
 use property::{Descriptor, Key, Properties, Property, Room, sort_indices};
 use regexp::RegExpObject;
@@ -180,6 +182,8 @@ pub(crate) enum ObjectKind {
     Host(HostObject),
     /// A RegExp object (22.2.7), `story:regexp-objects-exec-and-literals`.
     RegExp(RegExpObject),
+    /// A generator object (27.5), `story:generator-functions-and-suspended-frames`.
+    Generator(Generator),
 }
 
 /// Which kind an object is, for the dispatch.
@@ -195,6 +199,7 @@ pub(crate) enum KindTag {
     EcmascriptFunction,
     Host,
     RegExp,
+    Generator,
 }
 
 impl ObjectRecord {
@@ -227,6 +232,7 @@ impl ObjectRecord {
             ObjectKind::EcmascriptFunction(function) => function.trace(mark),
             ObjectKind::Host(host) => host.trace(mark),
             ObjectKind::RegExp(regexp) => regexp.trace(mark),
+            ObjectKind::Generator(generator) => generator.trace(mark),
         }
     }
 
@@ -245,6 +251,7 @@ impl ObjectRecord {
             ObjectKind::EcmascriptFunction(_) => KindTag::EcmascriptFunction,
             ObjectKind::Host(_) => KindTag::Host,
             ObjectKind::RegExp(_) => KindTag::RegExp,
+            ObjectKind::Generator(_) => KindTag::Generator,
         }
     }
 }

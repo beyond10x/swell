@@ -6,16 +6,16 @@ test262 harness 1 0 0 1 0 1 0
 test262 intl402 1 1 0 0 0 0 0
 test262 intl402/Locale 1 1 0 0 0 0 0
 test262 language/expressions 1 0 0 1 1 0 0
-test262 language/expressions/yield 2 0 0 2 0 2 0
+test262 language/expressions/yield 2 0 0 2 2 0 0
 test262 language/statements/if 1 0 0 1 1 0 0
 test262 language/statements/malformed 4 0 0 4 0 4 0
 test262 language/types 1 0 0 1 1 0 0
-test262 total 22 5 1 16 3 13 0
+test262 total 22 5 1 16 5 11 0
 test262-slice 01 1 2 0 0 1 0 1 0
 test262-slice 02 6 11 0 0 6 3 3 0
 test262-slice 03 2 3 0 0 2 0 2 0
 test262-slice 04 1 2 0 0 1 0 1 0
-test262-slice 07 3 4 0 0 3 0 3 0
+test262-slice 07 3 4 0 0 3 2 1 0
 test262-slice 10 1 2 0 0 1 0 1 0
 test262-slice 14 4 8 1 1 2 0 2 0
 test262-slice 21 3 6 3 0 0 0 0 0
@@ -24,4 +24,4 @@ test262-errors 4
 test262-section sec-object-objects incomplete 3 0 0
 test262-section sec-number-objects incomplete 3 0 0
 test262-section sec-atomics-object incomplete 3 0 1
-test262-section sec-fixture-language incomplete 4 2 0
+test262-section sec-fixture-language complete 4 4 0

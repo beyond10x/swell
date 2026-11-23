@@ -70,7 +70,7 @@ HOST-69 test swell::termination::host_69_finally_does_not_run_after_step_budget
 HOST-70 test swell::termination::host_70_agent_stays_alive_after_each_budget
 HOST-71 test swell::faults::host_71_injected_fault_at_each_call_faults_the_agent
 HOST-72 test swell::termination::host_72_a_host_function_cannot_end_a_termination
-HOST-73 pending slice 7
+HOST-73 test swell::generators::host_73_a_generator_running_at_a_step_budget_termination_throws_a_type_error_from_its_next_next
 HOST-74 pending slice 11
 HOST-75 pending slice 11
 HOST-76 pending slice 11

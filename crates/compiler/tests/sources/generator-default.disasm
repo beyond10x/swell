@@ -1,0 +1,38 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "d" length 0 locals 3 generator binds-parameters
+  params local 0, local 1
+  0000 2:13 Argument 3
+  0001 2:13 JumpIfNotUndefined 0003
+  0002 2:17 Number 1
+  0003 2:13 SetLocal 0
+  0004 2:13 Pop
+  0005 2:20 Argument 4
+  0006 2:20 JumpIfNotUndefined 0008
+  0007 2:24 GetLocal 0
+  0008 2:20 SetLocal 1
+  0009 2:20 Pop
+  0010 2:1 GeneratorStart 2
+  0011 2:1 EndFinally
+  0012 3:9 GetLocal 0
+  0013 3:13 GetLocal 1
+  0014 3:9 Add
+  0015 3:3 Yield 2
+  0016 3:3 JumpIfTag 0 0022
+  0017 3:3 JumpIfTag 2 0019
+  0018 3:3 EndFinally
+  0019 3:3 YieldReturn 0
+  0020 3:3 Tag 2
+  0021 3:3 Jump 0026
+  0022 3:3 Pop
+  0023 2:1 Undefined
+  0024 2:1 Tag 2
+  0025 2:1 Jump 0026
+  0026 2:1 GeneratorDone 2
+  0027 2:1 JumpIfTag 2 0029
+  0028 2:1 EndFinally
+  0029 2:1 GeneratorReturn 2
+  finally 0012..0026 -> 0026 items 0 envs 0

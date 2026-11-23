@@ -44,6 +44,7 @@ mod faults;
 mod for_of;
 mod frontend_ledger;
 mod fuzz;
+mod generators;
 mod hooks;
 mod host_objects;
 mod interrupt;

@@ -1,0 +1,65 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "f" length 1 locals 4 generator
+  params local 0
+  0000 2:1 GeneratorStart 3
+  0001 2:1 EndFinally
+  0002 3:17 GetLocal 0
+  0003 3:17 GetIterator
+  0004 3:3 IteratorStep 0024
+  0005 3:12 SetLocal 1
+  0006 3:12 Pop
+  0007 4:11 GetLocal 1
+  0008 4:5 Yield 3
+  0009 4:5 JumpIfTag 0 0015
+  0010 4:5 JumpIfTag 2 0012
+  0011 4:5 EndFinally
+  0012 4:5 YieldReturn 1
+  0013 4:5 Tag 2
+  0014 4:5 Jump 0017
+  0015 4:5 Pop
+  0016 3:3 LoopJump 0004
+  0017 3:3 IteratorClose
+  0018 3:3 JumpIfTag 2 0021
+  0019 3:3 EndFinally
+  0020 3:3 Jump 0024
+  0021 3:3 Nip 1
+  0022 3:3 Tag 2
+  0023 3:3 Jump 0051
+  0024 3:3 Pop
+  0025 6:21 GetLocal 0
+  0026 6:7 Dup
+  0027 6:7 GetIterator
+  0028 6:8 PatternStep 0
+  0029 6:8 JumpIfNotUndefined 0038
+  0030 6:12 Undefined
+  0031 6:12 Yield 3
+  0032 6:12 JumpIfTag 0 0038
+  0033 6:12 JumpIfTag 2 0035
+  0034 6:12 EndFinally
+  0035 6:12 YieldReturn 0
+  0036 6:12 Tag 2
+  0037 6:12 Jump 0051
+  0038 6:8 SetLocal 2
+  0039 6:8 Pop
+  0040 6:7 Undefined
+  0041 6:7 Tag 0
+  0042 6:7 IteratorClose
+  0043 6:7 Bury 2
+  0044 6:7 Bury 2
+  0045 6:7 Pop
+  0046 6:7 EndFinally
+  0047 6:7 Pop
+  0048 2:1 Undefined
+  0049 2:1 Tag 2
+  0050 2:1 Jump 0051
+  0051 2:1 GeneratorDone 3
+  0052 2:1 JumpIfTag 2 0054
+  0053 2:1 EndFinally
+  0054 2:1 GeneratorReturn 3
+  finally 0004..0017 -> 0017 items 1 envs 0
+  pattern 0028..0040 -> 0042 items 0 envs 0
+  finally 0002..0051 -> 0051 items 0 envs 0

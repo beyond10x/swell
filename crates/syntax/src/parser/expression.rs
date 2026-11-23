@@ -273,9 +273,15 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// Whether the token after `yield` is the `*` of `yield *`, on the same line; consumes it.
+    /// The first `*` of `yield *` in the source holds the refusal of slice 7 back to the end of
+    /// the parse, so its early errors are found first.
     #[inline(never)]
     fn yield_delegate(&mut self) -> R<bool> {
         if !self.tok.newline_before && self.is(Punct::Star) {
+            if self.held.is_none() {
+                let refusal = SyntaxError::refused("yield*", 7, self.tok.line, self.tok.column);
+                self.held = Some(refusal);
+            }
             self.advance()?;
             return Ok(true);
         }
@@ -1461,7 +1467,7 @@ impl<'a, 'm> Parser<'a, 'm> {
     fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
         let plain = !self.tok.escaped;
         let word = match &self.tok.kind {
-            TokenKind::Punct(Punct::Star) => return self.refuse("generator function", 7),
+            TokenKind::Punct(Punct::Star) => return self.refuse("generator method", 7),
             TokenKind::Name(n) if plain && n == "get" => FunctionKind::Getter,
             TokenKind::Name(n) if plain && n == "set" => FunctionKind::Setter,
             TokenKind::Name(n) if plain && n == "async" => {

@@ -751,3 +751,82 @@ fn templates_carry_the_span_of_their_source_text() {
     let span = code.functions[0].source_text;
     assert_eq!((span.start, span.end), (2, 17));
 }
+
+/// A generator template ("Suspended frames", items 2 and 6, `docs/design/engine.md`) has one
+/// local slot more than the same function written without `*`, the last, which no binding
+/// uses: its generator object. Its code binds the parameters and instantiates the function
+/// declarations first and only then starts the generator in that slot
+/// (`#sec-runtime-semantics-evaluategeneratorbody`), and every way out of it is the return of a
+/// generator, never a plain `Return`.
+#[test]
+fn a_generator_reserves_its_last_slot_and_starts_after_its_parameters() {
+    // The same bindings, `yield x` in the generator where the function has `x`.
+    let head = "(a = 1, [b] = [a]) { var x = b; function inner() {}";
+    let code = compile(&format!(
+        "function* g{head} yield x; return inner; }}\nfunction f{head} x; return inner; }}"
+    ))
+    .unwrap();
+    let g = function(&code, "g").unwrap();
+    let f = function(&code, "f").unwrap();
+    assert!(g.generator && !f.generator);
+    assert_eq!(g.locals, f.locals + 1);
+    let slot = g.locals - 1;
+    assert!(
+        g.params
+            .iter()
+            .all(|p| !matches!(p, Slot::Local(s) if *s == slot)),
+        "a parameter in the reserved slot: {:?}",
+        g.params
+    );
+    let start = g
+        .instructions
+        .iter()
+        .position(|i| *i == Instruction::GeneratorStart(slot))
+        .unwrap_or_else(|| panic!("no GeneratorStart {slot}: {:?}", g.instructions));
+    let last_before = g
+        .instructions
+        .iter()
+        .rposition(|i| {
+            matches!(
+                i,
+                Instruction::Argument(_)
+                    | Instruction::JumpIfNotUndefined(_)
+                    | Instruction::PatternStep(_)
+                    | Instruction::Closure(_)
+            )
+        })
+        .unwrap_or_else(|| panic!("no binding of the parameters: {:?}", g.instructions));
+    let first_yield = g
+        .instructions
+        .iter()
+        .position(|i| *i == Instruction::Yield(slot))
+        .unwrap_or_else(|| panic!("no Yield {slot}: {:?}", g.instructions));
+    assert!(
+        last_before < start && start < first_yield,
+        "{:?}",
+        g.instructions
+    );
+    assert_eq!(
+        g.instructions.get(start + 1),
+        Some(&Instruction::EndFinally)
+    );
+    for i in &g.instructions {
+        assert!(
+            !matches!(i, Instruction::Return),
+            "a plain Return in a generator: {:?}",
+            g.instructions
+        );
+        if let Instruction::GetLocal(s) | Instruction::SetLocal(s) = i {
+            assert_ne!(*s, slot, "a binding in the reserved slot");
+        }
+    }
+    assert!(g.instructions.contains(&Instruction::GeneratorReturn(slot)));
+    assert!(g.instructions.contains(&Instruction::GeneratorDone(slot)));
+    assert!(
+        g.handlers
+            .iter()
+            .any(|h| h.kind == HandlerKind::Finally && h.start as usize == start + 2),
+        "no finally from the start of the body: {:?}",
+        g.handlers
+    );
+}
