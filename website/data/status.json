@@ -19,15 +19,15 @@
     ]
   },
   "test262": {
-    "line": "test262 total 53801 8982 7 44812 20229 24581 2",
+    "line": "test262 total 53801 8982 7 44812 20697 24113 2",
     "exist": 53801,
     "excluded": 8982,
     "not_applicable": 7,
     "run": 44812,
-    "passed": 20229,
-    "failed": 24581,
+    "passed": 20697,
+    "failed": 24113,
     "budget": 2,
-    "passed_percent": "45.1"
+    "passed_percent": "46.1"
   },
   "delivery_slices": 19,
   "delivered": [1, 2, 3, 6],
@@ -134,16 +134,16 @@
       "name": "generators",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 07 1491 2841 0 0 1491 1168 323 0",
+      "line": "test262-slice 07 1491 2841 0 0 1491 1451 40 0",
       "cases": 1491,
       "runs": 2841,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1491,
-      "passed": 1168,
-      "failed": 323,
+      "passed": 1451,
+      "failed": 40,
       "budget": 0,
-      "passed_percent": "78.3"
+      "passed_percent": "97.3"
     },
     {
       "slice": "08",
@@ -182,32 +182,32 @@
       "name": "promises-and-async",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 10 3879 7499 0 0 3879 14 3865 0",
+      "line": "test262-slice 10 3879 7499 0 0 3879 161 3718 0",
       "cases": 3879,
       "runs": 7499,
       "excluded": 0,
       "not_applicable": 0,
       "run": 3879,
-      "passed": 14,
-      "failed": 3865,
+      "passed": 161,
+      "failed": 3718,
       "budget": 0,
-      "passed_percent": "0.3"
+      "passed_percent": "4.1"
     },
     {
       "slice": "11",
       "name": "modules",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 11 1281 1833 0 0 1281 16 1265 0",
+      "line": "test262-slice 11 1281 1833 0 0 1281 21 1260 0",
       "cases": 1281,
       "runs": 1833,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1281,
-      "passed": 16,
-      "failed": 1265,
+      "passed": 21,
+      "failed": 1260,
       "budget": 0,
-      "passed_percent": "1.2"
+      "passed_percent": "1.6"
     },
     {
       "slice": "12",
@@ -262,16 +262,16 @@
       "name": "iterator-helpers-and-resources",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 15 1094 2170 0 0 1094 51 1043 0",
+      "line": "test262-slice 15 1094 2170 0 0 1094 79 1015 0",
       "cases": 1094,
       "runs": 2170,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1094,
-      "passed": 51,
-      "failed": 1043,
+      "passed": 79,
+      "failed": 1015,
       "budget": 0,
-      "passed_percent": "4.6"
+      "passed_percent": "7.2"
     },
     {
       "slice": "16",
@@ -326,16 +326,16 @@
       "name": "staging",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 19 1474 2766 0 0 1474 615 857 2",
+      "line": "test262-slice 19 1474 2766 0 0 1474 620 852 2",
       "cases": 1474,
       "runs": 2766,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1474,
-      "passed": 615,
-      "failed": 857,
+      "passed": 620,
+      "failed": 852,
       "budget": 2,
-      "passed_percent": "41.7"
+      "passed_percent": "42.0"
     },
     {
       "slice": "20",
