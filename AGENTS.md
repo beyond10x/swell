@@ -12,7 +12,7 @@ interpreter and the builtins the test262 harness calls exist. **Slice 1 is deliv
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
 (the other 44 need a later slice and say so). 113 of 191 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate holds the test262 counts: 17,775 of the 44,812 run cases pass (2026-11-23, release `0.6.0`; 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
+gate holds the test262 counts: 18,155 of the 44,812 run cases pass (2026-11-23, release `0.7.0`; 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
 "Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
@@ -47,10 +47,12 @@ after slice 3"), and it is decided again at each boundary. Slice 5, `regexp`
 brought the crate `swell-regexp` (the pattern parser, the compiler, the backtracking matcher
 under the budgets), regular expression literals, `RegExp` with `exec` and `test`, `replace`,
 `replaceAll` and `split` of `String`, and the case methods, `normalize` and `localeCompare`
-for every String: 1,327 of its 2,724 cases pass
-(`test262-slice 05 2724 5441 0 0 2724 1327 1397 0`), and no host requirement is pending for
-it. Seven of its fifteen stories are open: the methods keyed by `@@match`, `@@replace`,
-`@@search` and `@@split`, property escapes, identifiers and group names outside ASCII,
+for every String; its second wave (`docs/plan/slice-05-wave-2.md`) the methods keyed by `@@match`, `@@replace`, `@@search` and
+`@@split` with `String.prototype.match` and `search` (release `0.7.0`): 1,667 of its 2,724
+cases pass
+(`test262-slice 05 2724 5441 0 0 2724 1667 1057 0`), and no host requirement is pending for
+it. Six of its fifteen stories are open: property escapes, identifiers and group names
+outside ASCII,
 `matchAll` and `RegExp.escape`, the flags `i` and `v`, and the close.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications

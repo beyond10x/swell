@@ -18,7 +18,7 @@ can use it.
 
 swell runs scripts of the ES5 grammar and of the bindings and iteration of ES2015 in both
 modes, with regular expressions, under a step budget and a memory budget.
-Its gate holds the test262 counts: 17,775 of the 44,812 cases that run pass (39.7 %), measured on 2026-11-23.
+Its gate holds the test262 counts: 18,155 of the 44,812 cases that run pass (40.5 %), measured on 2026-11-23.
 Four of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |
@@ -72,8 +72,9 @@ literals with and without a tag, arrow functions, default and rest parameters, o
 array destructuring, computed property names, spread in objects, arrays and calls, `Symbol`,
 the iterator protocol, `for`-`of`, function declarations in blocks and `Array.from`. All
 3,898 of its cases pass in all 7,351 runs; 402 cases that also need slice 4 or 5 are counted
-there. Slice 5, regular expressions, is in work: literals, `RegExp`, `exec` and `test` run, and
-1,327 of its 2,724 cases pass. The slices are taken in the order the first
+there. Slice 5, regular expressions, is in work: literals, `RegExp`, `exec`, `test`, `match`,
+`search`, and `replace` and `split` with a regular expression run, and
+1,667 of its 2,724 cases pass. The slices are taken in the order the first
 user, a browser, needs them: 6, 5, 7, 10, 4, 9.
 
 ## What swell is
