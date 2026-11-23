@@ -557,6 +557,41 @@ pub enum Instruction {
     /// for the site, made at its first evaluation, an argument of the tag's call
     /// (`#sec-tagged-templates-runtime-semantics-evaluation`).
     TemplateObject(u32),
+
+    // ---- generators ------------------------------------------------------------------------
+    /// `[] -> [v, tag]` across a suspension: the start of the code of a generator template
+    /// after FunctionDeclarationInstantiation (`#sec-runtime-semantics-evaluategeneratorbody`):
+    /// OrdinaryCreateFromConstructor of the running function with `%GeneratorPrototype%`
+    /// (`#sec-ordinarycreatefromconstructor`), stored in local slot `s`, its [[GeneratorState]]
+    /// suspended-start (GeneratorStart, `#sec-generatorstart`), then the frame suspends and the
+    /// object is the value of the call. The resumption puts the received value and its tag on
+    /// the stack; only `next`, [`TAG_NORMAL`], resumes a generator that has not started.
+    GeneratorStart(u32),
+    /// `[v] -> [r, tag]` across a suspension: Yield (`#sec-yield`) of `v` by the generator in
+    /// local slot `s`: CreateIteratorResultObject(v, false) (`#sec-createiterresultobject`),
+    /// then GeneratorYield (`#sec-generatoryield`): suspended-yield, and the frame suspends with
+    /// the result as the value of the resumption. The resumption puts the received value `r`
+    /// and its tag on the stack: [`TAG_NORMAL`] for `next`, [`TAG_THROW`] for `throw`,
+    /// [`TAG_RETURN`] for `return`.
+    Yield(u32),
+    /// `[x1..xk, v] -> [x1..xn, v]` with `n` the operand: the value of a `return` given to a
+    /// suspended generator at a `yield` inside an expression, above the statement-level entries:
+    /// the entries of the expression around the `yield` are dropped, and the iterator of each
+    /// array pattern among them whose [[Done]] is not set is closed with the return completion,
+    /// innermost first (IteratorClose, `#sec-iteratorclose`, as the destructuring around the
+    /// `yield` does with the abrupt completion of its element,
+    /// `#sec-runtime-semantics-iteratordestructuringassignmentevaluation`). A throw of a close
+    /// leaves every record on the stack, those closed marked done, for the handlers of the
+    /// patterns.
+    YieldReturn(u32),
+    /// `[v] -> `: the return of a generator template, the generator in local slot `s`:
+    /// [[GeneratorState]] completed, then CreateIteratorResultObject(v, true), which the frame
+    /// returns (GeneratorStart, `#sec-generatorstart`, step 4).
+    GeneratorReturn(u32),
+    /// `[] -> []`: the generator in local slot `s` is completed: the block of the `finally`
+    /// around the body of a generator template, which a throw leaving the body runs
+    /// (GeneratorStart, step 4.g).
+    GeneratorDone(u32),
 }
 
 impl Instruction {
@@ -678,6 +713,11 @@ impl Instruction {
             | Instruction::InitGlobal(_) => None,
             Instruction::ToString => None,
             Instruction::TemplateObject(_) => None,
+            Instruction::GeneratorStart(_)
+            | Instruction::Yield(_)
+            | Instruction::YieldReturn(_)
+            | Instruction::GeneratorReturn(_)
+            | Instruction::GeneratorDone(_) => None,
             Instruction::Argument(_)
             | Instruction::RestArguments(_)
             | Instruction::PushVarEnv(_) => None,
@@ -865,6 +905,10 @@ pub struct FunctionTemplate {
     /// an initializer or the rest parameter.
     pub length: u32,
     pub strict: bool,
+    /// A generator function (`function*`): its last local slot holds its generator object, its
+    /// code starts the generator after FunctionDeclarationInstantiation
+    /// ([`Instruction::GeneratorStart`]) and returns through [`Instruction::GeneratorReturn`].
+    pub generator: bool,
     /// Where each parameter goes, in order; for a parameter that is a pattern, where each name it
     /// binds goes, in source order (a list with a pattern is not simple: the call sets them
     /// uninitialized, [`FunctionTemplate::binds_parameters`]).

@@ -19,8 +19,11 @@
 //! (`story:the-host-names-the-iteration-intrinsics-of-web-idl`); `%RegExp%` and
 //! `%RegExp.prototype%` (22.2, `#sec-regexp-regular-expression-objects`), written by
 //! `story:regexp-objects-exec-and-literals`; `%RegExpStringIteratorPrototype%` (22.2.9.2,
-//! `#sec-%regexpstringiteratorprototype%-object`), written by `story:regexp-match-all-and-escape`.
-//! The other constructors and methods are later slices.
+//! `#sec-%regexpstringiteratorprototype%-object`), written by `story:regexp-match-all-and-escape`;
+//! `%GeneratorFunction.prototype%` and `%GeneratorPrototype%` (27.3.3 and 27.5.1,
+//! `#sec-properties-of-the-generatorfunction-prototype-object`,
+//! `#sec-properties-of-generator-prototype`), written by
+//! `story:generator-functions-and-suspended-frames`. The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
 //! first need no root until the realm record holds them all.
@@ -118,6 +121,10 @@ pub(crate) enum Intrinsic {
     RegExpPrototype,
     /// `%RegExpStringIteratorPrototype%` (22.2.9.2), `story:regexp-match-all-and-escape`.
     RegExpStringIteratorPrototype,
+    /// `%GeneratorFunction.prototype%` (27.3.3), `story:generator-functions-and-suspended-frames`.
+    GeneratorFunctionPrototype,
+    /// `%GeneratorPrototype%` (27.5.1).
+    GeneratorPrototype,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -172,6 +179,7 @@ pub(crate) struct Intrinsics {
     regexp: ObjectRef,
     regexp_prototype: ObjectRef,
     regexp_string_iterator_prototype: ObjectRef,
+    generator_prototypes: crate::builtins::generator::GeneratorPrototypes,
 }
 
 impl Intrinsics {
@@ -215,6 +223,8 @@ impl Intrinsics {
             Intrinsic::RegExp => self.regexp,
             Intrinsic::RegExpPrototype => self.regexp_prototype,
             Intrinsic::RegExpStringIteratorPrototype => self.regexp_string_iterator_prototype,
+            Intrinsic::GeneratorFunctionPrototype => self.generator_prototypes.function_prototype,
+            Intrinsic::GeneratorPrototype => self.generator_prototypes.prototype,
         }
     }
 
@@ -269,6 +279,8 @@ impl Intrinsics {
             self.regexp,
             self.regexp_prototype,
             self.regexp_string_iterator_prototype,
+            self.generator_prototypes.function_prototype,
+            self.generator_prototypes.prototype,
         ] {
             mark.object(object);
         }
@@ -443,6 +455,8 @@ impl<H: Host> Agent<H> {
         let iterator_prototypes = self.create_iterator_prototypes(making)?;
         let regexp_string_iterator_prototype =
             self.create_regexp_string_iterator_prototype(making, iterator_prototypes.iterator)?;
+        let generator_prototypes =
+            self.create_generator_prototypes(making, iterator_prototypes.iterator)?;
         // %Array.prototype.values% (23.1.3.38), %Array.prototype.entries% (23.1.3.5),
         // %Array.prototype.keys% (23.1.3.19) and %Array.prototype.forEach% (23.1.3.15): the
         // methods `create_array_constructor` has defined on %Array.prototype%, read before any
@@ -483,6 +497,7 @@ impl<H: Host> Agent<H> {
             regexp,
             regexp_prototype,
             regexp_string_iterator_prototype,
+            generator_prototypes,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {

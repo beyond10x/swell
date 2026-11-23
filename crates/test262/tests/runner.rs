@@ -97,16 +97,16 @@ test262 harness 1 0 0 1 0 1 0
 test262 intl402 1 1 0 0 0 0 0
 test262 intl402/Locale 1 1 0 0 0 0 0
 test262 language/expressions 1 0 0 1 1 0 0
-test262 language/expressions/yield 2 0 0 2 0 2 0
+test262 language/expressions/yield 2 0 0 2 2 0 0
 test262 language/statements/if 1 0 0 1 1 0 0
 test262 language/statements/malformed 4 0 0 4 0 4 0
 test262 language/types 1 0 0 1 1 0 0
-test262 total 22 5 1 16 3 13 0
+test262 total 22 5 1 16 5 11 0
 test262-slice 01 1 2 0 0 1 0 1 0
 test262-slice 02 6 11 0 0 6 3 3 0
 test262-slice 03 2 3 0 0 2 0 2 0
 test262-slice 04 1 2 0 0 1 0 1 0
-test262-slice 07 3 4 0 0 3 0 3 0
+test262-slice 07 3 4 0 0 3 2 1 0
 test262-slice 10 1 2 0 0 1 0 1 0
 test262-slice 14 4 8 1 1 2 0 2 0
 test262-slice 21 3 6 3 0 0 0 0 0
@@ -210,7 +210,7 @@ fn fixture_files_are_not_cases() -> TestResult {
     assert!(!printed.stdout.contains("harness/assert.js"));
     let counted = count_tree()?;
     assert!(
-        counted.has("test262 total 22 5 1 16 3 13 0"),
+        counted.has("test262 total 22 5 1 16 5 11 0"),
         "{}",
         counted.stdout
     );
@@ -237,7 +237,7 @@ fn directory_is_second_level_and_third_under_expressions_and_statements() -> Tes
     );
     let printed = count_tree()?;
     for line in [
-        "test262 language/expressions/yield 2 0 0 2 0 2 0",
+        "test262 language/expressions/yield 2 0 0 2 2 0 0",
         "test262 language/statements/if 1 0 0 1 1 0 0",
         "test262 language/types 1 0 0 1 1 0 0",
         "test262 built-ins/Number 3 0 0 3 0 3 0",
@@ -387,7 +387,7 @@ fn can_block_is_true_counts_as_not_applicable() -> TestResult {
         "{}",
         printed.stdout
     );
-    assert!(printed.has("test262 total 22 5 1 16 3 13 0"));
+    assert!(printed.has("test262 total 22 5 1 16 5 11 0"));
     assert!(printed.has("test262-slice 14 4 8 1 1 2 0 2 0"));
     Ok(())
 }
@@ -444,7 +444,7 @@ fn features_file_must_list_exactly_the_declared_features() -> TestResult {
         assert!(printed.has(line), "{line} not in\n{}", printed.stdout);
     }
     assert!(
-        printed.has("test262 total 22 4 1 17 4 13 0"),
+        printed.has("test262 total 22 4 1 17 6 11 0"),
         "{}",
         printed.stdout
     );
@@ -569,7 +569,7 @@ fn an_unknown_rule_kind_fails_the_run() -> TestResult {
     // (story string-transform-and-compare-methods). Every other count of the tree reads
     // design.md, whose exclude-slice 21 excludes that case.
     assert!(
-        printed.has("test262 total 22 1 1 20 4 16 0"),
+        printed.has("test262 total 22 1 1 20 6 14 0"),
         "{}",
         printed.stdout
     );

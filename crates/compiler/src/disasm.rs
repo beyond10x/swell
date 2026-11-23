@@ -110,6 +110,9 @@ pub fn disassemble(code: &Code) -> String {
         if f.strict {
             out.push_str(" strict");
         }
+        if f.generator {
+            out.push_str(" generator");
+        }
         if f.self_binding {
             out.push_str(" self");
         }
@@ -317,6 +320,11 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::PatternStep(n) => format!("PatternStep {n}"),
         I::PatternRest(n) => format!("PatternRest {n}"),
         I::TemplateObject(k) => format!("TemplateObject {k}"),
+        I::GeneratorStart(n) => format!("GeneratorStart {n}"),
+        I::Yield(n) => format!("Yield {n}"),
+        I::YieldReturn(n) => format!("YieldReturn {n}"),
+        I::GeneratorReturn(n) => format!("GeneratorReturn {n}"),
+        I::GeneratorDone(n) => format!("GeneratorDone {n}"),
         other => format!("{other:?}"),
     }
 }

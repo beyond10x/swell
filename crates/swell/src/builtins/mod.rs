@@ -12,7 +12,9 @@
 //! Array and String Iterators. Slice 5 adds `regexp` (`story:regexp-objects-exec-and-literals`),
 //! a directory: `regexp/mod.rs` holds the constructor and `%RegExp.prototype%`, `regexp/exec.rs`
 //! RegExpExec and RegExpBuiltinExec with `exec` and `test`, and `regexp/budget.rs` the budget of
-//! `swell-regexp` over the agent. Later slices add their files here.
+//! `swell-regexp` over the agent. Slice 7 adds `generator`
+//! (`story:generator-functions-and-suspended-frames`): `%GeneratorFunction.prototype%` and
+//! `%GeneratorPrototype%` with `next`, `return` and `throw`. Later slices add their files here.
 //!
 //! `array`, `object` and `string` are directories (`story:builtin-group-modules`): `mod.rs`
 //! holds the constructor and the builtins of the base, and each group of builtins a story of
@@ -34,6 +36,7 @@ pub(crate) mod array;
 pub(crate) mod boolean;
 pub(crate) mod error;
 pub(crate) mod function;
+pub(crate) mod generator;
 pub(crate) mod global;
 pub(crate) mod iterator;
 pub(crate) mod json;

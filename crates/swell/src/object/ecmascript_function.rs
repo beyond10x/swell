@@ -483,6 +483,15 @@ impl<H: Host> Agent<H> {
     /// `#sec-setfunctionlength`), SetFunctionName (`#sec-setfunctionname`), and MakeConstructor
     /// (`#sec-makeconstructor`) but for an accessor, a method or an arrow function, which have no
     /// [[Construct]] (an arrow function's `this` is set by [`Agent::keep_lexical_this`] after).
+    /// A generator template, whatever its kind, is InstantiateGeneratorFunctionObject
+    /// (`#sec-runtime-semantics-instantiategeneratorfunctionobject`),
+    /// InstantiateGeneratorFunctionExpression
+    /// (`#sec-runtime-semantics-instantiategeneratorfunctionexpression`) or the
+    /// MethodDefinitionEvaluation of a GeneratorMethod
+    /// (`#sec-runtime-semantics-methoddefinitionevaluation`): `%GeneratorFunction.prototype%`
+    /// of `realm` instead of `%Function.prototype%`, no [[Construct]], and a `prototype`
+    /// { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: false } holding a new
+    /// object whose [[Prototype]] is `%GeneratorPrototype%`, with no `constructor`.
     /// A named function expression that refers to its own name gets an environment of one
     /// immutable binding holding it.
     pub(crate) fn instantiate_function(
@@ -501,10 +510,12 @@ impl<H: Host> Agent<H> {
             (Some(template), Some(&name)) => (template, name),
             _ => return Err(self.fault()),
         };
-        let constructor = matches!(
-            template.kind,
-            FunctionKind::Declaration | FunctionKind::Expression
-        );
+        let generator = template.generator;
+        let constructor = !generator
+            && matches!(
+                template.kind,
+                FunctionKind::Declaration | FunctionKind::Expression
+            );
         let self_binding = template.self_binding;
         let length = template.length;
         let strict = template.strict;
@@ -519,7 +530,11 @@ impl<H: Host> Agent<H> {
         } else {
             env
         };
-        let prototype = self.intrinsic(realm, Intrinsic::FunctionPrototype)?;
+        let prototype = if generator {
+            self.intrinsic(realm, Intrinsic::GeneratorFunctionPrototype)?
+        } else {
+            self.intrinsic(realm, Intrinsic::FunctionPrototype)?
+        };
         let function = self.allocate_object(
             Some(prototype),
             ObjectKind::EcmascriptFunction(EcmascriptFunction {
@@ -559,6 +574,19 @@ impl<H: Host> Agent<H> {
                 constructor_key,
                 Property::data(Value::Object(function), true, false, true),
             )?;
+            let prototype_key = self.name_key("prototype")?;
+            self.add_property(
+                function,
+                prototype_key,
+                Property::data(Value::Object(made), true, false, false),
+            )?;
+        }
+        if generator {
+            // A new object whose [[Prototype]] is %GeneratorPrototype%, with no "constructor",
+            // as the function's "prototype".
+            let generator_prototype = self.intrinsic(realm, Intrinsic::GeneratorPrototype)?;
+            let made =
+                self.ordinary_object_create(Some(generator_prototype), OrdinaryData::Plain)?;
             let prototype_key = self.name_key("prototype")?;
             self.add_property(
                 function,

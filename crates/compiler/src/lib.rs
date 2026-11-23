@@ -497,6 +497,9 @@ pub(crate) struct Compiler<'a, 'm> {
     chains: Vec<Chain>,
     /// The names of the slots of each environment `PushNamedEnv` and `PushLexicalEnv` make.
     pub(crate) scopes: Vec<Vec<SlotName>>,
+    /// Of a generator template: the local slot of its generator object. Its `return` ends in
+    /// [`Instruction::GeneratorReturn`] instead of [`Instruction::Return`].
+    pub(crate) generator: Option<u32>,
 }
 
 /// The finished code of one template.
@@ -619,6 +622,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
             tasks: Vec::new(),
             chains: Vec::new(),
             scopes: Vec::new(),
+            generator: None,
         }
     }
 
@@ -870,7 +874,10 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 self.emit(Instruction::Tag(TAG_RETURN), span)?;
                 self.goto(entry, span)
             }
-            None => self.emit(Instruction::Return, span),
+            None => match self.generator {
+                Some(slot) => self.emit(Instruction::GeneratorReturn(slot), span),
+                None => self.emit(Instruction::Return, span),
+            },
         }
     }
 

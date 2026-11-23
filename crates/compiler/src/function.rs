@@ -40,9 +40,11 @@ use swell_syntax::Script;
 use swell_syntax::ast::{Ast, BindingTarget, ExprId, Function, FunctionId, Span};
 use swell_syntax::ledger::Meter;
 
-use crate::bytecode::{FunctionTemplate, Handler, Instruction, SlotName};
+use crate::bytecode::{FunctionTemplate, Handler, HandlerKind, Instruction, SlotName, TAG_RETURN};
 use crate::resolve::{Binding, FunctionInfo, Resolution, Site};
-use crate::{Body, Chain, CompileError, Compiler, Constants, Task, malformed};
+use crate::{
+    Body, Chain, CompileError, Compiler, Constants, Control, Task, malformed, release_jumps,
+};
 
 /// The code of the script itself.
 pub(crate) fn compile_script_body(
@@ -103,15 +105,21 @@ pub(crate) fn compile_function(
         c.emit(store, span)?;
         c.emit(Instruction::Pop, span)?;
     }
-    c.run(&f.body)?;
-    c.emit(Instruction::Undefined, f.span)?;
-    c.emit(Instruction::Return, f.span)?;
+    match info.generator_slot {
+        Some(slot) => generator_body(&mut c, f, slot)?,
+        None => {
+            c.run(&f.body)?;
+            c.emit(Instruction::Undefined, f.span)?;
+            c.emit(Instruction::Return, f.span)?;
+        }
+    }
     let body = c.finish()?;
     Ok(FunctionTemplate {
         kind: f.kind,
         name,
         length,
         strict: f.strict,
+        generator: info.generator_slot.is_some(),
         params,
         binds_parameters: !f.is_simple(),
         parameter_environment: !f.strict && f.scope.parameters_contain_direct_eval,
@@ -125,6 +133,62 @@ pub(crate) fn compile_function(
         positions: body.positions,
         handlers: body.handlers,
         source_text: f.span,
+    })
+}
+
+/// The code of a generator function after FunctionDeclarationInstantiation
+/// (`#sec-runtime-semantics-evaluategeneratorbody`; "Suspended frames", item 6,
+/// `docs/design/engine.md`): [`Instruction::GeneratorStart`], which makes the generator object
+/// into local slot `slot` and suspends, and [`Instruction::EndFinally`] for the normal
+/// completion of the first `next`; then the body in a `finally` of its own whose block marks the
+/// generator completed ([`Instruction::GeneratorDone`]), so a throw that leaves the body
+/// completes it on its way out (GeneratorStart, `#sec-generatorstart`, step 4). The end of the
+/// body returns `undefined` as a `return` does: through that `finally`, to
+/// [`Instruction::GeneratorReturn`].
+fn generator_body(c: &mut Compiler<'_, '_>, f: &Function, slot: u32) -> Result<(), CompileError> {
+    let span = f.span;
+    c.generator = Some(slot);
+    c.emit(Instruction::GeneratorStart(slot), span)?;
+    c.emit(Instruction::EndFinally, span)?;
+    let (start, entry, returned) = (c.label(), c.label(), c.label());
+    let (items, envs) = (c.items, c.envs);
+    c.bind(start)?;
+    c.m.push(
+        &mut c.control,
+        Control::Finally {
+            entry,
+            items,
+            envs,
+            returns: false,
+            jumps: Vec::new(),
+            closes: false,
+        },
+    )?;
+    c.run(&f.body)?;
+    c.emit(Instruction::Undefined, span)?;
+    c.exit_return(span)?;
+    if let Some(Control::Finally { jumps, .. }) = c.control.pop() {
+        release_jumps(c.m, jumps);
+    }
+    c.bind(entry)?;
+    c.emit(Instruction::GeneratorDone(slot), span)?;
+    c.emit(
+        Instruction::JumpIfTag {
+            tag: TAG_RETURN,
+            target: returned,
+        },
+        span,
+    )?;
+    c.emit(Instruction::EndFinally, span)?;
+    c.bind(returned)?;
+    c.emit(Instruction::GeneratorReturn(slot), span)?;
+    c.handler(Handler {
+        kind: HandlerKind::Finally,
+        start,
+        end: entry,
+        target: entry,
+        items,
+        envs,
     })
 }
 

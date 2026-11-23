@@ -29,7 +29,7 @@ use swell_syntax::ast::{
     PatternProperty, PatternTarget, Property, PropertyKey, PropertyValue, Span, UnaryOp, UpdateOp,
 };
 
-use crate::bytecode::{HandlerKind, Instruction, TAG_NORMAL};
+use crate::bytecode::{HandlerKind, Instruction, TAG_NORMAL, TAG_RETURN};
 use crate::resolve::{Binding, LexicalPlace, Site, anonymous_function, property_key};
 use crate::{CompileError, Compiler, Short, Task, Tasks, malformed};
 
@@ -663,9 +663,13 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     u32::try_from(strings.len()).map_err(|_| CompileError::TooMany("arguments"))?;
                 t.push(emit(Instruction::Call(n)))?;
             }
-            // A YieldExpression stands only in a generator, and the parse of a source with a
-            // generator ends on the refusal of slice 7: never a parsed script.
-            Expr::Yield { .. } => return Err(malformed("a yield expression")),
+            // A YieldExpression stands only in a generator; the parse of `yield*` ends on the
+            // refusal of slice 7: never a parsed script.
+            Expr::Yield {
+                argument,
+                delegate: false,
+            } => self.yield_expression(*argument, span, &mut t)?,
+            Expr::Yield { delegate: true, .. } => return Err(malformed("a yield* expression")),
         }
         Ok(t)
     }
@@ -938,6 +942,51 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// `yield` with its operand or none (`#sec-generator-function-definitions-runtime-semantics-evaluation`,
+    /// Yield, `#sec-yield`): the operand, or `undefined`, then [`Instruction::Yield`], which
+    /// suspends; the resumption leaves the received value and its tag, and the code dispatches
+    /// on the tag as the end of a `finally` block does ("Suspended frames", item 6,
+    /// `docs/design/engine.md`): a normal completion is the value of the expression, a return
+    /// completion returns the value as a `return` statement here does, through every `finally`
+    /// block around it, after [`Instruction::YieldReturn`] dropped what the expression around
+    /// the `yield` holds, and [`Instruction::EndFinally`] throws a throw completion here.
+    fn yield_expression(
+        &mut self,
+        argument: Option<ExprId>,
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let slot = self
+            .generator
+            .ok_or_else(|| malformed("a yield outside a generator"))?;
+        match argument {
+            Some(e) => t.push(Task::Expr(e))?,
+            None => t.push(Task::Emit(Instruction::Undefined, span))?,
+        }
+        let (normal, returned) = (self.label(), self.label());
+        t.push(Task::Emit(Instruction::Yield(slot), span))?;
+        t.push(Task::Emit(
+            Instruction::JumpIfTag {
+                tag: TAG_NORMAL,
+                target: normal,
+            },
+            span,
+        ))?;
+        t.push(Task::Emit(
+            Instruction::JumpIfTag {
+                tag: TAG_RETURN,
+                target: returned,
+            },
+            span,
+        ))?;
+        t.push(Task::Emit(Instruction::EndFinally, span))?;
+        t.push(Task::Bind(returned))?;
+        t.push(Task::Emit(Instruction::YieldReturn(self.items), span))?;
+        t.push(Task::Return(span))?;
+        t.push(Task::Bind(normal))?;
         Ok(())
     }
 

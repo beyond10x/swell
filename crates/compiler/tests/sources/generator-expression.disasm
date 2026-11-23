@@ -1,0 +1,37 @@
+script locals 0
+  var "e"
+  0000 2:5 ResolveGlobal "e"
+  0001 2:9 Closure 0
+  0002 2:5 PutGlobalRef "e"
+  0003 2:5 Pop
+  0004 0:0 LoadCompletion
+  0005 0:0 Return
+
+function 0 expression "named" length 1 locals 2 generator self
+  params local 0
+  0000 2:9 GeneratorStart 1
+  0001 2:9 EndFinally
+  0002 3:10 GetEnv 0 0
+  0003 3:20 GetLocal 0
+  0004 3:10 StrictEq
+  0005 3:10 JumpIfFalse 0015
+  0006 3:30 Number 1
+  0007 3:24 Yield 1
+  0008 3:24 JumpIfTag 0 0014
+  0009 3:24 JumpIfTag 2 0011
+  0010 3:24 EndFinally
+  0011 3:24 YieldReturn 0
+  0012 3:24 Tag 2
+  0013 3:24 Jump 0021
+  0014 3:10 Jump 0016
+  0015 3:34 Number 2
+  0016 3:3 Tag 2
+  0017 3:3 Jump 0021
+  0018 2:9 Undefined
+  0019 2:9 Tag 2
+  0020 2:9 Jump 0021
+  0021 2:9 GeneratorDone 1
+  0022 2:9 JumpIfTag 2 0024
+  0023 2:9 EndFinally
+  0024 2:9 GeneratorReturn 1
+  finally 0002..0021 -> 0021 items 0 envs 0

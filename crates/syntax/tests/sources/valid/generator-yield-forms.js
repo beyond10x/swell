@@ -1,4 +1,5 @@
-// sec-generator-function-definitions: refused "generator function is not supported before slice 7"
+// sec-generator-function-definitions: parses
+// sloppy-only
 function* g(a, b = 0, ...c) {
   yield;
   yield 1;

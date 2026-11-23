@@ -20,7 +20,6 @@ use crate::ast::{
     AssignOp, BindingTarget, Child, Expr, ExprId, ExprNode, Function, FunctionId, FunctionKind,
     Name, PatternKind, Scope, Span, Stmt, StmtId,
 };
-use crate::error::SyntaxError;
 use crate::token::{Keyword, Punct};
 
 impl<'a, 'm> Parser<'a, 'm> {
@@ -45,19 +44,13 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// `function`, the `*` of a generator and the name: numbers the function, so functions are
     /// numbered in source order. The name is read with the [Yield] around it; that it is no
     /// `yield` where [Yield] is set, or in a GeneratorExpression (`BindingIdentifier[+Yield]`),
-    /// is an early error (`src/early.rs`). The first `*` of the source holds the refusal of
-    /// slice 7 back to the end of the parse.
+    /// is an early error (`src/early.rs`).
     #[inline(never)]
     fn function_head(&mut self, kind: FunctionKind) -> R<FunctionId> {
         let span = self.start();
         self.expect_keyword(Keyword::Function)?;
         let generator = self.is(Punct::Star);
         if generator {
-            if self.held.is_none() {
-                let refusal =
-                    SyntaxError::refused("generator function", 7, self.tok.line, self.tok.column);
-                self.held = Some(refusal);
-            }
             self.advance()?;
         }
         let name = if kind == FunctionKind::Expression && self.is(Punct::LParen) {
