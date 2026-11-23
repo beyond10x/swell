@@ -16,7 +16,8 @@
 //! `access.rs` (`story:string-access-and-search-methods`) and `transform.rs`
 //! (`story:string-transform-and-compare-methods`); those of slice 5 in `replace.rs`
 //! (`story:string-replace-replace-all-and-split`) and `pattern.rs`, `match` and `search`
-//! (`story:regexp-symbol-methods-and-string-match-search`). Their keys follow the keys of this
+//! (`story:regexp-symbol-methods-and-string-match-search`) and `matchAll`
+//! (`story:regexp-match-all-and-escape`). Their keys follow the keys of this
 //! file on `%String%` and `%String.prototype%`, in that order of the groups. Every method of
 //! `String.prototype` but `toString` and `valueOf` starts with [`Agent::this_string`]. This
 //! file also has CodePointAt (`#sec-codepointat`) and UTF16EncodeCodePoint
