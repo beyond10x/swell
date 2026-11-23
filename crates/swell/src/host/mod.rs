@@ -16,6 +16,7 @@ pub(crate) mod hooks;
 pub(crate) mod host_bytes;
 pub(crate) mod host_object;
 pub(crate) mod interrupt;
+pub(crate) mod jobs;
 pub(crate) mod limits;
 pub(crate) mod outcome;
 
@@ -24,6 +25,7 @@ pub use hooks::*;
 pub use host_bytes::*;
 pub use host_object::*;
 pub use interrupt::*;
+pub use jobs::{CheckpointReport, Microtask};
 pub use limits::*;
 pub use outcome::*;
 
@@ -974,6 +976,45 @@ impl<H: Host> Cx<'_, H> {
             .begin()
             .and_then(|()| agent.script_evaluation(script.handle));
         Ok(agent.hand_out_completion(completion))
+    }
+
+    /// Queue the host microtask `task` behind every queued entry, with the current realm of this
+    /// `Cx` as its realm (decision 11, "A host microtask's realm"; decision 7): inside a host
+    /// function that function's [[Realm]], inside `with_cx` the realm `with_cx` took, inside a
+    /// host microtask that microtask's (HOST-192). It runs no code, spends no step and calls no
+    /// hook.
+    pub fn queue_microtask(&mut self, task: Microtask<H>) -> Result<(), HostError> {
+        let agent = &mut *self.agent;
+        agent.alive()?;
+        // Host code runs only inside an entry, which names a live realm: anything else is a
+        // broken invariant.
+        let Some(realm) = agent
+            .realm_slot()
+            .filter(|&realm| agent.heap.realms.get(realm).is_ok())
+        else {
+            agent.fault();
+            return Err(HostError::Faulted);
+        };
+        agent.enqueue_microtask(realm, task)
+    }
+
+    /// HTML's microtask checkpoint through `cx` (decision 11): while a checkpoint runs it answers
+    /// both counts 0 at once and runs nothing (HOST-81, "If the event loop's performing a
+    /// microtask checkpoint is true, then return", `html:perform-a-microtask-checkpoint`).
+    /// Otherwise it runs the loop of `Agent::perform_microtask_checkpoint`: from `with_cx` as an
+    /// outermost entry of its own, from a host function inside the running entry, on its steps
+    /// (HOST-193), each entry's scope inside the host function's, which keeps what it was handed
+    /// before. A termination is the run's, sticky until the outermost entry ends; an entry that
+    /// calls into code re-enters above the caller's frames, counted against `reentry_depth` as
+    /// every call from a host function is.
+    pub fn perform_microtask_checkpoint(&mut self) -> Completion<CheckpointReport> {
+        let agent = &mut *self.agent;
+        agent.running()?;
+        if agent.checkpointing {
+            return Ok(CheckpointReport::default());
+        }
+        agent.begin()?;
+        agent.checkpoint()
     }
 }
 

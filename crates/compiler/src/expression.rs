@@ -663,13 +663,19 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     u32::try_from(strings.len()).map_err(|_| CompileError::TooMany("arguments"))?;
                 t.push(emit(Instruction::Call(n)))?;
             }
-            // A YieldExpression stands only in a generator; the parse of `yield*` ends on the
-            // refusal of slice 7: never a parsed script.
+            // A YieldExpression stands only in a generator; `yield*` always has its operand.
             Expr::Yield {
                 argument,
                 delegate: false,
             } => self.yield_expression(*argument, span, &mut t)?,
-            Expr::Yield { delegate: true, .. } => return Err(malformed("a yield* expression")),
+            Expr::Yield {
+                argument: Some(e),
+                delegate: true,
+            } => self.yield_star_expression(*e, span, &mut t)?,
+            Expr::Yield {
+                argument: None,
+                delegate: true,
+            } => return Err(malformed("a yield* without its operand")),
             // An AwaitExpression stands only in an `async` function, and the parse of a source
             // with one ends on the refusal of slice 10: never a parsed script.
             Expr::Await(_) => return Err(malformed("an await expression")),
@@ -991,6 +997,73 @@ impl<'a, 'm> Compiler<'a, 'm> {
         t.push(Task::Return(span))?;
         t.push(Task::Bind(normal))?;
         Ok(())
+    }
+
+    /// `yield*` with its operand (`#sec-generator-function-definitions-runtime-semantics-evaluation`,
+    /// YieldExpression : `yield *` AssignmentExpression; `docs/design/engine.md`, decision 3,
+    /// "Suspended frames", item 6): the operand, GetIterator of it (sync), its record kept on
+    /// the stack as a `for`-`of` head keeps it, the received completion a normal `undefined`;
+    /// then the loop: [`Instruction::DelegateStep`] with the received completion,
+    /// [`Instruction::JumpIfDelegateDone`] on its result, [`Instruction::DelegateYield`] of the
+    /// result as it is, whose resumption leaves the next received completion, and the jump
+    /// back. Done, the record is dropped and the value and its tag are left: for a normal one
+    /// the value of the expression; for a return the value is returned as a `return` statement
+    /// here returns it, through every `finally` block around it, after
+    /// [`Instruction::YieldReturn`] dropped what the expression around the `yield*` holds. A
+    /// throw from the loop enters a [`HandlerKind::Pattern`] handler, which cuts the stack just
+    /// above the record; its block drops the record, not closed, and throws again, so the
+    /// handler of an array pattern around the `yield*` finds its own record on top.
+    fn yield_star_expression(
+        &mut self,
+        argument: ExprId,
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let slot = self
+            .generator
+            .ok_or_else(|| malformed("a yield* outside a generator"))?;
+        let (start, top, end, done, normal) = (
+            self.label(),
+            self.label(),
+            self.label(),
+            self.label(),
+            self.label(),
+        );
+        t.push(Task::Expr(argument))?;
+        t.push(Task::Emit(Instruction::GetIterator, span))?;
+        t.push(Task::Bind(start))?;
+        t.push(Task::Emit(Instruction::Undefined, span))?;
+        t.push(Task::Emit(Instruction::Tag(TAG_NORMAL), span))?;
+        t.push(Task::Bind(top))?;
+        t.push(Task::Emit(Instruction::DelegateStep(done), span))?;
+        t.push(Task::Emit(Instruction::JumpIfDelegateDone(done), span))?;
+        t.push(Task::Emit(Instruction::DelegateYield(slot), span))?;
+        t.push(Task::Goto(top, span))?;
+        t.push(Task::Bind(end))?;
+        t.push(Task::Emit(Instruction::Bury(2), span))?;
+        t.push(Task::Emit(Instruction::Bury(2), span))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        t.push(Task::Emit(Instruction::EndFinally, span))?;
+        t.push(Task::Bind(done))?;
+        t.push(Task::Emit(
+            Instruction::JumpIfTag {
+                tag: TAG_NORMAL,
+                target: normal,
+            },
+            span,
+        ))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        t.push(Task::Emit(Instruction::YieldReturn(self.items), span))?;
+        t.push(Task::Return(span))?;
+        t.push(Task::Bind(normal))?;
+        t.push(Task::Handler {
+            kind: HandlerKind::Pattern,
+            start,
+            end,
+            target: end,
+            items: self.items,
+            envs: self.envs,
+        })
     }
 
     /// IteratorBindingInitialization of the ArrayBindingPattern `id`

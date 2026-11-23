@@ -18,4 +18,6 @@ test/built-ins/AsyncGeneratorFunction/prototype/extensibility.js
 test/built-ins/AsyncGeneratorFunction/prototype/not-callable.js
 test/built-ins/AsyncGeneratorFunction/prototype/prop-desc.js
 test/built-ins/AsyncGeneratorFunction/prototype/prototype.js
+test/built-ins/Function/prototype/toString/AsyncGenerator.js
+test/built-ins/Object/seal/seal-asyncgeneratorfunction.js
 test/language/comments/hashbang/function-constructor.js

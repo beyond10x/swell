@@ -18,8 +18,24 @@ use crate::host::agent::Agent;
 use crate::host::{Host, HostError};
 use crate::value::{Root, Value};
 
-/// The queue of released roots, as (index, generation) pairs.
-pub(crate) type ReleaseQueue = Rc<Cell<Vec<(u32, u32)>>>;
+/// The queue of released roots, as (index, generation) pairs, and whether a root was pushed on
+/// it since the last drain: a drop pushes and sets the flag, and a drain reads the flag before
+/// it takes the queue, so that a safe point after no drop does no more than that read.
+#[derive(Default)]
+pub(crate) struct ReleaseQueue {
+    entries: Cell<Vec<(u32, u32)>>,
+    pending: Cell<bool>,
+}
+
+impl ReleaseQueue {
+    /// Queue the release of the root at `index` with `generation`.
+    pub(crate) fn push(&self, index: u32, generation: u32) {
+        let mut entries = self.entries.take();
+        entries.push((index, generation));
+        self.entries.set(entries);
+        self.pending.set(true);
+    }
+}
 
 /// What a root holds: a value, the realm record of a `Realm`, or the script record of a
 /// `Script`.
@@ -40,7 +56,7 @@ pub(crate) struct RootTable {
     key: u32,
     slots: Vec<RootSlot>,
     free: Vec<u32>,
-    released: ReleaseQueue,
+    released: Rc<ReleaseQueue>,
 }
 
 impl RootTable {
@@ -50,7 +66,7 @@ impl RootTable {
             key,
             slots: Vec::new(),
             free: Vec::new(),
-            released: Rc::new(Cell::new(Vec::new())),
+            released: Rc::new(ReleaseQueue::default()),
         }
     }
 
@@ -141,9 +157,23 @@ impl RootTable {
         }
     }
 
-    /// Release every root the host dropped since the last drain.
+    /// Release every root the host dropped since the last drain. With none dropped, one read of
+    /// the queue's flag: the queue is not taken.
+    #[inline]
     pub(crate) fn drain(&mut self) {
-        for (index, generation) in self.released.take() {
+        if self.released.pending.get() {
+            self.drain_queue();
+        }
+    }
+
+    /// The work of [`RootTable::drain`] after a drop: the flag cleared and every queued root
+    /// released.
+    #[inline(never)]
+    fn drain_queue(&mut self) {
+        self.released.pending.set(false);
+        #[cfg(test)]
+        QUEUE_TAKEN.with(|taken| taken.set(taken.get().saturating_add(1)));
+        for (index, generation) in self.released.entries.take() {
             let Some(slot) = usize::try_from(index)
                 .ok()
                 .and_then(|i| self.slots.get_mut(i))
@@ -170,6 +200,13 @@ impl RootTable {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The drains that took the release queue, in the counting build of the tests; a test
+    /// resets it before it reads it.
+    pub(crate) static QUEUE_TAKEN: Cell<u64> = const { Cell::new(0) };
+}
+
 /// Root site of the collector: every value, realm record and script record of the root table.
 pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
     mark.count("heap/roots.rs trace_roots");
@@ -185,9 +222,10 @@ pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
 
 #[cfg(test)]
 mod tests {
-    use super::RootTable;
+    use super::{QUEUE_TAKEN, RootTable};
     use crate::heap::arena::Handle;
-    use crate::{HostError, Value};
+    use crate::host::hooks::test_host::agent_with_realm;
+    use crate::{HostError, Outcome, Parsed, Source, Value};
 
     #[test]
     fn a_dropped_root_is_released_at_the_drain_and_its_slot_reused() {
@@ -235,5 +273,62 @@ mod tests {
         drop(root);
         table.drain();
         assert_eq!(table.held(), 1);
+    }
+
+    /// The drains that took the release queue since the count was reset.
+    fn queue_taken() -> u64 {
+        QUEUE_TAKEN.with(std::cell::Cell::get)
+    }
+
+    /// A safe point with no root dropped since the last drain does no work for the release
+    /// queue (`story:an-index-store-does-not-go-through-text`): a script whose loop runs 20
+    /// times, every instruction a safe point, takes the queue 0 times (2,815 times for 200 on
+    /// its base); after two roots are dropped, the next run of it takes the queue once, and
+    /// both are released by then, as they were at the first safe point after their drop
+    /// before.
+    #[test]
+    fn a_safe_point_with_nothing_dropped_takes_no_queue() {
+        let (mut agent, realm) = agent_with_realm();
+        let Ok(Parsed::Parsed(script)) = agent.parse_script(
+            &realm,
+            Source::Utf8("for (var i = 0; i < 20; i++) {} i"),
+            None,
+        ) else {
+            panic!("the script did not parse");
+        };
+        let global = agent.global_object(&realm).unwrap();
+        // Whatever the setup dropped is released here.
+        assert!(agent.collect().is_ok());
+        QUEUE_TAKEN.with(|taken| taken.set(0));
+        let Ok(Outcome::Normal(first)) = agent.evaluate_script(&script) else {
+            panic!("the first run did not complete");
+        };
+        assert_eq!(
+            queue_taken(),
+            0,
+            "drains that took the queue, nothing dropped"
+        );
+        let held = agent.heap.roots.held();
+        drop(global);
+        drop(first);
+        assert_eq!(
+            agent.heap.roots.held(),
+            held,
+            "dropping only queues the release"
+        );
+        let Ok(Outcome::Normal(second)) = agent.evaluate_script(&script) else {
+            panic!("the second run did not complete");
+        };
+        assert_eq!(
+            queue_taken(),
+            1,
+            "drains that took the queue, two roots dropped"
+        );
+        assert_eq!(
+            agent.heap.roots.held(),
+            held - 1,
+            "two released, the answer held"
+        );
+        drop(second);
     }
 }

@@ -47,6 +47,7 @@ mod spread;
 pub(crate) mod suspend;
 mod template;
 mod templates;
+mod yield_star;
 
 use frame::{Entry, Frame, entry_bytes};
 

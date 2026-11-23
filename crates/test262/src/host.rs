@@ -79,8 +79,8 @@ pub(crate) struct RunnerHost {
     pub(crate) interrupt: Option<InterruptHandle>,
     /// What `print` received, each as its string value.
     pub(crate) printed: Vec<String>,
-    /// The jobs and module loads the engine handed over. No case before slice 10 needs one run;
-    /// they are kept, never performed.
+    /// The generic and timeout jobs and the module loads the engine handed over: kept, never
+    /// performed. The jobs come with `Atomics.waitAsync` (slice 14), the loads with slice 11.
     jobs: Vec<Job>,
     loads: Vec<LoadRequest>,
 }

@@ -10,11 +10,11 @@
 //! answered `Err(HostError::StaleHandle)`, one of another agent `Err(HostError::ForeignHandle)`.
 //! Written by `story:heap-values-and-host-surface`.
 
-use std::cell::Cell;
 use std::fmt;
 use std::rc::Rc;
 
 use crate::heap::arena::Handle;
+use crate::heap::roots::ReleaseQueue;
 
 /// An ECMAScript language value (6.1).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -68,14 +68,12 @@ pub struct Root {
     pub(crate) key: u32,
     pub(crate) index: u32,
     pub(crate) generation: u32,
-    pub(crate) released: Rc<Cell<Vec<(u32, u32)>>>,
+    pub(crate) released: Rc<ReleaseQueue>,
 }
 
 impl Drop for Root {
     fn drop(&mut self) {
-        let mut queue = self.released.take();
-        queue.push((self.index, self.generation));
-        self.released.set(queue);
+        self.released.push(self.index, self.generation);
     }
 }
 

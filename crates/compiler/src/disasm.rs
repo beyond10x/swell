@@ -325,6 +325,9 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::YieldReturn(n) => format!("YieldReturn {n}"),
         I::GeneratorReturn(n) => format!("GeneratorReturn {n}"),
         I::GeneratorDone(n) => format!("GeneratorDone {n}"),
+        I::DelegateStep(t) => format!("DelegateStep {t:04}"),
+        I::JumpIfDelegateDone(t) => format!("JumpIfDelegateDone {t:04}"),
+        I::DelegateYield(n) => format!("DelegateYield {n}"),
         other => format!("{other:?}"),
     }
 }

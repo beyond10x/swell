@@ -2,7 +2,9 @@
 //! HOST-3; `docs/design/engine.md`, decision 13, "Fuzzing is tooling"): a generator written
 //! with `std` only issues, from a seed, sequences of interface calls on two agents, every
 //! `Agent` entry point and read, `with_cx` with every `Cx` operation, setup closures with the
-//! `HookCx` operations, and host functions that call back into the engine, with arbitrary
+//! `HookCx` operations, and host functions that call back into the engine, with the microtask
+//! queue among them (host microtasks queued through `Agent` and `Cx`, checkpoints of both, and
+//! `clear_microtasks`; `story:job-queue-and-microtask-checkpoint`), with arbitrary
 //! arguments: stale, released, foreign and wrong-kind handles among them, and small scripts of
 //! the slice 1 grammar and broken sources, under small and random limits.
 //!
@@ -55,7 +57,7 @@ use swell::{
 /// measured alone on 2026-11-22, and the sequences from 15 on are the ones that cost (below).
 /// The gate runs
 /// the first 160 and, in the collect mode, the first 15: every choice of the generator is drawn
-/// uniformly among at most 34 kinds, so the 3,840 entry calls of 160 sequences (360 of 15) draw
+/// uniformly among at most 36 kinds, so the 3,840 entry calls of 160 sequences (360 of 15) draw
 /// each kind about a hundred times (about ten), and a kind the full count reaches is not left
 /// out. With 400 and 40 the parts took 15.1 to 22.6 s each in the default mode, and in the
 /// collect mode the fourth and the fifth 36.3 and 31.8 s (the sequences 15 to 24, the others
@@ -1124,11 +1126,24 @@ fn hook_op(cx: &mut HookCx<'_, FuzzHost>) -> String {
 /// One operation of a `Cx`: the shared ones, and those that run code.
 fn cx_op(cx: &mut Cx<'_, FuzzHost>) -> String {
     let me = cx.host().index;
-    let choice = pool!(cx).rng.below(34);
+    let choice = pool!(cx).rng.below(36);
     if choice < 12 {
         return scoped_op!(cx, choice);
     }
     match choice {
+        34 => {
+            // A host microtask that makes one operation of its own `Cx` when a checkpoint
+            // runs it, in the current realm of this `Cx`.
+            let answer = cx.queue_microtask(Box::new(|cx: &mut Cx<'_, FuzzHost>| {
+                let line = cx_op(cx);
+                pool!(cx).log.push(format!("  microtask {line}"));
+            }));
+            format!("cx.queue_microtask -> {}", shape(&answer))
+        }
+        35 => {
+            let answer = cx.perform_microtask_checkpoint();
+            format!("cx.perform_microtask_checkpoint -> {answer:?}")
+        }
         12 => {
             let count = pool!(cx).realm_refs.len();
             if count == 0 {
@@ -1851,7 +1866,7 @@ fn op_call(world: &mut World, a: usize, construct: bool) -> String {
 
 /// One of the reads and the other entry points that take a realm, a root or a script.
 fn op_read(world: &mut World, a: usize) -> String {
-    match world.pool.rng.below(7) {
+    match world.pool.rng.below(10) {
         0 => {
             let Some((origin, realm)) = world.take_realm() else {
                 return "global_object(no realm)".to_string();
@@ -1915,11 +1930,31 @@ fn op_read(world: &mut World, a: usize) -> String {
         5 => {
             let agent = &world.agents[a];
             format!(
-                "reads -> {:?} {:?} {:?}",
+                "reads -> {:?} {:?} {:?} {:?}",
                 agent.state(),
                 agent.heap_bytes(),
-                agent.last_entry_steps()
+                agent.last_entry_steps(),
+                agent.pending_microtasks()
             )
+        }
+        7 => {
+            let Some((origin, realm)) = world.take_realm() else {
+                return "queue_microtask(no realm)".to_string();
+            };
+            let answer = world.on(a, |agent| agent.queue_microtask(&realm, Box::new(cx_ops)));
+            if is_foreign(origin, a) {
+                foreign_answer("queue_microtask", &answer);
+            }
+            world.pool.realms.push((origin, realm));
+            format!("queue_microtask -> {}", shape(&answer))
+        }
+        8 => {
+            let answer = world.on(a, |agent| agent.perform_microtask_checkpoint());
+            format!("perform_microtask_checkpoint -> {}", shape(&answer))
+        }
+        9 => {
+            let answer = world.on(a, |agent| agent.clear_microtasks());
+            format!("clear_microtasks -> {}", shape(&answer))
         }
         _ => {
             world.agents[a].interrupt_handle().interrupt();

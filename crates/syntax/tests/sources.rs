@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use swell_syntax::ast::{Expr, FunctionId, FunctionKind, Stmt};
 use swell_syntax::{
     MessageKind, ParseOptions, Script, SyntaxError, message_kind, parse_dynamic_function,
-    parse_eval, parse_script,
+    parse_dynamic_generator_function, parse_eval, parse_script,
 };
 
 const LIMIT: u32 = 1_000;
@@ -237,8 +237,8 @@ fn refused_sources_name_their_slice() {
 
 /// The refusal of slice 10 (`async function`) does not stop the parse: a source with an `async`
 /// function or arrow function and no other error ends on it alone, at the `async` of the first
-/// one of the source, through each entry; a refusal held for `yield*` earlier in the source
-/// comes first; an early error or a grammar error anywhere ends the source on that error
+/// one of the source, through each entry, the dynamic ones of `Function` and
+/// `%GeneratorFunction%` too; an early error or a grammar error anywhere ends the source on that error
 /// instead (`#sec-async-function-definitions`, `docs/design/engine.md`, section 12, "A part
 /// before its slice").
 #[test]
@@ -263,9 +263,15 @@ fn the_refusal_of_slice_10_comes_after_the_whole_parse() {
         at("y = async (a = async function () {}) => a;"),
         (refusal.clone(), 1, 5)
     );
+    // `yield*` parses since slice 7 delivered it; a generator method in an `async` function has
+    // [Await] cleared in its parameters and body, and its computed name has the [Await] around.
     assert_eq!(
         at("function* g() { yield* a; }\nasync function f() {}"),
-        ("yield* is not supported before slice 7".to_string(), 1, 22)
+        (refusal.clone(), 2, 1)
+    );
+    assert_eq!(
+        at("async function f() { return { *[await a]() { await: yield; } }; }"),
+        (refusal.clone(), 1, 1)
     );
     for (text, message) in [
         (
@@ -290,6 +296,14 @@ fn the_refusal_of_slice_10_comes_after_the_whole_parse() {
         .unwrap();
     assert_eq!(messages(&errors), vec![refusal.clone()]);
     let errors = parse_dynamic_function(&units("a"), &units("return async () => a;"), options)
+        .err()
+        .unwrap();
+    assert_eq!(messages(&errors), vec![refusal.clone()]);
+    // The body of `Function` and of `%GeneratorFunction%` ends on the refusal as a script does.
+    let body = units("async function f(){}");
+    let errors = parse_dynamic_function(&[], &body, options).err().unwrap();
+    assert_eq!(messages(&errors), vec![refusal.clone()]);
+    let errors = parse_dynamic_generator_function(&[], &body, options)
         .err()
         .unwrap();
     assert_eq!(messages(&errors), vec![refusal]);
@@ -594,6 +608,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "generator_expression" => ("x = ", "function* (){ return ", "0", "; }", ";"),
         "yield" => ("function* g(){ ", "yield ", "0;", "", " }"),
         "yield_star" => ("function* g(){ ", "yield* ", "0;", "", " }"),
+        "generator_method" => ("x = ", "{*m(){ return ", "0", "; }}", ";"),
         "async_function_expression" => ("x = ", "async function (){ return ", "0", "; }", ";"),
         "async_arrow" => ("x = ", "async x => ", "0", "", ";"),
         "await" => ("async function f(){ ", "await ", "0;", "", " }"),
@@ -607,7 +622,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 56] = [
+const NESTING_KINDS: [&str; 57] = [
     "array",
     "paren",
     "block",
@@ -661,6 +676,7 @@ const NESTING_KINDS: [&str; 56] = [
     "generator_expression",
     "yield",
     "yield_star",
+    "generator_method",
     "async_function_expression",
     "async_arrow",
     "await",
@@ -689,20 +705,12 @@ fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec
 
 /// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
 /// nesting error alone (`Some(false)`), or fail otherwise (`None`). A source whose one error is
-/// the refusal of slice 7 parsed: that refusal comes only after the whole parse and the early
-/// errors (`story:yield-star-delegation` takes this arm out again). So did a source whose one
-/// error is the refusal of slice 10, held back the same way (`story:async-functions-and-await`
-/// takes that arm out).
+/// the refusal of slice 10 parsed: that refusal comes only after the whole parse and the early
+/// errors (`story:async-functions-and-await` takes this arm out).
 fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     let source = nested(kind, n)?;
     match parse_through(entry, &source, limit) {
         Ok(_) => Some(true),
-        Err(e)
-            if e.len() == 1
-                && message_kind(&e.first()?.message) == (MessageKind::Refusal { slice: 7 }) =>
-        {
-            Some(true)
-        }
         Err(e)
             if e.len() == 1
                 && message_kind(&e.first()?.message) == (MessageKind::Refusal { slice: 10 }) =>

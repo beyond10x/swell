@@ -1213,6 +1213,10 @@ impl<'a, 'm> Checker<'a, 'm> {
                 seen.insert(p.name.as_str());
                 continue;
             }
+            // `#sec-method-definitions-static-semantics-early-errors` and
+            // `#sec-generator-function-definitions-static-semantics-early-errors`: the
+            // UniqueFormalParameters of a method, a generator method too, in any code; a
+            // generator method's other early errors are those of every generator.
             if f.kind == FunctionKind::Method {
                 self.error(
                     format!("duplicate parameter name {} in a method", p.name),

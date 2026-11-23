@@ -28,6 +28,18 @@
 //!   name in front when it was one of them; for a negative case that passed, the error it
 //!   passed with; empty for any other pass. A tab or line end in a field is written as a space.
 //!   The file is written before anything is printed; with `--run none` it holds no line.
+//! - `count ... --part <k>/<n> --runs <file> [--workers <n>] [--run all|none]` runs the cases of
+//!   part `k` of `n` only (case `i` of the list in byte order, from 0, is of part `i mod n + 1`)
+//!   and writes the file of the part to `<file>` ([`parts`] gives its format); it prints no
+//!   count line and compares with nothing, and prints `test262-part <k>/<n>: <c> case(s) of
+//!   <cases>, <r> run(s), written to <file>`. It takes no `--sections` and no `--expected`.
+//! - `count ... --from-parts <directory or file> [--run all|none]` runs no case: it reads the
+//!   files of the parts (every `*.tsv` of the directory, or the file) and prints, writes and
+//!   compares what `count` with every case run prints, writes and compares, the milliseconds of
+//!   a `test262-time` line the sum of the times of the slice's runs in the parts. It takes no
+//!   `--workers`. Files that do not make one whole run (a part missing or given twice, two
+//!   `n`, another `--run`, a case or a run missing, in two parts or unknown) are a command it
+//!   cannot carry out.
 //!
 //! Both name a case whose front matter cannot be read on standard error as
 //! `test262-error <path>: <reason>`. `count` then prints its problems and exits 1 when there is
@@ -40,7 +52,8 @@
 //! are equal it prints `test262: <n> lines equal <file>` to standard error. A command it cannot
 //! carry out (a wrong argument, a worker count that is not a positive integer, a `--run` other
 //! than `all` or `none`, a file or directory it cannot read, a checkout with no case, a worker
-//! thread that cannot start, a `--runs` file it cannot write) exits 2.
+//! thread that cannot start, a `--runs` file it cannot write, a part that is not `<k>/<n>`,
+//! parts that do not make one whole run) exits 2.
 
 use std::io::{self, BufWriter, Write};
 use std::num::NonZeroUsize;
@@ -48,11 +61,17 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use swell_test262::count::{self, Loaded, RunLines};
+use swell_test262::parts::{self, Part};
 use swell_test262::{expected, features, run, sections, slices};
 
 const USAGE: &str = "usage: swell-test262 meta --test262 <checkout>\n       \
 swell-test262 count --test262 <checkout> --design <file> --features <file> \
-[--sections <file>] [--expected <file>] [--workers <n>] [--run all|none] [--runs <file>]";
+[--sections <file>] [--expected <file>] [--workers <n>] [--run all|none] [--runs <file>]\n       \
+swell-test262 count --test262 <checkout> --design <file> --features <file> \
+--part <k>/<n> --runs <file> [--workers <n>] [--run all|none]\n       \
+swell-test262 count --test262 <checkout> --design <file> --features <file> \
+--from-parts <directory or file> [--sections <file>] [--expected <file>] [--run all|none] \
+[--runs <file>]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -76,11 +95,10 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         return Err(USAGE.to_string());
     };
     let options = options(rest)?;
+    let given = |name: &str| options.iter().find(|(n, _)| n == name).map(|(_, v)| v);
     let get = |name: &str| -> Result<PathBuf, String> {
-        options
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| PathBuf::from(v))
+        given(name)
+            .map(PathBuf::from)
             .ok_or_else(|| format!("{command} needs {name}\n{USAGE}"))
     };
     let allowed: &[&str] = match command.as_str() {
@@ -94,26 +112,26 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             "--workers",
             "--run",
             "--runs",
+            "--part",
+            "--from-parts",
         ],
         _ => return Err(format!("unknown command {command}\n{USAGE}")),
     };
     if let Some((name, _)) = options.iter().find(|(n, _)| !allowed.contains(&n.as_str())) {
         return Err(format!("{command} takes no {name}\n{USAGE}"));
     }
-    let workers = match options.iter().find(|(n, _)| n == "--workers") {
-        Some((_, value)) => value
+    let workers = match given("--workers") {
+        Some(value) => value
             .parse::<NonZeroUsize>()
             .map_err(|_| format!("--workers needs a positive integer, not {value}\n{USAGE}"))?,
         None => NonZeroUsize::MIN,
     };
-    let run_cases = match options.iter().find(|(n, _)| n == "--run") {
-        None => true,
-        Some((_, value)) => match value.as_str() {
-            "all" => true,
-            "none" => false,
-            _ => return Err(format!("--run needs all or none, not {value}\n{USAGE}")),
-        },
+    let run_cases = match given("--run").map(String::as_str) {
+        None | Some("all") => true,
+        Some("none") => false,
+        Some(value) => return Err(format!("--run needs all or none, not {value}\n{USAGE}")),
     };
+    let source = source(&options)?;
     let checkout = get("--test262")?;
     let mut loaded = load(&checkout)?;
     if command == "meta" {
@@ -127,8 +145,56 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         runs: get("--runs").ok(),
         workers,
         run_cases,
+        source,
     };
     count(&checkout, &mut loaded, &inputs)
+}
+
+/// Where the outcomes of the runs come from, from the options: the engine, for every case or
+/// for one part, or the files of the parts. Refuses the options a part or a count from parts
+/// does not take.
+fn source(options: &[(String, String)]) -> Result<Source, String> {
+    let given = |name: &str| options.iter().find(|(n, _)| n == name).map(|(_, v)| v);
+    match (given("--part"), given("--from-parts")) {
+        (Some(_), Some(_)) => Err(format!(
+            "count takes --part or --from-parts, not both\n{USAGE}"
+        )),
+        (Some(part), None) => {
+            let part = Part::parse(part).map_err(|e| format!("--part: {e}\n{USAGE}"))?;
+            if given("--runs").is_none() {
+                return Err(format!(
+                    "count --part needs --runs, the file of the part\n{USAGE}"
+                ));
+            }
+            for name in ["--sections", "--expected"] {
+                if given(name).is_some() {
+                    return Err(format!(
+                        "count --part takes no {name}: a part prints no count line\n{USAGE}"
+                    ));
+                }
+            }
+            Ok(Source::Part(part))
+        }
+        (None, Some(path)) => {
+            if given("--workers").is_some() {
+                return Err(format!(
+                    "count --from-parts takes no --workers: it runs no case\n{USAGE}"
+                ));
+            }
+            Ok(Source::FromParts(PathBuf::from(path)))
+        }
+        (None, None) => Ok(Source::Run),
+    }
+}
+
+/// Where the outcomes of the runs come from.
+enum Source {
+    /// Every run case is run on the engine (or none, with `--run none`).
+    Run,
+    /// The cases of one part are run, and the file of the part is written.
+    Part(Part),
+    /// No case is run: the outcomes are read from the files of the parts at the path.
+    FromParts(PathBuf),
 }
 
 /// The files `count` reads besides the checkout, and its worker count.
@@ -143,6 +209,8 @@ struct Inputs {
     /// Whether the run cases are run (`--run all`, the default) or counted failed unrun
     /// (`--run none`).
     run_cases: bool,
+    /// Where the outcomes of the runs come from.
+    source: Source,
 }
 
 /// The `--name value` pairs of the arguments.
@@ -206,7 +274,43 @@ fn meta(loaded: &[Loaded]) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// Runs the cases of `part` and writes the file of the part to `file`; prints one line.
+fn part(
+    checkout: &Path,
+    loaded: &[Loaded],
+    inputs: &Inputs,
+    part: Part,
+    file: &Path,
+) -> Result<ExitCode, String> {
+    let (rules, _) = slices::read(&read_text(&inputs.design)?);
+    let (listed, _) = features::read_listed(&read_text(&inputs.features)?);
+    let runner = inputs.run_cases.then_some((inputs.workers, &run::LIMITS));
+    let lines = parts::run_part(checkout, loaded, &rules, &listed, part, runner)?;
+    write_lines(file, &lines)?;
+    let cases = lines
+        .iter()
+        .filter(|l| l.starts_with("test262-case\t"))
+        .count();
+    let runs = lines
+        .iter()
+        .filter(|l| l.starts_with("test262-run\t"))
+        .count();
+    print([format!(
+        "test262-part {part}: {cases} case(s) of {}, {runs} run(s), written to {}",
+        loaded.len(),
+        file.display()
+    )])?;
+    Ok(ExitCode::SUCCESS)
+}
+
 fn count(checkout: &Path, loaded: &mut [Loaded], inputs: &Inputs) -> Result<ExitCode, String> {
+    if let Source::Part(one) = &inputs.source {
+        let file = inputs
+            .runs
+            .as_deref()
+            .ok_or_else(|| format!("count --part needs --runs, the file of the part\n{USAGE}"))?;
+        return part(checkout, loaded, inputs, *one, file);
+    }
     let (rules, mut problems) = slices::read(&read_text(&inputs.design)?);
     let (listed, listed_problems) = features::read_listed(&read_text(&inputs.features)?);
     problems.extend(listed_problems);
@@ -222,17 +326,20 @@ fn count(checkout: &Path, loaded: &mut [Loaded], inputs: &Inputs) -> Result<Exit
         ));
     }
     problems.extend(features::check(&listed, &declared, &rules));
-    let ran = if inputs.run_cases {
-        count::run_cases(
+    let ran = match &inputs.source {
+        Source::FromParts(path) => {
+            let files = parts::read(path)?;
+            parts::from_parts(loaded, &rules, &listed, &files, inputs.run_cases)?
+        }
+        Source::Run if inputs.run_cases => count::run_cases(
             checkout,
             loaded,
             &rules,
             &listed,
             inputs.workers,
             &run::LIMITS,
-        )?
-    } else {
-        RunLines::default()
+        )?,
+        Source::Run | Source::Part(_) => RunLines::default(),
     };
     if let Some(file) = &inputs.runs {
         write_lines(file, &ran.runs)?;
