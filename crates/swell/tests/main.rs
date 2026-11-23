@@ -46,6 +46,7 @@ mod frontend_ledger;
 mod fuzz;
 mod hooks;
 mod host_objects;
+mod index_stores;
 mod interrupt;
 mod language;
 mod lexical_declarations;

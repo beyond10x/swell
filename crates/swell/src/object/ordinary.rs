@@ -374,6 +374,14 @@ impl<H: Host> Agent<H> {
         value: Value,
         receiver: Value,
     ) -> Completion<bool> {
+        // An index of an Array that is its own receiver, when its answer is known
+        // (`object/array.rs`, `array_set_index`).
+        if let Key::Index(index) = key
+            && receiver == Value::Object(object)
+            && let Some(done) = self.array_set_index(object, index, value)?
+        {
+            return Ok(done);
+        }
         let mut o = object;
         let own = loop {
             match self.get_own_property(o, key)? {

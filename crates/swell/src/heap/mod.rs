@@ -276,6 +276,9 @@ thread_local! {
     /// The collections run, counted in [`Heap::collected`], in the counting build of the tests;
     /// a test resets it before it reads it.
     pub(crate) static COLLECTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// The String records stored, counted in [`Heap::new_string_record`], in the counting build
+    /// of the tests; a test resets it before it reads it.
+    pub(crate) static STRINGS_MADE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// The heap of one agent.
@@ -469,6 +472,8 @@ impl Heap {
         owned_bytes: u64,
     ) -> Result<StringRef, OverBudget> {
         let handle = store(&mut self.accounting, &mut self.strings, string, owned_bytes)?;
+        #[cfg(test)]
+        STRINGS_MADE.with(|made| made.set(made.get().saturating_add(1)));
         Ok(StringRef { handle })
     }
 
