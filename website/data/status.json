@@ -19,15 +19,15 @@
     ]
   },
   "test262": {
-    "line": "test262 total 53801 8982 7 44812 16412 28399 1",
+    "line": "test262 total 53801 8982 7 44812 16567 28244 1",
     "exist": 53801,
     "excluded": 8982,
     "not_applicable": 7,
     "run": 44812,
-    "passed": 16412,
-    "failed": 28399,
+    "passed": 16567,
+    "failed": 28244,
     "budget": 1,
-    "passed_percent": "36.6"
+    "passed_percent": "36.9"
   },
   "delivery_slices": 19,
   "delivered": [1, 2, 3, 6],
@@ -102,16 +102,16 @@
       "name": "regexp",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 05 2724 5441 0 0 2724 52 2672 0",
+      "line": "test262-slice 05 2724 5441 0 0 2724 198 2526 0",
       "cases": 2724,
       "runs": 5441,
       "excluded": 0,
       "not_applicable": 0,
       "run": 2724,
-      "passed": 52,
-      "failed": 2672,
+      "passed": 198,
+      "failed": 2526,
       "budget": 0,
-      "passed_percent": "1.9"
+      "passed_percent": "7.2"
     },
     {
       "slice": "06",
@@ -166,16 +166,16 @@
       "name": "collections-proxy-reflect",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 09 1779 3529 0 0 1779 131 1648 0",
+      "line": "test262-slice 09 1779 3529 0 0 1779 134 1645 0",
       "cases": 1779,
       "runs": 3529,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1779,
-      "passed": 131,
-      "failed": 1648,
+      "passed": 134,
+      "failed": 1645,
       "budget": 0,
-      "passed_percent": "7.3"
+      "passed_percent": "7.5"
     },
     {
       "slice": "10",
@@ -326,16 +326,16 @@
       "name": "staging",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 19 1474 2766 0 0 1474 485 988 1",
+      "line": "test262-slice 19 1474 2766 0 0 1474 491 982 1",
       "cases": 1474,
       "runs": 2766,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1474,
-      "passed": 485,
-      "failed": 988,
+      "passed": 491,
+      "failed": 982,
       "budget": 1,
-      "passed_percent": "32.9"
+      "passed_percent": "33.3"
     },
     {
       "slice": "20",

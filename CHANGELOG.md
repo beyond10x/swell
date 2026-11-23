@@ -10,8 +10,19 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Added
+
+- `String.prototype.replace`, `replaceAll` and `split` with a String to search for or to split
+  at: the replacement patterns of GetSubstitution, a function as the replacement, and a method
+  an object keys by `@@replace` or `@@split`. 16,567 of the 44,812 selected test262 cases pass
+  (16,412 in 0.5.0), 198 of the 2,724 of the fifth slice (52).
+
 ### Host interface
 
+- `BINDINGS_REALM_HEAP_BYTES` (changed): 506,112, from 381,696. A realm of 300 host functions and
+  40 host objects raises `heap_bytes()` by 449,848 since `String.prototype` has `replace`,
+  `replaceAll` and `split`: an arena grows once more inside the window `HOST-187` measures. A
+  host that sizes its memory budget by this ceiling raises it.
 - `HOST-191` (new): a refusal that `RegExp` raises at run time for a part of the fifth slice
   that is not built yet is counted by the agent, like a refusal of the parser.
 
