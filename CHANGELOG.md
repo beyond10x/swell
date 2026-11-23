@@ -115,6 +115,17 @@ cases pass (18,155 in 0.7.0).
   `test262-slice 06 3898 7351 0 0 3898 3898 0 0`). Of the fifth, which is in work, 2,523 of
   2,724 cases pass (`test262-slice 05 2724 5441 0 0 2724 2523 201 0`), and of the seventh, in work too, 1,168 of 1,491
   (`test262-slice 07 1491 2841 0 0 1491 1168 323 0`). A refusal never counts as a pass, also when the script catches it.
+- The host interface: 114 of its 208 numbered requirements
+  ([`docs/design/host-interface.md`](docs/design/host-interface.md)) are held by a test in
+  this commit; none is pending for the four delivered slices, for the fifth or for the
+  seventh, and 31 are pending for the tenth. 14 of the 58 scenarios of the interface's
+  model pass on the engine, and the other 44 name what they wait for. The interface will
+  change before 1.0.
+- The engine's own tests: `17 test binaries: 1215 passed, 0 failed, 1 ignored`, the tests of
+  the engine crate in the mode that collects garbage at every safe point
+  (`test-collect: 2 test binaries: 934 passed, 0 failed, 1 ignored`), and the test of an
+  injected engine fault (`test-faults: 1 test binaries: 1 passed, 0 failed, 758 ignored`; the
+  758 are the tests that step's filter leaves out).
 - No binary, no command line, and the crates are not on a package registry. To use the
   library, depend on the repository at the tag:
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.8.0" }`.
