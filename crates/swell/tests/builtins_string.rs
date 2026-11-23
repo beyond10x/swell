@@ -616,8 +616,8 @@ fn ascii_units(length: usize) -> Vec<u16> {
 
 /// A String of 1,000 code units with a surrogate pair at 255 and 256, where a range of 256
 /// units of QuoteJSONString would end between its units, a lone leading surrogate at 511, a
-/// lone trailing one at 767 and U+00E9 between: `localeCompare` refuses it before its story of
-/// slice 5.
+/// lone trailing one at 767 and U+00E9 between, which `localeCompare` decomposes into two code
+/// units.
 fn other_units() -> Vec<u16> {
     let mut units = ascii_units(1_000);
     units[255] = 0xD83D;
@@ -726,8 +726,8 @@ const RECORDED: &[(&str, &str, u64)] = &[
     ("toUpperCase s0", "0:cbf29ce484222325", 1),
     ("toLocaleLowerCase s0", "0:cbf29ce484222325", 1),
     ("toLocaleUpperCase s0", "0:cbf29ce484222325", 1),
-    ("localeCompare s0", "Number(-1.0)", 3),
-    ("localeCompare this s0", "Number(1.0)", 3),
+    ("localeCompare s0", "Number(-1.0)", 7),
+    ("localeCompare this s0", "Number(1.0)", 7),
     ("Error name s0", "1:af63e04c8601f358", 1),
     ("Error message s0", "5:5f343a43e7ea9f91", 2),
     ("concat s0", "1:af63dc4c8601ec8c", 2),
@@ -756,8 +756,8 @@ const RECORDED: &[(&str, &str, u64)] = &[
     ("toUpperCase s1", "1:af639d4c8601817f", 3),
     ("toLocaleLowerCase s1", "1:af639d4c8601817f", 3),
     ("toLocaleUpperCase s1", "1:af639d4c8601817f", 3),
-    ("localeCompare s1", "Number(-1.0)", 4),
-    ("localeCompare this s1", "Number(1.0)", 4),
+    ("localeCompare s1", "Number(-1.0)", 10),
+    ("localeCompare this s1", "Number(1.0)", 10),
     ("Error name s1", "4:56fd6a73ba2a8a40", 5),
     ("Error message s1", "8:879f43ab73cdecb9", 10),
     ("concat s1", "3:e63fd7190483a1ec", 4),
@@ -786,8 +786,8 @@ const RECORDED: &[(&str, &str, u64)] = &[
     ("toUpperCase s31", "31:c23a7bb7bc92b457", 63),
     ("toLocaleLowerCase s31", "31:8fe8865311922117", 63),
     ("toLocaleUpperCase s31", "31:c23a7bb7bc92b457", 63),
-    ("localeCompare s31", "Number(-1.0)", 34),
-    ("localeCompare this s31", "Number(1.0)", 34),
+    ("localeCompare s31", "Number(-1.0)", 100),
+    ("localeCompare this s31", "Number(1.0)", 100),
     ("Error name s31", "34:5a2aa54066202de8", 35),
     ("Error message s31", "38:688ea8267f7b1f99", 40),
     ("concat s31", "63:7181aa45390d2bd4", 64),
@@ -816,8 +816,8 @@ const RECORDED: &[(&str, &str, u64)] = &[
     ("toUpperCase s32", "32:9c14b0356d48a635", 65),
     ("toLocaleLowerCase s32", "32:1a3d7626db4e7075", 65),
     ("toLocaleUpperCase s32", "32:9c14b0356d48a635", 65),
-    ("localeCompare s32", "Number(-1.0)", 35),
-    ("localeCompare this s32", "Number(1.0)", 35),
+    ("localeCompare s32", "Number(-1.0)", 103),
+    ("localeCompare this s32", "Number(1.0)", 103),
     ("Error name s32", "35:60b9bbc0c7ddd11e", 36),
     ("Error message s32", "39:2587726a9e36e75b", 41),
     ("concat s32", "65:a6c8f015ad88622c", 66),
@@ -846,8 +846,8 @@ const RECORDED: &[(&str, &str, u64)] = &[
     ("toUpperCase s33", "33:7e5485c8b13223a8", 67),
     ("toLocaleLowerCase s33", "33:e51a1f06a67a62e8", 67),
     ("toLocaleUpperCase s33", "33:7e5485c8b13223a8", 67),
-    ("localeCompare s33", "Number(-1.0)", 36),
-    ("localeCompare this s33", "Number(1.0)", 36),
+    ("localeCompare s33", "Number(-1.0)", 106),
+    ("localeCompare this s33", "Number(1.0)", 106),
     ("Error name s33", "36:cddcba6f0b7b235d", 37),
     ("Error message s33", "40:fc3ad42ad7707256", 42),
     ("concat s33", "67:3f82654323fe86ea", 68),
@@ -876,8 +876,8 @@ const RECORDED: &[(&str, &str, u64)] = &[
     ("toUpperCase s1000", "1000:e66f9bd46157802d", 2001),
     ("toLocaleLowerCase s1000", "1000:b7a5dd44d4de2dad", 2001),
     ("toLocaleUpperCase s1000", "1000:e66f9bd46157802d", 2001),
-    ("localeCompare s1000", "Number(-1.0)", 1003),
-    ("localeCompare this s1000", "Number(1.0)", 1003),
+    ("localeCompare s1000", "Number(-1.0)", 3007),
+    ("localeCompare this s1000", "Number(1.0)", 3007),
     ("Error name s1000", "1003:7a646bc65f7a09c6", 1004),
     ("Error message s1000", "1007:0ce473a449c23c13", 1009),
     ("concat s1000", "2001:0eedc710bd9581dc", 2002),
@@ -906,8 +906,8 @@ const RECORDED: &[(&str, &str, u64)] = &[
     ("toUpperCase u1000", "1000:8efc88564c07005a", 2001),
     ("toLocaleLowerCase u1000", "1000:096689fc19a3a81a", 2001),
     ("toLocaleUpperCase u1000", "1000:8efc88564c07005a", 2001),
-    ("localeCompare u1000", "throw SyntaxError", 1003),
-    ("localeCompare this u1000", "throw SyntaxError", 1003),
+    ("localeCompare u1000", "Number(-1.0)", 3008),
+    ("localeCompare this u1000", "Number(1.0)", 3008),
     ("Error name u1000", "1003:8c5212807280fff7", 1004),
     ("Error message u1000", "1007:a6e61755e3287b98", 1009),
     ("concat u1000", "2001:d4b02baa5398c6c0", 2002),

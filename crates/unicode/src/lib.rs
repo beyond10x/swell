@@ -8,13 +8,22 @@
 //! `UnicodeData.txt`, `SpecialCasing.txt` and `DerivedCoreProperties.txt` and their lookups
 //! ([`to_lowercase`], [`to_uppercase`], [`final_sigma_lowercase`], [`is_cased`],
 //! [`is_case_ignorable`]), for the case methods of `String.prototype`
-//! (`#sec-string.prototype.tolowercase`).
+//! (`#sec-string.prototype.tolowercase`); and the normalization tables of `UnicodeData.txt`,
+//! `CompositionExclusions.txt` and `DerivedNormalizationProps.txt` with the four forms of UAX
+//! #15 ([`Form`], [`normalize`], [`decompose`], [`reorder_and_compose`]), for
+//! `String.prototype.normalize` (`#sec-string.prototype.normalize`) and the order of
+//! `localeCompare` (`#sec-string.prototype.localecompare`).
 
 mod case;
+mod normalize;
 mod tables;
 
 pub use case::{
     CaseMapping, final_sigma_lowercase, is_case_ignorable, is_cased, to_lowercase, to_uppercase,
+};
+pub use normalize::{
+    Buffer, Form, FormBuffer, Stop, canonical_combining_class, decompose, decomposition, normalize,
+    primary_composite, reorder_and_compose,
 };
 
 /// Whether `c` has the General_Category `Space_Separator` (`Zs`), the code points `WhiteSpace`

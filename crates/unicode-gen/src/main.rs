@@ -23,6 +23,8 @@
 //! data file it cannot read, a line it cannot parse, a data file of another Unicode version, or
 //! a table that would be empty.
 
+mod case;
+mod normalize;
 mod render;
 mod tables;
 mod ucd;
