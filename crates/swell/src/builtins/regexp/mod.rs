@@ -27,11 +27,15 @@
 //!
 //! The methods keyed by `%Symbol.match%`, `%Symbol.replace%`, `%Symbol.search%` and
 //! `%Symbol.split%` (`regexp/symbol.rs`) are `story:regexp-symbol-methods-and-string-match-search`,
-//! defined here in the order of 22.2.6 under the keys of their symbols; the one keyed by
-//! `%Symbol.matchAll%` comes with its story.
+//! defined here in the order of 22.2.6 under the keys of their symbols. The one keyed by
+//! `%Symbol.matchAll%` with `%RegExpStringIteratorPrototype%` (`regexp/match_all.rs`) and
+//! `RegExp.escape` (`#sec-regexp.escape`, `regexp/escape.rs`) are
+//! `story:regexp-match-all-and-escape`.
 
 mod budget;
+mod escape;
 mod exec;
+mod match_all;
 mod symbol;
 
 use swell_regexp::{CompileError, Flags, ParseError, PatternError, Program, Stop};
@@ -59,6 +63,8 @@ use crate::value::{ObjectRef, StringRef, Value};
 pub(crate) enum RegExpBuiltin {
     /// `RegExp ( pattern, flags )` (22.2.4.1).
     Constructor,
+    /// `RegExp.escape ( string )` (22.2.5.1).
+    Escape,
     /// `get RegExp [ %Symbol.species% ]` (22.2.5.3).
     Species,
     /// `RegExp.prototype.exec ( string )` (22.2.6.2).
@@ -70,6 +76,8 @@ pub(crate) enum RegExpBuiltin {
     HasFlag(FlagGetter),
     /// `RegExp.prototype [ %Symbol.match% ] ( string )` (22.2.6.8).
     Match,
+    /// `RegExp.prototype [ %Symbol.matchAll% ] ( string )` (22.2.6.9).
+    MatchAll,
     /// `RegExp.prototype [ %Symbol.replace% ] ( string, replaceValue )` (22.2.6.11).
     Replace,
     /// `RegExp.prototype [ %Symbol.search% ] ( string )` (22.2.6.12).
@@ -82,6 +90,8 @@ pub(crate) enum RegExpBuiltin {
     Test,
     /// `RegExp.prototype.toString ( )` (22.2.6.17).
     ToString,
+    /// `%RegExpStringIteratorPrototype%.next ( )` (22.2.9.2.1).
+    StringIteratorNext,
 }
 
 /// A getter of one flag: the property it is and the code unit RegExpHasFlag looks for.
@@ -127,8 +137,7 @@ impl FlagGetter {
     }
 }
 
-/// The properties of `%RegExp.prototype%` after `constructor`, in the order of 22.2.6 (the
-/// method keyed by `@@matchAll` comes with its story).
+/// The properties of `%RegExp.prototype%` after `constructor`, in the order of 22.2.6.
 enum PrototypeProperty {
     /// A method: its name, its "length" and its steps.
     Method(&'static str, u32, RegExpBuiltin),
@@ -139,7 +148,7 @@ enum PrototypeProperty {
     SymbolMethod(&'static str, u32, RegExpBuiltin),
 }
 
-const PROTOTYPE_PROPERTIES: [PrototypeProperty; 17] = [
+const PROTOTYPE_PROPERTIES: [PrototypeProperty; 18] = [
     PrototypeProperty::Method("exec", 1, RegExpBuiltin::Exec),
     PrototypeProperty::Getter("dotAll", RegExpBuiltin::HasFlag(FlagGetter::DotAll)),
     PrototypeProperty::Getter("flags", RegExpBuiltin::Flags),
@@ -147,6 +156,7 @@ const PROTOTYPE_PROPERTIES: [PrototypeProperty; 17] = [
     PrototypeProperty::Getter("hasIndices", RegExpBuiltin::HasFlag(FlagGetter::HasIndices)),
     PrototypeProperty::Getter("ignoreCase", RegExpBuiltin::HasFlag(FlagGetter::IgnoreCase)),
     PrototypeProperty::SymbolMethod("match", 1, RegExpBuiltin::Match),
+    PrototypeProperty::SymbolMethod("matchAll", 1, RegExpBuiltin::MatchAll),
     PrototypeProperty::Getter("multiline", RegExpBuiltin::HasFlag(FlagGetter::Multiline)),
     PrototypeProperty::SymbolMethod("replace", 2, RegExpBuiltin::Replace),
     PrototypeProperty::SymbolMethod("search", 1, RegExpBuiltin::Search),
@@ -239,7 +249,8 @@ fn parse_and_compile_latin1(
 impl<H: Host> Agent<H> {
     /// `%RegExp%` (22.2.4) and `%RegExp.prototype%` (22.2.6), answered in that order: the
     /// constructor's "length" 2, its "prototype" { [[Writable]]: false, [[Enumerable]]: false,
-    /// [[Configurable]]: false } (22.2.5.2) and `get [Symbol.species]` (22.2.5.3); the
+    /// [[Configurable]]: false } (22.2.5.2), `escape` of "length" 1 (22.2.5.1, a method as
+    /// below) and `get [Symbol.species]` (22.2.5.3); the
     /// prototype, an ordinary object whose [[Prototype]] is `%Object.prototype%` and which is
     /// not a RegExp instance (22.2.6), with its properties in the order of 22.2.6: methods {
     /// [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true } and accessors {
@@ -256,6 +267,14 @@ impl<H: Host> Agent<H> {
             2,
             BuiltinId::RegExp(RegExpBuiltin::Constructor),
             prototype,
+        )?;
+        // 22.2.5.1: `RegExp.escape ( string )`.
+        self.define_builtin_method(
+            making,
+            constructor,
+            "escape",
+            1,
+            BuiltinId::RegExp(RegExpBuiltin::Escape),
         )?;
         // 22.2.5.3: an accessor whose set accessor function is undefined, named "get
         // [Symbol.species]".
@@ -294,6 +313,7 @@ impl<H: Host> Agent<H> {
                 PrototypeProperty::SymbolMethod(name, length, id) => {
                     let symbol = match id {
                         RegExpBuiltin::Match => making.symbols.r#match,
+                        RegExpBuiltin::MatchAll => making.symbols.match_all,
                         RegExpBuiltin::Replace => making.symbols.replace,
                         RegExpBuiltin::Search => making.symbols.search,
                         _ => making.symbols.split,
@@ -326,18 +346,21 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Value> {
         match id {
             RegExpBuiltin::Constructor => self.regexp_constructor(function, args, new_target),
+            RegExpBuiltin::Escape => self.regexp_escape(args),
             // `#sec-get-regexp-%symbol.species%`: 1. Return the this value.
             RegExpBuiltin::Species => Ok(this),
             RegExpBuiltin::Exec => self.regexp_prototype_exec(this, args),
             RegExpBuiltin::Flags => self.regexp_prototype_flags(this),
             RegExpBuiltin::HasFlag(flag) => self.regexp_has_flag(this, flag),
             RegExpBuiltin::Match => self.regexp_symbol_match(this, args),
+            RegExpBuiltin::MatchAll => self.regexp_symbol_match_all(this, args),
             RegExpBuiltin::Replace => self.regexp_symbol_replace(this, args),
             RegExpBuiltin::Search => self.regexp_symbol_search(this, args),
             RegExpBuiltin::Source => self.regexp_prototype_source(this),
             RegExpBuiltin::Split => self.regexp_symbol_split(this, args),
             RegExpBuiltin::Test => self.regexp_prototype_test(this, args),
             RegExpBuiltin::ToString => self.regexp_prototype_to_string(this),
+            RegExpBuiltin::StringIteratorNext => self.regexp_string_iterator_next(this),
         }
     }
 
