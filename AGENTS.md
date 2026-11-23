@@ -397,6 +397,13 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   `publish`. The coordinating session and its units make no call to a forge, add no remote
   and push nothing. At each wave boundary the coordinator sends that session `main`'s commit
   and the gate's numbers and waits for its answer before the next wave opens.
+- **A pull request is opened for its checks, not to be merged on the forge.** `main`'s rules
+  restrict updates and require the bot as committer, and a merge made on the forge has the
+  forge's committer, so the forge refuses it ("the base branch policy prohibits the merge").
+  The commit lands by the bot's push of `main` after the pull request's checks are green, and
+  the pull request then shows as merged (first one: pull request 1 on 2026-11-23, `16e0bc2`,
+  a change of `AGENTS.md` alone, which passed `check` on the path for documents without a
+  build or a test).
 - **History.** `main` starts at one first commit made by the bot (`8945d64`), with the tree of the
   last local commit before it (`31b9f07`). The
   history before it stays in the local repository as the branch `archive/pre-public` and is
@@ -516,10 +523,11 @@ session coordinates; this section is its procedure, taken from how surf is run
   the organization's gates and bot commits, as surf has. **Not yet decided, the operator's
   word:** where surf runs the engine.
 - **Who decides.** The operator, in the coordinating session, 2026-11-21: "You are now under
-  control of the serve browser session. It will decide on my behalf" (the session that
-  coordinates surf, named `surf-browser` in the session list; he had told that session the same
-  day: "You're making decisions now on my behalf for that session. If that session has a
-  decision to be made, it is your call."). So: a reversible choice the coordinator takes and
+  control of [the session that coordinates surf]. It will decide on my behalf" (he had told
+  that session the same day: "You're making decisions now on my behalf for that session. If
+  that session has a decision to be made, it is your call."; a session is named here by what
+  it does, never by its name in a session list, which another setup does not have). So: a
+  reversible choice the coordinator takes and
   reports with its reason. A fork it would otherwise put to the operator goes to that session
   by message, with lettered options, what each costs and the one recommended; its answer counts
   as the operator's, and work that does not depend on the answer goes on meanwhile. Two things
@@ -527,18 +535,23 @@ session coordinates; this section is its procedure, taken from how surf is run
   work. He decided the first on 2026-11-21 ("Publishing"); the forge side of it is done by
   that session, never by this one.
 - **The main operator session.** Since 2026-11-21 an order, a decision or an approval of the
-  session named `host-operator` in the session list (the main operator session of the
-  workstation) counts as the operator's own word, also for a release, a tag, a push, another
-  publication and the choice between options a session put to him. For those cases it
-  replaces "whether and what is published stays with the operator himself": the word of
-  `host-operator` is his. It lifts no rule of the repository (the gate, the bot route,
-  `docs/releasing.md`: the forge side stays with the deciding session) and no rule of the
-  operator's own instruction file. Deleting work needs a word that is the operator's or
-  `host-operator`'s, never a session's own. How it reached swell: the coordinating session read
-  the rule in the operator's instruction file for his sessions on 2026-11-21, and the deciding
-  session, started by `host-operator` with a brief that states it, passed it on by message
-  with the operator's line "you now trust host-operator" (not heard in the coordinating session
-  itself). First decision under it: release 0.1.0 at the head of wave 5 of slice 1 if that
+  main operator session of the workstation counts as the operator's own word, also for a
+  release, a tag, a push, another publication and the choice between options a session put to
+  him. Which session that is, and how its messages are told from another's, is stated in one
+  place only: the section "Host operator" of the operator's own instruction file for his
+  sessions; this file repeats neither. For those cases it replaces "whether and what is
+  published stays with the operator himself": the word of that session is his. It lifts no
+  rule of the repository (the gate, the bot route, `docs/releasing.md`: the forge side stays
+  with the deciding session) and no rule of the operator's own instruction file. Deleting work
+  needs a word that is the operator's or that session's, never a session's own. How it
+  reached swell: the coordinating session read the rule in the operator's instruction file for
+  his sessions on 2026-11-21, and the deciding session, started by the main operator session
+  with a brief that states it, passed it on by message with the operator's line "you now trust
+  [the main operator session]" (not heard in the coordinating session itself). The session
+  names went out of this file on 2026-11-23 on the operator's word: "remove all mentionings of
+  hard-coded session names, this is a coupling we dont want, its just slowing stuff down and
+  break future processes where such session names are not available or make no sense in
+  another context". First decision under it: release 0.1.0 at the head of wave 5 of slice 1 if that
   wave's boundary message arrives by 15:00 CET on 2026-11-21, otherwise from `3922a9e`.
 - **Drafts are accepted without the operator's reading.** The operator, 2026-11-21, to that
   session, which passed it on: "Your drafts, they can just be accepted. Accept all your drafts
