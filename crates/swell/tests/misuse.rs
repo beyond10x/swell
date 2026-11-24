@@ -827,6 +827,15 @@ fn agent_entries_refuse_foreign(
                 Box::new(move |_cx: &mut Cx<'_, Recorder>| queued.set(true)),
             )),
         ),
+        ("promise_state", shape(agent.promise_state(other_root))),
+        (
+            "promise_is_handled",
+            shape(agent.promise_is_handled(other_root)),
+        ),
+        (
+            "mark_promise_as_handled",
+            shape(agent.mark_promise_as_handled(other_root)),
+        ),
     ];
     for (name, answer) in &answers {
         assert_eq!(*answer, foreign, "Agent::{name}");
@@ -838,6 +847,15 @@ fn agent_entries_refuse_foreign(
                 ("get", shape(cx.get(other_root))),
                 ("duplicate", shape(cx.duplicate(other_root))),
                 ("realm_ref", shape(cx.realm_ref(other_realm))),
+                ("promise_state", shape(cx.promise_state(other_root))),
+                (
+                    "promise_is_handled",
+                    shape(cx.promise_is_handled(other_root)),
+                ),
+                (
+                    "mark_promise_as_handled",
+                    shape(cx.mark_promise_as_handled(other_root)),
+                ),
             ]
         })
         .unwrap();
@@ -988,6 +1006,15 @@ fn host_48_a_faulted_agent_answers_faulted_everywhere() {
             "perform_microtask_checkpoint",
             shape(agent.perform_microtask_checkpoint()),
         ),
+        ("promise_state", shape(agent.promise_state(&good.object))),
+        (
+            "promise_is_handled",
+            shape(agent.promise_is_handled(&good.object)),
+        ),
+        (
+            "mark_promise_as_handled",
+            shape(agent.mark_promise_as_handled(&good.object)),
+        ),
     ];
     for (name, answer) in &answers {
         assert_eq!(*answer, faulted, "{name}");
@@ -1030,17 +1057,23 @@ fn reads(agent: &mut Agent<Recorder>, realm: &Realm, script: &Script, root: &Roo
                 cx.to_utf16(name),
                 cx.to_rust_string_lossy(name),
                 cx.realm_ref(realm).is_ok(),
+                cx.promise_state(root).map(|_| ()),
+                cx.promise_is_handled(root),
+                cx.mark_promise_as_handled(root),
             )
         })
         .unwrap();
     format!(
-        "{:?} {:?} {:?} {:?} {:?} {:?} {scoped:?}",
+        "{:?} {:?} {:?} {:?} {:?} {:?} {scoped:?} {:?} {:?} {:?}",
         agent.state(),
         agent.heap_bytes(),
         agent.last_entry_steps(),
         agent.realm_host_defined(realm).map(|d| d.is_some()),
         agent.script_host_defined(script).map(|d| d.is_some()),
         agent.pending_microtasks(),
+        agent.promise_state(root).map(|_| ()),
+        agent.promise_is_handled(root),
+        agent.mark_promise_as_handled(root),
     )
 }
 

@@ -20,10 +20,10 @@ section sec-string-objects
 path sec-string-objects test/built-ins/String/
 omit sec-string-objects unicode-17.0.0 open-item-C
 omit sec-string-objects string-length-limit decision-3
-omit sec-string-objects case-mapping-and-comparison-outside-ascii section-12-slice-5
 section sec-regexp-regular-expression-objects
 path sec-regexp-regular-expression-objects test/built-ins/RegExp/
 omit sec-regexp-regular-expression-objects unicode-17.0.0 open-item-C
+omit sec-regexp-regular-expression-objects parser-nesting-limit decision-3
 section sec-array-objects
 path sec-array-objects test/built-ins/Array/
 omit sec-array-objects string-length-limit decision-3
@@ -73,9 +73,11 @@ section sec-proxy-objects
 path sec-proxy-objects test/built-ins/Proxy/
 section sec-names-and-keywords
 path sec-names-and-keywords test/language/identifiers/
-omit sec-names-and-keywords identifiers-outside-ascii section-12-part-before-its-slice
+omit sec-names-and-keywords unicode-17.0.0 open-item-C
 section sec-literals-regular-expression-literals
 path sec-literals-regular-expression-literals test/language/literals/regexp/
+omit sec-literals-regular-expression-literals unicode-17.0.0 open-item-C
+omit sec-literals-regular-expression-literals parser-nesting-limit decision-3
 section sec-parse-script
 path sec-parse-script test/language/global-code/
 omit sec-parse-script parser-nesting-limit decision-3

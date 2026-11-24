@@ -61,6 +61,7 @@ mod names;
 mod object_patterns;
 mod objects;
 mod parameters;
+mod promise_reads;
 mod promises;
 mod property_index;
 mod realms;

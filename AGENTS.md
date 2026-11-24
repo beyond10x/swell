@@ -43,16 +43,19 @@ delivery in the block): all 3,898 cases of slice 6 pass in all 7,351 runs
 The slices are not delivered in the order of their numbers: after slice 3 the order is
 6, 5, 7, 10, 4, 9, by what the first consumer needs first (`docs/plan/waves.md`, "The order
 after slice 3"), and it is decided again at each boundary. Slice 5, `regexp`
-(`epic:slice-05-regexp`), is in work: its first wave on 2026-11-23 (`docs/plan/slice-05-wave-1.md`)
+(`epic:slice-05-regexp`), was delivered on 2026-11-24: its first wave on 2026-11-23 (`docs/plan/slice-05-wave-1.md`)
 brought the crate `swell-regexp` (the pattern parser, the compiler, the backtracking matcher
 under the budgets), regular expression literals, `RegExp` with `exec` and `test`, `replace`,
 `replaceAll` and `split` of `String`, and the case methods, `normalize` and `localeCompare`
 for every String; its second wave (`docs/plan/slice-05-wave-2.md`) the methods keyed by `@@match`, `@@replace`, `@@search` and
 `@@split` with `String.prototype.match` and `search` (release `0.7.0`); after it `matchAll` and
 `RegExp.escape`, property escapes, the flag `i`, and identifiers and group names outside ASCII
-(its third wave, `docs/plan/slice-05-wave-3.md`, release `0.8.0`): 2,523 of its 2,724 cases pass
-(`test262-slice 05 2724 5441 0 0 2724 2523 201 0`), and no host requirement is pending for
-it. Two of its fifteen stories are open: the flag `v` and the close. Slice 7, `generators`
+(its third wave, `docs/plan/slice-05-wave-3.md`, release `0.8.0`); after that the flag `v`
+with its class sets and properties of strings, and the close, with 18 cases moved to slices 4,
+8 and 9 with evidence and 18 cases of the pattern grammar of Annex B.1.2 taken in from slice
+18: all 2,724 cases of slice 5 pass in all 5,441 runs
+(`test262-slice 05 2724 5441 0 0 2724 2724 0 0`), and no host requirement is pending for
+it. Slice 7, `generators`
 (`epic:slice-07-generators`), is in work beside it: generator syntax, generators on suspended
 frames, `%GeneratorFunction%` and `yield*` are in release `0.8.0`, and 1,168 of its 1,491 cases
 pass (`test262-slice 07 1491 2841 0 0 1491 1168 323 0`); generator methods of object literals
