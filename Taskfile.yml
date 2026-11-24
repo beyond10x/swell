@@ -23,6 +23,14 @@ includes:
     taskfile: taskfiles/unicode-tables.yml
     flatten: true
     optional: true
+  libm:
+    taskfile: taskfiles/libm.yml
+    flatten: true
+    optional: true
+  math-data:
+    taskfile: taskfiles/math-data.yml
+    flatten: true
+    optional: true
   fault-injection:
     taskfile: taskfiles/fault-injection.yml
     flatten: true
@@ -95,11 +103,13 @@ tasks:
       - task: gate-vars
       - task: python-check
       - task: forbid-unsafe-check
+      - task: libm-check
       - task: lock-check
       - task: forge-check
       - task: nextest-check
       - task: test262-fetch
       - task: unicode-data-check
+      - task: math-data-check
       - task: unicode-tables-check
       - task: validate
       - task: conform
@@ -248,6 +258,7 @@ tasks:
         GATE_ROOT GATE_CRATES GATE_LOCK
         TEST262_URL TEST262_COMMIT TEST262_TREE TEST262_LS_TREE_SHA256 TEST262_CACHE
         UNICODE_DATA_DIR UNICODE_DATA_REQUIRED
+        LIBM_ROOT MATH_DATA_DIR
         SPEC_REFUSALS_MAX SPEC_OUT SPEC_SYNTHESIZE_LOG SPEC_CONFORM_LOG
         ESS_SUITE ESS_UNSUPPORTED_MAX
         HOST_REQ_DOC HOST_REQ_LIST HOST_REQ_SPEC HOST_REQ_DELIVERED HOST_REQ_TEST_LIST
