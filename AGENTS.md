@@ -266,8 +266,12 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   crate version or section 12 of the design regenerates it (`slot --local task site-data`).
 - A test stays under 1.5 CPU seconds alone in the gate's default mode and under 2 s with a
   collection at every safe point, and under 2.5 s at its full count (`SWELL_FULL_COUNTS=1`)
-  in either mode, measured with its test binary run directly with `--exact <name>
-  --test-threads 1` under the shell's `time` (user plus system). The bound is in CPU seconds
+  in either mode, measured with its test binary run with `--exact <name> --test-threads 1`
+  in a shell of its own whose `times` gives user plus system. The measurement is one job of
+  the build pool (`slot sh -c '...'`: `cargo test --locked -p <crate> --test main --no-run`
+  prints the binary's path, and the job runs it); a test binary is not run by its path
+  beside the pool, and no second job of the same tree runs while one builds, since the two
+  share one build directory. The bound is in CPU seconds
   because the machine's load multiplies wall time: on 2026-11-22, at a load of 110 to 166 on
   18 cores, tests of 4 to 18 CPU seconds were killed at 60 s
   (`story:heavy-tests-far-from-the-kill`), and at a bound of 5 s for the full count
