@@ -1,0 +1,8 @@
+test/built-ins/Math/sumPrecise/length.js
+test/built-ins/Math/sumPrecise/name.js
+test/built-ins/Math/sumPrecise/prop-desc.js
+test/built-ins/Math/sumPrecise/sum-is-NaN.js
+test/built-ins/Math/sumPrecise/sum-is-infinite.js
+test/built-ins/Math/sumPrecise/sum-is-minus-zero.js
+test/built-ins/Math/sumPrecise/sum.js
+test/built-ins/Math/sumPrecise/takes-iterable.js

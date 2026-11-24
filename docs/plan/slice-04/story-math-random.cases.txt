@@ -1,0 +1,6 @@
+test/built-ins/Math/random/S15.8.2.14_A1.js
+test/built-ins/Math/random/length.js
+test/built-ins/Math/random/name.js
+test/built-ins/Math/random/prop-desc.js
+test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-109.js
+test/language/expressions/property-accessors/S11.2.1_A4_T8.js

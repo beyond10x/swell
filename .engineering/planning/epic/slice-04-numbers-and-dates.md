@@ -2,12 +2,15 @@
 format: aep.planning-md/3
 id: epic:slice-04-numbers-and-dates
 kind: epic
-status: draft
+status: active
 title: 'Slice 4, numbers-and-dates: swell-num, Number, Math, Date'
-summary: 'swell-num with Number, Math, Date, parseInt and parseFloat, deterministic and host-timed: 1,196 cases and 2,392 runs.'
+summary: 'swell-num with Number, Math, Date, the operator **, parseInt and parseFloat, deterministic and host-timed: 1,612 cases and 3,184 runs.'
 relations:
 - depends_on: epic:slice-03-builtins-core
-revision: 1
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-24T11:52:42Z", actor: "human:operator", revision: 4}
+- {from: "proposed", to: "active", at: "2026-11-24T11:52:42Z", actor: "human:operator", revision: 5}
 ---
 ## Context
 
@@ -43,6 +46,13 @@ Governing decisions (`docs/design/engine.md`, decision N): 6 (numbers and dates,
 - `Date.parse` accepts the format of 21.4.1.32 and the forms `Date.prototype.toString` and
   `toUTCString` produce, nothing else.
 - `parseInt` and `parseFloat`.
+- The operators `**` and `**=` parse, compile and run over the one function
+  `swell_num::math::exponentiate`.
+- `Math` has its constants and 22 functions, plus `Math.sumPrecise` and `Math.random`.
+- `Number` has `isFinite`, `isInteger`, `isNaN` and `isSafeInteger`, with `toFixed`,
+  `toExponential`, `toPrecision` and `toLocaleString`.
+- `Date` has its object, the clock, the constructor, the getters, the 14 setters, the text
+  methods and `Date.parse`.
 
 ### Open, to be settled by this epic's first story
 
@@ -58,7 +68,7 @@ Governing decisions (`docs/design/engine.md`, decision N): 6 (numbers and dates,
 
 ## Counts
 
-- Slice 4 (`numbers-and-dates`): 1,196 cases, 2,392 runs (section 12 table).
+- Slice 4 (`numbers-and-dates`): 1,612 cases, 3,184 runs (section 12 table; `test262-slice 04 1612 3184 0 0 1612 261 1351 0` on `wave/s10-1` at `57e49c4`).
 - Directories the design names for it (paths under `test/`, cases): `Date` 492, `Number` 313,
   `Math` 284.
 - Lines of the `swell-slices` block that assign cases to this slice:
@@ -79,6 +89,8 @@ Source: `docs/design/engine.md`, section 12 and the output under 'How the counts
   locale-independent definitions): slice 21, open item A.
 - Any `Date.parse` fallback format beyond the forms above: not taken (decision 6).
 - Regular expressions: slice 5.
+- Scenarios of the executable specification for the host requirements of this slice: a story of
+  the specification, outside this epic.
 
 ## Constraints
 
@@ -96,7 +108,7 @@ Source: `docs/design/engine.md`, section 12 and the output under 'How the counts
 
 `slot task check` exits 0 on `main`, and in that run:
 
-1. The conformance runner's line for slice 4 reads 1,196 cases and 2,392 runs that exist, and every run of the slice passes; no case of the slice is counted as failed or as ended by a budget.
+1. The conformance runner's line for slice 4 reads 1,612 cases and 3,184 runs that exist, and every run of the slice passes; no case of the slice is counted as failed or as ended by a budget.
 2. No pass count of an earlier slice or of any directory line in `conformance/test262/expected.txt` is lower than before the slice.
 3. `conformance/test262/expected.txt` is committed with the lines of that run, and `AGENTS.md` and `README.md` carry the gate's numbers.
 4. A case of this slice that is found to need a later slice is moved by a rule line in the `swell-slices` block of the design with its reason, in the same change that moves the counts of both slices; none is skipped silently.
