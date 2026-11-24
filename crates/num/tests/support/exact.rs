@@ -439,3 +439,21 @@ pub fn is_faithful_root(r: f64, square: &Rat) -> bool {
         }
     }
 }
+
+impl Big {
+    /// floor(self / divisor) for a divisor from 1 to 2^64 - 1, limb by limb from the top (the
+    /// series of ln 2 and ln 10 in `math_exp_log.rs` divide by small integers); panics on 0.
+    pub fn div_u64(&self, divisor: u64) -> Big {
+        assert!(divisor != 0, "Big::div_u64 by zero");
+        let mut limbs = vec![0u64; self.0.len()];
+        let mut rest = 0u128;
+        for (i, &limb) in self.0.iter().enumerate().rev() {
+            let current = (rest << 64) | u128::from(limb);
+            limbs[i] = (current / u128::from(divisor)) as u64;
+            rest = current % u128::from(divisor);
+        }
+        let mut quotient = Big(limbs);
+        quotient.trim();
+        quotient
+    }
+}

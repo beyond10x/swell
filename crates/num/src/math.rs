@@ -26,6 +26,13 @@
 compile_error!("swell-num needs SSE2 or a target without extended-precision f64 arithmetic");
 
 pub mod dd;
+pub mod exp;
+pub mod log;
+pub mod pow;
+
+pub use exp::{cosh, exp, exp_dd, expm1, sinh, tanh};
+pub use log::{acosh, asinh, atanh, log, log_dd, log1p, log2, log10};
+pub use pow::{cbrt, exponentiate};
 
 /// The binary exponent e of a finite non-zero Number: 2^e ≤ |x| < 2^(e+1), from -1074 to 1023.
 fn binary_exponent(x: f64) -> i32 {
