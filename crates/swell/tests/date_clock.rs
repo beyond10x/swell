@@ -6,7 +6,8 @@
 //! reads of the busy wait of the first consumer.
 //!
 //! Three tests state an interim and are rewritten by the story that replaces it:
-//! `new_date_over_a_table_of_values` (the rows `new Date(1, 2)` and a String),
+//! `new_date_over_a_table_of_values` (the row of a String; the row `new Date(1, 2)` was
+//! rewritten by `story:date-object-constructor-now-utc-and-getters`),
 //! `date_called_as_a_function_answers_the_seam_text` and
 //! `interim_bodies_throw_a_type_error_that_names_the_function`.
 #![cfg(test)]
@@ -169,9 +170,11 @@ fn a_clock_hook_call_is_charged_one_step_before_it_is_made() {
 /// `new Date(value)` (`#sec-date-constructor`, `numberOfArgs` = 1) over a table: a Date is read
 /// by its [[DateValue]] with no call of its methods; another value goes through ToPrimitive
 /// with no hint and ToNumber, then TimeClip; a String goes to the seam of `Date.parse`, which
-/// answers NaN until the text story; two or more arguments go to the seam of the components,
-/// NaN until the zone story. The object is made after the coercion, from `new.target`'s
-/// realm when its `prototype` is not an object.
+/// answers NaN until the text story; two or more arguments are the components, whose
+/// coercions run and whose time value `new Date(1, 2)` is 1901-03-01T00:00:00.000Z in the
+/// zone "UTC" (`tests/date_zone.rs` holds the rest). None of them reads the clock. The object
+/// is made after the coercion, from `new.target`'s realm when its `prototype` is not an
+/// object.
 #[test]
 fn new_date_over_a_table_of_values() {
     let mut agent = agent().unwrap();
@@ -201,7 +204,7 @@ fn new_date_over_a_table_of_values() {
                return hint === 'default' ? 4 : 5; } }).getTime();",
             normal("4"),
         ),
-        ("new Date(1, 2).getTime();", normal("NaN")),
+        ("new Date(1, 2).getTime();", normal("-2172355200000")),
         (
             "var made = new Date(0); \
              (Object.getPrototypeOf(made) === Date.prototype) + ',' + typeof made;",
@@ -211,7 +214,7 @@ fn new_date_over_a_table_of_values() {
     for (source, expected) in rows {
         assert_eq!(eval_text(&mut agent, &realm, source), expected, "{source}");
     }
-    assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
+    assert_eq!(clock_calls(&agent), 0, "{:?}", agent.host().calls);
 
     // `new.target` of another realm whose `prototype` is not an object: the Date takes that
     // realm's %Date.prototype%, read after the argument's `valueOf` ran.
@@ -417,15 +420,15 @@ fn lengths_names_and_descriptors_of_date_and_its_functions() {
     );
 }
 
-/// The 16 functions of `Date` this story defines and later stories build (`Date.UTC`,
-/// `Date.parse` and the 14 setters other than `setTime`) each throw a TypeError whose message
+/// The 15 functions of `Date` this story defines and later stories build (`Date.parse` and
+/// the 14 setters other than `setTime`; `Date.UTC` was built by
+/// `story:date-object-constructor-now-utc-and-getters`) each throw a TypeError whose message
 /// names the function and says it is not built yet.
 #[test]
 fn interim_bodies_throw_a_type_error_that_names_the_function() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
     let calls = [
-        ("UTC", "Date.UTC(2000, 0);"),
         ("parse", "Date.parse('1970-01-01');"),
         ("setMilliseconds", "new Date(0).setMilliseconds(1);"),
         ("setUTCMilliseconds", "new Date(0).setUTCMilliseconds(1);"),

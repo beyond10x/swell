@@ -6,7 +6,7 @@
 
 use crate::support;
 
-use support::host::{TestHost, agent, realm};
+use support::host::{ProvidedHost, TestHost, agent, in_provided_hook, realm};
 use swell::{
     AgentState, Brand, CompilationType, CompileStrings, Completion, Cx, GlobalObjects, Handled,
     HookCx, Host, HostCall, HostObjectSpec, IsoDateTime, ObjectRef, Outcome, Prototype, RealmRef,
@@ -183,26 +183,28 @@ fn host_124_host_grow_shared_array_buffer_default() {
 }
 
 /// `system_time_zone_identifier` (`#sec-systemtimezoneidentifier`, "If the implementation only
-/// supports the UTC time zone, return "UTC""): `"UTC"`.
+/// supports the UTC time zone, return "UTC""): `"UTC"`. Asked of `ProvidedHost`, since
+/// `TestHost` answers the zone hooks from its fields.
 #[test]
 fn host_124_system_time_zone_identifier_default() {
-    let answer = in_hook(|cx, _, _| TestHost::system_time_zone_identifier(cx));
+    let answer = in_provided_hook(ProvidedHost::system_time_zone_identifier);
     assert_eq!(answer, "UTC");
 }
 
 /// `get_named_time_zone_offset_nanoseconds` (`#sec-getnamedtimezoneoffsetnanoseconds`, the
-/// default "Return 0."): 0 at every instant.
+/// default "Return 0."): 0 at every instant. Asked of `ProvidedHost`.
 #[test]
 fn host_124_get_named_time_zone_offset_nanoseconds_default() {
-    let answer = in_hook(|cx, _, _| {
-        [0, 1, -1, 8_640_000_000_000_000_000_000]
-            .map(|epoch_ns| TestHost::get_named_time_zone_offset_nanoseconds(cx, "UTC", epoch_ns))
+    let answer = in_provided_hook(|cx| {
+        [0, 1, -1, 8_640_000_000_000_000_000_000].map(|epoch_ns| {
+            ProvidedHost::get_named_time_zone_offset_nanoseconds(cx, "UTC", epoch_ns)
+        })
     });
     assert_eq!(answer, [0, 0, 0, 0]);
 }
 
 /// `get_named_time_zone_epoch_nanoseconds` (`#sec-getnamedtimezoneepochnanoseconds`, the
-/// default: « GetUTCEpochNanoseconds(isoDateTime) »).
+/// default: « GetUTCEpochNanoseconds(isoDateTime) »). Asked of `ProvidedHost`.
 #[test]
 fn host_124_get_named_time_zone_epoch_nanoseconds_default() {
     let date = |year, month, day, nanosecond| IsoDateTime {
@@ -216,11 +218,11 @@ fn host_124_get_named_time_zone_epoch_nanoseconds_default() {
         microsecond: 0,
         nanosecond,
     };
-    let answer = in_hook(|cx, _, _| {
+    let answer = in_provided_hook(|cx| {
         [
-            TestHost::get_named_time_zone_epoch_nanoseconds(cx, "UTC", date(1970, 1, 1, 1)),
-            TestHost::get_named_time_zone_epoch_nanoseconds(cx, "UTC", date(2000, 1, 1, 0)),
-            TestHost::get_named_time_zone_epoch_nanoseconds(cx, "UTC", date(1969, 12, 31, 0)),
+            ProvidedHost::get_named_time_zone_epoch_nanoseconds(cx, "UTC", date(1970, 1, 1, 1)),
+            ProvidedHost::get_named_time_zone_epoch_nanoseconds(cx, "UTC", date(2000, 1, 1, 0)),
+            ProvidedHost::get_named_time_zone_epoch_nanoseconds(cx, "UTC", date(1969, 12, 31, 0)),
         ]
     });
     assert_eq!(

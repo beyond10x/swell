@@ -6,15 +6,16 @@
 #![cfg(test)]
 
 use swell::{
-    Abrupt, Agent, Completion, CreateError, Cx, HookCx, Host, Job, Limits, LoadRequest, ObjectRef,
-    Outcome, PropertyDescriptor, PropertyKey, Realm, Root, Seeds, Value,
+    Abrupt, Agent, AgentState, Brand, Completion, CreateError, Cx, GlobalObjects, HookCx, Host,
+    HostObjectSpec, IsoDateTime, Job, Limits, LoadRequest, ObjectRef, Outcome, PropertyDescriptor,
+    PropertyKey, Prototype, Realm, Root, Seeds, Value,
 };
 
 /// A host that records every call of a required hook, in order, as the hook's name and its
 /// arguments, and keeps the jobs and load requests it is handed. The provided hooks keep their
 /// defaults (`docs/design/host-interface.md`, decision 16), which `tests/hooks.rs` checks; a test
-/// that reads `calls` shows which required hooks were called.
-#[derive(Default)]
+/// that reads `calls` shows which required hooks were called. The three time zone hooks it
+/// answers from its zone fields record their calls too.
 pub struct TestHost {
     pub calls: Vec<String>,
     pub jobs: Vec<Job>,
@@ -33,7 +34,44 @@ pub struct TestHost {
     pub kept: Vec<Option<ObjectRef>>,
     /// The charges of the host's own bytes a test's host functions keep.
     pub charges: Vec<swell::HostBytes>,
+    /// What `system_time_zone_identifier` answers: "UTC" by default.
+    pub zone_identifier: String,
+    /// What `get_named_time_zone_offset_nanoseconds` answers: 0 by default.
+    pub zone_offset_ns: i128,
+    /// What `get_named_time_zone_epoch_nanoseconds` answers for a local time; `None`, the
+    /// default, answers as the trait's default does.
+    pub zone_epochs: Option<fn(&IsoDateTime) -> Vec<i128>>,
 }
+
+impl Default for TestHost {
+    fn default() -> TestHost {
+        TestHost {
+            calls: Vec::new(),
+            jobs: Vec::new(),
+            loads: Vec::new(),
+            now: 0,
+            clock_step_ns: 0,
+            clock_globals: Vec::new(),
+            count: 0,
+            kept: Vec::new(),
+            charges: Vec::new(),
+            zone_identifier: "UTC".to_string(),
+            zone_offset_ns: 0,
+            zone_epochs: None,
+        }
+    }
+}
+
+/// The name `TestHost` records for a call of `system_time_zone_identifier`.
+pub const ZONE_IDENTIFIER: &str = "system_time_zone_identifier";
+
+/// The first word `TestHost` records for a call of `get_named_time_zone_offset_nanoseconds`,
+/// followed by the identifier and the epoch nanoseconds it was given.
+pub const ZONE_OFFSET: &str = "get_named_time_zone_offset_nanoseconds";
+
+/// The first word `TestHost` records for a call of `get_named_time_zone_epoch_nanoseconds`,
+/// followed by the identifier and the local time it was given.
+pub const ZONE_EPOCHS: &str = "get_named_time_zone_epoch_nanoseconds";
 
 impl Host for TestHost {
     fn host_enqueue_generic_job(cx: &mut HookCx<'_, Self>, job: Job) {
@@ -71,6 +109,99 @@ impl Host for TestHost {
         host.now = now.saturating_add(host.clock_step_ns);
         now
     }
+
+    fn system_time_zone_identifier(cx: &mut HookCx<'_, Self>) -> String {
+        let host = cx.host_mut();
+        host.calls.push(ZONE_IDENTIFIER.to_string());
+        host.zone_identifier.clone()
+    }
+
+    fn get_named_time_zone_offset_nanoseconds(
+        cx: &mut HookCx<'_, Self>,
+        id: &str,
+        epoch_ns: i128,
+    ) -> i128 {
+        let host = cx.host_mut();
+        host.calls.push(format!("{ZONE_OFFSET} {id} {epoch_ns}"));
+        host.zone_offset_ns
+    }
+
+    fn get_named_time_zone_epoch_nanoseconds(
+        cx: &mut HookCx<'_, Self>,
+        id: &str,
+        local: IsoDateTime,
+    ) -> Vec<i128> {
+        let host = cx.host_mut();
+        host.calls.push(format!(
+            "{ZONE_EPOCHS} {id} {}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}",
+            local.year,
+            local.month,
+            local.day,
+            local.hour,
+            local.minute,
+            local.second,
+            local.millisecond
+        ));
+        if let Some(epochs) = host.zone_epochs {
+            return epochs(&local);
+        }
+        let date = swell_num::date::IsoDateTime {
+            year: i64::from(local.year),
+            month: local.month,
+            day: local.day,
+            hour: local.hour,
+            minute: local.minute,
+            second: local.second,
+            millisecond: local.millisecond,
+            microsecond: local.microsecond,
+            nanosecond: local.nanosecond,
+        };
+        swell_num::date::get_utc_epoch_nanoseconds(&date)
+            .into_iter()
+            .collect()
+    }
+}
+
+/// A host that answers only the required hooks and records nothing: every provided hook, the
+/// four time zone hooks among them, keeps the trait's own body (`tests/hooks.rs` checks those
+/// defaults, `tests/date_zone.rs` runs `Date` over them).
+pub struct ProvidedHost;
+
+impl Host for ProvidedHost {
+    fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
+    fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {}
+    fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
+    fn host_load_imported_module(_cx: &mut HookCx<'_, Self>, _request: LoadRequest) {}
+    fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
+        0
+    }
+}
+
+/// Runs `f` inside the setup closure of a `create_realm` of an agent of [`ProvidedHost`], the
+/// place a host meets a `HookCx` outside a hook, and answers what `f` returned. The realm's
+/// global is a host object.
+pub fn in_provided_hook<R>(f: impl FnOnce(&mut HookCx<'_, ProvidedHost>) -> R) -> R {
+    let mut agent = Agent::new(ProvidedHost, limits(), seeds()).unwrap();
+    let mut f = Some(f);
+    let mut out = None;
+    let mut setup = |cx: &mut HookCx<'_, ProvidedHost>, _realm| -> Completion<GlobalObjects> {
+        let global = cx
+            .new_host_object(HostObjectSpec {
+                prototype: Prototype::Null,
+                brand: Brand(1),
+                data: None,
+                error_kind: None,
+            })
+            .unwrap()?;
+        if let Some(f) = f.take() {
+            out = Some(f(cx));
+        }
+        Ok(GlobalObjects { global, this: None })
+    };
+    let created = agent.create_realm(Some(&mut setup), None).unwrap();
+    assert!(matches!(created, Outcome::Normal(_)), "{created:?}");
+    assert_eq!(agent.state(), AgentState::Alive);
+    out.unwrap()
 }
 
 /// The limits the tests use unless a test sets one of its own: large enough that no test of
