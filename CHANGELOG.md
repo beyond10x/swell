@@ -12,6 +12,21 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- Slice 7, generators, is delivered: all 1,472 of its test262 cases pass in all 2,801 runs.
+  At its close 40 cases that need `class` or `super` move to slice 8, each with its
+  evidence, and 21 cases that failed only on generators count in slice 7 instead of slices
+  18 and 19.
+- The statics of `Promise`, a story of the tenth slice: `Promise.all`, `Promise.allSettled`,
+  `Promise.any`, `Promise.race`, `Promise.try` and `Promise.withResolvers`, with
+  `Promise.prototype.finally` and `AggregateError`. `Promise.all` over an iterator that
+  never ends stops at the step budget or the memory budget and keeps nothing; the values
+  of promises that never settle are charged to the memory budget and credited when the
+  promises are collected.
+- The grammar of async generators, a story of the tenth slice. `async function*`, as a
+  declaration and as an expression, is parsed whole, and its grammar errors and early
+  errors are reported. A script that holds one still ends with a `SyntaxError` that names
+  the tenth slice, now after every other error of the source; an `async *` method is
+  refused at its token as before. 143 more test262 cases of the slice pass.
 - `%AsyncFunction%`, the constructor of `async` functions from source text, a story of the
   tenth slice. It is reached through the `constructor` of the prototype of an `async`
   function and is no property of the global object. Called or constructed, it takes the
@@ -101,6 +116,13 @@ Every number below comes from the gate, `task check`, on the released commit.
   `promise_is_handled` and `mark_promise_as_handled`. A root that holds no promise
   answers `WrongKind`.
 - `HOST-46`, `HOST-100`, `HOST-101` and `HOST-121` have a test.
+- Breaking: `ErrorKind` is `#[non_exhaustive]`. A `match` over it in a host needs a wildcard
+  arm; a host that has one compiles as before. The list of error kinds follows the
+  standard, which grows.
+- New: `ErrorKind::AggregateError`. `new_error` with it makes an `AggregateError` with no
+  `errors`, and `error_summary` of an `AggregateError` answers the kind and the message
+  without reading `errors`. `ErrorKind::ALL` keeps its seven entries.
+- `HOST-201` and `HOST-202` have a test.
 
 ## [0.8.0] - 2026-11-24
 

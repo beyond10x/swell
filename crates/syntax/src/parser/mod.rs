@@ -87,10 +87,10 @@ pub(crate) struct Parser<'a, 'm> {
     /// beside `outer_yields`, saved and put back with it; the growth charged first.
     outer_awaits: Vec<bool>,
     /// The refusal of a construct whose parse goes on, held back to the end of the parse, at the
-    /// first token of the first such construct of the source; no construct holds one since
-    /// `async` functions parse whole (`story:async-functions-and-await`). The parse answers it
-    /// only when it ends without a grammar error and without an early error (`lib.rs`,
-    /// `analyse_parsed`).
+    /// first token of the first such construct of the source: that of an async generator,
+    /// `async generator function` (slice 10), at its `async` (`parser/function.rs`). `yield*`
+    /// (slice 7) holds none: it parses and runs. The parse answers it only when it ends without
+    /// a grammar error and without an early error (`lib.rs`, `analyse_parsed`).
     held: Option<SyntaxError>,
     /// The operator stack of the binary expression parser, shared by its nested calls.
     operators: Vec<expression::Pending>,

@@ -24,7 +24,9 @@
 //! call of `async` read again as its parameters, `parser/function.rs`) and the AwaitExpression
 //! (`#sec-async-function-definitions`), a prefix operator where [Await] is set; elsewhere
 //! `await` is an identifier, and `async` is one wherever no `async` function or arrow function
-//! starts; and the `async` methods of object literals (AsyncMethod).
+//! starts; and the `async` methods of object literals (AsyncMethod). An `async function*` is an
+//! AsyncGeneratorExpression (`#sec-async-generator-function-definitions`), whose refusal is held
+//! back to the end of the parse (`parser/function.rs`).
 //!
 //! Refused, each with its slice: `**` and `**=` (4), `class`, `super`, `new.target` (8), `async`
 //! generator methods (10), `import.meta` and dynamic `import` (11).
@@ -1031,7 +1033,8 @@ impl<'a, 'm> Parser<'a, 'm> {
                 _ => return self.unexpected(),
             },
             TokenKind::Name(n) => {
-                // `async [no LineTerminator here] function`: an AsyncFunctionExpression.
+                // `async [no LineTerminator here] function`: an AsyncFunctionExpression, or with
+                // a `*` an AsyncGeneratorExpression.
                 if !self.tok.escaped && n == "async" {
                     let next = self.peek()?;
                     if !next.newline_before && next.kind == TokenKind::Keyword(Keyword::Function) {

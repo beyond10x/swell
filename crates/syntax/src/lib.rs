@@ -148,9 +148,11 @@ impl Failure {
 /// `Script`: the tree, or every `SyntaxError` the parse found, at least one. A grammar error or a
 /// refusal stops the parse and is the only error; the early errors of a source that parses are
 /// all reported, in source order. Generator functions and methods, and `async` functions and
-/// arrow functions, parse. A refusal held back to the end of the parse (none since
-/// `story:async-functions-and-await`) would not stop the parse, and would come after the whole
-/// parse and the early errors, the only error of a source that has neither.
+/// arrow functions, parse. The one refusal held back to the end of the parse is that of an
+/// async generator, `async generator function` (slice 10): `async function*` parses whole with
+/// its early errors, and the refusal comes after the whole parse and the early errors, the only
+/// error of a source that has neither a grammar error nor an early error, at the `async` of its
+/// first async generator.
 pub fn parse_script(source: &[u16], options: ParseOptions) -> Result<Script, Vec<SyntaxError>> {
     parse_script_with(source, options, &mut Unlimited).map_err(Failure::into_errors)
 }
@@ -250,9 +252,8 @@ pub fn parse_dynamic_function_with(
 /// (`#sec-generator-function-definitions-static-semantics-early-errors`): so a YieldExpression
 /// in the parameters, and `yield` as a name, are a SyntaxError. The answer is a [`Script`] of
 /// one expression statement whose expression is the generator expression, `FunctionId(0)`,
-/// its own name taken off. No construct holds a refusal back to the end of the parse: an `async`
-/// function parses whole, and every refusal stops the parse at once, as [`parse_script`] answers
-/// it.
+/// its own name taken off. A refusal the parse holds back to its end (an async generator in the
+/// body) is answered as [`parse_script`] answers it.
 pub fn parse_dynamic_generator_function(
     parameters: &[u16],
     body: &[u16],

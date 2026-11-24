@@ -692,6 +692,16 @@ test/built-ins/isNaN/return-true-nan.js	3	4	part	Math.pow
 test/harness/asyncHelpers-asyncTest-func-throws-sync.js	2	3	part	globalThis
 test/harness/nativeFunctionMatcher.js	1	5	part	/\w/.test(
 test/harness/wellKnownIntrinsicObjects.js	1	10	part	async
+test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-multiple.js	7	8	part	class
+test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-null.js	7	8	part	class
+test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-single-args.js	7	8	part	class
+test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-spread-operator.js	7	8	part	class
+test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-undefined.js	7	8	part	class
+test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-multiple.js	7	8	part	class
+test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-null.js	7	8	part	class
+test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-single-args.js	7	8	part	class
+test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-spread-operator.js	7	8	part	class
+test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-undefined.js	7	8	part	class
 test/language/arguments-object/cls-decl-meth-args-trailing-comma-multiple.js	2	8	part	class
 test/language/arguments-object/cls-decl-meth-args-trailing-comma-null.js	2	8	part	class
 test/language/arguments-object/cls-decl-meth-args-trailing-comma-single-args.js	2	8	part	class
@@ -702,6 +712,16 @@ test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-null.js	
 test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-single-args.js	2	8	part	class
 test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-spread-operator.js	2	8	part	class
 test/language/arguments-object/cls-decl-meth-static-args-trailing-comma-undefined.js	2	8	part	class
+test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-multiple.js	7	8	part	class
+test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-null.js	7	8	part	class
+test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-single-args.js	7	8	part	class
+test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-spread-operator.js	7	8	part	class
+test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-undefined.js	7	8	part	class
+test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-multiple.js	7	8	part	class
+test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-null.js	7	8	part	class
+test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-single-args.js	7	8	part	class
+test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-spread-operator.js	7	8	part	class
+test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-undefined.js	7	8	part	class
 test/language/arguments-object/cls-expr-meth-args-trailing-comma-multiple.js	2	8	part	class
 test/language/arguments-object/cls-expr-meth-args-trailing-comma-null.js	2	8	part	class
 test/language/arguments-object/cls-expr-meth-args-trailing-comma-single-args.js	2	8	part	class
@@ -760,6 +780,7 @@ test/language/block-scope/syntax/function-declarations/in-statement-position-def
 test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-class.js	2	8	part	class
 test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-const.js	2	8	part	class
 test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-function.js	2	8	part	class
+test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-generator.js	7	8	part	class
 test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-let.js	2	8	part	class
 test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-var.js	2	8	part	class
 test/language/block-scope/syntax/redeclaration/const-name-redeclaration-attempt-with-class.js	2	8	part	class
@@ -777,6 +798,7 @@ test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attem
 test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-function.js	2	6	part	{ function f()
 test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-let.js	2	6	part	{ function f()
 test/language/block-scope/syntax/redeclaration/function-name-redeclaration-attempt-with-var.js	2	6	part	{ function f()
+test/language/block-scope/syntax/redeclaration/generator-name-redeclaration-attempt-with-class.js	7	8	part	class
 test/language/block-scope/syntax/redeclaration/inner-block-var-name-redeclaration-attempt-with-class.js	2	8	part	class
 test/language/block-scope/syntax/redeclaration/inner-block-var-name-redeclaration-attempt-with-const.js	2	6	part	const
 test/language/block-scope/syntax/redeclaration/inner-block-var-name-redeclaration-attempt-with-function.js	2	6	part	} function f() {} }
@@ -1204,6 +1226,10 @@ test/language/expressions/function/scope-param-rest-elem-var-open.js	2	6	part	( 
 test/language/expressions/function/scope-paramsbody-var-close.js	2	6	part	(_ = null)
 test/language/expressions/function/scope-paramsbody-var-open.js	2	6	part	(_ = probeParams
 test/language/expressions/function/use-strict-with-non-simple-param.js	2	6	part	function(a = 0)
+test/language/expressions/generators/dstr/ary-ptrn-elem-id-init-fn-name-class.js	7	8	part	class
+test/language/expressions/generators/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js	7	8	part	class
+test/language/expressions/generators/dstr/dflt-obj-ptrn-id-init-fn-name-class.js	7	8	part	class
+test/language/expressions/generators/dstr/obj-ptrn-id-init-fn-name-class.js	7	8	part	class
 test/language/expressions/in/S8.12.6_A2_T1.js	2	3	part	valueOf
 test/language/expressions/in/S8.12.6_A2_T2.js	2	3	part	valueOf
 test/language/expressions/in/rhs-yield-present.js	2	7	part	function *
@@ -1256,10 +1282,15 @@ test/language/expressions/object/accessor-name-literal-string-single-quote.js	2	
 test/language/expressions/object/accessor-name-literal-string-unicode-escape.js	2	6	part	get [
 test/language/expressions/object/computed-property-evaluation-order.js	2	6	part	[++counter]:
 test/language/expressions/object/computed-property-name-topropertykey-before-value-evaluation.js	2	6	part	[key]: value
+test/language/expressions/object/concise-generator.js	7	8	part	super
 test/language/expressions/object/cover-initialized-name.js	2	6	part	({ a = 1 })
 test/language/expressions/object/cpn-obj-lit-computed-property-name-from-async-arrow-function-expression.js	6	10	part	async
 test/language/expressions/object/cpn-obj-lit-computed-property-name-from-generator-function-declaration.js	6	7	part	function *
 test/language/expressions/object/cpn-obj-lit-computed-property-name-from-yield-expression.js	6	7	part	function *
+test/language/expressions/object/dstr/gen-meth-ary-ptrn-elem-id-init-fn-name-class.js	7	8	part	class
+test/language/expressions/object/dstr/gen-meth-dflt-ary-ptrn-elem-id-init-fn-name-class.js	7	8	part	class
+test/language/expressions/object/dstr/gen-meth-dflt-obj-ptrn-id-init-fn-name-class.js	7	8	part	class
+test/language/expressions/object/dstr/gen-meth-obj-ptrn-id-init-fn-name-class.js	7	8	part	class
 test/language/expressions/object/dstr/meth-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
 test/language/expressions/object/dstr/meth-dflt-ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
 test/language/expressions/object/dstr/meth-dflt-obj-ptrn-id-init-fn-name-class.js	6	8	part	class
@@ -1272,6 +1303,9 @@ test/language/expressions/object/method-definition/early-errors-object-method-fo
 test/language/expressions/object/method-definition/forbidden-ext/b2/meth-forbidden-ext-indirect-access-own-prop-caller-get.js	2	6	part	let
 test/language/expressions/object/method-definition/forbidden-ext/b2/meth-forbidden-ext-indirect-access-own-prop-caller-value.js	2	6	part	let
 test/language/expressions/object/method-definition/forbidden-ext/b2/meth-forbidden-ext-indirect-access-prop-caller.js	2	6	part	let
+test/language/expressions/object/method-definition/generator-super-call-body.js	7	8	part	super
+test/language/expressions/object/method-definition/generator-super-call-param.js	7	8	part	super
+test/language/expressions/object/method-definition/generator-super-prop-body.js	7	8	part	super
 test/language/expressions/object/method-definition/meth-dflt-params-trailing-comma.js	2	6	part	, b = 39,)
 test/language/expressions/object/method-definition/meth-rest-params-trailing-comma-early-error.js	2	6	part	...
 test/language/expressions/object/method-definition/name-param-init-yield.js	2	6	part	method(x = yield)
@@ -1635,6 +1669,10 @@ test/language/statements/function/scope-param-rest-elem-var-open.js	2	6	part	( _
 test/language/statements/function/scope-paramsbody-var-close.js	2	6	part	(_ = null)
 test/language/statements/function/scope-paramsbody-var-open.js	2	6	part	(_ = probeParams
 test/language/statements/function/use-strict-with-non-simple-param.js	2	6	part	function f(a = 0)
+test/language/statements/generators/dstr/ary-ptrn-elem-id-init-fn-name-class.js	7	8	part	class
+test/language/statements/generators/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js	7	8	part	class
+test/language/statements/generators/dstr/dflt-obj-ptrn-id-init-fn-name-class.js	7	8	part	class
+test/language/statements/generators/dstr/obj-ptrn-id-init-fn-name-class.js	7	8	part	class
 test/language/statements/if/if-cls-else-cls.js	2	8	part	class
 test/language/statements/if/if-cls-else-stmt.js	2	8	part	class
 test/language/statements/if/if-cls-no-else.js	2	8	part	class
@@ -1668,6 +1706,7 @@ test/language/statements/switch/scope-lex-generator.js	2	7	part	function *
 test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-class.js	2	8	part	class
 test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-const.js	2	8	part	class
 test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-function.js	2	8	part	class
+test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-generator.js	7	8	part	class
 test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-let.js	2	8	part	class
 test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-var.js	2	8	part	class
 test/language/statements/switch/syntax/redeclaration/const-name-redeclaration-attempt-with-class.js	2	8	part	class
@@ -1680,6 +1719,7 @@ test/language/statements/switch/syntax/redeclaration/function-name-redeclaration
 test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-function.js	2	6	part	case 1: function f()
 test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-let.js	2	6	part	case 1: function f()
 test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-var.js	2	6	part	case 1: function f()
+test/language/statements/switch/syntax/redeclaration/generator-name-redeclaration-attempt-with-class.js	7	8	part	class
 test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-class.js	2	8	part	class
 test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-const.js	2	6	part	let
 test/language/statements/switch/syntax/redeclaration/let-name-redeclaration-attempt-with-function.js	2	6	part	let

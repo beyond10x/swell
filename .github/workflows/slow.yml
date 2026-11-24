@@ -40,6 +40,7 @@ on:
       - "conformance/test262/**"
       - "docs/design/engine.md"
       - ".github/workflows/slow.yml"
+  workflow_dispatch:
 
 concurrency:
   group: slow-${{ github.event_name }}-${{ github.ref }}
