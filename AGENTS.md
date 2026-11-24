@@ -72,6 +72,10 @@ and the hooks of a promise; and the close, with 141 cases that need a later slic
 slices 8, 9, 12 and 13 with evidence and 21 cases taken in from slices 18 and 19: all 3,759
 cases of slice 10 pass in all 7,258 runs (`test262-slice 10 3759 7258 0 0 3759 3759 0 0`), and
 no host requirement is pending for it. Slice 10 is in no release yet.
+Slice 4, `numbers-and-dates` (`epic:slice-04-numbers-and-dates`), is accepted in seventeen
+stories (`docs/plan/waves.md`, "Slice 4, `numbers-and-dates`"); none is built yet, 261 of its
+1,612 cases pass (`test262-slice 04 1612 3184 0 0 1612 261 1351 0`), and 14 host requirements
+are pending for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases

@@ -1,0 +1,3 @@
+test/harness/nans.js
+test/language/expressions/typeof/built-in-functions.js
+test/built-ins/global/global-object.js

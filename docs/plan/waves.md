@@ -378,6 +378,25 @@ requirements (`HOST-201` to `HOST-208`), each moved by one story.
 
 **Delivered.** On the branch of the first wave of slice 10, by 2026-11-24: the orders 1 to 4 (the last of order 4 was `for await` with the Async-from-Sync Iterator), and order 5, the statics of `Promise` with `finally` and `AggregateError` and the target of the executable specification (18 of the model's 60 scenarios pass on the engine, 14 of 58 before); and of order 6 async generators with their request queue, the constructor of async generator functions, async generator methods of object literals, `yield*` in async generators and `Array.fromAsync`; and the close, with 141 cases that need a later slice moved to slices 8, 9, 12 and 13 with evidence and 21 cases taken in from slices 18 and 19. Slice 10 is delivered: all 3,759 cases pass in all 7,258 runs (`test262-slice 10 3759 7258 0 0 3759 3759 0 0`).
 
+## Slice 4, `numbers-and-dates`
+
+`epic:slice-04-numbers-and-dates`, accepted on 2026-11-24 in seventeen stories after three
+readings by the plan critics (`review-result:slice-04-round-3-*`). The case list and the guard
+list of each story are in `docs/plan/slice-04/`. The order follows the stories' edges; stories
+of one order can be built at the same time, and each names the hunks of the files it shares.
+
+| order | stories | what it brings |
+|---|---|---|
+| 1 | `math-constants-and-exact-functions`, `date-object-clock-and-time-value`, `swell-num-calendar-and-local-time`, `number-format`, `swell-num-math-double-double` | the constants and exact functions of `Math`; `Date` with the host's clock and the time value (with the first, the browser's seven `Math` calls and two `Date.now()` reads); calendar and local time in `swell-num`; `toFixed`, `toExponential`, `toPrecision`, `toLocaleString`; double-double arithmetic with `hypot` |
+| 2 | `date-object-constructor-now-utc-and-getters`, `swell-num-date-text`, `math-sum-precise`, `number-functions`, `swell-num-math-exp-and-log`, `swell-num-math-trigonometry` | the `Date` constructor, `Date.UTC` and the getters; date text in `swell-num`; `Math.sumPrecise`; `parseInt`, `parseFloat` and the predicates of `Number`; the exponential, logarithm and trigonometric functions in `swell-num` |
+| 3 | `date-setters`, `math-functions` | the 14 setters of `Date`; the 22 functions of `Math` |
+| 4 | `date-text-formats`, `exponentiation-operator`, `math-random` | the text methods of `Date` and `Date.parse`; `**` and `**=`; `Math.random` |
+| 5 | `slice-04-conformance-close` | the close of the slice |
+
+On the wave's branch before the first story: 261 of the 1,612 cases pass
+(`test262-slice 04 1612 3184 0 0 1612 261 1351 0`), and 14 host requirements are pending for
+the slice.
+
 ## What later slices take over
 
 Findings of delivered waves that belong to a slice not yet decomposed. The decomposition of
