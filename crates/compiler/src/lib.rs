@@ -500,6 +500,9 @@ pub(crate) struct Compiler<'a, 'm> {
     /// Of a generator template: the local slot of its generator object. Its `return` ends in
     /// [`Instruction::GeneratorReturn`] instead of [`Instruction::Return`].
     pub(crate) generator: Option<u32>,
+    /// Of an `async` template: the local slot of its activation. Its `return` ends in
+    /// [`Instruction::AsyncReturn`] instead of [`Instruction::Return`].
+    pub(crate) asynchronous: Option<u32>,
 }
 
 /// The finished code of one template.
@@ -623,6 +626,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
             chains: Vec::new(),
             scopes: Vec::new(),
             generator: None,
+            asynchronous: None,
         }
     }
 
@@ -874,9 +878,10 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 self.emit(Instruction::Tag(TAG_RETURN), span)?;
                 self.goto(entry, span)
             }
-            None => match self.generator {
-                Some(slot) => self.emit(Instruction::GeneratorReturn(slot), span),
-                None => self.emit(Instruction::Return, span),
+            None => match (self.generator, self.asynchronous) {
+                (Some(slot), _) => self.emit(Instruction::GeneratorReturn(slot), span),
+                (None, Some(slot)) => self.emit(Instruction::AsyncReturn(slot), span),
+                (None, None) => self.emit(Instruction::Return, span),
             },
         }
     }

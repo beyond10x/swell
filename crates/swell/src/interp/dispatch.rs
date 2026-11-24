@@ -433,6 +433,11 @@ impl<H: Host> Agent<H> {
             I::DelegateStep(target) => self.delegate_step(target),
             I::JumpIfDelegateDone(target) => self.jump_if_delegate_done(target),
             I::DelegateYield(slot) => self.delegate_yield(slot),
+            // ---- async functions (`interp/async_function.rs`) ----
+            I::AsyncStart(slot) => self.async_start(slot),
+            I::Await(slot) => self.await_instruction(slot),
+            I::AsyncReturn(slot) => self.async_return(slot),
+            I::AsyncReject(slot) => self.async_reject(slot),
         }
     }
 

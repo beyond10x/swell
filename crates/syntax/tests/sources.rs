@@ -235,44 +235,26 @@ fn refused_sources_name_their_slice() {
     println!("refused: {} file(s)", files.len());
 }
 
-/// The refusal of slice 10 (`async function`) does not stop the parse: a source with an `async`
-/// function or arrow function and no other error ends on it alone, at the `async` of the first
-/// one of the source, through each entry, the dynamic ones of `Function` and
-/// `%GeneratorFunction%` too; an early error or a grammar error anywhere ends the source on that error
-/// instead (`#sec-async-function-definitions`, `docs/design/engine.md`, section 12, "A part
-/// before its slice").
+/// `async` functions and arrow functions parse whole (`#sec-async-function-definitions`,
+/// `#sec-async-arrow-function-definitions`; `story:async-functions-and-await` lifted the refusal
+/// of slice 10 that held them back to the end of the parse): through each entry, the dynamic ones
+/// of `Function` and `%GeneratorFunction%` too; an early error or a grammar error anywhere ends
+/// the source on that error alone. `await` is an identifier outside an `async` function, and
+/// `async` one wherever no `async` function or arrow function starts.
 #[test]
-fn the_refusal_of_slice_10_comes_after_the_whole_parse() {
-    let refusal = "async function is not supported before slice 10".to_string();
-    let at = |text: &str| {
-        let errors = parse(text)
-            .err()
-            .unwrap_or_else(|| panic!("{text:?} parsed"));
-        assert_eq!(errors.len(), 1, "{text:?}: {errors:?}");
-        (errors[0].message.clone(), errors[0].line, errors[0].column)
-    };
-    assert_eq!(at("async function f() {}"), (refusal.clone(), 1, 1));
-    assert_eq!(at("x;\n  y = async (a) => a;"), (refusal.clone(), 2, 7));
-    assert_eq!(
-        at("y = async a => async function () {};"),
-        (refusal.clone(), 1, 5)
-    );
-    // The head of an `async` arrow function is read before its `async` holds the refusal; the
-    // first `async` of the source is still the one named.
-    assert_eq!(
-        at("y = async (a = async function () {}) => a;"),
-        (refusal.clone(), 1, 5)
-    );
-    // `yield*` parses since slice 7 delivered it; a generator method in an `async` function has
-    // [Await] cleared in its parameters and body, and its computed name has the [Await] around.
-    assert_eq!(
-        at("function* g() { yield* a; }\nasync function f() {}"),
-        (refusal.clone(), 2, 1)
-    );
-    assert_eq!(
-        at("async function f() { return { *[await a]() { await: yield; } }; }"),
-        (refusal.clone(), 1, 1)
-    );
+fn async_functions_parse_through_every_entry() {
+    for text in [
+        "async function f() {}",
+        "x;\n  y = async (a) => a;",
+        "y = async a => async function () {};",
+        "y = async (a = async function () {}) => a;",
+        "function* g() { yield* a; }\nasync function f() {}",
+        // A generator method in an `async` function has [Await] cleared in its parameters and
+        // body, and its computed name has the [Await] around.
+        "async function f() { return { *[await a]() { await: yield; } }; }",
+    ] {
+        assert!(parse(text).is_ok(), "{text:?}: {:?}", parse(text).err());
+    }
     for (text, message) in [
         (
             "async function f() {}\nlet a; let a;",
@@ -291,24 +273,11 @@ fn the_refusal_of_slice_10_comes_after_the_whole_parse() {
         );
     }
     let options = ParseOptions { max_nesting: LIMIT };
-    let errors = parse_eval(&units("async x => x"), true, options)
-        .err()
-        .unwrap();
-    assert_eq!(messages(&errors), vec![refusal.clone()]);
-    let errors = parse_dynamic_function(&units("a"), &units("return async () => a;"), options)
-        .err()
-        .unwrap();
-    assert_eq!(messages(&errors), vec![refusal.clone()]);
-    // The body of `Function` and of `%GeneratorFunction%` ends on the refusal as a script does.
+    assert!(parse_eval(&units("async x => x"), true, options).is_ok());
+    assert!(parse_dynamic_function(&units("a"), &units("return async () => a;"), options).is_ok());
     let body = units("async function f(){}");
-    let errors = parse_dynamic_function(&[], &body, options).err().unwrap();
-    assert_eq!(messages(&errors), vec![refusal.clone()]);
-    let errors = parse_dynamic_generator_function(&[], &body, options)
-        .err()
-        .unwrap();
-    assert_eq!(messages(&errors), vec![refusal]);
-    // `await` is an identifier outside an `async` function, and `async` one wherever no `async`
-    // function or arrow function starts.
+    assert!(parse_dynamic_function(&[], &body, options).is_ok());
+    assert!(parse_dynamic_generator_function(&[], &body, options).is_ok());
     for text in [
         "await;",
         "var await = async;",
@@ -318,11 +287,7 @@ fn the_refusal_of_slice_10_comes_after_the_whole_parse() {
         "function* g() { await: yield; }",
         "async function f() { function g() { var await; } }",
     ] {
-        let parsed = parse(text);
-        let refused = parsed.as_ref().err().is_some_and(|e| {
-            e.len() == 1 && e[0].message == "async function is not supported before slice 10"
-        });
-        assert!(parsed.is_ok() || refused, "{text:?}: {parsed:?}");
+        assert!(parse(text).is_ok(), "{text:?}: {:?}", parse(text).err());
     }
 }
 
@@ -704,19 +669,11 @@ fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec
 }
 
 /// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
-/// nesting error alone (`Some(false)`), or fail otherwise (`None`). A source whose one error is
-/// the refusal of slice 10 parsed: that refusal comes only after the whole parse and the early
-/// errors (`story:async-functions-and-await` takes this arm out).
+/// nesting error alone (`Some(false)`), or fail otherwise (`None`).
 fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     let source = nested(kind, n)?;
     match parse_through(entry, &source, limit) {
         Ok(_) => Some(true),
-        Err(e)
-            if e.len() == 1
-                && message_kind(&e.first()?.message) == (MessageKind::Refusal { slice: 10 }) =>
-        {
-            Some(true)
-        }
         Err(e) if e.len() == 1 && e.first()?.message.contains("parser_nesting") => Some(false),
         Err(_) => None,
     }

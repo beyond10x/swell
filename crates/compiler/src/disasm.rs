@@ -113,6 +113,9 @@ pub fn disassemble(code: &Code) -> String {
         if f.generator {
             out.push_str(" generator");
         }
+        if f.asynchronous {
+            out.push_str(" async");
+        }
         if f.self_binding {
             out.push_str(" self");
         }
@@ -328,6 +331,10 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::DelegateStep(t) => format!("DelegateStep {t:04}"),
         I::JumpIfDelegateDone(t) => format!("JumpIfDelegateDone {t:04}"),
         I::DelegateYield(n) => format!("DelegateYield {n}"),
+        I::AsyncStart(n) => format!("AsyncStart {n}"),
+        I::Await(n) => format!("Await {n}"),
+        I::AsyncReturn(n) => format!("AsyncReturn {n}"),
+        I::AsyncReject(n) => format!("AsyncReject {n}"),
         other => format!("{other:?}"),
     }
 }

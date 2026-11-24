@@ -339,7 +339,8 @@ impl<H: Host> Agent<H> {
                 | ObjectKind::Host(_)
                 | ObjectKind::RegExp(_)
                 | ObjectKind::Generator(_)
-                | ObjectKind::Promise(_) => true,
+                | ObjectKind::Promise(_)
+                | ObjectKind::AsyncActivation(_) => true,
             };
             if !plain || record.properties.may_hold_index() {
                 return Ok(None);

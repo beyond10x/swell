@@ -12,8 +12,8 @@
 //! A function declaration stands at the top of a body, where it is var scoped, and in a block, a
 //! `case` clause and a `try`, `catch` or `finally` block, where it is lexically scoped to that
 //! statement list (`#sec-block`, `#sec-switch-statement`), in strict and non-strict code.
-//! An `async` function declaration (slice 10) stands where a function declaration does, and
-//! the refusal of slice 10 is held back to the end of the parse (`parser/function.rs`).
+//! An `async` function declaration (slice 10) stands where a function declaration does
+//! (`parser/function.rs`).
 //! Refused are the declarations of later slices: `class` (8), `import`
 //! and `export` (11), and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
 //! `for (var a = 0 in o)` (18); the `var` binding and the duplicate declarations Annex B gives

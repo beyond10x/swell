@@ -1,4 +1,4 @@
-// sec-async-function-definitions: refused "async function is not supported before slice 10"
+// sec-async-function-definitions: parses
 async function f(a, b = 1, ...c) {
   await a;
   await await b;

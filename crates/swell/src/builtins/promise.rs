@@ -290,14 +290,18 @@ impl<H: Host> Agent<H> {
                 promise,
                 already_resolved,
             } => Ok((*promise, Rc::clone(already_resolved))),
-            Slots::Executor { .. } => Err(self.fault()),
+            Slots::Executor { .. } | Slots::Await { .. } => Err(self.fault()),
         }
     }
 
     /// resolveSteps of CreateResolvingFunctions (`#sec-createresolvingfunctions`, step 2) called
     /// with `resolution`; promiseOrEmpty is the function's [[Promise]] while its
     /// [[AlreadyResolved]] is false (the module's documentation).
-    fn resolve_function(&mut self, function: ObjectRef, resolution: Value) -> Completion<Value> {
+    pub(crate) fn resolve_function(
+        &mut self,
+        function: ObjectRef,
+        resolution: Value,
+    ) -> Completion<Value> {
         let (promise, already_resolved) = self.resolving_slots(function)?;
         // a. If promiseOrEmpty.[[Value]] is empty, return undefined.
         if already_resolved.get() {
@@ -360,7 +364,11 @@ impl<H: Host> Agent<H> {
 
     /// rejectSteps of CreateResolvingFunctions (`#sec-createresolvingfunctions`, step 4) called
     /// with `reason`.
-    fn reject_function(&mut self, function: ObjectRef, reason: Value) -> Completion<Value> {
+    pub(crate) fn reject_function(
+        &mut self,
+        function: ObjectRef,
+        reason: Value,
+    ) -> Completion<Value> {
         let (promise, already_resolved) = self.resolving_slots(function)?;
         // a. If promiseOrEmpty.[[Value]] is empty, return undefined.
         if already_resolved.get() {
@@ -383,7 +391,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Value> {
         let (resolve_slot, reject_slot) = match self.closure_slots(function)? {
             Slots::Executor { resolve, reject } => (*resolve, *reject),
-            Slots::Resolving { .. } => return Err(self.fault()),
+            Slots::Resolving { .. } | Slots::Await { .. } => return Err(self.fault()),
         };
         // a. If resolvingFuncs.[[Resolve]] is not undefined, throw a TypeError exception.
         // b. If resolvingFuncs.[[Reject]] is not undefined, throw a TypeError exception.
@@ -403,7 +411,7 @@ impl<H: Host> Agent<H> {
                 *resolve_slot = resolve;
                 *reject_slot = reject;
             }
-            Slots::Resolving { .. } => return Err(self.fault()),
+            Slots::Resolving { .. } | Slots::Await { .. } => return Err(self.fault()),
         }
         // e. Return NormalCompletion(undefined).
         Ok(Value::Undefined)
