@@ -361,6 +361,22 @@ entities:
         target: swell.host.Realm
         cardinality: one
         via: realm_id
+    # A job that will not run to its end is Abandoned (host-interface.md decision 11, "Steps, the
+    # interrupt and what a checkpoint leaves"): one that started and was ended by a termination of
+    # its checkpoint, which does not run it again; one `Agent::clear_microtasks` dropped; and one
+    # still queued when its agent faulted, whose queue never runs again (decision 6). A job whose
+    # step of taking off was refused was not taken off and stays Enqueued (HOST-199). Of these
+    # the model states the last, at EvaluateScript's `engine-fault`; the engine faults of
+    # PerformMicrotaskCheckpoint and Collect abandon the same jobs and are not stated there, as a
+    # set effect over jobs takes away the scenario synthesis writes for a branch.
+    # UNMAPPED: the job that had started when a termination ended its checkpoint. The
+    # `step-budget`, `memory-budget` and `interrupted` branches of PerformMicrotaskCheckpoint
+    # would move it to Abandoned, and a set effect cannot select the one entry that had started
+    # among the queued ones, so no branch moves it.
+    # Carried by HOST-77.
+    # UNMAPPED: `Agent::clear_microtasks`, which drops every queued entry unrun, so that each
+    # queued promise job is Abandoned. The model has no command for it.
+    # Carried by HOST-200.
     lifecycle:
       initial: Enqueued
       states:
@@ -368,11 +384,16 @@ entities:
           summary: Scheduled and not run.
         - name: Ran
           summary: Ran to completion (a job returns a normal completion, 9.5).
-      terminal: [Ran]
+        - name: Abandoned
+          summary: Will not run to its end.
+      terminal: [Ran, Abandoned]
       transitions:
         - name: run
           from: [Enqueued]
           to: Ran
+        - name: abandon
+          from: [Enqueued]
+          to: Abandoned
 
 actors:
   - name: swell.host.Host
@@ -664,6 +685,13 @@ commands:
           - entity: swell.host.Agent
             where: agent_id == input.agent_id
             moves: swell.host.Agent.fault
+          - entity: swell.host.Job
+            where:
+              all:
+                - agent_id == input.agent_id
+                - kind == PromiseJob
+                - state == Enqueued
+            moves: swell.host.Job.abandon
         summary: Terminated(EngineFault); the agent is Faulted from now on.
       - name: completed
         updates: swell.host.Script
@@ -1017,20 +1045,25 @@ commands:
         payload:
           swell.host.ModuleStatusChanged: {module_id: input.module_id, status: Evaluated}
 
-  # perform_microtask_checkpoint (decision 9): runs promise jobs until the queue is empty, under
-  # one step budget for the whole call (host-interface.md, decision 11). This is HTML's microtask
-  # checkpoint, which the host decides when to perform.
-  # UNMAPPED: the jobs a checkpoint runs that were enqueued while it ran. A set effect selects the
-  # rows as they were before the outcome, so only the jobs enqueued before the call are stated.
+  # perform_microtask_checkpoint (decision 9): takes every entry of the agent's microtask queue
+  # off in order, promise jobs and host microtasks alike, and runs it, until the queue is empty,
+  # as one outermost entry under one step budget for the whole call (host-interface.md, decision
+  # 11, "The checkpoint is one entry"). This is HTML's microtask checkpoint, which the host
+  # decides when to perform. The model states the promise jobs only: a host microtask is the
+  # host's own closure, queued by a call the model does not have.
+  # UNMAPPED: the entries a checkpoint runs that were queued while it ran. A set effect selects
+  # the rows as they were before the outcome, so only the jobs queued before the call are stated.
   # Carried by HOST-79.
-  # UNMAPPED: which jobs ran when the checkpoint ends with Terminated. It returns; the jobs before
-  # the one it ended in have run, that one never runs again, and the rest stay queued for the
-  # next checkpoint (host-interface.md, decision 11). The Terminated branches below state none of
-  # this: they move no job.
-  # Carried by HOST-77, HOST-80.
+  # UNMAPPED: which jobs ran when the checkpoint ends with Terminated. It returns; the entries
+  # before the one it ended in have run; the entry that had started is not run again (its job is
+  # Abandoned); an entry whose step of taking off was refused was not taken off and stays first;
+  # the rest stay queued in their order for the next checkpoint (host-interface.md, decision 11,
+  # "Steps, the interrupt and what a checkpoint leaves"). A set effect cannot select the one
+  # entry that had started, so the Terminated branches below move no job.
+  # Carried by HOST-77, HOST-80, HOST-199.
   - name: swell.host.PerformMicrotaskCheckpoint
     naming:
-      summary: Run the agent's promise jobs until its queue is empty.
+      summary: Run every entry of the agent's microtask queue, promise jobs and host microtasks, under one step budget, until the queue is empty.
     # UNMAPPED: the reference to HTML's "perform a microtask checkpoint". The HTML Standard is
     # not on disk, so its anchor was not read, and this model cites no anchor it has not read.
     # Carried by HOST-79.
@@ -1048,7 +1081,7 @@ commands:
         payload:
           swell.host.Faulted: {agent_id: input.agent_id}
       - name: step-budget
-        external: the checkpoint's promise jobs together spend the steps of the call
+        external: the entries the checkpoint takes off, a step each, and what they run together spend the steps of the call
         updates: swell.host.Agent
         instance: agent_id
         emits: [swell.host.RunTerminated]
@@ -1062,7 +1095,7 @@ commands:
         payload:
           swell.host.RunTerminated: {agent_id: input.agent_id, reason: MemoryBudget}
       - name: interrupted
-        external: the host sets the interrupt handle while a promise job runs
+        external: the host sets the interrupt handle before the checkpoint starts, before an entry is taken off or while an entry runs
         updates: swell.host.Agent
         instance: agent_id
         emits: [swell.host.RunTerminated]

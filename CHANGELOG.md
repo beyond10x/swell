@@ -134,9 +134,20 @@ Every number below comes from the gate, `task check`, on the released commit.
   that range; `HOST-210`, a host that answers no instant for every local time gets NaN
   after 31 hook calls and no exception; `HOST-211`, every call of a clock or time zone hook
   is charged one step before it is made.
+- New requirements of `Math.random`, pending for slice 4 (no code reads them yet):
+  `HOST-212`, each value is a Number in [0, 1) with positive sign on the grid of 2^-53;
+  `HOST-213`, the sequence of a realm follows from the agent's `random_seed` and the index
+  of the realm's creation, not from the order in which the realms' functions are called.
 - New: `WellKnownSymbol::AsyncIterator`, the thirteenth well-known symbol a host names. A
   host object with a method under it is the iterable of a `for await`.
 - `HOST-203` has a test.
+- The model of the interface (`spec/`) states the microtask checkpoint with its answers at the
+  step budget and at an interrupt, and a job that will not run to its end (`Abandoned`). Two
+  scenarios are new: a promise job runs at the next checkpoint and not before, and a rejection
+  without a handler is reported to the tracker and reported again when a handler is added.
+  18 of the model's 60 scenarios pass on the engine (14 of 58 before); the other 42 name the
+  later slice or the reason they wait for. The model has 53 places marked as not expressible
+  (51 before).
 
 ## [0.8.0] - 2026-11-24
 
