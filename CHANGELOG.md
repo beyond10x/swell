@@ -10,6 +10,14 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-24
+
+Promises and `async` functions run: the tenth delivery slice is delivered whole, with async
+generators, `for await` and `Array.fromAsync`, and the fifth and the seventh are closed, with
+the flag `v` of regular expressions and generator methods. `Date` exists over the host's
+clock, and a buffer the engine holds while it calls into script is charged to the memory
+budget. 24,838 of the 44,812 selected test262 cases pass (20,229 in 0.8.0).
+
 ### Added
 
 - `Date`, a story of the fourth slice: the constructor, `Date.now()`, and `getTime`, `setTime`
@@ -70,9 +78,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   promises are collected.
 - The grammar of async generators, a story of the tenth slice. `async function*`, as a
   declaration and as an expression, is parsed whole, and its grammar errors and early
-  errors are reported. A script that holds one still ends with a `SyntaxError` that names
-  the tenth slice, now after every other error of the source; an `async *` method is
-  refused at its token as before. 143 more test262 cases of the slice pass.
+  errors are reported.
 - `%AsyncFunction%`, the constructor of `async` functions from source text, a story of the
   tenth slice. It is reached through the `constructor` of the prototype of an `async`
   function and is no property of the global object. Called or constructed, it takes the
@@ -81,8 +87,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   the interrupt.
 - `async` methods of object literals run, a story of the tenth slice: `{ async m() {} }`,
   with a computed name too. A call returns a promise and the body awaits as the body of an
-  `async` function does; the method has no `prototype` and cannot be constructed. An
-  `async *` method is refused with a `SyntaxError` that names the tenth slice, and `super`
+  `async` function does; the method has no `prototype` and cannot be constructed. `super`
   in an `async` method is refused as in a plain method.
 - Slice 5, regular expressions, is delivered: all 2,724 of its test262 cases pass in all
   5,441 runs. At its close 18 cases that need `Date`, `Math`, `parseInt`, the operator
@@ -101,8 +106,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   is charged to the memory budget while it waits and credited when its promise settles or
   it is collected. An `await` in a loop that never ends ends the checkpoint at the step
   budget; a termination in a resumed activation leaves its promise pending and the jobs
-  behind it queued. `%AsyncFunction.prototype%` exists. `async function*` and `for await`
-  are still refused, each with a `SyntaxError` that names the tenth slice.
+  behind it queued. `%AsyncFunction.prototype%` exists.
 - `Promise`, the second story of the tenth slice: the constructor with its resolving
   functions, `Promise.prototype.then` and `catch`, `Promise.resolve`, `Promise.reject` and
   the getter of `Promise[Symbol.species]`. A reaction and the job of a thenable are entries
@@ -112,9 +116,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   `host_clean_up_after_job` with what the job threw. A job that queues itself ends the
   checkpoint at the step budget; a termination in a job leaves its promise pending and the
   jobs behind it queued. A reaction of a pending promise and a queued job are charged to
-  the memory budget until the promise settles or the job is taken off. `Promise.all`,
-  `Promise.allSettled`, `Promise.any`, `Promise.race` and `Promise.prototype.finally` are
-  not defined yet.
+  the memory budget until the promise settles or the job is taken off.
 - Regular expressions with the flag `v`: classes with union, intersection (`&&`),
   subtraction (`--`) and nested classes, `\q{...}` with its strings, and the seven
   properties of strings (`\p{RGI_Emoji}` and the six it is made of) from a sixteenth
@@ -128,7 +130,7 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The parser reads `async` function declarations, expressions and arrow functions with
   their early errors, and `await` where the grammar's [Await] is set. A refusal that names
   a later slice comes after the grammar errors and early errors of the source, which now
-  come first. `async function*` and `for await` keep refusals of their own.
+  come first.
 - The microtask queue of the agent and its checkpoint, the first story of the tenth slice. A
   host queues a microtask with the realm it runs in; a checkpoint runs every entry in the
   order it was queued, under the step budget of one entry, and spends one step for each
@@ -204,10 +206,48 @@ Every number below comes from the gate, `task check`, on the released commit.
   18 of the model's 60 scenarios pass on the engine (14 of 58 before); the other 42 name the
   later slice or the reason they wait for. The model has 53 places marked as not expressible
   (51 before).
-- New: `HostError::MemoryBudget`. `queue_microtask` answers it when the memory budget refuses
-  the growth of the microtask queue, with nothing queued.
+- Breaking: `HostError::MemoryBudget` is a new variant, and `HostError` is not
+  `#[non_exhaustive]`: a `match` over it in a host needs an arm for the variant or a wildcard
+  arm. `queue_microtask` answers it when the memory budget refuses the growth of the microtask
+  queue, with nothing queued.
 - `HOST-215` has a test: a buffer the engine holds while it calls into script is charged to
   `memory_bytes` before it is made, or not made.
+
+### Limits of this release
+
+- Not in the language yet: classes with `super` and private names, modules with dynamic
+  `import` and `import.meta`, the operator `**`, and the web-compatibility semantics of
+  function declarations in blocks (Annex B.3.2). A script that uses a construct of a later
+  slice is refused with a `SyntaxError` that names the delivery slice that brings it.
+  [`docs/design/engine.md`](docs/design/engine.md), section 12, lists the nineteen delivery
+  slices, what each brings and the order they are delivered in.
+- The builtins end at the core library, what the sixth slice adds to it, `RegExp` of the
+  fifth slice, the generator objects of the seventh and, of the tenth, `Promise`, async
+  functions and async generators. Of the fourth slice, which is in work, `Date` exists with
+  its constructor over a time value, `Date.now()`, `getTime`, `setTime` and `valueOf`;
+  `Date.UTC`, `Date.parse` and the other 14 setters throw a `TypeError`, and the getters of
+  the fields and the methods that write a date as text do not exist. `parseInt`,
+  `parseFloat` and all of `Math` but `max` do not exist, nor do `Map`, `Set`, `Reflect`,
+  `Proxy`, `BigInt` and typed arrays.
+- test262: 24,838 of the 44,812 cases the gate's digest stands for pass, 55.4 %. The
+  line reads `test262 total 53801 8982 7 44812 24838 19972 2`: 53,801 cases exist, 8,982
+  are excluded by recorded decision, 7 do not apply, 44,812 run, 24,838 pass, 19,972
+  fail, two end at the memory budget. The first, second, fifth, sixth, seventh and tenth
+  delivery slices pass all their cases in all their runs, and the third all but one
+  (`test262-slice 01 31 62 0 0 31 31 0 0`,
+  `test262-slice 02 4259 7543 0 0 4259 4259 0 0`,
+  `test262-slice 03 7011 13829 0 0 7011 7010 1 0`,
+  `test262-slice 05 2724 5441 0 0 2724 2724 0 0`,
+  `test262-slice 06 3898 7351 0 0 3898 3898 0 0`,
+  `test262-slice 07 1472 2801 0 0 1472 1472 0 0`,
+  `test262-slice 10 3759 7258 0 0 3759 3759 0 0`). Of the fourth, which is in work, 564 of
+  1,612 cases pass
+  (`test262-slice 04 1612 3184 0 0 1612 564 1048 0`). A refusal never counts as a pass, also
+  when the script catches it.
+- No binary, no command line, and the crates are not on a package registry. To use the
+  library, depend on the repository at the tag:
+  `swell = { git = "https://github.com/beyond10x/swell", tag = "0.9.0" }`.
+- Measured on x86_64 Linux with rustc 1.99.1 only.
 
 ## [0.8.0] - 2026-11-24
 
@@ -1052,7 +1092,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.8.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.9.0...HEAD
+[0.9.0]: https://github.com/beyond10x/swell/releases/tag/0.9.0
 [0.8.0]: https://github.com/beyond10x/swell/releases/tag/0.8.0
 [0.7.0]: https://github.com/beyond10x/swell/releases/tag/0.7.0
 [0.6.0]: https://github.com/beyond10x/swell/releases/tag/0.6.0
