@@ -19,7 +19,7 @@ can use it.
 swell runs scripts of the ES5 grammar and of the bindings and iteration of ES2015 in both
 modes, with regular expressions, under a step budget and a memory budget.
 Its gate holds the test262 counts: 20,229 of the 44,812 cases that run pass (45.1 %), measured on 2026-11-23.
-Six of nineteen delivery slices are delivered:
+Seven of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |
 |---|---|---|
@@ -29,6 +29,7 @@ Six of nineteen delivery slices are delivered:
 | 5 | regular expressions: `RegExp`, its flags with `v`, named groups, lookbehind, Unicode properties, and the `String` methods that take one | 2,724, every one passes |
 | 6 | bindings and iteration: `let`, `const`, templates, arrow functions, destructuring, spread, `Symbol`, iterators, `for`-`of` | 3,898, every one passes |
 | 7 | generators: generator functions and methods, `yield`, `yield*` and the `GeneratorFunction` constructor | 1,472, every one passes |
+| 10 | promises and `async`: `Promise` with its statics, `async` functions and methods, `await`, `for await`, async generators and `Array.fromAsync` | 3,759, every one passes |
 
 A delivered slice passes the test262 cases it holds, but for an exception the design states.
 The slices are not delivered in the order of their numbers, and a case is counted in the slice
@@ -76,8 +77,8 @@ the iterator protocol, `for`-`of`, function declarations in blocks and `Array.fr
 3,898 of its cases pass in all 7,351 runs; 402 cases that also need slice 4 or 5 are counted
 there. Slice 5, regular expressions, and slice 7, generators, were delivered on 2026-11-24:
 all 2,724 cases of slice 5 pass in all 5,441 runs and all 1,472 cases of slice 7 in all
-2,801 runs. Slice 10, promises and `async` functions, is in work: `Promise` with `then`,
-`async` functions, `async` methods, the statics of `Promise`, `for await`, async generators and `Array.fromAsync` run, and 3,738 of its 3,879 cases pass. The slices are taken in the order the first
+2,801 runs. Slice 10, promises and `async` functions, was delivered on 2026-11-24 too: all
+3,759 of its cases pass in all 7,258 runs; it is in no release yet. The slices are taken in the order the first
 user, a browser, needs them: 6, 5, 7, 10, 4, 9.
 
 ## What swell is

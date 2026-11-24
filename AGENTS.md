@@ -62,12 +62,16 @@ methods of object literals, and the close, with 40 cases that need `class` or `s
 slice 8 with evidence and 21 cases taken in from slices 18 and 19: all 1,472 cases of slice 7
 pass in all 2,801 runs (`test262-slice 07 1472 2801 0 0 1472 1472 0 0`), and no host
 requirement is pending for it. Slice 10, `promises-and-async`
-(`epic:slice-10-promises-and-async`), is accepted in seventeen stories (`docs/plan/waves.md`,
-"Slice 10, `promises-and-async`") and in work: sixteen of them are merged (the microtask queue,
-the syntax of `async` functions, `Promise` with `then`, `async` functions, the rejection
-tracker, `async` methods of object literals, `%AsyncFunction%`, the grammar of `async function*`, the statics of `Promise` with `finally` and `AggregateError`, `for await` with the Async-from-Sync Iterator, the target of the executable specification for the checkpoint and the hooks of a promise, async generators with their request queue, the constructor of async generator functions, async generator methods of object literals, `yield*` in async generators, and `Array.fromAsync`), 3,738 of its 3,879 cases
-pass (`test262-slice 10 3879 7499 0 0 3879 3738 141 0`), and no host requirement is pending
-for it.
+(`epic:slice-10-promises-and-async`), is delivered too (2026-11-24), in seventeen stories
+(`docs/plan/waves.md`, "Slice 10, `promises-and-async`"): the microtask queue and its
+checkpoint, `Promise` with its statics, `async` functions and methods with `await` on suspended
+frames, the rejection tracker, `%AsyncFunction%`, `for await` with the Async-from-Sync
+Iterator, async generators with their request queue, their methods, their constructor and
+`yield*`, `Array.fromAsync`, and the target of the executable specification for the checkpoint
+and the hooks of a promise; and the close, with 141 cases that need a later slice moved to
+slices 8, 9, 12 and 13 with evidence and 21 cases taken in from slices 18 and 19: all 3,759
+cases of slice 10 pass in all 7,258 runs (`test262-slice 10 3759 7258 0 0 3759 3759 0 0`), and
+no host requirement is pending for it. Slice 10 is in no release yet.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases

@@ -12,6 +12,12 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- Slice 10, promises and `async` functions, is delivered: all 3,759 of its test262 cases pass
+  in all 7,258 runs. At its close 141 cases that need a later slice move there, each with its
+  evidence (116 to slice 8 for `class`, `super` or `new.target`, 20 to slice 12 for a BigInt
+  literal, 4 to slice 9 for `Proxy` or `Map`, 1 to slice 13 for `ArrayBuffer`), and 21 cases
+  of slices 18 and 19 that pass with what slice 10 built and use no later part count in
+  slice 10.
 - Slice 7, generators, is delivered: all 1,472 of its test262 cases pass in all 2,801 runs.
   At its close 40 cases that need `class` or `super` move to slice 8, each with its
   evidence, and 21 cases that failed only on generators count in slice 7 instead of slices
