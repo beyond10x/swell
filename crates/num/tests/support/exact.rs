@@ -439,3 +439,63 @@ pub fn is_faithful_root(r: f64, square: &Rat) -> bool {
         }
     }
 }
+
+impl Big {
+    /// floor(self / divisor) for a divisor from 1 to 2^64 - 1, limb by limb from the top (the
+    /// series of ln 2 and ln 10 in `math_exp_log.rs` divide by small integers); panics on 0.
+    pub fn div_u64(&self, divisor: u64) -> Big {
+        assert!(divisor != 0, "Big::div_u64 by zero");
+        let mut limbs = vec![0u64; self.0.len()];
+        let mut rest = 0u128;
+        for (i, &limb) in self.0.iter().enumerate().rev() {
+            let current = (rest << 64) | u128::from(limb);
+            limbs[i] = (current / u128::from(divisor)) as u64;
+            rest = current % u128::from(divisor);
+        }
+        let mut quotient = Big(limbs);
+        quotient.trim();
+        quotient
+    }
+}
+
+/// Integer division, for the constants of `tests/math_trig.rs` (2/π as the quotient of a power
+/// of two by π, the terms of a series).
+impl Big {
+    /// floor(self / divisor), limb by limb; panics on a zero divisor.
+    pub fn div_small(&self, divisor: u64) -> Big {
+        assert!(divisor != 0, "Big::div_small by zero");
+        let divisor = u128::from(divisor);
+        let mut limbs = vec![0u64; self.0.len()];
+        let mut rest = 0u128;
+        for (slot, &limb) in limbs.iter_mut().zip(&self.0).rev() {
+            let current = (rest << 64) | u128::from(limb);
+            *slot = (current / divisor) as u64;
+            rest = current % divisor;
+        }
+        let mut quotient = Big(limbs);
+        quotient.trim();
+        quotient
+    }
+
+    /// floor(self / divisor), bit by bit (binary long division); panics on a zero divisor.
+    pub fn div_floor(&self, divisor: &Big) -> Big {
+        assert!(!divisor.is_zero(), "Big::div_floor by zero");
+        let one = Big::from_u64(1);
+        let mut limbs = vec![0u64; self.0.len()];
+        let mut rest = Big::zero();
+        for bit in (0..self.bit_len()).rev() {
+            let word = (bit / 64) as usize;
+            rest = rest.shl(1);
+            if (self.0[word] >> (bit % 64)) & 1 == 1 {
+                rest = rest.add(&one);
+            }
+            if rest.compare(divisor) != Ordering::Less {
+                rest = rest.sub(divisor);
+                limbs[word] |= 1 << (bit % 64);
+            }
+        }
+        let mut quotient = Big(limbs);
+        quotient.trim();
+        quotient
+    }
+}

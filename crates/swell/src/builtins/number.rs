@@ -12,12 +12,19 @@
 //! (`#sec-number.prototype.tostring`), with ThisNumberValue (`#sec-thisnumbervalue`) and
 //! SnapToInteger (`#sec-snaptointeger`); Number::toString in every radix
 //! (`#sec-numeric-types-number-tostring`) is `swell-num`'s. The rest of `Number` is slice 4:
-//! `toFixed`, `toExponential`, `toPrecision`, `toLocaleString` and the functions of the
-//! constructor (`isFinite`, `isInteger`, `isNaN`, `isSafeInteger`, `parseFloat`, `parseInt`).
+//! the functions of the constructor (`isFinite`, `isInteger`, `isNaN`, `isSafeInteger`,
+//! `parseFloat`, `parseInt`).
+//!
+//! Slice 4 adds `Number.prototype.toFixed` (`#sec-number.prototype.tofixed`), `toExponential`
+//! (`#sec-number.prototype.toexponential`) and `toPrecision`
+//! (`#sec-number.prototype.toprecision`), whose digits `swell-num` makes exactly (`format.rs`,
+//! `story:number-format`), and `toLocaleString` (`#sec-number.prototype.tolocalestring`), which
+//! gives the text of `toString()` of the same Number, with no locale (`docs/design/engine.md`,
+//! decision 6, "The text of toLocale*String").
 
 use crate::builtins::object::argument;
 use crate::host::agent::Agent;
-use crate::host::outcome::Completion;
+use crate::host::outcome::{Completion, Termination};
 use crate::host::{ErrorKind, Host};
 use crate::object::ObjectKind;
 use crate::object::builtin_function::BuiltinId;
@@ -35,7 +42,21 @@ pub(crate) enum NumberBuiltin {
     ToString,
     /// `Number.prototype.valueOf ( )` (21.1.3.7).
     ValueOf,
+    /// `Number.prototype.toFixed ( fractionDigits )` (21.1.3.3).
+    ToFixed,
+    /// `Number.prototype.toExponential ( fractionDigits )` (21.1.3.2).
+    ToExponential,
+    /// `Number.prototype.toPrecision ( precision )` (21.1.3.5).
+    ToPrecision,
+    /// `Number.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] )` (21.1.3.4).
+    ToLocaleString,
 }
+
+/// What one call of `toFixed`, `toExponential` or `toPrecision` charges as its temporary while
+/// `swell-num` formats (`docs/design/engine.md`, decision 6, "Big integers in slice 4"): at
+/// most six operands of 32 limbs, 1,536 bytes, charged as one temporary of 2,048 bytes before
+/// the call and credited when it returns.
+const FORMAT_TEMPORARY_BYTES: u64 = 2_048;
 
 /// The value properties of the Number constructor (21.1.2.1, 21.1.2.6 to 21.1.2.11 and
 /// 21.1.2.14), by name.
@@ -108,6 +129,36 @@ impl<H: Host> Agent<H> {
             0,
             BuiltinId::Number(NumberBuiltin::ValueOf),
         )?;
+        // 21.1.3.2, 21.1.3.3 and 21.1.3.5 have one parameter each, so "length" 1; 21.1.3.4 has
+        // only optional ones, so 0 (`#sec-ecmascript-standard-built-in-objects`).
+        self.define_builtin_method(
+            making,
+            number_prototype,
+            "toFixed",
+            1,
+            BuiltinId::Number(NumberBuiltin::ToFixed),
+        )?;
+        self.define_builtin_method(
+            making,
+            number_prototype,
+            "toExponential",
+            1,
+            BuiltinId::Number(NumberBuiltin::ToExponential),
+        )?;
+        self.define_builtin_method(
+            making,
+            number_prototype,
+            "toPrecision",
+            1,
+            BuiltinId::Number(NumberBuiltin::ToPrecision),
+        )?;
+        self.define_builtin_method(
+            making,
+            number_prototype,
+            "toLocaleString",
+            0,
+            BuiltinId::Number(NumberBuiltin::ToLocaleString),
+        )?;
         Ok(constructor)
     }
 
@@ -127,6 +178,10 @@ impl<H: Host> Agent<H> {
             NumberBuiltin::ValueOf => self
                 .this_number_value(this, "Number.prototype.valueOf")
                 .map(Value::Number),
+            NumberBuiltin::ToFixed => self.number_prototype_to_fixed(this, args),
+            NumberBuiltin::ToExponential => self.number_prototype_to_exponential(this, args),
+            NumberBuiltin::ToPrecision => self.number_prototype_to_precision(this, args),
+            NumberBuiltin::ToLocaleString => self.number_prototype_to_locale_string(this),
         }
     }
 
@@ -205,6 +260,125 @@ impl<H: Host> Agent<H> {
         // The digits are made by a loop that runs for the script: a step per code unit of the
         // result, at most 1,077 (radix 2: "-0.", 1,073 zeros and a 1 for -Number.MIN_VALUE,
         // whose last digit stands for 2^-1074, the place of the last bit of every Number).
+        self.charge_steps(u64::try_from(text.len()).unwrap_or(u64::MAX))?;
+        Ok(Value::String(self.new_string_str(&text)?))
+    }
+
+    /// `Number.prototype.toFixed ( fractionDigits )` (`#sec-number.prototype.tofixed`).
+    #[inline(never)]
+    fn number_prototype_to_fixed(&mut self, this: Value, args: &[Value]) -> Completion<Value> {
+        // 1. Let x be ? ThisNumberValue(this value).
+        let x = self.this_number_value(this, "Number.prototype.toFixed")?;
+        // 2. Let f be ? ToIntegerOrInfinity(fractionDigits). 3. (undefined gives 0.)
+        let f = self.to_integer_or_infinity(argument(args, 0))?;
+        // 4. If f is not an integer (ToIntegerOrInfinity answers one or ±∞), throw a RangeError.
+        // 5. If f < 0 or f > 100, throw a RangeError.
+        let f = self.count_of_digits(f, 0, "Number.prototype.toFixed")?;
+        // 6. If x is not finite, return Number::toString(x, 10).
+        if !x.is_finite() {
+            return self.number_text(x);
+        }
+        // 7 to 12, in `swell-num`, which also answers ToString(x) for abs(x) ≥ 10^21 (step 10).
+        self.formatted(|| swell_num::format::to_fixed(x, f))
+    }
+
+    /// `Number.prototype.toExponential ( fractionDigits )`
+    /// (`#sec-number.prototype.toexponential`).
+    #[inline(never)]
+    fn number_prototype_to_exponential(
+        &mut self,
+        this: Value,
+        args: &[Value],
+    ) -> Completion<Value> {
+        // 1. Let x be ? ThisNumberValue(this value).
+        let x = self.this_number_value(this, "Number.prototype.toExponential")?;
+        // 2. Let f be ? ToIntegerOrInfinity(fractionDigits). 3. (undefined gives 0.)
+        let digits = argument(args, 0);
+        let f = self.to_integer_or_infinity(digits)?;
+        // 4. If x is not finite, return Number::toString(x, 10).
+        if !x.is_finite() {
+            return self.number_text(x);
+        }
+        // 5. If f is not an integer (ToIntegerOrInfinity answers one or ±∞), throw a RangeError.
+        // 6. If f < 0 or f > 100, throw a RangeError.
+        let f = self.count_of_digits(f, 0, "Number.prototype.toExponential")?;
+        // 7 to 16, in `swell-num`: for an undefined fractionDigits (step 11.b) the shortest
+        // digits.
+        let f = if matches!(digits, Value::Undefined) {
+            None
+        } else {
+            Some(f)
+        };
+        self.formatted(|| swell_num::format::to_exponential(x, f))
+    }
+
+    /// `Number.prototype.toPrecision ( precision )` (`#sec-number.prototype.toprecision`).
+    #[inline(never)]
+    fn number_prototype_to_precision(&mut self, this: Value, args: &[Value]) -> Completion<Value> {
+        // 1. Let x be ? ThisNumberValue(this value).
+        let x = self.this_number_value(this, "Number.prototype.toPrecision")?;
+        // 2. If precision is undefined, return ! ToString(x).
+        let precision = argument(args, 0);
+        if matches!(precision, Value::Undefined) {
+            return self.number_text(x);
+        }
+        // 3. Let p be ? ToIntegerOrInfinity(precision).
+        let p = self.to_integer_or_infinity(precision)?;
+        // 4. If x is not finite, return Number::toString(x, 10).
+        if !x.is_finite() {
+            return self.number_text(x);
+        }
+        // 5. If p is not an integer (ToIntegerOrInfinity answers one or ±∞), throw a RangeError.
+        // 6. If p < 1 or p > 100, throw a RangeError.
+        let p = self.count_of_digits(p, 1, "Number.prototype.toPrecision")?;
+        // 7 to 15, in `swell-num`.
+        self.formatted(|| swell_num::format::to_precision(x, p))
+    }
+
+    /// `Number.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] )`
+    /// (`#sec-number.prototype.tolocalestring`): the clause leaves the text to the
+    /// implementation; it answers what `toString()` answers for the same Number, and the
+    /// arguments are read by nothing (`docs/design/engine.md`, decision 6, "The text of
+    /// toLocale*String").
+    #[inline(never)]
+    fn number_prototype_to_locale_string(&mut self, this: Value) -> Completion<Value> {
+        let x = self.this_number_value(this, "Number.prototype.toLocaleString")?;
+        self.number_text(x)
+    }
+
+    /// `Number::toString(x, 10)` as a String, a step charged per code unit of the text before
+    /// the String is made, as `toString` charges.
+    fn number_text(&mut self, x: f64) -> Completion<Value> {
+        let text = swell_num::to_string::number_to_string(x);
+        self.charge_steps(u64::try_from(text.len()).unwrap_or(u64::MAX))?;
+        Ok(Value::String(self.new_string_str(&text)?))
+    }
+
+    /// The count of digits of `method` after ToIntegerOrInfinity: a RangeError when it is not
+    /// finite or outside `minimum` to 100.
+    fn count_of_digits(&mut self, count: f64, minimum: u32, method: &str) -> Completion<u32> {
+        if !count.is_finite() || count < f64::from(minimum) || count > 100.0 {
+            return Err(self.throw_error(
+                ErrorKind::RangeError,
+                &format!("{method} takes from {minimum} to 100 digits"),
+            ));
+        }
+        // An integer from `minimum` to 100 (ToIntegerOrInfinity truncated it), which the cast
+        // keeps exactly.
+        Ok(count as u32)
+    }
+
+    /// The text `format` makes in `swell-num`, as a String. Its temporaries are charged as one
+    /// temporary of [`FORMAT_TEMPORARY_BYTES`] before `swell-num` is called (over the budget
+    /// the run ends in `Terminated(MemoryBudget)` and nothing is formatted) and credited when it
+    /// returns; then one step per code unit of the text is charged before the String is made
+    /// (`docs/design/engine.md`, decision 6, "Big integers in slice 4").
+    fn formatted(&mut self, format: impl FnOnce() -> String) -> Completion<Value> {
+        if self.heap.accounting.charge(FORMAT_TEMPORARY_BYTES).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        let text = format();
+        self.heap.accounting.credit(FORMAT_TEMPORARY_BYTES);
         self.charge_steps(u64::try_from(text.len()).unwrap_or(u64::MAX))?;
         Ok(Value::String(self.new_string_str(&text)?))
     }
