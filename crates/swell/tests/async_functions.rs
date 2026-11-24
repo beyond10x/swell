@@ -650,7 +650,7 @@ fn an_async_function_has_no_prototype_property_and_no_construct() {
                  Object.getPrototypeOf(f) === proto; }) &&\n\
              proto !== Function.prototype &&\n\
              Object.getPrototypeOf(proto) === Function.prototype &&\n\
-             !Object.prototype.hasOwnProperty.call(proto, 'constructor') &&\n\
+             proto.constructor !== Function &&\n\
              tag.value === 'AsyncFunction' && !tag.writable && !tag.enumerable && tag.configurable &&\n\
              Object.prototype.toString.call(d) === '[object AsyncFunction]' &&\n\
              news.join()"

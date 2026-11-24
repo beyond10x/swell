@@ -16,8 +16,8 @@
 use crate::support;
 
 use support::host::{TestHost, agent, get, get_object, global, object, realm, text};
-use support::script::{Outcome, run_both};
-use swell::{Abrupt, AgentState, Cx, ObjectRef, Value};
+use support::script::{Outcome, eval, run_both};
+use swell::{Abrupt, AgentState, Cx, ObjectRef, Outcome as HostOutcome, Value};
 
 /// `source` answers the String `expected` in sloppy and in strict code.
 fn answers(source: &str, expected: &str) {
@@ -322,16 +322,28 @@ fn symbol_this_and_symbol_objects_through_the_builtins_of_slice_3() {
     );
 }
 
-/// The functions of the realm that a walk from the global object reaches through its
-/// properties, String-keyed and Symbol-keyed: the value of each data property and the getter
-/// and setter of each accessor that is a function, each once, with its place and the object
-/// that holds it. Callable is asked of `Function.prototype.toString`, which throws a TypeError
-/// for a `this` that is not callable (`#sec-function.prototype.tostring`, step 4). The walk runs
-/// no script, so that with the feature `collect-every-safe-point` it pays a collection per call
-/// of a builtin, not one per instruction of a walk in script.
+/// The further roots of the walk of [`functions_of_the_realm`]: objects of the realm that no
+/// property reached from the global object leads to, each the source of an expression the test
+/// evaluates once before the walk, with the path printed for it. The stories of slice 10 append
+/// theirs; from `%AsyncFunction.prototype%` the walk reaches `%AsyncFunction%` through
+/// `constructor`.
+const FURTHER_ROOTS: &[(&str, &str)] = &[(
+    "Object.getPrototypeOf(async function () {})",
+    "%AsyncFunction.prototype%",
+)];
+
+/// The functions of the realm that a walk from the global object and from `roots` (each with
+/// its path) reaches through their properties, String-keyed and Symbol-keyed: the value of each
+/// data property and the getter and setter of each accessor that is a function, each once, with
+/// its place and the object that holds it. Callable is asked of `Function.prototype.toString`,
+/// which throws a TypeError for a `this` that is not callable
+/// (`#sec-function.prototype.tostring`, step 4). The walk runs no script, so that with the
+/// feature `collect-every-safe-point` it pays a collection per call of a builtin, not one per
+/// instruction of a walk in script.
 fn functions_of_the_realm(
     cx: &mut Cx<'_, TestHost>,
     global: ObjectRef,
+    roots: &[(ObjectRef, String)],
 ) -> Vec<(String, ObjectRef, Value)> {
     let object_constructor = get_object(cx, global, "Object");
     let names_of = get(cx, object_constructor, "getOwnPropertyNames");
@@ -349,6 +361,12 @@ fn functions_of_the_realm(
     };
     let mut queue = vec![(global, "global".to_string())];
     let mut seen = vec![global];
+    for (root, path) in roots {
+        if !seen.contains(root) {
+            seen.push(*root);
+            queue.push((*root, path.clone()));
+        }
+    }
     let mut functions: Vec<(String, ObjectRef, Value)> = Vec::new();
     let mut not_callable = Vec::new();
     let mut next = 0;
@@ -454,21 +472,36 @@ fn places_per_function() -> usize {
 /// `#sec-tostring` and `#sec-tonumber`, step 2 of each: a builtin that converts a Symbol to a
 /// String or a Number throws a TypeError; one that converts it to an object or a property key,
 /// or keeps it, answers. Every function of the realm a walk reaches under a String or a Symbol
-/// key (144 functions on the base of `story:symbol-values-in-core-builtins`) is called with a
-/// Symbol as `this` and with a Symbol as its first, second and third argument (`this` the
-/// object that holds it, 0 before the Symbol), 576 calls (288 at the gate count of
+/// key from the global object and from the [`FURTHER_ROOTS`] (144 functions on the base of
+/// `story:symbol-values-in-core-builtins`; the count is printed) is called with a Symbol as
+/// `this` and with a Symbol as its first, second and third argument (`this` the object that
+/// holds it, 0 before the Symbol), 576 calls (288 at the gate count of
 /// [`places_per_function`]), and each call answers or throws a TypeError, but for the eight
 /// calls below whose clauses throw another error before or without the Symbol: no termination,
-/// and the agent stays alive.
+/// and the agent stays alive. `%AsyncFunction%` is among the functions reached.
 #[test]
 fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error() {
     let places = places_per_function();
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
     let global_root = global(&mut agent, &realm);
+    let further: Vec<(swell::Root, String)> = FURTHER_ROOTS
+        .iter()
+        .map(|&(source, path)| {
+            let HostOutcome::Normal(root) = eval(&mut agent, &realm, &format!("{source};")) else {
+                panic!("{path}: {source} did not complete normally");
+            };
+            (root, path.to_string())
+        })
+        .collect();
+    let mut reached = Vec::new();
     let (called, found) = agent
         .with_cx(&realm, |cx| {
             let global = object(cx, &global_root);
+            let roots: Vec<(ObjectRef, String)> = further
+                .iter()
+                .map(|(root, path)| (object(cx, root), path.clone()))
+                .collect();
             let symbol_constructor = get(cx, global, "Symbol");
             let description = Value::String(cx.new_string("probe").unwrap());
             let symbol = cx
@@ -476,7 +509,11 @@ fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error() {
                 .unwrap()
                 .unwrap();
             let symbol_root = cx.root(symbol).unwrap();
-            let functions = functions_of_the_realm(cx, global);
+            let functions = functions_of_the_realm(cx, global, &roots);
+            reached = functions
+                .iter()
+                .map(|(place, _, _)| place.clone())
+                .collect();
             let mut found = Vec::new();
             let mut called = 0;
             for (place, holder, function) in functions {
@@ -507,7 +544,14 @@ fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error() {
             (called, found)
         })
         .unwrap();
+    println!("functions of the realm: {}, calls: {called}", reached.len());
     assert_eq!(agent.state(), AgentState::Alive, "{found:#?}");
+    assert!(
+        reached
+            .iter()
+            .any(|place| place == "%AsyncFunction.prototype%.constructor"),
+        "{reached:#?}"
+    );
     // The other errors the clauses give, none of them from the Symbol: `RegExp` with the flags
     // 0, whose ToString "0" is no flag, so the SyntaxError of RegExpInitialize comes before any
     // Symbol is read (`#sec-regexpinitialize`, steps 5 and 6); `JSON.parse` and
