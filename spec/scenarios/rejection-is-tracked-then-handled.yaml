@@ -1,0 +1,115 @@
+# A promise rejected with no handler is tracked, and a handler added to it in a later entry
+# withdraws the tracking: the script `Promise.reject(1)` calls HostPromiseRejectionTracker with
+# `reject`, and a later script that adds a handler to that promise calls it with `handle`
+# (HOST-121; ECMA-262 27.2.1.4 RejectPromise and 27.2.5.4.1 PerformPromiseThen). Synthesis
+# writes one `tracked` on an agent that ran no script, which an engine reaches only through a
+# promise of a script. The promise is an engine value the model does not hold, so the two calls
+# are tied by their order on the agent.
+type: ess-scenario/6
+domain: swell.host
+scenario: rejection-is-tracked-then-handled
+summary: A promise rejected with no handler is tracked with reject, and a handler added later is tracked with handle.
+
+arrange:
+  - instance: agent
+    entity: swell.host.Agent
+  - instance: realm
+    entity: swell.host.Realm
+  - instance: rejects
+    entity: swell.host.Script
+  - instance: handles
+    entity: swell.host.Script
+
+timeline:
+  - at: 2026-01-06T09:00:00Z
+    command: swell.host.CreateAgent
+    actor: swell.host.Host
+    input:
+      limits:
+        steps_per_entry: 1000000
+        memory_bytes: 67108864
+        frame_depth: 10000
+        reentry_depth: 256
+        parser_nesting: 1000
+        string_length: 1073741824
+        bigint_bits: 1048576
+      hash_key: AAECAwQFBgcICQoLDA0ODw==
+      random_seed: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    outcome: created
+    capture: {instance: agent, event: swell.host.AgentCreated, field: agent_id}
+
+  - at: 2026-01-06T09:00:01Z
+    command: swell.host.CreateRealm
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: created
+    capture: {instance: realm, event: swell.host.RealmCreated, field: realm_id}
+
+  - at: 2026-01-06T09:00:02Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "var p = Promise.reject(1);"
+    outcome: parsed
+    capture: {instance: rejects, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:03Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: rejects}
+    outcome: completed
+    events:
+      - event: swell.host.ScriptCompleted
+        payload:
+          script_id: {$instance: rejects}
+
+  - at: 2026-01-06T09:00:04Z
+    command: swell.host.HostPromiseRejectionTracker
+    input:
+      agent_id: {$instance: agent}
+      operation: reject
+    outcome: tracked
+    events:
+      - event: swell.host.PromiseRejectionTracked
+        payload:
+          agent_id: {$instance: agent}
+          operation: reject
+
+  - at: 2026-01-06T09:00:05Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "p.catch(function () {});"
+    outcome: parsed
+    capture: {instance: handles, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:06Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: handles}
+    outcome: completed
+    events:
+      - event: swell.host.ScriptCompleted
+        payload:
+          script_id: {$instance: handles}
+
+  - at: 2026-01-06T09:00:07Z
+    command: swell.host.HostPromiseRejectionTracker
+    input:
+      agent_id: {$instance: agent}
+      operation: handle
+    outcome: tracked
+    events:
+      - event: swell.host.PromiseRejectionTracked
+        payload:
+          agent_id: {$instance: agent}
+          operation: handle
