@@ -327,8 +327,15 @@ A decomposition of slice 10 can start when order 2 is merged. The close runs aft
 syntax, generators on suspended frames, `%GeneratorFunction%` and `yield*`; 1,168 of the
 1,491 cases pass (`test262-slice 07 1491 2841 0 0 1491 1168 323 0`). One case of the list of
 order 1, `expressions/object/prop-def-invalid-star-prefix.js`, ends on the refusal of a
-generator method and went to the list of order 4 (281 cases). Open: order 4, generator
-methods of object literals, being built, and the close.
+generator method and went to the list of order 4 (281 cases). After it, on the branch of the
+first wave of slice 10, 2026-11-24: order 4, `generator-methods-in-object-literals`, with which
+1,451 cases pass, and `slice-07-conformance-close`: the 40 cases that need `class` (36) or
+`super` (4) move to slice 8, and 21 cases come in, 2 from slice 18 and 19 from slice 19. The
+close was made on a base that holds code of slice 10, so a case of a later slice comes in only
+when every failed run of it at the start of the slice ends on a part of slice 7, no `feature`
+or `flag` line names a later slice for it and it uses no part of a later slice; 661 other cases
+that pass now stay in their slice. Slice 7 is delivered:
+`test262-slice 07 1472 2801 0 0 1472 1472 0 0`.
 
 ## Slice 10, `promises-and-async`
 

@@ -56,12 +56,18 @@ with its class sets and properties of strings, and the close, with 18 cases move
 18: all 2,724 cases of slice 5 pass in all 5,441 runs
 (`test262-slice 05 2724 5441 0 0 2724 2724 0 0`), and no host requirement is pending for
 it. Slice 7, `generators`
-(`epic:slice-07-generators`), is in work beside it: generator syntax, generators on suspended
-frames, `%GeneratorFunction%` and `yield*` are in release `0.8.0`, and 1,168 of its 1,491 cases
-pass (`test262-slice 07 1491 2841 0 0 1491 1168 323 0`); generator methods of object literals
-and the close are open. Slice 10, `promises-and-async` (`epic:slice-10-promises-and-async`), is
-accepted in seventeen stories (`docs/plan/waves.md`, "Slice 10, `promises-and-async`"), and its
-first order is being built; 31 host requirements are pending for it.
+(`epic:slice-07-generators`), is delivered too (2026-11-24): generator syntax, generators on
+suspended frames, `%GeneratorFunction%` and `yield*` are in release `0.8.0`; after it generator
+methods of object literals, and the close, with 40 cases that need `class` or `super` moved to
+slice 8 with evidence and 21 cases taken in from slices 18 and 19: all 1,472 cases of slice 7
+pass in all 2,801 runs (`test262-slice 07 1472 2801 0 0 1472 1472 0 0`), and no host
+requirement is pending for it. Slice 10, `promises-and-async`
+(`epic:slice-10-promises-and-async`), is accepted in seventeen stories (`docs/plan/waves.md`,
+"Slice 10, `promises-and-async`") and in work: seven of them are merged (the microtask queue,
+the syntax of `async` functions, `Promise` with `then`, `async` functions, the rejection
+tracker, `async` methods of object literals and `%AsyncFunction%`), 638 of its 3,879 cases
+pass (`test262-slice 10 3879 7499 0 0 3879 638 3241 0`), and 8 host requirements are pending
+for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
