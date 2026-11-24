@@ -104,10 +104,8 @@ test/language/expressions/async-function/named-reassign-fn-name-in-body-in-arrow
 test/language/expressions/async-function/named-reassign-fn-name-in-body-in-eval.js
 test/language/expressions/async-function/named-reassign-fn-name-in-body.js
 test/language/expressions/async-function/named-returns-async-arrow-returns-arguments-from-parent-function.js
-test/language/expressions/async-function/named-returns-async-arrow-returns-newtarget.js
 test/language/expressions/async-function/named-returns-async-arrow.js
 test/language/expressions/async-function/named-returns-async-function-returns-arguments-from-own-function.js
-test/language/expressions/async-function/named-returns-async-function-returns-newtarget.js
 test/language/expressions/async-function/named-returns-async-function.js
 test/language/expressions/async-function/named-strict-error-reassign-fn-name-in-body-in-arrow.js
 test/language/expressions/async-function/named-strict-error-reassign-fn-name-in-body-in-eval.js
@@ -185,10 +183,8 @@ test/language/statements/async-function/forbidden-ext/b2/async-func-decl-forbidd
 test/language/statements/async-function/params-trailing-comma-multiple.js
 test/language/statements/async-function/params-trailing-comma-single.js
 test/language/statements/async-function/returns-async-arrow-returns-arguments-from-parent-function.js
-test/language/statements/async-function/returns-async-arrow-returns-newtarget.js
 test/language/statements/async-function/returns-async-arrow.js
 test/language/statements/async-function/returns-async-function-returns-arguments-from-own-function.js
-test/language/statements/async-function/returns-async-function-returns-newtarget.js
 test/language/statements/async-function/returns-async-function.js
 test/language/statements/async-function/syntax-declaration-line-terminators-allowed.js
 test/language/statements/async-function/syntax-declaration.js
