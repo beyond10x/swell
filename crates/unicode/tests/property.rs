@@ -13,7 +13,10 @@
 use std::fs;
 use std::path::PathBuf;
 
-use swell_unicode::{Property, is_id_continue, is_id_start, lone_property, property_value};
+use swell_unicode::{
+    LONGEST_STRING, Property, is_id_continue, is_id_start, lone_property, property_value,
+    simple_case_fold_equivalents, string_property,
+};
 
 /// ECMA-262's table of non-binary properties: each name and alias.
 const NON_BINARY: &[&str] = &[
@@ -492,4 +495,135 @@ fn id_start_and_id_continue_answer_as_the_data_file() {
         assert_eq!(continues.contains(c), is_id_continue(c), "U+{c:04X}");
     }
     assert!(!is_id_start(0x110000) && !is_id_continue(u32::MAX));
+}
+
+/// ECMA-262's table of the binary properties of strings
+/// (`#table-binary-unicode-properties-of-strings`), which gives no alias.
+const OF_STRINGS: &[&str] = &[
+    "Basic_Emoji",
+    "Emoji_Keycap_Sequence",
+    "RGI_Emoji_Modifier_Sequence",
+    "RGI_Emoji_Flag_Sequence",
+    "RGI_Emoji_Tag_Sequence",
+    "RGI_Emoji_ZWJ_Sequence",
+    "RGI_Emoji",
+];
+
+/// A line of an emoji file: its sequence (empty for a range), its range of single code points,
+/// and its property.
+type EmojiLine = (Vec<u32>, Option<(u32, u32)>, String);
+
+#[test]
+fn the_properties_of_strings_resolve() {
+    // Each line of the two emoji files: its code points, a range of single code points or one
+    // sequence, and its property.
+    let mut lines: Vec<EmojiLine> = Vec::new();
+    for file in ["emoji-sequences.txt", "emoji-zwj-sequences.txt"] {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../data/unicode/17.0.0/emoji")
+            .join(file);
+        let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        for line in text.lines() {
+            let fields: Vec<&str> = line
+                .split('#')
+                .next()
+                .unwrap_or_default()
+                .split(';')
+                .collect();
+            let [points, property, ..] = fields.as_slice() else {
+                continue;
+            };
+            let hex = |text: &str| u32::from_str_radix(text, 16).expect("hex");
+            let points = points.trim();
+            match points.split_once("..") {
+                Some((first, last)) => {
+                    lines.push((
+                        Vec::new(),
+                        Some((hex(first), hex(last))),
+                        property.trim().into(),
+                    ));
+                }
+                None => {
+                    let sequence: Vec<u32> = points.split(' ').map(hex).collect();
+                    lines.push((sequence, None, property.trim().into()));
+                }
+            }
+        }
+    }
+    assert!(lines.len() > 3000, "{} lines", lines.len());
+    let union = string_property(&units("RGI_Emoji")).expect("RGI_Emoji");
+    let mut longest_of_all = 0;
+    for &name in OF_STRINGS {
+        let property = string_property(&units(name)).unwrap_or_else(|| panic!("{name}"));
+        assert_eq!(property.name(), name);
+        assert_eq!(lone(name), None, "{name} is no property of code points");
+        let own: Vec<_> = lines
+            .iter()
+            .filter(|(_, _, of)| name == "RGI_Emoji" || of == name)
+            .collect();
+        assert!(!own.is_empty(), "{name}");
+        let mut sequences = 0;
+        let mut longest = 1;
+        for (sequence, range, _) in own {
+            if let Some((first, last)) = range {
+                for c in [*first, *last, (first + last) / 2] {
+                    assert!(property.contains(c), "{name} U+{c:04X}");
+                    assert!(union.contains(c), "RGI_Emoji U+{c:04X}");
+                }
+            } else if let [c] = sequence.as_slice() {
+                assert!(property.contains(*c), "{name} U+{c:04X}");
+            } else {
+                sequences += 1;
+                longest = longest.max(sequence.len());
+                assert!(
+                    property.contains_sequence(sequence),
+                    "{name} {sequence:04X?}"
+                );
+                assert!(
+                    union.contains_sequence(sequence),
+                    "RGI_Emoji {sequence:04X?}"
+                );
+                // The matcher folds a sequence under `v` with `i` by trying the case equivalents
+                // of the one code point of the window that has some; a sequence with two would
+                // need their product.
+                let cased = sequence
+                    .iter()
+                    .filter(|&&c| simple_case_fold_equivalents(c).count() > 1)
+                    .count();
+                assert!(
+                    cased <= 1,
+                    "{name} {sequence:04X?}: {cased} code points with a case"
+                );
+            }
+        }
+        assert_eq!(property.sequences().count(), sequences, "{name}");
+        assert_eq!(property.longest(), longest, "{name}");
+        assert!(property.longest() <= LONGEST_STRING, "{name}");
+        longest_of_all = longest_of_all.max(longest);
+        assert!(!property.contains(u32::from('a')), "{name} a");
+        assert!(!property.contains_sequence(&[0x61, 0x62]), "{name} ab");
+        assert!(!property.contains_sequence(&[]), "{name} the empty string");
+    }
+    assert_eq!(LONGEST_STRING, longest_of_all);
+    assert_eq!(LONGEST_STRING, 10, "the ZWJ sequences of Unicode 17.0.0");
+    assert_eq!(union.longest(), LONGEST_STRING);
+    // The folded lookup: Ⓜ️ (U+24C2 U+FE0F) and its folding ⓜ️ (U+24DC U+FE0F).
+    let basic = string_property(&units("Basic_Emoji")).expect("Basic_Emoji");
+    assert!(basic.contains_sequence(&[0x24C2, 0xFE0F]));
+    assert!(!basic.contains_sequence(&[0x24DC, 0xFE0F]));
+    assert!(basic.contains_sequence_folded(&[0x24DC, 0xFE0F]));
+    assert!(basic.contains_sequence_folded(&[0x24C2, 0xFE0F]));
+    assert!(!basic.contains_sequence_folded(&[0x24DC, 0x24DC]));
+    assert!(union.contains_sequence_folded(&[0x1F1E9, 0x1F1EA]));
+    // No alias, no loose matching, no value.
+    for name in [
+        "rgi_emoji",
+        "RGI Emoji",
+        "RGIEmoji",
+        "Basic_Emoji=Yes",
+        "Emoji",
+        "",
+    ] {
+        assert!(string_property(&units(name)).is_none(), "{name:?}");
+    }
 }

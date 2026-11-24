@@ -1,34 +1,32 @@
 //! The errors of ParsePattern (`#sec-parsepattern`) and of the flags (`#sec-regexpinitialize`):
 //! one error with the offset of the code unit it names, or a stop of the budget.
 //!
-//! Three kinds of message, as `swell_syntax::message_kind` tells them apart from the message
+//! Two kinds of message, as `swell_syntax::message_kind` tells them apart from the message
 //! alone:
 //!
 //! - a grammar or early error of ECMA-262 (`#sec-patterns-static-semantics-early-errors`,
 //!   `#sec-patterns-static-semantics-early-errors-annexb`), worded here;
-//! - a refusal of a construct a later story of slice 5 brings (`docs/design/engine.md`, decision
-//!   7, "Refusals until the later stories of slice 5"): `<construct> is not supported before
-//!   slice 5`;
 //! - the nesting limit (decision 7, "No Rust recursion in the parser and the compiler of a
 //!   pattern"): `nesting deeper than parser_nesting (<limit>)`. It is not a refusal.
+//!
+//! ParsePattern refuses no construct since
+//! `story:regexp-v-flag-class-sets-and-properties-of-strings` brought the flag `v`, the last
+//! (`docs/design/engine.md`, decision 7, "Refusals until the later stories of slice 5").
 
 use std::fmt;
 
 use crate::budget::Stop;
 
-/// A construct ParsePattern refuses until the story that brings it.
+/// A construct ParsePattern refuses until the story that brings it: none since
+/// `story:regexp-v-flag-class-sets-and-properties-of-strings` brought the flag `v`, so no value
+/// of this type exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Refusal {
-    /// The flag `v` (`story:regexp-v-flag-class-sets-and-properties-of-strings`).
-    SetsFlag,
-}
+pub enum Refusal {}
 
 impl Refusal {
     /// The construct the message names.
     pub fn construct(self) -> &'static str {
-        match self {
-            Refusal::SetsFlag => "class set expressions of the v flag",
-        }
+        match self {}
     }
 }
 
@@ -90,9 +88,24 @@ pub enum ErrorKind {
     EmptyModifiers,
     /// 2^32 - 1 capturing groups or more.
     TooManyGroups,
-    /// A group that would pass the nesting limit the caller gave.
+    /// A group, a lookaround, a modifier group or under `v` a class that would pass the nesting
+    /// limit the caller gave.
     Nesting { limit: u32 },
-    /// A construct refused until a later story of slice 5.
+    /// Under `v`, a ClassSetReservedDoublePunctuator (`&&` where no operation may stand, `!!`,
+    /// `##` and the others) in a class, or `&` after `&&`.
+    ReservedDoublePunctuator,
+    /// Under `v`, a ClassUnion, a ClassIntersection and a ClassSubtraction mixed in one class,
+    /// or a range in an intersection or a subtraction.
+    MixedClassSetOperations,
+    /// Under `v`, a ClassSetSyntaxCharacter (`( ) [ ] { } / - \ |`) in a class where it does
+    /// not start a nested class, a range or an operation.
+    ClassSetSyntaxCharacter,
+    /// Under `v`, `&&` or `--` with no operand after it.
+    MissingClassSetOperand,
+    /// Under `v`, `[^...]` or `\P{...}` of a set whose MayContainStrings is true
+    /// (`#sec-patterns-static-semantics-early-errors`, NestedClass, CharacterClassEscape).
+    NegatedStrings,
+    /// A construct refused until a later story of slice 5; none is left ([`Refusal`]).
     Refused(Refusal),
 }
 
@@ -109,7 +122,8 @@ impl PatternError {
         PatternError { kind, offset }
     }
 
-    /// Whether this is a refusal of a construct a later story of slice 5 brings.
+    /// Whether this is a refusal of a construct a later story of slice 5 brings: never, since
+    /// [`Refusal`] has no value.
     pub fn is_refusal(&self) -> bool {
         matches!(self.kind, ErrorKind::Refused(_))
     }
@@ -126,9 +140,14 @@ impl fmt::Display for PatternError {
             ErrorKind::Nesting { limit } => {
                 return write!(f, "nesting deeper than parser_nesting ({limit})");
             }
-            ErrorKind::Refused(refusal) => {
-                return write!(f, "{} is not supported before slice 5", refusal.construct());
+            ErrorKind::Refused(refusal) => match refusal {},
+            ErrorKind::ReservedDoublePunctuator => "a reserved double punctuator in a class",
+            ErrorKind::MixedClassSetOperations => "class set operations mixed in one class",
+            ErrorKind::ClassSetSyntaxCharacter => {
+                "a class set syntax character that is not escaped"
             }
+            ErrorKind::MissingClassSetOperand => "a class set operation without its operand",
+            ErrorKind::NegatedStrings => "a negated class or \\P of a set that may contain strings",
             ErrorKind::UnknownFlag => "invalid regular expression flag",
             ErrorKind::RepeatedFlag => "repeated regular expression flag",
             ErrorKind::UnicodeWithSets => "the flags u and v together",

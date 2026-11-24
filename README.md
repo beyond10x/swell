@@ -37,8 +37,8 @@ What exists, measured on 2026-11-23:
 - The design, [`docs/design/engine.md`](docs/design/engine.md): what swell targets, how it is
   built, how it is measured, and the order in which it is delivered.
 - The host interface, specified before its code:
-  [`docs/design/host-interface.md`](docs/design/host-interface.md) has 191 numbered
-  requirements, and 113 of them have a test. An ESS model under [`spec/`](spec/) has 58
+  [`docs/design/host-interface.md`](docs/design/host-interface.md) has 208 numbered
+  requirements, and 114 of them have a test. An ESS model under [`spec/`](spec/) has 58
   scenarios. All 58 pass on ESS's interpreter. The gate runs them against the engine too, and
   14 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
@@ -50,7 +50,7 @@ What exists, measured on 2026-11-23:
   with a committed file on every run.
 - Refusals. A construct the parser does not have yet is refused, and a refusal never counts
   as a pass, also when the script catches its `SyntaxError`. The engine counts its refusals:
-  36,178 of the 85,556 runs meet one.
+  30,642 of the 85,556 runs meet one.
 - The first parts of the engine:
 
   | part | crate |

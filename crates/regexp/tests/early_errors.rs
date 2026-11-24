@@ -1,16 +1,13 @@
 //! The early errors of a pattern (`#sec-patterns-static-semantics-early-errors` and
 //! `#sec-patterns-static-semantics-early-errors-annexb`), each with a pattern that hits it and
-//! one beside it that does not; the flags of `#sec-regexpinitialize`; and the refusal of the
-//! parser in slice 5, the flag `v` (`docs/design/engine.md`, decision 7, "Refusals until the
-//! later stories of slice 5").
+//! one beside it that does not, under `v` too where it reads as under `u`; the flags of
+//! `#sec-regexpinitialize`; and that the parser refuses no pattern of slice 5.
 //!
 //! Not held here: CountLeftCapturingParensWithin ≥ 2^32 - 1 (a pattern of more than 2^32
 //! parentheses), the early errors of property escapes, which `property_escapes.rs` holds, and
-//! those of the flag `v`, which the parser refuses until its story.
+//! those of the class set expressions of the flag `v`, which `unicode_sets.rs` holds.
 
-use swell_regexp::{
-    ErrorKind, Flags, ParseError, Pattern, PatternError, Refusal, Unlimited, parse_pattern,
-};
+use swell_regexp::{ErrorKind, Flags, ParseError, Pattern, PatternError, Unlimited, parse_pattern};
 
 #[cfg(test)]
 fn units(text: &str) -> Vec<u16> {
@@ -54,7 +51,7 @@ fn hits(kind: ErrorKind, flag_sets: &[&str], wrong: &[(&str, usize)], right: &[&
 fn a_quantifier_whose_minimum_passes_its_maximum() {
     hits(
         ErrorKind::QuantifierOutOfOrder,
-        &["", "u"],
+        &["", "u", "v"],
         &[
             ("a{2,1}", 1),
             ("x(a){10,9}", 4),
@@ -76,7 +73,7 @@ fn a_quantifier_whose_minimum_passes_its_maximum() {
 fn a_backreference_past_the_count_of_groups() {
     hits(
         ErrorKind::BackreferencePastGroups,
-        &["u"],
+        &["u", "v"],
         &[("(a)\\2", 3), ("\\1", 0), ("(a)(b)\\3(c)\\4", 11)],
         &["(a)\\1", "\\1(a)", "(a)(b)\\2", "(a)(b)\\3(c)"],
     );
@@ -93,7 +90,7 @@ fn a_backreference_past_the_count_of_groups() {
 fn a_k_escape_naming_no_group() {
     hits(
         ErrorKind::UnknownGroupName,
-        &["", "u"],
+        &["", "u", "v"],
         &[
             ("(?<a>x)\\k<b>", 7),
             ("\\k<ab>(?<a>x)", 0),
@@ -101,7 +98,12 @@ fn a_k_escape_naming_no_group() {
         ],
         &["(?<a>x)\\k<a>", "\\k<a>(?<a>x)", "(?<a>x)|\\k<a>"],
     );
-    hits(ErrorKind::UnknownGroupName, &["u"], &[("\\k<a>", 0)], &[]);
+    hits(
+        ErrorKind::UnknownGroupName,
+        &["u", "v"],
+        &[("\\k<a>", 0)],
+        &[],
+    );
     hits(ErrorKind::UnknownGroupName, &[""], &[], &["\\k<a>"]);
 }
 
@@ -109,7 +111,7 @@ fn a_k_escape_naming_no_group() {
 fn duplicate_group_names_only_in_different_alternatives() {
     hits(
         ErrorKind::DuplicateGroupName,
-        &["", "u"],
+        &["", "u", "v"],
         &[
             ("(?<a>x)(?<a>y)", 7),
             ("(?<a>x(?<a>y))", 6),
@@ -158,6 +160,19 @@ fn a_class_range_out_of_order() {
         ],
         &["[a-b]", "[a-a]", "[\\x61-\\x62]", "[--a]"],
     );
+    // Under `v` a range is a ClassSetRange of a ClassUnion, and `\-` is a reserved punctuator.
+    hits(
+        ErrorKind::RangeOutOfOrder,
+        &["v"],
+        &[
+            ("[b-a]", 1),
+            ("x[ab-a]", 3),
+            ("[\\x62-\\x61]", 1),
+            ("[a-\\-]", 1),
+            ("[[a-b]z-y]", 6),
+        ],
+        &["[a-b]", "[a-a]", "[\\x61-\\x62]", "[\\--a]", "[[a-b]y-z]"],
+    );
 }
 
 #[test]
@@ -181,7 +196,7 @@ fn a_class_range_with_a_class_escape_under_u() {
 fn a_group_name_escape_that_is_no_identifier_start_or_part() {
     hits(
         ErrorKind::InvalidGroupName,
-        &["", "u"],
+        &["", "u", "v"],
         &[
             ("(?<\\u0030>x)", 3),
             ("(?<a\\u002D>x)", 4),
@@ -218,13 +233,13 @@ fn an_invalid_braced_quantifier_without_u() {
 fn modifiers_early_errors() {
     hits(
         ErrorKind::ModifierAddedAndRemoved,
-        &["", "u", "i"],
+        &["", "u", "i", "v"],
         &[("(?i-i:a)", 0), ("(?ims-m:a)", 0), ("x(?s-is:a)", 1)],
         &["(?i-m:a)", "(?ms-i:a)"],
     );
     hits(
         ErrorKind::RepeatedModifier,
-        &["", "u"],
+        &["", "u", "v"],
         &[
             ("(?ii:a)", 0),
             ("(?imi:a)", 0),
@@ -235,13 +250,13 @@ fn modifiers_early_errors() {
     );
     hits(
         ErrorKind::EmptyModifiers,
-        &["", "u"],
+        &["", "u", "v"],
         &[("(?-:a)", 0), ("a(?-:)", 1)],
         &["(?i-:a)", "(?-i:a)", "(?:a)"],
     );
     hits(
         ErrorKind::InvalidGroup,
-        &["", "u"],
+        &["", "u", "v"],
         &[
             ("(?x:a)", 0),
             ("(?i)", 0),
@@ -289,19 +304,14 @@ fn flags_are_d_g_i_m_s_u_v_y_each_once_and_not_u_with_v() {
 }
 
 #[test]
-fn the_v_flag_is_a_refusal_of_slice_5() {
-    let sets = "class set expressions of the v flag is not supported before slice 5";
-    for (pattern, flags, refusal, message, offset) in [
-        ("a", "v", Refusal::SetsFlag, sets, 0),
-        ("[a&&b]", "gv", Refusal::SetsFlag, sets, 0),
-        ("a{2,1}", "v", Refusal::SetsFlag, sets, 0),
-    ] {
-        let e = error(pattern, flags);
-        assert_eq!(e.kind, ErrorKind::Refused(refusal), "/{pattern}/{flags}");
-        assert!(e.is_refusal(), "/{pattern}/{flags}");
-        assert_eq!(e.message(), message, "/{pattern}/{flags}");
-        assert_eq!(e.offset, offset, "/{pattern}/{flags}");
+fn the_patterns_of_slice_5_are_no_refusals() {
+    // The flag `v` parses, and its early errors are early errors.
+    for (pattern, flags) in [("a", "v"), ("[a&&b]", "gv"), ("[\\p{L}--\\q{a|bc}]", "vi")] {
+        assert!(parse(pattern, flags).is_ok(), "/{pattern}/{flags}");
     }
+    let e = error("a{2,1}", "v");
+    assert_eq!((e.kind, e.offset), (ErrorKind::QuantifierOutOfOrder, 1));
+    assert!(!e.is_refusal());
     // A group name outside ASCII is no refusal (`group_names.rs`): it parses, and a reference
     // to a name no group has is the early error.
     for (pattern, flags) in [

@@ -7,3 +7,4 @@ mod limits;
 mod matcher;
 mod parse;
 mod property_escapes;
+mod unicode_sets;

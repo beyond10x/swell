@@ -1,0 +1,45 @@
+script locals 0
+  0000 2:2 NewObject
+  0001 2:4 Closure 0
+  0002 2:4 DefineMethod "g"
+  0003 2:26 String "h"
+  0004 2:26 ToPropertyKey
+  0005 2:24 Closure 1
+  0006 2:24 DefineComputedMethod
+  0007 2:1 StoreCompletion
+  0008 0:0 LoadCompletion
+  0009 0:0 Return
+
+function 0 method "g" length 1 locals 2 generator
+  params local 0
+  0000 2:4 GeneratorStart 1
+  0001 2:4 EndFinally
+  0002 2:18 GetLocal 0
+  0003 2:12 Yield 1
+  0004 2:12 JumpIfTag 0 0010
+  0005 2:12 JumpIfTag 2 0007
+  0006 2:12 EndFinally
+  0007 2:12 YieldReturn 0
+  0008 2:12 Tag 2
+  0009 2:12 Jump 0014
+  0010 2:12 Pop
+  0011 2:4 Undefined
+  0012 2:4 Tag 2
+  0013 2:4 Jump 0014
+  0014 2:4 GeneratorDone 1
+  0015 2:4 JumpIfTag 2 0017
+  0016 2:4 EndFinally
+  0017 2:4 GeneratorReturn 1
+  finally 0002..0014 -> 0014 items 0 envs 0
+
+function 1 method "" length 0 locals 1 generator
+  0000 2:24 GeneratorStart 0
+  0001 2:24 EndFinally
+  0002 2:24 Undefined
+  0003 2:24 Tag 2
+  0004 2:24 Jump 0005
+  0005 2:24 GeneratorDone 0
+  0006 2:24 JumpIfTag 2 0008
+  0007 2:24 EndFinally
+  0008 2:24 GeneratorReturn 0
+  finally 0002..0005 -> 0005 items 0 envs 0

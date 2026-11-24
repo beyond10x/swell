@@ -102,6 +102,82 @@ pub(crate) fn mappings(name: &str, mappings: &[(u32, Vec<u32>)]) -> Result<Strin
     Ok(constant(name, "(u32, &[u32])", &rows))
 }
 
+/// The row of a constant of type `&[&[u32]]` for the sequence `points`, as rustfmt writes it at
+/// the indent of a row: on one line where its items and their separators, the brackets not
+/// counted, fit `array_width`, else its items as many to a line as fit `max_width`, one indent
+/// deeper.
+fn sequence_row(points: &[u32]) -> String {
+    let items: Vec<String> = points.iter().map(|point| format!("{point:#06X}")).collect();
+    let inner = items.join(", ");
+    if inner.len() <= ARRAY_WIDTH {
+        return format!("    &[{inner}],\n");
+    }
+    let indent = "        ";
+    let mut text = String::from("    &[\n");
+    let mut line = String::new();
+    for item in &items {
+        let next = if line.is_empty() {
+            format!("{indent}{item},")
+        } else {
+            format!("{line} {item},")
+        };
+        if next.len() > MAX_WIDTH && !line.is_empty() {
+            text.push_str(&line);
+            text.push('\n');
+            line = format!("{indent}{item},");
+        } else {
+            line = next;
+        }
+    }
+    text.push_str(&line);
+    text.push_str("\n    ],\n");
+    text
+}
+
+/// The constant `name` of `sequences`, each of two code points or more, sorted by their code
+/// points with none twice (so a lookup is a binary search), written as rustfmt writes it; a
+/// sequence out of order, one twice, or one of fewer than two code points is an error.
+pub(crate) fn sequences(name: &str, sequences: &[Vec<u32>]) -> Result<String, String> {
+    for pair in sequences.windows(2) {
+        if let [before, after] = pair
+            && before >= after
+        {
+            return Err(format!(
+                "{name}: the sequence {after:04X?} is not above the sequence before it"
+            ));
+        }
+    }
+    if let Some(short) = sequences.iter().find(|sequence| sequence.len() < 2) {
+        return Err(format!(
+            "{name}: the sequence {short:04X?} has fewer than two code points"
+        ));
+    }
+    let head = format!("pub(crate) const {name}: &[&[u32]] = &");
+    let rows: Vec<String> = sequences
+        .iter()
+        .map(|sequence| sequence_row(sequence))
+        .collect();
+    let single: Vec<&str> = rows
+        .iter()
+        .filter_map(|row| row.trim().strip_suffix(','))
+        .filter(|row| !row.contains('\n'))
+        .collect();
+    let array = format!("[{}]", single.join(", "));
+    let line = format!("{head}{array};\n");
+    if single.len() == rows.len()
+        && array.len() <= ARRAY_WIDTH
+        && line.trim_end().len() <= MAX_WIDTH
+    {
+        return Ok(line);
+    }
+    let mut text = format!("{head}[\n");
+    for row in &rows {
+        text.push_str(row);
+    }
+    text.push_str("];\n");
+    Ok(text)
+}
+
 /// The constant `name` of `ranges`, sorted, disjoint inclusive ranges `(first, last)`.
 pub(crate) fn ranges(name: &str, ranges: &[(u32, u32)]) -> String {
     let rows: Vec<String> = ranges

@@ -12,6 +12,21 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- Regular expressions with the flag `v`: classes with union, intersection (`&&`),
+  subtraction (`--`) and nested classes, `\q{...}` with its strings, and the seven
+  properties of strings (`\p{RGI_Emoji}` and the six it is made of) from a sixteenth
+  generated table of the pinned Unicode data. With `i` the set is folded before a
+  complement is taken. A class costs one step per operand, and the lengths of its strings
+  besides. No construct of the fifth slice is refused any more; five patterns that the
+  grammar of `v` forbids are early errors.
+- Generator methods of object literals, `{ *g() {} }`, with their early errors, the fifth
+  story of the seventh slice. A `yield` in the computed name of one belongs to the generator
+  around the literal.
+- The parser reads `async` function declarations, expressions and arrow functions with
+  their early errors, and `await` where the grammar's [Await] is set. No such function runs
+  yet: a source with one is refused with a `SyntaxError` that names the tenth slice, after
+  its grammar errors and early errors, which now come first. `async function*`, `for await`
+  and the `async` method of an object literal keep refusals of their own.
 - The microtask queue of the agent and its checkpoint, the first story of the tenth slice. A
   host queues a microtask with the realm it runs in; a checkpoint runs every entry in the
   order it was queued, under the step budget of one entry, and spends one step for each
@@ -137,6 +152,17 @@ cases pass (18,155 in 0.7.0).
   `test262-slice 06 3898 7351 0 0 3898 3898 0 0`). Of the fifth, which is in work, 2,523 of
   2,724 cases pass (`test262-slice 05 2724 5441 0 0 2724 2523 201 0`), and of the seventh, in work too, 1,168 of 1,491
   (`test262-slice 07 1491 2841 0 0 1491 1168 323 0`). A refusal never counts as a pass, also when the script catches it.
+- The host interface: 114 of its 208 numbered requirements
+  ([`docs/design/host-interface.md`](docs/design/host-interface.md)) are held by a test in
+  this commit; none is pending for the four delivered slices, for the fifth or for the
+  seventh, and 31 are pending for the tenth. 14 of the 58 scenarios of the interface's
+  model pass on the engine, and the other 44 name what they wait for. The interface will
+  change before 1.0.
+- The engine's own tests: `17 test binaries: 1215 passed, 0 failed, 1 ignored`, the tests of
+  the engine crate in the mode that collects garbage at every safe point
+  (`test-collect: 2 test binaries: 934 passed, 0 failed, 1 ignored`), and the test of an
+  injected engine fault (`test-faults: 1 test binaries: 1 passed, 0 failed, 758 ignored`; the
+  758 are the tests that step's filter leaves out).
 - No binary, no command line, and the crates are not on a package registry. To use the
   library, depend on the repository at the tag:
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.8.0" }`.

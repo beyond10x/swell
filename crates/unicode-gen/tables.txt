@@ -13,3 +13,4 @@ crates/unicode/src/tables/script.rs script ucd/Scripts.txt ucd/PropertyValueAlia
 crates/unicode/src/tables/script_extensions.rs script_extensions ucd/ScriptExtensions.txt ucd/PropertyValueAliases.txt
 crates/unicode/src/tables/binary_properties.rs binary_properties ucd/PropertyAliases.txt ucd/PropList.txt ucd/DerivedCoreProperties.txt ucd/extracted/DerivedBinaryProperties.txt ucd/emoji/emoji-data.txt ucd/DerivedNormalizationProps.txt
 crates/unicode/src/tables/property_names.rs property_names ucd/PropertyAliases.txt ucd/PropertyValueAliases.txt ucd/extracted/DerivedGeneralCategory.txt
+crates/unicode/src/tables/properties_of_strings.rs properties_of_strings emoji/emoji-sequences.txt emoji/emoji-zwj-sequences.txt

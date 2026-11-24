@@ -20,16 +20,21 @@
 //!   RegExpBuiltinExec over the start indices, against a [`Subject`] read in place; the
 //!   [`Captures`] in code unit indices, or no match, or the stop of the budget.
 //!
-//! A property escape `\p{...}` or `\P{...}` under `u` names a property of `swell-unicode`
-//! ([`ClassEscape::Property`]); a name or a value ECMA-262 does not admit is an early error.
+//! A property escape `\p{...}` or `\P{...}` under `u` or `v` names a property of
+//! `swell-unicode` ([`ClassEscape::Property`]); a name or a value ECMA-262 does not admit is an
+//! early error. Under `v` a class is a ClassSetExpression kept as its operations
+//! ([`ClassSetOp`]): unions, intersections `&&`, subtractions `--`, nested classes, the strings
+//! of `\q{...}` and the properties of strings (`swell_unicode::StringProperty`), evaluated when
+//! the class is run.
 //!
-//! Refused until the later stories of slice 5, each with the message `<construct> is not
-//! supported before slice 5`: the flag `v` ([`Refusal`]), which ParsePattern refuses.
-//! CompilePattern refuses nothing ([`CompileRefusal`] has no value).
+//! Nothing is refused: ParsePattern and CompilePattern refuse no construct since the last story
+//! of slice 5 that brought one, the flag `v` ([`Refusal`] and [`CompileRefusal`] have no
+//! value).
 
 mod ast;
 mod budget;
 mod canonicalize;
+mod class_set;
 mod compile;
 mod early;
 mod error;
@@ -39,8 +44,8 @@ mod parser;
 mod program;
 
 pub use ast::{
-    Assertion, ClassEscape, ClassItem, List, Look, Modifiers, Name, Node, NodeId, Pattern,
-    Quantifier,
+    Assertion, ClassEscape, ClassItem, ClassSetOp, List, Look, Modifiers, Name, Node, NodeId,
+    Pattern, Quantifier,
 };
 pub use budget::{Budget, MAX_GRANT, POLL_INTERVAL, Stop, Unlimited};
 pub use canonicalize::canonicalize;

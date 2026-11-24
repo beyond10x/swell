@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use crate::case::{self, Simple};
+use crate::emoji;
 use crate::normalize;
 use crate::property;
 use crate::render::{self, Source};
@@ -31,6 +32,7 @@ pub(crate) fn renderer(name: &str) -> Option<Renderer> {
         "script_extensions" => Some(script_extensions),
         "binary_properties" => Some(binary_properties),
         "property_names" => Some(property_names),
+        "properties_of_strings" => Some(properties_of_strings),
         _ => None,
     }
 }
@@ -625,5 +627,107 @@ fn property_names(ucd: &mut Ucd, sources: &[Source]) -> Result<String, String> {
             order.len() + offset
         ));
     }
+    Ok(text)
+}
+
+/// The properties of strings of ECMA-262's table from `emoji/emoji-sequences.txt` and
+/// `emoji/emoji-zwj-sequences.txt`: per property its single code points, its sequences and the
+/// most code points of one of them; the lists of all of them in the order of the table, the
+/// bound over all, and the names.
+fn properties_of_strings(ucd: &mut Ucd, sources: &[Source]) -> Result<String, String> {
+    if sources.is_empty() {
+        return Err("the renderer properties_of_strings reads no file of sequences".to_string());
+    }
+    let paths: Vec<&str> = sources.iter().map(|source| source.path.as_str()).collect();
+    let properties = emoji::properties(ucd, &paths)?;
+    let mut text = render::head(sources);
+    text.push_str(
+        "//! The properties of strings of ECMA-262's table\n\
+         //! (`#table-binary-unicode-properties-of-strings`), which `\\p{...}` names under the flag\n\
+         //! `v` (`#sec-runtime-semantics-unicodematchproperty-p`): each property's single code\n\
+         //! points and its sequences of two code points or more, from the emoji sequence files of\n\
+         //! UTS #51. `RGI_Emoji`, the union of the others (UTS #51, ED-27), is made at run time.\n",
+    );
+    let names: Vec<String> = emoji::PROPERTIES
+        .iter()
+        .map(|property| emoji::constant(property))
+        .collect();
+    for ((property, name), strings) in emoji::PROPERTIES.iter().zip(&names).zip(&properties) {
+        text.push_str(&format!(
+            "\n/// The single code points of `{property}`: sorted, disjoint inclusive ranges.\n"
+        ));
+        text.push_str(&render::ranges(
+            &format!("{name}_SINGLES"),
+            &strings.singles,
+        ));
+        text.push_str(&format!(
+            "\n/// The sequences of `{property}` of two code points or more, sorted by their code\n\
+             /// points.\n"
+        ));
+        text.push_str(&render::sequences(name, &strings.sequences)?);
+        text.push_str(&format!(
+            "\n/// The most code points of a sequence of `{property}`.\n\
+             pub(crate) const {name}_LONGEST: usize = {};\n",
+            strings.longest
+        ));
+    }
+    let rows = |suffix: &str| -> Vec<String> {
+        names
+            .iter()
+            .map(|name| format!("    {name}{suffix},\n"))
+            .collect()
+    };
+    text.push_str(
+        "\n/// The single code points of each property of the files, in the order of ECMA-262's\n\
+         /// table: the index of a property is its number in `NAMES`.\n",
+    );
+    text.push_str(&normalize::constant(
+        "SINGLES",
+        "&[(u32, u32)]",
+        &rows("_SINGLES"),
+    ));
+    text.push_str("\n/// The sequences of each property of the files, in the same order.\n");
+    text.push_str(&normalize::constant("SEQUENCES", "&[&[u32]]", &rows("")));
+    text.push_str(
+        "\n/// The most code points of a sequence of each property, in the same order.\n",
+    );
+    text.push_str(&normalize::constant(
+        "LONGEST_OF",
+        "usize",
+        &rows("_LONGEST"),
+    ));
+    let longest = properties
+        .iter()
+        .map(|strings| strings.longest)
+        .max()
+        .unwrap_or(1);
+    text.push_str(&format!(
+        "\n/// The most code points of a sequence of any property of strings: the bound of the\n\
+         /// lookups of sequences at one position of a match.\n\
+         pub(crate) const LONGEST: usize = {longest};\n"
+    ));
+    let union = emoji::PROPERTIES.len();
+    let mut named: Vec<(&str, usize)> = emoji::PROPERTIES
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, property)| (property, index))
+        .chain(std::iter::once((emoji::UNION, union)))
+        .collect();
+    named.sort_unstable();
+    let rows: Vec<String> = named
+        .iter()
+        .map(|(name, number)| format!("    ({name:?}, {number}),\n"))
+        .collect();
+    text.push_str(
+        "\n/// The names of the seven properties of strings, which ECMA-262's table gives no alias,\n\
+         /// sorted as bytes for a binary search, each with its index in `SINGLES`, or [`UNION`].\n",
+    );
+    text.push_str(&normalize::constant("NAMES", "(&str, u8)", &rows));
+    text.push_str(&format!(
+        "\n/// The number of `{}`, the union of the others, made at run time.\n\
+         pub(crate) const UNION: u8 = {union};\n",
+        emoji::UNION
+    ));
     Ok(text)
 }

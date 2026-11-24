@@ -1,7 +1,8 @@
 //! The program CompilePattern (`#sec-compilepattern`) makes of a pattern's tree, and the
 //! matcher runs (`docs/design/engine.md`, decision 7): one vector of instructions, with the
-//! ranges and the property escapes of the classes, the group numbers a named backreference
-//! names and the group names in vectors beside it. Every vector was charged through the [`Budget`] before it grew;
+//! ranges and the property escapes of the classes, the operations and strings of the classes
+//! under `v`, the group numbers a named backreference names and the group names in vectors
+//! beside it. Every vector was charged through the [`Budget`] before it grew;
 //! [`Program::heap_bytes`] is what the budget holds for the program, and [`Program::release`]
 //! drops it and credits that.
 //!
@@ -10,7 +11,8 @@
 //! unset), group 0 the match; one counter per quantifier (the iterations run and the
 //! position the current one started at); one register per lookaround (the height of the
 //! backtrack stack when it was entered); and the backtrack stack, whose entries resume an
-//! instruction at a position or restore a slot or a counter. Each instruction below says what
+//! instruction at a position (under `v` a class with strings below a length too) or restore a
+//! slot or a counter. Each instruction below says what
 //! it does to that state; one that fails hands control to the backtrack stack.
 
 use swell_unicode::Property;
@@ -18,6 +20,7 @@ use swell_unicode::Property;
 use crate::ast::Name;
 use crate::budget::{Budget, capacity_bytes};
 use crate::canonicalize::equivalents;
+use crate::class_set::{SetBounds, SetClass, SetOp};
 use crate::flags::Flags;
 
 /// The value of a jump target or a register not yet known while the program is compiled.
@@ -47,6 +50,12 @@ pub(crate) enum Inst {
     Any { dot_all: bool, back: bool },
     /// A character of the class numbered `class` of [`Program::classes`].
     Class { class: u32, back: bool },
+    /// Under `v`, the class numbered `class` of [`Program::set_classes`] (`class_set.rs`): the
+    /// longest of its candidates at the position that the class holds, a character or a
+    /// string, and the position past it; where a shorter candidate is left, it pushes an entry
+    /// that resumes this instruction below the length taken (the alternatives of CompileAtom
+    /// for a CharSet with strings, longest first). Fails when none is held.
+    SetClass { class: u32, back: bool },
     /// `^`: the position is 0, or with `multiline` follows a LineTerminator.
     LineStart { multiline: bool },
     /// `$`: the position is the subject's end, or with `multiline` precedes a LineTerminator.
@@ -213,6 +222,12 @@ pub struct Program {
     pub(crate) ranges: Vec<(u32, u32)>,
     pub(crate) classes: Vec<ClassSet>,
     pub(crate) properties: Vec<(Property, bool)>,
+    pub(crate) set_classes: Vec<SetClass>,
+    pub(crate) set_ops: Vec<SetOp>,
+    pub(crate) points: Vec<u32>,
+    /// The most of any class under `v`: sets on its stack of evaluation, strings of `\q{...}`,
+    /// and candidates at one position. The matcher reserves its lists for them before a match.
+    pub(crate) set_bounds: SetBounds,
     pub(crate) named: Vec<u32>,
     pub(crate) names: Vec<(u32, Name)>,
     pub(crate) text: Vec<u8>,
@@ -269,6 +284,9 @@ impl Program {
             .saturating_add(capacity_bytes(&self.ranges))
             .saturating_add(capacity_bytes(&self.classes))
             .saturating_add(capacity_bytes(&self.properties))
+            .saturating_add(capacity_bytes(&self.set_classes))
+            .saturating_add(capacity_bytes(&self.set_ops))
+            .saturating_add(capacity_bytes(&self.points))
             .saturating_add(capacity_bytes(&self.named))
             .saturating_add(capacity_bytes(&self.names))
             .saturating_add(capacity_bytes(&self.text))

@@ -10,6 +10,7 @@ pub(crate) mod compositions;
 pub(crate) mod decompositions;
 pub(crate) mod general_category;
 pub(crate) mod lowercase;
+pub(crate) mod properties_of_strings;
 pub(crate) mod property_names;
 pub(crate) mod script;
 pub(crate) mod script_extensions;

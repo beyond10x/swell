@@ -744,31 +744,3 @@ fn next_return_and_throw_take_a_symbol() {
          types.join() === \"true,true,true\";",
     );
 }
-
-/// The refusal `text` of a source `eval` parses: a `SyntaxError` with that message, which moves
-/// `refusals()` by 1.
-fn refusal_is_counted(source: &str, text: &str) {
-    let mut agent = agent().unwrap();
-    let realm = realm(&mut agent);
-    let before = agent.refusals();
-    let script = format!(
-        "var message;\n\
-         try {{ eval({source:?}); }} catch (e) {{ message = e instanceof SyntaxError && e.message; }}\n\
-         message;"
-    );
-    assert_eq!(
-        eval_text(&mut agent, &realm, &script),
-        Outcome::Normal(format!("\"{text}\""))
-    );
-    assert_eq!(agent.refusals(), before + 1);
-}
-
-/// A generator method keeps a refusal of its own until the story of generator methods,
-/// counted.
-#[test]
-fn the_refusal_of_a_generator_method_is_counted() {
-    refusal_is_counted(
-        "({ *m() { yield 1; } });",
-        "generator method is not supported before slice 7 (1:4)",
-    );
-}

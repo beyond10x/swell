@@ -18,11 +18,16 @@
 //! its spread element last as the rest element; a spread element stands in an array literal and
 //! among the arguments of a call or `new` (`#sec-argument-lists`). Slice 7 adds the
 //! YieldExpression (`#sec-generator-function-definitions`) at the level of an
-//! `AssignmentExpression` where [Yield] is set; elsewhere `yield` is an identifier.
+//! `AssignmentExpression` where [Yield] is set; elsewhere `yield` is an identifier; and the
+//! generator methods of object literals (GeneratorMethod). Slice 10 adds the
+//! AsyncFunctionExpression, the AsyncArrowFunction (`async` and an identifier before `=>`, or a
+//! call of `async` read again as its parameters, `parser/function.rs`) and the AwaitExpression
+//! (`#sec-async-function-definitions`), a prefix operator where [Await] is set; elsewhere
+//! `await` is an identifier, and `async` is one wherever no `async` function or arrow function
+//! starts.
 //!
-//! Refused, each with its slice: `**` and `**=` (4), generator methods (7), `class`, `super`,
-//! `new.target` (8), `async` functions and
-//! `await` (10), `import.meta` and dynamic `import` (11).
+//! Refused, each with its slice: `**` and `**=` (4), `class`, `super`, `new.target` (8), `async`
+//! methods (10), `import.meta` and dynamic `import` (11).
 //!
 //! The functions that stay on the Rust stack while the parser recurses (each one an entry of the
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
@@ -110,6 +115,8 @@ enum Head {
 pub(crate) enum Prefix {
     Unary(UnaryOp),
     Update(UpdateOp),
+    /// The `await` of an AwaitExpression, `await UnaryExpression`.
+    Await,
 }
 
 impl HeapBytes for Pending {
@@ -218,14 +225,19 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// `AssignmentExpression` (`#sec-assignment-operators`), with the conditional operator
     /// (`#sec-conditional-operator`); where [Yield] is set, a `yield` written without an escape
-    /// is a YieldExpression ([`Parser::yield_expression`]).
+    /// is a YieldExpression ([`Parser::yield_expression`]). `async` and an identifier after it on
+    /// the same line start an AsyncArrowFunction ([`Parser::async_arrow_parameter`]).
     pub(super) fn assignment(&mut self, no_in: bool) -> R<ExprId> {
         if self.at_yield() {
             return self.yield_expression(no_in);
         }
         self.enter()?;
         let start = self.start();
-        let left = self.binary(no_in)?;
+        let left = if self.at_async_arrow()? {
+            self.async_arrow_parameter()?
+        } else {
+            self.binary(no_in)?
+        };
         let e = match self.assign_tail(left)? {
             AssignTail::None => left,
             AssignTail::Conditional => self.conditional_rest(left, start, no_in)?,
@@ -234,6 +246,34 @@ impl<'a, 'm> Parser<'a, 'm> {
         };
         self.leave();
         Ok(e)
+    }
+
+    /// Whether the current token begins `async AsyncArrowBindingIdentifier =>`
+    /// (`#sec-async-arrow-function-definitions`): `async` written without an escape, then a name
+    /// with no line terminator before it. No other expression has a name after `async`, so the
+    /// tokens after it decide. Not inlined, so that the look at the next token stays out of the
+    /// frame of [`Parser::assignment`].
+    #[inline(never)]
+    fn at_async_arrow(&mut self) -> R<bool> {
+        if !self.is_name("async") {
+            return Ok(false);
+        }
+        let next = self.peek()?;
+        Ok(!next.newline_before && matches!(next.kind, TokenKind::Name(_)))
+    }
+
+    /// The `async` at the current token and the `BindingIdentifier` after it, read as an
+    /// identifier: the parameter of an `async` arrow function, whose `=>` must follow. The
+    /// operand so starts after the start of its `AssignmentExpression`, which tells
+    /// [`Parser::arrow_function`] that the arrow function is `async`.
+    #[inline(never)]
+    fn async_arrow_parameter(&mut self) -> R<ExprId> {
+        self.advance()?;
+        let parameter = self.leaf()?;
+        if !self.is(Punct::Arrow) {
+            return self.unexpected();
+        }
+        Ok(parameter)
     }
 
     /// Whether the current token begins a YieldExpression: `yield` written without an escape
@@ -540,12 +580,14 @@ impl<'a, 'm> Parser<'a, 'm> {
             TokenKind::Punct(Punct::Bang) => Prefix::Unary(UnaryOp::Not),
             TokenKind::Punct(Punct::PlusPlus) => Prefix::Update(UpdateOp::Increment),
             TokenKind::Punct(Punct::MinusMinus) => Prefix::Update(UpdateOp::Decrement),
+            TokenKind::Name(n) if self.awaits && !self.tok.escaped && n == "await" => Prefix::Await,
             _ => return None,
         })
     }
 
     /// `UnaryExpression` and `UpdateExpression` (`#sec-unary-operators`,
-    /// `#sec-update-expressions`).
+    /// `#sec-update-expressions`), with the AwaitExpression where [Await] is set
+    /// (`#sec-async-function-definitions`: `await UnaryExpression`, an operand it always has).
     /// A chain of prefix operators adds no recursion: they wait on the shared stack
     /// `Parser::prefixes` for their operand, and the chain's depth in the tree is bounded by the
     /// node depth check, as a chain of binary operators is.
@@ -595,6 +637,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                 prefix: true,
                 operand,
             },
+            Prefix::Await => Expr::Await(operand),
         };
         self.make(expr, start)
     }
@@ -955,32 +998,6 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     // ---- primary expressions -------------------------------------------------------------------
 
-    /// Whether `kind`, after `await` on the same line, starts an operand: `await` then is an
-    /// `AwaitExpression` (slice 10), never the identifier `await` of a script.
-    fn starts_await_operand(kind: &TokenKind) -> bool {
-        matches!(
-            kind,
-            TokenKind::Name(_)
-                | TokenKind::Number(_)
-                | TokenKind::String(_)
-                | TokenKind::Punct(Punct::Bang)
-                | TokenKind::Punct(Punct::Tilde)
-                | TokenKind::Keyword(
-                    Keyword::This
-                        | Keyword::Function
-                        | Keyword::New
-                        | Keyword::Typeof
-                        | Keyword::Void
-                        | Keyword::Delete
-                        | Keyword::Null
-                        | Keyword::True
-                        | Keyword::False
-                        | Keyword::Class
-                        | Keyword::Super
-                )
-        )
-    }
-
     /// `PrimaryExpression` (`#sec-primary-expression`).
     fn primary(&mut self) -> R<ExprId> {
         self.enter()?;
@@ -1014,21 +1031,11 @@ impl<'a, 'm> Parser<'a, 'm> {
                 _ => return self.unexpected(),
             },
             TokenKind::Name(n) => {
-                if !self.tok.escaped && (n == "async" || n == "await") {
-                    let is_async = n == "async";
+                // `async [no LineTerminator here] function`: an AsyncFunctionExpression.
+                if !self.tok.escaped && n == "async" {
                     let next = self.peek()?;
-                    if !next.newline_before {
-                        if is_async
-                            && matches!(
-                                next.kind,
-                                TokenKind::Keyword(Keyword::Function) | TokenKind::Name(_)
-                            )
-                        {
-                            return self.refuse("async function", 10);
-                        }
-                        if !is_async && Parser::starts_await_operand(&next.kind) {
-                            return self.refuse("await expression", 10);
-                        }
+                    if !next.newline_before && next.kind == TokenKind::Keyword(Keyword::Function) {
+                        return Ok(Parser::function_expression_node);
                     }
                 }
                 Parser::leaf
@@ -1447,6 +1454,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         let start = self.start();
         match self.accessor_kind()? {
             Some(kind) => self.accessor_rest(object, kind, start)?,
+            None if self.is(Punct::Star) => self.generator_method(object, start)?,
             None if self.is(Punct::Ellipsis) => self.spread_property(object, start)?,
             None => self.value_property_rest(object, start)?,
         }
@@ -1455,13 +1463,12 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// Whether the property at the current token is a getter or setter: `get` or `set`, written
-    /// without an escape, followed by a property name or a computed one. Refuses generator and
-    /// `async` methods.
+    /// without an escape, followed by a property name or a computed one. Refuses `async`
+    /// methods.
     #[inline(never)]
     fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
         let plain = !self.tok.escaped;
         let word = match &self.tok.kind {
-            TokenKind::Punct(Punct::Star) => return self.refuse("generator method", 7),
             TokenKind::Name(n) if plain && n == "get" => FunctionKind::Getter,
             TokenKind::Name(n) if plain && n == "set" => FunctionKind::Setter,
             TokenKind::Name(n) if plain && n == "async" => {
@@ -1538,6 +1545,49 @@ impl<'a, 'm> Parser<'a, 'm> {
             Property {
                 key,
                 value,
+                span: start,
+            },
+        )?;
+        Ok(id)
+    }
+
+    /// `MethodDefinition : GeneratorMethod`, `* ClassElementName ( UniqueFormalParameters[+Yield,
+    /// ~Await] ) { GeneratorBody }` (`#sec-generator-function-definitions`), at its `*`,
+    /// appended to `object`. The name is read with the [Yield] of the code around the literal
+    /// (`ClassElementName[?Yield, ?Await]`), so in a generator a `yield` in a computed name is a
+    /// YieldExpression of that generator; the parameters and the body are those of a method
+    /// whose `generator` is set, which [`Parser::function_rest`] reads with [Yield] set.
+    fn generator_method(&mut self, object: ExprId, start: Span) -> R<()> {
+        self.enter()?;
+        self.advance()?;
+        let computed = self.computed_name()?;
+        let id = self.generator_method_head(object, start, computed)?;
+        self.function_rest(id)?;
+        self.property_end(object);
+        self.leave();
+        Ok(())
+    }
+
+    /// The `ClassElementName` of a generator method, a `PropertyName` (a `PrivateIdentifier`
+    /// stands only in a class): numbers its function, a method whose `generator` is set, and
+    /// appends the property.
+    #[inline(never)]
+    fn generator_method_head(
+        &mut self,
+        object: ExprId,
+        start: Span,
+        computed: Option<ExprId>,
+    ) -> R<FunctionId> {
+        let key = self.key_or(computed)?;
+        let id = self.begin_function(FunctionKind::Method, start, None);
+        if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {
+            f.generator = true;
+        }
+        self.push_property(
+            object,
+            Property {
+                key,
+                value: PropertyValue::Method(id),
                 span: start,
             },
         )?;

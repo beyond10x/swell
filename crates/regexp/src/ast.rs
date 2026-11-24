@@ -1,10 +1,10 @@
 //! The tree ParsePattern answers (`#sec-parsepattern`): the nodes of a Pattern in one vector,
 //! each naming its children by index, so that dropping a tree of any depth does not recurse
 //! (`docs/design/engine.md`, decision 7, "No Rust recursion in the parser and the compiler of a
-//! pattern"). The lists of children, the items of the classes and the group names live in
-//! vectors of their own beside the nodes. Every vector was charged through the [`Budget`] before
-//! it grew; [`Pattern::charged`] is what the budget holds for the tree, and
-//! [`Pattern::release`] drops the tree and credits it.
+//! pattern"). The lists of children, the items of the classes, the operations and strings of
+//! the classes under `v` and the group names live in vectors of their own beside the nodes.
+//! Every vector was charged through the [`Budget`] before it grew; [`Pattern::charged`] is what
+//! the budget holds for the tree, and [`Pattern::release`] drops the tree and credits it.
 //!
 //! A character is a code point under `u` (the pattern is read as code points, a surrogate pair
 //! one character) and a code unit without it (`#sec-regexpinitialize`: "each of pattern's 16-bit
@@ -141,6 +141,52 @@ pub enum ClassItem {
     Escape(ClassEscape),
 }
 
+/// One operation of a class under `v` (ClassSetExpression, `#sec-compiletocharset`), in
+/// postfix order: an operand pushes a set, a union, an intersection or a subtraction takes two
+/// and pushes one, a complement takes one and pushes one. The class is kept as the pattern
+/// writes it and evaluated when it is run (`class_set.rs`); no set is built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClassSetOp {
+    /// The characters and ranges of one operand in [`Pattern::class_items`] (only
+    /// [`ClassItem::Character`] and [`ClassItem::Range`]): the ClassSetCharacters and
+    /// ClassSetRanges of a ClassUnion taken together, or one ClassSetCharacter of an
+    /// intersection or a subtraction; with `negated` their complement.
+    Items {
+        items: List,
+        negated: bool,
+    },
+    /// `\d`, `\s`, `\w` or `\p{...}` (its `negated` false), with `negated` its complement
+    /// (`\D`, `\S`, `\W`, `\P{...}`, or a class `[^...]` of the escape alone).
+    Escape {
+        escape: ClassEscape,
+        negated: bool,
+    },
+    /// `\p{...}` of a property of strings (`#table-binary-unicode-properties-of-strings`).
+    Strings(swell_unicode::StringProperty),
+    /// One string of `\q{...}` of no code point or of two or more, its code points in
+    /// [`Pattern::class_string`]; a string of one code point is a character of
+    /// [`ClassSetOp::Items`].
+    String(List),
+    Union,
+    Intersection,
+    Subtraction,
+    /// The complement of a set of single characters (`[^...]`; CharacterComplement).
+    Complement,
+}
+
+impl ClassSetOp {
+    /// Whether it is an operand, which pushes a set.
+    pub fn is_operand(self) -> bool {
+        matches!(
+            self,
+            ClassSetOp::Items { .. }
+                | ClassSetOp::Escape { .. }
+                | ClassSetOp::Strings(_)
+                | ClassSetOp::String(_)
+        )
+    }
+}
+
 /// One node of a pattern.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Node {
@@ -170,6 +216,11 @@ pub enum Node {
         negated: bool,
         items: List,
     },
+    /// Under `v`, a class (`[...]`, nested classes, `&&`, `--`, `\q{...}`) or a class escape
+    /// outside one: its operations in [`Pattern::class_set_ops`], in postfix order.
+    ClassSet {
+        ops: List,
+    },
     /// A capturing group, numbered from 1 by its `(` from the left, with its name if it has one.
     Group {
         number: u32,
@@ -198,6 +249,8 @@ pub struct Pattern {
     pub(crate) nodes: Vec<Node>,
     pub(crate) lists: Vec<NodeId>,
     pub(crate) items: Vec<ClassItem>,
+    pub(crate) set_ops: Vec<ClassSetOp>,
+    pub(crate) points: Vec<u32>,
     pub(crate) names: Vec<(u32, Name)>,
     pub(crate) text: Vec<u8>,
     pub(crate) root: NodeId,
@@ -230,6 +283,16 @@ impl Pattern {
     /// The items a [`Node::Class`] names.
     pub fn class_items(&self, list: List) -> &[ClassItem] {
         self.items.get(list.range()).unwrap_or(&[])
+    }
+
+    /// The operations a [`Node::ClassSet`] names.
+    pub fn class_set_ops(&self, list: List) -> &[ClassSetOp] {
+        self.set_ops.get(list.range()).unwrap_or(&[])
+    }
+
+    /// The code points of a string a [`ClassSetOp::String`] names.
+    pub fn class_string(&self, list: List) -> &[u32] {
+        self.points.get(list.range()).unwrap_or(&[])
     }
 
     /// The text of a group name.
@@ -269,6 +332,8 @@ impl Pattern {
         capacity_bytes(&self.nodes)
             .saturating_add(capacity_bytes(&self.lists))
             .saturating_add(capacity_bytes(&self.items))
+            .saturating_add(capacity_bytes(&self.set_ops))
+            .saturating_add(capacity_bytes(&self.points))
             .saturating_add(capacity_bytes(&self.names))
             .saturating_add(capacity_bytes(&self.text))
     }

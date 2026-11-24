@@ -24,7 +24,13 @@
 //! its instruction's step the first and the rest charged before it reads a slot; a class one
 //! step per property escape it holds, its instruction's step the first and the rest charged
 //! before it tests the character, each property a bounded number of binary searches over a table
-//! of `swell-unicode` (at most seven, for the group `P` of General_Category); a try writes
+//! of `swell-unicode` (at most seven, for the group `P` of General_Category); a class under `v`
+//! one step per operand it holds (an operand of characters and ranges, `\d`, `\s`, `\w`, a
+//! property, a string of `\q{...}`, a property of strings), the instruction's step the first
+//! and the rest charged before the test, and where it may hold a string one step per code point
+//! of each string of `\q{...}` compared, `L - 1` per property of strings (`L` its longest
+//! sequence) for the lookups of its sequences, and its operands once more per further candidate
+//! evaluated (`class_set.rs` states the bound); a try writes
 //! one slot, since a try that failed undid its changes entry by entry. Under `i` a character
 //! and each code unit a backreference compares take one lookup of a canonical value
 //! (`canonicalize.rs`; without `u` and `v` the uppercase mapping, two binary searches), and a
@@ -46,8 +52,11 @@
 
 use std::ops::Range;
 
+use swell_unicode::LONGEST_STRING;
+
 use crate::budget::{Budget, MAX_GRANT, Stop};
 use crate::canonicalize::canonicalize;
+use crate::class_set::{SetClass, SetOp, Window, holds, sequence_in};
 use crate::program::{Inst, Program, is_line_terminator, is_word};
 
 /// The code units of a String in one of its two stored forms: Latin-1 bytes, each one code
@@ -197,6 +206,9 @@ struct Counter {
 enum Entry {
     /// Resume the instruction `pc` at `pos`.
     Resume { pc: u32, pos: usize },
+    /// Resume the class under `v` at `pc` and `pos` with its candidates of fewer than `below`
+    /// code points.
+    SetResume { pc: u32, pos: usize, below: u32 },
     /// Restore the capture slot `slot` to `old`.
     Capture { slot: u32, old: usize },
     /// Restore the counter `counter`.
@@ -233,6 +245,14 @@ struct Machine<'p, 's, 'b> {
     looks: Vec<usize>,
     stack: Vec<Entry>,
     visits: u64,
+    /// The stack of evaluation of a class under `v`.
+    truth: Vec<bool>,
+    /// Whether each string of `\q{...}` of a class under `v` was found at the position.
+    matched: Vec<bool>,
+    /// The candidates of a class under `v` at the position: code points and code units.
+    found: Vec<(u32, usize)>,
+    /// Set by an entry that resumes a class under `v`: its candidates below this length.
+    below: Option<u32>,
 }
 
 impl<'p, 's, 'b> Machine<'p, 's, 'b> {
@@ -253,6 +273,10 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
             looks: Vec::new(),
             stack: Vec::new(),
             visits: 0,
+            truth: Vec::new(),
+            matched: Vec::new(),
+            found: Vec::new(),
+            below: None,
         }
     }
 
@@ -349,6 +373,20 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
         let made = self.reserve(&mut v, looks);
         v.resize(v.capacity().min(looks), 0);
         self.looks = v;
+        made?;
+        // The lists of the classes under `v`, as large as the largest class needs.
+        let bounds = self.program.set_bounds;
+        let mut v = Vec::new();
+        let made = self.reserve(&mut v, bounds.depth as usize);
+        self.truth = v;
+        made?;
+        let mut v = Vec::new();
+        let made = self.reserve(&mut v, bounds.strings as usize);
+        self.matched = v;
+        made?;
+        let mut v = Vec::new();
+        let made = self.reserve(&mut v, bounds.candidates as usize);
+        self.found = v;
         made
     }
 
@@ -376,6 +414,9 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
         drop(std::mem::take(&mut self.slots));
         drop(std::mem::take(&mut self.counters));
         drop(std::mem::take(&mut self.looks));
+        drop(std::mem::take(&mut self.truth));
+        drop(std::mem::take(&mut self.matched));
+        drop(std::mem::take(&mut self.found));
         if bytes > 0 {
             self.budget.credit(bytes);
         }
@@ -442,6 +483,7 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
             *start = at;
         }
         self.stack.clear();
+        self.below = None;
         let mut pc = 0u32;
         let mut pos = at;
         loop {
@@ -481,6 +523,10 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
             let Some(entry) = self.stack.pop() else { break };
             match entry {
                 Entry::Resume { pc, pos } => return Ok(Some((pc, pos))),
+                Entry::SetResume { pc, pos, below } => {
+                    self.below = Some(below);
+                    return Ok(Some((pc, pos)));
+                }
                 Entry::Look {
                     negative: true,
                     pc,
@@ -516,7 +562,7 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
                     *value = old;
                 }
             }
-            Entry::Resume { .. } | Entry::Look { .. } => {}
+            Entry::Resume { .. } | Entry::SetResume { .. } | Entry::Look { .. } => {}
         }
     }
 
@@ -624,6 +670,26 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
                 self.read(pos, back)
                     .filter(|&(c, _)| set.is_some_and(|set| set.contains(program, c)))
                     .map(|(_, to)| (next, to))
+            }
+            Inst::SetClass { class, back } => {
+                let below = self.below.take();
+                let program = self.program;
+                let Some(set) = program.set_classes.get(class as usize) else {
+                    return Ok(None);
+                };
+                if set.strings {
+                    self.set_strings(set, pc, pos, back, below)?
+                } else {
+                    // One step per operand, this instruction's the first, charged before the
+                    // test of the character.
+                    self.steps((set.operands as usize).saturating_sub(1))?;
+                    let window = self.window(pos, back, 1);
+                    if window.len == 1 && holds(program, set, 1, &window, &[], &mut self.truth) {
+                        Some((next, Self::past(pos, back, window.units_of(1))))
+                    } else {
+                        None
+                    }
+                }
             }
             Inst::LineStart { multiline } => {
                 let at_start = pos == 0
@@ -772,6 +838,152 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
             Inst::LookEnd { look, negative } => self.look_end(look, negative, next)?,
             Inst::Match => Some((next, pos)),
         })
+    }
+
+    /// Up to `most` characters read from `pos` in the direction (at most [`LONGEST_STRING`]),
+    /// with the code units each prefix of them spans.
+    fn window(&self, pos: usize, back: bool, most: usize) -> Window {
+        let mut window = Window {
+            points: [0; LONGEST_STRING],
+            units: [0; LONGEST_STRING],
+            len: 0,
+            back,
+        };
+        let mut at = pos;
+        while window.len < most.min(LONGEST_STRING) {
+            let Some((c, to)) = self.read(at, back) else {
+                break;
+            };
+            if let (Some(point), Some(units)) = (
+                window.points.get_mut(window.len),
+                window.units.get_mut(window.len),
+            ) {
+                *point = c;
+                *units = to.abs_diff(pos);
+            }
+            window.len += 1;
+            at = to;
+        }
+        window
+    }
+
+    /// The position `units` code units past `pos` in the direction.
+    fn past(pos: usize, back: bool, units: usize) -> usize {
+        if back {
+            pos.saturating_sub(units)
+        } else {
+            pos.saturating_add(units)
+        }
+    }
+
+    /// The code units the string `s` spans at `pos` in the direction, its code points compared
+    /// one by one (under `i` by their simple case folding), or `None` where it is not there.
+    fn string_at(&self, s: &[u32], pos: usize, back: bool, fold: bool) -> Option<usize> {
+        let mut at = pos;
+        for i in 0..s.len() {
+            let index = if back { s.len() - 1 - i } else { i };
+            let want = s.get(index).copied()?;
+            let (c, to) = self.read(at, back)?;
+            if c != want && !(fold && canonicalize(c, true) == canonicalize(want, true)) {
+                return None;
+            }
+            at = to;
+        }
+        Some(at.abs_diff(pos))
+    }
+
+    /// A candidate of `points` code points spanning `units` code units, kept when there is room
+    /// (the program's bound of candidates makes it so).
+    fn candidate(&mut self, points: u32, units: usize) {
+        if self.found.len() < self.found.capacity() {
+            self.found.push((points, units));
+        }
+    }
+
+    /// A class under `v` that may hold a string, at `pc` and `pos` (`class_set.rs`): its tries
+    /// charged and made, the strings of `\q{...}` and the sequences of its properties of
+    /// strings found at the position, the character there a candidate too; then the
+    /// candidates below `below`, longest first, each evaluated over the class's operands, one
+    /// step per operand charged first (the instruction's step the first of them), until one is
+    /// held. Where shorter candidates are left an entry resumes the class below the length
+    /// taken, so that a failure after it tries the next (CompileAtom: the strings of a CharSet
+    /// are alternatives, longest first).
+    fn set_strings(
+        &mut self,
+        set: &SetClass,
+        pc: u32,
+        pos: usize,
+        back: bool,
+        below: Option<u32>,
+    ) -> Result<Next, Stop> {
+        let program = self.program;
+        let next = pc.saturating_add(1);
+        self.steps(set.tries as usize)?;
+        let window = self.window(pos, back, LONGEST_STRING);
+        self.found.clear();
+        self.matched.clear();
+        let start = set.start as usize;
+        let ops = program
+            .set_ops
+            .get(start..start.saturating_add(set.len as usize))
+            .unwrap_or(&[]);
+        for &op in ops {
+            match op {
+                SetOp::String { start, len } => {
+                    let first = start as usize;
+                    let s = program
+                        .points
+                        .get(first..first.saturating_add(len as usize))
+                        .unwrap_or(&[]);
+                    let units = self.string_at(s, pos, back, set.fold);
+                    if self.matched.len() < self.matched.capacity() {
+                        self.matched.push(units.is_some());
+                    }
+                    if let Some(units) = units {
+                        self.candidate(len, units);
+                    }
+                }
+                SetOp::Strings(property) => {
+                    for k in (2..=property.longest().min(window.len)).rev() {
+                        if sequence_in(property, &window, k, set.fold) {
+                            self.candidate(k as u32, window.units_of(k));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if window.len >= 1 {
+            self.candidate(1, window.units_of(1));
+        }
+        self.found
+            .sort_unstable_by_key(|candidate| std::cmp::Reverse(candidate.0));
+        self.found.dedup_by_key(|candidate| candidate.0);
+        let operands = set.operands as usize;
+        let mut charge = operands.saturating_sub(1);
+        let mut i = 0;
+        while let Some(&(k, units)) = self.found.get(i) {
+            i += 1;
+            if below.is_some_and(|below| k >= below) {
+                continue;
+            }
+            self.steps(charge)?;
+            charge = operands;
+            if holds(
+                program,
+                set,
+                k as usize,
+                &window,
+                &self.matched,
+                &mut self.truth,
+            ) {
+                if i < self.found.len() {
+                    self.push(Entry::SetResume { pc, pos, below: k })?;
+                }
+                return Ok(Some((next, Self::past(pos, back, units))));
+            }
+        }
+        Ok(None)
     }
 
     /// BackreferenceMatcher (`#sec-backreference-matcher`) of `group` at `pos`: an unset
