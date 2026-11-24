@@ -21,6 +21,11 @@ pub struct TestHost {
     pub loads: Vec<LoadRequest>,
     /// What `host_system_utc_epoch_nanoseconds` answers.
     pub now: i128,
+    /// What the clock adds to `now` after each answer: 0, a clock that does not advance, by
+    /// default.
+    pub clock_step_ns: i128,
+    /// The global object `host_system_utc_epoch_nanoseconds` was given, one per call.
+    pub clock_globals: Vec<ObjectRef>,
     /// A counter host functions of the tests may use.
     pub count: u32,
     /// The host's map from a node number to the handle it keeps for that node, with no root: a
@@ -57,11 +62,14 @@ impl Host for TestHost {
         host.loads.push(request);
     }
 
-    fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
+    fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Self>, global: ObjectRef) -> i128 {
         let host = cx.host_mut();
         host.calls
             .push("host_system_utc_epoch_nanoseconds".to_string());
-        host.now
+        host.clock_globals.push(global);
+        let now = host.now;
+        host.now = now.saturating_add(host.clock_step_ns);
+        now
     }
 }
 
