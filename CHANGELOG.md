@@ -12,6 +12,11 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- `async` methods of object literals run, a story of the tenth slice: `{ async m() {} }`,
+  with a computed name too. A call returns a promise and the body awaits as the body of an
+  `async` function does; the method has no `prototype` and cannot be constructed. An
+  `async *` method is refused with a `SyntaxError` that names the tenth slice, and `super`
+  in an `async` method is refused as in a plain method.
 - Slice 5, regular expressions, is delivered: all 2,724 of its test262 cases pass in all
   5,441 runs. At its close 18 cases that need `Date`, `Math`, `parseInt`, the operator
   `**`, `class` or `Map` move to slices 4, 8 and 9, each with its evidence, and 18 cases of
@@ -29,9 +34,8 @@ Every number below comes from the gate, `task check`, on the released commit.
   is charged to the memory budget while it waits and credited when its promise settles or
   it is collected. An `await` in a loop that never ends ends the checkpoint at the step
   budget; a termination in a resumed activation leaves its promise pending and the jobs
-  behind it queued. `%AsyncFunction.prototype%` exists. The `async` method of an object
-  literal, `async function*` and `for await` are still refused, each with a `SyntaxError`
-  that names the tenth slice.
+  behind it queued. `%AsyncFunction.prototype%` exists. `async function*` and `for await`
+  are still refused, each with a `SyntaxError` that names the tenth slice.
 - `Promise`, the second story of the tenth slice: the constructor with its resolving
   functions, `Promise.prototype.then` and `catch`, `Promise.resolve`, `Promise.reject` and
   the getter of `Promise[Symbol.species]`. A reaction and the job of a thenable are entries
@@ -57,8 +61,7 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The parser reads `async` function declarations, expressions and arrow functions with
   their early errors, and `await` where the grammar's [Await] is set. A refusal that names
   a later slice comes after the grammar errors and early errors of the source, which now
-  come first. `async function*`, `for await` and the `async` method of an object literal
-  keep refusals of their own.
+  come first. `async function*` and `for await` keep refusals of their own.
 - The microtask queue of the agent and its checkpoint, the first story of the tenth slice. A
   host queues a microtask with the realm it runs in; a checkpoint runs every entry in the
   order it was queued, under the step budget of one entry, and spends one step for each

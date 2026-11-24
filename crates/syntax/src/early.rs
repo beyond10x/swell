@@ -41,7 +41,7 @@
 //!   checked as those of its declaration, a parameter list or a `catch` parameter, and a pattern
 //!   in a declaration has an initializer outside a for-in or for-of head;
 //! - `#sec-method-definitions-static-semantics-early-errors`: the `UniqueFormalParameters` of a
-//!   method, in any code;
+//!   method, a generator or `async` method too, in any code;
 //! - `#sec-arrow-function-definitions-static-semantics-early-errors`: the
 //!   `ArrowFormalParameters` of an arrow function hold no name twice, in any code; a parameter
 //!   that the body declares lexically, and `eval` and `arguments` as parameters in strict code,
@@ -1213,10 +1213,15 @@ impl<'a, 'm> Checker<'a, 'm> {
                 seen.insert(p.name.as_str());
                 continue;
             }
-            // `#sec-method-definitions-static-semantics-early-errors` and
-            // `#sec-generator-function-definitions-static-semantics-early-errors`: the
-            // UniqueFormalParameters of a method, a generator method too, in any code; a
-            // generator method's other early errors are those of every generator.
+            // `#sec-method-definitions-static-semantics-early-errors`,
+            // `#sec-generator-function-definitions-static-semantics-early-errors` and
+            // `#sec-async-function-definitions-static-semantics-early-errors`: the
+            // UniqueFormalParameters of a method, a generator or `async` method too, in any code;
+            // a generator method's other early errors are those of every generator, and an
+            // `async` method's (AsyncMethod: no AwaitExpression in its parameters, no Use Strict
+            // Directive with a list that is not simple, no parameter its body declares
+            // lexically) those of every `async` function. HasDirectSuper needs `super`, which the
+            // parser refuses before slice 8, in a method as anywhere.
             if f.kind == FunctionKind::Method {
                 self.error(
                     format!("duplicate parameter name {} in a method", p.name),
