@@ -25,9 +25,8 @@
 //! (`#sec-async-function-definitions`), a prefix operator where [Await] is set; elsewhere
 //! `await` is an identifier, and `async` is one wherever no `async` function or arrow function
 //! starts; and the `async` methods of object literals (AsyncMethod). An `async function*` is an
-//! AsyncGeneratorExpression (`#sec-async-generator-function-definitions`); a `yield*` in it,
-//! where [Yield] and [Await] are both set, holds the refusal of slice 10 `yield* in an async
-//! generator` at its `*`, back to the end of the parse.
+//! AsyncGeneratorExpression (`#sec-async-generator-function-definitions`), `yield*` in it
+//! included.
 //!
 //! Refused, each with its slice: `**` and `**=` (4), `class`, `super`, `new.target` (8), `async`
 //! generator methods (10), `import.meta` and dynamic `import` (11).
@@ -316,31 +315,13 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// Whether the token after `yield` is the `*` of `yield *`, on the same line; consumes it.
-    /// Where [Await] is set too, in an async generator, the `*` holds the refusal of slice 10
-    /// ([`Parser::hold_yield_star`]).
     #[inline(never)]
     fn yield_delegate(&mut self) -> R<bool> {
         if !self.tok.newline_before && self.is(Punct::Star) {
-            if self.yields && self.awaits {
-                self.hold_yield_star();
-            }
             self.advance()?;
             return Ok(true);
         }
         Ok(false)
-    }
-
-    /// Holds the refusal of slice 10 of `yield*` in an async generator, at the current `*`, back
-    /// to the end of the parse ([`Parser::held`]), unless a refusal is held already: the first
-    /// such `yield*` of the source is the one named.
-    #[inline(never)]
-    fn hold_yield_star(&mut self) {
-        if self.held.is_none() {
-            let star = self.start();
-            let refusal =
-                SyntaxError::refused("yield* in an async generator", 10, star.line, star.column);
-            self.held = Some(refusal);
-        }
     }
 
     /// Whether the current token, after `yield`, is on the same line and can begin an

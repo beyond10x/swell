@@ -1230,33 +1230,496 @@ fn an_async_generator_suspended_at_a_termination_resumes_at_a_later_checkpoint()
     );
 }
 
-/// `yield*` in an async generator keeps a refusal of its own text, at its `*`, until
-/// `story:yield-star-in-async-generators`: through `eval` it is a `SyntaxError` with that text,
-/// and `refusals()` moves by 1; an async generator without it is no refusal.
+/// The functions the tests of `yield*` share (`story:yield-star-in-async-generators`):
+/// `show(r)` writes an iterator result as `<value> <done>`, `answer(p, name)` records the
+/// settling of the promise `p` in `answers[name]` (`<value> <done>`, or the name of the error a
+/// rejection gives, or `rejected <reason>`), and `asyncIterable(next, more)` is an object of the
+/// script whose `[Symbol.asyncIterator]` answers itself, with `next` and the properties of `more`.
+const DELEGATION: &str = "var log = [], answers = {};\n\
+     function show(r) { return r.value + ' ' + r.done; }\n\
+     function answer(p, name) {\n\
+       p.then(function (r) { answers[name] = show(r); },\n\
+         function (e) { answers[name] = e instanceof Error ? e.name : 'rejected ' + e; });\n\
+     }\n\
+     function asyncIterable(next, more) {\n\
+       var o = { next: next };\n\
+       o[Symbol.asyncIterator] = function () { return o; };\n\
+       for (var k in more) o[k] = more[k];\n\
+       return o;\n\
+     }\n";
+
+/// The `answers` of [`DELEGATION`] in the order of `names`, joined with `,`.
+fn answers(agent: &mut Agent<TestHost>, realm: &Realm, names: &[&str]) -> String {
+    let list: Vec<String> = names
+        .iter()
+        .map(|name| format!("answers['{name}']"))
+        .collect();
+    text(agent, realm, &format!("[{}].join()", list.join(", ")))
+}
+
+/// YieldExpression : `yield *` AssignmentExpression with generatorKind async, step 8.a: the
+/// inner iterator's `next` is called with the received value and its result awaited; a value
+/// not done is yielded by AsyncGeneratorYield without a second `await` (a promise as the value
+/// of an inner result is the value of the outer one), and the value it is done with is the value
+/// of the `yield*`. An inner async generator runs in the call of the outer `next`, before the
+/// code after that call ("Async generators on suspended frames", item 6); the [[NextMethod]] of
+/// an iterator of the script is read once and called with the iterator as the this value, also
+/// for requests queued while the delegating generator runs.
 #[test]
-fn the_refusal_of_yield_star_in_an_async_generator_is_counted() {
+fn yield_star_in_an_async_generator_delegates_to_an_async_iterator() {
     let (mut agent, realm) = new_agent(limits());
-    let before = agent.refusals();
+    run(
+        &mut agent,
+        &realm,
+        &format!(
+            "{DELEGATION}\
+             async function* inner(a) {{ log.push('inner ' + a); var x = yield 'i1';\n\
+               log.push('inner got ' + x); var y = yield 'i2'; log.push('inner got ' + y); return 'ret'; }}\n\
+             async function* outer() {{ log.push('outer'); var r = yield* inner('a'); log.push('r ' + r);\n\
+               yield 'after'; }}\n\
+             var it = outer();\n\
+             it.next('ignored').then(function (r) {{ answers.a = show(r); return it.next('x'); }})\n\
+               .then(function (r) {{ answers.b = show(r); return it.next('y'); }})\n\
+               .then(function (r) {{ answers.c = show(r); return it.next(); }})\n\
+               .then(function (r) {{ answers.d = show(r); }});\n\
+             log.push('called');\n\
+             var reads = 0, n = 0, calls = [], held = Promise.resolve(5), plain;\n\
+             plain = asyncIterable(null, {{}});\n\
+             Object.defineProperty(plain, 'next', {{ get: function () {{ reads++; return function (v) {{\n\
+               calls.push((this === plain) + ' ' + v); n++;\n\
+               return n === 1 ? Promise.resolve({{ value: held, done: false }}) : {{ value: n, done: n > 2 }}; }}; }} }});\n\
+             async function* g() {{ var r = yield* plain; calls.push('r ' + r); }}\n\
+             var it2 = g(), first = it2.next('a');\n\
+             answer(it2.next('b'), 'f'); answer(it2.next('c'), 'g');\n\
+             first.then(function (r) {{ answers.e = r.value === held; }});"
+        ),
+    );
     assert_eq!(
-        eval_text(
+        text(&mut agent, &realm, "log.join()"),
+        "outer,inner a,called"
+    );
+    normal(&mut agent);
+    assert_eq!(
+        text(&mut agent, &realm, "log.join()"),
+        "outer,inner a,called,inner got x,inner got y,r ret"
+    );
+    assert_eq!(
+        answers(&mut agent, &realm, &["a", "b", "c", "d"]),
+        "i1 false,i2 false,after false,undefined true"
+    );
+    assert_eq!(
+        text(&mut agent, &realm, "calls.join() + ' ' + reads"),
+        "true undefined,true b,true c,r 3 1"
+    );
+    assert_eq!(
+        answers(&mut agent, &realm, &["e", "f", "g"]),
+        "true,2 false,undefined true"
+    );
+}
+
+/// GetIterator(value, async) of a value with no `[Symbol.asyncIterator]`: the Async-from-Sync
+/// Iterator of its sync iterator (`#sec-createasyncfromsynciterator`), whose `next` passes the
+/// received value on and awaits the value of each result; the value a sync generator returns is
+/// the value of the `yield*`, and an Array delegates its elements.
+#[test]
+fn yield_star_in_an_async_generator_delegates_to_a_sync_iterator_through_async_from_sync() {
+    let (mut agent, realm) = new_agent(limits());
+    run(
+        &mut agent,
+        &realm,
+        &format!(
+            "{DELEGATION}\
+             function* s() {{ log.push('s'); var x = yield 1; log.push('s got ' + x);\n\
+               yield Promise.resolve(2); return 'end'; }}\n\
+             async function* g() {{ var r = yield* s(); log.push('r ' + r); var a = yield* [3, 4];\n\
+               log.push('a ' + a); }}\n\
+             var it = g();\n\
+             it.next().then(function (r) {{ answers.a = show(r); return it.next('x'); }})\n\
+               .then(function (r) {{ answers.b = show(r); return it.next(); }})\n\
+               .then(function (r) {{ answers.c = show(r); return it.next(); }})\n\
+               .then(function (r) {{ answers.d = show(r); return it.next(); }})\n\
+               .then(function (r) {{ answers.e = show(r); }});"
+        ),
+    );
+    normal(&mut agent);
+    assert_eq!(
+        answers(&mut agent, &realm, &["a", "b", "c", "d", "e"]),
+        "1 false,2 false,3 false,4 false,undefined true"
+    );
+    assert_eq!(
+        text(&mut agent, &realm, "log.join()"),
+        "s,s got x,r end,a undefined"
+    );
+}
+
+/// Steps 8.b and 8.c: a throw given to the delegating generator is passed to the inner
+/// iterator's `throw` (an async generator's `catch` catches it and yields), a return to its
+/// `return`; each result is awaited, and a return's value is awaited before it is passed on
+/// (AsyncGeneratorUnwrapYieldResumption). A `return` whose result is done completes the
+/// delegating generator with its value, not awaited (8.c.viii), through its `finally`; with no
+/// `return` method the received value is awaited and returned (8.c.iii).
+#[test]
+fn yield_star_passes_throw_and_return_on_and_awaits_them() {
+    let (mut agent, realm) = new_agent(limits());
+    run(
+        &mut agent,
+        &realm,
+        &format!(
+            "{DELEGATION}\
+             async function* inner() {{ try {{ yield 1; }} catch (e) {{ log.push('inner caught ' + e); yield 2; }} }}\n\
+             async function* outer(i) {{ try {{ yield* i; }} finally {{ log.push('outer finally'); }} }}\n\
+             var a = outer(inner());\n\
+             a.next().then(function () {{ answer(a['throw']('x'), 'throw'); }});\n\
+             var got = [], held = Promise.resolve('p');\n\
+             var withBoth = asyncIterable(function () {{ return {{ value: 1, done: false }}; }}, {{\n\
+               'throw': function (e) {{ got.push('throw ' + e); return Promise.resolve({{ value: 't', done: false }}); }},\n\
+               'return': function (v) {{ got.push('return ' + (v instanceof Promise ? 'a promise' : v));\n\
+                 return {{ value: held, done: true }}; }} }});\n\
+             var b = outer(withBoth);\n\
+             b.next().then(function () {{ answer(b['throw']('e'), 'thrown');\n\
+               b['return'](Promise.resolve('v')).then(function (r) {{ answers.returned = r.value === held; }}); }});\n\
+             var c = outer(asyncIterable(function () {{ return {{ value: 1, done: false }}; }}, {{}}));\n\
+             c.next().then(function () {{ answer(c['return'](Promise.resolve('w')), 'bare'); }});"
+        ),
+    );
+    normal(&mut agent);
+    assert_eq!(
+        answers(&mut agent, &realm, &["throw", "thrown", "returned", "bare"]),
+        "2 false,t false,true,w true"
+    );
+    assert_eq!(text(&mut agent, &realm, "got.join()"), "throw e,return v");
+    assert_eq!(
+        text(&mut agent, &realm, "log.join()"),
+        "inner caught x,outer finally,outer finally"
+    );
+}
+
+/// Step 8.b.iii: a throw given while the inner iterator has no `throw` closes it with
+/// AsyncIteratorClose and a normal completion (`#sec-asynciteratorclose`): its `return` is
+/// called with no argument and its result awaited, and then a `TypeError` rejects the request;
+/// a rejected result of `return` rejects it with that reason instead, and a result that is no
+/// Object with a `TypeError`; with no `return` either nothing is called. The delegating
+/// generator is completed after each.
+#[test]
+fn yield_star_closes_an_inner_iterator_without_throw() {
+    let (mut agent, realm) = new_agent(limits());
+    run(
+        &mut agent,
+        &realm,
+        &format!(
+            "{DELEGATION}\
+             var closed = [];\n\
+             function step() {{ return {{ value: 1, done: false }}; }}\n\
+             function closing(name, result) {{\n\
+               return asyncIterable(step, {{ 'return': function () {{\n\
+                 closed.push(name + ' ' + arguments.length); return result(); }} }});\n\
+             }}\n\
+             async function* g(i) {{ yield* i; }}\n\
+             function throwInto(i, name) {{\n\
+               var it = g(i);\n\
+               it.next().then(function () {{ answer(it['throw']('x'), name);\n\
+                 answer(it.next(), name + ' after'); }});\n\
+             }}\n\
+             throwInto(closing('a', function () {{ return Promise.resolve({{}}); }}), 'a');\n\
+             throwInto(closing('b', function () {{ return Promise.reject('no'); }}), 'b');\n\
+             throwInto(closing('c', function () {{ return 1; }}), 'c');\n\
+             throwInto(asyncIterable(step, {{}}), 'd');"
+        ),
+    );
+    normal(&mut agent);
+    assert_eq!(
+        answers(
             &mut agent,
             &realm,
-            "(function () { try { eval('(async function* () { yield* [1]; })'); return 'parsed'; }\n\
-               catch (e) { return e.name + ': ' + e.message; } })()"
+            &[
+                "a", "a after", "b", "b after", "c", "c after", "d", "d after"
+            ]
         ),
-        Shown::Normal(
-            "\"SyntaxError: yield* in an async generator is not supported before slice 10 (1:28)\""
-                .to_string()
-        )
+        "TypeError,undefined true,rejected no,undefined true,TypeError,undefined true,\
+         TypeError,undefined true"
     );
-    assert_eq!(agent.refusals(), before + 1);
+    assert_eq!(text(&mut agent, &realm, "closed.join()"), "a 0,b 0,c 0");
+}
+
+/// Item 6 of "Async generators on suspended frames": a chain of 30 delegating async generators
+/// over a leaf, with `reentry_depth` 20 (so `frame_depth` is 10,000, above the 32 frames of the
+/// script, the levels and the leaf), answers the three `next` calls of the outermost with the
+/// leaf's values and the value it returns: no level is a re-entry.
+#[test]
+fn a_chain_of_delegating_async_generators_deeper_than_reentry_depth_takes_no_re_entry_per_level() {
+    let mut limits = limits();
+    limits.reentry_depth = 20;
+    let (mut agent, realm) = new_agent(limits);
+    run(
+        &mut agent,
+        &realm,
+        &format!(
+            "{DELEGATION}\
+             async function* leaf() {{ yield 1; yield 2; return 3; }}\n\
+             async function* level(inner) {{ return yield* inner; }}\n\
+             var it = leaf();\n\
+             for (var i = 0; i < 30; i++) it = level(it);\n\
+             answer(it.next(), 'a'); answer(it.next(), 'b'); answer(it.next(), 'c');"
+        ),
+    );
+    normal(&mut agent);
     assert_eq!(
-        eval_text(
-            &mut agent,
-            &realm,
-            "typeof eval('(async function* () { yield 1; })')"
-        ),
-        Shown::Normal("\"function\"".to_string())
+        answers(&mut agent, &realm, &["a", "b", "c"]),
+        "1 false,2 false,3 true"
     );
-    assert_eq!(agent.refusals(), before + 1);
+}
+
+/// Item 6 with item 4: `frame_depth` counts the script's frame and the levels a `next` pushes
+/// in the loop, and a push is refused at a count of `frame_depth` or more. With `frame_depth` 20
+/// and a chain of 30 levels over a leaf, each catching at its `yield*`, recording its index and
+/// throwing again: the push of level 19 is refused at the `yield*` of level 18 (20 frames: the
+/// script's and those of levels 0 to 18), its request is rejected with the `RangeError` and it
+/// stays suspended at its start; level 18's `await` throws it, the throw leaves through levels
+/// 18 to 0, and after the checkpoint the outermost promise is rejected with it. A later `next`
+/// of level 19 runs the rest of the chain and is fulfilled with the leaf's value. 18 levels over
+/// a leaf (20 frames) are fulfilled, 19 are rejected.
+#[test]
+fn a_chain_of_delegating_async_generators_reaches_frame_depth_at_the_yield_star_that_would_push() {
+    let mut limits = limits();
+    limits.frame_depth = 20;
+    let (mut agent, realm) = new_agent(limits);
+    run(
+        &mut agent,
+        &realm,
+        &format!(
+            "{DELEGATION}\
+             var gens = [], thrownAt = [];\n\
+             async function* level(i) {{ try {{ yield* gens[i + 1]; }} catch (e) {{ thrownAt.push(i); throw e; }} }}\n\
+             async function* leaf() {{ yield 'leaf'; }}\n\
+             for (var i = 0; i < 30; i++) gens.push(level(i));\n\
+             gens.push(leaf());\n\
+             async function* plain(gs, i) {{ yield* gs[i + 1]; }}\n\
+             function chain(n) {{ var gs = []; for (var i = 0; i < n; i++) gs.push(plain(gs, i));\n\
+               gs.push(leaf()); return gs[0]; }}\n\
+             var c18 = chain(18), c19 = chain(19);\n\
+             answer(gens[0].next(), 'outermost'); answer(c18.next(), '18'); answer(c19.next(), '19');"
+        ),
+    );
+    normal(&mut agent);
+    assert_eq!(
+        answers(&mut agent, &realm, &["outermost", "18", "19"]),
+        "RangeError,leaf false,RangeError"
+    );
+    let indices: Vec<String> = (0..=18).rev().map(|i| i.to_string()).collect();
+    assert_eq!(
+        text(&mut agent, &realm, "thrownAt.join()"),
+        indices.join(",")
+    );
+    run(&mut agent, &realm, "answer(gens[19].next(), 'rest');");
+    normal(&mut agent);
+    assert_eq!(answers(&mut agent, &realm, &["rest"]), "leaf false");
+}
+
+/// Item 6: a `next` through n levels of delegating async generators spends, per level, at least
+/// 4 and at most 20 steps more than through one, so through 101 levels between 400 and 2,000
+/// steps more than through 1 level, read with `last_entry_steps()` summed over the script of one
+/// `next` and the checkpoint after it. Both chains have run to their first `yield` before.
+/// `frame_depth` 10,000 is above the 103 frames of the script, 101 levels and the leaf. The test
+/// prints both sums.
+#[test]
+fn a_next_through_101_levels_spends_400_to_2000_steps_more_than_through_one() {
+    let (mut agent, realm) = new_agent(limits());
+    run(
+        &mut agent,
+        &realm,
+        "async function* leaf() { while (true) yield 1; }\n\
+         async function* level(inner) { yield* inner; }\n\
+         function chain(n) { var it = leaf(); for (var i = 0; i < n; i++) it = level(it); return it; }\n\
+         var one = chain(1), many = chain(101); one.next(); many.next();",
+    );
+    normal(&mut agent);
+    let mut steps_of = |source: &str| {
+        let script = parse(&mut agent, &realm, source);
+        run_parsed(&mut agent, &script);
+        let called = agent.last_entry_steps().unwrap();
+        normal(&mut agent);
+        called + agent.last_entry_steps().unwrap()
+    };
+    let through_one = steps_of("one.next(); 0;");
+    let through_many = steps_of("many.next(); 0;");
+    let more = through_many.saturating_sub(through_one);
+    println!(
+        "last_entry_steps: {through_one} for a next through 1 level, {through_many} through 101 \
+         levels, {more} more"
+    );
+    assert!(
+        (400..=2_000).contains(&more),
+        "{through_many} against {through_one}"
+    );
+}
+
+/// The `reentry_depth` of [`yield_star_over_a_script_iterator_at_reentry_depth_throws_a_range_error_at_the_yield_star`].
+const SCRIPT_ITERATOR_REENTRY: u32 = 10;
+
+/// The script of [`deep_delegation`]: `target(name)` is an async iterator of the script
+/// (`%AsyncIteratorPrototype%`'s `[Symbol.asyncIterator]`, a builtin, answers it) whose `next`,
+/// `throw` and `return` are script functions that record their call in `called`; `g` delegates
+/// to it; `at(n, f)` calls `f` under `n` re-entries through `reenter`.
+const DEEP_DELEGATION: &str = "var called = [], gen, promise;\n\
+     var AsyncIteratorPrototype = Object.getPrototypeOf(Object.getPrototypeOf(\n\
+       (async function* () {}).prototype));\n\
+     function target(name) {\n\
+       var o = Object.create(AsyncIteratorPrototype);\n\
+       o.next = function () { called.push(name + ' next'); return { value: name, done: false }; };\n\
+       o['throw'] = function () { called.push(name + ' throw'); return { value: name, done: false }; };\n\
+       o['return'] = function () { called.push(name + ' return'); return { value: name, done: true }; };\n\
+       return o;\n\
+     }\n\
+     async function* g(o) { yield* o; }\n\
+     function at(n, f) { if (n > 0) return reenter(function () { return at(n - 1, f); }); return f(); }\n\
+     0;";
+
+/// `method` (`next` of a generator not started, `throw` or `return` of one first run to its
+/// `yield*` by a `next` at the top) called under `depth` re-entries; for `return`, whose value
+/// the delegating generator awaits before it calls the inner `return`
+/// (AsyncGeneratorUnwrapYieldResumption), the checkpoint that resumes it runs there too
+/// (`checkpointHere`). Answers the state of the promise of the call after the checkpoint at the
+/// top, and the calls of the script's functions.
+fn deep_delegation(agent: &mut Agent<TestHost>, realm: &Realm, method: &str, depth: u32) -> String {
+    run(
+        agent,
+        realm,
+        &format!(
+            "gen = g(target('{method}')); {}",
+            if method == "next" {
+                "0;"
+            } else {
+                "gen.next();"
+            }
+        ),
+    );
+    normal(agent);
+    let deep = if method == "return" {
+        " checkpointHere();"
+    } else {
+        ""
+    };
+    run(
+        agent,
+        realm,
+        &format!(
+            "called = []; at({depth}, function () {{ promise = gen['{method}']('v');{deep} }}); 0;"
+        ),
+    );
+    normal(agent);
+    let state = state(agent, realm, "promise");
+    format!("{state} [{}]", text(agent, realm, "called.join()"))
+}
+
+/// Item 6 and "Depth bounds": a delegation to an iterator of the script calls its `next`,
+/// `throw` or `return` as one re-entry, the resumption of the delegating generator being one
+/// before it. With `reentry_depth` [`SCRIPT_ITERATOR_REENTRY`], under the deepest stack where
+/// the resumption still fits and the call does not, the `RangeError` is thrown at the `yield*`
+/// and rejects the request: `next` of a generator not started, `throw` of one at its `yield*`,
+/// and `return` of one at its `yield*` (in the checkpoint at that depth that resumes it after
+/// the `await` of its value) each answer a promise rejected with a `RangeError`, and the
+/// script's function was not called; one level shallower each is fulfilled. Measured: under
+/// `reentry_depth` - 1 re-entries of `reenter` for `next` and `throw`, and under
+/// `reentry_depth` - 2 for `return`, whose resumption is made by the function of its `await`,
+/// called by the job inside the host function `checkpointHere`, one re-entry more.
+#[test]
+fn yield_star_over_a_script_iterator_at_reentry_depth_throws_a_range_error_at_the_yield_star() {
+    let (mut agent, realm) = stack_agent(SCRIPT_ITERATOR_REENTRY);
+    define_function(
+        &mut agent,
+        &realm,
+        "checkpointHere",
+        0,
+        checkpoint_here,
+        false,
+    );
+    run(&mut agent, &realm, DEEP_DELEGATION);
+    for (method, deepest, done) in [
+        ("next", SCRIPT_ITERATOR_REENTRY - 2, false),
+        ("throw", SCRIPT_ITERATOR_REENTRY - 2, false),
+        ("return", SCRIPT_ITERATOR_REENTRY - 3, true),
+    ] {
+        assert_eq!(
+            deep_delegation(&mut agent, &realm, method, deepest + 1),
+            "rejected RangeError []",
+            "{method}"
+        );
+        assert_eq!(
+            deep_delegation(&mut agent, &realm, method, deepest),
+            format!("fulfilled \"{method}\" {done} [{method} {method}]"),
+            "{method}"
+        );
+    }
+}
+
+/// Item 5 of "Async generators on suspended frames" for each level of a chain of delegating
+/// async generators: `a` delegates to `b`, `b` to the leaf `l`, whose body runs `body` in the
+/// call of `a.next()`, so the three frames are on the stack when the entry ends in
+/// `termination`. No `finally` runs; every level stays executing, so a later `next`, `return` or
+/// `throw` of any of them only queues, and its promise stays pending through later checkpoints.
+fn a_delegating_level_leaves_its_requests_pending(
+    agent: &mut Agent<TestHost>,
+    realm: &Realm,
+    body: &str,
+    termination: Termination,
+) {
+    run(
+        agent,
+        realm,
+        &format!(
+            "var ranFinally = false, ps;\n\
+             async function* leaf() {{ try {{ {body} }} finally {{ ranFinally = true; }} }}\n\
+             async function* level(inner) {{ try {{ yield* inner; }} finally {{ ranFinally = true; }} }}\n\
+             var l = leaf(), b = level(l), a = level(b);"
+        ),
+    );
+    assert_eq!(
+        eval_text(agent, realm, "a.next();"),
+        Shown::Terminated(termination)
+    );
+    assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+    run(
+        agent,
+        realm,
+        "ps = [a.next(), b.next(), l.next(), a['return'](1), b['throw'](2), l['return'](3)];",
+    );
+    normal(agent);
+    normal(agent);
+    for index in 0..6 {
+        assert_eq!(
+            state(agent, realm, &format!("ps[{index}]")),
+            "pending",
+            "{index}"
+        );
+    }
+    assert_eq!(text(agent, realm, "ranFinally"), "false");
+}
+
+/// [`a_delegating_level_leaves_its_requests_pending`] at `Terminated(StepBudget)`,
+/// `Terminated(MemoryBudget)` and `Terminated(Interrupted)`.
+#[test]
+fn a_termination_inside_a_delegating_async_generator_leaves_its_request_pending() {
+    let (mut agent, realm) = new_agent(limits_with(1_000));
+    a_delegating_level_leaves_its_requests_pending(
+        &mut agent,
+        &realm,
+        "for (;;) {}",
+        Termination::StepBudget,
+    );
+
+    let (mut agent, realm) = memory_agent(FILL_ROOM, limits().steps_per_entry);
+    a_delegating_level_leaves_its_requests_pending(
+        &mut agent,
+        &realm,
+        FILL,
+        Termination::MemoryBudget,
+    );
+
+    let (mut agent, realm) = new_agent(limits());
+    a_delegating_level_leaves_its_requests_pending(
+        &mut agent,
+        &realm,
+        "interruptNow(); for (;;) {}",
+        Termination::Interrupted,
+    );
 }

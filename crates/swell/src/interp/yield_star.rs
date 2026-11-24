@@ -22,11 +22,25 @@
 //! of one turn of its loop (`LoopJump`, `DelegateStep`, `JumpIfDelegateDone`, `DelegateYield`),
 //! with the Get of the method for `return` and `throw`; it reads one property ("done") and
 //! moves one frame, and nothing walks the chain.
+//!
+//! The async kind (`AsyncDelegateStep` and `AsyncDelegateYield`, with `JumpIfDelegateDone`),
+//! written by `story:yield-star-in-async-generators`, is the loop of step 8 with generatorKind
+//! async, on the record of GetIterator(value, async): the code awaits the result of each call
+//! of `next`, `throw` or `return` (`Await`), yields the value of a result not done with
+//! AsyncGeneratorYield and no second `await`, and awaits a received return before it passes it
+//! on (AsyncGeneratorUnwrapYieldResumption). Its rule is item 6 of "Async generators on
+//! suspended frames": when the method is `%AsyncGeneratorPrototype%.next`, `.throw` or
+//! `.return` of any realm and the iterator an async generator object, the instruction does what
+//! that builtin does with no call (`Agent::async_generator_steps`, `builtins/async_generator.rs`)
+//! and the inner frame, when it is resumed, runs above the delegating one on the same run loop;
+//! the delegating frame then awaits the promise of the request. Any other method is called, a
+//! re-entry that returns before the delegating frame awaits.
 
 use swell_compiler::bytecode::{TAG_NORMAL, TAG_RETURN, TAG_THROW};
 
 use super::dispatch::Flow;
 use super::frame::{Entry, SlotValue};
+use crate::builtins::async_generator::AsyncGeneratorBuiltin;
 use crate::builtins::generator::{GeneratorBuiltin, Resume};
 use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
@@ -109,20 +123,11 @@ impl<H: Host> Agent<H> {
     /// `JumpIfDelegateDone(t)`: `r`, on top, is the inner result; a `TypeError` when it is no
     /// Object (steps 8.a.iii, 8.b.ii.4, 8.c.vi). When IteratorComplete(r) is true, IteratorValue(r)
     /// replaces the three entries with the tag `k` above it, `[v, k]`, the record's box credited,
-    /// and the run continues at `t`; otherwise nothing.
+    /// and the run continues at `t`; otherwise nothing. A `k` of [`TAG_THROW`], which only
+    /// `AsyncDelegateStep` leaves, ends AsyncIteratorClose with the `TypeError` of step 8.b.iii.6
+    /// (or of its step 8 when `r` is no Object) and reads nothing of `r`.
     #[inline(never)]
     pub(super) fn jump_if_delegate_done(&mut self, target: u32) -> Completion<Flow> {
-        let Value::Object(result) = self.peek_value(0)? else {
-            return Err(self.throw_error(
-                ErrorKind::TypeError,
-                "the result of the iterator of yield* is not an object",
-            ));
-        };
-        if !self.iterator_complete(result)? {
-            return Ok(Flow::Next);
-        }
-        let key = self.name_key("value")?;
-        let value = self.get(result, key)?;
         let kind = {
             let frame = self.top_frame()?;
             let below = frame.stack.len().checked_sub(2);
@@ -134,6 +139,25 @@ impl<H: Host> Agent<H> {
         let Some(kind) = kind else {
             return Err(self.fault());
         };
+        let Value::Object(result) = self.peek_value(0)? else {
+            return Err(self.throw_error(
+                ErrorKind::TypeError,
+                "the result of the iterator of yield* is not an object",
+            ));
+        };
+        // AsyncIteratorClose of an inner iterator without `throw` (step 8.b.iii), its result an
+        // Object (step 8 of the close): the TypeError of step 8.b.iii.6.
+        if kind == TAG_THROW {
+            return Err(self.throw_error(
+                ErrorKind::TypeError,
+                "the iterator of yield* has no throw method",
+            ));
+        }
+        if !self.iterator_complete(result)? {
+            return Ok(Flow::Next);
+        }
+        let key = self.name_key("value")?;
+        let value = self.get(result, key)?;
         self.drop_entries(3)?;
         self.push_value(value)?;
         self.push_entry(Entry::Tag(kind))?;
@@ -284,5 +308,216 @@ impl<H: Host> Agent<H> {
                 Ok(true)
             }
         }
+    }
+
+    /// `AsyncDelegateStep(t)`: one step of the loop of `yield*` in an async generator with the
+    /// received completion, its value `v` and its tag on top of the record `i` of
+    /// GetIterator(value, async).
+    ///
+    /// - A normal completion (step 8.a): the call of [[NextMethod]] with `v`.
+    /// - A throw completion (step 8.b): GetMethod(iterator, "throw"); its call with `v`, or, when
+    ///   it is `undefined`, AsyncIteratorClose with a normal completion
+    ///   ([`Agent::async_delegate_close`]).
+    /// - A return completion (step 8.c), its value awaited already by the code: GetMethod(iterator,
+    ///   "return"); its call with `v`, or, when it is `undefined`, `[v, TAG_RETURN]` and the jump
+    ///   to `t`, where the code awaits `v` (step 8.c.iii).
+    ///
+    /// A call leaves `[i, k, r, undefined]`, `k` as for `DelegateStep`, `r` the result the code
+    /// awaits after it drops the `undefined`. For `%AsyncGeneratorPrototype%.<which>` of any
+    /// realm and an async generator object `r` is the promise of the request
+    /// ([`Agent::async_delegate_in_loop`]).
+    #[inline(never)]
+    pub(super) fn async_delegate_step(&mut self, target: u32) -> Completion<Flow> {
+        let tag = match self.top_frame()?.stack.last() {
+            Some(Entry::Tag(tag)) => Some(*tag),
+            _ => None,
+        };
+        let value = self.peek_value(1)?;
+        let record = self.delegate_record(2)?;
+        match tag {
+            Some(TAG_NORMAL) => self.async_delegate_call(
+                record.next_method,
+                record.iterator,
+                value,
+                AsyncGeneratorBuiltin::Next,
+                TAG_NORMAL,
+            ),
+            Some(TAG_THROW) => match self.delegate_method(record.iterator, "throw")? {
+                Some(method) => self.async_delegate_call(
+                    method,
+                    record.iterator,
+                    value,
+                    AsyncGeneratorBuiltin::Throw,
+                    TAG_NORMAL,
+                ),
+                None => self.async_delegate_close(record.iterator),
+            },
+            Some(TAG_RETURN) => match self.delegate_method(record.iterator, "return")? {
+                Some(method) => self.async_delegate_call(
+                    method,
+                    record.iterator,
+                    value,
+                    AsyncGeneratorBuiltin::Return,
+                    TAG_RETURN,
+                ),
+                // 8.c.iii: the code at `t` awaits received.[[Value]] and returns it.
+                None => {
+                    self.drop_entries(3)?;
+                    self.push_value(value)?;
+                    self.push_entry(Entry::Tag(TAG_RETURN))?;
+                    self.top_frame()?.pc = usize::try_from(target).unwrap_or(usize::MAX);
+                    Ok(Flow::Next)
+                }
+            },
+            _ => Err(self.fault()),
+        }
+    }
+
+    /// Step 8.b.iii.3: AsyncIteratorClose(iteratorRecord, NormalCompletion(empty))
+    /// (`#sec-asynciteratorclose`) of the record on the stack, whose iterator has no `throw`:
+    /// GetMethod(iterator, "return"); `undefined` gives the `TypeError` of step 8.b.iii.6 at
+    /// once; a method is called with no argument and `[v, tag]` is replaced by `[TAG_THROW, r,
+    /// undefined]`, so the code awaits `r` (a rejection thrown there, steps 4 and 5 of the
+    /// close) and `JumpIfDelegateDone` ends with the `TypeError` (step 8 of the close, or step
+    /// 8.b.iii.6). A throw of either leaves the record to the handler, which does not close it
+    /// again.
+    fn async_delegate_close(&mut self, iterator: ObjectRef) -> Completion<Flow> {
+        let Some(method) = self.delegate_method(iterator, "return")? else {
+            return Err(self.throw_error(
+                ErrorKind::TypeError,
+                "the iterator of yield* has no throw method",
+            ));
+        };
+        let result = self.call_value(method, Value::Object(iterator), &[])?;
+        self.drop_entries(2)?;
+        self.push_entry(Entry::Tag(TAG_THROW))?;
+        self.push_value(result)?;
+        self.push_value(Value::Undefined)?;
+        Ok(Flow::Next)
+    }
+
+    /// The call of `method` with the iterator as the this value and the received value `value`
+    /// (steps 8.a.i, 8.b.ii.1, 8.c.iv), or, for `%AsyncGeneratorPrototype%.<which>` of any realm
+    /// and an async generator object, the request given in the loop
+    /// ([`Agent::async_delegate_in_loop`]). `[v, tag]` on top is replaced by `[k, r,
+    /// undefined]` after a call: a call of any other async iterator is a re-entry that returns
+    /// before the delegating frame awaits (item 6).
+    fn async_delegate_call(
+        &mut self,
+        method: Value,
+        iterator: ObjectRef,
+        value: Value,
+        which: AsyncGeneratorBuiltin,
+        kind: u32,
+    ) -> Completion<Flow> {
+        if let Some(realm) = self.async_generator_method_realm(method, which)?
+            && self.is_async_generator(iterator)?
+        {
+            return self.async_delegate_in_loop(realm, iterator, value, which, kind);
+        }
+        let result = self.call_value(method, Value::Object(iterator), &[value])?;
+        self.drop_entries(2)?;
+        self.push_entry(Entry::Tag(kind))?;
+        self.push_value(result)?;
+        self.push_value(Value::Undefined)?;
+        Ok(Flow::Next)
+    }
+
+    /// The [[Realm]] of `method` when it is `%AsyncGeneratorPrototype%.<which>` of a realm of
+    /// the agent (`Behaviour::Builtin`, `object/builtin_function.rs`); `None` for any other value.
+    fn async_generator_method_realm(
+        &mut self,
+        method: Value,
+        which: AsyncGeneratorBuiltin,
+    ) -> Completion<Option<Handle>> {
+        let Value::Object(function) = method else {
+            return Ok(None);
+        };
+        Ok(match &self.engine_object(function)?.kind {
+            ObjectKind::BuiltinFunction(builtin)
+                if matches!(
+                    builtin.behaviour,
+                    Behaviour::Builtin(BuiltinId::AsyncGenerator(id)) if id == which
+                ) =>
+            {
+                builtin.realm
+            }
+            _ => None,
+        })
+    }
+
+    /// What `%AsyncGeneratorPrototype%.<which>` of `realm` does with the async generator
+    /// `generator` and `value`, in the loop (item 6): `[v, tag]` on top is replaced by the tag
+    /// `k` and the promise of a new capability made in `realm` as the builtin makes it; then the
+    /// builtin's steps after its step 2 (`Agent::async_generator_steps`): AsyncGeneratorValidate
+    /// with a rejection, and, when the generator is suspended at its start or at a `yield`, the
+    /// checks of a resumption (item 4; a refusal rejects the promise) and its move, the request
+    /// queued. A resumption's frame runs above this one on this run loop and hands `undefined`
+    /// over as it leaves the frame stack; otherwise the request was queued or settled and
+    /// `undefined` is pushed here. Either way the code drops it and awaits the promise. `value`
+    /// and the resolving functions are kept while they are in no frame and no queue. Every way
+    /// out but the pushed frame makes the delegating frame's realm the current realm again; the
+    /// frame pushed hands it back as it suspends or returns.
+    fn async_delegate_in_loop(
+        &mut self,
+        realm: Handle,
+        generator: ObjectRef,
+        value: Value,
+        which: AsyncGeneratorBuiltin,
+        kind: u32,
+    ) -> Completion<Flow> {
+        let own = self.top_frame()?.realm;
+        self.drop_entries(2)?;
+        self.push_entry(Entry::Tag(kind))?;
+        let mark = self.keep(value);
+        self.set_realm_slot(Some(realm));
+        let tag = match which {
+            AsyncGeneratorBuiltin::Throw => TAG_THROW,
+            AsyncGeneratorBuiltin::Return => TAG_RETURN,
+            _ => TAG_NORMAL,
+        };
+        let pushed = self.async_delegate_request(generator, value, tag);
+        self.release(mark);
+        if !matches!(pushed, Ok(true)) {
+            self.set_realm_slot(Some(own));
+        }
+        pushed.map(|_| Flow::Next)
+    }
+
+    /// The request of [`Agent::async_delegate_in_loop`]: its promise pushed, then the steps;
+    /// `true` when a resumption's frame was pushed.
+    fn async_delegate_request(
+        &mut self,
+        generator: ObjectRef,
+        value: Value,
+        tag: u32,
+    ) -> Completion<bool> {
+        let capability = self.async_generator_capability()?;
+        self.push_value(Value::Object(capability.promise))?;
+        let mark = self.keep(Value::Object(capability.resolve));
+        self.keep(Value::Object(capability.reject));
+        let resumption =
+            self.async_generator_steps(Value::Object(generator), value, tag, capability);
+        self.release(mark);
+        if resumption?.is_some() {
+            return Ok(true);
+        }
+        self.push_value(Value::Undefined)?;
+        Ok(false)
+    }
+
+    /// `AsyncDelegateYield(s)`: IteratorValue(r) (`#sec-iteratorvalue`) of the awaited inner
+    /// result `r` on top, then AsyncGeneratorYield of it (step 8.a.vi, with no `await` of the
+    /// value) by the async generator in local slot `s`, as `AsyncGeneratorYield(s)` does; `k` and
+    /// `r` leave the stack first, so the frame continues or suspends with the record on top.
+    #[inline(never)]
+    pub(super) fn async_delegate_yield(&mut self, slot: u32) -> Completion<Flow> {
+        let Value::Object(result) = self.peek_value(0)? else {
+            return Err(self.fault());
+        };
+        let value = self.iterator_value(result)?;
+        self.drop_entries(2)?;
+        self.push_value(value)?;
+        self.async_generator_yield(slot)
     }
 }
