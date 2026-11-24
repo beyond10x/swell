@@ -176,6 +176,9 @@ Every number below comes from the gate, `task check`, on the released commit.
 - `HOST-203` has a test.
 - `HOST-204`, `HOST-205` and `HOST-206` have a test.
 - `HOST-207` and `HOST-208` have a test. No requirement is pending for the tenth slice.
+- `HOST-147` no longer names a `Map`: two processes with the same seeds print the same
+  `Math.random()` values and the same key order of an object. The key order of a `Map` is the
+  new requirement `HOST-214`, pending for the ninth slice.
 - The model of the interface (`spec/`) states the microtask checkpoint with its answers at the
   step budget and at an interrupt, and a job that will not run to its end (`Abandoned`). Two
   scenarios are new: a promise job runs at the next checkpoint and not before, and a rejection

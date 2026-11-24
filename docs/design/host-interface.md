@@ -363,11 +363,13 @@ object (decision 15) that draws on the host's own randomness; it is not an engin
 
 **HOST-146** (swell:D3) `Agent::new` is the only function of the interface that takes `Seeds`, and no other function, read or hook takes or returns seed or random bytes, which a scan of the `swell` crate's public items in the gate checks. [slice 1]
 
-**HOST-147** (swell:D3) Two processes that each create an agent with the same `Seeds` and run the same script, printing 1,000 `Math.random()` values and the key order of a `Map` and an object of 10,000 keys each, print the same bytes, which a test that starts two child processes checks: the engine reads no randomness but its seeds. [slice 4]
+**HOST-147** (swell:D3) Two processes that each create an agent with the same `Seeds` and run the same script, printing 1,000 `Math.random()` values and the key order of an object of 10,000 keys, print the same bytes, which a test that starts two child processes checks: the engine reads no randomness but its seeds. [slice 4]
 
 **HOST-212** (ecma262:sec-math.random) Each of the first 100,000 values of `Math.random()` in a realm is a Number in [0, 1) with positive sign (`Object.is(x, -0)` is false) and `x * 2 ** 53` is an integer. [slice 4]
 
 **HOST-213** (swell:D3) In two agents with the same `random_seed` that each create two realms, the first 64 values of `Math.random()` of the second realm are equal bit for bit between the agents and differ as sequences from those of the first realm of either, even when one agent calls the second realm's function before the first realm's and the other after it: a realm's stream is its creation index, not the order of calls. [slice 4]
+
+**HOST-214** (swell:D3) Two processes that each create an agent with the same `Seeds` and run the same script, printing the key order of a `Map` of 10,000 keys, print the same bytes, which a test that starts two child processes checks. [slice 9]
 
 ## 4. Values at the boundary
 

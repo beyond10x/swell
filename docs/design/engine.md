@@ -1859,6 +1859,13 @@ does not bound the forms, since they are not Strings.
   `str::parse::<f64>`, which rounds to nearest, ties to even (`dec2flt/mod.rs`, lines 9 to 13).
   ECMA-262 allows replacing digits after the 20th with 0 for radix 10; swell does not, so the
   result is the correctly rounded one.
+- **parseInt for a radix other than 10** (decision 6, beside "Parsing"). Radix 10 converts the
+  run of digits by `str::parse::<f64>`, correctly rounded, as a literal. Radix 2, 4, 8, 16 and
+  32 convert the run exactly and round once to nearest, ties to even (the leading 128 bits of
+  the value in a `u128`, the lower digits as one sticky bit, the shift as the exponent). Every
+  other radix accumulates `acc * radix + digit` in `f64`, exact below 2^53 and an approximation
+  after, as ECMA-262 19.2.5 step 16 allows; IEEE 754 multiplication and addition give the same
+  result on every platform.
 - **`BigInt`** is written here: 64-bit limbs with 128-bit intermediates (corrected on 2026-11-24
   from 32-bit limbs with 64-bit intermediates: the unsigned type slice 4 takes from
   `to_string.rs` has 64-bit limbs, and one type serves slices 4 and 12; "Big integers in slice
@@ -1986,22 +1993,34 @@ does not bound the forms, since they are not Strings.
     `cos(0)` and `cosh(0)` are 1, `acos(1)` is +0, `exp(0)` is 1, `tanh(±∞)` is ±1); beside
     them `log2(2^k)`, `log10(10^n)` for n 0 to 22, `cbrt` of a perfect cube, `hypot(3, 4)` and
     every `pow` whose result is exactly a Number.
-  - How a test holds the bound with no second implementation. `data/math/reference.txt` is
-    committed. One line holds the function, the bits of the argument or arguments (16 hex
-    digits each) and the bits of the two Numbers that enclose the exact result (equal when it
-    is a Number). About 9,000 lines. The test (`crates/num/tests/math.rs`, a module of the
-    crate's one test binary) holds group A to "one of the two", group B to a distance of 2 ulp
-    from the nearer, and takes under a second. The tool is not a dependency of the build or of
-    any test: no program of it is in the repository. This follows the vendored-data half of
-    decision 8 (a file under `data/` with its source stated and its SHA-256 listed in
-    `data/math/SOURCE`, checked by a task `math-data-check` on the model of
-    `unicode-data-check`) and not its generator half: nothing in the repository derives the
-    file, since that would be a second implementation of every function at test time.
+  - How a test holds the bound with no second implementation. The reference data is committed
+    under `data/math/`. One line holds the function, the bits of the argument or arguments (16
+    hex digits each) and the bits of the two Numbers that enclose the exact result (equal when
+    it is a Number). About 9,000 lines in all. A test holds group A to "one of the two", group
+    B to a distance of 2 ulp from the nearer, and each test file takes under a second. The
+    tool is not a dependency of the build or of any test: no program of it is in the
+    repository. This follows the vendored-data half of decision 8 (a file under `data/` with
+    its source stated and its SHA-256 listed in `data/math/SOURCE`, checked by a task
+    `math-data-check` on the model of `unicode-data-check`) and not its generator half:
+    nothing in the repository derives the files, since that would be a second implementation of
+    every function at test time.
+  - **Reference data of Math** (decision 6, in the paragraph "How a test holds the bound with
+    no second implementation", in place of a single file and its one test). Each of the three
+    stories that write `Math` functions in `swell-num` commits its own reference file, in the
+    line format and by the procedure of "The tool that makes the lines":
+    `data/math/reference-hypot.txt` (`story:swell-num-math-double-double`: the lines of `hypot`,
+    the only function it writes), `data/math/reference-exp-log.txt`
+    (`story:swell-num-math-exp-and-log`) and `data/math/reference-trig.txt`
+    (`story:swell-num-math-trigonometry`). Each file has one line `<sha256>  <file>` in
+    `data/math/SOURCE`, which `math-data-check` reads, and is read by the test file of its story
+    (`crates/num/tests/math_dd.rs`, `math_exp_log.rs`, `math_trig.rs`, modules of the crate's
+    one test binary).
   - The tool that makes the lines (added on 2026-11-24): POSIX `bc` run as `bc -l` (GNU bc
     1.08.2 on the host that made the file), driven by a POSIX `sh` script that is run once
     outside the repository and is not committed; no other language and no third-party crate. The header of
-    `reference.txt` and `data/math/SOURCE` name the tool and its version and say the procedure
-    in words, which is this one, so that a reader can make any line again with `bc -l` alone.
+    each reference file and `data/math/SOURCE` name the tool and its version and say the
+    procedure in words, which is this one, so that a reader can make any line again with `bc -l`
+    alone.
     1. Argument. The bits are read with `ibase=16` as one integer; sign, biased exponent and
        the 52 stored bits give an integer mantissa m and a binary exponent q, and the argument is
        m × 2^q, a dyadic rational that `bc` holds exactly as long as `scale` is at least the
@@ -2345,9 +2364,9 @@ does not bound the forms, since they are not Strings.
 
   DD, MM, HH, mm and ss out of their ranges, a month name or weekday name not in the tables, a
   second space, a missing element and any extra code unit after the last element are NaN. Not
-  accepted, so NaN: the forms `toDateString` and `toTimeString` produce, and what
-  `toLocaleString` and its two siblings produce (21.4.3.2 leaves that to the implementation),
-  unless a later decision makes a `toLocale*` method print one of the three forms. An expanded
+  accepted, so NaN: the forms `toDateString` and `toTimeString` produce, and so what
+  `toLocaleDateString` and `toLocaleTimeString` produce, which are those forms (the next
+  bullet); what `toLocaleString` produces is the second form and is accepted. An expanded
   year whose instant is outside the range is NaN with no fallback (`sec-expanded-years`), and
   the fallback of 21.4.3.2 is not taken. The work: one pass over the
   String with no backtracking, charged as every String operation is (decision 3): a String of up
@@ -2355,6 +2374,14 @@ does not bound the forms, since they are not Strings.
   the first is read, so the name of the second form, the only part without a length bound, is
   paid for by its length; the date-time form without an offset adds the steps of its hook
   calls.
+- **The text of toLocale*String** (decision 6, beside the `Date.parse` bullet).
+  `Number.prototype.toLocaleString` gives the text of `Number.prototype.toString()` of the same
+  Number, and `Date.prototype.toLocaleString`, `toLocaleDateString` and `toLocaleTimeString`
+  give the text of `toString`, `toDateString` and `toTimeString` of the same Date, each through
+  the same one conversion; there is no locale behaviour (`Intl` is excluded). `Date.parse` reads
+  the text of `toString`, `toUTCString` and `toISOString`, so `Date.parse(d.toLocaleString())`
+  is `d` to the second; it answers NaN for the text of `toDateString`, `toTimeString`,
+  `toLocaleDateString` and `toLocaleTimeString`.
 
 ## 7. Regular expressions
 
