@@ -24,6 +24,7 @@ mod builtins_json;
 mod builtins_json_parse;
 mod builtins_math;
 mod builtins_number;
+mod builtins_number_format;
 mod builtins_object;
 mod builtins_object_enumeration;
 mod builtins_object_from_entries;

@@ -14,10 +14,13 @@
 //! Slice 2 takes the other radices of [`to_string`] early, every radix from 2 to 36, for
 //! `Number.prototype.toString` (`story:number-boolean-and-global-functions-early`).
 //!
-//! Slice 4 adds `radix.rs` (reading a string in a radix, for `parseInt` and `parseFloat`),
-//! `math.rs` and `random.rs`; slice 12 adds `bigint.rs`.
+//! Slice 4 adds `format.rs` (the digits of `toFixed`, `toExponential` and `toPrecision`),
+//! `math.rs`, `nat.rs` (the exact unsigned integer type), `radix.rs` (reading a string in a
+//! radix, for `parseInt` and `parseFloat`) and `random.rs`; slice 12 adds `bigint.rs`.
 
 pub mod date;
+pub mod format;
 pub mod literal;
+mod nat;
 pub mod siphash;
 pub mod to_string;
