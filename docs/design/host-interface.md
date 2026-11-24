@@ -2049,7 +2049,7 @@ then the mechanism.
 
 **HOST-210** (ecma262:sec-utc-t) A host whose `get_named_time_zone_epoch_nanoseconds` answers the empty list for every local time makes `new Date(2020, 0, 1).getTime()` answer NaN after exactly 31 calls of zone hooks (one of `system_time_zone_identifier`, 30 of `get_named_time_zone_epoch_nanoseconds`, none of `get_named_time_zone_offset_nanoseconds`) and throws no exception. [slice 4]
 
-**HOST-211** (swell:D17) Every call of a clock or time zone hook is charged one step before it is made: `new Date(0).getHours()` calls `system_time_zone_identifier` once and then `get_named_time_zone_offset_nanoseconds` once, `last_entry_steps()` after it reads 2 more than after `new Date(0).getUTCHours()`, and with `steps_per_entry` set one below that reading the call ends in `Terminated(StepBudget)` before the second hook is called. [slice 4]
+**HOST-211** (swell:D17) Every call of a clock or time zone hook is charged one step before it is made: `new Date(0).getHours()` calls `system_time_zone_identifier` once and then `get_named_time_zone_offset_nanoseconds` once, `last_entry_steps()` after it reads 2 more than after `new Date(0).getUTCHours()`, and with `steps_per_entry` set to the step charged before the call of `system_time_zone_identifier` the call ends in `Terminated(StepBudget)` after that hook is called and before `get_named_time_zone_offset_nanoseconds` is called, and with it set one step lower it ends before either hook is called. [slice 4]
 
 ## 18. Collection and weak references
 

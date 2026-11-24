@@ -124,8 +124,8 @@ HOST-123 pending slice 14
 HOST-124 test swell::hooks::host_124_*
 HOST-125 test swell::date_clock::host_125_date_now_calls_the_clock_hook_once_and_floors_to_milliseconds
 HOST-126 test swell::date_clock::host_126_a_clock_answer_out_of_range_is_clamped
-HOST-127 pending slice 4
-HOST-128 pending slice 4
+HOST-127 test swell::date_text::host_127_with_the_provided_zone_methods_get_timezone_offset_is_zero_and_to_string_contains_gmt_0000
+HOST-128 test swell::date_zone::host_128_an_offset_of_one_hour_makes_get_hours_answer_one
 HOST-129 test swell::misuse::host_129_collect_runs_no_code_and_calls_no_hook
 HOST-130 pending slice 16
 HOST-131 pending slice 16
@@ -206,9 +206,9 @@ HOST-205 test swell::async_generators::host_205_an_async_generator_suspended_whe
 HOST-206 test swell::async_generators::host_206_requests_are_charged_until_the_generator_is_freed_and_bounded_by_the_memory_budget
 HOST-207 test swell::builtins_array_from_async::host_207_an_await_of_from_async_goes_through_the_hooks_of_an_await
 HOST-208 test swell::builtins_array_from_async::host_208_a_from_async_cut_by_a_termination_leaves_its_promise_pending_for_good
-HOST-209 pending slice 4
-HOST-210 pending slice 4
-HOST-211 pending slice 4
+HOST-209 test swell::date_zone::host_209_an_offset_out_of_range_is_clamped
+HOST-210 test swell::date_zone::host_210_a_host_with_no_instant_for_any_local_time_gets_nan_after_31_calls
+HOST-211 test swell::date_zone::host_211_every_zone_hook_call_is_charged_one_step_before_it_is_made
 HOST-212 pending slice 4
 HOST-213 pending slice 4
 HOST-214 pending slice 9
