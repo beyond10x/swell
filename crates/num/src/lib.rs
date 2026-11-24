@@ -19,5 +19,6 @@
 
 pub mod date;
 pub mod literal;
+pub mod math;
 pub mod siphash;
 pub mod to_string;

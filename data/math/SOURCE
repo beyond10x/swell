@@ -1,0 +1,9 @@
+# The reference data of Math (docs/design/engine.md, decision 6, "Reference data of Math"),
+# read by the tests of swell-num.
+# Each file was made once by GNU bc 1.08.2, run as bc -l, driven by a POSIX sh script that was
+# run outside the repository and is not committed, by the procedure of the design's "The tool
+# that makes the lines", steps 1 to 6; the header of each file says the procedure for it.
+# One line per data file, "<sha256>  <file>", as sha256sum writes it. The task math-data-check
+# (taskfiles/math-data.yml) compares each and refuses a file without a line; it regenerates
+# nothing.
+4c66a99445752c3fde9af1e57a7515a843a340b2ece2b3705c7d63f1f22f097d  reference-hypot.txt
