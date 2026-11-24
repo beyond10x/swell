@@ -28,14 +28,22 @@
 //! without it: its ranges and property escapes are tested against the characters of the
 //! canonical value of a character when the class is run, so the compile step builds no
 //! closure and its work stays linear in the pattern, also for many classes of wide ranges.
+//!
+//! Under `v` a class, and a class escape outside one, is [`Inst::SetClass`]: its operations are
+//! copied in their order (`class_set.rs`), each operand of characters and ranges sorted and
+//! joined, each string of `\q{...}` copied, each property and property of strings named. No set
+//! is built at compile, so the work stays linear in the pattern here too.
 
 use std::fmt;
 
 use swell_unicode::Property;
 
-use crate::ast::{Assertion, ClassEscape, ClassItem, List, Look, Name, Node, NodeId, Pattern};
+use crate::ast::{
+    Assertion, ClassEscape, ClassItem, ClassSetOp, List, Look, Name, Node, NodeId, Pattern,
+};
 use crate::budget::{Budget, Meter, Stop};
 use crate::canonicalize::{canonicalize, has_no_other_case};
+use crate::class_set::{SetBounds, SetClass, SetOp};
 use crate::program::{ClassSet, Inst, MAX_CODE_POINT, Program, UNPATCHED};
 
 /// A construct CompilePattern refuses until the story that brings it: none since
@@ -67,8 +75,7 @@ impl CompileError {
         matches!(self, CompileError::Refused(_))
     }
 
-    /// The message: for a refusal that of the `SyntaxError`, `<construct> is not supported
-    /// before slice 5`.
+    /// The message: that of the stop (no refusal is left to word).
     pub fn message(&self) -> String {
         self.to_string()
     }
@@ -190,6 +197,10 @@ fn build(pattern: &Pattern, m: &mut Meter<'_>) -> Result<Program, CompileError> 
         ranges: Vec::new(),
         classes: Vec::new(),
         properties: Vec::new(),
+        set_classes: Vec::new(),
+        set_ops: Vec::new(),
+        points: Vec::new(),
+        set_bounds: SetBounds::default(),
         named: Vec::new(),
         spans: Vec::new(),
         tasks: Vec::new(),
@@ -204,6 +215,10 @@ fn build(pattern: &Pattern, m: &mut Meter<'_>) -> Result<Program, CompileError> 
         ranges,
         classes,
         properties,
+        set_classes,
+        set_ops,
+        points,
+        set_bounds,
         named,
         spans,
         tasks,
@@ -225,6 +240,10 @@ fn build(pattern: &Pattern, m: &mut Meter<'_>) -> Result<Program, CompileError> 
         ranges,
         classes,
         properties,
+        set_classes,
+        set_ops,
+        points,
+        set_bounds,
         named,
         names,
         text,
@@ -244,6 +263,10 @@ struct Compiler<'p, 'm, 'b> {
     ranges: Vec<(u32, u32)>,
     classes: Vec<ClassSet>,
     properties: Vec<(Property, bool)>,
+    set_classes: Vec<SetClass>,
+    set_ops: Vec<SetOp>,
+    points: Vec<u32>,
+    set_bounds: SetBounds,
     named: Vec<u32>,
     spans: Vec<Span>,
     tasks: Vec<Task>,
@@ -494,6 +517,10 @@ impl Compiler<'_, '_, '_> {
                 let class = self.class(negated, pattern.class_items(items), mode.ignore_case)?;
                 self.emit(Inst::Class { class, back })?;
             }
+            Node::ClassSet { ops } => {
+                let class = self.set_class(ops, mode.ignore_case)?;
+                self.emit(Inst::SetClass { class, back })?;
+            }
             Node::Group { number, body, .. } => {
                 // Inside a lookbehind the end of the group is reached first.
                 let start = number.saturating_mul(2);
@@ -652,6 +679,16 @@ impl Compiler<'_, '_, '_> {
                 }
             }
         }
+        set.len = self.join_ranges(start)?;
+        set.properties_len = index32(self.properties.len().saturating_sub(first_property))?;
+        let number = index32(self.classes.len())?;
+        self.m.push(&mut self.classes, set)?;
+        Ok(number)
+    }
+
+    /// The ranges from `start` on sorted and joined where they meet, n log n for n ranges;
+    /// their count.
+    fn join_ranges(&mut self, start: usize) -> Result<u32, Stop> {
         let own = self.ranges.get_mut(start..).unwrap_or(&mut []);
         own.sort_unstable();
         // Join in place: `kept` ranges are final, each later one joins the last or follows it.
@@ -671,10 +708,116 @@ impl Compiler<'_, '_, '_> {
             kept += 1;
         }
         self.ranges.truncate(start.saturating_add(kept));
-        set.len = index32(kept)?;
-        set.properties_len = index32(self.properties.len().saturating_sub(first_property))?;
-        let number = index32(self.classes.len())?;
-        self.m.push(&mut self.classes, set)?;
+        index32(kept)
+    }
+
+    /// A class under `v` of the operations `ops` (`class_set.rs`): each operand of characters
+    /// and ranges as its ranges sorted and joined, `\d` and `\w` as their ranges (under `i` and
+    /// `v` the WordCharacters of `i`), `\s` and each property named, each property of strings
+    /// named, each string of `\q{...}` copied; no set is built. The operations keep their
+    /// order, so the work is linear in the class but for the sort of the ranges of an operand.
+    /// Its number.
+    fn set_class(&mut self, ops: List, fold: bool) -> Result<u32, Stop> {
+        let pattern = self.pattern;
+        let start = index32(self.set_ops.len())?;
+        let mut operands = 0u32;
+        let mut tries = 0u32;
+        let mut strings = 0u32;
+        let mut candidates = 1u32;
+        let mut depth = 0u32;
+        let mut deepest = 0u32;
+        let mut may_hold_strings = false;
+        for &op in pattern.class_set_ops(ops) {
+            self.m.visit()?;
+            let made = match op {
+                ClassSetOp::Items { items, negated } => {
+                    let first = self.ranges.len();
+                    for &item in pattern.class_items(items) {
+                        self.m.visit()?;
+                        match item {
+                            ClassItem::Character(c) => self.range(c, c)?,
+                            ClassItem::Range(a, b) => self.range(a, b)?,
+                            ClassItem::Escape(_) => {}
+                        }
+                    }
+                    SetOp::Ranges {
+                        start: index32(first)?,
+                        len: self.join_ranges(first)?,
+                        negated,
+                    }
+                }
+                ClassSetOp::Escape { escape, negated } => match escape {
+                    ClassEscape::Space => SetOp::Space { negated },
+                    ClassEscape::NotSpace => SetOp::Space { negated: !negated },
+                    ClassEscape::Property {
+                        property,
+                        negated: own,
+                    } => SetOp::Property {
+                        property,
+                        negated: negated != own,
+                    },
+                    other => {
+                        let first = self.ranges.len();
+                        for &(a, b) in escape_ranges(other, self.unicode && fold) {
+                            self.range(a, b)?;
+                        }
+                        SetOp::Ranges {
+                            start: index32(first)?,
+                            len: self.join_ranges(first)?,
+                            negated,
+                        }
+                    }
+                },
+                ClassSetOp::Strings(property) => {
+                    may_hold_strings = true;
+                    let lookups = index32(property.longest().saturating_sub(1))?;
+                    tries = tries.saturating_add(lookups);
+                    candidates = candidates.saturating_add(lookups);
+                    SetOp::Strings(property)
+                }
+                ClassSetOp::String(list) => {
+                    may_hold_strings = true;
+                    let string = pattern.class_string(list);
+                    tries = tries.saturating_add(index32(string.len().max(1))?);
+                    strings = strings.saturating_add(1);
+                    candidates = candidates.saturating_add(1);
+                    let first = self.points.len();
+                    self.m.grow_by(&mut self.points, string.len())?;
+                    self.points.extend_from_slice(string);
+                    SetOp::String {
+                        start: index32(first)?,
+                        len: index32(string.len())?,
+                    }
+                }
+                ClassSetOp::Union => SetOp::Union,
+                ClassSetOp::Intersection => SetOp::Intersection,
+                ClassSetOp::Subtraction => SetOp::Subtraction,
+                ClassSetOp::Complement => SetOp::Complement,
+            };
+            if made.is_operand() {
+                operands = operands.saturating_add(1);
+                depth = depth.saturating_add(1);
+                deepest = deepest.max(depth);
+            } else if made != SetOp::Complement {
+                depth = depth.saturating_sub(1);
+            }
+            self.m.push(&mut self.set_ops, made)?;
+        }
+        let len = index32(self.set_ops.len())?.saturating_sub(start);
+        let bounds = &mut self.set_bounds;
+        bounds.depth = bounds.depth.max(deepest);
+        bounds.strings = bounds.strings.max(strings);
+        bounds.candidates = bounds.candidates.max(candidates);
+        let class = SetClass {
+            start,
+            len,
+            operands,
+            tries,
+            strings: may_hold_strings,
+            fold,
+        };
+        let number = index32(self.set_classes.len())?;
+        self.m.push(&mut self.set_classes, class)?;
         Ok(number)
     }
 

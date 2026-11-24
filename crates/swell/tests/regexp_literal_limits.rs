@@ -1,12 +1,11 @@
 //! The pattern of a regular expression literal checked at parse through the host interface
 //! (`docs/design/engine.md`, decision 7, "No Rust recursion in the parser and the compiler of a
-//! pattern" and "Refusals until the later stories of slice 5";
-//! `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`): a
-//! pattern nested deeper than `parser_nesting` is the `SyntaxError` naming the limit, an early
+//! pattern"; `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`):
+//! a pattern nested deeper than `parser_nesting` is the `SyntaxError` naming the limit, an early
 //! error of the script through `parse_script` (HOST-142) and a `SyntaxError` the script catches
 //! through `eval` and `Function`; a pattern that is not valid is an early error of the eval
-//! code; and a part of the pattern grammar a later story brings is a refused parse, counted by
-//! `refusals()` (HOST-164). Run also with the feature `collect-every-safe-point`.
+//! code; and no part of the pattern grammar is a refused parse any more, so `refusals()`
+//! (HOST-164) stays 0. Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
 
 use crate::support;
@@ -139,13 +138,12 @@ fn an_invalid_pattern_in_eval_code_throws_a_syntax_error() {
     assert_eq!(agent.refusals(), 0, "a grammar error is no refusal");
 }
 
-/// The part of the pattern grammar a later story of slice 5 brings, the flag `v`, is a refused
-/// parse: `parse_script` answers the refusal alone, `<construct> is not supported before slice
-/// 5`, and `refusals()` moves by 1 (HOST-164); through `eval` the refusal is a `SyntaxError` the
-/// script catches, counted too. A property escape under `u` and a group name outside ASCII parse
-/// and move nothing.
+/// No part of the pattern grammar is refused any more (HOST-164): a literal with the flag `v`,
+/// a property escape under `u` and a group name outside ASCII parse and move nothing; an early
+/// error of `v` is an early error of the script and of the eval code, no refusal; and classes of
+/// `v` nested deeper than `parser_nesting` are the `SyntaxError` naming the limit.
 #[test]
-fn a_refused_pattern_of_a_literal_is_counted_as_a_refused_parse() {
+fn the_patterns_of_slice_5_in_a_literal_are_not_refused() {
     assert_eq!(parse_errors("x = /\\p{L}/u;"), (None, 0));
     assert_eq!(
         parse_errors("x = /\\P{Script=Greek}[\\p{Lu}]/u;"),
@@ -153,26 +151,45 @@ fn a_refused_pattern_of_a_literal_is_counted_as_a_refused_parse() {
     );
     assert_eq!(parse_errors("x = /(?<\u{e9}>a)/;"), (None, 0));
     assert_eq!(parse_errors("x = /(?<\\u{e9}>a)\\k<\u{e9}>/u;"), (None, 0));
+    assert_eq!(parse_errors("x = /[a]/v;"), (None, 0));
     assert_eq!(
-        parse_errors("x = /[a]/v;"),
+        parse_errors("x = /[\\p{L}--[a-z]][\\q{ab|c}&&\\q{c}]\\p{RGI_Emoji}/gv;"),
+        (None, 0)
+    );
+    assert_eq!(
+        parse_errors("x = /[a&&&b]/v;"),
         (
             Some(vec![
-                "class set expressions of the v flag is not supported before slice 5 (1:5)"
-                    .to_string()
+                "a reserved double punctuator in a class (1:5)".to_string()
             ]),
-            1
+            0
         )
     );
+    let deep = format!("x = /{}a{}/v;", "[".repeat(1_001), "]".repeat(1_001));
+    assert_eq!(
+        parse_errors(&deep),
+        (
+            Some(vec![
+                "nesting deeper than parser_nesting (1000) (1:5)".to_string()
+            ]),
+            0
+        )
+    );
+    let deep = format!("x = /{}a{}/v;", "[".repeat(1_000), "]".repeat(1_000));
+    assert_eq!(parse_errors(&deep), (None, 0));
     let mut agent = agent_with(limits()).unwrap();
     let realm = realm(&mut agent);
-    let source = "try { eval(\"/[a]/v\"); } catch (e) { e.name + \": \" + e.message; }";
+    let source = "/[\\q{ab|c}--c]/v.test(\"ab\") && !/^[\\q{ab|c}--c]$/v.test(\"c\")";
+    assert_eq!(
+        eval_text(&mut agent, &realm, source),
+        Outcome::Normal("true".to_string())
+    );
+    let source = "try { eval(\"/[a--]/v\"); } catch (e) { e.name + \": \" + e.message; }";
     assert_eq!(
         eval_text(&mut agent, &realm, source),
         Outcome::Normal(
-            "\"SyntaxError: class set expressions of the v flag is not supported before slice 5 \
-             (1:1)\""
-                .to_string()
+            "\"SyntaxError: a class set operation without its operand (1:1)\"".to_string()
         )
     );
-    assert_eq!(agent.refusals(), 1);
+    assert_eq!(agent.refusals(), 0);
 }

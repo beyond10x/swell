@@ -16,8 +16,8 @@
 //! `regexp/budget.rs`, with the `parser_nesting` of the agent. Any error of the pattern, the
 //! nesting limit included, is a `SyntaxError` of the current realm with the crate's message and
 //! no position after it, never counted. A refusal of the crate (decision 7, "Refusals until the
-//! later stories of slice 5": the flag `v` from
-//! the parse; the compile step refuses nothing) is the same `SyntaxError`, which
+//! later stories of slice 5": none is left since the flag `v` was brought, and neither the
+//! parse nor the compile step refuses anything) would be the same `SyntaxError`, which
 //! the agent counts before it throws ([`Agent::count_refusal`]), caught or not. An error of
 //! ToString or of the flags is thrown before the parse and is not counted. The program the
 //! compile step charged becomes the bytes the object's record owns (`object/regexp.rs`).

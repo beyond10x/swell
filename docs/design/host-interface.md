@@ -1267,16 +1267,17 @@ holds these.
 that brings each, RegExpInitialize (`ecma262:sec-regexpinitialize`), which the `RegExp`
 constructor, the evaluation of a literal and the `String` methods that make a RegExp run,
 refuses one part of the pattern grammar and the flags (`engine.md` decision 7, "Refusals
-until the later stories of slice 5"; section 12, the third form): the flag `v`. A group name
-with a code point outside ASCII was refused until
+until the later stories of slice 5"; section 12, the third form): none is left. The flag `v`
+was refused until `story:regexp-v-flag-class-sets-and-properties-of-strings`, a group name
+with a code point outside ASCII until
 `story:identifiers-and-group-names-outside-ascii`, and the flag `i` and a modifier `i` until
-`story:regexp-case-insensitive-matching-and-modifiers`. That
-refusal is raised while running and is counted like a refused parse. The script sees a
-`SyntaxError` object of the current realm whose `message` is exactly `class set expressions of
-the v flag is not supported before slice 5`, with no position after it; each such throw moves
+`story:regexp-case-insensitive-matching-and-modifiers`. Such a
+refusal was raised while running and counted like a refused parse. The script saw a
+`SyntaxError` object of the current realm whose `message` was exactly `class set expressions of
+the v flag is not supported before slice 5`, with no position after it; each such throw moved
 `refusals()` by 1, caught or not. An error that ToString of the pattern or the flags or the check of the flags
 throws before the parse, a grammar error of the pattern and the nesting limit are not refusals
-and are not counted. In a literal `v` is a refusal of the parse (HOST-164). The methods of `%RegExp.prototype%` keyed by `%Symbol.match%`, `%Symbol.replace%`,
+and are not counted. In a literal `v` was a refusal of the parse (HOST-164). The methods of `%RegExp.prototype%` keyed by `%Symbol.match%`, `%Symbol.replace%`,
 `%Symbol.search%` and `%Symbol.split%` (`ecma262:sec-regexp.prototype-%symbol.match%`,
 `ecma262:sec-regexp.prototype-%symbol.replace%`, `ecma262:sec-regexp.prototype-%symbol.search%`,
 `ecma262:sec-regexp.prototype-%symbol.split%`; `engine.md` decision 7, the same paragraph) refuse

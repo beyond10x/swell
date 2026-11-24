@@ -1520,15 +1520,16 @@ against the limit with its frames inside the stack bound. A pattern counts its l
 so a literal at the limit inside a script at the limit would need the bound twice, and
 `min_stack_bytes()` would double for every host.
 
-**Refusals until the later stories of slice 5.** Added on 2026-11-23 for slice 5. Until the
-story that brings it, the engine refuses one part of the pattern grammar and the flags: the
-flag `v` (`class set expressions of the v flag`), which ParsePattern refuses. A group name with a
+**Refusals until the later stories of slice 5.** Added on 2026-11-23 for slice 5. None is left:
+the flag `v` (`class set expressions of the v flag`) was refused by ParsePattern until
+`story:regexp-v-flag-class-sets-and-properties-of-strings`, which keeps a class under `v` as its
+operations and evaluates it when it is run, building no set at compile. A group name with a
 code point outside ASCII, written or escaped, was refused (`group name outside ASCII`) until
 `story:identifiers-and-group-names-outside-ascii`. CompilePattern refuses nothing: the
 flag `i` and a modifier `i` are matched since
 `story:regexp-case-insensitive-matching-and-modifiers`. The message is exactly `<construct>
 is not supported before slice 5`, which `swell_syntax::message_kind` reads as a refusal. In a
-literal the flag `v` is a refusal of the parse, counted as any refused parse (HOST-164). At
+literal the flag `v` was a refusal of the parse, counted as any refused parse (HOST-164). At
 run time, in RegExpInitialize (`sec-regexpinitialize`: the constructor, RegExpCreate of the
 `String` methods that make a RegExp, and the evaluation of a literal), a refusal is a
 `SyntaxError` of the current realm with that message and no position after it, which the agent
@@ -1555,7 +1556,7 @@ and `story:regexp-symbol-methods-and-string-match-search` defines the methods of
 under the same keys in their place, named `[Symbol.replace]` and `[Symbol.split]` with `length`
 2 as their clauses give, so the property keeps its key and attributes. What `refusals()` still
 counts for `RegExp` are the refusals of RegExpInitialize above (`host-interface.md`, decision
-13, "A refusal raised by `RegExp`", HOST-191): the flag `v`.
+13, "A refusal raised by `RegExp`", HOST-191): none, since the flag `v` is matched.
 
 ## 8. Unicode data
 
@@ -2131,8 +2132,8 @@ from `swell-unicode`. The rule:
   only. Named on 2026-11-23 for slice 5: RegExpInitialize (`sec-regexpinitialize`), and so the
   `RegExp` constructor, the evaluation of a literal and the `String` methods that make a
   RegExp, answers every pattern and flags but the parts of decision 7, "Refusals until the later
-  stories of slice 5" (the flag `v`; the flag or modifier `i` and a group name outside ASCII
-  until their stories), and refuses those with the counted refusal naming slice 5, each
+  stories of slice 5" (the flag `v`, the flag or modifier `i` and a group name outside ASCII,
+  each until its story), and refuses those with the counted refusal naming slice 5, each
   until the story of slice 5 that brings it. Named on 2026-11-23 for slice 5 as well, and no
   longer in this form: `RegExp.prototype [ %Symbol.replace% ]` and `RegExp.prototype [
   %Symbol.split% ]` (`sec-regexp.prototype-%symbol.replace%`,

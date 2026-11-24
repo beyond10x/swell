@@ -15,22 +15,33 @@
 //! escape otherwise. A pattern parsed without [NamedCaptureGroups] that has a group name is
 //! parsed again with it (B.1.2.9, step 3).
 //!
+//! Under `v` (`#sec-patterns` with [+UnicodeSetsMode]) a class is a ClassSetExpression: a
+//! ClassUnion of characters, ranges and operands, a ClassIntersection (`&&`) or a
+//! ClassSubtraction (`--`) of operands, an operand a character, a nested class, a class escape,
+//! `\q{...}` or a property of strings. The class is kept as its operations in postfix order
+//! ([`ClassSetOp`]), linear in its text, with one more explicit stack: one entry per open class,
+//! each class counted against the nesting limit with the open groups. The early errors of
+//! MayContainStrings (`#sec-static-semantics-maycontainstrings`) are decided as each class
+//! closes.
+//!
 //! The parser charges no step; it polls the interrupt before it reads the pattern and then at
 //! least once per 4,096 code units it reads and per 4,096 nodes it makes or visits.
 
+use swell_unicode::StringProperty;
+
 use crate::ast::{
-    Assertion, ClassEscape, ClassItem, List, Look, MODIFIER_I, MODIFIER_M, MODIFIER_S, Modifiers,
-    Name, Node, NodeId, Pattern, Quantifier,
+    Assertion, ClassEscape, ClassItem, ClassSetOp, List, Look, MODIFIER_I, MODIFIER_M, MODIFIER_S,
+    Modifiers, Name, Node, NodeId, Pattern, Quantifier,
 };
 use crate::budget::{Budget, Meter, Stop};
-use crate::early::{self, ClassAtom, Names};
-use crate::error::{ErrorKind, ParseError, PatternError, Refusal};
+use crate::early::{self, ClassAtom, Names, SetOperation};
+use crate::error::{ErrorKind, ParseError, PatternError};
 use crate::flags::Flags;
 
 /// ParsePattern of `pattern`, its code units, with `flags`, and with `nesting_limit` the most
-/// groups, lookarounds and modifier groups open at once (the host value `parser_nesting`), every
-/// growth charged to `budget`: the tree, or one error, or the stop of the budget with everything
-/// credited. The flag `v` is refused until the story that brings it.
+/// groups, lookarounds, modifier groups and, under `v`, classes open at once (the host value
+/// `parser_nesting`), every growth charged to `budget`: the tree, or one error, or the stop of
+/// the budget with everything credited.
 pub fn parse_pattern(
     pattern: &[u16],
     flags: Flags,
@@ -62,12 +73,6 @@ fn parse_counted(
     nesting_limit: u32,
     budget: &mut dyn Budget,
 ) -> Result<(Pattern, u64), ParseError> {
-    if flags.unicode_sets() {
-        return Err(ParseError::Pattern(PatternError::new(
-            ErrorKind::Refused(Refusal::SetsFlag),
-            0,
-        )));
-    }
     let mut m = Meter::new(budget);
     let parsed = parse_with(pattern, flags, nesting_limit, &mut m);
     match (parsed, m.stopped()) {
@@ -234,6 +239,46 @@ enum Reference {
     Name(Name, usize),
 }
 
+/// What a class under `v` is so far: a ClassUnion, a ClassIntersection or a ClassSubtraction,
+/// or not known before its second operand.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SetMode {
+    Unknown,
+    Union,
+    Intersection,
+    Subtraction,
+}
+
+/// An open class under `v`.
+#[derive(Clone, Copy)]
+struct ClassLevel {
+    /// The offset of its `[`.
+    offset: usize,
+    negated: bool,
+    /// Where its operations start in the parser's `set_ops`.
+    ops_start: usize,
+    /// Where its characters and ranges of a ClassUnion start in the parser's `pending`.
+    pending_start: usize,
+    mode: SetMode,
+    /// The operands read: characters and ranges of a union included.
+    operands: u32,
+    /// The operands whose operations are written: a union's characters and ranges are written
+    /// as one operand when it closes.
+    written: u32,
+    /// A ClassSetRange was read.
+    ranged: bool,
+    /// After `&&` or `--`: an operand must follow.
+    expect: bool,
+    /// MayContainStrings of the operands read.
+    may: bool,
+}
+
+/// A property escape `\p{...}` or `\P{...}`: of code points, or under `v` of strings.
+enum PropertyEscape {
+    Points(ClassEscape),
+    Strings(StringProperty),
+}
+
 /// `{n}`, `{n,}` or `{n,m}` as written at the parser's position.
 struct Braced {
     min: u32,
@@ -254,6 +299,8 @@ struct Parser<'p, 'm, 'b> {
     nodes: Vec<Node>,
     lists: Vec<NodeId>,
     items: Vec<ClassItem>,
+    set_ops: Vec<ClassSetOp>,
+    points: Vec<u32>,
     names: Vec<(u32, Name)>,
     text: Vec<u8>,
     groups: u32,
@@ -262,6 +309,8 @@ struct Parser<'p, 'm, 'b> {
     alternatives: Vec<NodeId>,
     declared: Names,
     references: Vec<Reference>,
+    classes: Vec<ClassLevel>,
+    pending: Vec<ClassItem>,
 }
 
 fn index32(n: usize) -> Result<u32, ParseError> {
@@ -302,6 +351,8 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
             nodes: Vec::new(),
             lists: Vec::new(),
             items: Vec::new(),
+            set_ops: Vec::new(),
+            points: Vec::new(),
             names: Vec::new(),
             text: Vec::new(),
             groups: 0,
@@ -310,6 +361,8 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
             alternatives: Vec::new(),
             declared,
             references: Vec::new(),
+            classes: Vec::new(),
+            pending: Vec::new(),
         })
     }
 
@@ -739,6 +792,7 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
                 self.bump(1)?;
                 self.node(Node::Dot)
             }
+            Some(b'[') if self.flags.unicode_sets() => self.class_set(),
             Some(b'[') => self.class(),
             Some(b'\\') => self.atom_escape(),
             Some(b']' | b'}') if self.unicode => {
@@ -772,6 +826,20 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
     /// braces are the early error, as `\p` or `\P` without `{` is an invalid escape. The lookup is
     /// a binary search of sorted names, linear in the name.
     fn property(&mut self, start: usize) -> Result<ClassEscape, ParseError> {
+        match self.property_or_strings(start, false)? {
+            PropertyEscape::Points(escape) => Ok(escape),
+            PropertyEscape::Strings(_) => Err(error(ErrorKind::InvalidPropertyName, start)),
+        }
+    }
+
+    /// [`Parser::property`], and with `strings` (under `v`) a LoneUnicodePropertyNameOrValue
+    /// that names a property of strings (`#table-binary-unicode-properties-of-strings`) too,
+    /// looked up as written. `\P{...}` of one is the early error of MayContainStrings.
+    fn property_or_strings(
+        &mut self,
+        start: usize,
+        strings: bool,
+    ) -> Result<PropertyEscape, ParseError> {
         let negated = self.is(0, b'P');
         if !self.is(1, b'{') {
             return Err(error(ErrorKind::InvalidEscape, start));
@@ -792,16 +860,29 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
                 name_len.saturating_add(value_len).saturating_add(3),
             )
         } else {
-            (
-                swell_unicode::lone_property(name),
-                name_len.saturating_add(2),
-            )
+            let len = name_len.saturating_add(2);
+            let lone = swell_unicode::lone_property(name);
+            if lone.is_none()
+                && strings
+                && self.is(len, b'}')
+                && let Some(property) = swell_unicode::string_property(name)
+            {
+                if negated {
+                    return Err(error(ErrorKind::NegatedStrings, start));
+                }
+                self.bump(len.saturating_add(1))?;
+                return Ok(PropertyEscape::Strings(property));
+            }
+            (lone, len)
         };
         let Some(property) = property.filter(|_| self.is(len, b'}')) else {
             return Err(error(ErrorKind::InvalidPropertyName, start));
         };
         self.bump(len.saturating_add(1))?;
-        Ok(ClassEscape::Property { property, negated })
+        Ok(PropertyEscape::Points(ClassEscape::Property {
+            property,
+            negated,
+        }))
     }
 
     /// The count of ASCII letters, digits and `_` (UnicodePropertyValueCharacter) from `offset`
@@ -829,9 +910,31 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
         let b = ascii(unit);
         if let Some(escape) = b.and_then(Self::class_escape_kind) {
             self.bump(1)?;
+            if self.flags.unicode_sets() {
+                // Under `v` a class escape is a class of its own (CompileAtom, Atom ::
+                // `\` AtomEscape, with CompileToCharSet of the escape).
+                let ops = index32(self.set_ops.len())?;
+                self.set_leaf(escape)?;
+                return self.node(Node::ClassSet {
+                    ops: List { start: ops, len: 1 },
+                });
+            }
             return self.node(Node::Escape(escape));
         }
         match b {
+            Some(b'p' | b'P') if self.flags.unicode_sets() => {
+                let ops = index32(self.set_ops.len())?;
+                match self.property_or_strings(start, true)? {
+                    PropertyEscape::Points(escape) => self.set_leaf(escape)?,
+                    PropertyEscape::Strings(property) => {
+                        self.m
+                            .push(&mut self.set_ops, ClassSetOp::Strings(property))?;
+                    }
+                }
+                self.node(Node::ClassSet {
+                    ops: List { start: ops, len: 1 },
+                })
+            }
             Some(b'p' | b'P') if self.unicode => {
                 let escape = self.property(start)?;
                 self.node(Node::Escape(escape))
@@ -1119,6 +1222,469 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
         }
     }
 
+    // ----- classes under `v` -----
+
+    /// The operation of the class escape `escape` (`\d \D \s \S \w \W \p{...} \P{...}`): the
+    /// escape without its complement, and whether it is one.
+    fn set_leaf(&mut self, escape: ClassEscape) -> Result<(), ParseError> {
+        let (escape, negated) = match escape {
+            ClassEscape::NotDigit => (ClassEscape::Digit, true),
+            ClassEscape::NotSpace => (ClassEscape::Space, true),
+            ClassEscape::NotWord => (ClassEscape::Word, true),
+            ClassEscape::Property { property, negated } => (
+                ClassEscape::Property {
+                    property,
+                    negated: false,
+                },
+                negated,
+            ),
+            other => (other, false),
+        };
+        self.m
+            .push(&mut self.set_ops, ClassSetOp::Escape { escape, negated })?;
+        Ok(())
+    }
+
+    /// CharacterClass[+UnicodeSetsMode] (`#prod-ClassSetExpression`), the parser at its `[`: one
+    /// loop over the class and its nested classes, one entry of `classes` per open class. Each
+    /// operand writes its operations, and the operation that joins it to the operands before it
+    /// follows it; the characters and ranges of a ClassUnion are kept aside and written as one
+    /// operand when it closes.
+    fn class_set(&mut self) -> Result<NodeId, ParseError> {
+        let ops_start = self.set_ops.len();
+        self.open_class_set()?;
+        while let Some(level) = self.classes.last().copied() {
+            let at = self.pos;
+            let Some(unit) = self.at(0) else {
+                let outer = self.classes.first().map_or(at, |level| level.offset);
+                return Err(error(ErrorKind::UnterminatedClass, outer));
+            };
+            match ascii(unit) {
+                Some(b']') => {
+                    self.bump(1)?;
+                    self.close_class_set(level, at)?;
+                }
+                Some(b'[') => {
+                    Self::before_operand(level, at)?;
+                    self.open_class_set()?;
+                }
+                Some(b'&') if self.is(1, b'&') => {
+                    self.set_operation(level, SetMode::Intersection, at)?;
+                }
+                Some(b'-') if self.is(1, b'-') => {
+                    self.set_operation(level, SetMode::Subtraction, at)?;
+                }
+                Some(b'\\')
+                    if self.at(1).and_then(ascii).is_some_and(|b| {
+                        matches!(b, b'q' | b'p' | b'P') || Self::class_escape_kind(b).is_some()
+                    }) =>
+                {
+                    Self::before_operand(level, at)?;
+                    self.set_escape_operand(at)?;
+                }
+                _ => self.set_character_operand(level, at)?,
+            }
+        }
+        let len = index32(self.set_ops.len().saturating_sub(ops_start))?;
+        self.node(Node::ClassSet {
+            ops: List {
+                start: index32(ops_start)?,
+                len,
+            },
+        })
+    }
+
+    /// A `[` under `v`: a new open class, unless the open groups and classes are at the
+    /// nesting limit.
+    fn open_class_set(&mut self) -> Result<(), ParseError> {
+        let start = self.pos;
+        let open = self
+            .levels
+            .len()
+            .saturating_sub(1)
+            .saturating_add(self.classes.len());
+        if open >= self.limit as usize {
+            return Err(error(ErrorKind::Nesting { limit: self.limit }, start));
+        }
+        self.bump(1)?;
+        let negated = self.is(0, b'^');
+        if negated {
+            self.bump(1)?;
+        }
+        self.m.visit()?;
+        let level = ClassLevel {
+            offset: start,
+            negated,
+            ops_start: self.set_ops.len(),
+            pending_start: self.pending.len(),
+            mode: SetMode::Unknown,
+            operands: 0,
+            written: 0,
+            ranged: false,
+            expect: false,
+            may: false,
+        };
+        self.m.push(&mut self.classes, level)?;
+        Ok(())
+    }
+
+    /// An operand at `at` in `level`: after an operand of an intersection or a subtraction only
+    /// `&&`, `--` or `]` may follow.
+    fn before_operand(level: ClassLevel, at: usize) -> Result<(), ParseError> {
+        match level.mode {
+            SetMode::Intersection | SetMode::Subtraction if !level.expect => {
+                Err(error(ErrorKind::MixedClassSetOperations, at))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// The operand just written (its operations at the end of `set_ops`), whose
+    /// MayContainStrings is `may`, joined to the operands before it in the innermost class.
+    fn operand_written(&mut self, may: bool) -> Result<(), ParseError> {
+        let Some(mut level) = self.classes.last().copied() else {
+            return Ok(());
+        };
+        let join = match level.mode {
+            SetMode::Unknown | SetMode::Union => {
+                level.may = if level.operands == 0 {
+                    may
+                } else {
+                    SetOperation::Union.may_contain_strings(level.may, may)
+                };
+                level.operands = level.operands.saturating_add(1);
+                if level.operands >= 2 {
+                    level.mode = SetMode::Union;
+                }
+                (level.written > 0).then_some(ClassSetOp::Union)
+            }
+            SetMode::Intersection => {
+                level.may = SetOperation::Intersection.may_contain_strings(level.may, may);
+                level.operands = level.operands.saturating_add(1);
+                level.expect = false;
+                Some(ClassSetOp::Intersection)
+            }
+            SetMode::Subtraction => {
+                level.may = SetOperation::Subtraction.may_contain_strings(level.may, may);
+                level.operands = level.operands.saturating_add(1);
+                level.expect = false;
+                Some(ClassSetOp::Subtraction)
+            }
+        };
+        level.written = level.written.saturating_add(1);
+        if let Some(op) = join {
+            self.m.push(&mut self.set_ops, op)?;
+        }
+        if let Some(slot) = self.classes.last_mut() {
+            *slot = level;
+        }
+        Ok(())
+    }
+
+    /// The characters and ranges of the union kept aside from `from` on, written as one
+    /// operand of [`ClassSetOp::Items`].
+    fn flush_pending(&mut self, from: usize) -> Result<(), ParseError> {
+        let moved = self.pending.get(from..).unwrap_or(&[]);
+        let start = index32(self.items.len())?;
+        let len = index32(moved.len())?;
+        self.m.grow_by(&mut self.items, moved.len())?;
+        self.items.extend_from_slice(moved);
+        self.pending.truncate(from);
+        self.m.push(
+            &mut self.set_ops,
+            ClassSetOp::Items {
+                items: List { start, len },
+                negated: false,
+            },
+        )?;
+        Ok(())
+    }
+
+    /// `&&` or `--` at `at` in `level` (ClassIntersection, ClassSubtraction): after exactly one
+    /// operand that is no range, or after an operand of the same operation.
+    fn set_operation(
+        &mut self,
+        level: ClassLevel,
+        operation: SetMode,
+        at: usize,
+    ) -> Result<(), ParseError> {
+        let misplaced = if operation == SetMode::Intersection {
+            ErrorKind::ReservedDoublePunctuator
+        } else {
+            ErrorKind::ClassSetSyntaxCharacter
+        };
+        if level.operands == 0 || level.expect {
+            return Err(error(misplaced, at));
+        }
+        let mut level = level;
+        match level.mode {
+            SetMode::Unknown if level.operands == 1 && !level.ranged => {
+                if self.pending.len() > level.pending_start {
+                    self.flush_pending(level.pending_start)?;
+                    level.written = 1;
+                }
+                level.mode = operation;
+            }
+            mode if mode == operation => {}
+            _ => return Err(error(ErrorKind::MixedClassSetOperations, at)),
+        }
+        self.bump(2)?;
+        if operation == SetMode::Intersection && self.is(0, b'&') {
+            return Err(error(ErrorKind::ReservedDoublePunctuator, self.pos));
+        }
+        level.expect = true;
+        if let Some(slot) = self.classes.last_mut() {
+            *slot = level;
+        }
+        Ok(())
+    }
+
+    /// The `]` at `at` of `level`: its union's characters written, the empty class an operand
+    /// of no character, `[^...]` the complement (an early error where MayContainStrings is
+    /// true); the class is an operand of the class around it.
+    fn close_class_set(&mut self, level: ClassLevel, at: usize) -> Result<(), ParseError> {
+        if level.expect {
+            return Err(error(ErrorKind::MissingClassSetOperand, at));
+        }
+        let mut written = level.written;
+        if self.pending.len() > level.pending_start {
+            self.flush_pending(level.pending_start)?;
+            if written > 0 {
+                self.m.push(&mut self.set_ops, ClassSetOp::Union)?;
+            }
+            written = written.saturating_add(1);
+        }
+        if written == 0 {
+            let start = index32(self.items.len())?;
+            self.m.push(
+                &mut self.set_ops,
+                ClassSetOp::Items {
+                    items: List { start, len: 0 },
+                    negated: false,
+                },
+            )?;
+        }
+        if level.negated {
+            if level.may {
+                return Err(error(ErrorKind::NegatedStrings, level.offset));
+            }
+            self.complement(level.ops_start)?;
+        }
+        self.classes.pop();
+        self.operand_written(level.may && !level.negated)
+    }
+
+    /// The complement of the class whose operations start at `start`: an operand of one
+    /// operation takes it as its own flag, and a complement taken twice is none, so a chain of
+    /// `[^[^...]]` adds no operation.
+    fn complement(&mut self, start: usize) -> Result<(), ParseError> {
+        let own = self.set_ops.len().saturating_sub(start);
+        match self.set_ops.last_mut() {
+            Some(ClassSetOp::Items { negated, .. } | ClassSetOp::Escape { negated, .. })
+                if own == 1 =>
+            {
+                *negated = !*negated;
+                Ok(())
+            }
+            Some(ClassSetOp::Complement) => {
+                self.set_ops.pop();
+                Ok(())
+            }
+            _ => {
+                self.m.push(&mut self.set_ops, ClassSetOp::Complement)?;
+                Ok(())
+            }
+        }
+    }
+
+    /// `\q{...}`, `\p{...}`, `\P{...}` or a class escape at `at`, an operand.
+    fn set_escape_operand(&mut self, at: usize) -> Result<(), ParseError> {
+        self.bump(1)?;
+        let b = self.at(0).and_then(ascii);
+        if b == Some(b'q') {
+            if !self.is(1, b'{') {
+                return Err(error(ErrorKind::InvalidEscape, at));
+            }
+            self.bump(2)?;
+            let may = self.class_strings()?;
+            return self.operand_written(may);
+        }
+        if let Some(escape) = b.and_then(Self::class_escape_kind) {
+            self.bump(1)?;
+            self.set_leaf(escape)?;
+            return self.operand_written(false);
+        }
+        match self.property_or_strings(at, true)? {
+            PropertyEscape::Points(escape) => {
+                self.set_leaf(escape)?;
+                self.operand_written(false)
+            }
+            PropertyEscape::Strings(property) => {
+                self.m
+                    .push(&mut self.set_ops, ClassSetOp::Strings(property))?;
+                self.operand_written(true)
+            }
+        }
+    }
+
+    /// ClassStringDisjunction, the parser past `\q{`: each ClassString of no code point or of
+    /// two or more one [`ClassSetOp::String`], those of one code point together one
+    /// [`ClassSetOp::Items`], joined by unions; its MayContainStrings.
+    fn class_strings(&mut self) -> Result<bool, ParseError> {
+        let items_start = self.items.len();
+        let mut written = 0u32;
+        let mut may = false;
+        loop {
+            let points_start = self.points.len();
+            loop {
+                let Some(unit) = self.at(0) else {
+                    let outer = self.classes.first().map_or(self.pos, |level| level.offset);
+                    return Err(error(ErrorKind::UnterminatedClass, outer));
+                };
+                if unit == u16::from(b'|') || unit == u16::from(b'}') {
+                    break;
+                }
+                let c = self.set_character()?;
+                self.m.push(&mut self.points, c)?;
+            }
+            let n = self.points.len().saturating_sub(points_start);
+            if n == 1 {
+                if let Some(c) = self.points.pop() {
+                    self.m.push(&mut self.items, ClassItem::Character(c))?;
+                }
+            } else {
+                may = true;
+                self.m.push(
+                    &mut self.set_ops,
+                    ClassSetOp::String(List {
+                        start: index32(points_start)?,
+                        len: index32(n)?,
+                    }),
+                )?;
+                if written > 0 {
+                    self.m.push(&mut self.set_ops, ClassSetOp::Union)?;
+                }
+                written = written.saturating_add(1);
+            }
+            let bar = self.is(0, b'|');
+            self.bump(1)?;
+            if !bar {
+                break;
+            }
+        }
+        let singles = self.items.len().saturating_sub(items_start);
+        if singles > 0 {
+            self.m.push(
+                &mut self.set_ops,
+                ClassSetOp::Items {
+                    items: List {
+                        start: index32(items_start)?,
+                        len: index32(singles)?,
+                    },
+                    negated: false,
+                },
+            )?;
+            if written > 0 {
+                self.m.push(&mut self.set_ops, ClassSetOp::Union)?;
+            }
+        }
+        Ok(may)
+    }
+
+    /// A ClassSetCharacter at the position, read past: a character that is no
+    /// ClassSetSyntaxCharacter and does not start a ClassSetReservedDoublePunctuator, or `\`
+    /// and a CharacterEscape[+UnicodeMode], a ClassSetReservedPunctuator or `b`.
+    fn set_character(&mut self) -> Result<u32, ParseError> {
+        let at = self.pos;
+        let Some(unit) = self.at(0) else {
+            let outer = self.classes.first().map_or(at, |level| level.offset);
+            return Err(error(ErrorKind::UnterminatedClass, outer));
+        };
+        if unit == u16::from(b'\\') {
+            self.bump(1)?;
+            let Some(next) = self.at(0) else {
+                return Err(error(ErrorKind::TrailingBackslash, at));
+            };
+            return match ascii(next) {
+                Some(b'b') => {
+                    self.bump(1)?;
+                    Ok(0x08)
+                }
+                Some(b) if early::is_class_set_reserved_punctuator(b) => {
+                    self.bump(1)?;
+                    Ok(u32::from(b))
+                }
+                _ => self.character_escape(at, true),
+            };
+        }
+        if let Some(b) = ascii(unit) {
+            if early::is_reserved_double(b) && self.is(1, b) {
+                return Err(error(ErrorKind::ReservedDoublePunctuator, at));
+            }
+            if early::is_class_set_syntax(b) {
+                return Err(error(ErrorKind::ClassSetSyntaxCharacter, at));
+            }
+        }
+        self.read_code_point()
+    }
+
+    /// A ClassSetCharacter at `at` in `level`, an operand: in a union with the characters and
+    /// ranges kept aside, the start of a ClassSetRange where `-` follows; in an intersection or
+    /// a subtraction an operand of its own.
+    fn set_character_operand(&mut self, level: ClassLevel, at: usize) -> Result<(), ParseError> {
+        Self::before_operand(level, at)?;
+        let c = self.set_character()?;
+        let ranged = self.is(0, b'-') && !self.is(1, b'-');
+        if matches!(level.mode, SetMode::Intersection | SetMode::Subtraction) {
+            if ranged {
+                return Err(error(ErrorKind::MixedClassSetOperations, self.pos));
+            }
+            let start = index32(self.items.len())?;
+            self.m.push(&mut self.items, ClassItem::Character(c))?;
+            self.m.push(
+                &mut self.set_ops,
+                ClassSetOp::Items {
+                    items: List { start, len: 1 },
+                    negated: false,
+                },
+            )?;
+            return self.operand_written(false);
+        }
+        let mut level = level;
+        let item = if ranged {
+            let dash = self.pos;
+            self.bump(1)?;
+            let ends = match self.at(0).and_then(ascii) {
+                Some(b']' | b'[') => false,
+                Some(b'\\') => !self.at(1).and_then(ascii).is_some_and(|b| {
+                    matches!(b, b'q' | b'p' | b'P') || Self::class_escape_kind(b).is_some()
+                }),
+                _ => true,
+            };
+            if !ends {
+                return Err(error(ErrorKind::ClassSetSyntaxCharacter, dash));
+            }
+            let d = self.set_character()?;
+            if c > d {
+                return Err(error(ErrorKind::RangeOutOfOrder, at));
+            }
+            level.ranged = true;
+            level.mode = SetMode::Union;
+            ClassItem::Range(c, d)
+        } else {
+            ClassItem::Character(c)
+        };
+        self.m.push(&mut self.pending, item)?;
+        level.operands = level.operands.saturating_add(1);
+        if level.operands >= 2 {
+            level.mode = SetMode::Union;
+        }
+        if let Some(slot) = self.classes.last_mut() {
+            *slot = level;
+        }
+        Ok(())
+    }
+
     // ----- the end -----
 
     /// The early errors that need the whole pattern: a backreference past the count of
@@ -1148,6 +1714,8 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
             nodes,
             lists,
             items,
+            set_ops,
+            points,
             names,
             text,
             groups,
@@ -1156,6 +1724,8 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
             alternatives,
             declared,
             references,
+            classes,
+            pending,
             flags,
             ..
         } = self;
@@ -1163,11 +1733,15 @@ impl<'p, 'm, 'b> Parser<'p, 'm, 'b> {
         m.release(terms);
         m.release(alternatives);
         m.release(references);
+        m.release(classes);
+        m.release(pending);
         declared.release(m);
         Pattern {
             nodes,
             lists,
             items,
+            set_ops,
+            points,
             names,
             text,
             root,

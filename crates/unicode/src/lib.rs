@@ -18,7 +18,9 @@
 //! General_Category, Script, Script_Extensions and the binary properties of ECMA-262's table,
 //! with their names and aliases ([`Property`], [`lone_property`], [`property_value`]), for the
 //! property escapes `\p{...}` and `\P{...}` of `swell-regexp`
-//! (`#sec-runtime-semantics-unicodematchproperty-p`), and [`is_id_start`] and
+//! (`#sec-runtime-semantics-unicodematchproperty-p`); the properties of strings of the emoji
+//! sequence files ([`StringProperty`], [`string_property`], [`LONGEST_STRING`]) for `\p{...}`
+//! under `v`; and [`is_id_start`] and
 //! [`is_id_continue`] for identifiers (`#sec-names-and-keywords`).
 
 mod case;
@@ -36,7 +38,8 @@ pub use normalize::{
     primary_composite, reorder_and_compose,
 };
 pub use property::{
-    Property, PropertyRanges, is_id_continue, is_id_start, lone_property, property_value,
+    LONGEST_STRING, Property, PropertyRanges, StringProperty, is_id_continue, is_id_start,
+    lone_property, property_value, string_property,
 };
 
 /// Whether `c` has the General_Category `Space_Separator` (`Zs`), the code points `WhiteSpace`

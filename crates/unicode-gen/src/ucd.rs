@@ -395,6 +395,69 @@ impl Ucd {
     pub(crate) fn source_name(&self, source: &str) -> String {
         self.name(source)
     }
+
+    /// The elements of `source`, a file of sequences (`emoji/emoji-sequences.txt`,
+    /// `emoji/emoji-zwj-sequences.txt`) of lines `<code points> ; <property> ; <name> # ...`:
+    /// each data line with its number from 1, the property of its second field and its
+    /// element, a range of single code points (`<first>..<last>`, or one code point) or a
+    /// sequence of two code points or more separated by spaces. Any other line is an error that
+    /// names it.
+    pub(crate) fn sequences(&mut self, source: &str) -> Result<Vec<SequenceLine>, String> {
+        let name = self.name(source);
+        let lines = self.data_lines(source)?;
+        let mut read = Vec::with_capacity(lines.len());
+        for (number, data) in lines {
+            let bad = |what: &str| format!("{name}:{number}: {what}: {data:?}");
+            let mut fields = data.split(';');
+            let points = fields.next().unwrap_or_default().trim_ascii();
+            let property = fields
+                .next()
+                .map(str::trim_ascii)
+                .filter(|property| !property.is_empty())
+                .ok_or_else(|| bad("not <code points> ; <property>"))?;
+            let element = if let Some((first, last)) = points.split_once("..") {
+                let first = code_point(first).ok_or_else(|| bad("not a code point"))?;
+                let last = code_point(last).ok_or_else(|| bad("not a code point"))?;
+                if first > last {
+                    return Err(bad("a range whose first code point passes its last"));
+                }
+                Element::Range(first, last)
+            } else {
+                let sequence = points
+                    .split_ascii_whitespace()
+                    .map(code_point)
+                    .collect::<Option<Vec<u32>>>()
+                    .ok_or_else(|| bad("not a code point"))?;
+                match sequence.as_slice() {
+                    [] => return Err(bad("no code point")),
+                    &[point] => Element::Range(point, point),
+                    _ => Element::Sequence(sequence),
+                }
+            };
+            read.push(SequenceLine {
+                line: number,
+                property: property.to_owned(),
+                element,
+            });
+        }
+        Ok(read)
+    }
+}
+
+/// One data line of a file of sequences ([`Ucd::sequences`]).
+pub(crate) struct SequenceLine {
+    /// The number of its line in the file, from 1.
+    pub(crate) line: usize,
+    pub(crate) property: String,
+    pub(crate) element: Element,
+}
+
+/// What a line of a file of sequences gives its property.
+pub(crate) enum Element {
+    /// The single code points from the first to the last, both included.
+    Range(u32, u32),
+    /// One sequence of two code points or more.
+    Sequence(Vec<u32>),
 }
 
 /// A code point written as 4 to 6 hexadecimal digits, at most `10FFFF`.
@@ -416,7 +479,7 @@ pub(crate) fn code_point(text: &str) -> Option<u32> {
 }
 
 /// `ranges` sorted, with overlapping and adjacent ranges joined.
-fn merge(mut ranges: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
+pub(crate) fn merge(mut ranges: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
     ranges.sort_unstable();
     let mut merged: Vec<(u32, u32)> = Vec::with_capacity(ranges.len());
     for (first, last) in ranges {

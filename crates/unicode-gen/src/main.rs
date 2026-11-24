@@ -25,6 +25,7 @@
 
 mod case;
 mod case_folding;
+mod emoji;
 mod normalize;
 mod property;
 mod render;
