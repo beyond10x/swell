@@ -93,7 +93,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   answers `WrongKind`.
 - `HOST-46`, `HOST-100`, `HOST-101` and `HOST-121` have a test.
 
-## [0.8.0] - 2026-11-23
+## [0.8.0] - 2026-11-24
 
 Generator functions run, and a regular expression takes the flag `i`, Unicode property escapes
 and group names outside ASCII: four of the six stories of the seventh delivery slice and
