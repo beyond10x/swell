@@ -27,10 +27,10 @@ use crate::object::ordinary::OrdinaryData;
 use crate::value::{ObjectRef, Realm, RealmRef, SymbolRef, Value};
 use intrinsics::{Intrinsic, Intrinsics};
 
-/// The well-known symbols of slice 6 (`#sec-well-known-symbols`, Table 1): twelve, the seven of
-/// slice 1 and the five `story:symbol-constructor-and-well-known-symbols` adds with the `Symbol`
-/// constructor, whose properties they are (`builtins/symbol.rs`). `%Symbol.asyncIterator%`
-/// comes with slice 10.
+/// The well-known symbols (`#sec-well-known-symbols`, Table 1): thirteen, the seven of slice 1,
+/// the five `story:symbol-constructor-and-well-known-symbols` adds with the `Symbol`
+/// constructor, whose properties they are (`builtins/symbol.rs`), and `%Symbol.asyncIterator%`,
+/// the last, of slice 10 (`story:for-await-and-async-from-sync-iterator`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WellKnown {
     pub(crate) has_instance: SymbolRef,
@@ -57,10 +57,13 @@ pub(crate) struct WellKnown {
     pub(crate) search: SymbolRef,
     /// @@split (`#sec-symbol.split`), a hook of `RegExp` (slice 5).
     pub(crate) split: SymbolRef,
+    /// @@asyncIterator (`#sec-symbol.asynciterator`), which GetIterator with kind async reads
+    /// (`#sec-getiterator`), the last, of slice 10.
+    pub(crate) async_iterator: SymbolRef,
 }
 
 /// The [[Description]] of each well-known symbol, in the order of [`WellKnown::all`].
-const DESCRIPTIONS: [&str; 12] = [
+const DESCRIPTIONS: [&str; 13] = [
     "Symbol.hasInstance",
     "Symbol.toPrimitive",
     "Symbol.toStringTag",
@@ -73,11 +76,12 @@ const DESCRIPTIONS: [&str; 12] = [
     "Symbol.replace",
     "Symbol.search",
     "Symbol.split",
+    "Symbol.asyncIterator",
 ];
 
 impl WellKnown {
     /// Every symbol, in the order they are made; the tracer reads each.
-    fn all(&self) -> [SymbolRef; 12] {
+    fn all(&self) -> [SymbolRef; 13] {
         [
             self.has_instance,
             self.to_primitive,
@@ -91,6 +95,7 @@ impl WellKnown {
             self.replace,
             self.search,
             self.split,
+            self.async_iterator,
         ]
     }
 }
@@ -272,6 +277,7 @@ impl<H: Host> Agent<H> {
             replace,
             search,
             split,
+            async_iterator,
         ] = made.as_slice()
         else {
             return Err(self.fault());
@@ -289,6 +295,7 @@ impl<H: Host> Agent<H> {
             replace,
             search,
             split,
+            async_iterator,
         };
         self.symbols = Some(symbols);
         Ok(symbols)

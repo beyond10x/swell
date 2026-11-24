@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slow-lane-starts-by-hand
 kind: story
-status: active
+status: implemented
 title: The lane slow can be started by hand, so a release tip whose push changed prose only gets its run
 summary: slow.yml gets a workflow_dispatch trigger with no inputs; docs/releasing.md step 5 says how the deciding session starts the lane on a tip whose push changed no path of the lane's list; the rule that a release needs a green slow run on its commit stays.
 relations:
@@ -14,10 +14,11 @@ scope:
   path: Taskfile.yml
 - confidence: cited
   path: docs/releasing.md
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T05:23:52Z", actor: "human:operator", revision: 6}
 - {from: "proposed", to: "active", at: "2026-11-24T05:23:52Z", actor: "human:operator", revision: 7}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:09Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 ## Context
 

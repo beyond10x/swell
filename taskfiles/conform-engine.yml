@@ -2,11 +2,11 @@ version: '3'
 
 vars:
   ESS_SUITE: '{{.ESS_SUITE | default ".out/suite.json"}}'
-  ESS_UNSUPPORTED_MAX: '{{.ESS_UNSUPPORTED_MAX | default 44}}'
+  ESS_UNSUPPORTED_MAX: '{{.ESS_UNSUPPORTED_MAX | default 42}}'
 
 tasks:
   conform-engine:
-    desc: Run the ESS scenarios against the host interface of swell (conformance/ess); a failure, an error, fewer than 14 passed or more than ESS_UNSUPPORTED_MAX unsupported fail it.
+    desc: Run the ESS scenarios against the host interface of swell (conformance/ess); a failure, an error, fewer than 18 passed or more than ESS_UNSUPPORTED_MAX unsupported fail it.
     summary: |
       Run the scenarios of the ESS model under spec/ against the hand-written host interface of
       crates/swell, through the conformance target in the workspace of its own, conformance/ess
@@ -21,12 +21,13 @@ tasks:
       absolute path) into .out/conform-engine-test.log, prints their summed counts and slowest
       tests as the task test does ("conform-engine: <b> test binaries: ..." and "gate-slowest
       conform-engine ..."; the log is printed when nextest fails), and checks that the
-      planted-defect test a_target_whose_interrupt_does_nothing_fails_a_scenario ran and passed. Then it runs
+      planted-defect tests a_target_whose_interrupt_does_nothing_fails_a_scenario and
+      a_target_whose_checkpoint_runs_no_job_fails_a_scenario ran and passed. Then it runs
       the suite with the binary swell-conformance, writing the ess-conformance-report/2 to
       .out/conform-engine.json and its output to .out/conform-engine.log, and prints the runner
       summary line "<n> scenarios: <p> passed, <f> failed, <e> error, <u> unsupported". It
-      fails, naming both numbers, when a scenario failed or errored, when fewer than 14 passed,
-      or when more than ESS_UNSUPPORTED_MAX (default 44) were unsupported; then the lines of
+      fails, naming both numbers, when a scenario failed or errored, when fewer than 18 passed,
+      or when more than ESS_UNSUPPORTED_MAX (default 42) were unsupported; then the lines of
       the log for the scenarios that did not pass are printed too. Both commands find their
       binaries built before the clock by build-conform-engine: the nextest log and the log of
       cargo run (written without --quiet, so that cargo's Compiling lines show) each fail the
@@ -63,6 +64,11 @@ tasks:
           exit 1
         fi
         echo "conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok"
+        if ! grep -qE '^ *PASS \[ *[0-9.]+s\] .*swell-conformance::planted_defect a_target_whose_checkpoint_runs_no_job_fails_a_scenario$' .out/conform-engine-test.log.plain; then
+          echo "conform-engine: the planted-defect test a_target_whose_checkpoint_runs_no_job_fails_a_scenario did not run and pass; see .out/conform-engine-test.log"
+          exit 1
+        fi
+        echo "conform-engine: planted defect refused: test a_target_whose_checkpoint_runs_no_job_fails_a_scenario ... ok"
         status=0
         cargo run --locked --manifest-path conformance/ess/Cargo.toml -- "$suite" .out/conform-engine.json > .out/conform-engine.log 2>&1 || status=$?
         if [ "$status" -ge 2 ]; then
@@ -77,7 +83,7 @@ tasks:
             seen = 1
             total = $1; passed = $3; failed = $5; errors = $7; unsupported = $9
             if (failed > 0 || errors > 0) { print "conform-engine: " failed " failed and " errors " error; none may"; bad = 1 }
-            if (passed < 14) { print "conform-engine: " passed " passed, fewer than 14"; bad = 1 }
+            if (passed < 18) { print "conform-engine: " passed " passed, fewer than 18"; bad = 1 }
             if (unsupported > max) { print "conform-engine: " unsupported " unsupported, more than ESS_UNSUPPORTED_MAX=" max; bad = 1 }
           }
           END {

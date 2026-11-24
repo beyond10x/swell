@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:generator-syntax-and-early-errors
 kind: story
-status: active
+status: implemented
 title: 'Generator syntax and its early errors: function* and yield parse, and a script with a generator ends on the refusal of slice 7 after its early errors'
 summary: The grammar of function* and yield (the [Yield] flag, yield* parsed), their early errors, AST nodes and three nesting kinds; the refusal keeps its text and moves behind the early-error pass; 115 negative parse cases (218 runs) on its list; no runner line moves.
 relations:
@@ -36,10 +36,11 @@ scope:
   path: crates/syntax/tests/sources/refused/yield-star.js
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/yield-as-identifier.js
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T10:49:42Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T10:49:42Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:07Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 ## Context
 

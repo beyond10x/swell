@@ -9,8 +9,8 @@ and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the byteco
 (`swell-compiler`), and in `swell` the heap, the values, the object model, realms, the
 interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
 6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
-requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
-(the other 44 need a later slice and say so). 114 of 208 host requirements have a test.
+requirement is pending for it, and 18 of the 60 scenarios of the ESS model pass on the engine
+(the other 42 need a later slice and say so). 140 of 211 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
 gate holds the test262 counts: 20,229 of the 44,812 run cases pass (2026-11-23, release `0.8.0`; 18,155 in `0.7.0`, 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
@@ -63,10 +63,10 @@ slice 8 with evidence and 21 cases taken in from slices 18 and 19: all 1,472 cas
 pass in all 2,801 runs (`test262-slice 07 1472 2801 0 0 1472 1472 0 0`), and no host
 requirement is pending for it. Slice 10, `promises-and-async`
 (`epic:slice-10-promises-and-async`), is accepted in seventeen stories (`docs/plan/waves.md`,
-"Slice 10, `promises-and-async`") and in work: eight of them are merged (the microtask queue,
+"Slice 10, `promises-and-async`") and in work: eleven of them are merged (the microtask queue,
 the syntax of `async` functions, `Promise` with `then`, `async` functions, the rejection
-tracker, `async` methods of object literals, `%AsyncFunction%` and the grammar of `async function*`), 781 of its 3,879 cases
-pass (`test262-slice 10 3879 7499 0 0 3879 781 3098 0`), and 8 host requirements are pending
+tracker, `async` methods of object literals, `%AsyncFunction%`, the grammar of `async function*`, the statics of `Promise` with `finally` and `AggregateError`, `for await` with the Async-from-Sync Iterator, and the target of the executable specification for the checkpoint and the hooks of a promise), 1,665 of its 3,879 cases
+pass (`test262-slice 10 3879 7499 0 0 3879 1665 2214 0`), and 5 host requirements are pending
 for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
@@ -114,8 +114,8 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   an ESS model under `spec/` before its code (decision 10). Do not restate language semantics in
   ESS. Names follow the standard's terms; a builtin's module and comments cite its clause.
 - The host interface has two specifications, and both come before its code. ESS states about
-  half of it: the model (`spec/`, ess 0.97.4) validates and its 58 scenarios, 8 of them authored,
-  pass on the interpreter, with 41 refusals and 51 `UNMAPPED:` markers
+  half of it: the model (`spec/`, ess 0.97.4) validates and its 60 scenarios, 10 of them authored,
+  pass on the interpreter, with 41 refusals and 53 `UNMAPPED:` markers
   (`docs/design/host-interface-model.md`). What ESS cannot state (engine values in outcomes,
   hooks that answer the engine, `call` and `construct`, host objects and roots, re-entrancy,
   the interrupt, budgets as bounds, determinism) is stated in `docs/design/host-interface.md`
@@ -263,7 +263,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 - `website/data/status.json` is written by `task site-data` from the gate's committed files;
   `site-data-check`, a step of `check`, fails when it differs from its regeneration. A commit
   that changes `expected.txt`, `slices-delivered.txt`, `requirements.txt`, `moves.tsv`, a
-  crate version or section 12 of the design regenerates it (`slot --local task site-data`).
+  crate version or section 12 of the design regenerates it (`task site-data`, which runs awk over the committed files and compiles nothing, so it takes no slot of the pool).
 - A test stays under 1.5 CPU seconds alone in the gate's default mode and under 2 s with a
   collection at every safe point, and under 2.5 s at its full count (`SWELL_FULL_COUNTS=1`)
   in either mode, measured with its test binary run with `--exact <name> --test-threads 1`
@@ -271,7 +271,10 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   the build pool (`slot sh -c '...'`: `cargo test --locked -p <crate> --test main --no-run`
   prints the binary's path, and the job runs it); a test binary is not run by its path
   beside the pool, and no second job of the same tree runs while one builds, since the two
-  share one build directory. The bound is in CPU seconds
+  share one build directory. The script of a measure job is given inline or lies in the
+  worktree (its ignored `.out/`), never under a cache directory of the home: the pool runs a
+  job whose script lies there on this machine, not on its build node, and refuses that form
+  from 2026-11-24. The bound is in CPU seconds
   because the machine's load multiplies wall time: on 2026-11-22, at a load of 110 to 166 on
   18 cores, tests of 4 to 18 CPU seconds were killed at 60 s
   (`story:heavy-tests-far-from-the-kill`), and at a bound of 5 s for the full count
@@ -547,9 +550,9 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   third wave of slice 5 with the first four stories of slice 7, on the decision "cut 0.8.0
   when the two running slice 5 units are merged and a unit has brought the full test262 run
   under 15 min of a pool job" of the session that decides for the operator
-  (https://github.com/beyond10x/swell/releases/tag/0.8.0; the link opens once the release is
-  published). After a release
-  `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
+  (https://github.com/beyond10x/swell/releases/tag/0.8.0; the tag is on `0c18271`, whose `check`
+  and lane `slow` ran green on the forge). After a release
+  `task host-surface-snapshot` (a scan with awk, no build and no slot of the pool) writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of
   `shared-gates.yml` (`tags: ['*']`) and none of `check.yml`; the release is created after

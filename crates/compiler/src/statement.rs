@@ -286,6 +286,14 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 self.for_of(id, span, target, *object, *body, labels, &mut t)?;
             }
             Stmt::ForIn {
+                target,
+                object,
+                body,
+                iteration: IterationKind::AsyncIterate,
+            } => {
+                self.for_await(id, span, target, *object, *body, labels, &mut t)?;
+            }
+            Stmt::ForIn {
                 target: ForInTarget::Var(kind, target),
                 object,
                 body,
@@ -806,6 +814,131 @@ impl<'a, 'm> Compiler<'a, 'm> {
             items,
             envs,
         })
+    }
+
+    /// A for-await-of in an `async` function (`#sec-runtime-semantics-forinofheadevaluation`
+    /// and `#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`
+    /// for `async-iterate` and iteratorKind async): as [`Compiler::for_of`], with
+    /// [`Instruction::GetAsyncIterator`] for the head, and for each step the call of `next`
+    /// ([`Instruction::AsyncIteratorNext`]), the `await` of its result as an `await` expression
+    /// awaits (a rejection throws there), and the check of the awaited result
+    /// ([`Instruction::AsyncIteratorStep`]); a throw of the three leaves the loop with no close,
+    /// so the region of the [`Control::Finally`] that `closes` starts after them. Its block is
+    /// AsyncIteratorClose (`#sec-asynciteratorclose`): [`Instruction::AsyncIteratorClose`], the
+    /// `await` of the result of `return`, and [`Instruction::AsyncIteratorClosed`]; a throw of
+    /// that `await` itself (of PromiseResolve) enters a [`HandlerKind::Finally`] handler whose
+    /// target is [`Instruction::AsyncIteratorClosed`], which receives it as a rejection.
+    #[allow(clippy::too_many_arguments)]
+    fn for_await(
+        &mut self,
+        id: StmtId,
+        span: Span,
+        target: &ForInTarget,
+        object: ExprId,
+        body: StmtId,
+        labels: Vec<String>,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let slot = self
+            .asynchronous
+            .ok_or_else(|| malformed("a for await outside an async function"))?;
+        let lexical = matches!(target, ForInTarget::Var(kind, _) if kind.is_lexical());
+        self.reset_completion(span, t)?;
+        let (items, envs) = (self.items.saturating_add(1), self.envs);
+        let (top, normal, start, end, entry, exit) = (
+            self.label(),
+            self.label(),
+            self.label(),
+            self.label(),
+            self.label(),
+            self.label(),
+        );
+        let (close_await, awaited, closed) = (self.label(), self.label(), self.label());
+        let key = self.finally_key();
+        let tdz = lexical && self.enter_scope(ScopeKey::Tdz(id), span, t)?;
+        t.push(Task::Expr(object))?;
+        leave_scope(tdz, span, t)?;
+        let object_span = self.ast.expr(object).map(|n| n.span).unwrap_or(span);
+        t.push(Task::Emit(Instruction::GetAsyncIterator, object_span))?;
+        t.push(Task::ItemsUp)?;
+        t.push(Task::PushControl(Control::Loop {
+            exit,
+            next: top,
+            items,
+            envs,
+            labels,
+        }))?;
+        t.push(Task::PushControl(Control::Finally {
+            entry,
+            items,
+            envs,
+            returns: false,
+            jumps: Vec::new(),
+            closes: true,
+        }))?;
+        t.push(Task::Bind(top))?;
+        t.push(Task::Emit(Instruction::AsyncIteratorNext, span))?;
+        t.push(Task::Emit(Instruction::Await(slot), span))?;
+        t.push(Task::Emit(
+            Instruction::JumpIfTag {
+                tag: TAG_NORMAL,
+                target: normal,
+            },
+            span,
+        ))?;
+        t.push(Task::Emit(Instruction::EndFinally, span))?;
+        t.push(Task::Bind(normal))?;
+        t.push(Task::Emit(Instruction::AsyncIteratorStep(exit), span))?;
+        t.push(Task::Bind(start))?;
+        let iteration = match target {
+            ForInTarget::Var(kind, target) if kind.is_lexical() => {
+                let iteration = self.enter_scope(ScopeKey::Iteration(id), span, t)?;
+                self.initialize_head(id, target, t)?;
+                iteration
+            }
+            _ => {
+                self.put_to_head(id, span, target, t)?;
+                false
+            }
+        };
+        t.push(Task::Stmt(body))?;
+        leave_scope(iteration, span, t)?;
+        t.push(Task::PopControl(Some(key)))?;
+        t.push(Task::Goto(top, span))?;
+        t.push(Task::Bind(end))?;
+        t.push(Task::Bind(entry))?;
+        t.push(Task::ItemsUp)?;
+        t.push(Task::ItemsUp)?;
+        t.push(Task::Emit(Instruction::AsyncIteratorClose(closed), span))?;
+        t.push(Task::Bind(close_await))?;
+        t.push(Task::Emit(Instruction::Await(slot), span))?;
+        t.push(Task::Bind(awaited))?;
+        t.push(Task::Emit(Instruction::AsyncIteratorClosed, span))?;
+        t.push(Task::Bind(closed))?;
+        t.push(Task::FinallyDispatch(key, span))?;
+        t.push(Task::PopControl(None))?;
+        t.push(Task::Bind(exit))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        t.push(Task::ItemsDown)?;
+        t.push(Task::Handler {
+            kind: HandlerKind::Finally,
+            start,
+            end,
+            target: entry,
+            items,
+            envs,
+        })?;
+        // The `await` of the result of `return`, the one instruction from `close_await` to
+        // `awaited`.
+        t.push(Task::Handler {
+            kind: HandlerKind::Finally,
+            start: close_await,
+            end: awaited,
+            target: awaited,
+            items: items.saturating_add(2),
+            envs,
+        })?;
+        Ok(())
     }
 
     /// `#sec-try-statement-runtime-semantics-evaluation`, with CatchClauseEvaluation

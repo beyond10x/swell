@@ -36,9 +36,13 @@ use crate::object::{ObjectKind, ObjectRecord};
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, PropertyKey, Realm, RealmRef, Root, ScriptRef, StringRef, Value};
 
-/// The kind of an error object (20.5.5, `#sec-native-error-types-used-in-this-standard`, and
-/// `Error`), for `new_error`.
+/// The kind of an error object (20.5.5, `#sec-native-error-types-used-in-this-standard`,
+/// `Error`, and `AggregateError`, `#sec-aggregate-error-objects`), for `new_error`. Its variants
+/// follow a list of the draft that grows, so it is `#[non_exhaustive]`: a `match` outside swell
+/// has a wildcard arm (`docs/design/host-interface.md`, "The kind of an AggregateError, and kinds
+/// to come").
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ErrorKind {
     Error,
     EvalError,
@@ -47,10 +51,11 @@ pub enum ErrorKind {
     SyntaxError,
     TypeError,
     UriError,
+    AggregateError,
 }
 
 impl ErrorKind {
-    /// Every kind, `Error` first.
+    /// `Error` and the six NativeError kinds, `Error` first.
     pub const ALL: [ErrorKind; 7] = [
         ErrorKind::Error,
         ErrorKind::EvalError,
@@ -71,6 +76,7 @@ impl ErrorKind {
             ErrorKind::SyntaxError => "SyntaxError",
             ErrorKind::TypeError => "TypeError",
             ErrorKind::UriError => "URIError",
+            ErrorKind::AggregateError => "AggregateError",
         }
     }
 }

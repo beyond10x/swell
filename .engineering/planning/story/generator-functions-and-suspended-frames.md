@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:generator-functions-and-suspended-frames
 kind: story
-status: active
+status: implemented
 title: 'Generators run: yield moves the frame, boxed, into the generator object, and next, return and throw move it back'
 summary: The suspended frame slice 10 builds on, as decision 3 "Suspended frames" fixes it (boxed in its holder with a credit guard beside it, traced by its kind site, checked before executing is set); 978 failing cases (1,863 runs) on its list; %GeneratorPrototype%; HOST-73; the runner lines of the two yield fixtures; yield* and generator methods keep refusals of their own text.
 relations:
@@ -95,10 +95,11 @@ scope:
   path: crates/test262/tests/sections.rs
 - confidence: cited
   path: website/data/status.json
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T11:07:28Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T11:07:28Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:07Z", actor: "human:operator", revision: 14, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 ## Context
 

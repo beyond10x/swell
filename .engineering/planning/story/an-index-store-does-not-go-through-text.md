@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:an-index-store-does-not-go-through-text
 kind: story
-status: active
+status: implemented
 title: A store at an array index does not go through text
 summary: A computed store at a Number index made a heap String of the index and parsed it back, the Array's [[Set]] looked its index up on the Array, its prototypes and the Array again and `length` up by a key built from text, every fixed name built a `Vec<u16>` per use, and every safe point took the release queue of the root table; a Number that is an array index is now its key, a fixed name is built on the stack, a safe point reads one flag, and a store into an Array that is its own receiver, at an element it holds, at a hole or at its end, writes in place with the steps OrdinarySet charges.
 relations:
 - decomposes: epic:slice-05-regexp
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T19:04:02Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T19:04:03Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:06Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 
 ## Context

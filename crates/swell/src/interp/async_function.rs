@@ -223,7 +223,9 @@ impl<H: Host> Agent<H> {
                 activation,
                 suspension,
             } => (*activation, *suspension),
-            Slots::Resolving { .. } | Slots::Executor { .. } => return Err(self.fault()),
+            Slots::Resolving { .. } | Slots::Executor { .. } | Slots::AsyncFromSync(_) => {
+                return Err(self.fault());
+            }
         };
         if !self.activation_mut(activation)?.suspended_at(suspension) {
             return Ok(Value::Undefined);

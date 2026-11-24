@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 //! The host interface of swell as a [`ConformanceTarget`]: one function per command of
-//! `spec/domains/host.yaml` that slice 1 has an entry point for, each turning the model's input
+//! `spec/domains/host.yaml` that the engine has an entry point for, each turning the model's input
 //! into one call of the interface and the interface's answer into the model's outcome, error and
 //! events.
 //!
@@ -10,8 +10,19 @@
 //! | `CreateRealm` | `Agent::create_realm(None, None)` | `created`, `faulted` |
 //! | `ParseScript` | `Agent::parse_script(realm, Source::Utf8(text), None)` | `parsed`, `parse-failed`, `memory-budget`, `foreign-realm`, `faulted` |
 //! | `EvaluateScript` | `Agent::evaluate_script(script)` | `completed`, `threw`, `step-budget`, `memory-budget`, `interrupted`, `engine-fault`, `faulted` |
+//! | `PerformMicrotaskCheckpoint` | `Agent::perform_microtask_checkpoint()` | `drained`, `step-budget`, `memory-budget`, `interrupted`, `engine-fault`, `faulted` |
 //! | `Interrupt` | `InterruptHandle::interrupt` on `Agent::interrupt_handle()` | `set` |
 //! | `Collect` | `Agent::collect()` | `collected`, `engine-fault`, `faulted` |
+//!
+//! Two commands the engine issues itself are awaited, never invoked: the hooks
+//! `host_enqueue_promise_job` (`HostEnqueuePromiseJob`, `enqueued`) and
+//! `host_promise_rejection_tracker` (`HostPromiseRejectionTracker`, `tracked`). The
+//! [`ConformanceHost`] of each agent records every call of the two with its realm or its
+//! operation, in the agent's own host value; an await of one of them on an agent answers the
+//! first call of that hook the agent recorded and no await has answered yet, so the calls are
+//! answered in the order the engine made them. An await no recorded call answers is
+//! `unsupported`: the engine runs only inside a command, so a hook it did not call by then is
+//! never called for that await.
 //!
 //! The model's identities are the target's: each scenario keeps its agents by `agent_id`, and
 //! the `Realm` and `Script` values the interface returned by `realm_id` and `script_id`, each with
@@ -22,8 +33,9 @@
 //!
 //! What the target answers `unsupported`, with its reason, never as a pass:
 //!
-//! - the twelve commands without an entry point in slice 1: the module commands (slice 11),
-//!   `PerformMicrotaskCheckpoint` and the hooks the engine issues (slices 10 and 11);
+//! - the nine commands without an entry point yet: the module commands (slice 11) and the hooks
+//!   `HostEnqueueGenericJob` and `HostEnqueueTimeoutJob` (slice 14);
+//! - an await of a hook the engine did not call (above);
 //! - an answer of the interface the model has no outcome for, each an `UNMAPPED:` marker of the
 //!   model: `Err(ForeignHandle)` for a script of another agent (HOST-45, HOST-48), a
 //!   `create_realm` that ends in `Throw` or `Terminated` (HOST-12, HOST-41, HOST-71), a
@@ -38,21 +50,28 @@
 //! answered, so that an engine that does not reach the outcome fails the scenario: `ParseScript`'s
 //! `parse-failed` (a source that is no Script), `EvaluateScript`'s `threw`, `step-budget` and
 //! `memory-budget` (a source and limits that reach them) and `interrupted` (the scenario's
-//! `Interrupt` before the run; HOST-92). `Collect`'s `engine-fault` is reached through the
-//! interface's own test switch, the feature `fault-injection` (`Agent::inject_fault`, HOST-71).
-//! Unsupported stay `ParseScript`'s `memory-budget` (the target makes no limits and no source
-//! of its own, and no scenario's parse passes its budget) and `EvaluateScript`'s
-//! `engine-fault` (the fault switch has no point at `evaluate_script`).
+//! `Interrupt` before the run; HOST-92). `PerformMicrotaskCheckpoint`'s `step-budget` and
+//! `memory-budget` are reached by the jobs the scenario's scripts queued, and its `interrupted`
+//! through the scenario's `Interrupt` on the agent (HOST-198); a checkpoint forced to the first
+//! two on an empty queue, or to the third on an agent no `Interrupt` of the scenario was made
+//! on, has no means to reach them and is unsupported. `Collect`'s `engine-fault` is reached
+//! through the interface's own test switch, the feature `fault-injection`
+//! (`Agent::inject_fault`, HOST-71). Unsupported stay `ParseScript`'s `memory-budget` (the
+//! target makes no limits and no source of its own, and no scenario's parse passes its budget)
+//! and the `engine-fault` of `EvaluateScript` and `PerformMicrotaskCheckpoint` (the fault switch
+//! has no point at either).
 //!
 //! How the `Interrupt` command sets the flag is the target's [`Interrupter`]:
 //! [`sets_the_flag`] in the target of [`shipped`](crate::shipped), a function that does nothing
-//! in the planted-defect test.
+//! in the planted-defect test. How `PerformMicrotaskCheckpoint` runs the queue is its
+//! [`Checkpoint`]: [`runs_the_queue`] in the shipped target, one that answers `Normal` without
+//! running a job in the planted-defect test.
 //!
 //! Every agent runs on the thread [`run`](crate::run) makes, of [`STACK_BYTES`]; an agent whose
 //! `Limits::min_stack_bytes()` is more is not created (HOST-17).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
 use ess_conformance::scenario::{CommandRef, ErrorRef, EventRef, OutcomeRef};
@@ -66,8 +85,9 @@ use ess_domain::command::OutcomeName;
 use ess_primitives::ids::CorrelationId;
 use ess_primitives::node::Node;
 use swell::{
-    Agent, Cx, FaultPoint, HookCx, Host, HostError, InterruptHandle, Job, LoadRequest, ObjectRef,
-    Outcome, Parsed, PropertyKey, Realm, Root, Script, Source, Termination, Value,
+    Agent, CheckpointReport, Cx, FaultPoint, HookCx, Host, HostError, InterruptHandle, Job,
+    LoadRequest, ObjectRef, Outcome, Parsed, PropertyKey, Realm, RealmRef, RejectionOperation,
+    Root, Script, Source, Termination, Value,
 };
 use swell_syntax::{MessageKind, message_kind};
 
@@ -86,11 +106,79 @@ pub fn sets_the_flag(handle: &InterruptHandle) {
     handle.interrupt();
 }
 
-/// The host of every agent the target creates. The scripts of slice 1 schedule no job and load
-/// no module; a job or a load the engine hands it is dropped, and the clock reads the epoch.
-pub struct ConformanceHost;
+/// How the target performs an agent's microtask checkpoint for `PerformMicrotaskCheckpoint`.
+pub type Checkpoint =
+    fn(&mut Agent<ConformanceHost>) -> Result<Outcome<CheckpointReport>, HostError>;
+
+/// The interface's own: `Agent::perform_microtask_checkpoint`.
+pub fn runs_the_queue(
+    agent: &mut Agent<ConformanceHost>,
+) -> Result<Outcome<CheckpointReport>, HostError> {
+    agent.perform_microtask_checkpoint()
+}
+
+/// The host of every agent the target creates. It records each call of the two hooks the model
+/// states as commands the engine issues, in the order the engine made them; a promise job stays
+/// in the agent's queue, as the hook's default leaves it. A generic, timeout or cleanup job and
+/// a module load the engine hands it are dropped (slices 14, 16 and 11), and the clock reads the
+/// epoch.
+#[derive(Default)]
+pub struct ConformanceHost {
+    /// Every call of a recorded hook no await has answered yet, oldest first.
+    issued: Vec<Issued>,
+}
+
+/// One call of a hook the model states as a command the engine issues.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Issued {
+    /// `host_enqueue_promise_job` with the job's realm or none (`HostEnqueuePromiseJob`).
+    PromiseJob(Option<RealmRef>),
+    /// `host_promise_rejection_tracker` with its operation (`HostPromiseRejectionTracker`).
+    RejectionTracker(RejectionOperation),
+}
+
+/// Which recorded hook an await asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Hook {
+    PromiseJob,
+    RejectionTracker,
+}
+
+impl Issued {
+    fn hook(self) -> Hook {
+        match self {
+            Self::PromiseJob(_) => Hook::PromiseJob,
+            Self::RejectionTracker(_) => Hook::RejectionTracker,
+        }
+    }
+}
+
+impl ConformanceHost {
+    /// The oldest call of `hook` no await has answered yet, now answered.
+    fn take(&mut self, hook: Hook) -> Option<Issued> {
+        let index = self.issued.iter().position(|call| call.hook() == hook)?;
+        Some(self.issued.remove(index))
+    }
+}
 
 impl Host for ConformanceHost {
+    /// HostEnqueuePromiseJob: recorded with the job's realm; the job stays in the agent's queue.
+    fn host_enqueue_promise_job(cx: &mut HookCx<'_, Self>, realm: Option<RealmRef>) {
+        cx.host_mut().issued.push(Issued::PromiseJob(realm));
+    }
+
+    /// HostPromiseRejectionTracker: recorded with its operation. The promise is an engine value
+    /// the model does not hold (`spec/domains/host.yaml`, the `UNMAPPED:` marker of the command).
+    fn host_promise_rejection_tracker(
+        cx: &mut HookCx<'_, Self>,
+        _promise: ObjectRef,
+        operation: RejectionOperation,
+    ) {
+        cx.host_mut()
+            .issued
+            .push(Issued::RejectionTracker(operation));
+    }
+
     fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
 
     fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {}
@@ -110,6 +198,12 @@ impl Host for ConformanceHost {
 enum Forced {
     /// `Collect`'s `engine-fault`: the fault switch is set at `collect` before the call.
     CollectFault,
+    /// `PerformMicrotaskCheckpoint`'s `step-budget` or `memory-budget`: reached by the queued
+    /// jobs, so unsupported on an empty queue.
+    CheckpointBudget,
+    /// `PerformMicrotaskCheckpoint`'s `interrupted`: reached through the scenario's `Interrupt`,
+    /// so unsupported on an agent no `Interrupt` of the scenario was made on.
+    CheckpointInterrupt,
 }
 
 /// A value of the interface and the agent that made it.
@@ -127,12 +221,14 @@ struct Scenario {
     /// Identities made so far in this scenario.
     made: u64,
     forced: Option<Forced>,
+    /// The agents the scenario's `Interrupt` was made on.
+    interrupted: BTreeSet<String>,
     /// Every event the scenario's commands published, in order.
     published: Vec<ObservedEvent>,
 }
 
 impl Scenario {
-    /// A new identity for an `AgentId` (kind 1), `RealmId` (2) or `ScriptId` (3).
+    /// A new identity for an `AgentId` (kind 1), `RealmId` (2), `ScriptId` (3) or `JobId` (4).
     fn identity(&mut self, kind: u32) -> String {
         self.made += 1;
         format!("{kind:08x}-0000-4000-8000-{:012x}", self.made)
@@ -150,6 +246,20 @@ impl Scenario {
             return true;
         }
         false
+    }
+
+    /// The forced outcome of `PerformMicrotaskCheckpoint`, taken; another stays for its own
+    /// command.
+    fn take_checkpoint(&mut self) -> Option<Forced> {
+        let forced = self.forced?;
+        if matches!(
+            forced,
+            Forced::CheckpointBudget | Forced::CheckpointInterrupt
+        ) {
+            self.forced = None;
+            return Some(forced);
+        }
+        None
     }
 }
 
@@ -268,7 +378,7 @@ fn unexpected(call: &str, error: HostError) -> TargetError {
     )
 }
 
-/// The slice that brings an entry point for a command of the model slice 1 does not have.
+/// The slice that brings an entry point for a command of the model the engine does not have yet.
 fn later_slice(command: &str) -> Option<&'static str> {
     Some(match command.strip_prefix("swell.host.")? {
         "ParseModule"
@@ -278,31 +388,45 @@ fn later_slice(command: &str) -> Option<&'static str> {
         | "EvaluateModule"
         | "HostLoadImportedModule"
         | "AsyncModuleExecutionSettled" => "slice 11 (modules)",
-        "PerformMicrotaskCheckpoint"
-        | "HostEnqueuePromiseJob"
-        | "HostEnqueueGenericJob"
-        | "HostEnqueueTimeoutJob"
-        | "HostPromiseRejectionTracker" => "slice 10 (promises and jobs)",
+        "HostEnqueueGenericJob" | "HostEnqueueTimeoutJob" => "slice 14 (generic and timeout jobs)",
         _ => return None,
     })
+}
+
+/// The hook a command the engine issues names, for the two hooks the target records.
+fn recorded_hook(command: &str) -> Option<Hook> {
+    match command {
+        "swell.host.HostEnqueuePromiseJob" => Some(Hook::PromiseJob),
+        "swell.host.HostPromiseRejectionTracker" => Some(Hook::RejectionTracker),
+        _ => None,
+    }
 }
 
 /// The swell host interface as a conformance target: a fresh set of agents per scenario.
 pub struct SwellTarget {
     identity: ImplementationIdentity,
     interrupter: Interrupter,
+    checkpoint: Checkpoint,
     scenario: RefCell<Option<Scenario>>,
 }
 
 impl SwellTarget {
-    /// A target named `identity` that sets an interrupt flag with `interrupter`. It runs agents
-    /// on the calling thread, which must have [`STACK_BYTES`]; [`run`](crate::run) makes it.
+    /// A target named `identity` that sets an interrupt flag with `interrupter` and performs a
+    /// checkpoint with [`runs_the_queue`]. It runs agents on the calling thread, which must have
+    /// [`STACK_BYTES`]; [`run`](crate::run) makes it.
     pub fn new(identity: ImplementationIdentity, interrupter: Interrupter) -> Self {
         Self {
             identity,
             interrupter,
+            checkpoint: runs_the_queue,
             scenario: RefCell::new(None),
         }
+    }
+
+    /// The same target, performing a checkpoint with `checkpoint`.
+    #[must_use]
+    pub fn with_checkpoint(self, checkpoint: Checkpoint) -> Self {
+        Self { checkpoint, ..self }
     }
 
     /// `f` on the open scenario.
@@ -330,22 +454,79 @@ impl SwellTarget {
             "swell.host.CreateRealm" => create_realm(scenario, &mut input),
             "swell.host.ParseScript" => parse_script(scenario, &mut input),
             "swell.host.EvaluateScript" => self.evaluate_script(scenario, &mut input),
+            "swell.host.PerformMicrotaskCheckpoint" => {
+                self.perform_microtask_checkpoint(scenario, &mut input)
+            }
             "swell.host.Interrupt" => self.interrupt(scenario, &mut input),
             "swell.host.Collect" => collect(scenario, &mut input),
             other => {
                 return Err(TargetError::unsupported(
                     format!("invoking `{other}`"),
-                    match later_slice(other) {
-                        Some(slice) => {
-                            format!("slice 1 has no entry point for `{other}`; {slice} brings it")
-                        }
-                        None => format!("the model of slice 1 has no command `{other}`"),
+                    if let Some(slice) = later_slice(other) {
+                        format!("the engine has no entry point for `{other}`; {slice} brings it")
+                    } else if recorded_hook(other).is_some() {
+                        format!("the engine issues `{other}` itself; a scenario awaits it")
+                    } else {
+                        format!("the model has no command `{other}`")
                     },
                 ));
             }
         }?;
         input.finish()?;
         Ok(answer)
+    }
+
+    /// `PerformMicrotaskCheckpoint`: the target's [`Checkpoint`] on the agent, its `Outcome` as
+    /// the branch the model names for it: `Normal` is `drained`, `Terminated(reason)` the branch
+    /// of the reason with `RunTerminated`, `Err(Faulted)` is `faulted` (HOST-79, HOST-77). A
+    /// forced `step-budget` or `memory-budget` on an empty queue, or a forced `interrupted` on an
+    /// agent no `Interrupt` of the scenario was made on, gives the engine no means to reach it,
+    /// and is unsupported before the call.
+    fn perform_microtask_checkpoint(
+        &self,
+        scenario: &mut Scenario,
+        input: &mut Input<'_>,
+    ) -> Result<Answer, TargetError> {
+        let agent_id = input.text("agent_id")?;
+        let forced = scenario.take_checkpoint();
+        let interrupted = scenario.interrupted.contains(&agent_id);
+        let Some(agent) = scenario.agent(&agent_id) else {
+            return Answer::not_held("no-agent");
+        };
+        match forced {
+            Some(Forced::CheckpointBudget) if matches!(agent.pending_microtasks(), Ok(0)) => {
+                return Err(TargetError::unsupported(
+                    "`swell.host.PerformMicrotaskCheckpoint` forced to a budget on an empty queue",
+                    "a checkpoint that finds the queue empty takes nothing off, spends no step and \
+                     allocates nothing (HOST-193), and the scenario's scripts queued no job",
+                ));
+            }
+            Some(Forced::CheckpointInterrupt) if !interrupted => {
+                return Err(TargetError::unsupported(
+                    "`swell.host.PerformMicrotaskCheckpoint` forced to `interrupted`",
+                    "the target sets the interrupt handle only for the scenario's `Interrupt`, \
+                     and none was made on this agent (HOST-198)",
+                ));
+            }
+            _ => {}
+        }
+        match (self.checkpoint)(agent) {
+            Err(HostError::Faulted) => Answer::faulted(&agent_id),
+            Err(error) => Err(unexpected("swell.host.PerformMicrotaskCheckpoint", error)),
+            Ok(Outcome::Normal(_)) => Ok(Answer::took(
+                "drained",
+                vec![(
+                    "swell.host.MicrotaskCheckpointPerformed",
+                    vec![("agent_id", values::text(&agent_id))],
+                )],
+            )),
+            Ok(Outcome::Terminated(termination)) => Ok(Answer::terminated(&agent_id, termination)),
+            Ok(Outcome::Throw(_)) => Err(TargetError::unavailable(
+                "`swell.host.PerformMicrotaskCheckpoint`",
+                "the checkpoint answered Throw, which it never answers: an entry's throw stays \
+                 inside the entry",
+            )),
+        }
     }
 
     /// `EvaluateScript`: `Agent::evaluate_script`, its `Outcome` as the branch of the same name.
@@ -406,8 +587,108 @@ impl SwellTarget {
             return Answer::not_held("no-agent");
         };
         (self.interrupter)(&agent.interrupt_handle());
+        scenario.interrupted.insert(agent_id);
         Ok(Answer::took("set", Vec::new()))
     }
+
+    /// The answer to an await of `hook` on the agent `agent_id`: the oldest call of the hook the
+    /// agent's host recorded and no await answered, as the branch, the events and the input the
+    /// model states for it. `unsupported` when the scenario holds no such agent or the engine
+    /// made no such call (module documentation).
+    fn awaited(
+        scenario: &mut Scenario,
+        command: &str,
+        hook: Hook,
+        agent_id: &str,
+    ) -> Result<(Answer, BTreeMap<String, Node>), TargetError> {
+        let awaiting = || format!("awaiting `{command}` on the agent `{agent_id}`");
+        let Some(agent) = scenario.agents.get_mut(agent_id) else {
+            return Err(TargetError::unsupported(
+                awaiting(),
+                "the scenario holds no agent of this identity, so no engine issues the command \
+                 on it",
+            ));
+        };
+        let Some(call) = agent.host_mut().take(hook) else {
+            return Err(TargetError::unsupported(
+                awaiting(),
+                format!(
+                    "the engine made no call of the hook `{command}` names on this agent that an \
+                     earlier await did not answer: it calls the hook only inside a command, for a \
+                     promise a script made, and the scenario's commands made none"
+                ),
+            ));
+        };
+        let mut input = BTreeMap::new();
+        input.insert("agent_id".to_owned(), values::text(agent_id));
+        let answer = match call {
+            Issued::RejectionTracker(operation) => {
+                let operation = values::text(match operation {
+                    RejectionOperation::Reject => "reject",
+                    RejectionOperation::Handle => "handle",
+                });
+                input.insert("operation".to_owned(), operation.clone());
+                Answer::took(
+                    "tracked",
+                    vec![(
+                        "swell.host.PromiseRejectionTracked",
+                        vec![
+                            ("agent_id", values::text(agent_id)),
+                            ("operation", operation),
+                        ],
+                    )],
+                )
+            }
+            Issued::PromiseJob(realm) => {
+                let realm_id = match realm {
+                    None => None,
+                    Some(realm) => Some(realm_id_of(scenario, agent_id, realm)?),
+                };
+                let job_id = scenario.identity(4);
+                let mut payload = vec![
+                    ("job_id", values::text(&job_id)),
+                    ("agent_id", values::text(agent_id)),
+                ];
+                if let Some(realm_id) = realm_id {
+                    input.insert("realm_id".to_owned(), values::text(&realm_id));
+                    payload.push(("realm_id", values::text(&realm_id)));
+                }
+                Answer::took("enqueued", vec![("swell.host.PromiseJobEnqueued", payload)])
+            }
+        };
+        Ok((answer, input))
+    }
+}
+
+/// The identity of the realm of the agent `agent_id` that `realm`, a realm a hook was handed,
+/// is: each realm the scenario holds of that agent is read as a `RealmRef` through
+/// `Agent::with_cx` and compared. A realm the scenario does not hold is an adapter failure: the
+/// engine hands a hook only realms of the agent.
+fn realm_id_of(
+    scenario: &mut Scenario,
+    agent_id: &str,
+    realm: RealmRef,
+) -> Result<String, TargetError> {
+    let reading = "reading the realm of `swell.host.HostEnqueuePromiseJob`";
+    let Some(agent) = scenario.agents.get_mut(agent_id) else {
+        return Err(TargetError::unavailable(reading, "the agent is not held"));
+    };
+    for (realm_id, held) in &scenario.realms {
+        if held.agent != agent_id {
+            continue;
+        }
+        let read = agent
+            .with_cx(&held.value, |cx| cx.realm_ref(&held.value))
+            .and_then(|read| read)
+            .map_err(|error| unexpected(reading, error))?;
+        if read == realm {
+            return Ok(realm_id.clone());
+        }
+    }
+    Err(TargetError::unavailable(
+        reading,
+        "the hook was handed a realm the scenario holds no identity for",
+    ))
 }
 
 /// `CreateAgent`: `Agent::new` with the limits and the seeds of the input.
@@ -426,7 +707,7 @@ fn create_agent(scenario: &mut Scenario, input: &mut Input<'_>) -> Result<Answer
             ),
         ));
     }
-    let agent = Agent::new(ConformanceHost, limits, seeds).map_err(|error| {
+    let agent = Agent::new(ConformanceHost::default(), limits, seeds).map_err(|error| {
         TargetError::unavailable("`swell.host.CreateAgent`", format!("{error:?}"))
     })?;
     let agent_id = scenario.identity(1);
@@ -672,6 +953,42 @@ fn observed(
     Ok(event.in_activity(correlation.clone()).at(sequence))
 }
 
+/// `answer` of `command` as the runner's result, its events published in the scenario
+/// `correlation`, after every event the scenario published before.
+fn published(
+    scenario: &mut Scenario,
+    command: &str,
+    answer: Answer,
+    correlation: &CorrelationId,
+) -> Result<SemanticCommandResult, TargetError> {
+    let outcome = OutcomeName::new(answer.outcome).map_err(|error| {
+        TargetError::unavailable(format!("naming `{}`", answer.outcome), error.to_string())
+    })?;
+    let mut result =
+        SemanticCommandResult::took(OutcomeRef::new(named::<CommandRef>(command)?, outcome));
+    result.error = answer.error;
+    for (name, payload) in answer.events {
+        let sequence = u64::try_from(scenario.published.len()).unwrap_or(u64::MAX);
+        let event = observed(name, payload, correlation, sequence)?;
+        scenario.published.push(event.clone());
+        result = result.emitting(event);
+    }
+    Ok(result)
+}
+
+/// The agent an await names: its `agent_id` input where the runner states one, else the
+/// awaited instance.
+fn awaited_agent(request: &AwaitRequest) -> Option<String> {
+    match request
+        .compared
+        .get("agent_id")
+        .unwrap_or(&request.instance)
+    {
+        Node::Text(agent_id) => Some(agent_id.clone()),
+        _ => None,
+    }
+}
+
 impl ConformanceTarget for SwellTarget {
     fn identity(&self) -> Result<ImplementationIdentity, TargetError> {
         Ok(self.identity.clone())
@@ -694,21 +1011,7 @@ impl ConformanceTarget for SwellTarget {
         self.with(|scenario| {
             let command = request.command.to_string();
             let answer = self.issue(scenario, &command, &request.input)?;
-            let outcome = OutcomeName::new(answer.outcome).map_err(|error| {
-                TargetError::unavailable(format!("naming `{}`", answer.outcome), error.to_string())
-            })?;
-            let mut result = SemanticCommandResult::took(OutcomeRef::new(
-                named::<CommandRef>(&command)?,
-                outcome,
-            ));
-            result.error = answer.error;
-            for (name, payload) in answer.events {
-                let sequence = u64::try_from(scenario.published.len()).unwrap_or(u64::MAX);
-                let event = observed(name, payload, &request.correlation, sequence)?;
-                scenario.published.push(event.clone());
-                result = result.emitting(event);
-            }
-            Ok(result)
+            published(scenario, &command, answer, &request.correlation)
         })
     }
 
@@ -733,8 +1036,9 @@ impl ConformanceTarget for SwellTarget {
         })
     }
 
-    /// Accepts a forced outcome the call reaches for real and arranges `Collect`'s
-    /// `engine-fault`; every other one is unsupported (module documentation).
+    /// Accepts a forced outcome the call reaches for real, arranges `Collect`'s `engine-fault`
+    /// and keeps a forced outcome of `PerformMicrotaskCheckpoint` for the check of its call;
+    /// every other one is unsupported (module documentation).
     fn configure_external_outcome(
         &self,
         request: ExternalOutcomeControl,
@@ -748,12 +1052,22 @@ impl ConformanceTarget for SwellTarget {
             )
             | ("swell.host.ParseScript", "parse-failed") => return Ok(()),
             ("swell.host.Collect", "engine-fault") => Forced::CollectFault,
+            ("swell.host.PerformMicrotaskCheckpoint", "step-budget" | "memory-budget") => {
+                Forced::CheckpointBudget
+            }
+            ("swell.host.PerformMicrotaskCheckpoint", "interrupted") => Forced::CheckpointInterrupt,
             _ => {
                 let why = if let Some(slice) = later_slice(&command) {
-                    format!("slice 1 has no entry point for `{command}`; {slice} brings it")
-                } else if command == "swell.host.EvaluateScript" && outcome == "engine-fault" {
-                    "the fault switch of the interface has no point at evaluate_script \
-                     (FaultPoint: ParseScript, CreateRealm, Collect; HOST-71)"
+                    format!("the engine has no entry point for `{command}`; {slice} brings it")
+                } else if outcome == "engine-fault"
+                    && matches!(
+                        command.as_str(),
+                        "swell.host.EvaluateScript" | "swell.host.PerformMicrotaskCheckpoint"
+                    )
+                {
+                    "the fault switch of the interface has no point at evaluate_script or \
+                     perform_microtask_checkpoint (FaultPoint: ParseScript, CreateRealm, \
+                     Collect; HOST-71)"
                         .to_owned()
                 } else if command == "swell.host.ParseScript" && outcome == "memory-budget" {
                     "a parse passes the memory budget only with limits and a source that reach \
@@ -782,15 +1096,35 @@ impl ConformanceTarget for SwellTarget {
         ))
     }
 
+    /// Answers an await of `HostEnqueuePromiseJob` or `HostPromiseRejectionTracker` from the
+    /// calls the agent's host recorded, in their order; every other await is unsupported
+    /// (module documentation).
     fn await_outcome(&self, request: AwaitRequest) -> Result<AwaitAnswer, TargetError> {
         let command = request.command.to_string();
-        Err(TargetError::unsupported(
-            format!("awaiting `{command}` on an instance"),
-            match later_slice(&command) {
-                Some(slice) => format!("the engine of slice 1 never issues `{command}`; {slice}"),
-                None => format!("the model of slice 1 has no command `{command}`"),
-            },
-        ))
+        let Some(hook) = recorded_hook(&command) else {
+            return Err(TargetError::unsupported(
+                format!("awaiting `{command}` on an instance"),
+                match later_slice(&command) {
+                    Some(slice) => format!("the engine never issues `{command}` yet; {slice}"),
+                    None => format!("the model has no command `{command}` the engine issues"),
+                },
+            ));
+        };
+        let Some(agent_id) = awaited_agent(&request) else {
+            return Err(TargetError::unavailable(
+                format!("awaiting `{command}`"),
+                "the await names no agent by its identity",
+            ));
+        };
+        self.with(|scenario| {
+            let (answer, input) = Self::awaited(scenario, &command, hook, &agent_id)?;
+            let result = published(scenario, &command, answer, &request.correlation)?;
+            Ok(AwaitAnswer::Reached {
+                result,
+                input,
+                elapsed_ms: None,
+            })
+        })
     }
 }
 
@@ -802,11 +1136,11 @@ mod tests {
     use ess_primitives::node::Node;
 
     use ess_conformance::target::{ImplementationIdentity, TargetError};
-    use swell::InterruptHandle;
+    use swell::{Agent, CheckpointReport, HostError, InterruptHandle, Outcome};
 
     use super::{
-        Answer, Forced, Interrupter, STACK_BYTES, Scenario, SwellTarget, create_agent,
-        create_realm, parse_script, sets_the_flag, values,
+        Answer, ConformanceHost, Forced, Hook, Interrupter, STACK_BYTES, Scenario, SwellTarget,
+        create_agent, create_realm, parse_script, sets_the_flag, values,
     };
     use crate::values::Input;
 
@@ -1029,5 +1363,174 @@ mod tests {
         };
         assert!(scenario.take(Forced::CollectFault));
         assert!(!scenario.take(Forced::CollectFault));
+        assert_eq!(scenario.take_checkpoint(), None);
+        scenario.forced = Some(Forced::CheckpointInterrupt);
+        assert!(!scenario.take(Forced::CollectFault));
+        assert_eq!(
+            scenario.take_checkpoint(),
+            Some(Forced::CheckpointInterrupt)
+        );
+        assert_eq!(scenario.take_checkpoint(), None);
+    }
+
+    fn target() -> SwellTarget {
+        SwellTarget::new(ImplementationIdentity::new("swell", "test"), sets_the_flag)
+    }
+
+    /// The branch `EvaluateScript` of `source`, parsed on `AGENT` in `REALM`, answers.
+    fn run(scenario: &mut Scenario, source: &str) -> Result<&'static str, String> {
+        let parsed = parse(scenario, source).map_err(|error| error.to_string())?;
+        assert_eq!(parsed, ("parsed", None));
+        let script_id = format!("00000003-0000-4000-8000-{:012x}", scenario.made);
+        let input = fields(&[("agent_id", AGENT), ("script_id", &script_id)]);
+        target()
+            .evaluate_script(scenario, &mut Input::new("EvaluateScript", &input))
+            .map(|answer| answer.outcome)
+            .map_err(|error| error.to_string())
+    }
+
+    /// The branch `PerformMicrotaskCheckpoint` on `AGENT` answers over `target`.
+    fn checkpoint(target: &SwellTarget, scenario: &mut Scenario) -> Result<&'static str, String> {
+        let input = fields(&[("agent_id", AGENT)]);
+        target
+            .perform_microtask_checkpoint(scenario, &mut Input::new("Checkpoint", &input))
+            .map(|answer| answer.outcome)
+            .map_err(|error| error.to_string())
+    }
+
+    fn pending(scenario: &mut Scenario) -> Option<usize> {
+        scenario.agent(AGENT)?.pending_microtasks().ok()
+    }
+
+    /// HOST-79 through the target: the job a script queued stays queued until the checkpoint,
+    /// which runs it and answers `drained` with the queue empty; a checkpoint that runs no job
+    /// answers `drained` too, with the job still queued, which only a later read can tell.
+    #[test]
+    fn the_checkpoint_runs_the_queued_job_and_answers_drained() {
+        let mut scenario = agent_and_realm();
+        let source = "var ran = false; Promise.resolve().then(function () { ran = true; });";
+        assert_eq!(run(&mut scenario, source), Ok("completed"));
+        assert_eq!(pending(&mut scenario), Some(1));
+        assert_eq!(checkpoint(&target(), &mut scenario), Ok("drained"));
+        assert_eq!(pending(&mut scenario), Some(0));
+        assert_eq!(
+            run(&mut scenario, "if (!ran) { throw 0; }"),
+            Ok("completed")
+        );
+
+        fn runs_no_job(
+            _agent: &mut Agent<ConformanceHost>,
+        ) -> Result<Outcome<CheckpointReport>, HostError> {
+            Ok(Outcome::Normal(CheckpointReport {
+                promise_jobs: 0,
+                host_microtasks: 0,
+            }))
+        }
+        let mut scenario = agent_and_realm();
+        assert_eq!(run(&mut scenario, source), Ok("completed"));
+        let planted = target().with_checkpoint(runs_no_job);
+        assert_eq!(checkpoint(&planted, &mut scenario), Ok("drained"));
+        assert_eq!(pending(&mut scenario), Some(1));
+        assert_eq!(run(&mut scenario, "if (!ran) { throw 0; }"), Ok("threw"));
+    }
+
+    /// A forced budget on an empty queue and a forced `interrupted` with no `Interrupt` have no
+    /// means to be reached; with the `Interrupt` the checkpoint reaches `interrupted` for real.
+    #[test]
+    fn a_forced_checkpoint_outcome_needs_the_means_to_reach_it() {
+        let mut scenario = agent_and_realm();
+        scenario.forced = Some(Forced::CheckpointBudget);
+        let answer = checkpoint(&target(), &mut scenario);
+        assert!(
+            answer
+                .as_ref()
+                .is_err_and(|error| error.contains("empty queue")),
+            "{answer:?}"
+        );
+        scenario.forced = Some(Forced::CheckpointInterrupt);
+        let answer = checkpoint(&target(), &mut scenario);
+        assert!(
+            answer
+                .as_ref()
+                .is_err_and(|error| error.contains("Interrupt")),
+            "{answer:?}"
+        );
+        let agent = fields(&[("agent_id", AGENT)]);
+        let set = target()
+            .interrupt(&mut scenario, &mut Input::new("Interrupt", &agent))
+            .map(|answer| answer.outcome)
+            .map_err(|error| error.to_string());
+        assert_eq!(set, Ok("set"));
+        scenario.forced = Some(Forced::CheckpointInterrupt);
+        assert_eq!(checkpoint(&target(), &mut scenario), Ok("interrupted"));
+        assert_eq!(checkpoint(&target(), &mut scenario), Ok("drained"));
+    }
+
+    /// The branch, the input and the event payload an await of `hook` on `AGENT` answers.
+    type Awaited = (
+        &'static str,
+        BTreeMap<String, Node>,
+        Vec<(&'static str, Node)>,
+    );
+
+    fn awaited(scenario: &mut Scenario, command: &str, hook: Hook) -> Result<Awaited, String> {
+        SwellTarget::awaited(scenario, command, hook, AGENT)
+            .map(|(mut answer, input)| {
+                let payload = answer
+                    .events
+                    .pop()
+                    .map(|(_, payload)| payload)
+                    .unwrap_or_default();
+                (answer.outcome, input, payload)
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    /// HOST-121 and HOST-83 through the target: each hook call is answered once, in the order the
+    /// engine made it, with its operation or the identity of its realm; one more await of a hook
+    /// the engine did not call again is unsupported.
+    #[test]
+    fn an_await_answers_the_hook_calls_in_their_order() {
+        let mut scenario = agent_and_realm();
+        assert_eq!(
+            run(&mut scenario, "var p = Promise.reject(1);"),
+            Ok("completed")
+        );
+        assert_eq!(
+            run(&mut scenario, "p.catch(function () {});"),
+            Ok("completed")
+        );
+        let tracker = "swell.host.HostPromiseRejectionTracker";
+        let mut operations = Vec::new();
+        for _ in 0..2 {
+            let (outcome, input, payload) =
+                awaited(&mut scenario, tracker, Hook::RejectionTracker).unwrap_or_default();
+            assert_eq!(outcome, "tracked");
+            assert_eq!(input.get("agent_id"), Some(&values::text(AGENT)));
+            assert_eq!(payload.len(), 2);
+            operations.push(input.get("operation").cloned());
+        }
+        assert_eq!(
+            operations,
+            [Some(values::text("reject")), Some(values::text("handle"))]
+        );
+        let again = awaited(&mut scenario, tracker, Hook::RejectionTracker);
+        assert!(
+            again
+                .as_ref()
+                .is_err_and(|error| error.contains("made no call")),
+            "{again:?}"
+        );
+
+        let job = "swell.host.HostEnqueuePromiseJob";
+        let (outcome, input, payload) =
+            awaited(&mut scenario, job, Hook::PromiseJob).unwrap_or_default();
+        assert_eq!(outcome, "enqueued");
+        assert_eq!(input.get("realm_id"), Some(&values::text(REALM)));
+        assert_eq!(
+            payload.iter().map(|(field, _)| *field).collect::<Vec<_>>(),
+            ["job_id", "agent_id", "realm_id"]
+        );
+        assert!(awaited(&mut scenario, job, Hook::PromiseJob).is_err());
     }
 }

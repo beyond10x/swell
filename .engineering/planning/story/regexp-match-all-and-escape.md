@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:regexp-match-all-and-escape
 kind: story
-status: active
+status: implemented
 title: RegExp.prototype[@@matchAll], %RegExpStringIteratorPrototype%, String.prototype.matchAll and RegExp.escape
 summary: 83 failing cases (166 runs); the last methods of decision 7 that need no new table, on the operations of the first wave.
 relations:
@@ -27,10 +27,11 @@ scope:
   path: crates/swell/tests/main.rs
 - confidence: cited
   path: crates/swell/tests/regexp_match_all.rs
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T03:24:23Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T03:24:23Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:08Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 ## Context
 

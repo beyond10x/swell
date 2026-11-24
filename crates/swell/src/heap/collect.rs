@@ -304,6 +304,7 @@ pub(crate) fn collect<H: Host>(agent: &mut Agent<H>) -> Result<CollectReport, St
 #[cfg(test)]
 mod tests {
     use super::{Item, Mark, mark_phase};
+    use crate::builtins::async_iteration::AsyncFromSyncIterator;
     use crate::env::EnvironmentRecord;
     use crate::heap::SymbolRecord;
     use crate::heap::string::HeapString;
@@ -340,7 +341,7 @@ mod tests {
 
     /// The trace function of each kind of the layout but the common object record, which is
     /// called once per object.
-    const KIND_SITES: [&str; 18] = [
+    const KIND_SITES: [&str; 19] = [
         "heap/string.rs HeapString::trace",
         "heap/mod.rs SymbolRecord::trace",
         "host/host_object.rs HostObject::trace",
@@ -355,6 +356,7 @@ mod tests {
         "object/generator.rs Generator::trace",
         "object/promise.rs Promise::trace",
         "object/async_function.rs AsyncActivation::trace",
+        "builtins/async_iteration.rs AsyncFromSyncIterator::trace",
         "realm/mod.rs RealmRecord::trace",
         "env/global.rs RealmGlobalEnv::trace",
         "env/mod.rs EnvironmentRecord::trace",
@@ -421,6 +423,13 @@ mod tests {
         objects.push(
             heap.objects
                 .allocate(ObjectRecord::new(None, activation), 0)
+                .unwrap(),
+        );
+        // An Async-from-Sync Iterator names its sync iterator: the ordinary object stands for it.
+        let from_sync = ObjectKind::AsyncFromSyncIterator(AsyncFromSyncIterator::for_test(named));
+        objects.push(
+            heap.objects
+                .allocate(ObjectRecord::new(None, from_sync), 0)
                 .unwrap(),
         );
         let array = heap.objects.get_mut(objects[1]).unwrap();
