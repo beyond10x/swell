@@ -34,6 +34,7 @@
 mod array_patterns;
 mod arrow;
 mod async_function;
+mod async_generator;
 pub(crate) mod budget;
 pub(crate) mod dispatch;
 mod for_of;

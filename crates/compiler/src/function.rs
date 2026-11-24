@@ -42,6 +42,12 @@
 //!   call ([`Instruction::AsyncReject`]); a `return` and the end of the body resolve it
 //!   ([`Instruction::AsyncReturn`]). An `async` arrow takes `this`, `arguments` and `new.target`
 //!   from its scope as every arrow does.
+//! - An async generator (`#sec-async-generator-function-definitions`) reserves one last local
+//!   slot for its object, which its `await`s use too; its code starts it after
+//!   FunctionDeclarationInstantiation, as a generator's does, and from there to the end of its
+//!   body runs in a handler region whose block settles the request at the head with the throw
+//!   ([`Instruction::AsyncGeneratorReject`]); a `return` and the end of the body settle it with
+//!   their value ([`Instruction::AsyncGeneratorReturn`]).
 
 use swell_syntax::Script;
 use swell_syntax::ast::{Ast, BindingTarget, ExprId, Function, FunctionId, Span};
@@ -97,9 +103,9 @@ pub(crate) fn compile_function(
     let params = m.copy(&info.params)?;
 
     let mut c = Compiler::new(ast, resolution, constants, false, m);
-    let region = match info.async_slot {
-        Some(slot) => Some((slot, async_start(&mut c, f, slot)?)),
-        None => None,
+    let region = match (info.async_slot, info.generator_slot) {
+        (Some(slot), None) => Some((slot, async_start(&mut c, f, slot)?)),
+        (Some(_), Some(_)) | (None, _) => None,
     };
     if !f.is_simple() {
         bind_parameters(&mut c, id, info)?;
@@ -116,10 +122,11 @@ pub(crate) fn compile_function(
         c.emit(store, span)?;
         c.emit(Instruction::Pop, span)?;
     }
-    match (info.generator_slot, region) {
-        (Some(slot), _) => generator_body(&mut c, f, slot)?,
-        (None, Some((slot, start))) => async_body(&mut c, f, slot, start)?,
-        (None, None) => {
+    match (info.generator_slot, info.async_slot, region) {
+        (Some(slot), Some(_), _) => async_generator_body(&mut c, f, slot)?,
+        (Some(slot), None, _) => generator_body(&mut c, f, slot)?,
+        (None, _, Some((slot, start))) => async_body(&mut c, f, slot, start)?,
+        (None, _, None) => {
             c.run(&f.body)?;
             c.emit(Instruction::Undefined, f.span)?;
             c.emit(Instruction::Return, f.span)?;
@@ -245,6 +252,45 @@ fn async_body(
         target: rejected,
         items: 0,
         envs: 0,
+    })
+}
+
+/// The code of an async generator function after FunctionDeclarationInstantiation
+/// (`#sec-runtime-semantics-evaluateasyncgeneratorbody`; "Async generators on suspended frames",
+/// item 1, `docs/design/engine.md`): [`Instruction::AsyncGeneratorStart`], which makes the async
+/// generator object into local slot `slot` and suspends, and [`Instruction::EndFinally`] for the
+/// normal completion of the first `next`; then the body, whose end returns `undefined` as a
+/// `return` does, through [`Instruction::AsyncGeneratorReturn`] (AsyncGeneratorStart,
+/// `#sec-asyncgeneratorstart`, step 4). Everything after the start is a [`HandlerKind::Catch`]
+/// region whose block is [`Instruction::AsyncGeneratorReject`], so a throw that leaves the body
+/// settles the request at the head with it. The slot is the generator's and the `await`s'
+/// alike: [`Compiler::generator`] and [`Compiler::asynchronous`] both name it.
+fn async_generator_body(
+    c: &mut Compiler<'_, '_>,
+    f: &Function,
+    slot: u32,
+) -> Result<(), CompileError> {
+    let span = f.span;
+    c.generator = Some(slot);
+    c.asynchronous = Some(slot);
+    c.emit(Instruction::AsyncGeneratorStart(slot), span)?;
+    c.emit(Instruction::EndFinally, span)?;
+    let (items, envs) = (c.items, c.envs);
+    let start = c.label();
+    c.bind(start)?;
+    c.run(&f.body)?;
+    c.emit(Instruction::Undefined, span)?;
+    c.exit_return(span)?;
+    let rejected = c.label();
+    c.bind(rejected)?;
+    c.emit(Instruction::AsyncGeneratorReject(slot), span)?;
+    c.handler(Handler {
+        kind: HandlerKind::Catch,
+        start,
+        end: rejected,
+        target: rejected,
+        items,
+        envs,
     })
 }
 

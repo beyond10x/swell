@@ -1,0 +1,52 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "g" length 1 locals 3 generator async
+  params local 0
+  0000 2:1 AsyncGeneratorStart 2
+  0001 2:1 EndFinally
+  0002 3:17 GetLocal 0
+  0003 3:11 Await 2
+  0004 3:11 JumpIfTag 0 0006
+  0005 3:11 EndFinally
+  0006 3:11 AsyncGeneratorYield 2
+  0007 3:11 JumpIfTag 0 0015
+  0008 3:11 JumpIfTag 2 0010
+  0009 3:11 EndFinally
+  0010 3:11 Await 2
+  0011 3:11 JumpIfTag 0 0013
+  0012 3:11 EndFinally
+  0013 3:11 YieldReturn 0
+  0014 3:11 AsyncGeneratorReturn 2
+  0015 3:7 SetLocal 1
+  0016 3:7 Pop
+  0017 4:3 Undefined
+  0018 4:3 Await 2
+  0019 4:3 JumpIfTag 0 0021
+  0020 4:3 EndFinally
+  0021 4:3 AsyncGeneratorYield 2
+  0022 4:3 JumpIfTag 0 0030
+  0023 4:3 JumpIfTag 2 0025
+  0024 4:3 EndFinally
+  0025 4:3 Await 2
+  0026 4:3 JumpIfTag 0 0028
+  0027 4:3 EndFinally
+  0028 4:3 YieldReturn 0
+  0029 4:3 AsyncGeneratorReturn 2
+  0030 4:3 Pop
+  0031 5:9 GetLocal 1
+  0032 5:3 Await 2
+  0033 5:3 JumpIfTag 0 0035
+  0034 5:3 EndFinally
+  0035 5:3 Pop
+  0036 6:10 GetLocal 1
+  0037 6:3 Await 2
+  0038 6:3 JumpIfTag 0 0040
+  0039 6:3 EndFinally
+  0040 6:3 AsyncGeneratorReturn 2
+  0041 2:1 Undefined
+  0042 2:1 AsyncGeneratorReturn 2
+  0043 2:1 AsyncGeneratorReject 2
+  catch 0002..0043 -> 0043 items 0 envs 0

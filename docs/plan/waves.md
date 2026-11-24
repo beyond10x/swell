@@ -376,7 +376,7 @@ requirements (`HOST-201` to `HOST-208`), each moved by one story.
 | 7 | `yield-star-in-async-generators`, `async-generator-methods-in-object-literals`, `async-generator-function-constructor`, `array-from-async` | `yield*` in an async generator; its methods and constructor; `Array.fromAsync` |
 | 8 | `slice-10-conformance-close` | 138 cases moved to later slices; after `slice-07-conformance-close` |
 
-**Delivered so far.** On the branch of the first wave of slice 10, by 2026-11-24: the orders 1 to 4 (the last of order 4 was `for await` with the Async-from-Sync Iterator), and order 5, the statics of `Promise` with `finally` and `AggregateError` and the target of the executable specification (18 of the model's 60 scenarios pass on the engine, 14 of 58 before); order 6, async generators, is being built. 1,665 of the 3,879 cases pass (`test262-slice 10 3879 7499 0 0 3879 1665 2214 0`).
+**Delivered so far.** On the branch of the first wave of slice 10, by 2026-11-24: the orders 1 to 4 (the last of order 4 was `for await` with the Async-from-Sync Iterator), and order 5, the statics of `Promise` with `finally` and `AggregateError` and the target of the executable specification (18 of the model's 60 scenarios pass on the engine, 14 of 58 before); and of order 6 async generators with their request queue; the stories that build on them are being built. 2,785 of the 3,879 cases pass (`test262-slice 10 3879 7499 0 0 3879 2785 1094 0`).
 
 ## What later slices take over
 

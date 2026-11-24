@@ -16,12 +16,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   At its close 40 cases that need `class` or `super` move to slice 8, each with its
   evidence, and 21 cases that failed only on generators count in slice 7 instead of slices
   18 and 19.
+- Async generators, a story of the tenth slice: `async function*` as a declaration and as
+  an expression, `%AsyncGeneratorPrototype%` with `next`, `return` and `throw`, and the
+  queue of requests behind them. Each call returns a promise of an iterator result; calls
+  made while the generator runs or waits are queued and answered in their order. `return`
+  with a value awaits it. A request is charged to the memory budget when it is queued, and
+  the queue is credited when the generator is freed; a script that queues requests without
+  end stops at the memory budget, and a generator that never ends stops at the step
+  budget. `yield*` in an async generator and `async *` methods are still refused, each with
+  a `SyntaxError` that names the tenth slice; `%AsyncGeneratorFunction%` has no constructor
+  yet.
 - `for await (x of y)` in an `async` function, a story of the tenth slice, with
   `%AsyncIteratorPrototype%`, `Symbol.asyncIterator` and the Async-from-Sync Iterator that
   wraps a sync iterable. Each result of `next` is awaited, and the iterator is closed on
   every exit of the loop. A loop over an iterator that never ends stops at the step budget;
-  a wrapped iterator is charged to the memory budget until it is freed. `for await` in an
-  `async function*` waits for async generators.
+  a wrapped iterator is charged to the memory budget until it is freed.
 - The statics of `Promise`, a story of the tenth slice: `Promise.all`, `Promise.allSettled`,
   `Promise.any`, `Promise.race`, `Promise.try` and `Promise.withResolvers`, with
   `Promise.prototype.finally` and `AggregateError`. `Promise.all` over an iterator that
@@ -141,6 +150,7 @@ Every number below comes from the gate, `task check`, on the released commit.
 - New: `WellKnownSymbol::AsyncIterator`, the thirteenth well-known symbol a host names. A
   host object with a method under it is the iterable of a `for await`.
 - `HOST-203` has a test.
+- `HOST-204`, `HOST-205` and `HOST-206` have a test.
 - The model of the interface (`spec/`) states the microtask checkpoint with its answers at the
   step budget and at an interrupt, and a job that will not run to its end (`Abandoned`). Two
   scenarios are new: a promise job runs at the next checkpoint and not before, and a rejection

@@ -11,10 +11,8 @@
 //! clear [Yield], but the parameters of an arrow function, which keep the [Yield] around them.
 //! An `async` function or arrow function (slice 10, `#sec-async-function-definitions`,
 //! `#sec-async-arrow-function-definitions`) is parsed whole the same way with [Await], and an
-//! async generator, `async function*` (`#sec-async-generator-function-definitions`), with both;
-//! the refusal of slice 10 at the `async` of the first async generator of the source is held
-//! back to the end of the parse ([`Parser::held`]). A
-//! function's code is strict mode code when the code around it is or when its body starts with
+//! async generator, `async function*` (`#sec-async-generator-function-definitions`), with both
+//! (a `yield*` in it holds a refusal of its own, `parser/expression.rs`). A function's code is strict mode code when the code around it is or when its body starts with
 //! a Use Strict Directive (`#sec-strict-mode-code`); the parser tracks that while it reads the
 //! body, and the early errors that depend on it are checked afterwards (`src/early.rs`).
 
@@ -23,7 +21,6 @@ use crate::ast::{
     AssignOp, BindingTarget, Child, Expr, ExprId, ExprNode, Function, FunctionId, FunctionKind,
     Name, PatternKind, Scope, Span, Stmt, StmtId,
 };
-use crate::error::SyntaxError;
 use crate::token::{Keyword, Punct};
 
 impl<'a, 'm> Parser<'a, 'm> {
@@ -54,8 +51,7 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// set, no `await` where [Await] is set, or either in a GeneratorExpression, an
     /// AsyncFunctionExpression or an AsyncGeneratorExpression (`BindingIdentifier[+Yield]`,
     /// `BindingIdentifier[~Yield, +Await]`, `BindingIdentifier[+Yield, +Await]`) is an early
-    /// error (`src/early.rs`). An async generator, `async function*`, holds the refusal of
-    /// slice 10 at its `async` ([`Parser::hold_async_generator`]).
+    /// error (`src/early.rs`).
     #[inline(never)]
     fn function_head(&mut self, kind: FunctionKind) -> R<FunctionId> {
         let span = self.start();
@@ -66,9 +62,6 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.expect_keyword(Keyword::Function)?;
         let generator = self.is(Punct::Star);
         if generator {
-            if asynchronous {
-                self.hold_async_generator(span);
-            }
             self.advance()?;
         }
         let name = if kind == FunctionKind::Expression && self.is(Punct::LParen) {
@@ -82,18 +75,6 @@ impl<'a, 'm> Parser<'a, 'm> {
             f.asynchronous = asynchronous;
         }
         Ok(id)
-    }
-
-    /// Holds the refusal of slice 10 of the async generator whose `async` is at `span` back to
-    /// the end of the parse ([`Parser::held`]), unless a refusal is held already: the first
-    /// async generator of the source is the one named, its head read before any one inside it.
-    #[inline(never)]
-    fn hold_async_generator(&mut self, span: Span) {
-        if self.held.is_none() {
-            let refusal =
-                SyntaxError::refused("async generator function", 10, span.line, span.column);
-            self.held = Some(refusal);
-        }
     }
 
     /// Numbers a function whose first token is at `span`.
@@ -921,18 +902,18 @@ mod tests {
         assert_eq!(meter.held(), tree, "held against the tree");
     }
 
-    /// The parser's tree of async generators (`#sec-async-generator-function-definitions`),
-    /// which no entry answers while the refusal of slice 10 stands: each function is both
-    /// `generator` and `asynchronous`, and its span, its source text, starts at its `async`; a
-    /// `yield` in one is a YieldExpression and an `await` an AwaitExpression; the parse holds the
-    /// refusal at the `async` of the first async generator of the source; and what the ledger
-    /// holds after the parse is the tree's capacity.
+    /// The parser's tree of async generators (`#sec-async-generator-function-definitions`):
+    /// each function is both `generator` and `asynchronous`, and its span, its source text,
+    /// starts at its `async`; a `yield` in one is a YieldExpression, a `yield*` too, and an
+    /// `await` an AwaitExpression; the parse holds the refusal of slice 10 of `yield*` in an
+    /// async generator at the `*` of the first one of the source; and what the ledger holds
+    /// after the parse is the tree's capacity.
     #[test]
-    fn async_generators_parse_whole_and_hold_the_refusal_of_slice_10() {
+    fn async_generators_parse_whole_and_hold_the_refusal_of_yield_star() {
         let text = "x = 1;\n\
                     var g = async function* h(a = 0) { yield await a; }, \
                     i = async function* () { yield; };\n\
-                    { async function* j() { var k = async function* () { await (yield k); }; } }";
+                    { async function* j() { var k = async function* () { await (yield k); yield* k; }; } }";
         let source: Vec<u16> = text.encode_utf16().collect();
         let mut ledger = Counting::default();
         let meter = Meter::new(&mut ledger);
@@ -950,8 +931,8 @@ mod tests {
             [
                 "async function* h(a = 0) { yield await a; }",
                 "async function* () { yield; }",
-                "async function* j() { var k = async function* () { await (yield k); }; }",
-                "async function* () { await (yield k); }",
+                "async function* j() { var k = async function* () { await (yield k); yield* k; }; }",
+                "async function* () { await (yield k); yield* k; }",
             ]
         );
         let kinds: Vec<FunctionKind> = functions.iter().map(|f| f.kind).collect();
@@ -971,7 +952,11 @@ mod tests {
                 .filter(|n| pick(&n.expr))
                 .count()
         };
-        assert_eq!(count(|e| matches!(e, Expr::Yield { .. })), 3);
+        assert_eq!(count(|e| matches!(e, Expr::Yield { .. })), 4);
+        assert_eq!(
+            count(|e| matches!(e, Expr::Yield { delegate: true, .. })),
+            1
+        );
         assert_eq!(count(|e| matches!(e, Expr::Await(_))), 2);
         let held = parsed
             .held
@@ -980,9 +965,9 @@ mod tests {
         assert_eq!(
             held,
             Some((
-                "async generator function is not supported before slice 10",
-                2,
-                9
+                "yield* in an async generator is not supported before slice 10",
+                3,
+                76
             ))
         );
         let tree = parsed

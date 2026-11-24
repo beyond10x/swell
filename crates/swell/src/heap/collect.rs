@@ -314,6 +314,7 @@ mod tests {
     use crate::object::arguments::ArgumentsObject;
     use crate::object::array::Array;
     use crate::object::async_function::AsyncActivation;
+    use crate::object::async_generator::AsyncGenerator;
     use crate::object::bound_function::BoundFunction;
     use crate::object::builtin_function::BuiltinFunction;
     use crate::object::ecmascript_function::EcmascriptFunction;
@@ -341,7 +342,7 @@ mod tests {
 
     /// The trace function of each kind of the layout but the common object record, which is
     /// called once per object.
-    const KIND_SITES: [&str; 19] = [
+    const KIND_SITES: [&str; 20] = [
         "heap/string.rs HeapString::trace",
         "heap/mod.rs SymbolRecord::trace",
         "host/host_object.rs HostObject::trace",
@@ -357,6 +358,7 @@ mod tests {
         "object/promise.rs Promise::trace",
         "object/async_function.rs AsyncActivation::trace",
         "builtins/async_iteration.rs AsyncFromSyncIterator::trace",
+        "object/async_generator.rs AsyncGenerator::trace",
         "realm/mod.rs RealmRecord::trace",
         "env/global.rs RealmGlobalEnv::trace",
         "env/mod.rs EnvironmentRecord::trace",
@@ -430,6 +432,14 @@ mod tests {
         objects.push(
             heap.objects
                 .allocate(ObjectRecord::new(None, from_sync), 0)
+                .unwrap(),
+        );
+        // An async generator names the value and the capability of its one request: the
+        // ordinary object stands for them.
+        let async_generator = ObjectKind::AsyncGenerator(AsyncGenerator::for_test(named));
+        objects.push(
+            heap.objects
+                .allocate(ObjectRecord::new(None, async_generator), 0)
                 .unwrap(),
         );
         let array = heap.objects.get_mut(objects[1]).unwrap();

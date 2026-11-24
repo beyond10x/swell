@@ -501,7 +501,9 @@ pub(crate) struct Compiler<'a, 'm> {
     /// [`Instruction::GeneratorReturn`] instead of [`Instruction::Return`].
     pub(crate) generator: Option<u32>,
     /// Of an `async` template: the local slot of its activation. Its `return` ends in
-    /// [`Instruction::AsyncReturn`] instead of [`Instruction::Return`].
+    /// [`Instruction::AsyncReturn`] instead of [`Instruction::Return`]. Of an async generator
+    /// template, both are the slot of its async generator object, and its `return` ends in
+    /// [`Instruction::AsyncGeneratorReturn`].
     pub(crate) asynchronous: Option<u32>,
 }
 
@@ -879,7 +881,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 self.goto(entry, span)
             }
             None => match (self.generator, self.asynchronous) {
-                (Some(slot), _) => self.emit(Instruction::GeneratorReturn(slot), span),
+                (Some(slot), Some(_)) => self.emit(Instruction::AsyncGeneratorReturn(slot), span),
+                (Some(slot), None) => self.emit(Instruction::GeneratorReturn(slot), span),
                 (None, Some(slot)) => self.emit(Instruction::AsyncReturn(slot), span),
                 (None, None) => self.emit(Instruction::Return, span),
             },

@@ -35,6 +35,7 @@
 pub(crate) mod arguments;
 pub(crate) mod array;
 pub(crate) mod async_function;
+pub(crate) mod async_generator;
 pub(crate) mod bound_function;
 pub(crate) mod builtin_function;
 pub(crate) mod ecmascript_function;
@@ -56,6 +57,7 @@ use crate::value::{ObjectRef, Value};
 use arguments::ArgumentsObject;
 use array::Array;
 use async_function::AsyncActivation;
+use async_generator::AsyncGenerator;
 use bound_function::BoundFunction;
 use builtin_function::BuiltinFunction;
 use ecmascript_function::EcmascriptFunction;
@@ -199,6 +201,10 @@ pub(crate) enum ObjectKind {
     /// An Async-from-Sync Iterator object (27.1.5.3), with [[SyncIteratorRecord]] in a box of
     /// its kind, `story:for-await-and-async-from-sync-iterator` (`builtins/async_iteration.rs`).
     AsyncFromSyncIterator(crate::builtins::async_iteration::AsyncFromSyncIterator),
+    /// An async generator object (27.6), with its frame and its request queue in boxes of its
+    /// kind (`docs/design/engine.md`, decision 3, "Async generators on suspended frames"),
+    /// `story:async-generators-and-their-request-queue`.
+    AsyncGenerator(AsyncGenerator),
 }
 
 /// Which kind an object is, for the dispatch.
@@ -218,6 +224,7 @@ pub(crate) enum KindTag {
     Promise,
     AsyncActivation,
     AsyncFromSyncIterator,
+    AsyncGenerator,
 }
 
 impl ObjectRecord {
@@ -254,6 +261,7 @@ impl ObjectRecord {
             ObjectKind::Promise(promise) => promise.trace(mark),
             ObjectKind::AsyncActivation(activation) => activation.trace(mark),
             ObjectKind::AsyncFromSyncIterator(iterator) => iterator.trace(mark),
+            ObjectKind::AsyncGenerator(generator) => generator.trace(mark),
         }
     }
 
@@ -276,6 +284,7 @@ impl ObjectRecord {
             ObjectKind::Promise(_) => KindTag::Promise,
             ObjectKind::AsyncActivation(_) => KindTag::AsyncActivation,
             ObjectKind::AsyncFromSyncIterator(_) => KindTag::AsyncFromSyncIterator,
+            ObjectKind::AsyncGenerator(_) => KindTag::AsyncGenerator,
         }
     }
 }

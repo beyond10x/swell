@@ -21,8 +21,10 @@
 //! (`story:async-functions-and-await`): `%AsyncFunction.prototype%`, and `%AsyncFunction%`, the
 //! constructor whose `prototype` it is; and `promise_statics`
 //! (`story:promise-statics-finally-and-aggregate-error`): `all`, `allSettled`, `any`, `race`,
-//! `try` and `withResolvers` of `%Promise%` with the element functions of the first three.
-//! Later slices add their files here.
+//! `try` and `withResolvers` of `%Promise%` with the element functions of the first three; and
+//! `async_generator` (`story:async-generators-and-their-request-queue`):
+//! `%AsyncGeneratorFunction.prototype%` and `%AsyncGeneratorPrototype%` with `next`, `return`
+//! and `throw`, and the operations of the request queue. Later slices add their files here.
 //!
 //! `array`, `object` and `string` are directories (`story:builtin-group-modules`): `mod.rs`
 //! holds the constructor and the builtins of the base, and each group of builtins a story of
@@ -42,6 +44,7 @@
 
 pub(crate) mod array;
 pub(crate) mod async_function;
+pub(crate) mod async_generator;
 pub(crate) mod async_iteration;
 pub(crate) mod boolean;
 pub(crate) mod error;

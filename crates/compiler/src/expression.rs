@@ -975,6 +975,9 @@ impl<'a, 'm> Compiler<'a, 'm> {
             Some(e) => t.push(Task::Expr(e))?,
             None => t.push(Task::Emit(Instruction::Undefined, span))?,
         }
+        if self.asynchronous.is_some() {
+            return self.async_generator_yield(slot, span, t);
+        }
         let (normal, returned) = (self.label(), self.label());
         t.push(Task::Emit(Instruction::Yield(slot), span))?;
         t.push(Task::Emit(
@@ -995,6 +998,70 @@ impl<'a, 'm> Compiler<'a, 'm> {
         t.push(Task::Bind(returned))?;
         t.push(Task::Emit(Instruction::YieldReturn(self.items), span))?;
         t.push(Task::Return(span))?;
+        t.push(Task::Bind(normal))?;
+        Ok(())
+    }
+
+    /// The rest of `yield` in an async generator, its operand on top (`#sec-yield`, step 2:
+    /// `AsyncGeneratorYield(? Await(value))`): the `await` of the operand
+    /// ([`Compiler::await_value`]), then [`Instruction::AsyncGeneratorYield`] of the async
+    /// generator in local slot `slot`, which leaves the received value and its tag, at once or
+    /// after a suspension; the code dispatches on the tag as at the `yield` of a generator, but
+    /// for a return completion it first awaits the value
+    /// (AsyncGeneratorUnwrapYieldResumption, `#sec-asyncgeneratorunwrapyieldresumption`): a
+    /// throw of that `await` throws here, and its value is returned as a `return` statement here
+    /// returns it.
+    fn async_generator_yield(
+        &mut self,
+        slot: u32,
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let (normal, returned) = (self.label(), self.label());
+        self.await_value(slot, span, t)?;
+        t.push(Task::Emit(Instruction::AsyncGeneratorYield(slot), span))?;
+        t.push(Task::Emit(
+            Instruction::JumpIfTag {
+                tag: TAG_NORMAL,
+                target: normal,
+            },
+            span,
+        ))?;
+        t.push(Task::Emit(
+            Instruction::JumpIfTag {
+                tag: TAG_RETURN,
+                target: returned,
+            },
+            span,
+        ))?;
+        t.push(Task::Emit(Instruction::EndFinally, span))?;
+        t.push(Task::Bind(returned))?;
+        self.await_value(slot, span, t)?;
+        t.push(Task::Emit(Instruction::YieldReturn(self.items), span))?;
+        t.push(Task::Return(span))?;
+        t.push(Task::Bind(normal))?;
+        Ok(())
+    }
+
+    /// Await of the value on top (`#sec-await`) by the holder in local slot `slot`:
+    /// [`Instruction::Await`], then the dispatch on the tag of the resumption, a throw thrown
+    /// here and a normal completion's value left on top.
+    pub(crate) fn await_value(
+        &mut self,
+        slot: u32,
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let normal = self.label();
+        t.push(Task::Emit(Instruction::Await(slot), span))?;
+        t.push(Task::Emit(
+            Instruction::JumpIfTag {
+                tag: TAG_NORMAL,
+                target: normal,
+            },
+            span,
+        ))?;
+        t.push(Task::Emit(Instruction::EndFinally, span))?;
         t.push(Task::Bind(normal))?;
         Ok(())
     }
@@ -1052,6 +1119,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
         let slot = self
             .generator
             .ok_or_else(|| malformed("a yield* outside a generator"))?;
+        // The parse refuses `yield*` in an async generator before slice 10
+        // (`story:yield-star-in-async-generators`), so no tree that compiles holds one.
+        if self.asynchronous.is_some() {
+            return Err(malformed("a yield* in an async generator"));
+        }
         let (start, top, end, done, normal) = (
             self.label(),
             self.label(),

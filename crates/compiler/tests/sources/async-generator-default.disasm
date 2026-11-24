@@ -1,0 +1,39 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "d" length 0 locals 3 generator async binds-parameters
+  params local 0, local 1
+  0000 2:19 Argument 3
+  0001 2:19 JumpIfNotUndefined 0003
+  0002 2:23 Number 1
+  0003 2:19 SetLocal 0
+  0004 2:19 Pop
+  0005 2:26 Argument 4
+  0006 2:26 JumpIfNotUndefined 0008
+  0007 2:30 GetLocal 0
+  0008 2:26 SetLocal 1
+  0009 2:26 Pop
+  0010 2:1 AsyncGeneratorStart 2
+  0011 2:1 EndFinally
+  0012 3:9 GetLocal 0
+  0013 3:13 GetLocal 1
+  0014 3:9 Add
+  0015 3:3 Await 2
+  0016 3:3 JumpIfTag 0 0018
+  0017 3:3 EndFinally
+  0018 3:3 AsyncGeneratorYield 2
+  0019 3:3 JumpIfTag 0 0027
+  0020 3:3 JumpIfTag 2 0022
+  0021 3:3 EndFinally
+  0022 3:3 Await 2
+  0023 3:3 JumpIfTag 0 0025
+  0024 3:3 EndFinally
+  0025 3:3 YieldReturn 0
+  0026 3:3 AsyncGeneratorReturn 2
+  0027 3:3 Pop
+  0028 2:1 Undefined
+  0029 2:1 AsyncGeneratorReturn 2
+  0030 2:1 AsyncGeneratorReject 2
+  catch 0012..0030 -> 0030 items 0 envs 0
