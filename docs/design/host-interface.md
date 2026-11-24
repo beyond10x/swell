@@ -332,7 +332,10 @@ so it only decides which keys collide. With both seeds fixed at creation, an age
 function of its inputs (decision 19); a hook called whenever the engine wanted fresh bytes
 would add calls whose number depends on internal events such as map resizes. SipHash takes a
 128-bit key, hence 16 bytes; 32 bytes for the generator is the state size of the generator
-`swell-num` will choose, an upper bound it may use less of (not chosen yet; not checked).
+`swell-num` uses, xoshiro256** (chosen on 2026-11-24, `engine.md` decision 6, "`Math.random`":
+the 16 bytes after the key and the realm's creation index go through the SipHash to make the
+four words of the realm's state, so all 32 bytes are used; the index counts every call of
+`create_realm` that starts, one that ends in a termination included).
 
 Rejected: decision 9's "random bytes" from the trait; one seed for both purposes (a script that
 reads enough `Math.random` output must learn nothing about the hash key; two independent seeds
@@ -361,6 +364,10 @@ object (decision 15) that draws on the host's own randomness; it is not an engin
 **HOST-146** (swell:D3) `Agent::new` is the only function of the interface that takes `Seeds`, and no other function, read or hook takes or returns seed or random bytes, which a scan of the `swell` crate's public items in the gate checks. [slice 1]
 
 **HOST-147** (swell:D3) Two processes that each create an agent with the same `Seeds` and run the same script, printing 1,000 `Math.random()` values and the key order of a `Map` and an object of 10,000 keys each, print the same bytes, which a test that starts two child processes checks: the engine reads no randomness but its seeds. [slice 4]
+
+**HOST-212** (ecma262:sec-math.random) Each of the first 100,000 values of `Math.random()` in a realm is a Number in [0, 1) with positive sign (`Object.is(x, -0)` is false) and `x * 2 ** 53` is an integer. [slice 4]
+
+**HOST-213** (swell:D3) In two agents with the same `random_seed` that each create two realms, the first 64 values of `Math.random()` of the second realm are equal bit for bit between the agents and differ as sequences from those of the first realm of either, even when one agent calls the second realm's function before the first realm's and the other after it: a realm's stream is its creation index, not the order of calls. [slice 4]
 
 ## 4. Values at the boundary
 
@@ -2140,7 +2147,7 @@ table in `host-interface-model.md` gives each marker's first words.
 - `host.yaml:417`: HOST-18, HOST-36, HOST-137, HOST-138
 - `host.yaml:424`: HOST-37
 - `host.yaml:429`: HOST-43
-- `host.yaml:458`: HOST-25, HOST-26, HOST-27, HOST-144, HOST-145, HOST-146
+- `host.yaml:458`: HOST-25, HOST-26, HOST-27, HOST-144, HOST-145, HOST-146, HOST-212, HOST-213
 - `host.yaml:480`: HOST-49, HOST-50, HOST-51, HOST-155
 - `host.yaml:494`: HOST-12, HOST-41, HOST-71
 - `host.yaml:507`: HOST-55
@@ -2238,7 +2245,6 @@ table in `host-interface-model.md` gives each marker's first words.
 
 ## Not checked
 
-- The generator `swell-num` uses for `Math.random`, and so how much of the 32-byte seed it uses.
 - HTML 7.2.3 (`WindowProxy`) and `Location`, on `nav-history-apis.html`, were not read here.
 - Whether the draft's text allows the `RangeError`s of decision 2 for strings, BigInts and
   depth: `grep -i 'implementation limit'` finds no such text, and no other wording was looked
