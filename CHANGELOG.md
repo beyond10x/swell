@@ -244,6 +244,17 @@ budget. 24,838 of the 44,812 selected test262 cases pass (20,229 in 0.8.0).
   1,612 cases pass
   (`test262-slice 04 1612 3184 0 0 1612 564 1048 0`). A refusal never counts as a pass, also
   when the script catches it.
+- The host interface: 148 of its 215 numbered requirements
+  ([`docs/design/host-interface.md`](docs/design/host-interface.md)) are held by a test in
+  this commit; none is pending for the seven delivered slices, and 12 are pending for
+  the fourth. 18 of the 60 scenarios of the interface's model pass on the
+  engine, and the other 42 name what they wait for. The interface will change
+  before 1.0.
+- The engine's own tests: `17 test binaries: 1536 passed, 0 failed, 1 ignored`, the tests of
+  the engine crate in the mode that collects garbage at every safe point
+  (`test-collect: 2 test binaries: 1167 passed, 0 failed, 1 ignored`), and the test of an
+  injected engine fault (`test-faults: 1 test binaries: 1 passed, 0 failed, 964 ignored`; the
+  964 are the tests that step's filter leaves out).
 - No binary, no command line, and the crates are not on a package registry. To use the
   library, depend on the repository at the tag:
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.9.0" }`.

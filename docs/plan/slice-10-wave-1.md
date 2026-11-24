@@ -411,3 +411,8 @@ All of it is in `CHANGELOG.md`, "0.9.0", "Host interface".
   `slow-tests collect-every-safe-point: 2 test binaries: 867 passed, 0 failed, 301 ignored`, and
   the four tests of each stack profile (`test-stack-profiles release` and `stack-debug`:
   `4 passed, 0 failed, 961 skipped` each).
+- **The gate on the release commit.** `slot --timeout 30m task check-runner` on `5ee604a`, on
+  the build node at load 36 on 64 cores, exited 0: `gate-selftest: 66 passed, 0 failed`,
+  `gate-time test-steps 24.9 of 120, cpu 166.7`, `host-surface: 0 change(s) since 0.9.0, each
+  named`, and the counts of the closing gate above for the tests, the scenarios, the host
+  requirements and test262. Its lines are in `AGENTS.md`, "The gate's numbers".
