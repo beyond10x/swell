@@ -73,8 +73,10 @@ slices 8, 9, 12 and 13 with evidence and 21 cases taken in from slices 18 and 19
 cases of slice 10 pass in all 7,258 runs (`test262-slice 10 3759 7258 0 0 3759 3759 0 0`), and
 no host requirement is pending for it. Slice 10 is in no release yet.
 Slice 4, `numbers-and-dates` (`epic:slice-04-numbers-and-dates`), is accepted in seventeen
-stories (`docs/plan/waves.md`, "Slice 4, `numbers-and-dates`"); two are built (the calendar
-arithmetic of `swell-num`, and the `Date` object with the host's clock), 564 of its 1,612 cases
+stories (`docs/plan/waves.md`, "Slice 4, `numbers-and-dates`"); four are built (the calendar
+arithmetic, the text of a date and the double-double arithmetic with `hypot` in `swell-num`, and
+the `Date` object with the host's clock; the gate has the steps `libm-check` and
+`math-data-check` with the double-double story), 564 of its 1,612 cases
 pass (`test262-slice 04 1612 3184 0 0 1612 564 1048 0`), and 12 host requirements are pending
 for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
@@ -368,7 +370,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 - Task facts, measured in wave 1 (Task 3.54):
   - Task takes a variable from the environment when none is passed on the command line. A
     gate variable therefore carries a prefix (`GATE_`, `TEST262_`, `UNICODE_DATA_`, `SPEC_`,
-    `HOST_REQ_`, `HOST_SURFACE_`, `ESS_`, `SITE_DATA_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
+    `HOST_REQ_`, `HOST_SURFACE_`, `ESS_`, `SITE_DATA_`, `LIBM_`, `MATH_DATA_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
     ones that have a value as the gate's first line.
   - A variable is written as `'{{.X | default "..."}}'`: in an included file a plain value
     ignores the command line.

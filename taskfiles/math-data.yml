@@ -1,0 +1,85 @@
+version: '3'
+
+tasks:
+  math-data-check:
+    desc: Check every reference file of Math under data/math against its SHA-256 line in data/math/SOURCE, and that no file is unlisted.
+    summary: |
+      Check the reference data of Math (docs/design/engine.md, decision 6, "Reference data of
+      Math"): every file under MATH_DATA_DIR (default data/math; the tests of the task point it
+      at a fixture) but SOURCE has the SHA-256 that its line in SOURCE gives, and no file is
+      without a line. The data is made once by bc and committed; this check regenerates
+      nothing.
+
+      SOURCE holds a header of lines starting with # and one line "<sha256>  <file>" per data
+      file, the form sha256sum writes. A file whose SHA-256 differs prints "math-data-check:
+      mismatch <file>", a file without a line "math-data-check: unlisted <file>", a line whose
+      file does not exist "math-data-check: missing <file>", and a line of another form
+      "math-data-check: SOURCE:<n>: not <sha256>  <file>"; each fails the task. A missing
+      SOURCE fails it too. With all well it prints "math-data-check: <n> file(s)" and exits 0.
+    silent: true
+    vars:
+      MATH_DATA_DIR: '{{.MATH_DATA_DIR | default "data/math"}}'
+    env:
+      MATH_DATA_DIR: '{{.MATH_DATA_DIR}}'
+    cmds:
+      - |
+        if [ ! -f "$MATH_DATA_DIR/SOURCE" ]; then
+          echo "math-data-check: no SOURCE in $MATH_DATA_DIR"
+          exit 1
+        fi
+        sums=$(cd "$MATH_DATA_DIR" && find . -type f ! -path ./SOURCE -exec sha256sum {} + | LC_ALL=C sort -k 2) || {
+          echo "math-data-check: cannot read $MATH_DATA_DIR"
+          exit 1
+        }
+        printf '%s\n' "$sums" | awk '
+          BEGIN {
+            source = ENVIRON["MATH_DATA_DIR"] "/SOURCE"
+            bad = 0
+          }
+          NF {
+            path = substr($0, length($1) + 2)
+            sub(/^[ *]?\.\//, "", path)
+            actual[path] = $1
+            nf++
+            files[nf] = path
+          }
+          END {
+            ln = 0
+            while ((getline line < source) > 0) {
+              ln++
+              if (line ~ /^#/ || line ~ /^[ \t]*$/) {
+                continue
+              }
+              if (line !~ /^[0-9a-f][0-9a-f]*  [^ ]+$/ || index(line, " ") != 65) {
+                print "math-data-check: SOURCE:" ln ": not <sha256>  <file>"
+                bad = 1
+                continue
+              }
+              hash = substr(line, 1, 64)
+              path = substr(line, 67)
+              ns++
+              listed[ns] = path
+              expected[path] = hash
+            }
+            for (i = 1; i <= ns; i++) {
+              p = listed[i]
+              if (!(p in actual)) {
+                print "math-data-check: missing " p
+                bad = 1
+              } else if (actual[p] != expected[p]) {
+                print "math-data-check: mismatch " p
+                bad = 1
+              }
+            }
+            for (i = 1; i <= nf; i++) {
+              if (!(files[i] in expected)) {
+                print "math-data-check: unlisted " files[i]
+                bad = 1
+              }
+            }
+            if (bad) {
+              exit 1
+            }
+            print "math-data-check: " ns + 0 " file(s)"
+          }
+        '
