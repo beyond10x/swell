@@ -16,6 +16,11 @@ Every number below comes from the gate, `task check`, on the released commit.
   At its close 40 cases that need `class` or `super` move to slice 8, each with its
   evidence, and 21 cases that failed only on generators count in slice 7 instead of slices
   18 and 19.
+- The grammar of async generators, a story of the tenth slice. `async function*`, as a
+  declaration and as an expression, is parsed whole, and its grammar errors and early
+  errors are reported. A script that holds one still ends with a `SyntaxError` that names
+  the tenth slice, now after every other error of the source; an `async *` method is
+  refused at its token as before. 143 more test262 cases of the slice pass.
 - `%AsyncFunction%`, the constructor of `async` functions from source text, a story of the
   tenth slice. It is reached through the `constructor` of the prototype of an `async`
   function and is no property of the global object. Called or constructed, it takes the

@@ -63,10 +63,10 @@ slice 8 with evidence and 21 cases taken in from slices 18 and 19: all 1,472 cas
 pass in all 2,801 runs (`test262-slice 07 1472 2801 0 0 1472 1472 0 0`), and no host
 requirement is pending for it. Slice 10, `promises-and-async`
 (`epic:slice-10-promises-and-async`), is accepted in seventeen stories (`docs/plan/waves.md`,
-"Slice 10, `promises-and-async`") and in work: seven of them are merged (the microtask queue,
+"Slice 10, `promises-and-async`") and in work: eight of them are merged (the microtask queue,
 the syntax of `async` functions, `Promise` with `then`, `async` functions, the rejection
-tracker, `async` methods of object literals and `%AsyncFunction%`), 638 of its 3,879 cases
-pass (`test262-slice 10 3879 7499 0 0 3879 638 3241 0`), and 8 host requirements are pending
+tracker, `async` methods of object literals, `%AsyncFunction%` and the grammar of `async function*`), 781 of its 3,879 cases
+pass (`test262-slice 10 3879 7499 0 0 3879 781 3098 0`), and 8 host requirements are pending
 for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
