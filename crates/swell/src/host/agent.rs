@@ -39,6 +39,7 @@ use swell_compiler::bytecode::Instruction;
 
 use super::hooks::HostDefined;
 use super::host_bytes::HostBytes;
+use super::host_object::HostObject;
 use super::interrupt::InterruptHandle;
 use super::jobs::{CheckpointReport, Entry, Microtask};
 use super::limits::{CreateError, Limits, Seeds};
@@ -202,6 +203,10 @@ pub struct Agent<H: Host> {
     /// inside it answers at once ("performing a microtask checkpoint",
     /// `html:perform-a-microtask-checkpoint`).
     pub(crate) checkpointing: bool,
+    /// The [[HostDefined]] of the JobCallbacks of the promise jobs that run, innermost last, as
+    /// host data the collector traces (`host/jobs.rs`): a job taken off the queue is no longer
+    /// reached through it.
+    pub(crate) running_host_defined: Vec<HostObject>,
     /// Test only: how many site records were written.
     #[cfg(test)]
     pub(crate) site_records: u64,
@@ -271,6 +276,7 @@ impl<H: Host> Agent<H> {
             error_site: None,
             microtasks: VecDeque::new(),
             checkpointing: false,
+            running_host_defined: Vec::new(),
             #[cfg(test)]
             site_records: 0,
             #[cfg(feature = "fault-injection")]
@@ -691,7 +697,8 @@ impl<H: Host> Agent<H> {
 
     /// Drop every queued entry unrun and answer how many (decision 11, "Steps, the interrupt and
     /// what a checkpoint leaves"; `engine.md`, decision 3, "Emptying the queue is the host's
-    /// call"): a host microtask is dropped as a Rust value, its closure never called. It runs no
+    /// call"): a host microtask is dropped as a Rust value, its closure never called, and a
+    /// promise job is dropped with the bytes of its entry credited ("Queued jobs"). It runs no
     /// script, calls no hook and spends no step, so `last_entry_steps()` reads what it read. It
     /// takes `&mut Agent`, which no code inside an entry holds: a job cannot drop the entries
     /// behind it.
@@ -959,7 +966,7 @@ impl<H: Host> Agent<H> {
 
 /// Root site of the collector: the values handed to host code in the running scopes, the
 /// scripts handed out as `ScriptRef`s in the running outermost entry, and what the microtask
-/// queue holds (`host/jobs.rs`).
+/// queue holds with the [[HostDefined]] of the promise jobs that run (`host/jobs.rs`).
 pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
     mark.count("host/agent.rs trace_roots");
     for &value in &agent.scope {

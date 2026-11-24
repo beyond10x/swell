@@ -222,6 +222,48 @@ pub fn host_5_agent_call_inside_a_host_function() {}
 #[cfg(doctest)]
 pub fn host_149_hook_cx_cannot_perform_a_microtask_checkpoint() {}
 
+/// HOST-200, the half the compiler holds: `Cx` and `HookCx` have no `clear_microtasks`
+/// (decision 11, "Steps, the interrupt and what a checkpoint leaves": it takes `&mut Agent`,
+/// which no code inside an entry holds, so a job cannot drop the entries behind it). The other
+/// half is the test `promises::host_200_clear_microtasks_empties_the_queue_without_running_anything`.
+/// Emptying the queue through a `Cx` does not compile:
+///
+/// ```compile_fail,E0599
+/// use swell::{Host, Cx};
+/// fn host_function<H: Host>(cx: &mut Cx<'_, H>) {
+///     let _ = cx.clear_microtasks();
+/// }
+/// ```
+///
+/// and the same call on the `Agent` compiles:
+///
+/// ```
+/// use swell::{Host, Agent};
+/// fn host_function<H: Host>(cx: &mut Agent<H>) {
+///     let _ = cx.clear_microtasks();
+/// }
+/// ```
+///
+/// Emptying the queue through a `HookCx` does not compile:
+///
+/// ```compile_fail,E0599
+/// use swell::{Host, HookCx};
+/// fn hook<H: Host>(cx: &mut HookCx<'_, H>) {
+///     let _ = cx.clear_microtasks();
+/// }
+/// ```
+///
+/// and the same call on the `Agent` compiles:
+///
+/// ```
+/// use swell::{Host, Agent};
+/// fn hook<H: Host>(cx: &mut Agent<H>) {
+///     let _ = cx.clear_microtasks();
+/// }
+/// ```
+#[cfg(doctest)]
+pub fn host_200_cx_and_hook_cx_have_no_clear_microtasks() {}
+
 /// HOST-170: `get` of `Cx` and `HookCx` takes `&mut self`, since the value it reads is handed
 /// out to the running scope (section 4). A read through a shared `&HookCx` does not compile:
 ///

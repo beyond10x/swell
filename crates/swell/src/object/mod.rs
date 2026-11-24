@@ -5,7 +5,8 @@
 //! arm; `story:object-model-and-realms` adds [[Extensible]], the properties, the internal methods
 //! and their dispatch arms, and one marking arm per kind beside them.
 //! `story:regexp-objects-exec-and-literals` adds the RegExp kind (`object/regexp.rs`), which owns
-//! the program of its pattern.
+//! the program of its pattern. `story:promise-constructor-then-and-jobs` adds the Promise kind
+//! (`object/promise.rs`), which takes every internal method by its ordinary arm.
 //!
 //! Every kind but the Array, String and arguments exotic objects uses the ordinary internal
 //! methods (`object/ordinary.rs`); host objects too, until the overrides of slice 9. [[Call]] and
@@ -36,6 +37,7 @@ pub(crate) mod builtin_function;
 pub(crate) mod ecmascript_function;
 pub(crate) mod generator;
 pub(crate) mod ordinary;
+pub(crate) mod promise;
 pub(crate) mod property;
 pub(crate) mod regexp;
 pub(crate) mod string;
@@ -55,6 +57,7 @@ use builtin_function::BuiltinFunction;
 use ecmascript_function::EcmascriptFunction;
 use generator::Generator;
 use ordinary::Ordinary;
+use promise::Promise;
 use property::{Descriptor, Key, Properties, Property, Room, sort_indices};
 use regexp::RegExpObject;
 use string::StringObject;
@@ -184,6 +187,8 @@ pub(crate) enum ObjectKind {
     RegExp(RegExpObject),
     /// A generator object (27.5), `story:generator-functions-and-suspended-frames`.
     Generator(Generator),
+    /// A Promise instance (27.5.6), `story:promise-constructor-then-and-jobs`.
+    Promise(Promise),
 }
 
 /// Which kind an object is, for the dispatch.
@@ -200,6 +205,7 @@ pub(crate) enum KindTag {
     Host,
     RegExp,
     Generator,
+    Promise,
 }
 
 impl ObjectRecord {
@@ -233,6 +239,7 @@ impl ObjectRecord {
             ObjectKind::Host(host) => host.trace(mark),
             ObjectKind::RegExp(regexp) => regexp.trace(mark),
             ObjectKind::Generator(generator) => generator.trace(mark),
+            ObjectKind::Promise(promise) => promise.trace(mark),
         }
     }
 
@@ -252,6 +259,7 @@ impl ObjectRecord {
             ObjectKind::Host(_) => KindTag::Host,
             ObjectKind::RegExp(_) => KindTag::RegExp,
             ObjectKind::Generator(_) => KindTag::Generator,
+            ObjectKind::Promise(_) => KindTag::Promise,
         }
     }
 }
