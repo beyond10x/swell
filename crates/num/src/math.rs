@@ -25,7 +25,13 @@
 #[cfg(all(target_arch = "x86", not(target_feature = "sse2")))]
 compile_error!("swell-num needs SSE2 or a target without extended-precision f64 arithmetic");
 
+pub mod atan;
 pub mod dd;
+pub mod reduce;
+pub mod trig;
+
+pub use atan::{acos, asin, atan, atan2};
+pub use trig::{cos, sin, tan};
 
 /// The binary exponent e of a finite non-zero Number: 2^e ≤ |x| < 2^(e+1), from -1074 to 1023.
 fn binary_exponent(x: f64) -> i32 {
