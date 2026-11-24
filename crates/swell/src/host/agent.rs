@@ -28,7 +28,9 @@
 //!
 //! The calls of the microtask queue (decision 11), `queue_microtask`, `pending_microtasks`,
 //! `clear_microtasks` and `perform_microtask_checkpoint`, are written by
-//! `story:job-queue-and-microtask-checkpoint`; the queue and its loop are `host/jobs.rs`.
+//! `story:job-queue-and-microtask-checkpoint`; the queue and its loop are `host/jobs.rs`. The
+//! reads of a promise, `promise_state`, `promise_is_handled` and `mark_promise_as_handled`, are
+//! written by `story:promise-rejection-tracker-and-promise-reads`.
 
 use std::cell::Cell;
 use std::collections::VecDeque;
@@ -47,15 +49,17 @@ use super::outcome::{
     Abrupt, CollectReport, Completion, ErrorSite, ErrorSummary, HostError, Outcome, Parsed,
     Termination, ValueKind,
 };
-use super::{ErrorKind, GlobalSetup, Host, Source};
+use super::{ErrorKind, GlobalSetup, Host, PromiseState, Source};
 use crate::heap::Heap;
 use crate::heap::arena::Handle;
 use crate::heap::collect::{self, Item, Mark, Stale};
 use crate::interp::Interp;
+use crate::object::ObjectKind;
 use crate::object::builtin_function::Activation;
+use crate::object::promise::{Promise, PromiseState as Settlement};
 use crate::realm::WellKnown;
 use crate::script::{Compiled, ParseAnswer, parse_termination};
-use crate::value::{Realm, Root, Script, Value};
+use crate::value::{ObjectRef, Realm, Root, Script, Value};
 
 /// How many agents this process has created; the next agent's key is one more. A key is never
 /// 0, and never used twice in a process.
@@ -136,6 +140,19 @@ impl SiteRecord {
                 })
             }
         }
+    }
+}
+
+/// The answer of a read of a promise given a value that is no promise (HOST-46).
+const NOT_A_PROMISE: HostError = HostError::WrongKind {
+    expected: ValueKind::Promise,
+};
+
+/// The object `value` is, or the answer of a read of a promise given a primitive.
+fn not_a_promise_unless_object(value: Value) -> Result<ObjectRef, HostError> {
+    match value {
+        Value::Object(object) => Ok(object),
+        _ => Err(NOT_A_PROMISE),
     }
 }
 
@@ -753,6 +770,70 @@ impl<H: Host> Agent<H> {
         self.alive()?;
         let value = self.heap.roots.get(value)?;
         self.scoped_error_summary(value)
+    }
+
+    /// [[PromiseState]] of the promise `promise` holds, with its [[PromiseResult]] as a new root
+    /// once it is settled (section 13; HTML reads both, `html:notify-about-rejected-promises`).
+    /// A read: it runs no code, calls no hook and spends no step. Its one allocation is the root
+    /// of a settled promise's result, an entry of the root table, which is the host's storage
+    /// for its own calls and charged to neither budget (`engine.md`, decision 4, "Memory
+    /// budget"), so `heap_bytes()` and `live_bytes()` read the same after it. A root that holds
+    /// no promise answers `Err(WrongKind { expected: Promise })` (HOST-46).
+    pub fn promise_state(&mut self, promise: &Root) -> Result<PromiseState, HostError> {
+        self.alive()?;
+        let value = self.heap.roots.get(promise)?;
+        Ok(match self.host_promise(value)?.state {
+            Settlement::Pending => PromiseState::Pending,
+            Settlement::Fulfilled(result) => PromiseState::Fulfilled(self.heap.roots.add(result)),
+            Settlement::Rejected(result) => PromiseState::Rejected(self.heap.roots.add(result)),
+        })
+    }
+
+    /// [[PromiseIsHandled]] of the promise `promise` holds: whether a handler was added to it
+    /// or the host marked it (section 13; `html:notify-about-rejected-promises`). A read: no
+    /// code, no hook, no step, no allocation. A root that holds no promise answers
+    /// `Err(WrongKind { expected: Promise })`.
+    pub fn promise_is_handled(&self, promise: &Root) -> Result<bool, HostError> {
+        self.alive()?;
+        let value = self.heap.roots.get(promise)?;
+        Ok(self.host_promise(value)?.is_handled)
+    }
+
+    /// Set [[PromiseIsHandled]] of the promise `promise` holds to true (Web IDL, "mark as
+    /// handled", `webidl:mark-a-promise-as-handled`): a handler added to it later causes no call
+    /// of `host_promise_rejection_tracker` with `Handle`, and a rejection of it while it is
+    /// pending none with `Reject` (HOST-101). It runs no code, calls no hook, spends no step and
+    /// allocates nothing. A root that holds no promise answers
+    /// `Err(WrongKind { expected: Promise })`.
+    pub fn mark_promise_as_handled(&mut self, promise: &Root) -> Result<(), HostError> {
+        self.alive()?;
+        let value = self.heap.roots.get(promise)?;
+        let record = self
+            .heap
+            .objects
+            .get_mut(not_a_promise_unless_object(value)?.handle)
+            .map_err(super::host_error)?;
+        match &mut record.kind {
+            ObjectKind::Promise(slots) => {
+                slots.is_handled = true;
+                Ok(())
+            }
+            _ => Err(NOT_A_PROMISE),
+        }
+    }
+
+    /// The slots of the promise `value` is, for the host's reads: `Err(WrongKind { expected:
+    /// Promise })` for any other value.
+    fn host_promise(&self, value: Value) -> Result<&Promise, HostError> {
+        let record = self
+            .heap
+            .objects
+            .get(not_a_promise_unless_object(value)?.handle)
+            .map_err(super::host_error)?;
+        match &record.kind {
+            ObjectKind::Promise(slots) => Ok(slots),
+            _ => Err(NOT_A_PROMISE),
+        }
     }
 
     /// The steps the last outermost entry spent, or the running one so far (decision 13). Never

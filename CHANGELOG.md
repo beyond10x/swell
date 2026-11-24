@@ -12,6 +12,12 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- The engine calls the host's rejection tracker, a story of the tenth slice:
+  `host_promise_rejection_tracker` with `Reject` when a promise is rejected and has no
+  handler, and with `Handle` when a handler is added to such a promise later. A host reads
+  the state of a promise with its result, and whether it is handled, without running code,
+  calling a hook or spending a step, and marks a promise as handled; a promise it marked
+  causes no call of the tracker.
 - `async` functions run, the third story of the tenth slice: declarations, expressions and
   arrow functions. A call makes the function's promise and runs the body to its first
   `await`; an `await` suspends the activation and a promise job resumes it at a checkpoint.
@@ -75,6 +81,13 @@ Every number below comes from the gate, `task check`, on the released commit.
   and `HOST-200` have a test.
 - `HOST-194` and `HOST-195` have a test. No name of the host interface changes with
   `async` functions.
+- New: the enum `PromiseState` with its variants `PromiseState::Pending`,
+  `PromiseState::Fulfilled` and `PromiseState::Rejected`, the two settled ones with the
+  result as a new root; `Agent::promise_state`, `Agent::promise_is_handled` and
+  `Agent::mark_promise_as_handled`; and of the contexts `promise_state`,
+  `promise_is_handled` and `mark_promise_as_handled`. A root that holds no promise
+  answers `WrongKind`.
+- `HOST-46`, `HOST-100`, `HOST-101` and `HOST-121` have a test.
 
 ## [0.8.0] - 2026-11-23
 
