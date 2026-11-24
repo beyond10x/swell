@@ -7,6 +7,7 @@ mod literal;
 mod math_dd;
 mod math_exp_log;
 mod math_trig;
+mod parse;
 mod siphash;
 mod time_clip;
 mod to_string;

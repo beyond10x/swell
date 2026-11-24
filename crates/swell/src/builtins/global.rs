@@ -14,7 +14,15 @@
 //! `#sec-isfinite-number`) and `isNaN` (19.2.3, `#sec-isnan-number`), the intrinsics
 //! `%isFinite%` and `%isNaN%`; and `eval` (19.2.1, `#sec-eval-x`), slice 2's own, the intrinsic
 //! `%eval%`, whose steps are `dynamic_code.rs` (`story:eval-and-function-constructor`).
-//! `parseFloat` and `parseInt` are slice 4.
+//!
+//! Slice 4 adds `parseFloat` (19.2.4, `#sec-parsefloat-string`) and `parseInt` (19.2.5,
+//! `#sec-parseint-string-radix`), the intrinsics `%parseFloat%` and `%parseInt%`, which are also
+//! `Number.parseFloat` and `Number.parseInt` (`story:number-functions`). ToString of the
+//! argument, and for `parseInt` ToInt32 of the radix, may run code; then the interrupt is read,
+//! a step is charged per code unit of the String past 32 before one is read, and the code units
+//! are read in place by `swell-num` (`parse.rs`). Decimal digits go to an ASCII buffer of at
+//! most the String's length there, which is charged to the memory budget at that length before
+//! `swell-num` is called and credited when it returns.
 //!
 //! The URI handling functions (19.2.6, `#sec-uri-handling-functions`), slice 3
 //! (`story:global-this-uri-functions-and-is-error`): `decodeURI` (`#sec-decodeuri-encodeduri`),
@@ -33,10 +41,12 @@
 
 use crate::builtins::object::argument;
 use crate::builtins::string::{StringBuilder, code_point_at, utf16_encode_code_point};
+use crate::heap::string::HeapString;
 use crate::host::agent::Agent;
-use crate::host::outcome::{Abrupt, Completion};
+use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{ErrorKind, Host};
 use crate::object::builtin_function::BuiltinId;
+use crate::ops::conversion::number_to_int32;
 use crate::realm::intrinsics::Making;
 use crate::value::{ObjectRef, StringRef, Value};
 
@@ -59,6 +69,10 @@ pub(crate) enum GlobalBuiltin {
     IsNaN,
     /// `eval ( x )` (19.2.1), slice 2's own.
     Eval,
+    /// `parseFloat ( string )` (19.2.4).
+    ParseFloat,
+    /// `parseInt ( string, radix )` (19.2.5).
+    ParseInt,
     /// `decodeURI ( encodedURI )` (19.2.6.1).
     DecodeUri,
     /// `decodeURIComponent ( encodedURIComponent )` (19.2.6.2).
@@ -116,6 +130,15 @@ fn hex_digit_value(unit: u16) -> Option<u8> {
     }
 }
 
+/// `parseFloat` of the code units `text` when `radix` is `None`, otherwise `parseInt` with that
+/// value of ToInt32 (`swell-num`, `parse.rs`).
+fn parse_units<U: Copy + Into<u32>>(text: &[U], radix: Option<i32>) -> f64 {
+    match radix {
+        None => swell_num::parse::parse_float(text),
+        Some(radix) => swell_num::parse::parse_int(text, radix),
+    }
+}
+
 /// ParseHexOctet ( string, position ) (`#sec-parsehexoctet`): the octet the two code units of
 /// `string` at `position` and `position + 1` write as HexDigits[~Sep], or `None` when they do
 /// not parse (the List of SyntaxError objects, which Decode turns into a URIError) or are not
@@ -141,12 +164,12 @@ fn escape_octet(octet: u8) -> [u16; 3] {
 }
 
 impl<H: Host> Agent<H> {
-    /// `%isFinite%` and `%isNaN%`: built-in functions of length 1 (clause 18 and 19.2), not
-    /// constructors.
+    /// `%isFinite%`, `%isNaN%` and `%parseFloat%`, built-in functions of length 1, and
+    /// `%parseInt%`, of length 2 (clause 18 and 19.2), not constructors.
     pub(crate) fn create_global_functions(
         &mut self,
         making: Making,
-    ) -> Completion<(ObjectRef, ObjectRef)> {
+    ) -> Completion<(ObjectRef, ObjectRef, ObjectRef, ObjectRef)> {
         let is_finite = self.create_builtin(
             making,
             "isFinite",
@@ -155,7 +178,19 @@ impl<H: Host> Agent<H> {
         )?;
         let is_nan =
             self.create_builtin(making, "isNaN", 1, BuiltinId::Global(GlobalBuiltin::IsNaN))?;
-        Ok((is_finite, is_nan))
+        let parse_float = self.create_builtin(
+            making,
+            "parseFloat",
+            1,
+            BuiltinId::Global(GlobalBuiltin::ParseFloat),
+        )?;
+        let parse_int = self.create_builtin(
+            making,
+            "parseInt",
+            2,
+            BuiltinId::Global(GlobalBuiltin::ParseInt),
+        )?;
+        Ok((is_finite, is_nan, parse_float, parse_int))
     }
 
     /// `%eval%` (19.2.1): a built-in function of length 1 (clause 18), not a constructor.
@@ -213,6 +248,8 @@ impl<H: Host> Agent<H> {
             GlobalBuiltin::Eval => self.indirect_eval(args),
             GlobalBuiltin::IsFinite => self.number_test(true, args),
             GlobalBuiltin::IsNaN => self.number_test(false, args),
+            GlobalBuiltin::ParseFloat => self.parse_float(args),
+            GlobalBuiltin::ParseInt => self.parse_int(args),
             // `#sec-decodeuri-encodeduri`: 2. Let preserveEscapeSet be ";/?:@&=+$,#".
             GlobalBuiltin::DecodeUri => self.uri_function(false, URI_RESERVED, args),
             // `#sec-decodeuricomponent-encodeduricomponent`: 2. Let preserveEscapeSet be the
@@ -238,6 +275,62 @@ impl<H: Host> Agent<H> {
             // `#sec-isnan-number`: 2. If number is NaN, return true. 3. Return false.
             number.is_nan()
         }))
+    }
+
+    /// `parseFloat ( string )` (`#sec-parsefloat-string`).
+    #[inline(never)]
+    fn parse_float(&mut self, args: &[Value]) -> Completion<Value> {
+        // 1. Let inputString be ? ToString(string).
+        let string = self.to_string(argument(args, 0))?;
+        // 2 to 7, in `swell-num`.
+        self.parse_text(string, None)
+    }
+
+    /// `parseInt ( string, radix )` (`#sec-parseint-string-radix`).
+    #[inline(never)]
+    fn parse_int(&mut self, args: &[Value]) -> Completion<Value> {
+        // 1. Let inputString be ? ToString(string).
+        let string = self.to_string(argument(args, 0))?;
+        // 2. Let radixMV be ℝ(? ToInt32(radix)) (`#sec-toint32`: ToNumber, then the integer
+        // modulo 2^32). ToNumber may run code, so the String is kept while it runs.
+        let keep = self.keep(Value::String(string));
+        let radix = self.to_number(argument(args, 1));
+        self.release(keep);
+        let radix = number_to_int32(radix?);
+        // 3 to 16, in `swell-num`.
+        self.parse_text(string, Some(radix))
+    }
+
+    /// The steps of `parseFloat` after ToString (`radix` `None`) or of `parseInt` after ToInt32
+    /// (`radix` the value of ToInt32) over the code units of `string`. No code runs from here
+    /// on. The interrupt is read first, since the conversions before may have run code that
+    /// raised it and no instruction has read it since. Then a step is charged per code unit past
+    /// 32 before one is read; the code units are read in place, in the String's own storage;
+    /// and when the digits may be decimal (`parseFloat`, or a radix of 0 or 10) the ASCII buffer
+    /// `swell-num` copies them to, at most one byte per code unit, is charged at the String's
+    /// length before the call (over the budget the run ends in `Terminated(MemoryBudget)` and
+    /// nothing is read) and credited when it returns.
+    fn parse_text(&mut self, string: StringRef, radix: Option<i32>) -> Completion<Value> {
+        self.check_interrupt()?;
+        let length = self.string_length(string)?;
+        self.charge_code_units(length)?;
+        let buffer = match radix {
+            None | Some(0 | 10) => u64::try_from(length).unwrap_or(u64::MAX),
+            Some(_) => 0,
+        };
+        if self.heap.accounting.charge(buffer).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        let value = match self.heap.strings.get(string.handle) {
+            Ok(HeapString::Latin1(bytes)) => Some(parse_units(bytes, radix)),
+            Ok(HeapString::Utf16(units)) => Some(parse_units(units, radix)),
+            Err(_) => None,
+        };
+        self.heap.accounting.credit(buffer);
+        match value {
+            Some(value) => Ok(Value::Number(value)),
+            None => Err(self.fault()),
+        }
     }
 
     /// The four URI functions: Encode with extraUnescaped `set` when `encode`, otherwise Decode
@@ -417,6 +510,24 @@ impl<H: Host> Agent<H> {
 #[cfg(test)]
 mod tests {
     use super::{escape_octet, hex_digit_value, is_unescaped, parse_hex_octet};
+
+    /// The white space `parseFloat` and `parseInt` skip in `swell-num` is the engine's
+    /// `StrWhiteSpaceChar` (`ops/conversion.rs`, with `Zs` from `swell-unicode`), over every
+    /// code unit: 25 of them.
+    #[test]
+    fn the_white_space_of_swell_num_is_the_engines() {
+        let mut count = 0;
+        for unit in 0..=u16::MAX {
+            let engine = crate::ops::conversion::is_str_white_space(unit);
+            assert_eq!(
+                swell_num::parse::is_str_white_space(u32::from(unit)),
+                engine,
+                "{unit:#06x}"
+            );
+            count += usize::from(engine);
+        }
+        assert_eq!(count, 25);
+    }
 
     /// ParseHexOctet (`#sec-parsehexoctet`) reads two HexDigits of either case and nothing else
     /// (no sign, no space, no digit outside Basic Latin), and needs both code units.

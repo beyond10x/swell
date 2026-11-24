@@ -11,9 +11,7 @@
 //! (`#sec-number.prototype.valueof`) and `Number.prototype.toString`
 //! (`#sec-number.prototype.tostring`), with ThisNumberValue (`#sec-thisnumbervalue`) and
 //! SnapToInteger (`#sec-snaptointeger`); Number::toString in every radix
-//! (`#sec-numeric-types-number-tostring`) is `swell-num`'s. The rest of `Number` is slice 4:
-//! the functions of the constructor (`isFinite`, `isInteger`, `isNaN`, `isSafeInteger`,
-//! `parseFloat`, `parseInt`).
+//! (`#sec-numeric-types-number-tostring`) is `swell-num`'s.
 //!
 //! Slice 4 adds `Number.prototype.toFixed` (`#sec-number.prototype.tofixed`), `toExponential`
 //! (`#sec-number.prototype.toexponential`) and `toPrecision`
@@ -21,6 +19,13 @@
 //! `story:number-format`), and `toLocaleString` (`#sec-number.prototype.tolocalestring`), which
 //! gives the text of `toString()` of the same Number, with no locale (`docs/design/engine.md`,
 //! decision 6, "The text of toLocale*String").
+//!
+//! Slice 4 adds the functions of the constructor (`story:number-functions`): `Number.isFinite`
+//! (`#sec-number.isfinite`), `Number.isInteger` (`#sec-number.isinteger`), `Number.isNaN`
+//! (`#sec-number.isnan`) and `Number.isSafeInteger` (`#sec-number.issafeinteger`), which
+//! convert nothing, and `Number.parseFloat` (`#sec-number.parsefloat`) and `Number.parseInt`
+//! (`#sec-number.parseint`), whose values are `%parseFloat%` and `%parseInt%`
+//! (`builtins/global.rs`).
 
 use crate::builtins::object::argument;
 use crate::host::agent::Agent;
@@ -50,6 +55,56 @@ pub(crate) enum NumberBuiltin {
     ToPrecision,
     /// `Number.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] )` (21.1.3.4).
     ToLocaleString,
+    /// `Number.isFinite ( number )` (21.1.2.2).
+    IsFinite,
+    /// `Number.isInteger ( number )` (21.1.2.3).
+    IsInteger,
+    /// `Number.isNaN ( number )` (21.1.2.4).
+    IsNaN,
+    /// `Number.isSafeInteger ( number )` (21.1.2.5).
+    IsSafeInteger,
+}
+
+/// 𝔽(2^53 - 1), the largest safe integer (21.1.2.6).
+const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+/// A call of the predicate `id` of the constructor with `args`, out of line so that the frame of
+/// `Agent::run_number_builtin`, which every re-entry through a Number builtin pays, keeps its
+/// size.
+#[inline(never)]
+fn number_predicate_call(id: NumberBuiltin, args: &[Value]) -> Completion<Value> {
+    Ok(Value::Boolean(number_predicate(id, argument(args, 0))))
+}
+
+/// The answer of the predicate `id` of the constructor for `value`: false at once for a value
+/// that is not a Number, which no step converts. The operations are exact: `trunc`, `abs` and
+/// the comparisons (IEEE 754-2019 5.9 and 5.5.1).
+fn number_predicate(id: NumberBuiltin, value: Value) -> bool {
+    let Value::Number(number) = value else {
+        return false;
+    };
+    // An integral Number: finite, and its truncation is itself.
+    let integral = number.is_finite() && number.trunc() == number;
+    match id {
+        // `#sec-number.isfinite`: 1. If number is a finite Number, return true. 2. Return false.
+        NumberBuiltin::IsFinite => number.is_finite(),
+        // `#sec-number.isinteger`: 1. If number is an integral Number, return true. 2. Return
+        // false.
+        NumberBuiltin::IsInteger => integral,
+        // `#sec-number.isnan`: 1. If number is not a Number, return false. 2. If number is NaN,
+        // return true. 3. Return false.
+        NumberBuiltin::IsNaN => number.is_nan(),
+        // `#sec-number.issafeinteger`: 1. If number is an integral Number, then a. If
+        // abs(ℝ(number)) ≤ 2^53 - 1, return true. 2. Return false.
+        NumberBuiltin::IsSafeInteger => integral && number.abs() <= MAX_SAFE_INTEGER,
+        NumberBuiltin::Constructor
+        | NumberBuiltin::ToString
+        | NumberBuiltin::ValueOf
+        | NumberBuiltin::ToFixed
+        | NumberBuiltin::ToExponential
+        | NumberBuiltin::ToPrecision
+        | NumberBuiltin::ToLocaleString => false,
+    }
 }
 
 /// What one call of `toFixed`, `toExponential` or `toPrecision` charges as its temporary while
@@ -114,6 +169,15 @@ impl<H: Host> Agent<H> {
                 Property::data(Value::Number(value), false, false, false),
             )?;
         }
+        // 21.1.2.2 to 21.1.2.5, one parameter each, so "length" 1.
+        for (name, id) in [
+            ("isFinite", NumberBuiltin::IsFinite),
+            ("isInteger", NumberBuiltin::IsInteger),
+            ("isNaN", NumberBuiltin::IsNaN),
+            ("isSafeInteger", NumberBuiltin::IsSafeInteger),
+        ] {
+            self.define_builtin_method(making, constructor, name, 1, BuiltinId::Number(id))?;
+        }
         // 21.1.3.6: "The "length" property of this method is 1𝔽".
         self.define_builtin_method(
             making,
@@ -162,6 +226,20 @@ impl<H: Host> Agent<H> {
         Ok(constructor)
     }
 
+    /// `Number.parseFloat` (21.1.2.12) and `Number.parseInt` (21.1.2.13) of `%Number%`: "The
+    /// initial value of the "parseFloat" property is %parseFloat%", and of "parseInt"
+    /// `%parseInt%`, each { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }
+    /// (clause 18).
+    pub(crate) fn define_number_parse_functions(
+        &mut self,
+        number: ObjectRef,
+        parse_float: ObjectRef,
+        parse_int: ObjectRef,
+    ) -> Completion<()> {
+        self.define_builtin_property(number, "parseFloat", Value::Object(parse_float))?;
+        self.define_builtin_property(number, "parseInt", Value::Object(parse_int))
+    }
+
     /// The steps of the builtins of this module.
     pub(crate) fn run_number_builtin(
         &mut self,
@@ -182,6 +260,10 @@ impl<H: Host> Agent<H> {
             NumberBuiltin::ToExponential => self.number_prototype_to_exponential(this, args),
             NumberBuiltin::ToPrecision => self.number_prototype_to_precision(this, args),
             NumberBuiltin::ToLocaleString => self.number_prototype_to_locale_string(this),
+            NumberBuiltin::IsFinite
+            | NumberBuiltin::IsInteger
+            | NumberBuiltin::IsNaN
+            | NumberBuiltin::IsSafeInteger => number_predicate_call(id, args),
         }
     }
 
