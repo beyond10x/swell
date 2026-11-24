@@ -641,7 +641,10 @@ pub enum Instruction {
     /// `[i, k, r] -> [i, k, r]`, or `[v, k]` and a jump to `t`, after this one, when the inner
     /// result `r` is done: a `TypeError` when `r` is not an Object, then IteratorComplete(r)
     /// (`#sec-iteratorcomplete`); when it is true, `v` is IteratorValue(r)
-    /// (`#sec-iteratorvalue`) and the record `i` is dropped.
+    /// (`#sec-iteratorvalue`) and the record `i` is dropped. With `k` [`TAG_THROW`], which only
+    /// [`Instruction::AsyncDelegateStep`] leaves, `r` is the awaited result of the `return` of
+    /// AsyncIteratorClose (`#sec-asynciteratorclose`, steps 7 and 8) and nothing is read: a
+    /// `TypeError` either way (step 8.b.iii.6).
     JumpIfDelegateDone(u32),
     /// `[i, k, r] -> [i, v, tag]` across a suspension: GeneratorYield(r) (`#sec-generatoryield`)
     /// by the generator in local slot `s` with the inner result `r` as it is, no new result
@@ -710,6 +713,34 @@ pub enum Instruction {
     /// completion): draining-queue, the request at the head rejected with `e`, then
     /// AsyncGeneratorDrainQueue, and `undefined` returned by the frame.
     AsyncGeneratorReject(u32),
+    /// `[i, v, tag] -> [i, k, r, x]`, or `[v, k]` and a jump to `t`, after this one: a step of
+    /// the loop of `yield*` in an async generator
+    /// (`#sec-generator-function-definitions-runtime-semantics-evaluation`, YieldExpression :
+    /// `yield *` AssignmentExpression, step 8 with generatorKind async) on the Iterator Record
+    /// `i` of GetIterator(value, async) with the received completion, as
+    /// [`Instruction::DelegateStep`]: for [`TAG_NORMAL`] the call of [[NextMethod]] with `v`;
+    /// for [`TAG_THROW`] the call of GetMethod(iterator, "throw") with `v`, or, when it is
+    /// `undefined`, AsyncIteratorClose (`#sec-asynciteratorclose`) with a normal completion
+    /// begun: the call of GetMethod(iterator, "return") with no argument, `r` its result and `k`
+    /// [`TAG_THROW`], whose `await` and [`Instruction::JumpIfDelegateDone`] end the close with a
+    /// `TypeError` (a `TypeError` at once when that method is `undefined` too); for
+    /// [`TAG_RETURN`] the call of GetMethod(iterator, "return") with `v`, or, when it is
+    /// `undefined`, the jump with `v` and `k` [`TAG_RETURN`] to the code that awaits `v` (step
+    /// 8.c.iii). `r`, the result of the call, is awaited by the [`Instruction::Await`] after the
+    /// [`Instruction::Pop`] of `x`, an `undefined` the call pushes. An async generator object
+    /// whose method is the one of `%AsyncGeneratorPrototype%` of any realm is given the request
+    /// with no call, as that builtin does: `r` is the promise of the request, and when the inner
+    /// generator is resumed its frame runs above this one and hands `x` over as it leaves the
+    /// frame stack (`docs/design/engine.md`, decision 3, "Async generators on suspended
+    /// frames", item 6).
+    AsyncDelegateStep(u32),
+    /// `[i, k, r] -> [i, v, tag]`, across a suspension or not: IteratorValue(r)
+    /// (`#sec-iteratorvalue`) of the awaited inner result `r` that is not done, then
+    /// AsyncGeneratorYield of it by the async generator in local slot `s`
+    /// (`#sec-asyncgeneratoryield`, as [`Instruction::AsyncGeneratorYield`], without an `await`
+    /// of the value: step 8.a.vi); the resumption puts the received value and its tag above the
+    /// record.
+    AsyncDelegateYield(u32),
 }
 
 impl Instruction {
@@ -727,7 +758,8 @@ impl Instruction {
             | Instruction::AsyncIteratorClose(t)
             | Instruction::JumpIfTag { target: t, .. }
             | Instruction::DelegateStep(t)
-            | Instruction::JumpIfDelegateDone(t) => Some(t),
+            | Instruction::JumpIfDelegateDone(t)
+            | Instruction::AsyncDelegateStep(t) => Some(t),
             Instruction::Undefined
             | Instruction::Null
             | Instruction::True
@@ -851,7 +883,8 @@ impl Instruction {
             Instruction::AsyncGeneratorStart(_)
             | Instruction::AsyncGeneratorYield(_)
             | Instruction::AsyncGeneratorReturn(_)
-            | Instruction::AsyncGeneratorReject(_) => None,
+            | Instruction::AsyncGeneratorReject(_)
+            | Instruction::AsyncDelegateYield(_) => None,
             Instruction::Argument(_)
             | Instruction::RestArguments(_)
             | Instruction::PushVarEnv(_) => None,
@@ -894,6 +927,7 @@ impl Instruction {
             Instruction::JumpIfNotUndefined(_) => Instruction::JumpIfNotUndefined(t),
             Instruction::DelegateStep(_) => Instruction::DelegateStep(t),
             Instruction::JumpIfDelegateDone(_) => Instruction::JumpIfDelegateDone(t),
+            Instruction::AsyncDelegateStep(_) => Instruction::AsyncDelegateStep(t),
             other => other,
         }
     }

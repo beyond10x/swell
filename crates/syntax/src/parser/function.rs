@@ -12,7 +12,7 @@
 //! An `async` function or arrow function (slice 10, `#sec-async-function-definitions`,
 //! `#sec-async-arrow-function-definitions`) is parsed whole the same way with [Await], and an
 //! async generator, `async function*` (`#sec-async-generator-function-definitions`), with both
-//! (a `yield*` in it holds a refusal of its own, `parser/expression.rs`). A function's code is strict mode code when the code around it is or when its body starts with
+//! (`yield*` in it included). A function's code is strict mode code when the code around it is or when its body starts with
 //! a Use Strict Directive (`#sec-strict-mode-code`); the parser tracks that while it reads the
 //! body, and the early errors that depend on it are checked afterwards (`src/early.rs`).
 
@@ -907,11 +907,10 @@ mod tests {
     /// The parser's tree of async generators (`#sec-async-generator-function-definitions`):
     /// each function is both `generator` and `asynchronous`, and its span, its source text,
     /// starts at its `async`; a `yield` in one is a YieldExpression, a `yield*` too, and an
-    /// `await` an AwaitExpression; the parse holds the refusal of slice 10 of `yield*` in an
-    /// async generator at the `*` of the first one of the source; and what the ledger holds
-    /// after the parse is the tree's capacity.
+    /// `await` an AwaitExpression; the parse holds no refusal; and what the ledger holds after
+    /// the parse is the tree's capacity.
     #[test]
-    fn async_generators_parse_whole_and_hold_the_refusal_of_yield_star() {
+    fn async_generators_parse_whole_with_yield_star() {
         let text = "x = 1;\n\
                     var g = async function* h(a = 0) { yield await a; }, \
                     i = async function* () { yield; };\n\
@@ -960,18 +959,7 @@ mod tests {
             1
         );
         assert_eq!(count(|e| matches!(e, Expr::Await(_))), 2);
-        let held = parsed
-            .held
-            .as_ref()
-            .map(|e| (e.message.as_str(), e.line, e.column));
-        assert_eq!(
-            held,
-            Some((
-                "yield* in an async generator is not supported before slice 10",
-                3,
-                76
-            ))
-        );
+        assert!(parsed.held.is_none(), "{:?}", parsed.held);
         let tree = parsed
             .ast
             .heap_bytes()

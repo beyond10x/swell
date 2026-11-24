@@ -291,59 +291,26 @@ fn async_functions_parse_through_every_entry() {
     }
 }
 
-/// The refusal of slice 10 of `yield*` in an async generator (the async branch of
-/// YieldExpression : `yield *` AssignmentExpression,
-/// `#sec-generator-function-definitions-runtime-semantics-evaluation`; `docs/design/engine.md`,
-/// section 12, "A part before its slice") does not stop the parse: a source with such a `yield*`
-/// and no other error ends on it alone, at the `*` of the first one of the source, through each
-/// entry, the dynamic ones too; an early error or a grammar error anywhere ends the source on
-/// that error alone, and so does a refusal that stops the parse at its token (`super` in a
-/// method of an object literal). An async generator without it parses, and so does a `yield*`
-/// in a generator, also inside an async generator
-/// (`story:async-generators-and-their-request-queue` lifted the refusal of `async function*`).
+/// `yield*` in an async generator (the async branch of YieldExpression : `yield *`
+/// AssignmentExpression, `#sec-generator-function-definitions-runtime-semantics-evaluation`)
+/// parses through each entry, the dynamic ones too (`story:yield-star-in-async-generators`
+/// lifted the refusal of slice 10 that held it back to the end of the parse); an early error or
+/// a grammar error anywhere ends the source on that error alone, and so does a refusal that
+/// stops the parse at its token (`super` in a method of an object literal). An async generator
+/// without it parses, and so does a `yield*` in a generator, also inside an async generator.
 #[test]
-fn the_refusal_of_yield_star_in_an_async_generator_comes_after_the_whole_parse() {
-    let refusal = "yield* in an async generator is not supported before slice 10".to_string();
-    let at = |text: &str| {
-        let errors = parse(text)
-            .err()
-            .unwrap_or_else(|| panic!("{text:?} parsed"));
-        assert_eq!(errors.len(), 1, "{text:?}: {errors:?}");
-        (errors[0].message.clone(), errors[0].line, errors[0].column)
-    };
-    for (text, line, column) in [
-        ("async function* f() { yield* a; }", 1, 28),
-        ("x;\n  y = async function* () { yield* a; };", 2, 33),
-        ("async function* f() { yield* a; yield* b; }", 1, 28),
-        (
-            "async function* f(a = async function* () { yield* b; }) { yield* a; }",
-            1,
-            49,
-        ),
-        (
-            "async function* f() { yield await 1; }\nasync function* g() { yield* a; }",
-            2,
-            28,
-        ),
-        (
-            "{ async function* f() { yield* a; } }\nswitch (0) { case 0: async function* g() { yield* b; } }",
-            1,
-            30,
-        ),
-        (
-            "function* g() { yield* a; }\nasync function* f() { function* h() { yield* a; } yield* b; }",
-            2,
-            56,
-        ),
+fn yield_star_in_an_async_generator_parses_through_every_entry() {
+    for text in [
+        "async function* f() { yield* a; }",
+        "x;\n  y = async function* () { yield* a; };",
+        "async function* f() { yield* a; yield* b; }",
+        "async function* f(a = async function* () { yield* b; }) { yield* a; }",
+        "async function* f() { yield await 1; }\nasync function* g() { yield* a; }",
+        "{ async function* f() { yield* a; } }\nswitch (0) { case 0: async function* g() { yield* b; } }",
+        "function* g() { yield* a; }\nasync function* f() { function* h() { yield* a; } yield* b; }",
     ] {
-        assert_eq!(at(text), (refusal.clone(), line, column), "{text:?}");
+        assert!(parse(text).is_ok(), "{text:?}: {:?}", parse(text).err());
     }
-    let files = sources("refused").unwrap();
-    let forms = files
-        .iter()
-        .find(|(path, _)| path.ends_with("async-generator-yield-star.js"));
-    let (path, text) = forms.unwrap();
-    assert_eq!(at(text), (refusal.clone(), 4, 8), "{}", path.display());
     for (text, expected) in [
         (
             "async function* f() { yield* a; }\nlet a; let a;",
@@ -372,23 +339,23 @@ fn the_refusal_of_yield_star_in_an_async_generator_comes_after_the_whole_parse()
         assert_eq!(messages(&parse(text).err().unwrap()), expected, "{text:?}");
     }
     let options = ParseOptions { max_nesting: LIMIT };
-    let only_the_refusal = |answer: Result<Script, Vec<SyntaxError>>| {
-        assert_eq!(messages(&answer.err().unwrap()), vec![refusal.clone()]);
+    let parses = |answer: Result<Script, Vec<SyntaxError>>| {
+        assert!(answer.is_ok(), "{:?}", answer.err());
     };
-    only_the_refusal(parse_eval(
+    parses(parse_eval(
         &units("x = async function* () { yield* a; };"),
         true,
         options,
     ));
     let body = units("return async function* () { yield* a; };");
-    only_the_refusal(parse_dynamic_function(&units("a"), &body, options));
-    only_the_refusal(parse_dynamic_generator_function(
+    parses(parse_dynamic_function(&units("a"), &body, options));
+    parses(parse_dynamic_generator_function(
         &units("a"),
         &body,
         options,
     ));
-    only_the_refusal(parse_dynamic_async_function(&units("a"), &body, options));
-    only_the_refusal(parse_dynamic_function(
+    parses(parse_dynamic_async_function(&units("a"), &body, options));
+    parses(parse_dynamic_function(
         &units("a = async function* () { yield* b; }"),
         &[],
         options,
@@ -795,20 +762,11 @@ fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec
 }
 
 /// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
-/// nesting error alone (`Some(false)`), or fail otherwise (`None`). A source whose one error is
-/// the refusal of slice 10 parsed: the refusal of `yield*` in an async generator comes only
-/// after the whole parse and the early errors (`story:async-generators-and-their-request-queue`
-/// keeps this arm for it; `story:yield-star-in-async-generators` takes it out).
+/// nesting error alone (`Some(false)`), or fail otherwise (`None`).
 fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     let source = nested(kind, n)?;
     match parse_through(entry, &source, limit) {
         Ok(_) => Some(true),
-        Err(e)
-            if e.len() == 1
-                && message_kind(&e.first()?.message) == (MessageKind::Refusal { slice: 10 }) =>
-        {
-            Some(true)
-        }
         Err(e) if e.len() == 1 && e.first()?.message.contains("parser_nesting") => Some(false),
         Err(_) => None,
     }
