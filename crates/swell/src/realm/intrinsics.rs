@@ -28,7 +28,9 @@
 //! which is no property of the global object; `%Promise%` and `%Promise.prototype%` (27.5.3 and
 //! 27.5.5, `#sec-promise-constructor`, `#sec-properties-of-the-promise-prototype-object`), written
 //! by `story:promise-constructor-then-and-jobs`; `%AsyncFunction.prototype%` (27.7.3,
-//! `#sec-async-function-prototype-properties`), written by `story:async-functions-and-await`.
+//! `#sec-async-function-prototype-properties`), written by `story:async-functions-and-await`;
+//! `%AsyncFunction%` (`#sec-async-function-constructor`), written by
+//! `story:async-function-constructor`, which is no property of the global object.
 //! The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
@@ -147,6 +149,17 @@ pub(crate) enum Intrinsic {
     PromisePrototype,
     /// `%AsyncFunction.prototype%` (27.7.3), `story:async-functions-and-await`.
     AsyncFunctionPrototype,
+    /// `%AsyncFunction%` (`#sec-async-function-constructor`), `story:async-function-constructor`.
+    /// The realm holds it; no operation asks for it by name, its constructor being the active
+    /// function.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "%AsyncFunction% by name: the tests of the intrinsics"
+        )
+    )]
+    AsyncFunction,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -206,6 +219,7 @@ pub(crate) struct Intrinsics {
     promise: ObjectRef,
     promise_prototype: ObjectRef,
     async_function_prototype: ObjectRef,
+    async_function: ObjectRef,
 }
 
 impl Intrinsics {
@@ -255,6 +269,7 @@ impl Intrinsics {
             Intrinsic::Promise => self.promise,
             Intrinsic::PromisePrototype => self.promise_prototype,
             Intrinsic::AsyncFunctionPrototype => self.async_function_prototype,
+            Intrinsic::AsyncFunction => self.async_function,
         }
     }
 
@@ -315,6 +330,7 @@ impl Intrinsics {
             self.promise,
             self.promise_prototype,
             self.async_function_prototype,
+            self.async_function,
         ] {
             mark.object(object);
         }
@@ -498,6 +514,8 @@ impl<H: Host> Agent<H> {
         )?;
         let (promise, promise_prototype) = self.create_promise_constructor(making)?;
         let async_function_prototype = self.create_async_function_prototype(making)?;
+        let async_function =
+            self.create_async_function_constructor(making, function, async_function_prototype)?;
         // %Array.prototype.values% (23.1.3.38), %Array.prototype.entries% (23.1.3.5),
         // %Array.prototype.keys% (23.1.3.19) and %Array.prototype.forEach% (23.1.3.15): the
         // methods `create_array_constructor` has defined on %Array.prototype%, read before any
@@ -543,6 +561,7 @@ impl<H: Host> Agent<H> {
             promise,
             promise_prototype,
             async_function_prototype,
+            async_function,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {
@@ -698,5 +717,24 @@ mod tests {
             agent.get(prototype, key),
             Ok(Value::Object(generator_function))
         );
+    }
+
+    /// `%AsyncFunction%` (`#sec-async-function-constructor-properties`) has the [[Prototype]]
+    /// `%Function%`, its `prototype` is `%AsyncFunction.prototype%`, and it is the `constructor`
+    /// of that object (`#sec-async-function-prototype-properties-constructor`).
+    #[test]
+    fn async_function_is_the_constructor_of_its_prototype() {
+        let (mut agent, realm) = agent_with_realm();
+        let realm = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let async_function = agent.intrinsic(realm, Intrinsic::AsyncFunction).unwrap();
+        let function = agent.intrinsic(realm, Intrinsic::Function).unwrap();
+        let prototype = agent
+            .intrinsic(realm, Intrinsic::AsyncFunctionPrototype)
+            .unwrap();
+        assert_eq!(agent.get_prototype_of(async_function), Ok(Some(function)));
+        let key = agent.name_key("prototype").unwrap();
+        assert_eq!(agent.get(async_function, key), Ok(Value::Object(prototype)));
+        let key = agent.name_key("constructor").unwrap();
+        assert_eq!(agent.get(prototype, key), Ok(Value::Object(async_function)));
     }
 }

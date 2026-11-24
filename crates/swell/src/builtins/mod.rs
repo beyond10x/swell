@@ -18,8 +18,8 @@
 //! (`story:promise-constructor-then-and-jobs`): `%Promise%` with `resolve`, `reject` and its
 //! `[%Symbol.species%]`, `%Promise.prototype%` with `then` and `catch`, and the steps of the
 //! resolving functions and of the executor of a promise capability; and `async_function`
-//! (`story:async-functions-and-await`): `%AsyncFunction.prototype%`. Later slices add their
-//! files here.
+//! (`story:async-functions-and-await`): `%AsyncFunction.prototype%`, and `%AsyncFunction%`, the
+//! constructor whose `prototype` it is. Later slices add their files here.
 //!
 //! `array`, `object` and `string` are directories (`story:builtin-group-modules`): `mod.rs`
 //! holds the constructor and the builtins of the base, and each group of builtins a story of

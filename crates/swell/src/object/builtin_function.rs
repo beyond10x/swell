@@ -86,6 +86,9 @@ pub(crate) enum BuiltinId {
     /// `ReactionType::Fulfill` for onFulfilled, `ReactionType::Reject` for onRejected), with the
     /// slots [`Slots::Await`] (`story:async-functions-and-await`; `interp/async_function.rs`).
     Await(crate::object::promise::ReactionType),
+    /// `AsyncFunction ( ...paramArgs, bodyArg )` (`#sec-async-function-constructor-arguments`),
+    /// `story:async-function-constructor`.
+    AsyncFunction,
 }
 
 /// What a built-in function does when called.
@@ -603,6 +606,7 @@ impl<H: Host> Agent<H> {
                 let argument = args.first().copied().unwrap_or(Value::Undefined);
                 self.await_function(kind, function, argument)
             }
+            BuiltinId::AsyncFunction => self.async_function(function, args, new_target),
         }
     }
 

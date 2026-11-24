@@ -12,6 +12,12 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- `%AsyncFunction%`, the constructor of `async` functions from source text, a story of the
+  tenth slice. It is reached through the `constructor` of the prototype of an `async`
+  function and is no property of the global object. Called or constructed, it takes the
+  path of `Function`: the host's hook for the compilation of strings decides, the limits
+  of nesting and of re-entry hold, and the parse is charged to the memory budget and reads
+  the interrupt.
 - `async` methods of object literals run, a story of the tenth slice: `{ async m() {} }`,
   with a computed name too. A call returns a promise and the body awaits as the body of an
   `async` function does; the method has no `prototype` and cannot be constructed. An
