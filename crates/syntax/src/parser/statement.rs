@@ -12,8 +12,9 @@
 //! A function declaration stands at the top of a body, where it is var scoped, and in a block, a
 //! `case` clause and a `try`, `catch` or `finally` block, where it is lexically scoped to that
 //! statement list (`#sec-block`, `#sec-switch-statement`), in strict and non-strict code.
-//! An `async` function declaration (slice 10) stands where a function declaration does
-//! (`parser/function.rs`).
+//! An `async` function declaration and an async generator declaration (slice 10) stand where a
+//! function declaration does, and neither stands as the body of a statement or as a labelled
+//! item, in any code (`parser/function.rs`).
 //! Refused are the declarations of later slices: `class` (8), `import`
 //! and `export` (11), and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
 //! `for (var a = 0 in o)` (18); the `var` binding and the duplicate declarations Annex B gives
@@ -260,9 +261,10 @@ impl<'a, 'm> Parser<'a, 'm> {
                         _ => Ok(Parser::expression_statement),
                     };
                 }
-                // `async [no LineTerminator here] function` starts an AsyncFunctionDeclaration
-                // where a declaration stands, and no ExpressionStatement anywhere
-                // (`#sec-expression-statement`); Annex B admits a plain FunctionDeclaration only.
+                // `async [no LineTerminator here] function` starts an AsyncFunctionDeclaration,
+                // or with a `*` an AsyncGeneratorDeclaration, where a declaration stands, and no
+                // ExpressionStatement anywhere (`#sec-expression-statement`); Annex B admits a
+                // plain FunctionDeclaration only.
                 if is_async
                     && next.kind == TokenKind::Keyword(Keyword::Function)
                     && !next.newline_before

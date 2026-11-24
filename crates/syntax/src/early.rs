@@ -68,6 +68,14 @@
 //!   and the body of an `async` function or arrow function, and the parameters of an arrow
 //!   function inside them), nor the name of an AsyncFunctionExpression; the walk tracks [Await]
 //!   beside [Yield];
+//! - `#sec-async-generator-function-definitions-static-semantics-early-errors`: an async
+//!   generator is both a generator and an `async` function, with [Yield] and [Await] set in its
+//!   parameters and body and in the name of an AsyncGeneratorExpression, so the checks above
+//!   apply to it with the messages of each: its FormalParameters contain no YieldExpression and
+//!   no AwaitExpression, `yield` and `await` are no identifier inside it or as the name of the
+//!   expression, and a Use Strict Directive with a list that is not simple, a parameter its body
+//!   declares lexically, duplicate parameters and the redeclaration of an async generator
+//!   declaration in a block or a `case` block are those of every function;
 //! - `#sec-static-semantics-assignmenttargettype`: an AwaitExpression is no assignment target;
 //! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`:
 //!   IsValidRegularExpressionLiteral, the flags and then ParsePattern of `swell-regexp` with
@@ -1185,8 +1193,9 @@ impl<'a, 'm> Checker<'a, 'm> {
     /// The function's name and parameters, checked with its own strictness, inside code whose
     /// [Yield] and [Await] are `outer`: the name of a declaration with `outer`
     /// (`BindingIdentifier[?Yield, ?Await]`), that of an expression with the function's own
-    /// (`[+Yield]` for a GeneratorExpression, `[+Await]` for an AsyncFunctionExpression, each
-    /// cleared for a FunctionExpression); the parameters with those of
+    /// (`[+Yield]` for a GeneratorExpression, `[+Await]` for an AsyncFunctionExpression, both
+    /// for an AsyncGeneratorExpression, each cleared for a FunctionExpression); the parameters
+    /// with those of
     /// [`Checker::parameter_context`].
     fn check_function(&mut self, id: FunctionId, outer: (bool, bool)) {
         let Some(f) = self.ast.function(id) else {
