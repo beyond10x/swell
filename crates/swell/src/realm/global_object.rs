@@ -64,7 +64,9 @@ impl<H: Host> Agent<H> {
         // of slice 10 (`story:promise-constructor-then-and-jobs`); the constructor property
         // `AggregateError` (19.3.1, `#sec-constructor-properties-of-the-global-object-aggregate-error`)
         // of slice 10 (`story:promise-statics-finally-and-aggregate-error`), which the loop over
-        // `ErrorKind::ALL` above does not reach; each { [[Writable]]: true, [[Enumerable]]:
+        // `ErrorKind::ALL` above does not reach; the constructor property `Date` (19.3.10,
+        // `#sec-constructor-properties-of-the-global-object-date`) of slice 4
+        // (`story:date-object-clock-and-time-value`); each { [[Writable]]: true, [[Enumerable]]:
         // false, [[Configurable]]: true } (clause 18).
         for (name, which) in [
             ("Array", Intrinsic::Array),
@@ -85,6 +87,7 @@ impl<H: Host> Agent<H> {
                 "AggregateError",
                 Intrinsic::Error(ErrorKind::AggregateError),
             ),
+            ("Date", Intrinsic::Date),
         ] {
             let value = self.intrinsic(realm, which)?;
             let key = self.name_key(name)?;

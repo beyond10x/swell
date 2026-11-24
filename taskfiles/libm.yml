@@ -1,0 +1,52 @@
+version: '3'
+
+tasks:
+  libm-check:
+    desc: Fail, naming each line, when the source of a crate calls an f64 or f32 method of unspecified precision, the fused multiply-add, libm, extern "C" or core::arch.
+    summary: |
+      Fail, naming each line, when the source of a crate calls a method that the design does not
+      allow (docs/design/engine.md, decision 6, "Which f64 methods an engine crate may call").
+
+      It reads every .rs file under crates/*/src/ of LIBM_ROOT (default ., the tree; the tests
+      of the task point it at a fixture); the tests of a crate are not searched, they may use
+      std as an oracle. A line whose first non-blank characters are // is skipped. A hit is a
+      method call .name( or a path call f64::name( or f32::name( for each name of the list
+      std/src/num/f64.rs marks "Unspecified precision" (powi powf exp exp2 ln log log2 log10
+      cbrt hypot sin cos tan asin acos atan atan2 sin_cos exp_m1 ln_1p sinh cosh tanh asinh
+      acosh atanh gamma ln_gamma erf erfc abs_sub) and for mul_add, and any of libm,
+      extern "C", core::arch and std::arch. min and max are not in the search: a text search
+      cannot tell them from the integer methods of the same name. The functions of
+      swell_num::math are called by path (math::exp(x)) and do not match.
+
+      It prints one line per hit, "<path>:<line>: <text>", then "libm-check: <n> forbidden
+      call(s)" and exits 1; with no hit "libm-check: no forbidden call under <n> file(s)" and
+      exits 0. A tree with no .rs file under crates/*/src/ fails too.
+    silent: true
+    vars:
+      LIBM_ROOT: '{{.LIBM_ROOT | default "."}}'
+    env:
+      LIBM_ROOT: '{{.LIBM_ROOT}}'
+    cmds:
+      - |
+        files=$(find "$LIBM_ROOT"/crates/*/src -type f -name '*.rs' 2>/dev/null | LC_ALL=C sort) || true
+        n=$(printf '%s\n' "$files" | awk 'NF { n++ } END { print n + 0 }')
+        if [ "$n" -eq 0 ]; then
+          echo "libm-check: no .rs file under $LIBM_ROOT/crates/*/src"
+          exit 1
+        fi
+        hits=$(printf '%s\n' "$files" | xargs awk '
+          /^[ \t]*\/\// { next }
+          /(\.|f64::|f32::)(powi|powf|exp|exp2|ln|log|log2|log10|cbrt|hypot|sin|cos|tan|asin|acos|atan|atan2|sin_cos|exp_m1|ln_1p|sinh|cosh|tanh|asinh|acosh|atanh|gamma|ln_gamma|erf|erfc|abs_sub|mul_add)\(|libm|extern "C"|core::arch|std::arch/ {
+            path = FILENAME
+            sub(/^\.\//, "", path)
+            text = $0
+            sub(/^[ \t]+/, "", text)
+            print path ":" FNR ": " text
+          }
+        ') || { echo "libm-check: awk failed"; exit 1; }
+        if [ -n "$hits" ]; then
+          printf '%s\n' "$hits"
+          echo "libm-check: $(printf '%s\n' "$hits" | awk 'END { print NR }') forbidden call(s)"
+          exit 1
+        fi
+        echo "libm-check: no forbidden call under $n file(s)"
