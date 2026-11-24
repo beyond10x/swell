@@ -420,31 +420,24 @@ fn lengths_names_and_descriptors_of_date_and_its_functions() {
     );
 }
 
-/// The 15 functions of `Date` this story defines and later stories build (`Date.parse` and
-/// the 14 setters other than `setTime`; `Date.UTC` was built by
-/// `story:date-object-constructor-now-utc-and-getters`) each throw a TypeError whose message
-/// names the function and says it is not built yet.
+/// The functions of `Date` this story defines and a later story builds each throw a TypeError
+/// whose message names the function and says it is not built yet: `Date.parse` alone, which
+/// `story:date-text-formats` builds. `Date.UTC` was built by
+/// `story:date-object-constructor-now-utc-and-getters` and the 14 setters other than `setTime`
+/// by `story:date-setters`: `Date.prototype.setHours.call(new Date(0), 1)` answers a Number.
 #[test]
 fn interim_bodies_throw_a_type_error_that_names_the_function() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
-    let calls = [
-        ("parse", "Date.parse('1970-01-01');"),
-        ("setMilliseconds", "new Date(0).setMilliseconds(1);"),
-        ("setUTCMilliseconds", "new Date(0).setUTCMilliseconds(1);"),
-        ("setSeconds", "new Date(0).setSeconds(1);"),
-        ("setUTCSeconds", "new Date(0).setUTCSeconds(1);"),
-        ("setMinutes", "new Date(0).setMinutes(1);"),
-        ("setUTCMinutes", "new Date(0).setUTCMinutes(1);"),
-        ("setHours", "new Date(0).setHours(1);"),
-        ("setUTCHours", "new Date(0).setUTCHours(1);"),
-        ("setDate", "new Date(0).setDate(1);"),
-        ("setUTCDate", "new Date(0).setUTCDate(1);"),
-        ("setMonth", "new Date(0).setMonth(1);"),
-        ("setUTCMonth", "new Date(0).setUTCMonth(1);"),
-        ("setFullYear", "new Date(0).setFullYear(1);"),
-        ("setUTCFullYear", "new Date(0).setUTCFullYear(1);"),
-    ];
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "typeof Date.prototype.setHours.call(new Date(0), 1);"
+        ),
+        quoted("number")
+    );
+    let calls = [("parse", "Date.parse('1970-01-01');")];
     for (name, call) in calls {
         let source = format!(
             "try {{ {call} 'no throw'; }} catch (e) {{ \

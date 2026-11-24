@@ -17,18 +17,25 @@
 //! every offset and bound the search for `tBefore` (`docs/design/host-interface.md`, decision
 //! 17; HOST-128, HOST-209, HOST-210, HOST-211).
 //!
+//! The setters half, written by `story:date-setters`: the 14 setters of 21.4.4 but `setTime`
+//! (`#sec-date.prototype.setdate` to `#sec-date.prototype.setutcseconds`), one function over a
+//! table row each (`setter_of`): the time value read first, ToNumber of each argument present,
+//! then for a local setter `LocalTime` and `UTC` of the zone half (at most 2 + 59 = 61 hook
+//! calls, decision 17, item 5), TimeClip, and the store last.
+//!
 //! Every other own property of `%Date%` and `%Date.prototype%` that a later story builds is
 //! defined here with its name and length and an interim body, `date_not_built`, which throws a
-//! TypeError that names the function: `Date.parse` (the text story) and the 14 setters other
-//! than `setTime` (the setters story). Each interim is one line of the dispatch, the arm of its
-//! variant calling the interim body with the function's name as a string literal, which the
-//! story that builds the function replaces. Two steps are seams until their story: the String
+//! TypeError that names the function: `Date.parse` (the text story). Each interim is one line of
+//! the dispatch, the arm of its variant calling the interim body with the function's name as a
+//! string literal, which the story that builds the function replaces. Two steps are seams until
+//! their story: the String
 //! argument of the constructor (`parse_date_string`, NaN) and ToDateString of the call without
 //! `new` (`date_to_string`, "Invalid Date").
 //!
 //! The builtins re-enter script only through ToPrimitive and ToNumber, as `Number` does. The
-//! loops are the search of `swell-num` (a charged hook call per probe) and the ToNumber of at
-//! most seven arguments; none depends on a script value. Every call of a clock or time zone
+//! loops are the search of `swell-num` (a charged hook call per probe), the ToNumber of at
+//! most seven arguments and the fields of a setter (at most 4 arguments, 7 fields); none
+//! depends on a script value. Every call of a clock or time zone
 //! hook is charged one step before it is made (decision 17, item 6).
 
 use std::cell::RefCell;
@@ -96,35 +103,35 @@ pub(crate) enum DateBuiltin {
     GetUtcMonth,
     /// `Date.prototype.getUTCSeconds ( )` (21.4.4.19).
     GetUtcSeconds,
-    /// `Date.prototype.setDate ( date )` (21.4.4.20): interim.
+    /// `Date.prototype.setDate ( date )` (21.4.4.20).
     SetDate,
-    /// `Date.prototype.setFullYear ( year [ , month [ , date ] ] )` (21.4.4.21): interim.
+    /// `Date.prototype.setFullYear ( year [ , month [ , date ] ] )` (21.4.4.21).
     SetFullYear,
-    /// `Date.prototype.setHours ( hour [ , min [ , sec [ , ms ] ] ] )` (21.4.4.22): interim.
+    /// `Date.prototype.setHours ( hour [ , min [ , sec [ , ms ] ] ] )` (21.4.4.22).
     SetHours,
-    /// `Date.prototype.setMilliseconds ( ms )` (21.4.4.23): interim.
+    /// `Date.prototype.setMilliseconds ( ms )` (21.4.4.23).
     SetMilliseconds,
-    /// `Date.prototype.setMinutes ( min [ , sec [ , ms ] ] )` (21.4.4.24): interim.
+    /// `Date.prototype.setMinutes ( min [ , sec [ , ms ] ] )` (21.4.4.24).
     SetMinutes,
-    /// `Date.prototype.setMonth ( month [ , date ] )` (21.4.4.25): interim.
+    /// `Date.prototype.setMonth ( month [ , date ] )` (21.4.4.25).
     SetMonth,
-    /// `Date.prototype.setSeconds ( sec [ , ms ] )` (21.4.4.26): interim.
+    /// `Date.prototype.setSeconds ( sec [ , ms ] )` (21.4.4.26).
     SetSeconds,
     /// `Date.prototype.setTime ( time )` (21.4.4.27).
     SetTime,
-    /// `Date.prototype.setUTCDate ( date )` (21.4.4.28): interim.
+    /// `Date.prototype.setUTCDate ( date )` (21.4.4.28).
     SetUtcDate,
-    /// `Date.prototype.setUTCFullYear ( year [ , month [ , date ] ] )` (21.4.4.29): interim.
+    /// `Date.prototype.setUTCFullYear ( year [ , month [ , date ] ] )` (21.4.4.29).
     SetUtcFullYear,
-    /// `Date.prototype.setUTCHours ( hour [ , min [ , sec [ , ms ] ] ] )` (21.4.4.30): interim.
+    /// `Date.prototype.setUTCHours ( hour [ , min [ , sec [ , ms ] ] ] )` (21.4.4.30).
     SetUtcHours,
-    /// `Date.prototype.setUTCMilliseconds ( ms )` (21.4.4.31): interim.
+    /// `Date.prototype.setUTCMilliseconds ( ms )` (21.4.4.31).
     SetUtcMilliseconds,
-    /// `Date.prototype.setUTCMinutes ( min [ , sec [ , ms ] ] )` (21.4.4.32): interim.
+    /// `Date.prototype.setUTCMinutes ( min [ , sec [ , ms ] ] )` (21.4.4.32).
     SetUtcMinutes,
-    /// `Date.prototype.setUTCMonth ( month [ , date ] )` (21.4.4.33): interim.
+    /// `Date.prototype.setUTCMonth ( month [ , date ] )` (21.4.4.33).
     SetUtcMonth,
-    /// `Date.prototype.setUTCSeconds ( sec [ , ms ] )` (21.4.4.34): interim.
+    /// `Date.prototype.setUTCSeconds ( sec [ , ms ] )` (21.4.4.34).
     SetUtcSeconds,
     /// `Date.prototype.valueOf ( )` (21.4.4.44).
     ValueOf,
@@ -273,6 +280,69 @@ fn field_of(t: f64, field: Field) -> f64 {
     }
 }
 
+/// A setter of `%Date.prototype%` (21.4.4.20 to 21.4.4.34 but `setTime`): its name, the
+/// position in [`fields_of_time`] of the first field it writes, the number of arguments it
+/// reads (its "length"; the fields it writes follow the first), and whether it works on the
+/// local time (`LocalTime` before, `UTC` after) or on the time value itself.
+#[derive(Clone, Copy)]
+struct Setter {
+    name: &'static str,
+    first: usize,
+    length: usize,
+    local: bool,
+}
+
+/// The position of the year in [`fields_of_time`]: the full-year setters start from +0 for a
+/// time value of NaN (21.4.4.21 step 5, 21.4.4.29 step 4).
+const YEAR: usize = 0;
+
+/// The row of the setter `id`; `None` for a builtin that is not one.
+fn setter_of(id: DateBuiltin) -> Option<Setter> {
+    let (name, first, length, local) = match id {
+        DateBuiltin::SetDate => ("Date.prototype.setDate", 2, 1, true),
+        DateBuiltin::SetFullYear => ("Date.prototype.setFullYear", YEAR, 3, true),
+        DateBuiltin::SetHours => ("Date.prototype.setHours", 3, 4, true),
+        DateBuiltin::SetMilliseconds => ("Date.prototype.setMilliseconds", 6, 1, true),
+        DateBuiltin::SetMinutes => ("Date.prototype.setMinutes", 4, 3, true),
+        DateBuiltin::SetMonth => ("Date.prototype.setMonth", 1, 2, true),
+        DateBuiltin::SetSeconds => ("Date.prototype.setSeconds", 5, 2, true),
+        DateBuiltin::SetUtcDate => ("Date.prototype.setUTCDate", 2, 1, false),
+        DateBuiltin::SetUtcFullYear => ("Date.prototype.setUTCFullYear", YEAR, 3, false),
+        DateBuiltin::SetUtcHours => ("Date.prototype.setUTCHours", 3, 4, false),
+        DateBuiltin::SetUtcMilliseconds => ("Date.prototype.setUTCMilliseconds", 6, 1, false),
+        DateBuiltin::SetUtcMinutes => ("Date.prototype.setUTCMinutes", 4, 3, false),
+        DateBuiltin::SetUtcMonth => ("Date.prototype.setUTCMonth", 1, 2, false),
+        DateBuiltin::SetUtcSeconds => ("Date.prototype.setUTCSeconds", 5, 2, false),
+        _ => return None,
+    };
+    Some(Setter {
+        name,
+        first,
+        length,
+        local,
+    })
+}
+
+/// The seven fields of the time value `t` a setter keeps or writes, as Numbers: YearFromTime,
+/// MonthFromTime, DateFromTime, HourFromTime, MinuteFromTime, SecondFromTime and msFromTime.
+/// MakeDay over the first three is Day(`t`), MakeTime over the last four is
+/// TimeWithinDay(`t`), both exactly (integers below 2^53). NaN for every field where
+/// `date_fields` has none, which a time value and its local time never are.
+fn fields_of_time(t: f64) -> [f64; 7] {
+    let Some(fields) = date_fields(t) else {
+        return [f64::NAN; 7];
+    };
+    [
+        i32::try_from(fields.year).map_or(f64::NAN, f64::from),
+        f64::from(fields.month),
+        f64::from(fields.date),
+        f64::from(fields.hour),
+        f64::from(fields.minute),
+        f64::from(fields.second),
+        f64::from(fields.millisecond),
+    ]
+}
+
 /// The first [`IDENTIFIER_PREFIX_UNITS`] code units of `identifier`, never more (a character
 /// of two code units that crosses the bound is taken whole), or all of it when it is shorter:
 /// what a conversion hands to `swell-num` to decide whether the identifier is an offset string
@@ -364,21 +434,21 @@ impl<H: Host> Agent<H> {
             DateBuiltin::GetTime => Ok(self
                 .this_time_value(this, "Date.prototype.getTime")
                 .map(Value::Number)),
-            DateBuiltin::SetDate => date_not_built("setDate"),
-            DateBuiltin::SetFullYear => date_not_built("setFullYear"),
-            DateBuiltin::SetHours => date_not_built("setHours"),
-            DateBuiltin::SetMilliseconds => date_not_built("setMilliseconds"),
-            DateBuiltin::SetMinutes => date_not_built("setMinutes"),
-            DateBuiltin::SetMonth => date_not_built("setMonth"),
-            DateBuiltin::SetSeconds => date_not_built("setSeconds"),
-            DateBuiltin::SetTime => Ok(self.date_prototype_set_time(this, args)),
-            DateBuiltin::SetUtcDate => date_not_built("setUTCDate"),
-            DateBuiltin::SetUtcFullYear => date_not_built("setUTCFullYear"),
-            DateBuiltin::SetUtcHours => date_not_built("setUTCHours"),
-            DateBuiltin::SetUtcMilliseconds => date_not_built("setUTCMilliseconds"),
-            DateBuiltin::SetUtcMinutes => date_not_built("setUTCMinutes"),
-            DateBuiltin::SetUtcMonth => date_not_built("setUTCMonth"),
-            DateBuiltin::SetUtcSeconds => date_not_built("setUTCSeconds"),
+            DateBuiltin::SetDate
+            | DateBuiltin::SetFullYear
+            | DateBuiltin::SetHours
+            | DateBuiltin::SetMilliseconds
+            | DateBuiltin::SetMinutes
+            | DateBuiltin::SetMonth
+            | DateBuiltin::SetSeconds
+            | DateBuiltin::SetTime
+            | DateBuiltin::SetUtcDate
+            | DateBuiltin::SetUtcFullYear
+            | DateBuiltin::SetUtcHours
+            | DateBuiltin::SetUtcMilliseconds
+            | DateBuiltin::SetUtcMinutes
+            | DateBuiltin::SetUtcMonth
+            | DateBuiltin::SetUtcSeconds => Ok(self.date_prototype_set(id, this, args)),
             // `#sec-date.prototype.valueof`: the steps of `getTime`.
             DateBuiltin::ValueOf => Ok(self
                 .this_time_value(this, "Date.prototype.valueOf")
@@ -603,6 +673,113 @@ impl<H: Host> Agent<H> {
             Getter::TimezoneOffset => (tv - self.local_time_of(tv)?) / MS_PER_MINUTE,
         };
         Ok(Value::Number(answer))
+    }
+
+    /// The 14 setters of `%Date.prototype%` but `setTime` (`#sec-date.prototype.setdate` to
+    /// `#sec-date.prototype.setutcseconds`), over the row of `id` ([`setter_of`]); `setTime`
+    /// goes to `date_prototype_set_time`, the clock story's:
+    ///
+    /// - Let dateObj be the this value; perform ? RequireInternalSlot(dateObj, [[DateValue]]);
+    ///   let tv be dateObj.[[DateValue]], read before any argument.
+    /// - ? ToNumber of the first argument (undefined when absent), then ? ToNumber of each
+    ///   further argument present, up to the setter's "length", each once and in order, also
+    ///   when tv is NaN; an argument past it is not read. Numbers are kept, not values.
+    /// - `setFullYear` (21.4.4.21 step 5) and `setUTCFullYear` (21.4.4.29 step 4): if tv is
+    ///   NaN, set tv to +0𝔽, with no hook call; else `setFullYear` sets tv to LocalTime(tv),
+    ///   after ToNumber(year) and before ToNumber(month), as the clause orders them (step 4
+    ///   of `setUTCFullYear` reads nothing, so its place before ToNumber(year) is not
+    ///   observable). Every other setter: if tv is NaN, return NaN, with no store and no hook
+    ///   call; else a local one sets tv to LocalTime(tv) (2 hook calls).
+    /// - The fields of tv the arguments do not give are kept; the new date is
+    ///   MakeDate(MakeDay(year, month, date), MakeTime(hour, minute, second, ms)), which is
+    ///   MakeDate(Day(tv), MakeTime(...)) for the time setters and MakeDate(MakeDay(...),
+    ///   TimeWithinDay(tv)) for the date setters.
+    /// - A local setter takes UTC(newDate) (at most 59 hook calls; NaN, and nothing thrown,
+    ///   when the host has no instant, HOST-210), then TimeClip; the result is stored into
+    ///   [[DateValue]] last and returned, so a termination inside a hook leaves the Date
+    ///   unchanged.
+    ///
+    /// The Date is held by this builtin's activation while ToNumber runs code and while the
+    /// hooks are called.
+    #[inline(never)]
+    fn date_prototype_set(
+        &mut self,
+        id: DateBuiltin,
+        this: Value,
+        args: &[Value],
+    ) -> Completion<Value> {
+        // `setTime` shares this arm of the dispatch, so that the setters add no call to the
+        // dispatch's frame; its steps are its own.
+        if id == DateBuiltin::SetTime {
+            return self.date_prototype_set_time(this, args);
+        }
+        let Some(setter) = setter_of(id) else {
+            return Err(self.fault());
+        };
+        let tv = self.this_time_value(this, setter.name)?;
+        let Value::Object(date) = this else {
+            return Err(self.fault());
+        };
+        let present = args.len().clamp(1, setter.length);
+        let first = self.to_number(argument(args, 0))?;
+        let full_year = setter.first == YEAR;
+        let mut t = tv;
+        if full_year {
+            t = if tv.is_nan() {
+                0.0
+            } else if setter.local {
+                self.local_time_of(tv)?
+            } else {
+                tv
+            };
+        }
+        let mut rest = [f64::NAN; 3];
+        for (index, number) in rest.iter_mut().enumerate().take(present.saturating_sub(1)) {
+            *number = self.to_number(argument(args, index + 1))?;
+        }
+        if !full_year {
+            if tv.is_nan() {
+                return Ok(Value::Number(f64::NAN));
+            }
+            if setter.local {
+                t = self.local_time_of(tv)?;
+            }
+        }
+        let mut fields = fields_of_time(t);
+        let numbers = std::iter::once(first).chain(rest);
+        for (field, number) in fields
+            .iter_mut()
+            .skip(setter.first)
+            .zip(numbers.take(present))
+        {
+            *field = number;
+        }
+        let [year, month, day, hour, minute, second, millisecond] = fields;
+        let new_date = make_date(
+            make_day(year, month, day),
+            make_time(hour, minute, second, millisecond),
+        );
+        let u = if setter.local {
+            self.utc_of_local(new_date)?
+        } else {
+            new_date
+        };
+        let v = time_clip(u);
+        let stored = match &mut self.engine_object_mut(date)?.kind {
+            ObjectKind::Ordinary(ordinary) => match &mut ordinary.data {
+                OrdinaryData::Date(time) => {
+                    *time = v;
+                    true
+                }
+                _ => false,
+            },
+            _ => false,
+        };
+        // The object was a Date when tv was read, and an object's slots do not change kind.
+        if !stored {
+            return Err(self.fault());
+        }
+        Ok(Value::Number(v))
     }
 
     /// `LocalTime ( t )` (`#sec-localtime`) over the hooks: a `t` that is not finite answers
