@@ -63,6 +63,10 @@ includes:
     taskfile: taskfiles/stack-profiles.yml
     flatten: true
     optional: true
+  gate-time:
+    taskfile: taskfiles/gate-time.yml
+    flatten: true
+    optional: true
 
 tasks:
   check:
@@ -175,9 +179,14 @@ tasks:
       and the library's test binary of swell when a file under crates/swell/src reads it; it
       runs them through cargo-nextest with SWELL_FULL_COUNTS=1, then those of swell again with
       the feature collect-every-safe-point, so that a test that takes the variable up runs here
-      with nothing to edit. Prints "slow-tests: <b> test binaries: <p> passed, <f> failed, <i>
-      ignored" and the same after "slow-tests collect-every-safe-point: ", each with its ten
-      slowest.
+      with nothing to edit. The second run adds every module of swell's tests that calls
+      stack_with_room (crates/swell/tests/support/host.rs): its tests prove the promised stack
+      with a frame size that depends on the optimization level, and the gate's step test-collect
+      builds the collect mode at opt-level 1 (the profile collect, .cargo/collect-profile.toml),
+      so this run, in the test profile at opt-level 0 as before, is where the collect mode's
+      stack tests keep their unoptimized frames (story gate-test-steps-fit-four-cores). Prints
+      "slow-tests: <b> test binaries: <p> passed, <f> failed, <i> ignored" and the same after
+      "slow-tests collect-every-safe-point: ", each with its ten slowest.
     silent: true
     env:
       RUSTFLAGS: -D warnings
@@ -197,6 +206,12 @@ tasks:
           if [ "$pkg" = swell ]; then swell="$swell${swell:+ | }$term"; fi
         done
         if grep -rqs SWELL_FULL_COUNTS crates/swell/src; then all="$all${all:+ | }binary_id(swell)"; swell="$swell${swell:+ | }binary_id(swell)"; fi
+        for f in $(grep -l stack_with_room crates/swell/tests/*.rs | LC_ALL=C sort); do
+          stem=${f##*/}
+          stem=${stem%.rs}
+          term="(binary_id(swell::main) & test(/^$stem::/))"
+          case " | $swell | " in *" | $term | "*) ;; *) swell="$swell${swell:+ | }$term" ;; esac
+        done
         if [ -z "$all" ]; then echo "slow-tests: no test reads SWELL_FULL_COUNTS"; exit 1; fi
         echo "$all" > .out/slow-tests.filter
         echo "$swell" > .out/slow-tests-collect.filter
@@ -213,102 +228,6 @@ tasks:
         echo "$status" > .out/slow-tests-collect.status
       - task: nextest-report
         vars: {STEP: slow-tests-collect, PREFIX: 'slow-tests collect-every-safe-point: ', LOG: .out/slow-tests-collect.log, STATUS: .out/slow-tests-collect.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}
-
-  gate-time-start:
-    desc: Internal. Start the clock of the gate's test steps, and note the CPU seconds of the processes this task process has waited for.
-    summary: |
-      Internal. Starts the clock of the gate's test steps (.out/gate-time/mark) and writes to
-      .out/gate-time/cpu the PID of this task process and the CPU time, user and system, of
-      every process it has waited for: fields cutime and cstime of /proc/<pid>/stat, in clock
-      ticks. A child counts there once it has ended and been waited for, with the children it
-      waited for in turn, so cargo, cargo-nextest, rustc and every test process are counted.
-      gate-time-sum reads it again in the same task process; where /proc is missing the file
-      holds the PID alone.
-    silent: true
-    cmds:
-      - mkdir -p .out/gate-time
-      - date +%s.%N > .out/gate-time/mark
-      - ': > .out/gate-time/steps'
-      - |
-        pid=$(sh -c 'echo $PPID')
-        ticks=$(awk '{ sub(/^.*\) /, ""); print $14 + $15 }' "/proc/$pid/stat" 2>/dev/null)
-        echo "$pid $ticks" > .out/gate-time/cpu
-
-  gate-time:
-    desc: Internal. Print "gate-time <STEP> <seconds>", the wall time since the last mark, and set the mark.
-    summary: |
-      Internal, called by check after each test step. Prints "<LABEL> <STEP> <seconds>" (LABEL
-      default gate-time), the wall time since the mark that gate-time-start or the last
-      gate-time set, with one decimal, adds it to .out/gate-time/steps and sets the mark.
-      The time is of the steps as they run inside the gate's pool job: a wait for a slot of the
-      build pool is before the job starts and is not in it.
-    silent: true
-    vars:
-      LABEL: '{{.LABEL | default "gate-time"}}'
-    cmds:
-      - |
-        now=$(date +%s.%N)
-        mark=$(cat .out/gate-time/mark 2>/dev/null) || { echo "gate-time: no mark; gate-time-start runs first"; exit 1; }
-        line=$(awk -v a="$mark" -v b="$now" -v step='{{.STEP}}' -v label='{{.LABEL}}' 'BEGIN { printf "%s %s %.1f\n", label, step, b - a }')
-        echo "$line"
-        echo "$line" >> .out/gate-time/steps
-        echo "$now" > .out/gate-time/mark
-
-  gate-time-sum:
-    desc: Internal. Print "gate-time test-steps <sum> of <budget>", the sum of the gate-time lines of this run, and fail when it is over GATE_TIME_BUDGET (default 120).
-    summary: |
-      Internal, the last step of check. Sums the gate-time lines of .out/gate-time/steps and
-      prints "gate-time test-steps <sum> of <budget>", the budget GATE_TIME_BUDGET (default
-      120 s, the organization's budget for the test steps, "Tests stay fast"). When the sum is
-      over the budget it fails with "gate-time: the test steps ran <sum> s, over the budget of
-      <budget> s; the slowest: <step> <s>, <step> <s>, <step> <s>". A planted script sets a small
-      budget to show it; nothing raises it. No timed step fails too.
-      The seconds are the wall time of each step's run: the whole gate is one job of the pool,
-      so time spent in the pool's queue lies before the first mark; the machine's load slows a
-      step, so the sum line ends with the load at its end, ", load <1-minute load average> on
-      <cores> cores" from /proc/loadavg and nproc where they exist (left out where not). Before
-      the load it prints ", cpu <seconds>", the CPU time, user and system, of the processes of
-      the test steps: what the task process has waited for since gate-time-start (fields
-      cutime and cstime of /proc/<pid>/stat, divided by getconf CLK_TCK), cargo, cargo-nextest
-      and the test processes with their children included. It is left out when gate-time-start
-      ran in another task process (a separate task call) or /proc is missing. Neither the CPU
-      seconds nor the load changes whether the gate fails: only the wall time does.
-    silent: true
-    vars:
-      GATE_TIME_BUDGET: '{{.GATE_TIME_BUDGET | default "120"}}'
-    cmds:
-      - |
-        load=""
-        avg=$(cut -d ' ' -f 1 /proc/loadavg 2>/dev/null)
-        cores=$(nproc 2>/dev/null)
-        if [ -n "$avg" ] && [ -n "$cores" ]; then load=", load $avg on $cores cores"; fi
-        cpu=""
-        pid=$(sh -c 'echo $PPID')
-        if read -r pid0 ticks0 < .out/gate-time/cpu 2>/dev/null && [ "$pid" = "$pid0" ] && [ -n "$ticks0" ]; then
-          ticks=$(awk '{ sub(/^.*\) /, ""); print $14 + $15 }' "/proc/$pid/stat" 2>/dev/null)
-          hz=$(getconf CLK_TCK 2>/dev/null)
-          if [ -n "$ticks" ] && [ -n "$hz" ]; then
-            cpu=$(awk -v a="$ticks0" -v b="$ticks" -v hz="$hz" 'BEGIN { printf ", cpu %.1f", (b - a) / hz }')
-          fi
-        fi
-        awk -v budget='{{.GATE_TIME_BUDGET}}' -v cputext="$cpu" -v loadtext="$load" '
-          $1 == "gate-time" { s += $3; n++; step[n] = $2; secs[n] = $3 + 0 }
-          END {
-            if (!n) { print "gate-time: no step was timed"; exit 1 }
-            printf "gate-time test-steps %.1f of %s%s%s\n", s, budget, cputext, loadtext
-            if (budget !~ /^[0-9]+(\.[0-9]+)?$/) { print "gate-time: GATE_TIME_BUDGET " budget " is not a number of seconds"; exit 1 }
-            if (sprintf("%.1f", s) + 0 <= budget + 0) exit 0
-            line = ""
-            for (k = 1; k <= 3 && k <= n; k++) {
-              best = 0
-              for (i = 1; i <= n; i++) if (!(i in used) && (best == 0 || secs[i] > secs[best])) best = i
-              used[best] = 1
-              line = line (k > 1 ? ", " : "") step[best] " " sprintf("%.1f", secs[best])
-            }
-            printf "gate-time: the test steps ran %.1f s, over the budget of %s s; the slowest: %s\n", s, budget, line
-            exit 1
-          }
-        ' .out/gate-time/steps
 
   gate-vars:
     desc: Print, on one line, every gate variable that has a value before the checks run; a redirected run shows in its own output.
@@ -334,7 +253,7 @@ tasks:
         HOST_SURFACE_ROOT HOST_SURFACE_OUT HOST_SURFACE_SNAPSHOT HOST_SURFACE_CHANGELOG HOST_SURFACE_VERSION
         TEST262_DESIGN TEST262_FEATURES TEST262_SECTIONS TEST262_EXPECTED TEST262_DIGEST TEST262_OUT TEST262_WORKERS TEST262_RUN TEST262_PART TEST262_FROM_PARTS
         TEST262_MOVES TEST262_LATER_PARTS
-        GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_SELFTEST_DIR GATE_SELFTEST_JOBS
+        GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_CPU_BOUNDS GATE_SELFTEST_DIR GATE_SELFTEST_JOBS
         GATE_RUNNER_ENV GATE_TEST_BUILD_JSON
         SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES
     silent: true
@@ -480,9 +399,12 @@ tasks:
           (taskfiles/collect-mode.yml);
         - the step test-faults: task build-faults (taskfiles/fault-injection.yml);
         - the step conform-engine, its test run and its cargo run: task build-conform-engine
-          (taskfiles/conform-engine.yml).
+          (taskfiles/conform-engine.yml);
+        - the step gate-selftest, the release runner of test262 its planted scripts run: task
+          build-test262-runner (without RUSTFLAGS, as the task test262 runs it).
       The doc tests themselves are not built here: rustdoc compiles each when it runs it, and
       cargo refuses --no-run with --doc. test262-check and test262-moves-check build nothing.
+      gate-time-sum fails a run whose test steps wrote into a cargo target directory.
       A cargo that fails prints its log and fails the task. The steps hold to it: nextest-report,
       test-doc and the cargo run of conform-engine fail when their log has a Compiling line,
       naming the build task (task compile-check).
@@ -500,6 +422,31 @@ tasks:
       - task: build-collect
       - task: build-faults
       - task: build-conform-engine
+      - task: build-test262-runner
+
+  build-test262-runner:
+    desc: Build the release runner of test262 as the task test262 runs it, before the clock; the planted scripts of gate-selftest run it.
+    summary: |
+      Build the release runner of test262, "cargo build --locked --release -p swell-test262",
+      into .out/build-test262-runner.log, and print "build-test262-runner: <cargo's Finished
+      line>"; when cargo fails it prints the log and fails. A step of build-tests, before
+      gate-time-start (story gate-test-steps-fit-four-cores): the planted scripts of
+      gate-selftest that count a small checkout of their own run "cargo run --locked --release
+      -q -p swell-test262" through the task test262 (taskfiles/test262.yml), and without this
+      task the first of them built the runner inside the timed step gate-selftest. On the
+      forge's runner that build has no compile cache and no target directory built before;
+      here both hide it. It sets no RUSTFLAGS, as the task test262 sets none, so that the
+      cargo run of those scripts finds the same build fresh; gate-time-sum fails a run whose
+      test steps wrote into a target directory.
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        status=0
+        cargo build --locked --release -p swell-test262 > .out/build-test262-runner.log 2>&1 || status=$?
+        if [ "$status" -ne 0 ]; then cat .out/build-test262-runner.log; echo "build-test262-runner: cargo build failed, exit $status"; exit 1; fi
+        esc=$(printf '\033')
+        LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" .out/build-test262-runner.log | awk '/^ *Finished / { sub(/^ */, ""); line = $0 } END { print "build-test262-runner: " line }'
 
   clippy:
     desc: Run clippy over every crate and target of the workspace; a warning or a denied lint fails it.
@@ -542,8 +489,11 @@ tasks:
       warnings denied, and print the summed counts.
 
       Runs "cargo test --workspace --locked --doc" into .out/test-doc.log and "cargo test
-      --locked -p swell --features collect-every-safe-point --doc" into
-      .out/test-doc-collect.log; a log is printed when its cargo fails. The lines printed sum the
+      --locked -p swell --features collect-every-safe-point --config .cargo/collect-profile.toml
+      --profile collect --doc" into .out/test-doc-collect.log, in the profile collect of the
+      step test-collect (taskfiles/collect-mode.yml, whose variable COLLECT_CONFIG gives the
+      --config flag), whose library build-collect makes; a log is printed when its cargo
+      fails. The lines printed sum the
       "test result:" lines of each as "test-doc: <n> test suites: <p> passed, <f> failed, <i>
       ignored" and "test-doc collect-every-safe-point: <n> test suites: ...". It fails when
       cargo fails, a test fails, or a run prints no "test result:" line. The libraries the doc
@@ -565,7 +515,7 @@ tasks:
             status=0; cargo test --workspace --locked --doc > "$log" 2>&1 || status=$?
           else
             log=.out/test-doc-collect.log; label="test-doc collect-every-safe-point"
-            status=0; cargo test --locked -p swell --features collect-every-safe-point --doc > "$log" 2>&1 || status=$?
+            status=0; cargo test --locked -p swell --features collect-every-safe-point {{.COLLECT_CONFIG}} --profile collect --doc > "$log" 2>&1 || status=$?
           fi
           if [ "$status" -ne 0 ]; then cat "$log"; fi
           awk -v status="$status" -v label="$label" '

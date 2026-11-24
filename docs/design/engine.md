@@ -2587,8 +2587,8 @@ What each slice builds, and the directories it raises most (paths under `test/`,
    `Symbol`, iterators, `for-of`; from slice 3, `Array.from`, `Object.fromEntries`,
    `Object.groupBy` and the Array iterator methods `keys`, `values` and `entries`. `statements/for-of` 575, `expressions/assignment` 342,
    `expressions/arrow-function` 302.
-7. `generators`: frames saved in objects. `expressions/object` 303, `expressions/generators`
-   288, `statements/generators` 266.
+7. `generators`: frames saved in objects. `expressions/object` 298, `expressions/generators`
+   284, `statements/generators` 262 (counted at the close of the slice).
 8. `classes`: classes, `super`, `new.target`, private names, static blocks. `statements/class`
    3,016, `expressions/class` 2,731.
 9. `collections-proxy-reflect`: `Map`, `Set`, `WeakMap`, `WeakSet`, `Proxy`, `Reflect`. `Set`
@@ -3009,8 +3009,9 @@ case leaving slice 18; each passes in every one of its runs (the close's check (
 the 21 of `prototype/compile/` that run, `prototype/flags/order-after-compile` and the two of
 `prototype/Symbol.split/` that call it. The two that use generator functions
 (`RegExp-control-escape-russian-letter` and `RegExp-invalid-control-escape-character-class`, the
-feature `generators`) pass and stay where the block puts them, in slice 18: slice 7, which they
-need, is delivered after slice 5.
+feature `generators`) pass and stayed where the block puts them, in slice 18, at the close of
+slice 5: slice 7, which they need, is delivered after slice 5. The close of slice 7 brings them
+into slice 7 ("Slice 7's cases that need a later slice" below).
 
 **Slice 7's cases that need a later slice.** Measured at the close of slice 7 (2026-11-24,
 `story:slice-07-conformance-close`), with the run lines of the runner on the code of the slice

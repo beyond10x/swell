@@ -1,0 +1,252 @@
+version: '3'
+
+set: [pipefail]
+
+tasks:
+  gate-time-start:
+    desc: Internal. Start the clock of the gate's test steps, and note the CPU seconds of the processes this task process has waited for.
+    summary: |
+      Internal. Starts the clock of the gate's test steps (.out/gate-time/mark, and
+      .out/gate-time/start, written here only, whose modification time gate-time-sum compares
+      the files of the cargo target directories with) and writes to .out/gate-time/cpu the PID
+      of this task process and the CPU time, user and system, of every process it has waited
+      for: fields cutime and cstime of /proc/<pid>/stat, in clock ticks, and the same ticks to
+      .out/gate-time/cpu-mark. A child counts there once it has ended and been waited for, with
+      the children it waited for in turn, so cargo, cargo-nextest, rustc and every test process
+      are counted. gate-time and gate-time-sum read it again in the same task process; where
+      /proc is missing the file holds the PID alone.
+    silent: true
+    cmds:
+      - mkdir -p .out/gate-time
+      - date +%s.%N > .out/gate-time/mark
+      - date +%s.%N > .out/gate-time/start
+      - ': > .out/gate-time/steps'
+      - ': > .out/gate-time/cpu-steps'
+      - |
+        pid=$(sh -c 'echo $PPID')
+        ticks=$(awk '{ sub(/^.*\) /, ""); print $14 + $15 }' "/proc/$pid/stat" 2>/dev/null)
+        echo "$pid $ticks" > .out/gate-time/cpu
+        echo "$ticks" > .out/gate-time/cpu-mark
+
+  gate-time:
+    desc: Internal. Print "gate-time <STEP> <seconds>", the wall time since the last mark, note the step's CPU seconds, and set the mark.
+    summary: |
+      Internal, called by check after each test step. Prints "<LABEL> <STEP> <seconds>" (LABEL
+      default gate-time), the wall time since the mark that gate-time-start or the last
+      gate-time set, with one decimal, adds it to .out/gate-time/steps and sets the mark.
+      The time is of the steps as they run inside the gate's pool job: a wait for a slot of the
+      build pool is before the job starts and is not in it. In the task process of
+      gate-time-start it also adds "<LABEL> <STEP> <cpu>" to .out/gate-time/cpu-steps, the CPU
+      seconds the task process has waited for since the last mark (gate-time-start says how
+      they are read), which gate-time-sum prints; it prints nothing more.
+    silent: true
+    vars:
+      LABEL: '{{.LABEL | default "gate-time"}}'
+    cmds:
+      - |
+        now=$(date +%s.%N)
+        mark=$(cat .out/gate-time/mark 2>/dev/null) || { echo "gate-time: no mark; gate-time-start runs first"; exit 1; }
+        line=$(awk -v a="$mark" -v b="$now" -v step='{{.STEP}}' -v label='{{.LABEL}}' 'BEGIN { printf "%s %s %.1f\n", label, step, b - a }')
+        echo "$line"
+        echo "$line" >> .out/gate-time/steps
+        echo "$now" > .out/gate-time/mark
+        pid=$(sh -c 'echo $PPID')
+        if read -r pid0 ticks0 < .out/gate-time/cpu 2>/dev/null && [ "$pid" = "$pid0" ] && [ -n "$ticks0" ]; then
+          ticks=$(awk '{ sub(/^.*\) /, ""); print $14 + $15 }' "/proc/$pid/stat" 2>/dev/null)
+          last=$(cat .out/gate-time/cpu-mark 2>/dev/null)
+          hz=$(getconf CLK_TCK 2>/dev/null)
+          if [ -n "$ticks" ] && [ -n "$last" ] && [ -n "$hz" ]; then
+            awk -v a="$last" -v b="$ticks" -v hz="$hz" -v step='{{.STEP}}' -v label='{{.LABEL}}' \
+              'BEGIN { printf "%s %s %.2f\n", label, step, (b - a) / hz }' >> .out/gate-time/cpu-steps
+            echo "$ticks" > .out/gate-time/cpu-mark
+          fi
+        fi
+
+  gate-time-sum:
+    desc: Internal. Print the wall time and the CPU seconds of the gate's test steps; fail when the wall time is over GATE_TIME_BUDGET (120), the CPU seconds over the entry of GATE_CPU_BOUNDS for the machine's core count (when there is one), or a step wrote into target/*/deps or conformance/ess/target/*/deps.
+    summary: |
+      Internal, the last step of check. Three checks of the test steps, each with its line; it
+      fails when one of them fails, after printing every line.
+
+      1. The wall time. Sums the gate-time lines of .out/gate-time/steps and prints "gate-time
+      test-steps <sum> of <budget>", the budget GATE_TIME_BUDGET (default 120 s, the
+      organization's budget for the test steps, "Tests stay fast"). When the sum is over the
+      budget it fails with "gate-time: the test steps ran <sum> s, over the budget of <budget>
+      s; the slowest: <step> <s>, <step> <s>, <step> <s>". A planted script sets a small budget
+      to show it; nothing raises it. No timed step fails too. The seconds are the wall time of
+      each step's run: the whole gate is one job of the pool, so time spent in the pool's queue
+      lies before the first mark; the machine's load slows a step, so the sum line ends with
+      the load at its end, ", load <1-minute load average> on <cores> cores" from /proc/loadavg
+      and nproc where they exist (left out where not). Before the load it prints ", cpu
+      <seconds>", the CPU time, user and system, of the processes of the test steps: what the
+      task process has waited for since gate-time-start (fields cutime and cstime of
+      /proc/<pid>/stat, divided by getconf CLK_TCK), cargo, cargo-nextest and the test
+      processes with their children included. It is left out when gate-time-start ran in
+      another task process (a separate task call) or /proc is missing.
+
+      2. The CPU seconds (story gate-test-steps-fit-four-cores), each step's from
+      .out/gate-time/cpu-steps in the order they ran. They are a lower bound of the work: a
+      compile that the cache wrapper (sccache) runs is counted in its server, not here, and the
+      build phase lies before the clock. The bound is CPU seconds per kind of machine:
+      GATE_CPU_BOUNDS holds pairs "<cores>:<CPU seconds>" (check-runner gives the table
+      CPU_BOUNDS_BY_CORES of taskfiles/forge.yml; check alone on the forge gives none), keyed by
+      the core count of the wall line (nproc; GATE_TIME_CORES plants it, for the planted scripts
+      only). The same work counts other CPU seconds on another machine, so an entry holds only
+      for the kind of machine its base and change runs were measured on. With an entry for the
+      core count it prints "gate-cpu test-steps <cpu> of <bound> on <n> cores: <step> <cpu>,
+      ..." and fails over the bound with "gate-cpu: the test steps took <cpu> CPU seconds, over
+      the bound of <bound> for <n> cores; the costliest: <step> <cpu>, <step> <cpu>, <step>
+      <cpu>". With a table and no entry for the core count it prints "gate-cpu test-steps <cpu>,
+      no bound for <n> cores: ..." and the CPU seconds decide nothing; without a table, "gate-cpu
+      test-steps <cpu>: ...". An entry that is not "<cores>:<CPU seconds>" fails: "gate-cpu:
+      GATE_CPU_BOUNDS holds <entry>, not <cores>:<CPU seconds>", and so do two entries for one
+      core count: "gate-cpu: GATE_CPU_BOUNDS holds <n> cores twice". With an entry and no CPU
+      seconds to read (gate-time-start in another task process, or no /proc) it fails with
+      "gate-cpu: the CPU seconds of the test steps could not be read ..."; without an entry it
+      prints "gate-cpu test-steps: not read (...)" and passes. The line "gate-time yardstick <s>
+      s: conform-engine <a> and test262-moves-check <b>" prints the wall time of those two
+      steps, fixed work whose time on the forge's runner tells the runner's speed; it decides
+      nothing.
+
+      3. No build inside the clock (story gate-test-steps-fit-four-cores). A file under the
+      deps directory of a profile of the cargo target directory (CARGO_TARGET_DIR where it is
+      set, as on a build server of the pool; target/ otherwise, as on the forge) or of
+      conformance/ess/target/ (<dir>/<profile>/deps/) whose modification time is after that of
+      .out/gate-time/start was written by a compiler while the steps ran: the forge's runner pays
+      that build in CPU seconds and wall time where the local machine's compile cache and a
+      target directory built before hide it. It prints "gate-time: no file of <n> under
+      <dir>/*/deps changed while the test steps ran", and fails with "gate-time: the test steps
+      wrote <k> file(s) into <dir>/*/deps or conformance/ess/target/*/deps inside the clock, the
+      first <path>; the task build-tests builds what the steps run before gate-time-start". It
+      cannot tell whose compiler wrote: another job that builds into the same directory while
+      the clock runs makes it fail as well. A tree without
+      <dir>/*/deps fails too: the build phase writes it. It reads these directories only: a
+      planted script of gate-selftest that builds a crate of its own builds it in a target
+      directory under .out/gate-tests/ (or CARGO_TARGET_DIR), a small crate whose build is part
+      of what the step measures, on the forge as here.
+    silent: true
+    vars:
+      GATE_TIME_BUDGET: '{{.GATE_TIME_BUDGET | default "120"}}'
+      GATE_CPU_BOUNDS: '{{.GATE_CPU_BOUNDS | default ""}}'
+      GATE_TIME_CORES: '{{.GATE_TIME_CORES | default ""}}'
+    cmds:
+      - |
+        load=""
+        avg=$(cut -d ' ' -f 1 /proc/loadavg 2>/dev/null)
+        cores='{{.GATE_TIME_CORES}}'
+        if [ -z "$cores" ]; then cores=$(nproc 2>/dev/null); fi
+        if [ -n "$avg" ] && [ -n "$cores" ]; then load=", load $avg on $cores cores"; fi
+        cpu=""
+        pid=$(sh -c 'echo $PPID')
+        if read -r pid0 ticks0 < .out/gate-time/cpu 2>/dev/null && [ "$pid" = "$pid0" ] && [ -n "$ticks0" ]; then
+          ticks=$(awk '{ sub(/^.*\) /, ""); print $14 + $15 }' "/proc/$pid/stat" 2>/dev/null)
+          hz=$(getconf CLK_TCK 2>/dev/null)
+          if [ -n "$ticks" ] && [ -n "$hz" ]; then
+            cpu=$(awk -v a="$ticks0" -v b="$ticks" -v hz="$hz" 'BEGIN { printf "%.2f", (b - a) / hz }')
+          fi
+        fi
+        bad=0
+        cputext=""
+        if [ -n "$cpu" ]; then cputext=$(awk -v cpu="$cpu" 'BEGIN { printf ", cpu %.1f", cpu }'); fi
+        awk -v budget='{{.GATE_TIME_BUDGET}}' -v cputext="$cputext" -v loadtext="$load" '
+          $1 == "gate-time" { s += $3; n++; step[n] = $2; secs[n] = $3 + 0 }
+          END {
+            if (!n) { print "gate-time: no step was timed"; exit 1 }
+            printf "gate-time test-steps %.1f of %s%s%s\n", s, budget, cputext, loadtext
+            if (budget !~ /^[0-9]+(\.[0-9]+)?$/) { print "gate-time: GATE_TIME_BUDGET " budget " is not a number of seconds"; exit 1 }
+            if (sprintf("%.1f", s) + 0 <= budget + 0) exit 0
+            line = ""
+            for (k = 1; k <= 3 && k <= n; k++) {
+              best = 0
+              for (i = 1; i <= n; i++) if (!(i in used) && (best == 0 || secs[i] > secs[best])) best = i
+              used[best] = 1
+              line = line (k > 1 ? ", " : "") step[best] " " sprintf("%.1f", secs[best])
+            }
+            printf "gate-time: the test steps ran %.1f s, over the budget of %s s; the slowest: %s\n", s, budget, line
+            exit 1
+          }
+        ' .out/gate-time/steps || bad=1
+        awk '
+          $1 == "gate-time" && $2 == "conform-engine" { a = $3; na++ }
+          $1 == "gate-time" && $2 == "test262-moves-check" { b = $3; nb++ }
+          END {
+            if (na != 1 || nb != 1) exit 0
+            printf "gate-time yardstick %.1f s: conform-engine %s and test262-moves-check %s\n", a + b, a, b
+          }
+        ' .out/gate-time/steps
+        table='{{.GATE_CPU_BOUNDS}}'
+        bound=""
+        tablebad=0
+        seen=" "
+        for entry in $table; do
+          if ! printf '%s\n' "$entry" | grep -Eqx '[0-9]+:[0-9]+(\.[0-9]+)?'; then
+            echo "gate-cpu: GATE_CPU_BOUNDS holds $entry, not <cores>:<CPU seconds>"
+            tablebad=1
+            bad=1
+            continue
+          fi
+          key=${entry%%:*}
+          case "$seen" in
+            *" $key "*)
+              echo "gate-cpu: GATE_CPU_BOUNDS holds $key cores twice"
+              tablebad=1
+              bad=1
+              continue
+              ;;
+          esac
+          seen="$seen$key "
+          if [ "$key" = "$cores" ]; then bound=${entry#*:}; fi
+        done
+        if [ "$tablebad" -eq 1 ]; then
+          :
+        elif [ -z "$cpu" ]; then
+          if [ -n "$bound" ]; then
+            echo "gate-cpu: the CPU seconds of the test steps could not be read (gate-time-start ran in another task process, or there is no /proc); the bound of $bound for $cores cores needs them"
+            bad=1
+          else
+            echo "gate-cpu test-steps: not read (gate-time-start ran in another task process, or there is no /proc)"
+          fi
+        else
+          awk -v cpu="$cpu" -v bound="$bound" -v table="$table" -v cores="${cores:-an unknown number of}" '
+            $1 == "gate-time" {
+              n++; step[n] = $2; secs[n] = $3 + 0; list = list (n > 1 ? ", " : "") $2 " " sprintf("%.1f", $3)
+            }
+            END {
+              text = sprintf("gate-cpu test-steps %.1f", cpu)
+              if (bound != "") text = text sprintf(" of %s on %s cores", bound, cores)
+              else if (table != "") text = text sprintf(", no bound for %s cores", cores)
+              print text ": " list
+              if (bound == "") exit 0
+              if (sprintf("%.1f", cpu) + 0 <= bound + 0) exit 0
+              line = ""
+              for (k = 1; k <= 3 && k <= n; k++) {
+                best = 0
+                for (i = 1; i <= n; i++) if (!(i in used) && (best == 0 || secs[i] > secs[best])) best = i
+                used[best] = 1
+                line = line (k > 1 ? ", " : "") step[best] " " sprintf("%.1f", secs[best])
+              }
+              printf "gate-cpu: the test steps took %.1f CPU seconds, over the bound of %s for %s cores; the costliest: %s\n", cpu, bound, cores, line
+              exit 1
+            }
+          ' .out/gate-time/cpu-steps || bad=1
+        fi
+        tdir=${CARGO_TARGET_DIR:-target}
+        dirs=$(find "$tdir" conformance/ess/target -mindepth 2 -maxdepth 2 -type d -name deps 2>/dev/null | LC_ALL=C sort -u)
+        if [ -z "$dirs" ]; then
+          echo "gate-time: no $tdir/*/deps to read; the build phase writes it before gate-time-start"
+          bad=1
+        else
+          # shellcheck disable=SC2086
+          all=$(find $dirs -type f | awk 'END { print NR }')
+          # shellcheck disable=SC2086
+          newer=$(find $dirs -type f -newer .out/gate-time/start | LC_ALL=C sort)
+          if [ -n "$newer" ]; then
+            k=$(printf '%s\n' "$newer" | awk 'END { print NR }')
+            first=$(printf '%s\n' "$newer" | awk 'NR == 1')
+            echo "gate-time: the test steps wrote $k file(s) into $tdir/*/deps or conformance/ess/target/*/deps inside the clock, the first $first; the task build-tests builds what the steps run before gate-time-start"
+            bad=1
+          else
+            echo "gate-time: no file of $all under $tdir/*/deps changed while the test steps ran"
+          fi
+        fi
+        exit "$bad"

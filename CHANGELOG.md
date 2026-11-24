@@ -12,6 +12,17 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- `%AsyncFunction%`, the constructor of `async` functions from source text, a story of the
+  tenth slice. It is reached through the `constructor` of the prototype of an `async`
+  function and is no property of the global object. Called or constructed, it takes the
+  path of `Function`: the host's hook for the compilation of strings decides, the limits
+  of nesting and of re-entry hold, and the parse is charged to the memory budget and reads
+  the interrupt.
+- `async` methods of object literals run, a story of the tenth slice: `{ async m() {} }`,
+  with a computed name too. A call returns a promise and the body awaits as the body of an
+  `async` function does; the method has no `prototype` and cannot be constructed. An
+  `async *` method is refused with a `SyntaxError` that names the tenth slice, and `super`
+  in an `async` method is refused as in a plain method.
 - Slice 5, regular expressions, is delivered: all 2,724 of its test262 cases pass in all
   5,441 runs. At its close 18 cases that need `Date`, `Math`, `parseInt`, the operator
   `**`, `class` or `Map` move to slices 4, 8 and 9, each with its evidence, and 18 cases of
@@ -29,9 +40,8 @@ Every number below comes from the gate, `task check`, on the released commit.
   is charged to the memory budget while it waits and credited when its promise settles or
   it is collected. An `await` in a loop that never ends ends the checkpoint at the step
   budget; a termination in a resumed activation leaves its promise pending and the jobs
-  behind it queued. `%AsyncFunction.prototype%` exists. The `async` method of an object
-  literal, `async function*` and `for await` are still refused, each with a `SyntaxError`
-  that names the tenth slice.
+  behind it queued. `%AsyncFunction.prototype%` exists. `async function*` and `for await`
+  are still refused, each with a `SyntaxError` that names the tenth slice.
 - `Promise`, the second story of the tenth slice: the constructor with its resolving
   functions, `Promise.prototype.then` and `catch`, `Promise.resolve`, `Promise.reject` and
   the getter of `Promise[Symbol.species]`. A reaction and the job of a thenable are entries
@@ -57,8 +67,7 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The parser reads `async` function declarations, expressions and arrow functions with
   their early errors, and `await` where the grammar's [Await] is set. A refusal that names
   a later slice comes after the grammar errors and early errors of the source, which now
-  come first. `async function*`, `for await` and the `async` method of an object literal
-  keep refusals of their own.
+  come first. `async function*` and `for await` keep refusals of their own.
 - The microtask queue of the agent and its checkpoint, the first story of the tenth slice. A
   host queues a microtask with the realm it runs in; a checkpoint runs every entry in the
   order it was queued, under the step budget of one entry, and spends one step for each
@@ -93,7 +102,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   answers `WrongKind`.
 - `HOST-46`, `HOST-100`, `HOST-101` and `HOST-121` have a test.
 
-## [0.8.0] - 2026-11-23
+## [0.8.0] - 2026-11-24
 
 Generator functions run, and a regular expression takes the flag `i`, Unicode property escapes
 and group names outside ASCII: four of the six stories of the seventh delivery slice and
@@ -149,6 +158,12 @@ cases pass (18,155 in 0.7.0).
 - The full test262 run can be made in parts, each a pool job, and counted from their files to
   the lines the whole run prints: `task test262-part TEST262_PART=<k>/<n>` and
   `TEST262_FROM_PARTS` of `task test262`, `test262-expected` and `slow-test262`.
+- The gate's test steps cost less on few cores: the tests with a collection at every safe
+  point are built in a profile of their own at opt-level 1, and the release build of the
+  test262 runner is made before the clock. The gate refuses a run in which a test step
+  builds, and `check-runner` bounds the CPU seconds of the test steps on a machine whose
+  core count has an entry in its table. The budget of 120 seconds and the steps it is
+  counted over are unchanged. 66 planted defects, from 65.
 
 ### Host interface
 
