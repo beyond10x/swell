@@ -32,9 +32,9 @@ use support::stack::{TestPath, test_path};
 use swell::{
     Abrupt, Agent, AgentState, Brand, CompileStrings, Completion, Cx, ErrorKind, GlobalObjects,
     Handled, HookCx, Host, HostCall, HostData, HostError, HostObjectSpec, IsoDateTime, Job, Limits,
-    LoadRequest, ModuleRef, ObjectRef, Outcome, Parsed, PreferredType, PropertyDescriptor,
-    PropertyKey, Prototype, Realm, RealmRef, RejectionOperation, Root, Script, ScriptRef, Seeds,
-    Source, StringRef, Termination, TimeZoneIdentifier, Tracer, Value,
+    LoadRequest, ModuleRef, ObjectRef, Outcome, Parsed, PreferredType, PromiseState,
+    PropertyDescriptor, PropertyKey, Prototype, Realm, RealmRef, RejectionOperation, Root, Script,
+    ScriptRef, Seeds, Source, StringRef, Termination, TimeZoneIdentifier, Tracer, Value,
 };
 
 /// The sequences of one run: 400 in the default mode; with the feature
@@ -855,6 +855,16 @@ fn shape<T: std::fmt::Debug>(answer: &Result<T, HostError>) -> String {
     }
 }
 
+/// What `promise_state` answered, without the root of a settled promise's result, which is
+/// dropped here.
+fn settlement(state: PromiseState) -> &'static str {
+    match state {
+        PromiseState::Pending => "Pending",
+        PromiseState::Fulfilled(_) => "Fulfilled",
+        PromiseState::Rejected(_) => "Rejected",
+    }
+}
+
 /// An answer of a call whose one handle came from the other agent: it must be
 /// `Err(ForeignHandle)`, or `Err(Faulted)` for a faulted agent.
 fn foreign_answer<T: std::fmt::Debug>(name: &str, answer: &Result<T, HostError>) {
@@ -944,8 +954,23 @@ macro_rules! scoped_op {
                     }
                     line
                 };
+                // The reads of a promise, of the same root: they draw nothing from the
+                // generator, so every seed draws the operations it drew before them.
+                let state = $cx.promise_state(&root).map(settlement);
+                let handled = $cx.promise_is_handled(&root);
+                let marked = $cx.mark_promise_as_handled(&root);
+                if is_foreign(origin, me) {
+                    foreign_answer("promise_state", &state);
+                    foreign_answer("promise_is_handled", &handled);
+                    foreign_answer("mark_promise_as_handled", &marked);
+                }
                 pool!($cx).roots.push((origin, root));
-                line
+                format!(
+                    "{line} promise reads -> {} {} {}",
+                    shape(&state),
+                    shape(&handled),
+                    shape(&marked)
+                )
             }
             3 => {
                 let t = text(&mut pool!($cx).rng);
@@ -1920,8 +1945,26 @@ fn op_read(world: &mut World, a: usize) -> String {
             if let Ok(second) = answer {
                 keep(&mut world.pool.rng, &mut world.pool.roots, (a, second));
             }
+            // The reads of a promise, of the same root, with no draw of the generator.
+            let (state, handled, marked) = world.on(a, |agent| {
+                (
+                    agent.promise_state(&root).map(settlement),
+                    agent.promise_is_handled(&root),
+                    agent.mark_promise_as_handled(&root),
+                )
+            });
+            if is_foreign(origin, a) {
+                foreign_answer("promise_state", &state);
+                foreign_answer("promise_is_handled", &handled);
+                foreign_answer("mark_promise_as_handled", &marked);
+            }
             world.pool.roots.push((origin, root));
-            line
+            format!(
+                "{line} promise reads -> {} {} {}",
+                shape(&state),
+                shape(&handled),
+                shape(&marked)
+            )
         }
         4 => {
             let answer = world.on(a, |agent| agent.collect());

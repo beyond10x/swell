@@ -1450,21 +1450,3 @@ fn an_activation_whose_job_was_cleared_is_never_resumed() {
         "{before} -> {after}, promise {promise}"
     );
 }
-
-/// The refusal of an `async` method keeps its place and takes its own text: through `eval` it is
-/// a `SyntaxError` with that text, and `refusals()` moves by 1.
-#[test]
-fn the_refusal_of_an_async_method_is_counted() {
-    let (mut agent, realm) = new_agent(limits());
-    let before = agent.refusals();
-    assert_eq!(
-        text(
-            &mut agent,
-            &realm,
-            "(function () { try { eval('({ async m() {} })'); return 'parsed'; }\n\
-               catch (e) { return e.name + ': ' + e.message; } })()"
-        ),
-        "SyntaxError: async method is not supported before slice 10 (1:4)"
-    );
-    assert_eq!(agent.refusals(), before + 1);
-}

@@ -42,7 +42,7 @@ What exists, measured on 2026-11-23:
   scenarios. All 58 pass on ESS's interpreter. The gate runs them against the engine too, and
   14 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
-  pinned by checksum, both specifications checked, and 65 planted defects that the gate must
+  pinned by checksum, both specifications checked, and 66 planted defects that the gate must
   refuse. Its test steps have a budget of 120 seconds and a test is ended at 60.
 - The test262 runner, `swell-test262`. It reads all 53,801 cases, excludes 8,982 by recorded
   decision and runs the rest in both modes under budgets. It counts them per directory, per

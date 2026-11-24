@@ -12,6 +12,21 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- `async` methods of object literals run, a story of the tenth slice: `{ async m() {} }`,
+  with a computed name too. A call returns a promise and the body awaits as the body of an
+  `async` function does; the method has no `prototype` and cannot be constructed. An
+  `async *` method is refused with a `SyntaxError` that names the tenth slice, and `super`
+  in an `async` method is refused as in a plain method.
+- Slice 5, regular expressions, is delivered: all 2,724 of its test262 cases pass in all
+  5,441 runs. At its close 18 cases that need `Date`, `Math`, `parseInt`, the operator
+  `**`, `class` or `Map` move to slices 4, 8 and 9, each with its evidence, and 18 cases of
+  the pattern grammar of Annex B.1.2 count in slice 5 instead of slice 18.
+- The engine calls the host's rejection tracker, a story of the tenth slice:
+  `host_promise_rejection_tracker` with `Reject` when a promise is rejected and has no
+  handler, and with `Handle` when a handler is added to such a promise later. A host reads
+  the state of a promise with its result, and whether it is handled, without running code,
+  calling a hook or spending a step, and marks a promise as handled; a promise it marked
+  causes no call of the tracker.
 - `async` functions run, the third story of the tenth slice: declarations, expressions and
   arrow functions. A call makes the function's promise and runs the body to its first
   `await`; an `await` suspends the activation and a promise job resumes it at a checkpoint.
@@ -19,9 +34,8 @@ Every number below comes from the gate, `task check`, on the released commit.
   is charged to the memory budget while it waits and credited when its promise settles or
   it is collected. An `await` in a loop that never ends ends the checkpoint at the step
   budget; a termination in a resumed activation leaves its promise pending and the jobs
-  behind it queued. `%AsyncFunction.prototype%` exists. The `async` method of an object
-  literal, `async function*` and `for await` are still refused, each with a `SyntaxError`
-  that names the tenth slice.
+  behind it queued. `%AsyncFunction.prototype%` exists. `async function*` and `for await`
+  are still refused, each with a `SyntaxError` that names the tenth slice.
 - `Promise`, the second story of the tenth slice: the constructor with its resolving
   functions, `Promise.prototype.then` and `catch`, `Promise.resolve`, `Promise.reject` and
   the getter of `Promise[Symbol.species]`. A reaction and the job of a thenable are entries
@@ -47,8 +61,7 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The parser reads `async` function declarations, expressions and arrow functions with
   their early errors, and `await` where the grammar's [Await] is set. A refusal that names
   a later slice comes after the grammar errors and early errors of the source, which now
-  come first. `async function*`, `for await` and the `async` method of an object literal
-  keep refusals of their own.
+  come first. `async function*` and `for await` keep refusals of their own.
 - The microtask queue of the agent and its checkpoint, the first story of the tenth slice. A
   host queues a microtask with the realm it runs in; a checkpoint runs every entry in the
   order it was queued, under the step budget of one entry, and spends one step for each
@@ -75,8 +88,15 @@ Every number below comes from the gate, `task check`, on the released commit.
   and `HOST-200` have a test.
 - `HOST-194` and `HOST-195` have a test. No name of the host interface changes with
   `async` functions.
+- New: the enum `PromiseState` with its variants `PromiseState::Pending`,
+  `PromiseState::Fulfilled` and `PromiseState::Rejected`, the two settled ones with the
+  result as a new root; `Agent::promise_state`, `Agent::promise_is_handled` and
+  `Agent::mark_promise_as_handled`; and of the contexts `promise_state`,
+  `promise_is_handled` and `mark_promise_as_handled`. A root that holds no promise
+  answers `WrongKind`.
+- `HOST-46`, `HOST-100`, `HOST-101` and `HOST-121` have a test.
 
-## [0.8.0] - 2026-11-23
+## [0.8.0] - 2026-11-24
 
 Generator functions run, and a regular expression takes the flag `i`, Unicode property escapes
 and group names outside ASCII: four of the six stories of the seventh delivery slice and
@@ -132,6 +152,12 @@ cases pass (18,155 in 0.7.0).
 - The full test262 run can be made in parts, each a pool job, and counted from their files to
   the lines the whole run prints: `task test262-part TEST262_PART=<k>/<n>` and
   `TEST262_FROM_PARTS` of `task test262`, `test262-expected` and `slow-test262`.
+- The gate's test steps cost less on few cores: the tests with a collection at every safe
+  point are built in a profile of their own at opt-level 1, and the release build of the
+  test262 runner is made before the clock. The gate refuses a run in which a test step
+  builds, and `check-runner` bounds the CPU seconds of the test steps on a machine whose
+  core count has an entry in its table. The budget of 120 seconds and the steps it is
+  counted over are unchanged. 66 planted defects, from 65.
 
 ### Host interface
 

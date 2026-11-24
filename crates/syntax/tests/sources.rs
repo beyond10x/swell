@@ -577,6 +577,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "async_function_expression" => ("x = ", "async function (){ return ", "0", "; }", ";"),
         "async_arrow" => ("x = ", "async x => ", "0", "", ";"),
         "await" => ("async function f(){ ", "await ", "0;", "", " }"),
+        "async_method" => ("x = ", "{async m(){ return ", "0", "; }}", ";"),
         _ => return None,
     };
     let mut source = units(before);
@@ -587,7 +588,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 57] = [
+const NESTING_KINDS: [&str; 58] = [
     "array",
     "paren",
     "block",
@@ -645,6 +646,7 @@ const NESTING_KINDS: [&str; 57] = [
     "async_function_expression",
     "async_arrow",
     "await",
+    "async_method",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict

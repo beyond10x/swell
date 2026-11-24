@@ -2,6 +2,7 @@
 mod array_patterns;
 mod arrow_functions;
 mod async_functions;
+mod async_methods;
 mod block_functions;
 mod budgets;
 mod builtins_array;
@@ -60,6 +61,7 @@ mod names;
 mod object_patterns;
 mod objects;
 mod parameters;
+mod promise_reads;
 mod promises;
 mod property_index;
 mod realms;

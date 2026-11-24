@@ -52,7 +52,10 @@ deciding session's, from a checkout of the repository:
    `cargo metadata --offline --format-version 1` in `conformance/ess`. Only the version
    lines of the six packages of this repository change there.
 2. **Changelog.** In `CHANGELOG.md`, rename `## [Unreleased]` to `## [<version>] - <date>`,
-   put an empty `## [Unreleased]` above it, and set the two link lines at the end. Every number
+   put an empty `## [Unreleased]` above it, and set the two link lines at the end. `<date>`
+   is the day the tag is made (step 6); when the tag comes on a later day than this commit,
+   a commit before the tag sets the heading and the link line of the notes file to that day.
+   Every number
    in the section is copied from the gate's output on this commit (step 3). A number that
    cannot be copied from that output is not written.
    The section keeps its `### Host interface` heading, with `- None.` when the host interface
