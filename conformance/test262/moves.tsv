@@ -503,7 +503,7 @@ test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-97.js	3	4	part	Math.ac
 test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-98.js	3	4	part	Math.asin
 test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-99.js	3	4	part	Math.atan
 test/built-ins/Object/getOwnPropertyDescriptors/primitive-numbers.js	3	4	part	Math.PI
-test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-1.js	3	5	part	RegExp
+test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-1.js	3	4	part	parseInt
 test/built-ins/Object/getOwnPropertySymbols/length.js	3	6	part	Object.getOwnPropertySymbols
 test/built-ins/Object/getOwnPropertySymbols/name.js	3	6	part	Object.getOwnPropertySymbols
 test/built-ins/Object/getPrototypeOf/15.2.3.2-2-10.js	3	5	part	RegExp
@@ -586,7 +586,14 @@ test/built-ins/Object/seal/seal-weakset.js	3	9	part	WeakSet
 test/built-ins/Object/seal/throws-when-false.js	3	9	part	Proxy
 test/built-ins/Object/values/order-after-define-property.js	3	9	part	Proxy
 test/built-ins/Object/values/primitive-numbers.js	3	4	part	Math.PI
+test/built-ins/RegExp/match-indices/indices-array-non-unicode-match.js	5	9	part	Map
+test/built-ins/RegExp/match-indices/indices-array-unicode-match.js	5	9	part	Map
+test/built-ins/RegExp/named-groups/groups-object-subclass-sans.js	5	8	part	class
+test/built-ins/RegExp/named-groups/groups-object-subclass.js	5	8	part	class
+test/built-ins/RegExp/prototype/Symbol.replace/coerce-lastindex.js	5	4	part	Math.pow
+test/built-ins/RegExp/prototype/Symbol.split/species-ctor-species-non-ctor.js	5	4	part	Date
 test/built-ins/RegExp/prototype/dotAll/this-val-non-obj.js	6	12	part	4n
+test/built-ins/RegExp/prototype/exec/S15.10.6.2_A1_T12.js	5	4	part	Math.PI
 test/built-ins/RegExp/prototype/flags/this-val-non-obj.js	6	12	part	4n
 test/built-ins/RegExp/prototype/global/this-val-non-obj.js	6	12	part	4n
 test/built-ins/RegExp/prototype/hasIndices/this-val-non-obj.js	6	12	part	4n
@@ -629,7 +636,11 @@ test/built-ins/String/prototype/normalize/this-is-undefined-throws.js	3	5	part	S
 test/built-ins/String/prototype/replace/cstm-replace-on-bigint-primitive.js	6	12	part	BigInt
 test/built-ins/String/prototype/replaceAll/cstm-replaceall-on-bigint-primitive.js	6	12	part	BigInt
 test/built-ins/String/prototype/search/cstm-search-on-bigint-primitive.js	6	12	part	BigInt
+test/built-ins/String/prototype/split/call-split-1-math-pow-2-32-1-instance-is-number.js	5	4	part	Math.pow
 test/built-ins/String/prototype/split/cstm-split-on-bigint-primitive.js	6	12	part	BigInt
+test/built-ins/String/prototype/split/separator-number-limit-math-pow-2-32-1-instance-is-number.js	5	4	part	Math.pow
+test/built-ins/String/prototype/split/separator-undef-limit-custom.js	5	4	part	**
+test/built-ins/String/prototype/split/separator-undef-limit-zero.js	5	4	part	**
 test/built-ins/String/prototype/startsWith/return-abrupt-from-searchstring-regexp-test.js	6	5	part	/./
 test/built-ins/String/prototype/startsWith/searchstring-is-regexp-throws.js	3	5	part	/./
 test/built-ins/String/prototype/substring/S15.5.4.15_A3_T9.js	3	4	part	Math.PI
@@ -667,12 +678,12 @@ test/built-ins/Symbol/species/builtin-getter-name.js	6	10	part	Promise
 test/built-ins/Symbol/species/subclassing.js	6	8	part	class
 test/built-ins/ThrowTypeError/unique-per-realm-non-simple.js	3	6	part	function nonSimple(a = 0)
 test/built-ins/global/S10.2.3_A1.1_T2.js	3	4	part	parseInt
-test/built-ins/global/S10.2.3_A1.1_T3.js	3	5	part	RegExp
+test/built-ins/global/S10.2.3_A1.1_T3.js	3	4	part	Date
 test/built-ins/global/S10.2.3_A1.2_T2.js	3	4	part	parseInt
-test/built-ins/global/S10.2.3_A1.2_T3.js	3	5	part	RegExp
+test/built-ins/global/S10.2.3_A1.2_T3.js	3	4	part	Date
 test/built-ins/global/S10.2.3_A1.3_T2.js	3	4	part	parseInt
-test/built-ins/global/S10.2.3_A1.3_T3.js	3	5	part	RegExp
-test/built-ins/global/global-object.js	3	5	part	RegExp
+test/built-ins/global/S10.2.3_A1.3_T3.js	3	4	part	Date
+test/built-ins/global/global-object.js	3	4	part	Date
 test/built-ins/isFinite/S15.1.2.5_A2.7.js	3	6	part	=>
 test/built-ins/isFinite/return-true-for-valid-finite-numbers.js	3	4	part	Math.pow
 test/built-ins/isNaN/S15.1.2.4_A2.7.js	3	6	part	=>
@@ -1332,11 +1343,11 @@ test/language/expressions/property-accessors/S11.2.1_A4_T4.js	2	3	part	.reverse
 test/language/expressions/property-accessors/S11.2.1_A4_T5.js	2	5	part	.split
 test/language/expressions/property-accessors/S11.2.1_A4_T8.js	2	4	part	Math.E
 test/language/expressions/property-accessors/S11.2.1_A4_T9.js	2	4	part	Date
-test/language/expressions/typeof/built-in-exotic-objects-no-call.js	2	5	part	RegExp
+test/language/expressions/typeof/built-in-exotic-objects-no-call.js	2	4	part	Date
 test/language/expressions/typeof/built-in-functions.js	2	4	part	parseInt
 test/language/expressions/typeof/built-in-ordinary-objects-no-call.js	2	9	part	Reflect
 test/language/expressions/typeof/get-value.js	2	3	part	Object.defineProperties
-test/language/expressions/typeof/native-call.js	2	5	part	RegExp
+test/language/expressions/typeof/native-call.js	2	4	part	Date
 test/language/expressions/typeof/null.js	2	5	part	RegExp
 test/language/expressions/typeof/number.js	2	4	part	Math.PI
 test/language/expressions/typeof/string.js	2	4	part	Date
