@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:identifiers-and-group-names-outside-ascii
 kind: story
-status: active
+status: implemented
 title: Identifiers and regular expression group names outside ASCII, by ID_Start and ID_Continue
 summary: 105 failing cases (210 runs); the three refusals of the lexer and the refusal of group names go; HOST-191's group-name part.
 relations:
@@ -46,10 +46,11 @@ scope:
   path: crates/syntax/tests/sources/valid/identifiers-outside-ascii.js
 - confidence: cited
   path: crates/syntax/tests/sources/valid/regexp-literals.js
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T03:24:22Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T03:24:23Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:08Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 ## Context
 

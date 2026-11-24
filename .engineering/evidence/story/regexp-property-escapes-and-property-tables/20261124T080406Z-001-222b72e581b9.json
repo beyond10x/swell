@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-24T08:04:06Z",
+  "actor": "human:operator",
+  "artifact": "story:regexp-property-escapes-and-property-tables",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "the lane slow on the forge, commit 0c18271 (release 0.8.0)",
+    "reference": "https://github.com/beyond10x/swell/actions/runs/45346206881"
+  }
+}

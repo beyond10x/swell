@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:regexp-case-insensitive-matching-and-modifiers
 kind: story
-status: active
+status: implemented
 title: 'Case-insensitive matching and the modifier i: Canonicalize with simple case folding under u and v and the uppercase mapping under neither'
 summary: 88 failing cases (176 runs); the table of CaseFolding.txt; classes, property escapes and backreferences under i; the refusal of i goes; HOST-191's i part.
 relations:
@@ -43,10 +43,11 @@ scope:
   path: crates/unicode/src/tables/mod.rs
 - confidence: cited
   path: crates/unicode/tests/case.rs
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T03:24:24Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T03:24:24Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:08Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 ## Context
 
