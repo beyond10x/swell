@@ -36,16 +36,27 @@
 //! The iterator results are made in the current realm: AsyncGeneratorCompleteStep's realm of the
 //! `yield` is the realm of the context that resumed the generator, which is always the function
 //! of an `await` made by the generator's own code (every `yield` awaits its operand first).
+//!
+//! `%AsyncGeneratorFunction%` (`#sec-asyncgeneratorfunction-constructor`,
+//! `#sec-properties-of-asyncgeneratorfunction`) with its `prototype`
+//! (`#sec-asyncgeneratorfunction-prototype`), and the `constructor` of
+//! `%AsyncGeneratorFunction.prototype%` (`#sec-asyncgeneratorfunction-prototype-constructor`),
+//! written by `story:async-generator-function-constructor`: called or constructed,
+//! `AsyncGeneratorFunction ( ...paramArgs, bodyArg )` (`#sec-asyncgeneratorfunction`) is
+//! CreateDynamicFunction of kind `async-generator` (`dynamic_code.rs`). It is no property of the
+//! global object: a script reaches it as the `constructor` of the [[Prototype]] of an async
+//! generator function.
 
 use swell_compiler::bytecode::{TAG_NORMAL, TAG_RETURN, TAG_THROW};
 
+use crate::dynamic_code::DynamicFunctionKind;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{ErrorKind, Host};
 use crate::interp::suspend::{Resumption, SuspendedFrame};
 use crate::object::ObjectKind;
 use crate::object::async_generator::{AsyncGenerator, AsyncGeneratorState, Request, request_bytes};
-use crate::object::builtin_function::{BuiltinId, Slots};
+use crate::object::builtin_function::{Behaviour, BuiltinId, Slots};
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::Property;
 use crate::realm::intrinsics::{Intrinsic, Making};
@@ -126,6 +137,69 @@ impl<H: Host> Agent<H> {
             function_prototype,
             prototype,
         })
+    }
+
+    /// `%AsyncGeneratorFunction%`, a constructor whose [[Prototype]] is `function`, `%Function%`,
+    /// with "length" 1, "name" "AsyncGeneratorFunction" and `prototype` holding
+    /// `function_prototype`, `%AsyncGeneratorFunction.prototype%`, { [[Writable]]: false,
+    /// [[Enumerable]]: false, [[Configurable]]: false }; and the `constructor` of
+    /// `%AsyncGeneratorFunction.prototype%`, holding it, { [[Writable]]: false, [[Enumerable]]:
+    /// false, [[Configurable]]: true }.
+    pub(crate) fn create_async_generator_function_constructor(
+        &mut self,
+        making: Making,
+        function: ObjectRef,
+        function_prototype: ObjectRef,
+    ) -> Completion<ObjectRef> {
+        let constructor = self.create_builtin_function(
+            Behaviour::Builtin(BuiltinId::AsyncGeneratorFunction),
+            1,
+            "AsyncGeneratorFunction",
+            making.realm,
+            Some(function),
+            true,
+        )?;
+        let prototype_key = self.name_key("prototype")?;
+        self.add_property(
+            constructor,
+            prototype_key,
+            Property::data(Value::Object(function_prototype), false, false, false),
+        )?;
+        let constructor_key = self.name_key("constructor")?;
+        self.add_property(
+            function_prototype,
+            constructor_key,
+            Property::data(Value::Object(constructor), false, false, true),
+        )?;
+        Ok(constructor)
+    }
+
+    /// `AsyncGeneratorFunction ( ...paramArgs, bodyArg )` (`#sec-asyncgeneratorfunction`),
+    /// called or constructed: the active function `function`, `bodyArg` the last argument or the
+    /// empty String, then CreateDynamicFunction(function, NewTarget, async-generator, paramArgs,
+    /// bodyArg).
+    pub(crate) fn async_generator_function(
+        &mut self,
+        function: ObjectRef,
+        args: &[Value],
+        new_target: Option<ObjectRef>,
+    ) -> Completion<Value> {
+        // 1. Let activeFunc be the active function object. 2. If bodyArg is not present, set
+        // bodyArg to the empty String.
+        let (params, body) = match args.split_last() {
+            Some((body, params)) => (params, Some(*body)),
+            None => (args, None),
+        };
+        // 3. Return ? CreateDynamicFunction(activeFunc, NewTarget, async-generator, paramArgs,
+        // bodyArg).
+        let new_target = new_target.unwrap_or(function);
+        let made = self.create_dynamic_function(
+            new_target,
+            DynamicFunctionKind::AsyncGenerator,
+            params,
+            body,
+        )?;
+        Ok(Value::Object(made))
     }
 
     /// The steps of the builtins of this module, called with `this` and the first argument.

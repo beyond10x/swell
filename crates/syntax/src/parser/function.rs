@@ -288,9 +288,10 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// The body text of CreateDynamicFunction (step 17) alone, the whole source as
-    /// `FunctionBody[~Yield, ~Await]`, `GeneratorBody` for kind generator or `AsyncFunctionBody`
-    /// for kind async, whose caller sets [Yield] and [Await] first: the statements of a function
-    /// body to the end of the input, where `return` may stand and a `}` may not.
+    /// `FunctionBody[~Yield, ~Await]`, `GeneratorBody` for kind generator, `AsyncFunctionBody`
+    /// for kind async or `AsyncGeneratorBody` for kind async-generator, whose caller sets
+    /// [Yield] and [Await] first: the statements of a function body to the end of the input,
+    /// where `return` may stand and a `}` may not.
     pub(super) fn function_body_text(&mut self) -> R<()> {
         self.enter()?;
         self.advance()?;
@@ -306,11 +307,12 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// The source text of CreateDynamicFunction (step 19) as a `FunctionExpression`, as a
     /// `GeneratorExpression` when it starts `function*` (kind generator: the `*` is read as a
-    /// generator's), or as an `AsyncFunctionExpression` when it starts `async function` (kind
-    /// async: the `async` is read as an `async` function's), and nothing after it: the function,
-    /// its own name taken off (the name "anonymous" is given, not bound), then an expression
-    /// statement holding it, made without a depth check, so that the function is admitted
-    /// exactly when the same expression standing alone would be.
+    /// generator's), as an `AsyncFunctionExpression` when it starts `async function` (kind
+    /// async: the `async` is read as an `async` function's), or as an `AsyncGeneratorExpression`
+    /// when it starts `async function*` (kind async-generator: both), and nothing after it: the
+    /// function, its own name taken off (the name "anonymous" is given, not bound), then an
+    /// expression statement holding it, made without a depth check, so that the function is
+    /// admitted exactly when the same expression standing alone would be.
     pub(super) fn dynamic_function_text(&mut self) -> R<StmtId> {
         self.enter()?;
         self.advance()?;

@@ -296,7 +296,7 @@ fn async_functions_parse_through_every_entry() {
 /// parses through each entry, the dynamic ones too (`story:yield-star-in-async-generators`
 /// lifted the refusal of slice 10 that held it back to the end of the parse); an early error or
 /// a grammar error anywhere ends the source on that error alone, and so does a refusal that
-/// stops the parse at its token (an `async *` method of an object literal). An async generator
+/// stops the parse at its token (`super` in a method of an object literal). An async generator
 /// without it parses, and so does a `yield*` in a generator, also inside an async generator.
 #[test]
 fn yield_star_in_an_async_generator_parses_through_every_entry() {
@@ -332,8 +332,8 @@ fn yield_star_in_an_async_generator_parses_through_every_entry() {
             vec!["unexpected token ;"],
         ),
         (
-            "async function* f() { yield* a; }\nx = { async *m() {} };",
-            vec!["async generator method is not supported before slice 10"],
+            "async function* f() { yield* a; }\nx = { m() { super.x; } };",
+            vec!["super is not supported before slice 8"],
         ),
     ] {
         assert_eq!(messages(&parse(text).err().unwrap()), expected, "{text:?}");
@@ -665,6 +665,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "async_method" => ("x = ", "{async m(){ return ", "0", "; }}", ";"),
         "async_generator_expression" => ("x = ", "async function* (){ return ", "0", "; }", ";"),
         "for_await" => ("async function f(){ ", "for await (x of y) ", ";", "", " }"),
+        "async_generator_method" => ("x = ", "{async *m(){ return ", "0", "; }}", ";"),
         _ => return None,
     };
     let mut source = units(before);
@@ -675,7 +676,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 60] = [
+const NESTING_KINDS: [&str; 61] = [
     "array",
     "paren",
     "block",
@@ -736,6 +737,7 @@ const NESTING_KINDS: [&str; 60] = [
     "async_method",
     "async_generator_expression",
     "for_await",
+    "async_generator_method",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict
