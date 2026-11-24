@@ -2956,18 +2956,18 @@ The rule:
 | 5 | `regexp` | 2,724 | 5,441 |
 | 6 | `bindings-and-iteration` | 3,898 | 7,351 |
 | 7 | `generators` | 1,472 | 2,801 |
-| 8 | `classes` | 9,186 | 18,223 |
-| 9 | `collections-proxy-reflect` | 1,781 | 3,533 |
-| 10 | `promises-and-async` | 3,879 | 7,499 |
+| 8 | `classes` | 9,302 | 18,455 |
+| 9 | `collections-proxy-reflect` | 1,785 | 3,541 |
+| 10 | `promises-and-async` | 3,759 | 7,258 |
 | 11 | `modules` | 1,281 | 1,833 |
-| 12 | `bigint` | 338 | 676 |
-| 13 | `binary-data` | 3,060 | 6,076 |
+| 12 | `bigint` | 358 | 714 |
+| 13 | `binary-data` | 3,061 | 6,078 |
 | 14 | `shared-memory` | 598 | 1,192 |
 | 15 | `iterator-helpers-and-resources` | 1,094 | 2,170 |
 | 16 | `weak-references` | 82 | 164 |
 | 17 | `tail-calls` | 35 | 35 |
-| 18 | `annex-b` | 1,135 | 1,452 |
-| 19 | `staging` | 1,455 | 2,730 |
+| 18 | `annex-b` | 1,134 | 1,451 |
+| 19 | `staging` | 1,435 | 2,692 |
 | | slices 1 to 19 | 44,931 | 85,794 |
 | 20 | `temporal` (excluded at first) | 4,617 | 9,234 |
 | 21 | `intl402` (excluded at first) | 1,662 | 3,324 |
@@ -3030,6 +3030,19 @@ paragraph ("A case that comes into a slice from one delivered later" above). Mea
 code of the slice, every run passed. Every moved case goes to slice 8 and every case that comes
 in leaves slice 18 or 19, so slices 1 to 19 still hold 44,931 cases and 85,794 runs and the 22
 lines still sum to 53,801 and 103,360.
+
+Slice 10 had 3,879 cases and 7,499 runs by its rules (its `dir`, `feature` and `flag` lines, the
+lines of the closes of slices 2, 3 and 6 that gave it cases, and the order of delivery). 3,759
+cases and 7,258 runs are what slice 10 counts after its close: 141 cases (280 runs) that need a
+later slice move by the lines of the paragraph "Slice 10's cases that need a later slice", 116 to
+slice 8, 4 to 9, 20 to 12 and 1 to 13, 138 of them by new lines of `moves.tsv` and 3 by lines
+that change their target; and 21 cases (39 runs) come into it, 1 from slice 18 and 20 from slice
+19, by the lines of the same paragraph ("A case that comes into a slice from one delivered later"
+above). Measured on 2026-11-24 with the same check (`awk -f slices.awk` over this block and the
+inventory's `meta.tsv`, counting slice `10`): `10 3759 7258`, the slice line of `slot task
+test262` on the code of the slice, every run passed. Every moved case goes to slice 8, 9, 12 or
+13 and every case that comes in leaves slice 18 or 19, so slices 1 to 19 still hold 44,931 cases
+and 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
 
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
@@ -3541,6 +3554,86 @@ functions, `Promise` not defined, a counted refusal of the flag `i` or of an ide
 ASCII), and 1, `language/expressions/await/await-in-generator`, reads `await` as an identifier,
 which the grammar of async functions of slice 10 decides.
 
+**Slice 10's cases that need a later slice.** Measured at the close of slice 10 (2026-11-24,
+`story:slice-10-conformance-close`), with the run lines of the runner on the code of the slice
+(`slot task test262`): 141 of the 3,879 cases of slice 10 fail, each in every one of its runs (280
+runs), and none on a part of slice 10: the first failure of each run is the refusal `class is not
+supported before slice 8` (188 runs), `super is not supported before slice 8` (40), `new.target is
+not supported before slice 8` (12) or `BigInt literal is not supported before slice 12` (30, 18 of
+them in the harness file `temporalHelpers.js`), or a `ReferenceError` for `Proxy` (6), `Map` (2)
+or `ArrayBuffer` (2). Each was read: with its later part it needs nothing of slice 10 that its
+sibling cases without that part do not pass with (async functions, methods and generators,
+`for await`, the patterns of their parameters, `Promise` and its statics, `Array.fromAsync`). A
+case that needs two later slices moves to the one delivered last: the 4
+`resolve-throws-iterator-return-is-not-callable` cases of `Promise/all`, `allSettled`, `any` and
+`race` fail first on `class` and list `0n` among their values, and go to slice 12. All 141 move,
+each a line of `conformance/test262/moves.tsv` with kind `part` and a token of
+`conformance/test262/later-parts.tsv` as its evidence, held by `test262-moves-check`: 138 lines
+are new, with `from` 10; 3 are lines of cases moved to slice 10 earlier (2 with `from` 2, 1 with
+`from` 6), which keep their `from` and get the new `to` and evidence. The later parts gain the
+tokens `1n` and `2n` (slice 12). The block gains 138 lines `dir <file> <slice>`, one for a single
+file each, since every directory that holds one of them holds cases of slice 10 that stay, and 3
+lines change their slice from 10 to 8 or 9. The groups, by target slice (lines of the list; in
+brackets the lines with `from` 10):
+
+- to slice 8, 116 (114): `class` 90 (the 20 `cls-decl-async-gen-meth-*` and
+  `cls-expr-async-gen-meth-*` cases of `language/arguments-object/`, an async generator method of
+  a class called with a trailing comma; the 40 `*-init-fn-name-class` cases of
+  `statements/for-await-of/` 24, `expressions/async-generator/dstr/` 8,
+  `statements/async-generator/dstr/` 4 and `expressions/object/dstr/` 4; the 8 cases of a class
+  and an async function or async generator of one name in `block-scope/syntax/redeclaration/` and
+  `statements/switch/syntax/redeclaration/`, 4 each; the 8 `async-method-class-*` and
+  `async-generator-method-class-*` cases of `Function/prototype/toString/`; 7 of
+  `Promise/prototype/finally/` and the 4 `resolve-throws-iterator-return-null-or-undefined` cases
+  of `Promise/all`, `allSettled`, `any` and `race`, a subclass of `Promise` or a class as the
+  constructor; `Array/fromAsync/this-constructor-with-bad-length-setter`,
+  `AsyncGeneratorPrototype/throw/throw-suspendedYield-try-finally-return` and
+  `expressions/optional-chaining/member-expression`, `from` 2), `super` 20 (the 18
+  `early-errors-*-contains-super-*` cases of `expressions/async-arrow-function/`,
+  `expressions/async-function/`, `expressions/async-generator/` and `statements/async-function/`,
+  4 each, and of `expressions/object/method-definition/` 2, one of them `from` 2; and
+  `expressions/object/method-definition/async-super-call-body` and `-param`), `new.target` 6 (the
+  `*-returns-async-arrow-returns-newtarget` and `*-returns-async-function-returns-newtarget` cases
+  of `expressions/async-function/`, `expressions/object/method-definition/` and
+  `statements/async-function/`, 2 each);
+- to slice 9, 4 (3): `Proxy` 3 (`AggregateError/newtarget-proto-fallback`, with
+  `Reflect.construct`; `Array/fromAsync/this-constructor-operations`;
+  `Promise/prototype/finally/this-value-proxy`), `Map` 1 (`Symbol/species/builtin-getter-name`,
+  `from` 6, which reads the getters of `Map` and `Set`);
+- to slice 12, 20 (20): `2n` 9 (the cases of `Array/fromAsync/` that include
+  `temporalHelpers.js`, which holds BigInt literals, `class` and `super`, and whose
+  `propertyBagObserver` makes a `Proxy`), `0n` 4 (the `resolve-throws-iterator-return-is-not-callable` cases above), `1n` 4
+  (`Array/fromAsync/asyncitems-bigint`, `asyncitems-arraylike-length-accessor-throws`,
+  `asyncitems-asynciterator-not-callable` and `asyncitems-iterator-not-callable`), `42n` 2
+  (`Array/fromAsync/thisarg-primitive-sloppy` and `-strict`), `4n` 1
+  (`AsyncIteratorPrototype/Symbol.asyncIterator/return-val`);
+- to slice 13, 1 (1): `ArrayBuffer` (`Array/fromAsync/asyncitems-arraybuffer`).
+
+The counts sum to the 141 lines this change adds to or changes in the list, 138 of them with
+`from` 10.
+
+21 cases (39 runs) come into slice 10, by the rule "A case that comes into a slice from one
+delivered later" above. Each is counted by the block in a slice delivered after 10, failed at the
+start of the slice (`a350de3`) on a part of slice 10 (the refusal of async functions, a counted
+refusal of the async functions or `for await` it compiles with `eval` or `Function`, `Promise` not
+defined, or `AggregateError` or `Symbol.asyncIterator` missing), passes in every run on the code
+of the slice, has no `feature` or `flag` line of a slice delivered after 10, and neither it nor a
+harness file it includes uses a part of a later slice. From slice 18, 1:
+`test/annexB/language/eval-code/direct/var-env-lower-lex-catch-non-strict.js`, which declares
+async functions and async generators by direct `eval` in a `catch` block whose parameter has the
+same name (B.3.4, applied since slice 2). From slice 19, 20, all under `test/staging/sm/`:
+`async-functions/` 9, `Promise/` 5, `AsyncGenerators/` 3, and 1 each of `Error/`
+(`AggregateError`), `Symbol/` (`well-known`) and `extensions/` (`expression-closure-syntax`). Each
+gets a line `dir <file> 10` (no directory has every case come in), listed with the slice it leaves
+in `docs/plan/slice-10/close-into-10.tsv`; each passes in every one of its runs (the close's check
+(4) over that file), and none has a line of `moves.tsv`. 66 other cases of slices delivered after
+10 failed at the start of the slice and pass in every run on its code, and stay in their slice
+with no line: 65 have a `feature` line of a later slice (`explicit-resource-management` 38,
+`Reflect.construct` 18, `dynamic-import` 6, `class` 2, `__proto__` 1), and 1,
+`staging/sm/async-functions/inner-caller`, reads the `caller` property of a function (`feature
+caller 18`): it reaches the accessor of `%Function.prototype%` that throws, so its assertions never
+run.
+
 ```swell-slices
 order delivery 1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21
 dir test/harness/ 1
@@ -4045,7 +4138,7 @@ dir test/language/expressions/object/getter-super-prop.js 8
 dir test/language/expressions/object/identifier-shorthand-invalid-computed-name.js 6
 dir test/language/expressions/object/method-definition/early-errors-object-async-method-duplicate-parameters.js 10
 dir test/language/expressions/object/method-definition/early-errors-object-method-NSPL-with-USD.js 6
-dir test/language/expressions/object/method-definition/early-errors-object-method-formals-contains-super-call.js 10
+dir test/language/expressions/object/method-definition/early-errors-object-method-formals-contains-super-call.js 8
 dir test/language/expressions/object/method-definition/forbidden-ext/b2/ 6
 dir test/language/expressions/object/method-definition/meth-dflt-params-trailing-comma.js 6
 dir test/language/expressions/object/method-definition/meth-rest-params-trailing-comma-early-error.js 6
@@ -4085,7 +4178,7 @@ dir test/language/expressions/optional-chaining/iteration-statement-for-in.js 6
 dir test/language/expressions/optional-chaining/iteration-statement-for-of-type-error.js 6
 dir test/language/expressions/optional-chaining/iteration-statement-for.js 6
 dir test/language/expressions/optional-chaining/iteration-statement-while.js 6
-dir test/language/expressions/optional-chaining/member-expression.js 10
+dir test/language/expressions/optional-chaining/member-expression.js 8
 dir test/language/expressions/optional-chaining/new-target-optional-call.js 9
 dir test/language/expressions/optional-chaining/optional-call-preserves-this.js 6
 dir test/language/expressions/optional-chaining/optional-chain-expression-optional-expression.js 6
@@ -5105,7 +5198,7 @@ dir test/built-ins/String/prototype/replaceAll/cstm-replaceall-on-bigint-primiti
 dir test/built-ins/String/prototype/search/cstm-search-on-bigint-primitive.js 12
 dir test/built-ins/String/prototype/split/cstm-split-on-bigint-primitive.js 12
 dir test/built-ins/Symbol/prototype/description/this-val-non-symbol.js 9
-dir test/built-ins/Symbol/species/builtin-getter-name.js 10
+dir test/built-ins/Symbol/species/builtin-getter-name.js 9
 dir test/built-ins/Symbol/species/subclassing.js 8
 dir test/language/computed-property-names/class/ 8
 dir test/language/computed-property-names/object/accessor/getter-super.js 8
@@ -5254,6 +5347,165 @@ dir test/staging/sm/generators/yield-star-iterator-close.js 7
 dir test/staging/sm/generators/yield-star-iterator-primitive.js 7
 dir test/staging/sm/lexical-environment/block-scoped-functions-annex-b-generators.js 7
 dir test/staging/sm/regress/regress-530879.js 7
+dir test/built-ins/AggregateError/newtarget-proto-fallback.js 9
+dir test/built-ins/Array/fromAsync/asyncitems-arraybuffer.js 13
+dir test/built-ins/Array/fromAsync/asyncitems-arraylike-length-accessor-throws.js 12
+dir test/built-ins/Array/fromAsync/asyncitems-arraylike-promise.js 12
+dir test/built-ins/Array/fromAsync/asyncitems-asynciterator-exists.js 12
+dir test/built-ins/Array/fromAsync/asyncitems-asynciterator-not-callable.js 12
+dir test/built-ins/Array/fromAsync/asyncitems-asynciterator-null.js 12
+dir test/built-ins/Array/fromAsync/asyncitems-asynciterator-sync.js 12
+dir test/built-ins/Array/fromAsync/asyncitems-bigint.js 12
+dir test/built-ins/Array/fromAsync/asyncitems-iterator-exists.js 12
+dir test/built-ins/Array/fromAsync/asyncitems-iterator-not-callable.js 12
+dir test/built-ins/Array/fromAsync/asyncitems-iterator-null.js 12
+dir test/built-ins/Array/fromAsync/asyncitems-iterator-promise.js 12
+dir test/built-ins/Array/fromAsync/asyncitems-operations.js 12
+dir test/built-ins/Array/fromAsync/mapfn-result-awaited-once-per-iteration.js 12
+dir test/built-ins/Array/fromAsync/this-constructor-operations.js 9
+dir test/built-ins/Array/fromAsync/this-constructor-with-bad-length-setter.js 8
+dir test/built-ins/Array/fromAsync/thisarg-primitive-sloppy.js 12
+dir test/built-ins/Array/fromAsync/thisarg-primitive-strict.js 12
+dir test/built-ins/AsyncGeneratorPrototype/throw/throw-suspendedYield-try-finally-return.js 8
+dir test/built-ins/AsyncIteratorPrototype/Symbol.asyncIterator/return-val.js 12
+dir test/built-ins/Function/prototype/toString/async-generator-method-class-expression-static.js 8
+dir test/built-ins/Function/prototype/toString/async-generator-method-class-expression.js 8
+dir test/built-ins/Function/prototype/toString/async-generator-method-class-statement-static.js 8
+dir test/built-ins/Function/prototype/toString/async-generator-method-class-statement.js 8
+dir test/built-ins/Function/prototype/toString/async-method-class-expression-static.js 8
+dir test/built-ins/Function/prototype/toString/async-method-class-expression.js 8
+dir test/built-ins/Function/prototype/toString/async-method-class-statement-static.js 8
+dir test/built-ins/Function/prototype/toString/async-method-class-statement.js 8
+dir test/built-ins/Promise/all/resolve-throws-iterator-return-is-not-callable.js 12
+dir test/built-ins/Promise/all/resolve-throws-iterator-return-null-or-undefined.js 8
+dir test/built-ins/Promise/allSettled/resolve-throws-iterator-return-is-not-callable.js 12
+dir test/built-ins/Promise/allSettled/resolve-throws-iterator-return-null-or-undefined.js 8
+dir test/built-ins/Promise/any/resolve-throws-iterator-return-is-not-callable.js 12
+dir test/built-ins/Promise/any/resolve-throws-iterator-return-null-or-undefined.js 8
+dir test/built-ins/Promise/prototype/finally/rejected-observable-then-calls-PromiseResolve.js 8
+dir test/built-ins/Promise/prototype/finally/resolved-observable-then-calls-PromiseResolve.js 8
+dir test/built-ins/Promise/prototype/finally/species-constructor.js 8
+dir test/built-ins/Promise/prototype/finally/subclass-reject-count.js 8
+dir test/built-ins/Promise/prototype/finally/subclass-resolve-count.js 8
+dir test/built-ins/Promise/prototype/finally/subclass-species-constructor-reject-count.js 8
+dir test/built-ins/Promise/prototype/finally/subclass-species-constructor-resolve-count.js 8
+dir test/built-ins/Promise/prototype/finally/this-value-proxy.js 9
+dir test/built-ins/Promise/race/resolve-throws-iterator-return-is-not-callable.js 12
+dir test/built-ins/Promise/race/resolve-throws-iterator-return-null-or-undefined.js 8
+dir test/language/arguments-object/cls-decl-async-gen-meth-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-decl-async-gen-meth-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-decl-async-gen-meth-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-decl-async-gen-meth-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-decl-async-gen-meth-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-decl-async-gen-meth-static-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-decl-async-gen-meth-static-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-decl-async-gen-meth-static-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-decl-async-gen-meth-static-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-decl-async-gen-meth-static-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-expr-async-gen-meth-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-expr-async-gen-meth-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-expr-async-gen-meth-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-expr-async-gen-meth-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-expr-async-gen-meth-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-expr-async-gen-meth-static-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-expr-async-gen-meth-static-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-expr-async-gen-meth-static-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-expr-async-gen-meth-static-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-expr-async-gen-meth-static-args-trailing-comma-undefined.js 8
+dir test/language/block-scope/syntax/redeclaration/async-function-name-redeclaration-attempt-with-class.js 8
+dir test/language/block-scope/syntax/redeclaration/async-generator-name-redeclaration-attempt-with-class.js 8
+dir test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-async-function.js 8
+dir test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-async-generator.js 8
+dir test/language/expressions/async-arrow-function/early-errors-arrow-body-contains-super-call.js 8
+dir test/language/expressions/async-arrow-function/early-errors-arrow-body-contains-super-property.js 8
+dir test/language/expressions/async-arrow-function/early-errors-arrow-formals-contains-super-call.js 8
+dir test/language/expressions/async-arrow-function/early-errors-arrow-formals-contains-super-property.js 8
+dir test/language/expressions/async-function/early-errors-expression-body-contains-super-call.js 8
+dir test/language/expressions/async-function/early-errors-expression-body-contains-super-property.js 8
+dir test/language/expressions/async-function/early-errors-expression-formals-contains-super-call.js 8
+dir test/language/expressions/async-function/early-errors-expression-formals-contains-super-property.js 8
+dir test/language/expressions/async-function/named-returns-async-arrow-returns-newtarget.js 8
+dir test/language/expressions/async-function/named-returns-async-function-returns-newtarget.js 8
+dir test/language/expressions/async-generator/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/async-generator/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/async-generator/dstr/dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/async-generator/dstr/named-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/async-generator/dstr/named-dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/async-generator/dstr/named-dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/async-generator/dstr/named-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/async-generator/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/async-generator/early-errors-expression-body-contains-super-call.js 8
+dir test/language/expressions/async-generator/early-errors-expression-body-contains-super-property.js 8
+dir test/language/expressions/async-generator/early-errors-expression-formals-contains-super-call.js 8
+dir test/language/expressions/async-generator/early-errors-expression-formals-contains-super-property.js 8
+dir test/language/expressions/object/dstr/async-gen-meth-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/async-gen-meth-dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/async-gen-meth-dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/async-gen-meth-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/object/method-definition/async-returns-async-arrow-returns-newtarget.js 8
+dir test/language/expressions/object/method-definition/async-returns-async-function-returns-newtarget.js 8
+dir test/language/expressions/object/method-definition/async-super-call-body.js 8
+dir test/language/expressions/object/method-definition/async-super-call-param.js 8
+dir test/language/expressions/object/method-definition/early-errors-object-method-body-contains-super-call.js 8
+dir test/language/statements/async-function/early-errors-declaration-body-contains-super-call.js 8
+dir test/language/statements/async-function/early-errors-declaration-body-contains-super-property.js 8
+dir test/language/statements/async-function/early-errors-declaration-formals-contains-super-call.js 8
+dir test/language/statements/async-function/early-errors-declaration-formals-contains-super-property.js 8
+dir test/language/statements/async-function/returns-async-arrow-returns-newtarget.js 8
+dir test/language/statements/async-function/returns-async-function-returns-newtarget.js 8
+dir test/language/statements/async-generator/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/async-generator/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/async-generator/dstr/dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/async-generator/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-const-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-const-async-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-const-async-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-const-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-let-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-let-async-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-let-async-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-let-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-var-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-var-async-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-var-async-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-func-dstr-var-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-const-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-const-async-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-const-async-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-const-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-let-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-let-async-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-let-async-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-let-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-var-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-var-async-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-var-async-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/for-await-of/async-gen-dstr-var-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/switch/syntax/redeclaration/async-function-name-redeclaration-attempt-with-class.js 8
+dir test/language/statements/switch/syntax/redeclaration/async-generator-name-redeclaration-attempt-with-class.js 8
+dir test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-async-function.js 8
+dir test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-async-generator.js 8
+dir test/annexB/language/eval-code/direct/var-env-lower-lex-catch-non-strict.js 10
+dir test/staging/sm/AsyncGenerators/async-generator-declaration-in-modules.js 10
+dir test/staging/sm/AsyncGenerators/for-await-bad-syntax.js 10
+dir test/staging/sm/AsyncGenerators/for-await-of-error.js 10
+dir test/staging/sm/Error/AggregateError.js 10
+dir test/staging/sm/Promise/bug-1287334.js 10
+dir test/staging/sm/Promise/bug-1289040.js 10
+dir test/staging/sm/Promise/for-of-iterator-uses-getv.js 10
+dir test/staging/sm/Promise/methods-non-enumerable.js 10
+dir test/staging/sm/Promise/promise-species.js 10
+dir test/staging/sm/Symbol/well-known.js 10
+dir test/staging/sm/async-functions/async-contains-unicode-escape.js 10
+dir test/staging/sm/async-functions/async-property-name-error.js 10
+dir test/staging/sm/async-functions/await-error.js 10
+dir test/staging/sm/async-functions/await-in-arrow-parameters.js 10
+dir test/staging/sm/async-functions/await-in-parameters-of-async-func.js 10
+dir test/staging/sm/async-functions/constructor.js 10
+dir test/staging/sm/async-functions/length.js 10
+dir test/staging/sm/async-functions/no-expression-closure.js 10
+dir test/staging/sm/async-functions/toString.js 10
+dir test/staging/sm/extensions/expression-closure-syntax.js 10
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
@@ -5727,18 +5979,18 @@ Its output on this document:
 05 2724 5441
 06 3898 7351
 07 1472 2801
-08 9186 18223
-09 1781 3533
-10 3879 7499
+08 9302 18455
+09 1785 3541
+10 3759 7258
 11 1281 1833
-12 338 676
-13 3060 6076
+12 358 714
+13 3061 6078
 14 598 1192
 15 1094 2170
 16 82 164
 17 35 35
-18 1135 1452
-19 1455 2730
+18 1134 1451
+19 1435 2692
 20 4617 9234
 21 1662 3324
 x-stage3 2591 5008

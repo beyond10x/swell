@@ -328,6 +328,8 @@ BigInt	12	bigint: BigInt
 42n	12	BigInt literal is not supported before slice 12
 0n	12	BigInt literal is not supported before slice 12
 4n	12	BigInt literal is not supported before slice 12
+1n	12	BigInt literal is not supported before slice 12
+2n	12	BigInt literal is not supported before slice 12
 ArrayBuffer	13	binary-data: ArrayBuffer
 DataView	13	binary-data: DataView
 Int8Array	13	binary-data: typed arrays
