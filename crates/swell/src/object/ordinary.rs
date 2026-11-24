@@ -1,7 +1,8 @@
 //! Ordinary objects (ECMA-262 10.1, `#sec-ordinary-object-internal-methods-and-internal-slots`):
 //! every ordinary internal method, ValidateAndApplyPropertyDescriptor, OrdinaryObjectCreate and
 //! OrdinaryCreateFromConstructor, with the slots of the ordinary objects of this part: the
-//! Boolean and Number objects ([[BooleanData]], [[NumberData]]), the Symbol objects
+//! Boolean and Number objects ([[BooleanData]], [[NumberData]]), the Dates ([[DateValue]],
+//! `story:date-object-clock-and-time-value`), the Symbol objects
 //! ([[SymbolData]], `story:symbol-constructor-and-well-known-symbols`), the Error objects
 //! ([[ErrorData]]), the raw JSON objects ([[IsRawJSON]], `story:json-parse-and-raw-json`), the
 //! Array Iterators and String Iterators (`story:iterator-protocol-and-array-string-iterators`,
@@ -32,6 +33,9 @@ pub(crate) enum OrdinaryData {
     Boolean(bool),
     /// [[NumberData]].
     Number(f64),
+    /// [[DateValue]] of a Date (`#sec-properties-of-date-instances`): a time value or NaN
+    /// (`story:date-object-clock-and-time-value`, `builtins/date.rs`).
+    Date(f64),
     /// [[ErrorData]], with the kind of the constructor that made the object (decision 13 of
     /// `docs/design/host-interface.md`, `error_summary`).
     Error(crate::host::ErrorKind),

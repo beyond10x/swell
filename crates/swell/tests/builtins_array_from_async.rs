@@ -872,8 +872,8 @@ const ENDLESS_STEPS: u64 = if cfg!(feature = "collect-every-safe-point") {
     3_000
 };
 
-/// The memory room of the endless array-like: 64 KiB; 32 KiB with the feature
-/// `collect-every-safe-point`.
+/// The memory room of the endless array-like above the reading its script leaves: 64 KiB; 32
+/// KiB with the feature `collect-every-safe-point`.
 const ENDLESS_ROOM: u64 = if cfg!(feature = "collect-every-safe-point") {
     32 * 1024
 } else {
@@ -890,10 +890,26 @@ const ENDLESS: &str = "var made;\n\
 /// Item 2: every turn of the loop over an array-like awaits, so one of length 2^53 - 1 ends at a
 /// budget: with `steps_per_entry` [`ENDLESS_STEPS`] the checkpoint answers
 /// `Terminated(StepBudget)` and `last_entry_steps()` reads at most that budget; with a memory
-/// budget [`ENDLESS_ROOM`] over a fresh realm and no step budget to speak of, the object it fills
-/// reaches the memory budget first: `Terminated(MemoryBudget)`, with `heap_bytes()` above its
-/// reading before the checkpoint. The test prints the readings. (After the memory budget is
-/// reached no script can count the elements: its parse is refused its charge.)
+/// budget [`ENDLESS_ROOM`] above what the script leaves and no step budget to speak of, the
+/// object it fills reaches the memory budget first: the script answers, then the checkpoint
+/// answers `Terminated(MemoryBudget)`, with `heap_bytes()` above its reading before the
+/// checkpoint. The test prints the readings. (After the memory budget is reached no script can
+/// count the elements: its parse is refused its charge.)
+///
+/// How the memory budget is found, from a reading the test makes itself: a twin agent with the
+/// test limits and the same step budget runs the script, and its `heap_bytes()` after the
+/// script is the reading; the agent under test has `memory_bytes` that reading plus
+/// [`ENDLESS_ROOM`]. Until a charge is refused, a budget changes nothing an agent does (a
+/// collection is due by the bytes since the last one, not by the budget), so the agent under
+/// test leaves the same reading, which the test asserts, and the room is the room of the
+/// checkpoint whatever the script needed. The budget is not the realm's reading plus the room:
+/// the script's first objects may grow the arena of objects, by 54,272 bytes at 256 slots, and
+/// whether they do moves with every object a realm gains. Measured on 2026-11-24 with the
+/// collector at every safe point: on the realm's charge of 214,160 bytes plus 32 KiB the script
+/// answered at 223,135 and the checkpoint was refused that growth at its fourteenth step; with
+/// the 11 functions of `story:math-constants-and-exact-functions` (219,907) the script itself
+/// needed the growth, was refused it with 24,501 bytes left, and answered
+/// `Terminated(MemoryBudget)` before the checkpoint.
 #[test]
 fn from_async_of_an_endless_array_like_ends_at_a_budget() {
     let (mut agent, realm) = new_agent(limits_with(ENDLESS_STEPS));
@@ -906,9 +922,17 @@ fn from_async_of_an_endless_array_like_ends_at_a_budget() {
     assert!(defined.parse::<u64>().unwrap() > 0, "{defined}");
     assert_eq!(state_of(&mut agent, &realm, &promise), "pending");
 
-    let (mut agent, realm) = memory_agent(ENDLESS_ROOM, 1 << 40);
+    let reading = {
+        let (mut twin, realm) = new_agent(limits_with(1 << 40));
+        run(&mut twin, &realm, ENDLESS);
+        twin.heap_bytes().unwrap()
+    };
+    let mut memory = limits_with(1 << 40);
+    memory.memory_bytes = reading + ENDLESS_ROOM;
+    let (mut agent, realm) = new_agent(memory);
     run(&mut agent, &realm, ENDLESS);
     let before = agent.heap_bytes().unwrap();
+    assert_eq!(before, reading, "the twin's reading after the script");
     assert_eq!(terminated(&mut agent), Termination::MemoryBudget);
     let after = agent.heap_bytes().unwrap();
     let steps = agent.last_entry_steps().unwrap();

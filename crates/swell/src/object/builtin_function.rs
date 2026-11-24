@@ -69,6 +69,8 @@ pub(crate) enum BuiltinId {
     Array(crate::builtins::array::ArrayBuiltin),
     String(crate::builtins::string::StringBuiltin),
     Math(crate::builtins::math::MathBuiltin),
+    /// The builtins of `Date` (`story:date-object-clock-and-time-value`).
+    Date(crate::builtins::date::DateBuiltin),
     Json(crate::builtins::json::JsonBuiltin),
     /// The builtins slice 2 takes early (`story:number-boolean-and-global-functions-early`),
     /// each module of `builtins/` with its own ids.
@@ -764,6 +766,7 @@ impl<H: Host> Agent<H> {
             BuiltinId::Array(id) => self.run_array_builtin(id, function, this, args, new_target),
             BuiltinId::String(id) => self.run_string_builtin(id, function, this, args, new_target),
             BuiltinId::Math(id) => self.run_math_builtin(id, function, this, args, new_target),
+            BuiltinId::Date(id) => self.run_date_builtin(id, &this, args, &new_target),
             BuiltinId::Json(id) => self.run_json_builtin(id, function, this, args, new_target),
             BuiltinId::Number(id) => self.run_number_builtin(id, function, this, args, new_target),
             BuiltinId::Boolean(id) => {
@@ -954,6 +957,43 @@ mod tests {
         const ARGUMENTS: u64 = 100_000;
         const ON_THE_BASE: u64 = 0;
         const SOURCE: &str = "for (var i = 0; i < 12500; i++) Math.max(i, i, i, i, i, i, i, i); i";
+        let (mut agent, realm, _) = roomy();
+        let Ok(Parsed::Parsed(script)) = agent.parse_script(&realm, Source::Utf8(SOURCE), None)
+        else {
+            panic!("{SOURCE} did not parse");
+        };
+        COLLECTIONS.with(|collections| collections.set(0));
+        let outcome = agent.evaluate_script(&script);
+        let Ok(Outcome::Normal(answer)) = outcome else {
+            panic!("{outcome:?}");
+        };
+        let answer = agent.heap.roots.get(&answer);
+        assert!(
+            matches!(answer, Ok(Value::Number(n)) if n == 12_500.0),
+            "{answer:?}"
+        );
+        let collections = COLLECTIONS.with(std::cell::Cell::get);
+        let charged = ARGUMENTS * size_of::<Value>() as u64;
+        let bound = ON_THE_BASE + charged.div_ceil(MIN_TRIGGER_BYTES);
+        assert!(
+            collections <= bound,
+            "{collections} collections, at most {bound}"
+        );
+    }
+
+    /// The twin of `a_loop_of_builtin_calls_collects_within_its_bound` for `Math.min`, which
+    /// shares the argument loop of `Math.max`: 12,500 calls with eight arguments each under a
+    /// roomy budget run at most one more collection per `MIN_TRIGGER_BYTES` of the arguments
+    /// the calls charge. Not with the feature `collect-every-safe-point`, where every safe
+    /// point collects.
+    #[cfg(not(feature = "collect-every-safe-point"))]
+    #[test]
+    fn a_loop_of_math_min_calls_collects_within_its_bound() {
+        use crate::heap::{COLLECTIONS, MIN_TRIGGER_BYTES};
+        use crate::{Outcome, Parsed, Source};
+        const ARGUMENTS: u64 = 100_000;
+        const ON_THE_BASE: u64 = 0;
+        const SOURCE: &str = "for (var i = 0; i < 12500; i++) Math.min(i, i, i, i, i, i, i, i); i";
         let (mut agent, realm, _) = roomy();
         let Ok(Parsed::Parsed(script)) = agent.parse_script(&realm, Source::Utf8(SOURCE), None)
         else {
