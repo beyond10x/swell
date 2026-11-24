@@ -270,7 +270,7 @@ slice of its directory.
 | 5 | `identifiers-and-group-names-outside-ascii`, `regexp-match-all-and-escape` | `ID_Start` and `ID_Continue` in identifiers and group names; `matchAll`, `RegExp.escape` | none |
 | 6 | `regexp-case-insensitive-matching-and-modifiers` | the flag `i` and modifiers | none |
 | 7 | `regexp-v-flag-class-sets-and-properties-of-strings` | the flag `v` | none |
-| 8 | `slice-05-conformance-close` | 17 cases moved to later slices, 18 Annex B grammar cases taken into slice 5 | none |
+| 8 | `slice-05-conformance-close` | 18 cases moved to later slices, 18 Annex B grammar cases taken into slice 5 | none |
 
 Ahead of them, by the organization's rule that a test step over its budget is fixed before the
 next feature: `story:gate-test-steps-cost-half` (the gate's test steps cost about 300 CPU
@@ -287,8 +287,11 @@ regular expressions of the consumer answer and 1,667 cases pass. [Wave 3](slice-
 release `0.8.0`: `regexp-match-all-and-escape`, `regexp-property-escapes-and-property-tables`,
 `regexp-case-insensitive-matching-and-modifiers` and
 `identifiers-and-group-names-outside-ascii`, with which 2,523 cases pass
-(`test262-slice 05 2724 5441 0 0 2724 2523 201 0`). Open: the flag `v`, being built, and the
-close.
+(`test262-slice 05 2724 5441 0 0 2724 2523 201 0`). After it, on the branch of the first wave
+of slice 10, 2026-11-24: `regexp-v-flag-class-sets-and-properties-of-strings`, with which
+2,706 cases pass, and `slice-05-conformance-close`: 18 cases move to slices 4, 8 and 9 (14, 2
+and 2) and 18 cases of the pattern grammar of Annex B.1.2 come in from slice 18. Slice 5 is
+delivered: `test262-slice 05 2724 5441 0 0 2724 2724 0 0`.
 
 ## Slice 7, `generators`
 

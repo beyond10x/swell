@@ -223,12 +223,12 @@ test262 total 53801 8982 7 44812 21325 23485 2
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
-test262-slice 04 1598 3156 0 0 1598 261 1337 0
-test262-slice 05 2724 5441 0 0 2724 2706 18 0
+test262-slice 04 1612 3184 0 0 1612 261 1351 0
+test262-slice 05 2724 5441 0 0 2724 2724 0 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
 test262-slice 07 1491 2841 0 0 1491 1451 40 0
-test262-slice 08 9144 18139 0 0 9144 3 9141 0
-test262-slice 09 1779 3529 0 0 1779 159 1620 0
+test262-slice 08 9146 18143 0 0 9146 3 9143 0
+test262-slice 09 1781 3533 0 0 1781 159 1622 0
 test262-slice 10 3879 7499 0 0 3879 585 3294 0
 test262-slice 11 1281 1833 0 0 1281 21 1260 0
 test262-slice 12 338 676 0 0 338 39 299 0
@@ -237,7 +237,7 @@ test262-slice 14 598 1192 112 7 479 0 479 0
 test262-slice 15 1094 2170 0 0 1094 82 1012 0
 test262-slice 16 82 164 0 0 82 0 82 0
 test262-slice 17 35 35 0 0 35 0 35 0
-test262-slice 18 1155 1492 0 0 1155 189 966 0
+test262-slice 18 1137 1456 0 0 1137 171 966 0
 test262-slice 19 1474 2766 0 0 1474 631 841 2
 test262-slice 20 4617 9234 4617 0 0 0 0 0
 test262-slice 21 1662 3324 1662 0 0 0 0 0
@@ -252,8 +252,8 @@ test262-section sec-number-objects incomplete 340 250 0
 test262-section sec-bigint-objects incomplete 77 0 0
 test262-section sec-math-object incomplete 327 13 0
 test262-section sec-date-objects incomplete 610 0 0
-test262-section sec-string-objects incomplete 1223 1200 3
-test262-section sec-regexp-regular-expression-objects incomplete 1879 1859 1
+test262-section sec-string-objects incomplete 1223 1200 2
+test262-section sec-regexp-regular-expression-objects incomplete 1879 1859 2
 test262-section sec-array-objects incomplete 3083 2797 1
 test262-section sec-typedarray-objects incomplete 1453 0 0
 test262-section sec-uint8array incomplete 70 0 0
@@ -277,7 +277,7 @@ test262-section sec-async-function-objects incomplete 18 10 0
 test262-section sec-reflect-object incomplete 153 0 0
 test262-section sec-proxy-objects incomplete 311 0 0
 test262-section sec-names-and-keywords incomplete 268 208 1
-test262-section sec-literals-regular-expression-literals complete 240 240 0
+test262-section sec-literals-regular-expression-literals incomplete 240 240 2
 test262-section sec-parse-script incomplete 42 24 1
 test262-section sec-performeval incomplete 347 263 1
 test262-section sec-createdynamicfunction incomplete 509 415 1

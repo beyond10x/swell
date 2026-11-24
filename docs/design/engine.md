@@ -2477,12 +2477,12 @@ The rule:
 | 1 | `harness` | 31 | 62 |
 | 2 | `language-core` | 4,259 | 7,543 |
 | 3 | `builtins-core` | 7,011 | 13,829 |
-| 4 | `numbers-and-dates` | 1,598 | 3,156 |
+| 4 | `numbers-and-dates` | 1,612 | 3,184 |
 | 5 | `regexp` | 2,724 | 5,441 |
 | 6 | `bindings-and-iteration` | 3,898 | 7,351 |
 | 7 | `generators` | 1,491 | 2,841 |
-| 8 | `classes` | 9,144 | 18,139 |
-| 9 | `collections-proxy-reflect` | 1,779 | 3,529 |
+| 8 | `classes` | 9,146 | 18,143 |
+| 9 | `collections-proxy-reflect` | 1,781 | 3,533 |
 | 10 | `promises-and-async` | 3,879 | 7,499 |
 | 11 | `modules` | 1,281 | 1,833 |
 | 12 | `bigint` | 338 | 676 |
@@ -2491,7 +2491,7 @@ The rule:
 | 15 | `iterator-helpers-and-resources` | 1,094 | 2,170 |
 | 16 | `weak-references` | 82 | 164 |
 | 17 | `tail-calls` | 35 | 35 |
-| 18 | `annex-b` | 1,155 | 1,492 |
+| 18 | `annex-b` | 1,137 | 1,456 |
 | 19 | `staging` | 1,474 | 2,766 |
 | | slices 1 to 19 | 44,931 | 85,794 |
 | 20 | `temporal` (excluded at first) | 4,617 | 9,234 |
@@ -2532,6 +2532,18 @@ over this block and the inventory's `meta.tsv`, counting slice `06`): `06 3898 7
 8153` before the order of delivery). Every moved case goes to a slice from 4 to 13, so slices 1
 to 19 still hold 44,931 cases and 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
 
+Slice 5 had 2,724 cases and 5,441 runs by its rules (its `dir` and `feature` lines, the lines of
+the closes of slices 2, 3 and 6 that gave it cases, and the order of delivery). 2,724 cases and
+5,441 runs are what slice 5 counts after its close: 18 cases (36 runs) that need a later slice
+move by the lines of the paragraph "Slice 5's cases that need a later slice", 14 to slice 4, 2 to
+8 and 2 to 9, and 18 cases (36 runs) of the pattern grammar of B.1.2 come into it from slice 18 by
+the lines of the same paragraph ("A case that comes into a slice from one delivered later"
+above). Measured on 2026-11-24 with the same check (`awk -f slices.awk` over this block and the
+inventory's `meta.tsv`, counting slice `05`): `05 2724 5441`, the slice line of `slot task
+test262` on the code of the slice, every run passed. Every moved case goes to slice 4, 8 or 9 and
+every case that comes in leaves slice 18, so slices 1 to 19 still hold 44,931 cases and 85,794
+runs and the 22 lines still sum to 53,801 and 103,360.
+
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
 1. `harness`: lexer, parser and compile step for the ES5 grammar with strict mode (the runner
@@ -2556,8 +2568,9 @@ What each slice builds, and the directories it raises most (paths under `test/`,
    `parseInt`, `parseFloat`. `Date` 492, `Number` 313, `Math` 284.
 5. `regexp`: `swell-regexp`, `swell-unicode`, `RegExp` and the string methods that use it;
    from slice 3, case mapping (`toLowerCase`, `toUpperCase`, `toLocaleLowerCase`,
-   `toLocaleUpperCase`) and `localeCompare` outside ASCII, and `normalize`. `RegExp` 1,626,
-   `String` 252, `literals` 240.
+   `toLocaleUpperCase`) and `localeCompare` outside ASCII, and `normalize`; from slice 18, the
+   pattern grammar of B.1.2 (decision 7), 18 cases of `annexB` (the paragraph "Slice 5's cases
+   that need a later slice"). `RegExp` 1,848, `String` 359, `literals` 241, `annexB` 18.
 6. `bindings-and-iteration`: `let`, `const`, destructuring, spread, arrows, templates,
    `Symbol`, iterators, `for-of`; from slice 3, `Array.from`, `Object.fromEntries`,
    `Object.groupBy` and the Array iterator methods `keys`, `values` and `entries`. `statements/for-of` 575, `expressions/assignment` 342,
@@ -2583,7 +2596,7 @@ What each slice builds, and the directories it raises most (paths under `test/`,
 16. `weak-references`: `WeakRef`, `FinalizationRegistry`, `$262.gc`. `FinalizationRegistry` 47,
     `WeakRef` 29.
 17. `tail-calls`: `PrepareForTailCall`. Spread over `language/`.
-18. `annex-b`: Annex B and [[IsHTMLDDA]]. `annexB/language` 845, `annexB/built-ins` 215.
+18. `annex-b`: Annex B and [[IsHTMLDDA]]. `annexB/language` 837, `annexB/built-ins` 205.
 19. `staging`: what `test/staging/` asks beyond the above. `staging/sm` 1,404.
 
 Excluded at first: `temporal`, `built-ins/Temporal` 4,606; `intl402`, `intl402/Temporal` 492
@@ -2943,6 +2956,49 @@ and `startsWith`); to slice 4, `Date` (`symbol-tag-override-instances` and
 `Symbol/prototype/Symbol.toPrimitive/removed-symbol-wrapper-ordinary-toprimitive`). With them 9
 cases that pass leave slice 6 by their directory, 7 to slice 4 (`Math/Symbol.toStringTag` and 6
 of `Number`) and 2 to slice 5 (two of `String/prototype/normalize`), counted passed there.
+
+**Slice 5's cases that need a later slice.** Measured at the close of slice 5 (2026-11-24,
+`story:slice-05-conformance-close`), with the run lines of the runner on the code of the slice
+(`slot task test262`): 18 of the 2,724 cases of slice 5 fail, each in every one of its runs (36
+runs), and none on a part of slice 5 (no run ends on a refusal that names slice 5 or on a missing
+`RegExp`). All 18 move to a later slice, each a line of `conformance/test262/moves.tsv` with kind
+`part` and a token of `conformance/test262/later-parts.tsv` as its evidence, held by
+`test262-moves-check`: 11 lines are new, with `from` 5; 7 are lines of cases moved to slice 5
+earlier (5 with `from` 3, 2 with `from` 2), which keep their `from` and get the new `to` and
+evidence. The block gains 11 lines `dir <file> <slice>`, one for a single file each, and 7 lines
+change their slice from 5 to 4. The groups, by target slice (lines of the list):
+
+- to slice 4, 14: `Date` 7 (`global/global-object`, `S10.2.3_A1.1_T3`, `A1.2_T3` and `A1.3_T3`,
+  `expressions/typeof/built-in-exotic-objects-no-call` and `native-call`, and
+  `RegExp/prototype/Symbol.split/species-ctor-species-non-ctor`), `Math.pow` 3
+  (`RegExp/prototype/Symbol.replace/coerce-lastindex` and the two
+  `String/prototype/split/*-math-pow-2-32-1-instance-is-number` cases), `**` 2
+  (`split/separator-undef-limit-custom` and `-zero`), `parseInt` 1
+  (`Object/getOwnPropertyNames/15.2.3.4-4-1`, which expects the names of the global object),
+  `Math.PI` 1 (`RegExp/prototype/exec/S15.10.6.2_A1_T12`, whose subject converts `Math.PI` to a
+  String);
+- to slice 8, 2: `class` (`RegExp/named-groups/groups-object-subclass` and `-sans`);
+- to slice 9, 2: `Map` (`RegExp/match-indices/indices-array-non-unicode-match` and
+  `-unicode-match`, through `deepEqual.js`, which calls `new Map()`).
+
+The counts sum to the 18 lines this change adds to or changes in the list.
+
+18 cases (36 runs) come into slice 5 from slice 18, by the rule "A case that comes into a slice
+from one delivered later" above. The line `dir test/annexB/ 18` counts the 70 cases of
+`test/annexB/built-ins/RegExp/` (62) and `test/annexB/language/literals/regexp/` (8) in slice 18;
+26 of them are excluded (`legacy-regexp`, stage 3), and of the 44 that run, 20 pass and 24 fail on
+the code of the slice. The decision of the close: the 18 that test the pattern grammar of B.1.2
+alone, which this slice builds (decision 7), count in slice 5, by the lines `dir
+test/annexB/language/literals/regexp/ 5` (8 cases), `dir test/annexB/built-ins/RegExp/named-groups/
+5` (2) and one `dir <file> 5` for each of 8 files of `test/annexB/built-ins/RegExp/` (8), each
+case leaving slice 18; each passes in every one of its runs (the close's check (4) over
+`docs/plan/slice-05/close-annexb-to-5.tsv`), and none has a line of `moves.tsv`.
+`RegExp.prototype.compile` (B.2.4.1) stays in slice 18, and with it the 24 cases that fail on it:
+the 21 of `prototype/compile/` that run, `prototype/flags/order-after-compile` and the two of
+`prototype/Symbol.split/` that call it. The two that use generator functions
+(`RegExp-control-escape-russian-letter` and `RegExp-invalid-control-escape-character-class`, the
+feature `generators`) pass and stay where the block puts them, in slice 18: slice 7, which they
+need, is delivered after slice 5.
 
 ```swell-slices
 order delivery 1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21
@@ -3521,11 +3577,11 @@ dir test/language/expressions/property-accessors/S11.2.1_A4_T4.js 3
 dir test/language/expressions/property-accessors/S11.2.1_A4_T5.js 5
 dir test/language/expressions/property-accessors/S11.2.1_A4_T8.js 4
 dir test/language/expressions/property-accessors/S11.2.1_A4_T9.js 4
-dir test/language/expressions/typeof/built-in-exotic-objects-no-call.js 5
+dir test/language/expressions/typeof/built-in-exotic-objects-no-call.js 4
 dir test/language/expressions/typeof/built-in-functions.js 4
 dir test/language/expressions/typeof/built-in-ordinary-objects-no-call.js 9
 dir test/language/expressions/typeof/get-value.js 3
-dir test/language/expressions/typeof/native-call.js 5
+dir test/language/expressions/typeof/native-call.js 4
 dir test/language/expressions/typeof/null.js 5
 dir test/language/expressions/typeof/number.js 4
 dir test/language/expressions/typeof/string.js 4
@@ -4358,7 +4414,7 @@ dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-97.js 4
 dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-98.js 4
 dir test/built-ins/Object/getOwnPropertyDescriptor/15.2.3.3-4-99.js 4
 dir test/built-ins/Object/getOwnPropertyDescriptors/primitive-numbers.js 4
-dir test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-1.js 5
+dir test/built-ins/Object/getOwnPropertyNames/15.2.3.4-4-1.js 4
 dir test/built-ins/Object/getOwnPropertySymbols/ 6
 dir test/built-ins/Object/getPrototypeOf/15.2.3.2-2-10.js 5
 dir test/built-ins/Object/getPrototypeOf/15.2.3.2-2-25.js 4
@@ -4474,12 +4530,12 @@ dir test/built-ins/String/raw/template-substitutions-are-appended-on-same-index.
 dir test/built-ins/String/raw/zero-literal-segments.js 6
 dir test/built-ins/ThrowTypeError/unique-per-realm-non-simple.js 6
 dir test/built-ins/global/S10.2.3_A1.1_T2.js 4
-dir test/built-ins/global/S10.2.3_A1.1_T3.js 5
+dir test/built-ins/global/S10.2.3_A1.1_T3.js 4
 dir test/built-ins/global/S10.2.3_A1.2_T2.js 4
-dir test/built-ins/global/S10.2.3_A1.2_T3.js 5
+dir test/built-ins/global/S10.2.3_A1.2_T3.js 4
 dir test/built-ins/global/S10.2.3_A1.3_T2.js 4
-dir test/built-ins/global/S10.2.3_A1.3_T3.js 5
-dir test/built-ins/global/global-object.js 5
+dir test/built-ins/global/S10.2.3_A1.3_T3.js 4
+dir test/built-ins/global/global-object.js 4
 dir test/built-ins/isFinite/S15.1.2.5_A2.7.js 6
 dir test/built-ins/isFinite/return-true-for-valid-finite-numbers.js 4
 dir test/built-ins/isNaN/S15.1.2.4_A2.7.js 6
@@ -4575,6 +4631,27 @@ dir test/built-ins/String/prototype/endsWith/return-abrupt-from-searchstring-reg
 dir test/built-ins/String/prototype/includes/return-abrupt-from-searchstring-regexp-test.js 5
 dir test/built-ins/String/prototype/startsWith/return-abrupt-from-searchstring-regexp-test.js 5
 dir test/built-ins/Symbol/prototype/Symbol.toPrimitive/removed-symbol-wrapper-ordinary-toprimitive.js 4
+dir test/built-ins/RegExp/match-indices/indices-array-non-unicode-match.js 9
+dir test/built-ins/RegExp/match-indices/indices-array-unicode-match.js 9
+dir test/built-ins/RegExp/named-groups/groups-object-subclass-sans.js 8
+dir test/built-ins/RegExp/named-groups/groups-object-subclass.js 8
+dir test/built-ins/RegExp/prototype/Symbol.replace/coerce-lastindex.js 4
+dir test/built-ins/RegExp/prototype/Symbol.split/species-ctor-species-non-ctor.js 4
+dir test/built-ins/RegExp/prototype/exec/S15.10.6.2_A1_T12.js 4
+dir test/built-ins/String/prototype/split/call-split-1-math-pow-2-32-1-instance-is-number.js 4
+dir test/built-ins/String/prototype/split/separator-number-limit-math-pow-2-32-1-instance-is-number.js 4
+dir test/built-ins/String/prototype/split/separator-undef-limit-custom.js 4
+dir test/built-ins/String/prototype/split/separator-undef-limit-zero.js 4
+dir test/annexB/built-ins/RegExp/RegExp-decimal-escape-class-range.js 5
+dir test/annexB/built-ins/RegExp/RegExp-decimal-escape-not-capturing.js 5
+dir test/annexB/built-ins/RegExp/RegExp-invalid-control-escape-character-class-range.js 5
+dir test/annexB/built-ins/RegExp/RegExp-leading-escape-BMP.js 5
+dir test/annexB/built-ins/RegExp/RegExp-leading-escape.js 5
+dir test/annexB/built-ins/RegExp/RegExp-trailing-escape-BMP.js 5
+dir test/annexB/built-ins/RegExp/RegExp-trailing-escape.js 5
+dir test/annexB/built-ins/RegExp/incomplete_hex_unicode_escape.js 5
+dir test/annexB/built-ins/RegExp/named-groups/ 5
+dir test/annexB/language/literals/regexp/ 5
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
@@ -5044,12 +5121,12 @@ Its output on this document:
 01 31 62
 02 4259 7543
 03 7011 13829
-04 1598 3156
+04 1612 3184
 05 2724 5441
 06 3898 7351
 07 1491 2841
-08 9144 18139
-09 1779 3529
+08 9146 18143
+09 1781 3533
 10 3879 7499
 11 1281 1833
 12 338 676
@@ -5058,7 +5135,7 @@ Its output on this document:
 15 1094 2170
 16 82 164
 17 35 35
-18 1155 1492
+18 1137 1456
 19 1474 2766
 20 4617 9234
 21 1662 3324

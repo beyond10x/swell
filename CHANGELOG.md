@@ -12,6 +12,10 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- Slice 5, regular expressions, is delivered: all 2,724 of its test262 cases pass in all
+  5,441 runs. At its close 18 cases that need `Date`, `Math`, `parseInt`, the operator
+  `**`, `class` or `Map` move to slices 4, 8 and 9, each with its evidence, and 18 cases of
+  the pattern grammar of Annex B.1.2 count in slice 5 instead of slice 18.
 - The engine calls the host's rejection tracker, a story of the tenth slice:
   `host_promise_rejection_tracker` with `Reject` when a promise is rejected and has no
   handler, and with `Handle` when a handler is added to such a promise later. A host reads
