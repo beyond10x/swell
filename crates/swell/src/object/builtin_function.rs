@@ -113,6 +113,10 @@ pub(crate) enum BuiltinId {
     /// AsyncGeneratorAwaitReturn, with the slots [`Slots::Await`]
     /// (`story:async-generators-and-their-request-queue`).
     AsyncGenerator(crate::builtins::async_generator::AsyncGeneratorBuiltin),
+    /// The two functions an Await of a built-in async function makes (`#sec-await`, steps 3
+    /// to 6), with the slots [`Slots::Await`] that hold its activation
+    /// (`object/async_builtin.rs`, `story:array-from-async`).
+    AsyncBuiltinAwait(crate::object::promise::ReactionType),
 }
 
 /// What a built-in function does when called.
@@ -231,7 +235,9 @@ pub(crate) enum Slots {
     /// function was made for. For an `await` of an async generator, and for the two functions
     /// of AsyncGeneratorAwaitReturn (`#sec-asyncgeneratorawaitreturn`), `activation` is the
     /// async generator object and `suspension` the number of its wait ("Async generators on
-    /// suspended frames", item 1).
+    /// suspended frames", item 1). For an Await of a built-in async function
+    /// (`BuiltinId::AsyncBuiltinAwait`), `activation` is its activation
+    /// (`object/async_builtin.rs`).
     Await {
         activation: ObjectRef,
         suspension: u64,
@@ -789,6 +795,9 @@ impl<H: Host> Agent<H> {
             }
             BuiltinId::AsyncGenerator(id) => {
                 self.run_async_generator_builtin(id, function, this, args)
+            }
+            BuiltinId::AsyncBuiltinAwait(kind) => {
+                self.async_builtin_await_function(kind, function, args)
             }
         }
     }
