@@ -123,6 +123,11 @@ Every number below comes from the gate, `task check`, on the released commit.
   `errors`, and `error_summary` of an `AggregateError` answers the kind and the message
   without reading `errors`. `ErrorKind::ALL` keeps its seven entries.
 - `HOST-201` and `HOST-202` have a test.
+- New requirements of the clock and the time zones, pending for slice 4 (no code reads them
+  yet): `HOST-209`, an offset a host answers outside ±86,399,999,999,999 ns is clamped to
+  that range; `HOST-210`, a host that answers no instant for every local time gets NaN
+  after 31 hook calls and no exception; `HOST-211`, every call of a clock or time zone hook
+  is charged one step before it is made.
 
 ## [0.8.0] - 2026-11-24
 
