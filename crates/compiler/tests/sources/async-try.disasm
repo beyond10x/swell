@@ -1,0 +1,52 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "t" length 0 locals 2 async
+  0000 2:1 AsyncStart 1
+  0001 4:11 Number 1
+  0002 4:5 Await 1
+  0003 4:5 JumpIfTag 0 0005
+  0004 4:5 EndFinally
+  0005 4:5 Pop
+  0006 3:3 Jump 0014
+  0007 5:12 SetLocal 0
+  0008 5:12 Pop
+  0009 6:11 GetLocal 0
+  0010 6:5 Await 1
+  0011 6:5 JumpIfTag 0 0013
+  0012 6:5 EndFinally
+  0013 6:5 Pop
+  0014 3:3 Undefined
+  0015 3:3 Tag 0
+  0016 8:11 Number 2
+  0017 8:5 Await 1
+  0018 8:5 JumpIfTag 0 0020
+  0019 8:5 EndFinally
+  0020 8:5 Pop
+  0021 3:3 EndFinally
+  0022 11:18 Number 3
+  0023 11:12 Await 1
+  0024 11:12 JumpIfTag 0 0026
+  0025 11:12 EndFinally
+  0026 11:5 Tag 2
+  0027 11:5 Jump 0030
+  0028 10:3 Undefined
+  0029 10:3 Tag 0
+  0030 13:11 Number 4
+  0031 13:5 Await 1
+  0032 13:5 JumpIfTag 0 0034
+  0033 13:5 EndFinally
+  0034 13:5 Pop
+  0035 10:3 JumpIfTag 2 0038
+  0036 10:3 EndFinally
+  0037 10:3 Jump 0039
+  0038 10:3 AsyncReturn 1
+  0039 2:1 Undefined
+  0040 2:1 AsyncReturn 1
+  0041 2:1 AsyncReject 1
+  catch 0001..0007 -> 0007 items 0 envs 0
+  finally 0001..0014 -> 0016 items 0 envs 0
+  finally 0022..0028 -> 0030 items 0 envs 0
+  catch 0001..0041 -> 0041 items 0 envs 0

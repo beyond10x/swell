@@ -33,6 +33,7 @@
 
 mod array_patterns;
 mod arrow;
+mod async_function;
 pub(crate) mod budget;
 pub(crate) mod dispatch;
 mod for_of;

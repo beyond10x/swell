@@ -19,15 +19,15 @@
     ]
   },
   "test262": {
-    "line": "test262 total 53801 8982 7 44812 21095 23715 2",
+    "line": "test262 total 53801 8982 7 44812 21325 23485 2",
     "exist": 53801,
     "excluded": 8982,
     "not_applicable": 7,
     "run": 44812,
-    "passed": 21095,
-    "failed": 23715,
+    "passed": 21325,
+    "failed": 23485,
     "budget": 2,
-    "passed_percent": "47.0"
+    "passed_percent": "47.5"
   },
   "delivery_slices": 19,
   "delivered": [1, 2, 3, 6],
@@ -182,16 +182,16 @@
       "name": "promises-and-async",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 10 3879 7499 0 0 3879 365 3514 0",
+      "line": "test262-slice 10 3879 7499 0 0 3879 585 3294 0",
       "cases": 3879,
       "runs": 7499,
       "excluded": 0,
       "not_applicable": 0,
       "run": 3879,
-      "passed": 365,
-      "failed": 3514,
+      "passed": 585,
+      "failed": 3294,
       "budget": 0,
-      "passed_percent": "9.4"
+      "passed_percent": "15.0"
     },
     {
       "slice": "11",
@@ -262,16 +262,16 @@
       "name": "iterator-helpers-and-resources",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 15 1094 2170 0 0 1094 79 1015 0",
+      "line": "test262-slice 15 1094 2170 0 0 1094 82 1012 0",
       "cases": 1094,
       "runs": 2170,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1094,
-      "passed": 79,
-      "failed": 1015,
+      "passed": 82,
+      "failed": 1012,
       "budget": 0,
-      "passed_percent": "7.2"
+      "passed_percent": "7.4"
     },
     {
       "slice": "16",
@@ -326,16 +326,16 @@
       "name": "staging",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 19 1474 2766 0 0 1474 624 848 2",
+      "line": "test262-slice 19 1474 2766 0 0 1474 631 841 2",
       "cases": 1474,
       "runs": 2766,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1474,
-      "passed": 624,
-      "failed": 848,
+      "passed": 631,
+      "failed": 841,
       "budget": 2,
-      "passed_percent": "42.3"
+      "passed_percent": "42.8"
     },
     {
       "slice": "20",
@@ -388,14 +388,14 @@
   ],
   "host_requirements": {
     "total": 208,
-    "test": 131,
-    "pending": 77,
+    "test": 133,
+    "pending": 75,
     "omitted": 0,
     "pending_by_slice": [
       {"slice": 4, "count": 9},
       {"slice": 8, "count": 1},
       {"slice": 9, "count": 5},
-      {"slice": 10, "count": 14},
+      {"slice": 10, "count": 12},
       {"slice": 11, "count": 32},
       {"slice": 12, "count": 2},
       {"slice": 13, "count": 2},

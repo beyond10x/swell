@@ -12,6 +12,16 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- `async` functions run, the third story of the tenth slice: declarations, expressions and
+  arrow functions. A call makes the function's promise and runs the body to its first
+  `await`; an `await` suspends the activation and a promise job resumes it at a checkpoint.
+  A return resolves the promise and an uncaught throw rejects it. A suspended activation
+  is charged to the memory budget while it waits and credited when its promise settles or
+  it is collected. An `await` in a loop that never ends ends the checkpoint at the step
+  budget; a termination in a resumed activation leaves its promise pending and the jobs
+  behind it queued. `%AsyncFunction.prototype%` exists. The `async` method of an object
+  literal, `async function*` and `for await` are still refused, each with a `SyntaxError`
+  that names the tenth slice.
 - `Promise`, the second story of the tenth slice: the constructor with its resolving
   functions, `Promise.prototype.then` and `catch`, `Promise.resolve`, `Promise.reject` and
   the getter of `Promise[Symbol.species]`. A reaction and the job of a thenable are entries
@@ -35,10 +45,10 @@ Every number below comes from the gate, `task check`, on the released commit.
   story of the seventh slice. A `yield` in the computed name of one belongs to the generator
   around the literal.
 - The parser reads `async` function declarations, expressions and arrow functions with
-  their early errors, and `await` where the grammar's [Await] is set. No such function runs
-  yet: a source with one is refused with a `SyntaxError` that names the tenth slice, after
-  its grammar errors and early errors, which now come first. `async function*`, `for await`
-  and the `async` method of an object literal keep refusals of their own.
+  their early errors, and `await` where the grammar's [Await] is set. A refusal that names
+  a later slice comes after the grammar errors and early errors of the source, which now
+  come first. `async function*`, `for await` and the `async` method of an object literal
+  keep refusals of their own.
 - The microtask queue of the agent and its checkpoint, the first story of the tenth slice. A
   host queues a microtask with the realm it runs in; a checkpoint runs every entry in the
   order it was queued, under the step budget of one entry, and spends one step for each
@@ -63,6 +73,8 @@ Every number below comes from the gate, `task check`, on the released commit.
   that settle it.
 - `HOST-78`, `HOST-80`, `HOST-82`, `HOST-83`, `HOST-84`, `HOST-148`, `HOST-198`, `HOST-199`
   and `HOST-200` have a test.
+- `HOST-194` and `HOST-195` have a test. No name of the host interface changes with
+  `async` functions.
 
 ## [0.8.0] - 2026-11-23
 

@@ -258,7 +258,7 @@ impl<H: Host> Agent<H> {
     fn executor_slots(&mut self, executor: ObjectRef) -> Completion<(Value, Value)> {
         match self.closure_slots(executor)? {
             Slots::Executor { resolve, reject } => Ok((*resolve, *reject)),
-            Slots::Resolving { .. } => Err(self.fault()),
+            Slots::Resolving { .. } | Slots::Await { .. } => Err(self.fault()),
         }
     }
 
