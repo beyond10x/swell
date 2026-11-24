@@ -81,6 +81,84 @@ fn item(atom: ClassAtom) -> ClassItem {
     }
 }
 
+/// Whether `b`, written twice, is a ClassSetReservedDoublePunctuator
+/// (`#prod-ClassSetReservedDoublePunctuator`): `&& !! ## $$ %% ** ++ ,, .. :: ;; << == >> ?? @@
+/// ^^ `` ~~`. Under `v` no ClassSetCharacter starts one.
+pub(crate) fn is_reserved_double(b: u8) -> bool {
+    matches!(
+        b,
+        b'&' | b'!'
+            | b'#'
+            | b'$'
+            | b'%'
+            | b'*'
+            | b'+'
+            | b','
+            | b'.'
+            | b':'
+            | b';'
+            | b'<'
+            | b'='
+            | b'>'
+            | b'?'
+            | b'@'
+            | b'^'
+            | b'`'
+            | b'~'
+    )
+}
+
+/// Whether `b` is a ClassSetSyntaxCharacter (`#prod-ClassSetSyntaxCharacter`):
+/// `( ) [ ] { } / - \ |`, which no ClassSetCharacter is unescaped.
+pub(crate) fn is_class_set_syntax(b: u8) -> bool {
+    matches!(
+        b,
+        b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'/' | b'-' | b'\\' | b'|'
+    )
+}
+
+/// Whether `b` is a ClassSetReservedPunctuator (`#prod-ClassSetReservedPunctuator`), which a
+/// ClassSetCharacter may escape: `& - ! # % , : ; < = > @ `` ~`.
+pub(crate) fn is_class_set_reserved_punctuator(b: u8) -> bool {
+    matches!(
+        b,
+        b'&' | b'-'
+            | b'!'
+            | b'#'
+            | b'%'
+            | b','
+            | b':'
+            | b';'
+            | b'<'
+            | b'='
+            | b'>'
+            | b'@'
+            | b'`'
+            | b'~'
+    )
+}
+
+/// MayContainStrings (`#sec-static-semantics-maycontainstrings`) of an operation of a class
+/// under `v` from that of its operands: a ClassUnion when one of them may, a ClassIntersection
+/// when all of them may, a ClassSubtraction when its first operand may.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SetOperation {
+    Union,
+    Intersection,
+    Subtraction,
+}
+
+impl SetOperation {
+    /// MayContainStrings after one more operand that `may`, the ones before giving `so_far`.
+    pub(crate) fn may_contain_strings(self, so_far: bool, may: bool) -> bool {
+        match self {
+            SetOperation::Union => so_far || may,
+            SetOperation::Intersection => so_far && may,
+            SetOperation::Subtraction => so_far,
+        }
+    }
+}
+
 /// The early errors of the two lists of a modifier group: a modifier twice in one list, in
 /// both lists, or both lists empty with a `-` (`#sec-patterns-static-semantics-early-errors`,
 /// Atom). Each list is a set of bits; `repeated` tells whether a list named one twice.

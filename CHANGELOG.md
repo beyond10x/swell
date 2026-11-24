@@ -12,6 +12,13 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- Regular expressions with the flag `v`: classes with union, intersection (`&&`),
+  subtraction (`--`) and nested classes, `\q{...}` with its strings, and the seven
+  properties of strings (`\p{RGI_Emoji}` and the six it is made of) from a sixteenth
+  generated table of the pinned Unicode data. With `i` the set is folded before a
+  complement is taken. A class costs one step per operand, and the lengths of its strings
+  besides. No construct of the fifth slice is refused any more; five patterns that the
+  grammar of `v` forbids are early errors.
 - Generator methods of object literals, `{ *g() {} }`, with their early errors, the fifth
   story of the seventh slice. A `yield` in the computed name of one belongs to the generator
   around the literal.

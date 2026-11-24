@@ -129,6 +129,7 @@ fn node(p: &Pattern, id: NodeId) -> String {
                 format!("[{}]", items.join(" "))
             }
         }
+        Node::ClassSet { ops } => format!("[v {} ops]", p.class_set_ops(ops).len()),
         Node::Group { number, name, body } => match name {
             Some(name) => format!("({number}<{}> {})", p.name(name), node(p, body)),
             None => format!("({number} {})", node(p, body)),

@@ -18,10 +18,17 @@
 //! of Script_Extensions one over the ranges `ScriptExtensions.txt` lists and one over the list of
 //! scripts of the range found (at most 21 entries), or else one over the script's ranges. No test
 //! copies a table or builds a union.
+//!
+//! The properties of strings of `\p{...}` under `v` ([`StringProperty`],
+//! `#table-binary-unicode-properties-of-strings`) are tested the same way: a code point by one
+//! binary search per table, a sequence by one binary search per table of sorted sequences, each
+//! comparison at most [`LONGEST_STRING`] code points; `RGI_Emoji` by the six tables it joins.
 
 use crate::in_ranges;
+use crate::simple_case_fold_equivalents;
 use crate::tables::{
-    binary_properties, general_category, property_names, script, script_extensions,
+    binary_properties, general_category, properties_of_strings, property_names, script,
+    script_extensions,
 };
 
 /// The largest code point.
@@ -404,4 +411,123 @@ pub fn is_id_start(c: u32) -> bool {
 /// surrogate and a value above U+10FFFF have none.
 pub fn is_id_continue(c: u32) -> bool {
     in_ranges(binary_properties::ID_CONTINUE, c)
+}
+
+/// The most code points of a sequence of any property of strings: a match tries at most this
+/// many lengths at one position for one property. The generator states it in the table.
+pub const LONGEST_STRING: usize = properties_of_strings::LONGEST;
+
+/// A binary property of strings of ECMA-262's table (`#table-binary-unicode-properties-of-strings`)
+/// that `\p{...}` names under the flag `v`: a set of single code points and of sequences of two
+/// code points or more. `RGI_Emoji` is the union of the other six, tested as such: no table is
+/// joined.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct StringProperty(u8);
+
+/// The property of strings `name` as ECMA-262's table writes it (it gives no alias), or `None`.
+/// `name` is the code units of the pattern.
+pub fn string_property(name: &[u16]) -> Option<StringProperty> {
+    find(properties_of_strings::NAMES, name).map(StringProperty)
+}
+
+impl StringProperty {
+    /// The tables the property is made of: its own, or the six of `RGI_Emoji`.
+    fn parts(self) -> std::ops::Range<usize> {
+        if self.0 == properties_of_strings::UNION {
+            0..properties_of_strings::SINGLES.len()
+        } else {
+            let at = usize::from(self.0);
+            at..at + 1
+        }
+    }
+
+    /// Its name in ECMA-262's table.
+    pub fn name(self) -> &'static str {
+        properties_of_strings::NAMES
+            .iter()
+            .find(|&&(_, number)| number == self.0)
+            .map(|&(name, _)| name)
+            .unwrap_or_default()
+    }
+
+    /// Whether the single code point `c` is in the property: one binary search per table of
+    /// [`StringProperty`] (six for `RGI_Emoji`).
+    pub fn contains(self, c: u32) -> bool {
+        self.parts().any(|at| {
+            properties_of_strings::SINGLES
+                .get(at)
+                .is_some_and(|ranges| in_ranges(ranges, c))
+        })
+    }
+
+    /// Whether `sequence`, of two code points or more, is a sequence of the property: one binary
+    /// search per table, each comparison at most [`StringProperty::longest`] code points. A
+    /// sequence of fewer than two code points is none ([`StringProperty::contains`] tests one).
+    pub fn contains_sequence(self, sequence: &[u32]) -> bool {
+        sequence.len() >= 2
+            && self.parts().any(|at| {
+                properties_of_strings::SEQUENCES
+                    .get(at)
+                    .is_some_and(|list| list.binary_search(&sequence).is_ok())
+            })
+    }
+
+    /// Whether a sequence of the property has the simple case folding of `sequence` at each of
+    /// its code points (MaybeSimpleCaseFolding, `#sec-maybesimplecasefolding`, applied to the
+    /// property and to the subject). No sequence of the tables has two code points that have a
+    /// case equivalent (`the_properties_of_strings_resolve` holds it), so a sequence of the
+    /// subject with two such code points matches none, and one with one is tried with each of
+    /// its at most [`crate::MOST_CASE_FOLD_EQUIVALENTS`] equivalents in its place: at most that
+    /// many lookups of [`StringProperty::contains_sequence`].
+    pub fn contains_sequence_folded(self, sequence: &[u32]) -> bool {
+        if sequence.len() < 2 || sequence.len() > LONGEST_STRING {
+            return false;
+        }
+        let mut cased = None;
+        for (at, &c) in sequence.iter().enumerate() {
+            if simple_case_fold_equivalents(c).nth(1).is_some() {
+                if cased.is_some() {
+                    return false;
+                }
+                cased = Some(at);
+            }
+        }
+        let Some(at) = cased else {
+            return self.contains_sequence(sequence);
+        };
+        let mut window = [0u32; LONGEST_STRING];
+        let Some(window) = window.get_mut(..sequence.len()) else {
+            return false;
+        };
+        window.copy_from_slice(sequence);
+        let Some(c) = sequence.get(at).copied() else {
+            return false;
+        };
+        simple_case_fold_equivalents(c).any(|equivalent| {
+            if let Some(slot) = window.get_mut(at) {
+                *slot = equivalent;
+            }
+            self.contains_sequence(window)
+        })
+    }
+
+    /// The most code points of one of its sequences, 1 when it has none: the generator states
+    /// it per table.
+    pub fn longest(self) -> usize {
+        self.parts()
+            .filter_map(|at| properties_of_strings::LONGEST_OF.get(at).copied())
+            .max()
+            .unwrap_or(1)
+    }
+
+    /// Its sequences of two code points or more: for `RGI_Emoji` those of the six tables one
+    /// after the other.
+    pub fn sequences(self) -> impl Iterator<Item = &'static [u32]> {
+        let parts = self.parts();
+        properties_of_strings::SEQUENCES
+            .get(parts)
+            .unwrap_or(&[])
+            .iter()
+            .flat_map(|list| list.iter().copied())
+    }
 }

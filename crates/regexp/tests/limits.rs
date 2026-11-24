@@ -448,6 +448,22 @@ fn families() -> Vec<Family> {
             false,
             |k| "(?-i:[\\x80-\\uffff]k)[^a-z\\w\\p{Lu}](s)\\1".repeat(k),
         ),
+        (
+            "class set expressions with strings and properties of strings, under v",
+            "v",
+            false,
+            |k| "[[a-z]&&\\p{L}&&[^x]][[\\w--\\d]--_][\\q{ab|c|}\\p{RGI_Emoji}[^\\d]]".repeat(k),
+        ),
+        (
+            "nested classes of every operation, under v",
+            "vi",
+            false,
+            |k| {
+                let open = ["[a&&", "[\\q{xy|}--", "[\\p{RGI_Emoji}"];
+                let opened: String = open.iter().cycle().take(k).copied().collect();
+                format!("{opened}a{}", "]".repeat(k))
+            },
+        ),
     ]
 }
 
@@ -468,7 +484,18 @@ fn the_parse_is_linear_in_the_pattern() {
             3 * sizes.0 <= sizes.1 && sizes.1 <= 5 * sizes.0,
             "{family}: {sizes:?}"
         );
-        let (a, b) = (work_of(family, &small, f), work_of(family, &large, f));
+        let clock = std::time::Instant::now();
+        let a = work_of(family, &small, f);
+        let (at_small, clock) = (clock.elapsed(), std::time::Instant::now());
+        let b = work_of(family, &large, f);
+        let at_large = clock.elapsed();
+        if f.contains('v') {
+            println!(
+                "{family}: polls, bytes charged, name visits {a:?} in {at_small:?} at {} code \
+                 units and {b:?} in {at_large:?} at {}",
+                sizes.0, sizes.1
+            );
+        }
         for (what, (a, b)) in ["polls", "bytes charged", "name visits"]
             .into_iter()
             .zip(a.into_iter().zip(b))
