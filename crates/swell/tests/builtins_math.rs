@@ -2,9 +2,10 @@
 //! (`#sec-value-properties-of-the-math-object`), `Math[@@toStringTag]`
 //! (`#sec-math-%symbol.tostringtag%`), `Math.max` (`#sec-math.max`) and the functions whose
 //! answer IEEE 754 or integer arithmetic makes exact: `abs`, `ceil`, `clz32`, `floor`,
-//! `fround`, `imul`, `min`, `round`, `sign`, `sqrt` and `trunc`. The tables below give the order
-//! in which `%Math%` defines its own properties; a story that adds a member adds its row at its
-//! place.
+//! `fround`, `imul`, `min`, `round`, `sign`, `sqrt` and `trunc`; and the 22 functions whose
+//! answer IEEE 754 does not fix, `acos` to `tanh`, `hypot` and `pow`, which answer what
+//! `swell_num::math` answers. The tables below give the order in which `%Math%` defines its own
+//! properties; a story that adds a member adds its row at its place.
 #![cfg(test)]
 
 use crate::support;
@@ -48,6 +49,34 @@ const FUNCTIONS: [(&str, u32); 11] = [
     ("sign", 1),
     ("sqrt", 1),
     ("trunc", 1),
+];
+
+/// The functions of `Math` whose answer IEEE 754 does not fix, after those of `FUNCTIONS`, in
+/// the order `%Math%` defines them, each with the "length" the standard gives it (21.3.2.8,
+/// 21.3.2.19 and 21.3.2.27: 2 for `atan2`, `hypot` and `pow`).
+const APPROXIMATED: [(&str, u32); 22] = [
+    ("acos", 1),
+    ("acosh", 1),
+    ("asin", 1),
+    ("asinh", 1),
+    ("atan", 1),
+    ("atan2", 2),
+    ("atanh", 1),
+    ("cbrt", 1),
+    ("cos", 1),
+    ("cosh", 1),
+    ("exp", 1),
+    ("expm1", 1),
+    ("hypot", 2),
+    ("log", 1),
+    ("log10", 1),
+    ("log1p", 1),
+    ("log2", 1),
+    ("pow", 2),
+    ("sin", 1),
+    ("sinh", 1),
+    ("tan", 1),
+    ("tanh", 1),
 ];
 
 /// A valueOf that records its call and answers 1.
@@ -251,7 +280,7 @@ fn the_constants_are_the_numbers_of_the_standard_and_read_only() {
 fn the_functions_have_their_lengths_and_names() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
-    for (name, length) in FUNCTIONS {
+    for (name, length) in FUNCTIONS.into_iter().chain(APPROXIMATED) {
         let source = format!(
             "var d = Object.getOwnPropertyDescriptor(Math, \"{name}\"); \
              [typeof d.value, d.writable, d.enumerable, d.configurable, \
@@ -279,6 +308,7 @@ fn math_has_exactly_the_own_keys_of_its_tables_in_order() {
     let names: Vec<&str> = std::iter::once("max")
         .chain(VALUE_PROPERTIES.iter().map(|&(name, _)| name))
         .chain(FUNCTIONS.iter().map(|&(name, _)| name))
+        .chain(APPROXIMATED.iter().map(|&(name, _)| name))
         .collect();
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
@@ -952,7 +982,7 @@ fn min_and_max_over_many_arguments_end_at_an_interrupt() {
 #[test]
 fn a_symbol_argument_throws_a_type_error() {
     with_math(|cx, global, math| {
-        for (name, length) in FUNCTIONS {
+        for (name, length) in FUNCTIONS.into_iter().chain(APPROXIMATED) {
             let function = get(cx, math, name);
             assert!(matches!(function, Value::Object(_)), "Math.{name}");
             let symbol_constructor = get(cx, global, "Symbol");
@@ -968,4 +998,778 @@ fn a_symbol_argument_throws_a_type_error() {
             }
         }
     });
+}
+
+/// 1 + 2^-52, the Number after 1.
+const ABOVE_ONE: f64 = 1.000_000_000_000_000_2;
+/// 1 - 2^-53, the Number before 1.
+const BELOW_ONE: f64 = 0.999_999_999_999_999_9;
+const NAN: f64 = f64::NAN;
+const INF: f64 = f64::INFINITY;
+
+/// An argument of the tables below: a Number, or a value that ToNumber (`#sec-tonumber`)
+/// converts before the function reads it.
+#[derive(Clone, Copy, Debug)]
+enum Arg {
+    N(f64),
+    S(&'static str),
+    Undefined,
+    Null,
+    Bool(bool),
+}
+
+use Arg::{Bool, N, Null, S, Undefined};
+
+/// `arg` as a value of the agent of `cx`.
+fn arg_value(cx: &mut Cx<'_, TestHost>, arg: Arg) -> Value {
+    match arg {
+        N(number) => Value::Number(number),
+        S(source) => string(cx, source),
+        Undefined => Value::Undefined,
+        Null => Value::Null,
+        Bool(flag) => Value::Boolean(flag),
+    }
+}
+
+/// The one-argument function `Math[name]` over a table of 12 arguments, each with the answer the
+/// draft fixes for it, to the bit; and with no argument, which converts `undefined` to NaN.
+fn fixed_unary(name: &str, table: &[(Arg, f64); 12]) {
+    with_math(|cx, _, math| {
+        assert_same(call(cx, math, name, &[]), NAN, &format!("{name}()"));
+        for &(arg, answer) in table {
+            let value = arg_value(cx, arg);
+            let got = call(cx, math, name, &[value]);
+            assert_same(got, answer, &format!("{name}({arg:?})"));
+        }
+    });
+}
+
+/// `#sec-math.acos`: NaN, and a Number above 1 or below -1 (`acos(2)`), give NaN; 1 gives +0.
+#[test]
+fn acos_of_its_table() {
+    fixed_unary(
+        "acos",
+        &[
+            (N(NAN), NAN),
+            (N(2.0), NAN),
+            (N(-2.0), NAN),
+            (N(ABOVE_ONE), NAN),
+            (N(-ABOVE_ONE), NAN),
+            (N(INF), NAN),
+            (N(-INF), NAN),
+            (N(1.0), 0.0),
+            (S("1"), 0.0),
+            (Bool(true), 0.0),
+            (Undefined, NAN),
+            (S("x"), NAN),
+        ],
+    );
+}
+
+/// `#sec-math.acosh`: NaN and +∞ give themselves, 1 gives +0, below 1 NaN (`acosh(0.5)`).
+#[test]
+fn acosh_of_its_table() {
+    fixed_unary(
+        "acosh",
+        &[
+            (N(NAN), NAN),
+            (N(INF), INF),
+            (N(1.0), 0.0),
+            (N(0.5), NAN),
+            (N(BELOW_ONE), NAN),
+            (N(0.0), NAN),
+            (N(-0.0), NAN),
+            (N(-1.0), NAN),
+            (N(-INF), NAN),
+            (Bool(true), 0.0),
+            (S("Infinity"), INF),
+            (Null, NAN),
+        ],
+    );
+}
+
+/// `#sec-math.asin`: NaN and the zeros give themselves; above 1 or below -1 NaN
+/// (`asin(-1.1)`).
+#[test]
+fn asin_of_its_table() {
+    fixed_unary(
+        "asin",
+        &[
+            (N(NAN), NAN),
+            (N(0.0), 0.0),
+            (N(-0.0), -0.0),
+            (N(-1.1), NAN),
+            (N(1.1), NAN),
+            (N(ABOVE_ONE), NAN),
+            (N(INF), NAN),
+            (N(-INF), NAN),
+            (S("-0"), -0.0),
+            (Null, 0.0),
+            (Bool(false), 0.0),
+            (Undefined, NAN),
+        ],
+    );
+}
+
+/// The table of a function that gives back every argument that is not a non-zero finite
+/// Number: `asinh`, `cbrt` and `sinh`.
+const NOT_NON_ZERO_FINITE: [(Arg, f64); 12] = [
+    (N(NAN), NAN),
+    (N(0.0), 0.0),
+    (N(-0.0), -0.0),
+    (N(INF), INF),
+    (N(-INF), -INF),
+    (S("-0"), -0.0),
+    (Null, 0.0),
+    (S(""), 0.0),
+    (Bool(false), 0.0),
+    (S("Infinity"), INF),
+    (S("-Infinity"), -INF),
+    (Undefined, NAN),
+];
+
+/// `#sec-math.asinh`: an argument that is not a non-zero finite Number gives itself.
+#[test]
+fn asinh_of_its_table() {
+    fixed_unary("asinh", &NOT_NON_ZERO_FINITE);
+}
+
+/// `#sec-math.atan`: NaN and the zeros give themselves (the infinities answer an approximation
+/// of ±π/2, which the draft does not fix).
+#[test]
+fn atan_of_its_table() {
+    fixed_unary(
+        "atan",
+        &[
+            (N(NAN), NAN),
+            (N(0.0), 0.0),
+            (N(-0.0), -0.0),
+            (S("-0"), -0.0),
+            (S(" -0 "), -0.0),
+            (Null, 0.0),
+            (Bool(false), 0.0),
+            (S(""), 0.0),
+            (S("\t"), 0.0),
+            (Undefined, NAN),
+            (S("x"), NAN),
+            (S("NaN"), NAN),
+        ],
+    );
+}
+
+/// `#sec-math.atanh`: NaN and the zeros give themselves; above 1 or below -1 NaN; 1 gives +∞
+/// (`atanh(1)`) and -1 gives -∞.
+#[test]
+fn atanh_of_its_table() {
+    fixed_unary(
+        "atanh",
+        &[
+            (N(NAN), NAN),
+            (N(0.0), 0.0),
+            (N(-0.0), -0.0),
+            (N(1.0), INF),
+            (N(-1.0), -INF),
+            (N(ABOVE_ONE), NAN),
+            (N(-ABOVE_ONE), NAN),
+            (N(2.0), NAN),
+            (N(INF), NAN),
+            (N(-INF), NAN),
+            (Bool(true), INF),
+            (S("-1"), -INF),
+        ],
+    );
+}
+
+/// `#sec-math.cbrt`: an argument that is not a non-zero finite Number gives itself.
+#[test]
+fn cbrt_of_its_table() {
+    fixed_unary("cbrt", &NOT_NON_ZERO_FINITE);
+}
+
+/// `#sec-math.cos`: an argument that is not finite gives NaN; the zeros give 1 (`cos(±0)`).
+#[test]
+fn cos_of_its_table() {
+    fixed_unary(
+        "cos",
+        &[
+            (N(NAN), NAN),
+            (N(INF), NAN),
+            (N(-INF), NAN),
+            (N(0.0), 1.0),
+            (N(-0.0), 1.0),
+            (S("-0"), 1.0),
+            (Null, 1.0),
+            (Bool(false), 1.0),
+            (S(""), 1.0),
+            (Undefined, NAN),
+            (S("x"), NAN),
+            (S("Infinity"), NAN),
+        ],
+    );
+}
+
+/// `#sec-math.cosh`: NaN gives NaN, the infinities +∞, the zeros 1 (`cosh(±0)`).
+#[test]
+fn cosh_of_its_table() {
+    fixed_unary(
+        "cosh",
+        &[
+            (N(NAN), NAN),
+            (N(INF), INF),
+            (N(-INF), INF),
+            (N(0.0), 1.0),
+            (N(-0.0), 1.0),
+            (S("-0"), 1.0),
+            (Null, 1.0),
+            (Bool(false), 1.0),
+            (S(""), 1.0),
+            (S("-Infinity"), INF),
+            (Undefined, NAN),
+            (S("x"), NAN),
+        ],
+    );
+}
+
+/// `#sec-math.exp`: NaN and +∞ give themselves, the zeros 1 (`exp(±0)`), -∞ gives +0.
+#[test]
+fn exp_of_its_table() {
+    fixed_unary(
+        "exp",
+        &[
+            (N(NAN), NAN),
+            (N(INF), INF),
+            (N(-INF), 0.0),
+            (N(0.0), 1.0),
+            (N(-0.0), 1.0),
+            (S("-0"), 1.0),
+            (Null, 1.0),
+            (Bool(false), 1.0),
+            (S(""), 1.0),
+            (S("-Infinity"), 0.0),
+            (Undefined, NAN),
+            (S("Infinity"), INF),
+        ],
+    );
+}
+
+/// `#sec-math.expm1`: NaN, the zeros and +∞ give themselves, -∞ gives -1.
+#[test]
+fn expm1_of_its_table() {
+    fixed_unary(
+        "expm1",
+        &[
+            (N(NAN), NAN),
+            (N(0.0), 0.0),
+            (N(-0.0), -0.0),
+            (N(INF), INF),
+            (N(-INF), -1.0),
+            (S("-0"), -0.0),
+            (Null, 0.0),
+            (Bool(false), 0.0),
+            (S(""), 0.0),
+            (S("-Infinity"), -1.0),
+            (Undefined, NAN),
+            (S("Infinity"), INF),
+        ],
+    );
+}
+
+/// The table of a logarithm (`log`, `log10`, `log2`): NaN and +∞ give themselves, 1 gives +0,
+/// the zeros -∞, below -0 NaN (`log(-1)`); then the exact cases of the function.
+fn logarithm_table(exact: [(Arg, f64); 4]) -> [(Arg, f64); 12] {
+    let [a, b, c, d] = exact;
+    [
+        (N(NAN), NAN),
+        (N(INF), INF),
+        (N(1.0), 0.0),
+        (N(0.0), -INF),
+        (N(-0.0), -INF),
+        (N(-1.0), NAN),
+        (N(-INF), NAN),
+        (N(-5e-324), NAN),
+        a,
+        b,
+        c,
+        d,
+    ]
+}
+
+/// `#sec-math.log`: the table of a logarithm, and conversions.
+#[test]
+fn log_of_its_table() {
+    fixed_unary(
+        "log",
+        &logarithm_table([
+            (Bool(true), 0.0),
+            (Null, -INF),
+            (S("-0"), -INF),
+            (Undefined, NAN),
+        ]),
+    );
+}
+
+/// `#sec-math.log10`: the table of a logarithm, and `log10(10)`, `log10(100)` and
+/// `log10(1000)` of test262, exact.
+#[test]
+fn log10_of_its_table() {
+    fixed_unary(
+        "log10",
+        &logarithm_table([
+            (N(10.0), 1.0),
+            (N(100.0), 2.0),
+            (N(1000.0), 3.0),
+            (S("1000"), 3.0),
+        ]),
+    );
+}
+
+/// `#sec-math.log1p`: NaN, the zeros and +∞ give themselves, -1 gives -∞, below -1 NaN.
+#[test]
+fn log1p_of_its_table() {
+    fixed_unary(
+        "log1p",
+        &[
+            (N(NAN), NAN),
+            (N(0.0), 0.0),
+            (N(-0.0), -0.0),
+            (N(INF), INF),
+            (N(-1.0), -INF),
+            (N(-ABOVE_ONE), NAN),
+            (N(-2.0), NAN),
+            (N(-INF), NAN),
+            (S("-1"), -INF),
+            (Null, 0.0),
+            (S("-0"), -0.0),
+            (Undefined, NAN),
+        ],
+    );
+}
+
+/// `#sec-math.log2`: the table of a logarithm, and `log2(2)`, `log2(4)` and `log2(8)` of
+/// test262, exact.
+#[test]
+fn log2_of_its_table() {
+    fixed_unary(
+        "log2",
+        &logarithm_table([(N(2.0), 1.0), (N(4.0), 2.0), (N(8.0), 3.0), (S("8"), 3.0)]),
+    );
+}
+
+/// The table of `sin` and `tan`: NaN and the zeros give themselves, the infinities NaN.
+const SIN_AND_TAN: [(Arg, f64); 12] = [
+    (N(NAN), NAN),
+    (N(0.0), 0.0),
+    (N(-0.0), -0.0),
+    (N(INF), NAN),
+    (N(-INF), NAN),
+    (S("-0"), -0.0),
+    (Null, 0.0),
+    (Bool(false), 0.0),
+    (S(""), 0.0),
+    (Undefined, NAN),
+    (S("Infinity"), NAN),
+    (S("-Infinity"), NAN),
+];
+
+/// `#sec-math.sin`.
+#[test]
+fn sin_of_its_table() {
+    fixed_unary("sin", &SIN_AND_TAN);
+}
+
+/// `#sec-math.sinh`: an argument that is not a non-zero finite Number gives itself.
+#[test]
+fn sinh_of_its_table() {
+    fixed_unary("sinh", &NOT_NON_ZERO_FINITE);
+}
+
+/// `#sec-math.tan`.
+#[test]
+fn tan_of_its_table() {
+    fixed_unary("tan", &SIN_AND_TAN);
+}
+
+/// `#sec-math.tanh`: NaN and the zeros give themselves, +∞ gives 1 (`tanh(+∞)`), -∞ gives -1.
+#[test]
+fn tanh_of_its_table() {
+    fixed_unary(
+        "tanh",
+        &[
+            (N(NAN), NAN),
+            (N(0.0), 0.0),
+            (N(-0.0), -0.0),
+            (N(INF), 1.0),
+            (N(-INF), -1.0),
+            (S("-0"), -0.0),
+            (Null, 0.0),
+            (Bool(false), 0.0),
+            (S("Infinity"), 1.0),
+            (S("-Infinity"), -1.0),
+            (Undefined, NAN),
+            (S("x"), NAN),
+        ],
+    );
+}
+
+/// `#sec-math.atan2`: a NaN on either side gives NaN; y +0 with x above +0 or +0 gives +0, y -0
+/// so gives -0; y above +0 with x +∞ gives +0, below -0 gives -0. The other cases of the
+/// clause answer approximations of multiples of π, which the draft does not fix.
+#[test]
+fn atan2_of_its_table() {
+    with_math(|cx, _, math| {
+        assert_same(call(cx, math, "atan2", &[]), NAN, "atan2()");
+        assert_same(
+            call(cx, math, "atan2", &[Value::Number(0.0)]),
+            NAN,
+            "atan2(0)",
+        );
+        for (y, x, answer) in [
+            (NAN, 1.0, NAN),
+            (1.0, NAN, NAN),
+            (NAN, NAN, NAN),
+            (0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, INF, 0.0),
+            (-0.0, 0.0, -0.0),
+            (-0.0, 5.0, -0.0),
+            (-0.0, INF, -0.0),
+            (1.0, INF, 0.0),
+            (-1.0, INF, -0.0),
+            (-5e-324, INF, -0.0),
+        ] {
+            let got = call(cx, math, "atan2", &[Value::Number(y), Value::Number(x)]);
+            assert_same(got, answer, &format!("atan2({y:?}, {x:?})"));
+        }
+    });
+}
+
+/// `#sec-math.pow` is Number::exponentiate (`#sec-numeric-types-number-exponentiate`): every
+/// line of its table before the last, `pow(-8, 1/3)` NaN (a negative base with an exponent that
+/// is not integral), `pow(1, ∞)` NaN, and `pow(1, -2^31)` 1 of test262.
+#[test]
+fn pow_of_its_table() {
+    with_math(|cx, _, math| {
+        assert_same(call(cx, math, "pow", &[]), NAN, "pow()");
+        assert_same(call(cx, math, "pow", &[Value::Number(1.0)]), NAN, "pow(1)");
+        for (base, exponent, answer) in [
+            (1.0, NAN, NAN),
+            (NAN, 0.0, 1.0),
+            (NAN, -0.0, 1.0),
+            (NAN, 1.0, NAN),
+            (INF, 1.0, INF),
+            (INF, -1.0, 0.0),
+            (-INF, 3.0, -INF),
+            (-INF, 2.0, INF),
+            (-INF, -3.0, -0.0),
+            (-INF, -2.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (0.0, -1.0, INF),
+            (-0.0, 3.0, -0.0),
+            (-0.0, 2.0, 0.0),
+            (-0.0, -3.0, -INF),
+            (-0.0, -2.0, INF),
+            (2.0, INF, INF),
+            (1.0, INF, NAN),
+            (-1.0, INF, NAN),
+            (0.5, INF, 0.0),
+            (2.0, -INF, 0.0),
+            (1.0, -INF, NAN),
+            (0.5, -INF, INF),
+            (-8.0, 1.0 / 3.0, NAN),
+            (-1.5, 0.5, NAN),
+            (1.0, -2_147_483_648.0, 1.0),
+        ] {
+            let got = call(
+                cx,
+                math,
+                "pow",
+                &[Value::Number(base), Value::Number(exponent)],
+            );
+            assert_same(got, answer, &format!("pow({base:?}, {exponent:?})"));
+        }
+    });
+}
+
+/// `#sec-math.hypot`: an infinite argument gives +∞ even beside a NaN, then a NaN gives NaN,
+/// then arguments that are all zero (or none) give +0; `hypot(3, 4)` of test262 is 5.
+#[test]
+fn hypot_of_its_table() {
+    with_math(|cx, _, math| {
+        let tables: [(&[f64], f64); 13] = [
+            (&[], 0.0),
+            (&[INF], INF),
+            (&[-INF], INF),
+            (&[NAN, -INF], INF),
+            (&[INF, NAN], INF),
+            (&[1.0, NAN, -INF], INF),
+            (&[NAN], NAN),
+            (&[1.0, NAN], NAN),
+            (&[NAN, 0.0], NAN),
+            (&[0.0], 0.0),
+            (&[-0.0], 0.0),
+            (&[-0.0, 0.0, -0.0], 0.0),
+            (&[3.0, 4.0], 5.0),
+        ];
+        for (args, answer) in tables {
+            let values: Vec<Value> = args.iter().map(|&n| Value::Number(n)).collect();
+            let got = call(cx, math, "hypot", &values);
+            assert_same(got, answer, &format!("hypot{args:?}"));
+        }
+        assert_same(
+            call(cx, math, "hypot", &[Value::Undefined]),
+            NAN,
+            "hypot(undefined)",
+        );
+        let zero = string(cx, "-0");
+        assert_same(call(cx, math, "hypot", &[zero]), 0.0, "hypot(\"-0\")");
+    });
+}
+
+/// `#sec-math.atan2`, `#sec-math.pow` and `#sec-math.hypot`: ToNumber of each argument in
+/// order (y before x, base before exponent) before the answer, and of no argument after those
+/// the function has; `hypot(a, b, c)` converts all three even when the first is NaN or
+/// infinite; a conversion that throws ends the call before the next.
+#[test]
+fn atan2_pow_and_hypot_convert_their_arguments_in_order() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    for (expression, shown) in [
+        ("Math.atan2(o('y', 0), o('x', 1), o('z', 2))", "0:y,x"),
+        (
+            "Math.pow(o('base', 2), o('exponent', 10), o('z', 2))",
+            "1024:base,exponent",
+        ),
+        ("Math.hypot(o('a', 3), o('b', 4))", "5:a,b"),
+        ("Math.hypot(o('a', NaN), o('b', 3), o('c', 4))", "NaN:a,b,c"),
+        (
+            "Math.hypot(o('a', Infinity), o('b', NaN), o('c', 4))",
+            "Infinity:a,b,c",
+        ),
+        (
+            "Math.hypot(o('a', -Infinity), o('b', 1), o('c', 2))",
+            "Infinity:a,b,c",
+        ),
+        (
+            "(function () { try { Math.hypot(o('a', 1), thrower('b'), o('c', 2)); } \
+             catch (e) { return e; } }())",
+            "thrown:a,b",
+        ),
+        (
+            "(function () { try { Math.pow(thrower('base'), o('exponent', 2)); } \
+             catch (e) { return e; } }())",
+            "thrown:base",
+        ),
+        (
+            "(function () { try { Math.atan2(o('y', 1), thrower('x')); } \
+             catch (e) { return e; } }())",
+            "thrown:y,x",
+        ),
+    ] {
+        let source = format!(
+            "var log = []; \
+             function o(name, value) {{ \
+               return {{ valueOf: function () {{ log.push(name); return value; }} }}; }} \
+             function thrower(name) {{ \
+               return {{ valueOf: function () {{ log.push(name); throw 'thrown'; }} }}; }} \
+             {expression} + ':' + log.join()"
+        );
+        assert_eq!(
+            eval_text(&mut agent, &realm, &source),
+            Shown::Normal(format!("\"{shown}\"")),
+            "{expression}"
+        );
+    }
+}
+
+/// The step budget (decision 3): `Math.hypot` charges a step per argument while it converts
+/// them and a step per element of its list before `swell_num::math::hypot` runs over it, so a
+/// call with 5,000 arguments under a budget of 2,000 steps ends in `Terminated(StepBudget)`,
+/// where 900 arguments answer; the agent stays alive and its next entry runs.
+#[test]
+fn hypot_over_many_arguments_ends_at_the_step_budget() {
+    let mut limits = limits();
+    limits.steps_per_entry = 2_000;
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    let numbers: Vec<f64> = (0..5_000).map(f64::from).collect();
+    let many: Vec<Value> = numbers.iter().map(|&n| Value::Number(n)).collect();
+    let entry = |agent: &mut Agent<TestHost>, args: &[Value]| {
+        agent
+            .with_cx(&realm, |cx| {
+                let global = object(cx, &global_root);
+                let math = get_object(cx, global, "Math");
+                let function = get(cx, math, "hypot");
+                cx.call(function, Value::Object(math), args).unwrap()
+            })
+            .unwrap()
+    };
+    let answer = swell_num::math::hypot(&numbers[..900]);
+    assert_eq!(
+        entry(&mut agent, &many[..900]),
+        Ok(Value::Number(answer)),
+        "hypot of 900"
+    );
+    assert_eq!(
+        entry(&mut agent, &many),
+        Err(Abrupt::Terminated(Termination::StepBudget)),
+        "hypot of 5000"
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "Math.hypot(3, 4)"),
+        Shown::Normal("5".to_string())
+    );
+}
+
+/// The memory budget (`docs/design/engine.md`, "Memory budget"): `Math.hypot` charges its list
+/// of coerced Numbers, 8 bytes per argument, before it makes it. A call with 100,000 arguments
+/// under a budget that holds the copy of the arguments into the call (as a call of
+/// `Function.prototype`, which makes no list, shows by answering) and half of the list ends in
+/// `Terminated(MemoryBudget)`; the agent stays alive and its next entry runs. With the whole
+/// list and room the same call answers what `swell_num::math::hypot` answers.
+#[test]
+fn hypot_over_many_arguments_ends_at_the_memory_budget() {
+    const ARGUMENTS: u32 = 100_000;
+    let copy = u64::from(ARGUMENTS) * size_of::<Value>() as u64;
+    let list = u64::from(ARGUMENTS) * size_of::<f64>() as u64;
+    let mut agent = agent().unwrap();
+    let _realm = realm(&mut agent);
+    assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+    let base = agent.heap_bytes().unwrap();
+    let numbers: Vec<f64> = (0..ARGUMENTS).map(f64::from).collect();
+    let many: Vec<Value> = numbers.iter().map(|&n| Value::Number(n)).collect();
+    let entry = |agent: &mut Agent<TestHost>, realm: &Realm, holder: &str, name: &str| {
+        let global_root = global(agent, realm);
+        agent
+            .with_cx(realm, |cx| {
+                let global = object(cx, &global_root);
+                let holder = get_object(cx, global, holder);
+                let function = get(cx, holder, name);
+                cx.call(function, Value::Object(holder), &many).unwrap()
+            })
+            .unwrap()
+    };
+    let answer = swell_num::math::hypot(&numbers);
+    for (memory, fits) in [
+        (base + copy + list / 2, false),
+        (base + copy + 2 * list, true),
+    ] {
+        let mut limits = limits();
+        limits.memory_bytes = memory;
+        let mut agent = agent_with(limits).unwrap();
+        let realm = realm(&mut agent);
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        assert_eq!(
+            entry(&mut agent, &realm, "Function", "prototype"),
+            Ok(Value::Undefined),
+            "the copy of the arguments fits {memory}"
+        );
+        let got = entry(&mut agent, &realm, "Math", "hypot");
+        if fits {
+            assert_eq!(got, Ok(Value::Number(answer)), "hypot under {memory}");
+        } else {
+            assert_eq!(
+                got,
+                Err(Abrupt::Terminated(Termination::MemoryBudget)),
+                "hypot under {memory}"
+            );
+        }
+        assert_eq!(agent.state(), AgentState::Alive);
+        assert_eq!(
+            eval_text(&mut agent, &realm, "Math.hypot(3, 4)"),
+            Shown::Normal("5".to_string())
+        );
+    }
+}
+
+/// The interrupt (HOST-96, as `tests/interrupt.rs` holds it): a valueOf of the first argument
+/// that raises the interrupt ends `Math.hypot`, `Math.atan2` and `Math.pow` in
+/// `Terminated(Interrupted)` before the second argument is converted; the statement after the
+/// call does not run.
+#[test]
+fn hypot_atan2_and_pow_end_at_an_interrupt_between_two_arguments() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    define_function(&mut agent, &realm, "interruptNow", 0, interrupt_now, false);
+    for name in ["hypot", "atan2", "pow"] {
+        HANDLE.with(|slot| slot.set(Some(agent.interrupt_handle())));
+        let source = format!(
+            "var seen = 0, after = 0; \
+             var o = {{ valueOf: interruptNow }}; \
+             var p = {{ valueOf: function () {{ seen = seen + 1; return 0; }} }}; \
+             Math.{name}(o, p); after = 1;"
+        );
+        assert_eq!(
+            eval_text(&mut agent, &realm, &source),
+            Shown::Terminated(Termination::Interrupted),
+            "{name}"
+        );
+        assert!(!agent.interrupt_handle().is_set());
+        assert_eq!(
+            eval_text(&mut agent, &realm, "seen + ',' + after"),
+            Shown::Normal("\"0,0\"".to_string()),
+            "{name}"
+        );
+    }
+    assert_eq!(agent.host().count, 3);
+}
+
+/// What `swell_num::math` answers for the function `name` of `APPROXIMATED` at `x`, and `y` for
+/// the second argument of `atan2`, `hypot` and `pow`: the function the steps of each end in.
+fn swell_num_answer(name: &str, x: f64, y: f64) -> f64 {
+    use swell_num::math;
+    match name {
+        "acos" => math::acos(x),
+        "acosh" => math::acosh(x),
+        "asin" => math::asin(x),
+        "asinh" => math::asinh(x),
+        "atan" => math::atan(x),
+        "atan2" => math::atan2(x, y),
+        "atanh" => math::atanh(x),
+        "cbrt" => math::cbrt(x),
+        "cos" => math::cos(x),
+        "cosh" => math::cosh(x),
+        "exp" => math::exp(x),
+        "expm1" => math::expm1(x),
+        "hypot" => math::hypot(&[x, y]),
+        "log" => math::log(x),
+        "log10" => math::log10(x),
+        "log1p" => math::log1p(x),
+        "log2" => math::log2(x),
+        "pow" => math::exponentiate(x, y),
+        "sin" => math::sin(x),
+        "sinh" => math::sinh(x),
+        "tan" => math::tan(x),
+        "tanh" => math::tanh(x),
+        other => panic!("no function of swell_num for {other}"),
+    }
+}
+
+/// Each of the 22 functions of `APPROXIMATED` over the 64 inputs of `INPUTS` (`atan2`, `hypot`
+/// and `pow` with a second argument taken 23 rows further on): 1,408 calls, each answer to the
+/// bit what `swell_num::math` answers for the same Numbers, so that each function is bound to
+/// its own. No answer is held to an accuracy here; the data of `swell-num` holds that.
+#[test]
+fn the_approximated_functions_over_a_table_of_64_inputs() {
+    let n = Value::Number;
+    let calls = with_math(|cx, _, math| {
+        let mut calls = 0;
+        for (name, length) in APPROXIMATED {
+            for (row, &x) in INPUTS.iter().enumerate() {
+                let y = INPUTS[(row + 23) % INPUTS.len()];
+                let args = [n(x), n(y)];
+                let args = &args[..usize::try_from(length).unwrap()];
+                let got = call(cx, math, name, args);
+                assert_same(
+                    got,
+                    swell_num_answer(name, x, y),
+                    &format!("{name}{args:?}"),
+                );
+                calls += 1;
+            }
+        }
+        calls
+    });
+    assert_eq!(calls, 1_408);
 }

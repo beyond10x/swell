@@ -132,7 +132,7 @@ HOST-131 pending slice 16
 HOST-132 test swell::collect::host_132_report_matches_heap_bytes
 HOST-133 test swell::determinism::host_133_same_calls_same_hooks_same_outcomes
 HOST-134 pending slice 16
-HOST-135 pending slice 4
+HOST-135 test swell::math_platform::host_135_a_script_prints_the_same_bytes_on_every_platform
 HOST-136 test swell::doc::compile_fail::host_136_agent_is_not_send
 HOST-137 test swell::scripts::host_137_nesting_error_names_parser_nesting_and_10_levels_parse
 HOST-138 pending slice 11
