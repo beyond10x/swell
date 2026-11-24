@@ -6,6 +6,8 @@
 //! (`#sec-iteratornext`), IteratorComplete (`#sec-iteratorcomplete`) and IteratorValue
 //! (`#sec-iteratorvalue`), IteratorClose (`#sec-iteratorclose`) and CreateIteratorResultObject
 //! (`#sec-createiterresultobject`). Written by `story:iterator-protocol-and-array-string-iterators`.
+//! GetIterator of the async kind, with CreateAsyncFromSyncIterator for a sync iterable, is
+//! [`Agent::get_async_iterator`], written by `story:for-await-and-async-from-sync-iterator`.
 //!
 //! The design is `docs/design/engine.md`, decision 3, "Iterators held by a builtin":
 //!
@@ -101,12 +103,53 @@ impl<H: Host> Agent<H> {
         self.get_iterator_from_method(object, method)
     }
 
+    /// GetIterator ( obj, async ) (`#sec-getiterator`): the method of `%Symbol.asyncIterator%`,
+    /// or CreateAsyncFromSyncIterator (`builtins/async_iteration.rs`) of the Iterator Record of
+    /// the method of `%Symbol.iterator%`. The caller holds `object` across the call; the record
+    /// answered is not kept.
+    pub(crate) fn get_async_iterator(&mut self, object: Value) -> Completion<IteratorRecord> {
+        let Some(symbols) = self.well_known() else {
+            return Err(self.fault());
+        };
+        // 1.a. Let method be ? GetMethod(obj, %Symbol.asyncIterator%).
+        let method = self.get_method(object, Key::Symbol(symbols.async_iterator))?;
+        if let Some(method) = method {
+            // 4. Return ? GetIteratorFromMethod(obj, method).
+            return self.get_iterator_from_method(object, method);
+        }
+        // 1.b.i. Let syncMethod be ? GetMethod(obj, %Symbol.iterator%).
+        let sync_method = self.get_method(object, Key::Symbol(symbols.iterator))?;
+        // 1.b.ii. If syncMethod is undefined, throw a TypeError exception.
+        let Some(sync_method) = sync_method else {
+            return Err(self.throw_error(ErrorKind::TypeError, "the value is not async iterable"));
+        };
+        // 1.b.iii. Let syncIteratorRecord be ? GetIteratorFromMethod(obj, syncMethod).
+        let sync = self.get_iterator_from_method(object, sync_method)?;
+        // 1.b.iv. Return CreateAsyncFromSyncIterator(syncIteratorRecord).
+        self.create_async_from_sync_iterator(sync)
+    }
+
     /// IteratorNext ( iteratorRecord ) (`#sec-iteratornext`) with no value: the call of
     /// [[NextMethod]] with [[Iterator]] as the this value holds both.
     fn iterator_next(&mut self, record: &mut IteratorRecord) -> Completion<ObjectRef> {
+        self.iterator_next_with(record, None)
+    }
+
+    /// IteratorNext ( iteratorRecord [ , value ] ) (`#sec-iteratornext`), with `value` when it
+    /// is present (`%AsyncFromSyncIteratorPrototype%.next`, `builtins/async_iteration.rs`).
+    pub(crate) fn iterator_next_with(
+        &mut self,
+        record: &mut IteratorRecord,
+        value: Option<Value>,
+    ) -> Completion<ObjectRef> {
         // 1.a. Let result be Completion(Call(iteratorRecord.[[NextMethod]],
-        // iteratorRecord.[[Iterator]])).
-        let result = self.call_value(record.next_method, Value::Object(record.iterator), &[]);
+        // iteratorRecord.[[Iterator]])). 2.a. Else, Let result be
+        // Completion(Call(iteratorRecord.[[NextMethod]], iteratorRecord.[[Iterator]], « value »)).
+        let this = Value::Object(record.iterator);
+        let result = match value {
+            Some(value) => self.call_value(record.next_method, this, &[value]),
+            None => self.call_value(record.next_method, this, &[]),
+        };
         match result {
             // 4. Set result to ! result.
             Ok(Value::Object(result)) => Ok(result),
@@ -135,7 +178,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// IteratorValue ( iteratorResult ) (`#sec-iteratorvalue`).
-    fn iterator_value(&mut self, result: ObjectRef) -> Completion<Value> {
+    pub(crate) fn iterator_value(&mut self, result: ObjectRef) -> Completion<Value> {
         // 1. Return ? Get(iteratorResult, "value").
         let key = self.name_key("value")?;
         self.get(result, key)

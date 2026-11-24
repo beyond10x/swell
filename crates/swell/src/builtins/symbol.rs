@@ -12,8 +12,10 @@
 //! `[%Symbol.toPrimitive%]` (`#sec-symbol.prototype-%symbol.toprimitive%`) and
 //! `[%Symbol.toStringTag%]` (`#sec-symbol.prototype-%symbol.tostringtag%`).
 //!
-//! Twelve of the well-known symbols of Table 1 are properties of the constructor in slice 6;
-//! `Symbol.asyncIterator` comes with slice 10 (`docs/design/engine.md`, decision 4, "Symbols").
+//! Thirteen of the well-known symbols of Table 1 are properties of the constructor: twelve of
+//! slice 6 and `Symbol.asyncIterator`, the last, of slice 10
+//! (`story:for-await-and-async-from-sync-iterator`; `docs/design/engine.md`, decision 4,
+//! "Symbols").
 //! A Symbol object is an ordinary object whose [[SymbolData]] is its Symbol
 //! (`#sec-properties-of-symbol-instances`; `OrdinaryData::Symbol`), made by ToObject
 //! (`ops/conversion.rs`).
@@ -52,6 +54,10 @@ pub(crate) enum SymbolBuiltin {
 /// A well-known symbol property of the constructor: its name and its symbol.
 type WellKnownProperty = (&'static str, fn(&WellKnown) -> SymbolRef);
 
+/// The well-known symbol property of the constructor before "for", in the order of 20.4.2
+/// (20.4.2.2; the engine has no `asyncDispose` or `dispose`, 20.4.2.1 and 20.4.2.3).
+const BEFORE_FOR: [WellKnownProperty; 1] = [("asyncIterator", |symbols| symbols.async_iterator)];
+
 /// The well-known symbol properties of the constructor before "keyFor", in the order of 20.4.2
 /// (20.4.2.5 to 20.4.2.7).
 const BEFORE_KEY_FOR: [WellKnownProperty; 3] = [
@@ -78,7 +84,7 @@ impl<H: Host> Agent<H> {
     /// `%Symbol%` (20.4.1) and `%Symbol.prototype%` (20.4.3), answered in that order: the
     /// constructor's "length" 0 (20.4.2), its "prototype" { [[Writable]]: false,
     /// [[Enumerable]]: false, [[Configurable]]: false } (20.4.2.11), "for", "keyFor" and the
-    /// twelve well-known symbols, each { [[Writable]]: false, [[Enumerable]]: false,
+    /// thirteen well-known symbols, each { [[Writable]]: false, [[Enumerable]]: false,
     /// [[Configurable]]: false }; the prototype, an ordinary object whose [[Prototype]] is
     /// `%Object.prototype%` with no [[SymbolData]] (20.4.3), with its properties in the order of
     /// 20.4.3.
@@ -95,6 +101,7 @@ impl<H: Host> Agent<H> {
             BuiltinId::Symbol(SymbolBuiltin::Constructor),
             prototype,
         )?;
+        self.define_well_known_properties(making, constructor, &BEFORE_FOR)?;
         self.define_builtin_method(
             making,
             constructor,

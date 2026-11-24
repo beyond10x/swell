@@ -6,24 +6,29 @@
 //! `reentry_depth`, `frame_depth`, the step budget and the memory budget. Then
 //! `%GeneratorFunction%` (`#sec-generatorfunction-constructor`), CreateDynamicFunction of kind
 //! generator through the same hook, with the compilation type `Function`, and the same nesting
-//! limit. Run also with the feature `collect-every-safe-point`.
+//! limit. Then `%AsyncFunction%` (`#sec-async-function-constructor`), CreateDynamicFunction of
+//! kind async through the same hook and the same limits. Run also with the feature
+//! `collect-every-safe-point`.
 #![cfg(test)]
 
 use crate::support;
 
 use support::host::{TestHost, agent_with, get, get_object, global, key, limits, object, realm};
-use support::script::{Outcome, eval, eval_text, run};
+use support::script::{Outcome, eval, eval_text, parse, run};
 use swell::{
-    Abrupt, Agent, CompilationType, CompileStrings, Completion, Cx, HookCx, Host, HostCall, Job,
-    LoadRequest, ObjectRef, Outcome as HostOutcome, Parsed, Source, StringRef, Termination, Value,
+    Abrupt, Agent, CompilationType, CompileStrings, Completion, Cx, HookCx, Host, HostCall,
+    InterruptHandle, Job, LoadRequest, ObjectRef, Outcome as HostOutcome, Parsed, Source,
+    StringRef, Termination, Value,
 };
 
 /// A host that records each call of `host_ensure_can_compile_strings`, and answers it with a
-/// throw of the String "refused" when `refuse` is set; the required hooks do nothing.
+/// throw of the String "refused" when `refuse` is set; with an interrupt handle, the hook sets
+/// the interrupt first. The required hooks do nothing.
 #[derive(Default)]
 struct CompileHost {
     calls: Vec<Request>,
     refuse: bool,
+    interrupt: Option<InterruptHandle>,
 }
 
 /// One call of `host_ensure_can_compile_strings`, with its Strings as text.
@@ -58,6 +63,9 @@ impl Host for CompileHost {
             same_realm: REALM.with(std::cell::Cell::get) == Some(request.callee_realm),
         };
         cx.host_mut().calls.push(request);
+        if let Some(handle) = &cx.host().interrupt {
+            handle.interrupt();
+        }
         if cx.host().refuse {
             return Err(Abrupt::Throw(Value::String(cx.new_string("refused")?)));
         }
@@ -645,5 +653,407 @@ fn generator_function_with_a_symbol_throws_a_type_error() {
             "\"false,TypeError,TypeError,TypeError,TypeError,TypeError,made,TypeError,made\""
                 .to_string()
         )
+    );
+}
+
+/// `%AsyncFunction%`, which no global names: the `constructor` of `%AsyncFunction.prototype%`,
+/// the [[Prototype]] of an `async` function. Without an own `constructor` there, the name read
+/// is the one `%Function.prototype%` holds, `%Function%`, which throws a `TypeError` here.
+const ASYNC_FUNCTION: &str = "var AF = Object.getPrototypeOf(async function () {}).constructor;\n\
+     if (AF === Function) throw new TypeError(\"no %AsyncFunction%\");\n";
+
+/// `source` after [`ASYNC_FUNCTION`], with `limits`, in a fresh agent and realm, which must
+/// complete normally; then a microtask checkpoint, which must too; then what `read` answers.
+fn settled(limits: swell::Limits, source: &str, read: &str) -> Outcome {
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    let ran = eval_text(&mut agent, &realm, &format!("{ASYNC_FUNCTION}{source}"));
+    assert!(matches!(ran, Outcome::Normal(_)), "{ran:?}");
+    let HostOutcome::Normal(_) = agent.perform_microtask_checkpoint().unwrap() else {
+        panic!("the checkpoint did not complete normally");
+    };
+    eval_text(&mut agent, &realm, read)
+}
+
+/// `#sec-async-function-constructor-arguments` and `#sec-createdynamicfunction` of kind async:
+/// called or constructed, `%AsyncFunction%` makes an `async` function of its parameter
+/// arguments and its body argument (none: the empty body), named "anonymous", of the length its
+/// parameters give, whose [[Prototype]] is `%AsyncFunction.prototype%`, with no [[Construct]] and
+/// no `prototype` (step 32, the note after it). A call answers a promise that its body settles:
+/// fulfilled with what it returns after its `await`, rejected with what it throws.
+#[test]
+fn async_function_constructor_makes_an_async_function_from_source_text() {
+    assert_eq!(
+        settled(
+            limits(),
+            "var f = AF(\"a\", \"b\", \"return await a + b;\");\n\
+             var g = new AF(\"a,b\", \"await 1;\"), h = AF(), seen = [];\n\
+             var r = [typeof f, f.name, f.length, g.length, h.length,\n\
+                      Object.getPrototypeOf(f) === AF.prototype,\n\
+                      Object.getPrototypeOf(g) === AF.prototype,\n\
+                      Object.prototype.hasOwnProperty.call(f, \"prototype\"), f instanceof AF,\n\
+                      f(1, 2) instanceof Promise];\n\
+             var made;\n\
+             try { new f(); made = \"constructed\"; } catch (e) { made = e.name; }\n\
+             r.push(made);\n\
+             f(1, 2).then(function (v) { seen.push(v); });\n\
+             AF(\"throw 7\")().then(null, function (e) { seen.push(\"rejected \" + e); });\n\
+             h().then(function (v) { seen.push(v); });\n\
+             0;",
+            "r.concat(seen).join();"
+        ),
+        Outcome::Normal(
+            "\"function,anonymous,2,2,0,true,true,false,true,true,TypeError,rejected 7,,3\""
+                .to_string()
+        )
+    );
+}
+
+/// `#sec-createdynamicfunction` of kind async: the parameters are `FormalParameters[~Yield,
+/// +Await]`, the body `AsyncFunctionBody` and the source an `AsyncFunctionExpression` with its
+/// early errors (`#sec-async-function-definitions-static-semantics-early-errors`): an
+/// AwaitExpression in the parameters, and `await` as a parameter's or a variable's name, are
+/// each a `SyntaxError`, where the `Function` constructor, whose kind is normal, takes `await` as
+/// a name; `await` in the body is an AwaitExpression, and `yield` stays a name. Each part parses
+/// alone first: a comment that spans the two is a `SyntaxError`.
+#[test]
+fn async_function_constructor_parses_await_in_its_body_only() {
+    assert_eq!(
+        settled(
+            limits(),
+            "var r = [], seen = [];\n\
+             var sources = [[\"x = await 1\", \"\"], [\"await\", \"\"], [\"var await;\"],\n\
+                            [\"/*\", \"*/){\"], [\"a\", \"(async function () {})(await a)\"],\n\
+                            [\"yield\", \"return yield\"]];\n\
+             for (var i = 0; i < sources.length; i++) {\n\
+               try { AF.apply(null, sources[i]); r.push(\"made\"); } catch (e) { r.push(e.name); }\n\
+             }\n\
+             r.push(Function(\"await\", \"return await\")(5));\n\
+             AF(\"a\", \"return await a\")(6).then(function (v) { seen.push(v); });\n\
+             0;",
+            "r.concat(seen).join();"
+        ),
+        Outcome::Normal(
+            "\"SyntaxError,SyntaxError,SyntaxError,SyntaxError,made,made,5,6\"".to_string()
+        )
+    );
+}
+
+/// HOST-117 for `%AsyncFunction%` (`#sec-createdynamicfunction`, step 16;
+/// `#sec-hostensurecancompilestrings`): `AF("a", "return await a")` calls
+/// `host_ensure_can_compile_strings` once, before it parses, with the compilation type
+/// `Function`, the parts, the whole source text and the current realm. A throw of the hook is
+/// thrown by `AF`, called or constructed, before anything is parsed: a source that would not
+/// parse throws the hook's value, not a `SyntaxError`. A refusal of the parse (a construct of a
+/// later slice in the body) is a `SyntaxError` counted by `refusals()`.
+#[test]
+fn async_function_constructor_is_refused_by_the_hook_of_compile_strings() {
+    let (answer, calls) = run_on_compile_host(
+        CompileHost::default(),
+        &format!("{ASYNC_FUNCTION}typeof AF(\"a\", \"return await a\");"),
+    );
+    assert_eq!(answer, "function");
+    assert_eq!(
+        calls,
+        [Request {
+            params: vec!["a".to_string()],
+            body: "return await a".to_string(),
+            code: "async function anonymous(a\n) {\nreturn await a\n}".to_string(),
+            kind: CompilationType::Function,
+            param_args: vec!["a".to_string()],
+            body_arg: "return await a".to_string(),
+            same_realm: true,
+        }]
+    );
+    let host = CompileHost {
+        refuse: true,
+        ..CompileHost::default()
+    };
+    let (answer, calls) = run_on_compile_host(
+        host,
+        &format!(
+            "{ASYNC_FUNCTION}var r = [];\n\
+             try {{ AF(\"await 1\"); r.push(\"made\"); }} catch (e) {{ r.push(e); }}\n\
+             try {{ new AF(\"a\", \"await 1 +\"); r.push(\"made\"); }} catch (e) {{ r.push(e); }}\n\
+             r.join();"
+        ),
+    );
+    assert_eq!(answer, "refused,refused");
+    assert_eq!(calls.len(), 2);
+    assert!(
+        calls
+            .iter()
+            .all(|call| call.kind == CompilationType::Function
+                && call.code.starts_with("async function anonymous(")),
+        "{calls:?}"
+    );
+    let mut agent = agent_with(limits()).unwrap();
+    let realm = realm(&mut agent);
+    let before = agent.refusals();
+    let caught = eval_text(
+        &mut agent,
+        &realm,
+        &format!(
+            "{ASYNC_FUNCTION}try {{ AF(\"class C {{}}\"); }} catch (e) {{ e.name + \": \" + e.message; }}"
+        ),
+    );
+    let Outcome::Normal(caught) = caught else {
+        panic!("the script did not complete normally: {caught:?}");
+    };
+    assert!(
+        caught.starts_with("\"SyntaxError: class is not supported before slice 8"),
+        "{caught}"
+    );
+    assert_eq!(agent.refusals(), before + 1);
+}
+
+/// `#sec-createdynamicfunction`, steps 15 and 28: the [[SourceText]] of the function is the
+/// whole source text, `async function anonymous(` the parameter texts joined with ",", a line
+/// feed, `) {`, a line feed, the body, a line feed and `}`, comments and all, as
+/// `Function.prototype.toString` answers it.
+#[test]
+fn async_function_constructor_source_text_starts_with_async_function_anonymous() {
+    assert_eq!(
+        run(
+            limits(),
+            &format!(
+                "{ASYNC_FUNCTION}var g = AF(\"a\", \" /* a */ b, c /* b */ //\", \"/* c */ ; /* d */ //\");\n\
+                 [g.toString() === \"async function anonymous(a, /* a */ b, c /* b */ //\\n) {{\\n/* c */ ; /* d */ //\\n}}\",\n\
+                  AF().toString() === \"async function anonymous(\\n) {{\\n\\n}}\",\n\
+                  new AF(\"x\", \"return x\").toString()].join(\"|\");"
+            )
+        ),
+        Outcome::Normal("\"true|true|async function anonymous(x\n) {\nreturn x\n}\"".to_string())
+    );
+}
+
+/// `#sec-async-function-prototype-properties-constructor` and
+/// `#sec-async-function-constructor-properties`: the `constructor` of `%AsyncFunction.prototype%`
+/// is `%AsyncFunction%`, { [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: true };
+/// `%AsyncFunction%` is a function named "AsyncFunction" of length 1 (each { [[Writable]]: false,
+/// [[Enumerable]]: false, [[Configurable]]: true }) whose [[Prototype]] is `%Function%` and whose
+/// `prototype` is `%AsyncFunction.prototype%`, { [[Writable]]: false, [[Enumerable]]: false,
+/// [[Configurable]]: false }; it is extensible, no property of the global object, and every
+/// `async` function and arrow is an instance of it.
+#[test]
+fn async_function_constructor_is_not_a_global_and_is_the_constructor_of_its_prototype() {
+    assert_eq!(
+        run(
+            limits(),
+            &format!(
+                "{ASYNC_FUNCTION}var AFP = Object.getPrototypeOf(async function () {{}});\n\
+                 var c = Object.getOwnPropertyDescriptor(AFP, \"constructor\");\n\
+                 var p = Object.getOwnPropertyDescriptor(AF, \"prototype\");\n\
+                 var n = Object.getOwnPropertyDescriptor(AF, \"name\");\n\
+                 var l = Object.getOwnPropertyDescriptor(AF, \"length\");\n\
+                 [typeof AF, n.value, l.value, n.writable, n.configurable, l.writable,\n\
+                  l.configurable, Object.getPrototypeOf(AF) === Function, AF === Function,\n\
+                  AF.prototype === AFP, c.value === AF, c.writable, c.enumerable, c.configurable,\n\
+                  p.writable, p.enumerable, p.configurable, typeof AsyncFunction,\n\
+                  \"AsyncFunction\" in this, (async function () {{}}) instanceof AF,\n\
+                  (async () => 1) instanceof AF, Object.isExtensible(AF)].join();"
+            )
+        ),
+        Outcome::Normal(
+            "\"function,AsyncFunction,1,false,true,false,true,true,false,true,true,false,false,\
+             true,false,false,false,undefined,false,true,true,true\""
+                .to_string()
+        )
+    );
+}
+
+/// The lines of the body of [`async_function_constructor_charges_its_parse_and_reads_the_interrupt`].
+const CHARGED_LINES: usize = 1_000;
+
+/// Decision 12 and HOST-168 through `%AsyncFunction%`: an interrupt set by
+/// HostEnsureCanCompileStrings, which then answers `Ok(())`, ends the run in
+/// `Terminated(Interrupted)` before the source is copied or parsed, and the flag is clear after.
+/// Decision 3 through `%AsyncFunction%`: the tree of the parse and the scratch of the compile
+/// step are charged to `memory_bytes` before they grow. R is the rise of `live_bytes()` over a
+/// successful call with a body of [`CHARGED_LINES`] statements (what the function keeps: its
+/// code and its source); under a budget of what the heap reads before the call, R and 4 KiB the
+/// same call ends in `Terminated(MemoryBudget)`, since the tree is charged on top of R before
+/// the code exists, and after a collection the heap reads as before the call.
+#[test]
+fn async_function_constructor_charges_its_parse_and_reads_the_interrupt() {
+    let mut agent = Agent::new(CompileHost::default(), limits(), support::host::seeds()).unwrap();
+    let HostOutcome::Normal(compile_realm) = agent.create_realm(None, None).unwrap() else {
+        panic!("create_realm did not answer Normal");
+    };
+    let handle = agent.interrupt_handle();
+    let set_by_hook = agent.interrupt_handle();
+    agent.host_mut().interrupt = Some(set_by_hook);
+    let source = format!("{ASYNC_FUNCTION}try {{ AF(\"a\", \"<!-- x\"); }} catch (e) {{}}");
+    let Parsed::Parsed(script) = agent
+        .parse_script(&compile_realm, Source::Utf8(&source), None)
+        .unwrap()
+    else {
+        panic!("the script did not parse");
+    };
+    let refusals = agent.refusals();
+    assert!(matches!(
+        agent.evaluate_script(&script).unwrap(),
+        HostOutcome::Terminated(Termination::Interrupted)
+    ));
+    assert!(!handle.is_set());
+    assert_eq!(agent.refusals(), refusals);
+    assert_eq!(agent.host().calls.len(), 1);
+
+    let setup = format!(
+        "{ASYNC_FUNCTION}var body = \"x = 1;\\n\".repeat({CHARGED_LINES});\n\
+         body.length;"
+    );
+    let prepared = |limits: swell::Limits| {
+        let mut agent = agent_with(limits).unwrap();
+        let realm = realm(&mut agent);
+        assert_eq!(
+            eval_text(&mut agent, &realm, &setup),
+            Outcome::Normal((CHARGED_LINES * 7).to_string())
+        );
+        let script = parse(&mut agent, &realm, "AF(body);");
+        agent.collect().unwrap();
+        let before = agent.heap_bytes().unwrap();
+        (agent, script, before)
+    };
+    let (mut probe, script, before) = prepared(limits());
+    let live = probe.live_bytes().unwrap();
+    assert!(matches!(
+        probe.evaluate_script(&script).unwrap(),
+        HostOutcome::Normal(_)
+    ));
+    let r = probe.live_bytes().unwrap() - live;
+    let mut budget = limits();
+    budget.memory_bytes = before + r + 4096;
+    let (mut agent, script, at_start) = prepared(budget);
+    assert_eq!(at_start, before, "the two agents read the same");
+    println!("AF(body) of {CHARGED_LINES} lines: before {before} R {r}");
+    assert!(matches!(
+        agent.evaluate_script(&script).unwrap(),
+        HostOutcome::Terminated(Termination::MemoryBudget)
+    ));
+    agent.collect().unwrap();
+    assert_eq!(agent.heap_bytes().unwrap(), before);
+}
+
+/// HOST-141 through `%AsyncFunction%` (decision 9, item 9): a body, an `await` operand and a
+/// parameter's initializer nested deeper than `parser_nesting` (1,000) throw a `SyntaxError`
+/// whose message names `parser_nesting`, which the script catches; with 10 levels the function
+/// answers 0.
+#[test]
+fn async_function_constructor_past_parser_nesting_throws_a_catchable_syntax_error() {
+    let deep = nested(2_000);
+    let caught = run(
+        limits(),
+        &format!(
+            "{ASYNC_FUNCTION}var r = [];\n\
+             try {{ AF(\"return \" + \"{deep}\"); }} catch (e) {{ r.push(e.name + \": \" + e.message); }}\n\
+             try {{ AF(\"await \" + \"{deep}\"); }} catch (e) {{ r.push(e.name + \": \" + e.message); }}\n\
+             try {{ AF(\"a = \" + \"{deep}\", \"\"); }} catch (e) {{ r.push(e.name + \": \" + e.message); }}\n\
+             r.join(\"|\");"
+        ),
+    );
+    let Outcome::Normal(caught) = caught else {
+        panic!("the script did not complete normally: {caught:?}");
+    };
+    let caught = caught.trim_matches('"');
+    let parts: Vec<&str> = caught.split('|').collect();
+    assert_eq!(parts.len(), 3, "{caught}");
+    for part in parts {
+        assert!(
+            part.starts_with("SyntaxError: ") && part.contains("parser_nesting (1000)"),
+            "{part}"
+        );
+    }
+    assert_eq!(
+        settled(
+            limits(),
+            &format!(
+                "var v; AF(\"return await \" + \"{}\")().then(function (x) {{ v = x; }}); 0;",
+                nested(10)
+            ),
+            "v;"
+        ),
+        Outcome::Normal("0".to_string())
+    );
+}
+
+/// `reentry_depth` through `%AsyncFunction%`: with `reentry_depth` 16, an object whose
+/// `toString` calls `AF(o, "")` on itself re-enters from Rust at each ToString of a parameter
+/// (`#sec-createdynamicfunction`, step 9), until the re-entry past the bound throws a
+/// `RangeError` whose message is `reentry_depth exceeded`, which the script catches.
+#[test]
+fn async_function_constructor_past_reentry_depth_throws_a_range_error() {
+    let mut limits = limits();
+    limits.reentry_depth = 16;
+    assert_eq!(
+        run(
+            limits,
+            &format!(
+                "{ASYNC_FUNCTION}var o = {{ toString: function () {{ return AF(o, \"\"); }} }};\n\
+                 var r;\n\
+                 try {{ AF(o, \"\"); }} catch (e) {{ r = e.name + \": \" + e.message; }}\n\
+                 r;"
+            )
+        ),
+        Outcome::Normal("\"RangeError: reentry_depth exceeded\"".to_string())
+    );
+}
+
+/// The step budget through `%AsyncFunction%`, [`step_budget`] steps: an `async` function whose
+/// body loops forever before any `await` ends the run of its call in `Terminated(StepBudget)`;
+/// one whose body awaits in an endless loop completes the script with its promise, and the
+/// microtask checkpoint that runs its resumptions ends in `Terminated(StepBudget)`.
+#[test]
+fn step_budget_ends_an_endless_async_function_from_the_constructor() {
+    ends_in_step_budget(&format!("{ASYNC_FUNCTION}AF(\"for (;;) {{}}\")();"));
+    let mut limits = limits();
+    limits.steps_per_entry = step_budget();
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            &format!("{ASYNC_FUNCTION}var p = AF(\"for (;;) await null;\")(); typeof p;")
+        ),
+        Outcome::Normal("\"object\"".to_string())
+    );
+    assert!(matches!(
+        agent.perform_microtask_checkpoint().unwrap(),
+        HostOutcome::Terminated(Termination::StepBudget)
+    ));
+}
+
+/// The memory budget through `%AsyncFunction%`, as
+/// [`memory_budget_ends_a_dynamic_function_whose_code_does_not_fit`]: a body of 32,768
+/// statements `0;` whose code does not fit in what is left of the budget ends the run in
+/// `Terminated(MemoryBudget)`; `heap_bytes()` then reads at most the budget, and the agent stays
+/// `Alive` and makes the next function.
+#[test]
+fn memory_budget_ends_an_async_function_constructor_whose_code_does_not_fit() {
+    let mut limits = limits();
+    limits.memory_bytes = realm_bytes(limits) + 512 * 1024;
+    let budget = limits.memory_bytes;
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    let build = "var s = \"0;\"; for (var i = 0; i < 15; i++) s = s + s; ";
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            &format!("{ASYNC_FUNCTION}{build} s.length;")
+        ),
+        Outcome::Normal("65536".to_string()),
+        "the source fits"
+    );
+    assert_eq!(
+        eval_text(&mut agent, &realm, &format!("{build} AF(s);")),
+        Outcome::Terminated(Termination::MemoryBudget)
+    );
+    assert!(agent.heap_bytes().unwrap() <= budget);
+    assert_eq!(agent.state(), swell::AgentState::Alive);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "typeof AF(\"return 2\");"),
+        Outcome::Normal("\"function\"".to_string())
     );
 }

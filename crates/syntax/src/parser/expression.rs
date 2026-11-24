@@ -24,10 +24,12 @@
 //! call of `async` read again as its parameters, `parser/function.rs`) and the AwaitExpression
 //! (`#sec-async-function-definitions`), a prefix operator where [Await] is set; elsewhere
 //! `await` is an identifier, and `async` is one wherever no `async` function or arrow function
-//! starts.
+//! starts; and the `async` methods of object literals (AsyncMethod). An `async function*` is an
+//! AsyncGeneratorExpression (`#sec-async-generator-function-definitions`), whose refusal is held
+//! back to the end of the parse (`parser/function.rs`).
 //!
 //! Refused, each with its slice: `**` and `**=` (4), `class`, `super`, `new.target` (8), `async`
-//! methods (10), `import.meta` and dynamic `import` (11).
+//! generator methods (10), `import.meta` and dynamic `import` (11).
 //!
 //! The functions that stay on the Rust stack while the parser recurses (each one an entry of the
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
@@ -1031,7 +1033,8 @@ impl<'a, 'm> Parser<'a, 'm> {
                 _ => return self.unexpected(),
             },
             TokenKind::Name(n) => {
-                // `async [no LineTerminator here] function`: an AsyncFunctionExpression.
+                // `async [no LineTerminator here] function`: an AsyncFunctionExpression, or with
+                // a `*` an AsyncGeneratorExpression.
                 if !self.tok.escaped && n == "async" {
                     let next = self.peek()?;
                     if !next.newline_before && next.kind == TokenKind::Keyword(Keyword::Function) {
@@ -1453,6 +1456,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.enter()?;
         let start = self.start();
         match self.accessor_kind()? {
+            Some(FunctionKind::Method) => self.async_method(object, start)?,
             Some(kind) => self.accessor_rest(object, kind, start)?,
             None if self.is(Punct::Star) => self.generator_method(object, start)?,
             None if self.is(Punct::Ellipsis) => self.spread_property(object, start)?,
@@ -1463,8 +1467,11 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// Whether the property at the current token is a getter or setter: `get` or `set`, written
-    /// without an escape, followed by a property name or a computed one. Refuses `async`
-    /// methods.
+    /// without an escape, followed by a property name or a computed one; or an `async` method
+    /// (`FunctionKind::Method`, AsyncMethod, `#sec-async-function-definitions`): `async`, written
+    /// without an escape, followed with no line terminator before it by a property name or a
+    /// computed one; the `async` is consumed. `async *` is refused at its `*`
+    /// (`story:async-generator-methods-in-object-literals` lifts it).
     #[inline(never)]
     fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
         let plain = !self.tok.escaped;
@@ -1480,7 +1487,11 @@ impl<'a, 'm> Parser<'a, 'm> {
                             TokenKind::Punct(Punct::Star) | TokenKind::Punct(Punct::LBracket)
                         ))
                 {
-                    return self.refuse("async method", 10);
+                    self.advance()?;
+                    if self.is(Punct::Star) {
+                        return self.refuse("async generator method", 10);
+                    }
+                    return Ok(Some(FunctionKind::Method));
                 }
                 return Ok(None);
             }
@@ -1561,27 +1572,47 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.enter()?;
         self.advance()?;
         let computed = self.computed_name()?;
-        let id = self.generator_method_head(object, start, computed)?;
+        let id = self.method_head(object, start, computed, true)?;
         self.function_rest(id)?;
         self.property_end(object);
         self.leave();
         Ok(())
     }
 
-    /// The `ClassElementName` of a generator method, a `PropertyName` (a `PrivateIdentifier`
-    /// stands only in a class): numbers its function, a method whose `generator` is set, and
-    /// appends the property.
+    /// `MethodDefinition : AsyncMethod`, `async ClassElementName ( UniqueFormalParameters[~Yield,
+    /// +Await] ) { AsyncFunctionBody }` (`#sec-async-function-definitions`), after its `async`,
+    /// appended to `object`; its function's span starts at the `async` (`start`). The name is
+    /// read with the [Yield] and [Await] of the code around the literal
+    /// (`ClassElementName[?Yield, ?Await]`), so in an `async` function an `await` in a computed
+    /// name is an AwaitExpression of that function; the parameters and the body are those of a
+    /// method whose `asynchronous` is set, which [`Parser::function_rest`] reads with [Await]
+    /// set and [Yield] cleared.
+    fn async_method(&mut self, object: ExprId, start: Span) -> R<()> {
+        self.enter()?;
+        let computed = self.computed_name()?;
+        let id = self.method_head(object, start, computed, false)?;
+        self.function_rest(id)?;
+        self.property_end(object);
+        self.leave();
+        Ok(())
+    }
+
+    /// The `ClassElementName` of a generator method (`generator`) or an `async` method, a
+    /// `PropertyName` (a `PrivateIdentifier` stands only in a class): numbers its function, a
+    /// method whose `generator` or `asynchronous` is set, and appends the property.
     #[inline(never)]
-    fn generator_method_head(
+    fn method_head(
         &mut self,
         object: ExprId,
         start: Span,
         computed: Option<ExprId>,
+        generator: bool,
     ) -> R<FunctionId> {
         let key = self.key_or(computed)?;
         let id = self.begin_function(FunctionKind::Method, start, None);
         if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {
-            f.generator = true;
+            f.generator = generator;
+            f.asynchronous = !generator;
         }
         self.push_property(
             object,

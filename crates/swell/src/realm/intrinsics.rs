@@ -28,7 +28,15 @@
 //! which is no property of the global object; `%Promise%` and `%Promise.prototype%` (27.5.3 and
 //! 27.5.5, `#sec-promise-constructor`, `#sec-properties-of-the-promise-prototype-object`), written
 //! by `story:promise-constructor-then-and-jobs`; `%AsyncFunction.prototype%` (27.7.3,
-//! `#sec-async-function-prototype-properties`), written by `story:async-functions-and-await`.
+//! `#sec-async-function-prototype-properties`), written by `story:async-functions-and-await`;
+//! `%AsyncFunction%` (`#sec-async-function-constructor`), written by
+//! `story:async-function-constructor`, which is no property of the global object;
+//! `%AsyncIteratorPrototype%` and `%AsyncFromSyncIteratorPrototype%` (27.1.4 and 27.1.5.2,
+//! `#sec-asynciteratorprototype`, `#sec-%asyncfromsynciteratorprototype%-object`), written by
+//! `story:for-await-and-async-from-sync-iterator`;
+//! `%AggregateError%` and `%AggregateError.prototype%` (20.5.7, `#sec-aggregate-error-objects`),
+//! written by `story:promise-statics-finally-and-aggregate-error`, made after the seven of
+//! [`ErrorKind::ALL`] and held beside them.
 //! The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
@@ -147,6 +155,30 @@ pub(crate) enum Intrinsic {
     PromisePrototype,
     /// `%AsyncFunction.prototype%` (27.7.3), `story:async-functions-and-await`.
     AsyncFunctionPrototype,
+    /// `%AsyncFunction%` (`#sec-async-function-constructor`), `story:async-function-constructor`.
+    /// The realm holds it; no operation asks for it by name, its constructor being the active
+    /// function.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "%AsyncFunction% by name: the tests of the intrinsics"
+        )
+    )]
+    AsyncFunction,
+    /// `%AsyncIteratorPrototype%` (27.1.4), `story:for-await-and-async-from-sync-iterator`. The
+    /// realm holds it; no operation asks for it by name before the async generators.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "%AsyncIteratorPrototype% by name: the tests of the intrinsics"
+        )
+    )]
+    AsyncIteratorPrototype,
+    /// `%AsyncFromSyncIteratorPrototype%` (27.1.5.2), the [[Prototype]] of an
+    /// Async-from-Sync Iterator object (`#sec-createasyncfromsynciterator`).
+    AsyncFromSyncIteratorPrototype,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -178,6 +210,8 @@ pub(crate) struct Intrinsics {
     throw_type_error: ObjectRef,
     /// In the order of [`ErrorKind::ALL`].
     errors: [ErrorIntrinsics; 7],
+    /// `%AggregateError%` and `%AggregateError.prototype%`, which `ErrorKind::ALL` does not hold.
+    aggregate_error: ErrorIntrinsics,
     object: ObjectRef,
     array: ObjectRef,
     string: ObjectRef,
@@ -206,6 +240,8 @@ pub(crate) struct Intrinsics {
     promise: ObjectRef,
     promise_prototype: ObjectRef,
     async_function_prototype: ObjectRef,
+    async_function: ObjectRef,
+    async_iteration_prototypes: crate::builtins::async_iteration::AsyncIterationPrototypes,
 }
 
 impl Intrinsics {
@@ -255,6 +291,11 @@ impl Intrinsics {
             Intrinsic::Promise => self.promise,
             Intrinsic::PromisePrototype => self.promise_prototype,
             Intrinsic::AsyncFunctionPrototype => self.async_function_prototype,
+            Intrinsic::AsyncFunction => self.async_function,
+            Intrinsic::AsyncIteratorPrototype => self.async_iteration_prototypes.async_iterator,
+            Intrinsic::AsyncFromSyncIteratorPrototype => {
+                self.async_iteration_prototypes.async_from_sync_iterator
+            }
         }
     }
 
@@ -268,6 +309,7 @@ impl Intrinsics {
             ErrorKind::SyntaxError => syntax,
             ErrorKind::TypeError => type_error,
             ErrorKind::UriError => uri,
+            ErrorKind::AggregateError => self.aggregate_error,
         }
     }
 
@@ -315,10 +357,13 @@ impl Intrinsics {
             self.promise,
             self.promise_prototype,
             self.async_function_prototype,
+            self.async_function,
+            self.async_iteration_prototypes.async_iterator,
+            self.async_iteration_prototypes.async_from_sync_iterator,
         ] {
             mark.object(object);
         }
-        for error in &self.errors {
+        for error in self.errors.iter().chain([&self.aggregate_error]) {
             mark.object(error.constructor);
             mark.object(error.prototype);
         }
@@ -454,6 +499,8 @@ impl<H: Host> Agent<H> {
         let boolean_prototype = self.create_boolean_prototype(object_prototype)?;
         let number_prototype = self.create_number_prototype(object_prototype)?;
         let errors = self.create_error_intrinsics(realm, object_prototype, function_prototype)?;
+        let [error, ..] = errors;
+        let aggregate_error = self.create_aggregate_error_intrinsics(realm, error)?;
         // Every realm record holds the well-known symbols from its creation (`realm/mod.rs`).
         let Some(symbols) = self.realm_record(realm)?.symbols else {
             return Err(self.fault());
@@ -498,6 +545,9 @@ impl<H: Host> Agent<H> {
         )?;
         let (promise, promise_prototype) = self.create_promise_constructor(making)?;
         let async_function_prototype = self.create_async_function_prototype(making)?;
+        let async_function =
+            self.create_async_function_constructor(making, function, async_function_prototype)?;
+        let async_iteration_prototypes = self.create_async_iteration_prototypes(making)?;
         // %Array.prototype.values% (23.1.3.38), %Array.prototype.entries% (23.1.3.5),
         // %Array.prototype.keys% (23.1.3.19) and %Array.prototype.forEach% (23.1.3.15): the
         // methods `create_array_constructor` has defined on %Array.prototype%, read before any
@@ -515,6 +565,7 @@ impl<H: Host> Agent<H> {
             number_prototype,
             throw_type_error,
             errors,
+            aggregate_error,
             object,
             array,
             string,
@@ -543,6 +594,8 @@ impl<H: Host> Agent<H> {
             promise,
             promise_prototype,
             async_function_prototype,
+            async_function,
+            async_iteration_prototypes,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {
@@ -698,5 +751,24 @@ mod tests {
             agent.get(prototype, key),
             Ok(Value::Object(generator_function))
         );
+    }
+
+    /// `%AsyncFunction%` (`#sec-async-function-constructor-properties`) has the [[Prototype]]
+    /// `%Function%`, its `prototype` is `%AsyncFunction.prototype%`, and it is the `constructor`
+    /// of that object (`#sec-async-function-prototype-properties-constructor`).
+    #[test]
+    fn async_function_is_the_constructor_of_its_prototype() {
+        let (mut agent, realm) = agent_with_realm();
+        let realm = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let async_function = agent.intrinsic(realm, Intrinsic::AsyncFunction).unwrap();
+        let function = agent.intrinsic(realm, Intrinsic::Function).unwrap();
+        let prototype = agent
+            .intrinsic(realm, Intrinsic::AsyncFunctionPrototype)
+            .unwrap();
+        assert_eq!(agent.get_prototype_of(async_function), Ok(Some(function)));
+        let key = agent.name_key("prototype").unwrap();
+        assert_eq!(agent.get(async_function, key), Ok(Value::Object(prototype)));
+        let key = agent.name_key("constructor").unwrap();
+        assert_eq!(agent.get(prototype, key), Ok(Value::Object(async_function)));
     }
 }

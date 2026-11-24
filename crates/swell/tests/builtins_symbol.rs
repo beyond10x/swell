@@ -1,7 +1,8 @@
 //! Symbol objects (ECMA-262 20.4, `#sec-symbol-objects`), `story:symbol-constructor-and-well-known-symbols`:
 //! the `Symbol` function (`#sec-symbol-description`), `Symbol.for` and `Symbol.keyFor`
 //! (`#sec-symbol.for`, `#sec-symbol.keyfor`) over the agent's GlobalSymbolRegistry
-//! (`#sec-globalsymbolregistry-records`), the twelve well-known symbols of slice 6 as properties
+//! (`#sec-globalsymbolregistry-records`), the thirteen well-known symbols (twelve of slice 6,
+//! `asyncIterator` of slice 10) as properties
 //! of the constructor (`#sec-well-known-symbols`), `%Symbol.prototype%`
 //! (`#sec-properties-of-the-symbol-prototype-object`), ToObject of a Symbol (`#sec-toobject`) and
 //! the TypeError of ToString and ToNumber of one (`#sec-tostring`, `#sec-tonumber`). The design
@@ -146,15 +147,16 @@ fn symbol_key_for_answers_the_key_of_a_registered_symbol_only() {
 }
 
 /// `#sec-well-known-symbols` and `#sec-properties-of-the-symbol-constructor`: the constructor
-/// has twelve own properties whose values are Symbols, each a well-known symbol whose
+/// has thirteen own properties whose values are Symbols, each a well-known symbol whose
 /// [[Description]] is "Symbol." and its name (Table 1), not writable, not enumerable and not
-/// configurable; `Symbol.asyncIterator` (slice 10) is not one of them. They are "shared by all
-/// realms" (6.1.5.1): two realms of one agent read the same twelve Symbols. The script runs in
+/// configurable; `Symbol.asyncIterator`, the last of them, is one. They are "shared by all
+/// realms" (6.1.5.1): two realms of one agent read the same thirteen Symbols. The script runs in
 /// sloppy code only, in the first of the two realms: no step of it differs in strict code, and
 /// with the feature `collect-every-safe-point` each of its instructions collects.
 #[test]
-fn the_well_known_symbols_are_twelve_and_the_same_in_every_realm() {
-    const NAMES: [&str; 12] = [
+fn the_well_known_symbols_are_thirteen_and_the_same_in_every_realm() {
+    const NAMES: [&str; 13] = [
+        "asyncIterator",
         "hasInstance",
         "isConcatSpreadable",
         "iterator",
@@ -189,10 +191,10 @@ fn the_well_known_symbols_are_twelve_and_the_same_in_every_realm() {
                each.push([d.value.description, d.writable, d.enumerable, d.configurable,\n\
                           Symbol.keyFor(d.value) === undefined].join(\":\"));\n\
              }\n\
-             [found.join(), each.join(), Symbol.asyncIterator === undefined,\n\
+             [found.join(), each.join(), typeof Symbol.asyncIterator === \"symbol\",\n\
               \"asyncIterator\" in Symbol, Symbol.iterator === Symbol(\"Symbol.iterator\")].join(\"|\");"
         ),
-        Outcome::Normal(format!("\"{listed}|{}|true|false|false\"", each.join(",")))
+        Outcome::Normal(format!("\"{listed}|{}|true|true|false\"", each.join(",")))
     );
     let read = |agent: &mut Agent<TestHost>, realm: &Realm| -> Vec<Value> {
         let global_root = global(agent, realm);

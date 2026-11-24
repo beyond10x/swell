@@ -10,7 +10,7 @@ and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the byteco
 interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
 6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
-(the other 44 need a later slice and say so). 114 of 208 host requirements have a test.
+(the other 44 need a later slice and say so). 140 of 211 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
 gate holds the test262 counts: 20,229 of the 44,812 run cases pass (2026-11-23, release `0.8.0`; 18,155 in `0.7.0`, 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
@@ -56,12 +56,18 @@ with its class sets and properties of strings, and the close, with 18 cases move
 18: all 2,724 cases of slice 5 pass in all 5,441 runs
 (`test262-slice 05 2724 5441 0 0 2724 2724 0 0`), and no host requirement is pending for
 it. Slice 7, `generators`
-(`epic:slice-07-generators`), is in work beside it: generator syntax, generators on suspended
-frames, `%GeneratorFunction%` and `yield*` are in release `0.8.0`, and 1,168 of its 1,491 cases
-pass (`test262-slice 07 1491 2841 0 0 1491 1168 323 0`); generator methods of object literals
-and the close are open. Slice 10, `promises-and-async` (`epic:slice-10-promises-and-async`), is
-accepted in seventeen stories (`docs/plan/waves.md`, "Slice 10, `promises-and-async`"), and its
-first order is being built; 31 host requirements are pending for it.
+(`epic:slice-07-generators`), is delivered too (2026-11-24): generator syntax, generators on
+suspended frames, `%GeneratorFunction%` and `yield*` are in release `0.8.0`; after it generator
+methods of object literals, and the close, with 40 cases that need `class` or `super` moved to
+slice 8 with evidence and 21 cases taken in from slices 18 and 19: all 1,472 cases of slice 7
+pass in all 2,801 runs (`test262-slice 07 1472 2801 0 0 1472 1472 0 0`), and no host
+requirement is pending for it. Slice 10, `promises-and-async`
+(`epic:slice-10-promises-and-async`), is accepted in seventeen stories (`docs/plan/waves.md`,
+"Slice 10, `promises-and-async`") and in work: ten of them are merged (the microtask queue,
+the syntax of `async` functions, `Promise` with `then`, `async` functions, the rejection
+tracker, `async` methods of object literals, `%AsyncFunction%`, the grammar of `async function*`, the statics of `Promise` with `finally` and `AggregateError`, and `for await` with the Async-from-Sync Iterator), 1,665 of its 3,879 cases
+pass (`test262-slice 10 3879 7499 0 0 3879 1665 2214 0`), and 5 host requirements are pending
+for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
@@ -206,6 +212,33 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   `gate-time test-steps <sum> of 120, cpu <s>, load <l> on <n> cores`; it fails when the sum
   of wall time is over 120 s. When that line is the only red line and its load is above its
   core count, see "How the work is run": the forge's run judges.
+- After that line the test steps print (`taskfiles/gate-time.yml`,
+  `story:gate-test-steps-fit-four-cores`): `gate-time yardstick <s> s: conform-engine <a> and
+  test262-moves-check <b>`, which decides nothing; one of `gate-cpu test-steps <c> of <bound>
+  on <n> cores: <step> <c>, ...`, `gate-cpu test-steps <c>, no bound for <n> cores: ...`,
+  without a table `gate-cpu test-steps <c>: ...`, or, when the CPU seconds cannot be read on
+  a core count without an entry, `gate-cpu test-steps: not read (...)`; and `gate-time: no
+  file of <k> under <dir>/*/deps changed while the test steps ran` (`<k>` counts both
+  directories).
+- `check-runner` passes `GATE_CPU_BOUNDS`, the table `CPU_BOUNDS_BY_CORES` of
+  `taskfiles/forge.yml`: pairs `<cores>:<CPU seconds>`, now `16:245` (provisional: its pair
+  under this tree is recorded by the first two check-runner jobs on a 16-core machine after
+  the merge, `story:gate-cpu-table-held-by-a-check`). The gate fails when the test steps' CPU
+  seconds are over the entry for the core count it runs on. A core count without an entry
+  gets no CPU bound; there the CPU seconds are printed, and only the wall budget and the
+  `deps` check decide. A green there says nothing of the forge's time. The pool's build node
+  (64 cores) and the forge (4 cores) have no entry; on the forge the wall time decides.
+- An entry of `CPU_BOUNDS_BY_CORES` is added or changed only together with a pair measured
+  on that kind of machine, recorded in the same commit. The pair is the code before the
+  change over the entry and the change under it, each a whole check-runner job. The entry is
+  the geometric mean of the highest change and the lowest base, rounded to 5. The highest
+  change × 1.25 must be at most the entry, and the entry × 1.25 at most the lowest base. Two
+  entries for one core count are refused (`gate-cpu: GATE_CPU_BOUNDS holds <n> cores twice`).
+- The gate fails when a test step writes into `<dir>/*/deps` (`CARGO_TARGET_DIR` or `target`)
+  or `conformance/ess/target/*/deps` inside the clock. Another job of the same tree that
+  builds meanwhile turns that red, so the gate runs one job per tree at a time. A red
+  `gate-cpu` or `deps` line holds the commit; only a red `gate-time test-steps` line under
+  load goes to the forge.
 - The gate does not run test262 in full. `test262-check` compares a digest of the run's
   sources (`crates/*/src`, the manifests and the lock file, `.cargo/config.toml`, the
   toolchain file, `taskfiles/test262.yml`, the files of `conformance/test262/` the run reads)
@@ -215,7 +248,10 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   (`slot --timeout 30m task test262-part TEST262_PART=<k>/<n>` for each k), and counted from
   their files (`slot task test262-expected TEST262_FROM_PARTS=.out/test262/parts`);
   the lane `slow` (`task slow`, `.github/workflows/slow.yml`) makes the full run on the forge
-  and compares bytes. A release waits for a green lane `slow` on its commit.
+  and compares bytes. A release waits for a green lane `slow` on its commit. The lane starts
+  on a push to `main` and on a pull request, each only when it changes a path of the
+  workflow's list, and by hand (`workflow_dispatch`) for a release tip whose push changed
+  none (`docs/releasing.md`, step 5).
 - A heavy test has a gate count and a full count: `SWELL_FULL_COUNTS=1` gives the full one,
   and the lane `slow` (task `slow-tests`) runs every `crates/*/tests/*.rs` that reads the
   variable at its full count in both collection modes.
@@ -227,11 +263,18 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 - `website/data/status.json` is written by `task site-data` from the gate's committed files;
   `site-data-check`, a step of `check`, fails when it differs from its regeneration. A commit
   that changes `expected.txt`, `slices-delivered.txt`, `requirements.txt`, `moves.tsv`, a
-  crate version or section 12 of the design regenerates it (`slot --local task site-data`).
+  crate version or section 12 of the design regenerates it (`task site-data`, which runs awk over the committed files and compiles nothing, so it takes no slot of the pool).
 - A test stays under 1.5 CPU seconds alone in the gate's default mode and under 2 s with a
   collection at every safe point, and under 2.5 s at its full count (`SWELL_FULL_COUNTS=1`)
-  in either mode, measured with its test binary run directly with `--exact <name>
-  --test-threads 1` under the shell's `time` (user plus system). The bound is in CPU seconds
+  in either mode, measured with its test binary run with `--exact <name> --test-threads 1`
+  in a shell of its own whose `times` gives user plus system. The measurement is one job of
+  the build pool (`slot sh -c '...'`: `cargo test --locked -p <crate> --test main --no-run`
+  prints the binary's path, and the job runs it); a test binary is not run by its path
+  beside the pool, and no second job of the same tree runs while one builds, since the two
+  share one build directory. The script of a measure job is given inline or lies in the
+  worktree (its ignored `.out/`), never under a cache directory of the home: the pool runs a
+  job whose script lies there on this machine, not on its build node, and refuses that form
+  from 2026-11-24. The bound is in CPU seconds
   because the machine's load multiplies wall time: on 2026-11-22, at a load of 110 to 166 on
   18 cores, tests of 4 to 18 CPU seconds were killed at 60 s
   (`story:heavy-tests-far-from-the-kill`), and at a bound of 5 s for the full count
@@ -256,9 +299,14 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   2026-11-23, the sum of each test run alone: 86.0 in the default mode over 973 tests, 138.7
   with a collection at every safe point over 796, 36.9 for the 65 planted scripts; 94.0,
   154.5 and 43.0 before that story). The collect mode is spread over hundreds of tests whose
-  scripts are what they show, so a gate count does not lower it further. Building the
-  collect-mode tests at `opt-level = 1` was measured and not taken: it adds about 200 CPU
-  seconds of build to a run and saves about 120 of tests. `gate-selftest` runs the planted
+  scripts are what they show, so a gate count does not lower it further. Since
+  `story:gate-test-steps-fit-four-cores` `test-collect` runs in the profile `collect`
+  (opt-level 1) through `--config .cargo/collect-profile.toml`: its build is before the
+  clock, and on the pool's 64-core node the step went from 168.5 to 33.3 and 34.0 CPU
+  seconds. That flag is `COLLECT_CONFIG` in `taskfiles/collect-mode.yml`, used by
+  test-collect, build-collect and test-doc's collect line; build-collect checks the file.
+  The lane `slow` runs the collect-mode stack modules (those calling `stack_with_room`) in
+  the test profile at opt-level 0. `gate-selftest` runs the planted
   scripts as a rolling pool (`xargs -P`), with `GOGC=off` and `GOMEMLIMIT=1GiB` for its
   many short go-task processes.
 - Each crate has one integration-test binary, `tests/main.rs`, generated by
@@ -293,7 +341,8 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   send the deciding session the log lines and do not change the constant before it answers.
 - The gate builds before its clock: `build`, then `build-tests`, which builds every binary the
   timed test steps run with each step's own flags, features and manifest (`build-collect`,
-  `build-faults`, `build-conform-engine`). A test step whose log has a `Compiling` line fails
+  `build-faults`, `build-conform-engine`) and ends with `build-test262-runner`, so no release
+  build happens inside the clock. A test step whose log has a `Compiling` line fails
   and names the build task that should have built it (`compile-check`); only the doc tests
   compile inside `test-doc`, because rustdoc compiles them as it runs them. The test report
   (`nextest-report`) reads a coloured log, and a log with nothing to count fails.
@@ -322,21 +371,24 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot --timeout 30m task check-runner` on 2026-11-23, on the commit of release `0.8.0`
-(`a350de3`, the branch of wave 3 of slice 5; `docs/plan/slice-05-wave-3.md`), load 26 before
-and 34 after on 16 cores. Every check passed and the run exited 0: the test steps took 94.3 s
-of their 120 at that load (312.1 CPU seconds; on the commit of release `0.7.0` they took
-194.7 s at load 65, and the run exited 201 on that line alone). The planted scripts' single
+`slot --timeout 30m task check-runner` on 2026-11-24, on `756b8be`: the code of release
+`0.8.0` (`a350de3`, the branch of wave 3 of slice 5; `docs/plan/slice-05-wave-3.md`) with the
+gate change of `story:gate-test-steps-fit-four-cores`, on the pool's build node, load 67 on
+64 cores. Every check passed and the run exited 0: the test steps took 34.3 s of their 120
+(201.5 CPU seconds, of them `test-collect` 34.5; 64 cores have no entry in the table of CPU
+seconds, so the `gate-cpu` line prints no bound). Before the change, on the same code, a
+16-core machine took 94.3 s at load 34 (312.1 CPU seconds) and the forge's runner of 4 cores
+127.9 s (448.5 CPU seconds). The planted scripts' single
 `ok` lines, the ten slowest tests of each step and the slice lines after slice 7 but that of
 slice 10 are left out (`conformance/test262/expected.txt` has every slice line). The fault
 step's line counts the 758 tests its filter leaves out as ignored:
 
 ```
-python-check: no Python file among 1931 file(s)
+python-check: no Python file among 1937 file(s)
 forbid-unsafe-check: 9 crate root(s), each with #![forbid(unsafe_code)]
 Cargo.lock: 8 package(s), none from outside this repository
 toolchain-check: rustc 1.99.1, the channel rust-toolchain.toml pins; 5 workflow file(s), none names a compiler
-nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 16 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
+nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 17 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
 data/unicode/17.0.0: 17 file(s), each with the SHA-256 its SOURCE line gives; 17 required path(s) present
 unicode-tables: 15 table(s) equal the generator output
@@ -349,24 +401,26 @@ host-surface: 0 change(s) since 0.8.0, each named
 site-data-check: website/data/status.json equals its regeneration from conformance/test262/expected.txt, conformance/slices-delivered.txt, conformance/host/requirements.txt, conformance/test262/moves.tsv, docs/design/engine.md, Cargo.toml, Cargo.lock and the crate roots under crates
 test-main: 8 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
 test-binaries-check: 17 test executables, 8 integration-test binaries in 8 packages, none with a .debug_ section
-build-tests: Finished `test` profile [unoptimized] target(s) in 0.01s
-build-collect: Finished `test` profile [unoptimized] target(s) in 19.78s
-build-faults: Finished `test` profile [unoptimized] target(s) in 18.77s
-build-conform-engine: Finished `test` profile [unoptimized] target(s) in 2m 04s
-build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.06s
+build-tests: Finished `test` profile [unoptimized] target(s) in 0.04s
+build-collect: Finished `collect` profile [optimized] target(s) in 3m 38s
+build-collect: 2 test executables in target/collect/deps, none with a .debug_ section
+build-faults: Finished `test` profile [unoptimized] target(s) in 14.97s
+build-conform-engine: Finished `test` profile [unoptimized] target(s) in 2m 01s
+build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.11s
+build-test262-runner: Finished `release` profile [optimized] target(s) in 38.88s
 17 test binaries: 1215 passed, 0 failed, 1 ignored
-gate-time test 28.5
+gate-time test 13.9
 test-doc: 8 test suites: 13 passed, 0 failed, 0 ignored
 test-doc collect-every-safe-point: 2 test suites: 13 passed, 0 failed, 0 ignored
-gate-time test-doc 3.7
+gate-time test-doc 5.6
 test-collect: 2 test binaries: 934 passed, 0 failed, 1 ignored
-gate-time test-collect 43.6
+gate-time test-collect 2.7
 test-faults: 1 test binaries: 1 passed, 0 failed, 758 ignored
 gate-time test-faults 0.2
 conform-engine: 3 test binaries: 12 passed, 0 failed, 0 ignored
 conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok
   58 scenarios: 14 passed, 0 failed, 0 error, 44 unsupported
-gate-time conform-engine 1.6
+gate-time conform-engine 1.2
 test262-refused 30642
 test262 total 53801 8982 7 44812 20229 24581 2
 test262: 221 directory lines sum to the total
@@ -383,10 +437,13 @@ test262-errors 0
 test262: 287 lines of conformance/test262/expected.txt; sources digest 976eb9f2f5ecf761b639fd4e892b9e0d4c881e866a70136a9ff516ef01633619 equals conformance/test262/expected.digest
 gate-time test262-check 0.1
 test262-moves: 1774 case(s) moved, 3:78 4:325 5:285 6:694 7:60 8:183 9:22 10:86 11:4 12:21 13:16; slices 1 to 19: 44931 85794
-gate-time test262-moves-check 7.2
-gate-selftest: 65 passed, 0 failed
-gate-time gate-selftest 9.4
-gate-time test-steps 94.3 of 120, cpu 312.1, load 33.84 on 16 cores
+gate-time test262-moves-check 2.3
+gate-selftest: 66 passed, 0 failed
+gate-time gate-selftest 8.3
+gate-time test-steps 34.3 of 120, cpu 201.5, load 67.20 on 64 cores
+gate-time yardstick 3.5 s: conform-engine 1.2 and test262-moves-check 2.3
+gate-cpu test-steps 201.5, no bound for 64 cores: test 126.6, test-doc 5.5, test-collect 34.5, test-faults 0.2, conform-engine 1.3, test262-check 0.1, test262-moves-check 2.1, gate-selftest 31.2
+gate-time: no file of 324 under target/*/deps changed while the test steps ran
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`
@@ -483,14 +540,19 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   (https://github.com/beyond10x/swell/releases/tag/0.6.0); `0.7.0`, 2026-11-23, tagged on
   `e0bb1ec`, the second wave of slice 5, with which the regular expressions of the first
   consumer's harness answer, on the decision "cut 0.7.0 now" of the session that decides for
-  the operator (https://github.com/beyond10x/swell/releases/tag/0.7.0); `0.8.0`, 2026-11-23,
-  tagged on the commit of its gate numbers, the one after the release commit `a350de3`: the
+  the operator (https://github.com/beyond10x/swell/releases/tag/0.7.0); `0.8.0`, 2026-11-24,
+  tagged on a commit of `main` whose `check` and lane `slow` are green on the forge, the
+  code of the release commit `a350de3` (2026-11-23, the day its counts were measured) with
+  the gate change of `story:gate-test-steps-fit-four-cores` after it (on `d9d1b95` the
+  forge's test steps took 127.9 s of their 120), the heading of its changelog section
+  set to the day of the tag and the manual trigger of the lane `slow`
+  (`story:slow-lane-starts-by-hand`), whose push starts the lane on the tagged commit: the
   third wave of slice 5 with the first four stories of slice 7, on the decision "cut 0.8.0
   when the two running slice 5 units are merged and a unit has brought the full test262 run
   under 15 min of a pool job" of the session that decides for the operator
-  (https://github.com/beyond10x/swell/releases/tag/0.8.0; the link opens once the release is
-  published). After a release
-  `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
+  (https://github.com/beyond10x/swell/releases/tag/0.8.0; the tag is on `0c18271`, whose `check`
+  and lane `slow` ran green on the forge). After a release
+  `task host-surface-snapshot` (a scan with awk, no build and no slot of the pool) writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of
   `shared-gates.yml` (`tags: ['*']`) and none of `check.yml`; the release is created after

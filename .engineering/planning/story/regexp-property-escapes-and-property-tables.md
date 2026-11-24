@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:regexp-property-escapes-and-property-tables
 kind: story
-status: active
+status: implemented
 title: Unicode property escapes under u, with the tables of General_Category, Script, Script_Extensions and the binary properties
 summary: 588 failing cases (1,176 runs), the largest list after the first wave; about 17,000 ranges of tables; the refusal of property escapes goes; ID_Start and ID_Continue for the identifier story; the cost of the generated cases measured.
 relations:
@@ -58,10 +58,11 @@ scope:
   path: crates/unicode/tests/main.rs
 - confidence: cited
   path: crates/unicode/tests/property.rs
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T03:24:22Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T03:24:22Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:08Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -52,7 +52,10 @@ deciding session's, from a checkout of the repository:
    `cargo metadata --offline --format-version 1` in `conformance/ess`. Only the version
    lines of the six packages of this repository change there.
 2. **Changelog.** In `CHANGELOG.md`, rename `## [Unreleased]` to `## [<version>] - <date>`,
-   put an empty `## [Unreleased]` above it, and set the two link lines at the end. Every number
+   put an empty `## [Unreleased]` above it, and set the two link lines at the end. `<date>`
+   is the day the tag is made (step 6); when the tag comes on a later day than this commit,
+   a commit before the tag sets the heading and the link line of the notes file to that day.
+   Every number
    in the section is copied from the gate's output on this commit (step 3). A number that
    cannot be copied from that output is not written.
    The section keeps its `### Host interface` heading, with `- None.` when the host interface
@@ -90,6 +93,18 @@ deciding session's, from a checkout of the repository:
        $gates gh -- run list --workflow check.yml --branch main --limit 1
        $gates gh -- run watch <run-id> --exit-status
        $gates gh -- run list --workflow slow.yml --branch main --limit 1
+       $gates gh -- run watch <run-id> --exit-status
+
+   The lane starts on a push only when the push changes a path of its list. When the push of
+   the tip changed no such path (a tip that changes prose only), the deciding session starts
+   the lane by hand on `main` at that tip and waits for that run as for one a push started;
+   a run of the lane on an earlier commit does not stand in for it. A run started by hand
+   takes some seconds to appear in the list; wait on the run whose `headSha` is the tip, and
+   a run with another `headSha` is not the one to wait for:
+
+       $gates gh -- workflow run slow.yml --ref main
+       $gates gh -- run list --workflow slow.yml --branch main --event workflow_dispatch \
+         --limit 5 --json databaseId,headSha,event,status
        $gates gh -- run watch <run-id> --exit-status
 
 6. **Tag.** Scan the notes file, then tag the commit with it as the message and push the tag.

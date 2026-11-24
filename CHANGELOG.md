@@ -12,6 +12,38 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- Slice 7, generators, is delivered: all 1,472 of its test262 cases pass in all 2,801 runs.
+  At its close 40 cases that need `class` or `super` move to slice 8, each with its
+  evidence, and 21 cases that failed only on generators count in slice 7 instead of slices
+  18 and 19.
+- `for await (x of y)` in an `async` function, a story of the tenth slice, with
+  `%AsyncIteratorPrototype%`, `Symbol.asyncIterator` and the Async-from-Sync Iterator that
+  wraps a sync iterable. Each result of `next` is awaited, and the iterator is closed on
+  every exit of the loop. A loop over an iterator that never ends stops at the step budget;
+  a wrapped iterator is charged to the memory budget until it is freed. `for await` in an
+  `async function*` waits for async generators.
+- The statics of `Promise`, a story of the tenth slice: `Promise.all`, `Promise.allSettled`,
+  `Promise.any`, `Promise.race`, `Promise.try` and `Promise.withResolvers`, with
+  `Promise.prototype.finally` and `AggregateError`. `Promise.all` over an iterator that
+  never ends stops at the step budget or the memory budget and keeps nothing; the values
+  of promises that never settle are charged to the memory budget and credited when the
+  promises are collected.
+- The grammar of async generators, a story of the tenth slice. `async function*`, as a
+  declaration and as an expression, is parsed whole, and its grammar errors and early
+  errors are reported. A script that holds one still ends with a `SyntaxError` that names
+  the tenth slice, now after every other error of the source; an `async *` method is
+  refused at its token as before. 143 more test262 cases of the slice pass.
+- `%AsyncFunction%`, the constructor of `async` functions from source text, a story of the
+  tenth slice. It is reached through the `constructor` of the prototype of an `async`
+  function and is no property of the global object. Called or constructed, it takes the
+  path of `Function`: the host's hook for the compilation of strings decides, the limits
+  of nesting and of re-entry hold, and the parse is charged to the memory budget and reads
+  the interrupt.
+- `async` methods of object literals run, a story of the tenth slice: `{ async m() {} }`,
+  with a computed name too. A call returns a promise and the body awaits as the body of an
+  `async` function does; the method has no `prototype` and cannot be constructed. An
+  `async *` method is refused with a `SyntaxError` that names the tenth slice, and `super`
+  in an `async` method is refused as in a plain method.
 - Slice 5, regular expressions, is delivered: all 2,724 of its test262 cases pass in all
   5,441 runs. At its close 18 cases that need `Date`, `Math`, `parseInt`, the operator
   `**`, `class` or `Map` move to slices 4, 8 and 9, each with its evidence, and 18 cases of
@@ -29,9 +61,8 @@ Every number below comes from the gate, `task check`, on the released commit.
   is charged to the memory budget while it waits and credited when its promise settles or
   it is collected. An `await` in a loop that never ends ends the checkpoint at the step
   budget; a termination in a resumed activation leaves its promise pending and the jobs
-  behind it queued. `%AsyncFunction.prototype%` exists. The `async` method of an object
-  literal, `async function*` and `for await` are still refused, each with a `SyntaxError`
-  that names the tenth slice.
+  behind it queued. `%AsyncFunction.prototype%` exists. `async function*` and `for await`
+  are still refused, each with a `SyntaxError` that names the tenth slice.
 - `Promise`, the second story of the tenth slice: the constructor with its resolving
   functions, `Promise.prototype.then` and `catch`, `Promise.resolve`, `Promise.reject` and
   the getter of `Promise[Symbol.species]`. A reaction and the job of a thenable are entries
@@ -57,8 +88,7 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The parser reads `async` function declarations, expressions and arrow functions with
   their early errors, and `await` where the grammar's [Await] is set. A refusal that names
   a later slice comes after the grammar errors and early errors of the source, which now
-  come first. `async function*`, `for await` and the `async` method of an object literal
-  keep refusals of their own.
+  come first. `async function*` and `for await` keep refusals of their own.
 - The microtask queue of the agent and its checkpoint, the first story of the tenth slice. A
   host queues a microtask with the realm it runs in; a checkpoint runs every entry in the
   order it was queued, under the step budget of one entry, and spends one step for each
@@ -92,8 +122,30 @@ Every number below comes from the gate, `task check`, on the released commit.
   `promise_is_handled` and `mark_promise_as_handled`. A root that holds no promise
   answers `WrongKind`.
 - `HOST-46`, `HOST-100`, `HOST-101` and `HOST-121` have a test.
+- Breaking: `ErrorKind` is `#[non_exhaustive]`. A `match` over it in a host needs a wildcard
+  arm; a host that has one compiles as before. The list of error kinds follows the
+  standard, which grows.
+- New: `ErrorKind::AggregateError`. `new_error` with it makes an `AggregateError` with no
+  `errors`, and `error_summary` of an `AggregateError` answers the kind and the message
+  without reading `errors`. `ErrorKind::ALL` keeps its seven entries.
+- `HOST-201` and `HOST-202` have a test.
+- New requirements of the clock and the time zones, pending for slice 4 (no code reads them
+  yet): `HOST-209`, an offset a host answers outside ±86,399,999,999,999 ns is clamped to
+  that range; `HOST-210`, a host that answers no instant for every local time gets NaN
+  after 31 hook calls and no exception; `HOST-211`, every call of a clock or time zone hook
+  is charged one step before it is made.
+- New: `WellKnownSymbol::AsyncIterator`, the thirteenth well-known symbol a host names. A
+  host object with a method under it is the iterable of a `for await`.
+- `HOST-203` has a test.
+- The model of the interface (`spec/`) states the microtask checkpoint with its answers at the
+  step budget and at an interrupt, and a job that will not run to its end (`Abandoned`). Two
+  scenarios are new: a promise job runs at the next checkpoint and not before, and a rejection
+  without a handler is reported to the tracker and reported again when a handler is added.
+  18 of the model's 60 scenarios pass on the engine (14 of 58 before); the other 42 name the
+  later slice or the reason they wait for. The model has 53 places marked as not expressible
+  (51 before).
 
-## [0.8.0] - 2026-11-23
+## [0.8.0] - 2026-11-24
 
 Generator functions run, and a regular expression takes the flag `i`, Unicode property escapes
 and group names outside ASCII: four of the six stories of the seventh delivery slice and
@@ -149,6 +201,12 @@ cases pass (18,155 in 0.7.0).
 - The full test262 run can be made in parts, each a pool job, and counted from their files to
   the lines the whole run prints: `task test262-part TEST262_PART=<k>/<n>` and
   `TEST262_FROM_PARTS` of `task test262`, `test262-expected` and `slow-test262`.
+- The gate's test steps cost less on few cores: the tests with a collection at every safe
+  point are built in a profile of their own at opt-level 1, and the release build of the
+  test262 runner is made before the clock. The gate refuses a run in which a test step
+  builds, and `check-runner` bounds the CPU seconds of the test steps on a machine whose
+  core count has an entry in its table. The budget of 120 seconds and the steps it is
+  counted over are unchanged. 66 planted defects, from 65.
 
 ### Host interface
 

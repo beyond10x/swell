@@ -5,15 +5,16 @@
 //! Every ES5 statement is parsed, `with` in non-strict code included (slice 2), and the `let` and
 //! `const` declarations of slice 6 (`#sec-let-and-const-declarations`) in a script, a function
 //! body, a block, a `case` clause and the head of a `for`, a `for`-`in` or a `for`-`of`
-//! (`#sec-for-in-and-for-of-statements`, whose `for await` waits for slice 10). In non-strict code
+//! (`#sec-for-in-and-for-of-statements`, and of `for await` in async code). In non-strict code
 //! `let` is an identifier where no declaration can stand: before a token that cannot start a
 //! binding, and in the place of a Statement (the body of `if`, a loop, `with` or a label), where
 //! `let [` is an error (the lookahead of ExpressionStatement, `#sec-expression-statement`).
 //! A function declaration stands at the top of a body, where it is var scoped, and in a block, a
 //! `case` clause and a `try`, `catch` or `finally` block, where it is lexically scoped to that
 //! statement list (`#sec-block`, `#sec-switch-statement`), in strict and non-strict code.
-//! An `async` function declaration (slice 10) stands where a function declaration does
-//! (`parser/function.rs`).
+//! An `async` function declaration and an async generator declaration (slice 10) stand where a
+//! function declaration does, and neither stands as the body of a statement or as a labelled
+//! item, in any code (`parser/function.rs`).
 //! Refused are the declarations of later slices: `class` (8), `import`
 //! and `export` (11), and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
 //! `for (var a = 0 in o)` (18); the `var` binding and the duplicate declarations Annex B gives
@@ -260,9 +261,10 @@ impl<'a, 'm> Parser<'a, 'm> {
                         _ => Ok(Parser::expression_statement),
                     };
                 }
-                // `async [no LineTerminator here] function` starts an AsyncFunctionDeclaration
-                // where a declaration stands, and no ExpressionStatement anywhere
-                // (`#sec-expression-statement`); Annex B admits a plain FunctionDeclaration only.
+                // `async [no LineTerminator here] function` starts an AsyncFunctionDeclaration,
+                // or with a `*` an AsyncGeneratorDeclaration, where a declaration stands, and no
+                // ExpressionStatement anywhere (`#sec-expression-statement`); Annex B admits a
+                // plain FunctionDeclaration only.
                 if is_async
                     && next.kind == TokenKind::Keyword(Keyword::Function)
                     && !next.newline_before
@@ -677,9 +679,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(s)
     }
 
-    /// `for (;;)`, `for-in` and `for-of` (`#sec-for-statement`,
-    /// `#sec-for-in-and-for-of-statements`); the head declares with `var`, `let` or `const`;
-    /// `for await` is refused where [Await] is set, and elsewhere no `for` statement.
+    /// `for (;;)`, `for-in`, `for-of` and, where [Await] is set, `for await` of a for-of head
+    /// (`#sec-for-statement`, `#sec-for-in-and-for-of-statements`); the head declares with
+    /// `var`, `let` or `const`. Outside [Await] `for await` is no `for` statement.
     fn for_statement(&mut self) -> R<StmtId> {
         self.enter()?;
         let start = self.start();
@@ -689,30 +691,54 @@ impl<'a, 'm> Parser<'a, 'm> {
             update: None,
             body: StmtId(u32::MAX),
         });
-        self.for_head(id)?;
-        if self.is_keyword(Keyword::In) {
-            self.for_in_head(id, start, IterationKind::Enumerate)?;
-            self.for_in_rest(id, IterationKind::Enumerate)?;
-        } else if self.is_name("of") && self.has_for_init(id) {
-            self.for_in_head(id, start, IterationKind::Iterate)?;
-            self.for_in_rest(id, IterationKind::Iterate)?;
-        } else {
-            self.for_rest(id)?;
+        let awaits = self.for_head(id)?;
+        match self.for_iteration(id, awaits)? {
+            Some(iteration) => {
+                self.for_in_head(id, start, iteration)?;
+                self.for_in_rest(id, iteration)?;
+            }
+            None => self.for_rest(id)?,
         }
         let id = self.complete_stmt(id, start)?;
         self.leave();
         Ok(id)
     }
 
-    /// `for (` and what stands before the first `;`, `in` or `of`, recorded as the `init` of
-    /// `id`. The target of a for-of may not start with the token `let`
-    /// (`for ( [lookahead ∉ { let, async of }] LeftHandSideExpression of ...`); `async of` there
-    /// reads as the head of an `async` arrow function whose `=>` is missing.
-    fn for_head(&mut self, id: StmtId) -> R<()> {
+    /// The kind of the `for` statement `id` whose head is read up to its first `;`, `in` or
+    /// `of`: a for-in before `in`, a for-of before `of` after a head, `None` for `for (;;)`. A
+    /// head after `for await` is a for-of head or a grammar error: `for await ( ... of ... )` is
+    /// the only production with `await` (`#sec-for-in-and-for-of-statements`).
+    #[inline(never)]
+    fn for_iteration(&mut self, id: StmtId, awaits: bool) -> R<Option<IterationKind>> {
+        let of = self.is_name("of") && self.has_for_init(id);
+        if awaits {
+            if !of {
+                return self.unexpected();
+            }
+            return Ok(Some(IterationKind::AsyncIterate));
+        }
+        if self.is_keyword(Keyword::In) {
+            Ok(Some(IterationKind::Enumerate))
+        } else if of {
+            Ok(Some(IterationKind::Iterate))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// `for (` or, where [Await] is set, `for await (`, and what stands before the first `;`,
+    /// `in` or `of`, recorded as the `init` of `id`; answers whether `await` stood there. The
+    /// target of a for-of may not start with the token `let`
+    /// (`for ( [lookahead ∉ { let, async of }] LeftHandSideExpression of ...`), and `async of`
+    /// there reads as the head of an `async` arrow function whose `=>` is missing; after
+    /// `for await (` only `let` is excluded (`for await ( [lookahead ≠ let]
+    /// LeftHandSideExpression of ...`), so `async` before `of` is an identifier there.
+    fn for_head(&mut self, id: StmtId) -> R<bool> {
         self.enter()?;
         self.advance()?;
-        if self.awaits && self.is_name("await") {
-            return self.refuse("for await", 10);
+        let awaits = self.awaits && self.is_name("await");
+        if awaits {
+            self.advance()?;
         }
         self.expect(Punct::LParen)?;
         if self.for_head_declares()? {
@@ -722,7 +748,10 @@ impl<'a, 'm> Parser<'a, 'm> {
             self.var_declarations(id, true)?;
         } else if !self.is(Punct::Semicolon) {
             let let_first = self.is_name("let");
-            let e = self.expression(true)?;
+            let e = match self.async_before_of(awaits)? {
+                Some(e) => e,
+                None => self.expression(true)?,
+            };
             self.set_for_init(id, ForInit::Expression(e));
             if let_first && self.is_name("of") {
                 let at = self.expr_span(e);
@@ -730,7 +759,24 @@ impl<'a, 'm> Parser<'a, 'm> {
             }
         }
         self.leave();
-        Ok(())
+        Ok(awaits)
+    }
+
+    /// After `for await (`, the token `async` written without an escape and followed by `of`:
+    /// the IdentifierReference `async`, the target of a for-await-of. `None` anywhere else.
+    #[inline(never)]
+    fn async_before_of(&mut self, awaits: bool) -> R<Option<ExprId>> {
+        if !awaits || !self.is_name("async") {
+            return Ok(None);
+        }
+        let next = self.peek()?;
+        if next.escaped || !matches!(&next.kind, TokenKind::Name(n) if n == "of") {
+            return Ok(None);
+        }
+        let start = self.start();
+        let name = self.charged(super::copy_name(self.m, "async"))?;
+        self.advance()?;
+        Ok(Some(self.make(Expr::Identifier(name), start)?))
     }
 
     /// Sets the `init` of the `for` statement `id`: an expression, or an empty declaration list.
@@ -822,7 +868,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                     // code (`#sec-initializers-in-forin-statement-heads`).
                     let pattern = d.target.pattern().is_some();
                     self.m.release(d);
-                    if iteration == IterationKind::Iterate {
+                    if iteration != IterationKind::Enumerate {
                         return self.fail_at("initializer in a for-of head", start);
                     }
                     if self.strict || kind.is_lexical() || pattern {
@@ -858,7 +904,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.advance()?;
         let object = match iteration {
             IterationKind::Enumerate => self.expression(false)?,
-            IterationKind::Iterate => self.assignment(false)?,
+            IterationKind::Iterate | IterationKind::AsyncIterate => self.assignment(false)?,
         };
         self.set_loop_part(id, LoopPart::Object(object));
         self.expect(Punct::RParen)?;

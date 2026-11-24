@@ -377,6 +377,37 @@ pub enum Instruction {
     /// every other tag, whose completion a throw of `return`, or a result of it that is no
     /// object, replaces.
     IteratorClose,
+    /// `[v] -> [i]`: ForIn/OfHeadEvaluation for `async-iterate`
+    /// (`#sec-runtime-semantics-forinofheadevaluation`, step 7.a): the Iterator Record of
+    /// GetIterator(v, async) (`#sec-getiterator`): the method of `%Symbol.asyncIterator%`, or,
+    /// when there is none, CreateAsyncFromSyncIterator (`#sec-createasyncfromsynciterator`) of
+    /// the sync iterator; a `TypeError` when `v` has neither method.
+    GetAsyncIterator,
+    /// `[i] -> [i, r]`: the call of [[NextMethod]] of the record `i` with [[Iterator]] as the
+    /// this value and no argument (ForIn/OfBodyEvaluation, step 6.a,
+    /// `#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`),
+    /// its result `r`, which an [`Instruction::Await`] after it awaits (step 6.b). A throw of it
+    /// leaves the loop with no close.
+    AsyncIteratorNext,
+    /// `[i, r] -> [i, v]`, or `[i]` and a jump to `t`, after this one, when the iterator is done:
+    /// the check of the awaited result `r` of `next` (ForIn/OfBodyEvaluation, steps 6.c to 6.f):
+    /// a `TypeError` when it is not an Object, then IteratorComplete (`#sec-iteratorcomplete`),
+    /// whose true sets the record's [[Done]], then IteratorValue (`#sec-iteratorvalue`). A throw
+    /// of it leaves the loop with no close.
+    AsyncIteratorStep(u32),
+    /// `[i, v, tag] -> [i, v, tag, r]`, or `[i, v, tag]` and a jump to `t`, after this one:
+    /// AsyncIteratorClose (`#sec-asynciteratorclose`, steps 3 and 4) of the record under a
+    /// completion record, unless its [[Done]] is set, which it then sets: GetMethod(iterator,
+    /// "return") (`#sec-getmethod`) and, unless it is `undefined` (the jump), its call with no
+    /// argument, whose result `r` an [`Instruction::Await`] after it awaits (step 4.d). For
+    /// [`TAG_THROW`] a throw of GetMethod or of the call is dropped with the jump, and the
+    /// completion stands; for every other tag it replaces the completion.
+    AsyncIteratorClose(u32),
+    /// `[i, v, tag, r, rtag] -> [i, v, tag]`: the end of AsyncIteratorClose
+    /// (`#sec-asynciteratorclose`, steps 5 to 8) with the awaited result `r` of `return` and its
+    /// tag: for a completion of [`TAG_THROW`] nothing; otherwise a throw of `r` for an `rtag` of
+    /// [`TAG_THROW`], and a `TypeError` when `r` is not an Object.
+    AsyncIteratorClosed,
     /// `[v] -> `: throws `v`.
     Throw,
     /// Throws a `SyntaxError` of the current realm with the message `strings[k]`: evaluating a
@@ -658,6 +689,8 @@ impl Instruction {
             | Instruction::CaseJump(t)
             | Instruction::ForInNext(t)
             | Instruction::IteratorStep(t)
+            | Instruction::AsyncIteratorStep(t)
+            | Instruction::AsyncIteratorClose(t)
             | Instruction::JumpIfTag { target: t, .. }
             | Instruction::DelegateStep(t)
             | Instruction::JumpIfDelegateDone(t) => Some(t),
@@ -745,6 +778,9 @@ impl Instruction {
             | Instruction::ForInStart
             | Instruction::GetIterator
             | Instruction::IteratorClose
+            | Instruction::GetAsyncIterator
+            | Instruction::AsyncIteratorNext
+            | Instruction::AsyncIteratorClosed
             | Instruction::Throw
             | Instruction::ThrowSyntaxError(_)
             | Instruction::Return
@@ -814,6 +850,8 @@ impl Instruction {
             Instruction::CaseJump(_) => Instruction::CaseJump(t),
             Instruction::ForInNext(_) => Instruction::ForInNext(t),
             Instruction::IteratorStep(_) => Instruction::IteratorStep(t),
+            Instruction::AsyncIteratorStep(_) => Instruction::AsyncIteratorStep(t),
+            Instruction::AsyncIteratorClose(_) => Instruction::AsyncIteratorClose(t),
             Instruction::JumpIfTag { tag, .. } => Instruction::JumpIfTag { tag, target: t },
             Instruction::JumpIfNotUndefined(_) => Instruction::JumpIfNotUndefined(t),
             Instruction::DelegateStep(_) => Instruction::DelegateStep(t),

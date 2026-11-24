@@ -17,8 +17,12 @@
 //! slots and shares one [[AlreadyResolved]] flag between the two, which answers the same: the
 //! second call of either returns undefined.
 //!
-//! Not here: `finally`, `all`, `allSettled`, `any`, `race`, `withResolvers` and `try`, a later
-//! story of slice 10.
+//! `story:promise-statics-finally-and-aggregate-error` adds `Promise.prototype.finally`
+//! (`#sec-promise.prototype.finally`) with the steps of its closures thenFinally, catchFinally,
+//! valueThunk and thrower, built-in functions with slots of their own kind
+//! (`PromiseSlots::Finally` and `PromiseSlots::Thunk`, `object/builtin_function.rs`), and puts
+//! `all`, `allSettled`, `any`, `race`, `try` and `withResolvers` (`builtins/promise_statics.rs`)
+//! on `%Promise%` beside `reject` and `resolve`, in the order of the clauses.
 //!
 //! A job calls the resolve or reject function of its capability from Rust
 //! ([`Agent::call_settling_function`]): when that function is one of the resolving functions
@@ -28,11 +32,12 @@
 
 use std::rc::Rc;
 
+use crate::builtins::promise_statics::PromiseStaticsBuiltin;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion};
 use crate::host::{ErrorKind, Host};
 use crate::object::ObjectKind;
-use crate::object::builtin_function::{Behaviour, BuiltinFunction, BuiltinId, Slots};
+use crate::object::builtin_function::{Behaviour, BuiltinFunction, BuiltinId, PromiseSlots, Slots};
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Key, Property, Slot};
 use crate::realm::intrinsics::{Intrinsic, Making};
@@ -62,6 +67,16 @@ pub(crate) enum PromiseBuiltin {
     /// executorClosure of NewPromiseCapability (27.5.1.5, step 4), with the record
     /// resolvingFuncs.
     CapabilityExecutor,
+    /// `Promise.prototype.finally ( onFinally )` (27.5.5.3).
+    Finally,
+    /// thenFinallyClosure of `finally` (27.5.5.3, step 6.a), with onFinally and ctor.
+    ThenFinally,
+    /// catchFinallyClosure of `finally` (27.5.5.3, step 6.c), with onFinally and ctor.
+    CatchFinally,
+    /// returnValue of thenFinallyClosure (step 6.a.iii), with value.
+    ValueThunk,
+    /// throwReason of catchFinallyClosure (step 6.c.iii), with reason.
+    Thrower,
 }
 
 impl<H: Host> Agent<H> {
@@ -83,11 +98,43 @@ impl<H: Host> Agent<H> {
             BuiltinId::Promise(PromiseBuiltin::Constructor),
             prototype,
         )?;
-        for (name, id) in [
-            ("reject", PromiseBuiltin::Reject),
-            ("resolve", PromiseBuiltin::Resolve),
+        // 27.5.4.1 to 27.5.4.9 but `prototype`, in the order of the clauses; `length` as each
+        // clause's parameters give it.
+        for (name, length, id) in [
+            (
+                "all",
+                1,
+                BuiltinId::PromiseStatics(PromiseStaticsBuiltin::All),
+            ),
+            (
+                "allSettled",
+                1,
+                BuiltinId::PromiseStatics(PromiseStaticsBuiltin::AllSettled),
+            ),
+            (
+                "any",
+                1,
+                BuiltinId::PromiseStatics(PromiseStaticsBuiltin::Any),
+            ),
+            (
+                "race",
+                1,
+                BuiltinId::PromiseStatics(PromiseStaticsBuiltin::Race),
+            ),
+            ("reject", 1, BuiltinId::Promise(PromiseBuiltin::Reject)),
+            ("resolve", 1, BuiltinId::Promise(PromiseBuiltin::Resolve)),
+            (
+                "try",
+                1,
+                BuiltinId::PromiseStatics(PromiseStaticsBuiltin::Try),
+            ),
+            (
+                "withResolvers",
+                0,
+                BuiltinId::PromiseStatics(PromiseStaticsBuiltin::WithResolvers),
+            ),
         ] {
-            self.define_builtin_method(making, constructor, name, 1, BuiltinId::Promise(id))?;
+            self.define_builtin_method(making, constructor, name, length, id)?;
         }
         // 27.5.4.10: an accessor whose set accessor function is undefined, named "get
         // [Symbol.species]".
@@ -111,6 +158,7 @@ impl<H: Host> Agent<H> {
         )?;
         for (name, length, id) in [
             ("catch", 1, PromiseBuiltin::Catch),
+            ("finally", 1, PromiseBuiltin::Finally),
             ("then", 2, PromiseBuiltin::Then),
         ] {
             self.define_builtin_method(making, prototype, name, length, BuiltinId::Promise(id))?;
@@ -144,7 +192,142 @@ impl<H: Host> Agent<H> {
             PromiseBuiltin::CapabilityExecutor => {
                 self.capability_executor(function, arg(0), arg(1))
             }
+            PromiseBuiltin::Finally => self.promise_finally(this, arg(0)),
+            PromiseBuiltin::ThenFinally | PromiseBuiltin::CatchFinally => {
+                self.finally_closure(id, function, arg(0))
+            }
+            PromiseBuiltin::ValueThunk | PromiseBuiltin::Thrower => {
+                let value = match self.promise_closure_slots(function)? {
+                    PromiseSlots::Thunk { value } => *value,
+                    PromiseSlots::Element { .. } | PromiseSlots::Finally { .. } => {
+                        return Err(self.fault());
+                    }
+                };
+                // returnValue: 1. Return NormalCompletion(value). throwReason: 1. Return
+                // ThrowCompletion(reason).
+                if id == PromiseBuiltin::ValueThunk {
+                    Ok(value)
+                } else {
+                    Err(Abrupt::Throw(value))
+                }
+            }
         }
+    }
+
+    /// `Promise.prototype.finally ( onFinally )` (`#sec-promise.prototype.finally`).
+    fn promise_finally(&mut self, this: Value, on_finally: Value) -> Completion<Value> {
+        // 1. Let promise be the this value. 2. If promise is not an Object, throw a TypeError
+        // exception.
+        let Value::Object(promise) = this else {
+            return Err(self.throw_error(
+                ErrorKind::TypeError,
+                "Promise.prototype.finally called on a value that is not an object",
+            ));
+        };
+        // 3. Let ctor be ? SpeciesConstructor(promise, %Promise%). 4. Assert: IsConstructor(ctor)
+        // is true.
+        let default = self.current_intrinsic(Intrinsic::Promise)?;
+        let ctor = self.species_constructor(promise, default)?;
+        let mark = self.keep(Value::Object(ctor));
+        let answer =
+            self.finally_handlers(ctor, on_finally)
+                .and_then(|(then_finally, catch_finally)| {
+                    self.keep(then_finally);
+                    self.keep(catch_finally);
+                    // 7. Return ? Invoke(promise, "then", « thenFinally, catchFinally »).
+                    let key = self.name_key("then")?;
+                    self.invoke(this, key, &[then_finally, catch_finally])
+                });
+        self.release(mark);
+        answer
+    }
+
+    /// Steps 5 and 6 of `finally`: onFinally twice when it is not callable, else thenFinally and
+    /// catchFinally, CreateBuiltinFunction(closure, 1, "", « ») of the current realm, whose
+    /// slots hold onFinally and ctor.
+    fn finally_handlers(
+        &mut self,
+        ctor: ObjectRef,
+        on_finally: Value,
+    ) -> Completion<(Value, Value)> {
+        // 5. If IsCallable(onFinally) is false, then a. Let thenFinally be onFinally. b. Let
+        // catchFinally be onFinally.
+        if !self.is_callable(on_finally)? {
+            return Ok((on_finally, on_finally));
+        }
+        // 6. Else, a and b: thenFinally; c and d: catchFinally.
+        let realm = self.current_realm()?;
+        let slots = || PromiseSlots::Finally {
+            on_finally,
+            constructor: ctor,
+        };
+        let then_finally = self.create_promise_closure(
+            BuiltinId::Promise(PromiseBuiltin::ThenFinally),
+            slots(),
+            1,
+            realm,
+        )?;
+        let mark = self.keep(Value::Object(then_finally));
+        let catch_finally = self.create_promise_closure(
+            BuiltinId::Promise(PromiseBuiltin::CatchFinally),
+            slots(),
+            1,
+            realm,
+        );
+        self.release(mark);
+        Ok((Value::Object(then_finally), Value::Object(catch_finally?)))
+    }
+
+    /// thenFinallyClosure ( value ) or catchFinallyClosure ( reason ) of `finally`
+    /// (`#sec-promise.prototype.finally`, steps 6.a and 6.c), the closure `function`.
+    fn finally_closure(
+        &mut self,
+        id: PromiseBuiltin,
+        function: ObjectRef,
+        argument: Value,
+    ) -> Completion<Value> {
+        let (on_finally, ctor) = match self.promise_closure_slots(function)? {
+            PromiseSlots::Finally {
+                on_finally,
+                constructor,
+            } => (*on_finally, *constructor),
+            PromiseSlots::Element { .. } | PromiseSlots::Thunk { .. } => {
+                return Err(self.fault());
+            }
+        };
+        // i. Let result be ? Call(onFinally, undefined).
+        let result = self.call_value(on_finally, Value::Undefined, &[])?;
+        // ii. Let p be ? PromiseResolve(ctor, result).
+        let mark = self.keep(result);
+        let p = self.promise_resolve(ctor, result);
+        self.release(mark);
+        let p = p?;
+        let mark = self.keep(p);
+        // iii and iv: valueThunk, CreateBuiltinFunction(returnValue, 0, "", « »), or thrower,
+        // CreateBuiltinFunction(throwReason, 0, "", « »), capturing the argument.
+        let thunk_id = if id == PromiseBuiltin::ThenFinally {
+            PromiseBuiltin::ValueThunk
+        } else {
+            PromiseBuiltin::Thrower
+        };
+        let answer = self
+            .current_realm()
+            .and_then(|realm| {
+                self.create_promise_closure(
+                    BuiltinId::Promise(thunk_id),
+                    PromiseSlots::Thunk { value: argument },
+                    0,
+                    realm,
+                )
+            })
+            .and_then(|thunk| {
+                self.keep(Value::Object(thunk));
+                // v. Return ? Invoke(p, "then", « valueThunk ») or « thrower ».
+                let key = self.name_key("then")?;
+                self.invoke(p, key, &[Value::Object(thunk)])
+            });
+        self.release(mark);
+        answer
     }
 
     /// `Promise ( executor )` (`#sec-promise-executor`).
@@ -290,7 +473,9 @@ impl<H: Host> Agent<H> {
                 promise,
                 already_resolved,
             } => Ok((*promise, Rc::clone(already_resolved))),
-            Slots::Executor { .. } | Slots::Await { .. } => Err(self.fault()),
+            Slots::Executor { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => {
+                Err(self.fault())
+            }
         }
     }
 
@@ -391,7 +576,9 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Value> {
         let (resolve_slot, reject_slot) = match self.closure_slots(function)? {
             Slots::Executor { resolve, reject } => (*resolve, *reject),
-            Slots::Resolving { .. } | Slots::Await { .. } => return Err(self.fault()),
+            Slots::Resolving { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => {
+                return Err(self.fault());
+            }
         };
         // a. If resolvingFuncs.[[Resolve]] is not undefined, throw a TypeError exception.
         // b. If resolvingFuncs.[[Reject]] is not undefined, throw a TypeError exception.
@@ -411,7 +598,9 @@ impl<H: Host> Agent<H> {
                 *resolve_slot = resolve;
                 *reject_slot = reject;
             }
-            Slots::Resolving { .. } | Slots::Await { .. } => return Err(self.fault()),
+            Slots::Resolving { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => {
+                return Err(self.fault());
+            }
         }
         // e. Return NormalCompletion(undefined).
         Ok(Value::Undefined)

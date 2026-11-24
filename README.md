@@ -19,14 +19,16 @@ can use it.
 swell runs scripts of the ES5 grammar and of the bindings and iteration of ES2015 in both
 modes, with regular expressions, under a step budget and a memory budget.
 Its gate holds the test262 counts: 20,229 of the 44,812 cases that run pass (45.1 %), measured on 2026-11-23.
-Four of nineteen delivery slices are delivered:
+Six of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |
 |---|---|---|
 | 1 | the test262 harness itself | 31, every one passes |
 | 2 | the ES5-level language with `with`, `arguments`, `eval` and the global `Function` | 4,259, every one passes |
 | 3 | the core library: `Object`, `Function`, `Array`, `String`, `JSON`, `globalThis`, the URI functions | 7,010 of 7,011 pass |
+| 5 | regular expressions: `RegExp`, its flags with `v`, named groups, lookbehind, Unicode properties, and the `String` methods that take one | 2,724, every one passes |
 | 6 | bindings and iteration: `let`, `const`, templates, arrow functions, destructuring, spread, `Symbol`, iterators, `for`-`of` | 3,898, every one passes |
+| 7 | generators: generator functions and methods, `yield`, `yield*` and the `GeneratorFunction` constructor | 1,472, every one passes |
 
 A delivered slice passes the test262 cases it holds, but for an exception the design states.
 The slices are not delivered in the order of their numbers, and a case is counted in the slice
@@ -42,7 +44,7 @@ What exists, measured on 2026-11-23:
   scenarios. All 58 pass on ESS's interpreter. The gate runs them against the engine too, and
   14 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
-  pinned by checksum, both specifications checked, and 65 planted defects that the gate must
+  pinned by checksum, both specifications checked, and 66 planted defects that the gate must
   refuse. Its test steps have a budget of 120 seconds and a test is ended at 60.
 - The test262 runner, `swell-test262`. It reads all 53,801 cases, excludes 8,982 by recorded
   decision and runs the rest in both modes under budgets. It counts them per directory, per
@@ -72,9 +74,10 @@ literals with and without a tag, arrow functions, default and rest parameters, o
 array destructuring, computed property names, spread in objects, arrays and calls, `Symbol`,
 the iterator protocol, `for`-`of`, function declarations in blocks and `Array.from`. All
 3,898 of its cases pass in all 7,351 runs; 402 cases that also need slice 4 or 5 are counted
-there. Slice 5, regular expressions, is in work: all of it runs but the flag `v`, and
-2,523 of its 2,724 cases pass. Slice 7, generators, is in work too: generator functions,
-`yield*` and the `GeneratorFunction` constructor run, and 1,168 of its 1,491 cases pass. The slices are taken in the order the first
+there. Slice 5, regular expressions, and slice 7, generators, were delivered on 2026-11-24:
+all 2,724 cases of slice 5 pass in all 5,441 runs and all 1,472 cases of slice 7 in all
+2,801 runs. Slice 10, promises and `async` functions, is in work: `Promise` with `then`,
+`async` functions, `async` methods, the statics of `Promise` and `for await` run, and 1,665 of its 3,879 cases pass. The slices are taken in the order the first
 user, a browser, needs them: 6, 5, 7, 10, 4, 9.
 
 ## What swell is

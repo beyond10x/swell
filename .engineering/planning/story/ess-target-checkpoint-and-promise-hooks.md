@@ -17,13 +17,15 @@ scope:
   path: conformance/ess/tests/planted_defect.rs
 - confidence: cited
   path: spec/domains/host.yaml
+- confidence: cited
+  path: spec/ess-inputs.yaml
 - confidence: inferred
   path: spec/scenarios/promise-job-runs-at-the-next-checkpoint.yaml
 - confidence: inferred
   path: spec/scenarios/rejection-is-tracked-then-handled.yaml
 - confidence: cited
   path: taskfiles/conform-engine.yml
-revision: 11
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T19:58:14Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T19:58:15Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
@@ -73,6 +75,18 @@ Writes: `conformance/ess/src/target.rs`, `conformance/ess/tests/planted_defect.r
 `slot task suite` exits 0, then `slot task conform-engine` exits 0 and prints `conform-engine: planted defect refused: test a_target_whose_checkpoint_runs_no_job_fails_a_scenario ... ok` (a line this story adds to the task); its report shows both new scenarios passed and `step-budget-ends-one-run` and `faulted-agent-refuses-every-call` passed; its summary line has more passed and fewer unsupported than on its base (the report quotes both lines). The floor and the maximum equal the measured counts: with `last=$(tail -n 1 .out/conform-engine.log)`, `grep -c "passed < $(printf '%s\n' "$last" | awk '{ print $3 }'))" taskfiles/conform-engine.yml` prints `1` and `grep -c "default $(printf '%s\n' "$last" | awk '{ print $9 }')}}" taskfiles/conform-engine.yml` prints `1` (on the base, with 14 and 44 in the task, neither prints `1` once more scenarios pass). The four declarations, each by a search that prints `0` on `397ffff`: `grep -c 'Run every entry of the agent' spec/domains/host.yaml`, `grep -c 'a step each, and what they run' spec/domains/host.yaml`, `grep -c 'before an entry is taken off' spec/domains/host.yaml` and `grep -c 'name: Abandoned' spec/domains/host.yaml` each print `1`. `grep -rn 'slice 10 (promises and jobs)' conformance spec taskfiles` prints nothing (line 285 of `target.rs` on `397ffff`). `git diff --quiet "$BASE" -- crates spec/system.yaml` exits 0, `slot task validate` exits 0 (`BASE` the join the unit starts from). `slot task clippy` exits 0. Time: the new test stays under 1.5 CPU seconds alone and the step `conform-engine` rises by at most 5 s, as the unit measured them; the report lists both, and a time over its bound fails this acceptance. Scenario files: each new or changed scenario file needs a policy admission, which the coordinator asks for before the commit; no document of this story holds the value of a scenario seed.
 
 test262: no case moves; the story writes no file the runner reads.
+
+## Measured by the unit
+
+The unit built this story on `fa35b9d` and met five places where the text above does not hold. Each replaces the sentence it names; the rest of Change and Acceptance stands.
+
+- `Writes:` gets `spec/ess-inputs.yaml`, two lines: `ess` reads the authored scenarios from the list `scenarios` of that file, and without the two new files in it `task suite` writes 58 scenarios and the new planted-defect test cannot run on them.
+- The scenario `promise-job-runs-at-the-next-checkpoint` has no awaited step `HostEnqueuePromiseJob`. `ess` 0.97.4 refuses it (`ESS-AUTHOR-045`: the outcome `enqueued` creates the record the step addresses, so no record exists before the step). HOST-83 is therefore stated by no scenario; the scenario's head comment says so, and a unit test of the target covers the answer to that await.
+- The same scenario ends with one more script that throws when the job did not run. Without it a checkpoint that runs no job still answers `drained`, and the planted-defect test `a_target_whose_checkpoint_runs_no_job_fails_a_scenario` could not fail.
+- `faulted-agent-refuses-every-call` stays unsupported: it forces the outcome `engine-fault` of `EvaluateScript`, and the engine's fault switch has no point there; on the base the missing checkpoint was only the first reason the target named. The measured line is `60 scenarios: 18 passed, 0 failed, 0 error, 42 unsupported` (base: 58 scenarios, 14 passed, 44 unsupported); the floor of the task is 18 and `ESS_UNSUPPORTED_MAX` is 42. The acceptance's sentence that this scenario passed is replaced by: it is unsupported, with that reason.
+- `Abandoned` is reached in the model through the transition `abandon` on the branch `engine-fault` of `EvaluateScript` (a faulted agent's queue never runs again): `ess` refuses a state no outcome reaches. The two causes Change names (a job ended by a termination; `Agent::clear_microtasks`) carry `UNMAPPED` markers that name HOST-77 and HOST-200. The same transition on the checkpoint's own `engine-fault` was measured and not taken: the refusals of synthesis rise from 41 to 42, over `SPEC_REFUSALS_MAX`, and one synthesized scenario is lost.
+
+Counts after the change: `task validate` prints `swell v1 — 2 file(s), 10 scenario(s), valid`; `task suite` `60 scenario(s) (10 authored), 41 refusal(s)`; the conformance crate runs 16 tests in 3 binaries; `host-requirements-check` counts 53 `UNMAPPED` markers (51 before). The step `conform-engine` took 1.5 to 2.1 s of wall time in three runs on the pool's build node (1.6 to 1.9 before).
 
 ## Out of scope
 

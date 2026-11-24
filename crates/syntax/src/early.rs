@@ -41,7 +41,7 @@
 //!   checked as those of its declaration, a parameter list or a `catch` parameter, and a pattern
 //!   in a declaration has an initializer outside a for-in or for-of head;
 //! - `#sec-method-definitions-static-semantics-early-errors`: the `UniqueFormalParameters` of a
-//!   method, in any code;
+//!   method, a generator or `async` method too, in any code;
 //! - `#sec-arrow-function-definitions-static-semantics-early-errors`: the
 //!   `ArrowFormalParameters` of an arrow function hold no name twice, in any code; a parameter
 //!   that the body declares lexically, and `eval` and `arguments` as parameters in strict code,
@@ -68,6 +68,14 @@
 //!   and the body of an `async` function or arrow function, and the parameters of an arrow
 //!   function inside them), nor the name of an AsyncFunctionExpression; the walk tracks [Await]
 //!   beside [Yield];
+//! - `#sec-async-generator-function-definitions-static-semantics-early-errors`: an async
+//!   generator is both a generator and an `async` function, with [Yield] and [Await] set in its
+//!   parameters and body and in the name of an AsyncGeneratorExpression, so the checks above
+//!   apply to it with the messages of each: its FormalParameters contain no YieldExpression and
+//!   no AwaitExpression, `yield` and `await` are no identifier inside it or as the name of the
+//!   expression, and a Use Strict Directive with a list that is not simple, a parameter its body
+//!   declares lexically, duplicate parameters and the redeclaration of an async generator
+//!   declaration in a block or a `case` block are those of every function;
 //! - `#sec-static-semantics-assignmenttargettype`: an AwaitExpression is no assignment target;
 //! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`:
 //!   IsValidRegularExpressionLiteral, the flags and then ParsePattern of `swell-regexp` with
@@ -1185,8 +1193,9 @@ impl<'a, 'm> Checker<'a, 'm> {
     /// The function's name and parameters, checked with its own strictness, inside code whose
     /// [Yield] and [Await] are `outer`: the name of a declaration with `outer`
     /// (`BindingIdentifier[?Yield, ?Await]`), that of an expression with the function's own
-    /// (`[+Yield]` for a GeneratorExpression, `[+Await]` for an AsyncFunctionExpression, each
-    /// cleared for a FunctionExpression); the parameters with those of
+    /// (`[+Yield]` for a GeneratorExpression, `[+Await]` for an AsyncFunctionExpression, both
+    /// for an AsyncGeneratorExpression, each cleared for a FunctionExpression); the parameters
+    /// with those of
     /// [`Checker::parameter_context`].
     fn check_function(&mut self, id: FunctionId, outer: (bool, bool)) {
         let Some(f) = self.ast.function(id) else {
@@ -1213,10 +1222,15 @@ impl<'a, 'm> Checker<'a, 'm> {
                 seen.insert(p.name.as_str());
                 continue;
             }
-            // `#sec-method-definitions-static-semantics-early-errors` and
-            // `#sec-generator-function-definitions-static-semantics-early-errors`: the
-            // UniqueFormalParameters of a method, a generator method too, in any code; a
-            // generator method's other early errors are those of every generator.
+            // `#sec-method-definitions-static-semantics-early-errors`,
+            // `#sec-generator-function-definitions-static-semantics-early-errors` and
+            // `#sec-async-function-definitions-static-semantics-early-errors`: the
+            // UniqueFormalParameters of a method, a generator or `async` method too, in any code;
+            // a generator method's other early errors are those of every generator, and an
+            // `async` method's (AsyncMethod: no AwaitExpression in its parameters, no Use Strict
+            // Directive with a list that is not simple, no parameter its body declares
+            // lexically) those of every `async` function. HasDirectSuper needs `super`, which the
+            // parser refuses before slice 8, in a method as anywhere.
             if f.kind == FunctionKind::Method {
                 self.error(
                     format!("duplicate parameter name {} in a method", p.name),

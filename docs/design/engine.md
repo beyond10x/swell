@@ -737,7 +737,11 @@ and per code unit of a pattern before its parse at run time (decision 7, "What o
 the matcher is"), per limb operation for `BigInt`, per code unit of its text and per value for
 `JSON.parse` and `JSON.rawJSON`, per code unit of eval code before its parse, and per
 pass of a sort of n property keys, n before the pass; plus what a host function charges for its
-own work with `cx.charge_steps` (`host-interface.md`, section 14); and, from slice 10, a step for
+own work with `cx.charge_steps` (`host-interface.md`, section 14); one step for each call of a
+clock or time zone hook, charged before the call, so that one built-in call makes at most 61
+(`host-interface.md`, decision 17, added on 2026-11-24); per code unit past 32 of the String
+that `Date.parse` and `new Date(string)` read, charged before the first is read (decision 6);
+and, from slice 10, a step for
 each entry a microtask checkpoint takes off its queue and one for each promise job queued ("The
 microtask checkpoint is one entry" below). Eval code: PerformEval charges one step per
 code unit of the eval String before it copies it; CreateDynamicFunction charges one per code
@@ -1879,7 +1883,128 @@ does not bound the forms, since they are not Strings.
   `AvailableNamedTimeZoneIdentifiers ( )`. The command-line host and the test262 runner answer
   "UTC" unless told otherwise. `Date.parse` accepts the format of 21.4.1.32 and the forms
   `Date.prototype.toString` and `toUTCString` produce; nothing else (an implementation-defined
-  fallback the standard allows and swell does not take).
+  fallback the standard allows and swell does not take); the three forms are written out below.
+  How often the engine calls the time hooks, what a call costs and what it does with an answer
+  out of range are in `host-interface.md` decision 17. The rest of this decision's `Date` items
+  were added on 2026-11-24 for slice 4.
+- **`MakeDay` far outside the time range** (`MakeDay`, 21.4.1.28, `ecma262:sec-makeday`). What a
+  script sees: the draft asks for a finite time value `tv` (an integral Number) in year
+  ℝ(balancedYear), month balancedMonthMV and date 1, and answers NaN "if this is not possible
+  (because some argument is out of range)". It does not hold `tv` to ±8.64 × 10^15; only
+  `TimeClip` does, in every caller (`Date.UTC`, the constructor, the setters, `Date.parse`), so
+  `MakeDay` answers a day number for the year 275760 and for the year 285000 alike, and
+  `Date.UTC(275760, 8, 13)` is 8.64e15 while `Date.UTC(275760, 8, 14)` and `Date.UTC(1e300, 0)`
+  are NaN. swell answers as the draft does for every balancedYear of magnitude up to 2^53
+  (9,007,199,254,740,992): the day number when some Number lies in the day, that is in
+  [d × 86,400,000, (d + 1) × 86,400,000) milliseconds, and NaN when none does. Every day holds
+  a Number below 2^79 milliseconds, the year 1.9 × 10^13 (from 2^79 on, the gap of two Numbers
+  is 2^27 ms, longer than a day); above it a day holds one less often: at the year 2^53 the
+  day starts near 2^87.8 ms, the gap is 2^35 ms, and one day in 398 holds a Number (`MakeDay(2^53,
+  0, 1)` is NaN, `MakeDay(2^53 - 65, 0, 1)` is not). For a balancedYear of magnitude above 2^53
+  `MakeDay` answers NaN. That differs from the draft only for a script that makes the day number
+  cancel against a time of its own, as in `new Date(Y, 0, 1, H)` with an `H` of the size of the
+  day number's milliseconds, on a year above 2^53 whose first day holds a Number (about one
+  in 400 at 2^53, one in 400,000 at 10^19, fewer above); no argument of a setter can
+  (`TimeWithinDay` is below 86,400,000, so the sum is far outside the range and `TimeClip` makes
+  it NaN), and a search of `test/built-ins/Date` for exponents, powers of two and 2^53 finds no
+  year above 10^13. Rejected: a bound at the first year whose millisecond count leaves the safe
+  integers (285,426): `new Date(300000, 0, 1, -1e9)` is the day number 108,853,222
+  (9.4 × 10^15 ms, above 2^53, in a day that holds Numbers) plus -3.6 × 10^15, a date near
+  5.8 × 10^15 in the range, which that bound would make NaN with ordinary arguments; and a
+  bound above 2^53, which only moves the deviation to years no script writes and costs wider
+  integers. The mechanism: `swell-num` reads balancedYear as an integer only when it is
+  integral and of magnitude at most 2^53, so the year and the day number (about
+  365.2425 × 2^53, under 2^62) fit `i64`; the day's first millisecond, `d × 86,400,000` (under
+  2^89), is computed in `i128`; whether the day holds a Number is one comparison of that integer
+  with the next Number at or above it; the first day of the month comes from the closed form of
+  `DayFromYear` and a table of month starts, with no loop over years or months. `dayMV` is added
+  in Number arithmetic as the draft's last step has it. `crates/num` does this today
+  (`make_day`, `day_holds_a_number`); its module header calls the bound "not decided" and is
+  rewritten to cite this item.
+- **`UTC ( t )` and the local time that does not exist** (21.4.1.26, `ecma262:sec-utc-t`).
+  What a script and a host see: for a local time that repeats, the first instant; for one that
+  a positive transition skips, the offset in force just before the transition; for every other
+  local time, its one instant. The draft finds the skipped case's offset from `tBefore`, "the
+  largest integral Number < t for which possibleInstantsBefore is not empty", and states no
+  bound on the search. swell's search is bounded: it asks `get_named_time_zone_epoch_nanoseconds`
+  at most 57 times for one `UTC ( t )`, and when it finds no `tBefore` within 2^28 milliseconds
+  (268,435,456 ms, 74.5 hours) below `t`, `UTC ( t )` answers NaN, so `new Date(y, m, d)` is
+  then a Date whose time value is NaN, never an exception and never a hang. The bound has two
+  grounds. A host that keeps to the offset range of `host-interface.md` decision 17 has offsets
+  below 24 hours on each side of a transition, so a gap is shorter than 48 hours
+  (172,800,000 ms, below 2^28); a real zone's longest gap is one day. And a host that does not
+  (one that answers the empty list for every local time, a broken or hostile host) gets NaN
+  after a known number of calls instead of the draft's search without end. NaN rather than the
+  offset of some instant: no instant before `t` was found, so any offset would be one the host
+  never gave for that time, and the Date still exists. The mechanism: `t` must be integral and
+  within 8.64 × 10^15 + 86,400,000 in magnitude, else NaN with no hook call (an offset below
+  86,400,000 ms puts `t - offset` outside the range, so `TimeClip` of every caller would make
+  it NaN; `LocalTime` of a time value stays inside the same limit). The
+  common path asks `get_named_time_zone_epoch_nanoseconds` once with the fields of `t` and
+  `get_named_time_zone_offset_nanoseconds` once with the first element. If the list is empty
+  the search runs: the probe times are `t - d` for d = 1, 2, 4, ..., 2^28 (29 probes, the first
+  non-empty one ends the gallop), then a bisection between the last distance that gave an empty
+  list and the first that did not, one probe per halving of an interval of at most 2^27
+  milliseconds (27 probes), keeping the list of the lowest distance that gave a non-empty one;
+  that list's last element goes to the offset hook. The most is 1 + 29 + 27 = 57 asks of the
+  epoch hook; with no `tBefore` it is 1 + 29 = 30. A probe time outside the limit above counts
+  as an empty answer and makes no call. The search is exact when the empty answers just below
+  `t` form one run followed by non-empty ones (every real zone); for a host whose answers do
+  not, the result is the boundary the probes met, the same for the same answers (HOST-133).
+  Time spent: decision 3 and `host-interface.md` decision 17 charge one step for each hook
+  call.
+- **`Date.parse` and the String argument of `new Date`** read exactly three forms, each the
+  whole String, with no space before or after and with the letters as written below; anything
+  else is NaN, with no fallback. They are told apart by the first code unit, so no form is tried
+  and abandoned: a digit, `+` or `-` starts the first form, a letter the second or third (by
+  the fourth code unit: a space or a comma).
+  1. The Date Time String Format of 21.4.1.32 (`ecma262:sec-date-time-string-format`):
+     `YYYY`, `YYYY-MM` or `YYYY-MM-DD`, optionally followed by `THH:mm`, `THH:mm:ss` or
+     `THH:mm:ss.sss` (exactly three digits), and after a time, optionally `Z` or `+HH:mm` or
+     `-HH:mm` (a date-only form takes no offset: `2020-01-01Z` is NaN). A year is four digits, or `+` or `-` and six digits (`ecma262:sec-expanded-years`);
+     `-000000` is NaN. MM is 01 to 12 and DD is 01 to the length of that month in that year (a
+     day the month does not have, `2021-02-30`, is an illegal element value and NaN; the draft
+     says only 01 to 31, and a reader of "out-of-bounds elements" has no other number to name),
+     HH is 00 to 24, mm and ss 00 to 59, and an offset's HH 00 to 23 and mm 00 to 59 (the draft's
+     offset format). HH of 24 is allowed only with mm, ss and sss all zero and reads as 00:00 of
+     the next day (Note 1 of 21.4.1.32). A date-only form is read as UTC. A date-time form
+     with an offset is read at that offset and calls no hook. A date-time form without an offset
+     is read as local time, `UTC(MakeDate(MakeDay, MakeTime))` through the conversion of
+     `host-interface.md` decision 17, with at most 59 hook calls. The value is the result of
+     `TimeClip`, so an instant outside the time range is NaN, `+275760-09-13T00:00:00.001Z`
+     included, and `+275760-09-13T01:00:00+01:00` is 8.64e15, since the offset is taken off
+     before the clip.
+  2. The form of `Date.prototype.toString` (`ToDateString`, `ecma262:sec-todatestring`, with
+     `DateString`, `TimeString` and `TimeZoneString`): `Www Mmm DD Y HH:mm:ss GMT±HHmm`
+     optionally followed by ` (name)`. `Www` is one of `Sun Mon Tue Wed Thu Fri Sat` and `Mmm`
+     one of `Jan` to `Dec` (tables 61 and 62, `ecma262:sec-todatestring-day-names`,
+     `ecma262:sec-todatestring-month-names`), written as there; DD is two digits; Y is
+     four to six digits, with a `-` before them for a year below 0 (`DateString` pads to four
+     and writes a sign only when negative, and 271,821 and 275,760 have six digits; `-0000` is
+     NaN); HH, mm and ss are two digits (HH 00 to 23: `TimeString` never writes 24); the offset
+     is `+` or `-`, HH 00 to 23, mm 00 to 59, with no colon. The name is the one place the
+     draft leaves to the implementation (`ecma262:sec-timezoneestring`, "an implementation-defined
+     time zone name"): swell's own `toString` writes none, since no hook answers a name, and
+     the parse accepts
+     a space, `(`, one or more code units other than `(` and `)`, and `)` as the last code unit
+     of the String, and ignores them. The weekday is read and not checked against the date. The
+     instant is the fields read as a time at the String's offset, no hook, no zone of the host.
+  3. The form of `Date.prototype.toUTCString` (`ecma262:sec-date.prototype.toutcstring`):
+     `Www, DD Mmm Y HH:mm:ss GMT`, with the same `Www`, `Mmm`, DD, Y and time as the second
+     form, read as UTC.
+
+  DD, MM, HH, mm and ss out of their ranges, a month name or weekday name not in the tables, a
+  second space, a missing element and any extra code unit after the last element are NaN. Not
+  accepted, so NaN: the forms `toDateString` and `toTimeString` produce, and what
+  `toLocaleString` and its two siblings produce (21.4.3.2 leaves that to the implementation),
+  unless a later decision makes a `toLocale*` method print one of the three forms. An expanded
+  year whose instant is outside the range is NaN with no fallback (`sec-expanded-years`), and
+  the fallback of 21.4.3.2 is not taken. The work: one pass over the
+  String with no backtracking, charged as every String operation is (decision 3): a String of up
+  to 32 code units costs the step of the call and each code unit past 32 one step, charged before
+  the first is read, so the name of the second form, the only part without a length bound, is
+  paid for by its length; the date-time form without an offset adds the steps of its hook
+  calls.
 
 ## 7. Regular expressions
 
@@ -2480,8 +2605,8 @@ The rule:
 | 4 | `numbers-and-dates` | 1,612 | 3,184 |
 | 5 | `regexp` | 2,724 | 5,441 |
 | 6 | `bindings-and-iteration` | 3,898 | 7,351 |
-| 7 | `generators` | 1,491 | 2,841 |
-| 8 | `classes` | 9,146 | 18,143 |
+| 7 | `generators` | 1,472 | 2,801 |
+| 8 | `classes` | 9,186 | 18,223 |
 | 9 | `collections-proxy-reflect` | 1,781 | 3,533 |
 | 10 | `promises-and-async` | 3,879 | 7,499 |
 | 11 | `modules` | 1,281 | 1,833 |
@@ -2491,8 +2616,8 @@ The rule:
 | 15 | `iterator-helpers-and-resources` | 1,094 | 2,170 |
 | 16 | `weak-references` | 82 | 164 |
 | 17 | `tail-calls` | 35 | 35 |
-| 18 | `annex-b` | 1,137 | 1,456 |
-| 19 | `staging` | 1,474 | 2,766 |
+| 18 | `annex-b` | 1,135 | 1,452 |
+| 19 | `staging` | 1,455 | 2,730 |
 | | slices 1 to 19 | 44,931 | 85,794 |
 | 20 | `temporal` (excluded at first) | 4,617 | 9,234 |
 | 21 | `intl402` (excluded at first) | 1,662 | 3,324 |
@@ -2544,6 +2669,18 @@ test262` on the code of the slice, every run passed. Every moved case goes to sl
 every case that comes in leaves slice 18, so slices 1 to 19 still hold 44,931 cases and 85,794
 runs and the 22 lines still sum to 53,801 and 103,360.
 
+Slice 7 had 1,491 cases and 2,841 runs by its rules (its `dir` lines, `feature generators 7`,
+the lines of the closes of slices 2, 3 and 6 that gave it cases, and the order of delivery).
+1,472 cases and 2,801 runs are what slice 7 counts after its close: 40 cases (80 runs) that
+need slice 8 move by the lines of the paragraph "Slice 7's cases that need a later slice", and
+21 cases (40 runs) come into it, 2 from slice 18 and 19 from slice 19, by the lines of the same
+paragraph ("A case that comes into a slice from one delivered later" above). Measured on
+2026-11-24 with the same check (`awk -f slices.awk` over this block and the inventory's
+`meta.tsv`, counting slice `07`): `07 1472 2801`, the slice line of `slot task test262` on the
+code of the slice, every run passed. Every moved case goes to slice 8 and every case that comes
+in leaves slice 18 or 19, so slices 1 to 19 still hold 44,931 cases and 85,794 runs and the 22
+lines still sum to 53,801 and 103,360.
+
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
 1. `harness`: lexer, parser and compile step for the ES5 grammar with strict mode (the runner
@@ -2575,8 +2712,8 @@ What each slice builds, and the directories it raises most (paths under `test/`,
    `Symbol`, iterators, `for-of`; from slice 3, `Array.from`, `Object.fromEntries`,
    `Object.groupBy` and the Array iterator methods `keys`, `values` and `entries`. `statements/for-of` 575, `expressions/assignment` 342,
    `expressions/arrow-function` 302.
-7. `generators`: frames saved in objects. `expressions/object` 303, `expressions/generators`
-   288, `statements/generators` 266.
+7. `generators`: frames saved in objects. `expressions/object` 298, `expressions/generators`
+   284, `statements/generators` 262 (counted at the close of the slice).
 8. `classes`: classes, `super`, `new.target`, private names, static blocks. `statements/class`
    3,016, `expressions/class` 2,731.
 9. `collections-proxy-reflect`: `Map`, `Set`, `WeakMap`, `WeakSet`, `Proxy`, `Reflect`. `Set`
@@ -2997,8 +3134,62 @@ case leaving slice 18; each passes in every one of its runs (the close's check (
 the 21 of `prototype/compile/` that run, `prototype/flags/order-after-compile` and the two of
 `prototype/Symbol.split/` that call it. The two that use generator functions
 (`RegExp-control-escape-russian-letter` and `RegExp-invalid-control-escape-character-class`, the
-feature `generators`) pass and stay where the block puts them, in slice 18: slice 7, which they
-need, is delivered after slice 5.
+feature `generators`) pass and stayed where the block puts them, in slice 18, at the close of
+slice 5: slice 7, which they need, is delivered after slice 5. The close of slice 7 brings them
+into slice 7 ("Slice 7's cases that need a later slice" below).
+
+**Slice 7's cases that need a later slice.** Measured at the close of slice 7 (2026-11-24,
+`story:slice-07-conformance-close`), with the run lines of the runner on the code of the slice
+(`slot task test262`): 40 of the 1,491 cases of slice 7 fail, each in every one of its runs (80
+runs), and none on a part of slice 7: the first failure of each run is the refusal `class is not
+supported before slice 8` (72 runs) or `super is not supported before slice 8` (8 runs). Each was
+read: with its `class` or `super` it needs nothing of slice 7 that its sibling cases without
+them do not pass with (generator methods, a generator declaration in a block or a `switch`, the
+patterns of the parameters of a generator). All 40 move to slice 8, each a new line of
+`conformance/test262/moves.tsv` with `from` 7, kind `part` and a token of
+`conformance/test262/later-parts.tsv` as its evidence, held by `test262-moves-check`. The block
+gains 40 lines `dir <file> 8`, one for a single file each: every directory that holds one of them
+holds cases of slice 7 that stay. The groups, by target slice (lines of the list):
+
+- to slice 8, 40: `class` 36 (the 20 `cls-decl-gen-meth-*` and `cls-expr-gen-meth-*` cases of
+  `language/arguments-object/`, a generator method of a class called with a trailing comma; the
+  12 `*-init-fn-name-class` cases of `expressions/generators/dstr/`, `statements/generators/dstr/`
+  and `expressions/object/dstr/`, 4 each; the 4 cases of a class and a generator declaration of
+  one name in `block-scope/syntax/redeclaration/` and `statements/switch/syntax/redeclaration/`, 2
+  each), `super` 4 (`expressions/object/concise-generator` and the three
+  `expressions/object/method-definition/generator-super-*` cases).
+
+The counts sum to the 40 lines this change adds to the list.
+
+21 cases (40 runs) come into slice 7, by the rule "A case that comes into a slice from one
+delivered later" above. Each is counted by the block in a slice delivered after 7, failed at the
+start of the slice (`4971b9b`) on a part of slice 7 only (the refusal `generator function is not
+supported before slice 7` in every failed run, or, for
+`staging/sm/expressions/object-literal-__proto__`, a counted refusal of the generator method it
+compiles with `Function`), passes in every run on the code of the slice, has no `feature` or
+`flag` line of a slice delivered after 7, and neither it nor a harness file it includes uses a
+part of a later slice. From slice 18, 2:
+`test/annexB/built-ins/RegExp/RegExp-control-escape-russian-letter.js` and
+`RegExp-invalid-control-escape-character-class.js`, the two cases of the pattern grammar of B.1.2
+that the paragraph of slice 5 left in slice 18 because they use generator functions. From slice
+19, 19, all under `test/staging/sm/`: `generators/` 11, `class/` 2 (`compPropNames` and
+`methDefnGen`, generator methods of object literals and no class), and 1 each of `Array/`
+(`sort_small`), `Symbol/` (`for-in-order`), `expressions/` (`object-literal-__proto__`: a
+`__proto__` property of an object literal, which ECMA-262 states outside Annex B; each
+`.__proto__` it reads is an own property), `lexical-environment/`
+(`block-scoped-functions-annex-b-generators`: a generator declaration in a block is not hoisted,
+which the web compatibility semantics of Annex B do not change) and `regress/`
+(`regress-530879`). Each gets a line `dir <file> 7` (no directory has every case come in),
+listed with the slice it leaves in `docs/plan/slice-07/close-into-7.tsv`; each passes in every
+one of its runs (the close's check (4) over that file), and none has a line of `moves.tsv`.
+661 other cases of slices delivered after 7 failed at the start of the slice and pass in every
+run on its code, and stay in their slice with no line: 463 have a `feature` or `flag` line of a
+later slice (`flag async`, `async-functions`, `async-iteration`, the `Promise` features,
+`Reflect.construct`, `explicit-resource-management`, `iterator-helpers`, `iterator-chunking`,
+`dynamic-import`), 197 failed at the start on a part that is not slice 7's (the refusal of async
+functions, `Promise` not defined, a counted refusal of the flag `i` or of an identifier outside
+ASCII), and 1, `language/expressions/await/await-in-generator`, reads `await` as an identifier,
+which the grammar of async functions of slice 10 decides.
 
 ```swell-slices
 order delivery 1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21
@@ -4652,6 +4843,67 @@ dir test/annexB/built-ins/RegExp/RegExp-trailing-escape.js 5
 dir test/annexB/built-ins/RegExp/incomplete_hex_unicode_escape.js 5
 dir test/annexB/built-ins/RegExp/named-groups/ 5
 dir test/annexB/language/literals/regexp/ 5
+dir test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-undefined.js 8
+dir test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-generator.js 8
+dir test/language/block-scope/syntax/redeclaration/generator-name-redeclaration-attempt-with-class.js 8
+dir test/language/expressions/generators/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/generators/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/generators/dstr/dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/generators/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/object/concise-generator.js 8
+dir test/language/expressions/object/dstr/gen-meth-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/gen-meth-dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/gen-meth-dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/gen-meth-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/object/method-definition/generator-super-call-body.js 8
+dir test/language/expressions/object/method-definition/generator-super-call-param.js 8
+dir test/language/expressions/object/method-definition/generator-super-prop-body.js 8
+dir test/language/statements/generators/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/generators/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/generators/dstr/dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/generators/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-generator.js 8
+dir test/language/statements/switch/syntax/redeclaration/generator-name-redeclaration-attempt-with-class.js 8
+dir test/annexB/built-ins/RegExp/RegExp-control-escape-russian-letter.js 7
+dir test/annexB/built-ins/RegExp/RegExp-invalid-control-escape-character-class.js 7
+dir test/staging/sm/Array/sort_small.js 7
+dir test/staging/sm/Symbol/for-in-order.js 7
+dir test/staging/sm/class/compPropNames.js 7
+dir test/staging/sm/class/methDefnGen.js 7
+dir test/staging/sm/expressions/object-literal-__proto__.js 7
+dir test/staging/sm/generators/delegating-yield-10.js 7
+dir test/staging/sm/generators/delegating-yield-12.js 7
+dir test/staging/sm/generators/delegating-yield-2.js 7
+dir test/staging/sm/generators/delegating-yield-3.js 7
+dir test/staging/sm/generators/delegating-yield-4.js 7
+dir test/staging/sm/generators/objects.js 7
+dir test/staging/sm/generators/regress-366941.js 7
+dir test/staging/sm/generators/return-finally.js 7
+dir test/staging/sm/generators/syntax.js 7
+dir test/staging/sm/generators/yield-iterator-close.js 7
+dir test/staging/sm/generators/yield-star-iterator-close.js 7
+dir test/staging/sm/generators/yield-star-iterator-primitive.js 7
+dir test/staging/sm/lexical-environment/block-scoped-functions-annex-b-generators.js 7
+dir test/staging/sm/regress/regress-530879.js 7
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
@@ -5124,8 +5376,8 @@ Its output on this document:
 04 1612 3184
 05 2724 5441
 06 3898 7351
-07 1491 2841
-08 9146 18143
+07 1472 2801
+08 9186 18223
 09 1781 3533
 10 3879 7499
 11 1281 1833
@@ -5135,8 +5387,8 @@ Its output on this document:
 15 1094 2170
 16 82 164
 17 35 35
-18 1137 1456
-19 1474 2766
+18 1135 1452
+19 1455 2730
 20 4617 9234
 21 1662 3324
 x-stage3 2591 5008

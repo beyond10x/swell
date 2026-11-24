@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:yield-star-delegation
 kind: story
-status: active
+status: implemented
 title: 'yield* delegates in the loop of the delegating frame: a chain of n generators holds n frames and takes no Rust frame per level'
 summary: The delegation step as instructions of the delegating frame (decision 3, Suspended frames, item 6); 2 to 10 steps per level and next, frame_depth through a chain; removes the refusal yield* is not supported before slice 7; 49 cases (98 runs).
 relations:
@@ -43,10 +43,11 @@ scope:
   path: crates/syntax/tests/sources/refused/yield-star.js
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/generator-yield-star.js
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T11:15:33Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T11:15:33Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:09Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 ## Context
 

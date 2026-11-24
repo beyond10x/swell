@@ -148,9 +148,11 @@ impl Failure {
 /// `Script`: the tree, or every `SyntaxError` the parse found, at least one. A grammar error or a
 /// refusal stops the parse and is the only error; the early errors of a source that parses are
 /// all reported, in source order. Generator functions and methods, and `async` functions and
-/// arrow functions, parse. A refusal held back to the end of the parse (none since
-/// `story:async-functions-and-await`) would not stop the parse, and would come after the whole
-/// parse and the early errors, the only error of a source that has neither.
+/// arrow functions, parse. The one refusal held back to the end of the parse is that of an
+/// async generator, `async generator function` (slice 10): `async function*` parses whole with
+/// its early errors, and the refusal comes after the whole parse and the early errors, the only
+/// error of a source that has neither a grammar error nor an early error, at the `async` of its
+/// first async generator.
 pub fn parse_script(source: &[u16], options: ParseOptions) -> Result<Script, Vec<SyntaxError>> {
     parse_script_with(source, options, &mut Unlimited).map_err(Failure::into_errors)
 }
@@ -213,9 +215,9 @@ pub fn parse_eval_with(
 /// The answer is a [`Script`] of one expression statement whose expression is the function
 /// expression, `FunctionId(0)`, the only function at the top of the tree; its own name is taken
 /// off, since the name "anonymous" is given by SetFunctionName (step 35) and not bound inside
-/// the function. The kind `generator` has its entry, [`parse_dynamic_generator_function`];
-/// the kinds `async` (slice 10) and `async generator` (slice 10) come with their constructors
-/// and have no entry before then.
+/// the function. The kind `generator` has its entry, [`parse_dynamic_generator_function`], and
+/// the kind `async` its own, [`parse_dynamic_async_function`]; the kind `async generator`
+/// (slice 10) comes with its constructor and has no entry before then.
 pub fn parse_dynamic_function(
     parameters: &[u16],
     body: &[u16],
@@ -250,8 +252,8 @@ pub fn parse_dynamic_function_with(
 /// (`#sec-generator-function-definitions-static-semantics-early-errors`): so a YieldExpression
 /// in the parameters, and `yield` as a name, are a SyntaxError. The answer is a [`Script`] of
 /// one expression statement whose expression is the generator expression, `FunctionId(0)`,
-/// its own name taken off. A refusal the parse holds back to its end (`async` function, slice
-/// 10) is answered as [`parse_script`] answers it.
+/// its own name taken off. A refusal the parse holds back to its end (an async generator in the
+/// body) is answered as [`parse_script`] answers it.
 pub fn parse_dynamic_generator_function(
     parameters: &[u16],
     body: &[u16],
@@ -270,6 +272,43 @@ pub fn parse_dynamic_generator_function_with(
 ) -> Result<Script, Failure> {
     dynamic_function(
         parser::DynamicKind::Generator,
+        parameters,
+        body,
+        options,
+        ledger,
+    )
+}
+
+/// Parses the parts of CreateDynamicFunction (`#sec-createdynamicfunction`) for kind `async`
+/// (`%AsyncFunction%`, `#sec-async-function-constructor-arguments`) as
+/// [`parse_dynamic_function`] parses those of kind `normal`, with the grammar symbols of that
+/// kind (steps 4 and 18 to 20): `parameters` alone as `FormalParameters[~Yield, +Await]`;
+/// `body`, with a line feed before and after, alone as `AsyncFunctionBody`
+/// (`FunctionBody[~Yield, +Await]`); then the whole source text
+/// `async function anonymous(<P>\n) {\n<body>\n}` as an `AsyncFunctionExpression` with its
+/// early errors (`#sec-async-function-definitions-static-semantics-early-errors`): so an
+/// AwaitExpression in the parameters, and `await` as a name, are a SyntaxError, and `await` in
+/// the body is an AwaitExpression. The answer is a [`Script`] of one expression statement whose
+/// expression is the `async` function expression, `FunctionId(0)`, its own name taken off. A
+/// refusal the parse holds back to its end is answered as [`parse_script`] answers it.
+pub fn parse_dynamic_async_function(
+    parameters: &[u16],
+    body: &[u16],
+    options: ParseOptions,
+) -> Result<Script, Vec<SyntaxError>> {
+    parse_dynamic_async_function_with(parameters, body, options, &mut Unlimited)
+        .map_err(Failure::into_errors)
+}
+
+/// [`parse_dynamic_async_function`] charged to `ledger` (the module's documentation).
+pub fn parse_dynamic_async_function_with(
+    parameters: &[u16],
+    body: &[u16],
+    options: ParseOptions,
+    ledger: &mut dyn Ledger,
+) -> Result<Script, Failure> {
+    dynamic_function(
+        parser::DynamicKind::Async,
         parameters,
         body,
         options,
