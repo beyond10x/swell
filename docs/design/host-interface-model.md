@@ -152,14 +152,16 @@ asking a caller, and the interface passes engine values the crate has no type fo
 `Binary64` kept, nothing is generated at all. The interface is written by hand against the
 `HOST-<n>` requirements.
 
-## The 51 markers
+## The 53 markers
 
 Brought in line with `spec/` after wave 6 of slice 1 (2026-11-21; section "Wave 6 of slice 1"
-below), by `awk` over `spec/system.yaml` and `spec/domains/host.yaml`. The sections above are
-the first measurement and keep its numbers. Each `UNMAPPED:` marker with its first words and
-what carries it: one or several `HOST-<n>` of `host-interface.md`, `ESS limit` where nothing of
-the interface is left unstated, or both where the marker names the requirement and the limit of
-ESS 0.96.0 that keeps it out of the model. No marker is `open`.
+below), and again on 2026-11-24 after the executable specification's target for the microtask
+checkpoint and the hooks of a promise (a story of slice 10; section "The checkpoint and the hooks
+of a promise" below), by `awk` over `spec/system.yaml` and `spec/domains/host.yaml`. The sections
+above are the first measurement and keep its numbers and its places. Each `UNMAPPED:` marker with
+its first words and what carries it: one or several `HOST-<n>` of `host-interface.md`, `ESS limit`
+where nothing of the interface is left unstated, or both where the marker names the requirement
+and the limit of ESS 0.96.0 that keeps it out of the model. No marker is `open`.
 
 | Place | First words | Carried by |
 |---|---|---|
@@ -167,56 +169,60 @@ ESS 0.96.0 that keeps it out of the model. No marker is `open`.
 | `host.yaml:40` | the unit, width and bounds of each limit. host-interface.md decision ... | HOST-9, HOST-12, HOST-14, HOST-16, HOST-19, HOST-20, HOST-22, HOST-23, HOST-24 |
 | `host.yaml:47` | what a budget is, as opposed to what it is ... | HOST-6, HOST-7, HOST-8, HOST-10, HOST-80 |
 | `host.yaml:123` | the representation of source text across the interface. ParseScript and ... | HOST-35 |
-| `host.yaml:135` | the host object that answers the hooks (a Rust trait ... | HOST-4, HOST-26, HOST-27, HOST-83, HOST-84, HOST-116 to HOST-128 |
+| `host.yaml:135` | the host object that answers the hooks (a Rust trait ... | HOST-4, HOST-26, HOST-27, HOST-83, HOST-84, HOST-116 to HOST-128, HOST-149, HOST-150, HOST-151, HOST-158, HOST-209 to HOST-211 |
 | `host.yaml:186` | whether a realm ends (is released by the host, or ... | HOST-52 |
 | `host.yaml:222` | whether a script may be evaluated more than once. ScriptEvaluation ... | HOST-54 |
 | `host.yaml:237` | [[Status]] linking and evaluating. Both hold only inside one call ... | HOST-74, HOST-98 |
 | `host.yaml:298` | the referrer of a load requested by import() is a ... | HOST-65, HOST-66 |
-| `host.yaml:413` | ESS addresses every row by an identity and requires an ... | ESS limit |
-| `host.yaml:438` | the List of SyntaxError objects ParseScript and ParseModule return (16.1.5, ... | HOST-18, HOST-36, HOST-137, HOST-138 |
-| `host.yaml:446` | the thrown value (an engine value) of Throw(value). | HOST-37 |
-| `host.yaml:452` | not part of decision 9; see EvaluateModule's `not-linked`. | HOST-43 |
-| `host.yaml:482` | the length of each seed. `hash_key` is exactly 16 bytes ... | HOST-25, HOST-26, HOST-27, HOST-144, HOST-145, HOST-146 |
-| `host.yaml:507` | the global object and the global `this` value the host ... | HOST-49, HOST-50, HOST-51 |
-| `host.yaml:522` | what CreateRealm answers when creating the intrinsics passes the memory ... | HOST-12, HOST-41, HOST-71 |
-| `host.yaml:536` | hostDefined, the value the host attaches to the Script Record ... | HOST-55 |
-| `host.yaml:581` | an engine fault while parsing. It must fault the agent, ... | HOST-71 |
-| `host.yaml:597` | a script of another agent than the one called, which ... | HOST-45, HOST-48; ESS limit |
-| `host.yaml:677` | hostDefined, as for ParseScript. | HOST-55 |
-| `host.yaml:679` | a realm of another agent than the one called, which ... | HOST-31; ESS limit |
-| `host.yaml:717` | an engine fault while parsing, as for ParseScript. | HOST-157 |
-| `host.yaml:729` | its result. LoadRequestedModules returns a Promise that settles when the ... | HOST-39, HOST-60, HOST-61 |
-| `host.yaml:733` | hostDefined, passed on to every HostLoadImportedModule of the graph. | HOST-57 |
-| `host.yaml:750` | the tie between this refusal and the agent's Faulted state, ... | HOST-48 |
-| `host.yaml:818` | what the host passes. Decision 9 says "with the module's ... | HOST-57, HOST-59, HOST-62, HOST-63, HOST-64 |
-| `host.yaml:823` | the error value of the throw completion (an engine value ... | HOST-31, HOST-61 |
-| `host.yaml:826` | the effect on the graph. When the last pending load ... | HOST-56, HOST-60 |
-| `host.yaml:872` | Link on a module whose [[Status]] is new. The draft ... | HOST-42 |
-| `host.yaml:886` | the tie between this refusal and the agent's Faulted state. | HOST-48 |
-| `host.yaml:908` | an engine fault while linking. The refusal that leaves the ... | HOST-157 |
-| `host.yaml:925` | its result. Evaluate returns a Promise, rejected with the exception ... | HOST-38 |
-| `host.yaml:929` | Evaluate on a module whose [[Status]] is new or unlinked. ... | HOST-43 |
-| `host.yaml:932` | a run of Evaluate that ends with Terminated. The modules ... | HOST-70, HOST-74, HOST-48 |
-| `host.yaml:950` | the tie between this refusal and the agent's Faulted state. | HOST-48 |
-| `host.yaml:967` | this answer. Evaluate on a new or unlinked module breaks ... | HOST-43 |
-| `host.yaml:1007` | the step on a module that is evaluated already, where ... | ESS limit |
-| `host.yaml:1023` | the jobs a checkpoint runs that were enqueued while it ... | HOST-79 |
-| `host.yaml:1026` | which jobs ran when the checkpoint ends with Terminated. It ... | HOST-77, HOST-80 |
-| `host.yaml:1034` | the reference to HTML's "perform a microtask checkpoint". The HTML ... | HOST-79 |
-| `host.yaml:1123` | running a generic or timeout job. The model has no ... | HOST-85, HOST-86, HOST-88 |
-| `host.yaml:1179` | the promise, an engine value. Without it the host cannot ... | HOST-100, HOST-101, HOST-121 |
-| `host.yaml:1204` | the effect. The run in progress on the agent's thread ... | HOST-90, HOST-96 |
-| `host.yaml:1209` | that the engine clears the flag when it ends a ... | HOST-91, HOST-92, HOST-93 |
-| `host.yaml:1229` | what a collection changes that the host sees: WeakRef targets ... | HOST-87, HOST-129, HOST-130, HOST-131 |
-| `host.yaml:1260` | call(function, this, arguments) and construct (decision 9, "Entry points"), and ... | HOST-15, HOST-47, HOST-103 to HOST-107 |
-| `host.yaml:1267` | host objects: their classes, brand, host data, the `trace` method, ... | HOST-108 to HOST-115 |
-| `host.yaml:1270` | the root table (decision 4, "Host-held values"): a Root is ... | HOST-28, HOST-29, HOST-30 |
-| `host.yaml:1297` | the completion value, an engine value. | HOST-37 |
-| `host.yaml:1304` | the thrown value, an engine value "the host can read" ... | HOST-37 |
-| `host.yaml:1346` | how the host reads a module's [[Status]] or a checkpoint's ... | HOST-79, HOST-97, HOST-100 |
+| `host.yaml:372` | the job that had started when a termination ended its checkpoint. The ... | HOST-77 |
+| `host.yaml:377` | `Agent::clear_microtasks`, which drops every queued entry unrun, so ... | HOST-200 |
+| `host.yaml:434` | ESS addresses every row by an identity and requires an ... | ESS limit |
+| `host.yaml:459` | the List of SyntaxError objects ParseScript and ParseModule return (16.1.5, ... | HOST-18, HOST-36, HOST-137, HOST-138 |
+| `host.yaml:467` | the thrown value (an engine value) of Throw(value). | HOST-37 |
+| `host.yaml:473` | not part of decision 9; see EvaluateModule's `not-linked`. | HOST-43 |
+| `host.yaml:503` | the length of each seed. `hash_key` is exactly 16 bytes ... | HOST-25, HOST-26, HOST-27, HOST-144, HOST-145, HOST-146, HOST-212, HOST-213 |
+| `host.yaml:528` | the global object and the global `this` value the host ... | HOST-49, HOST-50, HOST-51 |
+| `host.yaml:543` | what CreateRealm answers when creating the intrinsics passes the memory ... | HOST-12, HOST-41, HOST-71 |
+| `host.yaml:557` | hostDefined, the value the host attaches to the Script Record ... | HOST-55 |
+| `host.yaml:602` | an engine fault while parsing. It must fault the agent, ... | HOST-71 |
+| `host.yaml:618` | a script of another agent than the one called, which ... | HOST-45, HOST-48; ESS limit |
+| `host.yaml:705` | hostDefined, as for ParseScript. | HOST-55 |
+| `host.yaml:707` | a realm of another agent than the one called, which ... | HOST-31; ESS limit |
+| `host.yaml:745` | an engine fault while parsing, as for ParseScript. | HOST-157 |
+| `host.yaml:757` | its result. LoadRequestedModules returns a Promise that settles when the ... | HOST-39, HOST-60, HOST-61 |
+| `host.yaml:761` | hostDefined, passed on to every HostLoadImportedModule of the graph. | HOST-57 |
+| `host.yaml:778` | the tie between this refusal and the agent's Faulted state, ... | HOST-48 |
+| `host.yaml:846` | what the host passes. Decision 9 says "with the module's ... | HOST-57, HOST-59, HOST-62, HOST-63, HOST-64 |
+| `host.yaml:851` | the error value of the throw completion (an engine value ... | HOST-31, HOST-61 |
+| `host.yaml:854` | the effect on the graph. When the last pending load ... | HOST-56, HOST-60 |
+| `host.yaml:900` | Link on a module whose [[Status]] is new. The draft ... | HOST-42 |
+| `host.yaml:914` | the tie between this refusal and the agent's Faulted state. | HOST-48 |
+| `host.yaml:936` | an engine fault while linking. The refusal that leaves the ... | HOST-157 |
+| `host.yaml:953` | its result. Evaluate returns a Promise, rejected with the exception ... | HOST-38 |
+| `host.yaml:957` | Evaluate on a module whose [[Status]] is new or unlinked. ... | HOST-43 |
+| `host.yaml:960` | a run of Evaluate that ends with Terminated. The modules ... | HOST-70, HOST-74, HOST-48 |
+| `host.yaml:978` | the tie between this refusal and the agent's Faulted state. | HOST-48 |
+| `host.yaml:995` | this answer. Evaluate on a new or unlinked module breaks ... | HOST-43 |
+| `host.yaml:1035` | the step on a module that is evaluated already, where ... | ESS limit |
+| `host.yaml:1054` | the entries a checkpoint runs that were queued while it ran. A set ... | HOST-79 |
+| `host.yaml:1057` | which jobs ran when the checkpoint ends with Terminated. It ... | HOST-77, HOST-80, HOST-199 |
+| `host.yaml:1067` | the reference to HTML's "perform a microtask checkpoint". The HTML ... | HOST-79 |
+| `host.yaml:1156` | running a generic or timeout job. The model has no ... | HOST-85, HOST-86, HOST-88 |
+| `host.yaml:1212` | the promise, an engine value. Without it the host cannot ... | HOST-100, HOST-101, HOST-121 |
+| `host.yaml:1237` | the effect. The run in progress on the agent's thread ... | HOST-90, HOST-96 |
+| `host.yaml:1242` | that the engine clears the flag when it ends a ... | HOST-91, HOST-92, HOST-93 |
+| `host.yaml:1262` | what a collection changes that the host sees: WeakRef targets ... | HOST-87, HOST-129, HOST-130, HOST-131 |
+| `host.yaml:1293` | call(function, this, arguments) and construct (decision 9, "Entry points"), and ... | HOST-15, HOST-47, HOST-103 to HOST-107 |
+| `host.yaml:1300` | host objects: their classes, brand, host data, the `trace` method, ... | HOST-108 to HOST-115 |
+| `host.yaml:1303` | the root table (decision 4, "Host-held values"): a Root is ... | HOST-28, HOST-29, HOST-30 |
+| `host.yaml:1330` | the completion value, an engine value. | HOST-37 |
+| `host.yaml:1337` | the thrown value, an engine value "the host can read" ... | HOST-37 |
+| `host.yaml:1379` | how the host reads a module's [[Status]] or a checkpoint's ... | HOST-79, HOST-97, HOST-100 |
 
-Totals: 51 markers (50 in `host.yaml`, 1 in `system.yaml`): 47 carried by requirements, 2
-`ESS limit`, 2 both, 0 `open`.
+Totals: 53 markers (52 in `host.yaml`, 1 in `system.yaml`): 49 carried by requirements, 2
+`ESS limit`, 2 both, 0 `open`. (Measured on 2026-11-24: `grep -n 'UNMAPPED' spec/domains/host.yaml
+spec/system.yaml | wc -l` prints 53; the 2 `ESS limit` are `host.yaml:434` and `host.yaml:1035`,
+the 2 both `host.yaml:618` and `host.yaml:707`.)
 
 ## Wave 6 of slice 1: a realm's and a script's agent
 
@@ -255,6 +261,52 @@ What changed in `spec/` so that the scenarios can run on the engine, and why.
   only by forcing it). Every outcome of ParseScript and EvaluateScript has a scenario but
   EvaluateScript `no-script`, which had none before either (ESS-SYNTH-003). Scenarios 58
   (8 authored), refusals 41, markers 51.
+
+## The checkpoint and the hooks of a promise: the ESS target of slice 10
+
+What changed in `spec/` on the merge of `story:ess-target-checkpoint-and-promise-hooks`, so that
+the conformance target runs the microtask checkpoint and awaits the hook of a promise job and the
+rejection tracker (brought into this file on 2026-11-24).
+
+- **What the model states now that it did not.**
+  - `PerformMicrotaskCheckpoint` is "run every entry of the agent's microtask queue, promise jobs
+    and host microtasks, under one step budget, until the queue is empty" (it said promise jobs
+    only). Its outcome `step-budget` is the entries it takes off, a step each, and what they run,
+    together spending the steps of the call. Its outcome `interrupted` is the
+    three places of decision 11: the host sets the interrupt handle before the checkpoint starts,
+    before an entry is taken off (the entry stays queued; HOST-198, HOST-199), or while an entry
+    runs.
+  - `swell.host.Job` has the terminal state `Abandoned` ("will not run to its end"), reached by
+    the transition `abandon` on the `engine-fault` branch of `EvaluateScript` (the jobs still
+    queued when the agent faulted, whose queue never runs again; decision 6).
+  - Two scenarios, listed in `spec/ess-inputs.yaml`: `promise-job-runs-at-the-next-checkpoint`
+    (a script queues a promise job, a checkpoint answers `drained`, a later script throws when
+    the job did not run) and `rejection-is-tracked-then-handled` (the tracker is awaited with
+    `Reject`, then with `Handle`).
+  - Two markers: `host.yaml:372` (the job that had started when a termination ended its
+    checkpoint is Abandoned on the `step-budget`, `memory-budget` and `interrupted` branches, but a
+    set effect cannot select the one entry that had started; HOST-77) and `host.yaml:377`
+    (`Agent::clear_microtasks` drops every queued entry unrun, and the model has no command for
+    it; HOST-200). The marker `host.yaml:1057` also names HOST-199 now.
+- **Counts, before and after.** Scenarios 58 to 60, authored 8 to 10, refusals 41 to 41,
+  markers 51 to 53 (`grep -n 'UNMAPPED' spec/domains/host.yaml spec/system.yaml | wc -l`). On the
+  engine, through `task conform-engine`: 14 of 58 scenarios passed (44 unsupported) before, 18 of
+  60 (42 unsupported) now; all 60 pass on the interpreter of `ess`.
+- **What stays unstated.**
+  - No scenario states HOST-83 (the hook of a promise job): `ess` refuses an awaited step
+    `HostEnqueuePromiseJob` (`ESS-AUTHOR-045`, the outcome `enqueued` creates the record the step
+    would address), so the scenario has no such step and the target's answer to that await is
+    covered by a unit test of the target.
+  - `faulted-agent-refuses-every-call` stays unsupported: it forces the outcome `engine-fault` of
+    `EvaluateScript`, and the engine's fault switch has no point there. The missing checkpoint was
+    only the first reason the target named.
+  - `Abandoned` through the checkpoint's own `engine-fault` (and `Collect`'s) is not stated: the
+    transition there was measured, raises the refusals of synthesis from 41 to 42, over the gate's
+    maximum, and loses one synthesized scenario.
+  - The two causes of `Abandoned` that carry markers (a job ended by a termination, and
+    `clear_microtasks`) have no scenario.
+  - The promise itself is an engine value the model does not hold (the marker `host.yaml:1212`),
+    so no scenario reads a promise.
 
 ## What a conformance target needs from the interface
 

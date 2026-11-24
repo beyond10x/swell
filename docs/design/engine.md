@@ -2806,7 +2806,7 @@ components with ports (surf `AGENTS.md`, "Layout"), not a library interface. How
 an in-process library interface was measured by the first slice (`host-interface-model.md`,
 corrected on 2026-11-23 from "Not checked: ...; the first slice finds out."): ESS 0.96.0 let the
 model state its commands, outcomes and lifecycles, its generated code is "not usable for an
-in-process library interface", and what it could not state is listed there as 51 markers, each
+in-process library interface", and what it could not state is listed there as 53 markers, each
 carried by a `HOST-<n>` requirement or named an ESS limit.
 
 What is not put into ESS: the language's semantics (values, objects, the 2,300 distinct section
