@@ -4,6 +4,7 @@ set: [pipefail]
 
 vars:
   RUNNER_FORM: CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0
+  CPU_BOUNDS_BY_CORES: "16:245"
 
 tasks:
   forge-check:
@@ -267,10 +268,23 @@ tasks:
           checkout to rule it out;
         - the tools: go-task, cargo-nextest and ess at the versions .github/workflows/check.yml
           installs; a developer's shell has its own;
-        - the operating system image and the number of cores of the runner, which no task
-          reproduces.
+        - the number of cores: the runner has 4, the local machine more, and it is shared, so
+          the wall time there says nothing about the runner's. check-runner gives check the
+          table GATE_CPU_BOUNDS (default CPU_BOUNDS_BY_CORES of taskfiles/forge.yml), CPU seconds
+          per kind of machine keyed by its core count, "<cores>:<CPU seconds>" pairs:
+          gate-time-sum (taskfiles/gate-time.yml) fails when the CPU seconds of the test steps
+          are over the entry for the core count it runs on, and prints them without a bound
+          where there is none. An entry is added or changed only together with a pair of runs,
+          the code before the change over it and the change under it, measured on that kind of
+          machine and recorded in the same commit (story gate-test-steps-fit-four-cores). The
+          entry 16:245 is provisional: it was derived from runs of earlier forms of this tree,
+          and its pair under this tree is recorded by the first two check-runner jobs on a
+          16-core machine. The forge's 4 cores have no entry: check alone, as the forge runs
+          it, has no table, and there the wall time is the measure;
+        - the operating system image of the runner, which no task reproduces.
     vars:
       GATE_RUNNER_ENV: '{{.GATE_RUNNER_ENV | default .RUNNER_FORM}}'
+      GATE_CPU_BOUNDS: '{{.GATE_CPU_BOUNDS | default .CPU_BOUNDS_BY_CORES}}'
       DRY: '{{if eq .CLI_ARGS "--dry"}}--dry --verbose {{end}}'
     cmds:
       - cmd: |
@@ -281,4 +295,4 @@ tasks:
         silent: true
       - task: runner-env-check
         vars: {GATE_RUNNER_ENV: '{{.GATE_RUNNER_ENV}}'}
-      - env {{range splitList " " .GATE_RUNNER_ENV}}{{if .}}{{shellQuote .}} {{end}}{{end}}{{shellQuote .TASK_EXE}} {{.DRY}}check
+      - env {{range splitList " " .GATE_RUNNER_ENV}}{{if .}}{{shellQuote .}} {{end}}{{end}}{{shellQuote .TASK_EXE}} {{.DRY}}check GATE_CPU_BOUNDS={{shellQuote .GATE_CPU_BOUNDS}}

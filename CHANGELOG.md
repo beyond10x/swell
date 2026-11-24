@@ -149,6 +149,12 @@ cases pass (18,155 in 0.7.0).
 - The full test262 run can be made in parts, each a pool job, and counted from their files to
   the lines the whole run prints: `task test262-part TEST262_PART=<k>/<n>` and
   `TEST262_FROM_PARTS` of `task test262`, `test262-expected` and `slow-test262`.
+- The gate's test steps cost less on few cores: the tests with a collection at every safe
+  point are built in a profile of their own at opt-level 1, and the release build of the
+  test262 runner is made before the clock. The gate refuses a run in which a test step
+  builds, and `check-runner` bounds the CPU seconds of the test steps on a machine whose
+  core count has an entry in its table. The budget of 120 seconds and the steps it is
+  counted over are unchanged. 66 planted defects, from 65.
 
 ### Host interface
 

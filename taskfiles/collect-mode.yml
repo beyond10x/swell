@@ -1,5 +1,8 @@
 version: '3'
 
+vars:
+  COLLECT_CONFIG: --config .cargo/collect-profile.toml
+
 tasks:
   test-collect:
     desc: Run every test of swell but the doc tests through cargo-nextest with the collector run at every safe point and warnings denied, and print the summed counts and the ten slowest tests.
@@ -9,11 +12,21 @@ tasks:
       tests (engine design, decisions 4 and 13: the mode that finds a missing root). The doc
       tests of this mode run in the step test-doc.
 
-      Runs "cargo nextest run --locked -p swell --features collect-every-safe-point --profile
-      default" over the library and every integration test of the package, with
-      RUSTFLAGS="-D warnings", as the task test does: every test in a process of its own,
-      terminated at 60 s and counted failed (.config/nextest.toml). The log is
-      .out/test-collect.log; it is printed when nextest fails. The line printed is
+      Runs "cargo nextest run --locked -p swell --features collect-every-safe-point --config
+      .cargo/collect-profile.toml --cargo-profile collect --profile default" over the library
+      and every integration test of the package, with RUSTFLAGS="-D warnings", as the task test
+      does: every test in a process of its own, terminated at 60 s and counted failed
+      (.config/nextest.toml). The profile collect is the test profile at opt-level 1 (story
+      gate-test-steps-fit-four-cores): the mode runs the collector at every safe point, and at
+      opt-level 0 its tests took 56 % of the CPU seconds of the gate's test steps (63 to 64 %
+      of those without gate-selftest), and the step took 57.9 s of the 127.9 s of the forge's
+      runner of 4 cores on the run that went over the budget. It is defined in
+      .cargo/collect-profile.toml, not in Cargo.toml or .cargo/config.toml, which are sources of
+      the digest of the test262 counts (taskfiles/test262.yml); build-collect checks that file.
+      The flag that names it is the variable COLLECT_CONFIG of this file, used by test-collect,
+      build-collect and the collect line of test-doc alike.
+      The lane slow runs the stack tests of this mode at opt-level 0 (task slow-tests). The log
+      is .out/test-collect.log; it is printed when nextest fails. The line printed is
       "test-collect: <b> test binaries: <p> passed, <f> failed, <i> ignored", then ten lines
       "gate-slowest test-collect <seconds> <binary> <test>". It fails when nextest fails (a
       failing test, a build error, or a crates/swell without the feature
@@ -27,31 +40,68 @@ tasks:
       - mkdir -p .out
       - |
         status=0
-        cargo nextest run --locked -p swell --features collect-every-safe-point --profile default > .out/test-collect.log 2>&1 || status=$?
+        cargo nextest run --locked -p swell --features collect-every-safe-point {{.COLLECT_CONFIG}} --cargo-profile collect --profile default > .out/test-collect.log 2>&1 || status=$?
         echo "$status" > .out/test-collect.status
       - task: nextest-report
         vars: {STEP: test-collect, PREFIX: 'test-collect: ', LOG: .out/test-collect.log, STATUS: .out/test-collect.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1', BUILT_BY: build-collect}
 
   build-collect:
-    desc: Build, without running them, the test binaries the step test-collect runs, with its flags and features; part of the gate's build phase.
+    desc: Build, without running them, the test binaries the step test-collect runs, with its flags, features and profile; part of the gate's build phase.
     summary: |
       Build, without running them, the test binaries the step test-collect runs: "cargo nextest
       run --no-run" with the step's arguments ("--locked -p swell --features
-      collect-every-safe-point --profile default") and RUSTFLAGS="-D warnings", into
-      .out/build-collect.log. The library of swell it builds with the feature is the one the
-      step test-doc's collect-every-safe-point doc tests link. A step of build-tests, before
-      gate-time-start, so that test-collect compiles nothing inside its timed step
-      (nextest-report fails it when its log has a Compiling line). It prints "build-collect:
-      <cargo's Finished line>"; when cargo fails (a build error, or a crates/swell without the
-      feature collect-every-safe-point) it prints the log and fails.
+      collect-every-safe-point --config .cargo/collect-profile.toml --cargo-profile collect
+      --profile default") and RUSTFLAGS="-D warnings", into .out/build-collect.log. The library
+      of swell it builds with the feature is the one the step test-doc's
+      collect-every-safe-point doc tests link. A step of build-tests, before gate-time-start, so
+      that test-collect compiles nothing inside its timed step (nextest-report fails it when its
+      log has a Compiling line).
+
+      First it checks .cargo/collect-profile.toml: its lines other than blank ones are exactly
+      [profile.collect], inherits = "test" and opt-level = 1, in that order, so that the collect
+      mode differs from the test profile in its optimization level and nothing else (a key such as
+      debug, overflow-checks or debug-assertions would change what its tests prove); otherwise it
+      fails with 'build-collect: .cargo/collect-profile.toml holds "<line>" as its line <n>; the
+      profile collect is [profile.collect], inherits = "test", opt-level = 1 and nothing else'.
+      After the build it runs taskfiles/no-debug-sections.sh on the test executables of
+      <target>/collect/deps, <target> being CARGO_TARGET_DIR or target (test-binaries-check reads
+      those of the test profile only), and fails naming each that has a .debug_ section. It prints
+      "build-collect: <cargo's Finished line>", then "build-collect: <n> test executables in
+      <target>/collect/deps, none with a .debug_ section"; when cargo fails (a build error, or a
+      crates/swell without the feature collect-every-safe-point) it prints the log and fails. The
+      planted script tests/gate/test-collect-refuses-a-crate-without-the-feature.sh holds the
+      profile check.
     env:
       RUSTFLAGS: -D warnings
     silent: true
     cmds:
       - mkdir -p .out
       - |
+        LC_ALL=C awk '
+          NF == 0 { next }
+          { n++; line = $0; sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line) }
+          n == 1 && line == "[profile.collect]" { next }
+          n == 2 && line == "inherits = \"test\"" { next }
+          n == 3 && line == "opt-level = 1" { next }
+          { printf "build-collect: .cargo/collect-profile.toml holds \"%s\" as its line %d; the profile collect is [profile.collect], inherits = \"test\", opt-level = 1 and nothing else\n", line, n; bad = 1; exit }
+          END { if (!bad && n != 3) { printf "build-collect: .cargo/collect-profile.toml holds %d line(s); the profile collect is [profile.collect], inherits = \"test\", opt-level = 1 and nothing else\n", n; bad = 1 } exit bad }
+        ' .cargo/collect-profile.toml || exit 1
+      - |
         status=0
-        cargo nextest run --no-run --locked -p swell --features collect-every-safe-point --profile default > .out/build-collect.log 2>&1 || status=$?
+        cargo nextest run --no-run --locked -p swell --features collect-every-safe-point {{.COLLECT_CONFIG}} --cargo-profile collect --profile default > .out/build-collect.log 2>&1 || status=$?
         if [ "$status" -ne 0 ]; then cat .out/build-collect.log; echo "build-collect: cargo nextest run --no-run failed, exit $status"; exit 1; fi
         esc=$(printf '\033')
         LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" .out/build-collect.log | awk '/^ *Finished / { sub(/^ */, ""); line = $0 } END { print "build-collect: " line }'
+        deps=${CARGO_TARGET_DIR:-target}/collect/deps
+        bins=$(find "$deps" -maxdepth 1 -type f -perm -u+x ! -name '*.*' 2>/dev/null | LC_ALL=C sort)
+        if [ -z "$bins" ]; then echo "build-collect: no test executable in $deps"; exit 1; fi
+        n=$(printf '%s\n' "$bins" | awk 'END { print NR }')
+        status=0
+        # shellcheck disable=SC2086
+        sh {{shellQuote .TASKFILE_DIR}}/no-debug-sections.sh $bins > .out/build-collect.sections.log 2>&1 || status=$?
+        if [ "$status" -ne 0 ]; then
+          grep -v ': 0 debug sections among ' .out/build-collect.sections.log || true
+          echo "build-collect: a test executable of $deps has a .debug_ section, or was not read (.out/build-collect.sections.log)"
+          exit 1
+        fi
+        echo "build-collect: $n test executables in $deps, none with a .debug_ section"
