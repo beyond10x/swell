@@ -6,6 +6,8 @@
 # build-collect fails, naming the feature and "build-collect: cargo nextest run --no-run failed,
 # exit <n>". The step test-collect run alone on that crate fails too, with "test-collect: read
 # no "Starting <n> tests across <b> binaries" line ...: nothing to count" and no count line.
+# With the feature, build-collect also refuses a .cargo/collect-profile.toml with a key beyond
+# inherits and opt-level, naming the line, before it builds.
 # Run from the repository root: sh tests/gate/test-collect-refuses-a-crate-without-the-feature.sh
 # Works only under .out/gate-tests/<name>/, which is also its cargo target directory's parent;
 # prints "<name>: ok" or "<name>: FAIL <why>".
@@ -16,7 +18,8 @@
 # [package] and [lints] sections, without dependencies, targets or features. Its Cargo.lock is
 # made for it (cargo generate-lockfile --offline). Its lib.rs has one passing test. The task
 # runs in the planted workspace (task -d), with the real taskfiles/collect-mode.yml and
-# taskfiles/nextest.yml and the real .config/nextest.toml.
+# taskfiles/nextest.yml, the real .config/nextest.toml and the real .cargo/collect-profile.toml
+# (the profile collect the step builds and runs in).
 
 # The same output from task, cargo and ess on any machine: no colour, and no "::error" line
 # that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
@@ -35,6 +38,7 @@ rm -rf "$dir" && mkdir -p "$dir/crates/swell/src" || fail "cannot make $dir"
 # The task runs through cargo-nextest with the real configuration, and prints its counts with
 # the task nextest-report of taskfiles/nextest.yml: the planted Taskfile.yml includes both files.
 mkdir -p "$dir/.config" && cp .config/nextest.toml "$dir/.config/nextest.toml" || fail "cannot copy .config/nextest.toml"
+mkdir -p "$dir/.cargo" && cp .cargo/collect-profile.toml "$dir/.cargo/collect-profile.toml" || fail "cannot copy .cargo/collect-profile.toml, the profile collect of the collect mode"
 taskfile=$(pwd)/$dir/Taskfile.yml
 printf "version: '3'\n\nincludes:\n  real:\n    taskfile: %s\n    flatten: true\n  nextest:\n    taskfile: %s\n    flatten: true\n" \
   "$real" "$nextest" > "$taskfile" || fail "cannot write the planted Taskfile.yml"
@@ -82,8 +86,20 @@ cp "$manifest.with" "$manifest" || fail "cannot plant the manifest with the feat
 # build-collect, and then the step, which compiles nothing and prints its counts.
 task -d "$dir" -t "$taskfile" build-collect > "$dir/build-with.log" 2>&1 ||
   fail "the task build-collect refused the planted crate with the feature (log: $dir/build-with.log)"
-grep -q '^build-collect: Finished ' "$dir/build-with.log" ||
-  fail "the task build-collect did not print cargo's Finished line (log: $dir/build-with.log)"
+grep -q '^build-collect: Finished `collect` profile' "$dir/build-with.log" ||
+  fail "the task build-collect did not print cargo's Finished line of the profile collect (log: $dir/build-with.log)"
+grep -qE '^build-collect: [1-9][0-9]* test executables in [^ ]*collect/deps, none with a \.debug_ section$' "$dir/build-with.log" ||
+  fail "the task build-collect did not check the test executables of <target>/collect/deps for debug sections (log: $dir/build-with.log)"
+
+# A profile collect with a key beyond inherits and opt-level is refused before anything builds.
+cp "$dir/.cargo/collect-profile.toml" "$dir/collect-profile.toml.real" || fail "cannot keep the real profile"
+printf 'debug-assertions = false\n' >> "$dir/.cargo/collect-profile.toml" || fail "cannot plant a fourth key"
+if task -d "$dir" -t "$taskfile" build-collect > "$dir/build-profile.log" 2>&1; then
+  fail "the task build-collect accepted a profile collect with debug-assertions = false (log: $dir/build-profile.log)"
+fi
+grep -qxF 'build-collect: .cargo/collect-profile.toml holds "debug-assertions = false" as its line 4; the profile collect is [profile.collect], inherits = "test", opt-level = 1 and nothing else' "$dir/build-profile.log" ||
+  fail "the task build-collect did not name the planted line of the profile (log: $dir/build-profile.log)"
+cp "$dir/collect-profile.toml.real" "$dir/.cargo/collect-profile.toml" || fail "cannot put the real profile back"
 task -d "$dir" -t "$taskfile" test-collect > "$dir/with.log" 2>&1 ||
   fail "the task refused the planted crate with the feature (log: $dir/with.log)"
 grep -qxF 'test-collect: 1 test binaries: 1 passed, 0 failed, 0 ignored' "$dir/with.log" ||
