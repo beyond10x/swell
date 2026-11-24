@@ -148,8 +148,9 @@ tasks:
       full counts; and build-stack-profiles with test-stack-profiles, the stack tests in the
       release profile and in stack-debug, the dev profile with full debug information (the
       gate runs them in the dev profile without it). The
-      workflow .github/workflows/slow.yml runs it on a push to main and on a
-      pull request that changes a source of the digest, the expected file or the digest file.
+      workflow .github/workflows/slow.yml runs it on a push to main and on a pull request, each
+      only when it changes a path of the workflow's list (a source of the digest, the expected
+      file or the digest file among them), and on a run started by hand on a branch.
       Prints "slow-time <part> <seconds>" after each part.
     silent: true
     cmds:
