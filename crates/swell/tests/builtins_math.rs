@@ -50,6 +50,11 @@ const FUNCTIONS: [(&str, u32); 11] = [
     ("trunc", 1),
 ];
 
+/// The functions of `Math` after those of `FUNCTIONS`, in the order `%Math%` defines them: those
+/// whose argument is not a Number, which the tables of this file do not call
+/// (`Math.sumPrecise`, `story:math-sum-precise`, held by `tests/math_sum_precise.rs`).
+const LATER_FUNCTIONS: [&str; 1] = ["sumPrecise"];
+
 /// A valueOf that records its call and answers 1.
 fn value_of(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
     cx.host_mut().calls.push("valueOf".to_string());
@@ -279,6 +284,7 @@ fn math_has_exactly_the_own_keys_of_its_tables_in_order() {
     let names: Vec<&str> = std::iter::once("max")
         .chain(VALUE_PROPERTIES.iter().map(|&(name, _)| name))
         .chain(FUNCTIONS.iter().map(|&(name, _)| name))
+        .chain(LATER_FUNCTIONS)
         .collect();
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);

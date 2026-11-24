@@ -62,6 +62,7 @@ mod jobs;
 mod language;
 mod lexical_declarations;
 mod limits_scripts;
+mod math_sum_precise;
 mod misuse;
 mod names;
 mod object_patterns;

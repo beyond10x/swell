@@ -17,7 +17,8 @@
 //! Slice 4 adds `date_text.rs` (the text of a date: the parser and the writers), `format.rs`
 //! (the digits of `toFixed`, `toExponential` and `toPrecision`), `math.rs`, `nat.rs` (the exact
 //! unsigned integer type), `radix.rs` (reading a string in a radix, for `parseInt` and
-//! `parseFloat`), `random.rs` and `time_value.rs` (`time_clip` and the time-value helpers);
+//! `parseFloat`), `random.rs`, `sum.rs` (the exact accumulator of `Math.sumPrecise`) and
+//! `time_value.rs` (`time_clip` and the time-value helpers);
 //! slice 12 adds `bigint.rs`.
 
 pub mod date;
@@ -27,5 +28,6 @@ pub mod literal;
 pub mod math;
 mod nat;
 pub mod siphash;
+pub mod sum;
 pub mod time_value;
 pub mod to_string;
