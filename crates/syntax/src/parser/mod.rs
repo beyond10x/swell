@@ -130,8 +130,7 @@ pub(crate) fn parse_eval(
 }
 
 /// The kind of a dynamic function (`#sec-createdynamicfunction`, steps 2 to 5): the prefix of
-/// its source text and the [Yield] and [Await] of its parameters and body. The kind
-/// `async-generator` is slice 10's.
+/// its source text and the [Yield] and [Await] of its parameters and body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DynamicKind {
     /// `normal`, the `Function` constructor: prefix `function`, `FormalParameters[~Yield,
@@ -143,6 +142,9 @@ pub(crate) enum DynamicKind {
     /// `async`, `%AsyncFunction%`: prefix `async function`, `FormalParameters[~Yield, +Await]`,
     /// `AsyncFunctionBody`, an `AsyncFunctionExpression`.
     Async,
+    /// `async-generator`, `%AsyncGeneratorFunction%`: prefix `async function*`,
+    /// `FormalParameters[+Yield, +Await]`, `AsyncGeneratorBody`, an `AsyncGeneratorExpression`.
+    AsyncGenerator,
 }
 
 impl DynamicKind {
@@ -152,17 +154,18 @@ impl DynamicKind {
             DynamicKind::Normal => "function anonymous(",
             DynamicKind::Generator => "function* anonymous(",
             DynamicKind::Async => "async function anonymous(",
+            DynamicKind::AsyncGenerator => "async function* anonymous(",
         }
     }
 
     /// The [Yield] of the parameters and the body.
     fn yields(self) -> bool {
-        self == DynamicKind::Generator
+        matches!(self, DynamicKind::Generator | DynamicKind::AsyncGenerator)
     }
 
     /// The [Await] of the parameters and the body.
     fn awaits(self) -> bool {
-        self == DynamicKind::Async
+        matches!(self, DynamicKind::Async | DynamicKind::AsyncGenerator)
     }
 }
 
@@ -171,8 +174,9 @@ impl DynamicKind {
 /// [Yield] and [Await] of the kind, the body text (a line feed before and after `body`) alone as
 /// the `FunctionBody` of the kind, then the whole source text
 /// `<prefix> anonymous(<parameters>\n) {\n<body>\n}` as the function expression of the kind
-/// (`function` and a `FunctionExpression`, `function*` and a `GeneratorExpression`, or
-/// `async function` and an `AsyncFunctionExpression`). The answer is the tree of the last parse
+/// (`function` and a `FunctionExpression`, `function*` and a `GeneratorExpression`,
+/// `async function` and an `AsyncFunctionExpression`, or `async function*` and an
+/// `AsyncGeneratorExpression`). The answer is the tree of the last parse
 /// as a script of one expression statement, the function expression, whose own name is taken
 /// off: SetFunctionName gives the function the name "anonymous" (step 35), but the name is not
 /// bound inside it. The refusal the last parse holds

@@ -215,9 +215,9 @@ pub fn parse_eval_with(
 /// The answer is a [`Script`] of one expression statement whose expression is the function
 /// expression, `FunctionId(0)`, the only function at the top of the tree; its own name is taken
 /// off, since the name "anonymous" is given by SetFunctionName (step 35) and not bound inside
-/// the function. The kind `generator` has its entry, [`parse_dynamic_generator_function`], and
-/// the kind `async` its own, [`parse_dynamic_async_function`]; the kind `async generator`
-/// (slice 10) comes with its constructor and has no entry before then.
+/// the function. The kind `generator` has its entry, [`parse_dynamic_generator_function`], the
+/// kind `async` its own, [`parse_dynamic_async_function`], and the kind `async-generator` its
+/// own, [`parse_dynamic_async_generator_function`].
 pub fn parse_dynamic_function(
     parameters: &[u16],
     body: &[u16],
@@ -309,6 +309,44 @@ pub fn parse_dynamic_async_function_with(
 ) -> Result<Script, Failure> {
     dynamic_function(
         parser::DynamicKind::Async,
+        parameters,
+        body,
+        options,
+        ledger,
+    )
+}
+
+/// Parses the parts of CreateDynamicFunction (`#sec-createdynamicfunction`) for kind
+/// `async-generator` (`%AsyncGeneratorFunction%`, `#sec-asyncgeneratorfunction`) as
+/// [`parse_dynamic_function`] parses those of kind `normal`, with the grammar symbols of that
+/// kind (steps 5 and 18 to 20): `parameters` alone as `FormalParameters[+Yield, +Await]`;
+/// `body`, with a line feed before and after, alone as `AsyncGeneratorBody`
+/// (`FunctionBody[+Yield, +Await]`); then the whole source text
+/// `async function* anonymous(<P>\n) {\n<body>\n}` as an `AsyncGeneratorExpression` with its
+/// early errors (`#sec-async-generator-function-definitions-static-semantics-early-errors`): so
+/// a YieldExpression or an AwaitExpression in the parameters, and `yield` or `await` as a name,
+/// are a SyntaxError, and `yield` and `await` in the body are a YieldExpression and an
+/// AwaitExpression. The answer is a [`Script`] of one expression statement whose expression is
+/// the async generator expression, `FunctionId(0)`, its own name taken off. A refusal the parse
+/// holds back to its end (`yield*` in the body) is answered as [`parse_script`] answers it.
+pub fn parse_dynamic_async_generator_function(
+    parameters: &[u16],
+    body: &[u16],
+    options: ParseOptions,
+) -> Result<Script, Vec<SyntaxError>> {
+    parse_dynamic_async_generator_function_with(parameters, body, options, &mut Unlimited)
+        .map_err(Failure::into_errors)
+}
+
+/// [`parse_dynamic_async_generator_function`] charged to `ledger` (the module's documentation).
+pub fn parse_dynamic_async_generator_function_with(
+    parameters: &[u16],
+    body: &[u16],
+    options: ParseOptions,
+    ledger: &mut dyn Ledger,
+) -> Result<Script, Failure> {
+    dynamic_function(
+        parser::DynamicKind::AsyncGenerator,
         parameters,
         body,
         options,

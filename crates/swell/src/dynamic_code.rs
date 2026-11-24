@@ -10,7 +10,10 @@
 //! of kind `async`, for `%AsyncFunction%` (`#sec-async-function-constructor-arguments`,
 //! `builtins/async_function.rs`), is `story:async-function-constructor`, the same way: the
 //! prefix `async function`, the fallback prototype `%AsyncFunction.prototype%` and the parse
-//! entry of that kind.
+//! entry of that kind. CreateDynamicFunction of kind `async-generator`, for
+//! `%AsyncGeneratorFunction%` (`#sec-asyncgeneratorfunction`, `builtins/async_generator.rs`), is
+//! `story:async-generator-function-constructor`, the same way: the prefix `async function*`, the
+//! fallback prototype `%AsyncGeneratorFunction.prototype%` and the parse entry of that kind.
 //!
 //! Both ask the host first, HostEnsureCanCompileStrings (`#sec-hostensurecancompilestrings`,
 //! with its seven parameters) before anything is parsed; `eval` of an object and each argument
@@ -35,8 +38,8 @@
 //! decision 4, "Source text."): for eval code the String PerformEval parsed, for the `Function`
 //! constructor the whole text of its last parse, `function anonymous(` P `\n) {\n` body `\n}`
 //! (`#sec-createdynamicfunction`; `function* anonymous(` for kind `generator`, `async function
-//! anonymous(` for kind `async`), of which the
-//! function's [[SourceText]] is all.
+//! anonymous(` for kind `async`, `async function* anonymous(` for kind `async-generator`), of
+//! which the function's [[SourceText]] is all.
 //!
 //! Eval code runs in a frame of its own: the direct `eval` pushes it on the running loop, as a
 //! call of an ECMAScript function is (`interp/dispatch.rs`), with no Rust recursion; the
@@ -74,8 +77,7 @@ pub(crate) enum EvalStart {
 }
 
 /// The kind of CreateDynamicFunction (`#sec-createdynamicfunction`, steps 2 to 5): the prefix
-/// of the source text, the fallback prototype and the parse entry. `async-generator` is slice
-/// 10's.
+/// of the source text, the fallback prototype and the parse entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DynamicFunctionKind {
     /// `normal`, the `Function` constructor.
@@ -84,6 +86,8 @@ pub(crate) enum DynamicFunctionKind {
     Generator,
     /// `async`, `%AsyncFunction%`.
     Async,
+    /// `async-generator`, `%AsyncGeneratorFunction%`.
+    AsyncGenerator,
 }
 
 impl DynamicFunctionKind {
@@ -93,16 +97,18 @@ impl DynamicFunctionKind {
             DynamicFunctionKind::Normal => "function anonymous(",
             DynamicFunctionKind::Generator => "function* anonymous(",
             DynamicFunctionKind::Async => "async function anonymous(",
+            DynamicFunctionKind::AsyncGenerator => "async function* anonymous(",
         }
     }
 
-    /// fallbackProto: `%Function.prototype%`, `%GeneratorFunction.prototype%` or
-    /// `%AsyncFunction.prototype%`.
+    /// fallbackProto: `%Function.prototype%`, `%GeneratorFunction.prototype%`,
+    /// `%AsyncFunction.prototype%` or `%AsyncGeneratorFunction.prototype%`.
     fn fallback_prototype(self) -> Intrinsic {
         match self {
             DynamicFunctionKind::Normal => Intrinsic::FunctionPrototype,
             DynamicFunctionKind::Generator => Intrinsic::GeneratorFunctionPrototype,
             DynamicFunctionKind::Async => Intrinsic::AsyncFunctionPrototype,
+            DynamicFunctionKind::AsyncGenerator => Intrinsic::AsyncGeneratorFunctionPrototype,
         }
     }
 }
@@ -832,8 +838,11 @@ impl<H: Host> Agent<H> {
         // its name, and MakeConstructor for kind `normal`; for kind `generator` the template is
         // a generator's, so the function has no [[Construct]] and its `prototype` is a new
         // object whose [[Prototype]] is `%GeneratorPrototype%`; for kind `async` the template
-        // is an `async` function's, so the function has neither [[Construct]] nor `prototype`
-        // (`instantiate_function`); then the [[Prototype]] step 26 gives it.
+        // is an `async` function's, so the function has neither [[Construct]] nor `prototype`;
+        // for kind `async-generator` the template is an async generator's, so the function has
+        // no [[Construct]] and its `prototype` is a new object whose [[Prototype]] is
+        // `%AsyncGeneratorPrototype%` (`instantiate_function`); then the [[Prototype]] step 26
+        // gives it.
         let function = self.instantiate_function(&compiled, script, realm, 0, None)?;
         self.keep(Value::Object(function));
         // Step 26: GetPrototypeFromConstructor(newTarget, fallbackProto), which may run code; it
@@ -846,8 +855,8 @@ impl<H: Host> Agent<H> {
 
     /// The parses of CreateDynamicFunction (steps 17 to 25) through the entry of `kind` with
     /// the agent's `parser_nesting` (`swell_syntax::parse_dynamic_function_with`,
-    /// `parse_dynamic_generator_function_with` or `parse_dynamic_async_function_with`): the
-    /// parameter text and the body text, taken
+    /// `parse_dynamic_generator_function_with`, `parse_dynamic_async_function_with` or
+    /// `parse_dynamic_async_generator_function_with`): the parameter text and the body text, taken
     /// from the source String `source` (the head of `kind`, P, `\n) {\n`, the body, `\n}`), whose
     /// copy is charged from the start; the third parse reads the same text, so the spans of its
     /// tree are spans of the copy. The script with the copy, or the throw of the first
@@ -881,6 +890,9 @@ impl<H: Host> Agent<H> {
             DynamicFunctionKind::Normal => swell_syntax::parse_dynamic_function_with,
             DynamicFunctionKind::Generator => swell_syntax::parse_dynamic_generator_function_with,
             DynamicFunctionKind::Async => swell_syntax::parse_dynamic_async_function_with,
+            DynamicFunctionKind::AsyncGenerator => {
+                swell_syntax::parse_dynamic_async_generator_function_with
+            }
         };
         let parsed = match parts {
             (Some(parameters), Some(body)) => {

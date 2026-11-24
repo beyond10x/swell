@@ -1178,7 +1178,11 @@ fn an_interrupt_in_a_running_async_generator_leaves_its_request_pending() {
 /// frame and its charge (a `collect()` after the termination reads at least [`FRAME_FLOOR`]
 /// above the reading after the next checkpoint completes it and a `collect()`), its job stays
 /// queued, and the next checkpoint resumes it and settles its requests in order: two jobs, that
-/// of its `await` and that of the `await` of the value of its `return`.
+/// of its `await` and that of the `await` of the value of its `return`. Each reading is
+/// `heap_bytes()` after a `collect()`, in the second of two rounds: the first grows the arenas,
+/// whose capacity stays in `heap_bytes()`, so the second reads only what the suspended frame
+/// holds (the termination ends the checkpoint, not the agent, so a round can follow it). The
+/// script of a round is parsed before the first reading; the test prints both rounds.
 fn resumes_at_a_later_checkpoint(
     agent: &mut Agent<TestHost>,
     realm: &Realm,
@@ -1191,28 +1195,39 @@ fn resumes_at_a_later_checkpoint(
         &format!(
             "function ends() {{ {ends} }}\n\
              async function* f() {{ {} await null; return 7; }}\n\
-             Promise.resolve().then(ends);\n\
-             var it = f(), p = it.next(), q = it.next();",
+             var it, p, q; 0;",
             locals()
         ),
     );
-    assert_eq!(terminated(agent), termination);
-    assert_eq!(agent.pending_microtasks(), Ok(1));
-    let suspended = collected(agent);
-    assert_eq!(normal(agent), report(2, 0));
-    let completed = collected(agent);
-    println!("heap_bytes after {termination:?}: {suspended} suspended, {completed} completed");
+    let round = parse(
+        agent,
+        realm,
+        "Promise.resolve().then(ends);\n\
+         it = f(); p = it.next(); q = it.next(); 0;",
+    );
+    let mut readings = Vec::new();
+    for _round in 0..2 {
+        run_parsed(agent, &round);
+        assert_eq!(terminated(agent), termination);
+        assert_eq!(agent.pending_microtasks(), Ok(1));
+        let suspended = collected(agent);
+        assert_eq!(normal(agent), report(2, 0));
+        let completed = collected(agent);
+        readings.push((suspended, completed));
+        assert_eq!(state(agent, realm, "p"), "fulfilled 7 true");
+        assert_eq!(state(agent, realm, "q"), "fulfilled undefined true");
+    }
+    println!("heap_bytes after {termination:?} (suspended, completed) per round: {readings:?}");
+    let (suspended, completed) = readings[1];
     assert!(
         suspended.saturating_sub(completed) >= FRAME_FLOOR,
-        "{suspended} -> {completed}"
+        "{readings:?}"
     );
-    assert_eq!(state(agent, realm, "p"), "fulfilled 7 true");
-    assert_eq!(state(agent, realm, "q"), "fulfilled undefined true");
 }
 
 /// Item 5: [`resumes_at_a_later_checkpoint`] at `Terminated(StepBudget)`,
 /// `Terminated(MemoryBudget)` (the collection after the termination frees what the fill held,
-/// not the suspended generator) and `Terminated(Interrupted)`.
+/// not the suspended generator) and `Terminated(Interrupted)`, each reading of the second round.
 #[test]
 fn an_async_generator_suspended_at_a_termination_resumes_at_a_later_checkpoint() {
     let (mut agent, realm) = new_agent(limits_with(1_000));

@@ -113,6 +113,9 @@ pub(crate) enum BuiltinId {
     /// AsyncGeneratorAwaitReturn, with the slots [`Slots::Await`]
     /// (`story:async-generators-and-their-request-queue`).
     AsyncGenerator(crate::builtins::async_generator::AsyncGeneratorBuiltin),
+    /// `AsyncGeneratorFunction ( ...paramArgs, bodyArg )` (`#sec-asyncgeneratorfunction`),
+    /// `story:async-generator-function-constructor`.
+    AsyncGeneratorFunction,
     /// The two functions an Await of a built-in async function makes (`#sec-await`, steps 3
     /// to 6), with the slots [`Slots::Await`] that hold its activation
     /// (`object/async_builtin.rs`, `story:array-from-async`).
@@ -795,6 +798,9 @@ impl<H: Host> Agent<H> {
             }
             BuiltinId::AsyncGenerator(id) => {
                 self.run_async_generator_builtin(id, function, this, args)
+            }
+            BuiltinId::AsyncGeneratorFunction => {
+                self.async_generator_function(function, args, new_target)
             }
             BuiltinId::AsyncBuiltinAwait(kind) => {
                 self.async_builtin_await_function(kind, function, args)

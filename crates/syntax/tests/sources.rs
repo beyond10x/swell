@@ -297,7 +297,7 @@ fn async_functions_parse_through_every_entry() {
 /// section 12, "A part before its slice") does not stop the parse: a source with such a `yield*`
 /// and no other error ends on it alone, at the `*` of the first one of the source, through each
 /// entry, the dynamic ones too; an early error or a grammar error anywhere ends the source on
-/// that error alone, and so does a refusal that stops the parse at its token (an `async *`
+/// that error alone, and so does a refusal that stops the parse at its token (`super` in a
 /// method of an object literal). An async generator without it parses, and so does a `yield*`
 /// in a generator, also inside an async generator
 /// (`story:async-generators-and-their-request-queue` lifted the refusal of `async function*`).
@@ -365,8 +365,8 @@ fn the_refusal_of_yield_star_in_an_async_generator_comes_after_the_whole_parse()
             vec!["unexpected token ;"],
         ),
         (
-            "async function* f() { yield* a; }\nx = { async *m() {} };",
-            vec!["async generator method is not supported before slice 10"],
+            "async function* f() { yield* a; }\nx = { m() { super.x; } };",
+            vec!["super is not supported before slice 8"],
         ),
     ] {
         assert_eq!(messages(&parse(text).err().unwrap()), expected, "{text:?}");
@@ -698,6 +698,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "async_method" => ("x = ", "{async m(){ return ", "0", "; }}", ";"),
         "async_generator_expression" => ("x = ", "async function* (){ return ", "0", "; }", ";"),
         "for_await" => ("async function f(){ ", "for await (x of y) ", ";", "", " }"),
+        "async_generator_method" => ("x = ", "{async *m(){ return ", "0", "; }}", ";"),
         _ => return None,
     };
     let mut source = units(before);
@@ -708,7 +709,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 60] = [
+const NESTING_KINDS: [&str; 61] = [
     "array",
     "paren",
     "block",
@@ -769,6 +770,7 @@ const NESTING_KINDS: [&str; 60] = [
     "async_method",
     "async_generator_expression",
     "for_await",
+    "async_generator_method",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict

@@ -1489,8 +1489,9 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// without an escape, followed by a property name or a computed one; or an `async` method
     /// (`FunctionKind::Method`, AsyncMethod, `#sec-async-function-definitions`): `async`, written
     /// without an escape, followed with no line terminator before it by a property name or a
-    /// computed one; the `async` is consumed. `async *` is refused at its `*`
-    /// (`story:async-generator-methods-in-object-literals` lifts it).
+    /// computed one; the `async` is consumed. `async *` is an async generator method
+    /// (AsyncGeneratorMethod, `#sec-async-generator-function-definitions`), whose `*`
+    /// [`Parser::async_method`] reads.
     #[inline(never)]
     fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
         let plain = !self.tok.escaped;
@@ -1507,9 +1508,6 @@ impl<'a, 'm> Parser<'a, 'm> {
                         ))
                 {
                     self.advance()?;
-                    if self.is(Punct::Star) {
-                        return self.refuse("async generator method", 10);
-                    }
                     return Ok(Some(FunctionKind::Method));
                 }
                 return Ok(None);
@@ -1591,7 +1589,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.enter()?;
         self.advance()?;
         let computed = self.computed_name()?;
-        let id = self.method_head(object, start, computed, true)?;
+        let id = self.method_head(object, start, computed, true, false)?;
         self.function_rest(id)?;
         self.property_end(object);
         self.leave();
@@ -1605,20 +1603,29 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// (`ClassElementName[?Yield, ?Await]`), so in an `async` function an `await` in a computed
     /// name is an AwaitExpression of that function; the parameters and the body are those of a
     /// method whose `asynchronous` is set, which [`Parser::function_rest`] reads with [Await]
-    /// set and [Yield] cleared.
+    /// set and [Yield] cleared. A `*` after the `async` makes it `MethodDefinition :
+    /// AsyncGeneratorMethod`, `async * ClassElementName ( UniqueFormalParameters[+Yield, +Await] )
+    /// { AsyncGeneratorBody }` (`#sec-async-generator-function-definitions`): the `*` is
+    /// consumed, its name is read as above, and its function has both `generator` and
+    /// `asynchronous` set, so its parameters and body are read with [Yield] and [Await] set.
     fn async_method(&mut self, object: ExprId, start: Span) -> R<()> {
         self.enter()?;
+        let generator = self.is(Punct::Star);
+        if generator {
+            self.advance()?;
+        }
         let computed = self.computed_name()?;
-        let id = self.method_head(object, start, computed, false)?;
+        let id = self.method_head(object, start, computed, generator, true)?;
         self.function_rest(id)?;
         self.property_end(object);
         self.leave();
         Ok(())
     }
 
-    /// The `ClassElementName` of a generator method (`generator`) or an `async` method, a
-    /// `PropertyName` (a `PrivateIdentifier` stands only in a class): numbers its function, a
-    /// method whose `generator` or `asynchronous` is set, and appends the property.
+    /// The `ClassElementName` of a generator method (`generator`), an `async` method
+    /// (`asynchronous`) or an async generator method (both), a `PropertyName` (a
+    /// `PrivateIdentifier` stands only in a class): numbers its function, a method with those
+    /// flags, and appends the property.
     #[inline(never)]
     fn method_head(
         &mut self,
@@ -1626,12 +1633,13 @@ impl<'a, 'm> Parser<'a, 'm> {
         start: Span,
         computed: Option<ExprId>,
         generator: bool,
+        asynchronous: bool,
     ) -> R<FunctionId> {
         let key = self.key_or(computed)?;
         let id = self.begin_function(FunctionKind::Method, start, None);
         if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {
             f.generator = generator;
-            f.asynchronous = !generator;
+            f.asynchronous = asynchronous;
         }
         self.push_property(
             object,

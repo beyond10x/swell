@@ -37,7 +37,9 @@
 //! `%AsyncGeneratorPrototype%` (27.4.3 and 27.6.1,
 //! `#sec-properties-of-asyncgeneratorfunction-prototype`,
 //! `#sec-properties-of-asyncgenerator-prototype`), written by
-//! `story:async-generators-and-their-request-queue`;
+//! `story:async-generators-and-their-request-queue`; `%AsyncGeneratorFunction%`
+//! (`#sec-asyncgeneratorfunction-constructor`), written by
+//! `story:async-generator-function-constructor`, which is no property of the global object;
 //! `%AggregateError%` and `%AggregateError.prototype%` (20.5.7, `#sec-aggregate-error-objects`),
 //! written by `story:promise-statics-finally-and-aggregate-error`, made after the seven of
 //! [`ErrorKind::ALL`] and held beside them.
@@ -189,6 +191,17 @@ pub(crate) enum Intrinsic {
     AsyncGeneratorFunctionPrototype,
     /// `%AsyncGeneratorPrototype%` (27.6.1, `#sec-properties-of-asyncgenerator-prototype`).
     AsyncGeneratorPrototype,
+    /// `%AsyncGeneratorFunction%` (`#sec-asyncgeneratorfunction-constructor`),
+    /// `story:async-generator-function-constructor`. The realm holds it; no operation asks for
+    /// it by name, its constructor being the active function.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "%AsyncGeneratorFunction% by name: the tests of the intrinsics"
+        )
+    )]
+    AsyncGeneratorFunction,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -253,6 +266,7 @@ pub(crate) struct Intrinsics {
     async_function: ObjectRef,
     async_iteration_prototypes: crate::builtins::async_iteration::AsyncIterationPrototypes,
     async_generator_prototypes: crate::builtins::async_generator::AsyncGeneratorPrototypes,
+    async_generator_function: ObjectRef,
 }
 
 impl Intrinsics {
@@ -311,6 +325,7 @@ impl Intrinsics {
                 self.async_generator_prototypes.function_prototype
             }
             Intrinsic::AsyncGeneratorPrototype => self.async_generator_prototypes.prototype,
+            Intrinsic::AsyncGeneratorFunction => self.async_generator_function,
         }
     }
 
@@ -377,6 +392,7 @@ impl Intrinsics {
             self.async_iteration_prototypes.async_from_sync_iterator,
             self.async_generator_prototypes.function_prototype,
             self.async_generator_prototypes.prototype,
+            self.async_generator_function,
         ] {
             mark.object(object);
         }
@@ -567,6 +583,11 @@ impl<H: Host> Agent<H> {
         let async_iteration_prototypes = self.create_async_iteration_prototypes(making)?;
         let async_generator_prototypes = self
             .create_async_generator_prototypes(making, async_iteration_prototypes.async_iterator)?;
+        let async_generator_function = self.create_async_generator_function_constructor(
+            making,
+            function,
+            async_generator_prototypes.function_prototype,
+        )?;
         // %Array.prototype.values% (23.1.3.38), %Array.prototype.entries% (23.1.3.5),
         // %Array.prototype.keys% (23.1.3.19) and %Array.prototype.forEach% (23.1.3.15): the
         // methods `create_array_constructor` has defined on %Array.prototype%, read before any
@@ -616,6 +637,7 @@ impl<H: Host> Agent<H> {
             async_function,
             async_iteration_prototypes,
             async_generator_prototypes,
+            async_generator_function,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {
@@ -790,5 +812,36 @@ mod tests {
         assert_eq!(agent.get(async_function, key), Ok(Value::Object(prototype)));
         let key = agent.name_key("constructor").unwrap();
         assert_eq!(agent.get(prototype, key), Ok(Value::Object(async_function)));
+    }
+
+    /// `%AsyncGeneratorFunction%` (`#sec-properties-of-asyncgeneratorfunction`) has the
+    /// [[Prototype]] `%Function%`, its `prototype` is `%AsyncGeneratorFunction.prototype%`, and
+    /// it is the `constructor` of that object
+    /// (`#sec-asyncgeneratorfunction-prototype-constructor`).
+    #[test]
+    fn async_generator_function_is_the_constructor_of_its_prototype() {
+        let (mut agent, realm) = agent_with_realm();
+        let realm = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let async_generator_function = agent
+            .intrinsic(realm, Intrinsic::AsyncGeneratorFunction)
+            .unwrap();
+        let function = agent.intrinsic(realm, Intrinsic::Function).unwrap();
+        let prototype = agent
+            .intrinsic(realm, Intrinsic::AsyncGeneratorFunctionPrototype)
+            .unwrap();
+        assert_eq!(
+            agent.get_prototype_of(async_generator_function),
+            Ok(Some(function))
+        );
+        let key = agent.name_key("prototype").unwrap();
+        assert_eq!(
+            agent.get(async_generator_function, key),
+            Ok(Value::Object(prototype))
+        );
+        let key = agent.name_key("constructor").unwrap();
+        assert_eq!(
+            agent.get(prototype, key),
+            Ok(Value::Object(async_generator_function))
+        );
     }
 }
