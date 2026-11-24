@@ -1018,6 +1018,45 @@ mod tests {
         );
     }
 
+    /// The twin of `a_loop_of_math_min_calls_collects_within_its_bound` for `Math.hypot`, which
+    /// shares the argument loop of `Math.max` and `Math.min`: 12,500 calls with eight arguments
+    /// each under a roomy budget run at most one more collection per `MIN_TRIGGER_BYTES` of the
+    /// arguments the calls charge. Not with the feature `collect-every-safe-point`, where every
+    /// safe point collects. The script names the function `Math["hypot"]`: `libm-check` reads
+    /// every line under `src/`, and `.hypot(` is the call of a method it refuses.
+    #[cfg(not(feature = "collect-every-safe-point"))]
+    #[test]
+    fn a_loop_of_math_hypot_calls_collects_within_its_bound() {
+        use crate::heap::{COLLECTIONS, MIN_TRIGGER_BYTES};
+        use crate::{Outcome, Parsed, Source};
+        const ARGUMENTS: u64 = 100_000;
+        const ON_THE_BASE: u64 = 0;
+        const SOURCE: &str =
+            "for (var i = 0; i < 12500; i++) Math[\"hypot\"](i, i, i, i, i, i, i, i); i";
+        let (mut agent, realm, _) = roomy();
+        let Ok(Parsed::Parsed(script)) = agent.parse_script(&realm, Source::Utf8(SOURCE), None)
+        else {
+            panic!("{SOURCE} did not parse");
+        };
+        COLLECTIONS.with(|collections| collections.set(0));
+        let outcome = agent.evaluate_script(&script);
+        let Ok(Outcome::Normal(answer)) = outcome else {
+            panic!("{outcome:?}");
+        };
+        let answer = agent.heap.roots.get(&answer);
+        assert!(
+            matches!(answer, Ok(Value::Number(n)) if n == 12_500.0),
+            "{answer:?}"
+        );
+        let collections = COLLECTIONS.with(std::cell::Cell::get);
+        let charged = ARGUMENTS * size_of::<Value>() as u64;
+        let bound = ON_THE_BASE + charged.div_ceil(MIN_TRIGGER_BYTES);
+        assert!(
+            collections <= bound,
+            "{collections} collections, at most {bound}"
+        );
+    }
+
     /// The bytes a built-in function with slots is charged for its slots, which
     /// `tests/promises.rs` states as `RESOLVING_BOX_BYTES` and `EXECUTOR_BOX_BYTES`: the box of
     /// the slots, and for a resolving function half of the box of the flag it shares.
