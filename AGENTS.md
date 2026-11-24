@@ -242,7 +242,10 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   (`slot --timeout 30m task test262-part TEST262_PART=<k>/<n>` for each k), and counted from
   their files (`slot task test262-expected TEST262_FROM_PARTS=.out/test262/parts`);
   the lane `slow` (`task slow`, `.github/workflows/slow.yml`) makes the full run on the forge
-  and compares bytes. A release waits for a green lane `slow` on its commit.
+  and compares bytes. A release waits for a green lane `slow` on its commit. The lane starts
+  on a push to `main` and on a pull request, each only when it changes a path of the
+  workflow's list, and by hand (`workflow_dispatch`) for a release tip whose push changed
+  none (`docs/releasing.md`, step 5).
 - A heavy test has a gate count and a full count: `SWELL_FULL_COUNTS=1` gives the full one,
   and the lane `slow` (task `slow-tests`) runs every `crates/*/tests/*.rs` that reads the
   variable at its full count in both collection modes.
@@ -528,8 +531,9 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   tagged on a commit of `main` whose `check` and lane `slow` are green on the forge, the
   code of the release commit `a350de3` (2026-11-23, the day its counts were measured) with
   the gate change of `story:gate-test-steps-fit-four-cores` after it (on `d9d1b95` the
-  forge's test steps took 127.9 s of their 120) and the heading of its changelog section
-  set to the day of the tag: the
+  forge's test steps took 127.9 s of their 120), the heading of its changelog section
+  set to the day of the tag and the manual trigger of the lane `slow`
+  (`story:slow-lane-starts-by-hand`), whose push starts the lane on the tagged commit: the
   third wave of slice 5 with the first four stories of slice 7, on the decision "cut 0.8.0
   when the two running slice 5 units are merged and a unit has brought the full test262 run
   under 15 min of a pool job" of the session that decides for the operator
