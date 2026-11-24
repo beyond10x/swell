@@ -2480,8 +2480,8 @@ The rule:
 | 4 | `numbers-and-dates` | 1,612 | 3,184 |
 | 5 | `regexp` | 2,724 | 5,441 |
 | 6 | `bindings-and-iteration` | 3,898 | 7,351 |
-| 7 | `generators` | 1,491 | 2,841 |
-| 8 | `classes` | 9,146 | 18,143 |
+| 7 | `generators` | 1,472 | 2,801 |
+| 8 | `classes` | 9,186 | 18,223 |
 | 9 | `collections-proxy-reflect` | 1,781 | 3,533 |
 | 10 | `promises-and-async` | 3,879 | 7,499 |
 | 11 | `modules` | 1,281 | 1,833 |
@@ -2491,8 +2491,8 @@ The rule:
 | 15 | `iterator-helpers-and-resources` | 1,094 | 2,170 |
 | 16 | `weak-references` | 82 | 164 |
 | 17 | `tail-calls` | 35 | 35 |
-| 18 | `annex-b` | 1,137 | 1,456 |
-| 19 | `staging` | 1,474 | 2,766 |
+| 18 | `annex-b` | 1,135 | 1,452 |
+| 19 | `staging` | 1,455 | 2,730 |
 | | slices 1 to 19 | 44,931 | 85,794 |
 | 20 | `temporal` (excluded at first) | 4,617 | 9,234 |
 | 21 | `intl402` (excluded at first) | 1,662 | 3,324 |
@@ -2543,6 +2543,18 @@ inventory's `meta.tsv`, counting slice `05`): `05 2724 5441`, the slice line of 
 test262` on the code of the slice, every run passed. Every moved case goes to slice 4, 8 or 9 and
 every case that comes in leaves slice 18, so slices 1 to 19 still hold 44,931 cases and 85,794
 runs and the 22 lines still sum to 53,801 and 103,360.
+
+Slice 7 had 1,491 cases and 2,841 runs by its rules (its `dir` lines, `feature generators 7`,
+the lines of the closes of slices 2, 3 and 6 that gave it cases, and the order of delivery).
+1,472 cases and 2,801 runs are what slice 7 counts after its close: 40 cases (80 runs) that
+need slice 8 move by the lines of the paragraph "Slice 7's cases that need a later slice", and
+21 cases (40 runs) come into it, 2 from slice 18 and 19 from slice 19, by the lines of the same
+paragraph ("A case that comes into a slice from one delivered later" above). Measured on
+2026-11-24 with the same check (`awk -f slices.awk` over this block and the inventory's
+`meta.tsv`, counting slice `07`): `07 1472 2801`, the slice line of `slot task test262` on the
+code of the slice, every run passed. Every moved case goes to slice 8 and every case that comes
+in leaves slice 18 or 19, so slices 1 to 19 still hold 44,931 cases and 85,794 runs and the 22
+lines still sum to 53,801 and 103,360.
 
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
@@ -2999,6 +3011,59 @@ the 21 of `prototype/compile/` that run, `prototype/flags/order-after-compile` a
 (`RegExp-control-escape-russian-letter` and `RegExp-invalid-control-escape-character-class`, the
 feature `generators`) pass and stay where the block puts them, in slice 18: slice 7, which they
 need, is delivered after slice 5.
+
+**Slice 7's cases that need a later slice.** Measured at the close of slice 7 (2026-11-24,
+`story:slice-07-conformance-close`), with the run lines of the runner on the code of the slice
+(`slot task test262`): 40 of the 1,491 cases of slice 7 fail, each in every one of its runs (80
+runs), and none on a part of slice 7: the first failure of each run is the refusal `class is not
+supported before slice 8` (72 runs) or `super is not supported before slice 8` (8 runs). Each was
+read: with its `class` or `super` it needs nothing of slice 7 that its sibling cases without
+them do not pass with (generator methods, a generator declaration in a block or a `switch`, the
+patterns of the parameters of a generator). All 40 move to slice 8, each a new line of
+`conformance/test262/moves.tsv` with `from` 7, kind `part` and a token of
+`conformance/test262/later-parts.tsv` as its evidence, held by `test262-moves-check`. The block
+gains 40 lines `dir <file> 8`, one for a single file each: every directory that holds one of them
+holds cases of slice 7 that stay. The groups, by target slice (lines of the list):
+
+- to slice 8, 40: `class` 36 (the 20 `cls-decl-gen-meth-*` and `cls-expr-gen-meth-*` cases of
+  `language/arguments-object/`, a generator method of a class called with a trailing comma; the
+  12 `*-init-fn-name-class` cases of `expressions/generators/dstr/`, `statements/generators/dstr/`
+  and `expressions/object/dstr/`, 4 each; the 4 cases of a class and a generator declaration of
+  one name in `block-scope/syntax/redeclaration/` and `statements/switch/syntax/redeclaration/`, 2
+  each), `super` 4 (`expressions/object/concise-generator` and the three
+  `expressions/object/method-definition/generator-super-*` cases).
+
+The counts sum to the 40 lines this change adds to the list.
+
+21 cases (40 runs) come into slice 7, by the rule "A case that comes into a slice from one
+delivered later" above. Each is counted by the block in a slice delivered after 7, failed at the
+start of the slice (`4971b9b`) on a part of slice 7 only (the refusal `generator function is not
+supported before slice 7` in every failed run, or, for
+`staging/sm/expressions/object-literal-__proto__`, a counted refusal of the generator method it
+compiles with `Function`), passes in every run on the code of the slice, has no `feature` or
+`flag` line of a slice delivered after 7, and neither it nor a harness file it includes uses a
+part of a later slice. From slice 18, 2:
+`test/annexB/built-ins/RegExp/RegExp-control-escape-russian-letter.js` and
+`RegExp-invalid-control-escape-character-class.js`, the two cases of the pattern grammar of B.1.2
+that the paragraph of slice 5 left in slice 18 because they use generator functions. From slice
+19, 19, all under `test/staging/sm/`: `generators/` 11, `class/` 2 (`compPropNames` and
+`methDefnGen`, generator methods of object literals and no class), and 1 each of `Array/`
+(`sort_small`), `Symbol/` (`for-in-order`), `expressions/` (`object-literal-__proto__`: a
+`__proto__` property of an object literal, which ECMA-262 states outside Annex B; each
+`.__proto__` it reads is an own property), `lexical-environment/`
+(`block-scoped-functions-annex-b-generators`: a generator declaration in a block is not hoisted,
+which the web compatibility semantics of Annex B do not change) and `regress/`
+(`regress-530879`). Each gets a line `dir <file> 7` (no directory has every case come in),
+listed with the slice it leaves in `docs/plan/slice-07/close-into-7.tsv`; each passes in every
+one of its runs (the close's check (4) over that file), and none has a line of `moves.tsv`.
+661 other cases of slices delivered after 7 failed at the start of the slice and pass in every
+run on its code, and stay in their slice with no line: 463 have a `feature` or `flag` line of a
+later slice (`flag async`, `async-functions`, `async-iteration`, the `Promise` features,
+`Reflect.construct`, `explicit-resource-management`, `iterator-helpers`, `iterator-chunking`,
+`dynamic-import`), 197 failed at the start on a part that is not slice 7's (the refusal of async
+functions, `Promise` not defined, a counted refusal of the flag `i` or of an identifier outside
+ASCII), and 1, `language/expressions/await/await-in-generator`, reads `await` as an identifier,
+which the grammar of async functions of slice 10 decides.
 
 ```swell-slices
 order delivery 1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21
@@ -4652,6 +4717,67 @@ dir test/annexB/built-ins/RegExp/RegExp-trailing-escape.js 5
 dir test/annexB/built-ins/RegExp/incomplete_hex_unicode_escape.js 5
 dir test/annexB/built-ins/RegExp/named-groups/ 5
 dir test/annexB/language/literals/regexp/ 5
+dir test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-decl-gen-meth-static-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-args-trailing-comma-undefined.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-multiple.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-null.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-single-args.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-spread-operator.js 8
+dir test/language/arguments-object/cls-expr-gen-meth-static-args-trailing-comma-undefined.js 8
+dir test/language/block-scope/syntax/redeclaration/class-name-redeclaration-attempt-with-generator.js 8
+dir test/language/block-scope/syntax/redeclaration/generator-name-redeclaration-attempt-with-class.js 8
+dir test/language/expressions/generators/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/generators/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/generators/dstr/dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/generators/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/object/concise-generator.js 8
+dir test/language/expressions/object/dstr/gen-meth-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/gen-meth-dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/gen-meth-dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/object/dstr/gen-meth-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/expressions/object/method-definition/generator-super-call-body.js 8
+dir test/language/expressions/object/method-definition/generator-super-call-param.js 8
+dir test/language/expressions/object/method-definition/generator-super-prop-body.js 8
+dir test/language/statements/generators/dstr/ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/generators/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js 8
+dir test/language/statements/generators/dstr/dflt-obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/generators/dstr/obj-ptrn-id-init-fn-name-class.js 8
+dir test/language/statements/switch/syntax/redeclaration/class-name-redeclaration-attempt-with-generator.js 8
+dir test/language/statements/switch/syntax/redeclaration/generator-name-redeclaration-attempt-with-class.js 8
+dir test/annexB/built-ins/RegExp/RegExp-control-escape-russian-letter.js 7
+dir test/annexB/built-ins/RegExp/RegExp-invalid-control-escape-character-class.js 7
+dir test/staging/sm/Array/sort_small.js 7
+dir test/staging/sm/Symbol/for-in-order.js 7
+dir test/staging/sm/class/compPropNames.js 7
+dir test/staging/sm/class/methDefnGen.js 7
+dir test/staging/sm/expressions/object-literal-__proto__.js 7
+dir test/staging/sm/generators/delegating-yield-10.js 7
+dir test/staging/sm/generators/delegating-yield-12.js 7
+dir test/staging/sm/generators/delegating-yield-2.js 7
+dir test/staging/sm/generators/delegating-yield-3.js 7
+dir test/staging/sm/generators/delegating-yield-4.js 7
+dir test/staging/sm/generators/objects.js 7
+dir test/staging/sm/generators/regress-366941.js 7
+dir test/staging/sm/generators/return-finally.js 7
+dir test/staging/sm/generators/syntax.js 7
+dir test/staging/sm/generators/yield-iterator-close.js 7
+dir test/staging/sm/generators/yield-star-iterator-close.js 7
+dir test/staging/sm/generators/yield-star-iterator-primitive.js 7
+dir test/staging/sm/lexical-environment/block-scoped-functions-annex-b-generators.js 7
+dir test/staging/sm/regress/regress-530879.js 7
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
@@ -5124,8 +5250,8 @@ Its output on this document:
 04 1612 3184
 05 2724 5441
 06 3898 7351
-07 1491 2841
-08 9146 18143
+07 1472 2801
+08 9186 18223
 09 1781 3533
 10 3879 7499
 11 1281 1833
@@ -5135,8 +5261,8 @@ Its output on this document:
 15 1094 2170
 16 82 164
 17 35 35
-18 1137 1456
-19 1474 2766
+18 1135 1452
+19 1455 2730
 20 4617 9234
 21 1662 3324
 x-stage3 2591 5008
