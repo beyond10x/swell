@@ -19,13 +19,13 @@
     ]
   },
   "test262": {
-    "line": "test262 total 53801 8982 7 44812 23553 21257 2",
+    "line": "test262 total 53801 8982 7 44812 23564 21246 2",
     "exist": 53801,
     "excluded": 8982,
     "not_applicable": 7,
     "run": 44812,
-    "passed": 23553,
-    "failed": 21257,
+    "passed": 23564,
+    "failed": 21246,
     "budget": 2,
     "passed_percent": "52.5"
   },
@@ -182,16 +182,16 @@
       "name": "promises-and-async",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 10 3879 7499 0 0 3879 2785 1094 0",
+      "line": "test262-slice 10 3879 7499 0 0 3879 2796 1083 0",
       "cases": 3879,
       "runs": 7499,
       "excluded": 0,
       "not_applicable": 0,
       "run": 3879,
-      "passed": 2785,
-      "failed": 1094,
+      "passed": 2796,
+      "failed": 1083,
       "budget": 0,
-      "passed_percent": "71.7"
+      "passed_percent": "72.0"
     },
     {
       "slice": "11",
