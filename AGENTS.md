@@ -10,7 +10,7 @@ and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the byteco
 interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
 6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
-(the other 44 need a later slice and say so). 114 of 208 host requirements have a test.
+(the other 44 need a later slice and say so). 140 of 211 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
 gate holds the test262 counts: 20,229 of the 44,812 run cases pass (2026-11-23, release `0.8.0`; 18,155 in `0.7.0`, 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
@@ -263,7 +263,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 - `website/data/status.json` is written by `task site-data` from the gate's committed files;
   `site-data-check`, a step of `check`, fails when it differs from its regeneration. A commit
   that changes `expected.txt`, `slices-delivered.txt`, `requirements.txt`, `moves.tsv`, a
-  crate version or section 12 of the design regenerates it (`slot --local task site-data`).
+  crate version or section 12 of the design regenerates it (`task site-data`, which runs awk over the committed files and compiles nothing, so it takes no slot of the pool).
 - A test stays under 1.5 CPU seconds alone in the gate's default mode and under 2 s with a
   collection at every safe point, and under 2.5 s at its full count (`SWELL_FULL_COUNTS=1`)
   in either mode, measured with its test binary run with `--exact <name> --test-threads 1`
@@ -552,7 +552,7 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   under 15 min of a pool job" of the session that decides for the operator
   (https://github.com/beyond10x/swell/releases/tag/0.8.0; the tag is on `0c18271`, whose `check`
   and lane `slow` ran green on the forge). After a release
-  `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
+  `task host-surface-snapshot` (a scan with awk, no build and no slot of the pool) writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of
   `shared-gates.yml` (`tags: ['*']`) and none of `check.yml`; the release is created after
