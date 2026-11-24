@@ -196,6 +196,9 @@ pub(crate) enum ObjectKind {
     /// The activation of an `async` function (`docs/design/engine.md`, decision 3, "`async`
     /// functions on suspended frames", item 1), `story:async-functions-and-await`.
     AsyncActivation(AsyncActivation),
+    /// An Async-from-Sync Iterator object (27.1.5.3), with [[SyncIteratorRecord]] in a box of
+    /// its kind, `story:for-await-and-async-from-sync-iterator` (`builtins/async_iteration.rs`).
+    AsyncFromSyncIterator(crate::builtins::async_iteration::AsyncFromSyncIterator),
 }
 
 /// Which kind an object is, for the dispatch.
@@ -214,6 +217,7 @@ pub(crate) enum KindTag {
     Generator,
     Promise,
     AsyncActivation,
+    AsyncFromSyncIterator,
 }
 
 impl ObjectRecord {
@@ -249,6 +253,7 @@ impl ObjectRecord {
             ObjectKind::Generator(generator) => generator.trace(mark),
             ObjectKind::Promise(promise) => promise.trace(mark),
             ObjectKind::AsyncActivation(activation) => activation.trace(mark),
+            ObjectKind::AsyncFromSyncIterator(iterator) => iterator.trace(mark),
         }
     }
 
@@ -270,6 +275,7 @@ impl ObjectRecord {
             ObjectKind::Generator(_) => KindTag::Generator,
             ObjectKind::Promise(_) => KindTag::Promise,
             ObjectKind::AsyncActivation(_) => KindTag::AsyncActivation,
+            ObjectKind::AsyncFromSyncIterator(_) => KindTag::AsyncFromSyncIterator,
         }
     }
 }

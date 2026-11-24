@@ -290,7 +290,9 @@ impl<H: Host> Agent<H> {
                 promise,
                 already_resolved,
             } => Ok((*promise, Rc::clone(already_resolved))),
-            Slots::Executor { .. } | Slots::Await { .. } => Err(self.fault()),
+            Slots::Executor { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => {
+                Err(self.fault())
+            }
         }
     }
 
@@ -391,7 +393,9 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Value> {
         let (resolve_slot, reject_slot) = match self.closure_slots(function)? {
             Slots::Executor { resolve, reject } => (*resolve, *reject),
-            Slots::Resolving { .. } | Slots::Await { .. } => return Err(self.fault()),
+            Slots::Resolving { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => {
+                return Err(self.fault());
+            }
         };
         // a. If resolvingFuncs.[[Resolve]] is not undefined, throw a TypeError exception.
         // b. If resolvingFuncs.[[Reject]] is not undefined, throw a TypeError exception.
@@ -411,7 +415,9 @@ impl<H: Host> Agent<H> {
                 *resolve_slot = resolve;
                 *reject_slot = reject;
             }
-            Slots::Resolving { .. } | Slots::Await { .. } => return Err(self.fault()),
+            Slots::Resolving { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => {
+                return Err(self.fault());
+            }
         }
         // e. Return NormalCompletion(undefined).
         Ok(Value::Undefined)

@@ -556,12 +556,12 @@ const ASSIGN_REENTRY: u32 = if cfg!(feature = "collect-every-safe-point") {
 };
 
 /// The only Symbol values a builtin of the realm hands to a script through a String-keyed data
-/// property are the twelve well-known symbols of slice 6 on `Symbol`
-/// (`#sec-properties-of-the-symbol-constructor`,
+/// property are the thirteen well-known symbols on `Symbol`, twelve of slice 6 and
+/// `asyncIterator` of slice 10 (`#sec-properties-of-the-symbol-constructor`,
 /// `story:symbol-constructor-and-well-known-symbols`; before it, none: design, section 12, "A
 /// part before its slice"): a walk from the global object over every own String-keyed data
 /// property, and the prototype, of each object it reaches, calling no getter and no method of
-/// the objects it walks, finds a Symbol value at exactly those twelve places. The walk reads
+/// the objects it walks, finds a Symbol value at exactly those thirteen places. The walk reads
 /// what a script reads, through the host interface: `Object.getOwnPropertyNames`,
 /// `Object.getOwnPropertyDescriptors` and `Object.getPrototypeOf` of each object once, then the
 /// "value" of each data descriptor; it runs no script, so that with the feature
@@ -629,6 +629,7 @@ fn no_builtin_hands_a_symbol_value_to_a_script() {
     let mut found = found;
     found.sort();
     let mut expected: Vec<String> = [
+        "asyncIterator",
         "hasInstance",
         "isConcatSpreadable",
         "iterator",

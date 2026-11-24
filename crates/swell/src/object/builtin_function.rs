@@ -89,6 +89,10 @@ pub(crate) enum BuiltinId {
     /// `AsyncFunction ( ...paramArgs, bodyArg )` (`#sec-async-function-constructor-arguments`),
     /// `story:async-function-constructor`.
     AsyncFunction,
+    /// The builtins of `%AsyncIteratorPrototype%` and `%AsyncFromSyncIteratorPrototype%` and
+    /// the two functions of AsyncFromSyncIteratorContinuation, with the slots
+    /// [`Slots::AsyncFromSync`] (`story:for-await-and-async-from-sync-iterator`).
+    AsyncIteration(crate::builtins::async_iteration::AsyncIterationBuiltin),
 }
 
 /// What a built-in function does when called.
@@ -130,6 +134,10 @@ pub(crate) enum Slots {
         activation: ObjectRef,
         suspension: u64,
     },
+    /// The unwrap function or the function that closes the sync iterator of
+    /// AsyncFromSyncIteratorContinuation (`#sec-asyncfromsynciteratorcontinuation`;
+    /// `builtins/async_iteration.rs`).
+    AsyncFromSync(crate::builtins::async_iteration::AsyncFromSyncSlots),
 }
 
 impl Slots {
@@ -142,6 +150,7 @@ impl Slots {
                 mark.value(*reject);
             }
             Slots::Await { activation, .. } => mark.object(*activation),
+            Slots::AsyncFromSync(slots) => slots.trace(mark),
         }
     }
 
@@ -151,7 +160,7 @@ impl Slots {
     pub(crate) fn bytes(&self) -> u64 {
         let shared = match self {
             Slots::Resolving { .. } => size_of::<(Cell<usize>, Cell<usize>, Cell<bool>)>() / 2,
-            Slots::Executor { .. } | Slots::Await { .. } => 0,
+            Slots::Executor { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => 0,
         };
         u64::try_from(size_of::<Slots>().saturating_add(shared)).unwrap_or(u64::MAX)
     }
@@ -607,6 +616,9 @@ impl<H: Host> Agent<H> {
                 self.await_function(kind, function, argument)
             }
             BuiltinId::AsyncFunction => self.async_function(function, args, new_target),
+            BuiltinId::AsyncIteration(id) => {
+                self.run_async_iteration_builtin(id, function, this, args)
+            }
         }
     }
 
@@ -803,9 +815,14 @@ mod tests {
             activation: object,
             suspension: 1,
         };
+        use crate::builtins::async_iteration::AsyncFromSyncSlots;
+        let unwrap = Slots::AsyncFromSync(AsyncFromSyncSlots::Unwrap { done: false });
+        let close = Slots::AsyncFromSync(AsyncFromSyncSlots::Close { iterator: object });
         let size = size_of::<Slots>();
         assert_eq!(resolving.bytes(), 44, "the slots are {size} bytes");
         assert_eq!(executor.bytes(), 32, "the slots are {size} bytes");
         assert_eq!(awaiting.bytes(), 32, "the slots are {size} bytes");
+        assert_eq!(unwrap.bytes(), 32, "the slots are {size} bytes");
+        assert_eq!(close.bytes(), 32, "the slots are {size} bytes");
     }
 }

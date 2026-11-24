@@ -30,7 +30,10 @@
 //! by `story:promise-constructor-then-and-jobs`; `%AsyncFunction.prototype%` (27.7.3,
 //! `#sec-async-function-prototype-properties`), written by `story:async-functions-and-await`;
 //! `%AsyncFunction%` (`#sec-async-function-constructor`), written by
-//! `story:async-function-constructor`, which is no property of the global object.
+//! `story:async-function-constructor`, which is no property of the global object;
+//! `%AsyncIteratorPrototype%` and `%AsyncFromSyncIteratorPrototype%` (27.1.4 and 27.1.5.2,
+//! `#sec-asynciteratorprototype`, `#sec-%asyncfromsynciteratorprototype%-object`), written by
+//! `story:for-await-and-async-from-sync-iterator`.
 //! The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
@@ -160,6 +163,19 @@ pub(crate) enum Intrinsic {
         )
     )]
     AsyncFunction,
+    /// `%AsyncIteratorPrototype%` (27.1.4), `story:for-await-and-async-from-sync-iterator`. The
+    /// realm holds it; no operation asks for it by name before the async generators.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "%AsyncIteratorPrototype% by name: the tests of the intrinsics"
+        )
+    )]
+    AsyncIteratorPrototype,
+    /// `%AsyncFromSyncIteratorPrototype%` (27.1.5.2), the [[Prototype]] of an
+    /// Async-from-Sync Iterator object (`#sec-createasyncfromsynciterator`).
+    AsyncFromSyncIteratorPrototype,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -220,6 +236,7 @@ pub(crate) struct Intrinsics {
     promise_prototype: ObjectRef,
     async_function_prototype: ObjectRef,
     async_function: ObjectRef,
+    async_iteration_prototypes: crate::builtins::async_iteration::AsyncIterationPrototypes,
 }
 
 impl Intrinsics {
@@ -270,6 +287,10 @@ impl Intrinsics {
             Intrinsic::PromisePrototype => self.promise_prototype,
             Intrinsic::AsyncFunctionPrototype => self.async_function_prototype,
             Intrinsic::AsyncFunction => self.async_function,
+            Intrinsic::AsyncIteratorPrototype => self.async_iteration_prototypes.async_iterator,
+            Intrinsic::AsyncFromSyncIteratorPrototype => {
+                self.async_iteration_prototypes.async_from_sync_iterator
+            }
         }
     }
 
@@ -331,6 +352,8 @@ impl Intrinsics {
             self.promise_prototype,
             self.async_function_prototype,
             self.async_function,
+            self.async_iteration_prototypes.async_iterator,
+            self.async_iteration_prototypes.async_from_sync_iterator,
         ] {
             mark.object(object);
         }
@@ -516,6 +539,7 @@ impl<H: Host> Agent<H> {
         let async_function_prototype = self.create_async_function_prototype(making)?;
         let async_function =
             self.create_async_function_constructor(making, function, async_function_prototype)?;
+        let async_iteration_prototypes = self.create_async_iteration_prototypes(making)?;
         // %Array.prototype.values% (23.1.3.38), %Array.prototype.entries% (23.1.3.5),
         // %Array.prototype.keys% (23.1.3.19) and %Array.prototype.forEach% (23.1.3.15): the
         // methods `create_array_constructor` has defined on %Array.prototype%, read before any
@@ -562,6 +586,7 @@ impl<H: Host> Agent<H> {
             promise_prototype,
             async_function_prototype,
             async_function,
+            async_iteration_prototypes,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {

@@ -503,13 +503,17 @@ pub enum ForInTarget {
 }
 
 /// The iterationKind of ForIn/OfHeadEvaluation (`#sec-runtime-semantics-forinofheadevaluation`)
-/// of a [`Stmt::ForIn`]: the keys of a for-in, the values of a for-of.
+/// of a [`Stmt::ForIn`]: the keys of a for-in, the values of a for-of, the awaited values of a
+/// for-await-of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IterationKind {
     /// `for (... in ...)`: EnumerateObjectProperties.
     Enumerate,
-    /// `for (... of ...)`: GetIterator.
+    /// `for (... of ...)`: GetIterator with kind sync.
     Iterate,
+    /// `for await (... of ...)`, where [Await] is set: GetIterator with kind async, and each
+    /// result of `next` awaited (async-iterate).
+    AsyncIterate,
 }
 
 /// A name a `let` or `const` declaration binds (the BoundNames of a `LexicalDeclaration`), or a

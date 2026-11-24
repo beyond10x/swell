@@ -113,6 +113,9 @@ pub enum WellKnownSymbol {
     /// `%Symbol.iterator%`: the key under which an interface with an indexed property getter
     /// gets `%Array.prototype.values%` (`webidl:define-the-iteration-methods`).
     Iterator,
+    /// `%Symbol.asyncIterator%`: the key of an interface's asynchronous iteration methods
+    /// (`webidl:define-the-asynchronous-iteration-methods`).
+    AsyncIterator,
 }
 
 impl WellKnownSymbol {
@@ -122,6 +125,7 @@ impl WellKnownSymbol {
             WellKnownSymbol::ToStringTag => symbols.to_string_tag,
             WellKnownSymbol::Unscopables => symbols.unscopables,
             WellKnownSymbol::Iterator => symbols.iterator,
+            WellKnownSymbol::AsyncIterator => symbols.async_iterator,
         }
     }
 }
