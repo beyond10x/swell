@@ -10,7 +10,7 @@ and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the byteco
 interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
 6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
 requirement is pending for it, and 18 of the 60 scenarios of the ESS model pass on the engine
-(the other 42 need a later slice and say so). 145 of 214 host requirements have a test.
+(the other 42 need a later slice and say so). 147 of 214 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
 gate holds the test262 counts: 20,229 of the 44,812 run cases pass (2026-11-23, release `0.8.0`; 18,155 in `0.7.0`, 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
@@ -73,9 +73,10 @@ slices 8, 9, 12 and 13 with evidence and 21 cases taken in from slices 18 and 19
 cases of slice 10 pass in all 7,258 runs (`test262-slice 10 3759 7258 0 0 3759 3759 0 0`), and
 no host requirement is pending for it. Slice 10 is in no release yet.
 Slice 4, `numbers-and-dates` (`epic:slice-04-numbers-and-dates`), is accepted in seventeen
-stories (`docs/plan/waves.md`, "Slice 4, `numbers-and-dates`"); none is built yet, 261 of its
-1,612 cases pass (`test262-slice 04 1612 3184 0 0 1612 261 1351 0`), and 14 host requirements
-are pending for it.
+stories (`docs/plan/waves.md`, "Slice 4, `numbers-and-dates`"); two are built (the calendar
+arithmetic of `swell-num`, and the `Date` object with the host's clock), 564 of its 1,612 cases
+pass (`test262-slice 04 1612 3184 0 0 1612 564 1048 0`), and 12 host requirements are pending
+for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases

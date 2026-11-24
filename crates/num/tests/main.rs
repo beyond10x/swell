@@ -3,4 +3,5 @@ mod calendar;
 mod date;
 mod literal;
 mod siphash;
+mod time_clip;
 mod to_string;
