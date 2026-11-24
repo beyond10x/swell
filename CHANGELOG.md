@@ -12,6 +12,10 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- Slice 7, generators, is delivered: all 1,472 of its test262 cases pass in all 2,801 runs.
+  At its close 40 cases that need `class` or `super` move to slice 8, each with its
+  evidence, and 21 cases that failed only on generators count in slice 7 instead of slices
+  18 and 19.
 - `%AsyncFunction%`, the constructor of `async` functions from source text, a story of the
   tenth slice. It is reached through the `constructor` of the prototype of an `async`
   function and is no property of the global object. Called or constructed, it takes the

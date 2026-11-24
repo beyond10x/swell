@@ -56,12 +56,18 @@ with its class sets and properties of strings, and the close, with 18 cases move
 18: all 2,724 cases of slice 5 pass in all 5,441 runs
 (`test262-slice 05 2724 5441 0 0 2724 2724 0 0`), and no host requirement is pending for
 it. Slice 7, `generators`
-(`epic:slice-07-generators`), is in work beside it: generator syntax, generators on suspended
-frames, `%GeneratorFunction%` and `yield*` are in release `0.8.0`, and 1,168 of its 1,491 cases
-pass (`test262-slice 07 1491 2841 0 0 1491 1168 323 0`); generator methods of object literals
-and the close are open. Slice 10, `promises-and-async` (`epic:slice-10-promises-and-async`), is
-accepted in seventeen stories (`docs/plan/waves.md`, "Slice 10, `promises-and-async`"), and its
-first order is being built; 31 host requirements are pending for it.
+(`epic:slice-07-generators`), is delivered too (2026-11-24): generator syntax, generators on
+suspended frames, `%GeneratorFunction%` and `yield*` are in release `0.8.0`; after it generator
+methods of object literals, and the close, with 40 cases that need `class` or `super` moved to
+slice 8 with evidence and 21 cases taken in from slices 18 and 19: all 1,472 cases of slice 7
+pass in all 2,801 runs (`test262-slice 07 1472 2801 0 0 1472 1472 0 0`), and no host
+requirement is pending for it. Slice 10, `promises-and-async`
+(`epic:slice-10-promises-and-async`), is accepted in seventeen stories (`docs/plan/waves.md`,
+"Slice 10, `promises-and-async`") and in work: seven of them are merged (the microtask queue,
+the syntax of `async` functions, `Promise` with `then`, `async` functions, the rejection
+tracker, `async` methods of object literals and `%AsyncFunction%`), 638 of its 3,879 cases
+pass (`test262-slice 10 3879 7499 0 0 3879 638 3241 0`), and 8 host requirements are pending
+for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
@@ -242,7 +248,10 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   (`slot --timeout 30m task test262-part TEST262_PART=<k>/<n>` for each k), and counted from
   their files (`slot task test262-expected TEST262_FROM_PARTS=.out/test262/parts`);
   the lane `slow` (`task slow`, `.github/workflows/slow.yml`) makes the full run on the forge
-  and compares bytes. A release waits for a green lane `slow` on its commit.
+  and compares bytes. A release waits for a green lane `slow` on its commit. The lane starts
+  on a push to `main` and on a pull request, each only when it changes a path of the
+  workflow's list, and by hand (`workflow_dispatch`) for a release tip whose push changed
+  none (`docs/releasing.md`, step 5).
 - A heavy test has a gate count and a full count: `SWELL_FULL_COUNTS=1` gives the full one,
   and the lane `slow` (task `slow-tests`) runs every `crates/*/tests/*.rs` that reads the
   variable at its full count in both collection modes.
@@ -528,8 +537,9 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   tagged on a commit of `main` whose `check` and lane `slow` are green on the forge, the
   code of the release commit `a350de3` (2026-11-23, the day its counts were measured) with
   the gate change of `story:gate-test-steps-fit-four-cores` after it (on `d9d1b95` the
-  forge's test steps took 127.9 s of their 120) and the heading of its changelog section
-  set to the day of the tag: the
+  forge's test steps took 127.9 s of their 120), the heading of its changelog section
+  set to the day of the tag and the manual trigger of the lane `slow`
+  (`story:slow-lane-starts-by-hand`), whose push starts the lane on the tagged commit: the
   third wave of slice 5 with the first four stories of slice 7, on the decision "cut 0.8.0
   when the two running slice 5 units are merged and a unit has brought the full test262 run
   under 15 min of a pool job" of the session that decides for the operator
