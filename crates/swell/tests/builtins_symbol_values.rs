@@ -15,7 +15,7 @@
 
 use crate::support;
 
-use support::host::{TestHost, agent, get, get_object, global, object, realm, text};
+use support::host::{TestHost, agent, get, get_object, global, object, text};
 use support::script::{Outcome, eval, run_both};
 use swell::{Abrupt, AgentState, Cx, ObjectRef, Outcome as HostOutcome, Value};
 
@@ -491,7 +491,11 @@ fn places_per_function() -> usize {
 fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error() {
     let places = places_per_function();
     let mut agent = agent().unwrap();
-    let realm = realm(&mut agent);
+    // The bare realm, never padded (an exception of `support::host::create_realm`): the walk
+    // asserts over every function of the realm and prints their count.
+    let HostOutcome::Normal(realm) = agent.create_realm(None, None).unwrap() else {
+        panic!("create_realm did not answer Normal");
+    };
     let global_root = global(&mut agent, &realm);
     let further: Vec<(swell::Root, String)> = FURTHER_ROOTS
         .iter()

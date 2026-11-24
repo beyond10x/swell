@@ -108,7 +108,8 @@ impl Host for EvalHost {
 /// counts its calls in `marks`.
 fn eval_agent() -> (Agent<EvalHost>, Realm) {
     let mut agent = Agent::new(EvalHost::default(), limits(), support::host::seeds()).unwrap();
-    let HostOutcome::Normal(realm) = agent.create_realm(None, None).unwrap() else {
+    let HostOutcome::Normal(realm) = support::host::create_realm(&mut agent, None, None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     let global = agent.global_object(&realm).unwrap();

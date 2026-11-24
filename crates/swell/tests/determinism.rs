@@ -601,7 +601,7 @@ fn corpus_agent(setup: CorpusSetup) -> (Agent<Transcript>, Realm) {
 /// defined and the global `pin` declared (`null`).
 fn corpus_agent_with(setup: CorpusSetup) -> (Agent<Transcript>, Realm) {
     let mut agent = Agent::new(Transcript::default(), setup.limits, seeds()).unwrap();
-    let realm = match agent.create_realm(None, None).unwrap() {
+    let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
     };

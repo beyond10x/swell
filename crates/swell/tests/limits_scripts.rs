@@ -39,6 +39,18 @@ fn realm_bytes() -> u64 {
 /// grows with the square of the heap (this test took 29.1 s in that mode with it, 0.27 s without
 /// it, measured), and
 /// a budget is reached the same way at any size.
+///
+/// The script after the fill: the fill keeps every object it makes, so it leaves whatever its
+/// last refused growth left, and the next entry runs as HOST-188 to HOST-190 state. So the host
+/// makes the room HOST-190 states for `1`: it holds [`ROOM_FOR_ONE`] charged during the fill
+/// and gives it back after the termination (M is the realm's bytes, the room and that charge),
+/// and the answer of `1` is read with no allocation (`support::host::number_answer`): a
+/// description makes the String "1", whose slot can need a growth of the arena of Strings that
+/// the room does not cover. Before, M was the realm's bytes and the room and `1` was described:
+/// on 2026-11-24, at a realm of 232 functions (the base of
+/// `story:tests-hold-at-any-size-of-the-realm`), that description was refused
+/// (`Terminated(MemoryBudget)` from `ToString`) in both modes, and at that realm padded by 2 to
+/// 200 functions it was not. The test prints the room after the fill and after the credit.
 #[test]
 fn host_10_endless_allocation_ends_in_memory_budget() {
     let base = realm_bytes();
@@ -49,11 +61,15 @@ fn host_10_endless_allocation_ends_in_memory_budget() {
     };
     for &room in rooms {
         let mut limits = limits();
-        limits.memory_bytes = base + room;
+        limits.memory_bytes = base + room + ROOM_FOR_ONE;
         limits.steps_per_entry = u64::MAX;
         let budget = limits.memory_bytes;
         let mut agent = agent_with(limits).unwrap();
         let realm = realm(&mut agent);
+        let held = agent
+            .with_cx(&realm, |cx| cx.charge_host_bytes(ROOM_FOR_ONE))
+            .unwrap()
+            .unwrap();
         assert_eq!(
             eval_text(&mut agent, &realm, "var a = []; while (true) a.push({});"),
             Outcome::Terminated(Termination::MemoryBudget),
@@ -62,13 +78,28 @@ fn host_10_endless_allocation_ends_in_memory_budget() {
         let bytes = agent.heap_bytes().unwrap();
         assert!(bytes <= budget, "{bytes} > {budget}");
         assert_eq!(agent.state(), AgentState::Alive);
+        agent.credit_host_bytes(held).unwrap();
+        let given = budget - agent.heap_bytes().unwrap();
+        println!(
+            "room {room}: {} bytes left after the fill, {given} after the host's credit",
+            budget - bytes
+        );
+        assert!(
+            given >= ROOM_FOR_ONE,
+            "room {room}: {given} after the credit"
+        );
         assert_eq!(
-            eval_text(&mut agent, &realm, "1;"),
-            Outcome::Normal("1".to_string())
+            support::host::number_answer(&mut agent, &realm, "1;"),
+            Ok(1.0),
+            "room {room}"
         );
         assert!(agent.heap_bytes().unwrap() <= budget);
     }
 }
+
+/// The room HOST-190 states for the script `1` after a termination by the memory budget, 3 KiB,
+/// as `tests/termination.rs` holds it.
+const ROOM_FOR_ONE: u64 = 3 * 1024;
 
 /// HOST-16: with `reentry_depth` 0, `[1].map(function (x) { return x; })` answers `Throw` of a
 /// `RangeError` of its realm: no callback runs from a builtin. With 1 the same script answers
@@ -231,7 +262,9 @@ fn host_49_setup_closure_and_clause_19_globals() {
                     .unwrap()?;
                 Ok(GlobalObjects { global, this: None })
             };
-        let HostOutcome::Normal(realm) = agent.create_realm(Some(&mut setup), None).unwrap() else {
+        let HostOutcome::Normal(realm) =
+            support::host::create_realm(&mut agent, Some(&mut setup), None).unwrap()
+        else {
             panic!("create_realm did not answer Normal");
         };
         assert_eq!(calls, 1, "the setup closure ran once in round {round}");
@@ -309,7 +342,9 @@ fn host_53_parse_defines_no_global_binding() {
                 .unwrap()?;
             Ok(GlobalObjects { global, this: None })
         };
-    let HostOutcome::Normal(realm) = agent.create_realm(Some(&mut setup), None).unwrap() else {
+    let HostOutcome::Normal(realm) =
+        support::host::create_realm(&mut agent, Some(&mut setup), None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     define_function(&mut agent, &realm, "counting", 0, counting, false);

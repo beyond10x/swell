@@ -77,6 +77,19 @@ fn host_70_budgets() -> (u64, u64) {
 /// Arrays long before its 10,000 steps (a quarter of each in the collect gate,
 /// [`host_70_budgets`]); they are held by its function's frame only, so the collection after
 /// the termination frees them for the next script.
+///
+/// After the memory budget the next entry runs as HOST-188 to HOST-190 state, so the host makes
+/// the room HOST-190 states: it holds [`ROOM_FOR_ONE`] charged during the memory script and
+/// gives it back after the termination (the budget is the realm's bytes, the room and that
+/// charge), and the room for `1` is at least that whatever the script's last refused growth
+/// left. Each answer of `1` is read with no allocation (`support::host::number_answer`): a
+/// description of it makes the String "1", whose slot can need a growth of the arena of
+/// Strings that the room does not cover. Before, the budget was the realm's bytes and the room,
+/// and `1` was described: on 2026-11-24 with the collector at every safe point, at a realm of
+/// 232 functions (the base of `story:tests-hold-at-any-size-of-the-realm`), a description of
+/// `1` was refused (`Terminated(MemoryBudget)` from `ToString`), and at that realm padded by 2
+/// to 200 functions none was. The test prints the room after the termination and after the
+/// host's credit.
 #[test]
 fn host_70_agent_stays_alive_after_each_budget() {
     let realm_bytes = {
@@ -87,18 +100,25 @@ fn host_70_agent_stays_alive_after_each_budget() {
     let (steps, room) = host_70_budgets();
     let mut limits = limits();
     limits.steps_per_entry = steps;
-    limits.memory_bytes = realm_bytes + room;
+    limits.memory_bytes = realm_bytes + room + ROOM_FOR_ONE;
+    let budget = limits.memory_bytes;
     let mut agent = agent_with(limits).unwrap();
     let realm = realm(&mut agent);
-    let one = Outcome::Normal("1".to_string());
+    let one = |agent: &mut Agent<TestHost>, realm: &Realm| {
+        support::host::number_answer(agent, realm, "1;")
+    };
 
     assert_eq!(
         eval_text(&mut agent, &realm, "while (true) {}"),
         Outcome::Terminated(Termination::StepBudget)
     );
     assert_eq!(agent.state(), AgentState::Alive);
-    assert_eq!(eval_text(&mut agent, &realm, "1;"), one);
+    assert_eq!(one(&mut agent, &realm), Ok(1.0));
 
+    let held = agent
+        .with_cx(&realm, |cx| cx.charge_host_bytes(ROOM_FOR_ONE))
+        .unwrap()
+        .unwrap();
     assert_eq!(
         eval_text(
             &mut agent,
@@ -108,7 +128,12 @@ fn host_70_agent_stays_alive_after_each_budget() {
         Outcome::Terminated(Termination::MemoryBudget)
     );
     assert_eq!(agent.state(), AgentState::Alive);
-    assert_eq!(eval_text(&mut agent, &realm, "1;"), one);
+    let ended = budget - agent.heap_bytes().unwrap();
+    agent.credit_host_bytes(held).unwrap();
+    let given = budget - agent.heap_bytes().unwrap();
+    println!("room after the memory budget: {ended} bytes, {given} after the host's credit");
+    assert!(given >= ROOM_FOR_ONE, "room {given}");
+    assert_eq!(one(&mut agent, &realm), Ok(1.0));
 
     let script = support::script::parse(&mut agent, &realm, "while (true) {}");
     agent.interrupt_handle().interrupt();
@@ -118,7 +143,7 @@ fn host_70_agent_stays_alive_after_each_budget() {
         Outcome::Terminated(Termination::Interrupted)
     );
     assert_eq!(agent.state(), AgentState::Alive);
-    assert_eq!(eval_text(&mut agent, &realm, "1;"), one);
+    assert_eq!(one(&mut agent, &realm), Ok(1.0));
 }
 
 /// The room the host of [`an_agent_that_ended_in_memory_budget_runs_again_after_a_collection`]
@@ -357,12 +382,21 @@ fn host_188_calls_that_take_no_memory_answer_with_a_room_of_0() {
     drop(agent);
 }
 
-/// The script `1` in `realm`, parsed and evaluated: what it answered and the steps it spent,
-/// read before the answer is described (a description that converts a value begins an entry).
-fn one(agent: &mut swell::Agent<TestHost>, realm: &swell::Realm) -> (Outcome, u64) {
+/// The script `1` in `realm`, parsed and evaluated: the Number it answered and the steps it
+/// spent, read before the answer is read (a read begins an entry).
+///
+/// The answer is read with no allocation (`support::host::number_of`), so that the room
+/// HOST-190 states, [`ROOM_FOR_ONE`], is the script's alone. A description of the Number
+/// (`support::script::describe`) makes the String "1", whose slot needs a growth of the arena of
+/// Strings when the realm left that arena full, and where that falls moves with every String a
+/// realm holds: on 2026-11-24, at a realm of 232 functions (the base of
+/// `story:tests-hold-at-any-size-of-the-realm`), a description of the `1` that had answered was
+/// refused (`Terminated(MemoryBudget)` from `ToString`) in both modes, and at that realm padded
+/// by 2 to 200 functions none was.
+fn one(agent: &mut swell::Agent<TestHost>, realm: &swell::Realm) -> (Result<f64, String>, u64) {
     let outcome = support::script::eval(agent, realm, "1;");
     let steps = agent.last_entry_steps().unwrap();
-    (support::script::describe(agent, realm, outcome), steps)
+    (support::host::number_of(agent, realm, outcome), steps)
 }
 
 /// HOST-189 and HOST-190 after a loop that keeps every object it makes ended in
@@ -405,7 +439,7 @@ fn host_189_190_one_runs_after_a_memory_budget_termination_once_the_host_made_ro
     assert!(room >= HELD_DURING_FILL, "room {room}");
     let _rest = leave_room(&mut agent, &realm, budget, ROOM_FOR_ONE);
     let (answer, steps) = one(&mut agent, &realm);
-    assert_eq!(answer, Outcome::Normal("1".to_string()));
+    assert_eq!(answer, Ok(1.0));
     assert!(steps > 0);
 
     let fresh_budget = limits().memory_bytes;

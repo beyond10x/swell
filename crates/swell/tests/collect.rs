@@ -286,7 +286,7 @@ fn host_170_a_value_read_from_a_dropped_root_lives_until_its_scope_ends() {
     let mut limits = support::host::limits();
     limits.steps_per_entry = 1 << 26;
     let mut agent = Agent::new(Keeper::default(), limits, support::host::seeds()).unwrap();
-    let Ok(Outcome::Normal(realm)) = agent.create_realm(None, None) else {
+    let Ok(Outcome::Normal(realm)) = support::host::create_realm(&mut agent, None, None) else {
         panic!("create_realm did not answer Normal");
     };
     let n = (2 * agent.heap_bytes().unwrap()).max(1 << 20);

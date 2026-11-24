@@ -231,7 +231,9 @@ fn host_50_setup_this_is_script_this() {
                 this: Some(this),
             })
         };
-    let HostOutcome::Normal(realm) = agent.create_realm(Some(&mut setup), None).unwrap() else {
+    let HostOutcome::Normal(realm) =
+        support::host::create_realm(&mut agent, Some(&mut setup), None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     let kept = kept.unwrap();

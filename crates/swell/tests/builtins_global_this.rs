@@ -64,7 +64,9 @@ fn host_made_realm(agent: &mut Agent<TestHost>, with_this: bool) -> (Realm, Opti
         };
         Ok(GlobalObjects { global, this })
     };
-    let HostOutcome::Normal(realm) = agent.create_realm(Some(&mut setup), None).unwrap() else {
+    let HostOutcome::Normal(realm) =
+        support::host::create_realm(agent, Some(&mut setup), None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     (realm, kept)

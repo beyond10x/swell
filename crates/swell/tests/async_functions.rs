@@ -187,7 +187,7 @@ fn interrupt_now(cx: &mut Cx<'_, AsyncHost>, _call: HostCall<'_>) -> Completion<
 fn new_agent(limits: Limits) -> (Agent<AsyncHost>, Realm) {
     let mut agent = Agent::new(AsyncHost::default(), limits, seeds()).unwrap();
     agent.host_mut().interrupt = Some(agent.interrupt_handle());
-    let realm = match agent.create_realm(None, None).unwrap() {
+    let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
     };

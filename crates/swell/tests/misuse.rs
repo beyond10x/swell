@@ -208,7 +208,7 @@ fn agent() -> Agent<Recorder> {
 
 /// A realm with no setup closure.
 fn realm(agent: &mut Agent<Recorder>) -> Realm {
-    match agent.create_realm(None, None).unwrap() {
+    match support::host::create_realm(agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
     }
@@ -299,7 +299,7 @@ fn good(agent: &mut Agent<Recorder>, realm: &Realm) -> Good {
 /// Stale handles of `agent`: an object whose root was released, a String, a realm and a script
 /// whose scopes ended, each freed by a collection, which each is checked to be.
 fn stale(agent: &mut Agent<Recorder>, realm: &Realm) -> Bad {
-    let doomed = match agent.create_realm(None, None).unwrap() {
+    let doomed = match support::host::create_realm(agent, None, None).unwrap() {
         Outcome::Normal(doomed) => doomed,
         other => panic!("{other:?}"),
     };
@@ -612,7 +612,7 @@ fn misuse_changes_nothing(
             Ok(GlobalObjects { global, this: None })
         };
     assert!(matches!(
-        agent.create_realm(Some(&mut setup), None),
+        support::host::create_realm(agent, Some(&mut setup), None),
         Ok(Outcome::Normal(_))
     ));
     assert_eq!(answers.len(), 10);

@@ -373,7 +373,11 @@ fn cx_methods_check_their_handles_before_the_sticky_termination() {
     let mut limits = limits();
     limits.steps_per_entry = 0;
     let mut agent = agent_with(limits).unwrap();
-    let realm = realm(&mut agent);
+    // The bare realm (an exception of `support::host::create_realm`): with no step the
+    // padding's entry cannot run.
+    let Outcome::Normal(realm) = agent.create_realm(None, None).unwrap() else {
+        panic!("create_realm did not answer Normal");
+    };
     let stale = agent
         .with_cx(&realm, |cx| {
             cx.to_object(Value::Boolean(true)).unwrap().unwrap()
@@ -480,7 +484,11 @@ fn a_call_spends_the_step_budget_of_the_outermost_entry() {
         let mut limits = limits();
         limits.steps_per_entry = steps;
         let mut agent = agent_with(limits).unwrap();
-        let realm = realm(&mut agent);
+        // The bare realm (an exception of `support::host::create_realm`): with no step the
+        // padding's entry cannot run.
+        let Outcome::Normal(realm) = agent.create_realm(None, None).unwrap() else {
+            panic!("create_realm did not answer Normal");
+        };
         let outcome = agent
             .with_cx(&realm, |cx| {
                 let realm = cx.realm_ref(&realm).unwrap();

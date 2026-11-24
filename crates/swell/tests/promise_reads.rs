@@ -106,7 +106,7 @@ impl Host for ReadsHost {
 /// An agent of the test host with a realm.
 fn agent() -> (Agent<ReadsHost>, Realm) {
     let mut agent = Agent::new(ReadsHost::default(), limits(), seeds()).unwrap();
-    let realm = match agent.create_realm(None, None).unwrap() {
+    let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
     };

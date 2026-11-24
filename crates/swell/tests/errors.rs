@@ -515,7 +515,7 @@ fn host_179_an_error_is_read_without_running_code() {
             .unwrap()?;
         Ok(GlobalObjects { global, this: None })
     };
-    let second = agent.create_realm(Some(&mut setup), None).unwrap();
+    let second = support::host::create_realm(&mut agent, Some(&mut setup), None).unwrap();
     assert!(matches!(second, HostOutcome::Normal(_)), "{second:?}");
     assert_eq!(seen, vec![Some(type_error), Some(host_type_error)]);
 

@@ -33,7 +33,7 @@ fn in_hook<R>(f: impl FnOnce(&mut HookCx<'_, TestHost>, RealmRef, ObjectRef) -> 
         }
         Ok(GlobalObjects { global, this: None })
     };
-    let created = agent.create_realm(Some(&mut setup), None).unwrap();
+    let created = support::host::create_realm(&mut agent, Some(&mut setup), None).unwrap();
     assert!(matches!(created, Outcome::Normal(_)), "{created:?}");
     assert_eq!(agent.state(), AgentState::Alive);
     assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);

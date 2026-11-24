@@ -128,7 +128,7 @@ fn interrupt_now(cx: &mut Cx<'_, FromAsyncHost>, _call: HostCall<'_>) -> Complet
 
 /// A realm of `agent` whose global `interruptNow` is the host function of this file.
 fn new_realm(agent: &mut Agent<FromAsyncHost>) -> Realm {
-    let realm = match agent.create_realm(None, None).unwrap() {
+    let realm = match support::host::create_realm(agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
     };

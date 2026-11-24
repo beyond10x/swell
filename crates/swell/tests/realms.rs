@@ -214,9 +214,9 @@ fn the_setup_closure_gives_the_global_object() {
             Ok(GlobalObjects { global, this: None })
         };
     let settings: Rc<dyn HostData> = Rc::new(Settings);
-    let Outcome::Normal(realm) = agent
-        .create_realm(Some(&mut setup), Some(Rc::clone(&settings)))
-        .unwrap()
+    let Outcome::Normal(realm) =
+        support::host::create_realm(&mut agent, Some(&mut setup), Some(Rc::clone(&settings)))
+            .unwrap()
     else {
         panic!("create_realm did not answer Normal");
     };
