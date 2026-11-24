@@ -9,7 +9,7 @@ use crate::support;
 
 use support::host::{TestHost, agent_with, limits, realm};
 use support::script::{Outcome, define_function, eval_text};
-use swell::{Abrupt, AgentState, Completion, Cx, HostCall, Termination, Value};
+use swell::{Abrupt, Agent, AgentState, Completion, Cx, HostCall, Realm, Termination, Value};
 
 /// HOST-69 (`html:killing-scripts`): `var f; try { while (true) {} } finally { f = 1; }` ends
 /// in `Terminated(StepBudget)`, and the script `f` then answers `Normal(undefined)`: the
@@ -137,32 +137,80 @@ fn host_70_agent_stays_alive_after_each_budget() {
 /// passed by 155 bytes in the collect gate.
 const AFTER_FILL_ROOM: u64 = 16 * 1024;
 
-/// An agent that ended in `Terminated(MemoryBudget)` runs again after a collection: with
-/// `memory_bytes` the realm's bytes plus 64 KiB, as HOST-70 sizes it, plus [`AFTER_FILL_ROOM`],
-/// which the host holds charged (`charge_host_bytes`) before the fill, the fill below ends by
-/// memory with 64 KiB above the realm (each iteration adds an element to `a`, whose capacity is
-/// charged as it doubles, so the room lasts far fewer iterations than the million steps);
-/// `collect()` answers `Normal`, the host gives its charge back (`credit_host_bytes`), `n` reads
-/// the objects the fill made, and a second script that makes ten objects and an Array answers
-/// `Normal(10)`: its records take the slots the fill's records left free, at what they own. The
-/// room for it is bounded from below whatever the fill's doublings did: `heap_bytes()` is at
-/// most `memory_bytes` after the termination (HOST-171), the collection lowers it, and the
-/// credit lowers it by [`AFTER_FILL_ROOM`], so at least that much is free. The test prints `n`,
-/// the room `memory_bytes - heap_bytes()` and `live_bytes()` after the collection and the
-/// credit. In the gate with the collector at every safe point, where each safe point walks the
-/// whole heap, the fill has the realm's bytes plus 16 KiB: it still ends in
-/// `Terminated(MemoryBudget)`, after fewer objects, and the second script runs as at 64 KiB;
-/// the lane `slow` (`SWELL_FULL_COUNTS=1`) gives 64 KiB there too.
+/// Where the arena of objects of `agent` grows next, as the fill below meets it: the script
+/// `a.push({});`, run once per entry on a global Array `a`, keeps one more object and one more
+/// element each time, as an iteration of the fill does, until one run raises `heap_bytes()` by
+/// more than 64 bytes for each object kept and 16 more. An object `{}` and its element are
+/// charged a few hundred bytes, and the elements of `a` grow by doubling, 16 bytes an element,
+/// so to at most 32 bytes for each object kept; the arena of objects grows by doubling too, 212
+/// bytes a slot, to at least as many slots as objects are kept, and at least 16. Answers the
+/// reading before that run and the rise; the agent keeps the objects, so it is a probe and not
+/// the agent under test.
+fn next_object_doubling(agent: &mut Agent<TestHost>, realm: &Realm) -> (u64, u64) {
+    assert_eq!(
+        eval_text(agent, realm, "var a = [];"),
+        Outcome::Normal("undefined".to_string())
+    );
+    let script = support::script::parse(agent, realm, "a.push({});");
+    let mut before = agent.heap_bytes().unwrap();
+    for kept in 0..1_u64 << 16 {
+        let outcome = agent.evaluate_script(&script).unwrap();
+        assert!(matches!(outcome, swell::Outcome::Normal(_)), "{outcome:?}");
+        let after = agent.heap_bytes().unwrap();
+        let rise = after.saturating_sub(before);
+        if rise > 64 * (kept + 16) {
+            return (before, rise);
+        }
+        before = after;
+    }
+    panic!("no growth of the arena of objects in 65,536 objects");
+}
+
+/// An agent that ended in `Terminated(MemoryBudget)` runs again after a collection.
+///
+/// How the budget is found, from readings the test makes itself: a probe agent with the test
+/// limits makes its realm and pushes one object per entry on an Array, as the fill does
+/// ([`next_object_doubling`]), until the arena of objects grows; the reading before that growth
+/// is `doubles_at` and the growth is
+/// `doubling`. The agent under test has `memory_bytes` `doubles_at + doubling` plus `room` (64
+/// KiB; 16 KiB in the gate with the collector at every safe point, where each safe point walks
+/// the whole heap; the lane `slow`, `SWELL_FULL_COUNTS=1`, gives 64 KiB there too) plus
+/// [`AFTER_FILL_ROOM`], which its host holds charged (`charge_host_bytes`) during the fill. So
+/// the fill below, which keeps every object it makes, passes that growth of the arena whatever
+/// the realm holds, and ends by memory about `room` further on (each iteration adds an element
+/// to `a`, whose capacity is charged as it doubles, so the room lasts far fewer iterations than
+/// the million steps). `collect()` answers `Normal`, the host gives its charge back
+/// (`credit_host_bytes`), `n` reads the objects the fill made, and a second script that makes
+/// ten objects and an Array answers `Normal(10)`: its records take the slots the fill's records
+/// left free, which are more than it needs since the fill made at least `room` worth of objects
+/// past the growth, and its parse and run take the room the credit gave back, which is at least
+/// [`AFTER_FILL_ROOM`] whatever the fill's last doublings did: `heap_bytes()` is at most
+/// `memory_bytes` after the termination (HOST-171), the collection lowers it, and the credit
+/// lowers it by that much.
+///
+/// The budget is not taken from the realm's own reading plus a constant: the fill ends where
+/// the arena of objects runs out of slots, and how many it has free above a realm moves with
+/// every object a realm gains. Measured on 2026-11-24 in the collect mode: the realm's charge
+/// was 214,160 bytes with 256 slots of objects; the realm plus 32 KiB let the fill make 15
+/// objects before the growth to 512 slots (54,272 bytes) was refused, and the second script
+/// found free slots. With the 11 functions of `story:math-constants-and-exact-functions` the
+/// realm's charge was 219,907, the fill made 4 objects before that refusal, and the second
+/// script, which needed the same growth, was refused it with 28,451 bytes of room. The test
+/// prints the probe's readings, `n`, and the room and `live_bytes()` after the collection; that
+/// day in the collect mode, at the realm of that story, the arena grew by 54,272 bytes at
+/// 222,702, the budget was 309,742, the fill made 260 objects and the room after the credit was
+/// 31,246 bytes; with its `Math` table installed a second time the realm had passed 256 slots,
+/// the arena grew from 512 by 108,544 bytes at 286,682, and the fill made 760.
 #[test]
 fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
-    let realm_bytes = {
-        let mut agent = support::host::agent().unwrap();
-        let _realm = realm(&mut agent);
-        agent.heap_bytes().unwrap()
+    let (doubles_at, doubling) = {
+        let mut probe = support::host::agent().unwrap();
+        let realm = realm(&mut probe);
+        next_object_doubling(&mut probe, &realm)
     };
-    let kib = if in_the_collect_gate() { 16 } else { 64 };
+    let room = if in_the_collect_gate() { 16 } else { 64 } * 1024;
     let mut limits = limits();
-    limits.memory_bytes = realm_bytes + kib * 1024 + AFTER_FILL_ROOM;
+    limits.memory_bytes = doubles_at + doubling + room + AFTER_FILL_ROOM;
     let budget = limits.memory_bytes;
     let mut agent = agent_with(limits).unwrap();
     let realm = realm(&mut agent);
@@ -179,17 +227,23 @@ fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
         ),
         Outcome::Terminated(Termination::MemoryBudget)
     );
+    let ended_at = agent.heap_bytes().unwrap();
+    assert!(
+        ended_at >= doubles_at + doubling,
+        "the fill ended at {ended_at}, before the arena's growth of {doubling} at {doubles_at}"
+    );
     assert!(matches!(agent.collect(), Ok(swell::Outcome::Normal(_))));
     agent.credit_host_bytes(held).unwrap();
-    let room = budget - agent.heap_bytes().unwrap();
-    assert!(room >= AFTER_FILL_ROOM, "room {room}");
+    let after = budget - agent.heap_bytes().unwrap();
+    assert!(after >= AFTER_FILL_ROOM, "room {after}");
     let live = agent.live_bytes().unwrap();
     let Outcome::Normal(made) = eval_text(&mut agent, &realm, "n;") else {
         panic!("n did not answer");
     };
     println!(
-        "objects the fill made: {made}; after the collection and the credit: room {room} bytes, \
-         live_bytes {live}"
+        "the arena of objects grows by {doubling} bytes at {doubles_at}; budget {budget}; the \
+         fill ended at {ended_at} and made {made} objects; after the collection and the credit: \
+         room {after} bytes, live_bytes {live}"
     );
     assert_eq!(
         eval_text(
