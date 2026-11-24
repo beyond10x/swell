@@ -32,7 +32,9 @@ use crate::heap::collect::Mark;
 use crate::host::agent::Agent;
 use crate::host::host_object::{Brand, HostData, HostObject, Tracer};
 use crate::host::outcome::{Abrupt, Completion};
-use crate::host::{Cx, Host, HostDefined, PromiseCapability, Termination};
+use crate::host::{
+    Cx, HookCx, Host, HostDefined, PromiseCapability, RejectionOperation, Termination,
+};
 use crate::object::ObjectKind;
 use crate::value::{ObjectRef, Value};
 
@@ -48,8 +50,9 @@ pub(crate) enum PromiseState {
 pub(crate) struct Promise {
     /// [[PromiseState]] and [[PromiseResult]].
     pub(crate) state: PromiseState,
-    /// [[PromiseIsHandled]]: set by PerformPromiseThen; read by the rejection tracker of a later
-    /// story of slice 10.
+    /// [[PromiseIsHandled]]: set by PerformPromiseThen and by the host's
+    /// `mark_promise_as_handled`; read by [`Agent::track_unhandled_rejection`] and the host's
+    /// `promise_is_handled`.
     pub(crate) is_handled: bool,
     /// [[PromiseFulfillReactions]] and [[PromiseRejectReactions]], while the promise holds a
     /// reaction.
@@ -423,6 +426,25 @@ impl<H: Host> Agent<H> {
             }
             Err(Abrupt::Terminated(termination)) => Err(self.terminate(termination)),
         }
+    }
+
+    /// HostPromiseRejectionTracker(promise, operation) (`#sec-host-promise-rejection-tracker`)
+    /// when promise.[[PromiseIsHandled]] is false, as RejectPromise (`#sec-rejectpromise`, step
+    /// 7) and PerformPromiseThen (`#sec-performpromisethen`, step 11.c) perform it: the host's
+    /// hook with a `HookCx`, which runs no code. It spends no step. A termination of the run
+    /// while the hook ran is the answer.
+    pub(crate) fn track_unhandled_rejection(
+        &mut self,
+        promise: ObjectRef,
+        operation: RejectionOperation,
+    ) -> Completion<()> {
+        if self.promise_slots(promise)?.is_handled {
+            return Ok(());
+        }
+        let start = self.scope.len();
+        H::host_promise_rejection_tracker(&mut HookCx { agent: self }, promise, operation);
+        self.scope.truncate(start);
+        self.running()
     }
 }
 
