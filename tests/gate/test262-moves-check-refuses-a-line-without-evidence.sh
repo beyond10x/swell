@@ -8,7 +8,8 @@
 # The planted evidence is the first token of later-parts.tsv with the line's target slice that
 # `grep -F` finds nowhere in the case, taken from the first "part" line whose case includes no
 # harness file (so the case file is all the task may read for it). A third copy has one line
-# whose <to> is below its <from>, which the task must refuse for that order.
+# whose <from> is a slice delivered after its <to> by the order line of the design's
+# swell-slices block, which the task must refuse for that order.
 # Run from the repository root: sh tests/gate/test262-moves-check-refuses-a-line-without-evidence.sh
 # The same output from task, cargo and ess on any machine: no colour, and no "::error" line
 # that go-task adds under GITHUB_ACTIONS (gate-selftest-is-colour-proof.sh checks this).
@@ -79,14 +80,29 @@ fi
 grep -qF ": $first: " "$dir/planted-to-2.out" ||
   fail "task test262-moves-check did not name $first ($dir/planted-to-2.out)"
 
-# A line whose <to> is below its <from> moves a case into a delivered slice from a later one.
-# The planted line is the first of the unchanged lines whose <to> is 3 or more: its <from> is
-# raised to <to> + 1, so its <to>, its kind, its evidence and the slice the block gives the case
-# stay as they are and the order of the two slices is the one thing wrong with it.
-below=$(awk -F'\t' '$3 + 0 >= 3 { print NR; exit }' "$dir/moves.tsv")
-[ -n "$below" ] || fail "no line of $dir/moves.tsv with a <to> of 3 or more"
+# A line whose <to> is not delivered after its <from> moves a case into a delivered slice from a
+# later one. The order is the line "order delivery <slice>,<slice>,..." of the swell-slices block
+# of the design, the line the task reads; the numbers of the slices are not their order. The
+# planted line is the first of the unchanged lines whose <to> has a slice from 1 to 19 after it
+# in that order: its <from> becomes the first such slice, so its <to>, its kind, its evidence and
+# the slice the block gives the case stay as they are and the order of the two slices is the one
+# thing wrong with it. An unchanged line's <from> comes before its <to>, so the copy differs.
+plant=$(awk -F'\t' -v design="$design" '
+  FILENAME == design {
+    sub(/\r$/, "")
+    if ($0 == "```swell-slices") { inb = 1; next }
+    if (inb && $0 == "```") { inb = 0; next }
+    if (inb && $0 ~ /^order delivery /) { k = split(substr($0, 16), o, ","); for (j = 1; j <= k; j++) at[o[j] + 0] = j }
+    next
+  }
+  ($3 + 0) in at {
+    for (j = at[$3 + 0] + 1; j <= k; j++) if (o[j] + 0 >= 1 && o[j] + 0 <= 19) { print FNR "\t" (o[j] + 0); exit }
+  }' "$design" "$dir/moves.tsv")
+[ -n "$plant" ] || fail "no line of $dir/moves.tsv has a <to> with a slice from 1 to 19 after it in the order line of $design: $(awk -F'\t' '{ printf "%s%s to %s", NR > 1 ? "; " : "", $1, $3 }' "$dir/moves.tsv")"
+below=${plant%%"$tab"*}
+later=${plant#*"$tab"}
 below_path=$(awk -F'\t' -v n="$below" 'NR == n { print $1 }' "$dir/moves.tsv")
-awk -F'\t' -v OFS='\t' -v n="$below" 'NR == n { $2 = $3 + 1 } { print }' "$dir/moves.tsv" > "$dir/planted-to-below-from.tsv"
+awk -F'\t' -v OFS='\t' -v n="$below" -v from="$later" 'NR == n { $2 = from } { print }' "$dir/moves.tsv" > "$dir/planted-to-below-from.tsv"
 cmp -s "$dir/moves.tsv" "$dir/planted-to-below-from.tsv" && fail "the planted <to> below <from> copy equals the unchanged lines"
 if task -d . test262-moves-check TEST262_CACHE="$cache" TEST262_DESIGN="$design" TEST262_MOVES="$dir/planted-to-below-from.tsv" > "$dir/planted-to-below-from.out" 2>&1; then
   fail "task test262-moves-check exited 0 with a line whose <to> is below its <from>, $below_path ($dir/planted-to-below-from.out)"
