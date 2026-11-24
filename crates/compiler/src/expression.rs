@@ -1119,10 +1119,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
         let slot = self
             .generator
             .ok_or_else(|| malformed("a yield* outside a generator"))?;
-        // The parse refuses `yield*` in an async generator before slice 10
-        // (`story:yield-star-in-async-generators`), so no tree that compiles holds one.
         if self.asynchronous.is_some() {
-            return Err(malformed("a yield* in an async generator"));
+            return self.async_yield_star_expression(argument, slot, span, t);
         }
         let (start, top, end, done, normal) = (
             self.label(),
@@ -1154,6 +1152,85 @@ impl<'a, 'm> Compiler<'a, 'm> {
             },
             span,
         ))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        t.push(Task::Emit(Instruction::YieldReturn(self.items), span))?;
+        t.push(Task::Return(span))?;
+        t.push(Task::Bind(normal))?;
+        t.push(Task::Handler {
+            kind: HandlerKind::Pattern,
+            start,
+            end,
+            target: end,
+            items: self.items,
+            envs: self.envs,
+        })
+    }
+
+    /// `yield*` in an async generator, the generator in local slot `slot` (YieldExpression :
+    /// `yield *` AssignmentExpression with generatorKind async; `docs/design/engine.md`,
+    /// decision 3, "Async generators on suspended frames", item 6): the operand, GetIterator of
+    /// it (async), the record kept on the stack, the received completion a normal `undefined`;
+    /// then the loop: [`Instruction::AsyncDelegateStep`] with the received completion, the
+    /// [`Instruction::Await`] of its result (a throw of it thrown here), then
+    /// [`Instruction::JumpIfDelegateDone`] and [`Instruction::AsyncDelegateYield`] of its value,
+    /// whose resumption leaves the next received completion; a return completion's value is
+    /// awaited first (AsyncGeneratorUnwrapYieldResumption,
+    /// `#sec-asyncgeneratorunwrapyieldresumption`): fulfilled, it stays a return completion, and
+    /// rejected, it becomes a throw completion of the reason. Done, the record is dropped and the
+    /// value and its tag are left as for a generator; a return the iterator has no `return` for
+    /// awaits its value first (step 8.c.iii.2). The handler of the record is the one of a
+    /// generator's `yield*`.
+    fn async_yield_star_expression(
+        &mut self,
+        argument: ExprId,
+        slot: u32,
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let (start, top, awaited, unwrap, received_return) = (
+            self.label(),
+            self.label(),
+            self.label(),
+            self.label(),
+            self.label(),
+        );
+        let (end, returned, done, normal) =
+            (self.label(), self.label(), self.label(), self.label());
+        let jump_if_tag = |tag, target| Task::Emit(Instruction::JumpIfTag { tag, target }, span);
+        t.push(Task::Expr(argument))?;
+        t.push(Task::Emit(Instruction::GetAsyncIterator, span))?;
+        t.push(Task::Bind(start))?;
+        t.push(Task::Emit(Instruction::Undefined, span))?;
+        t.push(Task::Emit(Instruction::Tag(TAG_NORMAL), span))?;
+        t.push(Task::Bind(top))?;
+        t.push(Task::Emit(Instruction::AsyncDelegateStep(returned), span))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        t.push(Task::Emit(Instruction::Await(slot), span))?;
+        t.push(jump_if_tag(TAG_NORMAL, awaited))?;
+        t.push(Task::Emit(Instruction::EndFinally, span))?;
+        t.push(Task::Bind(awaited))?;
+        t.push(Task::Emit(Instruction::JumpIfDelegateDone(done), span))?;
+        t.push(Task::Emit(Instruction::AsyncDelegateYield(slot), span))?;
+        t.push(jump_if_tag(TAG_RETURN, unwrap))?;
+        t.push(Task::Goto(top, span))?;
+        t.push(Task::Bind(unwrap))?;
+        t.push(Task::Emit(Instruction::Await(slot), span))?;
+        t.push(jump_if_tag(TAG_NORMAL, received_return))?;
+        t.push(Task::Goto(top, span))?;
+        t.push(Task::Bind(received_return))?;
+        t.push(Task::Emit(Instruction::Tag(TAG_RETURN), span))?;
+        t.push(Task::Goto(top, span))?;
+        t.push(Task::Bind(end))?;
+        t.push(Task::Emit(Instruction::Bury(2), span))?;
+        t.push(Task::Emit(Instruction::Bury(2), span))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        t.push(Task::Emit(Instruction::EndFinally, span))?;
+        t.push(Task::Bind(returned))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        self.await_value(slot, span, t)?;
+        t.push(Task::Emit(Instruction::Tag(TAG_RETURN), span))?;
+        t.push(Task::Bind(done))?;
+        t.push(jump_if_tag(TAG_NORMAL, normal))?;
         t.push(Task::Emit(Instruction::Pop, span))?;
         t.push(Task::Emit(Instruction::YieldReturn(self.items), span))?;
         t.push(Task::Return(span))?;

@@ -53,7 +53,7 @@ use crate::dynamic_code::DynamicFunctionKind;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{ErrorKind, Host};
-use crate::interp::suspend::SuspendedFrame;
+use crate::interp::suspend::{Resumption, SuspendedFrame};
 use crate::object::ObjectKind;
 use crate::object::async_generator::{AsyncGenerator, AsyncGeneratorState, Request, request_bytes};
 use crate::object::builtin_function::{Behaviour, BuiltinId, Slots};
@@ -88,10 +88,10 @@ pub(crate) struct AsyncGeneratorPrototypes {
 
 /// The capability of a request: a promise of `%Promise%` and its resolving functions.
 #[derive(Clone, Copy, Debug)]
-struct Capability {
-    promise: ObjectRef,
-    resolve: ObjectRef,
-    reject: ObjectRef,
+pub(crate) struct Capability {
+    pub(crate) promise: ObjectRef,
+    pub(crate) resolve: ObjectRef,
+    pub(crate) reject: ObjectRef,
 }
 
 impl<H: Host> Agent<H> {
@@ -262,7 +262,7 @@ impl<H: Host> Agent<H> {
     /// NewPromiseCapability(%Promise%) (`#sec-newpromisecapability`) as `AsyncStart` makes it
     /// (the module's documentation): a new pending promise whose [[Prototype]] is
     /// `%Promise.prototype%` of the current realm, and its resolving functions.
-    fn async_generator_capability(&mut self) -> Completion<Capability> {
+    pub(crate) fn async_generator_capability(&mut self) -> Completion<Capability> {
         let prototype = self.current_intrinsic(Intrinsic::PromisePrototype)?;
         let promise = self.new_promise_object(prototype)?;
         let mark = self.keep(Value::Object(promise));
@@ -287,25 +287,36 @@ impl<H: Host> Agent<H> {
         self.keep(Value::Object(capability.resolve));
         self.keep(Value::Object(capability.reject));
         self.keep(value);
-        let done = self.async_generator_steps(this, value, tag, capability);
+        let done = self
+            .async_generator_steps(this, value, tag, capability)
+            .and_then(|resumption| match resumption {
+                Some(resumption) => self.run_resumed(resumption).map(|_| ()),
+                None => Ok(()),
+            });
         self.release(mark);
         done?;
         Ok(Value::Object(capability.promise))
     }
 
-    /// The steps of `next`, `return` and `throw` after step 2.
-    fn async_generator_steps(
+    /// The steps of `next`, `return` and `throw` after step 2, with the capability's values kept
+    /// by the caller. A resumption's frame is pushed and not run: the builtin runs it
+    /// ([`Agent::run_resumed`]), and the instruction of `yield*` in an async generator
+    /// (`interp/yield_star.rs`) goes on in its own run loop, in which it runs above the frame
+    /// that resumed it.
+    pub(crate) fn async_generator_steps(
         &mut self,
         this: Value,
         value: Value,
         tag: u32,
         capability: Capability,
-    ) -> Completion<()> {
+    ) -> Completion<Option<Resumption>> {
         // 3. Let result be Completion(AsyncGeneratorValidate(generator, empty)). 4.
         // IfAbruptRejectPromise(result, promiseCapability).
         let Some((generator, mut state)) = self.async_generator_validate(this)? else {
             let error = self.throw_error(ErrorKind::TypeError, "not an async generator object");
-            return self.reject_request_capability(capability, error);
+            return self
+                .reject_request_capability(capability, error)
+                .map(|()| None);
         };
         // 5. Let state be generator.[[AsyncGeneratorState]].
         match tag {
@@ -319,7 +330,7 @@ impl<H: Host> Agent<H> {
                     let mark = self.keep(Value::Object(result));
                     let settled = self.resolve_function(capability.resolve, Value::Object(result));
                     self.release(mark);
-                    return settled.map(|_| ());
+                    return settled.map(|_| None);
                 }
             }
             TAG_THROW => {
@@ -332,7 +343,7 @@ impl<H: Host> Agent<H> {
                 // 7. If state is completed, then a. Perform ! Call(promiseCapability.[[Reject]],
                 // undefined, « exception »). b. Return promiseCapability.[[Promise]].
                 if state == AsyncGeneratorState::Completed {
-                    return self.reject_function(capability.reject, value).map(|_| ());
+                    return self.reject_function(capability.reject, value).map(|_| None);
                 }
             }
             _ => {}
@@ -361,10 +372,13 @@ impl<H: Host> Agent<H> {
                 tag,
             ) {
                 Ok(resumption) => resumption,
-                Err(abrupt) => return self.reject_request_capability(capability, abrupt),
+                Err(abrupt) => {
+                    return self
+                        .reject_request_capability(capability, abrupt)
+                        .map(|()| None);
+                }
             };
-            self.run_resumed(resumption)?;
-            return Ok(());
+            return Ok(Some(resumption));
         }
         // Perform AsyncGeneratorEnqueue(generator, completion, promiseCapability).
         self.async_generator_enqueue(generator, request)?;
@@ -387,7 +401,7 @@ impl<H: Host> Agent<H> {
             }
         }
         // Else, Assert: state is either executing or draining-queue.
-        Ok(())
+        Ok(None)
     }
 
     /// IfAbruptRejectPromise of a request's capability (`#sec-ifabruptrejectpromise`): a throw

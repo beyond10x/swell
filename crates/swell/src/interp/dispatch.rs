@@ -448,6 +448,9 @@ impl<H: Host> Agent<H> {
             I::AsyncGeneratorYield(slot) => self.async_generator_yield(slot),
             I::AsyncGeneratorReturn(slot) => self.async_generator_return(slot),
             I::AsyncGeneratorReject(slot) => self.async_generator_reject(slot),
+            // ---- `yield*` in an async generator (`interp/yield_star.rs`) ----
+            I::AsyncDelegateStep(target) => self.async_delegate_step(target),
+            I::AsyncDelegateYield(slot) => self.async_delegate_yield(slot),
         }
     }
 

@@ -16,6 +16,12 @@ Every number below comes from the gate, `task check`, on the released commit.
   At its close 40 cases that need `class` or `super` move to slice 8, each with its
   evidence, and 21 cases that failed only on generators count in slice 7 instead of slices
   18 and 19.
+- `yield*` in an async generator, a story of the tenth slice: it delegates to an async
+  iterator, or to a sync iterable through the Async-from-Sync Iterator, and awaits the
+  result of each call of the inner iterator's `next`, `throw` or `return`. A received
+  `return` is awaited before it goes to the inner iterator. Where the inner iterator has
+  no `throw` method, it is closed and the delegation throws a `TypeError`. A `next` through
+  n levels of delegation costs 15 steps per level.
 - `%AsyncGeneratorFunction%`, the constructor that makes an async generator function from
   source text, a story of the tenth slice. It is not a global: a script reaches it as the
   `constructor` of the prototype of an async generator function. The hook of compile
@@ -31,8 +37,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   with a value awaits it. A request is charged to the memory budget when it is queued, and
   the queue is credited when the generator is freed; a script that queues requests without
   end stops at the memory budget, and a generator that never ends stops at the step
-  budget. `yield*` in an async generator is still refused, with
-  a `SyntaxError` that names the tenth slice.
+  budget.
 - `for await (x of y)` in an `async` function, a story of the tenth slice, with
   `%AsyncIteratorPrototype%`, `Symbol.asyncIterator` and the Async-from-Sync Iterator that
   wraps a sync iterable. Each result of `next` is awaited, and the iterator is closed on

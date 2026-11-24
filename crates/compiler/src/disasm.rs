@@ -341,6 +341,8 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::AsyncGeneratorYield(n) => format!("AsyncGeneratorYield {n}"),
         I::AsyncGeneratorReturn(n) => format!("AsyncGeneratorReturn {n}"),
         I::AsyncGeneratorReject(n) => format!("AsyncGeneratorReject {n}"),
+        I::AsyncDelegateStep(t) => format!("AsyncDelegateStep {t:04}"),
+        I::AsyncDelegateYield(n) => format!("AsyncDelegateYield {n}"),
         other => format!("{other:?}"),
     }
 }
