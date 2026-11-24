@@ -17,10 +17,17 @@
 //! an object ends the run in `Terminated(EngineFault)`. What a host function returns in a run that
 //! is terminated is not used, and not checked.
 //!
+//! A built-in function with slots (`Behaviour::Closure`, `story:promise-constructor-then-and-jobs`)
+//! runs the steps of a [`BuiltinId`] with the slots an abstract operation gave it ([`Slots`]):
+//! the resolving functions of a promise and the executor of NewPromiseCapability. Its slots are
+//! boxed and charged with it, as a host function's boxes are.
+//!
 //! Two sites of the collector: the kind site [`BuiltinFunction::trace`] and the root site
 //! [`trace_roots`] (the activations and the kept stack).
 
 use std::any::Any;
+use std::cell::Cell;
+use std::rc::Rc;
 
 use super::ObjectKind;
 use super::property::Property;
@@ -71,6 +78,9 @@ pub(crate) enum BuiltinId {
     GeneratorFunction,
     /// The builtins of `RegExp` (`story:regexp-objects-exec-and-literals`).
     RegExp(crate::builtins::regexp::RegExpBuiltin),
+    /// The builtins of `Promise` and the built-in functions with slots its abstract operations
+    /// make (`story:promise-constructor-then-and-jobs`).
+    Promise(crate::builtins::promise::PromiseBuiltin),
 }
 
 /// What a built-in function does when called.
@@ -81,6 +91,53 @@ pub(crate) enum Behaviour {
         steps: Box<dyn Any>,
         data: Option<HostObject>,
     },
+    /// A built-in function with slots, made by an abstract operation (CreateBuiltinFunction with
+    /// a list of additional internal slots, `#sec-createbuiltinfunction`): the builtin whose
+    /// steps it runs and its slots, in a box charged with the function
+    /// ([`Agent::create_builtin_closure`]).
+    Closure {
+        id: BuiltinId,
+        slots: Box<Slots>,
+    },
+}
+
+/// The slots of a built-in function with slots: what the Abstract Closure it was made from
+/// captured. Matched without a wildcard.
+pub(crate) enum Slots {
+    /// A resolving function of CreateResolvingFunctions (`#sec-createresolvingfunctions`): the
+    /// promise to settle, and the flag its resolve and reject functions share, set when either
+    /// runs.
+    Resolving {
+        promise: ObjectRef,
+        already_resolved: Rc<Cell<bool>>,
+    },
+    /// executorClosure of NewPromiseCapability (`#sec-newpromisecapability`): the record
+    /// resolvingFuncs, its [[Resolve]] and [[Reject]].
+    Executor { resolve: Value, reject: Value },
+}
+
+impl Slots {
+    /// Every value the slots hold.
+    fn trace(&self, mark: &mut Mark) {
+        match self {
+            Slots::Resolving { promise, .. } => mark.object(*promise),
+            Slots::Executor { resolve, reject } => {
+                mark.value(*resolve);
+                mark.value(*reject);
+            }
+        }
+    }
+
+    /// The bytes the function with these slots is charged: the box of the slots, and for a
+    /// resolving function half of the shared flag's reference-counted box, so that the two
+    /// functions of a promise are charged the flag once.
+    pub(crate) fn bytes(&self) -> u64 {
+        let shared = match self {
+            Slots::Resolving { .. } => size_of::<(Cell<usize>, Cell<usize>, Cell<bool>)>() / 2,
+            Slots::Executor { .. } => 0,
+        };
+        u64::try_from(size_of::<Slots>().saturating_add(shared)).unwrap_or(u64::MAX)
+    }
 }
 
 /// The slots of a built-in function object.
@@ -95,8 +152,8 @@ pub(crate) struct BuiltinFunction {
 }
 
 impl BuiltinFunction {
-    /// Kind site of the collector: [[Realm]], [[InitialName]], and what a host function's data
-    /// lists.
+    /// Kind site of the collector: [[Realm]], [[InitialName]], what a host function's data
+    /// lists, and the slots of a built-in function with slots.
     pub(crate) fn trace(&self, mark: &mut Mark) {
         mark.count("object/builtin_function.rs BuiltinFunction::trace");
         if let Some(realm) = self.realm {
@@ -105,11 +162,12 @@ impl BuiltinFunction {
         if let Some(name) = self.initial_name {
             mark.value(Value::String(name));
         }
-        if let Behaviour::Host {
-            data: Some(data), ..
-        } = &self.behaviour
-        {
-            data.trace(mark);
+        match &self.behaviour {
+            Behaviour::Builtin(_) | Behaviour::Host { data: None, .. } => {}
+            Behaviour::Host {
+                data: Some(data), ..
+            } => data.trace(mark),
+            Behaviour::Closure { slots, .. } => slots.trace(mark),
         }
     }
 
@@ -334,6 +392,87 @@ impl<H: Host> Agent<H> {
         recorded
     }
 
+    /// A built-in function with slots (CreateBuiltinFunction ( behaviour, length, "", « ... »
+    /// ), `#sec-createbuiltinfunction`) in `realm`, which runs the steps of `id` with `slots`:
+    /// not a constructor, its `name` the empty String. The box of its slots
+    /// ([`Slots::bytes`]) is charged to the memory budget before it is made and recorded in the
+    /// function's [`Grown`] as a host function's boxes are, so the sweep that frees it credits
+    /// them; over the budget the run ends in `Terminated(MemoryBudget)`.
+    ///
+    /// [`Grown`]: super::Grown
+    pub(crate) fn create_builtin_closure(
+        &mut self,
+        id: BuiltinId,
+        slots: Slots,
+        length: u32,
+        realm: Handle,
+    ) -> Completion<ObjectRef> {
+        let bytes = slots.bytes();
+        if self.heap.accounting.charge(bytes).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        let made = self.create_builtin_function(
+            Behaviour::Closure {
+                id,
+                slots: Box::new(slots),
+            },
+            length,
+            "",
+            realm,
+            None,
+            false,
+        );
+        let recorded = made.and_then(|function| {
+            self.record_grown(function, bytes)?;
+            Ok(function)
+        });
+        if recorded.is_err() {
+            self.heap.accounting.credit(bytes);
+        }
+        recorded
+    }
+
+    /// The slots of the built-in function with slots `function`; any other object is a broken
+    /// invariant.
+    pub(crate) fn closure_slots(&mut self, function: ObjectRef) -> Completion<&Slots> {
+        if !matches!(
+            self.engine_object(function)?.kind,
+            ObjectKind::BuiltinFunction(BuiltinFunction {
+                behaviour: Behaviour::Closure { .. },
+                ..
+            })
+        ) {
+            return Err(self.fault());
+        }
+        match &self.engine_object(function)?.kind {
+            ObjectKind::BuiltinFunction(BuiltinFunction {
+                behaviour: Behaviour::Closure { slots, .. },
+                ..
+            }) => Ok(slots.as_ref()),
+            _ => Err(Abrupt::Terminated(Termination::EngineFault)),
+        }
+    }
+
+    /// As [`Agent::closure_slots`], to change.
+    pub(crate) fn closure_slots_mut(&mut self, function: ObjectRef) -> Completion<&mut Slots> {
+        if !matches!(
+            self.engine_object(function)?.kind,
+            ObjectKind::BuiltinFunction(BuiltinFunction {
+                behaviour: Behaviour::Closure { .. },
+                ..
+            })
+        ) {
+            return Err(self.fault());
+        }
+        match &mut self.engine_object_mut(function)?.kind {
+            ObjectKind::BuiltinFunction(BuiltinFunction {
+                behaviour: Behaviour::Closure { slots, .. },
+                ..
+            }) => Ok(slots.as_mut()),
+            _ => Err(Abrupt::Terminated(Termination::EngineFault)),
+        }
+    }
+
     /// The bookkeeping of every call into a function (decision 2): the sticky termination, a
     /// step, and the re-entry count, whose bound throws a `RangeError` in the current realm.
     fn enter_function(&mut self) -> Completion<()> {
@@ -359,7 +498,7 @@ impl<H: Host> Agent<H> {
             ObjectKind::BuiltinFunction(builtin) => (
                 builtin.realm,
                 match builtin.behaviour {
-                    Behaviour::Builtin(id) => Some(id),
+                    Behaviour::Builtin(id) | Behaviour::Closure { id, .. } => Some(id),
                     Behaviour::Host { .. } => None,
                 },
             ),
@@ -443,6 +582,9 @@ impl<H: Host> Agent<H> {
                 self.run_generator_builtin(id, function, this, args, new_target)
             }
             BuiltinId::GeneratorFunction => self.generator_function(function, args, new_target),
+            BuiltinId::Promise(id) => {
+                self.run_promise_builtin(id, function, this, args, new_target)
+            }
         }
     }
 
@@ -614,5 +756,29 @@ mod tests {
             collections <= bound,
             "{collections} collections, at most {bound}"
         );
+    }
+
+    /// The bytes a built-in function with slots is charged for its slots, which
+    /// `tests/promises.rs` states as `RESOLVING_BOX_BYTES` and `EXECUTOR_BOX_BYTES`: the box of
+    /// the slots, and for a resolving function half of the box of the flag it shares.
+    #[test]
+    fn the_slots_of_a_closure_are_charged_their_box() {
+        use super::Slots;
+        let (mut agent, realm, _) = roomy();
+        let realm_handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let object = agent
+            .intrinsic(realm_handle, Intrinsic::FunctionPrototype)
+            .unwrap();
+        let resolving = Slots::Resolving {
+            promise: object,
+            already_resolved: std::rc::Rc::new(std::cell::Cell::new(false)),
+        };
+        let executor = Slots::Executor {
+            resolve: Value::Undefined,
+            reject: Value::Undefined,
+        };
+        let size = size_of::<Slots>();
+        assert_eq!(resolving.bytes(), 44, "the slots are {size} bytes");
+        assert_eq!(executor.bytes(), 32, "the slots are {size} bytes");
     }
 }

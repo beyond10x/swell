@@ -14,7 +14,11 @@
 //! RegExpExec and RegExpBuiltinExec with `exec` and `test`, and `regexp/budget.rs` the budget of
 //! `swell-regexp` over the agent. Slice 7 adds `generator`
 //! (`story:generator-functions-and-suspended-frames`): `%GeneratorFunction.prototype%` and
-//! `%GeneratorPrototype%` with `next`, `return` and `throw`. Later slices add their files here.
+//! `%GeneratorPrototype%` with `next`, `return` and `throw`. Slice 10 adds `promise`
+//! (`story:promise-constructor-then-and-jobs`): `%Promise%` with `resolve`, `reject` and its
+//! `[%Symbol.species%]`, `%Promise.prototype%` with `then` and `catch`, and the steps of the
+//! resolving functions and of the executor of a promise capability. Later slices add their files
+//! here.
 //!
 //! `array`, `object` and `string` are directories (`story:builtin-group-modules`): `mod.rs`
 //! holds the constructor and the builtins of the base, and each group of builtins a story of
@@ -43,6 +47,7 @@ pub(crate) mod json;
 pub(crate) mod math;
 pub(crate) mod number;
 pub(crate) mod object;
+pub(crate) mod promise;
 pub(crate) mod regexp;
 pub(crate) mod string;
 pub(crate) mod symbol;

@@ -12,6 +12,18 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- `Promise`, the second story of the tenth slice: the constructor with its resolving
+  functions, `Promise.prototype.then` and `catch`, `Promise.resolve`, `Promise.reject` and
+  the getter of `Promise[Symbol.species]`. A reaction and the job of a thenable are entries
+  of the agent's queue and run at a checkpoint in the order they were queued. The engine
+  announces a promise job to the host before it can run, and calls
+  `host_prepare_to_run_job` with the job's realm, `host_call_job_callback` and
+  `host_clean_up_after_job` with what the job threw. A job that queues itself ends the
+  checkpoint at the step budget; a termination in a job leaves its promise pending and the
+  jobs behind it queued. A reaction of a pending promise and a queued job are charged to
+  the memory budget until the promise settles or the job is taken off. `Promise.all`,
+  `Promise.allSettled`, `Promise.any`, `Promise.race` and `Promise.prototype.finally` are
+  not defined yet.
 - Regular expressions with the flag `v`: classes with union, intersection (`&&`),
   subtraction (`--`) and nested classes, `\q{...}` with its strings, and the seven
   properties of strings (`\p{RGI_Emoji}` and the six it is made of) from a sixteenth
@@ -31,8 +43,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   host queues a microtask with the realm it runs in; a checkpoint runs every entry in the
   order it was queued, under the step budget of one entry, and spends one step for each
   entry it takes off. A checkpoint asked for inside a checkpoint returns at once. A
-  termination leaves the entries behind it queued. No promise job exists yet: `Promise` is
-  not defined.
+  termination leaves the entries behind it queued.
 - The test262 runner runs a case with the flag `async`: it performs a checkpoint after the
   script and decides the case by the first line `Test262:AsyncTestComplete` or
   `Test262:AsyncTestFailure:` the script prints.
@@ -46,6 +57,12 @@ Every number below comes from the gate, `task check`, on the released commit.
   `CheckpointReport::host_microtasks`.
 - `HOST-77`, `HOST-79`, `HOST-81`, `HOST-149`, `HOST-192`, `HOST-193`, `HOST-196` and
   `HOST-197` have a test.
+- New: the struct `PromiseCapability` with its fields `PromiseCapability::promise`,
+  `PromiseCapability::resolve` and `PromiseCapability::reject`, and of the context
+  `new_promise_capability`, which hands a host a pending promise with the two functions
+  that settle it.
+- `HOST-78`, `HOST-80`, `HOST-82`, `HOST-83`, `HOST-84`, `HOST-148`, `HOST-198`, `HOST-199`
+  and `HOST-200` have a test.
 
 ## [0.8.0] - 2026-11-23
 

@@ -8,8 +8,9 @@
 //! parser refuses or nests too deep, and one early error the ES5 grammar has.
 //! `tests/fixtures/eval-script/` holds the cases of `$262.evalScript`: three that pass, and two
 //! that catch the `SyntaxError` of a refusal or of the nesting limit inside it and fail.
-//! `tests/fixtures/async/` holds three cases with the flag `async`, judged by what `$DONE` of its
-//! own `doneprintHandle.js` prints, and one without the flag that prints the failure line.
+//! `tests/fixtures/async/` holds six cases with the flag `async`, judged by what `$DONE` of its
+//! own `doneprintHandle.js` prints (three of them call it from a promise job, one queues jobs
+//! without end), and one without the flag that prints the failure line.
 //!
 //! With `--runs <file>` the runner writes one line per run to the file, `test262-run`, the slice,
 //! the path, the mode, the outcome and the detail, separated by tabs; the tests read it from
@@ -680,13 +681,50 @@ fn a_grammar_error_caught_inside_eval_passes() -> TestResult {
     Ok(())
 }
 
-/// The run lines of the async tree, from one count of the tree written to the runs file `file`;
-/// the tree's directory line is checked first.
-fn async_lines(file: &str) -> Result<Vec<RunLine>, Box<dyn Error>> {
-    let (printed, lines) = counted_runs("async", file, &[])?;
-    // complete.js and not-async.js pass; failure.js and no-done.js fail.
-    assert_line(&printed, "test262 language/async 4 0 0 4 2 2 0");
-    Ok(lines)
+/// The step budget the async tree runs with: endless.js queues a job from each job, so its
+/// checkpoint runs until the step budget ends it; a test build spends the runner's 2^30 steps in
+/// minutes, so the tree runs here with this budget and the other limits of the runner's table,
+/// through the functions `count` calls, as `an_endless_case_is_printed_as_budget` does.
+const ASYNC_STEPS: u64 = 100_000;
+
+/// The run lines of the async tree, from one run of its cases through the functions `count`
+/// calls, with [`ASYNC_STEPS`]; the tree's directory line is checked first.
+fn async_lines() -> Result<Vec<RunLine>, Box<dyn Error>> {
+    let limits = Limits {
+        steps_per_entry: ASYNC_STEPS,
+        ..run::LIMITS
+    };
+    let design = std::fs::read_to_string(fixture("design.md"))?;
+    let (rules, problems) = slices::read(&design);
+    assert_eq!(problems, Vec::<String>::new());
+    let (listed, problems) =
+        features::read_listed(&std::fs::read_to_string(fixture("features.txt"))?);
+    assert_eq!(problems, Vec::<String>::new());
+    let tree = std::path::PathBuf::from(fixture("async"));
+    let mut loaded = count::load(&tree)?;
+    let ran = count::run_cases(
+        &tree,
+        &mut loaded,
+        &rules,
+        &listed,
+        NonZeroUsize::MIN,
+        &limits,
+    )?;
+    let report = count::tally(&loaded, &rules, &listed);
+    // complete.js, then.js and not-async.js pass; failure.js, no-done.js and then-failure.js
+    // fail; endless.js ends at the step budget of its checkpoint.
+    assert!(
+        report
+            .lines()
+            .contains(&"test262 language/async 7 0 0 7 3 3 1".to_string()),
+        "{:?}",
+        report.lines()
+    );
+    Ok(ran
+        .runs
+        .iter()
+        .map(|line| line.split('\t').map(str::to_string).collect())
+        .collect())
 }
 
 /// The runs of the case `name` of the async tree, as (mode, outcome, detail).
@@ -717,8 +755,30 @@ fn both_runs(outcome: &str, detail: &str) -> Vec<(String, String, String)> {
 /// (design, decision 11, the bullet "`async`"; test262 `INTERPRETING.md`).
 #[test]
 fn an_async_case_passes_when_done_prints_complete() -> TestResult {
-    let lines = async_lines("async-complete")?;
+    let lines = async_lines()?;
     assert_eq!(async_runs(&lines, "complete.js"), both_runs("Passed", ""));
+    Ok(())
+}
+
+/// An `async` case whose `then` callback calls `$DONE` passes once the checkpoint ran the job;
+/// one whose rejection handler is `$DONE` fails with the line `$DONE` printed for the reason;
+/// and one whose job queues a job like itself without end ends at the step budget of the
+/// checkpoint (`story:promise-constructor-then-and-jobs`).
+#[test]
+fn an_async_case_settles_in_a_promise_job() -> TestResult {
+    let lines = async_lines()?;
+    assert_eq!(async_runs(&lines, "then.js"), both_runs("Passed", ""));
+    assert_eq!(
+        async_runs(&lines, "then-failure.js"),
+        both_runs(
+            "Failed",
+            "Test262:AsyncTestFailure:Test262Error: Test262Error: x"
+        )
+    );
+    assert_eq!(
+        async_runs(&lines, "endless.js"),
+        both_runs("Budget", "checkpoint: Terminated(StepBudget)")
+    );
     Ok(())
 }
 
@@ -727,7 +787,7 @@ fn an_async_case_passes_when_done_prints_complete() -> TestResult {
 /// called` when the queue is empty and neither line was printed.
 #[test]
 fn an_async_case_fails_on_the_failure_line_and_when_done_is_not_called() -> TestResult {
-    let lines = async_lines("async-failure")?;
+    let lines = async_lines()?;
     assert_eq!(
         async_runs(&lines, "failure.js"),
         both_runs(
@@ -749,7 +809,7 @@ fn an_async_case_fails_on_the_failure_line_and_when_done_is_not_called() -> Test
 /// it prints the failure line of an `async` case and passes, since it completes normally.
 #[test]
 fn a_case_without_the_flag_has_no_async_judgement() -> TestResult {
-    let lines = async_lines("async-not-async")?;
+    let lines = async_lines()?;
     assert_eq!(async_runs(&lines, "not-async.js"), both_runs("Passed", ""));
     Ok(())
 }

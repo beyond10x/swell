@@ -59,6 +59,7 @@ mod names;
 mod object_patterns;
 mod objects;
 mod parameters;
+mod promises;
 mod property_index;
 mod realms;
 mod regexp_literal_limits;

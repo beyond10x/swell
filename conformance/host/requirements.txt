@@ -75,13 +75,13 @@ HOST-74 pending slice 11
 HOST-75 pending slice 11
 HOST-76 pending slice 11
 HOST-77 test swell::jobs::host_77_a_termination_leaves_the_jobs_behind_it_queued
-HOST-78 pending slice 10
+HOST-78 test swell::promises::host_78_promise_jobs_and_host_microtasks_run_in_one_order
 HOST-79 test swell::jobs::host_79_a_checkpoint_runs_the_microtasks_queued_while_it_runs
-HOST-80 pending slice 10
+HOST-80 test swell::promises::host_80_a_job_that_queues_itself_ends_the_checkpoint_at_the_step_budget
 HOST-81 test swell::jobs::host_81_a_checkpoint_inside_a_checkpoint_returns_at_once
-HOST-82 pending slice 10
-HOST-83 pending slice 10
-HOST-84 pending slice 10
+HOST-82 test swell::promises::host_82_the_hooks_around_a_promise_job_get_its_realm_and_its_throw
+HOST-83 test swell::promises::host_83_each_promise_job_is_announced_to_the_host_before_it_can_run
+HOST-84 test swell::promises::host_84_then_makes_a_job_callback_and_the_job_calls_it_with_its_host_defined
 HOST-85 pending slice 14
 HOST-86 pending slice 14
 HOST-87 pending slice 16
@@ -145,7 +145,7 @@ HOST-144 pending slice 4
 HOST-145 test swell::lib::heap::map::tests::host_145_hash_is_keyed_by_hash_key_alone
 HOST-146 test swell::source_scan::host_146_only_agent_new_takes_seeds
 HOST-147 pending slice 4
-HOST-148 pending slice 10
+HOST-148 test swell::promises::host_148_the_host_can_tell_which_checkpoint_spent_its_budget
 HOST-149 test swell::doc::compile_fail::host_149_hook_cx_cannot_perform_a_microtask_checkpoint
 HOST-150 pending slice 11
 HOST-151 pending slice 14
@@ -195,9 +195,9 @@ HOST-194 pending slice 10
 HOST-195 pending slice 10
 HOST-196 test swell::jobs::host_196_a_checkpoint_holds_what_a_job_was_handed_only_until_it_ends
 HOST-197 test swell::jobs::host_197_last_entry_steps_reads_the_whole_checkpoint
-HOST-198 pending slice 10
-HOST-199 pending slice 10
-HOST-200 pending slice 10
+HOST-198 test swell::promises::host_198_the_interrupt_ends_a_checkpoint_at_three_places
+HOST-199 test swell::promises::host_199_a_checkpoint_ended_by_its_budget_leaves_the_rest_in_order
+HOST-200 test swell::promises::host_200_clear_microtasks_empties_the_queue_without_running_anything
 HOST-201 pending slice 10
 HOST-202 pending slice 10
 HOST-203 pending slice 10

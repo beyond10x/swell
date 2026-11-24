@@ -102,6 +102,15 @@ pub struct PropertyDescriptor {
     pub configurable: Option<bool>,
 }
 
+/// A PromiseCapability Record (27.5.1.1, `#sec-promisecapability-records`): a promise and the
+/// functions that resolve and reject it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PromiseCapability {
+    pub promise: ObjectRef,
+    pub resolve: Value,
+    pub reject: Value,
+}
+
 /// What a host function receives (decision 14): `this`, the arguments, `new_target` when it is
 /// constructed, and the function object itself.
 #[derive(Clone, Copy, Debug)]
@@ -1015,6 +1024,25 @@ impl<H: Host> Cx<'_, H> {
         }
         agent.begin()?;
         agent.checkpoint()
+    }
+
+    /// NewPromiseCapability(%Promise%) (`#sec-newpromisecapability`) of the current realm of
+    /// this `Cx`: a pending promise and its resolve and reject functions, the three handed out,
+    /// which the host roots to settle the promise later. It takes no handle, so a faulted agent
+    /// answers `Err(Abrupt::Terminated(EngineFault))` (HOST-48); a throw is handed out.
+    pub fn new_promise_capability(&mut self) -> Completion<PromiseCapability> {
+        let agent = &mut *self.agent;
+        agent.running()?;
+        let completion = agent
+            .begin()
+            .and_then(|()| agent.new_intrinsic_promise_capability());
+        let completion = hand_out_throw(agent, completion);
+        if let Ok(capability) = &completion {
+            agent.hand_out(Value::Object(capability.promise));
+            agent.hand_out(capability.resolve);
+            agent.hand_out(capability.reject);
+        }
+        completion
     }
 }
 
