@@ -4,8 +4,7 @@
 //! `async` function of kind method, made by the instantiation every `async` template takes, and
 //! defined on its object by DefineMethod; it runs on the suspended frames of
 //! `story:async-functions-and-await` (`docs/design/engine.md`, decision 3, "`async` functions on
-//! suspended frames"). `async *m() {}` is refused until
-//! `story:async-generator-methods-in-object-literals`. Written by
+//! suspended frames"). `async *m() {}` is tested in `tests/async_generator_methods.rs`. Written by
 //! `story:async-methods-in-object-literals`. Run also with the feature
 //! `collect-every-safe-point`.
 //!
@@ -159,27 +158,4 @@ fn a_computed_async_method_gets_its_name() {
         "true pending",
         "true awaited 7",
     );
-}
-
-/// `async *m() {}` keeps a refusal of its own text, at its `*`, until
-/// `story:async-generator-methods-in-object-literals`: through `eval` it is a `SyntaxError` with
-/// that text, and `refusals()` moves by 1.
-#[test]
-fn the_refusal_of_an_async_generator_method_is_counted() {
-    let mut agent = agent().unwrap();
-    let realm = realm(&mut agent);
-    let before = agent.refusals();
-    assert_eq!(
-        eval_text(
-            &mut agent,
-            &realm,
-            "(function () { try { eval('({ async *m() {} })'); return 'parsed'; }\n\
-               catch (e) { return e.name + ': ' + e.message; } })()"
-        ),
-        Outcome::Normal(
-            "\"SyntaxError: async generator method is not supported before slice 10 (1:10)\""
-                .to_string()
-        )
-    );
-    assert_eq!(agent.refusals(), before + 1);
 }
