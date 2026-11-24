@@ -415,7 +415,11 @@ pub struct Module(Root);
 #[derive(Clone, Copy, PartialEq, Eq)] pub struct ModuleRef { /* as ObjectRef */ }
 
 pub enum Source<'s> { Utf8(&'s str), Utf16(&'s [u16]) }
-pub enum ErrorKind { Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, UriError }
+#[non_exhaustive]   // from slice 10 ("The kind of an AggregateError, and kinds to come")
+pub enum ErrorKind { Error, EvalError, RangeError, ReferenceError, SyntaxError, TypeError, UriError,
+    // with slice 10's story of the statics of `Promise` (HOST-201, HOST-202):
+    AggregateError,
+}
 
 impl<H: Host> Agent<H> {
     pub fn duplicate(&mut self, root: &Root) -> Result<Root, HostError>;
@@ -445,6 +449,67 @@ from `&self`, a breaking change of the interface. Handing a value out to a scope
 nothing to either budget and changes neither `heap_bytes()` nor `live_bytes()`: the scope's list
 is the agent's storage for the host's own calls, as the root table is, it grows by one entry per
 value handed out and ends with the scope.
+
+**The kind of an AggregateError, and kinds to come.** Added on 2026-11-23 for slice 10. What a
+host sees:
+
+- `ErrorKind` has the variant `AggregateError` from slice 10, and carries `#[non_exhaustive]`
+  from the same release. An embedder whose `match` over `ErrorKind` has no wildcard arm stops
+  compiling with that release, once: the attribute obliges a wildcard arm in every crate but
+  swell, so the next kind, `SuppressedError` (`ecma262:sec-suppressederror-objects`, slice 15
+  of `engine.md` section 12), and any later one is no break. An embedder that matches with a
+  wildcard arm, or reads `ErrorKind::name`, compiles unchanged.
+- `error_summary` (decision 13) of an AggregateError, made by a script
+  (`ecma262:sec-aggregate-error`) or by the engine (the rejection of `Promise.any`,
+  `ecma262:sec-performpromiseany`), answers kind `AggregateError` and its own message, as for
+  every kind: the kind the constructor recorded, whatever the prototype. Its `errors` are an own
+  data property ("Perform ! DefinePropertyOrThrow(obj, "errors", ...)",
+  `ecma262:sec-aggregate-error`), not a part of the kind or of [[ErrorData]] ("The only
+  specified use of [[ErrorData]] is by Object.prototype.toString (20.1.3.6) and Error.isError
+  (20.5.2.1)", `ecma262:sec-properties-of-aggregate-error-instances`): `error_summary` does not
+  read them, and the host reads them as any property, with `cx.get` (decision 14), which runs
+  code where a script made `errors` an accessor.
+- `new_error(realm, ErrorKind::AggregateError, message)` makes, without running code, the object
+  `new AggregateError([], message)` makes in that realm: its [[Prototype]] is the realm's
+  `%AggregateError.prototype%`, it has the own `message` `new_error` gives every kind, and an own
+  `errors`, writable, configurable and not enumerable, holding a new empty Array of that realm
+  (CreateArrayFromList of an empty List, `ecma262:sec-createarrayfromlist`). It charges the two
+  objects. A host that needs elements in `errors` defines them on that Array, or constructs
+  the realm's `AggregateError` with `construct`, which runs the steps with an iterable. A host
+  object made with `error_kind: Some(ErrorKind::AggregateError)` (decision 15) gets [[ErrorData]]
+  of that kind and no `errors`.
+- `ErrorKind::ALL` keeps its seven entries and its type, `[ErrorKind; 7]`: `Error` and the six
+  NativeError kinds (`ecma262:sec-error-constructor`,
+  `ecma262:sec-native-error-types-used-in-this-standard`), whose constructors take `(message,
+  options)` and which the realm makes from one template in that order (`realm/global_object.rs`,
+  `builtins/error.rs`, `realm/intrinsics.rs`). AggregateError's constructor takes `(errors,
+  message, options)` (`ecma262:sec-aggregate-error-constructor`) and is made by a step of its
+  own after them, so `ALL` does not hold it. Its doc comment, "Every kind, `Error` first",
+  becomes "`Error` and the six NativeError kinds, `Error` first"; a doc comment changes nothing
+  of the interface.
+
+The rule: **an enum of the interface whose variants follow a list of the draft or of Web IDL
+that grows is `#[non_exhaustive]`**: `ErrorKind`, `HostIntrinsic` and `WellKnownSymbol`
+(decision 15). A variant added to such an enum is no break and is named under
+`### Host interface` as any added name ("How the gate holds this document"). A variant added to
+an enum without the attribute is a break: the release that carries it lists it under the notes'
+`**Breaking**`, beside the removed and changed names `docs/releasing.md` lists there. The release
+that carries `ErrorKind::AggregateError` names, under `### Host interface`, `ErrorKind` (its
+attribute `non_exhaustive` added, a changed name), `ErrorKind::AggregateError`, `HOST-201` and
+`HOST-202`, and lists `ErrorKind` under `**Breaking**`.
+
+Rejected: reading an AggregateError as `ErrorKind::Error`, with `%AggregateError%` an intrinsic
+of the realm alone. It avoids the break of this release only to need it at `SuppressedError`;
+`error_summary` would answer a kind no constructor recorded, against decision 13's "the kind
+recorded by the constructor that made the object"; and a host could tell an AggregateError from
+an Error only by reading `name` or the prototype, which can run code. Rejected too: `ALL` with
+eight entries (its type changes, a second changed name, and the realm's loop would make
+AggregateError from the NativeError template); `ALL` as `&'static [ErrorKind]` (a break of its
+own, for a list no host needs to grow).
+
+**HOST-201** (ecma262:sec-properties-of-aggregate-error-instances) After the script `throw new AggregateError([new TypeError("t")], "m")` answered `Throw`, `error_summary` of its root answers kind `AggregateError` and message `[0x6D]`, also when the script set the error's prototype to `null` before the throw; the rejection reason of the promise the script `Promise.any([])` answers, read with `promise_state` with no checkpoint between (PerformPromiseAny rejects it at once), answers kind `AggregateError` and message `None`; `ErrorKind::AggregateError.name()` answers `"AggregateError"`, and `ErrorKind::ALL` holds seven kinds and not `AggregateError`. [slice 10]
+
+**HOST-202** (swell:D4) `new_error(realm, ErrorKind::AggregateError, "m")` runs no code and answers an object for which the script `e instanceof AggregateError && Object.getPrototypeOf(e) === AggregateError.prototype && Array.isArray(e.errors) && e.errors.length === 0 && e.message === "m" && !Object.prototype.propertyIsEnumerable.call(e, "errors")`, run in that realm with `e` a global holding it, answers `true`, and `error_summary` of it answers kind `AggregateError`. [slice 10]
 
 **HOST-28** (swell:D4) An object held only by a `Root` survives `collect`, and the root then reads the same object. [slice 1]
 
@@ -670,11 +735,19 @@ every realm.
 | `HostIntrinsic::ArrayPrototypeEntries`, `%Array.prototype.entries%` | "If definition has a value iterator, then: Perform ! CreateDataPropertyOrThrow(target, "entries", %Array.prototype.entries%)." (`webidl:define-the-iteration-methods`) | HOST-185, as above |
 | `HostIntrinsic::ArrayPrototypeKeys`, `%Array.prototype.keys%` | the same step for "keys" (`webidl:define-the-iteration-methods`) | HOST-185, as above |
 | `HostIntrinsic::ArrayPrototypeForEach`, `%Array.prototype.forEach%` | the same step for "forEach" (`webidl:define-the-iteration-methods`) | HOST-185, as above |
+| `WellKnownSymbol::AsyncIterator`, `%Symbol.asyncIterator%` | "Asynchronously iterable declarations": "Perform DefineMethodProperty(target, %Symbol.asyncIterator%, F, false)." (`webidl:define-the-asynchronous-iteration-methods`) | HOST-203, with slice 10's story of `for await` |
 
-The first five are made by the realm today. The last five come with slice 6: `%Symbol.iterator%`
+The first five are made by the realm today. The next five come with slice 6: `%Symbol.iterator%`
 with the story of the `Symbol` constructor and the well-known symbols, `%Array.prototype.values%`
 with the story of the iterator protocol, and `entries`, `keys` and `forEach` as intrinsics of the
-realm recorded where their builtins are installed, so that each is the original function.
+realm recorded where their builtins are installed, so that each is the original function. The
+eleventh, `%Symbol.asyncIterator%`, added on 2026-11-23, comes with slice 10's story of
+`for await` (`engine.md` decision 4, "Symbols": the thirteenth well-known symbol, made with the
+agent as the other twelve are). The host reads it as it reads the others: `well_known_symbol`
+answers the agent's Symbol, the same in every realm, with no code, no hook, no step and no
+allocation. The variant is no break, since `WellKnownSymbol` is `#[non_exhaustive]` (decision 4,
+"The kind of an AggregateError, and kinds to come"); the changelog names
+`WellKnownSymbol::AsyncIterator` and `HOST-203`.
 
 Rejected: a host-made global passed in before the call (its prototype could not come from the
 realm's own intrinsics); an explicit `destroy_realm` (objects of a destroyed realm reachable
@@ -708,7 +781,10 @@ onto the execution context stack", `ecma262:sec-initializehostdefinedrealm`), `p
 realm given, `evaluate_script` the script's ("Set the Realm of scriptContext to
 scriptRecord.[[Realm]]", `ecma262:sec-runtime-semantics-scriptevaluation`),
 `load_requested_modules`, `link` and `evaluate_module` the module's [[Realm]],
-`finish_loading_imported_module` the referrer's, `run_job` the job's. `HookCx` needs none: each of
+`finish_loading_imported_module` the referrer's, `run_job` the job's, and
+`perform_microtask_checkpoint` that of each job it runs while the job runs: a promise job's
+realm, or the realm current when it was queued if its realm is null, and a host microtask's the
+realm it was queued with (decision 11, "A host microtask's realm"; added on 2026-11-23). `HookCx` needs none: each of
 its methods that makes an object names the realm or the prototype. A `Realm` is a root, so the
 answer depends on no collection and no creation order, an agent with no realm cannot reach a call
 that needs one, and a stale or foreign `Realm` answers `Err(StaleHandle)` or `Err(ForeignHandle)`
@@ -734,6 +810,8 @@ which realm it got).
 **HOST-184** (webidl:interface-prototype-object) A host object whose own `@@toStringTag` data property, defined with `well_known_symbol(ToStringTag)`, is `"Node"` makes the script `Object.prototype.toString.call(n)` answer `"[object Node]"`; one with an own `@@unscopables` object whose `before` is `true` makes `with (n) { before }` read the outer binding; the symbols are the same in two realms of the agent. [slice 6]
 
 **HOST-185** (webidl:define-the-iteration-methods) A host object `list` with indexed own data properties `0` and `1` holding the host objects `a` and `b`, a `length` of 2, and own data properties `@@iterator`, `entries`, `keys`, `values` and `forEach` defined from `well_known_symbol(Iterator)` and the four intrinsics, makes the script `var r = [], it = list[Symbol.iterator](); r.push(it.next().value === a, it.next().value === b, it.next().done); var e = list.entries().next().value; r.push(e[0] === 0 && e[1] === a, list.keys().next().value === 0, list.values().next().value === a); list.forEach(function (n, i) { r.push(n === (i ? b : a)); }); r.join()` answer `"true,true,true,true,true,true,true,true"` (no `for`-`of`, which a later story of slice 6 brings), also after a script replaced `Array.prototype.values`, `entries`, `keys` and `forEach` before the host defined them; `intrinsic(realm, ArrayPrototypeValues)` answers the same object as `Array.prototype[Symbol.iterator]` read before that script. [slice 6]
+
+**HOST-203** (webidl:define-the-asynchronous-iteration-methods) In the setup closure and in `with_cx` of each of two realms of the agent, `well_known_symbol(AsyncIterator)` answers the same Symbol, for which the script `s === Symbol.asyncIterator && s.description === "Symbol.asyncIterator" && Symbol.keyFor(s) === undefined`, run in either realm with `s` a global holding it, answers `true`; a host object whose own `@@asyncIterator` method, defined with it, answers an object with a `next` method that answers `{ value: 1, done: false }` and then `{ done: true }`, makes the script `(async function () { var r = []; for await (var x of o) r.push(x); return r.join(); })()` answer a promise fulfilled with `"1"` after a checkpoint; the read spends no step (`last_entry_steps()` unchanged). [slice 10]
 
 ## 8. Scripts
 
@@ -880,7 +958,22 @@ step of the draft meets a state its assertions exclude.
 - **Generators and async functions.** A generator that was executing stays `executing`, so a
   later `next` throws: "If state is executing, throw a TypeError exception."
   (`ecma262:sec-generatorvalidate`). An async function or generator cut mid-step leaves its
-  promise pending.
+  promise pending. Added on 2026-11-23 for slice 10 (`engine.md` decision 3, "`async` functions
+  on suspended frames", item 5): an `async` function whose frame was on the stack, in its call or
+  in the job that resumed it, loses its frame (credited), runs no `finally`, and its promise
+  stays pending for good, since nothing can resume it (HOST-195); one suspended at an `await`
+  keeps its frame and a later checkpoint resumes it, unless its job had started and a check of
+  its resumption was refused, or `clear_microtasks` dropped its job: its reaction is then spent
+  and leaves its promise pending. Added the same day for the later waves of slice 10 (`engine.md`
+  decision 3, "Async generators on suspended frames", item 5, and "A built-in async function",
+  item 3): an async generator whose frame was on the stack loses its frame (credited), runs no
+  `finally`, and the promises of its queued requests stay pending for good, as do those of the
+  requests later `next`, `return` and `throw` queue, since an executing async generator only
+  queues (HOST-204); one suspended at its start, at a `yield` or at an `await` keeps its frame
+  and queue and is resumed later, its queued requests answered in order (HOST-205); a drain a
+  termination ended leaves the requests it did not settle pending for good. A built-in async
+  function (`Array.fromAsync`) whose steps ran leaves its promise pending for good and closes no
+  iterator; one suspended at an Await is continued by a later checkpoint (HOST-208).
 - **Module evaluation.** Every module on the evaluation stack (status `evaluating`) stays
   `evaluating` and is marked terminated; `evaluate_module` of any module whose graph reaches a
   marked module answers `Err(ModuleTerminated)`. Left unmarked, the next Evaluate would meet
@@ -902,7 +995,13 @@ step of the draft meets a state its assertions exclude.
 - **The microtask checkpoint.** The job that was running was dequeued ("Let oldestMicrotask be
   the result of dequeuing from the event loop's microtask queue", `html:perform-a-microtask-checkpoint`)
   and is not run again; the jobs before it ran; the jobs after it stay queued, in order;
-  ClearKeptObjects is not performed; the next checkpoint starts afresh.
+  ClearKeptObjects is not performed; the next checkpoint starts afresh. Added on 2026-11-23: a
+  job whose step of taking off was refused, by the step budget or the interrupt, was not taken
+  off: it is still first in the queue and the next checkpoint runs it, so nothing of a job is
+  lost between two jobs; the jobs left stay charged; the engine drops none of them, and the host
+  may with `clear_microtasks` (HOST-199, HOST-200); and a promise job whose
+  `host_prepare_to_run_job` was called gets its `host_clean_up_after_job` with `Ok(())` (decision
+  11, "The checkpoint is one entry").
 - **The interrupt flag** is cleared when it ends a run (decision 12).
 
 Rejected: rolling the heap back (no algorithm for it, and HTML says the script ceases, not
@@ -949,6 +1048,16 @@ entry and does not count on what the run left.
 
 **HOST-77** (html:perform-a-microtask-checkpoint) When the third of five queued jobs ends the checkpoint in `Terminated(StepBudget)`, the first two have run, the third never runs again, and the next checkpoint runs the fourth and fifth in order. [slice 10]
 
+**HOST-195** (swell:D10) The script `(async function () { await null; for (;;) {} })()` answers `Normal` with a promise; the next `perform_microtask_checkpoint` answers `Terminated(StepBudget)`, and `promise_state` of that promise reads `Pending` after it and after a later checkpoint, which answers `Normal` with both counts 0. [slice 10]
+
+**HOST-204** (swell:D10) The script `var g = (async function* () { try { await null; for (;;) {} } finally { globalThis.f = 1; } })(); [g.next(), g.next()]` answers `Normal` with an array of two promises; the next `perform_microtask_checkpoint` answers `Terminated(StepBudget)`; `promise_state` of both reads `Pending` after it and after a later checkpoint, which answers `Normal` with both counts 0; the script `typeof f` then answers `"undefined"`; and the script `g.next()` answers `Normal` with a promise whose `promise_state` reads `Pending` after a further checkpoint. [slice 10]
+
+**HOST-205** (swell:D10) An async generator suspended when an entry ends keeps its frame and its queue: after the script `var res; var g = (async function* () { var x = yield await new Promise(function (r) { res = r; }); yield x; })(); var p = g.next(), q = g.next(7); 0` and a checkpoint, the script `for (;;) {}` ends in `Terminated(StepBudget)`; the script `res(5)` and the next checkpoint then fulfil p with `{ value: 5, done: false }` and q with `{ value: 7, done: false }`, read through `promise_state` and `cx.get`. [slice 10]
+
+**HOST-206** (swell:D4) Requests queued on an async generator are charged until the generator is freed, and bounded by the memory budget alone: after the script `var g = (async function* () { await new Promise(function () {}); })(); g.next(); for (var i = 0; i < 1000; i++) g.next(); 0`, `heap_bytes()` exceeds its reading before the loop by at least 1,000 times 64 bytes; after the script `g = null` one `collect()` gives at least that back; and with `steps_per_entry` 10^9 the script `var h = (async function* () { await new Promise(function () {}); })(); h.next(); for (;;) h.next();` ends in `Terminated(MemoryBudget)`. [slice 10]
+
+**HOST-208** (swell:D10) A built-in async function cut by a termination leaves its promise pending for good: the script `var p = Array.fromAsync({ length: 2, 0: 0, get 1() { for (;;) {} } }); p` answers `Normal` with the promise p; the next checkpoint answers `Terminated(StepBudget)`; `promise_state` of p reads `Pending` after it and after a later checkpoint, which answers `Normal` with both counts 0. And the script `var q = Array.fromAsync({ length: 1, 0: new Promise(function (r) { globalThis.res = r; }) }); q`, then the script `for (;;) {}`, which ends in `Terminated(StepBudget)`, then the script `res(3)` and a checkpoint fulfil q with an array whose element 0 is 3. [slice 10]
+
 ## 11. Jobs and the microtask checkpoint
 
 **Promise jobs stay in the agent, in one FIFO microtask queue that also takes host microtasks,
@@ -970,7 +1079,7 @@ Why:
   order; a promise queue in the agent beside a host queue would not.
 - One budget per checkpoint: `function f() { Promise.resolve().then(f); } f();` queues a new
   job from each job, each far under any per-job budget; with a budget per job, as decision 9
-  has it, the checkpoint never returns and the host hangs (`AGENTS.md`: "Hostile input must
+  had it until 2026-11-23, the checkpoint never returns and the host hangs (`AGENTS.md`: "Hostile input must
   never hang, crash or exhaust the host").
 - HTML's steps around a promise job ("If job settings is not null, then prepare to run script
   with job settings. ... Let result be job(). ... If result is an abrupt completion, then
@@ -988,8 +1097,8 @@ Why:
 - A checkpoint called while a checkpoint runs returns at once with nothing run: "If the event
   loop's performing a microtask checkpoint is true, then return." (`html:perform-a-microtask-checkpoint`).
 
-Rejected: running jobs through `call` (decision 9's text); a budget per promise job (decision 9's
-"each with the budget"); a promise queue held by the host (the engine could not bound a
+Rejected: running jobs through `call` (decision 9's text until 2026-11-23); a budget per promise
+job (decision 9's "each with the budget", likewise); a promise queue held by the host (the engine could not bound a
 checkpoint, and the host would keep two queues in one order).
 
 ```rust
@@ -1005,10 +1114,14 @@ pub struct CheckpointReport { pub promise_jobs: u64, pub host_microtasks: u64 }
 
 impl<H: Host> Agent<H> {
     pub fn run_job(&mut self, job: Job) -> Result<Outcome<()>, HostError>;
-    pub fn queue_microtask(&mut self, task: Microtask<H>) -> Result<(), HostError>;
+    /// `realm` is the current realm of the microtask while it runs; it is checked first.
+    pub fn queue_microtask(&mut self, realm: &Realm, task: Microtask<H>) -> Result<(), HostError>;
+    /// Drop every queued entry unrun; answers how many. No script, no hook, no step.
+    pub fn clear_microtasks(&mut self) -> Result<usize, HostError>;
     pub fn perform_microtask_checkpoint(&mut self) -> Result<Outcome<CheckpointReport>, HostError>;
 }
 impl<'a, H: Host> Cx<'a, H> {   // no run_job: a job runs only when no code runs (9.5)
+    /// Queued with the current realm of this `Cx` (decision 7).
     pub fn queue_microtask(&mut self, task: Microtask<H>) -> Result<(), HostError>;
     pub fn perform_microtask_checkpoint(&mut self) -> Completion<CheckpointReport>;
 }
@@ -1029,6 +1142,88 @@ fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Self>, job
 performs its "host-defined steps for reporting the error" (`ecma262:sec-weakref-host-hooks`).
 A dropped `Job` releases its roots. The test262 runner answers `host_enqueue_timeout_job` by
 running the job when the queue is otherwise empty (`engine.md` decision 11).
+
+**A host microtask's realm.** Added on 2026-11-23 for slice 10. A host microtask runs with a
+realm, as every entry does (decision 7): the realm it was queued with is the current realm of
+every call it makes through its `Cx` while it runs. `Agent::queue_microtask` takes that realm
+and checks it first, as `Agent::call` does: a stale or released one answers
+`Err(StaleHandle)`, one of another agent `Err(ForeignHandle)`, and nothing is queued.
+`Cx::queue_microtask` takes the current realm of its `Cx`: inside a host function that
+function's [[Realm]], inside `with_cx` the realm `with_cx` took, inside a host microtask that
+microtask's (HOST-192). Neither call runs code, spends a step or calls a hook; no hook is called
+around a host microtask, whose own code does what the host needs before and after it. The
+queue holds the realm while the microtask is queued. Rejected: a microtask with no realm (a
+`Cx` call in it would have no current realm, which decision 7 excludes); the realm the
+checkpoint was called in (`Agent::perform_microtask_checkpoint` takes none, and one host
+microtask may need another realm than the next).
+
+**The checkpoint is one entry.** Added on 2026-11-23 for slice 10, the rule of `engine.md`
+decision 3, "The microtask checkpoint is one entry". `perform_microtask_checkpoint` is one
+outermost entry: its steps start at 0, and every entry it takes off the queue spends from them,
+one step for taking it off and then what it runs; every promise job queued costs a step more.
+So a checkpoint takes at most `steps_per_entry` entries off the queue, and a job that queues a
+job without end ends it in `Terminated(StepBudget)` (HOST-80). `Cx::perform_microtask_checkpoint`
+inside a host function runs inside the running entry and spends its steps (HOST-193). A
+termination of one job ends the checkpoint with the jobs behind it queued (section 10, HOST-77);
+`host_clean_up_after_job` is called for every promise job whose `host_prepare_to_run_job` was
+called, after a termination with `Ok(())`, and the checkpoint's outcome carries the reason.
+After it the host reads `last_entry_steps()` and `pending_microtasks()`; `Normal` with its
+`CheckpointReport` comes only once the queue is empty (HOST-79, HOST-148). One budget, but a
+scope per job (section 4): a value handed out to host code while a job runs, to a host
+microtask, a hook or a host function the job calls, is valid until that job ends, and the
+`ScriptRef`s `cx.parse_script` handed out in it are held until then; after it, a handle the host
+kept with no `Root` keeps nothing alive, and a collection later in the same checkpoint, or a
+`collect()` after it, frees its record once nothing else reaches it, after which the handle
+answers `Err(StaleHandle)` (HOST-196, as HOST-178 for `with_cx`). A checkpoint therefore holds
+what the running job was handed, not what every job touched.
+
+**Steps, the interrupt and what a checkpoint leaves.** Added on 2026-11-23 for the first
+embedder (`engine.md` decision 3, "The microtask checkpoint is one entry"; decision 9, "Jobs").
+`last_entry_steps()` after `perform_microtask_checkpoint()` reads the steps of the whole
+checkpoint, every entry taken off and everything the jobs ran, at most `steps_per_entry`, the
+same after `Normal` and after a termination; after a checkpoint that found the queue empty it
+reads 0; a nested checkpoint that returned at once (HOST-81) adds 0 to the entry around it; so a
+host that sums the reading after every entry counts every step once (HOST-197). The interrupt
+ends a running checkpoint with `Terminated(Interrupted)` at three places: at its start, before
+any entry is taken off, so a flag set before the checkpoint ends it with nothing taken off, as
+it ends any entry that starts (decision 12); before each entry is taken off, when the step of
+that entry is charged, so a flag set between two jobs leaves the next entry first in the queue;
+and while a job runs, wherever the step budget is checked (HOST-198). A checkpoint ended by the
+step budget, the interrupt or the memory budget leaves every entry it did not start queued, in
+its order and charged, and the next checkpoint runs them under its own budget (HOST-199). The
+engine drops none of them: HTML stops a script without clearing the microtask queue, and only
+the host knows whether the page goes on. The host empties the queue with
+`Agent::clear_microtasks`, so that a page that floods the queue cannot spend the budgets of
+later entries: it drops every queued entry unrun, credits what the promise jobs among them were
+charged, and answers how many entries it dropped; it runs no script, calls no hook and spends no
+step, and since no job runs, neither `host_prepare_to_run_job` nor `host_clean_up_after_job` is
+called; a dropped host microtask is dropped as a Rust value, the host's own code. A promise
+whose reaction job it dropped stays pending for good, as after a termination (HOST-200). It
+cannot be called inside a running checkpoint: it takes `&mut Agent`, which no code inside an
+entry holds, and `Cx` and `HookCx` have no such method, so a job cannot drop the entries behind
+it and change the order of the checkpoint that runs it. Rejected: a no-op answer inside a
+checkpoint (0 with entries queued would mislead); the engine emptying the queue at every
+termination (it would drop jobs of a page the host keeps). Dropping the agent with entries
+queued frees them and calls nothing of the host: no hook, job or microtask runs. A host function
+called from a job may settle a promise through a resolve function it holds; the reaction job
+that queues runs in the same checkpoint, behind every entry already queued (HOST-78, HOST-79).
+
+**What a queued job costs.** Added on 2026-11-23 for slice 10 (`engine.md` decision 4, "Queued
+jobs"). A promise job is charged to the memory budget while it is queued and credited when a
+checkpoint takes it off; everything it holds is traced through the queue, a root. A host
+microtask is not charged: its closure is the host's own storage, bounded by the host's calls,
+and holds the engine values it needs in `Root`s; dropping the agent drops it unrun.
+
+**The hooks of an `await`.** Added on 2026-11-23 for slice 10 (`engine.md` decision 3, "`async`
+functions on suspended frames", item 3). An `await` makes the two functions of the draft's Await
+and hands them to PerformPromiseThen, so the host sees what it sees for a `then`: two calls of
+`host_make_job_callback` per `await`, and for the job that resumes the function
+`host_prepare_to_run_job` with the function's realm, one call of `host_call_job_callback` with one
+of the two functions and the value made for it, and `host_clean_up_after_job` (HOST-194). A
+function of an `await` resumes the activation only while it is suspended at that `await`; called
+at any other time, by a host that kept it, it does nothing and returns `undefined`. Rejected: an
+`await` with no functions and no job-callback hooks, which no script can tell apart but a host
+that implements either hook can.
 
 **HOST-78** (ecma262:sec-hostenqueuepromisejob) Promise jobs and host microtasks run in the order they were queued: a script that queues `then` callbacks a and c with a host microtask b queued between them through a host function records the order a, b, c. [slice 10]
 
@@ -1055,6 +1250,24 @@ running the job when the queue is otherwise empty (`engine.md` decision 11).
 **HOST-89** (html:perform-a-microtask-checkpoint) A `WeakRef` whose target was returned by `deref()` in a job keeps that target through `collect` until the checkpoint that ran the job returns, and the first `collect` after it frees the target when nothing else reaches it. [slice 16]
 
 **HOST-148** (swell:D11) The host can tell which checkpoint spent its budget: with `steps_per_entry` N, a checkpoint after a script that queued three `then` callbacks answers `Normal(CheckpointReport)` with `promise_jobs` 3; the script `function f() { Promise.resolve().then(f); } f();` then answers `Normal`; and the next `perform_microtask_checkpoint` answers `Terminated(StepBudget)` with `last_entry_steps()` at most N. [slice 10]
+
+**HOST-192** (swell:D11) A host microtask runs in the realm it was queued with: one queued by `Agent::queue_microtask` with the second of two realms that calls a value that is not callable through `cx.call` gets a `TypeError` whose prototype is the second realm's `%TypeError.prototype%`; one queued by `cx.queue_microtask` in a host function of the second realm called from a script of the first gets the same; and `Agent::queue_microtask` with a released realm answers `Err(HostError::StaleHandle)`, and with a realm of another agent `Err(HostError::ForeignHandle)`, each queueing nothing (`pending_microtasks()` unchanged). [slice 10]
+
+**HOST-193** (swell:D11) A checkpoint is one outermost entry and spends one step for each entry it takes off the queue: with k host microtasks queued that make no call, `perform_microtask_checkpoint` answers `Normal` with `host_microtasks` k and `last_entry_steps()` then reads k; with nothing queued it answers `Normal` with both counts 0 and `last_entry_steps()` 0; and a script that calls a host function which queues three such microtasks and then calls `cx.perform_microtask_checkpoint` reads, in `last_entry_steps()` after the script, at least 3 steps more than the same script whose host function queues none. [slice 10]
+
+**HOST-196** (swell:D4) A checkpoint holds what a job was handed only until that job ends: of three host microtasks queued in one checkpoint, the first makes a host object with `cx.new_host_object` and the host keeps it as an `ObjectRef` with no root, the second calls through `cx.call` a function whose allocations start a collection, and the third then gets `Err(HostError::StaleHandle)` from `brand` of the kept handle, the checkpoint answering `Normal` with `host_microtasks` 3 and `state()` reading `Alive`. [slice 10]
+
+**HOST-197** (swell:D11) `last_entry_steps()` after a checkpoint reads the steps of the whole checkpoint, also after a termination: with `steps_per_entry` 3 and five host microtasks queued that make no call, `perform_microtask_checkpoint` answers `Terminated(StepBudget)`, `last_entry_steps()` reads 3 and `pending_microtasks()` reads 2; and a checkpoint of two host microtasks that make no call, the first of which calls `cx.perform_microtask_checkpoint` (which answers both counts 0), answers `Normal` with `host_microtasks` 2 and `last_entry_steps()` then reads 2. [slice 10]
+
+**HOST-198** (swell:D12) The interrupt ends a checkpoint with `Terminated(Interrupted)` at each of three places, and the flag is clear after: set before `perform_microtask_checkpoint` with two host microtasks queued, the checkpoint answers it with `last_entry_steps()` 0 and `pending_microtasks()` 2; set through the agent's `InterruptHandle` by the first of two host microtasks, which then returns, it answers it with `pending_microtasks()` 1, and the next checkpoint runs the second; set from another thread while a `then` callback loops without end, it answers it, and the next checkpoint answers `Normal` without running that callback again. [slice 10]
+
+**HOST-199** (html:perform-a-microtask-checkpoint) A checkpoint ended by its budget leaves every entry it did not start queued, in order, for the next one: with `steps_per_entry` N, after a script that queues 20 `then` callbacks, each of which first appends its number to a global array and then spends about N / 4 steps, every checkpoint answers `Terminated(StepBudget)` with `last_entry_steps()` at most N until one answers `Normal`, and the array then holds 1 to 20, each once and in order. [slice 10]
+
+**HOST-200** (swell:D11) `Agent::clear_microtasks` empties the queue without running anything: after the script `var p = Promise.resolve().then(function () { return 1; }); p`, which answers `Normal` with the promise p, `clear_microtasks` answers `Ok(1)` and calls no hook, `pending_microtasks()` then reads 0 and `heap_bytes()` less than before the call, the next checkpoint answers `Normal` with both counts 0, and `promise_state` of p reads `Pending`; `Cx` and `HookCx` have no `clear_microtasks`, which a `compile_fail` test holds. [slice 10]
+
+**HOST-194** (ecma262:await) The script `(async function () { await 1; })()` calls `host_make_job_callback` twice, with two distinct functions, and the checkpoint after it runs one promise job, for which the engine calls `host_prepare_to_run_job` with the script's realm, then `host_call_job_callback` once, with the first of those two functions and the value `host_make_job_callback` returned for it, then `host_clean_up_after_job` with `Ok(())`. [slice 10]
+
+**HOST-207** (ecma262:sec-builtincallorconstruct) An Await of a built-in async function goes through the hooks of an `await`: the script `A.fromAsync({ length: 1, 0: 1 })`, run in the second of two realms with the global `A` holding the first realm's `Array`, calls `host_make_job_callback` twice, with two distinct functions, and the checkpoint after it runs one promise job, for which the engine calls `host_prepare_to_run_job` with the first realm (the builtin's), then `host_call_job_callback` once, with the first of those two functions and the value `host_make_job_callback` returned for it, then `host_clean_up_after_job` with `Ok(())`; the promise is then fulfilled with an array of the first realm whose element 0 is 1, and `last_entry_steps()` of the checkpoint reads at least 3. [slice 10]
 
 ## 12. Interrupting
 
@@ -1550,6 +1763,8 @@ pub enum WellKnownSymbol {
     ToStringTag, Unscopables,
     // with slice 6's `Symbol` story (HOST-185):
     Iterator,
+    // with slice 10's `for await` story (HOST-203):
+    AsyncIterator,
 }
 impl<'a, H: Host> Cx<'a, H> {   // also on HookCx
     pub fn new_host_object(&mut self, spec: HostObjectSpec<H>) -> Result<Completion<ObjectRef>, HostError>;
@@ -1788,9 +2003,10 @@ The coordinator changes these in `engine.md`, which this unit does not edit:
 2. Decision 9, "After EngineFault the agent answers every call with EngineFault": it answers
    `Err(HostError::Faulted)`; the interrupt handle is not a call (decisions 6, 12).
 3. Decision 9, `perform_microtask_checkpoint` "each with the budget": one budget for the whole
-   checkpoint (decision 11).
+   checkpoint (decision 11). Changed in `engine.md` on 2026-11-23.
 4. Decision 9, "Generic and timeout jobs are handed to the host, which runs them through
-   `call`": through `run_job`; cleanup jobs likewise (decision 11).
+   `call`": through `run_job`; cleanup jobs likewise (decision 11). Changed in `engine.md` on
+   2026-11-23.
 5. Decision 9, "the host later calls `finish_loading_imported_module` with the module's source
    or an error": with a `Module` the host parsed, or a thrown value (decision 9).
 6. Decision 9, "a hash and random seed" and "random bytes" from the trait: two seeds, no
@@ -1925,7 +2141,6 @@ table in `host-interface-model.md` gives each marker's first words.
 
 ## Not checked
 
-- `min_stack_bytes` and the Rust stack one re-entry needs: no code exists; slice 1 measures it.
 - The generator `swell-num` uses for `Math.random`, and so how much of the 32-byte seed it uses.
 - HTML 7.2.3 (`WindowProxy`) and `Location`, on `nav-history-apis.html`, were not read here.
 - Whether the draft's text allows the `RangeError`s of decision 2 for strings, BigInts and

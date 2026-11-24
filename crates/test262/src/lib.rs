@@ -13,12 +13,14 @@
 //! - `host`: the runner's `Host`, with `print` and `$262`.
 //! - [`sections`]: `conformance/test262/sections.txt` and the judgement of each section.
 //! - [`expected`]: the comparison of the printed lines with `conformance/test262/expected.txt`.
+//! - [`parts`]: the run in parts, each part a run of its own, and the count from their files.
 
 pub mod count;
 pub mod expected;
 pub mod features;
 pub mod front_matter;
 mod host;
+pub mod parts;
 pub mod run;
 pub mod sections;
 pub mod slices;

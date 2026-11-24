@@ -13,9 +13,8 @@ These are the limits of release <Num at="version" />, from the [changelog](https
 
 | missing | brought by |
 |---|---|
-| in a regular expression: the flags `i` and `v`, property escapes and group names outside ASCII | the rest of slice 5, `regexp` |
-| identifiers outside ASCII | the rest of slice 5, with the Unicode tables |
-| generators | slice 7, `generators` |
+| in a regular expression: the flag `v` with its class sets and properties of strings | the rest of slice 5, `regexp` |
+| generator methods of object literals | the rest of slice 7, `generators` |
 | classes, `super`, private names | slice 8, `classes` |
 | promises, async functions, `for await` | slice 10, `promises-and-async` |
 | modules, dynamic `import`, `import.meta` | slice 11, `modules` |
@@ -24,12 +23,11 @@ These are the limits of release <Num at="version" />, from the [changelog](https
 
 ## The builtins
 
-The core library exists: `Object`, `Function`, `Array`, `String`, `Error`, `JSON`, `globalThis` and the URI functions, and with slice 6 `Symbol`, the Array and String iterators, `Array.from`, `Object.fromEntries` and `Object.groupBy`. Regular expressions run since release 0.6.0: the literal, `RegExp`, `exec` and `test`. Since release 0.7.0 `match` and `search` exist, and `replace`, `replaceAll` and `split` of `String` take a regular expression. The case methods, `normalize` and `localeCompare` take every String. A part of a regular expression that is not built yet is refused with a counted `SyntaxError`.
+The core library exists: `Object`, `Function`, `Array`, `String`, `Error`, `JSON`, `globalThis` and the URI functions, and with slice 6 `Symbol`, the Array and String iterators, `Array.from`, `Object.fromEntries` and `Object.groupBy`. Regular expressions run since release 0.6.0: the literal, `RegExp`, `exec` and `test`. Since release 0.7.0 `match` and `search` exist, and `replace`, `replaceAll` and `split` of `String` take a regular expression. Since release 0.8.0 `matchAll` and `RegExp.escape` exist, a regular expression takes the flag `i`, Unicode property escapes and group names outside ASCII, identifiers take code points outside ASCII, and generator functions run, with `yield*`. The case methods, `normalize` and `localeCompare` take every String. A part of a regular expression that is not built yet is refused with a counted `SyntaxError`.
 
 | missing | brought by |
 |---|---|
 | `Date`, `parseInt`, `parseFloat`, the rest of `Number`, all of `Math` but `max` | slice 4, `numbers-and-dates` |
-| `String.prototype.matchAll` and `RegExp.escape` | the rest of slice 5, `regexp` |
 | `Map`, `Set`, `WeakMap`, `WeakSet`, `Proxy`, `Reflect` | slice 9 |
 | `Promise` | slice 10 |
 | `BigInt` | slice 12 |

@@ -2,7 +2,11 @@
 //! EvalDeclarationInstantiation `#sec-evaldeclarationinstantiation`, and the direct call of
 //! `#sec-function-calls-runtime-semantics-evaluation`, step 6) and the `Function` constructor
 //! (`#sec-function-p1-p2-pn-body`, CreateDynamicFunction `#sec-createdynamicfunction`, kind
-//! `normal`). Written by `story:eval-and-function-constructor`.
+//! `normal`). Written by `story:eval-and-function-constructor`. CreateDynamicFunction of kind
+//! `generator`, for `%GeneratorFunction%` (`#sec-generatorfunction`, `builtins/generator.rs`),
+//! is `story:generator-function-constructor`: the same steps, with the prefix `function*`, the
+//! fallback prototype `%GeneratorFunction.prototype%`, the parse entry of that kind and the
+//! same hook, whose compilation type is `Function` for every kind (step 16).
 //!
 //! Both ask the host first, HostEnsureCanCompileStrings (`#sec-hostensurecancompilestrings`,
 //! with its seven parameters) before anything is parsed; `eval` of an object and each argument
@@ -26,7 +30,8 @@
 //! The code is kept in a script record of its own, and the copy with it (`docs/design/engine.md`,
 //! decision 4, "Source text."): for eval code the String PerformEval parsed, for the `Function`
 //! constructor the whole text of its last parse, `function anonymous(` P `\n) {\n` body `\n}`
-//! (`#sec-createdynamicfunction`), of which the function's [[SourceText]] is all.
+//! (`#sec-createdynamicfunction`; `function* anonymous(` for kind `generator`), of which the
+//! function's [[SourceText]] is all.
 //!
 //! Eval code runs in a frame of its own: the direct `eval` pushes it on the running loop, as a
 //! call of an ECMAScript function is (`interp/dispatch.rs`), with no Rust recursion; the
@@ -61,6 +66,35 @@ pub(crate) enum EvalStart {
         compiled: Rc<Compiled>,
         strict: bool,
     },
+}
+
+/// The kind of CreateDynamicFunction (`#sec-createdynamicfunction`, steps 2 to 5): the prefix
+/// of the source text, the fallback prototype and the parse entry. `async` and
+/// `async-generator` are slice 10's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DynamicFunctionKind {
+    /// `normal`, the `Function` constructor.
+    Normal,
+    /// `generator`, `%GeneratorFunction%`.
+    Generator,
+}
+
+impl DynamicFunctionKind {
+    /// The source text up to the parameter text: the prefix, then " anonymous(" (step 15).
+    fn head(self) -> &'static str {
+        match self {
+            DynamicFunctionKind::Normal => "function anonymous(",
+            DynamicFunctionKind::Generator => "function* anonymous(",
+        }
+    }
+
+    /// fallbackProto: `%Function.prototype%` or `%GeneratorFunction.prototype%`.
+    fn fallback_prototype(self) -> Intrinsic {
+        match self {
+            DynamicFunctionKind::Normal => Intrinsic::FunctionPrototype,
+            DynamicFunctionKind::Generator => Intrinsic::GeneratorFunctionPrototype,
+        }
+    }
 }
 
 /// The environments of an eval code's frame (PerformEval, steps 16 to 18).
@@ -649,7 +683,8 @@ impl<H: Host> Agent<H> {
             None => (args, None),
         };
         let new_target = new_target.unwrap_or(constructor);
-        let made = self.create_dynamic_function(new_target, params, body)?;
+        let made =
+            self.create_dynamic_function(new_target, DynamicFunctionKind::Normal, params, body)?;
         Ok(Value::Object(made))
     }
 
@@ -664,13 +699,14 @@ impl<H: Host> Agent<H> {
         self.to_string(arg)
     }
 
-    /// CreateDynamicFunction (`#sec-createdynamicfunction`) of kind `normal`, with `new_target`
-    /// set (step 1), the parameter arguments `params` and the body argument `body` (`None`: the
+    /// CreateDynamicFunction (`#sec-createdynamicfunction`) of `kind`, with `new_target` set
+    /// (step 1), the parameter arguments `params` and the body argument `body` (`None`: the
     /// empty String). The parts' Strings, the source String and the function are kept across
     /// every step that may run code.
-    fn create_dynamic_function(
+    pub(crate) fn create_dynamic_function(
         &mut self,
         new_target: ObjectRef,
+        kind: DynamicFunctionKind,
         params: &[Value],
         body: Option<Value>,
     ) -> Completion<ObjectRef> {
@@ -680,7 +716,7 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let mark = self.kept.len();
-        let made = self.dynamic_function_steps(new_target, params, body);
+        let made = self.dynamic_function_steps(new_target, kind, params, body);
         self.release(mark);
         self.heap.accounting.credit(list);
         made
@@ -690,6 +726,7 @@ impl<H: Host> Agent<H> {
     fn dynamic_function_steps(
         &mut self,
         new_target: ObjectRef,
+        kind: DynamicFunctionKind,
         params: &[Value],
         body: Option<Value>,
     ) -> Completion<ObjectRef> {
@@ -715,7 +752,7 @@ impl<H: Host> Agent<H> {
         // Steps 12 to 15: P, bodyParseString and sourceString, whose length `string_length`
         // bounds and whose code units are charged a step each as they are copied.
         let mut builder = StringBuilder::new();
-        self.append_str(&mut builder, "function anonymous(")?;
+        self.append_str(&mut builder, kind.head())?;
         for (k, &string) in param_strings.iter().enumerate() {
             if k > 0 {
                 self.append_str(&mut builder, ",")?;
@@ -727,7 +764,7 @@ impl<H: Host> Agent<H> {
         self.append_str(&mut builder, "\n}")?;
         let source_string = self.finish_string(builder)?;
         self.keep(Value::String(source_string));
-        // Step 16.
+        // Step 16: the compilation type is `Function` for every kind.
         self.ensure_can_compile_strings(
             &CompileStrings {
                 callee_realm: RealmRef { handle: realm },
@@ -743,7 +780,7 @@ impl<H: Host> Agent<H> {
         // Steps 17 to 25: the three parses, then the compile step. The text of the last parse is
         // kept with the code: the function's [[SourceText]] (step 28) is all of it.
         let (script, copy) =
-            self.parse_dynamic_function_code(realm, source_string, &param_strings)?;
+            self.parse_dynamic_function_code(realm, kind, source_string, &param_strings)?;
         let compiled = swell_compiler::compile_script_with(&script, &mut self.ledger());
         self.drop_tree(script);
         let (mut code, copy) = match self.compiled_with_source(realm, compiled, copy)? {
@@ -781,33 +818,38 @@ impl<H: Host> Agent<H> {
         }
         let script = self.make_script_record(realm, code, copy, None, true)?;
         let (_, compiled) = self.script_parts(script)?;
-        // Steps 27 to 31: OrdinaryFunctionCreate in the global environment of the realm, with
-        // its name and MakeConstructor, then the [[Prototype]] step 26 gives it.
+        // Steps 27 to 32: OrdinaryFunctionCreate in the global environment of the realm, with
+        // its name, and MakeConstructor for kind `normal`; for kind `generator` the template is
+        // a generator's, so the function has no [[Construct]] and its `prototype` is a new
+        // object whose [[Prototype]] is `%GeneratorPrototype%` (`instantiate_function`); then
+        // the [[Prototype]] step 26 gives it.
         let function = self.instantiate_function(&compiled, script, realm, 0, None)?;
         self.keep(Value::Object(function));
-        // Step 26: GetPrototypeFromConstructor(newTarget, "%Function.prototype%"), which may run
-        // code; it is read once the source parsed, as the steps order it.
+        // Step 26: GetPrototypeFromConstructor(newTarget, fallbackProto), which may run code; it
+        // is read once the source parsed, as the steps order it.
         let prototype =
-            self.get_prototype_from_constructor(new_target, Intrinsic::FunctionPrototype)?;
+            self.get_prototype_from_constructor(new_target, kind.fallback_prototype())?;
         self.engine_object_mut(function)?.prototype = Some(prototype);
         Ok(function)
     }
 
-    /// The parses of CreateDynamicFunction (steps 17 to 25) through
-    /// `swell_syntax::parse_dynamic_function` with the agent's `parser_nesting`: the parameter
-    /// text and the body text, taken from the source String `source` (`function anonymous(`,
-    /// P, `\n) {\n`, the body, `\n}`), whose copy is charged from the start; the third parse
-    /// reads the same text, so the spans of its tree are spans of the copy. The script with the
-    /// copy, or the throw of the first `SyntaxError` in `realm`, the copy credited. Not inlined
-    /// into its caller.
+    /// The parses of CreateDynamicFunction (steps 17 to 25) through the entry of `kind` with
+    /// the agent's `parser_nesting` (`swell_syntax::parse_dynamic_function_with` or
+    /// `parse_dynamic_generator_function_with`): the parameter text and the body text, taken
+    /// from the source String `source` (the head of `kind`, P, `\n) {\n`, the body, `\n}`), whose
+    /// copy is charged from the start; the third parse reads the same text, so the spans of its
+    /// tree are spans of the copy. The script with the copy, or the throw of the first
+    /// `SyntaxError` in `realm` (a refusal the parse held back to its end among them, counted
+    /// as a script's is), the copy credited. Not inlined into its caller.
     #[inline(never)]
     fn parse_dynamic_function_code(
         &mut self,
         realm: Handle,
+        kind: DynamicFunctionKind,
         source: StringRef,
         param_strings: &[StringRef],
     ) -> Completion<(swell_syntax::Script, SourceCopy)> {
-        let head = "function anonymous(".len();
+        let head = kind.head().len();
         let mut joined = param_strings.len().saturating_sub(1);
         for &string in param_strings {
             let length = self.source_length(string)?;
@@ -823,13 +865,14 @@ impl<H: Host> Agent<H> {
             units.get(head..head.saturating_add(joined)),
             units.get(body_start..units.len().saturating_sub("\n}".len())),
         );
+        let entry = match kind {
+            DynamicFunctionKind::Normal => swell_syntax::parse_dynamic_function_with,
+            DynamicFunctionKind::Generator => swell_syntax::parse_dynamic_generator_function_with,
+        };
         let parsed = match parts {
-            (Some(parameters), Some(body)) => Some(swell_syntax::parse_dynamic_function_with(
-                parameters,
-                body,
-                options,
-                &mut self.ledger(),
-            )),
+            (Some(parameters), Some(body)) => {
+                Some(entry(parameters, body, options, &mut self.ledger()))
+            }
             _ => None,
         };
         let Some(parsed) = parsed else {

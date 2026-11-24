@@ -147,9 +147,11 @@ impl Failure {
 /// Parses `source`, UTF-16 code units (a UTF-8 source is converted by the caller), as a
 /// `Script`: the tree, or every `SyntaxError` the parse found, at least one. A grammar error or a
 /// refusal stops the parse and is the only error; the early errors of a source that parses are
-/// all reported, in source order. The refusal of a generator function (slice 7) does not stop
-/// the parse: it comes after the whole parse and the early errors, the only error of a source
-/// that has neither a grammar error nor an early error, at the `*` of its first generator.
+/// all reported, in source order. Generator functions and methods parse. The one refusal held
+/// back to the end of the parse is that of an `async` function or arrow function (slice 10): it
+/// does not stop the parse, and comes after the whole parse and the early errors, the only error
+/// of a source that has neither a grammar error nor an early error, at the `async` of its first
+/// `async` function or arrow function.
 pub fn parse_script(source: &[u16], options: ParseOptions) -> Result<Script, Vec<SyntaxError>> {
     parse_script_with(source, options, &mut Unlimited).map_err(Failure::into_errors)
 }
@@ -212,8 +214,9 @@ pub fn parse_eval_with(
 /// The answer is a [`Script`] of one expression statement whose expression is the function
 /// expression, `FunctionId(0)`, the only function at the top of the tree; its own name is taken
 /// off, since the name "anonymous" is given by SetFunctionName (step 35) and not bound inside
-/// the function. The kinds `generator` (slice 7), `async` (slice 10) and `async generator`
-/// (slice 10) come with their constructors and have no entry before then.
+/// the function. The kind `generator` has its entry, [`parse_dynamic_generator_function`];
+/// the kinds `async` (slice 10) and `async generator` (slice 10) come with their constructors
+/// and have no entry before then.
 pub fn parse_dynamic_function(
     parameters: &[u16],
     body: &[u16],
@@ -230,8 +233,63 @@ pub fn parse_dynamic_function_with(
     options: ParseOptions,
     ledger: &mut dyn Ledger,
 ) -> Result<Script, Failure> {
+    dynamic_function(
+        parser::DynamicKind::Normal,
+        parameters,
+        body,
+        options,
+        ledger,
+    )
+}
+
+/// Parses the parts of CreateDynamicFunction (`#sec-createdynamicfunction`) for kind
+/// `generator` (`%GeneratorFunction%`, `#sec-generatorfunction`) as [`parse_dynamic_function`]
+/// parses those of kind `normal`, with the grammar symbols of that kind (steps 3 and 18 to 20):
+/// `parameters` alone as `FormalParameters[+Yield, ~Await]`; `body`, with a line feed before and
+/// after, alone as `GeneratorBody` (`FunctionBody[+Yield, ~Await]`); then the whole source text
+/// `function* anonymous(<P>\n) {\n<body>\n}` as a `GeneratorExpression` with its early errors
+/// (`#sec-generator-function-definitions-static-semantics-early-errors`): so a YieldExpression
+/// in the parameters, and `yield` as a name, are a SyntaxError. The answer is a [`Script`] of
+/// one expression statement whose expression is the generator expression, `FunctionId(0)`,
+/// its own name taken off. A refusal the parse holds back to its end (`async` function, slice
+/// 10) is answered as [`parse_script`] answers it.
+pub fn parse_dynamic_generator_function(
+    parameters: &[u16],
+    body: &[u16],
+    options: ParseOptions,
+) -> Result<Script, Vec<SyntaxError>> {
+    parse_dynamic_generator_function_with(parameters, body, options, &mut Unlimited)
+        .map_err(Failure::into_errors)
+}
+
+/// [`parse_dynamic_generator_function`] charged to `ledger` (the module's documentation).
+pub fn parse_dynamic_generator_function_with(
+    parameters: &[u16],
+    body: &[u16],
+    options: ParseOptions,
+    ledger: &mut dyn Ledger,
+) -> Result<Script, Failure> {
+    dynamic_function(
+        parser::DynamicKind::Generator,
+        parameters,
+        body,
+        options,
+        ledger,
+    )
+}
+
+/// The three parses of CreateDynamicFunction of `kind`, then the early errors and the scope
+/// analysis of the last.
+fn dynamic_function(
+    kind: parser::DynamicKind,
+    parameters: &[u16],
+    body: &[u16],
+    options: ParseOptions,
+    ledger: &mut dyn Ledger,
+) -> Result<Script, Failure> {
     let meter = Meter::new(ledger);
-    let parsed = parser::parse_dynamic_function(parameters, body, options.max_nesting, &meter);
+    let parsed =
+        parser::parse_dynamic_function(kind, parameters, body, options.max_nesting, &meter);
     analysed(parsed, options.max_nesting, &meter)
 }
 

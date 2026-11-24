@@ -10,9 +10,9 @@ and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the byteco
 interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
 6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
 requirement is pending for it, and 14 of the 58 scenarios of the ESS model pass on the engine
-(the other 44 need a later slice and say so). 113 of 191 host requirements have a test.
+(the other 44 need a later slice and say so). 114 of 208 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate holds the test262 counts: 18,155 of the 44,812 run cases pass (2026-11-23, release `0.7.0`; 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
+gate holds the test262 counts: 20,229 of the 44,812 run cases pass (2026-11-23, release `0.8.0`; 18,155 in `0.7.0`, 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
 "Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
@@ -48,12 +48,17 @@ brought the crate `swell-regexp` (the pattern parser, the compiler, the backtrac
 under the budgets), regular expression literals, `RegExp` with `exec` and `test`, `replace`,
 `replaceAll` and `split` of `String`, and the case methods, `normalize` and `localeCompare`
 for every String; its second wave (`docs/plan/slice-05-wave-2.md`) the methods keyed by `@@match`, `@@replace`, `@@search` and
-`@@split` with `String.prototype.match` and `search` (release `0.7.0`): 1,667 of its 2,724
-cases pass
-(`test262-slice 05 2724 5441 0 0 2724 1667 1057 0`), and no host requirement is pending for
-it. Six of its fifteen stories are open: property escapes, identifiers and group names
-outside ASCII,
-`matchAll` and `RegExp.escape`, the flags `i` and `v`, and the close.
+`@@split` with `String.prototype.match` and `search` (release `0.7.0`); after it `matchAll` and
+`RegExp.escape`, property escapes, the flag `i`, and identifiers and group names outside ASCII
+(its third wave, `docs/plan/slice-05-wave-3.md`, release `0.8.0`): 2,523 of its 2,724 cases pass
+(`test262-slice 05 2724 5441 0 0 2724 2523 201 0`), and no host requirement is pending for
+it. Two of its fifteen stories are open: the flag `v` and the close. Slice 7, `generators`
+(`epic:slice-07-generators`), is in work beside it: generator syntax, generators on suspended
+frames, `%GeneratorFunction%` and `yield*` are in release `0.8.0`, and 1,168 of its 1,491 cases
+pass (`test262-slice 07 1491 2841 0 0 1491 1168 323 0`); generator methods of object literals
+and the close are open. Slice 10, `promises-and-async` (`epic:slice-10-promises-and-async`), is
+accepted in seventeen stories (`docs/plan/waves.md`, "Slice 10, `promises-and-async`"), and its
+first order is being built; 31 host requirements are pending for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
@@ -202,7 +207,10 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   sources (`crates/*/src`, the manifests and the lock file, `.cargo/config.toml`, the
   toolchain file, `taskfiles/test262.yml`, the files of `conformance/test262/` the run reads)
   with `conformance/test262/expected.digest`. A change of a source runs the full run
-  (`slot --timeout 30m task test262-expected`), which writes `expected.txt` and the digest;
+  (`slot --timeout 30m task test262-expected`), which writes `expected.txt` and the digest; where
+  the run does not fit one pool job, it is made in parts, each a job of its own
+  (`slot --timeout 30m task test262-part TEST262_PART=<k>/<n>` for each k), and counted from
+  their files (`slot task test262-expected TEST262_FROM_PARTS=.out/test262/parts`);
   the lane `slow` (`task slow`, `.github/workflows/slow.yml`) makes the full run on the forge
   and compares bytes. A release waits for a green lane `slow` on its commit.
 - A heavy test has a gate count and a full count: `SWELL_FULL_COUNTS=1` gives the full one,
@@ -311,68 +319,71 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot --timeout 30m task check-runner` on 2026-11-23, on the commit of release `0.7.0`
-(`1d32bfe`, the branch of wave 2 of slice 5; `docs/plan/slice-05-wave-2.md`), load 60 before
-and 65 after on 16 cores. Every check passed and the run exited 201 on its last line alone:
-the test steps took 194.7 s of their 120 at that load (331.3 CPU seconds). The planted
-scripts' single `ok` lines and the slice lines after slice 6 are left out
-(`conformance/test262/expected.txt` has every slice line). The fault step's line counts the
-695 tests its filter leaves out as ignored:
+`slot --timeout 30m task check-runner` on 2026-11-23, on the commit of release `0.8.0`
+(`a350de3`, the branch of wave 3 of slice 5; `docs/plan/slice-05-wave-3.md`), load 26 before
+and 34 after on 16 cores. Every check passed and the run exited 0: the test steps took 94.3 s
+of their 120 at that load (312.1 CPU seconds; on the commit of release `0.7.0` they took
+194.7 s at load 65, and the run exited 201 on that line alone). The planted scripts' single
+`ok` lines, the ten slowest tests of each step and the slice lines after slice 7 but that of
+slice 10 are left out (`conformance/test262/expected.txt` has every slice line). The fault
+step's line counts the 758 tests its filter leaves out as ignored:
 
 ```
-python-check: no Python file among 1775 file(s)
+python-check: no Python file among 1931 file(s)
 forbid-unsafe-check: 9 crate root(s), each with #![forbid(unsafe_code)]
 Cargo.lock: 8 package(s), none from outside this repository
 toolchain-check: rustc 1.99.1, the channel rust-toolchain.toml pins; 5 workflow file(s), none names a compiler
 nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 16 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
 data/unicode/17.0.0: 17 file(s), each with the SHA-256 its SOURCE line gives; 17 required path(s) present
-unicode-tables: 9 table(s) equal the generator output
+unicode-tables: 15 table(s) equal the generator output
 swell v1 — 2 file(s), 8 scenario(s), valid
 58 scenario(s) (8 authored), 41 refusal(s), written to .out/suite.json
   58 scenarios: 58 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 191 requirement(s), 191 line(s): 113 test, 78 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 4:9 7:1 8:1 9:5 10:14 11:32 12:2 13:2 14:6 16:5 18:1
-host-surface: 0 change(s) since 0.7.0, each named
+host-requirements: 208 requirement(s), 208 line(s): 114 test, 94 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 4:9 8:1 9:5 10:31 11:32 12:2 13:2 14:6 16:5 18:1
+host-surface: 0 change(s) since 0.8.0, each named
 site-data-check: website/data/status.json equals its regeneration from conformance/test262/expected.txt, conformance/slices-delivered.txt, conformance/host/requirements.txt, conformance/test262/moves.tsv, docs/design/engine.md, Cargo.toml, Cargo.lock and the crate roots under crates
 test-main: 8 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
 test-binaries-check: 17 test executables, 8 integration-test binaries in 8 packages, none with a .debug_ section
-build-tests: Finished `test` profile [unoptimized] target(s) in 0.08s
-build-collect: Finished `test` profile [unoptimized] target(s) in 38.12s
-build-faults: Finished `test` profile [unoptimized] target(s) in 48.26s
-build-conform-engine: Finished `test` profile [unoptimized] target(s) in 38.41s
-build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.37s
-17 test binaries: 1104 passed, 0 failed, 1 ignored
-gate-time test 51.9
+build-tests: Finished `test` profile [unoptimized] target(s) in 0.01s
+build-collect: Finished `test` profile [unoptimized] target(s) in 19.78s
+build-faults: Finished `test` profile [unoptimized] target(s) in 18.77s
+build-conform-engine: Finished `test` profile [unoptimized] target(s) in 2m 04s
+build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.06s
+17 test binaries: 1215 passed, 0 failed, 1 ignored
+gate-time test 28.5
 test-doc: 8 test suites: 13 passed, 0 failed, 0 ignored
 test-doc collect-every-safe-point: 2 test suites: 13 passed, 0 failed, 0 ignored
-gate-time test-doc 9.3
-test-collect: 2 test binaries: 864 passed, 0 failed, 1 ignored
-gate-time test-collect 78.9
-test-faults: 1 test binaries: 1 passed, 0 failed, 695 ignored
-gate-time test-faults 0.9
+gate-time test-doc 3.7
+test-collect: 2 test binaries: 934 passed, 0 failed, 1 ignored
+gate-time test-collect 43.6
+test-faults: 1 test binaries: 1 passed, 0 failed, 758 ignored
+gate-time test-faults 0.2
 conform-engine: 3 test binaries: 12 passed, 0 failed, 0 ignored
 conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok
   58 scenarios: 14 passed, 0 failed, 0 error, 44 unsupported
-gate-time conform-engine 4.9
-test262-refused 34929
-test262 total 53801 8982 7 44812 18155 26655 2
+gate-time conform-engine 1.6
+test262-refused 30642
+test262 total 53801 8982 7 44812 20229 24581 2
 test262: 221 directory lines sum to the total
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
 test262-slice 04 1598 3156 0 0 1598 261 1337 0
-test262-slice 05 2724 5441 0 0 2724 1667 1057 0
+test262-slice 05 2724 5441 0 0 2724 2523 201 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
+test262-slice 07 1491 2841 0 0 1491 1168 323 0
+test262-slice 10 3879 7499 0 0 3879 14 3865 0
 test262: 22 slice lines equal the design
 test262-errors 0
-test262: 287 lines of conformance/test262/expected.txt; sources digest a759135d07410aca0ba82f4116617071ad479b7c4db7ed4cd302809b1b099330 equals conformance/test262/expected.digest
-gate-time test262-check 1.0
+test262: 287 lines of conformance/test262/expected.txt; sources digest 976eb9f2f5ecf761b639fd4e892b9e0d4c881e866a70136a9ff516ef01633619 equals conformance/test262/expected.digest
+gate-time test262-check 0.1
 test262-moves: 1774 case(s) moved, 3:78 4:325 5:285 6:694 7:60 8:183 9:22 10:86 11:4 12:21 13:16; slices 1 to 19: 44931 85794
-gate-time test262-moves-check 21.1
+gate-time test262-moves-check 7.2
 gate-selftest: 65 passed, 0 failed
-gate-time gate-selftest 26.7
-gate-time test-steps 194.7 of 120, cpu 331.3, load 65.16 on 16 cores
+gate-time gate-selftest 9.4
+gate-time test-steps 94.3 of 120, cpu 312.1, load 33.84 on 16 cores
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`
@@ -469,7 +480,13 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   (https://github.com/beyond10x/swell/releases/tag/0.6.0); `0.7.0`, 2026-11-23, tagged on
   `e0bb1ec`, the second wave of slice 5, with which the regular expressions of the first
   consumer's harness answer, on the decision "cut 0.7.0 now" of the session that decides for
-  the operator (https://github.com/beyond10x/swell/releases/tag/0.7.0). After a release
+  the operator (https://github.com/beyond10x/swell/releases/tag/0.7.0); `0.8.0`, 2026-11-23,
+  tagged on the commit of its gate numbers, the one after the release commit `a350de3`: the
+  third wave of slice 5 with the first four stories of slice 7, on the decision "cut 0.8.0
+  when the two running slice 5 units are merged and a unit has brought the full test262 run
+  under 15 min of a pool job" of the session that decides for the operator
+  (https://github.com/beyond10x/swell/releases/tag/0.8.0; the link opens once the release is
+  published). After a release
   `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of

@@ -737,7 +737,9 @@ and per code unit of a pattern before its parse at run time (decision 7, "What o
 the matcher is"), per limb operation for `BigInt`, per code unit of its text and per value for
 `JSON.parse` and `JSON.rawJSON`, per code unit of eval code before its parse, and per
 pass of a sort of n property keys, n before the pass; plus what a host function charges for its
-own work with `cx.charge_steps` (`host-interface.md`, section 14). Eval code: PerformEval charges one step per
+own work with `cx.charge_steps` (`host-interface.md`, section 14); and, from slice 10, a step for
+each entry a microtask checkpoint takes off its queue and one for each promise job queued ("The
+microtask checkpoint is one entry" below). Eval code: PerformEval charges one step per
 code unit of the eval String before it copies it; CreateDynamicFunction charges one per code
 unit it copies into its source text and nothing more; `parse_script` charges none. Strings,
 added on 2026-11-22: a String operation charges its code units before it reads or copies them,
@@ -979,6 +981,509 @@ the rule first and then the mechanism.
    as code, a step per instruction, a chain of n levels spends steps in proportion to n, and only
    the collector walks a suspended frame, as it walks every record, spending no step.
 
+**The microtask checkpoint is one entry.** Added on 2026-11-23 for slice 10. What a host sees
+(`host-interface.md` decision 11): `perform_microtask_checkpoint` is one outermost entry with one
+step budget, whatever it runs. Its steps start at 0 and it reads the interrupt before it spends
+one, as every outermost entry does (`host-interface.md`, decisions 2 and 12). Every entry it
+takes off the queue, a promise job or a host microtask, spends from that one counter: one step
+for taking it off, charged while the entry is still first in the queue, so that a step budget or
+an interrupt that refuses the step leaves it there, unrun and whole; then what it runs, the steps
+of every call it makes and every instruction those calls run. An entry is therefore either
+still queued or has started; none is lost between two jobs (changed on 2026-11-23 from a step
+charged after the entry left the queue, which lost the entry whose step was refused). Every
+promise job queued while it runs (HostEnqueuePromiseJob, `sec-hostenqueuepromisejob`) costs one
+step more, charged before its record is made, so TriggerPromiseReactions over n reactions
+(`sec-triggerpromisereactions`) spends n steps, and PerformPromiseThen on a settled promise
+(`sec-performpromisethen`) one; a promise job queued by an entry outside a checkpoint costs that
+entry the same step. `last_entry_steps()` after `perform_microtask_checkpoint()` reads the steps
+of the whole checkpoint: every step of taking an entry off and everything the entries ran, at
+most `steps_per_entry`, the same whether the checkpoint answered `Normal` or a termination (the
+step a termination refused is not spent). After a checkpoint that found the queue empty it reads
+0, since the checkpoint is an outermost entry whose count starts at 0 and that spent none
+(HOST-193); a nested checkpoint that returned at once (HOST-81) spends no step and adds 0 to the
+entry around it. So a host that sums `last_entry_steps()` after each entry, scripts and
+checkpoints alike, counts every step once (HOST-197).
+
+The interrupt ends a running checkpoint as it ends a running script, with
+`Terminated(Interrupted)`, at three places: at the start, where `begin` reads the flag before the
+first entry is taken off, so a flag set before the checkpoint starts ends it with nothing taken
+off and `last_entry_steps()` 0, as it ends any entry that starts (`host-interface.md` decision
+12); before each entry is taken off, where `charge_steps` reads the flag before it spends the
+step of that entry, so a flag set between two jobs ends the checkpoint with the next entry still
+first in the queue; and while a job runs, at every place decision 3 checks the step budget, so a
+flag set from another thread while a job loops ends that job, which is not run again. The flag
+is cleared when it ends the checkpoint (HOST-198).
+
+The bound of the whole checkpoint: each entry it takes off costs at least one step, so one
+checkpoint takes at most `steps_per_entry` entries off the queue, whatever its jobs queue. A job
+that queues a job without end (`function f() { Promise.resolve().then(f); } f();`) ends the
+checkpoint in `Terminated(StepBudget)` (HOST-80), and so does a host microtask that queues a
+host microtask and runs no code; a job that queues many jobs at once pays a step and the charge
+of each ("Queued jobs", decision 4), so it ends in one of the two budgets. A step stands for a
+bounded amount of work here too: taking an entry off moves one record of fixed size and calls at
+most two hooks beside the job; queueing a promise job makes one record of fixed size.
+
+A termination of one job, `Terminated(StepBudget)`, `Terminated(MemoryBudget)` or
+`Terminated(Interrupted)` alike, ends the whole checkpoint. The entry that was running is not
+run again; an entry whose step of taking off was refused was not taken off and is still first;
+the entries behind stay queued in their order, and the promise jobs among them stay charged;
+ClearKeptObjects is not performed; the checkpoint answers `Terminated(reason)`, and the next one
+runs the entries left from the first, under its own budget, as every outermost entry has
+(`host-interface.md` section 10, HOST-77, HOST-199). Nothing is dropped behind the host's back:
+the engine does not empty the queue at a termination, since HTML stops a script without
+clearing the event loop's microtask queue and only the host knows whether the page goes on; a
+host that does not want the entries left run calls `Agent::clear_microtasks` (below). A promise job whose `host_prepare_to_run_job` was
+called gets its `host_clean_up_after_job` on every way out, after a termination with `Ok(())`,
+so the host's two steps around a job stay paired; the reason is the checkpoint's outcome.
+`Terminated(EngineFault)` faults the agent, and the queue never runs again. What the host reads
+afterwards: `Normal(CheckpointReport)`, with the count of each kind, only once the queue is
+empty; otherwise the termination, `last_entry_steps()` and `pending_microtasks()`, the entries
+left, so it can tell which checkpoint spent its budget (HOST-148).
+
+One budget, but a scope per job. The values handed out to host code while a job runs (to a
+host microtask through its `Cx`, to a hook of a promise job through its `HookCx`, to a host
+function a job calls) are valid for the scope of that job, as a value handed to a host function
+is valid until the function returns (`host-interface.md` section 4), and the scripts
+`Cx::parse_script` hands out as `ScriptRef`s in a job are held until that job ends. When the job
+ends, on every way out, the checkpoint stops holding them: a value a job handed out and the host
+kept with no `Root` and listed in no `trace` is then kept alive by nothing the host did, so a
+collection at a later safe point of the same checkpoint (between two jobs, or one an allocation
+of a later job starts) or a `collect()` after the checkpoint frees it once nothing else reaches
+it, and the kept handle then answers `Err(StaleHandle)`, as HOST-178 states for a handle kept
+past a `with_cx` (HOST-196). So a checkpoint of many jobs holds at any time what the running job
+was handed, never what every job touched. The mechanism: before each entry the loop notes the
+length of the agent's list of handed-out values (`Agent::scope`) and of its scoped scripts, and
+after it truncates both to those lengths, also after a termination; `Cx::perform_microtask_checkpoint`
+does the same inside the scope of the host function that called it, which keeps what it was
+handed before. Rejected: holding everything handed out until the checkpoint returns (the
+outermost entry's rule for `with_cx`): a checkpoint that runs `steps_per_entry` jobs would grow
+the list, uncharged, by every value each of them touched.
+
+The mechanism. The checkpoint calls `Agent::begin` once and then sets the agent's flag of a
+running checkpoint until it returns, on every path. `begin` sets `steps` to 0 and reads the
+interrupt only when no builtin runs and that flag is clear, so every `Cx` call a host microtask
+makes, and the call of a handler, is a nested entry that spends from the checkpoint
+(`host-interface.md` decision 2: "An entry made by host code that runs inside another entry (a
+host function, a hook, a host microtask) is nested"). The loop charges the step of the first
+entry with `charge_steps`, which reads the interrupt before it spends, then takes the entry off,
+puts the values of a promise job on the kept stack before it calls a hook or code ("Queued jobs", decision 4), runs it, and
+comes to a safe point before the next entry, where a collection may run. A host microtask runs
+with its realm as the realm of the entry, a promise job with its realm, or with the realm current
+at its enqueue when its realm is null. `Cx::perform_microtask_checkpoint` runs the same loop:
+from `with_cx` it is an outermost entry of its own; from a host function it runs inside the
+running entry, on that entry's steps, and a termination in it is that entry's, which the host
+function receives as `Abrupt::Terminated`; while the flag is set it answers both counts 0 at once
+and runs nothing (HOST-81). Rejected: a step budget per job (the text of decision 9 until
+2026-11-23: a job that queues a job would never let the checkpoint end); steps for code alone
+and none for taking an entry off (a host microtask that queues another and runs no code would
+never end the checkpoint).
+
+Emptying the queue is the host's call. Added on 2026-11-23. `Agent::clear_microtasks` drops
+every queued entry, promise jobs and host microtasks alike, credits what the promise jobs among
+them were charged, and answers how many entries it dropped (HOST-200), so that a page whose jobs
+flood the queue cannot spend the budgets of the entries that come after it. It runs no script,
+calls no hook and spends no step; a host microtask it drops is dropped unrun as a Rust value,
+which is the host's own code and not a callback of the engine. No job runs, so no
+`host_prepare_to_run_job` or `host_clean_up_after_job` is called for any of them. A promise whose
+reaction job it dropped stays pending for good, as after a termination: the derived promise of a
+`then` whose job was dropped is never settled, a promise whose resolve-thenable job was dropped
+is already resolved and so never settles, and an `async` function whose resumption was dropped
+is never resumed ("`async` functions on suspended frames" below, item 5). It is refused inside a running checkpoint by its type: it
+takes `&mut Agent`, which no code inside an entry holds, and `Cx` and `HookCx` have no such
+method; a job that dropped the entries behind it would change the order of the checkpoint that
+runs it, which HTML's checkpoint never does. Rejected: a no-op answer inside a checkpoint (a call
+that answers 0 with entries queued would mislead the host). Dropping the agent with entries
+still queued frees them with it and calls nothing of the host: no hook, no job and no
+microtask runs. A host function called from a job may settle a promise, through a resolve
+function it holds; the reaction job that queues runs in the same checkpoint, behind every entry
+already queued, in the one order of the queue (HOST-78, HOST-79).
+
+**`async` functions on suspended frames.** Added on 2026-11-23 for slice 10. What a script sees,
+the standard's: an `async` function runs in its call until its first `await` and returns its
+promise there (AsyncFunctionStart, `sec-async-functions-abstract-operations-async-function-start`;
+AsyncBlockStart, `sec-asyncblockstart`; EvaluateAsyncFunctionBody,
+`sec-runtime-semantics-evaluateasyncfunctionbody`); `await` suspends its execution context, and a
+job of the promise it awaits runs it again where it stopped, with the value, or with the reason
+thrown at the `await` (Await, `await`; RunSuspendedContext, `sec-runsuspendedcontext`). What a
+host sees: the hooks, budgets, bounds and states of the items below. Item 2 of "Suspended frames"
+leaves the holder of an `async` function's frame to this slice, and the items below name it;
+items 1 to 6 there hold for an `async` function as they are written for a generator, except
+where an item below says otherwise. Each item states the rule first and then the mechanism.
+
+1. The holder. A suspended `async` function, with its frame and every value only the frame holds,
+   stays alive exactly as long as something that will resume it is reachable: a reaction of the
+   promise it awaits, or the job of that reaction in the queue. `collect()` frees all of it once
+   neither is, also while a script still holds the function's own promise, which then stays
+   pending. The mechanism: the holder is the activation of an `async` function, an internal kind
+   of object (`object/async_function.rs`) with a null [[Prototype]], which no instruction and no
+   read hands to a script or a host. Its kind holds the slot for one suspended frame
+   (`SuspendedFrame`, `interp/suspend.rs`), the state (executing, suspended at an `await` with the
+   number of that suspension, completed) and the promise of the call with what settles it; its
+   kind site traces all of them. The call makes the activation and the promise before
+   FunctionDeclarationInstantiation, and its code keeps the activation in a local slot it
+   reserves, as a generator's code keeps its object, so while the frame runs the frame keeps the
+   activation alive (the frame stack is a root). While the frame is suspended, the two functions
+   of its `await` hold the activation in their slots (item 3), the reactions of the awaited
+   promise hold those functions, and the promise, or the queue once it settled, holds the
+   reactions. Rejected: the promise of the call as the holder. No resumption goes through it: a
+   job of the awaited promise resumes the function, so the call's promise is not the object item
+   2 of "Suspended frames" asks for; a promise a script keeps would keep alive a frame nothing can
+   resume once the awaited promise is garbage; and every promise would carry a slot for a frame.
+2. Its charge, and what an `await` that never ends costs. The frame is charged and credited as
+   item 3 of "Suspended frames" states: charged once, by the call that makes it; credited once,
+   when the body returns or throws (the return of an `async` template pops the frame,
+   `pop_frame`, and the handler around its body does so for a throw), when a termination drops it
+   while it runs (item 5), or after the sweep that frees the activation while the frame is
+   suspended, through the guard of the credit queue beside the box. While the promise it awaits
+   never settles, a suspended `async` function costs: its activation's slot, its frame's `charged`
+   (at least `frame_bytes()` + 16 × L bytes for L local slots), the two functions of its `await`
+   with their boxes (item 3; decision 4, "A built-in function with slots") and two reactions in
+   the awaited promise's lists. So with L = 200, `heap_bytes()` after the call exceeds the reading
+   before it by at least 3,200, and one `collect()` after the last reference to the awaited
+   promise is dropped gives at least 3,200 back, whether or not the script still holds the
+   function's own promise. A promise the host roots, or one a reachable object holds, keeps all of
+   it until the root is released or the object is freed; a script that keeps N such promises
+   reachable holds N times that and ends in `Terminated(MemoryBudget)` once the room is spent, as
+   one that keeps N arrays does. Dropping the agent frees it with the heap, and its charge ends
+   with the accounting it was in.
+3. What an `await` makes, and which hooks its job calls. The standard's, so what a host sees is
+   the draft's sequence: Await makes two built-in functions, onFulfilled and onRejected, with
+   CreateBuiltinFunction (`await`, steps 3 to 6), and calls PerformPromiseThen without a
+   capability, which calls HostMakeJobCallback for each (`sec-performpromisethen`,
+   `sec-hostmakejobcallback`). When the awaited promise settles, the reaction job
+   (`sec-newpromisereactionjob`) has the realm GetFunctionRealm gives for the function
+   (`sec-getfunctionrealm`): the current realm at the `await`, the `async` function's realm. It
+   calls the function through HostCallJobCallback (`sec-hostcalljobcallback`). So every `await`
+   calls `host_make_job_callback` twice, and the job that resumes the function calls
+   `host_prepare_to_run_job` with the function's realm, `host_call_job_callback` once with one of
+   the two functions and the value made for it, and `host_clean_up_after_job`, as every reaction
+   job does (HOST-82, HOST-84, HOST-194). The first suspension of a call hands the call's promise
+   to its caller as a return does; a later one ends the run of the function the job called, which
+   returns `undefined` (Await's closures: "Return NormalCompletion(undefined)."). The mechanism:
+   the two functions are built-in functions with slots (decision 4): each holds the activation and
+   the number of the suspension it was made for. Called while the activation is suspended at that
+   suspension, it resumes it, with `TAG_NORMAL` and the value or `TAG_THROW` and the reason;
+   called at any other time (its twin ran first, or a host kept it from `host_make_job_callback`
+   and calls it), it does nothing and returns `undefined`. The reaction is an ordinary reaction
+   whose handler is the JobCallback of that function, and its job runs in the checkpoint as every
+   promise job does. A function of an `await` resumes as a resumption from Rust does (item 6 of
+   "Suspended frames", "Re-entry"): one re-entry, which ends before the job does. Rejected: an
+   `await` that makes no function, with a reaction that names the activation directly and a job
+   that calls `host_prepare_to_run_job` and `host_clean_up_after_job` and neither job-callback
+   hook. No script could tell: the resumed code runs in the function's own execution context,
+   whose realm and ScriptOrModule decide the incumbent settings object and the active script
+   while it runs, as the topmost script-having execution context
+   (`html:incumbent-settings-object`, `html:topmost-script-having-execution-context`), with or
+   without the steps of `html:hostcalljobcallback`. But a host could: one that implements
+   `host_make_job_callback` or `host_call_job_callback` would see two calls fewer per `await`
+   and one fewer per job, and would get no function it could keep and call as the draft lets it.
+   The saving was two objects of fixed size per `await`, garbage once the job ran.
+4. Steps and depth. An `await` spends the step of its instruction and what its parts cost
+   anywhere: the Get of `constructor` that PromiseResolve makes when the value is a promise
+   (`sec-promise-resolve`), and the step of a promise job when the awaited promise is settled
+   already and PerformPromiseThen queues the job at once ("The microtask checkpoint is one
+   entry"); making the two functions and the two reactions is bounded work within its step. Its
+   resumption costs what a generator's does (items 4 and 5 of "Suspended frames"): the step of a
+   call for the resumption, beside the step of the call of the function the job calls and the step
+   of taking the job off the queue, so a resumed `await` has spent 3 steps when its next
+   instruction runs. The instructions it then runs are steps of the checkpoint that runs the job,
+   whichever entry made the activation, and nothing is charged to an entry that has ended. A frame
+   suspended at an `await` is not on the frame stack and takes no `frame_depth`; a resumption
+   checks `frame_depth`, spends its step, and checks `reentry_depth` and the interrupt before it
+   sets the state to executing and moves the frame out. A chain of `await`s of any length takes
+   neither depth, since each link is resumed by a job of its own and each job returns before the
+   next runs. A resumption that `frame_depth` or `reentry_depth` refuses, possible only in a
+   checkpoint a host function runs deep in its entry (`Cx::perform_microtask_checkpoint`), throws
+   the `RangeError` of "Depth bounds" from the function the job called: the job ends with that
+   throw, passed to `host_clean_up_after_job` as `Err`, and the activation stays suspended with
+   its frame. That reaction is spent, so nothing resumes it; its promise stays pending, and it is
+   freed with its frame once nothing reaches it. The draft asserts that such a job's handler
+   never completes abruptly ("Assert: handlerResult is not an abrupt completion.",
+   `sec-newpromisereactionjob`); the depth bounds are implementation limits it does not have
+   (`host-interface.md` decision 2), and this is where they show.
+5. Termination. A termination, `Terminated(StepBudget)`, `Terminated(MemoryBudget)` or
+   `Terminated(Interrupted)` alike, enters no handler: no `finally` around an `await` runs, the
+   handler around the body that rejects the function's promise does not run, and the promise is
+   not settled (`host-interface.md` section 10, HOST-195):
+   - an activation whose frame is on the frame stack at the termination, running or below a frame
+     it called, in the call that made it or in a job that resumed it, stays executing and holds no
+     frame. Its frame is dropped with the others and its charge credited (`drop_frames`); its
+     promise stays pending for good; a later call of a function of its `await` does nothing (item
+     3), so nothing runs it again, and it costs its object alone until nothing reaches it. Where
+     the memory budget refuses a growth makes no difference: making an `await`'s two functions,
+     its reactions or the record of a job happens while the frame runs, and a growth refused when
+     the received value is pushed after the move leaves it executing too, its frame dropped and
+     credited by `resume_frame`.
+   - an activation suspended at an `await` when an entry ends, the one that made it or a later
+     one, keeps its state, its frame and its charge. Its reaction stays in the awaited promise, or
+     its job in the queue, also when the step of taking that job off was the one refused, and a
+     later checkpoint resumes it as if the termination had not happened. Except when its job had
+     started and a check of the resumption before the move (the step of the call or of the
+     resumption, the interrupt) was refused: the reaction is spent, the activation is never
+     resumed, its promise stays pending, and it is freed with its frame once nothing reaches it.
+     The same holds when `Agent::clear_microtasks` drops its job.
+
+   Nothing credited stays charged, and nothing charged is credited twice, by the order of item 5
+   of "Suspended frames": a suspension sets the state and moves the frame into the activation
+   before it hands its value over, and a resumption moves the frame out only after its checks.
+
+**Async generators on suspended frames.** Added on 2026-11-23 for slice 10. What a script sees,
+the standard's: an async generator object (`sec-asyncgenerator-objects`,
+`sec-properties-of-asyncgenerator-intances`) holds a queue of requests, each a completion and a
+promise capability (`sec-asyncgeneratorrequest-records`); `next`, `return` and `throw`
+(`sec-asyncgenerator-prototype-next`, `sec-asyncgenerator-prototype-return`,
+`sec-asyncgenerator-prototype-throw`) each make a promise, queue a request
+(`sec-asyncgeneratorenqueue`) and resume the generator at once only when it is suspended at its
+start or at a `yield` (`sec-asyncgeneratorresume`); a `yield` awaits its operand, settles the
+request at the head and goes on without suspending while requests are queued
+(`sec-asyncgeneratoryield`, `sec-asyncgeneratorcompletestep`,
+`sec-asyncgeneratorunwrapyieldresumption`); the end of the body settles the head and drains the
+rest, waiting on the value of each `return` it meets (`sec-asyncgeneratorstart`,
+`sec-asyncgeneratordrainqueue`, `sec-asyncgeneratorawaitreturn`). What a host sees: the items
+below. Items 1 to 6 of "Suspended frames" hold for an async generator as they are written for a
+generator, and items 3 and 4 of "`async` functions on suspended frames" for each of its `await`s,
+except where an item below says otherwise. Each item states the rule first and then the
+mechanism.
+
+1. The holder, and who keeps it alive. An async generator, with its frame, its queue and every
+   value only they hold, stays alive exactly as long as something that can resume it or settle
+   one of its requests is reachable: its object, held by a script or a host; while its frame
+   runs, that frame; while it is suspended at an `await`, the two functions of that `await`,
+   through the reactions of the awaited promise or their job in the queue; while it waits on the
+   value of a `return` (AsyncGeneratorAwaitReturn), the two functions made there, the same way. A
+   queued request keeps nothing alive: the object holds the queue, and the promise of a request
+   holds no reference to the generator. So `collect()` frees a generator suspended at an `await`
+   of a promise nothing else reaches, with its frame and its queued requests, also while a script
+   holds the promises of those requests, which then stay pending. The mechanism: the holder of
+   item 2 of "Suspended frames" is the async generator object, `ObjectKind::AsyncGenerator`
+   (`object/async_generator.rs`), whose kind holds the state ([[AsyncGeneratorState]]:
+   suspended-start, suspended-yield, executing, draining-queue, completed), the frame in a box
+   with the guard of the credit queue beside it, as a generator's, the number of its current
+   wait (an `await`, or the wait of a `return`), and the queue in a box; [[GeneratorBrand]] is
+   empty for every async generator of the slice and is not held. The frame is in the box while
+   the generator is suspended at its start, at a `yield` or at an `await` (its state is then
+   executing, as the draft keeps it), and on the frame stack while it runs; the code keeps the
+   object in a local slot it reserves, as a generator's does. The two functions of an `await`
+   and of the wait of a `return` are built-in functions with slots (decision 4) that hold the
+   object and the number of that wait; called while the generator waits at that number, the
+   first resumes it with the value (`TAG_NORMAL`) and the second with the reason (`TAG_THROW`),
+   or, for the wait of a `return`, settles the head and drains as the draft's closures do;
+   called at any other time they do nothing and return `undefined`, as item 3 of "`async`
+   functions on suspended frames" states. The kind site traces the frame and every value of
+   every request (the completion's value, the capability's promise and its two functions); no
+   request is a root. The record of every object stays at 200 bytes (the test of
+   `object/generator.rs`).
+2. The queue's charge and its bound. Every request costs the memory budget from the call that
+   queues it until the collection that frees the generator. The mechanism: the queue is a
+   `VecDeque` of entries of one fixed size (the completion's tag and value, the capability's
+   promise and two functions) in the kind's box; its capacity grows by the engine's own
+   doubling with `try_reserve_exact`, is charged before it grows and is recorded in the object's
+   `Grown` (`object/mod.rs`), so the sweep that frees the object credits it; a growth the budget
+   refuses ends the run in `Terminated(MemoryBudget)` with nothing queued. Settling a request
+   credits nothing: the capacity, at most the most requests queued at once, stays charged while
+   the object lives. The bound on the queue is the memory budget, and no count: each request is
+   made by a call that spends a step and makes a promise with its two resolving functions, so a
+   script that queues requests without end (`for (;;) g.next();` on a generator suspended at an
+   `await` of a promise that never settles) ends in `Terminated(MemoryBudget)` or
+   `Terminated(StepBudget)`, whichever budget it spends first, and the promises of the requests
+   are charged as objects besides. Rejected: a limit on the count (a limit with an outcome of its
+   own for what the memory budget already bounds); charging each request when it is queued and
+   crediting it when it is settled (two operations of the accounting per request, for bytes the
+   capacity already counts).
+3. Steps. A call of `next`, `return` or `throw` spends the step of a builtin call; validating,
+   making its promise and queueing its request is bounded work within it. A call that resumes
+   the generator (suspended at its start or at a `yield`) also spends the step of the resumption
+   (item 5 of "Suspended frames"), and the instructions the generator runs are steps of the entry
+   that resumed it. A `yield` spends the step of its instruction beside its `await`; settling
+   the request at the head, or taking the next request and going on without suspending, is
+   bounded work within it. The drain, which settles requests without running the generator,
+   spends one step for each request it settles, before it takes that request off, so draining r
+   requests spends r steps, and the wait of a `return` it meets is an `await` (item 4 of
+   "`async` functions on suspended frames"). So a step stands for a bounded amount of work when a
+   script queues requests without end: a request costs a step to queue and a step, or the `yield`
+   that answers it, to settle.
+4. Depth. A resumption by `next`, `return` or `throw` is checked as a generator's (item 4 of
+   "Suspended frames"; one re-entry, item 6): `frame_depth`, its step, `reentry_depth` and the
+   interrupt, before the request is queued and before the state changes. A refusal there exists
+   only for an implementation limit the draft does not have, so the order differs from the
+   draft's (AsyncGeneratorEnqueue before AsyncGeneratorResume) nowhere a script can see. The
+   `RangeError` of "Depth bounds" there rejects the promise of the call, which the call answers,
+   since no step of the draft's `next`, `return` or `throw` after AsyncGeneratorValidate throws;
+   nothing is queued, and the generator stays suspended with its state and frame, to be resumed
+   once the stack is lower. A resumption by a job (a function of an `await` or of the wait of a
+   `return`) is checked as item 4 of "`async` functions on suspended frames" states. A generator
+   suspended at its start, at a `yield` or at an `await` takes no `frame_depth`.
+5. Termination. A termination, `Terminated(StepBudget)`, `Terminated(MemoryBudget)` or
+   `Terminated(Interrupted)` alike, enters no handler: no `finally` around a `yield` or an `await`
+   runs, the handler around the body that settles the head request with the body's completion
+   (AsyncGeneratorStart's closure) does not run, and no drain starts (`host-interface.md`,
+   section 10):
+   - a generator whose frame is on the frame stack at the termination, running or below a frame
+     it called, in the call of `next`, `return` or `throw` that resumed it or in a job that
+     resumed it, stays executing and holds no frame; its frame is dropped with the others and its
+     charge credited (`drop_frames`). The request at the head and every request behind it keep
+     their promises pending for good: a function of its last `await` does nothing (item 1), and
+     `next`, `return` and `throw` of an executing generator only queue ("Assert: state is either
+     executing or draining-queue.", `sec-asyncgenerator-prototype-next`). So every later call of
+     them queues a request whose promise stays pending, charged as item 2 states, until nothing
+     reaches the generator. Here it differs from a generator, whose `next` throws: the draft gives
+     an executing async generator no answer but to queue. Where the memory budget refuses a growth
+     makes no difference, its own queue's included.
+   - a generator suspended at its start or at a `yield` when an entry ends, the one that made it
+     or a later one, keeps its state, its frame, its charge and its queue (empty, by the draft's
+     invariant); a later entry resumes it as if the termination had not happened.
+   - a generator suspended at an `await`, or waiting on the value of a `return`, when an entry
+     ends keeps its state, its frame (it has none while it waits on a `return`), its charge and its
+     queue, and its reaction stays in the awaited promise or its job in the queue; a later
+     checkpoint resumes it, and the requests queued meanwhile are answered in order. Except when
+     its job had started and a check before the move was refused, or `Agent::clear_microtasks`
+     dropped that job: the reaction is spent, nothing resumes the generator, and every request
+     queued then or later keeps its promise pending for good, as in the first case.
+   - a drain that a termination ends (its step for a request refused, or a termination inside the
+     resolving of a request, which reads `then` of an iterator result and so can run a getter of
+     `Object.prototype`) leaves the state draining-queue and the requests it did not settle
+     queued, their promises pending for good: nothing drains the queue again, and later requests
+     only queue.
+
+   Nothing credited stays charged, and nothing charged is credited twice, by the order of item 5
+   of "Suspended frames". Rejected: settling the queued requests with a rejection once a
+   termination left the generator without a frame (a state and an order of settling the draft
+   does not have, decided by the engine while no code of the generator runs).
+6. `yield*` in an async generator (the async branch of YieldExpression : `yield *`
+   AssignmentExpression, `sec-generator-function-definitions-runtime-semantics-evaluation`). The
+   draft calls the inner iterator's method synchronously and awaits its result: "Let innerResult
+   be ? Call(iteratorRecord.[[NextMethod]], iteratorRecord.[[Iterator]], « received.[[Value]]
+   »)." and then "If generatorKind is async, set innerResult to ? Await(innerResult).", and the
+   inner async generator's `next` resumes it at once when it is suspended at its start or at a
+   `yield` (AsyncGeneratorResume). So a `next` given to the outermost of a chain of n delegating
+   async generators runs the n levels one inside the other, in that call, until the innermost
+   suspends at the `await` of its `yield` or of its code; only then does each level, from the
+   innermost out, get the promise of its request and await it. The answers settle afterwards, one
+   job per level, from the innermost out. A delegation that waits for a job before it calls the
+   inner `next` would run the inner generator's code after the code that follows the outer
+   `next` call, an order a script sees. The rule: the n levels of the call nest on the frame
+   stack, as the levels of a generator's `yield*` do, and take no Rust frame and no re-entry
+   per level. The mechanism, the one of the paragraph on `yield*` of "Suspended frames": when the
+   [[NextMethod]] is `%AsyncGeneratorPrototype%.next` of any realm of the agent and the iterator
+   is an async generator object (for a received throw or return, when the method GetMethod finds
+   is `%AsyncGeneratorPrototype%.throw` or `.return`), the instruction does what that builtin
+   does (its promise, AsyncGeneratorValidate with a rejection, and, when the inner generator is
+   suspended at its start or at a `yield`, the checks of item 4 and the move of a resumption, then
+   the request queued), and the inner frame runs above the delegating one on the same run loop.
+   When the inner frame leaves the stack (it suspends at an `await` or a `yield`, or its body
+   ends), the value it hands to the frame below is the promise of that request, which the
+   delegating frame awaits as the draft says. An inner generator that executes, drains or has
+   completed is not resumed: the instruction queues the request or settles it as the builtin
+   does and hands its promise over at once. Any other async iterator (an object of a script, an
+   Async-from-Sync Iterator object) is called as the step of a `for await` calls `next`, a
+   re-entry that returns before the delegating frame awaits.
+   What bounds a chain: while a `next` runs through it, the n levels hold n frames on the frame
+   stack, counted against `frame_depth`, and no re-entry; past `frame_depth`, the check of item 4
+   at the level that would push rejects that level's request with the `RangeError` of "Depth
+   bounds", which the delegating frame's `await` throws at its `yield*`, and the throw leaves
+   each level outward as the draft gives it, so the outermost request is rejected with that
+   `RangeError` after the checkpoint. Between two `next` calls each level is suspended and takes
+   neither depth; its frame, the functions and reactions of its `await` and its queued request
+   are charged (items 1 and 2), so the number of levels is bounded by `frame_depth` and the
+   memory budget. Each job of the settling resumes one level and returns before the next job
+   runs: one re-entry at a time, whatever n. Steps: a `next` through n levels spends, per level,
+   at least 4 and at most 20 steps more than through one: the step of the resumption and the
+   instructions of one turn of the delegation loop in the call, and the job's step, the step of
+   the call of the `await`'s function and the step of the resumption (item 4 of "`async`
+   functions on suspended frames"), the step of the promise job queued, and the `yield` that
+   settles the level's request in the settling. So a `next` through 101 levels spends between
+   400 and 2,000 steps more than one through 1 level, which a test reads with
+   `last_entry_steps()` over the script and the checkpoint.
+
+**A built-in async function.** Added on 2026-11-23 for slice 10. What a script sees, the
+standard's: a built-in function whose [[Async]] is true runs its steps as an `async` function
+runs its body (BuiltinCallOrConstruct, `sec-builtincallorconstruct`, which calls
+AsyncFunctionStart with a closure of the steps): the call answers a promise once the steps reach
+their first Await or their end, and each Await suspends the steps until a job of the awaited
+promise continues them; the execution context has the function's [[Realm]] and a null
+ScriptOrModule. `Array.fromAsync` is one ("This async function performs the following steps
+when called:", `sec-array.fromasync`); `AsyncDisposableStack.prototype.disposeAsync` of slice 15
+is the next. What a host sees: each Await of such a builtin is an `await` of item 3 of "`async`
+functions on suspended frames": two built-in functions made, `host_make_job_callback` called
+twice, and a job that calls `host_prepare_to_run_job` with the builtin's realm,
+`host_call_job_callback` once and `host_clean_up_after_job`, so a host cannot tell it from an
+`await` in a script. Each item states the rule first and then the mechanism.
+
+1. The holder, and its charge. A builtin suspended at an Await, with the values its steps hold
+   (for `Array.fromAsync`: the Iterator Record or the array-like and its length, the array, k,
+   the mapper, thisArg and the promise of the call), stays alive exactly as long as something
+   that will continue it is reachable, as an `async` function's activation does (item 1 of
+   "`async` functions on suspended frames"), and costs a fixed size while it waits: its
+   activation and the box of its state, the two functions of its Await with their boxes, and two
+   reactions; no frame, since its steps run in Rust. The mechanism: an internal kind of object,
+   `ObjectKind::AsyncBuiltinActivation` (`object/async_builtin.rs`), with a null [[Prototype]],
+   which no instruction and no read hands to a script or a host. Its kind holds the state
+   (running, suspended at an Await with the number of that suspension, completed), the
+   capability of the call, and a box with the builtin's own state: which builtin, the step it
+   reached, and its values, one variant of fixed size per builtin. The box is charged with the
+   record when it is made (`Heap::new_object` with those owned bytes, as for a built-in function
+   with slots, decision 4) and credited by the sweep that frees the record; the array and what
+   it grows are charged as any array. The kind site traces every value of the box and of the
+   capability; no value of it is a root. While its steps run, the activation is on the kept
+   stack (`Agent::keep`), where a running builtin keeps what it needs across a call into code;
+   while it is suspended, the two functions of its Await hold it in their slots, the reactions of
+   the awaited promise hold the functions, and the promise, or the queue once it settled, holds
+   the reactions.
+2. Steps and depth. The call spends the step of a builtin call and runs the steps to the first
+   Await in it. A continuation costs what an `await`'s resumption costs (item 4 of "`async`
+   functions on suspended frames"): the step of taking the job off, the step of the call of the
+   function the job calls and one step for the continuation, so 3 steps before the next of its
+   steps runs. Each continuation runs the builtin's steps from one Await to the next, or to the
+   end: bounded work beside the calls it makes into code, each of which spends the steps of the
+   code it runs. Every turn of both loops of `Array.fromAsync` awaits at least once, so no
+   continuation loops, and an array-like of length 10^9 costs at least 3 steps per element. A
+   continuation takes no frame and no re-entry of its own, so no depth is checked for it; each
+   call it makes into code (`next`, the mapper, a getter, a constructor) is a re-entry counted
+   against `reentry_depth`, as any call from a builtin is, and returns before the continuation
+   does. A `RangeError` of a depth bound there is a throw completion of the call, which the
+   builtin's steps handle as the draft's (IfAbruptCloseAsyncIterator for `Array.fromAsync`,
+   `sec-ifabruptcloseasynciterator`), and the interrupt is read at the continuation's step.
+3. Termination. A termination, `Terminated(StepBudget)`, `Terminated(MemoryBudget)` or
+   `Terminated(Interrupted)` alike, runs none of the builtin's steps: no AsyncIteratorClose, no
+   rejection of its promise (`host-interface.md`, section 10):
+   - a builtin whose steps run at the termination, in its call or in a continuation, or below a
+     call they made into code, stays running, and its promise stays pending for good: a later call
+     of a function of its last Await does nothing, as in item 3 of "`async` functions on
+     suspended frames", so nothing continues it; the iterator it read is not closed, and the array
+     keeps the elements defined so far. It costs its activation alone until nothing reaches it.
+   - a builtin suspended at an Await when an entry ends keeps its state, and its reaction stays
+     in the awaited promise or its job in the queue; a later checkpoint continues it as if the
+     termination had not happened. Except when its job had started and a check of the
+     continuation (the step of the call or of the continuation, the interrupt) was refused, or
+     `Agent::clear_microtasks` dropped the job: the reaction is spent, and its promise stays
+     pending for good.
+
+   Rejected: the steps written as script source compiled into each realm (a second text of the
+   draft's steps; its frames would count against `frame_depth`, its instructions would spend
+   steps no other builtin spends, and its functions could be reached through a stack of frames
+   or `Function.prototype.toString`); a Rust `async fn` (the values a compiler-made future holds
+   across an `.await` are invisible to the collector, so they would have to be roots, and a
+   builtin waiting on a promise nothing reaches would live as long as its roots); a kind per
+   builtin (a site to trace and a site to charge for each).
+
+**The Async-from-Sync Iterator.** Added on 2026-11-23 for slice 10. What a script sees, the
+standard's: CreateAsyncFromSyncIterator wraps a sync Iterator Record in an object that is never
+directly accessible to ECMAScript code (`sec-createasyncfromsynciterator`,
+`sec-async-from-sync-iterator-objects`), and the `next`, `return` and `throw` of
+`%AsyncFromSyncIteratorPrototype%` (`sec-%asyncfromsynciteratorprototype%-object`) call the
+sync iterator's method at once and settle their promise through PerformPromiseThen of the value
+wrapped by PromiseResolve with a capability (AsyncFromSyncIteratorContinuation,
+`sec-asyncfromsynciteratorcontinuation`). None of their steps Awaits, so nothing of them waits
+for a job and they need no activation: they use only built-in functions with slots (decision 4).
+The unwrap function holds `done` in its slot (`sec-async-from-sync-iterator-value-unwrap-functions`),
+the function that closes the sync iterator holds its Iterator Record, and the object holds
+[[SyncIteratorRecord]] in a box of its kind, `ObjectKind::AsyncFromSyncIterator`, charged with
+the record as owned bytes and traced at its kind site, as a built-in function's slots are. What a
+host sees is the draft's: `host_make_job_callback` for each callable handler PerformPromiseThen
+gets (one or two), and a reaction job per settlement. A call of one of these methods spends the
+step of a builtin call; the call of the sync iterator's method is a re-entry as any call from a
+builtin, and a sync generator resumed by it is resumed from Rust (item 6 of "Suspended frames").
+
 ## 4. Values and the heap without unsafe code
 
 **Value.** A Rust enum: `Undefined`, `Null`, `Boolean`, `Number(f64)`, and `String`, `Symbol`,
@@ -1087,6 +1592,67 @@ readings as part of what its holder owns. After a collection these are the live 
 holds their `HostBytes` (added on 2026-11-22); a dropped `HostBytes` is credited after the next
 sweep or at the host's next charge, or at once by `Agent::credit_host_bytes`, which empties it.
 
+**Queued jobs.** Added on 2026-11-23 for slice 10. What a host sees: a promise job costs the
+memory budget from the moment it is queued until the moment a checkpoint takes it off the queue,
+and nothing in the queue after that, whether it then runs or a termination ends the checkpoint
+first; a host microtask costs the budget nothing. So after a script that queues 100 reaction
+jobs, `heap_bytes()` exceeds the reading before it by at least 100 times the bytes of one entry,
+and the checkpoint that runs them gives those bytes back. The mechanism: the queue is a
+`VecDeque` of entries of one fixed size in the agent (`host/jobs.rs`). A promise job's entry
+holds its reaction job (the reaction, `sec-promisereaction-records`: its capability or none, its
+type, and its handler, none or a JobCallback record, `sec-jobcallback-records`, of a function and
+the [[HostDefined]] `host_make_job_callback` answered; and the argument) or its resolve-thenable
+job (the promise, the thenable and the JobCallback of `then`), its realm or none
+(`sec-newpromisereactionjob`, `sec-newpromiseresolvethenablejob`), the realm current when it was
+queued, which is the realm of the entry while a job whose realm is null runs, and the active
+script or module when it was queued, which the job makes active again as the draft requires
+("scriptOrModule is the active script or module at the time of job's invocation",
+`sec-hostenqueuepromisejob`). A host microtask's entry holds its realm and its `Microtask<H>`.
+A promise job's entry is charged by its size with `charge_bytes` before it is stored, and
+credited when the checkpoint takes it off or `Agent::clear_microtasks` drops it; an entry a
+terminated checkpoint left queued stays charged. The checkpoint puts the job's values on the kept
+stack (`object/builtin_function.rs`, `Agent::keep`), where a running builtin keeps what it needs
+across a call into code, before it calls a hook or code. The queue is a root: its site,
+`host/jobs.rs trace_roots`, called from the root site of `host/agent.rs`, reports every value
+and realm of every promise job, the script or module it will make active and the [[HostDefined]]
+of its JobCallbacks, through `HostData::trace` as a realm's and a script's [[HostDefined]] are
+traced; and the realm of every host microtask. So everything a queued job holds survives every
+collection until the job is taken off. A host microtask is not charged: its box is the host's
+allocation and holds Rust state the collector cannot see, so an engine value it needs it holds
+in `Root`s of the host's table, a root already. It is the host's own storage, bounded by the
+host's calls, as the entries of the root table are ("Memory budget", the rule), and a script
+grows it only through a host function that queues one, a step per call; every entry taken off
+costs a step. Dropping the agent drops the queue with every closure in it. The queue's buffer
+grows by the engine's own doubling with `try_reserve_exact`; its spare capacity, at most the
+most entries queued at once since the queue was last empty, is not charged, and a checkpoint
+that leaves the queue empty shrinks a buffer of more than 64 entries to 64. The reactions a
+pending promise holds are charged with the promise, in a box of its kind, by capacity as its
+lists grow; settling it empties the lists and credits them, and the jobs made from them are
+charged as above. Rejected: charging a host microtask (`queue_microtask` answers no outcome, so a
+refusal would have no answer the host could act on, and the closure is the host's allocation);
+charging the queue's capacity as an arena's (a host microtask would grow a charge it could not
+be refused).
+
+**A built-in function with slots.** Added on 2026-11-23 for slice 10. What a script sees, the
+standard's: CreateBuiltinFunction with additionalInternalSlots (`sec-createbuiltinfunction`)
+makes functions whose steps read slots of their own: the resolving functions of a promise
+([[Promise]] and [[AlreadyResolved]], `sec-promise-resolve-functions`), the executor of
+GetCapabilitiesExecutor ([[Capability]]), the two functions of an `await` (decision 3, "`async`
+functions on suspended frames", item 3), and later the element functions of the statics and the
+functions of `finally`. What a host sees: such a function costs its object and its slots from
+its creation until the collection that frees it, as any object costs what it owns. The
+mechanism: the slots lie in a box in the built-in function kind (`object/builtin_function.rs`, a
+variant of `Behaviour` with its id and the box), so the record of every object keeps its 200
+bytes (the test of `object/generator.rs`). The box has the fixed size of its type, and its bytes
+are part of what the record owns: charged with the record when CreateBuiltinFunction stores it
+(`Heap::new_object` with those owned bytes, as a RegExp object owns the box of its program,
+`regexp_owned_bytes`), and credited by the sweep that frees the record. A slot that two functions
+share and that holds no engine value, the [[AlreadyResolved]] record of the resolving functions,
+is an `Rc<Cell<bool>>` counted in the box of each, so it is charged twice and never less than it
+holds. The kind site, `BuiltinFunction::trace`, traces every value of the slots; no slot is a
+root. Rejected: the slots in the record (every object would grow); a table of slots beside the
+heap (a second place to trace and to credit).
+
 **Source text.** Added on 2026-11-21 for slice 3. The source text of a script, of eval code
 and of a dynamic function stays alive as long as a function made from it, and is charged to
 the memory budget with the compiled code. The text is the code units the parse read: the
@@ -1119,8 +1685,12 @@ for a Symbol `Symbol.for` did not make (`sec-symbol.for`, `sec-symbol.keyfor`, `
 The registry is the agent's, the append-only [[GlobalSymbolRegistry]] of its Agent Record
 (`sec-agents`, `sec-globalsymbolregistry-records`): every realm of the agent gets the same Symbol
 for a key. The well-known symbols (`sec-well-known-symbols`) are agent values as well
-(`realm/mod.rs`), twelve in slice 6 (`Symbol.asyncIterator` comes with slice 10), and none of them
-is in the registry. A Symbol is never converted to a String or a Number implicitly: ToString and
+(`realm/mod.rs`), twelve in slice 6 and thirteen from slice 10, whose story of `for await` adds
+`Symbol.asyncIterator` (`sec-symbol.asynciterator`), made with the agent as the other twelve are
+(corrected on 2026-11-23 from "twelve in slice 6 (`Symbol.asyncIterator` comes with slice 10)");
+none of them is in the registry. A host names it as it names the others, with
+`well_known_symbol(WellKnownSymbol::AsyncIterator)` (`host-interface.md` decision 7, "The closed
+list", HOST-203). A Symbol is never converted to a String or a Number implicitly: ToString and
 ToNumber of it throw a `TypeError` (`sec-tostring`, `sec-tonumber`), and so do `"" + s`,
 `` `${s}` ``, `+s`, `s < 1` and every builtin that passes it to them or to an operation built on
 them (ToIntegerOrInfinity, ToLength, ToNumeric). ToPropertyKey takes it as it is, a property key;
@@ -1597,7 +2167,7 @@ section differ.** This section is the first description; the first ESS model of 
 with nine places where it is unclear or silent, and that document answers them from the text of
 ECMA-262 and HTML, as 19 decisions and numbered requirements (`HOST-<n>`): 165 on 2026-11-21
 (corrected that day from 135, the count when the document was written), 171 on 2026-11-22
-with the six of resource accounting, 190 the same day with the host interface of the first consumer, and 191 on 2026-11-23 with the refusals `RegExp` raises, the count `task host-requirements-check` prints. The eleven places where it departs from this document:
+with the six of resource accounting, 190 the same day with the host interface of the first consumer, 191 on 2026-11-23 with the refusals `RegExp` raises, 200 the same day with nine of slice 10's jobs and `async` functions (HOST-192 to HOST-200), and 208 the same day with eight of slice 10's later waves (HOST-201 to HOST-208: the kind of an AggregateError, `Symbol.asyncIterator`, async generators, built-in async functions), the count `task host-requirements-check` prints. The eleven places where it departs from this document (3 and 4 no longer since 2026-11-23, when "Entry points" and "Jobs" below were corrected to say what that document says):
 
 1. Each entry point has a result type of its own instead of one `Outcome`; misuse answers
    `Err(HostError)`, never a panic.
@@ -1637,8 +2207,8 @@ that answers the hooks. An agent holds any number of realms (9.3); a realm is cr
 
 **Entry points**, each returning an `Outcome`: `parse_script`, `evaluate_script`, `parse_module`,
 `load_requested_modules`, `link`, `evaluate_module`, `call(function, this, arguments)`,
-`construct`, `perform_microtask_checkpoint` (runs promise jobs until the queue is empty, each
-with the budget), and `collect`. `Outcome` is `Normal(value)`, `Throw(value)` (an exception the
+`construct`, `perform_microtask_checkpoint` (runs the jobs of the microtask queue until it is
+empty, all of them under one step budget for the whole call: "Jobs" below), and `collect`. `Outcome` is `Normal(value)`, `Throw(value)` (an exception the
 script did not catch, as a value the host can read), or `Terminated(reason)` with reason
 `StepBudget`, `MemoryBudget`, `Interrupted` or `EngineFault`. After `EngineFault` the agent
 answers every call with `EngineFault`; the host discards it.
@@ -1666,10 +2236,39 @@ environment. Module loading is asynchronous as the draft has it: `HostLoadImport
 at once, and the host later calls `finish_loading_imported_module` with the module's source or
 an error.
 
-**Jobs.** The promise job queue is kept in the agent, because jobs hold engine values; the host
-is told of each job through `HostEnqueuePromiseJob` (so HTML can attach its incumbent settings
-through `HostMakeJobCallback`) and decides when to drain it, which is HTML's microtask checkpoint.
-Generic and timeout jobs are handed to the host, which runs them through `call` when it chooses.
+**Jobs.** The microtask queue is kept in the agent, because jobs hold engine values: promise jobs
+and the host's microtasks in one FIFO order (`host-interface.md` decision 11). The host is told
+of each promise job through `HostEnqueuePromiseJob` (so HTML can attach its incumbent settings
+through `HostMakeJobCallback`) and decides when to drain the queue, which is HTML's microtask
+checkpoint: `perform_microtask_checkpoint` is one outermost entry, and every job it runs spends
+from its one step budget (decision 3, "The microtask checkpoint is one entry"). A host
+microtask is queued with the realm it runs in: `Agent::queue_microtask` takes one and checks it
+first, answering `Err(StaleHandle)` for a stale or released realm and `Err(ForeignHandle)` for a
+realm of another agent, with nothing queued, and `Cx::queue_microtask` uses the current realm of
+its caller (HOST-192; HOST-31 and HOST-45 for every call that takes a realm). Added on
+2026-11-23 for the first embedder, each stated in decision 3, "The microtask checkpoint is one
+entry": `last_entry_steps()` after `perform_microtask_checkpoint()` reads the steps of the whole
+checkpoint, every entry taken off and everything the jobs ran, also when it ended in a
+termination; 0 after one that found the queue empty; and a nested checkpoint that returned at
+once adds nothing (HOST-197). The interrupt ends a running checkpoint with
+`Terminated(Interrupted)` at its start, before any entry is taken off, so a flag set before the
+checkpoint ends it there; before each entry is taken off, leaving that entry queued; and while a
+job runs, wherever the step budget is checked (HOST-198). A checkpoint that did not empty the
+queue, ended by the step budget, the interrupt or the memory budget, leaves every entry it did
+not start queued in its order and charged, and the next checkpoint runs them under its own
+budget (HOST-199); the engine drops none of them, and the host empties the queue with
+`Agent::clear_microtasks`, which runs no script and calls no hook, credits what the dropped
+promise jobs were charged and answers how many entries it dropped; a promise whose reaction it
+dropped stays pending for good (HOST-200). Dropping the agent with entries queued frees them and
+calls nothing of the host. A host function called from a job may settle a promise, and the
+reaction that queues runs in the same checkpoint, behind the entries already queued. Generic, timeout and
+FinalizationRegistry cleanup jobs are handed to the host as `Job` tokens, and the host runs
+each with `run_job` when it chooses, one entry each. Corrected on 2026-11-23: this paragraph
+said that the host runs generic and timeout jobs "through `call`", and "Entry points" above
+that the checkpoint runs its jobs "each with the budget". Both sentences were false against
+`host-interface.md` decision 11 from 2026-11-21 on (its departures 3 and 4): a Job is not a
+function, so `call` cannot run one, and with a budget per job a job that queues a job never lets
+the checkpoint end.
 
 **Host objects for the DOM.** The host defines classes, each a Web IDL interface (3.7): an
 interface object, an interface prototype object, constants, attributes as accessor properties and
@@ -1695,7 +2294,9 @@ wrapper) do not leak, because the node's references go through traced host data,
 
 **The Rust stack.** Re-entry (decision 3) uses the Rust stack; the interface documents the
 minimum stack the host must run the agent on, and a test runs at the re-entry limit on a thread
-of that size. The size is not measured yet.
+of that size. The size is measured: `Limits::min_stack_bytes()` (`host-interface.md` decision 2,
+HOST-17), with `STACK_BYTES_PER_REENTRY`, 14 KiB, per re-entry (`host/limits.rs`; decision 3,
+"Suspended frames", item 6). Corrected on 2026-11-23 from "The size is not measured yet."
 
 **What surf must have before it can use the engine at all:** a mutable DOM (surf has none: its
 parser builds a read-only tree, `docs/design/html-parser.md` item 1, and `agent-waves.md` plans no
@@ -1726,8 +2327,12 @@ The model is held by a conformance runner over a thin adapter to the hand-writte
 as surf's `conformance/` is, in a Cargo workspace of its own (the one place a third-party crate
 is allowed, because `ess-conformance` brings some). The engine's code is not generated from ESS:
 the host interface is an in-process library interface, and what ESS 0.97.4 generates is
-components with ports (surf `AGENTS.md`, "Layout"), not a library interface. Not checked: how well
-ESS states an in-process library interface; the first slice finds out.
+components with ports (surf `AGENTS.md`, "Layout"), not a library interface. How well ESS states
+an in-process library interface was measured by the first slice (`host-interface-model.md`,
+corrected on 2026-11-23 from "Not checked: ...; the first slice finds out."): ESS 0.96.0 let the
+model state its commands, outcomes and lifecycles, its generated code is "not usable for an
+in-process library interface", and what it could not state is listed there as 51 markers, each
+carried by a `HOST-<n>` requirement or named an ESS limit.
 
 What is not put into ESS: the language's semantics (values, objects, the 2,300 distinct section
 numbers of the draft, counted with `grep -o 'secnum>[^<]*' ecma262.html | sort -u | wc -l`).
@@ -4329,11 +4934,12 @@ works for both.
 - Whether ECMA-262 words an allowance for a `RangeError` when a `BigInt` result is too large, or
   for an implementation limit on pattern nesting.
 - The licence text of the Unicode data, and where the 17.0.0 emoji sequence files are published.
-- The Rust stack one re-entry needs (the size of `Value` is measured: 16 bytes, held by the
-  test `value_is_16_bytes` of `crates/swell`), the time test262
-  takes, and every speed cost: no code exists.
+- The time test262 takes and every speed cost, in this document's text. Corrected on 2026-11-23
+  from "The Rust stack one re-entry needs ...: no code exists.": the Rust stack is measured
+  (`STACK_BYTES_PER_REENTRY`, 14 KiB per re-entry, and `Limits::min_stack_bytes()`, decision 9,
+  "The Rust stack"), and so is the size of `Value` (16 bytes, held by the test
+  `value_is_16_bytes` of `crates/swell`).
 - The published ES2026 edition was not read.
-- How well ESS states an in-process library interface.
 
 ## How the counts were made
 

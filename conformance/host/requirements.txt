@@ -74,11 +74,11 @@ HOST-73 test swell::generators::host_73_a_generator_running_at_a_step_budget_ter
 HOST-74 pending slice 11
 HOST-75 pending slice 11
 HOST-76 pending slice 11
-HOST-77 pending slice 10
+HOST-77 test swell::jobs::host_77_a_termination_leaves_the_jobs_behind_it_queued
 HOST-78 pending slice 10
-HOST-79 pending slice 10
+HOST-79 test swell::jobs::host_79_a_checkpoint_runs_the_microtasks_queued_while_it_runs
 HOST-80 pending slice 10
-HOST-81 pending slice 10
+HOST-81 test swell::jobs::host_81_a_checkpoint_inside_a_checkpoint_returns_at_once
 HOST-82 pending slice 10
 HOST-83 pending slice 10
 HOST-84 pending slice 10
@@ -146,7 +146,7 @@ HOST-145 test swell::lib::heap::map::tests::host_145_hash_is_keyed_by_hash_key_a
 HOST-146 test swell::source_scan::host_146_only_agent_new_takes_seeds
 HOST-147 pending slice 4
 HOST-148 pending slice 10
-HOST-149 pending slice 10
+HOST-149 test swell::doc::compile_fail::host_149_hook_cx_cannot_perform_a_microtask_checkpoint
 HOST-150 pending slice 11
 HOST-151 pending slice 14
 HOST-152 test swell::eval_stack::host_152_deepest_reentry_evals_at_full_nesting
@@ -189,3 +189,20 @@ HOST-188 test swell::termination::host_188_calls_that_take_no_memory_answer_with
 HOST-189 test swell::termination::host_189_190_one_runs_after_a_memory_budget_termination_once_the_host_made_room
 HOST-190 test swell::termination::host_189_190_one_runs_after_a_memory_budget_termination_once_the_host_made_room
 HOST-191 test swell::regexp_refusals::host_191_regexp_counts_its_refusals_of_slice_5
+HOST-192 test swell::jobs::host_192_a_host_microtask_runs_in_the_realm_it_was_queued_with
+HOST-193 test swell::jobs::host_193_a_checkpoint_spends_one_step_for_each_entry_it_takes_off
+HOST-194 pending slice 10
+HOST-195 pending slice 10
+HOST-196 test swell::jobs::host_196_a_checkpoint_holds_what_a_job_was_handed_only_until_it_ends
+HOST-197 test swell::jobs::host_197_last_entry_steps_reads_the_whole_checkpoint
+HOST-198 pending slice 10
+HOST-199 pending slice 10
+HOST-200 pending slice 10
+HOST-201 pending slice 10
+HOST-202 pending slice 10
+HOST-203 pending slice 10
+HOST-204 pending slice 10
+HOST-205 pending slice 10
+HOST-206 pending slice 10
+HOST-207 pending slice 10
+HOST-208 pending slice 10

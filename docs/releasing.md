@@ -59,7 +59,9 @@ deciding session's, from a checkout of the repository:
    did not change. After step 1, `slot --local task host-surface-snapshot` writes the scan of
    the host interface into `conformance/host/surface.txt`, headed `# swell <version>`; the
    file is committed with steps 1 and 2. The notes' `**Breaking**` part (step 4) lists every
-   removed or changed name of that heading. The names have the form of "The host interface
+   removed or changed name of that heading, and every variant added to a public enum that is
+   not `non_exhaustive` (a `match` of an embedder without a wildcard arm stops compiling). The
+   names have the form of "The host interface
    in the changelog" below.
 3. **Gate.** One commit by the bot holds steps 1 and 2. Run the gate on it as the forge's
    runner does and compare its lines with the changelog section:
@@ -68,7 +70,9 @@ deciding session's, from a checkout of the repository:
 
    The gate does not run test262 in full; it compares the digest of the run's sources with
    `conformance/test262/expected.digest`. The version change is a source: run
-   `slot --timeout 30m task test262-expected` on the commit first, and
+   `slot --timeout 30m task test262-expected` on the commit first (or, where the run does not
+   fit one pool job, `slot --timeout 30m task test262-part TEST262_PART=<k>/<n>` for each part
+   and then `slot task test262-expected TEST262_FROM_PARTS=.out/test262/parts`), and
    `slot --local task site-data`, and commit the files they write with steps 1 and 2.
 
 4. **Notes.** Write the notes file, `.out/release-<version>-notes.md`, in the form the

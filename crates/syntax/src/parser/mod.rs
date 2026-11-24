@@ -77,10 +77,19 @@ pub(crate) struct Parser<'a, 'm> {
     /// innermost last: saved as a function opens and put back as it closes, here and never in a
     /// recursive frame; the growth charged first.
     outer_yields: Vec<bool>,
-    /// The refusal of a construct whose parse goes on, held back to the end of the parse: the
-    /// first generator function of the source (slice 7), at its `*`. The parse answers it only
-    /// when it ends without a grammar error and without an early error (`lib.rs`,
-    /// `analyse_parsed`).
+    /// The [Await] parameter of the grammar at the current position: set in the parameters and
+    /// the body of an `async` function or arrow function, cleared in those of every other
+    /// function but in the parameters of an arrow function, which keep the one around them
+    /// (`#sec-async-function-definitions`, `#sec-async-arrow-function-definitions`). Kept beside
+    /// [Yield] in the same way.
+    awaits: bool,
+    /// The [Await] of the code around each function whose parameters or body the parser is in,
+    /// beside `outer_yields`, saved and put back with it; the growth charged first.
+    outer_awaits: Vec<bool>,
+    /// The refusal of a construct whose parse goes on, held back to the end of the parse: that
+    /// of the first `async` function or arrow function of the source (slice 10), at its `async`.
+    /// The parse answers it only when it ends without a grammar error and without an early error
+    /// (`lib.rs`, `analyse_parsed`).
     held: Option<SyntaxError>,
     /// The operator stack of the binary expression parser, shared by its nested calls.
     operators: Vec<expression::Pending>,
@@ -118,26 +127,59 @@ pub(crate) fn parse_eval(
     }
 }
 
+/// The kind of a dynamic function (`#sec-createdynamicfunction`, steps 2 to 5): the prefix of
+/// its source text and the [Yield] of its parameters and body. The kinds `async` and
+/// `async-generator` are slice 10's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DynamicKind {
+    /// `normal`, the `Function` constructor: prefix `function`, `FormalParameters[~Yield,
+    /// ~Await]`, `FunctionBody[~Yield, ~Await]`, a `FunctionExpression`.
+    Normal,
+    /// `generator`, `%GeneratorFunction%`: prefix `function*`, `FormalParameters[+Yield,
+    /// ~Await]`, `GeneratorBody`, a `GeneratorExpression`.
+    Generator,
+}
+
+impl DynamicKind {
+    /// The source text up to the parameter text: the prefix, then " anonymous(" (step 15).
+    fn head(self) -> &'static str {
+        match self {
+            DynamicKind::Normal => "function anonymous(",
+            DynamicKind::Generator => "function* anonymous(",
+        }
+    }
+
+    /// The [Yield] of the parameters and the body.
+    fn yields(self) -> bool {
+        self == DynamicKind::Generator
+    }
+}
+
 /// The three parses of CreateDynamicFunction (`#sec-createdynamicfunction`, steps 16 to 20) for
-/// kind `normal`, each with nesting limit `max`: `parameters` alone as
-/// `FormalParameters[~Yield, ~Await]`, the body text (a line feed before and after `body`) alone
-/// as `FunctionBody[~Yield, ~Await]`, then the whole source text
-/// `function anonymous(<parameters>\n) {\n<body>\n}` as a `FunctionExpression`. The answer is
-/// the tree of the last parse as a script of one expression statement, the function
+/// `kind`, each with nesting limit `max`: `parameters` alone as `FormalParameters` with the
+/// [Yield] of the kind, the body text (a line feed before and after `body`) alone as the
+/// `FunctionBody` of the kind, then the whole source text
+/// `<prefix> anonymous(<parameters>\n) {\n<body>\n}` as the function expression of the kind
+/// (`function` and a `FunctionExpression`, or `function*` and a `GeneratorExpression`). The
+/// answer is the tree of the last parse as a script of one expression statement, the function
 /// expression, whose own name is taken off: SetFunctionName gives the function the name
-/// "anonymous" (step 35), but the name is not bound inside it.
+/// "anonymous" (step 35), but the name is not bound inside it. The refusal the last parse holds
+/// back to its end ([`Parsed::held`]) is answered with it, as a script's is; the first two
+/// parses drop theirs, since the last one reads the same text again.
 pub(crate) fn parse_dynamic_function(
+    kind: DynamicKind,
     parameters: &[u16],
     body: &[u16],
     max: u32,
     m: &Meter<'_>,
 ) -> Result<Parsed, SyntaxError> {
     const LF: u16 = 0x000A;
-    const HEAD: &str = "function anonymous(";
     const MIDDLE: &str = "\n) {";
+    let head = kind.head();
     // The first two parses keep nothing: what they charged is credited when each ends.
     let mark = m.held();
     let mut alone = Parser::new(parameters, max, m);
+    alone.yields = kind.yields();
     if alone.formal_parameters_text().is_err() {
         return Err(alone.into_error());
     }
@@ -153,19 +195,20 @@ pub(crate) fn parse_dynamic_function(
     let text_bytes = body_text.capacity().saturating_mul(unit_bytes);
     let mark = m.held();
     let mut alone = Parser::new(&body_text, max, m);
+    alone.yields = kind.yields();
     if alone.function_body_text().is_err() {
         return Err(alone.into_error());
     }
     drop(alone);
     m.credit(m.held().saturating_sub(mark));
-    let length = HEAD
+    let length = head
         .len()
         .saturating_add(parameters.len())
         .saturating_add(MIDDLE.len())
         .saturating_add(body_text.len())
         .saturating_add(1);
     let mut source = m.with_capacity::<u16>(length).map_err(|_| stopped())?;
-    source.extend(HEAD.encode_utf16());
+    source.extend(head.encode_utf16());
     source.extend_from_slice(parameters);
     source.extend(MIDDLE.encode_utf16());
     source.extend_from_slice(&body_text);
@@ -274,6 +317,8 @@ impl<'a, 'm> Parser<'a, 'm> {
             functions: 0,
             yields: false,
             outer_yields: Vec::new(),
+            awaits: false,
+            outer_awaits: Vec::new(),
             held: None,
             operators: Vec::new(),
             prefixes: Vec::new(),
@@ -293,6 +338,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         m.release(std::mem::take(&mut self.operators));
         m.release(std::mem::take(&mut self.prefixes));
         m.release(std::mem::take(&mut self.outer_yields));
+        m.release(std::mem::take(&mut self.outer_awaits));
         m.credit(self.tok.kind.heap_bytes());
         self.tok.kind = TokenKind::Eof;
         if let Some(peeked) = self.peeked.take() {

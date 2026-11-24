@@ -61,8 +61,8 @@ pub struct Case {
 
 /// The outcome of one run of a case of the checkout at `checkout`, run on the engine as decision
 /// 11 states ([`run`]): a fresh agent and realm, `$262` and `print`, `assert.js` and `sta.js`
-/// (not for `raw`), the `includes:` in order, then the case, judged by its `negative`.
-/// `doneprintHandle.js` and the `async` judgement come with slice 10.
+/// (not for `raw`), `doneprintHandle.js` for an `async` case, the `includes:` in order, then the
+/// case, judged by its `negative` and, for an `async` case, by what `$DONE` printed.
 pub fn run_outcome(checkout: &Path, case: &Case, run: Run) -> Outcome {
     match run::run_all(checkout, &[(case, run)], NonZeroUsize::MIN, &run::LIMITS) {
         Ok(ran) => ran.first().map_or(Outcome::Failed, |ran| ran.outcome),
@@ -256,7 +256,7 @@ pub struct RunLines {
 }
 
 /// `text` as one field of a run line: each tab and line end (LF, CR, U+2028, U+2029) a space.
-fn one_field(text: &str) -> String {
+pub fn one_field(text: &str) -> String {
     text.replace(['\t', '\n', '\r', '\u{2028}', '\u{2029}'], " ")
 }
 
@@ -267,6 +267,99 @@ fn outcome_name(outcome: Outcome) -> &'static str {
         Outcome::Failed => "Failed",
         Outcome::Budget => "Budget",
     }
+}
+
+/// One run the count makes: the position of its case in the list, the case, the run, and the
+/// slice of the case as printed.
+#[derive(Clone, Debug)]
+pub struct Job<'c> {
+    /// The position of the case in the list, from 0.
+    pub index: usize,
+    /// The case.
+    pub case: &'c Case,
+    /// The run.
+    pub run: Run,
+    /// The slice of the case, as printed.
+    pub slice: String,
+}
+
+/// The runs the count makes, in its order (the cases in the order of `loaded`, the runs of a
+/// case in the order of [`runs`]): every run of every case that is run. Beside them, every slice
+/// of the cases of `loaded`, run or not, as printed.
+pub fn jobs<'c>(
+    loaded: &'c [Loaded],
+    rules: &Rules,
+    listed: &Listed,
+) -> (Vec<Job<'c>>, BTreeSet<String>) {
+    let mut slices = BTreeSet::new();
+    let mut jobs = Vec::new();
+    for (index, item) in loaded.iter().enumerate() {
+        let (slice, plan) = plan(item, rules, listed);
+        let slice = slice.to_string();
+        if plan == Plan::Run {
+            for run in runs(&item.case.meta) {
+                jobs.push(Job {
+                    index,
+                    case: &item.case,
+                    run,
+                    slice: slice.clone(),
+                });
+            }
+        }
+        slices.insert(slice);
+    }
+    (jobs, slices)
+}
+
+/// What one run gave, as the count reads it: from a run on the engine ([`Record::of`]) or from
+/// the file of a part (`parts`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Record {
+    /// Passed, failed, or ended by a budget.
+    pub outcome: Outcome,
+    /// What ended it ([`run::Ran::detail`]), as the run gave it.
+    pub detail: String,
+    /// The steps every script of the run spent.
+    pub steps: u64,
+    /// The time it took.
+    pub elapsed: Duration,
+    /// It counts in `test262-refused` ([`run::Ran::refused`]).
+    pub refused: bool,
+    /// The budget that ended it, as `test262-budget` prints it, when its outcome is `Budget`.
+    pub budget: Option<String>,
+    /// It panicked.
+    pub panicked: bool,
+}
+
+impl Record {
+    /// The record of a run on the engine.
+    pub fn of(ran: &run::Ran) -> Record {
+        let budget = match (ran.outcome, ran.budget) {
+            (Outcome::Budget, Some(reason)) => Some(format!("{reason:?}")),
+            _ => None,
+        };
+        Record {
+            outcome: ran.outcome,
+            detail: ran.detail.clone(),
+            steps: ran.steps,
+            elapsed: ran.elapsed,
+            refused: ran.refused(),
+            budget,
+            panicked: ran.panicked,
+        }
+    }
+}
+
+/// The run line of `job` with `record` ([`RunLines::runs`]).
+pub fn run_line(job: &Job<'_>, record: &Record) -> String {
+    format!(
+        "test262-run\t{}\t{}\t{}\t{}\t{}",
+        one_field(&job.slice),
+        one_field(&job.case.path),
+        run::mode(job.run),
+        outcome_name(record.outcome),
+        one_field(&record.detail)
+    )
 }
 
 /// Runs every run of every case that is run, on `workers` threads with `limits` (the runner gives
@@ -285,49 +378,50 @@ pub fn run_cases(
     workers: NonZeroUsize,
     limits: &swell::Limits,
 ) -> Result<RunLines, String> {
-    let mut slices: BTreeMap<String, (u64, Duration)> = BTreeMap::new();
-    let mut jobs: Vec<(&Case, Run)> = Vec::new();
-    let mut owners: Vec<(usize, String)> = Vec::new();
-    for (index, item) in loaded.iter().enumerate() {
-        let (slice, plan) = plan(item, rules, listed);
-        let slice = slice.to_string();
-        slices.entry(slice.clone()).or_default();
-        if plan == Plan::Run {
-            for run in runs(&item.case.meta) {
-                jobs.push((&item.case, run));
-                owners.push((index, slice.clone()));
-            }
-        }
-    }
-    let ran = run::run_all(checkout, &jobs, workers, limits)?;
+    let (jobs, slices) = jobs(loaded, rules, listed);
+    let pairs: Vec<(&Case, Run)> = jobs.iter().map(|job| (job.case, job.run)).collect();
+    let ran = run::run_all(checkout, &pairs, workers, limits)?;
+    let records: Vec<Record> = ran.iter().map(Record::of).collect();
+    let (lines, outcomes) = lines_of(&jobs, &records, &slices);
+    keep_outcomes(loaded, &outcomes);
+    Ok(lines)
+}
+
+/// The lines [`run_cases`] answers for `jobs`, each with its record in `records` (in the same
+/// order), and `slices`, every slice of the cases; beside them the outcome of each case that
+/// was run, by its position in the list.
+pub fn lines_of(
+    jobs: &[Job<'_>],
+    records: &[Record],
+    slices: &BTreeSet<String>,
+) -> (RunLines, BTreeMap<usize, Outcome>) {
+    let mut times: BTreeMap<&str, (u64, Duration)> = slices
+        .iter()
+        .map(|slice| (slice.as_str(), (0, Duration::ZERO)))
+        .collect();
     let mut lines = Vec::new();
-    let mut run_lines = Vec::with_capacity(ran.len());
+    let mut run_lines = Vec::with_capacity(records.len());
     let mut outcomes: BTreeMap<usize, Vec<Outcome>> = BTreeMap::new();
-    let mut steps = Vec::with_capacity(ran.len());
+    let mut steps = Vec::with_capacity(records.len());
     let mut refused = 0u64;
-    for (((case, run), (index, slice)), ran) in jobs.iter().zip(&owners).zip(&ran) {
-        let mode = run::mode(*run);
-        run_lines.push(format!(
-            "test262-run\t{}\t{}\t{mode}\t{}\t{}",
-            one_field(slice),
-            one_field(&case.path),
-            outcome_name(ran.outcome),
-            one_field(&ran.detail)
-        ));
-        if let (Outcome::Budget, Some(reason)) = (ran.outcome, ran.budget) {
-            lines.push(format!("test262-budget {} {mode} {reason:?}", case.path));
+    for (job, record) in jobs.iter().zip(records) {
+        let mode = run::mode(job.run);
+        let path = job.case.path.as_str();
+        run_lines.push(run_line(job, record));
+        if let (Outcome::Budget, Some(reason)) = (record.outcome, &record.budget) {
+            lines.push(format!("test262-budget {path} {mode} {reason}"));
         }
-        if ran.panicked {
-            lines.push(format!("test262-panic {} {mode} {}", case.path, ran.detail));
+        if record.panicked {
+            lines.push(format!("test262-panic {path} {mode} {}", record.detail));
         }
-        if ran.refused() {
+        if record.refused {
             refused += 1;
         }
-        outcomes.entry(*index).or_default().push(ran.outcome);
-        steps.push((Reverse(ran.steps), case.path.as_str(), mode));
-        if let Some((runs, time)) = slices.get_mut(slice) {
+        outcomes.entry(job.index).or_default().push(record.outcome);
+        steps.push((Reverse(record.steps), path, mode));
+        if let Some((runs, time)) = times.get_mut(job.slice.as_str()) {
             *runs += 1;
-            *time = time.saturating_add(ran.elapsed);
+            *time = time.saturating_add(record.elapsed);
         }
     }
     lines.push(format!("test262-refused {refused}"));
@@ -335,18 +429,29 @@ pub fn run_cases(
     for (Reverse(spent), path, mode) in steps.into_iter().take(20) {
         lines.push(format!("test262-steps {spent} {path} {mode}"));
     }
-    for (slice, (runs, time)) in &slices {
+    for (slice, (runs, time)) in &times {
         lines.push(format!("test262-time {slice} {runs} {}", time.as_millis()));
     }
-    for (index, outcomes) in outcomes {
+    let outcomes = outcomes
+        .into_iter()
+        .map(|(index, outcomes)| (index, case_outcome(&outcomes)))
+        .collect();
+    (
+        RunLines {
+            log: lines,
+            runs: run_lines,
+        },
+        outcomes,
+    )
+}
+
+/// Keeps each outcome of `outcomes` in the [`Loaded`] at its position.
+pub fn keep_outcomes(loaded: &mut [Loaded], outcomes: &BTreeMap<usize, Outcome>) {
+    for (&index, &outcome) in outcomes {
         if let Some(item) = loaded.get_mut(index) {
-            item.outcome = Some(case_outcome(&outcomes));
+            item.outcome = Some(outcome);
         }
     }
-    Ok(RunLines {
-        log: lines,
-        runs: run_lines,
-    })
 }
 
 /// Counts the cases, with the outcomes [`run_cases`] kept.
