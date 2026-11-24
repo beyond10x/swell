@@ -326,11 +326,19 @@ fn symbol_this_and_symbol_objects_through_the_builtins_of_slice_3() {
 /// property reached from the global object leads to, each the source of an expression the test
 /// evaluates once before the walk, with the path printed for it. The stories of slice 10 append
 /// theirs; from `%AsyncFunction.prototype%` the walk reaches `%AsyncFunction%` through
-/// `constructor`.
-const FURTHER_ROOTS: &[(&str, &str)] = &[(
-    "Object.getPrototypeOf(async function () {})",
-    "%AsyncFunction.prototype%",
-)];
+/// `constructor`; from `%AsyncGeneratorFunction.prototype%` it reaches
+/// `%AsyncGeneratorPrototype%` through `prototype` and `%AsyncIteratorPrototype%` through its
+/// [[Prototype]].
+const FURTHER_ROOTS: &[(&str, &str)] = &[
+    (
+        "Object.getPrototypeOf(async function () {})",
+        "%AsyncFunction.prototype%",
+    ),
+    (
+        "Object.getPrototypeOf(async function* () {})",
+        "%AsyncGeneratorFunction.prototype%",
+    ),
+];
 
 /// The functions of the realm that a walk from the global object and from `roots` (each with
 /// its path) reaches through their properties, String-keyed and Symbol-keyed: the value of each

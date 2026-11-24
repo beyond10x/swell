@@ -14,6 +14,11 @@
 //! something that will resume it (a reaction of the promise it awaits, or the job of that
 //! reaction) or its running frame reaches it, and the sweep that frees it while it is suspended
 //! queues the charge of its frame for the agent to credit.
+//!
+//! The holder in the slots of the two functions of an `await` is an activation or, in an async
+//! generator, the async generator object (`object/async_generator.rs`,
+//! `story:async-generators-and-their-request-queue`), which holds the frame and the number of its
+//! wait itself; an async generator has no activation.
 
 use crate::heap::collect::Mark;
 use crate::interp::suspend::SuspendedFrame;

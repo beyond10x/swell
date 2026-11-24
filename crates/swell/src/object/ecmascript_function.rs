@@ -498,6 +498,12 @@ impl<H: Host> Agent<H> {
     /// (`#sec-runtime-semantics-instantiateasyncfunctionexpression`) or the evaluation of an
     /// async arrow (`#sec-async-arrow-function-definitions-runtime-semantics-evaluation`):
     /// `%AsyncFunction.prototype%` of `realm`, no [[Construct]] and no `prototype`.
+    /// An async generator template (both `generator` and `asynchronous`) is
+    /// InstantiateAsyncGeneratorFunctionObject
+    /// (`#sec-runtime-semantics-instantiateasyncgeneratorfunctionobject`) or
+    /// InstantiateAsyncGeneratorFunctionExpression
+    /// (`#sec-runtime-semantics-instantiateasyncgeneratorfunctionexpression`): as a generator's,
+    /// with `%AsyncGeneratorFunction.prototype%` and `%AsyncGeneratorPrototype%` of `realm`.
     /// A named function expression that refers to its own name gets an environment of one
     /// immutable binding holding it.
     pub(crate) fn instantiate_function(
@@ -538,7 +544,9 @@ impl<H: Host> Agent<H> {
         } else {
             env
         };
-        let prototype = if generator {
+        let prototype = if generator && asynchronous {
+            self.intrinsic(realm, Intrinsic::AsyncGeneratorFunctionPrototype)?
+        } else if generator {
             self.intrinsic(realm, Intrinsic::GeneratorFunctionPrototype)?
         } else if asynchronous {
             self.intrinsic(realm, Intrinsic::AsyncFunctionPrototype)?
@@ -592,9 +600,14 @@ impl<H: Host> Agent<H> {
             )?;
         }
         if generator {
-            // A new object whose [[Prototype]] is %GeneratorPrototype%, with no "constructor",
-            // as the function's "prototype".
-            let generator_prototype = self.intrinsic(realm, Intrinsic::GeneratorPrototype)?;
+            // A new object whose [[Prototype]] is %GeneratorPrototype%, or
+            // %AsyncGeneratorPrototype% for an async generator, with no "constructor", as the
+            // function's "prototype".
+            let generator_prototype = if asynchronous {
+                self.intrinsic(realm, Intrinsic::AsyncGeneratorPrototype)?
+            } else {
+                self.intrinsic(realm, Intrinsic::GeneratorPrototype)?
+            };
             let made =
                 self.ordinary_object_create(Some(generator_prototype), OrdinaryData::Plain)?;
             let prototype_key = self.name_key("prototype")?;

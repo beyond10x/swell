@@ -109,6 +109,10 @@ pub(crate) enum BuiltinId {
     /// `AggregateError ( errors, message [ , options ] )` (20.5.7.1.1), whose steps take
     /// `errors` before `message` (`story:promise-statics-finally-and-aggregate-error`).
     AggregateErrorConstructor,
+    /// The builtins of `%AsyncGeneratorPrototype%` and the two functions of
+    /// AsyncGeneratorAwaitReturn, with the slots [`Slots::Await`]
+    /// (`story:async-generators-and-their-request-queue`).
+    AsyncGenerator(crate::builtins::async_generator::AsyncGeneratorBuiltin),
 }
 
 /// What a built-in function does when called.
@@ -224,7 +228,10 @@ pub(crate) enum Slots {
     /// onFulfilled or onRejected of an `await` (`#sec-await`, steps 3 to 6;
     /// `docs/design/engine.md`, decision 3, "`async` functions on suspended frames", item 3):
     /// the activation of the `async` function that awaits, and the number of the suspension the
-    /// function was made for.
+    /// function was made for. For an `await` of an async generator, and for the two functions
+    /// of AsyncGeneratorAwaitReturn (`#sec-asyncgeneratorawaitreturn`), `activation` is the
+    /// async generator object and `suspension` the number of its wait ("Async generators on
+    /// suspended frames", item 1).
     Await {
         activation: ObjectRef,
         suspension: u64,
@@ -779,6 +786,9 @@ impl<H: Host> Agent<H> {
             }
             BuiltinId::AggregateErrorConstructor => {
                 self.aggregate_error_constructor(function, args, new_target)
+            }
+            BuiltinId::AsyncGenerator(id) => {
+                self.run_async_generator_builtin(id, function, this, args)
             }
         }
     }

@@ -291,15 +291,19 @@ fn async_functions_parse_through_every_entry() {
     }
 }
 
-/// The refusal of slice 10 of an async generator (`#sec-async-generator-function-definitions`,
-/// `docs/design/engine.md`, section 12, "A part before its slice") does not stop the parse: a
-/// source with an `async function*` and no other error ends on it alone, at the `async` of the
-/// first async generator of the source, through each entry, the dynamic ones too; an early
-/// error or a grammar error anywhere ends the source on that error alone, and so does a refusal
-/// that stops the parse at its token (an `async *` method of an object literal).
+/// The refusal of slice 10 of `yield*` in an async generator (the async branch of
+/// YieldExpression : `yield *` AssignmentExpression,
+/// `#sec-generator-function-definitions-runtime-semantics-evaluation`; `docs/design/engine.md`,
+/// section 12, "A part before its slice") does not stop the parse: a source with such a `yield*`
+/// and no other error ends on it alone, at the `*` of the first one of the source, through each
+/// entry, the dynamic ones too; an early error or a grammar error anywhere ends the source on
+/// that error alone, and so does a refusal that stops the parse at its token (an `async *`
+/// method of an object literal). An async generator without it parses, and so does a `yield*`
+/// in a generator, also inside an async generator
+/// (`story:async-generators-and-their-request-queue` lifted the refusal of `async function*`).
 #[test]
-fn the_refusal_of_async_generators_comes_after_the_whole_parse() {
-    let refusal = "async generator function is not supported before slice 10".to_string();
+fn the_refusal_of_yield_star_in_an_async_generator_comes_after_the_whole_parse() {
+    let refusal = "yield* in an async generator is not supported before slice 10".to_string();
     let at = |text: &str| {
         let errors = parse(text)
             .err()
@@ -308,46 +312,60 @@ fn the_refusal_of_async_generators_comes_after_the_whole_parse() {
         (errors[0].message.clone(), errors[0].line, errors[0].column)
     };
     for (text, line, column) in [
-        ("async function* f() {}", 1, 1),
-        ("x;\n  y = async function* () {};", 2, 7),
-        ("async function* f(a = async function* () {}) {}", 1, 1),
+        ("async function* f() { yield* a; }", 1, 28),
+        ("x;\n  y = async function* () { yield* a; };", 2, 33),
+        ("async function* f() { yield* a; yield* b; }", 1, 28),
         (
-            "y = async function () {};\nasync function* g() { yield await 1; }",
+            "async function* f(a = async function* () { yield* b; }) { yield* a; }",
+            1,
+            49,
+        ),
+        (
+            "async function* f() { yield await 1; }\nasync function* g() { yield* a; }",
             2,
-            1,
+            28,
         ),
         (
-            "{ async function* f() {} }\nswitch (0) { case 0: async function* g() {} }",
+            "{ async function* f() { yield* a; } }\nswitch (0) { case 0: async function* g() { yield* b; } }",
             1,
-            3,
+            30,
         ),
-        // `yield*` parses since slice 7 delivered it and holds no refusal of its own.
-        ("function* g() { yield* a; }\nasync function* f() {}", 2, 1),
+        (
+            "function* g() { yield* a; }\nasync function* f() { function* h() { yield* a; } yield* b; }",
+            2,
+            56,
+        ),
     ] {
         assert_eq!(at(text), (refusal.clone(), line, column), "{text:?}");
     }
     let files = sources("refused").unwrap();
     let forms = files
         .iter()
-        .find(|(path, _)| path.ends_with("async-generator-forms.js"));
+        .find(|(path, _)| path.ends_with("async-generator-yield-star.js"));
     let (path, text) = forms.unwrap();
-    assert_eq!(at(text), (refusal.clone(), 3, 1), "{}", path.display());
+    assert_eq!(at(text), (refusal.clone(), 4, 8), "{}", path.display());
     for (text, expected) in [
         (
-            "async function* f() {}\nlet a; let a;",
+            "async function* f() { yield* a; }\nlet a; let a;",
             vec!["duplicate lexical declaration of a"],
         ),
         (
-            "async function* f(x = yield) {}\nlet a; let a;",
+            "async function* f(x = yield) { yield* a; }\nlet a; let a;",
             vec![
                 "yield expression in the parameters of a generator function",
                 "duplicate lexical declaration of a",
             ],
         ),
-        ("async function* f() {}\n)", vec!["unexpected token )"]),
-        ("async function* f() { await; }", vec!["unexpected token ;"]),
         (
-            "async function* f() {}\nx = { async *m() {} };",
+            "async function* f() { yield* a; }\n)",
+            vec!["unexpected token )"],
+        ),
+        (
+            "async function* f() { yield* a; await; }",
+            vec!["unexpected token ;"],
+        ),
+        (
+            "async function* f() { yield* a; }\nx = { async *m() {} };",
             vec!["async generator method is not supported before slice 10"],
         ),
     ] {
@@ -358,11 +376,11 @@ fn the_refusal_of_async_generators_comes_after_the_whole_parse() {
         assert_eq!(messages(&answer.err().unwrap()), vec![refusal.clone()]);
     };
     only_the_refusal(parse_eval(
-        &units("x = async function* () {};"),
+        &units("x = async function* () { yield* a; };"),
         true,
         options,
     ));
-    let body = units("return async function* () { yield await a; };");
+    let body = units("return async function* () { yield* a; };");
     only_the_refusal(parse_dynamic_function(&units("a"), &body, options));
     only_the_refusal(parse_dynamic_generator_function(
         &units("a"),
@@ -371,17 +389,24 @@ fn the_refusal_of_async_generators_comes_after_the_whole_parse() {
     ));
     only_the_refusal(parse_dynamic_async_function(&units("a"), &body, options));
     only_the_refusal(parse_dynamic_function(
-        &units("a = async function* () {}"),
+        &units("a = async function* () { yield* b; }"),
         &[],
         options,
     ));
-    // `async` before a line terminator is an identifier, and `function*` after it a generator.
     for text in [
+        "async function* f() {}",
+        "x = async function* () { yield; yield 1; await 2; yield await 3; };",
+        "async function* f() { function* g() { yield* a; } }",
+        "function* g() { yield* a; }",
+        // `async` before a line terminator is an identifier, and `function*` after it a generator.
         "async\nfunction* g() {}",
         "var async; async\nfunction* g() {}",
     ] {
         assert!(parse(text).is_ok(), "{text:?}: {:?}", parse(text).err());
     }
+    let body = units("return async function* () { yield await a; };");
+    assert!(parse_dynamic_function(&units("a"), &body, options).is_ok());
+    assert!(parse_eval(&units("x = async function* () {};"), true, options).is_ok());
 }
 
 /// A hashbang comment (`#sec-hashbang`) is a comment at the very start of a source only: it
@@ -769,10 +794,9 @@ fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec
 
 /// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
 /// nesting error alone (`Some(false)`), or fail otherwise (`None`). A source whose one error is
-/// the refusal of slice 10 parsed: the refusal of an async generator comes only after the whole
-/// parse and the early errors (`story:async-generators-and-their-request-queue` lifts it and
-/// keeps this arm for its own held refusal; `story:yield-star-in-async-generators` takes it
-/// out).
+/// the refusal of slice 10 parsed: the refusal of `yield*` in an async generator comes only
+/// after the whole parse and the early errors (`story:async-generators-and-their-request-queue`
+/// keeps this arm for it; `story:yield-star-in-async-generators` takes it out).
 fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     let source = nested(kind, n)?;
     match parse_through(entry, &source, limit) {

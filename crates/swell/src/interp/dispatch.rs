@@ -443,6 +443,11 @@ impl<H: Host> Agent<H> {
             I::Await(slot) => self.await_instruction(slot),
             I::AsyncReturn(slot) => self.async_return(slot),
             I::AsyncReject(slot) => self.async_reject(slot),
+            // ---- async generators (`interp/async_generator.rs`) ----
+            I::AsyncGeneratorStart(slot) => self.async_generator_start(slot),
+            I::AsyncGeneratorYield(slot) => self.async_generator_yield(slot),
+            I::AsyncGeneratorReturn(slot) => self.async_generator_return(slot),
+            I::AsyncGeneratorReject(slot) => self.async_generator_reject(slot),
         }
     }
 

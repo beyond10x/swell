@@ -1,0 +1,21 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "g" length 0 locals 1 generator async
+  0000 2:1 AsyncGeneratorStart 0
+  0001 2:1 EndFinally
+  0002 3:9 Null
+  0003 3:3 Await 0
+  0004 3:3 JumpIfTag 0 0006
+  0005 3:3 EndFinally
+  0006 3:3 Pop
+  0007 4:3 ResolveGlobal "probed"
+  0008 4:12 True
+  0009 4:3 PutGlobalRef "probed"
+  0010 4:3 Pop
+  0011 2:1 Undefined
+  0012 2:1 AsyncGeneratorReturn 0
+  0013 2:1 AsyncGeneratorReject 0
+  catch 0002..0013 -> 0013 items 0 envs 0

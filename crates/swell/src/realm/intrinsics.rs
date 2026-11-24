@@ -33,7 +33,11 @@
 //! `story:async-function-constructor`, which is no property of the global object;
 //! `%AsyncIteratorPrototype%` and `%AsyncFromSyncIteratorPrototype%` (27.1.4 and 27.1.5.2,
 //! `#sec-asynciteratorprototype`, `#sec-%asyncfromsynciteratorprototype%-object`), written by
-//! `story:for-await-and-async-from-sync-iterator`;
+//! `story:for-await-and-async-from-sync-iterator`; `%AsyncGeneratorFunction.prototype%` and
+//! `%AsyncGeneratorPrototype%` (27.4.3 and 27.6.1,
+//! `#sec-properties-of-asyncgeneratorfunction-prototype`,
+//! `#sec-properties-of-asyncgenerator-prototype`), written by
+//! `story:async-generators-and-their-request-queue`;
 //! `%AggregateError%` and `%AggregateError.prototype%` (20.5.7, `#sec-aggregate-error-objects`),
 //! written by `story:promise-statics-finally-and-aggregate-error`, made after the seven of
 //! [`ErrorKind::ALL`] and held beside them.
@@ -179,6 +183,12 @@ pub(crate) enum Intrinsic {
     /// `%AsyncFromSyncIteratorPrototype%` (27.1.5.2), the [[Prototype]] of an
     /// Async-from-Sync Iterator object (`#sec-createasyncfromsynciterator`).
     AsyncFromSyncIteratorPrototype,
+    /// `%AsyncGeneratorFunction.prototype%` (27.4.3,
+    /// `#sec-properties-of-asyncgeneratorfunction-prototype`),
+    /// `story:async-generators-and-their-request-queue`.
+    AsyncGeneratorFunctionPrototype,
+    /// `%AsyncGeneratorPrototype%` (27.6.1, `#sec-properties-of-asyncgenerator-prototype`).
+    AsyncGeneratorPrototype,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -242,6 +252,7 @@ pub(crate) struct Intrinsics {
     async_function_prototype: ObjectRef,
     async_function: ObjectRef,
     async_iteration_prototypes: crate::builtins::async_iteration::AsyncIterationPrototypes,
+    async_generator_prototypes: crate::builtins::async_generator::AsyncGeneratorPrototypes,
 }
 
 impl Intrinsics {
@@ -296,6 +307,10 @@ impl Intrinsics {
             Intrinsic::AsyncFromSyncIteratorPrototype => {
                 self.async_iteration_prototypes.async_from_sync_iterator
             }
+            Intrinsic::AsyncGeneratorFunctionPrototype => {
+                self.async_generator_prototypes.function_prototype
+            }
+            Intrinsic::AsyncGeneratorPrototype => self.async_generator_prototypes.prototype,
         }
     }
 
@@ -360,6 +375,8 @@ impl Intrinsics {
             self.async_function,
             self.async_iteration_prototypes.async_iterator,
             self.async_iteration_prototypes.async_from_sync_iterator,
+            self.async_generator_prototypes.function_prototype,
+            self.async_generator_prototypes.prototype,
         ] {
             mark.object(object);
         }
@@ -548,6 +565,8 @@ impl<H: Host> Agent<H> {
         let async_function =
             self.create_async_function_constructor(making, function, async_function_prototype)?;
         let async_iteration_prototypes = self.create_async_iteration_prototypes(making)?;
+        let async_generator_prototypes = self
+            .create_async_generator_prototypes(making, async_iteration_prototypes.async_iterator)?;
         // %Array.prototype.values% (23.1.3.38), %Array.prototype.entries% (23.1.3.5),
         // %Array.prototype.keys% (23.1.3.19) and %Array.prototype.forEach% (23.1.3.15): the
         // methods `create_array_constructor` has defined on %Array.prototype%, read before any
@@ -596,6 +615,7 @@ impl<H: Host> Agent<H> {
             async_function_prototype,
             async_function,
             async_iteration_prototypes,
+            async_generator_prototypes,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {

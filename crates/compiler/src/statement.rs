@@ -344,10 +344,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 };
                 t.push(Task::Jump(JumpKind::Break, label, span))?;
             }
-            // `#sec-return-statement-runtime-semantics-evaluation`.
+            // `#sec-return-statement-runtime-semantics-evaluation`: in an async generator the
+            // value of `return Expression` is awaited (step 3); a bare `return` is not.
             Stmt::Return(e) => {
                 match e {
-                    Some(e) => t.push(Task::Expr(*e))?,
+                    Some(e) => {
+                        t.push(Task::Expr(*e))?;
+                        if let (Some(_), Some(slot)) = (self.generator, self.asynchronous) {
+                            self.await_value(slot, span, &mut t)?;
+                        }
+                    }
                     None => t.push(Task::Emit(Instruction::Undefined, span))?,
                 }
                 t.push(Task::Return(span))?;

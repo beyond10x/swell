@@ -1,4 +1,4 @@
-// sec-async-generator-function-definitions: refused "async generator function is not supported before slice 10"
+// sec-async-generator-function-definitions: parses
 var before = async function () { await 0; };
 async function* declared(a, b = 1, { c }, [d], ...e) {
   yield;
@@ -12,13 +12,13 @@ async function* declared(a, b = 1, { c }, [d], ...e) {
     yield inner;
   }
   var inner;
+  for await (var w of e) yield w;
   return e;
 }
 var expression = async function* () {}, named = async function* named(f) {
   "use strict";
   yield f;
 };
-async function* yield() {}
 async function* await() {}
 {
   async function* inBlock() {}

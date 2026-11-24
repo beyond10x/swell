@@ -676,6 +676,40 @@ pub enum Instruction {
     /// activation completed, the steps of the reject function of the promise of the call with
     /// `e` (no call of it), and that promise returned by the frame.
     AsyncReject(u32),
+
+    // ---- async generators -----------------------------------------------------------------
+    /// `[] -> [v, tag]` across a suspension: the start of the code of an async generator
+    /// template after FunctionDeclarationInstantiation
+    /// (`#sec-runtime-semantics-evaluateasyncgeneratorbody`): OrdinaryCreateFromConstructor of
+    /// the running function with `%AsyncGeneratorPrototype%`
+    /// (`#sec-ordinarycreatefromconstructor`), stored in local slot `s`, its queue empty and its
+    /// [[AsyncGeneratorState]] suspended-start (AsyncGeneratorStart, `#sec-asyncgeneratorstart`),
+    /// then the frame suspends and the object is the value of the call (`docs/design/engine.md`,
+    /// decision 3, "Async generators on suspended frames", item 1). The resumption puts the
+    /// received value and its tag on the stack; only `next`, [`TAG_NORMAL`], resumes an async
+    /// generator that has not started. Its `await`s are [`Instruction::Await`] with slot `s`.
+    AsyncGeneratorStart(u32),
+    /// `[v] -> [r, tag]`, across a suspension or not: AsyncGeneratorYield
+    /// (`#sec-asyncgeneratoryield`) of the awaited `v` by the async generator in local slot `s`:
+    /// AsyncGeneratorCompleteStep (`#sec-asyncgeneratorcompletestep`) of the request at the head
+    /// with `{ v, done: false }`; then, when its queue holds another request, the received
+    /// completion of that request goes on the stack at once, with no suspension (step 9);
+    /// otherwise suspended-yield, and the frame suspends. `r` and its tag: [`TAG_NORMAL`] for
+    /// `next`, [`TAG_THROW`] for `throw`, [`TAG_RETURN`] for `return`, whose value the code
+    /// then awaits (AsyncGeneratorUnwrapYieldResumption,
+    /// `#sec-asyncgeneratorunwrapyieldresumption`).
+    AsyncGeneratorYield(u32),
+    /// `[v] -> `: the return of an async generator template, the async generator in local slot
+    /// `s` (AsyncGeneratorStart, `#sec-asyncgeneratorstart`, step 4.f to 4.j for a normal or a
+    /// return completion): draining-queue, AsyncGeneratorCompleteStep of the request at the head
+    /// with `{ v, done: true }`, then AsyncGeneratorDrainQueue (`#sec-asyncgeneratordrainqueue`),
+    /// and `undefined` returned by the frame.
+    AsyncGeneratorReturn(u32),
+    /// `[e] -> `: a throw that leaves the body of an async generator template, the async
+    /// generator in local slot `s` (AsyncGeneratorStart, step 4.f to 4.j for a throw
+    /// completion): draining-queue, the request at the head rejected with `e`, then
+    /// AsyncGeneratorDrainQueue, and `undefined` returned by the frame.
+    AsyncGeneratorReject(u32),
 }
 
 impl Instruction {
@@ -814,6 +848,10 @@ impl Instruction {
             | Instruction::Await(_)
             | Instruction::AsyncReturn(_)
             | Instruction::AsyncReject(_) => None,
+            Instruction::AsyncGeneratorStart(_)
+            | Instruction::AsyncGeneratorYield(_)
+            | Instruction::AsyncGeneratorReturn(_)
+            | Instruction::AsyncGeneratorReject(_) => None,
             Instruction::Argument(_)
             | Instruction::RestArguments(_)
             | Instruction::PushVarEnv(_) => None,
@@ -1014,7 +1052,13 @@ pub struct FunctionTemplate {
     /// code starts with [`Instruction::AsyncStart`], before the binding of its parameters, and
     /// returns through [`Instruction::AsyncReturn`] or, for a throw that leaves its body,
     /// [`Instruction::AsyncReject`]. It is no constructor and has no `prototype`
-    /// (`#sec-runtime-semantics-instantiateasyncfunctionobject`).
+    /// (`#sec-runtime-semantics-instantiateasyncfunctionobject`). With `generator` set too, an
+    /// async generator (`async function*`): its last local slot holds its async generator
+    /// object, its code starts it after FunctionDeclarationInstantiation
+    /// ([`Instruction::AsyncGeneratorStart`]) and ends through
+    /// [`Instruction::AsyncGeneratorReturn`] or [`Instruction::AsyncGeneratorReject`]; it has a
+    /// `prototype` and no [[Construct]]
+    /// (`#sec-runtime-semantics-instantiateasyncgeneratorfunctionobject`).
     pub asynchronous: bool,
     /// Where each parameter goes, in order; for a parameter that is a pattern, where each name it
     /// binds goes, in source order (a list with a pattern is not simple: the call sets them

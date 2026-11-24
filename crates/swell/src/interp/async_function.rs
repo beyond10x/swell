@@ -33,6 +33,11 @@
 //! `TAG_NORMAL` or the reason and `TAG_THROW` ([`Agent::resume_frame`], then
 //! [`Agent::run_resumed`]: one re-entry, which ends before the job does); called at any other
 //! time they do nothing. Either way they return `undefined`.
+//!
+//! The slot of the holder takes an async generator object too
+//! (`story:async-generators-and-their-request-queue`): `Await` of an async generator and the two
+//! functions of its `await` go to `interp/async_generator.rs`, whose generator holds its frame and
+//! the number of its wait, and hands `undefined` over at each suspension.
 
 use swell_compiler::bytecode::{TAG_NORMAL, TAG_THROW};
 
@@ -109,8 +114,11 @@ impl<H: Host> Agent<H> {
     /// and the reactions are made, so a throw of PromiseResolve leaves it to the handlers.
     #[inline(never)]
     pub(super) fn await_instruction(&mut self, slot: u32) -> Completion<Flow> {
-        let value = self.peek_value(0)?;
         let activation = self.activation_in(slot)?;
+        if self.is_async_generator(activation)? {
+            return self.async_generator_await(activation);
+        }
+        let value = self.peek_value(0)?;
         // 2. Let promise be ? PromiseResolve(%Promise%, value).
         let constructor = self.current_intrinsic(Intrinsic::Promise)?;
         let Value::Object(promise) = self.promise_resolve(constructor, value)? else {
@@ -227,13 +235,16 @@ impl<H: Host> Agent<H> {
                 return Err(self.fault());
             }
         };
-        if !self.activation_mut(activation)?.suspended_at(suspension) {
-            return Ok(Value::Undefined);
-        }
         let tag = match kind {
             ReactionType::Fulfill => TAG_NORMAL,
             ReactionType::Reject => TAG_THROW,
         };
+        if self.is_async_generator(activation)? {
+            return self.async_generator_await_function(activation, suspension, argument, tag);
+        }
+        if !self.activation_mut(activation)?.suspended_at(suspension) {
+            return Ok(Value::Undefined);
+        }
         let resumption = self.resume_frame(
             |agent| agent.take_activation_frame(activation),
             argument,

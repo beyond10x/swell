@@ -2,6 +2,7 @@
 mod array_patterns;
 mod arrow_functions;
 mod async_functions;
+mod async_generators;
 mod async_methods;
 mod block_functions;
 mod budgets;
