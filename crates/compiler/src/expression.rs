@@ -676,9 +676,9 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 argument: None,
                 delegate: true,
             } => return Err(malformed("a yield* without its operand")),
-            // An AwaitExpression stands only in an `async` function, and the parse of a source
-            // with one ends on the refusal of slice 10: never a parsed script.
-            Expr::Await(_) => return Err(malformed("an await expression")),
+            // An AwaitExpression stands only in the body of an `async` function (an `await` in
+            // its parameters is an early error).
+            Expr::Await(e) => self.await_expression(*e, span, &mut t)?,
         }
         Ok(t)
     }
@@ -995,6 +995,36 @@ impl<'a, 'm> Compiler<'a, 'm> {
         t.push(Task::Bind(returned))?;
         t.push(Task::Emit(Instruction::YieldReturn(self.items), span))?;
         t.push(Task::Return(span))?;
+        t.push(Task::Bind(normal))?;
+        Ok(())
+    }
+
+    /// `await` with its operand (`#sec-async-function-definitions-runtime-semantics-evaluation`,
+    /// Await, `#sec-await`): the operand, then [`Instruction::Await`], which suspends; the
+    /// resumption leaves the received value and its tag, and the code dispatches on the tag as
+    /// the end of a `finally` block does: a normal completion is the value of the expression, and
+    /// [`Instruction::EndFinally`] throws a throw completion here. An `await` is never resumed
+    /// with a return completion.
+    fn await_expression(
+        &mut self,
+        argument: ExprId,
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let slot = self
+            .asynchronous
+            .ok_or_else(|| malformed("an await outside an async function"))?;
+        let normal = self.label();
+        t.push(Task::Expr(argument))?;
+        t.push(Task::Emit(Instruction::Await(slot), span))?;
+        t.push(Task::Emit(
+            Instruction::JumpIfTag {
+                tag: TAG_NORMAL,
+                target: normal,
+            },
+            span,
+        ))?;
+        t.push(Task::Emit(Instruction::EndFinally, span))?;
         t.push(Task::Bind(normal))?;
         Ok(())
     }

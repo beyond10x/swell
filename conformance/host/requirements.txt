@@ -191,8 +191,8 @@ HOST-190 test swell::termination::host_189_190_one_runs_after_a_memory_budget_te
 HOST-191 test swell::regexp_refusals::host_191_regexp_counts_its_refusals_of_slice_5
 HOST-192 test swell::jobs::host_192_a_host_microtask_runs_in_the_realm_it_was_queued_with
 HOST-193 test swell::jobs::host_193_a_checkpoint_spends_one_step_for_each_entry_it_takes_off
-HOST-194 pending slice 10
-HOST-195 pending slice 10
+HOST-194 test swell::async_functions::host_194_an_await_makes_two_job_callbacks_and_its_job_calls_one
+HOST-195 test swell::async_functions::host_195_a_step_budget_termination_in_a_resumed_activation_leaves_its_promise_pending_for_good
 HOST-196 test swell::jobs::host_196_a_checkpoint_holds_what_a_job_was_handed_only_until_it_ends
 HOST-197 test swell::jobs::host_197_last_entry_steps_reads_the_whole_checkpoint
 HOST-198 test swell::promises::host_198_the_interrupt_ends_a_checkpoint_at_three_places

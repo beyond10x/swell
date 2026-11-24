@@ -35,6 +35,13 @@
 //!   function whose own non-strict code calls `eval` directly and that binds no name still gets
 //!   a function environment ([`FunctionTemplate::eval_environment`]), the VariableEnvironment
 //!   the eval code adds its `var` names to.
+//! - An `async` function or arrow function (`#sec-async-function-definitions`,
+//!   `#sec-async-arrow-function-definitions`) reserves its last local slot for its activation;
+//!   its code starts with [`Instruction::AsyncStart`], before the binding of its parameters, and
+//!   from there to the end of its body runs in a handler region that rejects the promise of the
+//!   call ([`Instruction::AsyncReject`]); a `return` and the end of the body resolve it
+//!   ([`Instruction::AsyncReturn`]). An `async` arrow takes `this`, `arguments` and `new.target`
+//!   from its scope as every arrow does.
 
 use swell_syntax::Script;
 use swell_syntax::ast::{Ast, BindingTarget, ExprId, Function, FunctionId, Span};
@@ -43,7 +50,7 @@ use swell_syntax::ledger::Meter;
 use crate::bytecode::{FunctionTemplate, Handler, HandlerKind, Instruction, SlotName, TAG_RETURN};
 use crate::resolve::{Binding, FunctionInfo, Resolution, Site};
 use crate::{
-    Body, Chain, CompileError, Compiler, Constants, Control, Task, malformed, release_jumps,
+    Body, Chain, CompileError, Compiler, Constants, Control, Label, Task, malformed, release_jumps,
 };
 
 /// The code of the script itself.
@@ -90,6 +97,10 @@ pub(crate) fn compile_function(
     let params = m.copy(&info.params)?;
 
     let mut c = Compiler::new(ast, resolution, constants, false, m);
+    let region = match info.async_slot {
+        Some(slot) => Some((slot, async_start(&mut c, f, slot)?)),
+        None => None,
+    };
     if !f.is_simple() {
         bind_parameters(&mut c, id, info)?;
     }
@@ -105,9 +116,10 @@ pub(crate) fn compile_function(
         c.emit(store, span)?;
         c.emit(Instruction::Pop, span)?;
     }
-    match info.generator_slot {
-        Some(slot) => generator_body(&mut c, f, slot)?,
-        None => {
+    match (info.generator_slot, region) {
+        (Some(slot), _) => generator_body(&mut c, f, slot)?,
+        (None, Some((slot, start))) => async_body(&mut c, f, slot, start)?,
+        (None, None) => {
             c.run(&f.body)?;
             c.emit(Instruction::Undefined, f.span)?;
             c.emit(Instruction::Return, f.span)?;
@@ -120,6 +132,7 @@ pub(crate) fn compile_function(
         length,
         strict: f.strict,
         generator: info.generator_slot.is_some(),
+        asynchronous: info.async_slot.is_some(),
         params,
         binds_parameters: !f.is_simple(),
         parameter_environment: !f.strict && f.scope.parameters_contain_direct_eval,
@@ -189,6 +202,49 @@ fn generator_body(c: &mut Compiler<'_, '_>, f: &Function, slot: u32) -> Result<(
         target: entry,
         items,
         envs,
+    })
+}
+
+/// The start of the code of an `async` function or arrow function, before
+/// FunctionDeclarationInstantiation (`#sec-runtime-semantics-evaluateasyncfunctionbody`, step 1;
+/// "`async` functions on suspended frames", item 1, `docs/design/engine.md`):
+/// [`Instruction::AsyncStart`], which makes the promise of the call and the activation into local
+/// slot `slot`; answers the label of the region after it, which [`async_body`] closes.
+fn async_start(c: &mut Compiler<'_, '_>, f: &Function, slot: u32) -> Result<Label, CompileError> {
+    c.asynchronous = Some(slot);
+    c.emit(Instruction::AsyncStart(slot), f.span)?;
+    let start = c.label();
+    c.bind(start)?;
+    Ok(start)
+}
+
+/// The rest of the code of an `async` function or arrow function after the instantiation of its
+/// function declarations: the body, whose end returns `undefined` as a `return` does, through
+/// [`Instruction::AsyncReturn`] (AsyncBlockStart, `#sec-asyncblockstart`, steps 2.e and 2.f).
+/// Everything from the label `start`, the binding of the parameters included, is a
+/// [`HandlerKind::Catch`] region whose block is [`Instruction::AsyncReject`], so a throw that
+/// leaves the body (step 2.g), or a default of a parameter that throws
+/// (EvaluateAsyncFunctionBody, step 3), rejects the promise of the call, which the call returns.
+fn async_body(
+    c: &mut Compiler<'_, '_>,
+    f: &Function,
+    slot: u32,
+    start: Label,
+) -> Result<(), CompileError> {
+    let span = f.span;
+    c.run(&f.body)?;
+    c.emit(Instruction::Undefined, span)?;
+    c.exit_return(span)?;
+    let rejected = c.label();
+    c.bind(rejected)?;
+    c.emit(Instruction::AsyncReject(slot), span)?;
+    c.handler(Handler {
+        kind: HandlerKind::Catch,
+        start,
+        end: rejected,
+        target: rejected,
+        items: 0,
+        envs: 0,
     })
 }
 

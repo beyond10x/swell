@@ -27,8 +27,9 @@
 //! `#sec-generatorfunction-constructor`), written by `story:generator-function-constructor`,
 //! which is no property of the global object; `%Promise%` and `%Promise.prototype%` (27.5.3 and
 //! 27.5.5, `#sec-promise-constructor`, `#sec-properties-of-the-promise-prototype-object`), written
-//! by `story:promise-constructor-then-and-jobs`. The other constructors and methods are later
-//! slices.
+//! by `story:promise-constructor-then-and-jobs`; `%AsyncFunction.prototype%` (27.7.3,
+//! `#sec-async-function-prototype-properties`), written by `story:async-functions-and-await`.
+//! The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
 //! first need no root until the realm record holds them all.
@@ -144,6 +145,8 @@ pub(crate) enum Intrinsic {
     Promise,
     /// `%Promise.prototype%` (27.5.5).
     PromisePrototype,
+    /// `%AsyncFunction.prototype%` (27.7.3), `story:async-functions-and-await`.
+    AsyncFunctionPrototype,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -202,6 +205,7 @@ pub(crate) struct Intrinsics {
     generator_function: ObjectRef,
     promise: ObjectRef,
     promise_prototype: ObjectRef,
+    async_function_prototype: ObjectRef,
 }
 
 impl Intrinsics {
@@ -250,6 +254,7 @@ impl Intrinsics {
             Intrinsic::GeneratorFunction => self.generator_function,
             Intrinsic::Promise => self.promise,
             Intrinsic::PromisePrototype => self.promise_prototype,
+            Intrinsic::AsyncFunctionPrototype => self.async_function_prototype,
         }
     }
 
@@ -309,6 +314,7 @@ impl Intrinsics {
             self.generator_function,
             self.promise,
             self.promise_prototype,
+            self.async_function_prototype,
         ] {
             mark.object(object);
         }
@@ -491,6 +497,7 @@ impl<H: Host> Agent<H> {
             generator_prototypes.function_prototype,
         )?;
         let (promise, promise_prototype) = self.create_promise_constructor(making)?;
+        let async_function_prototype = self.create_async_function_prototype(making)?;
         // %Array.prototype.values% (23.1.3.38), %Array.prototype.entries% (23.1.3.5),
         // %Array.prototype.keys% (23.1.3.19) and %Array.prototype.forEach% (23.1.3.15): the
         // methods `create_array_constructor` has defined on %Array.prototype%, read before any
@@ -535,6 +542,7 @@ impl<H: Host> Agent<H> {
             generator_function,
             promise,
             promise_prototype,
+            async_function_prototype,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {

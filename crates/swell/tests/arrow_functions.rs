@@ -2,8 +2,9 @@
 //! around them (`docs/design/engine.md`, decision 3, "`this` and `arguments` in an arrow
 //! function"), no [[Construct]] and no `prototype`, their source text, the collector keeping
 //! the `this` an arrow took, the re-entry limit reached through calls of arrows, the site of a
-//! throw in an arrow's body, the ledger over a wide parameter list, and the refusals an arrow's
-//! parameters keep. Written by `story:arrow-functions`. Run also with the feature
+//! throw in an arrow's body, the ledger over a wide parameter list, and the forms of an arrow's
+//! parameters, `async` arrows among them. Written by `story:arrow-functions`. Run also with the
+//! feature
 //! `collect-every-safe-point`.
 //!
 //! Each script compares its results with `===` and answers `true`; none uses a template literal,
@@ -238,11 +239,12 @@ fn an_arrow_with_ten_thousand_parameters_is_charged_as_it_is_read() {
     assert_eq!(ledger.held, held, "the compile step credited its scratch");
 }
 
-/// An `async` arrow keeps the refusal of slice 10. Defaults and a rest element parse since
-/// `story:default-and-rest-parameters`, an object pattern since `story:object-destructuring`,
-/// an array pattern since `story:array-destructuring-and-spread`.
+/// Defaults and a rest element parse since `story:default-and-rest-parameters`, an object
+/// pattern since `story:object-destructuring`, an array pattern since
+/// `story:array-destructuring-and-spread`; an `async` arrow evaluates to a function since
+/// `story:async-functions-and-await`.
 #[test]
-fn arrow_defaults_rest_and_patterns_run_and_async_keeps_its_refusal() {
+fn arrow_defaults_rest_and_patterns_run_and_async_arrows_run() {
     for source in [
         "var f = (a = 1) => a;",
         "var f = (a, b = 1) => a;",
@@ -257,16 +259,14 @@ fn arrow_defaults_rest_and_patterns_run_and_async_keeps_its_refusal() {
             "{source}"
         );
     }
-    for (source, refused) in [
-        ("var f = async (a) => a;", "async function is not supported"),
-        ("var f = async a => a;", "async function is not supported"),
+    for source in [
+        "var f = async (a) => a; typeof f;",
+        "var f = async a => a; typeof f;",
     ] {
-        match run(limits(), source) {
-            Outcome::Errors(messages) => assert!(
-                messages.len() == 1 && messages.first().is_some_and(|m| m.starts_with(refused)),
-                "{source}: {messages:?}"
-            ),
-            other => panic!("{source}: {other:?}"),
-        }
+        assert_eq!(
+            run(limits(), source),
+            Outcome::Normal("\"function\"".into()),
+            "{source}"
+        );
     }
 }

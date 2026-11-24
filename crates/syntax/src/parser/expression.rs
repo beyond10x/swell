@@ -1480,7 +1480,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                             TokenKind::Punct(Punct::Star) | TokenKind::Punct(Punct::LBracket)
                         ))
                 {
-                    return self.refuse("async function", 10);
+                    return self.refuse("async method", 10);
                 }
                 return Ok(None);
             }

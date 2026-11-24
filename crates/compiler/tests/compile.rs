@@ -830,3 +830,86 @@ fn a_generator_reserves_its_last_slot_and_starts_after_its_parameters() {
         g.handlers
     );
 }
+
+/// An `async` template ("`async` functions on suspended frames", item 1, `docs/design/engine.md`)
+/// has one local slot more than the same function written without `async`, the last, which no
+/// binding uses: its activation. Its code starts the activation in that slot before it binds
+/// the parameters (`#sec-runtime-semantics-evaluateasyncfunctionbody`, step 1, before
+/// FunctionDeclarationInstantiation), and from right after the start to its end it is a catch
+/// region whose block rejects the promise of the call (step 3 and `#sec-asyncblockstart`); every
+/// way out of it is the return of an `async` template, never a plain `Return`.
+#[test]
+fn an_async_function_reserves_its_last_slot_and_starts_before_its_parameters() {
+    // The same bindings, `await x` in the async function where the function has `x`.
+    let head = "(a = 1, [b] = [a]) { var x = b; function inner() {}";
+    let code = compile(&format!(
+        "async function g{head} await x; return inner; }}\nfunction f{head} x; return inner; }}"
+    ))
+    .unwrap();
+    let g = function(&code, "g").unwrap();
+    let f = function(&code, "f").unwrap();
+    assert!(g.asynchronous && !f.asynchronous && !g.generator);
+    assert_eq!(g.locals, f.locals + 1);
+    let slot = g.locals - 1;
+    assert!(
+        g.params
+            .iter()
+            .all(|p| !matches!(p, Slot::Local(s) if *s == slot)),
+        "a parameter in the reserved slot: {:?}",
+        g.params
+    );
+    assert_eq!(
+        g.instructions.first(),
+        Some(&Instruction::AsyncStart(slot)),
+        "the start is not the first instruction: {:?}",
+        g.instructions
+    );
+    let first_binding = g
+        .instructions
+        .iter()
+        .position(|i| {
+            matches!(
+                i,
+                Instruction::Argument(_)
+                    | Instruction::JumpIfNotUndefined(_)
+                    | Instruction::PatternStep(_)
+                    | Instruction::Closure(_)
+            )
+        })
+        .unwrap_or_else(|| panic!("no binding of the parameters: {:?}", g.instructions));
+    let first_await = g
+        .instructions
+        .iter()
+        .position(|i| *i == Instruction::Await(slot))
+        .unwrap_or_else(|| panic!("no Await {slot}: {:?}", g.instructions));
+    assert!(0 < first_binding && first_binding < first_await);
+    for i in &g.instructions {
+        assert!(
+            !matches!(i, Instruction::Return),
+            "a plain Return in an async function: {:?}",
+            g.instructions
+        );
+        if let Instruction::GetLocal(s) | Instruction::SetLocal(s) = i {
+            assert_ne!(*s, slot, "a binding in the reserved slot");
+        }
+    }
+    assert!(g.instructions.contains(&Instruction::AsyncReturn(slot)));
+    let reject = g
+        .instructions
+        .iter()
+        .position(|i| *i == Instruction::AsyncReject(slot))
+        .unwrap_or_else(|| panic!("no AsyncReject {slot}: {:?}", g.instructions));
+    assert_eq!(
+        reject + 1,
+        g.instructions.len(),
+        "the rejection is not last"
+    );
+    assert!(
+        g.handlers.iter().any(|h| h.kind == HandlerKind::Catch
+            && h.start == 1
+            && h.end as usize == reject
+            && h.target as usize == reject),
+        "no catch from right after the start to the rejection: {:?}",
+        g.handlers
+    );
+}

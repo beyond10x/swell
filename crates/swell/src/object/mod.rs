@@ -6,7 +6,9 @@
 //! and their dispatch arms, and one marking arm per kind beside them.
 //! `story:regexp-objects-exec-and-literals` adds the RegExp kind (`object/regexp.rs`), which owns
 //! the program of its pattern. `story:promise-constructor-then-and-jobs` adds the Promise kind
-//! (`object/promise.rs`), which takes every internal method by its ordinary arm.
+//! (`object/promise.rs`), which takes every internal method by its ordinary arm, and
+//! `story:async-functions-and-await` the activation of an `async` function
+//! (`object/async_function.rs`), which does too.
 //!
 //! Every kind but the Array, String and arguments exotic objects uses the ordinary internal
 //! methods (`object/ordinary.rs`); host objects too, until the overrides of slice 9. [[Call]] and
@@ -32,6 +34,7 @@
 
 pub(crate) mod arguments;
 pub(crate) mod array;
+pub(crate) mod async_function;
 pub(crate) mod bound_function;
 pub(crate) mod builtin_function;
 pub(crate) mod ecmascript_function;
@@ -52,6 +55,7 @@ use crate::host::{Abrupt, Completion, Host, Termination};
 use crate::value::{ObjectRef, Value};
 use arguments::ArgumentsObject;
 use array::Array;
+use async_function::AsyncActivation;
 use bound_function::BoundFunction;
 use builtin_function::BuiltinFunction;
 use ecmascript_function::EcmascriptFunction;
@@ -189,6 +193,9 @@ pub(crate) enum ObjectKind {
     Generator(Generator),
     /// A Promise instance (27.5.6), `story:promise-constructor-then-and-jobs`.
     Promise(Promise),
+    /// The activation of an `async` function (`docs/design/engine.md`, decision 3, "`async`
+    /// functions on suspended frames", item 1), `story:async-functions-and-await`.
+    AsyncActivation(AsyncActivation),
 }
 
 /// Which kind an object is, for the dispatch.
@@ -206,6 +213,7 @@ pub(crate) enum KindTag {
     RegExp,
     Generator,
     Promise,
+    AsyncActivation,
 }
 
 impl ObjectRecord {
@@ -240,6 +248,7 @@ impl ObjectRecord {
             ObjectKind::RegExp(regexp) => regexp.trace(mark),
             ObjectKind::Generator(generator) => generator.trace(mark),
             ObjectKind::Promise(promise) => promise.trace(mark),
+            ObjectKind::AsyncActivation(activation) => activation.trace(mark),
         }
     }
 
@@ -260,6 +269,7 @@ impl ObjectRecord {
             ObjectKind::RegExp(_) => KindTag::RegExp,
             ObjectKind::Generator(_) => KindTag::Generator,
             ObjectKind::Promise(_) => KindTag::Promise,
+            ObjectKind::AsyncActivation(_) => KindTag::AsyncActivation,
         }
     }
 }

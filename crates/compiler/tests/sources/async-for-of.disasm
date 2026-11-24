@@ -1,0 +1,27 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "l" length 1 locals 3 async
+  params local 0
+  0000 2:1 AsyncStart 2
+  0001 3:17 GetLocal 0
+  0002 3:17 GetIterator
+  0003 3:3 IteratorStep 0014
+  0004 3:12 SetLocal 1
+  0005 3:12 Pop
+  0006 4:11 GetLocal 1
+  0007 4:5 Await 2
+  0008 4:5 JumpIfTag 0 0010
+  0009 4:5 EndFinally
+  0010 4:5 Pop
+  0011 3:3 LoopJump 0003
+  0012 3:3 IteratorClose
+  0013 3:3 EndFinally
+  0014 3:3 Pop
+  0015 2:1 Undefined
+  0016 2:1 AsyncReturn 2
+  0017 2:1 AsyncReject 2
+  finally 0003..0012 -> 0012 items 1 envs 0
+  catch 0001..0017 -> 0017 items 0 envs 0

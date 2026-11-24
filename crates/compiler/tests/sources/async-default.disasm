@@ -1,0 +1,31 @@
+script locals 0
+  declare 0
+  0000 0:0 LoadCompletion
+  0001 0:0 Return
+
+function 0 declaration "d" length 0 locals 3 async binds-parameters
+  params local 0, local 1
+  0000 2:1 AsyncStart 2
+  0001 2:18 Argument 3
+  0002 2:18 JumpIfNotUndefined 0006
+  0003 2:22 Undefined
+  0004 2:22 GetGlobal "b"
+  0005 2:22 Call 0
+  0006 2:18 SetLocal 0
+  0007 2:18 Pop
+  0008 2:27 Argument 4
+  0009 2:27 JumpIfNotUndefined 0011
+  0010 2:31 GetLocal 0
+  0011 2:27 SetLocal 1
+  0012 2:27 Pop
+  0013 3:16 GetLocal 0
+  0014 3:10 Await 2
+  0015 3:10 JumpIfTag 0 0017
+  0016 3:10 EndFinally
+  0017 3:20 GetLocal 1
+  0018 3:10 Add
+  0019 3:3 AsyncReturn 2
+  0020 2:1 Undefined
+  0021 2:1 AsyncReturn 2
+  0022 2:1 AsyncReject 2
+  catch 0001..0022 -> 0022 items 0 envs 0
