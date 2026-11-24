@@ -517,10 +517,11 @@ impl<H: Host> Agent<H> {
         // 5, 6. A code unit of F that is not a flag, or one that repeats, throws a SyntaxError;
         // ParsePattern's step 1, `u` with `v`, is checked with them. A String longer than the
         // flags there are is charged a step per code unit before it is read.
-        let units = if self.string_length(flags)? > MOST_FLAGS {
+        let length = self.string_length(flags)?;
+        let units = if length > MOST_FLAGS {
             self.charged_units(flags)?
         } else {
-            self.string_units(flags)?
+            self.string_units_in(flags, 0, length)?
         };
         let parsed = match Flags::parse(&units) {
             Ok(parsed) => parsed,

@@ -24,6 +24,7 @@ use std::collections::BTreeSet;
 
 use crate::builtins::object::argument;
 use crate::builtins::string::{StringBuilder, units_of};
+use crate::heap::accounting::ChargedVec;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host, Termination};
@@ -87,22 +88,23 @@ struct Frame {
 
 /// The JSON Serialization Record (`#sec-json-serialization-record`), with the frames that
 /// stand for the nested calls of SerializeJSONProperty and the result being written.
-struct State {
+struct State<'r> {
     replacer: Option<Value>,
     /// The property list, its Strings kept for the whole call.
-    property_list: Option<Vec<StringRef>>,
+    property_list: Option<ChargedVec<StringRef>>,
     gap: Vec<u16>,
-    indent: Vec<u16>,
+    indent: ChargedVec<u16>,
     /// The handles of the objects on state.[[Stack]], for the cycle check.
     on_stack: BTreeSet<(u32, u32, u32)>,
-    frames: Vec<Frame>,
+    frames: ChargedVec<Frame>,
     out: StringBuilder,
     /// The bytes charged for the frames, their lists of keys and the property list, credited
     /// when they go.
     charged: u64,
-    /// The room the kept stack had when the call began, and the growth charged for the keys
-    /// the frames keep, given back when the call ends.
-    room: KeptRoom,
+    /// The room of the kept stack for the call (`Agent::with_kept_room`): the growth charged
+    /// for the keys the frames keep and the items of the property list, given back when the
+    /// call ends.
+    room: &'r mut KeptRoom,
 }
 
 /// What SerializeJSONProperty of a value gives, before anything is written: undefined, a
@@ -161,21 +163,28 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Value> {
         match id {
             JsonBuiltin::Stringify => {
+                // The room is ended on every way out, as `Agent::with_kept_room` ends it;
+                // written out here so that no closure's frame stands between this call and a
+                // re-entry of `toJSON` or the replacer.
                 let mark = self.kept.len();
-                let mut state = State {
-                    replacer: None,
-                    property_list: None,
-                    gap: Vec::new(),
-                    indent: Vec::new(),
-                    on_stack: BTreeSet::new(),
-                    frames: Vec::new(),
-                    out: StringBuilder::new(),
-                    charged: 0,
-                    room: self.kept_room(),
+                let mut room = self.kept_room();
+                let result = {
+                    let mut state = State {
+                        replacer: None,
+                        property_list: None,
+                        gap: Vec::new(),
+                        indent: ChargedVec::new(),
+                        on_stack: BTreeSet::new(),
+                        frames: ChargedVec::new(),
+                        out: StringBuilder::new(),
+                        charged: 0,
+                        room: &mut room,
+                    };
+                    let result = self.json_stringify(&mut state, args);
+                    self.heap.accounting.credit(state.charged);
+                    result
                 };
-                let result = self.json_stringify(&mut state, args);
-                self.heap.accounting.credit(state.charged);
-                self.end_kept_room(mark, &state.room);
+                self.end_kept_room(mark, &room);
                 result
             }
             JsonBuiltin::IsRawJson => self.json_is_raw_json(args),
@@ -185,7 +194,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// Charge `bytes` of the walk to the memory budget.
-    fn json_charge(&mut self, state: &mut State, bytes: u64) -> Completion<()> {
+    fn json_charge(&mut self, state: &mut State<'_>, bytes: u64) -> Completion<()> {
         if self.heap.accounting.charge(bytes).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -195,7 +204,7 @@ impl<H: Host> Agent<H> {
 
     /// `JSON.stringify ( value [ , replacer [ , space ] ] )` (`#sec-json.stringify`). The
     /// arguments are held by this builtin's activation.
-    fn json_stringify(&mut self, state: &mut State, args: &[Value]) -> Completion<Value> {
+    fn json_stringify(&mut self, state: &mut State<'_>, args: &[Value]) -> Completion<Value> {
         let value = argument(args, 0);
         let replacer = argument(args, 1);
         // 5. If replacer is an Object, then
@@ -235,9 +244,9 @@ impl<H: Host> Agent<H> {
     /// in order. A step per element and per comparison with an item already listed; the
     /// comparison is in place and charges a step per code unit past 32 of two items of the
     /// same length before it reads them ([`Agent::string_equals`]).
-    fn json_property_list(&mut self, state: &mut State, replacer: ObjectRef) -> Completion<()> {
+    fn json_property_list(&mut self, state: &mut State<'_>, replacer: ObjectRef) -> Completion<()> {
         // 5.b.i. Set propertyList to a new empty List.
-        let mut list: Vec<StringRef> = Vec::new();
+        let mut list: ChargedVec<StringRef> = ChargedVec::new();
         // 5.b.ii. Let len be ? LengthOfArrayLike(replacer).
         let length = self.length_of_array_like(replacer)?;
         // 5.b.iii, iv. For each k below len.
@@ -268,13 +277,9 @@ impl<H: Host> Agent<H> {
                     }
                 }
                 if !listed {
-                    let bytes = size_of::<StringRef>().saturating_add(size_of::<Value>());
-                    self.json_charge(state, u64::try_from(bytes).unwrap_or(u64::MAX))?;
-                    if list.try_reserve(1).is_err() {
-                        return Err(self.terminate(Termination::MemoryBudget));
-                    }
+                    self.reserve_kept(state.room, 1)?;
                     self.keep(Value::String(item));
-                    list.push(item);
+                    self.push_vec(&mut list, item)?;
                 }
             }
             index += 1.0;
@@ -325,7 +330,7 @@ impl<H: Host> Agent<H> {
             // 8. If space is a String: its first 10 code units, and no more of it is read.
             Value::String(string) => {
                 let length = self.string_length(string)?.min(GAP_MAX);
-                self.string_units_in(string, 0, length)?
+                self.string_units_in(string, 0, length)?.into_vec()
             }
             // 9. Else, the empty String.
             _ => Vec::new(),
@@ -355,7 +360,7 @@ impl<H: Host> Agent<H> {
 
     /// QuoteJSONString of `key` for a member of an object, appended to the result: an index by
     /// its digits, a String key read in ranges as a String value is.
-    fn json_quote_key(&mut self, state: &mut State, key: JsonKey) -> Completion<()> {
+    fn json_quote_key(&mut self, state: &mut State<'_>, key: JsonKey) -> Completion<()> {
         match key {
             JsonKey::Key(Key::Index(index)) => {
                 self.json_quote_units(state, &units_of(&index.to_string()))
@@ -377,7 +382,7 @@ impl<H: Host> Agent<H> {
     /// held across the code that follows by the activation it is passed to.
     fn json_serialize_property(
         &mut self,
-        state: &State,
+        state: &State<'_>,
         key: JsonKey,
         holder: ObjectRef,
     ) -> Completion<Serialized> {
@@ -464,7 +469,7 @@ impl<H: Host> Agent<H> {
     /// Write a serialized value that is not undefined: its text, its quoted String, the text
     /// of a raw JSON object, or the opening of its object or array. A String is kept while it
     /// is read: it may be one no object holds, made by toJSON or the replacer.
-    fn json_write(&mut self, state: &mut State, serialized: Serialized) -> Completion<()> {
+    fn json_write(&mut self, state: &mut State<'_>, serialized: Serialized) -> Completion<()> {
         match serialized {
             Serialized::Undefined => Err(self.fault()),
             Serialized::Text(units) => self.append_units(&mut state.out, &units),
@@ -486,7 +491,7 @@ impl<H: Host> Agent<H> {
 
     /// QuoteJSONString (`#sec-quotejsonstring`) of the code units `units`, appended to the
     /// result.
-    fn json_quote_units(&mut self, state: &mut State, units: &[u16]) -> Completion<()> {
+    fn json_quote_units(&mut self, state: &mut State<'_>, units: &[u16]) -> Completion<()> {
         // 1. Let product be the String value consisting solely of the code unit 0x0022.
         let mut chunk: Vec<u16> = vec![u16::from(b'"')];
         self.json_quote_range(state, &mut chunk, units)?;
@@ -499,7 +504,7 @@ impl<H: Host> Agent<H> {
     /// is read in ranges of at most [`QUOTE_CHUNK`] code units, each quoted before the next is
     /// read; a range that would end between the two units of a surrogate pair ends before the
     /// first, so each pair is read whole.
-    fn json_quote_string(&mut self, state: &mut State, string: StringRef) -> Completion<()> {
+    fn json_quote_string(&mut self, state: &mut State<'_>, string: StringRef) -> Completion<()> {
         let length = self.string_length(string)?;
         // 1. Let product be the String value consisting solely of the code unit 0x0022.
         let mut chunk: Vec<u16> = vec![u16::from(b'"')];
@@ -527,7 +532,7 @@ impl<H: Host> Agent<H> {
     /// result and emptied each time it holds [`QUOTE_CHUNK`] units or more.
     fn json_quote_range(
         &mut self,
-        state: &mut State,
+        state: &mut State<'_>,
         chunk: &mut Vec<u16>,
         units: &[u16],
     ) -> Completion<()> {
@@ -576,7 +581,7 @@ impl<H: Host> Agent<H> {
     /// SerializeJSONObject (`#sec-serializejsonobject`) and SerializeJSONArray
     /// (`#sec-serializejsonarray`), steps 1 to 4 (to 6 of an array): the cycle check, the
     /// stack, the indent and the keys or length; the frame is charged and opened.
-    fn json_open(&mut self, state: &mut State, object: ObjectRef) -> Completion<()> {
+    fn json_open(&mut self, state: &mut State<'_>, object: ObjectRef) -> Completion<()> {
         // 1. If state.[[Stack]] contains value, throw a TypeError exception.
         if state.on_stack.contains(&identity(object)) {
             return Err(self.throw_error(
@@ -602,26 +607,24 @@ impl<H: Host> Agent<H> {
             // (`ops/objects.rs`): charged before it exists, each key kept in room charged to
             // the call until the frame's mark is released. The frame takes the list's charge
             // over.
-            let list = self.enumerable_own_keys(object, &mut state.room)?;
+            let list = self.enumerable_own_keys(object, state.room)?;
             state.charged = state.charged.saturating_add(list.bytes);
             let keys = Some(list.keys);
             (Members::Object { keys, next: 0 }, list.bytes)
         };
-        let bytes = size_of::<Frame>()
-            .saturating_add(size_of::<Value>())
-            .saturating_add(size_of::<(u32, u32, u32)>() * 4)
-            .saturating_add(state.gap.len() * 2);
+        // The frame's slot on the kept stack and four keys' bytes of `on_stack`; the frame
+        // itself and its indent are in lists charged by their capacity.
+        let bytes = size_of::<Value>().saturating_add(size_of::<(u32, u32, u32)>() * 4);
         let frame_bytes = u64::try_from(bytes).unwrap_or(u64::MAX);
         self.json_charge(state, frame_bytes)?;
         let charged = frame_bytes.saturating_add(list_bytes);
-        if state.frames.try_reserve(1).is_err()
-            || state.indent.try_reserve(state.gap.len()).is_err()
-        {
-            return Err(self.terminate(Termination::MemoryBudget));
+        self.reserve_vec(&mut state.frames, 1)?;
+        self.reserve_vec(&mut state.indent, state.gap.len())?;
+        if state.indent.extend_from_slice(&state.gap).is_err() {
+            return Err(self.fault());
         }
-        state.indent.extend_from_slice(&state.gap);
         state.on_stack.insert(identity(object));
-        state.frames.push(Frame {
+        let pushed = state.frames.push(Frame {
             object,
             members,
             written: false,
@@ -629,12 +632,15 @@ impl<H: Host> Agent<H> {
             mark,
             charged,
         });
+        if pushed.is_err() {
+            return Err(self.fault());
+        }
         Ok(())
     }
 
     /// The members of the open frames, the innermost first, until none is open: a step per
     /// member.
-    fn json_walk(&mut self, state: &mut State) -> Completion<()> {
+    fn json_walk(&mut self, state: &mut State<'_>) -> Completion<()> {
         while let Some(frame) = state.frames.last_mut() {
             let object = frame.object;
             // The next member of the innermost frame, if any.
@@ -692,7 +698,7 @@ impl<H: Host> Agent<H> {
     /// What comes before a member of the innermost frame: `open` before the first, a comma
     /// before the others; with a gap, a line feed and state.[[Indent]] (steps 10.b of the
     /// clauses, the separator and the start of final).
-    fn json_separator(&mut self, state: &mut State, open: u8) -> Completion<()> {
+    fn json_separator(&mut self, state: &mut State<'_>, open: u8) -> Completion<()> {
         let Some(frame) = state.frames.last_mut() else {
             return Err(self.fault());
         };
@@ -715,7 +721,7 @@ impl<H: Host> Agent<H> {
     /// The end of the innermost frame: "{}" or "[]" when it wrote no member; else, with a gap,
     /// a line feed and stepBack, and the closing bracket. Then the last element of
     /// state.[[Stack]] is removed and state.[[Indent]] is set to stepBack.
-    fn json_close(&mut self, state: &mut State) -> Completion<()> {
+    fn json_close(&mut self, state: &mut State<'_>) -> Completion<()> {
         let Some(frame) = state.frames.pop() else {
             return Err(self.fault());
         };
@@ -802,5 +808,37 @@ mod tests {
             counting.counted(FEW_STEPS, "JSON.stringify(r)"),
             (Answer::Terminated(Termination::StepBudget), 0)
         );
+    }
+
+    /// `docs/design/engine.md`, "Memory budget": the result builder of `JSON.stringify`
+    /// (`#sec-json.stringify`), its frames, its indent and its property list are charged by
+    /// their capacity while it calls `toJSON`. Four levels, each holding the quoted String of
+    /// 65,536 code units, do not fit a room of three such copies and end in
+    /// `Terminated(MemoryBudget)`; with a property list of 64 Strings and a `space` of 4 no
+    /// capacity is uncovered at any entry into script.
+    #[test]
+    fn stringify_holds_charged_buffers_across_a_call_of_to_json() {
+        use crate::object::string::across::Across;
+        use crate::object::string::copies;
+        let mut across = Across::with_steps(4_000_000);
+        across.string("s", &vec![0x61; 65_536]);
+        let script = across.parse(
+            "var d = 0; var o = { toJSON: function () { if (++d < 4) JSON.stringify([s, o]); \
+             return 1; } }; JSON.stringify([s, o]).length",
+        );
+        across.room(3 * 131_072);
+        assert_eq!(
+            across.evaluate(&script),
+            Answer::Terminated(Termination::MemoryBudget)
+        );
+
+        let mut across = Across::with_steps(4_000_000);
+        let answer = across.run(
+            "var d = 0; var l = []; for (var i = 0; i < 64; i++) l.push(\"k\" + i); var o = { \
+             k0: 1, toJSON: function () { if (++d < 4) JSON.stringify([\"a\", o], l, 4); \
+             return { k1: 2 }; } }; JSON.stringify([\"a\", o], l, 4).length",
+        );
+        assert_eq!(answer, Answer::Normal("Number(40.0)".to_string()));
+        assert_eq!(copies::uncovered_at_entry(), 0);
     }
 }

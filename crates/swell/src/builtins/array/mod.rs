@@ -32,7 +32,7 @@ pub(crate) mod search;
 
 use crate::builtins::iterator::ArrayIterationKind;
 use crate::builtins::object::argument;
-use crate::builtins::string::{StringBuilder, units_of};
+use crate::builtins::string::StringBuilder;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
@@ -330,23 +330,20 @@ impl<H: Host> Agent<H> {
     fn array_join_steps(&mut self, object: ObjectRef, separator: Value) -> Completion<Value> {
         // 2. Let len be ? LengthOfArrayLike(O).
         let length = self.length_of_array_like(object)?;
-        // 3, 4. If separator is undefined, let sep be ","; else let sep be ? ToString(separator).
-        // sep is appended only before an element after the first (JoinIndexedProperties, step
-        // a), so with len below 2 its units are not read.
+        // 3, 4. If separator is undefined, let sep be ","; else let sep be ? ToString(separator),
+        // kept and read in place each time it is appended (`None` stands for ",").
         let separator = match separator {
-            Value::Undefined => units_of(","),
-            separator => {
-                let separator = self.to_string(separator)?;
-                if length >= 2.0 {
-                    self.string_units(separator)?
-                } else {
-                    Vec::new()
-                }
-            }
+            Value::Undefined => None,
+            separator => Some(self.to_string(separator)?),
         };
+        let mark = self.kept.len();
+        if let Some(separator) = separator {
+            self.keep(Value::String(separator));
+        }
         // 5. Return ? JoinIndexedProperties(O, len, sep).
-        let joined = self.join_indexed_properties(object, length, &separator)?;
-        Ok(Value::String(joined))
+        let joined = self.join_indexed_properties(object, length, separator);
+        self.release(mark);
+        Ok(Value::String(joined?))
     }
 
     /// JoinIndexedProperties (`#sec-joinindexedproperties`) without a method name: a step per
@@ -355,7 +352,7 @@ impl<H: Host> Agent<H> {
         &mut self,
         object: ObjectRef,
         length: f64,
-        separator: &[u16],
+        separator: Option<crate::value::StringRef>,
     ) -> Completion<crate::value::StringRef> {
         let mut result = StringBuilder::new();
         let mut index = 0.0;
@@ -363,7 +360,10 @@ impl<H: Host> Agent<H> {
             self.charge_steps(1)?;
             // a. If k > 0, set R to the string-concatenation of R and sep.
             if index > 0.0 {
-                self.append_units(&mut result, separator)?;
+                match separator {
+                    Some(separator) => self.append_string(&mut result, separator)?,
+                    None => self.append_units(&mut result, &[u16::from(b',')])?,
+                }
             }
             // b. Let element be ? Get(O, ! ToString(𝔽(k))).
             let key = self.index_key(index)?;
@@ -741,7 +741,7 @@ mod tests {
                 let Ok(Value::String(answer)) = answer else {
                     panic!("{answer:?}");
                 };
-                let answer = agent.string_units(answer).unwrap();
+                let answer = agent.string_units_for_tests(answer).unwrap();
                 assert_eq!(String::from_utf16_lossy(&answer), "[object Tagged]");
                 let seen_key = agent.name_key("seen").unwrap();
                 assert_eq!(
@@ -867,4 +867,30 @@ mod tests {
             (Answer::Normal("1".to_string()), 0)
         );
     }
+
+    /// `docs/design/engine.md`, "Memory budget": `join` reads its separator in place
+    /// (`#sec-array.prototype.join`), so no copy of it is alive while ToString of an element
+    /// runs code, and its result builder is charged while it lives. Four levels of `join` with a
+    /// separator of 65,536 code units answer the same Number at the same steps, with no copy
+    /// of a String's units made and no capacity uncovered at any entry into script.
+    #[test]
+    fn join_reads_its_separator_in_place_across_a_call() {
+        use crate::builtins::string::transform::tests::Answer;
+        use crate::object::string::across::Across;
+        use crate::object::string::copies;
+        let mut across = Across::with_steps(4_000_000);
+        across.string("s", &vec![0x61; 65_536]);
+        let answer = across.run(
+            "var d = 0; var o = { toString: function () { return ++d < 4 ? [o, 1].join(s) : \
+             \"e\"; } }; [o, 1].join(s).length",
+        );
+        assert_eq!(answer, Answer::Normal("Number(262149.0)".to_string()));
+        assert_eq!(across.steps(), JOIN_ACROSS_STEPS);
+        assert_eq!(copies::longest(), 0);
+        assert_eq!(copies::uncovered_at_entry(), 0);
+    }
+
+    /// The steps of the script of [`join_reads_its_separator_in_place_across_a_call`] on the
+    /// base, before the story.
+    const JOIN_ACROSS_STEPS: u64 = 655_495;
 }

@@ -18,16 +18,19 @@
 //! call: a call may collect the atom of an index above 2^32 - 2.
 //!
 //! FlattenIntoArray recurses once per nested Array in the clause; here it is a loop over an
-//! explicit stack with one entry per source being flattened, each charged to the memory budget
-//! while it is open ([`OPEN_BYTES`]), so an Array that holds itself, flattened with depth
-//! `Infinity`, ends in the step or the memory budget and never in a Rust stack overflow.
+//! explicit stack with one entry per source being flattened, a list charged by its capacity,
+//! and each open source is kept in a room of the kept stack charged before it grows, so an Array
+//! that holds itself, flattened with depth `Infinity`, ends in the step or the memory budget and
+//! never in a Rust stack overflow.
 
 use super::MAX_SAFE_LENGTH;
 use crate::builtins::object::argument;
 use crate::builtins::{Method, SymbolData};
+use crate::heap::accounting::ChargedVec;
 use crate::host::agent::Agent;
-use crate::host::outcome::{Completion, Termination};
+use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
+use crate::object::builtin_function::KeptRoom;
 use crate::value::{ObjectRef, Value};
 
 /// The builtins of this group, by their steps.
@@ -109,10 +112,6 @@ struct Open {
     /// The length of the kept stack before the source was kept there.
     mark: usize,
 }
-
-/// The bytes an open source of FlattenIntoArray is charged to the memory budget while it is
-/// open: its entry on the explicit stack and its slot on the kept stack.
-const OPEN_BYTES: u64 = (size_of::<Open>() + size_of::<Value>()) as u64;
 
 impl<H: Host> Agent<H> {
     /// The steps of the builtins of this group; not inlined, so that the frame of
@@ -447,7 +446,8 @@ impl<H: Host> Agent<H> {
     /// Steps 2 to the end of `flat` (`#sec-array.prototype.flat`) and, with `map`, of `flatMap`
     /// (`#sec-array.prototype.flatmap`), with O kept: the depth or the mapper, then A by
     /// ArraySpeciesCreate, kept, then FlattenIntoArray (`#sec-flattenintoarray`) from O into A
-    /// at 0 on the explicit stack, whose charge is credited when it ends, however it ends.
+    /// at 0 on the explicit stack, in a room of the kept stack; the stack and the room are
+    /// credited when it ends, however it ends.
     fn array_flat(&mut self, object: ObjectRef, args: &[Value], map: bool) -> Completion<Value> {
         // 2. Let sourceLen be ? LengthOfArrayLike(O).
         let length = self.length_of_array_like(object)?;
@@ -473,45 +473,23 @@ impl<H: Host> Agent<H> {
         self.keep(Value::Object(array));
         // 6 (flat), 5 (flatMap). Perform ? FlattenIntoArray(A, O, sourceLen, 0, depthNum
         // [ , mapperFunc, thisArg ]).
-        let mut stack = Vec::new();
-        let mut charged = 0;
+        // The room is ended on every way out, as `Agent::with_kept_room` ends it; written out
+        // here so that no closure's frame stands between this call and the mapper's re-entry.
+        let mut stack = ChargedVec::new();
         let mark = self.kept.len();
-        let flattened = self.flatten_into_array(
-            array,
-            Open {
-                source: object,
-                length,
-                index: 0.0,
-                depth,
-                mark,
-            },
-            mapper,
-            &mut stack,
-            &mut charged,
-        );
-        self.heap.accounting.credit(charged);
+        let mut room = self.kept_room();
+        let outermost = Open {
+            source: object,
+            length,
+            index: 0.0,
+            depth,
+            mark,
+        };
+        let flattened = self.flatten_into_array(array, outermost, mapper, &mut stack, &mut room);
+        self.end_kept_room(mark, &room);
         flattened?;
         // 7 (flat), 6 (flatMap). Return A.
         Ok(Value::Object(array))
-    }
-
-    /// Open `open` on the explicit stack of FlattenIntoArray: charged to the memory budget
-    /// first, recorded in `charged` until it is closed.
-    fn open_source(
-        &mut self,
-        stack: &mut Vec<Open>,
-        charged: &mut u64,
-        open: Open,
-    ) -> Completion<()> {
-        if self.heap.accounting.charge(OPEN_BYTES).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        *charged = charged.saturating_add(OPEN_BYTES);
-        if stack.try_reserve(1).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        stack.push(open);
-        Ok(())
     }
 
     /// FlattenIntoArray ( target, source, sourceLength, start, depth [ , mapperFunc [ , thisArg
@@ -526,12 +504,12 @@ impl<H: Host> Agent<H> {
         target: ObjectRef,
         outermost: Open,
         mapper: Option<(Value, Value)>,
-        stack: &mut Vec<Open>,
-        charged: &mut u64,
+        stack: &mut ChargedVec<Open>,
+        room: &mut KeptRoom,
     ) -> Completion<()> {
         // 2. Let targetIndex be start.
         let mut target_index = 0.0;
-        self.open_source(stack, charged, outermost)?;
+        self.push_vec(stack, outermost)?;
         while let Some(&Open {
             source,
             length,
@@ -544,8 +522,6 @@ impl<H: Host> Agent<H> {
             if index >= length {
                 stack.pop();
                 self.release(mark);
-                self.heap.accounting.credit(OPEN_BYTES);
-                *charged = charged.saturating_sub(OPEN_BYTES);
                 continue;
             }
             self.charge_steps(1)?;
@@ -563,6 +539,7 @@ impl<H: Host> Agent<H> {
             // below may run code, and it is read or written after.
             let key = self.index_key(index)?;
             let mut element = self.get(source, key)?;
+            self.reserve_kept(room, 1)?;
             let element_mark = self.keep(element);
             // 3.c.ii. If mapperFunc is present, set element to ? Call(mapperFunc, thisArg,
             // « element, sourceIndex, source »).
@@ -593,9 +570,8 @@ impl<H: Host> Agent<H> {
                         depth - 1.0
                     };
                     let nested_length = self.length_of_array_like(nested)?;
-                    self.open_source(
+                    self.push_vec(
                         stack,
-                        charged,
                         Open {
                             source: nested,
                             length: nested_length,
@@ -865,7 +841,7 @@ mod tests {
                 let Value::String(error_name) = error_name else {
                     panic!("{error_name:?}");
                 };
-                let units = agent.string_units(error_name).unwrap();
+                let units = agent.string_units_for_tests(error_name).unwrap();
                 assert_eq!(String::from_utf16_lossy(&units), "TypeError", "{name}");
                 let function = method(&mut agent, prototype, name);
                 let made = agent.call_value(function, Value::Object(empty), &args);

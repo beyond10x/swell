@@ -118,6 +118,8 @@ impl<H: Host> Agent<H> {
         &mut self,
         activation: Option<(Activation, &[Value])>,
     ) -> Completion<Entered> {
+        #[cfg(test)]
+        crate::object::string::copies::entered();
         let depth = self.activations.len();
         let base = self.interp.running.unwrap_or(0);
         let entered = if depth > base || self.interp.running.is_some() {
@@ -324,27 +326,6 @@ impl<H: Host> Agent<H> {
         frame.charged = frame.charged.saturating_sub(held);
         self.heap.accounting.credit(held);
         Ok(())
-    }
-
-    /// The `count` values on top of the operand stack, bottom first, left there.
-    pub(crate) fn peek_values(&mut self, count: usize) -> Completion<Vec<Value>> {
-        let frame = self.top_frame()?;
-        let start = frame.stack.len().checked_sub(count);
-        let values: Option<Vec<Value>> = start.and_then(|start| {
-            frame.stack.get(start..).map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(|entry| match entry {
-                        Entry::Value(value) => Some(*value),
-                        _ => None,
-                    })
-                    .collect()
-            })
-        });
-        match values {
-            Some(values) if values.len() == count => Ok(values),
-            _ => Err(self.fault()),
-        }
     }
 
     /// The object `value` holds, which the bytecode guarantees.

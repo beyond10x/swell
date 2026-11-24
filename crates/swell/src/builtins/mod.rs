@@ -165,7 +165,7 @@ pub(crate) mod group_testing {
         let Value::String(string) = value else {
             panic!("{value:?} is not a String");
         };
-        String::from_utf16_lossy(&agent.string_units(string).unwrap())
+        String::from_utf16_lossy(&agent.string_units_for_tests(string).unwrap())
     }
 
     /// The own String keys of `object` are `base`, in that order, then the names of `groups`,

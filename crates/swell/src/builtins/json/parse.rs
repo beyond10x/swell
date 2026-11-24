@@ -28,6 +28,7 @@
 //! functions that return before it.
 
 use crate::builtins::object::argument;
+use crate::heap::accounting::ChargedVec;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host, Termination};
@@ -49,7 +50,7 @@ struct Record {
     value: Value,
     start: usize,
     end: usize,
-    children: Vec<(Key, usize)>,
+    children: ChargedVec<(Key, usize)>,
 }
 
 /// An array or object the parse has opened and not closed: an element of its stack.
@@ -74,7 +75,7 @@ struct Parser<'t> {
     unpaid: u64,
     stack: Vec<Open>,
     /// The records, when a reviver will walk them.
-    records: Option<Vec<Record>>,
+    records: Option<ChargedVec<Record>>,
     /// The bytes charged for the open entries and the records, credited when they go.
     charged: u64,
 }
@@ -146,7 +147,7 @@ struct Walker<'p> {
     reviver: Value,
     text: &'p [u16],
     records: &'p [Record],
-    frames: Vec<Walk>,
+    frames: ChargedVec<Walk>,
     pending: Option<Enter>,
     /// The bytes charged for the open frames and their lists of keys, credited when they
     /// close.
@@ -189,13 +190,17 @@ fn bytes_of<T>(count: usize) -> u64 {
 
 impl<H: Host> Agent<H> {
     /// `JSON.parse ( text [ , reviver ] )` (`#sec-json.parse`). The arguments are held by this
-    /// builtin's activation; what the parse and the walk keep is released and credited here.
+    /// builtin's activation; the parse and the walk run in a room of the kept stack, ended here
+    /// on every way out, and what they keep is released and credited here.
     pub(super) fn json_parse(&mut self, args: &[Value]) -> Completion<Value> {
+        // The room is ended on every way out, as `Agent::with_kept_room` ends it; written out
+        // here so that no closure's frame stands between this call and the reviver's re-entry.
         let mark = self.kept.len();
+        let room = self.kept_room();
         let mut charged = 0;
         let result = self.json_parse_with(args, &mut charged);
+        self.end_kept_room(mark, &room);
         self.heap.accounting.credit(charged);
-        self.release(mark);
         result
     }
 
@@ -205,7 +210,7 @@ impl<H: Host> Agent<H> {
         // 1. Let jsonString be ? ToString(text).
         let string = self.to_string(argument(args, 0))?;
         self.keep(Value::String(string));
-        let units = self.json_text_units(string, charged)?;
+        let units = self.json_text_units(string)?;
         // 4. If IsCallable(reviver) is false, return unfiltered: the records are made only
         // for a reviver (IsCallable runs no code, so it is asked before the parse).
         let callable = self.is_callable(reviver)?;
@@ -215,7 +220,7 @@ impl<H: Host> Agent<H> {
             position: 0,
             unpaid: 0,
             stack: Vec::new(),
-            records: callable.then(Vec::new),
+            records: callable.then(ChargedVec::new),
             charged: 0,
         };
         let parsed = self.json_parse_text(&mut parser);
@@ -241,7 +246,7 @@ impl<H: Host> Agent<H> {
             reviver,
             text: &units,
             records: &records,
-            frames: Vec::new(),
+            frames: ChargedVec::new(),
             pending: Some(Enter {
                 holder: root,
                 name: root_name,
@@ -256,17 +261,11 @@ impl<H: Host> Agent<H> {
         result
     }
 
-    /// The code units of `string`, charged to the memory budget while the parse reads them,
-    /// and a step per code unit, the step of reading it, charged before they are copied: a
-    /// parse that reads the text to its end costs what it costs to read it unit by unit, and
-    /// one that fails early has paid for the whole text.
-    fn json_text_units(&mut self, string: StringRef, charged: &mut u64) -> Completion<Vec<u16>> {
-        let length = self.string_length(string)?;
-        let bytes = bytes_of::<u16>(length);
-        if self.heap.accounting.charge(bytes).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        *charged = charged.saturating_add(bytes);
+    /// The code units of `string`, held charged to the memory budget while the parse and the
+    /// walk read them, and a step per code unit, the step of reading it, charged before they
+    /// are copied ([`Agent::charged_units`]): a parse that reads the text to its end costs what
+    /// it costs to read it unit by unit, and one that fails early has paid for the whole text.
+    fn json_text_units(&mut self, string: StringRef) -> Completion<crate::object::string::Units> {
         self.charged_units(string)
     }
 
@@ -498,10 +497,9 @@ impl<H: Host> Agent<H> {
         if parser.records.is_none() {
             return Ok(0);
         }
-        let bytes = bytes_of::<Record>(1)
-            .saturating_add(bytes_of::<(Key, usize)>(1))
-            .saturating_add(bytes_of::<Value>(2));
-        self.json_parse_charge(parser, bytes)?;
+        // The record and its entry in its parent are in lists charged by their capacity; the
+        // two slots of the kept stack are charged here.
+        self.json_parse_charge(parser, bytes_of::<Value>(2))?;
         if self.kept.try_reserve(2).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -509,16 +507,17 @@ impl<H: Host> Agent<H> {
         let Some(records) = parser.records.as_mut() else {
             return Err(self.fault());
         };
-        if records.try_reserve(1).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
+        self.reserve_vec(records, 1)?;
         let index = records.len();
-        records.push(Record {
+        let pushed = records.push(Record {
             value,
             start,
             end,
-            children: Vec::new(),
+            children: ChargedVec::new(),
         });
+        if pushed.is_err() {
+            return Err(self.fault());
+        }
         Ok(index)
     }
 
@@ -579,10 +578,10 @@ impl<H: Host> Agent<H> {
             self.charge_steps(compared)?;
             return if found { Ok(()) } else { Err(self.fault()) };
         }
-        if children.try_reserve(1).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
+        self.reserve_vec(children, 1)?;
+        if children.push((key, record)).is_err() {
+            return Err(self.fault());
         }
-        children.push((key, record));
         Ok(())
     }
 
@@ -976,10 +975,8 @@ impl<H: Host> Agent<H> {
         }
         walker.charged = walker.charged.saturating_add(frame);
         let charged = frame.saturating_add(list_bytes);
-        if walker.frames.try_reserve(1).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        walker.frames.push(Walk {
+        self.reserve_vec(&mut walker.frames, 1)?;
+        let pushed = walker.frames.push(Walk {
             holder: enter.holder,
             name: enter.name,
             value: object,
@@ -990,6 +987,9 @@ impl<H: Host> Agent<H> {
             mark,
             charged,
         });
+        if pushed.is_err() {
+            return Err(self.fault());
+        }
         Ok(())
     }
 
@@ -1027,7 +1027,7 @@ impl<H: Host> Agent<H> {
         // 1. Let jsonString be ? ToString(text).
         let string = self.to_string(argument(args, 0))?;
         self.keep(Value::String(string));
-        let units = self.json_text_units(string, charged)?;
+        let units = self.json_text_units(string)?;
         // 2. If jsonString is the empty String, throw a SyntaxError exception.
         // 3. The first code unit: an ASCII lowercase letter, an ASCII digit, 0x0022 or 0x002D.
         // 4. The last code unit: an ASCII lowercase letter, an ASCII digit or 0x0022.

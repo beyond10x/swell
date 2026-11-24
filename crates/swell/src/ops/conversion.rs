@@ -181,7 +181,7 @@ impl<H: Host> Agent<H> {
     pub(crate) fn string_to_number(&mut self, string: StringRef) -> Completion<f64> {
         let length = self.string_length(string)?;
         self.charge_steps(u64::try_from(length).unwrap_or(u64::MAX))?;
-        let units = self.string_units(string)?;
+        let units = self.string_units_in(string, 0, length)?;
         let start = units
             .iter()
             .position(|&unit| !is_str_white_space(unit))
@@ -433,15 +433,16 @@ impl<H: Host> Agent<H> {
         &mut self,
         string: StringRef,
     ) -> Completion<Option<f64>> {
-        let units = self.string_units(string)?;
-        if units == [u16::from(b'-'), u16::from(b'0')] {
+        let length = self.string_length(string)?;
+        let units = self.string_units_in(string, 0, length)?;
+        if units[..] == [u16::from(b'-'), u16::from(b'0')] {
             return Ok(Some(-0.0));
         }
         let number = self.string_to_number(string)?;
         let canonical: Vec<u16> = swell_num::to_string::number_to_string(number)
             .encode_utf16()
             .collect();
-        Ok((canonical == units).then_some(number))
+        Ok((canonical[..] == units[..]).then_some(number))
     }
 }
 

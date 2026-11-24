@@ -170,7 +170,8 @@ budget, not by `string_length`.
 A builtin charges steps in proportion to its work and before it (`engine.md` decision 3, "The
 step budget"); added on 2026-11-22: a comparison of two Strings and a String made a property key
 charge a step per code unit past 32 before the units are read, and compare in place (HOST-181,
-HOST-182).
+HOST-182). Added on 2026-11-24: a buffer the engine holds while it calls into script is charged
+to `memory_bytes` before it is made, or not made (HOST-215).
 
 **Two readings of the heap.** Added on 2026-11-22 for resource accounting. `heap_bytes()`
 (decision 13) reads what the memory budget has charged: the arenas' capacity with the
@@ -273,6 +274,8 @@ limit off; `AGENTS.md`: "Each limit ends in an outcome the host reads"); a wall-
 **HOST-181** (swell:D2) With `a` and `b` two Strings of 1,000,000 code units that differ only in the last, defined as globals by the host, the script `a === b` spends at least 999,968 steps more than the script `"x" === "y"`, and with `steps_per_entry` 10,000 it answers `Terminated(StepBudget)`; the same holds for `a < b` (1,000,000 steps), `a == b` and `[a].indexOf(b)`. [slice 6]
 
 **HOST-182** (swell:D2) With a global object `o` and a String `k` of 1,000,000 code units defined by the host, and a `collect()` before the entry, the script `o[k]` spends at least 999,968 steps more than the same script with a key of one code unit, and with `steps_per_entry` 10,000 it answers `Terminated(StepBudget)` with `heap_bytes()` after the entry equal to `heap_bytes()` before it (no atom made). [slice 6]
+
+**HOST-215** (swell:D2) With `memory_bytes` M = 67,108,864, `string_length` 2^24, `reentry_depth` 256 and `steps_per_entry` 10,000,000, a global `s` defined by the host as a String of 1,048,576 code units `x`, and a charge with `charge_host_bytes` of all of the room M − `heap_bytes()` but 8,388,608 bytes, held until the entry ends, the script `var o = { toString: function () { return [s, o].join(""); } }; [s, o].join("")` answers `Terminated(MemoryBudget)`; `heap_bytes()` before the entry, after it and after a `collect()` reads at most M each time, and once the host drops its charge and runs `collect()` the script `1` answers `Normal(1)`. [slice 6]
 
 **HOST-13** (swell:D2) With `frame_depth` D, the script `var n = 0; function f() { n++; f(); } f();` answers `Throw` of a `RangeError` of its realm, the script `n` then answers `Normal(D - 1)`, that script's own context being the first, and the script `try { f(); } catch (e) {}` answers `Normal`. [slice 1]
 
@@ -588,6 +591,7 @@ pub enum HostError {
     ModuleStatus { found: ModuleStatus },
     ModuleTerminated,
     EvaluationInProgress,
+    MemoryBudget,
 }
 pub enum ValueKind { Function, Constructor, Object, Promise, String }
 ```
@@ -644,6 +648,7 @@ answers finding 5.
 | finishing a load twice | "The host environment must perform FinishLoadingImportedModule" once per call (`ecma262:sec-HostLoadImportedModule`) | does not compile (decision 9) |
 | finishing a (referrer, request) pair already loaded with another module | "Assert: record.[[Module]] and result.[[Value]] are the same Module Record." (`ecma262:sec-FinishLoadingImportedModule`) | `FinishError { error: ModuleMismatch, request }`, the token handed back |
 | finishing a `type: "json"` request with a module not made by `parse_json_module` | "result must either be the Completion Record returned by an invocation of ParseJSONModule or a throw completion" (`ecma262:sec-HostLoadImportedModule`) | `FinishError { error: NotJsonModule, request }` |
+| `queue_microtask` when the memory budget refuses the queue's growth | none | `Err(MemoryBudget)` |
 
 `call` of a value that is not callable is not misuse: Call throws ("If IsCallable(F) is false,
 throw a TypeError exception", `ecma262:sec-call`), so it answers `Throw(TypeError)`.
@@ -1220,7 +1225,8 @@ that queues runs in the same checkpoint, behind every entry already queued (HOST
 **What a queued job costs.** Added on 2026-11-23 for slice 10 (`engine.md` decision 4, "Queued
 jobs"). A promise job is charged to the memory budget while it is queued and credited when a
 checkpoint takes it off; everything it holds is traced through the queue, a root. A host
-microtask is not charged: its closure is the host's own storage, bounded by the host's calls,
+microtask's slot of the queue's capacity is charged, and a refused growth answers
+`Err(HostError::MemoryBudget)` with nothing queued; its closure is the host's own storage, bounded by the host's calls,
 and holds the engine values it needs in `Root`s; dropping the agent drops it unrun.
 
 **The hooks of an `await`.** Added on 2026-11-23 for slice 10 (`engine.md` decision 3, "`async`

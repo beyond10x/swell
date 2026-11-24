@@ -247,7 +247,8 @@ impl<H: Host> Agent<H> {
         let string = self.to_string(argument(args, 0))?;
         // The code units are copied out: neither loop below calls code or allocates on the
         // heap before the result, so nothing has to be kept.
-        let units = self.string_units(string)?;
+        let length = self.string_length(string)?;
+        let units = self.string_units_in(string, 0, length)?;
         // 3. Return ? Encode(uriString, extraUnescaped) / ? Decode(uriString,
         // preserveEscapeSet).
         let result = if encode {

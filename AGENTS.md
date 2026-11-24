@@ -10,9 +10,9 @@ and `swell-unicode`, the parser for the ES5 grammar (`swell-syntax`), the byteco
 interpreter and the builtins the test262 harness calls exist. **Slice 1 is delivered** (waves 1 to
 6: `docs/plan/slice-01-wave-1.md` to `-6.md`): its 31 test262 cases pass in all 62 runs, no host
 requirement is pending for it, and 18 of the 60 scenarios of the ESS model pass on the engine
-(the other 42 need a later slice and say so). 147 of 214 host requirements have a test.
+(the other 42 need a later slice and say so). 148 of 215 host requirements have a test.
 `Agent::evaluate_script` runs a script of the ES5 grammar under a step and a memory budget. The
-gate holds the test262 counts: 20,229 of the 44,812 run cases pass (2026-11-23, release `0.8.0`; 18,155 in `0.7.0`, 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
+gate holds the test262 counts: 24,838 of the 44,812 run cases pass (2026-11-24, release `0.9.0`; 20,229 in `0.8.0`, 18,155 in `0.7.0`, 17,775 in `0.6.0`, 16,412 in `0.5.0`, 13,575 in `0.4.0`, 12,120 in `0.3.0`). Release `0.1.0` was cut at the close of
 wave 5 of slice 1, release `0.2.0` after the close of slice 2. **Slice 2 is delivered**, `language-core`, six stories in four waves (`docs/plan/waves.md`,
 "Slice 2"; `docs/plan/slice-02-wave-1.md`: the grammar of slice 2, `Number`
 and `Boolean`, one line per run from the runner; `docs/plan/slice-02-wave-2.md`: `with`, the
@@ -71,12 +71,14 @@ Iterator, async generators with their request queue, their methods, their constr
 and the hooks of a promise; and the close, with 141 cases that need a later slice moved to
 slices 8, 9, 12 and 13 with evidence and 21 cases taken in from slices 18 and 19: all 3,759
 cases of slice 10 pass in all 7,258 runs (`test262-slice 10 3759 7258 0 0 3759 3759 0 0`), and
-no host requirement is pending for it. Slice 10 is in no release yet.
+no host requirement is pending for it. Slice 10 is in release `0.9.0`, with the closes of
+slices 5 and 7 and the first six stories of slice 4 (`docs/plan/slice-10-wave-1.md`).
 Slice 4, `numbers-and-dates` (`epic:slice-04-numbers-and-dates`), is accepted in seventeen
-stories (`docs/plan/waves.md`, "Slice 4, `numbers-and-dates`"); four are built (the calendar
-arithmetic, the text of a date and the double-double arithmetic with `hypot` in `swell-num`, and
-the `Date` object with the host's clock; the gate has the steps `libm-check` and
-`math-data-check` with the double-double story), 564 of its 1,612 cases
+stories (`docs/plan/waves.md`, "Slice 4, `numbers-and-dates`"); six are built (in `swell-num`
+the calendar arithmetic, the text of a date, the double-double arithmetic with `hypot`, the
+exponential and logarithmic functions with `cbrt` and `exponentiate`, and the trigonometric
+functions; and the `Date` object with the host's clock; the gate has the steps `libm-check` and
+`math-data-check`, which reads three data files), 564 of its 1,612 cases
 pass (`test262-slice 04 1612 3184 0 0 1612 564 1048 0`), and 12 host requirements are pending
 for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
@@ -120,6 +122,12 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   every recursion is bounded. Each limit ends in an outcome the host reads (`Terminated(...)`, or a
   `RangeError` where the design says so), never in a panic or an abort. A new limit gets a test
   that reaches it.
+- A buffer whose size a script controls and that is alive while the engine calls into script (a
+  getter, `toString`, `valueOf`, a comparator, a replacer, a reviver, a job) is charged to
+  `memory_bytes`, bytes and steps, before it is made and credited when it is dropped
+  (`Accounting::hold`, `ChargedVec`, `string_units_in`), or it is not made: a String is read in
+  its own storage. HOST-215 and the tests named `*_across_a_call` hold it; a unit that adds
+  such a buffer states its measured charge in its report.
 - No panics on any input: no `unwrap`, `expect` or unchecked indexing in engine crates.
 - Spec first: ECMA-262 states the language and test262 holds it. The host interface is stated as
   an ESS model under `spec/` before its code (decision 10). Do not restate language semantics in
@@ -562,7 +570,12 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   when the two running slice 5 units are merged and a unit has brought the full test262 run
   under 15 min of a pool job" of the session that decides for the operator
   (https://github.com/beyond10x/swell/releases/tag/0.8.0; the tag is on `0c18271`, whose `check`
-  and lane `slow` ran green on the forge). After a release
+  and lane `slow` ran green on the forge); `0.9.0`, 2026-11-24, the first wave of slice 10
+  with the closes of slices 5 and 7, the first six stories of slice 4 and the charged buffers
+  (`docs/plan/slice-10-wave-1.md`), cut on the standing order the session that decides for
+  the operator passed on that day: "cut a release when a user sees something new, from a
+  green main by your release process" (https://github.com/beyond10x/swell/releases/tag/0.9.0).
+  After a release
   `task host-surface-snapshot` (a scan with awk, no build and no slot of the pool) writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of

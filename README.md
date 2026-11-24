@@ -18,7 +18,7 @@ can use it.
 
 swell runs scripts of the ES5 grammar and of the bindings and iteration of ES2015 in both
 modes, with regular expressions, under a step budget and a memory budget.
-Its gate holds the test262 counts: 20,229 of the 44,812 cases that run pass (45.1 %), measured on 2026-11-23.
+Its gate holds the test262 counts: 24,838 of the 44,812 cases that run pass (55.4 %), measured on 2026-11-24.
 Seven of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |
@@ -35,15 +35,15 @@ A delivered slice passes the test262 cases it holds, but for an exception the de
 The slices are not delivered in the order of their numbers, and a case is counted in the slice
 delivered last among the parts it needs: a `RegExp` case that uses `Symbol` counts in slice 5.
 
-What exists, measured on 2026-11-23:
+What exists, measured on 2026-11-24:
 
 - The design, [`docs/design/engine.md`](docs/design/engine.md): what swell targets, how it is
   built, how it is measured, and the order in which it is delivered.
 - The host interface, specified before its code:
-  [`docs/design/host-interface.md`](docs/design/host-interface.md) has 208 numbered
-  requirements, and 114 of them have a test. An ESS model under [`spec/`](spec/) has 58
-  scenarios. All 58 pass on ESS's interpreter. The gate runs them against the engine too, and
-  14 pass there.
+  [`docs/design/host-interface.md`](docs/design/host-interface.md) has 215 numbered
+  requirements, and 148 of them have a test. An ESS model under [`spec/`](spec/) has 60
+  scenarios. All 60 pass on ESS's interpreter. The gate runs them against the engine too, and
+  18 pass there.
 - The gate, `task check`: test262 pinned by commit and checksum, the Unicode 17.0.0 data
   pinned by checksum, both specifications checked, and 66 planted defects that the gate must
   refuse. Its test steps have a budget of 120 seconds and a test is ended at 60.
@@ -53,7 +53,7 @@ What exists, measured on 2026-11-23:
   with a committed file on every run.
 - Refusals. A construct the parser does not have yet is refused, and a refusal never counts
   as a pass, also when the script catches its `SyntaxError`. The engine counts its refusals:
-  30,642 of the 85,556 runs meet one.
+  23,324 of the 85,556 runs meet one.
 - The first parts of the engine:
 
   | part | crate |
@@ -78,7 +78,7 @@ the iterator protocol, `for`-`of`, function declarations in blocks and `Array.fr
 there. Slice 5, regular expressions, and slice 7, generators, were delivered on 2026-11-24:
 all 2,724 cases of slice 5 pass in all 5,441 runs and all 1,472 cases of slice 7 in all
 2,801 runs. Slice 10, promises and `async` functions, was delivered on 2026-11-24 too: all
-3,759 of its cases pass in all 7,258 runs; it is in no release yet. The slices are taken in the order the first
+3,759 of its cases pass in all 7,258 runs; it is in release `0.9.0`. The slices are taken in the order the first
 user, a browser, needs them: 6, 5, 7, 10, 4, 9.
 
 ## What swell is

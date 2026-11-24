@@ -1064,3 +1064,62 @@ fn host_charges_inside_with_cx_are_sticky() {
         .unwrap();
     assert_eq!(next, Ok(()));
 }
+
+/// HOST-215's room: the bytes the host leaves free with its charge.
+const HOST_215_ROOM: u64 = 8_388_608;
+
+/// HOST-215: with `memory_bytes` M = 64 MiB, `string_length` 2^24, `reentry_depth` 256 and
+/// 10,000,000 steps, a global `s` the host made of 1,048,576 code units `x`, and a host charge
+/// of all of the room but 8 MiB held until the entry ends, `join` nested through ToString holds
+/// a builder of 2 MiB per level, charged while the engine calls into script, and the script
+/// answers `Terminated(MemoryBudget)`; `heap_bytes()` reads at most M before the entry, after
+/// it and after a collection; once the host drops its charge and collects, `1` answers 1.
+#[test]
+fn host_215_a_buffer_held_across_a_call_into_script_is_charged() {
+    let mut limits = limits();
+    limits.string_length = 1 << 24;
+    limits.steps_per_entry = 10_000_000;
+    let budget = limits.memory_bytes;
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    let global = global(&mut agent, &realm);
+    agent
+        .with_cx(&realm, |cx| {
+            let s = cx.new_string_utf16(&vec![0x78; 1 << 20]).unwrap();
+            let Value::Object(global) = cx.get(&global).unwrap() else {
+                panic!("the global object is no object");
+            };
+            let key = swell::PropertyKey::String(cx.new_string("s").unwrap());
+            assert_eq!(
+                cx.set(global, key, Value::String(s), true).unwrap(),
+                Ok(true)
+            );
+        })
+        .unwrap();
+    let script = parse(
+        &mut agent,
+        &realm,
+        "var o = { toString: function () { return [s, o].join(\"\"); } }; [s, o].join(\"\")",
+    );
+    agent.collect().unwrap();
+    let room = budget - agent.heap_bytes().unwrap() - HOST_215_ROOM;
+    let charge = agent
+        .with_cx(&realm, |cx| cx.charge_host_bytes(room))
+        .unwrap()
+        .unwrap();
+    assert!(agent.heap_bytes().unwrap() <= budget);
+    let outcome = agent.evaluate_script(&script).unwrap();
+    assert!(
+        matches!(outcome, HostOutcome::Terminated(Termination::MemoryBudget)),
+        "{outcome:?}"
+    );
+    assert!(agent.heap_bytes().unwrap() <= budget);
+    agent.collect().unwrap();
+    assert!(agent.heap_bytes().unwrap() <= budget);
+    drop(charge);
+    agent.collect().unwrap();
+    assert_eq!(
+        eval_text(&mut agent, &realm, "1"),
+        Outcome::Normal("1".to_string())
+    );
+}

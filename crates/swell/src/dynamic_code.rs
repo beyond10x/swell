@@ -58,7 +58,7 @@ use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{CompilationType, CompileStrings, Cx, HookCx, Host};
 use crate::interp::frame::{Frame, SlotValue, frame_bytes};
-use crate::object::builtin_function::Activation;
+use crate::object::builtin_function::{Activation, KeptRoom};
 use crate::realm::intrinsics::Intrinsic;
 use crate::script::{Compiled, ParsedTree, SourceCopy, vec_bytes};
 use crate::value::{ObjectRef, RealmRef, StringRef, Value};
@@ -731,20 +731,22 @@ impl<H: Host> Agent<H> {
         if self.heap.accounting.charge(list).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
-        let mark = self.kept.len();
-        let made = self.dynamic_function_steps(new_target, kind, params, body);
-        self.release(mark);
+        let made = self.with_kept_room(|agent, room| {
+            agent.dynamic_function_steps(new_target, kind, params, body, room)
+        });
         self.heap.accounting.credit(list);
         made
     }
 
-    /// The steps of [`Agent::create_dynamic_function`]; what it keeps is released by the caller.
+    /// The steps of [`Agent::create_dynamic_function`]; what it keeps is released by the caller,
+    /// the paramStrings in `room`.
     fn dynamic_function_steps(
         &mut self,
         new_target: ObjectRef,
         kind: DynamicFunctionKind,
         params: &[Value],
         body: Option<Value>,
+        room: &mut KeptRoom,
     ) -> Completion<ObjectRef> {
         // Steps 9 and 10: paramStrings, then bodyString, each kept.
         let mut param_strings = Vec::new();
@@ -753,6 +755,7 @@ impl<H: Host> Agent<H> {
         }
         for &arg in params {
             let string = self.dynamic_function_part(arg)?;
+            self.reserve_kept(room, 1)?;
             self.keep(Value::String(string));
             param_strings.push(string);
         }

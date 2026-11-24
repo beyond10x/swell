@@ -441,7 +441,7 @@ mod tests {
             let Value::String(string) = value else {
                 panic!("{value:?}");
             };
-            units.extend(prepared.agent.string_units(string).unwrap());
+            units.extend(prepared.agent.string_units_for_tests(string).unwrap());
         }
         assert_eq!(String::from_utf16_lossy(&units), "ab");
         let mut record = prepared.iterator_of("list");

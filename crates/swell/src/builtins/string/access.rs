@@ -27,11 +27,12 @@
 use crate::builtins::object::argument;
 use crate::builtins::string::{StringBuilder, code_point_at, utf16_encode_code_point};
 use crate::builtins::{Method, SymbolData};
-use crate::heap::string::HeapString;
+use crate::heap::accounting::ChargedVec;
 use crate::host::agent::Agent;
-use crate::host::outcome::{Abrupt, Completion};
-use crate::host::{ErrorKind, Host, Termination};
+use crate::host::outcome::Completion;
+use crate::host::{ErrorKind, Host};
 use crate::object::property::Key;
+use crate::object::string::Units;
 use crate::ops::conversion::clamp_index;
 use crate::value::{ObjectRef, StringRef, Value};
 
@@ -180,28 +181,23 @@ impl<H: Host> Agent<H> {
     }
 
     /// The code units of `string` from `from` to `to`, a step per code unit charged before they
-    /// are copied. A range past the end of the String reads nothing; the callers' ranges lie
-    /// inside it.
+    /// are copied, then their bytes held charged to the memory budget while the copy lives
+    /// (`docs/design/engine.md`, "Memory budget"). A range past the end of the String reads
+    /// nothing; the callers' ranges lie inside it.
     pub(crate) fn read_units(
         &mut self,
         string: StringRef,
         from: usize,
         to: usize,
-    ) -> Completion<Vec<u16>> {
+    ) -> Completion<Units> {
         self.charge_steps(u64::try_from(to.saturating_sub(from)).unwrap_or(u64::MAX))?;
-        if self.heap.strings.get(string.handle).is_err() {
-            return Err(self.fault());
+        let length = self.string_length(string)?;
+        if from > to || to > length {
+            return Ok(ChargedVec::new());
         }
-        match self.heap.strings.get(string.handle) {
-            Ok(HeapString::Latin1(bytes)) => Ok(bytes
-                .get(from..to)
-                .unwrap_or_default()
-                .iter()
-                .map(|&byte| u16::from(byte))
-                .collect()),
-            Ok(HeapString::Utf16(units)) => Ok(units.get(from..to).unwrap_or_default().to_vec()),
-            Err(_) => Err(Abrupt::Terminated(Termination::EngineFault)),
-        }
+        let mut units = self.new_charged_vec(to - from)?;
+        self.extend_units(&mut units, string, from, to)?;
+        Ok(units)
     }
 
     /// "The substring of string from from to to" (6.1.4), made by a [`StringBuilder`].
@@ -517,7 +513,7 @@ impl<H: Host> Agent<H> {
         // searchStr, return true. 16. Return false.
         let candidate = self.read_units(string, start, end)?;
         let search = self.read_units(search, 0, search_length)?;
-        Ok(Value::Boolean(candidate == search))
+        Ok(Value::Boolean(candidate[..] == search[..]))
     }
 
     /// `String.prototype.includes ( searchString [ , position ] )`
@@ -699,7 +695,7 @@ impl<H: Host> Agent<H> {
         // searchStr, return true. 17. Return false.
         let candidate = self.read_units(string, start, end)?;
         let search = self.read_units(search, 0, search_length)?;
-        Ok(Value::Boolean(candidate == search))
+        Ok(Value::Boolean(candidate[..] == search[..]))
     }
 
     /// `String.prototype.substring ( start, end )` (`#sec-string.prototype.substring`).
@@ -787,7 +783,7 @@ mod tests {
         let Value::String(string) = value else {
             panic!("{value:?} is not a String");
         };
-        String::from_utf16_lossy(&agent.string_units(string).unwrap())
+        String::from_utf16_lossy(&agent.string_units_for_tests(string).unwrap())
     }
 
     /// A new ordinary object whose [[Prototype]] is `%Object.prototype%`, kept, with the
@@ -935,5 +931,39 @@ mod tests {
         assert!(!is_string_well_formed_unicode(&[0xDC00, 0xD800]));
         assert!(!is_string_well_formed_unicode(&[0x61, 0xD800, 0x62]));
         assert!(!is_string_well_formed_unicode(&[0xD800, 0xD800, 0xDC00]));
+    }
+
+    /// `docs/design/engine.md`, "Memory budget": the builder of `concat`
+    /// (`#sec-string.prototype.concat`) is charged while it lives, so four levels of `concat`,
+    /// each holding a String of 65,536 code units while ToString of its argument runs code, do
+    /// not fit a room of three such copies and end in `Terminated(MemoryBudget)`; the builder of
+    /// `String.fromCharCode` (`#sec-string.fromcharcode`), 64 code units when `valueOf` of its
+    /// last argument runs code, leaves no capacity uncovered at any entry into script.
+    #[test]
+    fn a_builder_is_charged_across_a_call_of_to_string_and_value_of() {
+        use crate::builtins::string::transform::tests::Answer;
+        use crate::object::string::across::Across;
+        use crate::object::string::copies;
+        let mut across = Across::with_steps(4_000_000);
+        across.string("s", &vec![0x61; 65_536]);
+        let script = across.parse(
+            "var d = 0; var o = { toString: function () { if (++d < 4) s.concat(o); return \
+             \"e\"; } }; s.concat(o).length",
+        );
+        across.room(3 * 131_072);
+        assert_eq!(
+            across.evaluate(&script),
+            Answer::Terminated(Termination::MemoryBudget)
+        );
+
+        let mut across = Across::with_steps(4_000_000);
+        let codes = vec!["65"; 64].join(", ");
+        let answer = across.run(&format!(
+            "var d = 0; var v = {{ valueOf: function () {{ if (++d < 4) \
+             String.fromCharCode({codes}, v); return 66; }} }}; String.fromCharCode({codes}, \
+             v).length"
+        ));
+        assert_eq!(answer, Answer::Normal("Number(65.0)".to_string()));
+        assert_eq!(copies::uncovered_at_entry(), 0);
     }
 }
