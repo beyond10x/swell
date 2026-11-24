@@ -4,6 +4,8 @@ mod date;
 mod date_text;
 mod literal;
 mod math_dd;
+mod math_exp_log;
+mod math_trig;
 mod siphash;
 mod time_clip;
 mod to_string;
