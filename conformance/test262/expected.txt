@@ -1,7 +1,7 @@
 test262 annexB/built-ins 241 26 0 215 12 203 0
 test262 annexB/language 845 0 0 845 177 668 0
 test262 built-ins/AbstractModuleSource 8 8 0 0 0 0 0
-test262 built-ins/AggregateError 25 0 0 25 0 25 0
+test262 built-ins/AggregateError 25 0 0 25 21 4 0
 test262 built-ins/Array 3083 0 0 3083 2797 286 0
 test262 built-ins/ArrayBuffer 221 29 0 192 0 192 0
 test262 built-ins/ArrayIteratorPrototype 27 0 0 27 17 10 0
@@ -31,8 +31,8 @@ test262 built-ins/Math 327 0 0 327 13 314 0
 test262 built-ins/NaN 6 0 0 6 6 0 0
 test262 built-ins/NativeErrors 94 0 0 94 82 12 0
 test262 built-ins/Number 340 0 0 340 250 90 0
-test262 built-ins/Object 3411 0 0 3411 3092 319 0
-test262 built-ins/Promise 732 89 0 643 209 434 0
+test262 built-ins/Object 3411 0 0 3411 3093 318 0
+test262 built-ins/Promise 732 89 0 643 603 40 0
 test262 built-ins/Proxy 311 0 0 311 0 311 0
 test262 built-ins/Reflect 153 0 0 153 0 153 0
 test262 built-ins/RegExp 1879 0 0 1879 1859 20 0
@@ -216,10 +216,10 @@ test262 staging/built-ins 8 0 0 8 5 3 0
 test262 staging/decorators 7 7 0 0 0 0 0
 test262 staging/explicit-resource-management 53 0 0 53 6 47 0
 test262 staging/set-methods 3 0 0 3 0 3 0
-test262 staging/sm 1406 2 0 1404 625 777 2
+test262 staging/sm 1406 2 0 1404 627 775 2
 test262 staging/source-phase-imports 2 2 0 0 0 0 0
 test262 staging/top-level-await 1 0 0 1 0 1 0
-test262 total 53801 8982 7 44812 21527 23283 2
+test262 total 53801 8982 7 44812 21945 22865 2
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
@@ -228,8 +228,8 @@ test262-slice 05 2724 5441 0 0 2724 2724 0 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
 test262-slice 07 1472 2801 0 0 1472 1472 0 0
 test262-slice 08 9186 18223 0 0 9186 3 9183 0
-test262-slice 09 1781 3533 0 0 1781 159 1622 0
-test262-slice 10 3879 7499 0 0 3879 781 3098 0
+test262-slice 09 1781 3533 0 0 1781 167 1614 0
+test262-slice 10 3879 7499 0 0 3879 1189 2690 0
 test262-slice 11 1281 1833 0 0 1281 22 1259 0
 test262-slice 12 338 676 0 0 338 39 299 0
 test262-slice 13 3060 6076 0 0 3060 0 3060 0
@@ -238,12 +238,12 @@ test262-slice 15 1094 2170 0 0 1094 82 1012 0
 test262-slice 16 82 164 0 0 82 0 82 0
 test262-slice 17 35 35 0 0 35 0 35 0
 test262-slice 18 1135 1452 0 0 1135 169 966 0
-test262-slice 19 1455 2730 0 0 1455 617 836 2
+test262-slice 19 1455 2730 0 0 1455 619 834 2
 test262-slice 20 4617 9234 4617 0 0 0 0 0
 test262-slice 21 1662 3324 1662 0 0 0 0 0
 test262-slice x-stage3 2591 5008 2591 0 0 0 0 0
 test262-errors 0
-test262-section sec-object-objects incomplete 3411 3092 0
+test262-section sec-object-objects incomplete 3411 3093 0
 test262-section sec-function-objects incomplete 509 417 0
 test262-section sec-boolean-objects incomplete 51 46 0
 test262-section sec-symbol-objects incomplete 98 88 0
@@ -270,7 +270,7 @@ test262-section sec-weak-ref-objects incomplete 29 0 0
 test262-section sec-finalization-registry-objects incomplete 47 0 0
 test262-section sec-disposablestack-objects incomplete 93 0 0
 test262-section sec-asyncdisposablestack-objects incomplete 104 0 0
-test262-section sec-promise-objects incomplete 732 209 0
+test262-section sec-promise-objects incomplete 732 603 0
 test262-section sec-generatorfunction-objects incomplete 23 20 0
 test262-section sec-asyncgeneratorfunction-objects incomplete 23 0 0
 test262-section sec-async-function-objects incomplete 18 16 0
