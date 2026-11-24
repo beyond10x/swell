@@ -95,6 +95,18 @@ deciding session's, from a checkout of the repository:
        $gates gh -- run list --workflow slow.yml --branch main --limit 1
        $gates gh -- run watch <run-id> --exit-status
 
+   The lane starts on a push only when the push changes a path of its list. When the push of
+   the tip changed no such path (a tip that changes prose only), the deciding session starts
+   the lane by hand on `main` at that tip and waits for that run as for one a push started;
+   a run of the lane on an earlier commit does not stand in for it. A run started by hand
+   takes some seconds to appear in the list; wait on the run whose `headSha` is the tip, and
+   a run with another `headSha` is not the one to wait for:
+
+       $gates gh -- workflow run slow.yml --ref main
+       $gates gh -- run list --workflow slow.yml --branch main --event workflow_dispatch \
+         --limit 5 --json databaseId,headSha,event,status
+       $gates gh -- run watch <run-id> --exit-status
+
 6. **Tag.** Scan the notes file, then tag the commit with it as the message and push the tag.
    `--cleanup=whitespace` keeps a line of the notes that starts with `#`. Without it git
    removes such a line:
