@@ -124,7 +124,7 @@ HOST-123 pending slice 14
 HOST-124 test swell::hooks::host_124_*
 HOST-125 test swell::date_clock::host_125_date_now_calls_the_clock_hook_once_and_floors_to_milliseconds
 HOST-126 test swell::date_clock::host_126_a_clock_answer_out_of_range_is_clamped
-HOST-127 pending slice 4
+HOST-127 test swell::date_text::host_127_with_the_provided_zone_methods_get_timezone_offset_is_zero_and_to_string_contains_gmt_0000
 HOST-128 test swell::date_zone::host_128_an_offset_of_one_hour_makes_get_hours_answer_one
 HOST-129 test swell::misuse::host_129_collect_runs_no_code_and_calls_no_hook
 HOST-130 pending slice 16

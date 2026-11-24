@@ -23,36 +23,49 @@
 //! then for a local setter `LocalTime` and `UTC` of the zone half (at most 2 + 59 = 61 hook
 //! calls, decision 17, item 5), TimeClip, and the store last.
 //!
-//! Every other own property of `%Date%` and `%Date.prototype%` that a later story builds is
-//! defined here with its name and length and an interim body, `date_not_built`, which throws a
-//! TypeError that names the function: `Date.parse` (the text story). Each interim is one line of
-//! the dispatch, the arm of its variant calling the interim body with the function's name as a
-//! string literal, which the story that builds the function replaces. Two steps are seams until
-//! their story: the String
-//! argument of the constructor (`parse_date_string`, NaN) and ToDateString of the call without
-//! `new` (`date_to_string`, "Invalid Date").
+//! The text half, written by `story:date-text-formats` over `swell_num::date_text`
+//! (`docs/design/engine.md`, decision 6, "`Date.parse` and the String argument of `new Date`"
+//! and "The text of toLocale*String"): `Date.parse` (`#sec-date.parse`) and the String argument
+//! of the constructor (step 4.c.ii of `#sec-date-constructor`, `time_value_of_text`), read in
+//! place after a step per code unit past 32; ToDateString (`#sec-todatestring`) of the call
+//! without `new` (step 1) and of `toString` (`#sec-date.prototype.tostring`), `toDateString`
+//! (`#sec-date.prototype.todatestring`), `toTimeString` (`#sec-date.prototype.totimestring`),
+//! `toUTCString` (`#sec-date.prototype.toutcstring`), `toISOString`
+//! (`#sec-date.prototype.toisostring`) and the three `toLocale*String`
+//! (`#sec-date.prototype.tolocalestring`), each the text of one conversion (`date_text`):
+//! `LocalTime` once (2 hook calls, 1 for an offset-string identifier, none for NaN), whose one
+//! offset gives both the local time and the `GMT±hhmm` (decision 17, item 1); `toJSON`
+//! (`#sec-date.prototype.tojson`) and `[Symbol.toPrimitive]`
+//! (`#sec-date.prototype-%symbol.toprimitive%`).
 //!
-//! The builtins re-enter script only through ToPrimitive and ToNumber, as `Number` does. The
-//! loops are the search of `swell-num` (a charged hook call per probe), the ToNumber of at
-//! most seven arguments and the fields of a setter (at most 4 arguments, 7 fields); none
-//! depends on a script value. Every call of a clock or time zone
-//! hook is charged one step before it is made (decision 17, item 6).
+//! The builtins re-enter script only through ToPrimitive, ToString, ToNumber and the Invoke of
+//! `toJSON`, as `Number` does. The loops are the search of `swell-num` (a charged hook call
+//! per probe), the ToNumber of at most seven arguments, the fields of a setter (at most 4
+//! arguments, 7 fields) and the one pass of the parse over a String, charged a step per code
+//! unit past 32 before the first is read. Every call of a clock or time zone hook is charged
+//! one step before it is made (decision 17, item 6).
 
 use std::cell::RefCell;
 
 use swell_num::date::{
-    date_fields, local_time, make_date, make_day, make_full_year, make_time, utc_from_local,
+    DateFields, date_fields, local_time, make_date, make_day, make_full_year, make_time,
+    utc_from_local,
+};
+use swell_num::date_text::{
+    DateText, date_string, iso_string, parse_date_text, time_string, time_zone_string, utc_string,
 };
 use swell_num::time_value::time_clip;
 
 use crate::builtins::Method;
 use crate::builtins::object::argument;
+use crate::heap::string::CodeUnits;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Completion, Termination};
-use crate::host::{ErrorKind, HookCx, Host, IsoDateTime};
+use crate::host::{ErrorKind, HookCx, Host, IsoDateTime, PreferredType};
 use crate::object::ObjectKind;
 use crate::object::builtin_function::BuiltinId;
 use crate::object::ordinary::OrdinaryData;
+use crate::object::property::{Key, Property};
 use crate::realm::intrinsics::{Intrinsic, Making};
 use crate::value::{ObjectRef, StringRef, Value};
 
@@ -63,7 +76,7 @@ pub(crate) enum DateBuiltin {
     Constructor,
     /// `Date.now ( )` (21.4.3.1).
     Now,
-    /// `Date.parse ( string )` (21.4.3.2): interim.
+    /// `Date.parse ( string )` (21.4.3.2).
     Parse,
     /// `Date.UTC ( year [ , month [ , ... ] ] )` (21.4.3.4).
     Utc,
@@ -133,8 +146,28 @@ pub(crate) enum DateBuiltin {
     SetUtcMonth,
     /// `Date.prototype.setUTCSeconds ( sec [ , ms ] )` (21.4.4.34).
     SetUtcSeconds,
+    /// `Date.prototype.toDateString ( )` (21.4.4.35).
+    ToDateString,
+    /// `Date.prototype.toISOString ( )` (21.4.4.36).
+    ToIsoString,
+    /// `Date.prototype.toJSON ( key )` (21.4.4.37).
+    ToJson,
+    /// `Date.prototype.toLocaleDateString ( [ reserved1 [ , reserved2 ] ] )` (21.4.4.38).
+    ToLocaleDateString,
+    /// `Date.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] )` (21.4.4.39).
+    ToLocaleString,
+    /// `Date.prototype.toLocaleTimeString ( [ reserved1 [ , reserved2 ] ] )` (21.4.4.40).
+    ToLocaleTimeString,
+    /// `Date.prototype.toString ( )` (21.4.4.41).
+    ToString,
+    /// `Date.prototype.toTimeString ( )` (21.4.4.42).
+    ToTimeString,
+    /// `Date.prototype.toUTCString ( )` (21.4.4.43).
+    ToUtcString,
     /// `Date.prototype.valueOf ( )` (21.4.4.44).
     ValueOf,
+    /// `Date.prototype [ %Symbol.toPrimitive% ] ( hint )` (21.4.4.45).
+    ToPrimitive,
 }
 
 /// The functions of `%Date%` (21.4.3) but `prototype`, in the order of the clauses; `length`
@@ -146,10 +179,10 @@ const CONSTRUCTOR_METHODS: [Method<DateBuiltin>; 3] = [
     ("UTC", 7, DateBuiltin::Utc),
 ];
 
-/// The methods of `%Date.prototype%` (21.4.4) this story defines, in the order of the clauses;
+/// The methods of `%Date.prototype%` (21.4.4) keyed by a String, in the order of the clauses;
 /// `length` as each clause's required parameters give it, and as its "length" sentence says
-/// where it has one.
-const PROTOTYPE_METHODS: [Method<DateBuiltin>; 34] = [
+/// where it has one. `[Symbol.toPrimitive]` (21.4.4.45) is defined after them.
+const PROTOTYPE_METHODS: [Method<DateBuiltin>; 43] = [
     ("getDate", 0, DateBuiltin::GetDate),
     ("getDay", 0, DateBuiltin::GetDay),
     ("getFullYear", 0, DateBuiltin::GetFullYear),
@@ -183,6 +216,15 @@ const PROTOTYPE_METHODS: [Method<DateBuiltin>; 34] = [
     ("setUTCMinutes", 3, DateBuiltin::SetUtcMinutes),
     ("setUTCMonth", 2, DateBuiltin::SetUtcMonth),
     ("setUTCSeconds", 2, DateBuiltin::SetUtcSeconds),
+    ("toDateString", 0, DateBuiltin::ToDateString),
+    ("toISOString", 0, DateBuiltin::ToIsoString),
+    ("toJSON", 1, DateBuiltin::ToJson),
+    ("toLocaleDateString", 0, DateBuiltin::ToLocaleDateString),
+    ("toLocaleString", 0, DateBuiltin::ToLocaleString),
+    ("toLocaleTimeString", 0, DateBuiltin::ToLocaleTimeString),
+    ("toString", 0, DateBuiltin::ToString),
+    ("toTimeString", 0, DateBuiltin::ToTimeString),
+    ("toUTCString", 0, DateBuiltin::ToUtcString),
     ("valueOf", 0, DateBuiltin::ValueOf),
 ];
 
@@ -358,14 +400,80 @@ fn offset_prefix(identifier: &str) -> &str {
     identifier
 }
 
-/// What an arm of the dispatch answers: the completion of the builtin's steps, or, for an
-/// interim body, the name of the function that is not built yet.
-type Ran = Result<Completion<Value>, &'static str>;
+/// The text of a Date whose time value is NaN (`#sec-todatestring`, step 1; 21.4.4.35 step 4,
+/// 21.4.4.42 step 4, 21.4.4.43 step 4).
+const INVALID_DATE: &str = "Invalid Date";
 
-/// The interim body of a function of `Date` that a later story builds: the dispatch throws a
-/// TypeError that names `name` and says it is not built yet.
-fn date_not_built(name: &'static str) -> Ran {
-    Err(name)
+/// The capacity of the one buffer a text is written into: the longest text, that of `toString`
+/// for a year of six digits and a sign, is 18 + 1 + 8 + 1 + 8 = 36 bytes (`DateString`,
+/// `TimeString`, `TimeZoneString`); `toUTCString` writes at most 32, `toISOString` 27.
+const TEXT_BYTES: usize = 40;
+
+/// What the TypeError of ThisTimeValue says after the name of the method.
+const REQUIRES: &str = " requires that 'this' be a Date";
+
+/// msPerDay (`#sec-time-related-constants`): an offset `swell-num` gives is below it in
+/// magnitude.
+const MS_PER_DAY: f64 = 86_400_000.0;
+
+/// What a writer of `%Date.prototype%` writes.
+#[derive(Clone, Copy)]
+enum Form {
+    /// ToDateString (`#sec-todatestring`): `DateString`, a space, `TimeString`, a space and
+    /// `TimeZoneString` of the local time.
+    Full,
+    /// `DateString` of the local time.
+    Date,
+    /// `TimeString`, a space and `TimeZoneString` of the local time.
+    Time,
+    /// The form of `toUTCString`, of the time value itself.
+    Utc,
+    /// The Date Time String Format, of the time value itself.
+    Iso,
+}
+
+/// The name and the form of the writer `id`; `None` for a builtin that is not one. The three
+/// `toLocale*String` write what `toString`, `toDateString` and `toTimeString` write (decision
+/// 6, "The text of toLocale*String").
+fn writer_of(id: DateBuiltin) -> Option<(&'static str, Form)> {
+    Some(match id {
+        DateBuiltin::ToDateString => ("Date.prototype.toDateString", Form::Date),
+        DateBuiltin::ToIsoString => ("Date.prototype.toISOString", Form::Iso),
+        DateBuiltin::ToLocaleDateString => ("Date.prototype.toLocaleDateString", Form::Date),
+        DateBuiltin::ToLocaleString => ("Date.prototype.toLocaleString", Form::Full),
+        DateBuiltin::ToLocaleTimeString => ("Date.prototype.toLocaleTimeString", Form::Time),
+        DateBuiltin::ToString => ("Date.prototype.toString", Form::Full),
+        DateBuiltin::ToTimeString => ("Date.prototype.toTimeString", Form::Time),
+        DateBuiltin::ToUtcString => ("Date.prototype.toUTCString", Form::Utc),
+        _ => return None,
+    })
+}
+
+/// Whether `units` are the ASCII code units of `name`, compared in place.
+fn units_are(units: CodeUnits<'_>, name: &[u8]) -> bool {
+    match units {
+        CodeUnits::Latin1(bytes) => bytes == name,
+        CodeUnits::Utf16(units) => {
+            units.len() == name.len()
+                && units
+                    .iter()
+                    .zip(name)
+                    .all(|(&unit, &byte)| unit == u16::from(byte))
+        }
+    }
+}
+
+/// The tryFirst of the hint `units` of `[Symbol.toPrimitive]` (21.4.4.45, steps 3 and 4):
+/// "string" and "default" give string, "number" gives number; any other String is not one of
+/// the allowed values. At most 7 code units are compared, in place.
+fn try_first_of(units: CodeUnits<'_>) -> Option<PreferredType> {
+    if units_are(units, b"string") || units_are(units, b"default") {
+        Some(PreferredType::String)
+    } else if units_are(units, b"number") {
+        Some(PreferredType::Number)
+    } else {
+        None
+    }
 }
 
 impl<H: Host> Agent<H> {
@@ -389,6 +497,19 @@ impl<H: Host> Agent<H> {
         )?;
         self.define_group_methods(making, constructor, &CONSTRUCTOR_METHODS, BuiltinId::Date)?;
         self.define_group_methods(making, prototype, &PROTOTYPE_METHODS, BuiltinId::Date)?;
+        // 21.4.4.45: named "[Symbol.toPrimitive]", length 1, with { [[Writable]]: false,
+        // [[Enumerable]]: false, [[Configurable]]: true }.
+        let to_primitive = self.create_builtin(
+            making,
+            "[Symbol.toPrimitive]",
+            1,
+            BuiltinId::Date(DateBuiltin::ToPrimitive),
+        )?;
+        self.add_property(
+            prototype,
+            Key::Symbol(making.symbols.to_primitive),
+            Property::data(Value::Object(to_primitive), false, false, true),
+        )?;
         Ok((constructor, prototype))
     }
 
@@ -405,13 +526,12 @@ impl<H: Host> Agent<H> {
         new_target: &Option<ObjectRef>,
     ) -> Completion<Value> {
         let (this, new_target) = (*this, *new_target);
-        let ran: Ran = match id {
-            DateBuiltin::Constructor => Ok(self.date_constructor(args, new_target)),
+        match id {
+            DateBuiltin::Constructor => self.date_constructor(args, new_target),
             // `#sec-date.now`: "the time value designating the UTC date and time of the
             // occurrence of the call to it".
-            DateBuiltin::Now => Ok(self.current_time_value().map(Value::Number)),
-            DateBuiltin::Parse => date_not_built("parse"),
-            DateBuiltin::Utc => Ok(self.date_utc(args)),
+            DateBuiltin::Now => self.current_time_value().map(Value::Number),
+            DateBuiltin::Utc => self.date_utc(args),
             DateBuiltin::GetDate
             | DateBuiltin::GetDay
             | DateBuiltin::GetFullYear
@@ -428,12 +548,12 @@ impl<H: Host> Agent<H> {
             | DateBuiltin::GetUtcMilliseconds
             | DateBuiltin::GetUtcMinutes
             | DateBuiltin::GetUtcMonth
-            | DateBuiltin::GetUtcSeconds => Ok(self.date_prototype_get(id, this)),
+            | DateBuiltin::GetUtcSeconds => self.date_prototype_get(id, this),
             // `#sec-date.prototype.gettime`: 1. Let dateObj be the this value. 2. Perform ?
             // RequireInternalSlot(dateObj, [[DateValue]]). 3. Return dateObj.[[DateValue]].
-            DateBuiltin::GetTime => Ok(self
+            DateBuiltin::GetTime => self
                 .this_time_value(this, "Date.prototype.getTime")
-                .map(Value::Number)),
+                .map(Value::Number),
             DateBuiltin::SetDate
             | DateBuiltin::SetFullYear
             | DateBuiltin::SetHours
@@ -448,18 +568,202 @@ impl<H: Host> Agent<H> {
             | DateBuiltin::SetUtcMilliseconds
             | DateBuiltin::SetUtcMinutes
             | DateBuiltin::SetUtcMonth
-            | DateBuiltin::SetUtcSeconds => Ok(self.date_prototype_set(id, this, args)),
+            | DateBuiltin::SetUtcSeconds => self.date_prototype_set(id, this, args),
             // `#sec-date.prototype.valueof`: the steps of `getTime`.
-            DateBuiltin::ValueOf => Ok(self
+            DateBuiltin::ValueOf => self
                 .this_time_value(this, "Date.prototype.valueOf")
-                .map(Value::Number)),
+                .map(Value::Number),
+            DateBuiltin::Parse
+            | DateBuiltin::ToDateString
+            | DateBuiltin::ToIsoString
+            | DateBuiltin::ToJson
+            | DateBuiltin::ToLocaleDateString
+            | DateBuiltin::ToLocaleString
+            | DateBuiltin::ToLocaleTimeString
+            | DateBuiltin::ToPrimitive
+            | DateBuiltin::ToString
+            | DateBuiltin::ToTimeString
+            | DateBuiltin::ToUtcString => self.date_text_builtin(id, this, args),
+        }
+    }
+
+    /// The builtins of the text half: `Date.parse`, the eight writers, `toJSON` and
+    /// `[Symbol.toPrimitive]`, one arm of the dispatch, out of line so that their locals (a
+    /// text, the fields of a date) are in no frame of the dispatch.
+    #[inline(never)]
+    fn date_text_builtin(
+        &mut self,
+        id: DateBuiltin,
+        this: Value,
+        args: &[Value],
+    ) -> Completion<Value> {
+        match id {
+            DateBuiltin::Parse => self.date_parse(args),
+            DateBuiltin::ToJson => self.date_prototype_to_json(this),
+            DateBuiltin::ToPrimitive => self.date_prototype_to_primitive(this, args),
+            _ => self.date_prototype_write(id, this),
+        }
+    }
+
+    /// `Date.parse ( string )` (`#sec-date.parse`): ToString of the argument, before any code
+    /// unit is read, then the time value of the text (`time_value_of_text`).
+    fn date_parse(&mut self, args: &[Value]) -> Completion<Value> {
+        let string = self.to_string(argument(args, 0))?;
+        Ok(Value::Number(self.time_value_of_text(string)?))
+    }
+
+    /// The writers of `%Date.prototype%` (`#sec-date.prototype.todatestring`,
+    /// `#sec-date.prototype.toisostring`, `#sec-date.prototype.tolocaledatestring` to
+    /// `#sec-date.prototype.tolocaletimestring`, `#sec-date.prototype.tostring`,
+    /// `#sec-date.prototype.totimestring`, `#sec-date.prototype.toutcstring`): 1. Let dateObj
+    /// be the this value. 2. Perform ? RequireInternalSlot(dateObj, [[DateValue]]). 3. Let tv
+    /// be dateObj.[[DateValue]]. Then the text of tv in the writer's form (`date_text`).
+    fn date_prototype_write(&mut self, id: DateBuiltin, this: Value) -> Completion<Value> {
+        let Some((name, form)) = writer_of(id) else {
+            return Err(self.fault());
         };
-        ran.unwrap_or_else(|name| {
-            Err(self.throw_error(
+        let tv = self.this_time_value(this, name)?;
+        self.date_text(tv, form).map(Value::String)
+    }
+
+    /// The text of the time value `tv` in `form`, as one String of the heap, charged as every
+    /// String is; the text is written into one buffer of [`TEXT_BYTES`] first.
+    ///
+    /// - NaN: `toISOString` throws a RangeError (21.4.4.36 step 4); every other form is
+    ///   [`INVALID_DATE`], with no hook call.
+    /// - `Iso` and `Utc` read the fields of tv itself, with no hook call. A time value always
+    ///   has fields, and its year, -271,821 to 275,760, has at most the six digits of an
+    ///   expanded year, so the RangeError of 21.4.4.36 step 6 is never thrown; a [[DateValue]]
+    ///   without fields is an engine fault.
+    /// - `Full`, `Date` and `Time` read the fields of LocalTime(tv) and the offset that
+    ///   conversion used (`local_fields_with_offset`): one conversion, 2 hook calls, 1 with an
+    ///   offset-string identifier; the `GMT±hhmm` is the offset of the local time it prints,
+    ///   and the draft's second read of the offset (`TimeZoneString`, step 2) is not made
+    ///   (`docs/design/host-interface.md`, decision 17, item 1).
+    #[inline(never)]
+    fn date_text(&mut self, tv: f64, form: Form) -> Completion<StringRef> {
+        if tv.is_nan() {
+            if let Form::Iso = form {
+                return Err(self.throw_error(
+                    ErrorKind::RangeError,
+                    "Date.prototype.toISOString of a Date whose time value is NaN",
+                ));
+            }
+            return self.new_string_str(INVALID_DATE);
+        }
+        let mut text = String::with_capacity(TEXT_BYTES);
+        match form {
+            Form::Iso | Form::Utc => {
+                let Some(fields) = date_fields(tv) else {
+                    return Err(self.fault());
+                };
+                text.push_str(&match form {
+                    Form::Iso => iso_string(&fields),
+                    _ => utc_string(&fields),
+                });
+            }
+            Form::Full | Form::Date | Form::Time => {
+                let (fields, offset_ms) = self.local_fields_with_offset(tv)?;
+                if let Form::Full | Form::Date = form {
+                    text.push_str(&date_string(&fields));
+                }
+                if let Form::Full = form {
+                    text.push(' ');
+                }
+                if let Form::Full | Form::Time = form {
+                    text.push_str(&time_string(&fields));
+                    text.push(' ');
+                    text.push_str(&time_zone_string(offset_ms));
+                }
+            }
+        }
+        self.new_string_str(&text)
+    }
+
+    /// The fields of LocalTime(`tv`) (`#sec-localtime`) and the offset in milliseconds that
+    /// conversion added, for a `tv` that is not NaN: one `local_time_of`, so one read of the
+    /// identifier and at most one of the offset hook. The offset is the local time minus `tv`,
+    /// both integral Numbers below 2^53, so the difference is exact, and `swell-num` clamps it
+    /// below msPerDay in magnitude. Neither a time value nor its local time is without
+    /// fields, and an offset outside that bound is not made: either is an engine fault.
+    fn local_fields_with_offset(&mut self, tv: f64) -> Completion<(DateFields, i64)> {
+        let local = self.local_time_of(tv)?;
+        let offset = local - tv;
+        // Range test of the cast: |offset| < msPerDay and integral, so `as i64` is exact.
+        if !(offset.abs() < MS_PER_DAY && offset.trunc() == offset) {
+            return Err(self.fault());
+        }
+        let offset_ms = offset as i64;
+        match date_fields(local) {
+            Some(fields) => Ok((fields, offset_ms)),
+            None => Err(self.fault()),
+        }
+    }
+
+    /// `Date.prototype.toJSON ( key )` (`#sec-date.prototype.tojson`). It is generic; the key
+    /// is not read. O is new for a primitive `this`, so it is kept, the kept stack's room for
+    /// it charged before, while ToPrimitive and Invoke run code.
+    #[inline(never)]
+    fn date_prototype_to_json(&mut self, this: Value) -> Completion<Value> {
+        // 1. Let O be ? ToObject(this value).
+        let object = self.to_object(this)?;
+        let mark = self.kept.len();
+        let mut room = self.kept_room();
+        let answer = match self.reserve_kept(&mut room, 1) {
+            Ok(()) => {
+                self.keep(Value::Object(object));
+                self.date_json_steps(object)
+            }
+            Err(abrupt) => Err(abrupt),
+        };
+        self.end_kept_room(mark, &room);
+        answer
+    }
+
+    /// Steps 2 to 4 of `toJSON` for the kept object `object`.
+    fn date_json_steps(&mut self, object: ObjectRef) -> Completion<Value> {
+        // 2. Let tv be ? ToPrimitive(O, number).
+        let tv = self.to_primitive(Value::Object(object), Some(PreferredType::Number))?;
+        // 3. If tv is a Number and tv is not finite, return null.
+        if let Value::Number(number) = tv
+            && !number.is_finite()
+        {
+            return Ok(Value::Null);
+        }
+        // 4. Return ? Invoke(O, "toISOString").
+        let key = self.name_key("toISOString")?;
+        self.invoke(Value::Object(object), key, &[])
+    }
+
+    /// `Date.prototype [ %Symbol.toPrimitive% ] ( hint )`
+    /// (`#sec-date.prototype-%symbol.toprimitive%`): 1. Let obj be the this value. 2. If obj is
+    /// not an Object, throw a TypeError exception. 3. Set hint to ? ValidateStringOption(hint,
+    /// reject, « "string", "number", "default" », required) (`#sec-validatestringoption`):
+    /// undefined and any value that is not a String throw a TypeError with no conversion, and
+    /// so does a String that is not one of the three. 4. If hint is "number", let tryFirst be
+    /// number; otherwise string. 5. Return ? OrdinaryToPrimitive(obj, tryFirst).
+    #[inline(never)]
+    fn date_prototype_to_primitive(&mut self, this: Value, args: &[Value]) -> Completion<Value> {
+        let Value::Object(object) = this else {
+            return Err(self.throw_error(
                 ErrorKind::TypeError,
-                &format!("the Date function {name} is not built yet"),
-            ))
-        })
+                "Date.prototype [ @@toPrimitive ] requires that 'this' be an Object",
+            ));
+        };
+        let try_first = match argument(args, 0) {
+            Value::String(hint) => match self.heap.strings.get(hint.handle) {
+                Ok(record) => try_first_of(record.units()),
+                Err(_) => return Err(self.fault()),
+            },
+            _ => None,
+        };
+        let Some(try_first) = try_first else {
+            return Err(self.throw_error(
+                ErrorKind::TypeError,
+                "the hint of Date.prototype [ @@toPrimitive ] is not \"string\", \"number\" or \"default\"",
+            ));
+        };
+        self.ordinary_to_primitive(object, try_first)
     }
 
     /// `Date ( ...values )` (`#sec-date-constructor`).
@@ -472,9 +776,8 @@ impl<H: Host> Agent<H> {
         let Some(new_target) = new_target else {
             // a. Let now be the time value (UTC) identifying the current time.
             let now = self.current_time_value()?;
-            // b. Return ToDateString(now).
-            let text = self.date_to_string(now)?;
-            return Ok(Value::String(self.new_string_str(&text)?));
+            // b. Return ToDateString(now). The arguments are not read.
+            return self.date_text(now, Form::Full).map(Value::String);
         };
         // 2. Let numberOfArgs be the number of elements in values.
         let dv = match args {
@@ -511,7 +814,7 @@ impl<H: Host> Agent<H> {
                 // next step never returns an abrupt completion because v is a String. 2. Let
                 // tv be the result of parsing v as a date, in exactly the same manner as for
                 // the parse method (21.4.3.2).
-                Value::String(text) => self.parse_date_string(text)?,
+                Value::String(text) => self.time_value_of_text(text)?,
                 // iii. Else, 1. Let tv be ? ToNumber(v).
                 primitive => self.to_number(primitive)?,
             },
@@ -538,10 +841,10 @@ impl<H: Host> Agent<H> {
         if let Some(time) = self.date_value(value)? {
             return Ok(time);
         }
-        Err(self.throw_error(
-            ErrorKind::TypeError,
-            &format!("{method} requires that 'this' be a Date"),
-        ))
+        let mut message = String::with_capacity(method.len() + REQUIRES.len());
+        message.push_str(method);
+        message.push_str(REQUIRES);
+        Err(self.throw_error(ErrorKind::TypeError, &message))
     }
 
     /// `Date.prototype.setTime ( time )` (`#sec-date.prototype.settime`).
@@ -600,11 +903,31 @@ impl<H: Host> Agent<H> {
         Ok(milliseconds as f64)
     }
 
-    /// The seam of the String argument of the constructor (step 4.c.ii of
-    /// `#sec-date-constructor`, "parsing v as a date, in exactly the same manner as for the
-    /// parse method"): NaN, until `story:date-text-formats` replaces it.
-    fn parse_date_string(&mut self, _text: StringRef) -> Completion<f64> {
-        Ok(f64::NAN)
+    /// The time value of the String `text` as `Date.parse` reads it (`#sec-date.parse`; step
+    /// 4.c.ii of `#sec-date-constructor`, "parsing v as a date, in exactly the same manner as
+    /// for the parse method"), by `swell_num::date_text::parse_date_text` over the code units
+    /// of the String's own storage, read in place: no copy is made. A step per code unit past
+    /// 32 is charged before the first is read (`charge_code_units`; decision 6: the name of the
+    /// form of `toString` has no length bound, so no length refuses a String unread). A text
+    /// that fixes its instant gives TimeClip of its time value with no hook call; a date-time
+    /// form without an offset gives TimeClip(UTC(t)) over the zone conversion (at most 59 hook
+    /// calls, each charged a step first); anything else NaN, with no fallback.
+    #[inline(never)]
+    fn time_value_of_text(&mut self, text: StringRef) -> Completion<f64> {
+        let length = self.string_length(text)?;
+        self.charge_code_units(length)?;
+        let read = match self.heap.strings.get(text.handle) {
+            Ok(record) => match record.units() {
+                CodeUnits::Latin1(bytes) => parse_date_text(bytes),
+                CodeUnits::Utf16(units) => parse_date_text(units),
+            },
+            Err(_) => return Err(self.fault()),
+        };
+        Ok(match read {
+            DateText::Utc(t) => time_clip(t),
+            DateText::Local(t) => time_clip(self.utc_of_local(t)?),
+            DateText::Invalid => f64::NAN,
+        })
     }
 
     /// Step 5 of `Date ( ...values )` (`#sec-date-constructor`), two or more arguments: the
@@ -918,11 +1241,5 @@ impl<H: Host> Agent<H> {
         drop(list);
         self.heap.accounting.credit(bytes);
         Ok(instants)
-    }
-
-    /// The seam of ToDateString (`#sec-todatestring`) for the call without `new`: "Invalid
-    /// Date", the text of a time value of NaN, until `story:date-text-formats` replaces it.
-    fn date_to_string(&mut self, _time: f64) -> Completion<String> {
-        Ok("Invalid Date".to_string())
     }
 }

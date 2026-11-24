@@ -43,6 +43,7 @@ mod computed_names_and_object_spread;
 mod conversion;
 mod date_clock;
 mod date_setters;
+mod date_text;
 mod date_zone;
 mod determinism;
 mod dynamic_function;

@@ -1,15 +1,14 @@
 //! The clock half of `Date` (ECMA-262 21.4, `#sec-date-objects`;
 //! `story:date-object-clock-and-time-value`): `%Date%` with `Date.now`, `new Date()` and
 //! `new Date(value)` over the host clock (HOST-125, HOST-126), the time value of a Date
-//! (`getTime`, `valueOf`, `setTime`), the step charged before each call of the clock hook, the
-//! interim bodies of the functions of `Date` later stories build, and the two `Date.now()`
-//! reads of the busy wait of the first consumer.
+//! (`getTime`, `valueOf`, `setTime`), the step charged before each call of the clock hook, and
+//! the two `Date.now()` reads of the busy wait of the first consumer.
 //!
-//! Three tests state an interim and are rewritten by the story that replaces it:
-//! `new_date_over_a_table_of_values` (the row of a String; the row `new Date(1, 2)` was
-//! rewritten by `story:date-object-constructor-now-utc-and-getters`),
-//! `date_called_as_a_function_answers_the_seam_text` and
-//! `interim_bodies_throw_a_type_error_that_names_the_function`.
+//! `story:date-text-formats` rewrote the rows and tests that stated an interim: the row of a
+//! String in `new_date_over_a_table_of_values` (the row `new Date(1, 2)` was rewritten by
+//! `story:date-object-constructor-now-utc-and-getters`) and
+//! `date_called_as_a_function_answers_the_text_of_to_string`; the test of the interim bodies
+//! went with the last of them, `Date.parse`.
 #![cfg(test)]
 
 use crate::support;
@@ -169,8 +168,8 @@ fn a_clock_hook_call_is_charged_one_step_before_it_is_made() {
 
 /// `new Date(value)` (`#sec-date-constructor`, `numberOfArgs` = 1) over a table: a Date is read
 /// by its [[DateValue]] with no call of its methods; another value goes through ToPrimitive
-/// with no hint and ToNumber, then TimeClip; a String goes to the seam of `Date.parse`, which
-/// answers NaN until the text story; two or more arguments are the components, whose
+/// with no hint and ToNumber, then TimeClip; a String is parsed as `Date.parse` parses it
+/// (`tests/date_text.rs` holds the forms); two or more arguments are the components, whose
 /// coercions run and whose time value `new Date(1, 2)` is 1901-03-01T00:00:00.000Z in the
 /// zone "UTC" (`tests/date_zone.rs` holds the rest). None of them reads the clock. The object
 /// is made after the coercion, from `new.target`'s realm when its `prototype` is not an
@@ -179,7 +178,7 @@ fn a_clock_hook_call_is_charged_one_step_before_it_is_made() {
 fn new_date_over_a_table_of_values() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
-    let rows: [(&str, Outcome); 13] = [
+    let rows: [(&str, Outcome); 14] = [
         ("new Date(1234.9).getTime();", normal("1234")),
         ("new Date(-1234.9).getTime();", normal("-1234")),
         (
@@ -194,7 +193,11 @@ fn new_date_over_a_table_of_values() {
         ("new Date(8.64e15 + 1).getTime();", normal("NaN")),
         ("1 / new Date(-0).getTime();", normal("Infinity")),
         ("new Date(NaN).getTime();", normal("NaN")),
-        ("new Date('1970-01-01T00:00:00Z').getTime();", normal("NaN")),
+        (
+            "new Date(\"1970-01-01T00:00:00.000Z\").getTime();",
+            normal("0"),
+        ),
+        ("new Date(\"garbage\").getTime();", normal("NaN")),
         (
             "new Date({ valueOf: function () { throw new RangeError('poisoned'); } });",
             Outcome::Throw("RangeError".to_string()),
@@ -256,12 +259,13 @@ fn new_date_over_a_table_of_values() {
 }
 
 /// `Date ( ...values )` called as a function (`#sec-date-constructor`, step 1): the clock is
-/// read once and the arguments are not read; the text is the seam of ToDateString, "Invalid
-/// Date", until the text story.
+/// read once and the arguments are not read; the text is ToDateString of the clock's value,
+/// the text of `toString` for it, with 3 hook calls: the clock, the identifier and the offset.
 #[test]
-fn date_called_as_a_function_answers_the_seam_text() {
+fn date_called_as_a_function_answers_the_text_of_to_string() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
+    agent.host_mut().now = 1_234_567_890_123_000_000;
     for (source, calls) in [
         ("Date();", 1),
         ("Date(0);", 2),
@@ -271,16 +275,34 @@ fn date_called_as_a_function_answers_the_seam_text() {
             4,
         ),
     ] {
+        let before = agent.host().calls.len();
         assert_eq!(
             eval_text(&mut agent, &realm, source),
-            quoted("Invalid Date"),
+            quoted("Fri Feb 13 2009 23:31:30 GMT+0000"),
             "{source}"
         );
         assert_eq!(clock_calls(&agent), calls, "{source}");
+        let made: Vec<&str> = agent.host().calls[before..]
+            .iter()
+            .map(|call| call.split(' ').next().unwrap())
+            .collect();
+        assert_eq!(
+            made,
+            [
+                CLOCK,
+                "system_time_zone_identifier",
+                "get_named_time_zone_offset_nanoseconds"
+            ],
+            "{source}"
+        );
     }
     assert_eq!(
-        eval_text(&mut agent, &realm, "typeof Date();"),
-        quoted("string")
+        eval_text(
+            &mut agent,
+            &realm,
+            "typeof Date() + ',' + (Date() === new Date(1234567890123).toString());"
+        ),
+        quoted("string,true")
     );
 }
 
@@ -418,38 +440,6 @@ fn lengths_names_and_descriptors_of_date_and_its_functions() {
         eval_text(&mut agent, &realm, source),
         quoted(&expected.join("|"))
     );
-}
-
-/// The functions of `Date` this story defines and a later story builds each throw a TypeError
-/// whose message names the function and says it is not built yet: `Date.parse` alone, which
-/// `story:date-text-formats` builds. `Date.UTC` was built by
-/// `story:date-object-constructor-now-utc-and-getters` and the 14 setters other than `setTime`
-/// by `story:date-setters`: `Date.prototype.setHours.call(new Date(0), 1)` answers a Number.
-#[test]
-fn interim_bodies_throw_a_type_error_that_names_the_function() {
-    let mut agent = agent().unwrap();
-    let realm = realm(&mut agent);
-    assert_eq!(
-        eval_text(
-            &mut agent,
-            &realm,
-            "typeof Date.prototype.setHours.call(new Date(0), 1);"
-        ),
-        quoted("number")
-    );
-    let calls = [("parse", "Date.parse('1970-01-01');")];
-    for (name, call) in calls {
-        let source = format!(
-            "try {{ {call} 'no throw'; }} catch (e) {{ \
-               (e instanceof TypeError) + ',' + (e.message.indexOf('{name}') >= 0) + ',' \
-               + (e.message.indexOf('not built yet') >= 0); }}"
-        );
-        assert_eq!(
-            eval_text(&mut agent, &realm, &source),
-            quoted("true,true,true"),
-            "{name}"
-        );
-    }
 }
 
 /// `Object.prototype.toString` (`#sec-object.prototype.tostring`, step 12) of a Date is
