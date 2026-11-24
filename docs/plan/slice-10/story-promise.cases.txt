@@ -184,4 +184,3 @@ test/built-ins/Promise/resolve/resolve-prms-cstm-then.js
 test/built-ins/Promise/resolve/resolve-self.js
 test/built-ins/Promise/resolve/resolve-thenable.js
 test/built-ins/Promise/undefined-newtarget.js
-test/built-ins/Symbol/species/builtin-getter-name.js
