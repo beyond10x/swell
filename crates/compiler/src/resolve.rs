@@ -220,6 +220,10 @@ pub(crate) struct FunctionInfo {
     /// Of a generator function: the local slot its code reserves for its generator object, the
     /// last of `locals` ("Suspended frames", item 2, `docs/design/engine.md`).
     pub generator_slot: Option<u32>,
+    /// Of an `async` function or arrow function: the local slot its code reserves for its
+    /// activation, the last of `locals` ("`async` functions on suspended frames", item 1,
+    /// `docs/design/engine.md`).
+    pub async_slot: Option<u32>,
 }
 
 pub(crate) struct Resolution {
@@ -442,6 +446,13 @@ fn resolve_with(
         info.locals = frames.get(&Some(id)).copied().unwrap_or(0);
         if script.ast.function(id).is_some_and(|f| f.generator) {
             info.generator_slot = Some(info.locals);
+            info.locals = info
+                .locals
+                .checked_add(1)
+                .ok_or(CompileError::TooMany("local slots"))?;
+        }
+        if script.ast.function(id).is_some_and(|f| f.asynchronous) {
+            info.async_slot = Some(info.locals);
             info.locals = info
                 .locals
                 .checked_add(1)

@@ -19,8 +19,9 @@
 //!
 //! A built-in function with slots (`Behaviour::Closure`, `story:promise-constructor-then-and-jobs`)
 //! runs the steps of a [`BuiltinId`] with the slots an abstract operation gave it ([`Slots`]):
-//! the resolving functions of a promise and the executor of NewPromiseCapability. Its slots are
-//! boxed and charged with it, as a host function's boxes are.
+//! the resolving functions of a promise, the executor of NewPromiseCapability, and the two
+//! functions of an `await` (`story:async-functions-and-await`). Its slots are boxed and charged
+//! with it, as a host function's boxes are.
 //!
 //! Two sites of the collector: the kind site [`BuiltinFunction::trace`] and the root site
 //! [`trace_roots`] (the activations and the kept stack).
@@ -81,6 +82,10 @@ pub(crate) enum BuiltinId {
     /// The builtins of `Promise` and the built-in functions with slots its abstract operations
     /// make (`story:promise-constructor-then-and-jobs`).
     Promise(crate::builtins::promise::PromiseBuiltin),
+    /// The two functions an `await` makes (`#sec-await`, steps 3 to 6:
+    /// `ReactionType::Fulfill` for onFulfilled, `ReactionType::Reject` for onRejected), with the
+    /// slots [`Slots::Await`] (`story:async-functions-and-await`; `interp/async_function.rs`).
+    Await(crate::object::promise::ReactionType),
 }
 
 /// What a built-in function does when called.
@@ -114,6 +119,14 @@ pub(crate) enum Slots {
     /// executorClosure of NewPromiseCapability (`#sec-newpromisecapability`): the record
     /// resolvingFuncs, its [[Resolve]] and [[Reject]].
     Executor { resolve: Value, reject: Value },
+    /// onFulfilled or onRejected of an `await` (`#sec-await`, steps 3 to 6;
+    /// `docs/design/engine.md`, decision 3, "`async` functions on suspended frames", item 3):
+    /// the activation of the `async` function that awaits, and the number of the suspension the
+    /// function was made for.
+    Await {
+        activation: ObjectRef,
+        suspension: u64,
+    },
 }
 
 impl Slots {
@@ -125,6 +138,7 @@ impl Slots {
                 mark.value(*resolve);
                 mark.value(*reject);
             }
+            Slots::Await { activation, .. } => mark.object(*activation),
         }
     }
 
@@ -134,7 +148,7 @@ impl Slots {
     pub(crate) fn bytes(&self) -> u64 {
         let shared = match self {
             Slots::Resolving { .. } => size_of::<(Cell<usize>, Cell<usize>, Cell<bool>)>() / 2,
-            Slots::Executor { .. } => 0,
+            Slots::Executor { .. } | Slots::Await { .. } => 0,
         };
         u64::try_from(size_of::<Slots>().saturating_add(shared)).unwrap_or(u64::MAX)
     }
@@ -585,6 +599,10 @@ impl<H: Host> Agent<H> {
             BuiltinId::Promise(id) => {
                 self.run_promise_builtin(id, function, this, args, new_target)
             }
+            BuiltinId::Await(kind) => {
+                let argument = args.first().copied().unwrap_or(Value::Undefined);
+                self.await_function(kind, function, argument)
+            }
         }
     }
 
@@ -777,8 +795,13 @@ mod tests {
             resolve: Value::Undefined,
             reject: Value::Undefined,
         };
+        let awaiting = Slots::Await {
+            activation: object,
+            suspension: 1,
+        };
         let size = size_of::<Slots>();
         assert_eq!(resolving.bytes(), 44, "the slots are {size} bytes");
         assert_eq!(executor.bytes(), 32, "the slots are {size} bytes");
+        assert_eq!(awaiting.bytes(), 32, "the slots are {size} bytes");
     }
 }

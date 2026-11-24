@@ -492,6 +492,12 @@ impl<H: Host> Agent<H> {
     /// of `realm` instead of `%Function.prototype%`, no [[Construct]], and a `prototype`
     /// { [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: false } holding a new
     /// object whose [[Prototype]] is `%GeneratorPrototype%`, with no `constructor`.
+    /// An `async` template, an arrow included, is InstantiateAsyncFunctionObject
+    /// (`#sec-runtime-semantics-instantiateasyncfunctionobject`),
+    /// InstantiateAsyncFunctionExpression
+    /// (`#sec-runtime-semantics-instantiateasyncfunctionexpression`) or the evaluation of an
+    /// async arrow (`#sec-async-arrow-function-definitions-runtime-semantics-evaluation`):
+    /// `%AsyncFunction.prototype%` of `realm`, no [[Construct]] and no `prototype`.
     /// A named function expression that refers to its own name gets an environment of one
     /// immutable binding holding it.
     pub(crate) fn instantiate_function(
@@ -511,7 +517,9 @@ impl<H: Host> Agent<H> {
             _ => return Err(self.fault()),
         };
         let generator = template.generator;
+        let asynchronous = template.asynchronous;
         let constructor = !generator
+            && !asynchronous
             && matches!(
                 template.kind,
                 FunctionKind::Declaration | FunctionKind::Expression
@@ -532,6 +540,8 @@ impl<H: Host> Agent<H> {
         };
         let prototype = if generator {
             self.intrinsic(realm, Intrinsic::GeneratorFunctionPrototype)?
+        } else if asynchronous {
+            self.intrinsic(realm, Intrinsic::AsyncFunctionPrototype)?
         } else {
             self.intrinsic(realm, Intrinsic::FunctionPrototype)?
         };

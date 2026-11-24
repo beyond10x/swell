@@ -6,9 +6,9 @@
 //! HostMakeJobCallback (`#sec-hostmakejobcallback`). Each is `pub(crate)` with the name the
 //! draft gives it, for the `await` of `story:async-functions-and-await`.
 //!
-//! RejectPromise does not call HostPromiseRejectionTracker, and PerformPromiseThen does not call
-//! it for a rejected promise not yet handled: a later story of slice 10 adds the tracker
-//! (HOST-121).
+//! RejectPromise and PerformPromiseThen call HostPromiseRejectionTracker for a promise not yet
+//! handled (`object/promise.rs`, `Agent::track_unhandled_rejection`; HOST-121), written by
+//! `story:promise-rejection-tracker-and-promise-reads`.
 //!
 //! A job is a [`PromiseJob`] record with its realm or none, queued by HostEnqueuePromiseJob
 //! (`host/jobs.rs`, `Agent::enqueue_promise_job`), which charges one step and the bytes of its
@@ -167,8 +167,7 @@ impl<H: Host> Agent<H> {
         self.trigger_promise_reactions(reactions, value)
     }
 
-    /// RejectPromise ( promise, reason ) (`#sec-rejectpromise`), without the call of
-    /// HostPromiseRejectionTracker (step 7, a later story).
+    /// RejectPromise ( promise, reason ) (`#sec-rejectpromise`).
     pub(crate) fn reject_promise(&mut self, promise: ObjectRef, reason: Value) -> Completion<()> {
         // 1. Assert: promise.[[PromiseState]] is pending.
         if self.promise_slots(promise)?.state != PromiseState::Pending {
@@ -180,6 +179,9 @@ impl<H: Host> Agent<H> {
         // 3. Set promise.[[PromiseResult]] to reason. 6. Set promise.[[PromiseState]] to
         // rejected.
         self.promise_slots(promise)?.state = PromiseState::Rejected(reason);
+        // 7. If promise.[[PromiseIsHandled]] is false, perform
+        // HostPromiseRejectionTracker(promise, "reject").
+        self.track_unhandled_rejection(promise, crate::host::RejectionOperation::Reject)?;
         // 8. Perform TriggerPromiseReactions(reactions, reason).
         self.trigger_promise_reactions(reactions, reason)
     }
@@ -258,7 +260,7 @@ impl<H: Host> Agent<H> {
     fn executor_slots(&mut self, executor: ObjectRef) -> Completion<(Value, Value)> {
         match self.closure_slots(executor)? {
             Slots::Executor { resolve, reject } => Ok((*resolve, *reject)),
-            Slots::Resolving { .. } => Err(self.fault()),
+            Slots::Resolving { .. } | Slots::Await { .. } => Err(self.fault()),
         }
     }
 
@@ -331,8 +333,8 @@ impl<H: Host> Agent<H> {
     }
 
     /// PerformPromiseThen ( promise, onFulfilled, onRejected [ , resultCapability ] )
-    /// (`#sec-performpromisethen`), without the call of HostPromiseRejectionTracker of step
-    /// 11.c (a later story). Answers the promise of `capability`, or undefined without one.
+    /// (`#sec-performpromisethen`). Answers the promise of `capability`, or undefined without
+    /// one.
     pub(crate) fn perform_promise_then(
         &mut self,
         promise: ObjectRef,
@@ -369,6 +371,9 @@ impl<H: Host> Agent<H> {
             }
             // 11. Else, promise.[[PromiseState]] is rejected.
             PromiseState::Rejected(reason) => {
+                // c. If promise.[[PromiseIsHandled]] is false, perform
+                // HostPromiseRejectionTracker(promise, "handle").
+                self.track_unhandled_rejection(promise, crate::host::RejectionOperation::Handle)?;
                 // d. Let rejectJob be NewPromiseReactionJob(rejectReaction, reason).
                 let (job, realm) = self.new_promise_reaction_job(reject, reason)?;
                 // e. Perform HostEnqueuePromiseJob(rejectJob.[[Job]], rejectJob.[[Realm]]).

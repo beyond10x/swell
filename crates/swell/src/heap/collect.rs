@@ -312,6 +312,7 @@ mod tests {
     use crate::host::host_object::HostObject;
     use crate::object::arguments::ArgumentsObject;
     use crate::object::array::Array;
+    use crate::object::async_function::AsyncActivation;
     use crate::object::bound_function::BoundFunction;
     use crate::object::builtin_function::BuiltinFunction;
     use crate::object::ecmascript_function::EcmascriptFunction;
@@ -324,7 +325,7 @@ mod tests {
     use crate::object::{ObjectKind, ObjectRecord};
     use crate::realm::RealmRecord;
     use crate::script::ScriptRecord;
-    use crate::value::{StringRef, Value};
+    use crate::value::{ObjectRef, StringRef, Value};
     use crate::{Agent, AgentState, Limits, Outcome, Parsed, Seeds, Source, Termination};
 
     /// The root sites, in the order the mark phase calls them.
@@ -339,7 +340,7 @@ mod tests {
 
     /// The trace function of each kind of the layout but the common object record, which is
     /// called once per object.
-    const KIND_SITES: [&str; 17] = [
+    const KIND_SITES: [&str; 18] = [
         "heap/string.rs HeapString::trace",
         "heap/mod.rs SymbolRecord::trace",
         "host/host_object.rs HostObject::trace",
@@ -353,6 +354,7 @@ mod tests {
         "object/regexp.rs RegExpObject::trace",
         "object/generator.rs Generator::trace",
         "object/promise.rs Promise::trace",
+        "object/async_function.rs AsyncActivation::trace",
         "realm/mod.rs RealmRecord::trace",
         "env/global.rs RealmGlobalEnv::trace",
         "env/mod.rs EnvironmentRecord::trace",
@@ -404,7 +406,7 @@ mod tests {
             ObjectKind::Generator(Generator::for_test()),
             ObjectKind::Promise(Promise::for_test()),
         ];
-        let objects: Vec<_> = kinds
+        let mut objects: Vec<_> = kinds
             .into_iter()
             .map(|kind| {
                 heap.objects
@@ -412,6 +414,15 @@ mod tests {
                     .unwrap()
             })
             .collect();
+        // An activation names a promise and its two functions: the ordinary object stands for
+        // all three.
+        let named = ObjectRef { handle: objects[0] };
+        let activation = ObjectKind::AsyncActivation(AsyncActivation::for_test(named));
+        objects.push(
+            heap.objects
+                .allocate(ObjectRecord::new(None, activation), 0)
+                .unwrap(),
+        );
         let array = heap.objects.get_mut(objects[1]).unwrap();
         let element = Property::data(
             Value::String(StringRef { handle: sparse }),

@@ -111,6 +111,16 @@ pub struct PromiseCapability {
     pub reject: Value,
 }
 
+/// [[PromiseState]] of a promise, with its [[PromiseResult]] as a new root once it is settled
+/// (`#sec-properties-of-promise-instances`; `docs/design/host-interface.md`, section 13), as
+/// `promise_state` reads it.
+#[derive(Debug)]
+pub enum PromiseState {
+    Pending,
+    Fulfilled(Root),
+    Rejected(Root),
+}
+
 /// What a host function receives (decision 14): `this`, the arguments, `new_target` when it is
 /// constructed, and the function object itself.
 #[derive(Clone, Copy, Debug)]
@@ -639,6 +649,27 @@ macro_rules! scoped_methods {
                 let symbol = which.of(&symbols);
                 agent.hand_out(Value::Symbol(symbol));
                 Ok(symbol)
+            }
+
+            /// [[PromiseState]] of the promise `promise` holds, with its [[PromiseResult]] as a
+            /// new root once it is settled, as [`Agent::promise_state`] reads it (section 13): a
+            /// read, the root its one allocation. A root that holds no promise answers
+            /// `Err(WrongKind { expected: Promise })` (HOST-46).
+            pub fn promise_state(&mut self, promise: &Root) -> Result<PromiseState, HostError> {
+                self.agent.promise_state(promise)
+            }
+
+            /// [[PromiseIsHandled]] of the promise `promise` holds, as
+            /// [`Agent::promise_is_handled`] reads it (section 13).
+            pub fn promise_is_handled(&self, promise: &Root) -> Result<bool, HostError> {
+                self.agent.promise_is_handled(promise)
+            }
+
+            /// Set [[PromiseIsHandled]] of the promise `promise` holds, as
+            /// [`Agent::mark_promise_as_handled`] does (`webidl:mark-a-promise-as-handled`): it
+            /// calls no hook.
+            pub fn mark_promise_as_handled(&mut self, promise: &Root) -> Result<(), HostError> {
+                self.agent.mark_promise_as_handled(promise)
             }
         }
     };

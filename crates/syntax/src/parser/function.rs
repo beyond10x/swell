@@ -10,8 +10,7 @@
 //! its parameters and body with [Yield] set; the parameters and body of every other function
 //! clear [Yield], but the parameters of an arrow function, which keep the [Yield] around them.
 //! An `async` function or arrow function (slice 10, `#sec-async-function-definitions`,
-//! `#sec-async-arrow-function-definitions`) is parsed whole the same way with [Await], and the
-//! refusal of slice 10 at its `async` is held back to the end of the parse ([`Parser::held`]);
+//! `#sec-async-arrow-function-definitions`) is parsed whole the same way with [Await];
 //! `async function*` is refused at its `*`. A
 //! function's code is strict mode code when the code around it is or when its body starts with
 //! a Use Strict Directive (`#sec-strict-mode-code`); the parser tracks that while it reads the
@@ -22,7 +21,6 @@ use crate::ast::{
     AssignOp, BindingTarget, Child, Expr, ExprId, ExprNode, Function, FunctionId, FunctionKind,
     Name, PatternKind, Scope, Span, Stmt, StmtId,
 };
-use crate::error::SyntaxError;
 use crate::token::{Keyword, Punct};
 
 impl<'a, 'm> Parser<'a, 'm> {
@@ -52,18 +50,12 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// is read with the [Yield] and [Await] around it; that it is no `yield` where [Yield] is
     /// set, no `await` where [Await] is set, or either in a GeneratorExpression or an
     /// AsyncFunctionExpression (`BindingIdentifier[+Yield]`, `BindingIdentifier[~Yield, +Await]`)
-    /// is an early error (`src/early.rs`). The first `async` of the source holds the refusal of
-    /// slice 10 back to the end of the parse; `async function*` is refused at its `*`.
+    /// is an early error (`src/early.rs`). `async function*` is refused at its `*`.
     #[inline(never)]
     fn function_head(&mut self, kind: FunctionKind) -> R<FunctionId> {
         let span = self.start();
         let asynchronous = self.is_name("async");
         if asynchronous {
-            if self.held.is_none() {
-                let refusal =
-                    SyntaxError::refused("async function", 10, self.tok.line, self.tok.column);
-                self.held = Some(refusal);
-            }
             self.advance()?;
         }
         self.expect_keyword(Keyword::Function)?;
@@ -429,10 +421,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// The parameters of the arrow function whose `=>` is the current token, from the operand
-    /// `left`; consumes the `=>` and numbers the function, its span starting at `start`. An
-    /// `async` arrow function ([`Parser::is_async_head`]) holds the refusal of slice 10 at its
-    /// `async` back to the end of the parse, unless one of the source before it is held already:
-    /// its parameters were read before it, and a refusal they hold stands after its `async`.
+    /// `left`; consumes the `=>` and numbers the function, its span starting at `start`; an
+    /// `async` arrow function ([`Parser::is_async_head`]) is marked `asynchronous`.
     #[inline(never)]
     fn arrow_head(&mut self, left: ExprId, start: Span) -> R<FunctionId> {
         if self.tok.newline_before {
@@ -453,15 +443,6 @@ impl<'a, 'm> Parser<'a, 'm> {
                 self.m.release(params);
                 self.m.release(initializers);
             }
-        }
-        if asynchronous
-            && self
-                .held
-                .as_ref()
-                .is_none_or(|h| (h.line, h.column) > (start.line, start.column))
-        {
-            let refusal = SyntaxError::refused("async function", 10, start.line, start.column);
-            self.held = Some(refusal);
         }
         Ok(id)
     }
@@ -856,14 +837,13 @@ mod tests {
     use crate::ast::{Expr, ExprId, FunctionKind};
     use crate::ledger::{Counting, HeapBytes, Meter};
 
-    /// The parser's tree of `async` functions and arrow functions, which no entry answers while
-    /// the refusal of slice 10 stands: each function is `asynchronous` and its span, its source
-    /// text (`#sec-function.prototype.tostring`), starts at its `async`; an `await` in one is an
-    /// AwaitExpression; the parse holds the refusal at the first `async` of the source; and what
-    /// the ledger holds after the parse is the tree's capacity, so the first reading of each
+    /// The parser's tree of `async` functions and arrow functions: each function is
+    /// `asynchronous` and its span, its source text (`#sec-function.prototype.tostring`), starts
+    /// at its `async`; an `await` in one is an AwaitExpression; the parse holds no refusal; and
+    /// what the ledger holds after the parse is the tree's capacity, so the first reading of each
     /// arrow function's head, the call of `async` and its arguments, was credited.
     #[test]
-    fn async_functions_start_at_async_and_hold_the_refusal_of_slice_10() {
+    fn async_functions_start_at_async_and_parse_whole() {
         let text = "x = 1;\n\
                     var f = async function g(a) { return await a; }, \
                     h = async (b, ...c) => b, i = async d => await d;\n\
@@ -915,14 +895,7 @@ mod tests {
             .filter(|n| matches!(n.expr, Expr::Await(_)))
             .count();
         assert_eq!(awaits, 2);
-        let held = parsed
-            .held
-            .as_ref()
-            .map(|e| (e.message.as_str(), e.line, e.column));
-        assert_eq!(
-            held,
-            Some(("async function is not supported before slice 10", 2, 9))
-        );
+        assert!(parsed.held.is_none(), "{:?}", parsed.held);
         let tree = parsed
             .ast
             .heap_bytes()

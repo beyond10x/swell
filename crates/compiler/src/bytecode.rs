@@ -617,6 +617,34 @@ pub enum Instruction {
     /// object; the resumption puts the received value and its tag above the record, as at
     /// [`Instruction::Yield`].
     DelegateYield(u32),
+
+    // ---- `async` functions ----------------------------------------------------------------
+    /// `[] -> []`: the start of the code of an `async` template, before
+    /// FunctionDeclarationInstantiation (`#sec-runtime-semantics-evaluateasyncfunctionbody`,
+    /// step 1, NewPromiseCapability(`%Promise%`)): the promise of the call and its resolving
+    /// functions, and the activation that holds them, stored in local slot `s`, its state
+    /// executing (`docs/design/engine.md`, decision 3, "`async` functions on suspended frames",
+    /// item 1). The code after it runs in a [`HandlerKind::Catch`] region whose block is
+    /// [`Instruction::AsyncReject`].
+    AsyncStart(u32),
+    /// `[v] -> [r, tag]` across a suspension: Await(v) (`#sec-await`) by the activation in local
+    /// slot `s`: PromiseResolve(`%Promise%`, v) (`#sec-promise-resolve`), the two built-in
+    /// functions of the `await` and PerformPromiseThen of them (`#sec-performpromisethen`), then
+    /// the activation suspended at a new suspension and the frame suspended into it, with the
+    /// promise of the call as the value handed over. The resumption puts the received value `r`
+    /// and its tag on the stack: [`TAG_NORMAL`] for a fulfilled promise, [`TAG_THROW`] for a
+    /// rejected one, never [`TAG_RETURN`].
+    Await(u32),
+    /// `[v] -> `: the return of an `async` template, the activation in local slot `s`
+    /// (AsyncBlockStart, `#sec-asyncblockstart`, steps 2.e and 2.f): the activation completed,
+    /// the steps of the resolve function of the promise of the call with `v` (no call of it), and
+    /// that promise returned by the frame.
+    AsyncReturn(u32),
+    /// `[e] -> `: a throw that leaves the body of an `async` template, the activation in local
+    /// slot `s` (AsyncBlockStart, step 2.g, and EvaluateAsyncFunctionBody, step 3): the
+    /// activation completed, the steps of the reject function of the promise of the call with
+    /// `e` (no call of it), and that promise returned by the frame.
+    AsyncReject(u32),
 }
 
 impl Instruction {
@@ -746,6 +774,10 @@ impl Instruction {
             | Instruction::GeneratorReturn(_)
             | Instruction::GeneratorDone(_)
             | Instruction::DelegateYield(_) => None,
+            Instruction::AsyncStart(_)
+            | Instruction::Await(_)
+            | Instruction::AsyncReturn(_)
+            | Instruction::AsyncReject(_) => None,
             Instruction::Argument(_)
             | Instruction::RestArguments(_)
             | Instruction::PushVarEnv(_) => None,
@@ -940,6 +972,12 @@ pub struct FunctionTemplate {
     /// code starts the generator after FunctionDeclarationInstantiation
     /// ([`Instruction::GeneratorStart`]) and returns through [`Instruction::GeneratorReturn`].
     pub generator: bool,
+    /// An `async` function or arrow function: its last local slot holds its activation, its
+    /// code starts with [`Instruction::AsyncStart`], before the binding of its parameters, and
+    /// returns through [`Instruction::AsyncReturn`] or, for a throw that leaves its body,
+    /// [`Instruction::AsyncReject`]. It is no constructor and has no `prototype`
+    /// (`#sec-runtime-semantics-instantiateasyncfunctionobject`).
+    pub asynchronous: bool,
     /// Where each parameter goes, in order; for a parameter that is a pattern, where each name it
     /// binds goes, in source order (a list with a pattern is not simple: the call sets them
     /// uninitialized, [`FunctionTemplate::binds_parameters`]).

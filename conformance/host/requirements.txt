@@ -43,7 +43,7 @@ HOST-42 pending slice 11
 HOST-43 pending slice 11
 HOST-44 pending slice 11
 HOST-45 test swell::misuse::host_45_realm_root_and_script_of_another_agent
-HOST-46 pending slice 10
+HOST-46 test swell::promise_reads::host_46_promise_state_of_a_value_that_is_no_promise_is_wrong_kind
 HOST-47 test swell::calls::host_47_call_and_construct_of_the_wrong_kind_throw_type_error
 HOST-48 test swell::misuse::host_48_a_faulted_agent_answers_faulted_everywhere
 HOST-49 test swell::limits_scripts::host_49_setup_closure_and_clause_19_globals
@@ -97,8 +97,8 @@ HOST-96 test swell::interrupt::host_96_interrupt_set_in_a_host_function_ends_the
 HOST-97 pending slice 11
 HOST-98 pending slice 11
 HOST-99 pending slice 11
-HOST-100 pending slice 10
-HOST-101 pending slice 10
+HOST-100 test swell::promise_reads::host_100_promise_state_and_is_handled_follow_the_promise
+HOST-101 test swell::promise_reads::host_101_a_promise_marked_as_handled_is_not_tracked_again
 HOST-102 test swell::misuse::host_102_reads_change_nothing_and_call_no_hook
 HOST-103 test swell::calls::host_103_host_function_receives_this_and_arguments
 HOST-104 test swell::calls::host_104_new_target_and_non_constructors
@@ -118,7 +118,7 @@ HOST-117 test swell::dynamic_function::host_117_function_asks_the_host_with_its_
 HOST-118 test swell::eval::host_118_eval_of_an_object_asks_host_get_code_for_eval
 HOST-119 pending slice 8
 HOST-120 test swell::builtins_function_source::host_120_no_source_text_gives_a_native_function_string
-HOST-121 pending slice 10
+HOST-121 test swell::promise_reads::host_121_a_rejection_with_no_handler_is_tracked_and_a_later_handler_withdraws_it
 HOST-122 pending slice 13
 HOST-123 pending slice 14
 HOST-124 test swell::hooks::host_124_*
@@ -191,8 +191,8 @@ HOST-190 test swell::termination::host_189_190_one_runs_after_a_memory_budget_te
 HOST-191 test swell::regexp_refusals::host_191_regexp_counts_its_refusals_of_slice_5
 HOST-192 test swell::jobs::host_192_a_host_microtask_runs_in_the_realm_it_was_queued_with
 HOST-193 test swell::jobs::host_193_a_checkpoint_spends_one_step_for_each_entry_it_takes_off
-HOST-194 pending slice 10
-HOST-195 pending slice 10
+HOST-194 test swell::async_functions::host_194_an_await_makes_two_job_callbacks_and_its_job_calls_one
+HOST-195 test swell::async_functions::host_195_a_step_budget_termination_in_a_resumed_activation_leaves_its_promise_pending_for_good
 HOST-196 test swell::jobs::host_196_a_checkpoint_holds_what_a_job_was_handed_only_until_it_ends
 HOST-197 test swell::jobs::host_197_last_entry_steps_reads_the_whole_checkpoint
 HOST-198 test swell::promises::host_198_the_interrupt_ends_a_checkpoint_at_three_places
