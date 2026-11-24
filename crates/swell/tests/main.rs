@@ -43,6 +43,7 @@ mod errors;
 mod eval;
 mod eval_stack;
 mod faults;
+mod for_await;
 mod for_of;
 mod frontend_ledger;
 mod fuzz;

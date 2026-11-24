@@ -296,6 +296,8 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::CaseJump(t) => format!("CaseJump {t:04}"),
         I::ForInNext(t) => format!("ForInNext {t:04}"),
         I::IteratorStep(t) => format!("IteratorStep {t:04}"),
+        I::AsyncIteratorStep(t) => format!("AsyncIteratorStep {t:04}"),
+        I::AsyncIteratorClose(t) => format!("AsyncIteratorClose {t:04}"),
         I::ThrowSyntaxError(k) => format!("ThrowSyntaxError {}", s(k)),
         I::NewRegExp { body, flags } => format!("NewRegExp {} {}", s(body), s(flags)),
         I::PushEnv(n) => format!("PushEnv {n}"),

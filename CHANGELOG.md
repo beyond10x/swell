@@ -16,6 +16,12 @@ Every number below comes from the gate, `task check`, on the released commit.
   At its close 40 cases that need `class` or `super` move to slice 8, each with its
   evidence, and 21 cases that failed only on generators count in slice 7 instead of slices
   18 and 19.
+- `for await (x of y)` in an `async` function, a story of the tenth slice, with
+  `%AsyncIteratorPrototype%`, `Symbol.asyncIterator` and the Async-from-Sync Iterator that
+  wraps a sync iterable. Each result of `next` is awaited, and the iterator is closed on
+  every exit of the loop. A loop over an iterator that never ends stops at the step budget;
+  a wrapped iterator is charged to the memory budget until it is freed. `for await` in an
+  `async function*` waits for async generators.
 - The statics of `Promise`, a story of the tenth slice: `Promise.all`, `Promise.allSettled`,
   `Promise.any`, `Promise.race`, `Promise.try` and `Promise.withResolvers`, with
   `Promise.prototype.finally` and `AggregateError`. `Promise.all` over an iterator that
@@ -128,6 +134,9 @@ Every number below comes from the gate, `task check`, on the released commit.
   that range; `HOST-210`, a host that answers no instant for every local time gets NaN
   after 31 hook calls and no exception; `HOST-211`, every call of a clock or time zone hook
   is charged one step before it is made.
+- New: `WellKnownSymbol::AsyncIterator`, the thirteenth well-known symbol a host names. A
+  host object with a method under it is the iterable of a `for await`.
+- `HOST-203` has a test.
 
 ## [0.8.0] - 2026-11-24
 

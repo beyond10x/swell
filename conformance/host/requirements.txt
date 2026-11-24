@@ -200,7 +200,7 @@ HOST-199 test swell::promises::host_199_a_checkpoint_ended_by_its_budget_leaves_
 HOST-200 test swell::promises::host_200_clear_microtasks_empties_the_queue_without_running_anything
 HOST-201 test swell::promise_statics::host_201_error_summary_reads_the_kind_of_an_aggregate_error
 HOST-202 test swell::promise_statics::host_202_new_error_makes_an_aggregate_error_with_no_errors
-HOST-203 pending slice 10
+HOST-203 test swell::for_await::host_203_a_host_reads_symbol_async_iterator_and_a_host_object_is_async_iterable
 HOST-204 pending slice 10
 HOST-205 pending slice 10
 HOST-206 pending slice 10

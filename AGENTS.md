@@ -63,10 +63,10 @@ slice 8 with evidence and 21 cases taken in from slices 18 and 19: all 1,472 cas
 pass in all 2,801 runs (`test262-slice 07 1472 2801 0 0 1472 1472 0 0`), and no host
 requirement is pending for it. Slice 10, `promises-and-async`
 (`epic:slice-10-promises-and-async`), is accepted in seventeen stories (`docs/plan/waves.md`,
-"Slice 10, `promises-and-async`") and in work: nine of them are merged (the microtask queue,
+"Slice 10, `promises-and-async`") and in work: ten of them are merged (the microtask queue,
 the syntax of `async` functions, `Promise` with `then`, `async` functions, the rejection
-tracker, `async` methods of object literals, `%AsyncFunction%`, the grammar of `async function*` and the statics of `Promise` with `finally` and `AggregateError`), 1,189 of its 3,879 cases
-pass (`test262-slice 10 3879 7499 0 0 3879 1189 2690 0`), and 6 host requirements are pending
+tracker, `async` methods of object literals, `%AsyncFunction%`, the grammar of `async function*`, the statics of `Promise` with `finally` and `AggregateError`, and `for await` with the Async-from-Sync Iterator), 1,665 of its 3,879 cases
+pass (`test262-slice 10 3879 7499 0 0 3879 1665 2214 0`), and 5 host requirements are pending
 for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
@@ -271,7 +271,10 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   the build pool (`slot sh -c '...'`: `cargo test --locked -p <crate> --test main --no-run`
   prints the binary's path, and the job runs it); a test binary is not run by its path
   beside the pool, and no second job of the same tree runs while one builds, since the two
-  share one build directory. The bound is in CPU seconds
+  share one build directory. The script of a measure job is given inline or lies in the
+  worktree (its ignored `.out/`), never under a cache directory of the home: the pool runs a
+  job whose script lies there on this machine, not on its build node, and refuses that form
+  from 2026-11-24. The bound is in CPU seconds
   because the machine's load multiplies wall time: on 2026-11-22, at a load of 110 to 166 on
   18 cores, tests of 4 to 18 CPU seconds were killed at 60 s
   (`story:heavy-tests-far-from-the-kill`), and at a bound of 5 s for the full count
