@@ -737,7 +737,11 @@ and per code unit of a pattern before its parse at run time (decision 7, "What o
 the matcher is"), per limb operation for `BigInt`, per code unit of its text and per value for
 `JSON.parse` and `JSON.rawJSON`, per code unit of eval code before its parse, and per
 pass of a sort of n property keys, n before the pass; plus what a host function charges for its
-own work with `cx.charge_steps` (`host-interface.md`, section 14); and, from slice 10, a step for
+own work with `cx.charge_steps` (`host-interface.md`, section 14); one step for each call of a
+clock or time zone hook, charged before the call, so that one built-in call makes at most 61
+(`host-interface.md`, decision 17, added on 2026-11-24); per code unit past 32 of the String
+that `Date.parse` and `new Date(string)` read, charged before the first is read (decision 6);
+and, from slice 10, a step for
 each entry a microtask checkpoint takes off its queue and one for each promise job queued ("The
 microtask checkpoint is one entry" below). Eval code: PerformEval charges one step per
 code unit of the eval String before it copies it; CreateDynamicFunction charges one per code
@@ -1879,7 +1883,128 @@ does not bound the forms, since they are not Strings.
   `AvailableNamedTimeZoneIdentifiers ( )`. The command-line host and the test262 runner answer
   "UTC" unless told otherwise. `Date.parse` accepts the format of 21.4.1.32 and the forms
   `Date.prototype.toString` and `toUTCString` produce; nothing else (an implementation-defined
-  fallback the standard allows and swell does not take).
+  fallback the standard allows and swell does not take); the three forms are written out below.
+  How often the engine calls the time hooks, what a call costs and what it does with an answer
+  out of range are in `host-interface.md` decision 17. The rest of this decision's `Date` items
+  were added on 2026-11-24 for slice 4.
+- **`MakeDay` far outside the time range** (`MakeDay`, 21.4.1.28, `ecma262:sec-makeday`). What a
+  script sees: the draft asks for a finite time value `tv` (an integral Number) in year
+  ℝ(balancedYear), month balancedMonthMV and date 1, and answers NaN "if this is not possible
+  (because some argument is out of range)". It does not hold `tv` to ±8.64 × 10^15; only
+  `TimeClip` does, in every caller (`Date.UTC`, the constructor, the setters, `Date.parse`), so
+  `MakeDay` answers a day number for the year 275760 and for the year 285000 alike, and
+  `Date.UTC(275760, 8, 13)` is 8.64e15 while `Date.UTC(275760, 8, 14)` and `Date.UTC(1e300, 0)`
+  are NaN. swell answers as the draft does for every balancedYear of magnitude up to 2^53
+  (9,007,199,254,740,992): the day number when some Number lies in the day, that is in
+  [d × 86,400,000, (d + 1) × 86,400,000) milliseconds, and NaN when none does. Every day holds
+  a Number below 2^79 milliseconds, the year 1.9 × 10^13 (from 2^79 on, the gap of two Numbers
+  is 2^27 ms, longer than a day); above it a day holds one less often: at the year 2^53 the
+  day starts near 2^87.8 ms, the gap is 2^35 ms, and one day in 398 holds a Number (`MakeDay(2^53,
+  0, 1)` is NaN, `MakeDay(2^53 - 65, 0, 1)` is not). For a balancedYear of magnitude above 2^53
+  `MakeDay` answers NaN. That differs from the draft only for a script that makes the day number
+  cancel against a time of its own, as in `new Date(Y, 0, 1, H)` with an `H` of the size of the
+  day number's milliseconds, on a year above 2^53 whose first day holds a Number (about one
+  in 400 at 2^53, one in 400,000 at 10^19, fewer above); no argument of a setter can
+  (`TimeWithinDay` is below 86,400,000, so the sum is far outside the range and `TimeClip` makes
+  it NaN), and a search of `test/built-ins/Date` for exponents, powers of two and 2^53 finds no
+  year above 10^13. Rejected: a bound at the first year whose millisecond count leaves the safe
+  integers (285,426): `new Date(300000, 0, 1, -1e9)` is the day number 108,853,222
+  (9.4 × 10^15 ms, above 2^53, in a day that holds Numbers) plus -3.6 × 10^15, a date near
+  5.8 × 10^15 in the range, which that bound would make NaN with ordinary arguments; and a
+  bound above 2^53, which only moves the deviation to years no script writes and costs wider
+  integers. The mechanism: `swell-num` reads balancedYear as an integer only when it is
+  integral and of magnitude at most 2^53, so the year and the day number (about
+  365.2425 × 2^53, under 2^62) fit `i64`; the day's first millisecond, `d × 86,400,000` (under
+  2^89), is computed in `i128`; whether the day holds a Number is one comparison of that integer
+  with the next Number at or above it; the first day of the month comes from the closed form of
+  `DayFromYear` and a table of month starts, with no loop over years or months. `dayMV` is added
+  in Number arithmetic as the draft's last step has it. `crates/num` does this today
+  (`make_day`, `day_holds_a_number`); its module header calls the bound "not decided" and is
+  rewritten to cite this item.
+- **`UTC ( t )` and the local time that does not exist** (21.4.1.26, `ecma262:sec-utc-t`).
+  What a script and a host see: for a local time that repeats, the first instant; for one that
+  a positive transition skips, the offset in force just before the transition; for every other
+  local time, its one instant. The draft finds the skipped case's offset from `tBefore`, "the
+  largest integral Number < t for which possibleInstantsBefore is not empty", and states no
+  bound on the search. swell's search is bounded: it asks `get_named_time_zone_epoch_nanoseconds`
+  at most 57 times for one `UTC ( t )`, and when it finds no `tBefore` within 2^28 milliseconds
+  (268,435,456 ms, 74.5 hours) below `t`, `UTC ( t )` answers NaN, so `new Date(y, m, d)` is
+  then a Date whose time value is NaN, never an exception and never a hang. The bound has two
+  grounds. A host that keeps to the offset range of `host-interface.md` decision 17 has offsets
+  below 24 hours on each side of a transition, so a gap is shorter than 48 hours
+  (172,800,000 ms, below 2^28); a real zone's longest gap is one day. And a host that does not
+  (one that answers the empty list for every local time, a broken or hostile host) gets NaN
+  after a known number of calls instead of the draft's search without end. NaN rather than the
+  offset of some instant: no instant before `t` was found, so any offset would be one the host
+  never gave for that time, and the Date still exists. The mechanism: `t` must be integral and
+  within 8.64 × 10^15 + 86,400,000 in magnitude, else NaN with no hook call (an offset below
+  86,400,000 ms puts `t - offset` outside the range, so `TimeClip` of every caller would make
+  it NaN; `LocalTime` of a time value stays inside the same limit). The
+  common path asks `get_named_time_zone_epoch_nanoseconds` once with the fields of `t` and
+  `get_named_time_zone_offset_nanoseconds` once with the first element. If the list is empty
+  the search runs: the probe times are `t - d` for d = 1, 2, 4, ..., 2^28 (29 probes, the first
+  non-empty one ends the gallop), then a bisection between the last distance that gave an empty
+  list and the first that did not, one probe per halving of an interval of at most 2^27
+  milliseconds (27 probes), keeping the list of the lowest distance that gave a non-empty one;
+  that list's last element goes to the offset hook. The most is 1 + 29 + 27 = 57 asks of the
+  epoch hook; with no `tBefore` it is 1 + 29 = 30. A probe time outside the limit above counts
+  as an empty answer and makes no call. The search is exact when the empty answers just below
+  `t` form one run followed by non-empty ones (every real zone); for a host whose answers do
+  not, the result is the boundary the probes met, the same for the same answers (HOST-133).
+  Time spent: decision 3 and `host-interface.md` decision 17 charge one step for each hook
+  call.
+- **`Date.parse` and the String argument of `new Date`** read exactly three forms, each the
+  whole String, with no space before or after and with the letters as written below; anything
+  else is NaN, with no fallback. They are told apart by the first code unit, so no form is tried
+  and abandoned: a digit, `+` or `-` starts the first form, a letter the second or third (by
+  the fourth code unit: a space or a comma).
+  1. The Date Time String Format of 21.4.1.32 (`ecma262:sec-date-time-string-format`):
+     `YYYY`, `YYYY-MM` or `YYYY-MM-DD`, optionally followed by `THH:mm`, `THH:mm:ss` or
+     `THH:mm:ss.sss` (exactly three digits), and after a time, optionally `Z` or `+HH:mm` or
+     `-HH:mm` (a date-only form takes no offset: `2020-01-01Z` is NaN). A year is four digits, or `+` or `-` and six digits (`ecma262:sec-expanded-years`);
+     `-000000` is NaN. MM is 01 to 12 and DD is 01 to the length of that month in that year (a
+     day the month does not have, `2021-02-30`, is an illegal element value and NaN; the draft
+     says only 01 to 31, and a reader of "out-of-bounds elements" has no other number to name),
+     HH is 00 to 24, mm and ss 00 to 59, and an offset's HH 00 to 23 and mm 00 to 59 (the draft's
+     offset format). HH of 24 is allowed only with mm, ss and sss all zero and reads as 00:00 of
+     the next day (Note 1 of 21.4.1.32). A date-only form is read as UTC. A date-time form
+     with an offset is read at that offset and calls no hook. A date-time form without an offset
+     is read as local time, `UTC(MakeDate(MakeDay, MakeTime))` through the conversion of
+     `host-interface.md` decision 17, with at most 59 hook calls. The value is the result of
+     `TimeClip`, so an instant outside the time range is NaN, `+275760-09-13T00:00:00.001Z`
+     included, and `+275760-09-13T01:00:00+01:00` is 8.64e15, since the offset is taken off
+     before the clip.
+  2. The form of `Date.prototype.toString` (`ToDateString`, `ecma262:sec-todatestring`, with
+     `DateString`, `TimeString` and `TimeZoneString`): `Www Mmm DD Y HH:mm:ss GMT±HHmm`
+     optionally followed by ` (name)`. `Www` is one of `Sun Mon Tue Wed Thu Fri Sat` and `Mmm`
+     one of `Jan` to `Dec` (tables 61 and 62, `ecma262:sec-todatestring-day-names`,
+     `ecma262:sec-todatestring-month-names`), written as there; DD is two digits; Y is
+     four to six digits, with a `-` before them for a year below 0 (`DateString` pads to four
+     and writes a sign only when negative, and 271,821 and 275,760 have six digits; `-0000` is
+     NaN); HH, mm and ss are two digits (HH 00 to 23: `TimeString` never writes 24); the offset
+     is `+` or `-`, HH 00 to 23, mm 00 to 59, with no colon. The name is the one place the
+     draft leaves to the implementation (`ecma262:sec-timezoneestring`, "an implementation-defined
+     time zone name"): swell's own `toString` writes none, since no hook answers a name, and
+     the parse accepts
+     a space, `(`, one or more code units other than `(` and `)`, and `)` as the last code unit
+     of the String, and ignores them. The weekday is read and not checked against the date. The
+     instant is the fields read as a time at the String's offset, no hook, no zone of the host.
+  3. The form of `Date.prototype.toUTCString` (`ecma262:sec-date.prototype.toutcstring`):
+     `Www, DD Mmm Y HH:mm:ss GMT`, with the same `Www`, `Mmm`, DD, Y and time as the second
+     form, read as UTC.
+
+  DD, MM, HH, mm and ss out of their ranges, a month name or weekday name not in the tables, a
+  second space, a missing element and any extra code unit after the last element are NaN. Not
+  accepted, so NaN: the forms `toDateString` and `toTimeString` produce, and what
+  `toLocaleString` and its two siblings produce (21.4.3.2 leaves that to the implementation),
+  unless a later decision makes a `toLocale*` method print one of the three forms. An expanded
+  year whose instant is outside the range is NaN with no fallback (`sec-expanded-years`), and
+  the fallback of 21.4.3.2 is not taken. The work: one pass over the
+  String with no backtracking, charged as every String operation is (decision 3): a String of up
+  to 32 code units costs the step of the call and each code unit past 32 one step, charged before
+  the first is read, so the name of the second form, the only part without a length bound, is
+  paid for by its length; the date-time form without an offset adds the steps of its hook
+  calls.
 
 ## 7. Regular expressions
 
