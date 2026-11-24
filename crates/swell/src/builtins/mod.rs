@@ -19,7 +19,10 @@
 //! `[%Symbol.species%]`, `%Promise.prototype%` with `then` and `catch`, and the steps of the
 //! resolving functions and of the executor of a promise capability; and `async_function`
 //! (`story:async-functions-and-await`): `%AsyncFunction.prototype%`, and `%AsyncFunction%`, the
-//! constructor whose `prototype` it is. Later slices add their files here.
+//! constructor whose `prototype` it is; and `promise_statics`
+//! (`story:promise-statics-finally-and-aggregate-error`): `all`, `allSettled`, `any`, `race`,
+//! `try` and `withResolvers` of `%Promise%` with the element functions of the first three.
+//! Later slices add their files here.
 //!
 //! `array`, `object` and `string` are directories (`story:builtin-group-modules`): `mod.rs`
 //! holds the constructor and the builtins of the base, and each group of builtins a story of
@@ -50,6 +53,7 @@ pub(crate) mod math;
 pub(crate) mod number;
 pub(crate) mod object;
 pub(crate) mod promise;
+pub(crate) mod promise_statics;
 pub(crate) mod regexp;
 pub(crate) mod string;
 pub(crate) mod symbol;
