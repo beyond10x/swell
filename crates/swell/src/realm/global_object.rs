@@ -13,8 +13,10 @@
 //! (`#sec-constructor-properties-of-the-global-object-regexp`,
 //! `story:regexp-objects-exec-and-literals`), and `Promise` of 19.3
 //! (`#sec-constructor-properties-of-the-global-object-promise`,
-//! `story:promise-constructor-then-and-jobs`). The global object itself is made by
-//! InitializeHostDefinedRealm or given by the host's setup closure (`realm/mod.rs`).
+//! `story:promise-constructor-then-and-jobs`), and `parseFloat` and `parseInt` of 19.2
+//! (`#sec-parsefloat-string`, `#sec-parseint-string-radix`, `story:number-functions`). The
+//! global object itself is made by InitializeHostDefinedRealm or given by the host's setup
+//! closure (`realm/mod.rs`).
 
 use super::intrinsics::Intrinsic;
 use crate::heap::arena::Handle;
@@ -66,8 +68,9 @@ impl<H: Host> Agent<H> {
         // of slice 10 (`story:promise-statics-finally-and-aggregate-error`), which the loop over
         // `ErrorKind::ALL` above does not reach; the constructor property `Date` (19.3.10,
         // `#sec-constructor-properties-of-the-global-object-date`) of slice 4
-        // (`story:date-object-clock-and-time-value`); each { [[Writable]]: true, [[Enumerable]]:
-        // false, [[Configurable]]: true } (clause 18).
+        // (`story:date-object-clock-and-time-value`); the function properties `parseFloat` and
+        // `parseInt` (19.2.4, 19.2.5) of slice 4 (`story:number-functions`); each {
+        // [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true } (clause 18).
         for (name, which) in [
             ("Array", Intrinsic::Array),
             ("Object", Intrinsic::Object),
@@ -76,6 +79,8 @@ impl<H: Host> Agent<H> {
             ("Math", Intrinsic::Math),
             ("isFinite", Intrinsic::IsFinite),
             ("isNaN", Intrinsic::IsNaN),
+            ("parseFloat", Intrinsic::ParseFloat),
+            ("parseInt", Intrinsic::ParseInt),
             ("Boolean", Intrinsic::Boolean),
             ("Number", Intrinsic::Number),
             ("eval", Intrinsic::Eval),
