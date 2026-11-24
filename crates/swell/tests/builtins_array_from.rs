@@ -345,9 +345,11 @@ const STEP_ROOM: u64 = if cfg!(feature = "collect-every-safe-point") {
     1_000
 };
 
-/// The memory room above the reading of an agent that ran the controls and collected: 1 MiB,
-/// which the Strings of `big` pass after about 8 values, about 524,000 steps of copying, within
-/// the step budget of `limits()`.
+/// The memory room above the reading of an agent that ran the setups of the memory runs and
+/// collected: 1 MiB, eight Strings of `big` (128 KiB each), so the eighth does not fit beside
+/// what the run makes besides them; the seven before it take 917,999 steps of copying (at every
+/// size of the realm the task `test-realm-sizes` pads), within the 1,000,000 steps of
+/// `limits()`.
 const MEMORY_ROOM: u64 = 1 << 20;
 
 /// `docs/design/engine.md`, decision 3, "Iterators held by a builtin", items 2 and 3: each of
@@ -356,8 +358,10 @@ const MEMORY_ROOM: u64 = 1 << 20;
 /// `Terminated(MemoryBudget)` when it keeps a new String of 128 KiB per value (in the Array,
 /// the object or the groups it builds), never in a hang, and no termination calls `return`.
 /// The step budget is the largest reading of the three controls (each over 3 values) plus
-/// [`STEP_ROOM`], the memory budget the heap after the controls and a collection plus
-/// [`MEMORY_ROOM`]; each control completes under them. After each termination the agent runs
+/// [`STEP_ROOM`]; the memory budget is the reading of a twin agent after the setups of the
+/// memory runs and a collection plus [`MEMORY_ROOM`], and the budgeted agent reads the same
+/// after its own setups and a collection, so no arena grows between the reading and the run;
+/// each control completes under them. After each termination the agent runs
 /// again: after a collection the script `1` answers `Normal(1)` and the control its count
 /// (HOST-70, HOST-190).
 #[test]
@@ -377,36 +381,62 @@ fn the_three_end_at_the_step_and_the_memory_budget_over_an_endless_iterator() {
         assert!(matches!(outcome, HostOutcome::Normal(_)), "{outcome:?}");
         steps = steps.max(measure.last_entry_steps().unwrap());
     }
-    measure.collect().unwrap();
-    let heap = measure.heap_bytes().unwrap();
-    println!("controls: at most {steps} steps, heap {heap} bytes after a collection");
+    println!("controls: at most {steps} steps");
 
     for (grows, termination) in [
         (false, Termination::StepBudget),
         (true, Termination::MemoryBudget),
     ] {
+        // The 1,024 steps of copying `chunk` would not fit the step budget of the step runs,
+        // which need no `big`.
+        let setups: &[&str] = if grows { &[ENDLESS, CHUNK] } else { &[ENDLESS] };
         let mut budgeted = limits();
+        let mut twin_heap = None;
         if grows {
+            // A twin agent runs the setups of the budgeted agent and collects: its reading is
+            // the budgeted agent's before its first run, whatever the size of the realm.
+            let mut twin = agent().unwrap();
+            let twin_realm = realm(&mut twin);
+            for setup in setups {
+                assert_eq!(
+                    eval_text(&mut twin, &twin_realm, setup),
+                    Outcome::Normal("true".to_string())
+                );
+            }
+            twin.collect().unwrap();
+            let heap = twin.heap_bytes().unwrap();
             budgeted.memory_bytes = heap + MEMORY_ROOM;
+            twin_heap = Some(heap);
         } else {
             budgeted.steps_per_entry = steps + STEP_ROOM;
         }
         let mut agent = agent_with(budgeted).unwrap();
         let realm = realm(&mut agent);
-        // The 1,024 steps of copying `chunk` would not fit the step budget of the step runs,
-        // which need no `big`.
-        let setups: &[&str] = if grows { &[ENDLESS, CHUNK] } else { &[ENDLESS] };
         for setup in setups {
             assert_eq!(
                 eval_text(&mut agent, &realm, setup),
                 Outcome::Normal("true".to_string())
             );
         }
+        if let Some(heap) = twin_heap {
+            agent.collect().unwrap();
+            assert_eq!(
+                agent.heap_bytes().unwrap(),
+                heap,
+                "the twin's reading after the setups and a collection"
+            );
+        }
         for (source, control) in three_over("Infinity", grows).iter().zip(&controls) {
+            let before = agent.heap_bytes().unwrap();
             assert_eq!(
                 eval_text(&mut agent, &realm, source),
                 Outcome::Terminated(termination),
                 "{source}"
+            );
+            println!(
+                "{source}: heap {before} before, {} at the termination, {} steps",
+                agent.heap_bytes().unwrap(),
+                agent.last_entry_steps().unwrap()
             );
             agent.collect().unwrap();
             assert_eq!(

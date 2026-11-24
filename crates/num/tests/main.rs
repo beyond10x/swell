@@ -9,5 +9,6 @@ mod math_exp_log;
 mod math_trig;
 mod parse;
 mod siphash;
+mod sum;
 mod time_clip;
 mod to_string;

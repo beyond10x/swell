@@ -21,18 +21,31 @@
 //! `sinh`, `tan` and `tanh`, convert their arguments here and answer what the function of
 //! `swell_num::math` of the same name answers (`exponentiate` for `pow`): it fixes the special
 //! values of its clause and computes the rest in plain `f64` arithmetic, so that a script prints
-//! the same bytes on every platform (HOST-135). `random` and `sumPrecise` are later stories of
-//! slice 4; their rows go after these in the tables, in the order of definition of `%Math%`.
+//! the same bytes on every platform (HOST-135). `random` is a later story of slice 4; its row
+//! goes after `sumPrecise` in the tables, in the order of definition of `%Math%`.
+//!
+//! `Math.sumPrecise` (`#sec-math.sumprecise`, `story:math-sum-precise`) iterates its argument as
+//! `docs/design/engine.md`, decision 3, "Iterators held by a builtin" has it and sums each Number
+//! exactly in `swell_num::sum::Sum`, which lives on the frame of the call (decision 6,
+//! "`Math.sumPrecise`"): a step per item through `charge_steps` beside the step of the call of
+//! `next`, 34 steps once before the sum is rounded, and nothing on the heap. Its row goes after
+//! the 22 functions.
 
 use crate::builtins::object::argument;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
-use crate::host::{Host, Termination};
+use crate::host::{ErrorKind, Host, Termination};
 use crate::object::builtin_function::BuiltinId;
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::Property;
+use crate::ops::iteration::IteratorRecord;
 use crate::realm::intrinsics::Making;
 use crate::value::{ObjectRef, Value};
+use swell_num::sum::{MAX_ITEMS, Sum};
+
+/// The steps `Math.sumPrecise` charges once before it rounds its sum: one per limb of the
+/// subtraction of the two accumulators (decision 6, "`Math.sumPrecise`").
+const FINISH_STEPS: u64 = 34;
 
 /// The builtins of this module, by their steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,6 +118,8 @@ pub(crate) enum MathBuiltin {
     Tan,
     /// `Math.tanh ( x )` (21.3.2.36).
     Tanh,
+    /// `Math.sumPrecise ( items )` (21.3.2.34).
+    SumPrecise,
 }
 
 /// The value properties of `Math` (21.3.1.1 to 21.3.1.8), by name, in the order of definition:
@@ -182,6 +197,13 @@ const APPROXIMATED: [(&str, u32, MathBuiltin); 22] = [
     ("tanh", 1, MathBuiltin::Tanh),
 ];
 
+/// The functions of `Math` after those of `APPROXIMATED`, by name, "length" and steps, in the
+/// order of definition (21.3.2) the stories of slice 4 share.
+const LATER_FUNCTIONS: [(&str, u32, MathBuiltin); 1] = [
+    // 21.3.2.34 (`story:math-sum-precise`).
+    ("sumPrecise", 1, MathBuiltin::SumPrecise),
+];
+
 /// Which end of the coerced arguments `Math.max` and `Math.min` answer.
 #[derive(Clone, Copy)]
 enum Extremum {
@@ -193,7 +215,8 @@ impl<H: Host> Agent<H> {
     /// `%Math%` (21.3): an ordinary object whose [[Prototype]] is `%Object.prototype%`, not a
     /// function. Its own properties, in the order of definition: `max`, the value properties
     /// (each { [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: false }), the
-    /// functions of `FUNCTIONS` and of `APPROXIMATED`, and @@toStringTag "Math" (21.3.1.9).
+    /// functions of `FUNCTIONS`, of `APPROXIMATED` and of `LATER_FUNCTIONS`, and @@toStringTag
+    /// "Math" (21.3.1.9).
     pub(crate) fn create_math_object(&mut self, making: Making) -> Completion<ObjectRef> {
         let math =
             self.ordinary_object_create(Some(making.object_prototype), OrdinaryData::Plain)?;
@@ -209,7 +232,7 @@ impl<H: Host> Agent<H> {
         for (name, length, id) in FUNCTIONS {
             self.define_builtin_method(making, math, name, length, BuiltinId::Math(id))?;
         }
-        for (name, length, id) in APPROXIMATED {
+        for (name, length, id) in APPROXIMATED.into_iter().chain(LATER_FUNCTIONS) {
             self.define_builtin_method(making, math, name, length, BuiltinId::Math(id))?;
         }
         self.define_to_string_tag(making, math, "Math")?;
@@ -298,6 +321,7 @@ impl<H: Host> Agent<H> {
             MathBuiltin::Sinh => return self.math_unary(x, swell_num::math::sinh),
             MathBuiltin::Tan => return self.math_unary(x, swell_num::math::tan),
             MathBuiltin::Tanh => return self.math_unary(x, swell_num::math::tanh),
+            MathBuiltin::SumPrecise => return self.sum_precise(x),
         };
         Ok(Value::Number(number))
     }
@@ -331,6 +355,72 @@ impl<H: Host> Agent<H> {
             agent.charge_steps(u64::try_from(coerced.len()).unwrap_or(u64::MAX))?;
             Ok(Value::Number(swell_num::math::hypot(coerced)))
         })
+    }
+
+    /// `Math.sumPrecise ( items )` (`#sec-math.sumprecise`), out of line so that the 552 bytes
+    /// of its `Sum` are on this function's frame and not on that of `run_math_builtin`. The
+    /// record's [[Iterator]] and [[NextMethod]] are kept from GetIterator until the loop ends,
+    /// on every way out (decision 3, item 1); `items` is held by the activation.
+    #[inline(never)]
+    fn sum_precise(&mut self, items: Value) -> Completion<Value> {
+        // 1. Perform ? RequireObjectCoercible(items) (`#sec-requireobjectcoercible`).
+        if matches!(items, Value::Undefined | Value::Null) {
+            return Err(self.throw_error(
+                ErrorKind::TypeError,
+                "Math.sumPrecise called on undefined or null",
+            ));
+        }
+        // 2. Let iteratorRecord be ? GetIterator(items, sync).
+        let mut record = self.get_iterator(items)?;
+        let mark = self.keep(Value::Object(record.iterator));
+        self.keep(record.next_method);
+        // 3. Let state be minus-zero. 4. Let sum be 0.
+        let mut sum = Sum::new();
+        let summed = self.sum_items(&mut record, &mut sum);
+        self.release(mark);
+        summed?;
+        // 8 to 12, after the steps of the final pass over the accumulators.
+        self.charge_steps(FINISH_STEPS)?;
+        Ok(Value::Number(sum.finish()))
+    }
+
+    /// Steps 5 to 7 of `#sec-math.sumprecise`: the loop over the iterator into `sum`. Each item
+    /// is charged a step through `charge_steps` once IteratorStepValue answered it, beside the
+    /// step of the call of `next` (decision 3, item 3); a termination of either ends the loop
+    /// with no sum and no IteratorClose (item 4), as does a throw of `next`, of reading `done` or
+    /// `value` (IteratorStepValue sets [[Done]]). The caller keeps the record.
+    fn sum_items(&mut self, record: &mut IteratorRecord, sum: &mut Sum) -> Completion<()> {
+        // 5. Let count be 0.
+        let mut count: u64 = 0;
+        // 6. Let next be not-started. 7. Repeat, while next is not done,
+        loop {
+            // 7.a. Set next to ? IteratorStepValue(iteratorRecord). 7.b. If next is not done,
+            let Some(next) = self.iterator_step_value(record)? else {
+                return Ok(());
+            };
+            self.charge_steps(1)?;
+            // 7.b.i. If count ≥ 2^53 - 1, return ? IteratorClose(iteratorRecord, a RangeError).
+            let counted = count.saturating_add(1);
+            if check_count(counted).is_err() {
+                let error = self.throw_error(
+                    ErrorKind::RangeError,
+                    "Math.sumPrecise: more than 2^53 - 1 items",
+                );
+                return Err(self.close_iterator_after(record, error));
+            }
+            // 7.b.ii. If next is not a Number, return ? IteratorClose(iteratorRecord, a
+            // TypeError).
+            let Value::Number(n) = next else {
+                let error = self.throw_error(
+                    ErrorKind::TypeError,
+                    "Math.sumPrecise: an item is not a Number",
+                );
+                return Err(self.close_iterator_after(record, error));
+            };
+            // 7.b.iii and 7.b.iv: the state and the exact sum. 7.b.v. Set count to count + 1.
+            sum.add(n);
+            count = counted;
+        }
     }
 
     /// `Math.max ( ...args )` (`#sec-math.max`) and `Math.min ( ...args )` (`#sec-math.min`):
@@ -429,8 +519,16 @@ fn round(n: f64) -> f64 {
     if y == 0.0 { 0.0_f64.copysign(n) } else { y }
 }
 
+/// Step 7.b.i of `Math.sumPrecise` (`#sec-math.sumprecise`) for an item that would be the
+/// `n`-th: "If count ≥ 2^53 - 1", with count the items before it, is `n` > `MAX_ITEMS`, the
+/// `RangeError` path. Not reachable under a step budget below 2^53.
+fn check_count(n: u64) -> Result<(), ()> {
+    if n > MAX_ITEMS { Err(()) } else { Ok(()) }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::{MAX_ITEMS, check_count};
     use crate::host::agent::Agent;
     use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, enter, limits};
     use crate::realm::intrinsics::Intrinsic;
@@ -484,5 +582,15 @@ mod tests {
             assert_eq!(hypot_peak - atan2_peak, 8 * count, "{count} argument(s)");
             assert_eq!(hypot_after, atan2_after, "{count} argument(s)");
         }
+    }
+
+    /// The count check of `Math.sumPrecise`: the 2^53 - 1-th item is summed, the next is the
+    /// `RangeError` path. 2^53 items cannot be run, so the helper the builtin calls is tested.
+    #[test]
+    fn the_count_check_of_sum_precise_refuses_the_item_after_2_to_the_53_less_1() {
+        assert_eq!(MAX_ITEMS, (1 << 53) - 1);
+        assert_eq!(check_count(1), Ok(()));
+        assert_eq!(check_count(MAX_ITEMS), Ok(()));
+        assert_eq!(check_count(MAX_ITEMS + 1), Err(()));
     }
 }
