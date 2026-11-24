@@ -7,7 +7,9 @@
 //! `%GeneratorFunction%` (`#sec-generatorfunction-constructor`), CreateDynamicFunction of kind
 //! generator through the same hook, with the compilation type `Function`, and the same nesting
 //! limit. Then `%AsyncFunction%` (`#sec-async-function-constructor`), CreateDynamicFunction of
-//! kind async through the same hook and the same limits. Run also with the feature
+//! kind async through the same hook and the same limits. Then `%AsyncGeneratorFunction%`
+//! (`#sec-asyncgeneratorfunction-constructor`), CreateDynamicFunction of kind async-generator
+//! through the same hook and the same limits. Run also with the feature
 //! `collect-every-safe-point`.
 #![cfg(test)]
 
@@ -1054,6 +1056,434 @@ fn memory_budget_ends_an_async_function_constructor_whose_code_does_not_fit() {
     assert_eq!(agent.state(), swell::AgentState::Alive);
     assert_eq!(
         eval_text(&mut agent, &realm, "typeof AF(\"return 2\");"),
+        Outcome::Normal("\"function\"".to_string())
+    );
+}
+
+/// `%AsyncGeneratorFunction%`, which no global names: the `constructor` of
+/// `%AsyncGeneratorFunction.prototype%`, the [[Prototype]] of an async generator function.
+/// Without an own `constructor` there, the name read is the one `%Function.prototype%` holds,
+/// `%Function%`, which throws a `TypeError` here.
+const ASYNC_GENERATOR_FUNCTION: &str = "var AGF = Object.getPrototypeOf(async function* () {}).constructor;\n\
+     if (AGF === Function) throw new TypeError(\"no %AsyncGeneratorFunction%\");\n";
+
+/// `source` after [`ASYNC_GENERATOR_FUNCTION`], then a microtask checkpoint, then what `read`
+/// answers, as [`settled`] runs them.
+fn async_generator_settled(limits: swell::Limits, source: &str, read: &str) -> Outcome {
+    settled(limits, &format!("{ASYNC_GENERATOR_FUNCTION}{source}"), read)
+}
+
+/// `#sec-asyncgeneratorfunction` and `#sec-createdynamicfunction` of kind async-generator:
+/// called or constructed, `%AsyncGeneratorFunction%` makes an async generator function of its
+/// parameter arguments and its body argument (none: the empty body), named "anonymous", of the
+/// length its parameters give, whose [[Prototype]] is `%AsyncGeneratorFunction.prototype%`, with
+/// no [[Construct]], and with a `prototype` { [[Writable]]: true, [[Enumerable]]: false,
+/// [[Configurable]]: false } that holds a new object with no own property whose [[Prototype]]
+/// is `%AsyncGeneratorPrototype%`. Its generators run its body: each `next` answers a promise
+/// settled with the iterator result of a `yield`, of the `return` (its operand awaited) and of
+/// the end, or rejected with what the body throws.
+#[test]
+fn async_generator_function_constructor_makes_an_async_generator_from_source_text() {
+    assert_eq!(
+        async_generator_settled(
+            limits(),
+            "var g = AGF(\"a\", \"b\", \"var x = yield a; yield x + b; return await a + b;\");\n\
+             var h = new AGF(\"a,b\", \"yield 1;\"), e = AGF();\n\
+             var d = Object.getOwnPropertyDescriptor(g, \"prototype\"), it = g(1, 2);\n\
+             var r = [typeof g, g.name, g.length, h.length, e.length,\n\
+                      Object.getPrototypeOf(g) === AGF.prototype,\n\
+                      Object.getPrototypeOf(h) === AGF.prototype,\n\
+                      Object.getPrototypeOf(g.prototype) === AGF.prototype.prototype,\n\
+                      Object.getPrototypeOf(it) === g.prototype,\n\
+                      d.writable, d.enumerable, d.configurable,\n\
+                      Object.getOwnPropertyNames(g.prototype).length, g instanceof AGF,\n\
+                      it.next(0) instanceof Promise];\n\
+             var made;\n\
+             try { new g(); made = \"constructed\"; } catch (x) { made = x.name; }\n\
+             r.push(made);\n\
+             var seen = [], empty = [], thrown = [];\n\
+             function into(list) { return function (v) { list.push(v.value + \"/\" + v.done); }; }\n\
+             it.next(10).then(into(seen)); it.next().then(into(seen)); it.next().then(into(seen));\n\
+             e().next().then(into(empty));\n\
+             AGF(\"throw 7\")().next().then(null, function (x) { thrown.push(\"rejected \" + x); });\n\
+             0;",
+            "r.concat(seen, empty, thrown).join();"
+        ),
+        Outcome::Normal(
+            "\"function,anonymous,2,2,0,true,true,true,true,true,false,false,0,true,true,\
+             TypeError,12/false,3/true,undefined/true,undefined/true,rejected 7\""
+                .to_string()
+        )
+    );
+}
+
+/// `#sec-createdynamicfunction` of kind async-generator: the parameters are
+/// `FormalParameters[+Yield, +Await]`, the body `AsyncGeneratorBody` and the source an
+/// `AsyncGeneratorExpression` with its early errors
+/// (`#sec-async-generator-function-definitions-static-semantics-early-errors`): a
+/// YieldExpression or an AwaitExpression in the parameters, and `yield` or `await` as a
+/// parameter's or a variable's name, are each a `SyntaxError`, also when the caller is an async
+/// generator, where the `Function` constructor, whose kind is normal, takes both as names;
+/// `yield` and `await` in the body are a YieldExpression and an AwaitExpression, also as the
+/// only argument, which is the body. Each part parses alone first: a comment that spans the two
+/// is a `SyntaxError`, and so is a hashbang in either (`#sec-hashbang`: only at the start of a
+/// Script or a Module).
+#[test]
+fn async_generator_function_constructor_parses_yield_and_await_in_its_body_only() {
+    assert_eq!(
+        async_generator_settled(
+            limits(),
+            "var r = [], seen = [];\n\
+             var sources = [[\"x = yield\", \"\"], [\"x = await 1\", \"\"], [\"yield\", \"\"],\n\
+                            [\"await\", \"\"], [\"var yield;\"], [\"var await;\"],\n\
+                            [\"/*\", \"*/){\"], [\"#!\\n_\", \"\"], [\"#!\\n_\"],\n\
+                            [\"a\", \"(async function* () {})(yield a, await a)\"],\n\
+                            [\"x = yield\"], [\"x = await 42\"]];\n\
+             for (var i = 0; i < sources.length; i++) {\n\
+               try { AGF.apply(null, sources[i]); r.push(\"made\"); } catch (e) { r.push(e.name); }\n\
+             }\n\
+             r.push(Function(\"yield\", \"await\", \"return yield + await\")(1, 2));\n\
+             (async function* () {\n\
+               try { AGF(\"x = yield\", \"\"); seen.push(\"made\"); } catch (e) { seen.push(e.name); }\n\
+             })().next();\n\
+             AGF(\"a\", \"var b = await a; yield b * 2;\")(Promise.resolve(4)).next()\n\
+               .then(function (v) { seen.push(v.value); });\n\
+             0;",
+            "r.concat(seen).join();"
+        ),
+        Outcome::Normal(
+            "\"SyntaxError,SyntaxError,SyntaxError,SyntaxError,SyntaxError,SyntaxError,\
+             SyntaxError,SyntaxError,SyntaxError,made,made,made,3,SyntaxError,8\""
+                .to_string()
+        )
+    );
+}
+
+/// HOST-117 for `%AsyncGeneratorFunction%` (`#sec-createdynamicfunction`, step 16;
+/// `#sec-hostensurecancompilestrings`): `AGF("a", "yield a")` calls
+/// `host_ensure_can_compile_strings` once, before it parses, with the compilation type
+/// `Function`, the parts, the whole source text and the current realm. A throw of the hook is
+/// thrown by `AGF`, called or constructed, before anything is parsed: a source that would not
+/// parse throws the hook's value, not a `SyntaxError`. A refusal of the parse (a construct of a
+/// later slice in the body) is a `SyntaxError` counted by `refusals()`.
+#[test]
+fn async_generator_function_constructor_is_refused_by_the_hook_of_compile_strings() {
+    let (answer, calls) = run_on_compile_host(
+        CompileHost::default(),
+        &format!("{ASYNC_GENERATOR_FUNCTION}typeof AGF(\"a\", \"yield a\");"),
+    );
+    assert_eq!(answer, "function");
+    assert_eq!(
+        calls,
+        [Request {
+            params: vec!["a".to_string()],
+            body: "yield a".to_string(),
+            code: "async function* anonymous(a\n) {\nyield a\n}".to_string(),
+            kind: CompilationType::Function,
+            param_args: vec!["a".to_string()],
+            body_arg: "yield a".to_string(),
+            same_realm: true,
+        }]
+    );
+    let host = CompileHost {
+        refuse: true,
+        ..CompileHost::default()
+    };
+    let (answer, calls) = run_on_compile_host(
+        host,
+        &format!(
+            "{ASYNC_GENERATOR_FUNCTION}var r = [];\n\
+             try {{ AGF(\"yield 1\"); r.push(\"made\"); }} catch (e) {{ r.push(e); }}\n\
+             try {{ new AGF(\"a\", \"yield 1 +\"); r.push(\"made\"); }} catch (e) {{ r.push(e); }}\n\
+             r.join();"
+        ),
+    );
+    assert_eq!(answer, "refused,refused");
+    assert_eq!(calls.len(), 2);
+    assert!(
+        calls
+            .iter()
+            .all(|call| call.kind == CompilationType::Function
+                && call.code.starts_with("async function* anonymous(")),
+        "{calls:?}"
+    );
+    let mut agent = agent_with(limits()).unwrap();
+    let realm = realm(&mut agent);
+    let before = agent.refusals();
+    let caught = eval_text(
+        &mut agent,
+        &realm,
+        &format!(
+            "{ASYNC_GENERATOR_FUNCTION}try {{ AGF(\"class C {{}}\"); }} catch (e) {{ e.name + \": \" + e.message; }}"
+        ),
+    );
+    let Outcome::Normal(caught) = caught else {
+        panic!("the script did not complete normally: {caught:?}");
+    };
+    assert!(
+        caught.starts_with("\"SyntaxError: class is not supported before slice 8"),
+        "{caught}"
+    );
+    assert_eq!(agent.refusals(), before + 1);
+}
+
+/// `#sec-createdynamicfunction`, steps 15 and 28: the [[SourceText]] of the async generator
+/// function is the whole source text, `async function* anonymous(` the parameter texts joined
+/// with ",", a line feed, `) {`, a line feed, the body, a line feed and `}`, comments and all,
+/// as `Function.prototype.toString` answers it.
+#[test]
+fn async_generator_function_constructor_source_text_starts_with_async_function_star_anonymous() {
+    assert_eq!(
+        run(
+            limits(),
+            &format!(
+                "{ASYNC_GENERATOR_FUNCTION}var g = AGF(\"a\", \" /* a */ b, c /* b */ //\", \"/* c */ ; /* d */ //\");\n\
+                 [g.toString() === \"async function* anonymous(a, /* a */ b, c /* b */ //\\n) {{\\n/* c */ ; /* d */ //\\n}}\",\n\
+                  AGF().toString() === \"async function* anonymous(\\n) {{\\n\\n}}\",\n\
+                  new AGF(\"x\", \"yield x\").toString()].join(\"|\");"
+            )
+        ),
+        Outcome::Normal("\"true|true|async function* anonymous(x\n) {\nyield x\n}\"".to_string())
+    );
+}
+
+/// `#sec-asyncgeneratorfunction-prototype-constructor` and
+/// `#sec-properties-of-asyncgeneratorfunction`: the `constructor` of
+/// `%AsyncGeneratorFunction.prototype%` is `%AsyncGeneratorFunction%`, { [[Writable]]: false,
+/// [[Enumerable]]: false, [[Configurable]]: true }; `%AsyncGeneratorFunction%` is a function
+/// named "AsyncGeneratorFunction" of length 1 (each { [[Writable]]: false, [[Enumerable]]:
+/// false, [[Configurable]]: true }) whose [[Prototype]] is `%Function%` and whose `prototype`
+/// is `%AsyncGeneratorFunction.prototype%` (`#sec-asyncgeneratorfunction-prototype`),
+/// { [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: false }; it is extensible,
+/// no property of the global object, and every async generator function is an instance of it.
+/// An async generator function it makes can be sealed.
+#[test]
+fn async_generator_function_constructor_is_not_a_global_and_is_the_constructor_of_its_prototype() {
+    assert_eq!(
+        run(
+            limits(),
+            &format!(
+                "{ASYNC_GENERATOR_FUNCTION}var AGFP = Object.getPrototypeOf(async function* () {{}});\n\
+                 var c = Object.getOwnPropertyDescriptor(AGFP, \"constructor\");\n\
+                 var p = Object.getOwnPropertyDescriptor(AGF, \"prototype\");\n\
+                 var n = Object.getOwnPropertyDescriptor(AGF, \"name\");\n\
+                 var l = Object.getOwnPropertyDescriptor(AGF, \"length\");\n\
+                 async function* declared() {{}}\n\
+                 [typeof AGF, n.value, l.value, n.writable, n.configurable, l.writable,\n\
+                  l.configurable, Object.getPrototypeOf(AGF) === Function, AGF === Function,\n\
+                  AGF.prototype === AGFP, c.value === AGF, c.writable, c.enumerable, c.configurable,\n\
+                  p.writable, p.enumerable, p.configurable, typeof AsyncGeneratorFunction,\n\
+                  \"AsyncGeneratorFunction\" in this, declared instanceof AGF,\n\
+                  (async function* () {{}}) instanceof AGF, Object.isExtensible(AGF),\n\
+                  Object.isSealed(Object.seal(new AGF()))].join();"
+            )
+        ),
+        Outcome::Normal(
+            "\"function,AsyncGeneratorFunction,1,false,true,false,true,true,false,true,true,false,\
+             false,true,false,false,false,undefined,false,true,true,true,true\""
+                .to_string()
+        )
+    );
+}
+
+/// Decision 12 and HOST-168 through `%AsyncGeneratorFunction%`: an interrupt set by
+/// HostEnsureCanCompileStrings, which then answers `Ok(())`, ends the run in
+/// `Terminated(Interrupted)` before the source is copied or parsed, and the flag is clear after.
+/// Decision 3 through `%AsyncGeneratorFunction%`: the tree of the parse and the scratch of the
+/// compile step are charged to `memory_bytes` before they grow. R is the rise of `live_bytes()`
+/// over a successful call with a body of [`CHARGED_LINES`] statements (what the function keeps:
+/// its code, its source and its `prototype` object; `live_bytes()`, since what the arenas keep
+/// as room is no part of it); under a budget of what `heap_bytes()` reads before the call (the
+/// budget's own measure), R and 4 KiB the same call ends in `Terminated(MemoryBudget)`, since
+/// the tree is charged on top of R before the code exists, and after a collection
+/// `heap_bytes()` reads as before the call: nothing of the call is left, and no arena grew.
+#[test]
+fn async_generator_function_constructor_charges_its_parse_and_reads_the_interrupt() {
+    let mut agent = Agent::new(CompileHost::default(), limits(), support::host::seeds()).unwrap();
+    let HostOutcome::Normal(compile_realm) = agent.create_realm(None, None).unwrap() else {
+        panic!("create_realm did not answer Normal");
+    };
+    let handle = agent.interrupt_handle();
+    let set_by_hook = agent.interrupt_handle();
+    agent.host_mut().interrupt = Some(set_by_hook);
+    let source =
+        format!("{ASYNC_GENERATOR_FUNCTION}try {{ AGF(\"a\", \"<!-- x\"); }} catch (e) {{}}");
+    let Parsed::Parsed(script) = agent
+        .parse_script(&compile_realm, Source::Utf8(&source), None)
+        .unwrap()
+    else {
+        panic!("the script did not parse");
+    };
+    let refusals = agent.refusals();
+    assert!(matches!(
+        agent.evaluate_script(&script).unwrap(),
+        HostOutcome::Terminated(Termination::Interrupted)
+    ));
+    assert!(!handle.is_set());
+    assert_eq!(agent.refusals(), refusals);
+    assert_eq!(agent.host().calls.len(), 1);
+
+    let setup = format!(
+        "{ASYNC_GENERATOR_FUNCTION}var body = \"x = 1;\\n\".repeat({CHARGED_LINES});\n\
+         body.length;"
+    );
+    let prepared = |limits: swell::Limits| {
+        let mut agent = agent_with(limits).unwrap();
+        let realm = realm(&mut agent);
+        assert_eq!(
+            eval_text(&mut agent, &realm, &setup),
+            Outcome::Normal((CHARGED_LINES * 7).to_string())
+        );
+        let script = parse(&mut agent, &realm, "AGF(body);");
+        agent.collect().unwrap();
+        let before = agent.heap_bytes().unwrap();
+        (agent, script, before)
+    };
+    let (mut probe, script, before) = prepared(limits());
+    let live = probe.live_bytes().unwrap();
+    assert!(matches!(
+        probe.evaluate_script(&script).unwrap(),
+        HostOutcome::Normal(_)
+    ));
+    let r = probe.live_bytes().unwrap() - live;
+    let mut budget = limits();
+    budget.memory_bytes = before + r + 4096;
+    let (mut agent, script, at_start) = prepared(budget);
+    assert_eq!(at_start, before, "the two agents read the same");
+    println!("AGF(body) of {CHARGED_LINES} lines: before {before} R {r}");
+    assert!(matches!(
+        agent.evaluate_script(&script).unwrap(),
+        HostOutcome::Terminated(Termination::MemoryBudget)
+    ));
+    agent.collect().unwrap();
+    assert_eq!(agent.heap_bytes().unwrap(), before);
+}
+
+/// HOST-141 through `%AsyncGeneratorFunction%` (decision 9, item 9): a body, a `yield` operand,
+/// an `await` operand and a parameter's initializer nested deeper than `parser_nesting` (1,000)
+/// throw a `SyntaxError` whose message names `parser_nesting`, which the script catches; with
+/// 10 levels the async generator yields 0.
+#[test]
+fn async_generator_function_constructor_past_parser_nesting_throws_a_catchable_syntax_error() {
+    let deep = nested(2_000);
+    let caught = run(
+        limits(),
+        &format!(
+            "{ASYNC_GENERATOR_FUNCTION}var r = [];\n\
+             try {{ AGF(\"return \" + \"{deep}\"); }} catch (e) {{ r.push(e.name + \": \" + e.message); }}\n\
+             try {{ AGF(\"yield \" + \"{deep}\"); }} catch (e) {{ r.push(e.name + \": \" + e.message); }}\n\
+             try {{ AGF(\"await \" + \"{deep}\"); }} catch (e) {{ r.push(e.name + \": \" + e.message); }}\n\
+             try {{ AGF(\"a = \" + \"{deep}\", \"\"); }} catch (e) {{ r.push(e.name + \": \" + e.message); }}\n\
+             r.join(\"|\");"
+        ),
+    );
+    let Outcome::Normal(caught) = caught else {
+        panic!("the script did not complete normally: {caught:?}");
+    };
+    let caught = caught.trim_matches('"');
+    let parts: Vec<&str> = caught.split('|').collect();
+    assert_eq!(parts.len(), 4, "{caught}");
+    for part in parts {
+        assert!(
+            part.starts_with("SyntaxError: ") && part.contains("parser_nesting (1000)"),
+            "{part}"
+        );
+    }
+    assert_eq!(
+        async_generator_settled(
+            limits(),
+            &format!(
+                "var v; AGF(\"yield \" + \"{}\")().next().then(function (x) {{ v = x.value; }}); 0;",
+                nested(10)
+            ),
+            "v;"
+        ),
+        Outcome::Normal("0".to_string())
+    );
+}
+
+/// `reentry_depth` through `%AsyncGeneratorFunction%`: with `reentry_depth` 16, an object whose
+/// `toString` calls `AGF(o, "")` on itself re-enters from Rust at each ToString of a parameter
+/// (`#sec-createdynamicfunction`, step 9), until the re-entry past the bound throws a
+/// `RangeError` whose message is `reentry_depth exceeded`, which the script catches.
+#[test]
+fn async_generator_function_constructor_past_reentry_depth_throws_a_range_error() {
+    let mut limits = limits();
+    limits.reentry_depth = 16;
+    assert_eq!(
+        run(
+            limits,
+            &format!(
+                "{ASYNC_GENERATOR_FUNCTION}var o = {{ toString: function () {{ return AGF(o, \"\"); }} }};\n\
+                 var r;\n\
+                 try {{ AGF(o, \"\"); }} catch (e) {{ r = e.name + \": \" + e.message; }}\n\
+                 r;"
+            )
+        ),
+        Outcome::Normal("\"RangeError: reentry_depth exceeded\"".to_string())
+    );
+}
+
+/// The step budget through `%AsyncGeneratorFunction%`, [`step_budget`] steps: an async
+/// generator whose body loops forever before any `await` or `yield`, resumed by `next`, ends the
+/// run of that call in `Terminated(StepBudget)`; one whose body awaits in an endless loop
+/// completes the script with the promise of its `next`, and the microtask checkpoint that runs
+/// its resumptions ends in `Terminated(StepBudget)`.
+#[test]
+fn step_budget_ends_an_endless_async_generator_from_the_constructor() {
+    ends_in_step_budget(&format!(
+        "{ASYNC_GENERATOR_FUNCTION}AGF(\"for (;;) {{}}\")().next();"
+    ));
+    let mut limits = limits();
+    limits.steps_per_entry = step_budget();
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            &format!(
+                "{ASYNC_GENERATOR_FUNCTION}var p = AGF(\"for (;;) await null;\")().next(); typeof p;"
+            )
+        ),
+        Outcome::Normal("\"object\"".to_string())
+    );
+    assert!(matches!(
+        agent.perform_microtask_checkpoint().unwrap(),
+        HostOutcome::Terminated(Termination::StepBudget)
+    ));
+}
+
+/// The memory budget through `%AsyncGeneratorFunction%`, as
+/// [`memory_budget_ends_a_dynamic_function_whose_code_does_not_fit`]: a body of 32,768
+/// statements `0;` whose code does not fit in what is left of the budget ends the run in
+/// `Terminated(MemoryBudget)`; `heap_bytes()` then reads at most the budget, and the agent stays
+/// `Alive` and makes the next async generator function.
+#[test]
+fn memory_budget_ends_an_async_generator_function_constructor_whose_code_does_not_fit() {
+    let mut limits = limits();
+    limits.memory_bytes = realm_bytes(limits) + 512 * 1024;
+    let budget = limits.memory_bytes;
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    let build = "var s = \"0;\"; for (var i = 0; i < 15; i++) s = s + s; ";
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            &format!("{ASYNC_GENERATOR_FUNCTION}{build} s.length;")
+        ),
+        Outcome::Normal("65536".to_string()),
+        "the source fits"
+    );
+    assert_eq!(
+        eval_text(&mut agent, &realm, &format!("{build} AGF(s);")),
+        Outcome::Terminated(Termination::MemoryBudget)
+    );
+    assert!(agent.heap_bytes().unwrap() <= budget);
+    assert_eq!(agent.state(), swell::AgentState::Alive);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "typeof AGF(\"yield 2\");"),
         Outcome::Normal("\"function\"".to_string())
     );
 }

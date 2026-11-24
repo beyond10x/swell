@@ -19,15 +19,15 @@
     ]
   },
   "test262": {
-    "line": "test262 total 53801 8982 7 44812 23553 21257 2",
+    "line": "test262 total 53801 8982 7 44812 23815 20995 2",
     "exist": 53801,
     "excluded": 8982,
     "not_applicable": 7,
     "run": 44812,
-    "passed": 23553,
-    "failed": 21257,
+    "passed": 23815,
+    "failed": 20995,
     "budget": 2,
-    "passed_percent": "52.5"
+    "passed_percent": "53.1"
   },
   "delivery_slices": 19,
   "delivered": [1, 2, 3, 6, 5, 7],
@@ -182,16 +182,16 @@
       "name": "promises-and-async",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 10 3879 7499 0 0 3879 2785 1094 0",
+      "line": "test262-slice 10 3879 7499 0 0 3879 3046 833 0",
       "cases": 3879,
       "runs": 7499,
       "excluded": 0,
       "not_applicable": 0,
       "run": 3879,
-      "passed": 2785,
-      "failed": 1094,
+      "passed": 3046,
+      "failed": 833,
       "budget": 0,
-      "passed_percent": "71.7"
+      "passed_percent": "78.5"
     },
     {
       "slice": "11",
@@ -310,16 +310,16 @@
       "name": "annex-b",
       "delivery": true,
       "delivered": false,
-      "line": "test262-slice 18 1135 1452 0 0 1135 170 965 0",
+      "line": "test262-slice 18 1135 1452 0 0 1135 171 964 0",
       "cases": 1135,
       "runs": 1452,
       "excluded": 0,
       "not_applicable": 0,
       "run": 1135,
-      "passed": 170,
-      "failed": 965,
+      "passed": 171,
+      "failed": 964,
       "budget": 0,
-      "passed_percent": "14.9"
+      "passed_percent": "15.0"
     },
     {
       "slice": "19",

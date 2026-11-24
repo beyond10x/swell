@@ -16,6 +16,11 @@ Every number below comes from the gate, `task check`, on the released commit.
   At its close 40 cases that need `class` or `super` move to slice 8, each with its
   evidence, and 21 cases that failed only on generators count in slice 7 instead of slices
   18 and 19.
+- `%AsyncGeneratorFunction%`, the constructor that makes an async generator function from
+  source text, a story of the tenth slice. It is not a global: a script reaches it as the
+  `constructor` of the prototype of an async generator function. The hook of compile
+  strings is asked first, and the parse and the compile are charged as those of `Function`
+  are.
 - Async generators, a story of the tenth slice: `async function*` as a declaration and as
   an expression, `%AsyncGeneratorPrototype%` with `next`, `return` and `throw`, and the
   queue of requests behind them. Each call returns a promise of an iterator result; calls
@@ -24,8 +29,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   the queue is credited when the generator is freed; a script that queues requests without
   end stops at the memory budget, and a generator that never ends stops at the step
   budget. `yield*` in an async generator and `async *` methods are still refused, each with
-  a `SyntaxError` that names the tenth slice; `%AsyncGeneratorFunction%` has no constructor
-  yet.
+  a `SyntaxError` that names the tenth slice.
 - `for await (x of y)` in an `async` function, a story of the tenth slice, with
   `%AsyncIteratorPrototype%`, `Symbol.asyncIterator` and the Async-from-Sync Iterator that
   wraps a sync iterable. Each result of `next` is awaited, and the iterator is closed on
