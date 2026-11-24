@@ -1859,7 +1859,10 @@ does not bound the forms, since they are not Strings.
   `str::parse::<f64>`, which rounds to nearest, ties to even (`dec2flt/mod.rs`, lines 9 to 13).
   ECMA-262 allows replacing digits after the 20th with 0 for radix 10; swell does not, so the
   result is the correctly rounded one.
-- **`BigInt`** is written here: 32-bit limbs with 64-bit intermediates, schoolbook multiplication
+- **`BigInt`** is written here: 64-bit limbs with 128-bit intermediates (corrected on 2026-11-24
+  from 32-bit limbs with 64-bit intermediates: the unsigned type slice 4 takes from
+  `to_string.rs` has 64-bit limbs, and one type serves slices 4 and 12; "Big integers in slice
+  4" below), schoolbook multiplication
   with Karatsuba above a size, Knuth's algorithm D for division, and radix conversion by divide and
   conquer. Sizes are bounded by the memory budget, and an operation whose result size is known in
   advance to exceed the host's `BigInt` limit throws a `RangeError` before computing (whether
@@ -1870,11 +1873,358 @@ does not bound the forms, since they are not Strings.
   even differ within the same execution" (`std/src/num/f64.rs`). ECMA-262 makes these results
   "implementation-approximated". For a run to be deterministic, swell writes these functions
   itself in `swell-num`, from published argument-reduction and polynomial methods, in plain `f64`
-  arithmetic, which IEEE 754 makes identical on every platform. `sqrt`, `abs`, `floor`, `trunc`,
-  `round_ties_even` and `mul_add` are not in that list and come from `std`. Rejected: `std`'s
-  functions (platform-dependent); a port of an existing C library (third-party code in what
-  ships).
-- **`Math.random`** draws from a generator in `swell-num` seeded from the host's randomness.
+  arithmetic, which IEEE 754 makes identical on every platform. `sqrt`, `abs`, `floor`, `ceil`,
+  `trunc` and `copysign` are not in that list and come from `std`. Corrected on 2026-11-24: this
+  sentence also took `round_ties_even` and `mul_add` from `std`. `Math.round` rounds a tie toward
+  +∞ and cannot use the first, and the second is not used at all; the methods an engine crate
+  may call, and the check that holds it, are in "Which `f64` methods an engine crate may call"
+  below. Rejected: `std`'s functions (platform-dependent); a port of an existing C library
+  (third-party code in what ships).
+- **The functions of `Math` that IEEE 754 does not fix** (added on 2026-11-24 for slice 4:
+  `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh exp expm1 log log1p log2
+  log10 cbrt hypot pow`; the draft fixes their special values and says "an
+  implementation-approximated Number value", `ecma262:sec-math.sin` and its siblings;
+  `pow` is `Number::exponentiate`, `ecma262:sec-numeric-types-number-exponentiate`).
+  - Where: the module `crates/num/src/math.rs` of `swell-num`, with `crates/num/src/math/` for
+    its parts (`dd.rs`, and one file per group below). The methods are the published ones:
+    Payne and Hanek's argument reduction, power series on a reduced interval, and double-double
+    arithmetic after Dekker and Knuth. The code and every constant are this repository's;
+    nothing is taken from a C library's source (the rejection above stands).
+  - Double-double. A pair (hi, lo) with hi + lo the value and |lo| at most half an ulp of hi.
+    `two_sum` is Knuth's (6 additions); `two_product` is Dekker's, with Veltkamp's split by
+    2^27 + 1, because `mul_add` is not used; an argument of magnitude 2^996 or more is scaled by
+    a power of two first, so that the split cannot overflow. Add, multiply, divide and square
+    root of pairs follow, the root by one Newton step on `sqrt` of the high part. Each
+    operation's relative error is at most 2^-100. Every polynomial below is evaluated in
+    double-double, by Horner's rule, with each coefficient as a pair (the exact rational rounded
+    to `hi`, its remainder rounded to `lo`). Plain `f64` arithmetic is used only where the text
+    says it is exact. `swell-num` does not compile for a target whose `f64` arithmetic carries
+    extended precision (x86 without SSE2; a `compile_error!` on `cfg(all(target_arch = "x86",
+    not(target_feature = "sse2")))`), and rustc does not contract `a * b + c` into a fused
+    operation.
+  - Reduction and kernels. Every series is cut where its first omitted term is below 2^-80 of
+    the result's magnitude on the whole reduced interval; the degrees that gives are stated, and
+    a unit that finds another one by the same rule uses it.
+    1. `sin`, `cos`, `tan`. For |x| at most π/4 no reduction; above it, Payne and Hanek for every
+       argument (Muller, Handbook of Floating-Point Arithmetic, 11.2): the 53-bit mantissa times
+       a window of the bits of 2/π (the table holds 1,280 fractional bits, 20 `u64` words: the
+       bits up to position 971 + 53 + 192 = 1,216 are needed, with 64 of margin), 192 bits of
+       the product kept; the
+       quotient modulo 4 and the fraction give r = x - k·π/2 as a pair with relative error at
+       most 2^-100, which keeps the relative accuracy for the arguments nearest to a multiple of
+       π/2 (the closest a double comes is about 2^-61). One method for every size, so no
+       medium-size path with its own constants. Kernels on |r| ≤ π/4: the Maclaurin series of
+       `sin` through r^21 and of `cos` through r^22; `tan` is the quotient of the two kernels in
+       double-double, `-cos / sin` in the odd quadrants.
+    2. `exp`, `expm1`, `sinh`, `cosh`, `tanh`. x = k·ln 2 + r with k the nearest integer, ln 2 as
+       three parts of 32, 32 and 53 bits so that k·part is exact for |k| below 2^11, |r| ≤
+       ln 2 / 2; the Maclaurin series of `exp` through r^18, in double-double; the result times
+       2^k, applied in two factors when 2^k alone is not a normal Number, and rounded once.
+       `expm1` of |x| below ln 2 / 2 sums the series from `r + r²/2 + ...` with the leading term
+       exact, for relative accuracy near 0; above it, `exp(x) - 1` in double-double; below
+       -38.5, -1; above 709.79, +∞. `sinh`, `cosh` and `tanh` are the identities (e^x ∓ e^-x)/2
+       and (e^2x - 1)/(e^2x + 1) in double-double over `exp` and `expm1`, with `cosh` and `sinh`
+       for |x| above 709 as (e^(|x|/2))²/2 so that the intermediate does not overflow, and `tanh`
+       ±1 for |x| of 22 or more.
+    3. `log`, `log2`, `log10`, `log1p`. x = 2^k·m with m in [√2/2, √2) (`from_bits`; subnormals
+       scaled by 2^54 first); f = m - 1 exactly; s = f/(2 + f) in double-double; log m = 2·(s +
+       s³/3 + s^5/5 + ...) through s^29 (|s| ≤ 0.172); the result is k·ln 2 + log m in
+       double-double. `log2` and `log10` multiply that pair by 1/ln 2 and 1/ln 10 as pairs.
+       `log1p(x)` takes f = x directly when 1 + x lies in that interval, and otherwise reduces
+       the exact pair 1 + x (`two_sum`) the same way. Exact results: `log2(2^k)` is k for every
+       k from -1074 to 1023, and `log10(10^n)` is n for n from 0 to 22 (the powers of ten that
+       are Numbers), because the pair is within 2^-79 of that integer (for a power of two f is 0
+       and the error is that of the pair operations, 2^-95) and a double holds it.
+    4. `atan`, `atan2`, `asin`, `acos`. The kernel takes y and x as pairs: |y/x| above 1 is
+       swapped and π/2 minus the result is taken; c is the nearest of 0, 1/8, ..., 1 to the
+       quotient q; atan(c) comes from a table of 9 pairs; u = (q - c)/(1 + q·c), |u| ≤ 1/16;
+       atan u = u - u³/3 + ... through u^19; the quadrant adds a multiple of π/2 or π as pairs.
+       `asin(x)` is `atan2(x, sqrt((1 - x)(1 + x)))` and `acos(x)` is `atan2(sqrt((1 - x)(1 +
+       x)), x)` with the root of the exact pair `(1 - x)(1 + x)`. `atan2` follows the draft's
+       table of special values (`ecma262:sec-math.atan2`) before it reduces, and scales y and x
+       by a power of two when their exponents differ by 60 or more.
+    5. `asinh`, `acosh`, `atanh`. The identities over `log1p` and `sqrt` in double-double:
+       `asinh(x) = sign·log1p(|x| + x²/(1 + sqrt(1 + x²)))`, `acosh(x) = log1p(t + sqrt(2t +
+       t²))` with t = x - 1 exact for x below 2, `log(x) + ln 2` above 2^28, and `atanh(x) =
+       log1p(2x/(1 - x))/2`; `asinh(x)` is x for |x| below 2^-28.
+    6. `pow`, which is `Number::exponentiate`. The draft's cases before the last line are written
+       as the draft has them: NaN exponent, zero exponent, NaN base, the infinities and zeros
+       with their odd-integer rule, an infinite exponent against |base| 1, and a negative
+       base with a non-integral exponent (NaN). Then, for a finite non-zero base and a finite
+       non-zero exponent: |x|^y = 2^(y·log2|x|), with log2|x| in double-double with relative
+       error at most 2^-79 (item 3), the product by y in double-double, then 2^(that) as in
+       item 2; overflow answers ±∞ and underflow ±0 by the sign rule (a negative base with an
+       odd integral exponent answers the negative). The product |y·log2|x|| is below 2^11 for a
+       result that is a Number, so the error of the result is below 2^-68, under 2^-14 ulp: a
+       result that is exactly a Number is returned exactly (`pow(2, 10)` is 1024, `pow(10, 2)`
+       is 100; `pow(2, -2^31)` is +0 by underflow).
+    7. `cbrt`. y0 = `exp(log(|x|)/3)` in double-double, then one Newton step
+       y = y0 - (y0³ - |x|)/(3·y0²) in double-double, the sign of x restored; a perfect cube
+       gives its root exactly.
+    8. `hypot`. The draft's order: every argument is coerced first, then an infinite argument
+       answers +∞ (a NaN argument too), then a NaN answers NaN, then all zero answers +0. For
+       the rest: the arguments scaled by 2^-e with e the largest exponent (a power of two, so
+       exact), the squares by `two_product`, summed in double-double (Neumaier), the pair's
+       square root, scaled back. `Math.hypot(3, 4)` is 5.
+  - Constants and how a reader checks them. A rational constant (a series coefficient) is
+    stored as `f64::from_bits` pairs and a test recomputes each from its defining fraction with
+    exact integer arithmetic (the test's own big integer type, which `tests/to_string.rs` already
+    has) and compares bit for bit. The transcendental ones (ln 2, ln 10, 1/ln 2, 1/ln 10, π/2,
+    2/π with its 1,280 bits, the 9 values of `atan(k/8)`) are recomputed the same way from a
+    series that needs nothing but integers: ln 2 and ln 10 by the series of 2·atanh of a
+    rational, π by Machin's formula, `atan(k/8)` by its series, each to 1,400 bits. A constant
+    that no test recomputes does not ship.
+  - The accuracy the engine promises, in ulp of the exact result (the gap between the two
+    Numbers that enclose it; 2^-1074 where the result is subnormal), for a finite argument
+    whose result is a normal Number: group A, `exp log log2 log10 sin cos atan pow cbrt hypot`:
+    less than 1 ulp (faithful: the result is one of the two Numbers that enclose the exact value,
+    or it is the exact value when that is a Number); group B, `tan asin acos atan2 expm1 log1p
+    sinh cosh tanh asinh acosh atanh`: at most 2 ulp. For a subnormal result: at most 1 ulp of
+    its grid. An overflow answers ±∞ when the exact value is above the largest Number by
+    more than 1 ulp of it, and the largest Number or ±∞ within that. The results the draft fixes
+    are exact in both groups (the special values of 21.3.2, `Number::exponentiate`'s table,
+    `cos(0)` and `cosh(0)` are 1, `acos(1)` is +0, `exp(0)` is 1, `tanh(±∞)` is ±1); beside
+    them `log2(2^k)`, `log10(10^n)` for n 0 to 22, `cbrt` of a perfect cube, `hypot(3, 4)` and
+    every `pow` whose result is exactly a Number.
+  - How a test holds the bound with no second implementation. `data/math/reference.txt` is
+    committed. One line holds the function, the bits of the argument or arguments (16 hex
+    digits each) and the bits of the two Numbers that enclose the exact result (equal when it
+    is a Number). About 9,000 lines. The test (`crates/num/tests/math.rs`, a module of the
+    crate's one test binary) holds group A to "one of the two", group B to a distance of 2 ulp
+    from the nearer, and takes under a second. The tool is not a dependency of the build or of
+    any test: no program of it is in the repository. This follows the vendored-data half of
+    decision 8 (a file under `data/` with its source stated and its SHA-256 listed in
+    `data/math/SOURCE`, checked by a task `math-data-check` on the model of
+    `unicode-data-check`) and not its generator half: nothing in the repository derives the
+    file, since that would be a second implementation of every function at test time.
+  - The tool that makes the lines (added on 2026-11-24): POSIX `bc` run as `bc -l` (GNU bc
+    1.08.2 on the host that made the file), driven by a POSIX `sh` script that is run once
+    outside the repository and is not committed; no other language and no third-party crate. The header of
+    `reference.txt` and `data/math/SOURCE` name the tool and its version and say the procedure
+    in words, which is this one, so that a reader can make any line again with `bc -l` alone.
+    1. Argument. The bits are read with `ibase=16` as one integer; sign, biased exponent and
+       the 52 stored bits give an integer mantissa m and a binary exponent q, and the argument is
+       m × 2^q, a dyadic rational that `bc` holds exactly as long as `scale` is at least the
+       count of fractional binary digits k (2^-k has k decimal digits). The same for a second
+       argument.
+    2. Scale. S0 = max(400, 2·(k1 + k2) + 100) + D, with D the count of integer decimal digits
+       of the largest argument (`bc`'s `s` and `c` reduce modulo 2π at the working scale, so a
+       result keeps about S − D digits: checked on 2026-11-24, `s(2^1023)` at scale 500
+       agrees with scale 800 to about 330 digits, and at 700 to about 380). 400 digits are about
+       1,330 bits, above the 200 bits the check needs. Every line is computed at S and at S + 60;
+       when the two enclosures differ, S grows by 400 and the line is tried again, up to 4,000;
+       a line still in doubt is left out and its count is in the header. This is also what covers
+       the cancellation of `expm1`, `log1p`, `sinh`, `tanh`, `asinh` and `atanh` for tiny
+       arguments.
+    3. The function. `bc -l` has `s`, `c`, `a` (arctangent), `l` (natural logarithm), `e` and
+       `sqrt`. `sin cos atan log exp` are those. `tan = s(x)/c(x)`. With π = 4·a(1): `asin(x) =
+       2·a(x/(1 + sqrt(1 - x²)))`, `acos(x) = 2·a(sqrt((1 - x)/(1 + x)))`, `atan2(y, x) = a(y/x)`
+       for x > 0, that plus π (y ≥ 0) or minus π (y < 0) for x < 0, and ±π/2 for x = 0.
+       `expm1 = e(x) - 1`, `log1p = l(1 + x)`, `log2 = l(x)/l(2)`, `log10 = l(x)/l(10)`,
+       `sinh = (e(x) - e(-x))/2`, `cosh = (e(x) + e(-x))/2`, `tanh = (e(2x) - 1)/(e(2x) + 1)` (the
+       sign of x restored for |x| > 0), `asinh(x) = l(|x| + sqrt(x² + 1))` with the sign,
+       `acosh = l(x + sqrt(x² - 1))`, `atanh = l((1 + x)/(1 - x))/2`, `cbrt = e(l(|x|)/3)` with
+       the sign, `hypot = sqrt(x² + y²)`, `pow = e(y·l(|x|))` with the sign by the parity of an
+       integral y and x > 0 or an odd y. Only finite arguments and the lines whose result is
+       not fixed by the draft's special values are made by `bc`; those are written by hand into
+       the test. A result beyond the Numbers is decided at scale 30 first (|y·l(x)| above 711
+       or below -746 for `exp`, `pow`, `sinh`, `cosh`; `bc` cannot hold `e(1e300)`) and is written
+       as the enclosure (largest Number, +∞) or (0, 2^-1074) without `e`.
+    4. The two Numbers. For the result r (at scale S): the binary exponent e with 2^e ≤ |r| <
+       2^(e+1), found by comparing with powers of two, and clamped below at -1022; M = |r| ×
+       2^(52 - e) cut to an integer with `scale=0`; the lower Number is M × 2^(e - 52) and the
+       upper is (M + 1) × 2^(e - 52), with their bits from integer arithmetic (`obase=16`), the
+       sign applied, and the upper being +∞ when M + 1 carries past the largest exponent. When
+       |r| × 2^(52 - e) is within 10^-(S - 40) of an integer, the value is taken as exactly
+       that integer: both Numbers are it (`bc` cannot say `log2(8)` is 3, it says 2.99...9 or
+       3.00...1; a value that is not exact is never that close to a Number).
+    5. The arguments. The special values, ±0, ±1, the powers of two and the thresholds of each
+       function are listed in the script. The 200 per function are drawn by Knuth's 64-bit
+       linear congruential generator (multiplier 6364136223846793005, increment
+       1442695040888963407, modulus 2^64, seed 1, computed in `bc` with `%`): the high bits give
+       the sign, a binary exponent uniform in the range the header gives for the function, and
+       the 52 mantissa bits.
+    6. What `bc` cannot do. (a) It does not search: the arguments of `sin cos tan` nearest to a
+       multiple of π/2 up to 2^1023 are found in `bc` by continued fractions, all in integers:
+       for a binary exponent q, the convergents and semiconvergents of the fractional part of
+       2^q·(2/π) (2/π from `bc`'s 4·a(1) at 1,400 digits) whose denominator is a 53-bit
+       mantissa; the argument is m × 2^q for the m with the smallest distance, for 40 values
+       of q from -20 to 960; a q with no such denominator is left out. The reduction itself
+       is served by the scale (S0 above gives 700 digits for 2^1023: 0.1 s a line). (b) It is
+       slow for the tiny arguments: m × 2^-1074 needs a scale of 2,100 or more, one second or
+       more a line (`l` at 1,500 digits took 1 s), so at most 10 lines per function have an
+       argument below 2^-500; the rest of the 9,000 lines take tens of milliseconds each, so
+       the run is minutes to tens of minutes of one core, run once and not in a build. (c) It
+       has no exponent notation and no bit operations, which is why the bits go through
+       integers and `ibase`, `obase`. Nothing else of the list is out of its reach.
+  - test262, pinned (`built-ins/Math`, 324 files): no assertion about these functions compares a
+    result against a tolerance; a search for `epsilon` and `Math.abs` finds only the value
+    constants, `abs` and `sqrt/results.js`, which holds `sqrt` to the correctly rounded result
+    (`f64::sqrt` is, by IEEE 754). The assertions are the special values and these exact
+    cases: `cosh(±0) = 1`, `cos(±0) = 1`, `exp(±0) = 1`, `hypot(3, 4) = 5`, `log10(10) = 1`,
+    `log10(100) = 2`, `log10(1000) = 3`, `log2(2) = 1`, `log2(4) = 2`, `log2(8) = 3`,
+    `pow(1, -2^31) = 1`, `tanh(+∞) = 1`. Every one is an exact result above; the bound meets
+    all of them.
+- **Which `f64` methods an engine crate may call** (added on 2026-11-24). Allowed: `+ - * /`
+  and `%` (IEEE 754 and `fmod`: exact), comparisons, `sqrt`, `abs`, `floor`, `ceil`, `trunc`,
+  `round` (ties away from zero) and `round_ties_even`, `copysign`, `signum`, `fract`,
+  `to_bits`, `from_bits`, `is_nan` and its kin, and `as` casts (saturating, NaN to 0, fixed
+  by the Rust reference). Not allowed: every method `std/src/num/f64.rs` marks "Unspecified
+  precision" (`powi powf exp exp2 ln log log2 log10 cbrt hypot sin cos tan asin acos atan atan2
+  sin_cos exp_m1 ln_1p sinh cosh tanh asinh acosh atanh gamma ln_gamma erf erfc abs_sub`), the
+  same on `f32`, `mul_add` (it is documented as one rounding, but where the target has no fused
+  instruction it is a call of the platform's library (not checked in the source), and a target
+  is known whose `fma` is wrong
+  (`core/src/num/f64.rs`, the FIXME on mingw, 2026-11-24); the kernels use `two_product`
+  instead), `libm`, `extern "C"`, and `core::arch` and `std::arch`. `f64::min` and `f64::max`
+  leave the sign of a zero unspecified (`core/src/num/f64.rs`): a Number's minimum and maximum
+  are written with comparisons, as `Math.max` is; a text search cannot tell them from
+  the integer methods of the same name, so they are not in the check below.
+  - The check: a task `libm-check`, in the gate before the test steps, on the model of
+    `forbid-unsafe-check`. It searches every `.rs` file under `crates/*/src/` (tests are not
+    searched; they may use `std` as an oracle), skipping a line whose first non-blank
+    characters are `//`, with the regular expression for a method call `\.(name)\(` or a
+    path call `f64::(name)\(`/`f32::(name)\(` for each name of the not-allowed list but
+    `min` and `max`, and for `libm`, `extern "C"`, `core::arch` and `std::arch`. It prints one line
+    per hit, `<path>:<line>: <text>`, then `libm-check: <n> forbidden call(s)` and exits 1; with
+    no hit it prints `libm-check: no forbidden call under <n> file(s)` and exits 0. A tree
+    with no `.rs` file fails too. The search on this tree finds none today. The functions of
+    `math.rs` are called by path (`math::exp(x)`), which the search does not match. The story
+    that writes `math.rs` (`swell-num-math`) writes the check and adds it to `task check`.
+- **`Math.round`** (`ecma262:sec-math.round`): the rule, over `floor`, a comparison and
+  `copysign` only. If x is NaN, ±∞ or equal to `floor(x)`, the answer is x (so -0, and every
+  value of magnitude 2^52 or more, which is integral, is returned as it is). Otherwise r =
+  `floor(x)`, and d = x - r, which is exact (the fractional part of a Number is a Number); y is
+  r + 1 when d ≥ 0.5 and r otherwise (r + 1 is exact below 2^52); when y is zero its sign is
+  x's (`copysign(0.0, x)`: -0 for -0.5 ≤ x < 0, +0 for 0 < x < 0.5). `floor(x + 0.5)` is wrong
+  twice, as the draft's Note 2 says in part: for 0.49999999999999994, x + 0.5 rounds to 1 and
+  the answer is 1 where it is 0; and for 2^52 + 1, x + 0.5 is a tie that rounds to the even
+  neighbour, and the answer is 2^52 + 2 for an integral x. `Math.round(-3.5)` is -3, `Math.round(2.5)` is 3.
+- **`Math.random`** (completed on 2026-11-24 for slice 4; `ecma262:sec-math.random`; the sentence
+  here before said only "seeded from the host's randomness", which named no source and no
+  generator). The engine reads no randomness of its own and no hook gives it any: the source is
+  the agent's `Seeds.random_seed` (32 bytes), given once to `Agent::new`
+  (`host-interface.md`, section 3; HOST-146). A call of `Math.random` reads nothing from the host
+  and costs the step of the call; it calls no hook and charges nothing else.
+  - The generator is xoshiro256** (Blackman and Vigna, 2018), in `crates/num/src/random.rs`:
+    four `u64` words `s0..s3`, 32 bytes, never all zero. A step returns
+    `rotl(s1 × 5, 7) × 9` (wrapping) and then `t = s1 << 17; s2 ^= s0; s3 ^= s1; s1 ^= s2;
+    s0 ^= s3; s2 ^= t; s3 = rotl(s3, 45)`. The Number is `(word >> 11) as f64 × 2^-53`: the top
+    53 bits as an integer (exact in `f64`) times a power of two (exact), so it is a multiple of
+    2^-53 in [0, 1 - 2^-53], with positive sign (0 gives +0).
+  - The state is per realm, each realm's own: the record of the realm holds the four words,
+    set when the realm is created. The agent counts the realms it creates, the creation
+    index n: 0 for the first, and one more for each later call of `create_realm` that starts,
+    one that ends in a termination included, so that an index is never used twice. The four
+    words are `siphash24(key = random_seed[0..16], message = random_seed[16..32] followed by n as
+    8 bytes, little-endian, followed by the byte i)` for i = 0, 1, 2, 3 (the SipHash of
+    decision 4, in `swell-num`), each as a little-endian `u64`; when all four are zero, `s0` is
+    1. The realm's sequence is a function of `random_seed`, n and the count of calls in that
+    realm: a call in one realm moves no other, and two realms of one agent differ because
+    their messages do (two derived states are equal with probability 2^-256), as the draft
+    demands. Two agents with the same `random_seed` give the same sequence in the realm of the
+    same index, and two with different seeds differ.
+  - Rejected: a hook that gives random bytes (decision 3 of `host-interface.md` has none, so
+    that a run is a function of its inputs); `std`'s `RandomState` (barred by HOST-2); one
+    generator for the agent, which one realm's calls would move for another; xorshift128+, the
+    generator some engines use, whose low bits fail linear tests, at no gain in cost; a jump
+    ahead per realm (O(n) work for the n-th); a counter of realms that skips a failed creation
+    (the index would then depend on what failed).
+  - What a test asserts. In `swell-num`: from the state (1, 2, 3, 4) the first three words are
+    11,520, 0 and 1,509,978,240 (worked by hand from the step above on 2026-11-24), the Number
+    of the word 11,520 is 5 × 2^-53 and of the word 0 is +0, and the derived state for an all-zero
+    seed at n = 0 and 1 is written in the test (the story records it from the algorithm as
+    written here), so that a change of the derivation fails. In the host's tests: HOST-26,
+    HOST-27, HOST-144 and HOST-147 (seeds, realms, two processes), and HOST-212 and HOST-213
+    (the range, and the stream of a realm by its index).
+- **Big integers in slice 4** (added on 2026-11-24). `Number.prototype.toString(radix)`,
+  `toFixed`, `toExponential` and `toPrecision` need exact integer arithmetic wider than `u128`
+  for some arguments (a subnormal against 10^324, or against 36^208), and `BigInt` of slice 12
+  needs the same. One type: `Nat`, an unsigned integer of any length, 64-bit limbs least
+  significant first, `u128` intermediates, no zero limb at the top, in `crates/num/src/nat.rs` of
+  `swell-num`. It is the private `Big` of `crates/num/src/to_string.rs` (`from_u64`, `bit_len`,
+  `bits_from`, `shl`, the comparison of a sum with a third value and what the digit
+  generation uses), moved out and made `pub(crate)`, with no change of behaviour: the
+  tests of `to_string` (the digits against Rust's `{:e}` and the round trips) are the proof. The
+  story `number-format`, which needs it first (`toFixed`, `toExponential`, `toPrecision`),
+  does the move as its first commit, and adds only what those three need: multiplication by a
+  `u64` and by a `Nat`, a power of a `u64`, division with remainder by a `u64`, subtraction,
+  right shift and conversion to digits in radix 10. Slice 4 writes nothing else: no sign, no
+  Karatsuba, no general division; slice 12 puts a sign and the rest on top of the same
+  magnitude (`bigint.rs`), and decides how a heap `BigInt` holds its limbs. Nothing outside
+  `swell-num` names `Nat` in slice 4.
+  - Largest size for these uses: no operand above 2,048 bits (32 limbs). By the arithmetic: the
+    shortest-digit conversion of 2^-1074 holds operands below 2^1,200 in every radix from 2 to
+    36 (radix^digits scaling is at most about 2^1,100 for the longest expansion); `toFixed` of
+    x below 10^21 with 100 fractional digits multiplies a 53-bit mantissa by 10^100 against
+    2^1,074, under 1,100 bits; `toExponential` and `toPrecision` of 5e-324 with 101 digits need
+    10^424, 1,408 bits against 2^1,074; of 1.8e308, 2^1,024 against 10^208, under 700 bits. A
+    test runs those extremes and a test-only counter of the longest operand states 2,048 as the
+    bound; no operand grows with a script's input beyond them, so nothing is refused with a
+    `RangeError` and no `bigint_bits` applies.
+  - Charges. Memory: the temporaries of one call (at most six operands of 32 limbs, 1,536
+    bytes) are charged by the builtin as one temporary of 2,048 bytes through the accounting
+    function before it calls `swell-num`, and credited when the call returns (decision 4:
+    "a temporary structure ... is credited when it drops"). Steps: one step per code unit of the
+    text it produces, charged before the String is made, as `Number.prototype.toString` of
+    slice 2 charges (`builtins/number.rs`); a digit costs at most 192 limb operations (six
+    operands of 32 limbs), so a step covers at most 192 limb operations, and a call is at most
+    about 1,100 digits (radix 2 of a subnormal). `swell-num` takes no budget: the bound of the
+    operand size is what makes the work finite. `BigInt`'s steps per limb operation
+    (decision 3) start with slice 12, whose operands have no such bound.
+- **`Math.sumPrecise`** (`ecma262:sec-math.sumprecise`; added on 2026-11-24). The draft's
+  algorithm sums in ℝ and rounds once: `𝔽(sum)` is the nearest Number, ties to even, so the
+  answer does not depend on the order of the items and may pass through values far above the
+  largest Number on the way (test262 has `[1e308, 1e308, 0.1, ..., -1e308, -1e308]`, which is
+  0.30000000000000004). Algorithm: an exact accumulator, the fixed-size superaccumulator of the
+  family the draft's note names (Neal, "Fast exact summation using small and large
+  superaccumulators"), not Shewchuk's expansions, whose size grows with the input. Two
+  unsigned integers, one for the positive items and one for the negative, each 34 `u64` limbs
+  (2,176 bits), counting units of 2^-1074: a finite Number is an integer mantissa of at most 53
+  bits times 2^(exponent - 1074), so adding it is adding a shifted mantissa, which touches two
+  limbs and carries as a binary counter does. Every finite Number is below 2^2,098 units and
+  fewer than 2^53 items are summed (the draft's count limit), so a sum stays below 2^2,151,
+  which 34 limbs hold. The state of the draft (not-a-number, plus-infinity, minus-infinity,
+  minus-zero, finite) is kept as written, which decides NaN, ±∞ and -0 and leaves the finite
+  sum to the accumulators; at the end, when the state is finite, the larger accumulator minus the
+  smaller (34 limb operations) gives the magnitude and the sign, which is rounded to 53 bits
+  to nearest, ties to even (the bits above, the next bit and a sticky bit of the rest), scaled
+  by 2^-1074, and is ±∞ when it rounds to 2^1,024 or more; an exact zero is +0 (the draft's
+  `𝔽(0)`). It lives in `crates/num/src/sum.rs` as a type with `add(f64)` and `finish() -> f64`;
+  the iteration is the builtin's (`Iterators held by a builtin`, decision 3).
+  - Work and storage per item: at most 4 limb operations, amortized (the carries of a binary
+    counter), and a bounded 34 at the end; storage is 544 bytes in the call's frame, the same
+    for one item and for 10^9, so nothing reaches the memory ledger. Charge: one step per item
+    through `charge_steps` beside the step of the call of `next` (item 3 of "Iterators held by
+    a builtin"), which covers the four limb operations, and 34 steps once before the final
+    pass. The count of the draft (2^53 - 1) is a `u64` counter that throws the draft's
+    `RangeError` and closes the iterator as written; it cannot be reached with a step budget
+    below 2^53.
+  - An iterable that ends in a budget: a `Terminated(StepBudget)`, `Terminated(MemoryBudget)` or
+    `Terminated(Interrupted)` of the iterator's `next` or of the loop's own step runs none of
+    the rest of the builtin: no sum is answered and the iterator is not closed (item 4 of
+    "Iterators held by a builtin"); the accumulators are on the frame and are dropped with it.
+    An item that is no Number is the draft's `TypeError` with IteratorClose; a throw of `next`
+    itself closes nothing, as the draft has it.
+  - test262: `features.txt` already says `run Math.sumPrecise`, and `built-ins/Math/` is mapped
+    to slice 4 (the line `dir test/built-ins/Math/ 4` of section 12), so the story is not a
+    move of a feature. The pinned directory has 10 files: `length`, `name`, `not-a-constructor`,
+    `prop-desc`, `sum`, `sum-is-infinite`, `sum-is-minus-zero`, `sum-is-NaN`, `takes-iterable`
+    and `throws-on-non-number`; `takes-iterable` also lists `generators` (`feature generators
+    7`) and `not-a-constructor` lists `Reflect.construct` (`feature Reflect.construct 9`), and
+    those two are placed by those feature lines.
+- **`**` and `Math.pow`** (added on 2026-11-24). They are one function:
+  `swell_num::math::exponentiate(base: f64, exponent: f64) -> f64`, `Number::exponentiate`
+  (6.1.6.1.3, `ecma262:sec-numeric-types-number-exponentiate`), with the draft's table of
+  special values and item 6 above for the rest. `Math.pow` is the draft's two `ToNumber` calls
+  and a call of it (`ecma262:sec-math.pow`); `**` and `**=` get a variant
+  `BinaryOperator::Exponentiate` in `ops/operators.rs` (the enum has none today), whose Number
+  arm calls it (a BigInt operand is `BigInt::exponentiate`, slice 12). The operator is refused today by the parser (`crates/syntax/src/parser/expression.rs`
+  refuses `**` and `**=` naming slice 4) and the compiler folds no arithmetic (nothing there
+  evaluates an operator at compile time), so no second copy of the function exists; if folding
+  of arithmetic is added, it calls the same function. `-2 ** 2` stays the `SyntaxError` of
+  the grammar (`UnaryExpression` cannot be the left operand), a parser matter of the story
+  `exponentiation-operator`.
 - **`Date`.** The current time is a host answer: the draft says only "the time value (UTC)
   identifying the current time"; HTML's `HostSystemUTCEpochNanoseconds(global)` (8.1.6.5) is the
   hook a browser will give. The time zone is the host's too, through the draft's
@@ -2456,7 +2806,7 @@ components with ports (surf `AGENTS.md`, "Layout"), not a library interface. How
 an in-process library interface was measured by the first slice (`host-interface-model.md`,
 corrected on 2026-11-23 from "Not checked: ...; the first slice finds out."): ESS 0.96.0 let the
 model state its commands, outcomes and lifecycles, its generated code is "not usable for an
-in-process library interface", and what it could not state is listed there as 51 markers, each
+in-process library interface", and what it could not state is listed there as 53 markers, each
 carried by a `HOST-<n>` requirement or named an ESS limit.
 
 What is not put into ESS: the language's semantics (values, objects, the 2,300 distinct section

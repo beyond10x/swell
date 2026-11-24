@@ -332,7 +332,10 @@ so it only decides which keys collide. With both seeds fixed at creation, an age
 function of its inputs (decision 19); a hook called whenever the engine wanted fresh bytes
 would add calls whose number depends on internal events such as map resizes. SipHash takes a
 128-bit key, hence 16 bytes; 32 bytes for the generator is the state size of the generator
-`swell-num` will choose, an upper bound it may use less of (not chosen yet; not checked).
+`swell-num` uses, xoshiro256** (chosen on 2026-11-24, `engine.md` decision 6, "`Math.random`":
+the 16 bytes after the key and the realm's creation index go through the SipHash to make the
+four words of the realm's state, so all 32 bytes are used; the index counts every call of
+`create_realm` that starts, one that ends in a termination included).
 
 Rejected: decision 9's "random bytes" from the trait; one seed for both purposes (a script that
 reads enough `Math.random` output must learn nothing about the hash key; two independent seeds
@@ -361,6 +364,10 @@ object (decision 15) that draws on the host's own randomness; it is not an engin
 **HOST-146** (swell:D3) `Agent::new` is the only function of the interface that takes `Seeds`, and no other function, read or hook takes or returns seed or random bytes, which a scan of the `swell` crate's public items in the gate checks. [slice 1]
 
 **HOST-147** (swell:D3) Two processes that each create an agent with the same `Seeds` and run the same script, printing 1,000 `Math.random()` values and the key order of a `Map` and an object of 10,000 keys each, print the same bytes, which a test that starts two child processes checks: the engine reads no randomness but its seeds. [slice 4]
+
+**HOST-212** (ecma262:sec-math.random) Each of the first 100,000 values of `Math.random()` in a realm is a Number in [0, 1) with positive sign (`Object.is(x, -0)` is false) and `x * 2 ** 53` is an integer. [slice 4]
+
+**HOST-213** (swell:D3) In two agents with the same `random_seed` that each create two realms, the first 64 values of `Math.random()` of the second realm are equal bit for bit between the agents and differ as sequences from those of the first realm of either, even when one agent calls the second realm's function before the first realm's and the other after it: a realm's stream is its creation index, not the order of calls. [slice 4]
 
 ## 4. Values at the boundary
 
@@ -2125,58 +2132,63 @@ The coordinator changes these in `engine.md`, which this unit does not edit:
 For the specification author's next round; this unit changes nothing under `spec/`.
 
 **(a) The markers.** Each `UNMAPPED:` marker gets the identifiers below, or `ESS limit`. The
-table in `host-interface-model.md` gives each marker's first words.
+table in `host-interface-model.md` gives each marker's first words. The places are those of
+`spec/domains/host.yaml` on 2026-11-24 (53 markers, the table's); a marker the model no longer
+has is not listed, and one that was split or is new has its own entry.
 
 - `system.yaml:16`: HOST-133, HOST-134, HOST-135, HOST-159
 - `host.yaml:40`: HOST-9, HOST-12, HOST-14, HOST-16, HOST-19, HOST-20, HOST-22, HOST-23, HOST-24
-- `host.yaml:43`: HOST-6, HOST-7, HOST-8, HOST-10, HOST-80
-- `host.yaml:118`: HOST-35
-- `host.yaml:129`: HOST-4, HOST-26, HOST-27, HOST-83, HOST-84, HOST-116 to HOST-128, HOST-149, HOST-150, HOST-151, HOST-158, HOST-209 to HOST-211
-- `host.yaml:179`: HOST-52
-- `host.yaml:214`: HOST-54, HOST-156
-- `host.yaml:228`: HOST-74, HOST-98
-- `host.yaml:288`: HOST-65, HOST-66
-- `host.yaml:402`: ESS limit
-- `host.yaml:417`: HOST-18, HOST-36, HOST-137, HOST-138
-- `host.yaml:424`: HOST-37
-- `host.yaml:429`: HOST-43
-- `host.yaml:458`: HOST-25, HOST-26, HOST-27, HOST-144, HOST-145, HOST-146
-- `host.yaml:480`: HOST-49, HOST-50, HOST-51, HOST-155
-- `host.yaml:494`: HOST-12, HOST-41, HOST-71
-- `host.yaml:507`: HOST-55
-- `host.yaml:508`: HOST-31, HOST-45
-- `host.yaml:543`: HOST-71
-- `host.yaml:630`: HOST-45, HOST-55
-- `host.yaml:664`: HOST-157
-- `host.yaml:675`: HOST-39, HOST-60, HOST-61
-- `host.yaml:678`: HOST-57
-- `host.yaml:694`: HOST-48
-- `host.yaml:761`: HOST-57, HOST-59, HOST-62, HOST-63, HOST-64
-- `host.yaml:765`: HOST-31, HOST-61
-- `host.yaml:767`: HOST-56, HOST-60
-- `host.yaml:812`: HOST-42
-- `host.yaml:825`: HOST-48
-- `host.yaml:846`: HOST-157
-- `host.yaml:862`: HOST-38
-- `host.yaml:865`: HOST-43
-- `host.yaml:932`: HOST-70, HOST-74, HOST-188 to HOST-190
-- `host.yaml:882`: HOST-48
-- `host.yaml:898`: HOST-43
-- `host.yaml:969`: ESS limit
-- `host.yaml:983`: HOST-79
-- `host.yaml:985`: HOST-77, HOST-80
-- `host.yaml:990`: HOST-79
-- `host.yaml:1077`: HOST-85, HOST-86, HOST-88
-- `host.yaml:1133`: HOST-100, HOST-101, HOST-121
-- `host.yaml:1157`: HOST-90, HOST-96
-- `host.yaml:1161`: HOST-91, HOST-92, HOST-93
-- `host.yaml:1178`: HOST-87, HOST-129, HOST-130, HOST-131
-- `host.yaml:1208`: HOST-15, HOST-47, HOST-103 to HOST-107
-- `host.yaml:1214`: HOST-108 to HOST-115
-- `host.yaml:1216`: HOST-28, HOST-29, HOST-30
-- `host.yaml:1242`: HOST-37
-- `host.yaml:1248`: HOST-37
-- `host.yaml:1289`: HOST-79, HOST-97, HOST-100
+- `host.yaml:47`: HOST-6, HOST-7, HOST-8, HOST-10, HOST-80
+- `host.yaml:123`: HOST-35
+- `host.yaml:135`: HOST-4, HOST-26, HOST-27, HOST-83, HOST-84, HOST-116 to HOST-128, HOST-149, HOST-150, HOST-151, HOST-158, HOST-209 to HOST-211
+- `host.yaml:186`: HOST-52
+- `host.yaml:222`: HOST-54, HOST-156
+- `host.yaml:237`: HOST-74, HOST-98
+- `host.yaml:298`: HOST-65, HOST-66
+- `host.yaml:372`: HOST-77
+- `host.yaml:377`: HOST-200
+- `host.yaml:434`: ESS limit
+- `host.yaml:459`: HOST-18, HOST-36, HOST-137, HOST-138
+- `host.yaml:467`: HOST-37
+- `host.yaml:473`: HOST-43
+- `host.yaml:503`: HOST-25, HOST-26, HOST-27, HOST-144, HOST-145, HOST-146, HOST-212, HOST-213
+- `host.yaml:528`: HOST-49, HOST-50, HOST-51, HOST-155
+- `host.yaml:543`: HOST-12, HOST-41, HOST-71
+- `host.yaml:557`: HOST-55
+- `host.yaml:602`: HOST-71
+- `host.yaml:618`: HOST-45, HOST-48, ESS limit
+- `host.yaml:705`: HOST-55
+- `host.yaml:707`: HOST-31, ESS limit
+- `host.yaml:745`: HOST-157
+- `host.yaml:757`: HOST-39, HOST-60, HOST-61
+- `host.yaml:761`: HOST-57
+- `host.yaml:778`: HOST-48
+- `host.yaml:846`: HOST-57, HOST-59, HOST-62, HOST-63, HOST-64
+- `host.yaml:851`: HOST-31, HOST-61
+- `host.yaml:854`: HOST-56, HOST-60
+- `host.yaml:900`: HOST-42
+- `host.yaml:914`: HOST-48
+- `host.yaml:936`: HOST-157
+- `host.yaml:953`: HOST-38
+- `host.yaml:957`: HOST-43
+- `host.yaml:960`: HOST-70, HOST-74, HOST-188 to HOST-190
+- `host.yaml:978`: HOST-48
+- `host.yaml:995`: HOST-43
+- `host.yaml:1035`: ESS limit
+- `host.yaml:1054`: HOST-79
+- `host.yaml:1057`: HOST-77, HOST-80, HOST-199
+- `host.yaml:1067`: HOST-79
+- `host.yaml:1156`: HOST-85, HOST-86, HOST-88
+- `host.yaml:1212`: HOST-100, HOST-101, HOST-121
+- `host.yaml:1237`: HOST-90, HOST-96
+- `host.yaml:1242`: HOST-91, HOST-92, HOST-93
+- `host.yaml:1262`: HOST-87, HOST-129, HOST-130, HOST-131
+- `host.yaml:1293`: HOST-15, HOST-47, HOST-103 to HOST-107
+- `host.yaml:1300`: HOST-108 to HOST-115
+- `host.yaml:1303`: HOST-28, HOST-29, HOST-30
+- `host.yaml:1330`: HOST-37
+- `host.yaml:1337`: HOST-37
+- `host.yaml:1379`: HOST-79, HOST-97, HOST-100
 
 **(b) Where the model as merged contradicts this document.**
 
@@ -2238,7 +2250,6 @@ table in `host-interface-model.md` gives each marker's first words.
 
 ## Not checked
 
-- The generator `swell-num` uses for `Math.random`, and so how much of the 32-byte seed it uses.
 - HTML 7.2.3 (`WindowProxy`) and `Location`, on `nav-history-apis.html`, were not read here.
 - Whether the draft's text allows the `RangeError`s of decision 2 for strings, BigInts and
   depth: `grep -i 'implementation limit'` finds no such text, and no other wording was looked
