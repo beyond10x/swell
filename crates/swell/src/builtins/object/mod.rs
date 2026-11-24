@@ -536,7 +536,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// Steps 4 to 14 of `Object.prototype.toString`: the builtinTag of the kinds this slice
-    /// has. No object has [[DateValue]] before its slice; an ordinary
+    /// has, [[DateValue]] with them (`story:date-object-clock-and-time-value`); an ordinary
     /// object with a slot the steps do not name, and every other kind, is step 14's "Object".
     fn builtin_tag(&mut self, object: ObjectRef) -> Completion<&'static str> {
         // 4, 5. If isArray is true, let builtinTag be "Array".
@@ -560,6 +560,8 @@ impl<H: Host> Agent<H> {
                 OrdinaryData::Boolean(_) => "Boolean",
                 // 10. [[NumberData]]: "Number".
                 OrdinaryData::Number(_) => "Number",
+                // 12. [[DateValue]]: "Date".
+                OrdinaryData::Date(_) => "Date",
                 // 14. Else, let builtinTag be "Object".
                 _ => "Object",
             },

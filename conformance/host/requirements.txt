@@ -122,8 +122,8 @@ HOST-121 test swell::promise_reads::host_121_a_rejection_with_no_handler_is_trac
 HOST-122 pending slice 13
 HOST-123 pending slice 14
 HOST-124 test swell::hooks::host_124_*
-HOST-125 pending slice 4
-HOST-126 pending slice 4
+HOST-125 test swell::date_clock::host_125_date_now_calls_the_clock_hook_once_and_floors_to_milliseconds
+HOST-126 test swell::date_clock::host_126_a_clock_answer_out_of_range_is_clamped
 HOST-127 pending slice 4
 HOST-128 pending slice 4
 HOST-129 test swell::misuse::host_129_collect_runs_no_code_and_calls_no_hook

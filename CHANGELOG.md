@@ -12,6 +12,13 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- `Date`, a story of the fourth slice: the constructor, `Date.now()`, and `getTime`, `setTime`
+  and `valueOf` of `Date.prototype`. `new Date()` and `Date.now()` ask the host's clock hook
+  once, after one step, floor the answer to milliseconds and clamp an answer out of range; the
+  engine reads no clock of its own. `Date.UTC`, `Date.parse` and the other 14 setters exist
+  with their name and length and throw a `TypeError` until their stories are built. Until
+  then a String argument, or two or more arguments, to the constructor give an invalid date,
+  and `Date()` without `new` answers `"Invalid Date"`. 330 more test262 cases pass with it.
 - Slice 10, promises and `async` functions, is delivered: all 3,759 of its test262 cases pass
   in all 7,258 runs. At its close 141 cases that need a later slice move there, each with its
   evidence (116 to slice 8 for `class`, `super` or `new.target`, 20 to slice 12 for a BigInt

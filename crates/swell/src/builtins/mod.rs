@@ -47,6 +47,7 @@ pub(crate) mod async_function;
 pub(crate) mod async_generator;
 pub(crate) mod async_iteration;
 pub(crate) mod boolean;
+pub(crate) mod date;
 pub(crate) mod error;
 pub(crate) mod function;
 pub(crate) mod generator;
