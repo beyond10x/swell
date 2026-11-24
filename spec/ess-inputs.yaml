@@ -12,3 +12,5 @@ scenarios:
   - scenarios/parse-error-leaves-the-agent-parsing.yaml
   - scenarios/thrown-run-leaves-the-agent-running.yaml
   - scenarios/memory-budget-ends-one-entry.yaml
+  - scenarios/promise-job-runs-at-the-next-checkpoint.yaml
+  - scenarios/rejection-is-tracked-then-handled.yaml

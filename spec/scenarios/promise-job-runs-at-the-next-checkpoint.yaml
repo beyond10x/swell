@@ -1,0 +1,104 @@
+# A script that adds a reaction to a settled promise queues a promise job, which the agent keeps
+# in its queue and announces to the host (HOST-83) and which no run of the script performs; the
+# next microtask checkpoint runs it in the order it was queued and returns once the queue is
+# empty (HOST-78; host-interface.md decision 11, "The checkpoint is one entry"). A last script
+# reads what the handler did, so a checkpoint that answers without running the job fails here.
+# The announcement itself is not stated: HostEnqueuePromiseJob's `enqueued` creates the record
+# it addresses, and ESS awaits no system-issued step that creates its record (ESS-AUTHOR-045 for
+# an authored step, ESS-SYNTH-023 for synthesis). Synthesis writes no scenario for
+# PerformMicrotaskCheckpoint's `drained` (its `affects:` needs a view of the jobs).
+type: ess-scenario/6
+domain: swell.host
+scenario: promise-job-runs-at-the-next-checkpoint
+summary: A promise job a script queued runs at the next microtask checkpoint, which then reports the queue drained.
+
+arrange:
+  - instance: agent
+    entity: swell.host.Agent
+  - instance: realm
+    entity: swell.host.Realm
+  - instance: script
+    entity: swell.host.Script
+  - instance: check
+    entity: swell.host.Script
+
+timeline:
+  - at: 2026-01-06T09:00:00Z
+    command: swell.host.CreateAgent
+    actor: swell.host.Host
+    input:
+      limits:
+        steps_per_entry: 1000000
+        memory_bytes: 67108864
+        frame_depth: 10000
+        reentry_depth: 256
+        parser_nesting: 1000
+        string_length: 1073741824
+        bigint_bits: 1048576
+      hash_key: AAECAwQFBgcICQoLDA0ODw==
+      random_seed: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+    outcome: created
+    capture: {instance: agent, event: swell.host.AgentCreated, field: agent_id}
+
+  - at: 2026-01-06T09:00:01Z
+    command: swell.host.CreateRealm
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: created
+    capture: {instance: realm, event: swell.host.RealmCreated, field: realm_id}
+
+  - at: 2026-01-06T09:00:02Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "var ran = false; Promise.resolve().then(function () { ran = true; });"
+    outcome: parsed
+    capture: {instance: script, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:03Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: script}
+    outcome: completed
+    events:
+      - event: swell.host.ScriptCompleted
+        payload:
+          script_id: {$instance: script}
+
+  - at: 2026-01-06T09:00:04Z
+    command: swell.host.PerformMicrotaskCheckpoint
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+    outcome: drained
+    events:
+      - event: swell.host.MicrotaskCheckpointPerformed
+        payload:
+          agent_id: {$instance: agent}
+
+  - at: 2026-01-06T09:00:05Z
+    command: swell.host.ParseScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      realm_id: {$instance: realm}
+      source_text: "if (!ran) { throw new Error('the promise job did not run'); }"
+    outcome: parsed
+    capture: {instance: check, event: swell.host.ScriptParsed, field: script_id}
+
+  - at: 2026-01-06T09:00:06Z
+    command: swell.host.EvaluateScript
+    actor: swell.host.Host
+    input:
+      agent_id: {$instance: agent}
+      script_id: {$instance: check}
+    outcome: completed
+    events:
+      - event: swell.host.ScriptCompleted
+        payload:
+          script_id: {$instance: check}

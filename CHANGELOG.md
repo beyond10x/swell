@@ -137,6 +137,13 @@ Every number below comes from the gate, `task check`, on the released commit.
 - New: `WellKnownSymbol::AsyncIterator`, the thirteenth well-known symbol a host names. A
   host object with a method under it is the iterable of a `for await`.
 - `HOST-203` has a test.
+- The model of the interface (`spec/`) states the microtask checkpoint with its answers at the
+  step budget and at an interrupt, and a job that will not run to its end (`Abandoned`). Two
+  scenarios are new: a promise job runs at the next checkpoint and not before, and a rejection
+  without a handler is reported to the tracker and reported again when a handler is added.
+  18 of the model's 60 scenarios pass on the engine (14 of 58 before); the other 42 name the
+  later slice or the reason they wait for. The model has 53 places marked as not expressible
+  (51 before).
 
 ## [0.8.0] - 2026-11-24
 
