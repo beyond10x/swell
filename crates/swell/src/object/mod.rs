@@ -8,7 +8,8 @@
 //! the program of its pattern. `story:promise-constructor-then-and-jobs` adds the Promise kind
 //! (`object/promise.rs`), which takes every internal method by its ordinary arm, and
 //! `story:async-functions-and-await` the activation of an `async` function
-//! (`object/async_function.rs`), which does too.
+//! (`object/async_function.rs`), which does too, as does the activation of a built-in async
+//! function (`object/async_builtin.rs`, `story:array-from-async`).
 //!
 //! Every kind but the Array, String and arguments exotic objects uses the ordinary internal
 //! methods (`object/ordinary.rs`); host objects too, until the overrides of slice 9. [[Call]] and
@@ -34,6 +35,7 @@
 
 pub(crate) mod arguments;
 pub(crate) mod array;
+pub(crate) mod async_builtin;
 pub(crate) mod async_function;
 pub(crate) mod async_generator;
 pub(crate) mod bound_function;
@@ -56,6 +58,7 @@ use crate::host::{Abrupt, Completion, Host, Termination};
 use crate::value::{ObjectRef, Value};
 use arguments::ArgumentsObject;
 use array::Array;
+use async_builtin::AsyncBuiltinActivation;
 use async_function::AsyncActivation;
 use async_generator::AsyncGenerator;
 use bound_function::BoundFunction;
@@ -205,6 +208,9 @@ pub(crate) enum ObjectKind {
     /// kind (`docs/design/engine.md`, decision 3, "Async generators on suspended frames"),
     /// `story:async-generators-and-their-request-queue`.
     AsyncGenerator(AsyncGenerator),
+    /// The activation of a built-in async function (`docs/design/engine.md`, decision 3, "A
+    /// built-in async function", item 1), `story:array-from-async` (`object/async_builtin.rs`).
+    AsyncBuiltinActivation(AsyncBuiltinActivation),
 }
 
 /// Which kind an object is, for the dispatch.
@@ -225,6 +231,7 @@ pub(crate) enum KindTag {
     AsyncActivation,
     AsyncFromSyncIterator,
     AsyncGenerator,
+    AsyncBuiltinActivation,
 }
 
 impl ObjectRecord {
@@ -262,6 +269,7 @@ impl ObjectRecord {
             ObjectKind::AsyncActivation(activation) => activation.trace(mark),
             ObjectKind::AsyncFromSyncIterator(iterator) => iterator.trace(mark),
             ObjectKind::AsyncGenerator(generator) => generator.trace(mark),
+            ObjectKind::AsyncBuiltinActivation(activation) => activation.trace(mark),
         }
     }
 
@@ -285,6 +293,7 @@ impl ObjectRecord {
             ObjectKind::AsyncActivation(_) => KindTag::AsyncActivation,
             ObjectKind::AsyncFromSyncIterator(_) => KindTag::AsyncFromSyncIterator,
             ObjectKind::AsyncGenerator(_) => KindTag::AsyncGenerator,
+            ObjectKind::AsyncBuiltinActivation(_) => KindTag::AsyncBuiltinActivation,
         }
     }
 }

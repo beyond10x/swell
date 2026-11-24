@@ -2,7 +2,7 @@ test262 annexB/built-ins 241 26 0 215 12 203 0
 test262 annexB/language 845 0 0 845 178 667 0
 test262 built-ins/AbstractModuleSource 8 8 0 0 0 0 0
 test262 built-ins/AggregateError 25 0 0 25 21 4 0
-test262 built-ins/Array 3083 0 0 3083 2797 286 0
+test262 built-ins/Array 3083 0 0 3083 2873 210 0
 test262 built-ins/ArrayBuffer 221 29 0 192 0 192 0
 test262 built-ins/ArrayIteratorPrototype 27 0 0 27 17 10 0
 test262 built-ins/AsyncDisposableStack 104 0 0 104 0 104 0
@@ -219,7 +219,7 @@ test262 staging/set-methods 3 0 0 3 0 3 0
 test262 staging/sm 1406 2 0 1404 632 770 2
 test262 staging/source-phase-imports 2 2 0 0 0 0 0
 test262 staging/top-level-await 1 0 0 1 0 1 0
-test262 total 53801 8982 7 44812 24432 20378 2
+test262 total 53801 8982 7 44812 24508 20302 2
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
@@ -228,8 +228,8 @@ test262-slice 05 2724 5441 0 0 2724 2724 0 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
 test262-slice 07 1472 2801 0 0 1472 1472 0 0
 test262-slice 08 9186 18223 0 0 9186 5 9181 0
-test262-slice 09 1781 3533 0 0 1781 169 1612 0
-test262-slice 10 3879 7499 0 0 3879 3663 216 0
+test262-slice 09 1781 3533 0 0 1781 170 1611 0
+test262-slice 10 3879 7499 0 0 3879 3738 141 0
 test262-slice 11 1281 1833 0 0 1281 22 1259 0
 test262-slice 12 338 676 0 0 338 39 299 0
 test262-slice 13 3060 6076 0 0 3060 0 3060 0
@@ -254,7 +254,7 @@ test262-section sec-math-object incomplete 327 13 0
 test262-section sec-date-objects incomplete 610 0 0
 test262-section sec-string-objects incomplete 1223 1200 2
 test262-section sec-regexp-regular-expression-objects incomplete 1879 1859 2
-test262-section sec-array-objects incomplete 3083 2797 1
+test262-section sec-array-objects incomplete 3083 2873 1
 test262-section sec-typedarray-objects incomplete 1453 0 0
 test262-section sec-uint8array incomplete 70 0 0
 test262-section sec-map-objects incomplete 204 0 0

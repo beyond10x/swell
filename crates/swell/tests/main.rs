@@ -9,6 +9,7 @@ mod block_functions;
 mod budgets;
 mod builtins_array;
 mod builtins_array_from;
+mod builtins_array_from_async;
 mod builtins_array_iteration;
 mod builtins_array_mutation;
 mod builtins_array_search;

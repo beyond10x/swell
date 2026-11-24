@@ -77,7 +77,7 @@ the iterator protocol, `for`-`of`, function declarations in blocks and `Array.fr
 there. Slice 5, regular expressions, and slice 7, generators, were delivered on 2026-11-24:
 all 2,724 cases of slice 5 pass in all 5,441 runs and all 1,472 cases of slice 7 in all
 2,801 runs. Slice 10, promises and `async` functions, is in work: `Promise` with `then`,
-`async` functions, `async` methods, the statics of `Promise`, `for await` and async generators run, and 3,663 of its 3,879 cases pass. The slices are taken in the order the first
+`async` functions, `async` methods, the statics of `Promise`, `for await`, async generators and `Array.fromAsync` run, and 3,738 of its 3,879 cases pass. The slices are taken in the order the first
 user, a browser, needs them: 6, 5, 7, 10, 4, 9.
 
 ## What swell is

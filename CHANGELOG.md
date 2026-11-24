@@ -16,6 +16,12 @@ Every number below comes from the gate, `task check`, on the released commit.
   At its close 40 cases that need `class` or `super` move to slice 8, each with its
   evidence, and 21 cases that failed only on generators count in slice 7 instead of slices
   18 and 19.
+- `Array.fromAsync`, a story of the tenth slice: it reads an async iterable, a sync iterable
+  or an array-like, awaits each value and the result of a mapper, and returns a promise of
+  the array. It is the first built-in async function: its `await` goes through the hooks
+  an `await` of a script function uses, a continuation spends one step before it runs, and
+  a termination leaves its promise pending. An array-like without end stops at the step
+  budget or at the memory budget.
 - `yield*` in an async generator, a story of the tenth slice: it delegates to an async
   iterator, or to a sync iterable through the Async-from-Sync Iterator, and awaits the
   result of each call of the inner iterator's `next`, `throw` or `return`. A received
@@ -163,6 +169,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   host object with a method under it is the iterable of a `for await`.
 - `HOST-203` has a test.
 - `HOST-204`, `HOST-205` and `HOST-206` have a test.
+- `HOST-207` and `HOST-208` have a test. No requirement is pending for the tenth slice.
 - The model of the interface (`spec/`) states the microtask checkpoint with its answers at the
   step budget and at an interrupt, and a job that will not run to its end (`Abandoned`). Two
   scenarios are new: a promise job runs at the next checkpoint and not before, and a rejection

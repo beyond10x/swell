@@ -204,8 +204,8 @@ HOST-203 test swell::for_await::host_203_a_host_reads_symbol_async_iterator_and_
 HOST-204 test swell::async_generators::host_204_a_termination_in_a_running_async_generator_leaves_every_request_pending
 HOST-205 test swell::async_generators::host_205_an_async_generator_suspended_when_an_entry_ends_keeps_its_frame_and_queue
 HOST-206 test swell::async_generators::host_206_requests_are_charged_until_the_generator_is_freed_and_bounded_by_the_memory_budget
-HOST-207 pending slice 10
-HOST-208 pending slice 10
+HOST-207 test swell::builtins_array_from_async::host_207_an_await_of_from_async_goes_through_the_hooks_of_an_await
+HOST-208 test swell::builtins_array_from_async::host_208_a_from_async_cut_by_a_termination_leaves_its_promise_pending_for_good
 HOST-209 pending slice 4
 HOST-210 pending slice 4
 HOST-211 pending slice 4
