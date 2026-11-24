@@ -521,11 +521,12 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   (https://github.com/beyond10x/swell/releases/tag/0.6.0); `0.7.0`, 2026-11-23, tagged on
   `e0bb1ec`, the second wave of slice 5, with which the regular expressions of the first
   consumer's harness answer, on the decision "cut 0.7.0 now" of the session that decides for
-  the operator (https://github.com/beyond10x/swell/releases/tag/0.7.0); `0.8.0`, 2026-11-23,
-  tagged on the first commit of `main` whose `check` and lane `slow` are green on the forge,
-  the code of the release commit `a350de3` with the gate change of
-  `story:gate-test-steps-fit-four-cores` after it (on `d9d1b95` the forge's test steps took
-  127.9 s of their 120): the
+  the operator (https://github.com/beyond10x/swell/releases/tag/0.7.0); `0.8.0`, 2026-11-24,
+  tagged on a commit of `main` whose `check` and lane `slow` are green on the forge, the
+  code of the release commit `a350de3` (2026-11-23, the day its counts were measured) with
+  the gate change of `story:gate-test-steps-fit-four-cores` after it (on `d9d1b95` the
+  forge's test steps took 127.9 s of their 120) and the heading of its changelog section
+  set to the day of the tag: the
   third wave of slice 5 with the first four stories of slice 7, on the decision "cut 0.8.0
   when the two running slice 5 units are merged and a unit has brought the full test262 run
   under 15 min of a pool job" of the session that decides for the operator
