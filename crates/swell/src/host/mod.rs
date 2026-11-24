@@ -1028,7 +1028,9 @@ impl<H: Host> Cx<'_, H> {
     /// `Cx` as its realm (decision 11, "A host microtask's realm"; decision 7): inside a host
     /// function that function's [[Realm]], inside `with_cx` the realm `with_cx` took, inside a
     /// host microtask that microtask's (HOST-192). It runs no code, spends no step and calls no
-    /// hook.
+    /// hook. Its slot of the queue's capacity is charged to the memory budget, and when the
+    /// budget refuses the queue's growth nothing is queued and it answers `Err(MemoryBudget)`
+    /// (HOST-215).
     pub fn queue_microtask(&mut self, task: Microtask<H>) -> Result<(), HostError> {
         let agent = &mut *self.agent;
         agent.alive()?;

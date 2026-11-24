@@ -661,6 +661,10 @@ thread_local! {
     /// the tests; a test resets it before it reads it.
     pub(crate) static CALL_ARGUMENTS_COPIED: std::cell::Cell<u64> =
         const { std::cell::Cell::new(0) };
+    /// The values the `Call(n)` and `New(n)` instructions copied off the operand stack, on
+    /// both paths, in the counting build of the tests; a test resets it before it reads it.
+    pub(crate) static INSTRUCTION_ARGUMENTS_COPIED: std::cell::Cell<u64> =
+        const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]

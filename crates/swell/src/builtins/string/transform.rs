@@ -223,10 +223,11 @@ impl<H: Host> Agent<H> {
     }
 
     /// An empty builder for a result of `length` code units, asked of both limits before a unit
-    /// is copied: a length above `string_length` throws a `RangeError`; a String of that
-    /// length that would not fit the memory budget ends the run in `Terminated(MemoryBudget)`,
-    /// as [`Agent::append_units`] would at its first unit past the budget, so the copy never
-    /// starts. `length` is a non-negative integer, possibly +∞.
+    /// is copied: a length above `string_length` throws a `RangeError`; room for that length is
+    /// charged to the memory budget before it is made ([`Agent::reserve_builder`]), and one the
+    /// budget refuses ends the run in `Terminated(MemoryBudget)`, as [`Agent::append_units`]
+    /// would at its first unit past the budget, so the copy never starts. `length` is a
+    /// non-negative integer, possibly +∞.
     fn result_builder(&mut self, length: f64) -> Completion<StringBuilder> {
         let limit = self.limits.string_length;
         // A length above the limit as an f64 is above the limit; the cast saturates and the
@@ -239,13 +240,10 @@ impl<H: Host> Agent<H> {
             ));
         }
         let mut builder = StringBuilder::new();
-        let reserved = usize::try_from(units)
-            .ok()
-            .filter(|_| self.heap.accounting.check(units.saturating_mul(2)).is_ok())
-            .is_some_and(|units| builder.units.try_reserve_exact(units).is_ok());
-        if !reserved {
+        let Ok(units) = usize::try_from(units) else {
             return Err(self.terminate(Termination::MemoryBudget));
-        }
+        };
+        self.reserve_builder(&mut builder, units)?;
         Ok(builder)
     }
 
@@ -303,16 +301,10 @@ impl<H: Host> Agent<H> {
             ));
         }
         self.charge_steps(count(units))?;
-        if self
-            .heap
-            .accounting
-            .check(count(length).saturating_mul(2))
-            .is_err()
-            || builder.units.try_reserve(units).is_err()
-        {
-            return Err(self.terminate(Termination::MemoryBudget));
+        self.reserve_builder(builder, units)?;
+        if builder.units.extend_from_within(0..units).is_err() {
+            return Err(self.fault());
         }
-        builder.units.extend_from_within(..units);
         Ok(())
     }
 
@@ -355,35 +347,37 @@ impl<H: Host> Agent<H> {
         // Of fillString only the units truncatedStringFiller takes are read: at most
         // intMaxLength - stringLength (StringPad, steps 4 and 5).
         let filler = match argument(args, 1) {
-            Value::Undefined => vec![0x0020],
+            Value::Undefined => None,
             fill_string => {
                 let fill_string = self.to_string(fill_string)?;
                 // A positive integer below 2^53: the cast keeps it.
                 let fill_length =
                     usize::try_from((max_length - length as f64) as u64).unwrap_or(usize::MAX);
                 let used = self.string_length(fill_string)?.min(fill_length);
-                self.string_units_in(fill_string, 0, used)?
+                Some((fill_string, used))
             }
         };
         // 7. Return StringPad(S, intMaxLength, fillString, placement).
-        self.string_pad(string, max_length, &filler, placement)
+        self.string_pad(string, max_length, filler, placement)
     }
 
     /// StringPad ( string, maxLength, fillString, placement ) (`#sec-stringpad`), with
-    /// `filler` the code units of fillString it uses. The length of the result, maxLength, is
-    /// asked of the limits before a unit is copied, and string is appended by its steps before
-    /// its units are read.
+    /// `filler` fillString and the count of its code units it uses, or `None` for the String of
+    /// the code unit 0x0020 (SPACE). The length of the result, maxLength, is asked of the limits
+    /// before a unit is copied; string and the filler are appended by their steps before their
+    /// units are read, in place.
     fn string_pad(
         &mut self,
         string: StringRef,
         max_length: f64,
-        filler: &[u16],
+        filler: Option<(StringRef, usize)>,
         placement: Placement,
     ) -> Completion<StringRef> {
         // 1. Let stringLength be the length of string. 2. If maxLength ≤ stringLength, return
         // string. 3. If fillString is the empty String, return string.
         let length = self.string_length(string)?;
-        if max_length <= length as f64 || filler.is_empty() {
+        let filler_length = filler.map_or(1, |(_, used)| used);
+        if max_length <= length as f64 || filler_length == 0 {
             return Ok(string);
         }
         let mut builder = self.result_builder(max_length)?;
@@ -400,8 +394,13 @@ impl<H: Host> Agent<H> {
         // 5. Let truncatedStringFiller be the String value consisting of repeated
         // concatenations of fillString truncated to length fillLength.
         while left > 0 {
-            let take = left.min(filler.len());
-            self.append_units(&mut builder, filler.get(..take).unwrap_or(&[]))?;
+            let take = left.min(filler_length);
+            match filler {
+                Some((fill_string, _)) => {
+                    self.append_string_range(&mut builder, fill_string, 0, take)?;
+                }
+                None => self.append_units(&mut builder, &[0x0020])?,
+            }
             left -= take;
         }
         if placement == Placement::Start {
@@ -609,11 +608,11 @@ impl<H: Host> Agent<H> {
         let units = if length == 3 || length == 4 {
             self.string_units_in(name, 0, length)?
         } else {
-            Vec::new()
+            crate::heap::accounting::ChargedVec::new()
         };
         // 4. If allowedValues does not contain value, throw a RangeError exception (coerce).
         // 5. Return value.
-        match units.as_slice() {
+        match &units[..] {
             [0x4E, 0x46, 0x43] => Ok(Form::Nfc),
             [0x4E, 0x46, 0x44] => Ok(Form::Nfd),
             [0x4E, 0x46, 0x4B, 0x43] => Ok(Form::Nfkc),

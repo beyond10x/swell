@@ -138,6 +138,17 @@ Every number below comes from the gate, `task check`, on the released commit.
   script and decides the case by the first line `Test262:AsyncTestComplete` or
   `Test262:AsyncTestFailure:` the script prints.
 
+### Changed
+
+- A buffer whose size a script controls and that the engine holds while it calls into script
+  (the arguments of `apply`, `call` and `new`, the lists of `JSON.parse`, `JSON.stringify` and
+  `flat`, the text a replacer builds, a copy of a String's code units) is charged to
+  `memory_bytes` before it is made and credited when it is dropped, or is not made and the
+  String is read in place. A script that passes the budget this way ends in
+  `Terminated(MemoryBudget)`.
+- The microtask queue grows through the memory budget: a job queued by script past the room
+  ends that entry in `Terminated(MemoryBudget)`.
+
 ### Host interface
 
 - New: `Agent::queue_microtask`, `Agent::perform_microtask_checkpoint`,
@@ -193,6 +204,10 @@ Every number below comes from the gate, `task check`, on the released commit.
   18 of the model's 60 scenarios pass on the engine (14 of 58 before); the other 42 name the
   later slice or the reason they wait for. The model has 53 places marked as not expressible
   (51 before).
+- New: `HostError::MemoryBudget`. `queue_microtask` answers it when the memory budget refuses
+  the growth of the microtask queue, with nothing queued.
+- `HOST-215` has a test: a buffer the engine holds while it calls into script is charged to
+  `memory_bytes` before it is made, or not made.
 
 ## [0.8.0] - 2026-11-24
 

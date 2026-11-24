@@ -743,8 +743,17 @@ impl<H: Host> Agent<H> {
 
     /// Steps 5 to 11 of CompareArrayElements: ? ToString(x) and ? ToString(y) compared by their
     /// code units (IsLessThan, `#sec-islessthan`, step 3): a step per code unit of the shorter,
-    /// as IsLessThan charges, before a unit is read, and a String compared in place.
+    /// as IsLessThan charges, before a unit is read, and a String compared in place. The String
+    /// ToString of an object answers is kept until the compare ends and read in place too.
     fn compare_as_strings(&mut self, x: Value, y: Value) -> Completion<f64> {
+        let mark = self.kept.len();
+        let compared = self.compare_converted(x, y);
+        self.release(mark);
+        compared
+    }
+
+    /// [`Agent::compare_as_strings`], what it keeps released by the caller.
+    fn compare_converted(&mut self, x: Value, y: Value) -> Completion<f64> {
         /// The record of `value` when it is a String the compare reads in place.
         fn record(
             heap: &crate::heap::Heap,
@@ -755,8 +764,8 @@ impl<H: Host> Agent<H> {
                 _ => None,
             }
         }
-        let x_units = self.sort_string_units(x)?;
-        let y_units = self.sort_string_units(y)?;
+        let (x, x_units) = self.sort_string_units(x)?;
+        let (y, y_units) = self.sort_string_units(y)?;
         let length = |agent: &mut Self, value: Value, units: Option<&[u16]>| match (units, value) {
             (Some(units), _) => Ok(units.len()),
             (None, Value::String(string)) => agent.string_length(string),
@@ -781,25 +790,27 @@ impl<H: Host> Agent<H> {
         })
     }
 
-    /// The code units of ToString(value) (`#sec-tostring`) for CompareArrayElements, or `None`
-    /// for a String, which the compare reads in place: those of another primitive are made
-    /// without a String on the heap, which a sort without a comparator would otherwise
-    /// allocate twice per comparison; an object goes through ToString, and its String is
-    /// copied.
-    fn sort_string_units(&mut self, value: Value) -> Completion<Option<Vec<u16>>> {
-        match value {
-            Value::String(_) => Ok(None),
-            Value::Number(number) => Ok(Some(units_of(&swell_num::to_string::number_to_string(
-                number,
-            )))),
-            Value::Boolean(true) => Ok(Some(units_of("true"))),
-            Value::Boolean(false) => Ok(Some(units_of("false"))),
-            Value::Null => Ok(Some(units_of("null"))),
+    /// ToString(value) (`#sec-tostring`) for CompareArrayElements: a String as it is, with
+    /// `None`, which the compare reads in place; the code units of another primitive, made
+    /// without a String on the heap, which a sort without a comparator would otherwise allocate
+    /// twice per comparison; an object through ToString, its String kept (the caller releases
+    /// it) and read in place, with `None`.
+    fn sort_string_units(&mut self, value: Value) -> Completion<(Value, Option<Vec<u16>>)> {
+        let units = match value {
+            Value::String(_) => None,
+            Value::Number(number) => {
+                Some(units_of(&swell_num::to_string::number_to_string(number)))
+            }
+            Value::Boolean(true) => Some(units_of("true")),
+            Value::Boolean(false) => Some(units_of("false")),
+            Value::Null => Some(units_of("null")),
             value => {
                 let string = self.to_string(value)?;
-                self.string_units(string).map(Some)
+                self.keep(Value::String(string));
+                return Ok((Value::String(string), None));
             }
-        }
+        };
+        Ok((value, units))
     }
 }
 
@@ -979,7 +990,10 @@ mod tests {
         let Value::String(a) = a else {
             panic!("{a:?}");
         };
-        assert_eq!(agent.string_units(a).unwrap(), vec![u16::from(b'a')]);
+        assert_eq!(
+            agent.string_units_for_tests(a).unwrap(),
+            vec![u16::from(b'a')]
+        );
         assert_eq!(agent.has_property(deleted, Key::Index(1)), Ok(false));
         assert_eq!(agent.get(deleted, Key::Index(2)), Ok(number(2.0)));
         let length_key = agent.name_key("length").unwrap();
@@ -1048,4 +1062,31 @@ mod tests {
         );
         assert_eq!(copies::longest(), 0);
     }
+
+    /// `docs/design/engine.md`, "Memory budget": the compare of a sort without a comparator
+    /// (CompareArrayElements, `#sec-comparearrayelements`) keeps the String ToString of an
+    /// object answers and reads it in place, so no copy of it is alive while ToString of the
+    /// other operand runs code. Four levels of `sort`, one operand a String of 65,536 code
+    /// units, answer as before at the same steps, with no copy made and no capacity uncovered at
+    /// any entry into script.
+    #[test]
+    fn sort_reads_a_converted_string_in_place_across_a_call() {
+        use crate::builtins::string::transform::tests::Answer;
+        use crate::object::string::across::Across;
+        let mut across = Across::with_steps(4_000_000);
+        across.string("s", &vec![0x61; 65_536]);
+        let answer = across.run(
+            "var d = 0; var o = { toString: function () { return s; } }; var p = { toString: \
+             function () { if (++d < 4) [o, p].sort(); return \"p\"; } }; var r = [o, \
+             p].sort(); (r[0] === o) + \",\" + d",
+        );
+        assert_eq!(answer, Answer::Normal("true,4".to_string()));
+        assert_eq!(across.steps(), SORT_ACROSS_STEPS);
+        assert_eq!(copies::longest(), 0);
+        assert_eq!(copies::uncovered_at_entry(), 0);
+    }
+
+    /// The steps of the script of [`sort_reads_a_converted_string_in_place_across_a_call`] on
+    /// the base, before the story.
+    const SORT_ACROSS_STEPS: u64 = 202;
 }

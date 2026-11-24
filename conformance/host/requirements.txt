@@ -212,3 +212,4 @@ HOST-211 pending slice 4
 HOST-212 pending slice 4
 HOST-213 pending slice 4
 HOST-214 pending slice 9
+HOST-215 test swell::budgets::host_215_a_buffer_held_across_a_call_into_script_is_charged

@@ -281,8 +281,6 @@ The list with its sentences is `CHANGELOG.md`, "Unreleased", "Host interface". I
 
 | finding | where it is recorded or which story takes it |
 |---|---|
-| The `call` and `new` instructions copy their argument list uncharged (`interp/dispatch.rs`) | `03a3a71`, `4960350`, "Not in this change"; a story after slice 6 |
-| `string_units` and `string_units_in` copy without a memory charge | `03a3a71`, `4960350`; a story after slice 6 |
 | `opt-level` 1 for the collect-mode tests | `1360327`; a story of its own (D39) |
 | The report line of a filtered step counts the tests its filter leaves out as ignored | `f9efb31`, `d624042`, "Left as it is" |
 | A statement node is 136 bytes for an empty block (570 MB for 4.19 million) | `84522ad`; a task for a smaller node |
@@ -300,6 +298,10 @@ Closed in the batch: the late Array length write and the five late allocations t
 found (`ac86f47`, `03a3a71`, `4960350`); the `dead_code` of `HeapString::equals` and the
 `STEP_CHUNK` comment that `24704ac` found (`03a3a71`); the paths of the lane `slow` that
 `fb9a355` found (`057c6e3`).
+
+Closed after the batch: the argument copies of the `call` and `new` instructions and the
+copies `string_units` and `string_units_in` made without a memory charge, by
+`story:copies-held-across-a-call-into-script-are-charged` (HOST-215).
 
 ## Rule breaches by units
 

@@ -64,6 +64,8 @@ pub enum HostError {
     ModuleTerminated,
     /// An Evaluate while another one runs in the agent.
     EvaluationInProgress,
+    /// The memory budget refused the room the call needs; nothing changed.
+    MemoryBudget,
 }
 
 /// The kind `HostError::WrongKind` expected.

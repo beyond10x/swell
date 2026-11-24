@@ -14,6 +14,7 @@
 //! `Error.captureStackTrace` and `Error.prototype.stack` are not in the pinned draft.
 
 use crate::builtins::object::argument;
+use crate::heap::accounting::ChargedVec;
 use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion};
@@ -407,9 +408,22 @@ impl<H: Host> Agent<H> {
             return Err(self.throw_error(ErrorKind::RangeError, "string_length exceeded"));
         }
         self.charge_steps(length)?;
-        let mut units = self.string_units(name)?;
-        units.extend([u16::from(b':'), u16::from(b' ')]);
-        units.extend(self.string_units(message)?);
+        // One buffer of the three parts, charged before it is made; its charge is given back
+        // before the String is made.
+        let mut units = ChargedVec::new();
+        self.reserve_vec(
+            &mut units,
+            name_length.saturating_add(2).saturating_add(message_length),
+        )?;
+        self.extend_units(&mut units, name, 0, name_length)?;
+        if units
+            .extend_from_slice(&[u16::from(b':'), u16::from(b' ')])
+            .is_err()
+        {
+            return Err(self.fault());
+        }
+        self.extend_units(&mut units, message, 0, message_length)?;
+        let units = units.into_vec();
         Ok(Value::String(self.new_string_value(&units)?))
     }
 }

@@ -334,12 +334,12 @@ impl HostData for FunctionData {
 }
 
 /// The room a holder made on the kept stack (a sort's list, a list of keys and what is kept
-/// with it): the capacity the stack had before ([`Agent::kept_room`]) and the bytes its growth
-/// was charged to the memory budget ([`Agent::reserve_kept`]), which
-/// [`Agent::end_kept_room`] gives back and credits.
+/// with it): the capacity the stack had before ([`Agent::kept_room`]), which
+/// [`Agent::end_kept_room`] gives back, and the charge of its growth ([`Agent::reserve_kept`]),
+/// credited when the room drops.
 pub(crate) struct KeptRoom {
     pub(crate) capacity: usize,
-    pub(crate) charged: u64,
+    pub(crate) charge: crate::heap::accounting::Charge,
 }
 
 /// The execution context of a running builtin (9.4): what the collector keeps while it runs.
@@ -397,14 +397,28 @@ impl<H: Host> Agent<H> {
     pub(crate) fn kept_room(&self) -> KeptRoom {
         KeptRoom {
             capacity: self.kept.capacity(),
-            charged: 0,
+            charge: crate::heap::accounting::Charge::default(),
         }
+    }
+
+    /// Take a room of the kept stack, run `body` with it, and end the room on every way out:
+    /// what `body` kept is released, the kept stack gets back the room it had, and the room's
+    /// charge is given back.
+    pub(crate) fn with_kept_room<T>(
+        &mut self,
+        body: impl FnOnce(&mut Self, &mut KeptRoom) -> Completion<T>,
+    ) -> Completion<T> {
+        let mark = self.kept.len();
+        let mut room = self.kept_room();
+        let answer = body(self, &mut room);
+        self.end_kept_room(mark, &room);
+        answer
     }
 
     /// Room on the kept stack for `more` values beyond its length: when it has none, its
     /// capacity grows to twice what it was, at least 16 and at least what is needed, charged
-    /// to the memory budget before it is made and added to `room`; over the budget the run
-    /// ends in `Terminated(MemoryBudget)`.
+    /// to the memory budget into the charge of `room` before it is made; over the budget the
+    /// run ends in `Terminated(MemoryBudget)`.
     pub(crate) fn reserve_kept(&mut self, room: &mut KeptRoom, more: usize) -> Completion<()> {
         let needed = self.kept.len().saturating_add(more);
         let capacity = self.kept.capacity();
@@ -415,26 +429,24 @@ impl<H: Host> Agent<H> {
         let slots = u64::try_from(wanted - capacity).unwrap_or(u64::MAX);
         let slot = u64::try_from(size_of::<Value>()).unwrap_or(u64::MAX);
         let bytes = slots.saturating_mul(slot);
-        if self.heap.accounting.charge(bytes).is_err() {
+        if room.charge.grow(&mut self.heap.accounting, bytes).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let length = self.kept.len();
         if self.kept.try_reserve_exact(wanted - length).is_err() {
-            self.heap.accounting.credit(bytes);
+            room.charge.release(bytes);
             return Err(self.terminate(Termination::MemoryBudget));
         }
-        room.charged = room.charged.saturating_add(bytes);
         Ok(())
     }
 
     /// The end of a holder of the kept stack, whatever its completion: what was kept since
-    /// `mark` is released, the kept stack is given back the room it had when `room` was taken,
-    /// and what its growth was charged is credited.
+    /// `mark` is released and the kept stack is given back the room it had when `room` was
+    /// taken; what its growth was charged is credited when `room` drops.
     pub(crate) fn end_kept_room(&mut self, mark: usize, room: &KeptRoom) {
         self.release(mark);
         let capacity = room.capacity.max(self.kept.len());
         self.kept.shrink_to(capacity);
-        self.heap.accounting.credit(room.charged);
     }
 
     /// CreateBuiltinFunction (`#sec-createbuiltinfunction`) with SetFunctionLength
@@ -673,6 +685,8 @@ impl<H: Host> Agent<H> {
     /// The bookkeeping of every call into a function (decision 2): the sticky termination, a
     /// step, and the re-entry count, whose bound throws a `RangeError` in the current realm.
     fn enter_function(&mut self) -> Completion<()> {
+        #[cfg(test)]
+        crate::object::string::copies::entered();
         self.running()?;
         self.charge_steps(1)?;
         let depth = u32::try_from(self.activations.len()).unwrap_or(u32::MAX);
@@ -1051,5 +1065,138 @@ mod tests {
         assert_eq!(element.bytes(), 144, "the slots are {size} bytes");
         assert_eq!(finally.bytes(), 32, "the slots are {size} bytes");
         assert_eq!(thunk.bytes(), 32, "the slots are {size} bytes");
+    }
+
+    /// One run of `source` in `across` after a collection, and its answer with `used()` read
+    /// after a collection before and after it.
+    fn collected_run(
+        across: &mut crate::object::string::across::Across,
+        source: &str,
+    ) -> (crate::builtins::string::transform::tests::Answer, u64, u64) {
+        let script = across.parse(source);
+        across.agent.collect().unwrap();
+        let before = across.used();
+        let answer = across.evaluate(&script);
+        across.agent.collect().unwrap();
+        let after = across.used();
+        drop(script);
+        (answer, before, after)
+    }
+
+    /// `docs/design/engine.md`, "Memory budget": a holder of a room of the kept stack ends it
+    /// on every way out (`Agent::with_kept_room`), so the kept stack gets back the capacity it
+    /// had and the growth's charge is given back. Each holder, in an agent of its own, runs
+    /// once with 1 element, then with 300: `apply` (`#sec-function.prototype.apply`),
+    /// `JSON.parse` with a reviver (`#sec-json.parse`), `Function` with 300 parameters
+    /// (`#sec-createdynamicfunction`) and `flat` of an array nested 300 deep
+    /// (`#sec-array.prototype.flat`). After the call the kept stack has the capacity it had
+    /// after the first run, and on a normal end and on a throw at element 150 `used()` reads
+    /// what it read before (each read in a second round, the arenas keeping their capacity).
+    /// `JSON.stringify` with a list of 300 property names holds the same.
+    #[test]
+    fn holders_give_the_kept_stack_back_its_room_across_a_call() {
+        use crate::builtins::string::transform::tests::Answer;
+        use crate::object::string::across::Across;
+        let names = (0..300).map(|n| format!("\"a{n}\"")).collect::<Vec<_>>();
+        let mut thrown_names = names.clone();
+        thrown_names[150] = "t".to_string();
+        let holders = [
+            (
+                "apply",
+                "function f() { return 0; } var a = []; for (var i = 0; i < 300; i++) \
+                 a.push(i); var b = a.slice(); Object.defineProperty(b, 150, { get: function \
+                 () { throw 1; } });"
+                    .to_string(),
+                "f.apply(null, [1])".to_string(),
+                "f.apply(null, a)".to_string(),
+                "f.apply(null, b)".to_string(),
+            ),
+            (
+                "JSON.parse",
+                "var a = []; for (var i = 0; i < 300; i++) a.push(i); var t = \"[\" + \
+                 a.join(\",\") + \"]\"; function r(k, v) { return v; } function q(k, v) { if \
+                 (k === \"150\") throw 1; return v; }"
+                    .to_string(),
+                "JSON.parse(\"[1]\", r).length".to_string(),
+                "JSON.parse(t, r).length".to_string(),
+                "JSON.parse(t, q)".to_string(),
+            ),
+            (
+                "Function",
+                "var t = { toString: function () { throw 1; } };".to_string(),
+                "Function(\"a0\", \"\").length".to_string(),
+                format!("Function({}, \"\").length", names.join(", ")),
+                format!("Function({}, \"\")", thrown_names.join(", ")),
+            ),
+            (
+                "flat",
+                "function deep(n, bad) { var x = [1]; for (var i = 1; i < n; i++) { if (i == \
+                 bad) { var y = []; Object.defineProperty(y, 0, { get: function () { throw 1; \
+                 } }); x = y; } else { x = [x]; } } return x; } var deepA = deep(300, -1); var \
+                 deepB = deep(300, 150);"
+                    .to_string(),
+                "[1].flat(Infinity).length".to_string(),
+                "deepA.flat(Infinity).length".to_string(),
+                "deepB.flat(Infinity)".to_string(),
+            ),
+            (
+                "JSON.stringify",
+                "var l = []; for (var i = 0; i < 300; i++) l.push(\"k\" + i); var m = \
+                 l.slice(); Object.defineProperty(m, 150, { get: function () { throw 1; } });"
+                    .to_string(),
+                "JSON.stringify({}, [\"k\"])".to_string(),
+                "JSON.stringify({}, l)".to_string(),
+                "JSON.stringify({}, m)".to_string(),
+            ),
+        ];
+        for (name, setup, warm, measured, thrown) in holders {
+            let mut across = Across::with_steps(1_000_000);
+            assert!(matches!(across.run(&setup), Answer::Normal(_)), "{name}");
+            assert!(matches!(across.run(&warm), Answer::Normal(_)), "{name}");
+            let warm_capacity = across.agent.kept.capacity();
+            assert!(warm_capacity < 300, "{name}: {warm_capacity}");
+            for (source, normal) in [(&measured, true), (&thrown, false)] {
+                for round in 0..2 {
+                    let (answer, before, after) = collected_run(&mut across, source);
+                    assert_eq!(
+                        matches!(answer, Answer::Normal(_)),
+                        normal,
+                        "{name}: {answer:?}"
+                    );
+                    assert_eq!(
+                        across.agent.kept.capacity(),
+                        warm_capacity,
+                        "{name}: {source}"
+                    );
+                    if round == 1 {
+                        assert_eq!(after, before, "{name}: {source}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// `docs/design/engine.md`, "Memory budget": a room of the kept stack whose growth the
+    /// budget refuses ends the run in `Terminated(MemoryBudget)`, and `with_kept_room` ends the
+    /// room on that way out too: `used()` and the kept stack's capacity read what they read
+    /// before.
+    #[test]
+    fn a_kept_room_past_the_budget_ends_across_a_call() {
+        let (mut agent, realm) =
+            agent_with_realm_and(crate::object::string::across::story_limits());
+        enter(&mut agent, &realm);
+        let used = agent.heap.accounting.used();
+        let capacity = agent.kept.capacity();
+        agent.heap.accounting.set_limit(used + 64 * 1_024);
+        let answer = agent.with_kept_room(|agent, room| {
+            agent.reserve_kept(room, 200)?;
+            for _ in 0..200 {
+                agent.keep(Value::Undefined);
+            }
+            agent.reserve_kept(room, 100_000)
+        });
+        assert_eq!(answer, Err(Abrupt::Terminated(Termination::MemoryBudget)));
+        assert_eq!(agent.heap.accounting.used(), used);
+        assert_eq!(agent.kept.capacity(), capacity);
     }
 }

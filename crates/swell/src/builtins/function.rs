@@ -36,7 +36,7 @@ use crate::host::outcome::{Completion, Termination};
 use crate::host::{ErrorKind, HookCx, Host};
 use crate::object::ObjectKind;
 use crate::object::bound_function::bound_function_create;
-use crate::object::builtin_function::BuiltinId;
+use crate::object::builtin_function::{BuiltinId, KeptRoom};
 use crate::object::property::{Key, Property};
 use crate::realm::intrinsics::Making;
 use crate::script::{Compiled, vec_bytes};
@@ -157,7 +157,8 @@ impl<H: Host> Agent<H> {
     }
 
     /// `Function.prototype.apply ( thisArg, argArray )` (`#sec-function.prototype.apply`). The
-    /// list is kept from its first element until the call returns, then released and credited.
+    /// list is kept in a room of the kept stack from its first element until the call returns,
+    /// then released and credited.
     #[inline(never)]
     fn function_apply(&mut self, this: Value, args: &[Value]) -> Completion<Value> {
         // 1. Let func be the this value. 2. If IsCallable(func) is false, throw a TypeError.
@@ -176,26 +177,30 @@ impl<H: Host> Agent<H> {
         }
         // 4. Let argList be ? CreateListFromArrayLike(argArray). 5. PrepareForTailCall().
         // 6. Return ? Call(func, thisArg, argList).
+        // The room is ended on every way out, as `Agent::with_kept_room` ends it; written out
+        // here so that no closure's frame stands between this call and the callee's re-entry.
         let mark = self.kept.len();
+        let mut room = self.kept_room();
         let mut charged = 0;
-        let result = match self.create_list_from_array_like(arg_array, &mut charged) {
+        let result = match self.create_list_from_array_like(arg_array, &mut charged, &mut room) {
             Ok(list) => self.call_value(this, this_arg, &list),
             Err(abrupt) => Err(abrupt),
         };
-        self.release(mark);
+        self.end_kept_room(mark, &room);
         self.heap.accounting.credit(charged);
         result
     }
 
     /// CreateListFromArrayLike (`#sec-createlistfromarraylike`) of `value`, validElementTypes
-    /// all: each element is pushed on the kept stack as it is read, and stays there until the
-    /// caller releases it; `charged` counts the bytes charged for the elements, which the caller
-    /// credits.
+    /// all: each element is pushed on the kept stack as it is read, in `room`, and stays there
+    /// until the caller releases it; `charged` counts the bytes charged for the elements' slots
+    /// of the list, which the caller credits.
     #[inline(never)]
     fn create_list_from_array_like(
         &mut self,
         value: Value,
         charged: &mut u64,
+        room: &mut KeptRoom,
     ) -> Completion<Vec<Value>> {
         // 1. validElementTypes is all. 2. If obj is not an Object, throw a TypeError.
         let Value::Object(object) = value else {
@@ -214,16 +219,14 @@ impl<H: Host> Agent<H> {
             // 6.a. Let indexName be ! ToString(𝔽(index)). 6.b. Let next be ? Get(obj, indexName).
             let key = self.index_key(index)?;
             let next = self.get(object, key)?;
-            // 6.c does not apply to all. 6.d. Append next to list: kept, and charged for its kept
-            // slot and its slot of the argument list.
-            let bytes = vec_bytes::<Value>(2);
+            // 6.c does not apply to all. 6.d. Append next to list: kept in the room, and charged
+            // for its slot of the argument list.
+            let bytes = vec_bytes::<Value>(1);
             if self.heap.accounting.charge(bytes).is_err() {
                 return Err(self.terminate(Termination::MemoryBudget));
             }
             *charged = charged.saturating_add(bytes);
-            if self.kept.try_reserve(1).is_err() {
-                return Err(self.terminate(Termination::MemoryBudget));
-            }
+            self.reserve_kept(room, 1)?;
             self.keep(next);
             // 6.e. Set index to index + 1.
             index += 1.0;

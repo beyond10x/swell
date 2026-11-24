@@ -491,7 +491,7 @@ mod tests {
                 .unwrap()
                 .description
                 .unwrap();
-            let units = agent.string_units(description).unwrap();
+            let units = agent.string_units_for_tests(description).unwrap();
             assert_eq!(String::from_utf16_lossy(&units), expected);
         }
         drop(b);
