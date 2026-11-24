@@ -216,6 +216,12 @@ pub struct Agent<H: Host> {
     pub(crate) error_site: Option<SiteRecord>,
     /// The microtask queue, one FIFO order for every entry (decision 11, `host/jobs.rs`).
     pub(crate) microtasks: VecDeque<Entry<H>>,
+    /// The charge of the microtask queue's capacity, capacity × `size_of::<Entry<H>>()` bytes
+    /// (`host/jobs.rs`).
+    pub(crate) queue_charge: crate::heap::accounting::Charge,
+    /// The counting build: what the queue adds to the tallies of `copies`.
+    #[cfg(test)]
+    pub(crate) queue_tally: crate::object::string::copies::Tally,
     /// A checkpoint runs: every `Cx` call is a nested entry of it, and a checkpoint asked for
     /// inside it answers at once ("performing a microtask checkpoint",
     /// `html:perform-a-microtask-checkpoint`).
@@ -292,6 +298,9 @@ impl<H: Host> Agent<H> {
             syntax_error_at: None,
             error_site: None,
             microtasks: VecDeque::new(),
+            queue_charge: crate::heap::accounting::Charge::default(),
+            #[cfg(test)]
+            queue_tally: crate::object::string::copies::Tally::default(),
             checkpointing: false,
             running_host_defined: Vec::new(),
             #[cfg(test)]
@@ -698,7 +707,9 @@ impl<H: Host> Agent<H> {
     /// stale or released one answers `Err(StaleHandle)`, one of another agent
     /// `Err(ForeignHandle)`, and nothing is queued (HOST-192). It runs no code, spends no step and
     /// calls no hook; the queue holds the realm until the microtask is taken off. A host
-    /// microtask is the host's storage and is not charged to the memory budget.
+    /// microtask's closure is the host's storage and is not charged to the memory budget; its
+    /// slot of the queue's capacity is, and when the budget refuses the queue's growth nothing
+    /// is queued and it answers `Err(MemoryBudget)` (HOST-215).
     pub fn queue_microtask(&mut self, realm: &Realm, task: Microtask<H>) -> Result<(), HostError> {
         self.alive()?;
         let realm = self.live_realm(realm)?;

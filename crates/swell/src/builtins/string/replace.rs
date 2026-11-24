@@ -95,7 +95,7 @@ enum Hook {
 /// is true) or the String template, as its code units.
 enum Replacement {
     Function(Value),
-    Template(Vec<u16>),
+    Template(crate::object::string::Units),
 }
 
 /// The arguments of GetSubstitution (`#sec-getsubstitution`) but the template: the matched
@@ -927,7 +927,7 @@ mod tests {
     ) -> String {
         let template = string(agent, template);
         let made = agent.get_substitution(substitution, template).unwrap();
-        String::from_utf16_lossy(&agent.string_units(made).unwrap())
+        String::from_utf16_lossy(&agent.string_units_for_tests(made).unwrap())
     }
 
     /// GetSubstitution (`#sec-getsubstitution`), each row of the table of its steps: `$$` a
@@ -1047,4 +1047,47 @@ mod tests {
         };
         assert_eq!(substituted(&mut agent, &past, "[$']"), "[]");
     }
+
+    /// `docs/design/engine.md`, "Memory budget": the copies of the String and of searchString
+    /// that `replace` (`#sec-string.prototype.replace`) holds while its replacer runs are
+    /// charged. Four levels, each holding a copy of 65,536 code units, raise the most charged
+    /// by at least four such copies, do not fit a room of three, leave no capacity uncovered at
+    /// any entry into script, and take the steps they took before.
+    #[test]
+    fn replace_holds_charged_copies_across_a_call_of_its_replacer() {
+        use crate::builtins::string::transform::tests::Answer;
+        use crate::host::Termination;
+        use crate::object::string::across::Across;
+        use crate::object::string::copies;
+        let mut units = vec![0x61; 65_535];
+        units.push(0x78);
+        let source = "var d = 0; function f() { if (++d < 4) s.replace(\"x\", f); return \"y\"; } \
+                      s.replace(\"x\", f).length";
+        let mut across = Across::with_steps(4_000_000);
+        across.string("s", &units);
+        let script = across.parse(source);
+        across.agent.heap.accounting.reset_high_water();
+        let before = across.agent.heap.accounting.high_water();
+        assert_eq!(
+            across.evaluate(&script),
+            Answer::Normal("Number(65536.0)".to_string())
+        );
+        let risen = across.agent.heap.accounting.high_water() - before;
+        assert!(risen >= 4 * 131_072, "{risen}");
+        assert_eq!(copies::uncovered_at_entry(), 0);
+        assert_eq!(across.steps(), REPLACE_ACROSS_STEPS);
+
+        let mut across = Across::with_steps(4_000_000);
+        across.string("s", &units);
+        let script = across.parse(source);
+        across.room(3 * 131_072);
+        assert_eq!(
+            across.evaluate(&script),
+            Answer::Terminated(Termination::MemoryBudget)
+        );
+    }
+
+    /// The steps of the script of
+    /// [`replace_holds_charged_copies_across_a_call_of_its_replacer`] on the base.
+    const REPLACE_ACROSS_STEPS: u64 = 786_530;
 }

@@ -1576,6 +1576,34 @@ out. The entries the host's own calls add, to the root table and to the list of 
 to a scope (`host-interface.md`, section 4), are the host's, bounded by its calls, and are not
 charged; the records they name are charged as any record.
 
+Added on 2026-11-24: a buffer of the engine outside its arenas whose size a script controls (a
+copy of a String's code units, the units a String builder grows, a list of values, keys,
+captures or records, the microtask queue, the kept stack's room) is charged by its capacity
+before it is made or grows, and credited when it drops. It is held as a `ChargedVec` grown only
+by `Agent::reserve_vec`, or as a `Charge` (`heap/accounting.rs`), whose drop gives the bytes back
+at once; the kept stack's room is a `KeptRoom` holding a `Charge`, ended on every way out by
+`Agent::with_kept_room`. A list charged by hand at its exact length is allowed only when this
+paragraph names it: the activation's copy of the arguments, the spread and rest lists, the
+`apply` list, the bound arguments, `param_strings` of `CreateDynamicFunction`, the descriptors
+of `Object.freeze` and `Object.seal`, `KeyList`, `SourceCopy`, the text of `JSON.parse`, the
+positions of `replaceAll`, the buffers of `normalize`, the captures and group names of
+RegExpBuiltinExec, and the list of `Agent::coerce_all`. Each is bounded by its count of
+elements, which steps or the arguments bound. One set is charged per entry and not by its
+nodes: the cycle set of `JSON.stringify` (`on_stack`, a `BTreeSet`), charged four keys' bytes
+in each open frame's charge and bounded by the open frames, which `memory_bytes` bounds through
+that charge; the walk has no depth limit. A buffer alive while the engine calls into script is
+never left uncharged: it is charged, or the code reads in place and makes none. Three are
+bounded by a limit and not charged: the list of activations, at most `reentry_depth` + 1
+entries (at 256, 257 × `size_of::<Activation>()` = 22,616 bytes); the spare capacity of the frame
+stack, at most `frame_depth` frames, each charged `frame_bytes()` (spare at most `frame_depth` ×
+`size_of::<Frame>()` = 2,080,000 bytes at `frame_depth` 10,000); and the growth of the kept stack by
+`keep` outside a room, a fixed count of values per running builtin (at most 10 values, so at
+`reentry_depth` 256 at most 257 × 10 × `size_of::<Value>()` = 41,120 bytes). A copy of n code
+units charges n steps before it is made, unless its caller charged those units first; the URI
+functions copy first and charge each unit as their loops read it; the copy of a call's n
+arguments by `Call(n)` and `New(n)` charges no step, since each was pushed by an instruction
+that spent one.
+
 The frontend charges through one ledger: a trait of `swell-syntax` with three operations,
 charge, credit and poll, which `swell-compiler` takes too and which `swell` implements once,
 over the agent's accounting and its interrupt flag; there is no second budget. The lexer, the
@@ -1599,7 +1627,8 @@ sweep or at the host's next charge, or at once by `Agent::credit_host_bytes`, wh
 **Queued jobs.** Added on 2026-11-23 for slice 10. What a host sees: a promise job costs the
 memory budget from the moment it is queued until the moment a checkpoint takes it off the queue,
 and nothing in the queue after that, whether it then runs or a termination ends the checkpoint
-first; a host microtask costs the budget nothing. So after a script that queues 100 reaction
+first; a host microtask costs its slot of the queue's capacity, and a refused growth answers
+`Err(HostError::MemoryBudget)` with nothing queued. So after a script that queues 100 reaction
 jobs, `heap_bytes()` exceeds the reading before it by at least 100 times the bytes of one entry,
 and the checkpoint that runs them gives those bytes back. The mechanism: the queue is a
 `VecDeque` of entries of one fixed size in the agent (`host/jobs.rs`). A promise job's entry
@@ -1621,21 +1650,24 @@ across a call into code, before it calls a hook or code. The queue is a root: it
 and realm of every promise job, the script or module it will make active and the [[HostDefined]]
 of its JobCallbacks, through `HostData::trace` as a realm's and a script's [[HostDefined]] are
 traced; and the realm of every host microtask. So everything a queued job holds survives every
-collection until the job is taken off. A host microtask is not charged: its box is the host's
+collection until the job is taken off. A host microtask's box is not charged: it is the host's
 allocation and holds Rust state the collector cannot see, so an engine value it needs it holds
 in `Root`s of the host's table, a root already. It is the host's own storage, bounded by the
 host's calls, as the entries of the root table are ("Memory budget", the rule), and a script
 grows it only through a host function that queues one, a step per call; every entry taken off
 costs a step. Dropping the agent drops the queue with every closure in it. The queue's buffer
-grows by the engine's own doubling with `try_reserve_exact`; its spare capacity, at most the
-most entries queued at once since the queue was last empty, is not charged, and a checkpoint
-that leaves the queue empty shrinks a buffer of more than 64 entries to 64. The reactions a
+grows by the engine's own doubling with `try_reserve_exact`, with no smaller fallback; its
+capacity is charged by a `Charge` before it grows, credited when a checkpoint that leaves the
+queue empty shrinks a buffer of more than 64 entries to 64, and credited whole when the queue is
+dropped. While a promise job is queued its slot is charged twice, in the capacity and in its
+entry. A refused growth for a promise job credits the entry's bytes and ends the entry in
+`Terminated(MemoryBudget)` with nothing queued; for a host microtask `queue_microtask` answers
+`Err(HostError::MemoryBudget)` with nothing queued. The reactions a
 pending promise holds are charged with the promise, in a box of its kind, by capacity as its
 lists grow; settling it empties the lists and credits them, and the jobs made from them are
-charged as above. Rejected: charging a host microtask (`queue_microtask` answers no outcome, so a
-refusal would have no answer the host could act on, and the closure is the host's allocation);
-charging the queue's capacity as an arena's (a host microtask would grow a charge it could not
-be refused).
+charged as above. Rejected: charging a host microtask's box (the closure is the host's
+allocation, which the engine cannot size); leaving the queue's capacity uncharged (2026-11-24: a
+script that queues jobs would hold a buffer it sized across every job it runs).
 
 **A built-in function with slots.** Added on 2026-11-23 for slice 10. What a script sees, the
 standard's: CreateBuiltinFunction with additionalInternalSlots (`sec-createbuiltinfunction`)

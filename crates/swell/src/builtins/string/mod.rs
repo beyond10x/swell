@@ -34,10 +34,10 @@ pub(crate) mod replace;
 pub(crate) mod transform;
 
 use crate::builtins::object::argument;
-use crate::heap::string::HeapString;
+use crate::heap::accounting::ChargedVec;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
-use crate::host::{ErrorKind, Host, Termination};
+use crate::host::{ErrorKind, Host};
 use crate::object::ObjectKind;
 use crate::object::builtin_function::BuiltinId;
 use crate::ops::conversion::clamp_index;
@@ -68,10 +68,10 @@ pub(crate) enum StringBuiltin {
     Pattern(pattern::PatternBuiltin),
 }
 
-/// The code units of a String being built.
+/// The code units of a String being built, charged by their capacity while the builder lives.
 #[derive(Default)]
 pub(crate) struct StringBuilder {
-    units: Vec<u16>,
+    units: ChargedVec<u16>,
 }
 
 impl StringBuilder {
@@ -194,8 +194,9 @@ pub(crate) fn utf16_encode_code_point(code_point: u32) -> Option<EncodedCodePoin
 
 impl<H: Host> Agent<H> {
     /// Append `units` to `builder`: a result longer than `string_length` throws a `RangeError`
-    /// before anything is copied; one whose String would not fit the memory budget ends the run
-    /// in `Terminated(MemoryBudget)` before the buffer grows; a step per code unit.
+    /// before anything is copied; a step per code unit; then the builder's growth is charged to
+    /// the memory budget before it is made ([`Agent::reserve_builder`]), and one the budget
+    /// refuses ends the run in `Terminated(MemoryBudget)` before the buffer grows.
     pub(crate) fn append_units(
         &mut self,
         builder: &mut StringBuilder,
@@ -209,14 +210,22 @@ impl<H: Host> Agent<H> {
             ));
         }
         self.charge_steps(u64::try_from(units.len()).unwrap_or(u64::MAX))?;
-        let bytes = u64::try_from(length).unwrap_or(u64::MAX).saturating_mul(2);
-        if self.heap.accounting.check(bytes).is_err()
-            || builder.units.try_reserve(units.len()).is_err()
-        {
-            return Err(self.terminate(Termination::MemoryBudget));
+        self.reserve_builder(builder, units.len())?;
+        if builder.units.extend_from_slice(units).is_err() {
+            return Err(self.fault());
         }
-        builder.units.extend_from_slice(units);
         Ok(())
+    }
+
+    /// Room in `builder` for `more` code units ([`Agent::reserve_vec`]), its doubled growth
+    /// capped at `string_length` units and charged to the memory budget before it is made.
+    pub(crate) fn reserve_builder(
+        &mut self,
+        builder: &mut StringBuilder,
+        more: usize,
+    ) -> Completion<()> {
+        let most = usize::try_from(self.limits.string_length).unwrap_or(usize::MAX);
+        self.reserve_vec_within(&mut builder.units, more, most)
     }
 
     /// Append the code units of `text`, as [`Agent::append_units`].
@@ -234,6 +243,19 @@ impl<H: Host> Agent<H> {
         string: StringRef,
     ) -> Completion<()> {
         let count = self.string_length(string)?;
+        self.append_string_range(builder, string, 0, count)
+    }
+
+    /// Append the code units of `string` from `from` to `to`, as [`Agent::append_string`]. A
+    /// range that is not inside the String is a broken invariant.
+    pub(crate) fn append_string_range(
+        &mut self,
+        builder: &mut StringBuilder,
+        string: StringRef,
+        from: usize,
+        to: usize,
+    ) -> Completion<()> {
+        let count = to.saturating_sub(from);
         let length = builder.units.len().saturating_add(count);
         if u64::try_from(length).unwrap_or(u64::MAX) > self.limits.string_length {
             return Err(self.throw_error(
@@ -242,32 +264,15 @@ impl<H: Host> Agent<H> {
             ));
         }
         self.charge_steps(u64::try_from(count).unwrap_or(u64::MAX))?;
-        let bytes = u64::try_from(length).unwrap_or(u64::MAX).saturating_mul(2);
-        if self.heap.accounting.check(bytes).is_err() || builder.units.try_reserve(count).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        let appended = match self.heap.strings.get(string.handle) {
-            Ok(HeapString::Latin1(latin1)) => {
-                builder
-                    .units
-                    .extend(latin1.iter().map(|&byte| u16::from(byte)));
-                true
-            }
-            Ok(HeapString::Utf16(units)) => {
-                builder.units.extend_from_slice(units);
-                true
-            }
-            Err(_) => false,
-        };
-        if !appended {
-            return Err(self.fault());
-        }
-        Ok(())
+        self.reserve_builder(builder, count)?;
+        self.extend_units(&mut builder.units, string, from, to)
     }
 
-    /// The String of the units built.
+    /// The String of the units built: the units are taken out and the builder's charge is
+    /// given back before the String is made.
     pub(crate) fn finish_string(&mut self, builder: StringBuilder) -> Completion<StringRef> {
-        self.new_string_value(&builder.units)
+        let units = builder.units.into_vec();
+        self.new_string_value(&units)
     }
 
     /// `%String%` (22.1.1) with `String.prototype.constructor`, `indexOf`, `toString` and
@@ -728,7 +733,7 @@ mod tests {
         else {
             panic!("String(symbol) is not a String");
         };
-        let text = agent.string_units(text).unwrap();
+        let text = agent.string_units_for_tests(text).unwrap();
         assert_eq!(
             String::from_utf16_lossy(&text),
             "Symbol(Symbol.hasInstance)"
@@ -741,7 +746,7 @@ mod tests {
         ) else {
             panic!("String(symbol) is not a String");
         };
-        let text = agent.string_units(text).unwrap();
+        let text = agent.string_units_for_tests(text).unwrap();
         assert_eq!(String::from_utf16_lossy(&text), "Symbol()");
         let thrown = agent.construct_value(string, &[symbol], None);
         assert!(matches!(thrown, Err(Abrupt::Throw(_))), "{thrown:?}");
@@ -751,7 +756,8 @@ mod tests {
     /// make asks the memory budget before it grows (`docs/design/engine.md`, decision 4, "Memory
     /// budget"): with `string_length` far above it, code units whose String would not fit
     /// `memory_bytes` end the run in `Terminated(MemoryBudget)` before the buffer grows, and
-    /// nothing is charged; within the budget they are appended.
+    /// nothing more is charged; within the budget they are appended. The builder's 1,000 code
+    /// units are charged by its capacity while it lives, and credited when it drops.
     #[test]
     fn builder_past_the_memory_budget_terminates() {
         let mut limits = limits();
@@ -770,6 +776,8 @@ mod tests {
             "{ended:?}"
         );
         assert_eq!(builder.units.len(), 1000);
+        assert_eq!(agent.heap.accounting.used(), used + 2000);
+        drop(builder);
         assert_eq!(agent.heap.accounting.used(), used);
     }
 

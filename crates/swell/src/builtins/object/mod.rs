@@ -684,7 +684,7 @@ mod tests {
             else {
                 panic!("toString answered no String");
             };
-            let text = agent.string_units(text).unwrap();
+            let text = agent.string_units_for_tests(text).unwrap();
             assert_eq!(String::from_utf16_lossy(&text), expected);
         }
     }

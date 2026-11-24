@@ -11,6 +11,7 @@
 //! `Math` (slice 4), so it comes with the `exponentiation` feature.
 
 use super::conversion::{number_to_int32, number_to_uint32};
+use crate::heap::accounting::ChargedVec;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
@@ -131,8 +132,15 @@ impl<H: Host> Agent<H> {
             ));
         }
         self.charge_steps(length)?;
-        let mut units = self.string_units(left)?;
-        units.extend(self.string_units(right)?);
+        // One buffer of both Strings' units, charged before it is made; its charge is given
+        // back before the String is made.
+        let left_length = self.string_length(left)?;
+        let right_length = self.string_length(right)?;
+        let mut units = ChargedVec::new();
+        self.reserve_vec(&mut units, left_length.saturating_add(right_length))?;
+        self.extend_units(&mut units, left, 0, left_length)?;
+        self.extend_units(&mut units, right, 0, right_length)?;
+        let units = units.into_vec();
         self.new_string_value(&units)
     }
 
@@ -186,7 +194,7 @@ mod tests {
         let Value::String(string) = value else {
             panic!("{value:?} is not a String");
         };
-        String::from_utf16(&agent.string_units(string).unwrap()).unwrap()
+        String::from_utf16(&agent.string_units_for_tests(string).unwrap()).unwrap()
     }
 
     /// A `valueOf` answering 7.

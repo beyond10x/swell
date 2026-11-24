@@ -25,9 +25,10 @@
 use crate::builtins::object::argument;
 use crate::builtins::string::StringBuilder;
 use crate::builtins::string::replace::Substitution;
+use crate::heap::accounting::ChargedVec;
+use crate::host::Host;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
-use crate::host::{Host, Termination};
 use crate::object::builtin_function::KeptRoom;
 use crate::object::property::Key;
 use crate::ops::conversion::clamp_index;
@@ -61,23 +62,6 @@ enum Replacement {
     Template(StringRef),
 }
 
-/// A list whose room is charged to the memory budget before it is reserved; its owner credits
-/// [`Charged::bytes`] when it drops the list, whatever the completion.
-struct Charged<T> {
-    list: Vec<T>,
-    bytes: u64,
-}
-
-impl<T> Charged<T> {
-    /// An empty list, nothing charged.
-    fn new() -> Charged<T> {
-        Charged {
-            list: Vec::new(),
-            bytes: 0,
-        }
-    }
-}
-
 /// One result of `@@replace` read: its position clamped to the String, the length of its
 /// matched String, and its replacement String.
 struct Piece {
@@ -92,25 +76,6 @@ fn count(units: usize) -> u64 {
 }
 
 impl<H: Host> Agent<H> {
-    /// Append `item` to `list`: when the list has no room, its room grows to twice what it
-    /// was, at least 4, the bytes charged to the memory budget before it is reserved; over the
-    /// budget the run ends in `Terminated(MemoryBudget)`.
-    fn push_charged<T>(&mut self, list: &mut Charged<T>, item: T) -> Completion<()> {
-        let capacity = list.list.capacity();
-        if list.list.len() == capacity {
-            let wanted = capacity.saturating_mul(2).max(4);
-            let bytes = count(wanted - capacity).saturating_mul(count(size_of::<T>()));
-            self.charge_bytes(bytes)?;
-            list.bytes = list.bytes.saturating_add(bytes);
-            let length = list.list.len();
-            if list.list.try_reserve_exact(wanted - length).is_err() {
-                return Err(self.terminate(Termination::MemoryBudget));
-            }
-        }
-        list.list.push(item);
-        Ok(())
-    }
-
     /// Keep `value` on the kept stack in room charged to `room` (`Agent::reserve_kept`).
     fn keep_in(&mut self, room: &mut KeptRoom, value: Value) -> Completion<()> {
         self.reserve_kept(room, 1)?;
@@ -401,10 +366,12 @@ impl<H: Host> Agent<H> {
                 // nextSourcePosition to position, and replacementString. iii. Set
                 // nextSourcePosition to position + matchLength.
                 Ok(piece) if piece.position >= next_source_position => {
-                    let appended = self
-                        .read_units(string, next_source_position, piece.position)
-                        .and_then(|units| self.append_units(&mut accumulated, &units))
-                        .and_then(|()| self.append_string(&mut accumulated, piece.replacement));
+                    let appended = self.regexp_replace_append(
+                        &mut accumulated,
+                        string,
+                        next_source_position,
+                        &piece,
+                    );
                     next_source_position = piece.position.saturating_add(piece.match_length);
                     appended
                 }
@@ -418,10 +385,38 @@ impl<H: Host> Agent<H> {
         // string-concatenation of accumulatedResult and the substring of S from
         // nextSourcePosition.
         if next_source_position < length {
-            let rest = self.read_units(string, next_source_position, length)?;
-            self.append_units(&mut accumulated, &rest)?;
+            self.append_read_range(&mut accumulated, string, next_source_position, length)?;
         }
         self.finish_string(accumulated)
+    }
+
+    /// Step 15.p.ii of `@@replace`: the substring of S from `from` to the piece's position,
+    /// then its replacement String. Not inlined, so that the frame of
+    /// [`Agent::regexp_replace_results`], alive while a replacer runs, holds none of it.
+    #[inline(never)]
+    fn regexp_replace_append(
+        &mut self,
+        accumulated: &mut StringBuilder,
+        string: StringRef,
+        from: usize,
+        piece: &Piece,
+    ) -> Completion<()> {
+        self.append_read_range(accumulated, string, from, piece.position)?;
+        self.append_string(accumulated, piece.replacement)
+    }
+
+    /// Append the code units of `string` from `from` to `to`, a step per code unit for reading
+    /// them and then the steps of the append, as a copy read and then appended would charge,
+    /// but read in place.
+    fn append_read_range(
+        &mut self,
+        builder: &mut StringBuilder,
+        string: StringRef,
+        from: usize,
+        to: usize,
+    ) -> Completion<()> {
+        self.charge_steps(count(to.saturating_sub(from)))?;
+        self.append_string_range(builder, string, from, to)
     }
 
     /// Steps 15.a to 15.o of `@@replace` for one result, kept: its length, matched, position,
@@ -453,7 +448,7 @@ impl<H: Host> Agent<H> {
         let position = self.to_integer_or_infinity(position);
         self.release(mark);
         let position = clamp_index(position?, length);
-        let mut captures = Charged::new();
+        let mut captures = ChargedVec::new();
         let made = self
             .regexp_replace_captures(result, captures_count, &mut captures, room)
             .and_then(|()| {
@@ -461,12 +456,11 @@ impl<H: Host> Agent<H> {
                     matched,
                     string,
                     position,
-                    captures: &captures.list,
+                    captures: &captures,
                     named_captures: None,
                 };
                 self.regexp_replacement_string(result, &substitution, replacement, room)
             });
-        self.heap.accounting.credit(captures.bytes);
         Ok(Piece {
             position,
             match_length,
@@ -480,7 +474,7 @@ impl<H: Host> Agent<H> {
         &mut self,
         result: ObjectRef,
         captures_count: f64,
-        captures: &mut Charged<Option<StringRef>>,
+        captures: &mut ChargedVec<Option<StringRef>>,
         room: &mut KeptRoom,
     ) -> Completion<()> {
         // g. Let captures be a new empty List. h. Let n be 1. i. Repeat, while n ≤ nCaptures,
@@ -500,7 +494,7 @@ impl<H: Host> Agent<H> {
                     Some(capture)
                 }
             };
-            self.push_charged(captures, capture)?;
+            self.push_vec(captures, capture)?;
             // v. Set n to n + 1.
             n += 1.0;
         }
@@ -562,34 +556,33 @@ impl<H: Host> Agent<H> {
         substitution: &Substitution<'_>,
         named_captures: Value,
     ) -> Completion<StringRef> {
-        let mut replacer_args = Charged::new();
+        let mut replacer_args = ChargedVec::new();
         let built = self.replacer_args(&mut replacer_args, substitution, named_captures);
         let answer = match built {
             // The arguments are kept by the caller and by the call's activation.
-            Ok(()) => self.call_value(function, Value::Undefined, &replacer_args.list),
+            Ok(()) => self.call_value(function, Value::Undefined, &replacer_args),
             Err(abrupt) => Err(abrupt),
         };
-        self.heap.accounting.credit(replacer_args.bytes);
         self.string_of_kept(answer?)
     }
 
     /// The list replacerArgs of step 15.k.i and ii of `@@replace`, in `list`.
     fn replacer_args(
         &mut self,
-        list: &mut Charged<Value>,
+        list: &mut ChargedVec<Value>,
         substitution: &Substitution<'_>,
         named_captures: Value,
     ) -> Completion<()> {
-        self.push_charged(list, Value::String(substitution.matched))?;
+        self.push_vec(list, Value::String(substitution.matched))?;
         for capture in substitution.captures {
             let value = capture.map_or(Value::Undefined, Value::String);
-            self.push_charged(list, value)?;
+            self.push_vec(list, value)?;
         }
         // An index of a String is below 2^53, so the conversion is exact.
-        self.push_charged(list, Value::Number(substitution.position as f64))?;
-        self.push_charged(list, Value::String(substitution.string))?;
+        self.push_vec(list, Value::Number(substitution.position as f64))?;
+        self.push_vec(list, Value::String(substitution.string))?;
         if !matches!(named_captures, Value::Undefined) {
-            self.push_charged(list, named_captures)?;
+            self.push_vec(list, named_captures)?;
         }
         Ok(())
     }

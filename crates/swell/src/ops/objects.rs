@@ -1377,7 +1377,7 @@ mod tests {
         let Value::String(string) = value else {
             panic!("{value:?} is not a String");
         };
-        String::from_utf16_lossy(&agent.string_units(string).unwrap())
+        String::from_utf16_lossy(&agent.string_units_for_tests(string).unwrap())
     }
 
     /// The elements of an Array of two, an entry of key+value.

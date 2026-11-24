@@ -16,6 +16,7 @@ use swell_compiler::bytecode::{HandlerKind, Instruction, TAG_NORMAL, TAG_THROW};
 
 use super::frame::{Entry, Enumerator, SlotValue};
 use crate::env::{NameReference, NameTable, SlotNames};
+use crate::heap::accounting::ChargedVec;
 use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion};
@@ -1402,14 +1403,13 @@ impl<H: Host> Agent<H> {
     /// `Call(n)`: EvaluateCall (`#sec-evaluatecall`). An ECMAScript function gets a frame on this
     /// loop; any other function is called from Rust, and the interrupt is checked when it
     /// returns. The frame of a call on this loop is made in [`Agent::push_call_frame`], so that
-    /// what it takes is not on the stack while a call from Rust runs.
+    /// what it takes is not on the stack while a call from Rust runs. `this` and the function
+    /// are read where they are; the n arguments are copied once (`docs/design/engine.md`,
+    /// "Memory budget"): into a plain list the frame takes over at once, or, for a call from
+    /// Rust, into a list charged before it is made ([`Agent::charged_arguments`]).
     fn call_instruction(&mut self, count: u32) -> Completion<Flow> {
         let count = usize::try_from(count).unwrap_or(usize::MAX);
-        let values = self.peek_values(count.saturating_add(2))?;
-        let (this, function, args) = match values.as_slice() {
-            [this, function, args @ ..] => (*this, *function, args.to_vec()),
-            _ => return Err(self.fault()),
-        };
+        let function = self.peek_value(count)?;
         let Value::Object(object) = function else {
             return Err(self.throw_error(ErrorKind::TypeError, "the value is not a function"));
         };
@@ -1417,11 +1417,72 @@ impl<H: Host> Agent<H> {
             return Err(self.throw_error(ErrorKind::TypeError, "the object is not a function"));
         }
         if self.is_ecmascript_function(object)? {
-            return self.push_call_frame(object, this, &args, count);
+            return self.call_frame_of_instruction(object, count);
         }
+        // A call from Rust: the copy is dropped, and so credited, when this returns, on every
+        // way out.
+        let this = self.peek_value(count.saturating_add(1))?;
+        let args = self.charged_arguments(count)?;
         let result = self.internal_call(object, this, &args)?;
         self.check_interrupt()?;
         self.replace(count.saturating_add(2), result)
+    }
+
+    /// The call of the ECMAScript function `function` by `Call(count)`: `this` and the
+    /// arguments read for [`Agent::push_call_frame`]. Not inlined, so that the frame of
+    /// [`Agent::call_instruction`], alive while a call from Rust runs, holds none of it.
+    #[inline(never)]
+    fn call_frame_of_instruction(&mut self, function: ObjectRef, count: usize) -> Completion<Flow> {
+        let this = self.peek_value(count.saturating_add(1))?;
+        let args = self.peek_arguments(count)?;
+        self.push_call_frame(function, this, &args, count)
+    }
+
+    /// The `count` arguments on top of the operand stack, bottom first, left there, in a plain
+    /// list: for a frame that copies them into its own charged slots before any code runs.
+    fn peek_arguments(&mut self, count: usize) -> Completion<Vec<Value>> {
+        #[cfg(test)]
+        note_instruction_copy(count);
+        let frame = self.top_frame()?;
+        let start = frame.stack.len().checked_sub(count);
+        let values: Option<Vec<Value>> = start.and_then(|start| {
+            frame.stack.get(start..).map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| match entry {
+                        Entry::Value(value) => Some(*value),
+                        _ => None,
+                    })
+                    .collect()
+            })
+        });
+        match values {
+            Some(values) if values.len() == count => Ok(values),
+            _ => Err(self.fault()),
+        }
+    }
+
+    /// The `count` arguments on top of the operand stack, bottom first, left there, in a list
+    /// charged to the memory budget before it is made and credited when it drops. It charges
+    /// no step: each value was pushed by an instruction that spent one.
+    fn charged_arguments(&mut self, count: usize) -> Completion<ChargedVec<Value>> {
+        #[cfg(test)]
+        note_instruction_copy(count);
+        let mut args = self.new_charged_vec(count)?;
+        let frame = self.top_frame()?;
+        let start = frame.stack.len().checked_sub(count);
+        let copied = start
+            .and_then(|start| frame.stack.get(start..))
+            .is_some_and(|entries| {
+                entries.iter().all(|entry| match entry {
+                    Entry::Value(value) => args.push(*value).is_ok(),
+                    _ => false,
+                })
+            });
+        if !copied {
+            return Err(self.fault());
+        }
+        Ok(args)
     }
 
     /// `CallEval(n)`: a call whose callee is the IdentifierReference `eval`
@@ -1481,24 +1542,35 @@ impl<H: Host> Agent<H> {
     }
 
     /// `New(n)`: EvaluateNew (`#sec-evaluatenew`). The frame of a construction on this loop is
-    /// made in [`Agent::push_construct_frame`], as for `Call(n)`.
+    /// made in [`Agent::push_construct_frame`], as for `Call(n)`, and the arguments are copied
+    /// once, as `Call(n)` copies them.
     fn new_instruction(&mut self, count: u32) -> Completion<Flow> {
         let count = usize::try_from(count).unwrap_or(usize::MAX);
-        let values = self.peek_values(count.saturating_add(1))?;
-        let (constructor, args) = match values.as_slice() {
-            [constructor, args @ ..] => (*constructor, args.to_vec()),
-            _ => return Err(self.fault()),
-        };
+        let constructor = self.peek_value(count)?;
         if !self.is_constructor(constructor)? {
             return Err(self.throw_error(ErrorKind::TypeError, "the value is not a constructor"));
         }
         let object = self.expect_object(constructor)?;
         if self.is_ecmascript_function(object)? {
-            return self.push_construct_frame(object, &args, count);
+            return self.construct_frame_of_instruction(object, count);
         }
+        let args = self.charged_arguments(count)?;
         let result = self.construct_value(object, &args, None)?;
         self.check_interrupt()?;
         self.replace(count.saturating_add(1), result)
+    }
+
+    /// The construction by the ECMAScript function `constructor` of `New(count)`: the
+    /// arguments read for [`Agent::push_construct_frame`], as
+    /// [`Agent::call_frame_of_instruction`] reads them.
+    #[inline(never)]
+    fn construct_frame_of_instruction(
+        &mut self,
+        constructor: ObjectRef,
+        count: usize,
+    ) -> Completion<Flow> {
+        let args = self.peek_arguments(count)?;
+        self.push_construct_frame(constructor, &args, count)
     }
 
     /// The construction by the ECMAScript function `constructor` of `New(count)` on this loop:
@@ -1600,6 +1672,15 @@ impl<H: Host> Agent<H> {
     }
 }
 
+/// The counting build: `Call(n)` or `New(n)` copied `count` values off the operand stack.
+#[cfg(test)]
+fn note_instruction_copy(count: usize) {
+    crate::object::ecmascript_function::INSTRUCTION_ARGUMENTS_COPIED.with(|copied| {
+        let count = u64::try_from(count).unwrap_or(u64::MAX);
+        copied.set(copied.get().saturating_add(count));
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use crate::host::hooks::test_host::agent_with_realm;
@@ -1646,4 +1727,120 @@ mod tests {
         let loop_ = format!("for (var i = 0; i < {iterations}; i++) {{ i * 2; }}");
         assert_eq!(records(&loop_), (0, false));
     }
+
+    std::thread_local! {
+        /// `used()` at the last two calls of `probe`, the last one second.
+        static PROBED: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+        /// The values `Call(n)` and `New(n)` copied before the last call of `probe`.
+        static COPIED_AT_PROBE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+        /// `used()` and the values copied when `h` was last entered, and its depth.
+        static IN_H: std::cell::Cell<(u64, u64, u32)> = const { std::cell::Cell::new((0, 0, 0)) };
+    }
+
+    /// The values the two instructions copied since the last reset.
+    fn copied() -> u64 {
+        crate::object::ecmascript_function::INSTRUCTION_ARGUMENTS_COPIED.with(std::cell::Cell::get)
+    }
+
+    /// The host function `probe`: records `used()` and the values copied, then counts the
+    /// copies again from 0.
+    fn probe(
+        cx: &mut crate::host::Cx<'_, crate::host::hooks::test_host::NoHooks>,
+        _call: crate::host::HostCall<'_>,
+    ) -> crate::host::Completion<crate::Value> {
+        let used = cx.agent.heap.accounting.used();
+        PROBED.with(|probed| probed.set((probed.get().1, used)));
+        COPIED_AT_PROBE.with(|at| at.set(copied()));
+        crate::object::ecmascript_function::INSTRUCTION_ARGUMENTS_COPIED.with(|c| c.set(0));
+        Ok(crate::Value::Undefined)
+    }
+
+    /// The host function `h`: records `used()` and the values copied, then calls its first
+    /// argument, a function, until it is entered the fourth time. Under `new` it answers
+    /// itself, an object.
+    fn h(
+        cx: &mut crate::host::Cx<'_, crate::host::hooks::test_host::NoHooks>,
+        call: crate::host::HostCall<'_>,
+    ) -> crate::host::Completion<crate::Value> {
+        let used = cx.agent.heap.accounting.used();
+        let depth = IN_H.with(|in_h| in_h.get().2) + 1;
+        IN_H.with(|in_h| in_h.set((used, copied(), depth)));
+        if depth < 4
+            && let Some(&function) = call.args.first()
+            && matches!(function, crate::Value::Object(_))
+        {
+            cx.call(function, crate::Value::Undefined, &[]).unwrap()?;
+        }
+        Ok(match call.new_target {
+            Some(_) => crate::Value::Object(call.callee),
+            None => crate::Value::Undefined,
+        })
+    }
+
+    /// `docs/design/engine.md`, "Memory budget": `Call(n)` and `New(n)` copy the n arguments of
+    /// a builtin or host function once, into a list charged before it is made and dropped
+    /// when the call returns (EvaluateCall, `#sec-evaluatecall`; EvaluateNew,
+    /// `#sec-evaluatenew`), and an ECMAScript callee's once, with nothing new charged. A host
+    /// function entered with 50 arguments reads the instruction's copy and the activation's
+    /// charged; each instruction copies 50 values; four levels through a call back into script
+    /// leave no capacity uncovered at an entry; an ECMAScript callee reads what it read before;
+    /// the steps are the base's.
+    #[test]
+    fn call_and_new_hold_one_charged_copy_of_their_arguments_across_a_call() {
+        use crate::builtins::string::transform::tests::Answer;
+        use crate::object::string::across::Across;
+        use crate::object::string::copies;
+        let value = u64::try_from(size_of::<crate::Value>()).unwrap();
+        let numbers = (2..=49)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut across = Across::with_steps(1_000_000);
+        across.function("probe", probe, false);
+        across.function("h", h, true);
+        let mut steps = Vec::new();
+        for (source, counted) in [
+            (format!("h(1, {numbers}, probe())"), 50),
+            (format!("new h(1, {numbers}, probe())"), 50),
+        ] {
+            IN_H.with(|in_h| in_h.set((0, 0, 0)));
+            assert!(matches!(across.run(&source), Answer::Normal(_)), "{source}");
+            let (inside, copied, _) = IN_H.with(std::cell::Cell::get);
+            let probed = PROBED.with(|probed| probed.get().1);
+            assert!(
+                inside - probed >= 2 * 50 * value,
+                "{source}: {}",
+                inside - probed
+            );
+            assert_eq!(copied, counted, "{source}");
+            steps.push(across.steps());
+        }
+        IN_H.with(|in_h| in_h.set((0, 0, 0)));
+        let source =
+            format!("function g() {{ h(g, {numbers}, probe()); }} h(g, {numbers}, probe())");
+        assert!(matches!(across.run(&source), Answer::Normal(_)));
+        assert_eq!(IN_H.with(|in_h| in_h.get().2), 4);
+        assert_eq!(copies::uncovered_at_entry(), 0);
+        steps.push(across.steps());
+        let parameters = (1..=50)
+            .map(|n| format!("a{n}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source =
+            format!("function e({parameters}) {{ probe(); }} probe(); e(1, {numbers}, 50)");
+        assert!(matches!(across.run(&source), Answer::Normal(_)));
+        let (first, second) = PROBED.with(std::cell::Cell::get);
+        assert_eq!(COPIED_AT_PROBE.with(std::cell::Cell::get), 50);
+        assert_eq!(second - first, CALLEE_RISE);
+        steps.push(across.steps());
+        assert_eq!(steps, CALL_ACROSS_STEPS);
+    }
+
+    /// The rise of `used()` from before the call of the ECMAScript callee to its first
+    /// statement on the base, before the story.
+    const CALLEE_RISE: u64 = 2_032;
+
+    /// The steps of the four scripts of
+    /// [`call_and_new_hold_one_charged_copy_of_their_arguments_across_a_call`] on the base.
+    const CALL_ACROSS_STEPS: [u64; 4] = [61, 60, 247, 73];
 }
