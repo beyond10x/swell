@@ -63,10 +63,10 @@ slice 8 with evidence and 21 cases taken in from slices 18 and 19: all 1,472 cas
 pass in all 2,801 runs (`test262-slice 07 1472 2801 0 0 1472 1472 0 0`), and no host
 requirement is pending for it. Slice 10, `promises-and-async`
 (`epic:slice-10-promises-and-async`), is accepted in seventeen stories (`docs/plan/waves.md`,
-"Slice 10, `promises-and-async`") and in work: eight of them are merged (the microtask queue,
+"Slice 10, `promises-and-async`") and in work: nine of them are merged (the microtask queue,
 the syntax of `async` functions, `Promise` with `then`, `async` functions, the rejection
-tracker, `async` methods of object literals, `%AsyncFunction%` and the grammar of `async function*`), 781 of its 3,879 cases
-pass (`test262-slice 10 3879 7499 0 0 3879 781 3098 0`), and 8 host requirements are pending
+tracker, `async` methods of object literals, `%AsyncFunction%`, the grammar of `async function*` and the statics of `Promise` with `finally` and `AggregateError`), 1,189 of its 3,879 cases
+pass (`test262-slice 10 3879 7499 0 0 3879 1189 2690 0`), and 6 host requirements are pending
 for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
@@ -547,8 +547,8 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   third wave of slice 5 with the first four stories of slice 7, on the decision "cut 0.8.0
   when the two running slice 5 units are merged and a unit has brought the full test262 run
   under 15 min of a pool job" of the session that decides for the operator
-  (https://github.com/beyond10x/swell/releases/tag/0.8.0; the link opens once the release is
-  published). After a release
+  (https://github.com/beyond10x/swell/releases/tag/0.8.0; the tag is on `0c18271`, whose `check`
+  and lane `slow` ran green on the forge). After a release
   `slot --local task host-surface-snapshot` writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
   the open wave move under `## [Unreleased]`. The push of a tag starts one run of

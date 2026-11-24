@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:test262-run-in-parts
 kind: story
-status: active
+status: implemented
 title: The full test262 run can be made in parts, each a pool job of its own
 summary: swell-test262 count --part <k>/<n> runs the cases of one part (case i of the sorted list in part i mod n + 1) and writes their runs with what the count needs beside them; count --from-parts reads the files of every part, runs no case and prints, writes and compares what the whole run does, byte for byte but the milliseconds of the time lines; the tasks test262-part and TEST262_FROM_PARTS of test262, test262-expected and slow-test262 use them.
 relations:
 - decomposes: epic:slice-05-regexp
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T19:12:15Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T19:12:15Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:09Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 
 ## Context

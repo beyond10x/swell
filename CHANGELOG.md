@@ -16,6 +16,18 @@ Every number below comes from the gate, `task check`, on the released commit.
   At its close 40 cases that need `class` or `super` move to slice 8, each with its
   evidence, and 21 cases that failed only on generators count in slice 7 instead of slices
   18 and 19.
+- `for await (x of y)` in an `async` function, a story of the tenth slice, with
+  `%AsyncIteratorPrototype%`, `Symbol.asyncIterator` and the Async-from-Sync Iterator that
+  wraps a sync iterable. Each result of `next` is awaited, and the iterator is closed on
+  every exit of the loop. A loop over an iterator that never ends stops at the step budget;
+  a wrapped iterator is charged to the memory budget until it is freed. `for await` in an
+  `async function*` waits for async generators.
+- The statics of `Promise`, a story of the tenth slice: `Promise.all`, `Promise.allSettled`,
+  `Promise.any`, `Promise.race`, `Promise.try` and `Promise.withResolvers`, with
+  `Promise.prototype.finally` and `AggregateError`. `Promise.all` over an iterator that
+  never ends stops at the step budget or the memory budget and keeps nothing; the values
+  of promises that never settle are charged to the memory budget and credited when the
+  promises are collected.
 - The grammar of async generators, a story of the tenth slice. `async function*`, as a
   declaration and as an expression, is parsed whole, and its grammar errors and early
   errors are reported. A script that holds one still ends with a `SyntaxError` that names
@@ -110,6 +122,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   `promise_is_handled` and `mark_promise_as_handled`. A root that holds no promise
   answers `WrongKind`.
 - `HOST-46`, `HOST-100`, `HOST-101` and `HOST-121` have a test.
+- Breaking: `ErrorKind` is `#[non_exhaustive]`. A `match` over it in a host needs a wildcard
+  arm; a host that has one compiles as before. The list of error kinds follows the
+  standard, which grows.
+- New: `ErrorKind::AggregateError`. `new_error` with it makes an `AggregateError` with no
+  `errors`, and `error_summary` of an `AggregateError` answers the kind and the message
+  without reading `errors`. `ErrorKind::ALL` keeps its seven entries.
+- `HOST-201` and `HOST-202` have a test.
+- New requirements of the clock and the time zones, pending for slice 4 (no code reads them
+  yet): `HOST-209`, an offset a host answers outside ±86,399,999,999,999 ns is clamped to
+  that range; `HOST-210`, a host that answers no instant for every local time gets NaN
+  after 31 hook calls and no exception; `HOST-211`, every call of a clock or time zone hook
+  is charged one step before it is made.
+- New: `WellKnownSymbol::AsyncIterator`, the thirteenth well-known symbol a host names. A
+  host object with a method under it is the iterable of a `for await`.
+- `HOST-203` has a test.
 
 ## [0.8.0] - 2026-11-24
 

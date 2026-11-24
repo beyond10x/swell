@@ -33,7 +33,10 @@
 //! `story:async-function-constructor`, which is no property of the global object;
 //! `%AsyncIteratorPrototype%` and `%AsyncFromSyncIteratorPrototype%` (27.1.4 and 27.1.5.2,
 //! `#sec-asynciteratorprototype`, `#sec-%asyncfromsynciteratorprototype%-object`), written by
-//! `story:for-await-and-async-from-sync-iterator`.
+//! `story:for-await-and-async-from-sync-iterator`;
+//! `%AggregateError%` and `%AggregateError.prototype%` (20.5.7, `#sec-aggregate-error-objects`),
+//! written by `story:promise-statics-finally-and-aggregate-error`, made after the seven of
+//! [`ErrorKind::ALL`] and held beside them.
 //! The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
@@ -207,6 +210,8 @@ pub(crate) struct Intrinsics {
     throw_type_error: ObjectRef,
     /// In the order of [`ErrorKind::ALL`].
     errors: [ErrorIntrinsics; 7],
+    /// `%AggregateError%` and `%AggregateError.prototype%`, which `ErrorKind::ALL` does not hold.
+    aggregate_error: ErrorIntrinsics,
     object: ObjectRef,
     array: ObjectRef,
     string: ObjectRef,
@@ -304,6 +309,7 @@ impl Intrinsics {
             ErrorKind::SyntaxError => syntax,
             ErrorKind::TypeError => type_error,
             ErrorKind::UriError => uri,
+            ErrorKind::AggregateError => self.aggregate_error,
         }
     }
 
@@ -357,7 +363,7 @@ impl Intrinsics {
         ] {
             mark.object(object);
         }
-        for error in &self.errors {
+        for error in self.errors.iter().chain([&self.aggregate_error]) {
             mark.object(error.constructor);
             mark.object(error.prototype);
         }
@@ -493,6 +499,8 @@ impl<H: Host> Agent<H> {
         let boolean_prototype = self.create_boolean_prototype(object_prototype)?;
         let number_prototype = self.create_number_prototype(object_prototype)?;
         let errors = self.create_error_intrinsics(realm, object_prototype, function_prototype)?;
+        let [error, ..] = errors;
+        let aggregate_error = self.create_aggregate_error_intrinsics(realm, error)?;
         // Every realm record holds the well-known symbols from its creation (`realm/mod.rs`).
         let Some(symbols) = self.realm_record(realm)?.symbols else {
             return Err(self.fault());
@@ -557,6 +565,7 @@ impl<H: Host> Agent<H> {
             number_prototype,
             throw_type_error,
             errors,
+            aggregate_error,
             object,
             array,
             string,

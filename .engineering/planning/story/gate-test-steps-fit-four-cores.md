@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:gate-test-steps-fit-four-cores
 kind: story
-status: active
+status: implemented
 title: The gate's test steps fit the forge's four cores; the local gate bounds their CPU seconds where it has an entry and refuses a build inside the clock everywhere
 summary: 'The forge''s runner of four cores took 127.9 s for the test steps of release 0.8.0 where the local gate took 94.3 s; the collect mode runs at opt-level 1 in a profile of its own, and the release runner of test262 is built before the clock instead of inside gate-selftest. check-runner bounds the CPU seconds of the test steps on a machine whose core count has an entry in a table of CPU seconds per kind of machine (16 cores: 245, provisional) and prints them unbounded on any other, and on every machine refuses a run that writes into target/*/deps or conformance/ess/target/*/deps inside the clock; the forge judges its own time.'
 relations:
 - decomposes: epic:foundation
 - depends_on: story:gate-test-steps-cost-half
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T23:54:01Z", actor: "human:operator", revision: 2, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T23:54:01Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:07Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 
 ## Context

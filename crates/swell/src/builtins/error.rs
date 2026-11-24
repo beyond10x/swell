@@ -5,6 +5,12 @@
 //! `Error.isError` (20.5.2.1, `#sec-error.iserror`), defined on `Error` after the keys above
 //! (`length`, `name`, `prototype`), is `story:global-this-uri-functions-and-is-error`.
 //!
+//! `%AggregateError%` and `%AggregateError.prototype%` (20.5.7, `#sec-aggregate-error-objects`)
+//! are `story:promise-statics-finally-and-aggregate-error`: made by a step of their own after the
+//! seven of [`ErrorKind::ALL`], since the constructor takes `errors` before `message`
+//! (`#sec-aggregate-error`), with the kind `ErrorKind::AggregateError` in [[ErrorData]]
+//! (`docs/design/host-interface.md`, "The kind of an AggregateError, and kinds to come").
+//!
 //! `Error.captureStackTrace` and `Error.prototype.stack` are not in the pinned draft.
 
 use crate::builtins::object::argument;
@@ -15,7 +21,7 @@ use crate::host::{ErrorKind, Host};
 use crate::object::ObjectKind;
 use crate::object::builtin_function::{Behaviour, BuiltinId};
 use crate::object::ordinary::OrdinaryData;
-use crate::object::property::{Descriptor, Property};
+use crate::object::property::{Descriptor, Key, Property};
 use crate::realm::intrinsics::{ErrorIntrinsics, Intrinsic};
 use crate::value::{ObjectRef, Value};
 
@@ -95,6 +101,47 @@ impl<H: Host> Agent<H> {
         }
     }
 
+    /// `%AggregateError%` and `%AggregateError.prototype%` of a realm
+    /// (`#sec-properties-of-the-aggregate-error-constructors`,
+    /// `#sec-properties-of-the-aggregate-error-prototype-objects`), made after the seven of
+    /// [`ErrorKind::ALL`] from `error`, `%Error%` and `%Error.prototype%`: the constructor's
+    /// [[Prototype]] is `%Error%` and its `length` 2, the prototype's [[Prototype]] is
+    /// `%Error.prototype%`, with `constructor`, the empty `message` and `name`
+    /// "AggregateError", in the order the NativeError prototypes have them.
+    pub(crate) fn create_aggregate_error_intrinsics(
+        &mut self,
+        realm: Handle,
+        error: ErrorIntrinsics,
+    ) -> Completion<ErrorIntrinsics> {
+        let kind = ErrorKind::AggregateError;
+        let prototype = self.ordinary_object_create(Some(error.prototype), OrdinaryData::Plain)?;
+        let constructor = self.create_builtin_function(
+            Behaviour::Builtin(BuiltinId::AggregateErrorConstructor),
+            2,
+            kind.name(),
+            realm,
+            Some(error.constructor),
+            true,
+        )?;
+        // "prototype": { [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: false }
+        // (`#sec-aggregate-error.prototype`).
+        let key = self.name_key("prototype")?;
+        self.add_property(
+            constructor,
+            key,
+            Property::data(Value::Object(prototype), false, false, false),
+        )?;
+        self.define_builtin_property(prototype, "constructor", Value::Object(constructor))?;
+        let empty = self.new_string_str("")?;
+        self.define_builtin_property(prototype, "message", Value::String(empty))?;
+        let name = self.new_string_str(kind.name())?;
+        self.define_builtin_property(prototype, "name", Value::String(name))?;
+        Ok(ErrorIntrinsics {
+            constructor,
+            prototype,
+        })
+    }
+
     /// An error object of `kind` with the [[Prototype]] `prototype` and an own "message"
     /// `message`, as `new kind(message)` makes one: its [[ErrorData]] records `kind`.
     pub(crate) fn create_error(
@@ -160,6 +207,122 @@ impl<H: Host> Agent<H> {
         }
         let options = args.get(1).copied().unwrap_or(Value::Undefined);
         self.install_error_cause(error, options)
+    }
+
+    /// `AggregateError ( errors, message [ , options ] )` (`#sec-aggregate-error`).
+    pub(crate) fn aggregate_error_constructor(
+        &mut self,
+        function: ObjectRef,
+        args: &[Value],
+        new_target: Option<ObjectRef>,
+    ) -> Completion<Value> {
+        let kind = ErrorKind::AggregateError;
+        // 1. If NewTarget is undefined, let newTarget be the active function object; else let
+        // newTarget be NewTarget.
+        let new_target = new_target.unwrap_or(function);
+        // 2. Let obj be ? OrdinaryCreateFromConstructor(newTarget, "%AggregateError.prototype%",
+        // « [[ErrorData]] »).
+        let error = self.ordinary_create_from_constructor(
+            new_target,
+            Intrinsic::ErrorPrototype(kind),
+            OrdinaryData::Error(kind),
+        )?;
+        let keep = self.keep(Value::Object(error));
+        let done = self.aggregate_error_steps(error, args);
+        self.release(keep);
+        done.map(|()| Value::Object(error))
+    }
+
+    /// Steps 3 to 6 of `AggregateError`, with `obj` kept: the message and the cause as `Error`
+    /// installs them, then the list of `errors` as an Array of the current realm in the own
+    /// property "errors".
+    fn aggregate_error_steps(&mut self, error: ObjectRef, args: &[Value]) -> Completion<()> {
+        // 3. If message is not undefined, then ... 4. Perform ? InstallErrorCause(obj, options).
+        self.error_constructor_steps(error, args.get(1..).unwrap_or(&[]))?;
+        // 5. Let errorsList be ? IteratorToList(? GetIterator(errors, sync)).
+        let errors = self.iterable_to_array(argument(args, 0))?;
+        // 6. Perform ! DefinePropertyOrThrow(obj, "errors", PropertyDescriptor {
+        // [[Configurable]]: true, [[Enumerable]]: false, [[Writable]]: true, [[Value]]:
+        // CreateArrayFromList(errorsList) }).
+        let mark = self.keep(Value::Object(errors));
+        let defined = self.name_key("errors").and_then(|key| {
+            self.define_property_or_throw(
+                error,
+                key,
+                Descriptor::data(Value::Object(errors), true, false, true),
+            )
+        });
+        self.release(mark);
+        defined
+    }
+
+    /// CreateArrayFromList ( IteratorToList ( ? GetIterator ( iterable, sync ) ) )
+    /// (`#sec-iteratortolist`, `#sec-createarrayfromlist`): the values of `iterable`, which the
+    /// caller holds, appended to a new Array of the current realm as they are read; the Array
+    /// grows as an Array does, charged before it grows. No script reaches it before it is
+    /// answered, so it is the Array CreateArrayFromList makes of the list.
+    pub(crate) fn iterable_to_array(&mut self, iterable: Value) -> Completion<ObjectRef> {
+        let mut record = self.get_iterator(iterable)?;
+        let mark = self.keep(Value::Object(record.iterator));
+        self.keep(record.next_method);
+        let answer = self.array_create(0.0, None).and_then(|array| {
+            self.keep(Value::Object(array));
+            self.append_iterator_values(&mut record, array)
+                .map(|()| array)
+        });
+        self.release(mark);
+        answer
+    }
+
+    /// The loop of IteratorToList: each value IteratorStepValue answers is appended to `array`,
+    /// which the caller keeps with the record's [[Iterator]] and [[NextMethod]].
+    fn append_iterator_values(
+        &mut self,
+        record: &mut crate::ops::iteration::IteratorRecord,
+        array: ObjectRef,
+    ) -> Completion<()> {
+        let mut index: u32 = 0;
+        while let Some(value) = self.iterator_step_value(record)? {
+            // An Array holds at most 2^32 - 1 elements.
+            if index == u32::MAX {
+                return Err(self.throw_error(ErrorKind::RangeError, "Invalid array length"));
+            }
+            self.create_data_property_or_throw(array, Key::Index(index), value)?;
+            index += 1;
+        }
+        Ok(())
+    }
+
+    /// An AggregateError of `realm`: [[ErrorData]] of the kind `AggregateError`, an own
+    /// "message" when `message` is given, and the own "errors" `errors` { [[Writable]]: true,
+    /// [[Enumerable]]: false, [[Configurable]]: true }; `errors` is kept while the error is
+    /// made. Runs no code.
+    pub(crate) fn create_aggregate_error(
+        &mut self,
+        realm: Handle,
+        message: Option<&str>,
+        errors: ObjectRef,
+    ) -> Completion<ObjectRef> {
+        let kind = ErrorKind::AggregateError;
+        let mark = self.keep(Value::Object(errors));
+        let made = self
+            .intrinsic(realm, Intrinsic::ErrorPrototype(kind))
+            .and_then(|prototype| match message {
+                Some(message) => self.create_error(kind, prototype, message),
+                None => self.ordinary_object_create(Some(prototype), OrdinaryData::Error(kind)),
+            })
+            .and_then(|error| {
+                self.keep(Value::Object(error));
+                let key = self.name_key("errors")?;
+                self.add_property(
+                    error,
+                    key,
+                    Property::data(Value::Object(errors), true, false, true),
+                )?;
+                Ok(error)
+            });
+        self.release(mark);
+        made
     }
 
     /// CreateNonEnumerableDataPropertyOrThrow (`#sec-createnonenumerabledatapropertyorthrow`).
@@ -253,13 +416,21 @@ impl<H: Host> Agent<H> {
 
 impl<H: Host> Agent<H> {
     /// `cx.new_error` (`docs/design/host-interface.md`, decision 14): an error of `kind` of
-    /// `realm` with the message `message`.
+    /// `realm` with the message `message`. For `ErrorKind::AggregateError` it is the object
+    /// `new AggregateError([], message)` makes in `realm`, with an own "errors" that is a new
+    /// empty Array of `realm` ("The kind of an AggregateError, and kinds to come"); both objects
+    /// are charged and no code runs.
     pub(crate) fn new_error_in(
         &mut self,
         realm: Handle,
         kind: ErrorKind,
         message: &str,
     ) -> Completion<ObjectRef> {
+        if kind == ErrorKind::AggregateError {
+            let array_prototype = self.intrinsic(realm, Intrinsic::ArrayPrototype)?;
+            let errors = self.array_create(0.0, Some(array_prototype))?;
+            return self.create_aggregate_error(realm, Some(message), errors);
+        }
         let prototype = self.intrinsic(realm, Intrinsic::ErrorPrototype(kind))?;
         self.create_error(kind, prototype, message)
     }

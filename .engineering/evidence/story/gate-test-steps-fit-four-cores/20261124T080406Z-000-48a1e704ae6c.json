@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-24T08:04:06Z",
+  "actor": "human:operator",
+  "artifact": "story:gate-test-steps-fit-four-cores",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "check on the forge, commit 0c18271 (release 0.8.0)",
+    "reference": "https://github.com/beyond10x/swell/actions/runs/45346206866"
+  }
+}

@@ -150,7 +150,7 @@ impl<H: Host> Agent<H> {
 
 | limit | unit | what it counts | reaching it ends in | at 0 |
 |---|---|---|---|---|
-| `steps_per_entry` | steps (decision 3 of `engine.md`: one per bytecode instruction, plus builtin charges and what a host function charges with `cx.charge_steps`, decision 14) | steps of one outermost entry, with every nested entry and every job of one checkpoint | `Terminated(StepBudget)` | an entry that would spend a step ends before spending it |
+| `steps_per_entry` | steps (decision 3 of `engine.md`: one per bytecode instruction, plus builtin charges and what a host function charges with `cx.charge_steps`, decision 14, and one for each call of a clock or time zone hook, decision 17) | steps of one outermost entry, with every nested entry and every job of one checkpoint | `Terminated(StepBudget)` | an entry that would spend a step ends before spending it |
 | `memory_bytes` | bytes charged by the accounting of `engine.md` decision 4 | the agent's heap over its life, and the bytes the host charged with `charge_host_bytes` while it holds their `HostBytes` (decision 14), read by `heap_bytes()`; a sweep credits what freed records own, and an arena's capacity stays charged | `Terminated(MemoryBudget)`; `RangeError` from the `ArrayBuffer`, `SharedArrayBuffer` and typed array constructors | `create_realm` ends in `Terminated(MemoryBudget)` |
 | `frame_depth` | execution contexts | ECMAScript execution contexts on the engine's frame stack | a `RangeError` thrown where the context would be pushed | every entry that pushes a context answers `Throw(RangeError)` |
 | `reentry_depth` | entries | calls from Rust into code (an ECMAScript function, a script or a host function) made while code runs, by a builtin or by host code, nested beyond the outermost entry | a `RangeError` thrown at the call that would re-enter | no callback runs from a builtin or host function |
@@ -1939,6 +1939,103 @@ pub struct TimeZoneIdentifier { pub identifier: String, pub primary: String }
 
 **HOST-128** (ecma262:sec-getnamedtimezoneoffsetnanoseconds) A host answering an offset of 3,600 × 10^9 ns for its system time zone makes `new Date(0).getHours()` answer 1. [slice 4]
 
+**Calls, bounds and cost of the zone hooks.** Added on 2026-11-24 for slice 4. The engine
+converts between UTC and local time in two operations, `LocalTime` (`ecma262:sec-localtime`) and
+`UTC` (`ecma262:sec-utc-t`); a conversion is one run of either. What a host and a script see,
+then the mechanism.
+
+1. The identifier is read once per conversion and never cached. A conversion calls
+   `system_time_zone_identifier` at its start and uses that answer for every later hook call of
+   the same conversion. Nothing is kept between conversions, in a realm, an agent or a Date
+   (the hook takes no realm): the next conversion calls it again. A host may therefore change
+   its zone between two calls, a user changing the system setting or a test host answering
+   another identifier the second time. A script then sees the new zone from the next
+   conversion on: `d.getHours()` read twice answers two hours for the same Date. The engine does
+   not check that the identifiers of two conversions of one operation agree: `setHours` converts
+   with `LocalTime` and then with `UTC`, each reading the identifier, and a host that answers
+   differently the second time gets a result computed from the two answers as given. The same
+   host answers give the same results and the same calls (HOST-133).
+2. An identifier that is an offset string. When the identifier conforms to the draft's UTC
+   offset format (`ecma262:sec-istimezoneoffsetstring`: a sign, an hour 00 to 23, optional
+   minutes, seconds and a fraction of up to 9 digits), the offset is the one
+   `ParseTimeZoneOffsetString` (`ecma262:sec-parsetimezoneoffsetstring`) reads from it, and
+   neither `get_named_time_zone_offset_nanoseconds` nor `get_named_time_zone_epoch_nanoseconds`
+   is called: the conversion makes one hook call. The longest such string is
+   `+23:59:59.999999999`, 19 code units; the engine reads at most the first 19 code units of an
+   identifier, and a longer one is a named zone by its length. A named zone's identifier is
+   passed to the two hooks as it was answered.
+3. An offset out of range is clamped. The draft's offset format never writes an offset of 24
+   hours or more (hour 00 to 23, minute and second 00 to 59, fraction of 9 digits, so at most
+   23:59:59.999999999, or 86,399,999,999,999 ns), and the pinned draft says nothing of the
+   absolute value an answer of `GetNamedTimeZoneOffsetNanoseconds` may have. The engine clamps
+   every answer of `get_named_time_zone_offset_nanoseconds` to ±86,399,999,999,999 ns before it
+   uses it (HOST-209), as it clamps the clock (HOST-126), and then takes the offset in whole
+   milliseconds truncated toward zero, so a local time is at most 86,399,999 ms from its UTC
+   time. Clamping and not reading the answer as 0: a host that answers one nanosecond too many
+   or a whole day gets the nearest offset the format allows, the sign and the order of its
+   answers kept, and not a silent switch to UTC; and with the clamp every arithmetic step of a
+   conversion stays inside `i64`, which an `i128` offset would not. The mechanism: the clamp
+   is `swell-num`'s, in the function that takes the offset, so no caller can skip it.
+4. A local time the host has no instant for. `UTC ( t )` calls
+   `get_named_time_zone_epoch_nanoseconds` once for the fields of `t`. When the list is empty
+   (a skipped local time), the draft searches without limit for `tBefore`, the last local time
+   that has an instant; the engine searches at most 2^28 milliseconds (74.5 hours) below `t`
+   with at most 56 more calls (`engine.md` decision 6, "`UTC ( t )` and the local time that
+   does not exist") and, when it finds none, `UTC ( t )` is NaN: the result of the operation is
+   a Date whose time value is NaN, and no exception is thrown. One conversion by `UTC` makes at
+   most 59 hook calls: the identifier, 57 of `get_named_time_zone_epoch_nanoseconds` and one of
+   `get_named_time_zone_offset_nanoseconds`; on the common path three, with an offset string
+   one. A host whose list is empty for every local time gets 31 calls (the identifier and 30
+   probes) and NaN. 2^28 ms is the smallest power of two above the longest gap a host that
+   keeps to item 3 can make: offsets below 24 hours on both sides of a transition make a gap
+   shorter than 48 hours, 172,800,000 ms; the longest gap of the IANA database is one day.
+5. What one built-in call makes at most. `LocalTime` of a time value that is NaN makes none; of
+   a number, at most 2 calls (the identifier and the offset), with an offset string 1.
+   - `Date.now()`, `new Date()`: 1 (the clock). `Date()` called as a function: 1 and one
+     `LocalTime`, 3.
+   - The getters `getDate`, `getDay`, `getFullYear`, `getHours`, `getMilliseconds`,
+     `getMinutes`, `getMonth`, `getSeconds`, `getTimezoneOffset`: one `LocalTime`, 2. The
+     UTC getters, `getTime`, `valueOf`, `setTime`, `setUTC*`, `Date.UTC`, `toISOString` and
+     `toUTCString`: none.
+   - `new Date(year, month, ...)` with two or more arguments: one `UTC`, 59. `new Date(value)`
+     with a Number or a Date: none. `new Date(string)` and `Date.parse(string)`: 59 for a
+     date-time form without an offset, otherwise none (`engine.md` decision 6, "`Date.parse`").
+   - `toString`, `toDateString` and `toTimeString`: one `LocalTime`, 2. The draft's `ToDateString`
+     reads `LocalTime(tv)` and then `TimeZoneString(tv)`, which asks for the same offset a
+     second time (`ecma262:sec-todatestring`, `ecma262:sec-timezoneestring`); the engine asks
+     once and uses the answer for both, so the time and the `GMT+hhmm` after it come from one
+     answer.
+   - The setters `setDate`, `setFullYear`, `setHours`, `setMilliseconds`, `setMinutes`,
+     `setMonth`, `setSeconds`: one `LocalTime` and one `UTC`, 61, the most any call makes. With
+     a time value of NaN they make none (`setFullYear` takes 0 for it and makes one `UTC`, 59).
+6. Every call of a clock or time zone hook is charged one step before it is made, by the
+   engine and not the host: the call is not made when the charge ends the entry (an exhausted
+   `steps_per_entry`, an interrupt). A call of one operation of item 5 therefore spends at
+   most 61 steps on hooks beside the step of the built-in call, and the work between two hook
+   calls is a bounded amount of integer arithmetic (the calendar has no loop that depends on a
+   script value), so a step still stands for a bounded amount of work. What a hook does
+   inside is the host's work: a `HookCx` has no `charge_steps` (only `Cx` has it, section 14),
+   so the engine's step is the whole charge in steps, and a host that must keep its hooks
+   short does it itself; the bytes a hook holds are charged with `charge_host_bytes`, which
+   `HookCx` has. The other hooks of this document are charged as they were.
+7. What an answer of the host is charged. The identifier is a `String` the host owns: the
+   engine reads at most 19 code units of it (item 2), copies none, and drops it when the
+   conversion ends, so it is charged neither steps for its length nor bytes of the agent's
+   memory budget, and has no ceiling of its own: the draft sets none for a named zone, and a
+   limit here would be a number nobody derived. Building a long identifier is the host's work
+   and the host's memory (section 14, "The host's own work and bytes"). The `Vec<i128>` that
+   `get_named_time_zone_epoch_nanoseconds` answers is read for its first element, and for the
+   last element of the list at `tBefore`: the engine charges 16 bytes per element to the
+   memory budget when it has the list, before it reads an element, and credits them when it
+   drops the list (the list kept for `tBefore` is dropped when the conversion ends); a refused
+   charge ends the entry in `Terminated(MemoryBudget)`.
+
+**HOST-209** (swell:D17) An offset answered outside ±86,399,999,999,999 ns (23:59:59.999999999, the largest the draft's UTC offset format writes) is clamped to that range: a host answering `i128::MAX` for its system time zone makes `new Date(0).getHours()` answer 23 and `new Date(0).getMilliseconds()` 999, and one answering `i128::MIN` makes `new Date(0).getDate()` answer 31 and `new Date(0).getMilliseconds()` 1. [slice 4]
+
+**HOST-210** (ecma262:sec-utc-t) A host whose `get_named_time_zone_epoch_nanoseconds` answers the empty list for every local time makes `new Date(2020, 0, 1).getTime()` answer NaN after exactly 31 calls of zone hooks (one of `system_time_zone_identifier`, 30 of `get_named_time_zone_epoch_nanoseconds`, none of `get_named_time_zone_offset_nanoseconds`) and throws no exception. [slice 4]
+
+**HOST-211** (swell:D17) Every call of a clock or time zone hook is charged one step before it is made: `new Date(0).getHours()` calls `system_time_zone_identifier` once and then `get_named_time_zone_offset_nanoseconds` once, `last_entry_steps()` after it reads 2 more than after `new Date(0).getUTCHours()`, and with `steps_per_entry` set one below that reading the call ends in `Terminated(StepBudget)` before the second hook is called. [slice 4]
+
 ## 18. Collection and weak references
 
 **`collect` runs a full collection at the call. The collector's roots are those of `engine.md`
@@ -2034,7 +2131,7 @@ table in `host-interface-model.md` gives each marker's first words.
 - `host.yaml:40`: HOST-9, HOST-12, HOST-14, HOST-16, HOST-19, HOST-20, HOST-22, HOST-23, HOST-24
 - `host.yaml:43`: HOST-6, HOST-7, HOST-8, HOST-10, HOST-80
 - `host.yaml:118`: HOST-35
-- `host.yaml:129`: HOST-4, HOST-26, HOST-27, HOST-83, HOST-84, HOST-116 to HOST-128, HOST-149, HOST-150, HOST-151, HOST-158
+- `host.yaml:129`: HOST-4, HOST-26, HOST-27, HOST-83, HOST-84, HOST-116 to HOST-128, HOST-149, HOST-150, HOST-151, HOST-158, HOST-209 to HOST-211
 - `host.yaml:179`: HOST-52
 - `host.yaml:214`: HOST-54, HOST-156
 - `host.yaml:228`: HOST-74, HOST-98

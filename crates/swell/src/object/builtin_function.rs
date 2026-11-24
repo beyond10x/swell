@@ -23,6 +23,15 @@
 //! functions of an `await` (`story:async-functions-and-await`). Its slots are boxed and charged
 //! with it, as a host function's boxes are.
 //!
+//! The element functions of `Promise.all`, `allSettled` and `any` and the closures of
+//! `Promise.prototype.finally` (`story:promise-statics-finally-and-aggregate-error`) are built-in
+//! functions with slots of their own kind (`Behaviour::PromiseClosure`, [`PromiseSlots`]), so
+//! that the matches over [`Slots`] in `ops/promise.rs` and `interp/async_function.rs`, which
+//! have no wildcard, stay as they are. An element function holds its [[Index]], its
+//! [[AlreadyCalled]] flag (shared by the two functions of an element of `allSettled`) and the
+//! record of its call in an `Rc` ([`ElementRecord`]); each function is charged its box, the
+//! flag's box and the record's box ("counted in the box of each closure").
+//!
 //! Two sites of the collector: the kind site [`BuiltinFunction::trace`] and the root site
 //! [`trace_roots`] (the activations and the kept stack).
 
@@ -93,6 +102,13 @@ pub(crate) enum BuiltinId {
     /// the two functions of AsyncFromSyncIteratorContinuation, with the slots
     /// [`Slots::AsyncFromSync`] (`story:for-await-and-async-from-sync-iterator`).
     AsyncIteration(crate::builtins::async_iteration::AsyncIterationBuiltin),
+    /// The statics of `Promise` that take an iterable or a callback, `withResolvers`, and the
+    /// element functions of the first three
+    /// (`story:promise-statics-finally-and-aggregate-error`).
+    PromiseStatics(crate::builtins::promise_statics::PromiseStaticsBuiltin),
+    /// `AggregateError ( errors, message [ , options ] )` (20.5.7.1.1), whose steps take
+    /// `errors` before `message` (`story:promise-statics-finally-and-aggregate-error`).
+    AggregateErrorConstructor,
 }
 
 /// What a built-in function does when called.
@@ -111,6 +127,85 @@ pub(crate) enum Behaviour {
         id: BuiltinId,
         slots: Box<Slots>,
     },
+    /// A built-in function with slots of the statics of `Promise` or of `finally`: the builtin
+    /// whose steps it runs and its slots, in a box charged with the function
+    /// ([`Agent::create_promise_closure`]).
+    PromiseClosure {
+        id: BuiltinId,
+        slots: Box<PromiseSlots>,
+    },
+}
+
+/// The slots of an element function or of a closure of `finally`: what the Abstract Closure it
+/// was made from captured. Matched without a wildcard.
+pub(crate) enum PromiseSlots {
+    /// A resolve element function of `Promise.all` or `allSettled`, a reject element function of
+    /// `allSettled` or `any` (`#sec-performpromiseall` and the two after it): [[Index]],
+    /// [[AlreadyCalled]], and the record the functions of one call share.
+    Element {
+        index: u32,
+        already_called: Rc<Cell<bool>>,
+        record: Rc<ElementRecord>,
+    },
+    /// thenFinally or catchFinally of `Promise.prototype.finally`
+    /// (`#sec-promise.prototype.finally`, step 6): onFinally and the constructor.
+    Finally {
+        on_finally: Value,
+        constructor: ObjectRef,
+    },
+    /// valueThunk or thrower of `finally`: the value it returns or throws.
+    Thunk { value: Value },
+}
+
+/// What the element functions of one call of `Promise.all`, `allSettled` or `any` share:
+/// [[Values]] or [[Errors]], an internal Array of the realm of the call that CreateArrayFromList
+/// answers as it is once every element is in (no script reaches it before), the
+/// [[Capability]] of the combined promise and [[RemainingElements]].
+pub(crate) struct ElementRecord {
+    pub(crate) values: ObjectRef,
+    pub(crate) capability: crate::host::PromiseCapability,
+    pub(crate) remaining: Cell<u64>,
+}
+
+impl ElementRecord {
+    /// The bytes of the record's reference-counted box.
+    pub(crate) fn bytes() -> u64 {
+        u64::try_from(size_of::<(Cell<usize>, Cell<usize>, ElementRecord)>()).unwrap_or(u64::MAX)
+    }
+}
+
+impl PromiseSlots {
+    /// Every value the slots hold.
+    fn trace(&self, mark: &mut Mark) {
+        match self {
+            PromiseSlots::Element { record, .. } => {
+                mark.object(record.values);
+                mark.object(record.capability.promise);
+                mark.value(record.capability.resolve);
+                mark.value(record.capability.reject);
+            }
+            PromiseSlots::Finally {
+                on_finally,
+                constructor,
+            } => {
+                mark.value(*on_finally);
+                mark.object(*constructor);
+            }
+            PromiseSlots::Thunk { value } => mark.value(*value),
+        }
+    }
+
+    /// The bytes the function with these slots is charged: the box of the slots, and for an
+    /// element function the box of its [[AlreadyCalled]] flag and the box of the shared record,
+    /// each counted in every function that holds it.
+    pub(crate) fn bytes(&self) -> u64 {
+        let shared = match self {
+            PromiseSlots::Element { .. } => size_of::<(Cell<usize>, Cell<usize>, Cell<bool>)>()
+                .saturating_add(usize::try_from(ElementRecord::bytes()).unwrap_or(usize::MAX)),
+            PromiseSlots::Finally { .. } | PromiseSlots::Thunk { .. } => 0,
+        };
+        u64::try_from(size_of::<PromiseSlots>().saturating_add(shared)).unwrap_or(u64::MAX)
+    }
 }
 
 /// The slots of a built-in function with slots: what the Abstract Closure it was made from
@@ -194,6 +289,7 @@ impl BuiltinFunction {
                 data: Some(data), ..
             } => data.trace(mark),
             Behaviour::Closure { slots, .. } => slots.trace(mark),
+            Behaviour::PromiseClosure { slots, .. } => slots.trace(mark),
         }
     }
 
@@ -434,20 +530,53 @@ impl<H: Host> Agent<H> {
         realm: Handle,
     ) -> Completion<ObjectRef> {
         let bytes = slots.bytes();
-        if self.heap.accounting.charge(bytes).is_err() {
-            return Err(self.terminate(Termination::MemoryBudget));
-        }
-        let made = self.create_builtin_function(
-            Behaviour::Closure {
+        self.create_charged_closure(
+            bytes,
+            || Behaviour::Closure {
                 id,
                 slots: Box::new(slots),
             },
             length,
-            "",
             realm,
-            None,
-            false,
-        );
+        )
+    }
+
+    /// As [`Agent::create_builtin_closure`], for the slots of an element function or of a
+    /// closure of `finally` ([`PromiseSlots::bytes`]).
+    pub(crate) fn create_promise_closure(
+        &mut self,
+        id: BuiltinId,
+        slots: PromiseSlots,
+        length: u32,
+        realm: Handle,
+    ) -> Completion<ObjectRef> {
+        let bytes = slots.bytes();
+        self.create_charged_closure(
+            bytes,
+            || Behaviour::PromiseClosure {
+                id,
+                slots: Box::new(slots),
+            },
+            length,
+            realm,
+        )
+    }
+
+    /// A built-in function with slots whose box of `bytes` is charged before `behaviour` makes
+    /// it and is recorded in the function's [`Grown`].
+    ///
+    /// [`Grown`]: super::Grown
+    fn create_charged_closure(
+        &mut self,
+        bytes: u64,
+        behaviour: impl FnOnce() -> Behaviour,
+        length: u32,
+        realm: Handle,
+    ) -> Completion<ObjectRef> {
+        if self.heap.accounting.charge(bytes).is_err() {
+            return Err(self.terminate(Termination::MemoryBudget));
+        }
+        let made = self.create_builtin_function(behaviour(), length, "", realm, None, false);
         let recorded = made.and_then(|function| {
             self.record_grown(function, bytes)?;
             Ok(function)
@@ -499,6 +628,30 @@ impl<H: Host> Agent<H> {
         }
     }
 
+    /// The slots of the element function or closure of `finally` `function`; any other object
+    /// is a broken invariant.
+    pub(crate) fn promise_closure_slots(
+        &mut self,
+        function: ObjectRef,
+    ) -> Completion<&PromiseSlots> {
+        if !matches!(
+            self.engine_object(function)?.kind,
+            ObjectKind::BuiltinFunction(BuiltinFunction {
+                behaviour: Behaviour::PromiseClosure { .. },
+                ..
+            })
+        ) {
+            return Err(self.fault());
+        }
+        match &self.engine_object(function)?.kind {
+            ObjectKind::BuiltinFunction(BuiltinFunction {
+                behaviour: Behaviour::PromiseClosure { slots, .. },
+                ..
+            }) => Ok(slots.as_ref()),
+            _ => Err(Abrupt::Terminated(Termination::EngineFault)),
+        }
+    }
+
     /// The bookkeeping of every call into a function (decision 2): the sticky termination, a
     /// step, and the re-entry count, whose bound throws a `RangeError` in the current realm.
     fn enter_function(&mut self) -> Completion<()> {
@@ -524,7 +677,9 @@ impl<H: Host> Agent<H> {
             ObjectKind::BuiltinFunction(builtin) => (
                 builtin.realm,
                 match builtin.behaviour {
-                    Behaviour::Builtin(id) | Behaviour::Closure { id, .. } => Some(id),
+                    Behaviour::Builtin(id)
+                    | Behaviour::Closure { id, .. }
+                    | Behaviour::PromiseClosure { id, .. } => Some(id),
                     Behaviour::Host { .. } => None,
                 },
             ),
@@ -618,6 +773,12 @@ impl<H: Host> Agent<H> {
             BuiltinId::AsyncFunction => self.async_function(function, args, new_target),
             BuiltinId::AsyncIteration(id) => {
                 self.run_async_iteration_builtin(id, function, this, args)
+            }
+            BuiltinId::PromiseStatics(id) => {
+                self.run_promise_statics_builtin(id, function, this, args)
+            }
+            BuiltinId::AggregateErrorConstructor => {
+                self.aggregate_error_constructor(function, args, new_target)
             }
         }
     }
@@ -824,5 +985,43 @@ mod tests {
         assert_eq!(awaiting.bytes(), 32, "the slots are {size} bytes");
         assert_eq!(unwrap.bytes(), 32, "the slots are {size} bytes");
         assert_eq!(close.bytes(), 32, "the slots are {size} bytes");
+    }
+
+    /// The bytes an element function and a closure of `finally` are charged for their slots,
+    /// which `tests/promise_statics.rs` states as `ELEMENT_BOX_BYTES`: the box of the slots, and
+    /// for an element function the boxes of its flag and of the record of its call.
+    #[test]
+    fn the_slots_of_an_element_function_are_charged_their_boxes() {
+        use super::{ElementRecord, PromiseSlots};
+        let (mut agent, realm, _) = roomy();
+        let realm_handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let object = agent
+            .intrinsic(realm_handle, Intrinsic::FunctionPrototype)
+            .unwrap();
+        let element = PromiseSlots::Element {
+            index: 0,
+            already_called: std::rc::Rc::new(std::cell::Cell::new(false)),
+            record: std::rc::Rc::new(ElementRecord {
+                values: object,
+                capability: crate::host::PromiseCapability {
+                    promise: object,
+                    resolve: Value::Undefined,
+                    reject: Value::Undefined,
+                },
+                remaining: std::cell::Cell::new(1),
+            }),
+        };
+        let finally = PromiseSlots::Finally {
+            on_finally: Value::Undefined,
+            constructor: object,
+        };
+        let thunk = PromiseSlots::Thunk {
+            value: Value::Undefined,
+        };
+        let size = size_of::<PromiseSlots>();
+        assert_eq!(ElementRecord::bytes(), 88, "the record's box");
+        assert_eq!(element.bytes(), 144, "the slots are {size} bytes");
+        assert_eq!(finally.bytes(), 32, "the slots are {size} bytes");
+        assert_eq!(thunk.bytes(), 32, "the slots are {size} bytes");
     }
 }

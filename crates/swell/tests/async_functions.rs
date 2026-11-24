@@ -1409,7 +1409,7 @@ fn an_activation_whose_resumption_was_refused_is_never_resumed() {
 /// once the script's values are released a `collect()` brings `heap_bytes()` back to within the
 /// bytes of the promise of a call (read as in
 /// [`a_frame_suspended_at_an_await_is_charged_until_its_activation_is_freed`]) of the reading
-/// before the script.
+/// before the script. A first round grows the arenas first.
 #[test]
 fn an_activation_whose_job_was_cleared_is_never_resumed() {
     let (mut agent, realm) = new_agent(limits());
@@ -1432,6 +1432,14 @@ fn an_activation_whose_job_was_cleared_is_never_resumed() {
         &realm,
         "p = null; q = null; stateRead = undefined; 0;",
     );
+    // A first round grows the arenas to what the round needs: their capacity stays in
+    // `heap_bytes()`.
+    run_parsed(&mut agent, &call_h);
+    run_parsed(&mut agent, &make);
+    assert_eq!(agent.clear_microtasks(), Ok(1));
+    assert_eq!(normal(&mut agent), report(0, 0));
+    assert_eq!(state_of(&mut agent, &realm, "p"), "pending");
+    run_parsed(&mut agent, &release);
     let before = collected(&mut agent);
     run_parsed(&mut agent, &call_h);
     let promise = collected(&mut agent).saturating_sub(before);

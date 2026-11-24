@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:generator-function-constructor
 kind: story
-status: active
+status: implemented
 title: '%GeneratorFunction% makes generators from source text through CreateDynamicFunction and the host hook'
 summary: CreateDynamicFunction of kind generator, a parse entry of its own, the constructor and the constructor property of %GeneratorFunction.prototype%; HostEnsureCanCompileStrings with compilationType Function, so the host interface does not change; 21 cases (42 runs).
 relations:
@@ -25,10 +25,11 @@ scope:
   path: crates/syntax/src/parser/function.rs
 - confidence: cited
   path: crates/syntax/src/parser/mod.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T11:15:32Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T11:15:32Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-24T08:04:07Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":2}}, executor: "agent:coordinator"}
 ---
 ## Context
 
