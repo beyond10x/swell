@@ -731,13 +731,17 @@ session coordinates; this section is its procedure, taken from how surf is run
   Anything over about 30 seconds runs in the background.
 - **Worktrees.** Nothing is edited in the primary checkout. The coordinator has a managed
   worktree of its own for the store, the plan documents and the root files; a unit has its own;
-  `main` moves only by a merge. Each worktree gets a symbolic link `.cache` to the primary
-  checkout's `.cache`, which holds `test262/<commit>/` (the pinned checkout),
-  `ecma262/<commit>/ecma262.txt` and `.html` (the pinned draft) and `inventory/` (the design's
-  `meta.awk`, `slices.awk`, `rules.txt`, `meta.tsv`). The pool syncs such a tree to its build
-  node with the link: on 2026-11-25 the eight parts of the full test262 run read
-  `.cache/test262/<commit>` through the link on the node. A build or test is never run with
-  `slot --local` to work around the node.
+  `main` moves only by a merge. Each worktree gets a copy of the primary checkout's `.cache`
+  (`cp -a --reflink=auto`, about 300 MB), which holds `test262/<commit>/` (the pinned
+  checkout), `ecma262/<commit>/ecma262.txt` and `.html` (the pinned draft) and `inventory/`
+  (the design's `meta.awk`, `slices.awk`, `rules.txt`, `meta.tsv`). A symbolic link to the
+  primary checkout's `.cache` reaches the pool's build node as a link whose target is not
+  there: on 2026-11-25 the pool printed "1 symlink leaves the tree (sent as a link)" and
+  `test262-fetch` failed on the node, where the link's absolute target does not exist. slot
+  sends a link as a link, never its target (its maintainer's answer the same day); the fix is
+  `story:test262-fetch-makes-the-target-of-a-cache-link`, after which a worktree gets the link
+  again. Until then the copy is the stopgap. A build or test is never run with `slot --local`
+  to work around the node.
 - **The store.** `.engineering/` (`aep.project/5`), written only through `aep plan artifact`,
   with `AEP_ACTOR=human:operator` so that no person's name enters a transition. Body files for
   `--from` go in `.engineering/drafts/`, which git ignores. A unit's brief starts from

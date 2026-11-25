@@ -10,6 +10,16 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-25
+
+`Date`, `Math` and `Number` work: nine more stories of the fourth slice give `Date` its time
+zone, setters and text, `Math` all its functions and `Number` its formatting and parsing.
+25,943 of the 44,812 selected test262 cases pass (24,838 in 0.10.0); the fourth slice passes
+1,533 of its 1,612 cases (`test262-slice 04 1612 3184 0 0 1612 1533 79 0`, 564 in 0.10.0), and
+the line reads `test262 total 53801 8982 7 44812 25943 18867 2`. One case of the eighteenth
+slice, not delivered, no longer passes: `annexB/built-ins/Date/prototype/toGMTString/value.js`
+held while `toGMTString` and `toUTCString` were both undefined; `toUTCString` exists now.
+
 ### Added
 
 - `Date` reads the host's time zone, a story of the fourth slice: the constructor with two or
@@ -1196,7 +1206,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.10.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.11.0...HEAD
+[0.11.0]: https://github.com/beyond10x/swell/releases/tag/0.11.0
 [0.10.0]: https://github.com/beyond10x/swell/releases/tag/0.10.0
 [0.9.1]: https://github.com/beyond10x/swell/releases/tag/0.9.1
 [0.9.0]: https://github.com/beyond10x/swell/releases/tag/0.9.0
