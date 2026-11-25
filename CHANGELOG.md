@@ -11,6 +11,18 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Added
+
+- The release build can sign the macOS and Windows binaries before it packages them: on
+  macOS with a Developer ID Application certificate, the hardened runtime and a secure
+  timestamp, then notarized with `xcrun notarytool` (the job fails unless the status is
+  `Accepted`); on Windows through Azure Artifact Signing, checked with
+  `Get-AuthenticodeSignature`. It signs when the twelve signing secrets are set; without
+  them, on every event including a tag, it builds unsigned and prints one line naming the
+  secrets that are not set. A release's notes say whether its binaries are signed.
+  `docs/releasing.md`, "Signing", names the secrets and how to rotate them;
+  `website/docs/embedding.md` shows how to check a signature (`story:binaries-signed`).
+
 ## [0.12.0] - 2026-11-25
 
 swell has a shell binary, `swell`, and a release ships it for Linux, macOS and Windows. The

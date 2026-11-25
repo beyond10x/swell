@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+*"
+  pull_request:
+    paths:
+      - ".github/workflows/release-build.yml"
+  workflow_dispatch:
 
 concurrency:
   group: release-build-${{ github.ref }}
@@ -20,7 +24,7 @@ jobs:
   build:
     name: swell / release build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
     strategy:
@@ -58,6 +62,59 @@ jobs:
           test -n "$channel"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
+      - name: Name the build
+        id: label
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/tags/*) tag=$GITHUB_REF_NAME ;;
+            *)
+              version=$(awk -F '"' '/^\[/ { section = $0 } section == "[workspace.package]" && /^version[ \t]*=/ { print $2; exit }' Cargo.toml)
+              test -n "$version"
+              tag="$version-${GITHUB_SHA:0:7}"
+              ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Decide on signing
+        id: signing
+        if: runner.os != 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+          HAS_APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 != '' }}
+          HAS_APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD != '' }}
+          HAS_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
+          HAS_APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID != '' }}
+          HAS_APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID != '' }}
+          HAS_APPLE_NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 != '' }}
+          HAS_AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID != '' }}
+          HAS_AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID != '' }}
+          HAS_AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET != '' }}
+          HAS_AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT != '' }}
+          HAS_AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT != '' }}
+          HAS_AZURE_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_SIGNING_CERTIFICATE_PROFILE != '' }}
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            macOS) names="APPLE_DEVELOPER_ID_P12_BASE64 APPLE_DEVELOPER_ID_P12_PASSWORD APPLE_TEAM_ID APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID APPLE_NOTARY_KEY_P8" ;;
+            Windows) names="AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_SIGNING_ENDPOINT AZURE_SIGNING_ACCOUNT AZURE_SIGNING_CERTIFICATE_PROFILE" ;;
+            *) echo "release-build: no signing is defined for $RUNNER_OS"; exit 1 ;;
+          esac
+          missing=
+          for name in $names; do
+            flag="HAS_$name"
+            if [ "${!flag:-false}" != true ]; then missing="$missing $name"; fi
+          done
+          if [ -z "$missing" ]; then
+            echo "sign=true" >> "$GITHUB_OUTPUT"
+            echo "release-build: $TARGET is signed in this run"
+            exit 0
+          fi
+          echo "sign=false" >> "$GITHUB_OUTPUT"
+          prefix=
+          case "$GITHUB_REF" in refs/tags/*) prefix="::warning::" ;; esac
+          echo "${prefix}release-build: $TARGET is not signed in this run; these signing secrets are not set:$missing"
+
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
           toolchain: ${{ steps.toolchain.outputs.channel }}
@@ -76,10 +133,121 @@ jobs:
           export RUSTFLAGS="$flags"
           cargo build --release --locked -p swell-cli --target "$TARGET"
 
+      - name: Sign the macOS binary
+        if: runner.os == 'macOS' && steps.signing.outputs.sign == 'true'
+        env:
+          TARGET: ${{ matrix.target }}
+          P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          binary="target/$TARGET/release/swell"
+          work="$RUNNER_TEMP/signing"
+          keychain="$work/swell-signing.keychain-db"
+          rm -rf "$work"
+          mkdir -m 700 "$work"
+          keychain_password=$(openssl rand -hex 32)
+          echo "::add-mask::$keychain_password"
+          printf '%s' "$P12_BASE64" | base64 --decode > "$work/identity.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$work/identity.p12" -k "$keychain" -f pkcs12 -P "$P12_PASSWORD" -T /usr/bin/codesign > /dev/null
+          rm -f "$work/identity.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user | xargs security list-keychains -d user -s "$keychain"
+          identity=$(security find-identity -v -p codesigning "$keychain" |
+            awk -v team="($TEAM_ID)\"" '/"Developer ID Application: / && index($0, team) { print $2; exit }')
+          if [ -z "$identity" ]; then
+            echo "::error::release-build: APPLE_DEVELOPER_ID_P12_BASE64 holds no valid Developer ID Application identity of the team APPLE_TEAM_ID names"
+            exit 1
+          fi
+          codesign --force --options runtime --timestamp --keychain "$keychain" --sign "$identity" "$binary"
+          codesign --verify --strict --verbose=2 "$binary"
+          details=$(codesign -dv --verbose=2 "$binary" 2>&1)
+          printf '%s\n' "$details" | awk -v team="$TEAM_ID" '{ while (team != "" && (i = index($0, team)) > 0) $0 = substr($0, 1, i - 1) "<APPLE_TEAM_ID>" substr($0, i + length(team)); print }'
+          printf '%s\n' "$details" | grep -q '^Authority=Developer ID Application: ' ||
+            { echo "::error::release-build: $binary is not signed by a Developer ID Application certificate"; exit 1; }
+          printf '%s\n' "$details" | grep -Eq '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' ||
+            { echo "::error::release-build: $binary is signed without the hardened runtime"; exit 1; }
+          printf '%s\n' "$details" | grep -q '^Timestamp=' ||
+            { echo "::error::release-build: the signature of $binary has no secure timestamp"; exit 1; }
+          echo "release-build: $binary signed with the hardened runtime and a secure timestamp"
+
+      - name: Notarize the macOS binary
+        if: runner.os == 'macOS' && steps.signing.outputs.sign == 'true'
+        env:
+          TARGET: ${{ matrix.target }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          binary="target/$TARGET/release/swell"
+          work="$RUNNER_TEMP/signing"
+          key="$work/notary-key.p8"
+          ditto -c -k --keepParent "$binary" "$work/swell.zip"
+          printf '%s\n' "$NOTARY_KEY_P8" > "$key"
+          status=0
+          result=$(xcrun notarytool submit "$work/swell.zip" --key "$key" --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" --wait --timeout 25m --output-format json) || status=$?
+          id=$(printf '%s' "$result" | plutil -extract id raw -o - - 2> /dev/null || true)
+          outcome=$(printf '%s' "$result" | plutil -extract status raw -o - - 2> /dev/null || true)
+          echo "release-build: notarization of $TARGET: submission ${id:-none}, status ${outcome:-none}, notarytool exited $status"
+          if [ "$outcome" != Accepted ]; then
+            if [ -n "$id" ]; then
+              xcrun notarytool log "$id" --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
+            fi
+            rm -f "$key"
+            echo "::error::release-build: notarization of $TARGET ended with status ${outcome:-none}, not Accepted"
+            exit 1
+          fi
+          rm -f "$key"
+
+      - name: Sign swell.exe
+        if: runner.os == 'Windows' && steps.signing.outputs.sign == 'true'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_SIGNING_CERTIFICATE_PROFILE }}
+          files: ${{ github.workspace }}\target\${{ matrix.target }}\release\swell.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-azure-cli-credential: true
+          cache-dependencies: false
+
+      - name: Verify the signature of swell.exe
+        if: runner.os == 'Windows' && steps.signing.outputs.sign == 'true'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $binary = "target\$env:TARGET\release\swell.exe"
+          $signature = Get-AuthenticodeSignature -FilePath $binary
+          Write-Output "release-build: ${binary}: Authenticode status $($signature.Status), $($signature.StatusMessage)"
+          Write-Output "release-build: signer $($signature.SignerCertificate.Subject), thumbprint $($signature.SignerCertificate.Thumbprint)"
+          Write-Output "release-build: timestamp by $($signature.TimeStamperCertificate.Subject)"
+          if ($signature.Status -ne 'Valid') {
+            Write-Output "::error::release-build: the signature of $binary is $($signature.Status), not Valid"
+            exit 1
+          }
+          if ($null -eq $signature.TimeStamperCertificate) {
+            Write-Output "::error::release-build: the signature of $binary has no timestamp"
+            exit 1
+          }
+
       - name: Package
         id: package
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.label.outputs.tag }}
           TARGET: ${{ matrix.target }}
           ARCHIVE: ${{ matrix.archive }}
         run: |
@@ -109,7 +277,7 @@ jobs:
 
       - name: Smoke test the archive
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.label.outputs.tag }}
           ARCHIVE: ${{ matrix.archive }}
           NAME: ${{ steps.package.outputs.name }}
           FILE: ${{ steps.package.outputs.file }}
@@ -146,3 +314,12 @@ jobs:
           path: dist/${{ steps.package.outputs.file }}
           if-no-files-found: error
           retention-days: 30
+
+      - name: Delete the signing keychain
+        if: always() && runner.os == 'macOS'
+        run: |
+          work="$RUNNER_TEMP/signing"
+          if [ -f "$work/swell-signing.keychain-db" ]; then
+            security delete-keychain "$work/swell-signing.keychain-db" || true
+          fi
+          rm -rf "$work"
