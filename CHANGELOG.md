@@ -30,6 +30,24 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The test262 sources digest (`task test262-digest`) now covers only the packages of the
   runner: `swell-test262` and what it depends on in `Cargo.lock`. A change to `crates/cli` or
   `crates/unicode-gen` no longer requires a full test262 run.
+### Fixed
+
+- The interrupt flag is read after every call from Rust into a host function, not only after
+  a call or a construction: a host function reached by a property read or write (a getter, a
+  setter), a conversion (`valueOf`, `toString`), an iterator's `next` or a promise job (a
+  thenable's `then`, a reaction handler) that sets the flag ends the run or the microtask
+  checkpoint in `Terminated(Interrupted)` when it returns or throws, also when it is the
+  script's last operation or the checkpoint's last job, and the thrown value reaches no
+  `catch`.
+- An embedder that calls a host function with `cx.call` and that function sets the flag now
+  gets `Err(Abrupt::Terminated(Termination::Interrupted))` from that call, where it got the
+  function's `Ok` value before and the termination only at the next call.
+
+### Host interface
+
+- `HOST-221` (new, slice 1) has a test: an interrupt set by a host getter, setter, `valueOf`,
+  iterator `next`, thenable `then` or reaction handler that then throws or returns ends the
+  run or the checkpoint, with the flag clear after.
 
 ## [0.11.0] - 2026-11-25
 

@@ -522,3 +522,131 @@ fn host_217_a_host_function_answering_interrupted_ends_the_run() {
         Shown::Normal("1".to_string())
     );
 }
+
+/// A host function that sets its agent's interrupt flag through the handle the host keeps, as
+/// [`interrupt_then_throw`] does, and then answers `Ok(3)`, counting its calls.
+fn interrupt_then_return(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    cx.host_mut().count += 1;
+    THROW_HANDLE.with(|slot| {
+        if let Some(handle) = slot.borrow().as_ref() {
+            handle.interrupt();
+        }
+    });
+    Ok(Value::Number(3.0))
+}
+
+/// What a HOST-221 run reads the host function from, and where it calls it.
+#[derive(Clone, Copy)]
+enum Reached {
+    /// The script `<form>` reaches the host function from Rust.
+    Script(&'static str),
+    /// The setup script queues a promise job that calls the host function, the only and so the
+    /// last job of the checkpoint that follows.
+    Job,
+}
+
+/// HOST-221: a host function that calls `interrupt()` and then answers `Err(Abrupt::Throw(v))`
+/// or `Ok(v)`, reached from Rust and not by `Call` or `New`: as a getter (`o.p`), as a setter
+/// (`o.p = 1`), as `valueOf` in `+o` and as the `next` of an iterator in `for (y of it) {}`,
+/// ends the run in `Terminated(Interrupted)` with the flag clear after, both when the form is
+/// followed by code that stores the global `x` (`try { <form>; x = 2 } catch (e) { x = 1 }`)
+/// and when the form is the script's last operation. The same for a promise job, the last job
+/// of `perform_microtask_checkpoint`: the `then` of a thenable passed to `Promise.resolve`, and
+/// a reaction handler of `Promise.prototype.then`; the checkpoint answers
+/// `Terminated(Interrupted)`. Each run is an agent of its own whose script before declares
+/// `x`, as for HOST-216, and makes the object the form reads or queues the job.
+#[test]
+fn host_221_an_interrupt_set_in_a_host_function_reached_from_rust_ends_the_run() {
+    let forms = [
+        (
+            "getter",
+            "Object.defineProperty(o, \"p\", { get: f });",
+            Reached::Script("o.p"),
+        ),
+        (
+            "setter",
+            "Object.defineProperty(o, \"p\", { set: f });",
+            Reached::Script("o.p = 1"),
+        ),
+        ("valueOf", "o.valueOf = f;", Reached::Script("+o")),
+        (
+            "next",
+            "o[Symbol.iterator] = function () { return { next: f }; };",
+            Reached::Script("for (var y of o) {}"),
+        ),
+        ("thenable", "o.then = f; Promise.resolve(o);", Reached::Job),
+        ("reaction", "Promise.resolve(1).then(f);", Reached::Job),
+    ];
+    let answers: [(&str, swell::HostFn<TestHost>); 2] = [
+        ("throw", interrupt_then_throw),
+        ("return", interrupt_then_return),
+    ];
+    let mut seen = Vec::new();
+    let mut expected = Vec::new();
+    for (name, setup, reached) in forms {
+        let positions: &[&str] = match reached {
+            Reached::Script(_) => &["store", "last"],
+            Reached::Job => &["job"],
+        };
+        for (answer, steps) in answers {
+            for &position in positions {
+                let mut agent = support::host::agent().unwrap();
+                let realm = support::host::realm(&mut agent);
+                define_function(&mut agent, &realm, "f", 0, steps, false);
+                let handle = agent.interrupt_handle();
+                THROW_HANDLE.with(|slot| slot.replace(None));
+                let ready = format!("var x; var o = {{}}; {setup} \"ready\";");
+                assert_eq!(
+                    eval_text(&mut agent, &realm, &ready),
+                    Shown::Normal("\"ready\"".to_string()),
+                    "{name}"
+                );
+                THROW_HANDLE.with(|slot| slot.replace(Some(handle.clone())));
+                // The flag is read before the outcome is described: describing a value is an
+                // entry of its own, which a flag still set would end.
+                let (outcome, set) = match reached {
+                    Reached::Script(form) => {
+                        let source = match position {
+                            "store" => format!("try {{ {form}; x = 2 }} catch (e) {{ x = 1 }}"),
+                            _ => format!("{form};"),
+                        };
+                        let outcome = eval(&mut agent, &realm, &source);
+                        let set = handle.is_set();
+                        handle.clear();
+                        (describe(&mut agent, &realm, outcome), set)
+                    }
+                    Reached::Job => {
+                        let outcome = agent.perform_microtask_checkpoint().unwrap();
+                        let set = handle.is_set();
+                        handle.clear();
+                        let outcome = match outcome {
+                            Outcome::Normal(_) => Shown::Normal("checkpoint".to_string()),
+                            Outcome::Throw(_) => Shown::Throw("checkpoint".to_string()),
+                            Outcome::Terminated(termination) => Shown::Terminated(termination),
+                        };
+                        (outcome, set)
+                    }
+                };
+                THROW_HANDLE.with(|slot| slot.replace(None));
+                let x = eval_text(&mut agent, &realm, "x;");
+                seen.push((name, answer, position, outcome, x, set, agent.host().count));
+                expected.push((
+                    name,
+                    answer,
+                    position,
+                    Shown::Terminated(Termination::Interrupted),
+                    Shown::Normal("undefined".to_string()),
+                    false,
+                    1,
+                ));
+            }
+        }
+    }
+    let wrong: Vec<_> = seen
+        .iter()
+        .zip(&expected)
+        .filter(|(got, want)| got != want)
+        .map(|(got, _)| got)
+        .collect();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
