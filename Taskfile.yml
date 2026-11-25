@@ -151,13 +151,14 @@ tasks:
     desc: The lane slow. The full runs the gate does not make; the forge runs it when a source of the expected file changed.
     summary: |
       The lane slow: the full runs the gate does not make, each compared with the committed file
-      the gate reads in their place, or the full counts of tests the gate runs a part of. Three:
+      the gate reads in their place, or the full counts of tests the gate runs a part of. Four:
       slow-test262, the full test262 run compared byte for byte with
       conformance/test262/expected.txt, and the digest of its sources checked against
       conformance/test262/expected.digest; slow-tests, the tests with a gate count at their
-      full counts; and build-stack-profiles with test-stack-profiles, the stack tests in the
-      release profile and in stack-debug, the dev profile with full debug information (the
-      gate runs them in the dev profile without it). The
+      full counts; test-realm-sizes, every test of swell in both modes with each realm padded by
+      k host functions for several k; and build-stack-profiles with test-stack-profiles, the
+      stack tests in the release profile and in stack-debug, the dev profile with full debug
+      information (the gate runs them in the dev profile without it). The
       workflow .github/workflows/slow.yml runs it on a push to main and on a pull request, each
       only when it changes a path of the workflow's list (a source of the digest, the expected
       file or the digest file among them), and on a run started by hand on a branch.
@@ -172,6 +173,9 @@ tasks:
       - task: slow-tests
       - task: gate-time
         vars: {STEP: slow-tests, LABEL: slow-time}
+      - task: test-realm-sizes
+      - task: gate-time
+        vars: {STEP: test-realm-sizes, LABEL: slow-time}
       - task: build-stack-profiles
       - task: test-stack-profiles
       - task: gate-time
@@ -240,6 +244,106 @@ tasks:
       - task: nextest-report
         vars: {STEP: slow-tests-collect, PREFIX: 'slow-tests collect-every-safe-point: ', LOG: .out/slow-tests-collect.log, STATUS: .out/slow-tests-collect.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}
 
+  build-realm-sizes:
+    desc: Build, without running them, the two test sets of swell that test-realm-sizes runs, the flags of test with -p swell and those of test-collect.
+    summary: |
+      The build step of test-realm-sizes: "cargo nextest run --no-run --locked -p swell
+      --profile default" (the flags of the step test, for the package swell) and "cargo
+      nextest run --no-run --locked -p swell --features collect-every-safe-point
+      --config .cargo/collect-profile.toml --cargo-profile collect --profile default" (those
+      of test-collect), with RUSTFLAGS="-D warnings", into .out/realm-sizes-build.log. Prints
+      "build-realm-sizes: <cargo's Finished line>" for each; when cargo fails it prints the log
+      and fails.
+    env:
+      RUSTFLAGS: -D warnings
+    silent: true
+    cmds:
+      - mkdir -p .out
+      - |
+        status=0
+        {
+          cargo nextest run --no-run --locked -p swell --profile default &&
+          cargo nextest run --no-run --locked -p swell --features collect-every-safe-point {{.COLLECT_CONFIG}} --cargo-profile collect --profile default
+        } > .out/realm-sizes-build.log 2>&1 || status=$?
+        if [ "$status" -ne 0 ]; then cat .out/realm-sizes-build.log; echo "build-realm-sizes: cargo nextest run --no-run failed, exit $status"; exit 1; fi
+        esc=$(printf '\033')
+        LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" .out/realm-sizes-build.log | awk '/^ *Finished / { sub(/^ */, ""); print "build-realm-sizes: " $0 }'
+
+  test-realm-sizes:
+    desc: Run every test of swell, in both modes, with each realm padded by k host functions for each k of REALM_SIZES; a part of the lane slow, and the command a unit that adds to the realm runs before it reports.
+    summary: |
+      Run every test of swell in the mode of the step test and in that of test-collect with
+      SWELL_TEST_REALM_FUNCTIONS=<k>, for each k of REALM_SIZES (default "4 11 17 38 64 128
+      200"; a value given replaces the list): every realm a test makes through
+      support::host::create_realm or support::host::realm is padded by k host functions
+      (crates/swell/tests/support/host.rs, pad_realm), so that a test that compares with a room
+      or a heap_bytes() reading fitted to one size of the realm goes red here
+      (story tests-hold-at-any-size-of-the-realm). A part of the lane slow after slow-tests, not
+      a step of check: one padded run of swell in both modes is a whole run of the package more.
+      A unit that adds anything to the realm (a builtin, an intrinsic, a property of one) runs
+      "slot --timeout 30m task test-realm-sizes" before it reports and names every red test with
+      its k and mode.
+
+      First build-realm-sizes builds both test sets (.out/realm-sizes-build.log). Then each run
+      writes .out/realm-sizes-<k>-<mode>.log (mode default or collect) and its JUnit file
+      .out/realm-sizes-<k>-<mode>.junit.xml, and prints "realm-sizes <k> <mode>: <p> passed, <f>
+      failed, <i> ignored", then each failed test as "realm-sizes <k> <mode>: failed <binary>
+      <test>". A red run does not stop the loop. A run red without a Summary line says so; a run
+      whose log holds a cargo Compiling line counts red, naming build-realm-sizes. Last it prints
+      "realm-sizes: <n> run(s) red" and fails when n is not 0. A k that is not a whole number
+      fails before any run.
+    vars:
+      REALM_SIZES: '{{.REALM_SIZES | default "4 11 17 38 64 128 200"}}'
+    env:
+      RUSTFLAGS: -D warnings
+    silent: true
+    cmds:
+      - task: build-realm-sizes
+      - |
+        sizes={{shellQuote .REALM_SIZES}}
+        for k in $sizes; do
+          case "$k" in ''|*[!0-9]*) echo "realm-sizes: REALM_SIZES holds $k, not a whole number"; exit 1 ;; esac
+        done
+        [ -n "$sizes" ] || { echo "realm-sizes: REALM_SIZES names no size"; exit 1; }
+        esc=$(printf '\033')
+        red=0
+        for k in $sizes; do
+          for mode in default collect; do
+            log=.out/realm-sizes-$k-$mode.log
+            status=0
+            if [ "$mode" = default ]; then
+              SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run --locked -p swell --profile default > "$log" 2>&1 || status=$?
+            else
+              SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run --locked -p swell --features collect-every-safe-point {{.COLLECT_CONFIG}} --cargo-profile collect --profile default > "$log" 2>&1 || status=$?
+            fi
+            cp target/nextest/default/junit.xml ".out/realm-sizes-$k-$mode.junit.xml" 2>/dev/null || :
+            LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" "$log" > "$log.plain"
+            LC_ALL=C awk -v k="$k" -v mode="$mode" -v status="$status" '
+              /^ *Summary \[/ {
+                summary = 1
+                for (i = 1; i <= NF; i++) {
+                  w = $(i + 1); gsub(/[^a-z]/, "", w)
+                  if ($i ~ /^run:?$/ && i > 2 && $(i - 2) ~ /^[0-9]+$/) run = $(i - 2)
+                  if (w == "passed" && $i ~ /^[0-9]+$/) passed = $i
+                  if (w == "skipped" && $i ~ /^[0-9]+$/) skipped = $i
+                }
+              }
+              /^ *(FAIL|TIMEOUT|SIGSEGV|SIGABRT|SIGKILL|ABORT) \[/ && !seen[$(NF - 1) " " $NF]++ { failed_tests[++n] = $(NF - 1) " " $NF }
+              /^ *Compiling [^ ]+ v[0-9]/ { compiled++ }
+              END {
+                failed = run - passed
+                printf "realm-sizes %s %s: %d passed, %d failed, %d ignored\n", k, mode, passed, failed, skipped
+                for (i = 1; i <= n; i++) printf "realm-sizes %s %s: failed %s\n", k, mode, failed_tests[i]
+                if (!summary) printf "realm-sizes %s %s: no Summary line, exit %s\n", k, mode, status
+                if (compiled) printf "realm-sizes %s %s: compiled %d crate(s), which the task build-realm-sizes builds before the runs\n", k, mode, compiled
+                exit (status != 0 || !summary || failed > 0 || compiled > 0)
+              }
+            ' "$log.plain" || red=$((red + 1))
+          done
+        done
+        echo "realm-sizes: $red run(s) red"
+        [ "$red" -eq 0 ]
+
   gate-vars:
     desc: Print, on one line, every gate variable that has a value before the checks run; a redirected run shows in its own output.
     summary: |
@@ -267,6 +371,7 @@ tasks:
         TEST262_MOVES TEST262_LATER_PARTS
         GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_CPU_BOUNDS GATE_SELFTEST_DIR GATE_SELFTEST_JOBS
         GATE_RUNNER_ENV GATE_TEST_BUILD_JSON
+        REALM_SIZES
         SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES
     silent: true
     cmds:

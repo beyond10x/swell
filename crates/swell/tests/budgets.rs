@@ -35,18 +35,43 @@ fn realm_bytes() -> u64 {
     made
 }
 
+/// The bytes the String "small" adds to an agent with the test limits right after
+/// `create_realm`: its owned bytes, and the growth of the arena of Strings when its slot needs
+/// one.
+fn small_string_bytes() -> u64 {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    let before = agent.heap_bytes().unwrap();
+    let made = agent
+        .with_cx(&realm, |cx| cx.new_string("small").map(|_| ()))
+        .unwrap();
+    assert_eq!(made, Ok(()));
+    agent.heap_bytes().unwrap() - before
+}
+
 /// The epic's item 9: an allocation that takes the agent over its memory budget ends the run
-/// with `Terminated(MemoryBudget)`. A `with_cx` whose `new_string` of 2,000 code units passes
-/// a budget of 1,024 bytes beyond the realm.
+/// with `Terminated(MemoryBudget)`. A `with_cx` whose `new_string` of at least 2,000 code units
+/// passes a budget of 1,024 bytes beyond the realm and the String "small".
+///
+/// The room is the bytes a twin agent reads for the String "small" after its realm
+/// ([`small_string_bytes`]) plus 1,024, and the long String is longer than the room, so it
+/// passes the budget whatever the slot of a String costs. Before, the room was 1,024 bytes: on
+/// 2026-11-24, at a realm of 232 functions (the base of
+/// `story:tests-hold-at-any-size-of-the-realm`), "small" needed a growth of the arena of Strings
+/// that the 1,024 bytes did not cover and was refused in both modes, and at that realm padded
+/// by 2 to 200 functions it was not. The test prints its readings.
 #[test]
 fn memory_budget_ends_with_cx_in_memory_budget() {
+    let small = small_string_bytes();
+    let room = small + 1_024;
     let mut limits = support::host::limits();
-    limits.memory_bytes = realm_bytes() + 1_024;
+    limits.memory_bytes = realm_bytes() + room;
     let budget = limits.memory_bytes;
     let mut agent = support::host::agent_with(limits).unwrap();
     let realm = support::host::realm(&mut agent);
+    println!("\"small\": {small} bytes, room {room} bytes");
 
-    let text = "x".repeat(2_000);
+    let text = "x".repeat(usize::try_from(room + 1).unwrap().max(2_000));
     let outcome = agent
         .with_cx(&realm, |cx| {
             let first = cx.new_string(&text).map(|_| ());
@@ -232,7 +257,11 @@ fn host_8_nested_entry_spends_the_outer_budget() {
 #[test]
 fn host_9_zero_steps_ends_before_the_first() {
     let mut agent = agent_with(with_steps(0)).unwrap();
-    let realm = realm(&mut agent);
+    // The bare realm (an exception of `support::host::create_realm`): with no step the
+    // padding's entry cannot run.
+    let HostOutcome::Normal(realm) = agent.create_realm(None, None).unwrap() else {
+        panic!("create_realm did not answer Normal");
+    };
     assert_eq!(
         eval_text(&mut agent, &realm, "1;"),
         Outcome::Terminated(Termination::StepBudget)
@@ -628,10 +657,20 @@ fn make(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
 /// `while (true) make();` with `memory_bytes` M, the bytes after the realm and 64 KiB, ends in
 /// `Terminated(MemoryBudget)`, and `heap_bytes()` then reads at most M; after the host drops the
 /// buffers with their `HostBytes`, the script `1` answers `Normal(1)`.
+///
+/// M is the realm's bytes, the bytes a twin agent reads for defining `make` after its realm
+/// ([`make_bytes`]) and the room ([`host_175_room`]), and the answer of `1` is read with no
+/// allocation (`support::host::number_answer`). Before, M had no share for `make`: on
+/// 2026-11-24 with the collector at every safe point, at a realm of 232 functions (the base of
+/// `story:tests-hold-at-any-size-of-the-realm`), defining `make` needed a growth of an arena that
+/// the room did not cover and was refused, and at that realm padded by 2 to 200 functions it was
+/// not. The test prints its readings.
 #[test]
 fn host_175_host_bytes_without_end_end_in_memory_budget() {
-    let budget = realm_bytes() + host_175_room();
-    let (mut agent, realm, _) = agent_with_budget(budget);
+    let defined = make_bytes();
+    let budget = realm_bytes() + defined + host_175_room();
+    let (mut agent, realm, room) = agent_with_budget(budget);
+    println!("make: {defined} bytes, room {room} bytes before it");
     define_function(&mut agent, &realm, "make", 0, make, false);
     assert_eq!(
         eval_text(&mut agent, &realm, "while (true) make();"),
@@ -645,10 +684,21 @@ fn host_175_host_bytes_without_end_end_in_memory_budget() {
     agent.host_mut().charges.clear();
     BUFFERS.with(|buffers| buffers.borrow_mut().clear());
     assert_eq!(
-        eval_text(&mut agent, &realm, "1;"),
-        Outcome::Normal("1".to_string())
+        support::host::number_answer(&mut agent, &realm, "1;"),
+        Ok(1.0)
     );
     assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// The bytes defining the host function `make` adds to an agent with the test limits after its
+/// realm and a collection: the function, its name and key, and any arena growth they need.
+fn make_bytes() -> u64 {
+    let mut agent = support::host::agent().unwrap();
+    let realm = realm(&mut agent);
+    agent.collect().unwrap();
+    let before = agent.heap_bytes().unwrap();
+    define_function(&mut agent, &realm, "make", 0, make, false);
+    agent.heap_bytes().unwrap() - before
 }
 
 /// Host data that holds a charge of the host and nothing else.
@@ -964,7 +1014,7 @@ fn realm_charging(agent: &mut Agent<TestHost>, charge: Option<u64>) -> HostOutco
             .unwrap()?;
         Ok(GlobalObjects { global, this: None })
     };
-    agent.create_realm(Some(&mut setup), None).unwrap()
+    support::host::create_realm(agent, Some(&mut setup), None).unwrap()
 }
 
 /// A charge made with the `HookCx` of a setup closure counts as one made with `Cx`: an agent

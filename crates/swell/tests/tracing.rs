@@ -20,12 +20,13 @@ fn collect(agent: &mut swell::Agent<support::host::TestHost>) {
 /// times in the default build, and few where every safe point collects. In the default build
 /// the lane `slow` (`SWELL_FULL_COUNTS=1`) runs 15,000 and the gate 6,000;
 /// [`garbage_passes_the_threshold_and_the_budget`] checks that this is still enough. An array of
-/// the loop is charged 464 bytes (measured), so 6,000 make 2,784,000 bytes a loop, more than
+/// the loop holds 488 bytes (the live reading, measured on 2026-11-24 at realms of 232 to 432
+/// functions; 464 charged on 2026-11-22), so 6,000 make 2,928,000 bytes a loop, more than
 /// twice the threshold, and three loops more than the 4 MiB budget; with 20,000
 /// [`operand_stack_and_local_values_survive_collect`] took 22.2 s at a load of 100 to 110 on
-/// 17 cores (cargo-nextest). 15,000 make 6,960,000 bytes a loop, six times the threshold; the
-/// 100,000 the lane ran before took 11.5 CPU seconds alone and 25,000 took 2.8 (6,000: 0.68),
-/// measured on 2026-11-22.
+/// 17 cores (cargo-nextest). 15,000 make 7,320,000 bytes a loop, more than six times the
+/// threshold; the 100,000 the lane ran before took 11.5 CPU seconds alone and 25,000 took 2.8
+/// (6,000: 0.68), measured on 2026-11-22.
 fn garbage() -> u32 {
     if cfg!(feature = "collect-every-safe-point") {
         20
@@ -36,9 +37,15 @@ fn garbage() -> u32 {
     }
 }
 
-/// The bytes one array of the garbage loop is charged: the heap after `garbage(400)` less the
-/// heap after `garbage(200)`, each run from a collection, so that no collection runs inside it
+/// The bytes one array of the garbage loop holds: the live reading after `garbage(400)` less
+/// that after `garbage(200)`, each run from a collection, so that no collection runs inside it
 /// and the scripts, of equal length, cancel out; divided by the 200 arrays more.
+///
+/// The live reading counts each record's slot and what it owns wherever the arenas' doublings
+/// fall. Before, this read `heap_bytes()`, which counts an arena's capacity: on 2026-11-24, at
+/// the realm of 232 functions (the base of `story:tests-hold-at-any-size-of-the-realm`) padded
+/// by 38 to 200 functions, the arena of objects had room for the 400 arrays after the realm, so
+/// the reading was 0 bytes an array, and at the realm alone it was not.
 fn array_bytes() -> u64 {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
@@ -53,12 +60,12 @@ fn array_bytes() -> u64 {
     let mut grown = Vec::new();
     for n in [200, 400] {
         collect(&mut agent);
-        let before = agent.heap_bytes().unwrap();
+        let before = agent.live_bytes().unwrap();
         assert_eq!(
             eval_text(&mut agent, &realm, &format!("garbage({n});")),
             Outcome::Normal(n.to_string())
         );
-        grown.push(agent.heap_bytes().unwrap().saturating_sub(before));
+        grown.push(agent.live_bytes().unwrap().saturating_sub(before));
     }
     grown[1].saturating_sub(grown[0]) / 200
 }

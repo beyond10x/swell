@@ -16,9 +16,10 @@ use crate::support;
 use support::host::{limits, seeds};
 use support::stack::{TestPath, test_path};
 use swell::{
-    Abrupt, Agent, CompileStrings, Completion, Cx, Handled, HookCx, Host, HostCall, IsoDateTime,
-    Job, Limits, LoadRequest, ModuleRef, ObjectRef, Outcome, Parsed, PropertyKey, Realm, RealmRef,
-    RejectionOperation, Root, Source, StringRef, Termination, TimeZoneIdentifier, Value,
+    Abrupt, Agent, Brand, CompileStrings, Completion, Cx, Handled, HookCx, Host, HostCall,
+    HostObjectSpec, IsoDateTime, Job, Limits, LoadRequest, ModuleRef, ObjectRef, Outcome, Parsed,
+    PropertyKey, Prototype, Realm, RealmRef, RejectionOperation, Root, Source, StringRef,
+    Termination, TimeZoneIdentifier, Value,
 };
 
 /// A host that writes every hook call, provided hooks included, and every call of its host
@@ -297,41 +298,15 @@ const CORPUS: &[&str] = &[
     "var e = new RangeError('r'); print(e.toString(), Object.prototype.toString.call(e), Object.prototype.toString.call([]));",
 ];
 
-/// The limits of the corpus: small enough that the endless scripts reach their budgets fast
-/// (`fib(15)` takes about 27,000 steps). In the default mode they are 40,000 steps per entry,
-/// the realm's charge ([`realm_charge`]) plus [`DEFAULT_ROOM`], 208 KiB, a `frame_depth` of 200
-/// and a `string_length` of 4,096, in the gate and in the lane `slow` (`SWELL_FULL_COUNTS=1`)
-/// alike.
-///
-/// The full count is these default-mode limits in the default mode and the collect mode's own
-/// limits in the collect mode, in the gate and the lane `slow` alike, because a collection at
-/// every safe point multiplies the work: the 40,000 steps are covered by the default mode, and
-/// the interleaving of two agents under collections by the collect mode at its smaller limits.
-///
-/// With the feature `collect-every-safe-point` the run has 2,000 steps per entry, a
-/// `frame_depth` of 30, a `string_length` of 256, and a memory budget of the realm's charge
-/// ([`realm_charge`]) plus [`COLLECT_ROOM`], 64 KiB. With 10,000 steps the test was terminated
-/// at 60 s in that mode, at a load of 100 to 110 on 17 cores (cargo-nextest): this process runs
-/// the corpus twice and every step collects. The numbers below were measured in that mode after
-/// the arenas were charged by capacity (an arena's slots are charged when it doubles, from 16,
-/// and stay charged): the realm's charge, `heap_bytes()`, is 172,603 bytes (`live_bytes()`
-/// 105,817), so the budget is 238,139; no script but the one that keeps every object reads
-/// more than 191,951, and each of them ends as it does with 40,000 steps under a budget of the
-/// realm plus 24 KiB (with 20,000 bytes of room the nested `join` ends in the memory budget);
-/// `fib(15)` ends in the step budget; the longest script that completes, the 50 squares, takes
-/// 1,794 steps; `deep()` reaches `frame_depth` in 123 steps; the doubling string reaches
-/// `string_length` in 598. The loop that keeps its objects starts from 189,739 bytes; at step
-/// 1,547, with 90 objects in `h`, an arena doubles and the charge would go from 213,444 to
-/// 265,668 bytes (52,224 more). The budget refuses that doubling: it is 24,695 bytes above the
-/// charge before it and 27,529 below the charge after it. Any budget from 213,444 to 265,667
-/// bytes ends the loop at that step; a smaller one ends it sooner, and a larger one lets the
-/// arena grow, so the loop runs into the step budget and the outcome `MemoryBudget` is lost. A
-/// realm that charges more moves the budget with it; what moves that window against the room is
-/// the arena the loop doubles, its capacity and its slot's size. So every outcome the test
-/// asserts is still reached under 2,000 steps: the endless loops and `fib(15)` end in the step
-/// budget, `deep()` at `frame_depth` (its 30 frames would need more than 1.6 KiB each to fill
-/// the budget first), the doubling string at `string_length`, the loop that keeps its objects
-/// in the memory budget, and the others where they end with 40,000.
+/// The limits of the corpus but its memory budget, which [`corpus_setup`] finds: small enough
+/// that the endless scripts reach their budgets fast (`fib(15)` takes about 27,000 steps). In
+/// the default mode they are 40,000 steps per entry, a `frame_depth` of 200 and a
+/// `string_length` of 4,096, in the gate and in the lane `slow` (`SWELL_FULL_COUNTS=1`) alike.
+/// With the feature `collect-every-safe-point` they are 2,000 steps per entry, a `frame_depth`
+/// of 30 and a `string_length` of 256: with 10,000 steps the test was terminated at 60 s in that
+/// mode, at a load of 100 to 110 on 17 cores (cargo-nextest), since this process runs the corpus
+/// twice and every step collects. The memory budget here is the test limits' own, wide enough
+/// that nothing the corpus does is refused; the probes of [`corpus_setup`] run under it.
 fn corpus_limits() -> Limits {
     let mut limits = limits();
     limits.steps_per_entry = 40_000;
@@ -342,57 +317,291 @@ fn corpus_limits() -> Limits {
         limits.steps_per_entry = 2_000;
         limits.frame_depth = 30;
         limits.string_length = 1 << 8;
-        limits.memory_bytes = realm_charge(limits) + COLLECT_ROOM;
-    } else {
-        limits.memory_bytes = realm_charge(limits) + DEFAULT_ROOM;
     }
     limits
 }
 
-/// The room of the memory budget above [`realm_charge`] with the feature
-/// `collect-every-safe-point` ([`corpus_limits`]).
-const COLLECT_ROOM: u64 = 64 * 1024;
+/// The slots of the arena of objects a corpus agent has free when the corpus starts: 48. More
+/// than the scripts before the loop that keeps its objects hold at once (with the collector at
+/// every safe point they hold the dozen objects they keep in globals and the few a statement
+/// makes; were it fewer, they would take the growth, and [`keeping_loop_budget`] would find
+/// none in the loop and fail), and few enough that the loop, which keeps one object per
+/// iteration at about 17 steps, fills them within half of the 2,000 steps it has with that
+/// collector.
+const FREE_OBJECT_SLOTS: u64 = 48;
 
-/// The room of the memory budget above [`realm_charge`] in the default mode
-/// ([`corpus_limits`]).
+/// The least rise of `heap_bytes()` that one kept object cannot make by itself: 2 KiB. An
+/// object of [`pin_objects`] or `{ a: h.length }` is charged its record's property table, and an
+/// element of `h` 16 bytes; an arena of objects that grows is charged its new slots, at least 16
+/// of 212 bytes, and from a realm on 54,272 bytes or more.
+const DOUBLING_FLOOR: u64 = 2 * 1024;
+
+/// The room the budget leaves above the charge the corpus returns to between its scripts, at the
+/// least: 128 KiB in the default mode, where `deep()` reaches `frame_depth` 200 only with about
+/// 84 KiB (a budget of 256,924 bytes over a realm's charge of 172,603 on `cc41ae6`); 40 KiB with
+/// the collector at every safe point, where its 30 frames take less than that and the nested
+/// `join` needs more than 20,000 bytes.
+const LEAST_ROOM: u64 = if cfg!(feature = "collect-every-safe-point") {
+    40 * 1024
+} else {
+    128 * 1024
+};
+
+/// The room the script after the loop that keeps its objects, `h = undefined; print(typeof
+/// h);`, needs while `h` still holds them: 8 KiB, more than twice what a parse and run of a
+/// script of its size takes (the script `1` needs 2,228 bytes, `tests/termination.rs`).
+const ROOM_AFTER_THE_LOOP: u64 = 8 * 1024;
+
+/// The variable that hands the setup of this process to a child: `<memory_bytes> <pins>`.
+const SETUP: &str = "SWELL_DETERMINISM_SETUP";
+
+/// What every corpus agent of a run is made with: [`corpus_limits`] with the memory budget
+/// [`corpus_setup`] found, and the number of objects its host keeps before the corpus starts.
+#[derive(Clone, Copy)]
+struct CorpusSetup {
+    limits: Limits,
+    pins: u64,
+}
+
+/// The setup of the corpus agents of this run, from readings the test makes itself. A child
+/// takes its parent's (the variable [`SETUP`]), so that every agent of the run has the same.
 ///
-/// Measured on `cc41ae6` in the default mode, where no collection runs inside an entry under
-/// these budgets: the realm's charge is 172,603 bytes, so the budget is 385,595. Every outcome
-/// the test asserts is reached: the endless loop and `fib(15)` as with any budget (the step
-/// budget at 40,000 steps; normal at 26,649), `deep()` at `frame_depth` in 803 steps, which needs
-/// a budget of at least 256,924 (below it `deep()` ends in the memory budget), the doubling
-/// string at `string_length` in 8,314 steps (198,978 bytes), and the loop that keeps its objects
-/// in the memory budget, which it reaches with any budget up to 1,571,155 (from 1,571,156 it runs
-/// into the step budget at 40,000 steps). That loop starts from 193,579 bytes; at step 5,899 the
-/// objects arena doubles from 512 to 1,024 slots and the charge would go from 333,332 to 437,780
-/// bytes (104,448 more, 204 per slot). The budget refuses that doubling: it is 52,263 bytes above
-/// the charge before it and 52,185 below the charge after it; any budget from 333,332 to 437,779
-/// ends the loop at that step. The doubling before it (256 to 512 slots, 52,224 bytes) ends the
-/// loop at step 1,547 for budgets from 217,620 to 269,843, and the one after it (1,024 to 2,048
-/// slots) ends it at step 14,603 from a budget between 560,000 and 570,000. The 256 KiB this
-/// budget replaces lay 5,220 bytes above `deep()`'s need.
-const DEFAULT_ROOM: u64 = 208 * 1024;
-
-/// What the heap of a corpus agent is charged once its realm is made and its host functions are
-/// defined: an agent of its own under `corpus` with the memory budget of the test limits. Every
-/// agent of the run, in this process and in each child, measures it in the same way, so all of
-/// them get the same limits; a charge that differed between processes would show as limits and
-/// transcripts that differ.
-fn realm_charge(mut corpus: Limits) -> u64 {
-    corpus.memory_bytes = limits().memory_bytes;
-    let (agent, _realm) = corpus_agent_with(corpus);
-    agent.heap_bytes().unwrap()
+/// Why it is measured: the outcome `MemoryBudget` comes from the loop that keeps its objects
+/// (`var h = []; while (true) h.push({ a: h.length });`), and the budget must refuse a growth of
+/// the arena of objects in that loop, large enough that the refusal leaves room for the next
+/// script, while every other script runs as it would with no budget. Where that growth falls
+/// moves with every object a realm gains: measured on 2026-11-24 with the collector at every
+/// safe point and the budget as the realm's charge plus 64 KiB, the realm charged 214,160 bytes
+/// with 256 slots of objects, and the loop's growth to 512 slots (54,272 bytes, from 234,764 to
+/// 236,197 bytes) was refused 8,811 to 10,244 bytes short; with the 11 functions of
+/// `story:math-constants-and-exact-functions` the realm charged 219,907, the fifth script took
+/// that growth at 229,241 with 2,459 bytes to spare, and every script after it was refused its
+/// parse: the loop never reached the budget, and the corpus lost `StepBudget`, `frame_depth`
+/// and `errors 1`.
+///
+/// How it is measured, in two probe agents under [`corpus_limits`]:
+/// 1. The free slots ([`pins_leaving_free_slots`]): the host keeps one object at a time until
+///    the arena grows, and once more if fewer than [`FREE_OBJECT_SLOTS`] were free; `pins` is
+///    the number of objects that leaves exactly that many free. Every corpus agent keeps that
+///    many, so the loop meets a growth of the arena after about the same number of objects
+///    whatever the realm holds. On 2026-11-24, in both modes, `pins` was 224 at the realm of
+///    `76aa4fc`, 213 with the 11 functions of that story, and 201 with its `Math` table installed
+///    a second time.
+/// 2. The budget ([`keeping_loop_budget`]): the scripts before the loop, then the loop one
+///    iteration per entry for at most half of `steps_per_entry`; the largest rise of
+///    `heap_bytes()` in one iteration is a growth of an arena, and the budget is the reading
+///    before it plus half the rise. Until a charge is refused a budget changes nothing an agent
+///    does, so the loop of the corpus reaches the same reading, give or take the few hundred
+///    bytes of the probe's scripts, and is refused that growth with about half of it left. On
+///    2026-11-24 with the collector at every safe point and the realm of that story: 213 pins,
+///    the arena's growth from 512 to 1,024 slots (109,280 bytes) at 377,284, a budget of
+///    431,924.
+///
+/// What it costs: the pins are made by the host, with no safe point ([`pin_objects`]), and
+/// marking them adds little (one run of the corpus in the collect mode took 1.6 CPU seconds
+/// with 213 pins and without); the second probe runs 19 of the 27 scripts of the corpus, the
+/// costly ones among them. On 2026-11-24 the test took 6.1 CPU seconds in the collect mode at
+/// the realm of `76aa4fc` and 6.4 to 6.9 at that story's, against 3.4 to 4.0 for the test of
+/// `76aa4fc` at its realm (a budget of the realm's charge plus a constant, and no probe).
+fn corpus_setup() -> CorpusSetup {
+    let mut limits = corpus_limits();
+    if let Some(passed) = std::env::var_os(SETUP) {
+        let passed = passed.to_string_lossy().into_owned();
+        let mut words = passed.split(' ').map(|word| word.parse::<u64>().unwrap());
+        limits.memory_bytes = words.next().unwrap();
+        let pins = words.next().unwrap();
+        return CorpusSetup { limits, pins };
+    }
+    let pins = pins_leaving_free_slots(limits);
+    limits.memory_bytes = keeping_loop_budget(CorpusSetup { limits, pins });
+    CorpusSetup { limits, pins }
 }
 
-/// An agent of the corpus run, its realm, and its host functions defined.
-fn corpus_agent() -> (Agent<Transcript>, Realm) {
-    corpus_agent_with(corpus_limits())
+/// How many objects the host of a corpus agent keeps so that [`FREE_OBJECT_SLOTS`] slots of the
+/// arena of objects are free when the corpus starts, read in a probe agent: [`pin_objects`]
+/// keeps one object per call; the call that raises `heap_bytes()` by more than
+/// [`DOUBLING_FLOOR`] grew the arena, so the objects before it filled the free slots.
+fn pins_leaving_free_slots(limits: Limits) -> u64 {
+    let (mut agent, realm) = corpus_agent_with(CorpusSetup { limits, pins: 0 });
+    let roots = PinRoots::new(&mut agent, &realm);
+    let mut before = agent.heap_bytes().unwrap();
+    let mut growths = Vec::new();
+    for kept in 1..=1_u64 << 17 {
+        pin_objects(&mut agent, &realm, &roots, 1);
+        let after = agent.heap_bytes().unwrap();
+        if after.saturating_sub(before) > DOUBLING_FLOOR {
+            // The kept objects before this one filled the arena.
+            growths.push(kept - 1);
+            match growths[..] {
+                [free] if free >= FREE_OBJECT_SLOTS => return free - FREE_OBJECT_SLOTS,
+                // Fewer were free: count on to the next growth, where every slot is taken.
+                [_] => {}
+                [_, full] => {
+                    return full
+                        .checked_sub(FREE_OBJECT_SLOTS)
+                        .expect("the arena grew twice within FREE_OBJECT_SLOTS objects");
+                }
+                _ => unreachable!(),
+            }
+        }
+        before = after;
+    }
+    panic!("no growth of the arena of objects in 131,072 objects");
 }
 
-/// An agent under `limits`, its realm, and the host functions of the corpus run defined.
-fn corpus_agent_with(limits: Limits) -> (Agent<Transcript>, Realm) {
-    let mut agent = Agent::new(Transcript::default(), limits, seeds()).unwrap();
-    let realm = match agent.create_realm(None, None).unwrap() {
+/// The brand of the objects [`pin_objects`] makes.
+const PIN_BRAND: Brand = Brand(133);
+
+/// The global object and the keys `pin` and `next`, rooted once, so that a call of
+/// [`pin_objects`] makes the objects it keeps and nothing else: no root, no string.
+struct PinRoots {
+    global: Root,
+    pin: Root,
+    next: Root,
+}
+
+impl PinRoots {
+    fn new(agent: &mut Agent<Transcript>, realm: &Realm) -> PinRoots {
+        let global = agent.global_object(realm).unwrap();
+        let (pin, next) = agent
+            .with_cx(realm, |cx| {
+                let pin = cx.new_string("pin").unwrap();
+                let next = cx.new_string("next").unwrap();
+                (
+                    cx.root(Value::String(pin)).unwrap(),
+                    cx.root(Value::String(next)).unwrap(),
+                )
+            })
+            .unwrap();
+        PinRoots { global, pin, next }
+    }
+}
+
+/// Keeps `count` more objects in the global `pin`, as `count` runs of the script `pin = { next:
+/// pin };` would: each a host object with no prototype whose property `next` holds the one
+/// before it. The host makes them in one call, with no safe point, so that no collection runs
+/// while they are made (with the collector at every safe point the script took a collection
+/// per instruction for each object).
+fn pin_objects(agent: &mut Agent<Transcript>, realm: &Realm, roots: &PinRoots, count: u64) {
+    agent
+        .with_cx(realm, |cx| {
+            let (Value::Object(global), Value::String(pin), Value::String(next)) = (
+                cx.get(&roots.global).unwrap(),
+                cx.get(&roots.pin).unwrap(),
+                cx.get(&roots.next).unwrap(),
+            ) else {
+                panic!("the roots of the pins");
+            };
+            let (pin, next) = (PropertyKey::String(pin), PropertyKey::String(next));
+            for _ in 0..count {
+                let previous = cx.get_property(global, pin).unwrap().unwrap();
+                let object = cx
+                    .new_host_object(HostObjectSpec {
+                        prototype: Prototype::Null,
+                        brand: PIN_BRAND,
+                        data: None,
+                        error_kind: None,
+                    })
+                    .unwrap()
+                    .unwrap();
+                cx.set(object, next, previous, true).unwrap().unwrap();
+                cx.set(global, pin, Value::Object(object), true)
+                    .unwrap()
+                    .unwrap();
+            }
+        })
+        .unwrap();
+}
+
+/// The memory budget of the corpus, read in a probe agent of `setup` with the budget of
+/// [`corpus_limits`]: the scripts before the loop that keeps its objects, then that loop one
+/// iteration per entry for at most half of `steps_per_entry`, the budget the reading before the
+/// largest rise of `heap_bytes()` so far plus half of that rise. The loop stops at the first
+/// rise that gives a budget both checks below pass: the iterations after it would run in every
+/// probe and change nothing.
+fn keeping_loop_budget(setup: CorpusSetup) -> u64 {
+    let (mut agent, realm) = corpus_agent(setup);
+    let keeping = CORPUS
+        .iter()
+        .position(|source| source.starts_with("var h = [];"))
+        .unwrap();
+    for index in 0..keeping {
+        run_item(&mut agent, &realm, index);
+    }
+    let between = agent.heap_bytes().unwrap();
+    let start = parse_corpus(&mut agent, &realm, "var h = [];");
+    assert!(matches!(
+        agent.evaluate_script(&start).unwrap(),
+        Outcome::Normal(_)
+    ));
+    let push = parse_corpus(&mut agent, &realm, "h.push({ a: h.length });");
+    let reach = setup.limits.steps_per_entry / 2;
+    let (mut spent, mut iterations) = (0, 0);
+    let mut before = agent.heap_bytes().unwrap();
+    let (mut rise, mut at) = (0, before);
+    while spent < reach {
+        let outcome = agent.evaluate_script(&push).unwrap();
+        assert!(matches!(outcome, Outcome::Normal(_)), "{outcome:?}");
+        spent += agent.last_entry_steps().unwrap();
+        iterations += 1;
+        let after = agent.heap_bytes().unwrap();
+        if after.saturating_sub(before) > rise {
+            (rise, at) = (after - before, before);
+        }
+        before = after;
+        if rise > DOUBLING_FLOOR
+            && rise / 2 >= ROOM_AFTER_THE_LOOP
+            && (at + rise / 2).saturating_sub(between) >= LEAST_ROOM
+        {
+            break;
+        }
+    }
+    let budget = at + rise / 2;
+    println!(
+        "corpus setup: {} kept objects; {between} bytes before the loop; in {iterations} \
+         iterations ({spent} steps) the largest rise {rise} at {at}; budget {budget}",
+        setup.pins
+    );
+    assert!(
+        rise > DOUBLING_FLOOR && rise / 2 >= ROOM_AFTER_THE_LOOP,
+        "no growth of an arena of {} bytes or more in the loop's reach: the loop would not end \
+         by memory with room for the next script; it needs more steps or fewer free slots",
+        2 * ROOM_AFTER_THE_LOOP
+    );
+    assert!(
+        budget - between >= LEAST_ROOM,
+        "the budget {budget} leaves {} bytes above {between}, less than {LEAST_ROOM}: the loop's \
+         growth comes too early; it needs a later one in its reach",
+        budget - between
+    );
+    budget
+}
+
+/// `source` parsed in a corpus agent, which must parse.
+fn parse_corpus(agent: &mut Agent<Transcript>, realm: &Realm, source: &str) -> swell::Script {
+    match agent
+        .parse_script(realm, Source::Utf8(source), None)
+        .unwrap()
+    {
+        Parsed::Parsed(script) => script,
+        _ => panic!("{source} did not parse"),
+    }
+}
+
+/// An agent of the corpus run under `setup`, its realm, its host functions defined and its
+/// objects kept.
+fn corpus_agent(setup: CorpusSetup) -> (Agent<Transcript>, Realm) {
+    let (mut agent, realm) = corpus_agent_with(setup);
+    let roots = PinRoots::new(&mut agent, &realm);
+    pin_objects(&mut agent, &realm, &roots, setup.pins);
+    (agent, realm)
+}
+
+/// An agent under the limits of `setup`, its realm, the host functions of the corpus run
+/// defined and the global `pin` declared (`null`).
+fn corpus_agent_with(setup: CorpusSetup) -> (Agent<Transcript>, Realm) {
+    let mut agent = Agent::new(Transcript::default(), setup.limits, seeds()).unwrap();
+    let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
     };
@@ -416,6 +625,8 @@ fn corpus_agent_with(limits: Limits) -> (Agent<Transcript>, Realm) {
                     .unwrap()
                     .unwrap();
             }
+            let key = PropertyKey::String(cx.new_string("pin").unwrap());
+            cx.set(global, key, Value::Null, true).unwrap().unwrap();
         })
         .unwrap();
     (agent, realm)
@@ -489,9 +700,9 @@ fn run_item(agent: &mut Agent<Transcript>, realm: &Realm, index: usize) {
 
 /// The transcripts of two agents with equal limits and seeds that run the corpus in one
 /// process, each call of one followed by the same call of the other.
-fn two_agents_interleaved() -> (String, String) {
-    let (mut a, realm_a) = corpus_agent();
-    let (mut b, realm_b) = corpus_agent();
+fn two_agents_interleaved(setup: CorpusSetup) -> (String, String) {
+    let (mut a, realm_a) = corpus_agent(setup);
+    let (mut b, realm_b) = corpus_agent(setup);
     for index in 0..CORPUS.len() {
         run_item(&mut a, &realm_a, index);
         run_item(&mut b, &realm_b, index);
@@ -509,11 +720,15 @@ const END: &str = "--- determinism transcript end ---";
 /// transcript, started and not waited for: the two children of the test run beside each other
 /// and beside the test's own two agents, each in a process of its own, so that the test takes
 /// the time of one of the three runs rather than of all of them.
-fn spawn_child(test: TestPath) -> std::process::Child {
+fn spawn_child(test: TestPath, setup: CorpusSetup) -> std::process::Child {
     let exe = std::env::current_exe().unwrap();
     std::process::Command::new(exe)
         .args(["--exact", test.as_str(), "--nocapture", "--test-threads=1"])
         .env(CHILD, "1")
+        .env(
+            SETUP,
+            format!("{} {}", setup.limits.memory_bytes, setup.pins),
+        )
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -543,14 +758,16 @@ fn child_transcript(child: std::process::Child) -> String {
 }
 
 /// HOST-133: the corpus run by two agents with equal limits and seeds in one process, and by
-/// child processes ([`host_133_children`]), gives the same transcript of hook calls, host function calls, outcomes,
-/// `last_entry_steps()`, `heap_bytes()` and collection reports, byte for byte. The corpus
+/// child processes ([`host_133_children`]), gives the same transcript of hook calls, host
+/// function calls, outcomes, `last_entry_steps()`, `heap_bytes()` and collection reports, byte
+/// for byte. The corpus
 /// reaches every outcome: normal, throw, a parse error, and the step and memory budgets, the
-/// frame depth and the string length.
+/// frame depth and the string length. The memory budget and the objects a corpus agent keeps
+/// are measured once, in this process ([`corpus_setup`]), and handed to the children.
 #[test]
 fn host_133_same_calls_same_hooks_same_outcomes() {
     if std::env::var_os(CHILD).is_some() {
-        let (mut agent, realm) = corpus_agent();
+        let (mut agent, realm) = corpus_agent(corpus_setup());
         for index in 0..CORPUS.len() {
             run_item(&mut agent, &realm, index);
         }
@@ -558,11 +775,12 @@ fn host_133_same_calls_same_hooks_same_outcomes() {
         println!("{BEGIN}\n{a}\n{END}");
         return;
     }
+    let setup = corpus_setup();
     let test = test_path!("host_133_same_calls_same_hooks_same_outcomes");
     let children: Vec<_> = (0..host_133_children())
-        .map(|_| spawn_child(test.clone()))
+        .map(|_| spawn_child(test.clone(), setup))
         .collect();
-    let (a, b) = two_agents_interleaved();
+    let (a, b) = two_agents_interleaved(setup);
     assert_eq!(a, b, "two agents in one process");
     let lines: Vec<&str> = a.lines().collect();
     for expected in [

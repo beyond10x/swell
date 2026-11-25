@@ -405,9 +405,17 @@ fn registry_agent(budget: u64) -> (Agent<TestHost>, Realm) {
 /// capacity the arenas grew to. The room R past C is the collection threshold, the garbage a
 /// safe point lets grow before it collects: L0, at least 1 MiB (`engine.md`, "Collector"); with
 /// the feature, where every safe point collects, 16 KiB. The loop runs over as many keys as
-/// keep 3 R. With `memory_bytes` C + R the loop over `Symbol.for` ends in
-/// `Terminated(MemoryBudget)` and `heap_bytes()` then reads at most the budget; the control
-/// completes normally under the same budget.
+/// keep 3 R, and while their registrations would fit the C + R − C0 bytes past the realm, over
+/// enough to pass them, with C measured again for the new count (at most eight times). With
+/// `memory_bytes` C + R the loop over `Symbol.for` ends in `Terminated(MemoryBudget)` and
+/// `heap_bytes()` then reads at most the budget; the control completes normally under the same
+/// budget. The test prints its readings.
+///
+/// Before, the count was 3 R alone: on 2026-11-24 with the collector at every safe point, at a
+/// realm of 232 functions (the base of `story:tests-hold-at-any-size-of-the-realm`), the
+/// arenas the control grew took C past the realm by more than 2 R, so 13 registrations of
+/// 3,617 bytes fit the 51,374 bytes past it, and at that realm padded by 2 to 200 functions
+/// they did not.
 #[test]
 fn the_registry_is_charged_to_the_memory_budget() {
     let collect_mode = cfg!(feature = "collect-every-safe-point");
@@ -431,14 +439,28 @@ fn the_registry_is_charged_to_the_memory_budget() {
     } else {
         live.max(1 << 20)
     };
-    let keys = 3 * room / per_key;
-    let (mut measure, measure_realm) = registry_agent(1 << 30);
-    assert_eq!(
-        eval_text(&mut measure, &measure_realm, &registry_loop("Symbol", keys)),
-        Outcome::Normal(keys.to_string())
-    );
-    let control = measure.heap_bytes().unwrap();
+    let control_of = |keys: u64| {
+        let (mut measure, measure_realm) = registry_agent(1 << 30);
+        assert_eq!(
+            eval_text(&mut measure, &measure_realm, &registry_loop("Symbol", keys)),
+            Outcome::Normal(keys.to_string())
+        );
+        measure.heap_bytes().unwrap()
+    };
+    let mut keys = 3 * room / per_key;
+    let mut control = control_of(keys);
+    for _ in 0..8 {
+        if keys * per_key > control + room - charged {
+            break;
+        }
+        keys = (control + room - charged) / per_key + 1;
+        control = control_of(keys);
+    }
     let budget = control + room;
+    println!(
+        "realm {charged} bytes, {per_key} bytes a key, {keys} keys, control {control}, budget \
+         {budget}"
+    );
     assert!(
         keys * per_key > budget - charged,
         "{keys} registrations of {per_key} bytes fit {} bytes past the realm",

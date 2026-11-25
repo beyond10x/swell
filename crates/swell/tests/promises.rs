@@ -290,7 +290,7 @@ fn note(cx: &mut Cx<'_, PromisesHost>, call: HostCall<'_>) -> Completion<Value> 
 /// An agent of the promises host with `limits` and a realm whose global `note` is [`note`].
 fn new_agent(limits: Limits) -> (Agent<PromisesHost>, Realm) {
     let mut agent = Agent::new(PromisesHost::default(), limits, support::host::seeds()).unwrap();
-    let realm = match agent.create_realm(None, None).unwrap() {
+    let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
     };
@@ -707,7 +707,7 @@ fn a_then_handler_of_a_nested_checkpoint_counts_against_reentry_depth() {
             support::host::seeds(),
         )
         .unwrap();
-        let realm = match agent.create_realm(None, None).unwrap() {
+        let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
             Outcome::Normal(realm) => realm,
             other => panic!("create_realm answered {other:?}"),
         };

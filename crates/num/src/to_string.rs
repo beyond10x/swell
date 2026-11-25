@@ -5,8 +5,8 @@
 //! 𝔽(s × radix^(n-k)) is x, and k is as small as possible. [`shortest_digits`] finds them
 //! exactly, with the free-format algorithm of Steele and White as Burger and Dybvig give it
 //! ("Printing Floating-Point Numbers Quickly and Accurately", 1996, figure 1 with the scaling of
-//! section 2.2; the algorithm is written for any output base), over the small unsigned big
-//! integers of this module: no floating-point arithmetic decides a digit. Where two values of s
+//! section 2.2; the algorithm is written for any output base), over the unsigned big integers
+//! of `nat.rs` (`Nat`): no floating-point arithmetic decides a digit. Where two values of s
 //! of that length round to x it takes the one closer to x, and of two equally close the even
 //! one, as the clause's Note 2 recommends (in an odd radix s is even when the sum of its digits
 //! is). Steps 6 to 12 then lay the digits out with the first `radix` code units of
@@ -17,6 +17,8 @@
 //! its slice"); `toFixed`, `toExponential` and `toPrecision` are slice 4's.
 
 use std::cmp::Ordering;
+
+use crate::nat::Nat;
 
 /// The digits of every radix, from the clause: "taken from the first r code units of
 /// "0123456789abcdefghijklmnopqrstuvwxyz" in order".
@@ -130,29 +132,29 @@ pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
     let unequal_gaps = biased > 1 && fraction == 0;
 
     // x = r / s; the interval that rounds to x is (r - m⁻, r + m⁺) / s.
-    let one = || Big::from_u64(1);
+    let one = || Nat::from_u64(1);
     let magnitude = e.unsigned_abs();
     let (mut r, mut s, mut m_plus, mut m_minus) = match (e >= 0, unequal_gaps) {
         (true, true) => (
-            Big::from_u64(f).shl(magnitude + 2),
-            Big::from_u64(4),
+            Nat::from_u64(f).shl(magnitude + 2),
+            Nat::from_u64(4),
             one().shl(magnitude + 1),
             one().shl(magnitude),
         ),
         (true, false) => (
-            Big::from_u64(f).shl(magnitude + 1),
-            Big::from_u64(2),
+            Nat::from_u64(f).shl(magnitude + 1),
+            Nat::from_u64(2),
             one().shl(magnitude),
             one().shl(magnitude),
         ),
         (false, true) => (
-            Big::from_u64(f).shl(2),
+            Nat::from_u64(f).shl(2),
             one().shl(magnitude + 2),
-            Big::from_u64(2),
+            Nat::from_u64(2),
             one(),
         ),
         (false, false) => (
-            Big::from_u64(f).shl(1),
+            Nat::from_u64(f).shl(1),
             one().shl(magnitude + 1),
             one(),
             one(),
@@ -180,7 +182,7 @@ pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
         m_plus.mul_pow(base, scale);
         m_minus.mul_pow(base, scale);
     }
-    let upper_reached = |r: &Big, m_plus: &Big, s: &Big| match Big::cmp_sum(r, m_plus, s) {
+    let upper_reached = |r: &Nat, m_plus: &Nat, s: &Nat| match Nat::cmp_sum(r, m_plus, s) {
         Ordering::Greater => true,
         Ordering::Equal => even,
         Ordering::Less => false,
@@ -210,7 +212,7 @@ pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
     let mut digits = Vec::with_capacity(17);
     // The sum of the digits so far: in an odd radix, s is even when it is.
     let mut digit_sum = 0u64;
-    let mut product = Big::from_u64(0);
+    let mut product = Nat::from_u64(0);
     let top_digit = u8::try_from(base - 1).unwrap_or(9);
     loop {
         r.mul_small(base);
@@ -317,177 +319,4 @@ fn log2_q16(base: u64) -> i64 {
         }
     }
     (i64::from(integer) << 16) | fraction
-}
-
-/// An unsigned integer of any size: 64-bit limbs, least significant first, with no zero limb at
-/// the top. Only what the digit generation needs.
-#[derive(Clone)]
-struct Big {
-    limbs: Vec<u64>,
-}
-
-impl Big {
-    fn from_u64(value: u64) -> Big {
-        let mut limbs = Vec::with_capacity(20);
-        if value != 0 {
-            limbs.push(value);
-        }
-        Big { limbs }
-    }
-
-    fn trim(&mut self) {
-        while self.limbs.last() == Some(&0) {
-            self.limbs.pop();
-        }
-    }
-
-    /// The number of bits up to the highest set one.
-    fn bit_len(&self) -> u32 {
-        let full = u32::try_from(self.limbs.len().saturating_sub(1)).unwrap_or(u32::MAX);
-        match self.limbs.last() {
-            Some(top) => full
-                .saturating_mul(64)
-                .saturating_add(64 - top.leading_zeros()),
-            None => 0,
-        }
-    }
-
-    /// The 128 bits from bit `shift` up: floor(self / 2^shift) modulo 2^128.
-    fn bits_from(&self, shift: u32) -> u128 {
-        let word = (shift / 64) as usize;
-        let bits = shift % 64;
-        let limb = |i: usize| u128::from(self.limbs.get(word + i).copied().unwrap_or(0));
-        let low = (limb(0) | (limb(1) << 64)) >> bits;
-        if bits == 0 {
-            low
-        } else {
-            low | (limb(2) << (128 - bits))
-        }
-    }
-
-    fn shl(mut self, bits: u32) -> Big {
-        let words = (bits / 64) as usize;
-        let bits = bits % 64;
-        if bits != 0 {
-            let mut carry = 0u64;
-            for limb in &mut self.limbs {
-                let value = *limb;
-                *limb = (value << bits) | carry;
-                carry = value >> (64 - bits);
-            }
-            if carry != 0 {
-                self.limbs.push(carry);
-            }
-        }
-        if words != 0 && !self.limbs.is_empty() {
-            self.limbs.splice(0..0, std::iter::repeat_n(0, words));
-        }
-        self
-    }
-
-    fn mul_small(&mut self, factor: u64) {
-        let mut carry = 0u128;
-        for limb in &mut self.limbs {
-            let product = u128::from(*limb) * u128::from(factor) + carry;
-            *limb = product as u64;
-            carry = product >> 64;
-        }
-        if carry != 0 {
-            self.limbs.push(carry as u64);
-        }
-        self.trim();
-    }
-
-    /// self × base^exponent, for a base from 2 to 36: by the largest power of the base that fits
-    /// in a limb (10^19 for radix 10), then by the rest.
-    fn mul_pow(&mut self, base: u64, mut exponent: u32) {
-        let base = base.max(2);
-        let (mut chunk, mut factor) = (0u32, 1u64);
-        while let Some(next) = factor.checked_mul(base) {
-            factor = next;
-            chunk += 1;
-        }
-        while exponent >= chunk {
-            self.mul_small(factor);
-            exponent -= chunk;
-        }
-        // base^exponent < factor, so it fits.
-        let mut rest = 1u64;
-        for _ in 0..exponent {
-            rest *= base;
-        }
-        if rest > 1 {
-            self.mul_small(rest);
-        }
-    }
-
-    fn add(&self, other: &Big) -> Big {
-        let (long, short) = if self.limbs.len() >= other.limbs.len() {
-            (self, other)
-        } else {
-            (other, self)
-        };
-        let mut limbs = Vec::with_capacity(long.limbs.len() + 1);
-        let mut carry = false;
-        let mut short = short.limbs.iter();
-        for &a in &long.limbs {
-            let b = short.next().copied().unwrap_or(0);
-            let (sum, c1) = a.overflowing_add(b);
-            let (sum, c2) = sum.overflowing_add(u64::from(carry));
-            limbs.push(sum);
-            carry = c1 || c2;
-        }
-        if carry {
-            limbs.push(1);
-        }
-        Big { limbs }
-    }
-
-    /// self - other, for other ≤ self.
-    fn sub_assign(&mut self, other: &Big) {
-        let mut borrow = false;
-        let mut other = other.limbs.iter();
-        for limb in &mut self.limbs {
-            let b = other.next().copied().unwrap_or(0);
-            let (difference, b1) = limb.overflowing_sub(b);
-            let (difference, b2) = difference.overflowing_sub(u64::from(borrow));
-            *limb = difference;
-            borrow = b1 || b2;
-        }
-        self.trim();
-    }
-
-    fn cmp(&self, other: &Big) -> Ordering {
-        self.limbs
-            .len()
-            .cmp(&other.limbs.len())
-            .then_with(|| self.limbs.iter().rev().cmp(other.limbs.iter().rev()))
-    }
-
-    /// a + b compared with c, without forming the sum: the sign of a + b - c, from the borrows
-    /// of c - a - b computed from the least significant limb up.
-    fn cmp_sum(a: &Big, b: &Big, c: &Big) -> Ordering {
-        let width = a.limbs.len().max(b.limbs.len()).max(c.limbs.len());
-        let (mut a, mut b, mut c) = (a.limbs.iter(), b.limbs.iter(), c.limbs.iter());
-        // c - a - b as limbs, with a borrow of 0, 1 or 2 into the next limb.
-        let mut borrow = 0u64;
-        let mut nonzero = false;
-        for _ in 0..width {
-            let x = c.next().copied().unwrap_or(0);
-            let y = a.next().copied().unwrap_or(0);
-            let z = b.next().copied().unwrap_or(0);
-            let (d, b1) = x.overflowing_sub(y);
-            let (d, b2) = d.overflowing_sub(z);
-            let (d, b3) = d.overflowing_sub(borrow);
-            borrow = u64::from(b1) + u64::from(b2) + u64::from(b3);
-            nonzero |= d != 0;
-        }
-        if borrow != 0 {
-            Ordering::Greater
-        } else if nonzero {
-            Ordering::Less
-        } else {
-            Ordering::Equal
-        }
-    }
 }

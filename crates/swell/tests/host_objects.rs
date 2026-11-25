@@ -614,7 +614,9 @@ fn host_183_the_host_names_three_intrinsics() {
             .unwrap()?;
         Ok(GlobalObjects { global, this: None })
     };
-    let Outcome::Normal(realm) = agent.create_realm(Some(&mut setup), None).unwrap() else {
+    let Outcome::Normal(realm) =
+        support::host::create_realm(&mut agent, Some(&mut setup), None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     assert_eq!(in_setup.len(), INTRINSICS.len());
@@ -816,7 +818,9 @@ fn host_184_the_host_names_two_symbols() {
             .unwrap()?;
         Ok(GlobalObjects { global, this: None })
     };
-    let Outcome::Normal(second) = agent.create_realm(Some(&mut setup), None).unwrap() else {
+    let Outcome::Normal(second) =
+        support::host::create_realm(&mut agent, Some(&mut setup), None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     assert_eq!(in_setup, symbols, "the setup closure of the second realm");
@@ -1274,7 +1278,9 @@ fn build_bindings(agent: &mut Agent<TestHost>) -> Bindings {
             .unwrap()?;
         Ok(GlobalObjects { global, this: None })
     };
-    let Outcome::Normal(realm) = agent.create_realm(Some(&mut setup), None).unwrap() else {
+    let Outcome::Normal(realm) =
+        support::host::create_realm(agent, Some(&mut setup), None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     let heap_before = agent.heap_bytes().unwrap();

@@ -297,7 +297,9 @@ fn host_203_a_host_reads_symbol_async_iterator_and_a_host_object_is_async_iterab
             .unwrap()?;
         Ok(GlobalObjects { global, this: None })
     };
-    let Outcome::Normal(second) = agent.create_realm(Some(&mut setup), None).unwrap() else {
+    let Outcome::Normal(second) =
+        support::host::create_realm(&mut agent, Some(&mut setup), None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     assert_eq!(in_setup, [symbol], "the setup closure of the second realm");

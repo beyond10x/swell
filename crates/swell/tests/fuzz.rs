@@ -2088,7 +2088,7 @@ fn check_fault(world: &World, a: usize, was_faulted: bool, line: &str) {
 
 /// The key of an agent, as its roots print it.
 fn agent_key(agent: &mut Agent<FuzzHost>) -> Option<String> {
-    let realm = match agent.create_realm(None, None) {
+    let realm = match support::host::create_realm(agent, None, None) {
         Ok(Outcome::Normal(realm)) => realm,
         _ => return None,
     };

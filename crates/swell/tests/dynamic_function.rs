@@ -100,7 +100,8 @@ thread_local! {
 #[test]
 fn host_117_function_asks_the_host_with_its_parts() {
     let mut agent = Agent::new(CompileHost::default(), limits(), support::host::seeds()).unwrap();
-    let HostOutcome::Normal(realm) = agent.create_realm(None, None).unwrap() else {
+    let HostOutcome::Normal(realm) = support::host::create_realm(&mut agent, None, None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     let realm_ref = agent
@@ -363,7 +364,8 @@ fn run_with_generator_function(source: &str) -> Outcome {
 /// test limits, and the calls of its hook; the realm the hook compares with is the agent's.
 fn run_on_compile_host(host: CompileHost, source: &str) -> (String, Vec<Request>) {
     let mut agent = Agent::new(host, limits(), support::host::seeds()).unwrap();
-    let HostOutcome::Normal(realm) = agent.create_realm(None, None).unwrap() else {
+    let HostOutcome::Normal(realm) = support::host::create_realm(&mut agent, None, None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     let realm_ref = agent
@@ -879,7 +881,9 @@ const CHARGED_LINES: usize = 1_000;
 #[test]
 fn async_function_constructor_charges_its_parse_and_reads_the_interrupt() {
     let mut agent = Agent::new(CompileHost::default(), limits(), support::host::seeds()).unwrap();
-    let HostOutcome::Normal(compile_realm) = agent.create_realm(None, None).unwrap() else {
+    let HostOutcome::Normal(compile_realm) =
+        support::host::create_realm(&mut agent, None, None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     let handle = agent.interrupt_handle();
@@ -1300,7 +1304,9 @@ fn async_generator_function_constructor_is_not_a_global_and_is_the_constructor_o
 #[test]
 fn async_generator_function_constructor_charges_its_parse_and_reads_the_interrupt() {
     let mut agent = Agent::new(CompileHost::default(), limits(), support::host::seeds()).unwrap();
-    let HostOutcome::Normal(compile_realm) = agent.create_realm(None, None).unwrap() else {
+    let HostOutcome::Normal(compile_realm) =
+        support::host::create_realm(&mut agent, None, None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     let handle = agent.interrupt_handle();

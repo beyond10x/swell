@@ -208,7 +208,7 @@ fn new_agent(limits: Limits) -> (Agent<JobsHost>, Realm) {
 
 /// A realm with no setup closure.
 fn new_realm(agent: &mut Agent<JobsHost>) -> Realm {
-    match agent.create_realm(None, None).unwrap() {
+    match support::host::create_realm(agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
     }

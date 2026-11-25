@@ -15,7 +15,7 @@
 
 use crate::support;
 
-use support::host::{TestHost, agent, get, get_object, global, object, realm, text};
+use support::host::{TestHost, agent, get, get_object, global, object, text};
 use support::script::{Outcome, eval, run_both};
 use swell::{Abrupt, AgentState, Cx, ObjectRef, Outcome as HostOutcome, Value};
 
@@ -484,14 +484,18 @@ fn places_per_function() -> usize {
 /// `story:symbol-values-in-core-builtins`; the count is printed) is called with a Symbol as
 /// `this` and with a Symbol as its first, second and third argument (`this` the object that
 /// holds it, 0 before the Symbol), 576 calls (288 at the gate count of
-/// [`places_per_function`]), and each call answers or throws a TypeError, but for the eight
+/// [`places_per_function`]), and each call answers or throws a TypeError, but for the ten
 /// calls below whose clauses throw another error before or without the Symbol: no termination,
 /// and the agent stays alive. `%AsyncFunction%` is among the functions reached.
 #[test]
 fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error() {
     let places = places_per_function();
     let mut agent = agent().unwrap();
-    let realm = realm(&mut agent);
+    // The bare realm, never padded (an exception of `support::host::create_realm`): the walk
+    // asserts over every function of the realm and prints their count.
+    let HostOutcome::Normal(realm) = agent.create_realm(None, None).unwrap() else {
+        panic!("create_realm did not answer Normal");
+    };
     let global_root = global(&mut agent, &realm);
     let further: Vec<(swell::Root, String)> = FURTHER_ROOTS
         .iter()
@@ -570,7 +574,8 @@ fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error() {
     // whose ToString "0" is no form name, so the RangeError of the form comes before any Symbol
     // is read (`#sec-string.prototype.normalize`, step 4; `#sec-validatestringoption`); and
     // `toString` of `Number.prototype` with the radix 0 (`#sec-number.prototype.tostring`, step
-    // 4).
+    // 4) and its `toPrecision` with the precision 0 (`#sec-number.prototype.toprecision`, step
+    // 6).
     let expected: Vec<&str> = [
         ("global.RegExp (argument 3): SyntaxError", 4),
         ("global.JSON.parse (this): SyntaxError", 1),
@@ -590,6 +595,14 @@ fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error() {
         ),
         (
             "global.Number.prototype.toString (argument 3): RangeError",
+            4,
+        ),
+        (
+            "global.Number.prototype.toPrecision (argument 2): RangeError",
+            3,
+        ),
+        (
+            "global.Number.prototype.toPrecision (argument 3): RangeError",
             4,
         ),
     ]

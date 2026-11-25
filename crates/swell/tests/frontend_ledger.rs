@@ -64,7 +64,8 @@ fn flat_source() -> String {
 /// An agent with [`LedgerHost`] and `limits`, and a realm.
 fn agent(limits: Limits) -> (Agent<LedgerHost>, Realm) {
     let mut agent = Agent::new(LedgerHost::default(), limits, seeds()).unwrap();
-    let Outcome::Normal(realm) = agent.create_realm(None, None).unwrap() else {
+    let Outcome::Normal(realm) = support::host::create_realm(&mut agent, None, None).unwrap()
+    else {
         panic!("create_realm did not answer Normal");
     };
     (agent, realm)

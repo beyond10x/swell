@@ -43,7 +43,9 @@
 //! `%AggregateError%` and `%AggregateError.prototype%` (20.5.7, `#sec-aggregate-error-objects`),
 //! written by `story:promise-statics-finally-and-aggregate-error`, made after the seven of
 //! [`ErrorKind::ALL`] and held beside them; `%Date%` and `%Date.prototype%` (21.4,
-//! `#sec-date-objects`), written by `story:date-object-clock-and-time-value`.
+//! `#sec-date-objects`), written by `story:date-object-clock-and-time-value`; `%parseFloat%` and
+//! `%parseInt%` (19.2.4 and 19.2.5), also the "parseFloat" and "parseInt" of `%Number%`, written
+//! by `story:number-functions`.
 //! The other constructors and methods are later slices.
 //!
 //! No step is charged and no safe point is passed while they are made, so the objects made
@@ -94,6 +96,10 @@ pub(crate) enum Intrinsic {
     IsNaN,
     /// `%isFinite%` (19.2.2), taken early by slice 2.
     IsFinite,
+    /// `%parseFloat%` (19.2.4), `story:number-functions`; also `Number.parseFloat`.
+    ParseFloat,
+    /// `%parseInt%` (19.2.5), `story:number-functions`; also `Number.parseInt`.
+    ParseInt,
     /// `%eval%` (19.2.1), slice 2.
     Eval,
     /// `%Function%` (20.2.1), the constructor that slice 2 delivers.
@@ -249,6 +255,8 @@ pub(crate) struct Intrinsics {
     boolean: ObjectRef,
     is_nan: ObjectRef,
     is_finite: ObjectRef,
+    parse_float: ObjectRef,
+    parse_int: ObjectRef,
     eval: ObjectRef,
     function: ObjectRef,
     object_prototype_to_string: ObjectRef,
@@ -298,6 +306,8 @@ impl Intrinsics {
             Intrinsic::Boolean => self.boolean,
             Intrinsic::IsNaN => self.is_nan,
             Intrinsic::IsFinite => self.is_finite,
+            Intrinsic::ParseFloat => self.parse_float,
+            Intrinsic::ParseInt => self.parse_int,
             Intrinsic::Eval => self.eval,
             Intrinsic::Function => self.function,
             Intrinsic::ObjectPrototypeToString => self.object_prototype_to_string,
@@ -371,6 +381,8 @@ impl Intrinsics {
             self.boolean,
             self.is_nan,
             self.is_finite,
+            self.parse_float,
+            self.parse_int,
             self.eval,
             self.function,
             self.object_prototype_to_string,
@@ -571,7 +583,8 @@ impl<H: Host> Agent<H> {
         let json = self.create_json_object(making)?;
         let number = self.create_number_constructor(making, number_prototype)?;
         let boolean = self.create_boolean_constructor(making, boolean_prototype)?;
-        let (is_finite, is_nan) = self.create_global_functions(making)?;
+        let (is_finite, is_nan, parse_float, parse_int) = self.create_global_functions(making)?;
+        self.define_number_parse_functions(number, parse_float, parse_int)?;
         let eval = self.create_eval_function(making)?;
         let function = self.create_function_constructor(making)?;
         let uri = self.create_uri_functions(making)?;
@@ -627,6 +640,8 @@ impl<H: Host> Agent<H> {
             boolean,
             is_nan,
             is_finite,
+            parse_float,
+            parse_int,
             eval,
             function,
             object_prototype_to_string,

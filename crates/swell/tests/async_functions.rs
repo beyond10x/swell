@@ -187,7 +187,7 @@ fn interrupt_now(cx: &mut Cx<'_, AsyncHost>, _call: HostCall<'_>) -> Completion<
 fn new_agent(limits: Limits) -> (Agent<AsyncHost>, Realm) {
     let mut agent = Agent::new(AsyncHost::default(), limits, seeds()).unwrap();
     agent.host_mut().interrupt = Some(agent.interrupt_handle());
-    let realm = match agent.create_realm(None, None).unwrap() {
+    let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
     };
@@ -687,6 +687,19 @@ fn charge_setup() -> String {
 /// `heap_bytes()` after the call of `f` exceeds the reading before it by at least that sum; once
 /// the script drops the only promise the `await` waits on, one `collect()` gives at least that
 /// sum back, both when the script still holds the promise of the call and when it does not.
+///
+/// The readings compared are those of a second round. An arena is charged its capacity and
+/// never shrinks, so a call that makes the arena of objects (or another) double is charged the
+/// doubling, and the calls after it take slots already charged; where a doubling falls moves
+/// with every object a realm gains. The first round (the three calls and the drop, then
+/// `renew`, which makes the two promises again and lets everything of the round go) leaves each
+/// arena at the capacity the round needs, so the second round's calls, which make the same
+/// records, are charged only what they hold beyond the arenas. For example, on 2026-11-24 with
+/// the collector at every safe point, a realm of four functions more than `76aa4fc`'s read g's
+/// `await` as 56,184 bytes, a doubling, and the call of `f` as 5,112 bytes, less than the sum
+/// 59,384 that reading gave, when the test read one round only. The second round read, at
+/// three realm sizes and in both modes, the promise of a call as 0 bytes (its records take
+/// slots already charged), g's `await` as 1,912 and the call of `f` as 5,112, the sum.
 #[test]
 fn a_frame_suspended_at_an_await_is_charged_until_its_activation_is_freed() {
     for keep_call_promise in [true, false] {
@@ -704,23 +717,36 @@ fn a_frame_suspended_at_an_await_is_charged_until_its_activation_is_freed() {
                 "never = null; p = null; 0;"
             },
         );
-        let start = collected(&mut agent);
-        run_parsed(&mut agent, &call_h);
-        let after_h = collected(&mut agent);
-        run_parsed(&mut agent, &call_g);
-        let after_g = collected(&mut agent);
+        let renew = parse(
+            &mut agent,
+            &realm,
+            "never = new Promise(function () {}); never0 = new Promise(function () {});\n\
+             p = pg = ph = undefined; 0;",
+        );
+        let mut rounds = Vec::new();
+        for _ in 0..2 {
+            run_parsed(&mut agent, &renew);
+            let start = collected(&mut agent);
+            run_parsed(&mut agent, &call_h);
+            let after_h = collected(&mut agent);
+            run_parsed(&mut agent, &call_g);
+            let after_g = collected(&mut agent);
+            run_parsed(&mut agent, &call_f);
+            let held = collected(&mut agent);
+            run_parsed(&mut agent, &drop_it);
+            let freed = collected(&mut agent);
+            rounds.push((start, after_h, after_g, held, freed));
+        }
+        let (start, after_h, after_g, held, freed) = rounds[1];
         let promise = after_h.saturating_sub(start);
         let rest = after_g.saturating_sub(after_h).saturating_sub(promise);
         let sum = FRAME_FLOOR + rest;
-        run_parsed(&mut agent, &call_f);
-        let held = collected(&mut agent);
-        run_parsed(&mut agent, &drop_it);
-        let freed = collected(&mut agent);
         println!(
             "keep the call's promise {keep_call_promise}: sum {sum} = frame locals {FRAME_FLOOR} \
              + rest of the await {rest} (g's await {} less the promise of a call {promise}); \
              heap_bytes {after_g} before the call, {held} after it (+{}), {freed} after \
-             collect() (-{})",
+             collect() (-{}); (start, after h, after g, after f, after the drop) per round: \
+             {rounds:?}",
             after_g.saturating_sub(after_h),
             held.saturating_sub(after_g),
             held.saturating_sub(freed)

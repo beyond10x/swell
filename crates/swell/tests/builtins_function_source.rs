@@ -285,7 +285,7 @@ fn host_120_no_source_text_gives_a_native_function_string() {
         },
     )
     .unwrap();
-    let realm = match agent.create_realm(None, None).unwrap() {
+    let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         HostOutcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
     };
