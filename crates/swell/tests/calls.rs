@@ -521,8 +521,9 @@ thread_local! {
 }
 
 /// Decision 12: the step function checks the interrupt flag. A flag set while nothing runs ends
-/// the next entry before it runs anything; a flag set inside a host function ends the run at
-/// the next check, the next call. The flag is cleared when it ends a run.
+/// the next entry before it runs anything; a flag set inside a host function ends the run when
+/// that function returns (HOST-221), and the next call in the same `with_cx` answers that
+/// termination without running. The flag is cleared when it ends a run.
 #[test]
 fn an_interrupt_ends_the_run_at_the_next_check() {
     let mut agent = agent().unwrap();
@@ -557,7 +558,7 @@ fn an_interrupt_ends_the_run_at_the_next_check() {
             (first, second)
         })
         .unwrap();
-    assert_eq!(outcome.0, Ok(Value::Undefined));
+    assert_eq!(outcome.0, Err(Abrupt::Terminated(Termination::Interrupted)));
     assert_eq!(outcome.1, Err(Abrupt::Terminated(Termination::Interrupted)));
     assert_eq!(agent.host().count, 1);
     assert!(!handle.is_set());
