@@ -10,6 +10,66 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Added
+
+- `Date` reads the host's time zone, a story of the fourth slice: the constructor with two or
+  more components, `Date.UTC`, and the 17 getters of `Date.prototype` in local time and in UTC.
+  Local time comes from the host's time zone hooks; every hook call is charged one step before
+  it is made, an offset out of range is clamped, and a host that has no instant for a local
+  time makes the date invalid after a bounded search.
+- `Date` setters, a story of the fourth slice: the 14 setters of `Date.prototype`, local and
+  UTC, with the conversions in the order the clauses give. They no longer throw a `TypeError`.
+- `Date` text, a story of the fourth slice: `Date.parse`, a String argument to the
+  constructor, `Date()` called without `new`, and `toString`, `toDateString`, `toTimeString`,
+  `toUTCString`, `toISOString`, `toJSON`, `toLocaleString`, `toLocaleDateString`,
+  `toLocaleTimeString` and `[Symbol.toPrimitive]`. A String is read in place: `Date.parse`
+  charges one step per code unit past 32 before it reads a unit, so a long String ends at the
+  step budget without a copy.
+- `Math` constants and exact functions, a story of the fourth slice: the eight constants and
+  `abs`, `ceil`, `clz32`, `floor`, `fround`, `imul`, `min`, `round`, `sign`, `sqrt` and `trunc`
+  beside `max`. Each is fixed by IEEE 754 or gives the same result on every platform.
+- `Math` approximated functions, a story of the fourth slice: the 22 functions IEEE 754 does
+  not fix (`acos` to `tanh`, `atan2`, `hypot`, `pow` and the others). A script prints the same
+  bytes for them on every platform. `Math.hypot` charges one step per argument and its list to
+  the memory budget before it reads it.
+- `Math.sumPrecise`, a story of the fourth slice: the exact sum of an iterable of Numbers,
+  computed in a fixed accumulator that does not grow with the count of items. It charges one
+  step per item, closes the iterator once when an item is not a Number, and checks the count
+  against 2^53 - 1 before it checks the type of an item.
+- `Number.prototype` formatting, a story of the fourth slice: `toFixed`, `toExponential`,
+  `toPrecision` and `toLocaleString`, with exact digits. A call charges its temporary to the
+  memory budget before it computes and credits it after. `toLocaleString` gives the text of
+  `toString()`.
+- `Number.isFinite`, `Number.isInteger`, `Number.isNaN` and `Number.isSafeInteger`, a story of
+  the fourth slice.
+- `parseInt` and `parseFloat`, a story of the fourth slice: both are globals, and
+  `Number.parseInt` and `Number.parseFloat` are the same objects. A String is read in place
+  after one step per code unit past 32 is charged, and the one buffer of script-controlled
+  size is charged to the memory budget before the call and credited when it returns.
+
+### Changed
+
+- The placeholders of 0.9.0 for `Date` are gone: a String argument or two or more arguments
+  to the constructor no longer give an invalid date, `Date()` without `new` no longer answers
+  `"Invalid Date"`, and `Date.UTC`, `Date.parse` and the other setters no longer throw a
+  `TypeError`. Each does what its clause says.
+- The tests of `swell` hold at any size of the realm: the test host pads the realm by
+  `SWELL_TEST_REALM_FUNCTIONS` host functions, and tests that compared against a room fitted
+  to one size now read their room from agents of their own. `task test-realm-sizes` runs them
+  in both modes at each size of `REALM_SIZES` and is a step of the lane `slow`. No file under
+  `crates/swell/src` changes with this story.
+
+### Host interface
+
+- `HOST-211` (changed, slice 4): its last clause states the budget by the step charged before
+  the call of `system_time_zone_identifier`. With that budget the call ends after that hook
+  and before `get_named_time_zone_offset_nanoseconds`, and one step lower it ends before
+  either hook. No public item of `value.rs` or of `host/*.rs` is added or changed.
+- `HOST-127`, `HOST-128`, `HOST-135`, `HOST-209`, `HOST-210` and `HOST-211` have a test: the
+  provided zone hooks, an offset of one hour, the bytes of `Math` on every platform, an offset
+  out of range, a host with no instant for any local time, and the step charged to every zone
+  hook call.
+
 ## [0.9.1] - 2026-11-25
 
 An interrupt set while a host function runs now ends the run when that function throws, as it
