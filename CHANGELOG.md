@@ -5,13 +5,31 @@ What changed in each release of swell. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The history starts at the first
 release; what came before it is in the git log and in `docs/plan/`.
 
-A release of swell is a version of its source: swell is a library, and no binary is built yet.
+A release of swell is a version of its source and, from 0.12.0 on, the `swell` shell binary for
+Linux, macOS and Windows (`docs/releasing.md`, "The binary of a release").
 Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
 ### Added
 
+- The shell binary `swell`, package `swell-cli` in `crates/cli`: `swell [flags] <file.js>` or
+  `swell [flags] -e <source>` runs one script and then its promise jobs. The realm has `print`,
+  and `console.log` as the same function. `Date.now()` reads the system clock. There is one flag
+  per field of `Limits` (`--steps`, `--memory`, `--depth`, `--reentry`, `--nesting`,
+  `--string-length`, `--bigint-bits`) and `--timeout <ms>`, which interrupts the run. The exit
+  status gives the outcome: 0 normal, 1 uncaught throw, 2 syntax error, 3 step budget, 4 memory
+  budget, 5 depth limit, 6 interrupted, 64 usage error, 70 engine fault. `swell --version`
+  prints the version. The binary is std only and has `#![forbid(unsafe_code)]`
+  (`story:cli-runs-a-script-file`).
+- Releases ship the binary: a pushed tag runs `.github/workflows/release-build.yml`, which
+  builds, smoke-tests and packages `swell` for `x86_64-unknown-linux-gnu`,
+  `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin` (`.tar.gz`) and
+  `x86_64-pc-windows-msvc` (`.zip`). The release has the five archives and `SHA256SUMS` as
+  assets (`docs/releasing.md`; `story:releases-ship-the-shell-for-three-systems`).
+- The test262 sources digest (`task test262-digest`) now covers only the packages of the
+  runner: `swell-test262` and what it depends on in `Cargo.lock`. A change to `crates/cli` or
+  `crates/unicode-gen` no longer requires a full test262 run.
 - The site's compare page, `/compare`: 2 to 4 engine configurations side by side, rows grouped
   by the KPIs K1 to K8 and the facts, the selection in the URL (`?e=swell,v8-jitless,quickjs,boa`),
   the best of the picked cells marked among values of one source, "not measured" with its

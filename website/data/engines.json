@@ -475,7 +475,7 @@
         },
         "K7.memory_safe": {
           "status": "measured",
-          "text": "yes: Rust, #![forbid(unsafe_code)] in 9 of 9 crate roots",
+          "text": "yes: Rust, #![forbid(unsafe_code)] in 10 of 10 crate roots",
           "source": {
             "label": "forbid scan of site-data",
             "url": "https://github.com/beyond10x/swell/tree/main/crates",
@@ -486,8 +486,8 @@
         },
         "K7.forbid_unsafe": {
           "status": "measured",
-          "value": 9,
-          "of": 9,
+          "value": 10,
+          "of": 10,
           "unit": "crate roots",
           "basis": "swell-only",
           "source": {
@@ -501,7 +501,7 @@
         "K7.third_party": {
           "status": "measured",
           "value": 0,
-          "of": 8,
+          "of": 9,
           "unit": "packages",
           "basis": "swell-only",
           "source": {

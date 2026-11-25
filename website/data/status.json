@@ -3,12 +3,13 @@
   "generated_by": "task site-data, taskfiles/site.yml",
   "version": "0.11.0",
   "crates": {
-    "roots": 9,
-    "roots_forbidding_unsafe": 9,
-    "lock_packages": 8,
+    "roots": 10,
+    "roots_forbidding_unsafe": 10,
+    "lock_packages": 9,
     "lock_packages_outside": 0,
     "packages": [
       {"name": "swell", "dependencies": ["swell-compiler", "swell-num", "swell-regexp", "swell-syntax", "swell-unicode"]},
+      {"name": "swell-cli", "dependencies": ["swell", "swell-syntax"]},
       {"name": "swell-compiler", "dependencies": ["swell-num", "swell-syntax"]},
       {"name": "swell-num", "dependencies": []},
       {"name": "swell-regexp", "dependencies": ["swell-unicode"]},

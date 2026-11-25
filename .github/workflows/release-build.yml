@@ -1,0 +1,148 @@
+name: Release build
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+*"
+
+concurrency:
+  group: release-build-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    name: swell / release build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2022
+            archive: zip
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Read the pinned compiler
+        id: toolchain
+        run: |
+          set -eu
+          channel=$(awk -F '"' '/^[ \t]*channel[ \t]*=/ { print $2; exit }' rust-toolchain.toml)
+          test -n "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: ${{ matrix.target }}
+
+      - name: Build swell-cli
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          home=${USERPROFILE:-$HOME}
+          flags="--remap-path-prefix=$home=~ --remap-path-prefix=$GITHUB_WORKSPACE=."
+          case "$TARGET" in
+            *-windows-msvc) flags="$flags -C link-arg=/PDBALTPATH:%_PDB%" ;;
+          esac
+          export RUSTFLAGS="$flags"
+          cargo build --release --locked -p swell-cli --target "$TARGET"
+
+      - name: Package
+        id: package
+        env:
+          TAG: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          set -euo pipefail
+          name="swell-$TAG-$TARGET"
+          exe=swell
+          if [ "$ARCHIVE" = zip ]; then exe=swell.exe; fi
+          home=${USERPROFILE:-$HOME}
+          binary="target/$TARGET/release/$exe"
+          for path in "$home" "$GITHUB_WORKSPACE"; do
+            if grep -qF -- "$path" "$binary"; then
+              echo "release-build: $binary holds the path $path"
+              exit 1
+            fi
+          done
+          mkdir -p "dist/$name"
+          cp "$binary" README.md LICENSE NOTICE "dist/$name/"
+          cd dist
+          if [ "$ARCHIVE" = zip ]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            tar -czf "$name.tar.gz" "$name"
+          fi
+          rm -r "$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "file=$name.$ARCHIVE" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the archive
+        env:
+          TAG: ${{ github.ref_name }}
+          ARCHIVE: ${{ matrix.archive }}
+          NAME: ${{ steps.package.outputs.name }}
+          FILE: ${{ steps.package.outputs.file }}
+        run: |
+          set -euo pipefail
+          smoke="$RUNNER_TEMP/smoke"
+          rm -rf "$smoke"
+          mkdir -p "$smoke"
+          if [ "$ARCHIVE" = zip ]; then
+            7z x -o"$smoke" "dist/$FILE" > /dev/null
+            swell="$smoke/$NAME/swell.exe"
+          else
+            tar -xzf "dist/$FILE" -C "$smoke"
+            swell="$smoke/$NAME/swell"
+          fi
+          for file in README.md LICENSE NOTICE; do
+            test -f "$smoke/$NAME/$file" || { echo "release-build: $FILE lacks $file"; exit 1; }
+          done
+          version=$("$swell" --version | tr -d '\r')
+          case "swell $TAG" in
+            "$version" | "$version"-*) ;;
+            *) echo "release-build: swell --version printed \"$version\", the tag is $TAG"; exit 1 ;;
+          esac
+          printed=$("$swell" -e "print(1 + 1)" | tr -d '\r')
+          test "$printed" = 2 || { echo "release-build: print(1 + 1) printed \"$printed\""; exit 1; }
+          status=0
+          "$swell" --steps 10000 -e "for (;;) {}" 2> "$smoke/stderr" || status=$?
+          test "$status" -eq 3 || { echo "release-build: a step budget exited $status, not 3"; cat "$smoke/stderr"; exit 1; }
+          echo "release-build: $FILE: $version, print(1 + 1) printed 2, a step budget exited 3"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: dist/${{ steps.package.outputs.file }}
+          if-no-files-found: error
+          retention-days: 30
