@@ -55,6 +55,41 @@ fn host_33_lossy_string_replaces_lone_surrogates() {
     assert_eq!(text, "\u{FFFD}\u{FFFD}\u{FF}");
 }
 
+/// HOST-220: `to_utf16_len` answers the number of code units of a String, lone surrogates
+/// included, equal to the length of what `to_utf16` gives; a freed handle is `StaleHandle`.
+#[test]
+fn host_220_to_utf16_len_counts_code_units() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    let long = vec![0x100_u16; 1 << 20];
+    let (lengths, copies, freed) = agent
+        .with_cx(&realm, |cx| {
+            let surrogate = cx.new_string_utf16(&[0xD800, 0x61]).unwrap();
+            let empty = cx.new_string_utf16(&[]).unwrap();
+            let latin1 = cx.new_string_utf16(&[0x61, 0xFF]).unwrap();
+            let long = cx.new_string_utf16(&long).unwrap();
+            let strings = [surrogate, empty, latin1, long];
+            let lengths: Vec<usize> = strings
+                .iter()
+                .map(|&s| cx.to_utf16_len(s).unwrap())
+                .collect();
+            let copies: Vec<usize> = strings
+                .iter()
+                .map(|&s| cx.to_utf16(s).unwrap().len())
+                .collect();
+            (lengths, copies, cx.new_string("freed").unwrap())
+        })
+        .unwrap();
+    assert_eq!(lengths, vec![2, 0, 2, 1_048_576]);
+    assert_eq!(lengths, copies);
+
+    assert!(matches!(agent.collect(), Ok(swell::Outcome::Normal(_))));
+    assert_eq!(
+        agent.with_cx(&realm, |cx| cx.to_utf16_len(freed)).unwrap(),
+        Err(HostError::StaleHandle)
+    );
+}
+
 /// HOST-34: `new_string` of a `&str` is the String of its UTF-16 encoding.
 #[test]
 fn host_34_new_string_is_utf16_of_the_str() {

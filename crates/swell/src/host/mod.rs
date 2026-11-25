@@ -239,6 +239,16 @@ impl<H: Host> Agent<H> {
             .to_utf16())
     }
 
+    fn scoped_to_utf16_len(&self, string: StringRef) -> Result<usize, HostError> {
+        self.alive()?;
+        Ok(self
+            .heap
+            .strings
+            .get(string.handle)
+            .map_err(host_error)?
+            .len())
+    }
+
     fn scoped_to_rust_string_lossy(&self, string: StringRef) -> Result<String, HostError> {
         self.alive()?;
         Ok(self
@@ -531,6 +541,12 @@ macro_rules! scoped_methods {
             /// Every code unit of `string`, exactly (Web IDL's `DOMString`, HOST-32).
             pub fn to_utf16(&self, string: StringRef) -> Result<Vec<u16>, HostError> {
                 self.agent.scoped_to_utf16(string)
+            }
+
+            /// The number of code units of `string`, lone surrogates included: the length of
+            /// what `to_utf16` gives, read without a copy (HOST-220).
+            pub fn to_utf16_len(&self, string: StringRef) -> Result<usize, HostError> {
+                self.agent.scoped_to_utf16_len(string)
             }
 
             /// `string` with each lone surrogate replaced by U+FFFD (Web IDL's `USVString`,

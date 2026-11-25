@@ -10,6 +10,15 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Host interface
+
+- `HOST-218` (new, slice 1) has a test and `HOST-219` (new, slice 12) is pending: a String
+  or a Symbol that host data lists in its `trace` with `Tracer::value` survives `collect`, as
+  an object does, and a BigInt will once slice 12 makes one. The design says a listed handle
+  keeps a value alive, not only an object.
+- `to_utf16_len` (new, on `Cx` and `HookCx`) answers the length of a String in code units
+  without copying it, held by `HOST-220` (new, slice 1, with a test). Additive, not breaking.
+
 ## [0.9.1] - 2026-11-25
 
 An interrupt set while a host function runs now ends the run when that function throws, as it

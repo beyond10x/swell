@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-25T05:00:46Z",
+  "actor": "human:operator",
+  "artifact": "story:the-host-reads-the-length-of-a-string",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "branch impl/the-host-reads-the-length-of-a-string: values::host_220 failed to compile on the base, passes in both modes; slot --local task check exit 0, test-steps 46.2 of 120"
+  }
+}
