@@ -1,4 +1,4 @@
-# swell 0.9.1
+# swell 0.10.0
 ALL pub const ALL: [ErrorKind; 7] = [ErrorKind::Error, ErrorKind::EvalError, ErrorKind::RangeError, ErrorKind::ReferenceError, ErrorKind::SyntaxError, ErrorKind::TypeError, ErrorKind::UriError]
 Abrupt #[derive(Clone, Copy, Debug, PartialEq)] pub enum Abrupt
 Abrupt::Terminated Terminated(Termination)
@@ -208,7 +208,10 @@ HOST-214 160a34ae512bf2d9ab8c2a26b79ffc9ad319e1522818bfa5b1b3e736847ff27f
 HOST-215 d9d7c5218e2cca5109feedd6d88de007c06023808750a1357fa43b1cd6e07ec6
 HOST-216 8f1518804b0aaadc911c113b2fdf771136ee3c0648e9d097fe3d20aa0e19bdbb
 HOST-217 4083bd1ce633d56850f413bcf7bc5fbaa7d940bde35127f4d353f0cafafaebc7
+HOST-218 d0def12a6b83b1fd2d9d9d608914eede6d3fce4d44b78926b1667e1af455f35f
+HOST-219 916f5fa35e9beb5e1ba1bc26cf8e75e43f533b3985149a83d32fa4877af6af15
 HOST-22 95197a02ba327c26e76877386b398cabf467c74cb48872b6188b1fbacde03626
+HOST-220 fd4de6a590df20d335210ae43b4ea2a26ce431d65973192c3f74adbc24697ffd
 HOST-23 37462ae323b6b890cd622433f01a0ceb7dc99df1b82c87f1c95eba223f44e19b
 HOST-24 0314f239198d2a75fd223009fa147b68b2448e28bdf3ab93ce1e67cae519bbc7
 HOST-25 f271a8f7d14fcad2e7fbaf903c134b22c51de87da7bd5ff4a320c3cdd3cc6da5
@@ -546,6 +549,7 @@ to_property_key pub fn to_property_key(&mut self, value: Value) -> Result<Comple
 to_rust_string_lossy pub fn to_rust_string_lossy(&self, string: StringRef) -> Result<String, HostError>
 to_string pub fn to_string(&mut self, value: Value) -> Result<Completion<StringRef>, HostError>
 to_utf16 pub fn to_utf16(&self, string: StringRef) -> Result<Vec<u16>, HostError>
+to_utf16_len pub fn to_utf16_len(&self, string: StringRef) -> Result<usize, HostError>
 trace fn trace(&self, tracer: &mut Tracer<'_>)
 value pub fn value(&mut self, value: Value)
 well_known_symbol pub fn well_known_symbol(&mut self, which: WellKnownSymbol) -> Result<crate::value::SymbolRef, HostError>
