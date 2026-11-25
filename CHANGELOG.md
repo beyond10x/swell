@@ -33,7 +33,8 @@ cases pass, as in 0.11.0 (`test262 total 53801 8982 7 44812 25943 18867 2`).
   builds, smoke-tests and packages `swell` for `x86_64-unknown-linux-gnu`,
   `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin` (`.tar.gz`) and
   `x86_64-pc-windows-msvc` (`.zip`). The release has the five archives and `SHA256SUMS` as
-  assets (`docs/releasing.md`; `story:releases-ship-the-shell-for-three-systems`).
+  assets (`docs/releasing.md`; `story:releases-ship-the-shell-for-three-systems`). The macOS
+  and Windows binaries are not signed; the release's notes say how to check and run them.
 - The test262 sources digest (`task test262-digest`) now covers only the packages of the
   runner: `swell-test262` and what it depends on in `Cargo.lock`. A change to `crates/cli` or
   `crates/unicode-gen` no longer requires a full test262 run.
