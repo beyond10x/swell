@@ -13,6 +13,13 @@ vars:
   SITE_DATA_MANIFEST: '{{.SITE_DATA_MANIFEST | default "Cargo.toml"}}'
   SITE_DATA_LOCK: '{{.SITE_DATA_LOCK | default "Cargo.lock"}}'
   SITE_DATA_CRATES: '{{.SITE_DATA_CRATES | default "crates"}}'
+  SITE_DATA_ENGINES: '{{.SITE_DATA_ENGINES | default "website/data/engines.json"}}'
+  SITE_DATA_CATALOG: '{{.SITE_DATA_CATALOG | default "bench/engines.jsonl"}}'
+  SITE_DATA_PUBLISHED: '{{.SITE_DATA_PUBLISHED | default "bench/published"}}'
+  SITE_DATA_RESULTS: '{{.SITE_DATA_RESULTS | default "bench/results"}}'
+  SITE_DATA_PIN: '{{.SITE_DATA_PIN | default "conformance/test262/PIN"}}'
+  SITE_DATA_LIMITS: '{{.SITE_DATA_LIMITS | default "crates/swell/src/host/limits.rs"}}'
+  SITE_DATA_INTERRUPT: '{{.SITE_DATA_INTERRUPT | default "crates/swell/src/host/interrupt.rs"}}'
 
 tasks:
   site-data:
@@ -45,6 +52,19 @@ tasks:
       requirement line of no known form. Writes through a temporary file, so a failed run leaves
       the previous file.
 
+      It also writes SITE_DATA_ENGINES (default website/data/engines.json), the compare page's
+      data, with taskfiles/site-engines.sh (sh and jq): from SITE_DATA_CATALOG
+      (bench/engines.jsonl, the engine catalog), the tables SITE_DATA_PUBLISHED/*.tsv
+      (bench/published, each listed with its sha256 in SITE_DATA_PUBLISHED/SHA256SUMS; a file
+      that differs from its digest fails, so a published line edited by hand fails), the result
+      files SITE_DATA_RESULTS/*.json (bench/results, format swell-bench/1; with none, the rows
+      K2 to K5 read "not measured", "no run yet"), and swell's own files: the expected counts,
+      SITE_DATA_PIN (the test262 commit), the manifest, the requirement line HOST-133,
+      SITE_DATA_LIMITS and SITE_DATA_INTERRUPT (the lines its resource-control cells cite) and
+      the status file just written. Every value carries its source, date, revision and method;
+      a missing value carries its reason. Fails on a line it cites that is gone, a result file
+      of another format, or a result row whose engine names no configuration of the catalog.
+
       Runs from the repository root, alone (task -d . -t taskfiles/site.yml site-data) and
       included from the root Taskfile.yml alike.
     dir: '{{.TASKFILE_DIR}}/..'
@@ -53,58 +73,71 @@ tasks:
       - task: site-data-write
         vars:
           SITE_DATA_TARGET: '{{.SITE_DATA_FILE}}'
-      - 'echo "site-data: wrote {{.SITE_DATA_FILE}}"'
+          SITE_DATA_ENGINES_TARGET: '{{.SITE_DATA_ENGINES}}'
+      - 'echo "site-data: wrote {{.SITE_DATA_FILE}} and {{.SITE_DATA_ENGINES}}"'
 
   site-data-check:
-    desc: Fail, naming the first line that differs, when website/data/status.json is not what site-data writes from the committed gate files.
+    desc: Fail, naming the first line that differs, when website/data/status.json or website/data/engines.json is not what site-data writes from the committed files.
     summary: |
-      Regenerate the website's numbers as site-data does, into SITE_DATA_OUT (default
-      .out/site-data/status.json), and compare the result with SITE_DATA_FILE (default
-      website/data/status.json), byte for byte. Fails when the committed file is missing, or
-      when they differ, printing the first line that differs as
+      Regenerate the website's data as site-data does, into SITE_DATA_OUT (default
+      .out/site-data/status.json and .out/site-data/engines.json), and compare the result with
+      SITE_DATA_FILE (default website/data/status.json) and SITE_DATA_ENGINES (default
+      website/data/engines.json), byte for byte. Fails when a committed file is missing, or
+      when one differs, printing the first line that differs as
       "site-data-check: <file> differs from its regeneration at line <n>: committed `<line>`,
-      regenerated `<line>`; run task site-data" (a line one side lacks reads "no line"). A number typed into the file by hand and an input
-      that moved without a regeneration both fail here. Needs no Node and no network; meant for
-      task check. Passing, it prints
-      "site-data-check: <file> equals its regeneration from <inputs>".
+      regenerated `<line>`; run task site-data" (a line one side lacks reads "no line"). A number typed into a file by hand and an input
+      that moved without a regeneration both fail here; so does a published table of
+      bench/published whose sha256 is not the one its SHA256SUMS lists (site-data refuses it).
+      Needs no Node and no network; meant for task check. Passing, it prints
+      "site-data-check: <file> equals its regeneration from <inputs>", once per file.
     dir: '{{.TASKFILE_DIR}}/..'
     silent: true
     cmds:
       - task: site-data-write
         vars:
           SITE_DATA_TARGET: '{{.SITE_DATA_OUT}}/status.json'
+          SITE_DATA_ENGINES_TARGET: '{{.SITE_DATA_OUT}}/engines.json'
       - |
-        committed='{{.SITE_DATA_FILE}}'
-        regenerated='{{.SITE_DATA_OUT}}/status.json'
-        if [ ! -f "$committed" ]; then
-          echo "site-data-check: $committed is missing; run task site-data"
-          exit 1
-        fi
-        if cmp -s "$committed" "$regenerated"; then
-          echo "site-data-check: $committed equals its regeneration from {{.SITE_DATA_EXPECTED}}, {{.SITE_DATA_DELIVERED}}, {{.SITE_DATA_REQUIREMENTS}}, {{.SITE_DATA_MOVES}}, {{.SITE_DATA_DESIGN}}, {{.SITE_DATA_MANIFEST}}, {{.SITE_DATA_LOCK}} and the crate roots under {{.SITE_DATA_CRATES}}"
-          exit 0
-        fi
-        awk -v file="$committed" '
-          NR == FNR { regen[FNR] = $0; nregen = FNR; next }
-          { committed[FNR] = $0; ncommitted = FNR }
-          END {
-            n = (ncommitted > nregen) ? ncommitted : nregen
-            for (i = 1; i <= n; i++) {
-              a = (i <= ncommitted) ? committed[i] : ""
-              b = (i <= nregen) ? regen[i] : ""
-              if (a != b || (i > ncommitted) != (i > nregen)) {
-                sub(/^[ \t]+/, "", a)
-                sub(/^[ \t]+/, "", b)
-                a = (i <= ncommitted) ? "`" a "`" : "no line"
-                b = (i <= nregen) ? "`" b "`" : "no line"
-                print "site-data-check: " file " differs from its regeneration at line " i ": committed " a ", regenerated " b "; run task site-data"
-                exit
+        red=0
+        compare() {
+          committed=$1
+          regenerated=$2
+          inputs=$3
+          if [ ! -f "$committed" ]; then
+            echo "site-data-check: $committed is missing; run task site-data"
+            red=1
+            return
+          fi
+          if cmp -s "$committed" "$regenerated"; then
+            echo "site-data-check: $committed equals its regeneration from $inputs"
+            return
+          fi
+          red=1
+          awk -v file="$committed" '
+            NR == FNR { regen[FNR] = $0; nregen = FNR; next }
+            { committed[FNR] = $0; ncommitted = FNR }
+            END {
+              n = (ncommitted > nregen) ? ncommitted : nregen
+              for (i = 1; i <= n; i++) {
+                a = (i <= ncommitted) ? committed[i] : ""
+                b = (i <= nregen) ? regen[i] : ""
+                if (a != b || (i > ncommitted) != (i > nregen)) {
+                  sub(/^[ \t]+/, "", a)
+                  sub(/^[ \t]+/, "", b)
+                  a = (i <= ncommitted) ? "`" a "`" : "no line"
+                  b = (i <= nregen) ? "`" b "`" : "no line"
+                  print "site-data-check: " file " differs from its regeneration at line " i ": committed " a ", regenerated " b "; run task site-data"
+                  exit
+                }
               }
+              print "site-data-check: " file " differs from its regeneration in its last byte; run task site-data"
             }
-            print "site-data-check: " file " differs from its regeneration in its last byte; run task site-data"
-          }
-        ' "$regenerated" "$committed"
-        exit 1
+          ' "$regenerated" "$committed"
+        }
+        compare '{{.SITE_DATA_FILE}}' '{{.SITE_DATA_OUT}}/status.json' '{{.SITE_DATA_EXPECTED}}, {{.SITE_DATA_DELIVERED}}, {{.SITE_DATA_REQUIREMENTS}}, {{.SITE_DATA_MOVES}}, {{.SITE_DATA_DESIGN}}, {{.SITE_DATA_MANIFEST}}, {{.SITE_DATA_LOCK}} and the crate roots under {{.SITE_DATA_CRATES}}'
+        compare '{{.SITE_DATA_ENGINES}}' '{{.SITE_DATA_OUT}}/engines.json' '{{.SITE_DATA_CATALOG}}, {{.SITE_DATA_PUBLISHED}}/*.tsv (held by its SHA256SUMS), {{.SITE_DATA_RESULTS}}/*.json, {{.SITE_DATA_EXPECTED}}, {{.SITE_DATA_PIN}}, {{.SITE_DATA_MANIFEST}}, {{.SITE_DATA_REQUIREMENTS}}, {{.SITE_DATA_LIMITS}}, {{.SITE_DATA_INTERRUPT}} and the status file'
+        exit $red
+
 
   site-data-write:
     internal: true
@@ -120,6 +153,14 @@ tasks:
       SITE_DATA_MANIFEST: '{{.SITE_DATA_MANIFEST}}'
       SITE_DATA_LOCK: '{{.SITE_DATA_LOCK}}'
       SITE_DATA_CRATES: '{{.SITE_DATA_CRATES}}'
+      SITE_DATA_ENGINES_TARGET: '{{.SITE_DATA_ENGINES_TARGET}}'
+      SITE_DATA_OUT: '{{.SITE_DATA_OUT}}'
+      SITE_DATA_CATALOG: '{{.SITE_DATA_CATALOG}}'
+      SITE_DATA_PUBLISHED: '{{.SITE_DATA_PUBLISHED}}'
+      SITE_DATA_RESULTS: '{{.SITE_DATA_RESULTS}}'
+      SITE_DATA_PIN: '{{.SITE_DATA_PIN}}'
+      SITE_DATA_LIMITS: '{{.SITE_DATA_LIMITS}}'
+      SITE_DATA_INTERRUPT: '{{.SITE_DATA_INTERRUPT}}'
     cmds:
       - |
         export LC_ALL=C
@@ -346,6 +387,7 @@ tasks:
           }
         ' > "$tmp" || { rm -f "$tmp"; exit 1; }
         mv "$tmp" "$SITE_DATA_TARGET"
+        sh taskfiles/site-engines.sh "$SITE_DATA_ENGINES_TARGET" "$SITE_DATA_TARGET"
 
   site-build:
     desc: Install the website's packages from its lock file and build it into website/build; not part of check.
@@ -354,7 +396,7 @@ tasks:
       and the network for registry.npmjs.org and github.com/beyond10x/docs-system (the shared
       documentation system, pinned by commit in website/package.json). Docusaurus telemetry is
       off (DOCUSAURUS_DISABLE_TELEMETRY=1); broken links and anchors fail the build. The numbers
-      the site shows come from website/data/status.json, which site-data writes and
+      the site shows come from website/data/status.json and website/data/engines.json, which site-data writes and
       site-data-check holds; this task does not write it.
     dir: '{{.TASKFILE_DIR}}/..'
     env:
@@ -362,3 +404,23 @@ tasks:
     cmds:
       - npm --prefix website ci
       - npm --prefix website run build
+
+  bench-import-zoo:
+    desc: Fetch javascript-zoo-data's test262 results for the catalog's engines and write bench/published; manual, needs the network, not part of check.
+    summary: |
+      Runs taskfiles/bench-import-zoo.sh (POSIX sh, curl, jq). For every configuration of
+      bench/engines.jsonl that names a zoo file (zoo_test262), it fetches
+      test262/<file>.json of https://github.com/ivankra/javascript-zoo-data at the data commit
+      BENCH_ZOO_COMMIT (default 450da50, tag 20260522) into .cache/zoo/<commit>/, checks that the
+      file is a test262 result at BENCH_ZOO_TEST262 (default 4a1e962) and that its passing count
+      equals its own summary, and writes bench/published/zoo-test262-<revision>.tsv: per
+      configuration and top directory of test262, and for all of them, the passed, failed and
+      total files, the test262, engine and runner revisions, the engine flags, the run date, the
+      data commit, the sha256 of the fetched file, the fetch date and its URL. It copies the
+      data's MIT notice to bench/published/LICENSE-javascript-zoo-data and writes
+      bench/published/SHA256SUMS, which site-data holds. The fetched files are data: jq reads
+      them, nothing runs them. A file the data does not have is skipped with a line. Run it
+      when the catalog or the data commit moves, then task site-data, and commit the output.
+    dir: '{{.TASKFILE_DIR}}/..'
+    cmds:
+      - sh taskfiles/bench-import-zoo.sh '{{.BENCH_ZOO_COMMIT | default "450da5030317276c38ae6601c85a737a1a3c8b52"}}' '{{.BENCH_ZOO_TEST262 | default "4a1e96230008fe27367233f7e4947ace176aac5a"}}'

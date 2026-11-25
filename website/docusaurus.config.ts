@@ -10,10 +10,11 @@ const siteDir = path.dirname(fileURLToPath(import.meta.url));
 // The landing page is src/pages/index.tsx on the shared docs-system product components; its hero
 // figure is src/components/EngineFigure.tsx. The pages in docs/ are written by hand from the
 // repository's README.md, CHANGELOG.md (section 0.2.0), docs/design/engine.md,
-// docs/design/host-interface.md, docs/plan/waves.md, AGENTS.md and the committed files of the
-// gate under conformance/. A page states only what those sources state. Every number the site
-// shows is read from data/status.json, which `task site-data` writes from the gate's files and
-// `task site-data-check` holds.
+// docs/design/host-interface.md, docs/design/quality-and-comparison.md, docs/plan/waves.md,
+// AGENTS.md and the committed files of the gate under conformance/. A page states only what
+// those sources state. Every number the site shows is read from data/status.json, which
+// `task site-data` writes from the gate's files and `task site-data-check` holds; the compare
+// page (src/pages/compare.tsx) reads data/engines.json, which the same tasks write and hold.
 
 const config: Config = {
   title: 'swell',
@@ -61,6 +62,7 @@ const config: Config = {
         {to: '/docs/architecture', label: 'Architecture', position: 'left'},
         {to: '/docs/embedding', label: 'Embedding', position: 'left'},
         {to: '/docs/roadmap', label: 'Roadmap', position: 'left'},
+        {to: '/compare', label: 'Compare', position: 'left'},
         {href: 'https://github.com/beyond10x/swell', label: 'GitHub', position: 'right'},
       ],
     },
@@ -75,6 +77,8 @@ const config: Config = {
             {label: 'Embedding', to: '/docs/embedding'},
             {label: 'Principles', to: '/docs/principles'},
             {label: 'Limits', to: '/docs/limits'},
+            {label: 'KPIs', to: '/docs/kpis'},
+            {label: 'Compare engines', to: '/compare'},
           ],
         },
         {

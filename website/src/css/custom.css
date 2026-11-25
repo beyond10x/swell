@@ -342,3 +342,26 @@
 /* swell's own mark in the navbar, in place of the shared letter tile (mark '' in the config). */
 .navbar .navbar__brand .navbar__logo { display: flex; flex: none; align-items: center; block-size: 2rem; margin-right: 0; }
 .navbar .navbar__brand .navbar__logo img { block-size: 2rem; inline-size: 2rem; }
+
+/* The compare page (src/pages/compare.tsx). */
+.sw-cmp { --sw-accent: var(--b10x-product-hue, var(--b10x-color-accent)); }
+.sw-cmp-picker { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: flex-start; margin: 1rem 0 1.5rem; }
+.sw-cmp-pick-group { display: flex; flex-wrap: wrap; gap: 4px 6px; max-inline-size: 60rem; margin: 0; padding: 6px 10px 8px; border: 1px solid var(--b10x-color-line); border-radius: 4px; }
+.sw-cmp-pick-group legend { padding: 0 4px; color: var(--b10x-color-muted); font-size: 0.82rem; }
+.sw-cmp-pick { display: inline-flex; gap: 4px; align-items: center; padding: 2px 8px; border: 1px solid var(--b10x-color-line); border-radius: 999px; font-size: 0.85rem; cursor: pointer; }
+.sw-cmp-pick--on { border-color: var(--sw-accent); }
+.sw-cmp-tag { margin-inline-start: 4px; color: var(--b10x-color-muted); font-size: 0.72rem; }
+.sw-cmp-jit { display: inline-flex; gap: 6px; align-items: center; font-size: 0.85rem; }
+.sw-cmp-scroll { overflow-x: auto; }
+.sw-cmp-table { display: table; inline-size: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.sw-cmp-table th, .sw-cmp-table td { vertical-align: top; text-align: start; }
+.sw-cmp-table thead th { min-inline-size: 12rem; }
+.sw-cmp-table tbody th[scope="row"] { min-inline-size: 13rem; font-weight: 500; }
+.sw-cmp-group th { background: var(--ifm-table-stripe-background); font-weight: 600; }
+.sw-cmp-mode, .sw-cmp-direction, .sw-cmp-secondary, .sw-cmp-reason, .sw-cmp-source { color: var(--b10x-color-muted); font-size: 0.78rem; font-weight: 400; }
+.sw-cmp-number { font-variant-numeric: tabular-nums; font-weight: 600; }
+.sw-cmp-missing { color: var(--b10x-color-muted); font-style: italic; }
+.sw-cmp-best { box-shadow: inset 3px 0 0 var(--sw-accent); }
+.sw-cmp-best-mark { color: var(--b10x-color-heading); font-size: 0.75rem; font-weight: 600; }
+.sw-cmp-source { margin-top: 4px; }
+.sw-cmp-foot { margin-top: 1.5rem; color: var(--b10x-color-muted); font-size: 0.85rem; }
