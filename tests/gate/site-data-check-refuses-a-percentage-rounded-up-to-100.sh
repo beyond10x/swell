@@ -5,7 +5,8 @@
 # every case passes. The task floors to one decimal. From a copy of
 # conformance/test262/expected.txt whose total line and slice 01 line pass 7,010 of 7,011 cases
 # and whose slice 02 line passes 31 of 31, site-data must write "99.9" for the total and slice 01,
-# never "100.0", and "100.0" for slice 02.
+# never "100.0", and "100.0" for slice 02. It writes no tracked file: status.json, engines.json and
+# the work directory of site-data all go under its own directory.
 # Run from the repository root: sh tests/gate/site-data-check-refuses-a-percentage-rounded-up-to-100.sh
 # Works only under .out/gate-tests/<name>/; prints "<name>: ok" or "<name>: FAIL <why>".
 
@@ -17,7 +18,9 @@ name=site-data-check-refuses-a-percentage-rounded-up-to-100
 dir=.out/gate-tests/$name
 expected=conformance/test262/expected.txt
 unset SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS \
-  SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES
+  SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES \
+  SITE_DATA_ENGINES SITE_DATA_CATALOG SITE_DATA_PUBLISHED SITE_DATA_RESULTS SITE_DATA_PIN \
+  SITE_DATA_LIMITS SITE_DATA_INTERRUPT
 fail() { echo "$name: FAIL $*"; exit 1; }
 
 rm -rf "$dir" && mkdir -p "$dir" || fail "cannot make $dir"
@@ -34,7 +37,11 @@ awk '
 grep -q '^test262-slice 01 7011 ' "$dir/expected.txt" || fail "no slice 01 line in $expected to plant"
 grep -q '^test262-slice 02 31 ' "$dir/expected.txt" || fail "no slice 02 line in $expected to plant"
 
-task -d . -t taskfiles/site.yml site-data SITE_DATA_FILE="$dir/status.json" SITE_DATA_EXPECTED="$dir/expected.txt" \
+# Every file site-data writes goes under $dir: the status file, the compare page's data and the
+# work directory. Left at its default, SITE_DATA_ENGINES is the tracked website/data/engines.json,
+# which this case would overwrite with the planted counts.
+task -d . -t taskfiles/site.yml site-data SITE_DATA_OUT="$dir/out" SITE_DATA_FILE="$dir/status.json" \
+  SITE_DATA_ENGINES="$dir/engines.json" SITE_DATA_EXPECTED="$dir/expected.txt" \
   > "$dir/site-data.out" 2>&1 || fail "site-data refused the planted counts ($dir/site-data.out)"
 
 # The passed_percent of the test262 total, then of each slice by its id.
