@@ -13,6 +13,25 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Added
 
+- The release build can sign the macOS and Windows binaries before it packages them: on
+  macOS with a Developer ID Application certificate, the hardened runtime and a secure
+  timestamp, then notarized with `xcrun notarytool` (the job fails unless the status is
+  `Accepted`); on Windows through Azure Artifact Signing, checked with
+  `Get-AuthenticodeSignature`. It signs when the twelve signing secrets are set; without
+  them, on every event including a tag, it builds unsigned and prints one line naming the
+  secrets that are not set. A release's notes say whether its binaries are signed.
+  `docs/releasing.md`, "Signing", names the secrets and how to rotate them;
+  `website/docs/embedding.md` shows how to check a signature (`story:binaries-signed`).
+
+## [0.12.0] - 2026-11-25
+
+swell has a shell binary, `swell`, and a release ships it for Linux, macOS and Windows. The
+site compares swell with other engines, and an interrupt set by a host function is read after
+every call from Rust. The test262 counts do not change: 25,943 of the 44,812 selected test262
+cases pass, as in 0.11.0 (`test262 total 53801 8982 7 44812 25943 18867 2`).
+
+### Added
+
 - The shell binary `swell`, package `swell-cli` in `crates/cli`: `swell [flags] <file.js>` or
   `swell [flags] -e <source>` runs one script and then its promise jobs. The realm has `print`,
   and `console.log` as the same function. `Date.now()` reads the system clock. There is one flag
@@ -26,16 +45,8 @@ Every number below comes from the gate, `task check`, on the released commit.
   builds, smoke-tests and packages `swell` for `x86_64-unknown-linux-gnu`,
   `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin` (`.tar.gz`) and
   `x86_64-pc-windows-msvc` (`.zip`). The release has the five archives and `SHA256SUMS` as
-  assets (`docs/releasing.md`; `story:releases-ship-the-shell-for-three-systems`).
-- The release build can sign the macOS and Windows binaries before it packages them: on
-  macOS with a Developer ID Application certificate, the hardened runtime and a secure
-  timestamp, then notarized with `xcrun notarytool` (the job fails unless the status is
-  `Accepted`); on Windows through Azure Artifact Signing, checked with
-  `Get-AuthenticodeSignature`. It signs when the twelve signing secrets are set; without
-  them, on every event including a tag, it builds unsigned and prints one line naming the
-  secrets that are not set. A release's notes say whether its binaries are signed.
-  `docs/releasing.md`, "Signing", names the secrets and how to rotate them;
-  `website/docs/embedding.md` shows how to check a signature (`story:binaries-signed`).
+  assets (`docs/releasing.md`; `story:releases-ship-the-shell-for-three-systems`). The macOS
+  and Windows binaries are not signed; the release's notes say how to check and run them.
 - The test262 sources digest (`task test262-digest`) now covers only the packages of the
   runner: `swell-test262` and what it depends on in `Cargo.lock`. A change to `crates/cli` or
   `crates/unicode-gen` no longer requires a full test262 run.
@@ -56,6 +67,10 @@ Every number below comes from the gate, `task check`, on the released commit.
   the published tables, result files of format `swell-bench/1` (none yet) and swell's own
   committed files; every value carries its source, date, revision and method.
   `site-data-check` holds it, and refuses a published table that differs from its sha256.
+- Two designs, of which nothing is built: `docs/design/quality-and-comparison.md`, what makes
+  swell good and how it is compared with other engines, and `docs/design/native-code.md`, a
+  path that compiles JavaScript ahead of time through codespec's `cir/1` to WebAssembly or
+  x86_64, with a JIT later.
 
 ### Fixed
 
@@ -1272,7 +1287,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.11.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.12.0...HEAD
+[0.12.0]: https://github.com/beyond10x/swell/releases/tag/0.12.0
 [0.11.0]: https://github.com/beyond10x/swell/releases/tag/0.11.0
 [0.10.0]: https://github.com/beyond10x/swell/releases/tag/0.10.0
 [0.9.1]: https://github.com/beyond10x/swell/releases/tag/0.9.1
