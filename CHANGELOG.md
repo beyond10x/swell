@@ -10,6 +10,12 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-25
+
+An interrupt set while a host function runs now ends the run when that function throws, as it
+did when the function returned. Nothing else changes: 24,838 of the 44,812 selected test262
+cases pass, as in 0.9.0 (`test262 total 53801 8982 7 44812 24838 19972 2`).
+
 ### Fixed
 
 - The interrupt flag is read after a builtin or host function called by a call or a
@@ -1115,7 +1121,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.9.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.9.1...HEAD
+[0.9.1]: https://github.com/beyond10x/swell/releases/tag/0.9.1
 [0.9.0]: https://github.com/beyond10x/swell/releases/tag/0.9.0
 [0.8.0]: https://github.com/beyond10x/swell/releases/tag/0.8.0
 [0.7.0]: https://github.com/beyond10x/swell/releases/tag/0.7.0
