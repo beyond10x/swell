@@ -30,6 +30,7 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The test262 sources digest (`task test262-digest`) now covers only the packages of the
   runner: `swell-test262` and what it depends on in `Cargo.lock`. A change to `crates/cli` or
   `crates/unicode-gen` no longer requires a full test262 run.
+
 ### Fixed
 
 - The interrupt flag is read after every call from Rust into a host function, not only after
