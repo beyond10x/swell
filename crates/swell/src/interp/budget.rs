@@ -8,16 +8,18 @@
 //!   steps builtins charge go through `Agent::charge_steps` (`host/agent.rs`) with the same
 //!   rule.
 //! - The interrupt flag is read by [`Agent::check_interrupt`] at every `LoopJump`, every call
-//!   (the frame a call pushes, and right after a builtin or host function returns), every
-//!   return and every re-entry (`interp/mod.rs`), and by `Agent::charge_steps`; a set flag ends
-//!   the run in `Terminated(Interrupted)` and is cleared.
+//!   (the frame a call pushes, and right after a builtin or host function returns or throws,
+//!   [`Agent::check_interrupt_after`]), every return and every re-entry (`interp/mod.rs`), and
+//!   by `Agent::charge_steps`; a set flag ends the run in `Terminated(Interrupted)` and is
+//!   cleared.
 //! - `frame_depth` bounds the frames on the frame stack, a script's own frame included
 //!   ([`Agent::check_frame_depth`]): the push that would make one more throws a `RangeError` in
 //!   the current realm, which the script can catch.
 
 use crate::host::agent::Agent;
-use crate::host::outcome::{Completion, Termination};
+use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{ErrorKind, Host};
+use crate::value::Value;
 
 impl<H: Host> Agent<H> {
     /// Spend one step of the running outermost entry.
@@ -36,6 +38,17 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::Interrupted));
         }
         Ok(())
+    }
+
+    /// The interrupt check after a builtin or host function called from Rust answered `answer`:
+    /// after a return and after a throw alike, so that a set flag ends the run and the thrown
+    /// value reaches no handler. A termination the call answered keeps its own reason
+    /// (decision 10), and the flag is not read.
+    pub(crate) fn check_interrupt_after(&mut self, answer: Completion<Value>) -> Completion<Value> {
+        if !matches!(answer, Err(Abrupt::Terminated(_))) {
+            self.check_interrupt()?;
+        }
+        answer
     }
 
     /// The `frame_depth` check before a frame is pushed.

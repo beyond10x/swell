@@ -1402,11 +1402,12 @@ impl<H: Host> Agent<H> {
 
     /// `Call(n)`: EvaluateCall (`#sec-evaluatecall`). An ECMAScript function gets a frame on this
     /// loop; any other function is called from Rust, and the interrupt is checked when it
-    /// returns. The frame of a call on this loop is made in [`Agent::push_call_frame`], so that
-    /// what it takes is not on the stack while a call from Rust runs. `this` and the function
-    /// are read where they are; the n arguments are copied once (`docs/design/engine.md`,
-    /// "Memory budget"): into a plain list the frame takes over at once, or, for a call from
-    /// Rust, into a list charged before it is made ([`Agent::charged_arguments`]).
+    /// returns or throws. The frame of a call on this loop is made in
+    /// [`Agent::push_call_frame`], so that what it takes is not on the stack while a call from
+    /// Rust runs. `this` and the function are read where they are; the n arguments are copied
+    /// once (`docs/design/engine.md`, "Memory budget"): into a plain list the frame takes over
+    /// at once, or, for a call from Rust, into a list charged before it is made
+    /// ([`Agent::charged_arguments`]).
     fn call_instruction(&mut self, count: u32) -> Completion<Flow> {
         let count = usize::try_from(count).unwrap_or(usize::MAX);
         let function = self.peek_value(count)?;
@@ -1423,8 +1424,8 @@ impl<H: Host> Agent<H> {
         // way out.
         let this = self.peek_value(count.saturating_add(1))?;
         let args = self.charged_arguments(count)?;
-        let result = self.internal_call(object, this, &args)?;
-        self.check_interrupt()?;
+        let result = self.internal_call(object, this, &args);
+        let result = self.check_interrupt_after(result)?;
         self.replace(count.saturating_add(2), result)
     }
 
@@ -1555,8 +1556,8 @@ impl<H: Host> Agent<H> {
             return self.construct_frame_of_instruction(object, count);
         }
         let args = self.charged_arguments(count)?;
-        let result = self.construct_value(object, &args, None)?;
-        self.check_interrupt()?;
+        let result = self.construct_value(object, &args, None);
+        let result = self.check_interrupt_after(result)?;
         self.replace(count.saturating_add(1), result)
     }
 

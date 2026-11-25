@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-25T03:42:21Z",
+  "actor": "human:operator",
+  "artifact": "story:interrupt-read-after-a-host-function-throws",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "branch fix/interrupt-after-host-throw: slot --local task check exit 0, test-steps 54.9 of 120; interrupt::host_216 red on d49a09b in 4 forms, green after; host_217 green"
+  }
+}
