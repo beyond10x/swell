@@ -213,3 +213,5 @@ HOST-212 pending slice 4
 HOST-213 pending slice 4
 HOST-214 pending slice 9
 HOST-215 test swell::budgets::host_215_a_buffer_held_across_a_call_into_script_is_charged
+HOST-216 test swell::interrupt::host_216_an_interrupt_set_before_a_host_function_throws_ends_the_run
+HOST-217 test swell::interrupt::host_217_a_host_function_answering_interrupted_ends_the_run

@@ -423,3 +423,102 @@ fn host_167_an_interrupt_set_in_a_host_function_ends_its_cx_parse_script() {
     assert_eq!(agent.refusals(), refusals + 1);
     assert_refused(&mut agent, &realm);
 }
+
+thread_local! {
+    /// The handle `interrupt_then_throw` sets on every call.
+    static THROW_HANDLE: RefCell<Option<InterruptHandle>> = const { RefCell::new(None) };
+}
+
+/// A host function that sets its agent's interrupt flag through the handle the host keeps and
+/// then answers `Err(Abrupt::Throw(2))`, counting its calls.
+fn interrupt_then_throw(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    cx.host_mut().count += 1;
+    THROW_HANDLE.with(|slot| {
+        if let Some(handle) = slot.borrow().as_ref() {
+            handle.interrupt();
+        }
+    });
+    Err(Abrupt::Throw(Value::Number(2.0)))
+}
+
+/// HOST-216: a host function that calls `interrupt()` and then answers `Err(Abrupt::Throw(v))`,
+/// called by `try { f() } catch (e) { x = 1 }`, ends the run in `Terminated(Interrupted)`: the
+/// `catch` block does not run, so the global `x` stays `undefined`, and the flag is clear after.
+/// The same for `new f()`, `f(...[1])` and `new f(...[1])`. Each form runs in an agent of its
+/// own whose global `x` a script `var x;` declared first: an assignment to an undeclared `x`
+/// walks the global object's prototype chain and charges a step, which reads the flag before
+/// the store and would hide a `catch` block that ran.
+#[test]
+fn host_216_an_interrupt_set_before_a_host_function_throws_ends_the_run() {
+    let forms = ["f()", "new f()", "f(...[1])", "new f(...[1])"];
+    let mut answers = Vec::new();
+    for form in forms {
+        let mut agent = support::host::agent().unwrap();
+        let realm = support::host::realm(&mut agent);
+        define_function(&mut agent, &realm, "f", 0, interrupt_then_throw, true);
+        let handle = agent.interrupt_handle();
+        THROW_HANDLE.with(|slot| slot.replace(Some(handle.clone())));
+        assert_eq!(
+            eval_text(&mut agent, &realm, "var x;"),
+            Shown::Normal("undefined".to_string())
+        );
+        let source = format!("try {{ {form} }} catch (e) {{ x = 1 }}");
+        let outcome = eval_text(&mut agent, &realm, &source);
+        let set = handle.is_set();
+        handle.clear();
+        let x = eval_text(&mut agent, &realm, "x;");
+        answers.push((form, outcome, x, set, agent.host().count));
+    }
+    let expected: Vec<_> = forms
+        .into_iter()
+        .map(|form| {
+            (
+                form,
+                Shown::Terminated(Termination::Interrupted),
+                Shown::Normal("undefined".to_string()),
+                false,
+                1,
+            )
+        })
+        .collect();
+    assert_eq!(answers, expected);
+}
+
+/// A host function that answers `Err(Abrupt::Terminated(Interrupted))` with the flag clear,
+/// counting its calls.
+fn answer_interrupted(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    cx.host_mut().count += 1;
+    Err(Abrupt::Terminated(Termination::Interrupted))
+}
+
+/// HOST-217: a host function that answers `Err(Abrupt::Terminated(Interrupted))` with the flag
+/// clear, called by `try { f() } catch (e) { x = 1 }`, ends the run in
+/// `Terminated(Interrupted)`: `x` stays `undefined`, the agent stays `Alive`, and the next
+/// script `1` answers `Normal(1)`.
+#[test]
+fn host_217_a_host_function_answering_interrupted_ends_the_run() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    define_function(&mut agent, &realm, "f", 0, answer_interrupted, false);
+    // Declared first, as for HOST-216, so that a `catch` block that ran would store `1`.
+    assert_eq!(
+        eval_text(&mut agent, &realm, "var x;"),
+        Shown::Normal("undefined".to_string())
+    );
+    assert!(!agent.interrupt_handle().is_set());
+    assert_eq!(
+        eval_text(&mut agent, &realm, "try { f() } catch (e) { x = 1 }"),
+        Shown::Terminated(Termination::Interrupted)
+    );
+    assert_eq!(agent.host().count, 1);
+    assert_eq!(agent.state(), AgentState::Alive);
+    assert!(!agent.interrupt_handle().is_set());
+    assert_eq!(
+        eval_text(&mut agent, &realm, "x;"),
+        Shown::Normal("undefined".to_string())
+    );
+    assert_eq!(
+        eval_text(&mut agent, &realm, "1"),
+        Shown::Normal("1".to_string())
+    );
+}

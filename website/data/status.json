@@ -1,7 +1,7 @@
 {
   "format": "swell-site-status/1",
   "generated_by": "task site-data, taskfiles/site.yml",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "crates": {
     "roots": 9,
     "roots_forbidding_unsafe": 9,
@@ -387,8 +387,8 @@
     }
   ],
   "host_requirements": {
-    "total": 215,
-    "test": 148,
+    "total": 217,
+    "test": 150,
     "pending": 67,
     "omitted": 0,
     "pending_by_slice": [

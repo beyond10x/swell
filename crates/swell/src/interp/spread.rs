@@ -148,8 +148,8 @@ impl<H: Host> Agent<H> {
         if self.is_ecmascript_function(object)? {
             return self.push_call_frame(object, this, args, 1);
         }
-        let result = self.internal_call(object, this, args)?;
-        self.check_interrupt()?;
+        let result = self.internal_call(object, this, args);
+        let result = self.check_interrupt_after(result)?;
         self.replace(3, result)
     }
 
@@ -205,8 +205,8 @@ impl<H: Host> Agent<H> {
         if self.is_ecmascript_function(object)? {
             return self.push_construct_frame(object, args, 1);
         }
-        let result = self.construct_value(object, args, None)?;
-        self.check_interrupt()?;
+        let result = self.construct_value(object, args, None);
+        let result = self.check_interrupt_after(result)?;
         self.replace(2, result)
     }
 }

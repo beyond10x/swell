@@ -10,6 +10,24 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-25
+
+An interrupt set while a host function runs now ends the run when that function throws, as it
+did when the function returned. Nothing else changes: 24,838 of the 44,812 selected test262
+cases pass, as in 0.9.0 (`test262 total 53801 8982 7 44812 24838 19972 2`).
+
+### Fixed
+
+- The interrupt flag is read after a builtin or host function called by a call or a
+  construction, with or without spread arguments, answers by a throw, as after a return: a
+  set flag ends the run in `Terminated(Interrupted)` and the thrown value reaches no `catch`.
+
+### Host interface
+
+- `HOST-216` and `HOST-217` (new, slice 1) have a test: an interrupt set by a host function
+  that then throws ends the run, and a host function that answers
+  `Terminated(Interrupted)` ends it with the agent alive.
+
 ## [0.9.0] - 2026-11-24
 
 Promises and `async` functions run: the tenth delivery slice is delivered whole, with async
@@ -244,6 +262,17 @@ budget. 24,838 of the 44,812 selected test262 cases pass (20,229 in 0.8.0).
   1,612 cases pass
   (`test262-slice 04 1612 3184 0 0 1612 564 1048 0`). A refusal never counts as a pass, also
   when the script catches it.
+- The host interface: 148 of its 215 numbered requirements
+  ([`docs/design/host-interface.md`](docs/design/host-interface.md)) are held by a test in
+  this commit; none is pending for the seven delivered slices, and 12 are pending for
+  the fourth. 18 of the 60 scenarios of the interface's model pass on the
+  engine, and the other 42 name what they wait for. The interface will change
+  before 1.0.
+- The engine's own tests: `17 test binaries: 1536 passed, 0 failed, 1 ignored`, the tests of
+  the engine crate in the mode that collects garbage at every safe point
+  (`test-collect: 2 test binaries: 1167 passed, 0 failed, 1 ignored`), and the test of an
+  injected engine fault (`test-faults: 1 test binaries: 1 passed, 0 failed, 964 ignored`; the
+  964 are the tests that step's filter leaves out).
 - No binary, no command line, and the crates are not on a package registry. To use the
   library, depend on the repository at the tag:
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.9.0" }`.
@@ -1092,7 +1121,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.9.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.9.1...HEAD
+[0.9.1]: https://github.com/beyond10x/swell/releases/tag/0.9.1
 [0.9.0]: https://github.com/beyond10x/swell/releases/tag/0.9.0
 [0.8.0]: https://github.com/beyond10x/swell/releases/tag/0.8.0
 [0.7.0]: https://github.com/beyond10x/swell/releases/tag/0.7.0

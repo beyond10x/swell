@@ -390,79 +390,83 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot --timeout 30m task check-runner` on 2026-11-24, on `756b8be`: the code of release
-`0.8.0` (`a350de3`, the branch of wave 3 of slice 5; `docs/plan/slice-05-wave-3.md`) with the
-gate change of `story:gate-test-steps-fit-four-cores`, on the pool's build node, load 67 on
-64 cores. Every check passed and the run exited 0: the test steps took 34.3 s of their 120
-(201.5 CPU seconds, of them `test-collect` 34.5; 64 cores have no entry in the table of CPU
-seconds, so the `gate-cpu` line prints no bound). Before the change, on the same code, a
+`slot --timeout 30m task check-runner` on 2026-11-24, on `5ee604a`, the release commit of
+`0.9.0` (the branch of wave 1 of slice 10; `docs/plan/slice-10-wave-1.md`), on the pool's
+build node, load 36 on 64 cores. Every check passed and the run exited 0: the test steps took
+24.9 s of their 120 (166.7 CPU seconds, of them `test-collect` 44.4; 64 cores have no entry in
+the table of CPU seconds, so the `gate-cpu` line prints no bound). On the code of release
+`0.8.0` with the gate change of `story:gate-test-steps-fit-four-cores` (`756b8be`) the same
+node took 34.3 s at load 67 (201.5 CPU seconds); before that change, on the code of `0.8.0`, a
 16-core machine took 94.3 s at load 34 (312.1 CPU seconds) and the forge's runner of 4 cores
 127.9 s (448.5 CPU seconds). The planted scripts' single
 `ok` lines, the ten slowest tests of each step and the slice lines after slice 7 but that of
 slice 10 are left out (`conformance/test262/expected.txt` has every slice line). The fault
-step's line counts the 758 tests its filter leaves out as ignored:
+step's line counts the 964 tests its filter leaves out as ignored:
 
 ```
-python-check: no Python file among 1937 file(s)
+python-check: no Python file among 2252 file(s)
 forbid-unsafe-check: 9 crate root(s), each with #![forbid(unsafe_code)]
+libm-check: no forbidden call under 198 file(s)
 Cargo.lock: 8 package(s), none from outside this repository
 toolchain-check: rustc 1.99.1, the channel rust-toolchain.toml pins; 5 workflow file(s), none names a compiler
-nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 17 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
+nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 19 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
 data/unicode/17.0.0: 17 file(s), each with the SHA-256 its SOURCE line gives; 17 required path(s) present
-unicode-tables: 15 table(s) equal the generator output
-swell v1 — 2 file(s), 8 scenario(s), valid
-58 scenario(s) (8 authored), 41 refusal(s), written to .out/suite.json
-  58 scenarios: 58 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 208 requirement(s), 208 line(s): 114 test, 94 pending, 0 omitted; 51 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 4:9 8:1 9:5 10:31 11:32 12:2 13:2 14:6 16:5 18:1
-host-surface: 0 change(s) since 0.8.0, each named
+math-data-check: 3 file(s)
+unicode-tables: 16 table(s) equal the generator output
+swell v1 — 2 file(s), 10 scenario(s), valid
+60 scenario(s) (10 authored), 41 refusal(s), written to .out/suite.json
+  60 scenarios: 60 passed, 0 failed, 0 error, 0 unsupported
+host-requirements: 215 requirement(s), 215 line(s): 148 test, 67 pending, 0 omitted; 53 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 4:12 8:1 9:6 11:32 12:2 13:2 14:6 16:5 18:1
+host-surface: 0 change(s) since 0.9.0, each named
 site-data-check: website/data/status.json equals its regeneration from conformance/test262/expected.txt, conformance/slices-delivered.txt, conformance/host/requirements.txt, conformance/test262/moves.tsv, docs/design/engine.md, Cargo.toml, Cargo.lock and the crate roots under crates
 test-main: 8 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
 test-binaries-check: 17 test executables, 8 integration-test binaries in 8 packages, none with a .debug_ section
-build-tests: Finished `test` profile [unoptimized] target(s) in 0.04s
-build-collect: Finished `collect` profile [optimized] target(s) in 3m 38s
-build-collect: 2 test executables in target/collect/deps, none with a .debug_ section
-build-faults: Finished `test` profile [unoptimized] target(s) in 14.97s
-build-conform-engine: Finished `test` profile [unoptimized] target(s) in 2m 01s
-build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.11s
-build-test262-runner: Finished `release` profile [optimized] target(s) in 38.88s
-17 test binaries: 1215 passed, 0 failed, 1 ignored
-gate-time test 13.9
-test-doc: 8 test suites: 13 passed, 0 failed, 0 ignored
-test-doc collect-every-safe-point: 2 test suites: 13 passed, 0 failed, 0 ignored
-gate-time test-doc 5.6
-test-collect: 2 test binaries: 934 passed, 0 failed, 1 ignored
-gate-time test-collect 2.7
-test-faults: 1 test binaries: 1 passed, 0 failed, 758 ignored
-gate-time test-faults 0.2
-conform-engine: 3 test binaries: 12 passed, 0 failed, 0 ignored
+build-tests: Finished `test` profile [unoptimized] target(s) in 0.01s
+build-collect: Finished `collect` profile [optimized] target(s) in 4m 01s
+build-collect: 4 test executables in target/collect/deps, none with a .debug_ section
+build-faults: Finished `test` profile [unoptimized] target(s) in 16.84s
+build-conform-engine: Finished `test` profile [unoptimized] target(s) in 8.67s
+build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.04s
+build-test262-runner: Finished `release` profile [optimized] target(s) in 0.01s
+17 test binaries: 1536 passed, 0 failed, 1 ignored
+gate-time test 6.4
+test-doc: 8 test suites: 19 passed, 0 failed, 0 ignored
+test-doc collect-every-safe-point: 2 test suites: 19 passed, 0 failed, 0 ignored
+gate-time test-doc 3.9
+test-collect: 2 test binaries: 1167 passed, 0 failed, 1 ignored
+gate-time test-collect 3.2
+test-faults: 1 test binaries: 1 passed, 0 failed, 964 ignored
+gate-time test-faults 0.3
+conform-engine: 3 test binaries: 16 passed, 0 failed, 0 ignored
 conform-engine: planted defect refused: test a_target_whose_interrupt_does_nothing_fails_a_scenario ... ok
-  58 scenarios: 14 passed, 0 failed, 0 error, 44 unsupported
-gate-time conform-engine 1.2
-test262-refused 30642
-test262 total 53801 8982 7 44812 20229 24581 2
+conform-engine: planted defect refused: test a_target_whose_checkpoint_runs_no_job_fails_a_scenario ... ok
+  60 scenarios: 18 passed, 0 failed, 0 error, 42 unsupported
+gate-time conform-engine 1.4
+test262-refused 23324
+test262 total 53801 8982 7 44812 24838 19972 2
 test262: 221 directory lines sum to the total
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
-test262-slice 04 1598 3156 0 0 1598 261 1337 0
-test262-slice 05 2724 5441 0 0 2724 2523 201 0
+test262-slice 04 1612 3184 0 0 1612 564 1048 0
+test262-slice 05 2724 5441 0 0 2724 2724 0 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
-test262-slice 07 1491 2841 0 0 1491 1168 323 0
-test262-slice 10 3879 7499 0 0 3879 14 3865 0
+test262-slice 07 1472 2801 0 0 1472 1472 0 0
+test262-slice 10 3759 7258 0 0 3759 3759 0 0
 test262: 22 slice lines equal the design
 test262-errors 0
-test262: 287 lines of conformance/test262/expected.txt; sources digest 976eb9f2f5ecf761b639fd4e892b9e0d4c881e866a70136a9ff516ef01633619 equals conformance/test262/expected.digest
+test262: 287 lines of conformance/test262/expected.txt; sources digest 385593bd7e603552a8c439160415e1b0a235584458ee4124a3eb95d02f58dacb equals conformance/test262/expected.digest
 gate-time test262-check 0.1
-test262-moves: 1774 case(s) moved, 3:78 4:325 5:285 6:694 7:60 8:183 9:22 10:86 11:4 12:21 13:16; slices 1 to 19: 44931 85794
-gate-time test262-moves-check 2.3
+test262-moves: 1963 case(s) moved, 3:78 4:339 5:278 6:694 7:60 8:341 9:28 10:83 11:4 12:41 13:17; slices 1 to 19: 44931 85794
+gate-time test262-moves-check 1.8
 gate-selftest: 66 passed, 0 failed
-gate-time gate-selftest 8.3
-gate-time test-steps 34.3 of 120, cpu 201.5, load 67.20 on 64 cores
-gate-time yardstick 3.5 s: conform-engine 1.2 and test262-moves-check 2.3
-gate-cpu test-steps 201.5, no bound for 64 cores: test 126.6, test-doc 5.5, test-collect 34.5, test-faults 0.2, conform-engine 1.3, test262-check 0.1, test262-moves-check 2.1, gate-selftest 31.2
-gate-time: no file of 324 under target/*/deps changed while the test steps ran
+gate-time gate-selftest 7.8
+gate-time test-steps 24.9 of 120, cpu 166.7, load 35.51 on 64 cores
+gate-time yardstick 3.2 s: conform-engine 1.4 and test262-moves-check 1.8
+gate-cpu test-steps 166.7, no bound for 64 cores: test 84.9, test-doc 4.7, test-collect 44.4, test-faults 0.2, conform-engine 2.0, test262-check 0.1, test262-moves-check 1.8, gate-selftest 28.6
+gate-time: no file of 624 under target/*/deps changed while the test steps ran
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`
@@ -723,7 +727,11 @@ session coordinates; this section is its procedure, taken from how surf is run
   `main` moves only by a merge. Each worktree gets a symbolic link `.cache` to the primary
   checkout's `.cache`, which holds `test262/<commit>/` (the pinned checkout),
   `ecma262/<commit>/ecma262.txt` and `.html` (the pinned draft) and `inventory/` (the design's
-  `meta.awk`, `slices.awk`, `rules.txt`, `meta.tsv`).
+  `meta.awk`, `slices.awk`, `rules.txt`, `meta.tsv`). The pool's build node has no copy of the
+  link's target, so in such a worktree a job that reads `.cache` (`task check`,
+  `test262-expected`, `test262-part`, `slow-tests`) runs with `slot --local`; on the build node
+  `test262-fetch` fails and the job exits 201 (2026-11-25, `slot --timeout 30m task check` and
+  `test262-expected` in the worktree of `story:interrupt-read-after-a-host-function-throws`).
 - **The store.** `.engineering/` (`aep.project/5`), written only through `aep plan artifact`,
   with `AEP_ACTOR=human:operator` so that no person's name enters a transition. Body files for
   `--from` go in `.engineering/drafts/`, which git ignores. A unit's brief starts from
