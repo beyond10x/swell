@@ -162,6 +162,14 @@ impl HeapString {
         }
     }
 
+    /// The number of code units, read from the storage's length.
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            HeapString::Latin1(bytes) => bytes.len(),
+            HeapString::Utf16(units) => units.len(),
+        }
+    }
+
     /// The code points, each lone surrogate replaced by U+FFFD (Web IDL's `USVString`).
     pub(crate) fn to_rust_string_lossy(&self) -> String {
         match self {

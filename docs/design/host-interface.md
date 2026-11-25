@@ -443,6 +443,7 @@ impl<'a, H: Host> Cx<'a, H> {   // the same methods on HookCx
     pub fn new_string(&mut self, text: &str) -> Completion<StringRef>;
     pub fn new_string_utf16(&mut self, units: &[u16]) -> Completion<StringRef>;
     pub fn to_utf16(&self, string: StringRef) -> Result<Vec<u16>, HostError>;
+    pub fn to_utf16_len(&self, string: StringRef) -> Result<usize, HostError>;
     pub fn to_rust_string_lossy(&self, string: StringRef) -> Result<String, HostError>;
     pub fn new_error(&mut self, realm: RealmRef, kind: ErrorKind, message: &str)
         -> Result<Completion<ObjectRef>, HostError>;
@@ -538,6 +539,8 @@ own, for a list no host needs to grow).
 **HOST-32** (webidl:idl-DOMString) `to_utf16` returns every code unit of a String exactly, lone surrogates included: `new_string_utf16(&[0xD800, 0x61])` read back with `to_utf16` gives `[0xD800, 0x61]`. [slice 1]
 
 **HOST-33** (webidl:idl-USVString) `to_rust_string_lossy` replaces each lone surrogate with U+FFFD and keeps every other code point: the String `[0xD800, 0x61, 0xD83D, 0xDE00]` gives `"\u{FFFD}a\u{1F600}"`. [slice 1]
+
+**HOST-220** (webidl:idl-DOMString) `to_utf16_len` answers the number of code units of a String, lone surrogates included, equal to the length of what `to_utf16` gives: `new_string_utf16(&[0xD800, 0x61])` gives 2, the empty String gives 0, and a String of 1,048,576 code units gives 1,048,576; a handle freed by `collect` answers `Err(HostError::StaleHandle)`. [slice 1]
 
 **HOST-34** (swell:D4) `new_string` of a `&str` gives the String of its UTF-16 encoding, which `to_utf16` returns unchanged. [slice 1]
 
