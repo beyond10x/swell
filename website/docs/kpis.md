@@ -22,7 +22,9 @@ Where the values come from:
 
 The page `website/data/engines.json` is written from these by `task site-data`, and `task site-data-check` fails when it differs from its regeneration; the site types no number.
 
-## K1. test262 conformance {#k1}
+<a id="k1"></a>
+
+## K1. test262 conformance
 
 - **Definition**: test262 cases passed at one pinned triple: the test262 revision, the harness and the exclusion list. In a comparison nothing is excluded: an unsupported feature counts as failed.
 - **Unit**: cases. **Direction**: higher is better. **Kind**: exact.
@@ -30,62 +32,80 @@ The page `website/data/engines.json` is written from these by `task site-data`, 
 - **How measured**: a case passes when every mode that applies to it passes (as written and in strict mode).
 - **Sources**: swell's value is its own runner's count at its pin, labelled "swell's runner" with the test262 commit. Two readings of it are shown: passed over every case at the pin (excluded and not applicable cases counted as failed), and passed over the cases the runner runs. Other engines' values are javascript-zoo-data's counts at test262 `4a1e962`, labelled "zoo runner", one outcome per test file. The two are at different revisions and runners: the page shows them side by side and ranks only within one source. A black-box runner of our own, run on every engine and on the swell shell at swell's pin, replaces both readings once it exists.
 
-## K2. Interpreter throughput {#k2}
+<a id="k2"></a>
+
+## K2. Interpreter throughput
 
 - **Definition**: time per iteration of each benchmark of two suites, bench-v8 version 7 and [are-we-fast-yet](https://github.com/smarr/are-we-fast-yet); never a mean across both suites. Per suite, the geometric mean of the benchmark medians is a separate output.
 - **Unit**: ms per iteration. **Direction**: lower is better. **Kind**: sampled, 5 runs, each a separate process, every iteration kept, timed inside the process with the shell's clock.
 - **Compared** only; no release judges it yet.
 - **Sources**: our runs. Interpreter configurations are compared with each other (V8 `--jitless`, SpiderMonkey and JavaScriptCore with their JITs off, QuickJS, Hermes, XS, Boa); JIT configurations are a separate band labelled "JIT reference", hidden by default. A benchmark an engine cannot run is a row with its message.
 
-## K3. Start {#k3}
+<a id="k3"></a>
+
+## K3. Start
 
 - **Definition**: two measurements. Empty script: process start to exit of the shell running an empty file. New realm: time per realm over many calls of `$262.createRealm()` in one process.
 - **Unit**: µs. **Direction**: lower is better. **Kind**: sampled, 10 runs, median with min and max.
 - **Compared** only. A shell without `$262.createRealm` reads "not measured" with that reason.
 - **Sources**: our runs.
 
-## K4. Memory {#k4}
+<a id="k4"></a>
+
+## K4. Memory
 
 - **Definition**: peak resident set size of a run on a pinned workload (GNU `time`, `%M`, in the image): the empty script, and bench-v8 Splay at its default iteration count. For swell also the bytes of an empty realm, from its own allocator count (the charge to `memory_bytes`).
 - **Unit**: bytes. **Direction**: lower is better. **Kind**: peak RSS sampled (median of 10 runs); the empty realm exact.
 - **Compared**: peak RSS. **Gate** (swell only, can gate): bytes of an empty realm.
 - **Sources**: our runs.
 
-## K5. Binary size {#k5}
+<a id="k5"></a>
+
+## K5. Binary size
 
 - **Definition**: bytes of the shell binary, for target `x86_64-unknown-linux-gnu`, profile `release`, stripped with `strip --strip-all`, built with the toolchain of `rust-toolchain.toml`. A peer's binary names the same four, or is labelled "as distributed" with its stripped state; a shell that loads shared libraries from its own directory counts them and says so.
 - **Unit**: bytes. **Direction**: lower is better. **Kind**: exact.
 - **Gate** (swell): does not rise against the accepted value. **Compared**: yes.
 - **Sources**: our runs. swell has no shell binary yet.
 
-## K6. Resource control for untrusted scripts {#k6}
+<a id="k6"></a>
+
+## K6. Resource control for untrusted scripts
 
 - **Definition**: what a host can bound when it runs a script it does not trust: a memory cap, a step or instruction budget, an interrupt or terminate call, a stack or recursion limit.
 - **Gate** (swell, exact): no step beyond the step budget, no byte beyond the memory budget, the agent runs the next script after each of its limits, and the interrupt's latency in steps. **Compared**: a capability matrix per engine.
 - **Unit**: none; each cell is the documented capability in words. **Direction**: none.
 - **Sources**: swell's cells cite the line of its source that defines each limit. Other engines' cells are the engine catalog's fields, each with its source URL (an API header, the documentation). A measured overshoot for other engines needs an embedding harness per engine and is not part of the page.
 
-## K7. Safety {#k7}
+<a id="k7"></a>
+
+## K7. Safety
 
 - **Definition**: crate roots without `#![forbid(unsafe_code)]`, and packages of `Cargo.lock` from outside the repository; a fuzz run over a fixed corpus and seed, once a fuzzer exists.
 - **Unit**: crate roots; packages. **Direction**: more crate roots with the line is better; fewer outside packages is better. **Kind**: exact.
 - **Gate** (swell): `forbid-unsafe-check` and `lock-check`. **Compared** as context only: whether an engine's implementation language is memory-safe, from the catalog. Vulnerability counts are not a row: they follow how widely an engine is used and fuzzed as much as its quality.
 - **Sources**: swell's counts are the scan `task site-data` makes of the crate roots and `Cargo.lock`; the memory-safety cell of other engines is the catalog's.
 
-## K8. Determinism {#k8}
+<a id="k8"></a>
+
+## K8. Determinism
 
 - **Definition**: the same script with the same host answers gives the same output bytes and the same step counts.
 - **Gate** (swell): a test replays a corpus twice and compares (host requirement `HOST-133`). **Compared**: whether an engine offers a deterministic step count, from the catalog.
 - **Unit**: none. **Direction**: none.
 - **Sources**: swell's cell cites the requirement line and its test. The catalog has no determinism field yet, so other engines read "unknown".
 
-## K9. Development {#k9}
+<a id="k9"></a>
+
+## K9. Development
 
 - **Definition**: the gate's test steps end within their wall-time budget, and no single test runs longer than its bound (`GATE_TIME_BUDGET`, `.config/nextest.toml`), with queue wait apart.
 - **Gate** only; it is not compared and has no row on the compare page.
 - **Sources**: the gate's own `gate-time` lines.
 
-## Facts {#facts}
+<a id="facts"></a>
+
+## Facts
 
 Not KPIs: per engine, with a source per cell, the implementation language, the licence, the execution model, whether an interpreter-only mode exists, the latest release, and the releases in the last 12 months. For swell they come from `Cargo.toml` and the design; for other engines from the catalog.
 
