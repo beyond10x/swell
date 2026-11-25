@@ -39,3 +39,6 @@ code data/*
 # site-data and held by site-data-check. docs/img/: the logo's lockup for README.md.
 site website/*
 site docs/img/*
+
+site bench/engines.jsonl
+site bench/published/*
