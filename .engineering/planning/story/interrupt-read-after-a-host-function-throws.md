@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:interrupt-read-after-a-host-function-throws
 kind: story
-status: active
+status: implemented
 title: The interrupt flag is read after a host function returns by a throw, as after a return
 summary: Call, New and their spread forms read the flag whatever the host function answered; HOST-216 (a throw with the flag set) and HOST-217 (a host function answering Terminated(Interrupted)).
 scope:
@@ -24,10 +24,11 @@ scope:
   path: docs/design/host-interface.md
 - confidence: cited
   path: website/data/status.json
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-25T03:16:25Z", actor: "human:operator", revision: 12}
 - {from: "proposed", to: "active", at: "2026-11-25T03:16:25Z", actor: "human:operator", revision: 13}
+- {from: "active", to: "implemented", at: "2026-11-25T03:42:21Z", actor: "human:operator", revision: 14, decided_on: {"recorded":{"test_result":1}}}
 ---
 Waits for: nothing. Base: `main` at `d49a09b` (release `0.9.0` and its numbers). Asked by the
 first consumer (surf): its limit end rests on the interrupt being read after every return of a
