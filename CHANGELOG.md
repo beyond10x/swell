@@ -10,6 +10,21 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Host interface
+
+- `HOST-218` (new, slice 1) has a test and `HOST-219` (new, slice 12) is pending: a String
+  or a Symbol that host data lists in its `trace` with `Tracer::value` survives `collect`, as
+  an object does, and a BigInt will once slice 12 makes one. The design says a listed handle
+  keeps a value alive, not only an object.
+- `to_utf16_len` (new, on `Cx` and `HookCx`) answers the length of a String in code units
+  without copying it, held by `HOST-220` (new, slice 1, with a test). Additive, not breaking.
+
+## [0.9.1] - 2026-11-25
+
+An interrupt set while a host function runs now ends the run when that function throws, as it
+did when the function returned. Nothing else changes: 24,838 of the 44,812 selected test262
+cases pass, as in 0.9.0 (`test262 total 53801 8982 7 44812 24838 19972 2`).
+
 ### Fixed
 
 - The interrupt flag is read after a builtin or host function called by a call or a
@@ -21,12 +36,6 @@ Every number below comes from the gate, `task check`, on the released commit.
 - `HOST-216` and `HOST-217` (new, slice 1) have a test: an interrupt set by a host function
   that then throws ends the run, and a host function that answers
   `Terminated(Interrupted)` ends it with the agent alive.
-- `HOST-218` (new, slice 1) has a test and `HOST-219` (new, slice 12) is pending: a String
-  or a Symbol that host data lists in its `trace` with `Tracer::value` survives `collect`, as
-  an object does, and a BigInt will once slice 12 makes one. The design says a listed handle
-  keeps a value alive, not only an object.
-- `to_utf16_len` (new, on `Cx` and `HookCx`) answers the length of a String in code units
-  without copying it, held by `HOST-220` (new, slice 1, with a test). Additive, not breaking.
 
 ## [0.9.0] - 2026-11-24
 
@@ -1121,7 +1130,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.9.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.9.1...HEAD
+[0.9.1]: https://github.com/beyond10x/swell/releases/tag/0.9.1
 [0.9.0]: https://github.com/beyond10x/swell/releases/tag/0.9.0
 [0.8.0]: https://github.com/beyond10x/swell/releases/tag/0.8.0
 [0.7.0]: https://github.com/beyond10x/swell/releases/tag/0.7.0
