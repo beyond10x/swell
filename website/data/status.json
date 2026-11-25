@@ -387,8 +387,8 @@
     }
   ],
   "host_requirements": {
-    "total": 220,
-    "test": 158,
+    "total": 221,
+    "test": 159,
     "pending": 62,
     "omitted": 0,
     "pending_by_slice": [

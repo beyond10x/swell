@@ -1336,6 +1336,8 @@ impl<H: Host> Agent<H> {
 
 **HOST-217** (swell:D10) A host function that answers `Err(Abrupt::Terminated(Termination::Interrupted))` with the flag clear, called by the script `try { f() } catch (e) { x = 1 }`, makes `evaluate_script` answer `Terminated(Interrupted)`, the global `x` stays `undefined`, `state()` reads `Alive`, and a following script `1` answers `Normal(1)`. [slice 1]
 
+**HOST-221** (swell:D12) A host function that calls `interrupt()` on its agent's interrupt handle and then answers `Err(Abrupt::Throw(v))` or `Ok(v)`, reached as a getter (`o.p` with `p` a host accessor), as a setter (`o.p = 1`), as `valueOf` in `+o`, and as the `next` of an iterator in `for (x of it) {}`, makes `evaluate_script` answer `Terminated(Interrupted)` with `is_set()` false after, both when the read is followed by `try`/`catch` code that stores a global and when it is the script's last operation; reached by a promise job that is the last job of `perform_microtask_checkpoint`, as the `then` of a thenable passed to `Promise.resolve` or as a reaction handler of `Promise.prototype.then`, it makes the checkpoint answer `Terminated(Interrupted)` with `is_set()` false after. [slice 1]
+
 **HOST-93** (swell:D12) `clear()` after `interrupt()` and before the next entry lets that entry run to `Normal`. [slice 1]
 
 **HOST-94** (swell:D12) `InterruptHandle` is `Send` and `Sync`, which a test that moves a clone into a spawned thread compiles. [slice 1]

@@ -218,3 +218,4 @@ HOST-217 test swell::interrupt::host_217_a_host_function_answering_interrupted_e
 HOST-218 test swell::host_objects::host_218_trace_keeps_a_listed_string_and_symbol
 HOST-219 pending slice 12
 HOST-220 test swell::values::host_220_to_utf16_len_counts_code_units
+HOST-221 test swell::interrupt::host_221_an_interrupt_set_in_a_host_function_reached_from_rust_ends_the_run
