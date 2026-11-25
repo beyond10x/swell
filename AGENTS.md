@@ -259,9 +259,11 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   `gate-cpu` or `deps` line holds the commit; only a red `gate-time test-steps` line under
   load goes to the forge.
 - The gate does not run test262 in full. `test262-check` compares a digest of the run's
-  sources (`crates/*/src`, the manifests and the lock file, `.cargo/config.toml`, the
+  sources (`src/` and the manifest of each crate the runner depends on in `Cargo.lock`, the
+  lock's entries of those packages, the workspace manifest, `.cargo/config.toml`, the
   toolchain file, `taskfiles/test262.yml`, the files of `conformance/test262/` the run reads)
-  with `conformance/test262/expected.digest`. A change of a source runs the full run
+  with `conformance/test262/expected.digest`; a crate the runner does not depend on
+  (`crates/cli`, `crates/unicode-gen`) is not covered. A change of a source runs the full run
   (`slot --timeout 30m task test262-expected`), which writes `expected.txt` and the digest; where
   the run does not fit one pool job, it is made in parts, each a job of its own
   (`slot --timeout 30m task test262-part TEST262_PART=<k>/<n>` for each k), and counted from

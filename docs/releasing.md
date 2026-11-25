@@ -1,9 +1,10 @@
 # Releasing swell
 
-A release of swell is a version of its source. swell is a library: a release holds no binary and
-no archive of its own, and nothing is uploaded to a package registry. The release is a tag on
+A release of swell is a version of its source and the shell binary `swell` (`crates/cli`) built
+from it for five targets. Nothing is uploaded to a package registry. The release is a tag on
 the public repository and a GitHub Release whose text is a short summary that links to the
-version's section of [`CHANGELOG.md`](../CHANGELOG.md).
+version's section of [`CHANGELOG.md`](../CHANGELOG.md). Its assets are the five archives of the
+binary and a `SHA256SUMS` file ("The binary of a release" below).
 
 - The tag is annotated, made by the organization bot (`b10x-bot[bot]`), and named exactly as
   the workspace version: `0.1.0`, no prefix.
@@ -24,9 +25,10 @@ version's section of [`CHANGELOG.md`](../CHANGELOG.md).
 - Every step on the forge goes through `b10x-gates` as the bot and is done by the session that
   decides for the operator. The coordinating session prepares the commit and makes no call to
   the forge ([`AGENTS.md`](../AGENTS.md), "Publishing").
-- No workflow builds anything for a release. `.github/workflows/check.yml` runs the gate on
-  the commit when `main` is pushed, and that run is the release's evidence. The push of the
-  tag starts one run of `.github/workflows/shared-gates.yml` and no run of `check.yml`.
+- `.github/workflows/check.yml` runs the gate on the commit when `main` is pushed, and that
+  run is the release's evidence. The push of the tag starts one run of
+  `.github/workflows/shared-gates.yml` and one run of `.github/workflows/release-build.yml`,
+  which builds the binary, and no run of `check.yml`.
 
 ## Versions
 
@@ -116,21 +118,38 @@ deciding session's, from a checkout of the repository:
          -F .out/release-<version>-notes.md <commit>
        $gates bot -- push origin <version>
 
-   The push starts one run of "Shared source gates" on the tag. Wait until it ends with
-   success before step 7:
+   The push starts one run of "Shared source gates" and one run of "Release build" on the
+   tag. Wait until both end with success before step 7:
 
        $gates gh -- run list --workflow shared-gates.yml --limit 1
+       $gates gh -- run list --workflow release-build.yml --branch <version> --limit 1 \
+         --json databaseId,headSha,status,conclusion
+       $gates gh -- run watch <run-id> --exit-status
 
-7. **Release.** Create the release as the bot, with no asset, and view it:
+   A red job of "Release build" holds the release. Its cause is fixed on `main` and released
+   as the next patch version; the tag is not moved.
 
+7. **Release.** Download the five archives of the tag's "Release build" run, write
+   `SHA256SUMS`, create the release as the bot with the six files as assets, and view it
+   ("The binary of a release" names the archives):
+
+       rm -rf .out/release-<version> && mkdir -p .out/release-<version>
+       $gates gh -- run download <run-id> --repo beyond10x/swell \
+         --dir .out/release-<version>
+       cd .out/release-<version>
+       mv */swell-<version>-* . && rmdir swell-<version>-*/
+       ls swell-<version>-* | wc -l
+       sha256sum swell-<version>-* > SHA256SUMS
        $gates gh -- release create <version> --repo beyond10x/swell --verify-tag \
          --title "swell <version>" \
-         --notes-file .out/release-<version>-notes.md
+         --notes-file ../release-<version>-notes.md \
+         swell-<version>-* SHA256SUMS
        $gates gh -- release view <version> --repo beyond10x/swell \
-         --json author,tagName,isDraft
+         --json author,tagName,isDraft,assets --jq '{author: .author.login, tagName, isDraft, assets: [.assets[].name]}'
 
-   The release is done when its author is `b10x-bot[bot]`, its tag is `<version>` and it is
-   not a draft.
+   `ls` counts five archives. The release is done when its author is `b10x-bot[bot]`, its tag
+   is `<version>`, it is not a draft and its assets are six: the five archives and
+   `SHA256SUMS`.
 8. **Report.** The deciding session reports the version, the tag's commit and the release's
    address to the coordinating session, which merges `main` into the open wave branch.
 
@@ -160,9 +179,32 @@ found:
 - a type, trait, constant or type alias: its name (`HostBytes`);
 - a requirement: `HOST-<n>`.
 
-## When swell ships a binary
+## The binary of a release
 
-`crates/cli` (the binary `swell`) is planned and not written. From the release that holds it, a
-release workflow builds the binary per target with `--locked`, the archives and a `SHA256SUMS`
-file are scanned and attached to the release, and this document gains the steps for it, as
-[surf's](https://github.com/beyond10x/surf/blob/main/docs/releasing.md) has them.
+`.github/workflows/release-build.yml` runs on every pushed tag of the form
+`<major>.<minor>.<patch>`, with anything after it. It has one job per target, each on a runner
+of that system, with the compiler of `rust-toolchain.toml`:
+
+| target | runner | archive |
+|---|---|---|
+| `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | `swell-<tag>-x86_64-unknown-linux-gnu.tar.gz` |
+| `aarch64-unknown-linux-gnu` | `ubuntu-22.04-arm` | `swell-<tag>-aarch64-unknown-linux-gnu.tar.gz` |
+| `x86_64-apple-darwin` | `macos-15-intel` | `swell-<tag>-x86_64-apple-darwin.tar.gz` |
+| `aarch64-apple-darwin` | `macos-15` | `swell-<tag>-aarch64-apple-darwin.tar.gz` |
+| `x86_64-pc-windows-msvc` | `windows-2022` | `swell-<tag>-x86_64-pc-windows-msvc.zip` |
+
+Each job:
+
+1. Builds `cargo build --release --locked -p swell-cli --target <target>`, with the runner's
+   home directory and the checkout remapped by `--remap-path-prefix`.
+2. Fails when the binary still holds either path.
+3. Packages the binary with `README.md`, `LICENSE` and `NOTICE` in a directory
+   `swell-<tag>-<target>/`.
+4. Unpacks the archive in a fresh directory and runs the smoke test there:
+   - `swell --version` prints `swell <version>`, where the tag is `<version>` or
+     `<version>-<suffix>`;
+   - `swell -e "print(1 + 1)"` prints `2`;
+   - `swell --steps 10000 -e "for (;;) {}"` exits 3, the step budget.
+5. Uploads the archive as a workflow artifact named `swell-<tag>-<target>`.
+
+A tag with a suffix, `<version>-<suffix>` on a branch, tests the workflow without a release.

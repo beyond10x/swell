@@ -467,9 +467,17 @@ tasks:
       Internal, called by test262-digest, test262-check, test262-expected and slow-test262.
 
       The sources of the expected file are every file that can change a line the runner prints,
-      and no other: the files git lists (tracked, or untracked and not ignored) of GATE_ROOT
-      (default .) under crates/*/src/ and as crates/*/Cargo.toml, then Cargo.toml, Cargo.lock,
-      .cargo/config.toml, rust-toolchain, rust-toolchain.toml, taskfiles/test262.yml (this file,
+      and no other. The runner's packages are swell-test262 and every package it depends on,
+      directly or through another, as the dependencies lists of GATE_ROOT's Cargo.lock give
+      them; a crate is the runner's when the name in the [package] table of its
+      crates/<dir>/Cargo.toml is one of them. So a crate the runner does not depend on, the
+      shell crates/cli (swell-cli) or the tool crates/unicode-gen, is not covered, and a change
+      of it leaves the committed files current (story cli-runs-a-script-file;
+      docs/design/quality-and-comparison.md, Q1). The sources are the files git lists (tracked,
+      or untracked and not ignored) of GATE_ROOT (default .) under crates/<dir>/src/ and as
+      crates/<dir>/Cargo.toml of each crate of the runner, then Cargo.toml, Cargo.lock with only
+      its header and the [[package]] entries of the runner's packages (listed under the name
+      Cargo.lock), .cargo/config.toml, rust-toolchain, rust-toolchain.toml, taskfiles/test262.yml (this file,
       the runner's task file), conformance/test262/PIN, conformance/test262/moves.tsv and
       conformance/test262/later-parts.tsv. Not covered: the tests of the crates
       (crates/*/tests/), the gate's own tests (tests/gate/) and the documents beyond the block
@@ -480,8 +488,9 @@ tasks:
       A file git lists that is deleted from the working tree is listed as "deleted <path>".
       Each is one line "<sha256>  <name>" of TEST262_OUT/sources.txt, in byte order; the
       digest is the SHA-256 of that file, written as "test262-sources <sha256>" to
-      TEST262_OUT/sources.digest. It fails when git cannot list the files, when there is none,
-      when a file named by a variable is missing, and when the design has no swell-slices block.
+      TEST262_OUT/sources.digest. It fails when GATE_ROOT has no Cargo.lock or its lock names no
+      package swell-test262, when git cannot list the files, when there is none, when a file
+      named by a variable is missing, and when the design has no swell-slices block.
       Like every task of this file it reads its variables as template values, so that a value
       given on the command line wins over an exported one (the task test262 says why).
     silent: true
@@ -500,7 +509,41 @@ tasks:
         TEST262_OUT={{shellQuote .TEST262_OUT}}
         mkdir -p "$TEST262_OUT"
         out="$TEST262_OUT/sources.txt"
-        paths=":(glob)crates/*/src/** :(glob)crates/*/Cargo.toml Cargo.toml Cargo.lock .cargo/config.toml rust-toolchain rust-toolchain.toml taskfiles/test262.yml conformance/test262/PIN conformance/test262/moves.tsv conformance/test262/later-parts.tsv"
+        lock="$GATE_ROOT/Cargo.lock"
+        [ -f "$lock" ] || { echo "test262-sources: no Cargo.lock in $GATE_ROOT"; exit 1; }
+        # The runner's packages: swell-test262 and what it depends on, read from the lock.
+        LC_ALL=C awk '
+          /^\[\[package\]\]$/ { name = ""; deps = 0; next }
+          /^name = "/ { name = $3; gsub(/"/, "", name); known[name] = 1; next }
+          /^dependencies = \[$/ { deps = 1; next }
+          deps && /^\]$/ { deps = 0; next }
+          deps { d = $1; gsub(/[",]/, "", d); edges[name] = edges[name] " " d }
+          END {
+            root = "swell-test262"
+            if (!(root in known)) exit 3
+            n = 1; queue[1] = root; seen[root] = 1
+            for (i = 1; i <= n; i++) {
+              k = split(edges[queue[i]], ds, " ")
+              for (j = 1; j <= k; j++) if (!(ds[j] in seen)) { seen[ds[j]] = 1; queue[++n] = ds[j] }
+            }
+            for (i = 1; i <= n; i++) print queue[i]
+          }
+        ' "$lock" > "$TEST262_OUT/runner.packages" ||
+          { echo "test262-sources: $lock names no package swell-test262, whose sources the expected file has"; exit 1; }
+        LC_ALL=C awk 'NR == FNR { keep[$0] = 1; next }
+          { name = ""; if ($1 == "[[package]]" && $2 == "name" && $3 == "=") { name = $4; gsub(/"/, "", name) } }
+          name == "" || name in keep { printf "%s%s\n", (out++ ? "\n" : ""), $0 }
+        ' "$TEST262_OUT/runner.packages" RS= "$lock" > "$TEST262_OUT/runner.lock"
+        crate_paths=
+        for manifest in "$GATE_ROOT"/crates/*/Cargo.toml; do
+          [ -f "$manifest" ] || continue
+          package=$(awk -F '"' '/^\[/ { section = $0 } section == "[package]" && /^name *=/ { print $2; exit }' "$manifest")
+          grep -qxF -- "$package" "$TEST262_OUT/runner.packages" || continue
+          dir=${manifest%/Cargo.toml}
+          dir=crates/${dir##*/}
+          crate_paths="$crate_paths :(glob)$dir/src/** $dir/Cargo.toml"
+        done
+        paths="$crate_paths Cargo.toml .cargo/config.toml rust-toolchain rust-toolchain.toml taskfiles/test262.yml conformance/test262/PIN conformance/test262/moves.tsv conformance/test262/later-parts.tsv"
         # shellcheck disable=SC2086
         files=$(git -C "$GATE_ROOT" ls-files --cached --others --exclude-standard -- $paths) ||
           { echo "test262-sources: git cannot list the files of $GATE_ROOT"; exit 1; }
@@ -525,6 +568,7 @@ tasks:
           (cd "$GATE_ROOT" && xargs -r -d '\n' sha256sum --) < "$TEST262_OUT/sources.present" ||
             { echo "test262-sources: sha256sum failed on the files of $GATE_ROOT" >&2; exit 1; }
           sed 's/^/deleted /' "$TEST262_OUT/sources.deleted"
+          printf '%s  %s\n' "$(sum < "$TEST262_OUT/runner.lock")" Cargo.lock
           printf '%s  %s\n' "$(sum < "$TEST262_FEATURES")" conformance/test262/features.txt
           printf '%s  %s\n' "$(sum < "$TEST262_SECTIONS")" conformance/test262/sections.txt
           printf '%s\n' "$block" | { printf '%s  %s\n' "$(sum)" "docs/design/engine.md swell-slices"; }
