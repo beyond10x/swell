@@ -30,6 +30,23 @@ Every number below comes from the gate, `task check`, on the released commit.
 - The test262 sources digest (`task test262-digest`) now covers only the packages of the
   runner: `swell-test262` and what it depends on in `Cargo.lock`. A change to `crates/cli` or
   `crates/unicode-gen` no longer requires a full test262 run.
+- The site's compare page, `/compare`: 2 to 4 engine configurations side by side, rows grouped
+  by the KPIs K1 to K8 and the facts, the selection in the URL (`?e=swell,v8-jitless,quickjs,boa`),
+  the best of the picked cells marked among values of one source, "not measured" with its
+  reason, and a source link in every cell. JIT configurations are offered behind a toggle and
+  shown as "JIT reference". The page `/docs/kpis` describes each KPI: definition, unit,
+  direction, gate or compare, how it is measured and where each engine's value comes from.
+- `bench/engines.jsonl`: a catalog of 35 ECMAScript engines, a source URL per field and
+  "unknown" where no source says, the default set of eight marked, and the configurations the
+  page compares.
+- `task bench-import-zoo` (manual, network): javascript-zoo-data's test262 results at test262
+  `4a1e962` for the 35 configurations it has, counted per top directory into
+  `bench/published/zoo-test262-4a1e962.tsv` with the data commit, the sha256 of each fetched
+  file and the fetch date, its MIT notice, and `bench/published/SHA256SUMS`.
+- `task site-data` writes `website/data/engines.json` beside `status.json`, from the catalog,
+  the published tables, result files of format `swell-bench/1` (none yet) and swell's own
+  committed files; every value carries its source, date, revision and method.
+  `site-data-check` holds it, and refuses a published table that differs from its sha256.
 
 ### Fixed
 

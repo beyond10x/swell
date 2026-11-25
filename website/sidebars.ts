@@ -19,7 +19,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Reference',
       collapsed: false,
-      items: ['embedding'],
+      items: ['embedding', 'kpis'],
     },
     {
       type: 'category',
