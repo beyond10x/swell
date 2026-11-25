@@ -27,6 +27,15 @@ Every number below comes from the gate, `task check`, on the released commit.
   `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin` (`.tar.gz`) and
   `x86_64-pc-windows-msvc` (`.zip`). The release has the five archives and `SHA256SUMS` as
   assets (`docs/releasing.md`; `story:releases-ship-the-shell-for-three-systems`).
+- The release build can sign the macOS and Windows binaries before it packages them: on
+  macOS with a Developer ID Application certificate, the hardened runtime and a secure
+  timestamp, then notarized with `xcrun notarytool` (the job fails unless the status is
+  `Accepted`); on Windows through Azure Artifact Signing, checked with
+  `Get-AuthenticodeSignature`. It signs when the twelve signing secrets are set; without
+  them, on every event including a tag, it builds unsigned and prints one line naming the
+  secrets that are not set. A release's notes say whether its binaries are signed.
+  `docs/releasing.md`, "Signing", names the secrets and how to rotate them;
+  `website/docs/embedding.md` shows how to check a signature (`story:binaries-signed`).
 - The test262 sources digest (`task test262-digest`) now covers only the packages of the
   runner: `swell-test262` and what it depends on in `Cargo.lock`. A change to `crates/cli` or
   `crates/unicode-gen` no longer requires a full test262 run.

@@ -28,7 +28,7 @@ binary and a `SHA256SUMS` file ("The binary of a release" below).
 - `.github/workflows/check.yml` runs the gate on the commit when `main` is pushed, and that
   run is the release's evidence. The push of the tag starts one run of
   `.github/workflows/shared-gates.yml` and one run of `.github/workflows/release-build.yml`,
-  which builds the binary, and no run of `check.yml`.
+  which builds and signs the binary, and no run of `check.yml`.
 
 ## Versions
 
@@ -83,7 +83,9 @@ deciding session's, from a checkout of the repository:
 4. **Notes.** Write the notes file, `.out/release-<version>-notes.md`, in the form the
    introduction gives: the lead, `**Breaking**`, `**Changed**`, the link line. Count its
    characters without the link line (at most 900) and check each statement against the
-   changelog section. The same file is the tag's message (step 6) and the release's notes
+   changelog section. `**Changed**` has one bullet that says whether the macOS and Windows
+   binaries are signed: signed when the twelve signing secrets ("Signing" below) are set,
+   unsigned otherwise. The same file is the tag's message (step 6) and the release's notes
    (step 7). The branch tip, the path of the notes file, its character count and the
    gate's lines are sent to the deciding session. On its answer `main` is moved to the commit
    (fast-forward).
@@ -109,10 +111,13 @@ deciding session's, from a checkout of the repository:
          --limit 5 --json databaseId,headSha,event,status
        $gates gh -- run watch <run-id> --exit-status
 
-6. **Tag.** Scan the notes file, then tag the commit with it as the message and push the tag.
-   `--cleanup=whitespace` keeps a line of the notes that starts with `#`. Without it git
-   removes such a line:
+6. **Tag.** Scan the notes file, then tag the commit with it as the message and push the
+   tag. `secret list` is for information: it prints the names and dates of the secrets that
+   are set, never values, and shows whether the run will sign; when it disagrees with the
+   notes' signing bullet, the bullet is corrected before the tag. `--cleanup=whitespace`
+   keeps a line of the notes that starts with `#`. Without it git removes such a line:
 
+       $gates gh -- secret list --repo beyond10x/swell
        $gates scan-text .out/release-<version>-notes.md
        $gates bot -- tag --cleanup=whitespace -a <version> \
          -F .out/release-<version>-notes.md <commit>
@@ -126,8 +131,16 @@ deciding session's, from a checkout of the repository:
          --json databaseId,headSha,status,conclusion
        $gates gh -- run watch <run-id> --exit-status
 
-   A red job of "Release build" holds the release. Its cause is fixed on `main` and released
-   as the next patch version; the tag is not moved.
+   With the secrets set, the run signs the macOS and Windows binaries before it packages
+   them. Each of the two macOS jobs prints the output of `codesign --verify --strict` and
+   `codesign -dv` and a notarization status of `Accepted`; the Windows job prints an
+   Authenticode status of `Valid`. Without them, each of those jobs prints one warning,
+   `<target> is not signed in this run`, with the names of the secrets that are not set, and
+   goes on unsigned. A red job of "Release build" holds the release. Its cause is fixed on
+   `main` and released as the next patch version; the tag is not moved. A job that failed
+   because a signing secret was wrong or had expired is run again
+   (`$gates gh -- run rerun <run-id> --failed`) once the secret is fixed; the tag is not
+   moved.
 
 7. **Release.** Download the five archives of the tag's "Release build" run, write
    `SHA256SUMS`, create the release as the bot with the six files as assets, and view it
@@ -182,8 +195,9 @@ found:
 ## The binary of a release
 
 `.github/workflows/release-build.yml` runs on every pushed tag of the form
-`<major>.<minor>.<patch>`, with anything after it. It has one job per target, each on a runner
-of that system, with the compiler of `rust-toolchain.toml`:
+`<major>.<minor>.<patch>`, with anything after it, on a pull request that changes the
+workflow, and when started by hand. It has one job per target, each on a runner of that
+system, with the compiler of `rust-toolchain.toml`:
 
 | target | runner | archive |
 |---|---|---|
@@ -197,14 +211,113 @@ Each job:
 
 1. Builds `cargo build --release --locked -p swell-cli --target <target>`, with the runner's
    home directory and the checkout remapped by `--remap-path-prefix`.
-2. Fails when the binary still holds either path.
-3. Packages the binary with `README.md`, `LICENSE` and `NOTICE` in a directory
-   `swell-<tag>-<target>/`.
-4. Unpacks the archive in a fresh directory and runs the smoke test there:
+2. On macOS and Windows, signs the binary ("Signing" below).
+3. Fails when the binary still holds either path.
+4. Packages the binary with `README.md`, `LICENSE` and `NOTICE` in a directory
+   `swell-<tag>-<target>/`. The archive and `SHA256SUMS` hold the signed binary.
+5. Unpacks the archive in a fresh directory and runs the smoke test there, on the binary as
+   packaged, signed or not:
    - `swell --version` prints `swell <version>`, where the tag is `<version>` or
      `<version>-<suffix>`;
    - `swell -e "print(1 + 1)"` prints `2`;
    - `swell --steps 10000 -e "for (;;) {}"` exits 3, the step budget.
-5. Uploads the archive as a workflow artifact named `swell-<tag>-<target>`.
+6. Uploads the archive as a workflow artifact named `swell-<tag>-<target>`.
 
 A tag with a suffix, `<version>-<suffix>` on a branch, tests the workflow without a release.
+On a pull request or a run started by hand on
+a branch, `<tag>` is the workspace version and the first seven characters of the commit
+(`0.12.0-1a2b3c4`).
+
+## Signing
+
+The macOS and Windows binaries of a release are signed when the signing secrets are set and
+unsigned otherwise; the release notes say which (step 4). Signing comes before Package, so
+the archive, its smoke test and `SHA256SUMS` all see the signed binary.
+
+- **macOS** (both jobs): the job imports the Developer ID Application certificate into a
+  temporary keychain with a random password, finds the identity of the team
+  `APPLE_TEAM_ID` names in it, and runs
+  `codesign --force --options runtime --timestamp` on `swell` (the hardened runtime and a
+  secure timestamp). It prints `codesign --verify --strict --verbose=2` and
+  `codesign -dv --verbose=2` and fails unless the authority is a Developer ID Application,
+  the flags hold `runtime` and the signature has a timestamp. It then zips the binary with
+  `ditto` and sends it to Apple with `xcrun notarytool submit --wait` and the App Store
+  Connect API key, prints the submission id and its status, and fails on any status but
+  `Accepted` (it prints the notary log first). A bare binary cannot be stapled, so
+  Gatekeeper looks the ticket up online on first run. The last step of the job deletes the
+  keychain and the key files, also when an earlier step failed.
+- **Windows**: the job signs `swell.exe` with Azure Artifact Signing (formerly Trusted
+  Signing) through the action `azure/artifact-signing-action`, pinned by commit (`v2.0.0`),
+  SHA-256 file digest and the service's RFC 3161 timestamp
+  (`http://timestamp.acs.microsoft.com`). The service's certificates are valid for three
+  days, so the timestamp is what keeps the signature valid. The job then reads the signature
+  with `Get-AuthenticodeSignature`, prints its status, signer and timestamp, and fails unless
+  the status is `Valid` and a timestamp is present.
+
+Which jobs sign is decided first in each macOS and Windows job:
+
+- All six secrets of the job's system set: the job signs, on any event. A signing step that
+  fails (a wrong or expired secret, a notarization status other than `Accepted`, a signature
+  that is not `Valid`) fails the job.
+- One or more not set, on any event, tags included: the signing steps do nothing. The job
+  prints one line, `<target> is not signed in this run; these signing secrets are not set:`
+  and the names (names only; a warning on a tag), and builds, packages and smoke-tests the
+  unsigned binary. A pull request from a fork never sees the secrets.
+
+The Linux jobs do not sign.
+
+### The secrets
+
+Each value is a GitHub Actions secret of the repository (Settings, Secrets and variables,
+Actions), set by the owner. None is in the repository. The decision step sees only whether
+each is set. The signing steps get the values as environment variables or action inputs,
+write the `.p12` and the `.p8` only into a directory of mode 700 with files of mode 600
+(removed by the step, and by the last step of the job, which runs also after a failure), and
+print none of them: no step traces its commands, and the `codesign -dv` output shows the
+team ID as `<APPLE_TEAM_ID>`. GitHub also masks every secret in the log.
+
+| secret | holds |
+|---|---|
+| `APPLE_DEVELOPER_ID_P12_BASE64` | the Developer ID Application certificate with its private key, exported from Keychain Access as `.p12`, encoded with `base64` |
+| `APPLE_DEVELOPER_ID_P12_PASSWORD` | the password of that `.p12` |
+| `APPLE_TEAM_ID` | the ten-character Team ID of the Apple Developer account; the job signs with the identity of this team |
+| `APPLE_NOTARY_KEY_ID` | the key ID of an App Store Connect API key (role Developer) |
+| `APPLE_NOTARY_ISSUER_ID` | the issuer ID of the App Store Connect API keys of the account |
+| `APPLE_NOTARY_KEY_P8` | the text of that key's `.p8` file, `-----BEGIN PRIVATE KEY-----` to `-----END PRIVATE KEY-----` |
+| `AZURE_TENANT_ID` | the Microsoft Entra tenant (directory) ID |
+| `AZURE_CLIENT_ID` | the client (application) ID of the app registration that signs |
+| `AZURE_CLIENT_SECRET` | a client secret of that app registration |
+| `AZURE_SIGNING_ENDPOINT` | the endpoint of the Artifact Signing account's region, such as `https://weu.codesigning.azure.net/` |
+| `AZURE_SIGNING_ACCOUNT` | the name of the Artifact Signing account |
+| `AZURE_SIGNING_CERTIFICATE_PROFILE` | the name of its Public Trust certificate profile |
+
+The app registration has the role "Artifact Signing Certificate Profile Signer" on the
+certificate profile and no other role. Set a secret with `gh secret set <name>
+--repo beyond10x/swell` and the value on standard input, never as an argument; for the
+`.p12`, `base64 < identity.p12 | gh secret set APPLE_DEVELOPER_ID_P12_BASE64 --repo
+beyond10x/swell`.
+
+### Rotating them
+
+A rotation sets the new value before the old one is revoked, and the next tag's run is the
+check. Between releases, a run by hand on `main` signs with the new values without a
+release: `$gates gh -- workflow run release-build.yml --ref main`.
+
+- **Developer ID certificate** (valid five years): create a new Developer ID Application
+  certificate in the Apple Developer account, export it with its key as `.p12` with a new
+  password, set `APPLE_DEVELOPER_ID_P12_BASE64` and `APPLE_DEVELOPER_ID_P12_PASSWORD`, and
+  delete the exported file. Revoke the old certificate only when it leaked: after a
+  revocation Gatekeeper can refuse the binaries of earlier releases signed with it.
+- **App Store Connect API key**: create a new key in App Store Connect (Users and Access,
+  Integrations), set `APPLE_NOTARY_KEY_ID` and `APPLE_NOTARY_KEY_P8`, then revoke the old
+  key. The issuer ID does not change.
+- **Azure client secret**: add a new client secret to the app registration in Microsoft
+  Entra ID, set `AZURE_CLIENT_SECRET`, then delete the old secret. A client secret expires
+  at the date chosen when it is made, at most two years; rotate before that date.
+- **Artifact Signing account or profile**: when either is replaced, set
+  `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT` and `AZURE_SIGNING_CERTIFICATE_PROFILE`
+  and give the app registration the signer role on the new profile. The profile's
+  short-lived certificates are renewed by the service and need nothing.
+- **Team ID and tenant ID** change only with the account or tenant.
+
+A leaked secret is rotated at once, without waiting for a release.

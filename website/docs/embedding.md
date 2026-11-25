@@ -209,6 +209,23 @@ tar -xzf swell-<version>-x86_64-unknown-linux-gnu.tar.gz
 swell-<version>-x86_64-unknown-linux-gnu/swell --version
 ```
 
+The release notes say whether a release's macOS and Windows binaries are signed. A signed macOS `swell` is signed with a Developer ID Application certificate and the hardened runtime and notarized by Apple; a bare binary carries no stapled ticket, so macOS checks the notarization online the first time it runs. To check the signature:
+
+```sh
+codesign --verify --strict --verbose=2 swell-<version>-aarch64-apple-darwin/swell
+codesign -dv --verbose=2 swell-<version>-aarch64-apple-darwin/swell
+```
+
+For a signed binary `codesign -dv` prints `Authority=Developer ID Application: …`, `flags=0x10000(runtime)` and a `Timestamp=` line. `spctl --assess` is for app bundles and installer packages and rejects a bare command-line binary, so it is not the check here.
+
+A signed Windows `swell.exe` is signed through Azure Artifact Signing with a timestamp. In PowerShell:
+
+```powershell
+Get-AuthenticodeSignature .\swell-<version>-x86_64-pc-windows-msvc\swell.exe | Format-List Status, SignerCertificate, TimeStamperCertificate
+```
+
+`Status` is `Valid`. An unsigned binary (`NotSigned` on Windows; on macOS no `Authority=` line, at most an ad-hoc signature) is one of a release whose notes say so, or of a release made before signing was added; the system may warn about it on first run.
+
 To build it from source:
 
 ```sh
