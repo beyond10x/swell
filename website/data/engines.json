@@ -299,7 +299,7 @@
             "label": "swell's runner, test262 2a1ade30",
             "url": "https://github.com/beyond10x/swell/blob/main/conformance/test262/expected.txt#L1-L2",
             "date": null,
-            "revision": "test262 2a1ade30, swell 0.11.0",
+            "revision": "test262 2a1ade30, swell 0.12.0",
             "method": "the sum of the annexB/ lines of expected.txt; excluded and not applicable cases count as failed; a case passes when every mode that applies to it passes"
           }
         },
@@ -320,7 +320,7 @@
             "label": "swell's runner, test262 2a1ade30",
             "url": "https://github.com/beyond10x/swell/blob/main/conformance/test262/expected.txt#L3-L66",
             "date": null,
-            "revision": "test262 2a1ade30, swell 0.11.0",
+            "revision": "test262 2a1ade30, swell 0.12.0",
             "method": "the sum of the built-ins/ lines of expected.txt; excluded and not applicable cases count as failed; a case passes when every mode that applies to it passes"
           }
         },
@@ -341,7 +341,7 @@
             "label": "swell's runner, test262 2a1ade30",
             "url": "https://github.com/beyond10x/swell/blob/main/conformance/test262/expected.txt#L67",
             "date": null,
-            "revision": "test262 2a1ade30, swell 0.11.0",
+            "revision": "test262 2a1ade30, swell 0.12.0",
             "method": "the sum of the harness/ lines of expected.txt; excluded and not applicable cases count as failed; a case passes when every mode that applies to it passes"
           }
         },
@@ -362,7 +362,7 @@
             "label": "swell's runner, test262 2a1ade30",
             "url": "https://github.com/beyond10x/swell/blob/main/conformance/test262/expected.txt#L68-L87",
             "date": null,
-            "revision": "test262 2a1ade30, swell 0.11.0",
+            "revision": "test262 2a1ade30, swell 0.12.0",
             "method": "the sum of the intl402/ lines of expected.txt; excluded and not applicable cases count as failed; a case passes when every mode that applies to it passes"
           }
         },
@@ -383,7 +383,7 @@
             "label": "swell's runner, test262 2a1ade30",
             "url": "https://github.com/beyond10x/swell/blob/main/conformance/test262/expected.txt#L88-L211",
             "date": null,
-            "revision": "test262 2a1ade30, swell 0.11.0",
+            "revision": "test262 2a1ade30, swell 0.12.0",
             "method": "the sum of the language/ lines of expected.txt; excluded and not applicable cases count as failed; a case passes when every mode that applies to it passes"
           }
         },
@@ -404,7 +404,7 @@
             "label": "swell's runner, test262 2a1ade30",
             "url": "https://github.com/beyond10x/swell/blob/main/conformance/test262/expected.txt#L212-L221",
             "date": null,
-            "revision": "test262 2a1ade30, swell 0.11.0",
+            "revision": "test262 2a1ade30, swell 0.12.0",
             "method": "the sum of the staging/ lines of expected.txt; excluded and not applicable cases count as failed; a case passes when every mode that applies to it passes"
           }
         },
@@ -425,7 +425,7 @@
             "label": "swell's runner, test262 2a1ade30",
             "url": "https://github.com/beyond10x/swell/blob/main/conformance/test262/expected.txt#L222",
             "date": null,
-            "revision": "test262 2a1ade30, swell 0.11.0",
+            "revision": "test262 2a1ade30, swell 0.12.0",
             "method": "the total line of expected.txt; excluded and not applicable cases count as failed; a case passes when every mode that applies to it passes"
           }
         },
@@ -436,7 +436,7 @@
             "label": "swell source",
             "url": "https://github.com/beyond10x/swell/blob/main/crates/swell/src/host/limits.rs#L17",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "the field of Limits"
           }
         },
@@ -447,7 +447,7 @@
             "label": "swell source",
             "url": "https://github.com/beyond10x/swell/blob/main/crates/swell/src/host/limits.rs#L14",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "the field of Limits"
           }
         },
@@ -458,7 +458,7 @@
             "label": "swell source",
             "url": "https://github.com/beyond10x/swell/blob/main/crates/swell/src/host/interrupt.rs#L19",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "the host's interrupt handle"
           }
         },
@@ -469,7 +469,7 @@
             "label": "swell source",
             "url": "https://github.com/beyond10x/swell/blob/main/crates/swell/src/host/limits.rs#L19",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "the fields of Limits"
           }
         },
@@ -480,7 +480,7 @@
             "label": "forbid scan of site-data",
             "url": "https://github.com/beyond10x/swell/tree/main/crates",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "the crate roots forbid-unsafe-check reads"
           }
         },
@@ -494,7 +494,7 @@
             "label": "forbid scan of site-data",
             "url": "https://github.com/beyond10x/swell/tree/main/crates",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "crate roots holding the line #![forbid(unsafe_code)]"
           }
         },
@@ -508,7 +508,7 @@
             "label": "Cargo.lock",
             "url": "https://github.com/beyond10x/swell/blob/main/Cargo.lock",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "packages of Cargo.lock with a source line"
           }
         },
@@ -519,7 +519,7 @@
             "label": "host requirement HOST-133",
             "url": "https://github.com/beyond10x/swell/blob/main/conformance/host/requirements.txt#L133",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "a test replays a corpus and compares"
           }
         },
@@ -530,7 +530,7 @@
             "label": "Cargo.toml",
             "url": "https://github.com/beyond10x/swell/blob/main/Cargo.toml#L6",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "the workspace manifest"
           }
         },
@@ -541,7 +541,7 @@
             "label": "Cargo.toml",
             "url": "https://github.com/beyond10x/swell/blob/main/Cargo.toml#L7",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "the workspace manifest"
           }
         },
@@ -552,7 +552,7 @@
             "label": "design",
             "url": "https://github.com/beyond10x/swell/blob/main/docs/design/engine.md",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "the design and the rule of AGENTS.md"
           }
         },
@@ -563,18 +563,18 @@
             "label": "AGENTS.md",
             "url": "https://github.com/beyond10x/swell/blob/main/AGENTS.md",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "the repository's rule: no just-in-time compiler"
           }
         },
         "F.latest_release": {
           "status": "documented",
-          "text": "0.11.0",
+          "text": "0.12.0",
           "source": {
             "label": "Cargo.toml",
             "url": "https://github.com/beyond10x/swell/blob/main/Cargo.toml#L8",
             "date": null,
-            "revision": "swell 0.11.0",
+            "revision": "swell 0.12.0",
             "method": "the workspace version"
           }
         },

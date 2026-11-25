@@ -11,6 +11,13 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-25
+
+swell has a shell binary, `swell`, and a release ships it for Linux, macOS and Windows. The
+site compares swell with other engines, and an interrupt set by a host function is read after
+every call from Rust. The test262 counts do not change: 25,943 of the 44,812 selected test262
+cases pass, as in 0.11.0 (`test262 total 53801 8982 7 44812 25943 18867 2`).
+
 ### Added
 
 - The shell binary `swell`, package `swell-cli` in `crates/cli`: `swell [flags] <file.js>` or
@@ -47,6 +54,10 @@ Every number below comes from the gate, `task check`, on the released commit.
   the published tables, result files of format `swell-bench/1` (none yet) and swell's own
   committed files; every value carries its source, date, revision and method.
   `site-data-check` holds it, and refuses a published table that differs from its sha256.
+- Two designs, of which nothing is built: `docs/design/quality-and-comparison.md`, what makes
+  swell good and how it is compared with other engines, and `docs/design/native-code.md`, a
+  path that compiles JavaScript ahead of time through codespec's `cir/1` to WebAssembly or
+  x86_64, with a JIT later.
 
 ### Fixed
 
@@ -1263,7 +1274,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.11.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.12.0...HEAD
+[0.12.0]: https://github.com/beyond10x/swell/releases/tag/0.12.0
 [0.11.0]: https://github.com/beyond10x/swell/releases/tag/0.11.0
 [0.10.0]: https://github.com/beyond10x/swell/releases/tag/0.10.0
 [0.9.1]: https://github.com/beyond10x/swell/releases/tag/0.9.1
