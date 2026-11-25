@@ -578,7 +578,14 @@ of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made
   with the closes of slices 5 and 7, the first six stories of slice 4 and the charged buffers
   (`docs/plan/slice-10-wave-1.md`), cut on the standing order the session that decides for
   the operator passed on that day: "cut a release when a user sees something new, from a
-  green main by your release process" (https://github.com/beyond10x/swell/releases/tag/0.9.0).
+  green main by your release process" (https://github.com/beyond10x/swell/releases/tag/0.9.0);
+  `0.9.1`, 2026-11-25, tagged on `4e5c989`, the interrupt read after a host function's throw
+  (HOST-216, HOST-217), asked by the first consumer
+  (https://github.com/beyond10x/swell/releases/tag/0.9.1); `0.10.0`, 2026-11-25, tagged on
+  `b9d3d46`, the host method `to_utf16_len` and a String or Symbol kept by a trace (HOST-218 to
+  220), the release the first consumer moves its pin to
+  (https://github.com/beyond10x/swell/releases/tag/0.10.0). Both were cut by the coordinating
+  session after the main operator session merged the pull request.
   After a release
   `task host-surface-snapshot` (a scan with awk, no build and no slot of the pool) writes `conformance/host/surface.txt` for the
   released tree (`HOST_SURFACE_ROOT`, `HOST_SURFACE_VERSION`), and the changelog entries of
@@ -727,11 +734,10 @@ session coordinates; this section is its procedure, taken from how surf is run
   `main` moves only by a merge. Each worktree gets a symbolic link `.cache` to the primary
   checkout's `.cache`, which holds `test262/<commit>/` (the pinned checkout),
   `ecma262/<commit>/ecma262.txt` and `.html` (the pinned draft) and `inventory/` (the design's
-  `meta.awk`, `slices.awk`, `rules.txt`, `meta.tsv`). The pool's build node has no copy of the
-  link's target, so in such a worktree a job that reads `.cache` (`task check`,
-  `test262-expected`, `test262-part`, `slow-tests`) runs with `slot --local`; on the build node
-  `test262-fetch` fails and the job exits 201 (2026-11-25, `slot --timeout 30m task check` and
-  `test262-expected` in the worktree of `story:interrupt-read-after-a-host-function-throws`).
+  `meta.awk`, `slices.awk`, `rules.txt`, `meta.tsv`). The pool syncs such a tree to its build
+  node with the link: on 2026-11-25 the eight parts of the full test262 run read
+  `.cache/test262/<commit>` through the link on the node. A build or test is never run with
+  `slot --local` to work around the node.
 - **The store.** `.engineering/` (`aep.project/5`), written only through `aep plan artifact`,
   with `AEP_ACTOR=human:operator` so that no person's name enters a transition. Body files for
   `--from` go in `.engineering/drafts/`, which git ignores. A unit's brief starts from

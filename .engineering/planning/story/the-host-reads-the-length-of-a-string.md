@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:the-host-reads-the-length-of-a-string
 kind: story
-status: active
+status: implemented
 title: The host reads the length of a String in code units without a copy
 summary: Cx::to_utf16_len beside to_utf16, additive, and HOST-220.
 relations:
@@ -22,10 +22,11 @@ scope:
   path: docs/design/host-interface.md
 - confidence: cited
   path: website/data/status.json
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-25T03:16:26Z", actor: "human:operator", revision: 10}
 - {from: "proposed", to: "active", at: "2026-11-25T03:16:26Z", actor: "human:operator", revision: 11}
+- {from: "active", to: "implemented", at: "2026-11-25T05:00:46Z", actor: "human:operator", revision: 12, decided_on: {"recorded":{"test_result":1}}}
 ---
 Waits for: `story:a-string-listed-by-a-trace-survives-collect` (it takes the numbers HOST-218 and
 219). Base: `main` after that story. Asked by the first consumer (surf, finding F2, a wish):

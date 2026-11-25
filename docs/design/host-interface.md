@@ -391,7 +391,7 @@ listed by no `trace`, does not keep its record alive. While the record lives, ev
 the handle answers as it would inside the scope; once a collection freed it, every call answers
 `Err(StaleHandle)`, never another record, because a generation is never used twice. A host that
 keeps such a handle checks it before it returns it to the engine (HOST-160) and never lists it
-in a `trace` (HOST-110). What keeps an object alive for the host is a `Root` (decision 4), or a
+in a `trace` (HOST-110). What keeps a value alive for the host is a `Root` (decision 4), or a
 handle that host data the engine reaches lists in its `trace` from the scope it was handed in
 onward (decision 15); such a handle is strong, not kept in this way.
 The agent key lets the engine answer a handle of another agent (finding 5). The two string
@@ -443,6 +443,7 @@ impl<'a, H: Host> Cx<'a, H> {   // the same methods on HookCx
     pub fn new_string(&mut self, text: &str) -> Completion<StringRef>;
     pub fn new_string_utf16(&mut self, units: &[u16]) -> Completion<StringRef>;
     pub fn to_utf16(&self, string: StringRef) -> Result<Vec<u16>, HostError>;
+    pub fn to_utf16_len(&self, string: StringRef) -> Result<usize, HostError>;
     pub fn to_rust_string_lossy(&self, string: StringRef) -> Result<String, HostError>;
     pub fn new_error(&mut self, realm: RealmRef, kind: ErrorKind, message: &str)
         -> Result<Completion<ObjectRef>, HostError>;
@@ -538,6 +539,8 @@ own, for a list no host needs to grow).
 **HOST-32** (webidl:idl-DOMString) `to_utf16` returns every code unit of a String exactly, lone surrogates included: `new_string_utf16(&[0xD800, 0x61])` read back with `to_utf16` gives `[0xD800, 0x61]`. [slice 1]
 
 **HOST-33** (webidl:idl-USVString) `to_rust_string_lossy` replaces each lone surrogate with U+FFFD and keeps every other code point: the String `[0xD800, 0x61, 0xD83D, 0xDE00]` gives `"\u{FFFD}a\u{1F600}"`. [slice 1]
+
+**HOST-220** (webidl:idl-DOMString) `to_utf16_len` answers the number of code units of a String, lone surrogates included, equal to the length of what `to_utf16` gives: `new_string_utf16(&[0xD800, 0x61])` gives 2, the empty String gives 0, and a String of 1,048,576 code units gives 1,048,576; a handle freed by `collect` answers `Err(HostError::StaleHandle)`. [slice 1]
 
 **HOST-34** (swell:D4) `new_string` of a `&str` gives the String of its UTF-16 encoding, which `to_utf16` returns unchanged. [slice 1]
 
@@ -1821,6 +1824,10 @@ box is the host's to charge with `charge_host_bytes` (decision 14). Making one s
 **HOST-108** (webidl:is-a-platform-object) `host_data::<T>` with the object's own brand and type returns `Some`, and with another brand, another type, or an object made by script returns `Ok(None)`. [slice 1]
 
 **HOST-109** (swell:D15) An object reachable only through a value that a host object's `trace` lists survives `collect`; the same object not listed is freed by it. [slice 1]
+
+**HOST-218** (swell:D15) A String made by `String.fromCharCode(0x61, 0xD800)` and a Symbol made by `Symbol("d")`, each kept only in a host object's data and listed by its `trace` with `Tracer::value`, survive `collect`: after it `to_utf16` of the String gives `[0x61, 0xD800]`, and a host function that returns the kept Symbol, called by the script `get().description`, answers `Normal("d")`. A String kept the same way but not listed answers `Err(HostError::StaleHandle)` from `to_utf16` after `collect`. [slice 1]
+
+**HOST-219** (swell:D15) A BigInt kept only in a host object's data and listed by its `trace` survives `collect`, and a script reading it back through a host function compares equal to the BigInt it made. [slice 12]
 
 **HOST-110** (swell:D15) A `trace` that lists a stale handle makes `collect` answer `Terminated(EngineFault)`. [slice 1]
 

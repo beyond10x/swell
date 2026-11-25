@@ -70,6 +70,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   out of range, a host with no instant for any local time, and the step charged to every zone
   hook call.
 
+## [0.10.0] - 2026-11-25
+
+The host reads the length of a String without a copy, and a String or a Symbol that host data
+lists in its trace is held to survive a collection. Nothing else changes: 24,838 of the 44,812
+selected test262 cases pass, as in 0.9.1 (`test262 total 53801 8982 7 44812 24838 19972 2`).
+
+### Host interface
+
+- `HOST-218` (new, slice 1) has a test and `HOST-219` (new, slice 12) is pending: a String
+  or a Symbol that host data lists in its `trace` with `Tracer::value` survives `collect`, as
+  an object does, and a BigInt will once slice 12 makes one. The design says a listed handle
+  keeps a value alive, not only an object.
+- `to_utf16_len` (new, on `Cx` and `HookCx`) answers the length of a String in code units
+  without copying it, held by `HOST-220` (new, slice 1, with a test). Additive, not breaking.
+
 ## [0.9.1] - 2026-11-25
 
 An interrupt set while a host function runs now ends the run when that function throws, as it
@@ -1181,7 +1196,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.9.1...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.10.0...HEAD
+[0.10.0]: https://github.com/beyond10x/swell/releases/tag/0.10.0
 [0.9.1]: https://github.com/beyond10x/swell/releases/tag/0.9.1
 [0.9.0]: https://github.com/beyond10x/swell/releases/tag/0.9.0
 [0.8.0]: https://github.com/beyond10x/swell/releases/tag/0.8.0

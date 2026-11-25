@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-25T04:10:13Z",
+  "actor": "human:operator",
+  "artifact": "story:a-string-listed-by-a-trace-survives-collect",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "branch impl/a-string-listed-by-a-trace-survives-collect: host_objects::host_218 passes in both modes; fails with String or Symbol tracing removed from Tracer::value; slot --local task check exit 0, test-steps 48.0 of 120"
+  }
+}
