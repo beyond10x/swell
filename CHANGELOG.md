@@ -10,6 +10,18 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Fixed
+
+- The interrupt flag is read after a builtin or host function called by a call or a
+  construction, with or without spread arguments, answers by a throw, as after a return: a
+  set flag ends the run in `Terminated(Interrupted)` and the thrown value reaches no `catch`.
+
+### Host interface
+
+- `HOST-216` and `HOST-217` (new, slice 1) have a test: an interrupt set by a host function
+  that then throws ends the run, and a host function that answers
+  `Terminated(Interrupted)` ends it with the agent alive.
+
 ## [0.9.0] - 2026-11-24
 
 Promises and `async` functions run: the tenth delivery slice is delivered whole, with async
