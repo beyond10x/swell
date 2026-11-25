@@ -166,6 +166,91 @@ fn host_109_trace_keeps_listed_values() {
     assert_eq!(agent.state(), AgentState::Alive);
 }
 
+/// Host data that holds a String and a Symbol it lists in its trace, and a String it does not.
+struct Keeper {
+    string: Value,
+    symbol: Value,
+    _unlisted: Value,
+}
+
+impl HostData for Keeper {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        tracer.value(self.string);
+        tracer.value(self.symbol);
+    }
+}
+
+/// The host function `get`: the Symbol the `Keeper` of the host's first kept object holds.
+fn kept_symbol(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
+    let holder = cx.host().kept.first().copied().flatten().unwrap();
+    Ok(cx
+        .host_data::<Keeper>(holder, OTHER)
+        .unwrap()
+        .unwrap()
+        .symbol)
+}
+
+/// HOST-218: a String with a lone surrogate and a Symbol, each kept only in a host object's
+/// data and listed by its `trace` with `Tracer::value`, survive `collect`; a String kept the
+/// same way but not listed is freed by it.
+#[test]
+fn host_218_trace_keeps_a_listed_string_and_symbol() {
+    let mut agent = support::host::agent().unwrap();
+    let realm = support::host::realm(&mut agent);
+    define_function(&mut agent, &realm, "get", 0, kept_symbol, false);
+    let made: Vec<Root> = [
+        "String.fromCharCode(0x61, 0xD800)",
+        "Symbol(\"d\")",
+        "String.fromCharCode(0x62, 0xD800)",
+    ]
+    .iter()
+    .map(
+        |source| match support::script::eval(&mut agent, &realm, source) {
+            Outcome::Normal(root) => root,
+            other => panic!("{source:?} answered {other:?}"),
+        },
+    )
+    .collect();
+    let (_root, string, unlisted) = agent
+        .with_cx(&realm, |cx| {
+            let values: Vec<Value> = made.iter().map(|root| cx.get(root).unwrap()).collect();
+            let (Value::String(string), Value::Symbol(_), Value::String(unlisted)) =
+                (values[0], values[1], values[2])
+            else {
+                panic!("the scripts made {values:?}");
+            };
+            let holder = cx
+                .new_host_object(spec(
+                    OTHER,
+                    Some(Box::new(Keeper {
+                        string: values[0],
+                        symbol: values[1],
+                        _unlisted: values[2],
+                    })),
+                ))
+                .unwrap()
+                .unwrap();
+            cx.host_mut().kept = vec![Some(holder)];
+            (cx.root(Value::Object(holder)).unwrap(), string, unlisted)
+        })
+        .unwrap();
+    drop(made);
+
+    assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+
+    agent
+        .with_cx(&realm, |cx| {
+            assert_eq!(cx.to_utf16(string), Ok(vec![0x61, 0xD800]));
+            assert_eq!(cx.to_utf16(unlisted), Err(HostError::StaleHandle));
+        })
+        .unwrap();
+    assert_eq!(
+        eval_text(&mut agent, &realm, "get().description"),
+        Shown::Normal("\"d\"".to_string())
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
 /// HOST-110: a `trace` that lists a stale handle makes `collect` answer
 /// `Terminated(EngineFault)`, and the agent is faulted after it.
 #[test]

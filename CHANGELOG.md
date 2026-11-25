@@ -21,6 +21,10 @@ Every number below comes from the gate, `task check`, on the released commit.
 - `HOST-216` and `HOST-217` (new, slice 1) have a test: an interrupt set by a host function
   that then throws ends the run, and a host function that answers
   `Terminated(Interrupted)` ends it with the agent alive.
+- `HOST-218` (new, slice 1) has a test and `HOST-219` (new, slice 12) is pending: a String
+  or a Symbol that host data lists in its `trace` with `Tracer::value` survives `collect`, as
+  an object does, and a BigInt will once slice 12 makes one. The design says a listed handle
+  keeps a value alive, not only an object.
 
 ## [0.9.0] - 2026-11-24
 

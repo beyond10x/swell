@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:a-string-listed-by-a-trace-survives-collect
 kind: story
-status: active
+status: implemented
 title: A String or Symbol that host data lists with Tracer::value survives collect
 summary: HOST-218 for a String and a Symbol held only through a traced value, HOST-219 pending slice 12 for a BigInt; the design sentence says a value, not an object.
 relations:
@@ -20,10 +20,11 @@ scope:
   path: docs/design/host-interface.md
 - confidence: cited
   path: website/data/status.json
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-25T03:16:25Z", actor: "human:operator", revision: 9}
 - {from: "proposed", to: "active", at: "2026-11-25T03:16:25Z", actor: "human:operator", revision: 10}
+- {from: "active", to: "implemented", at: "2026-11-25T04:10:13Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"test_result":1}}}
 ---
 Waits for: `story:interrupt-read-after-a-host-function-throws` (it takes the numbers HOST-216 and
 217). Base: `main` after that story. Asked by the first consumer (surf, finding F1): it keeps the
