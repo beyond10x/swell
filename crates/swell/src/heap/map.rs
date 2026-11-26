@@ -15,7 +15,9 @@
 //! room ([`KeyedMap::spare`]) and charge ([`KeyedMap::table_bytes`]) after every operation. A
 //! control byte is `EMPTY`, `DELETED` (a removal inside a run of full groups, which a probe must
 //! walk past) or the top 7 bits of the hash of the entry it holds; the 16 bytes after the last
-//! bucket repeat the first 16, so a group read near the end needs no wrap.
+//! bucket repeat the first 16, so a group read near the end needs no wrap. A group is read as
+//! two 64-bit words and matched with word arithmetic: the crate has no `unsafe` and calls no
+//! `core::arch` intrinsic (decision 6).
 
 use alloc::vec::Vec;
 use core::borrow::Borrow;
@@ -54,41 +56,106 @@ fn bucket_mask_to_capacity(bucket_mask: usize) -> usize {
     }
 }
 
-/// The 16 control bytes of a group, byte `i` in bits `8 i` to `8 i + 7`. A set of the group's
-/// buckets is a mask of the same shape with the top bit of each member's byte set.
-type Group = u128;
-
-/// The byte 0x80 in every byte of a group: the top bits.
-const TOPS: Group = Group::from_le_bytes([0x80; WIDTH]);
-/// The byte 0x7F in every byte of a group: the low bits.
-const LOWS: Group = Group::from_le_bytes([0x7F; WIDTH]);
-
-/// The buckets of `group` whose control byte is `byte`. Exact: `(x & 0x7F) + 0x7F` has its top
-/// bit set for every byte of `x` but 0 and carries into no other byte.
-fn match_byte(group: Group, byte: u8) -> Group {
-    let x = group ^ Group::from_le_bytes([byte; WIDTH]);
-    !((x & LOWS).wrapping_add(LOWS) | x) & TOPS
+/// The 16 control bytes of a group as two words, byte `i` of a word in its bits `8 i` to
+/// `8 i + 7`: buckets 0 to 7 in `low`, 8 to 15 in `high`.
+#[derive(Clone, Copy)]
+struct Group {
+    low: u64,
+    high: u64,
 }
 
-/// The buckets of `group` that are empty: of the three kinds of byte only `EMPTY` has bits 6
-/// and 7 both set.
-fn match_empty(group: Group) -> Group {
-    group & (group << 1) & TOPS
+/// The byte 0x80 in every byte of a word: the top bits.
+const TOPS: u64 = 0x8080_8080_8080_8080;
+/// The byte 0x01 in every byte of a word.
+const ONES: u64 = 0x0101_0101_0101_0101;
+
+/// The buckets of a group a set marks, as two words with the top bit of each member's byte
+/// set, taken lowest first.
+struct Members {
+    low: u64,
+    high: u64,
 }
 
-/// The buckets of `group` that are empty or deleted: the bytes with bit 7 set.
-fn match_empty_or_deleted(group: Group) -> Group {
-    group & TOPS
+impl Iterator for Members {
+    type Item = usize;
+
+    #[inline]
+    fn next(&mut self) -> Option<usize> {
+        if self.low != 0 {
+            let offset = (self.low.trailing_zeros() / 8) as usize;
+            self.low &= self.low - 1;
+            Some(offset)
+        } else if self.high != 0 {
+            let offset = (self.high.trailing_zeros() / 8) as usize;
+            self.high &= self.high - 1;
+            Some(offset + 8)
+        } else {
+            None
+        }
+    }
 }
 
-/// The lowest member of the set `mask` as a bucket offset in its group; 16 for none.
-fn lowest(mask: Group) -> usize {
-    (mask.trailing_zeros() / 8) as usize
-}
+impl Group {
+    /// The buckets whose control byte may be `byte`: each that is, and rarely one that is not
+    /// (a byte one above a matching byte can borrow), so the caller compares the key of each.
+    #[inline]
+    fn candidates(self, byte: u8) -> Members {
+        let splat = ONES.wrapping_mul(u64::from(byte));
+        let low = self.low ^ splat;
+        let high = self.high ^ splat;
+        Members {
+            low: low.wrapping_sub(ONES) & !low & TOPS,
+            high: high.wrapping_sub(ONES) & !high & TOPS,
+        }
+    }
 
-/// The buckets at the end of a group before the last member of the set `mask`; 16 for none.
-fn leading_outside(mask: Group) -> u32 {
-    mask.leading_zeros() / 8
+    /// The empty buckets: of the three kinds of byte only `EMPTY` has bits 6 and 7 both set.
+    #[inline]
+    fn empty(self) -> Members {
+        Members {
+            low: self.low & (self.low << 1) & TOPS,
+            high: self.high & (self.high << 1) & TOPS,
+        }
+    }
+
+    /// Whether a bucket is empty.
+    #[inline]
+    fn has_empty(self) -> bool {
+        let empty = self.empty();
+        empty.low | empty.high != 0
+    }
+
+    /// The first bucket that is empty or deleted: the bytes with bit 7 set.
+    #[inline]
+    fn first_empty_or_deleted(self) -> Option<usize> {
+        Members {
+            low: self.low & TOPS,
+            high: self.high & TOPS,
+        }
+        .next()
+    }
+
+    /// The full or deleted buckets at the start of the group, before its first empty one; 16
+    /// for none.
+    fn taken_at_start(self) -> u32 {
+        let empty = self.empty();
+        if empty.low != 0 {
+            empty.low.trailing_zeros() / 8
+        } else {
+            8 + empty.high.trailing_zeros() / 8
+        }
+    }
+
+    /// The full or deleted buckets at the end of the group, after its last empty one; 16 for
+    /// none.
+    fn taken_at_end(self) -> u32 {
+        let empty = self.empty();
+        if empty.high != 0 {
+            empty.high.leading_zeros() / 8
+        } else {
+            8 + empty.low.leading_zeros() / 8
+        }
+    }
 }
 
 /// The sequence of groups a probe reads: from the bucket of the hash, then 16, 32, 48 and so
@@ -134,47 +201,47 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
     }
 
     /// The value stored under `key`.
+    #[inline]
     pub(crate) fn get<Q>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        let index = self.find(self.hasher.hash_one(key), key)?;
-        self.slots.get(index)?.as_ref().map(|(_, value)| value)
+        let (_, (_, value)) = self.find(self.hasher.hash_one(key), key)?;
+        Some(value)
     }
 
     /// Store `value` under `key` and answer the value it replaces; a key already stored keeps
     /// the key it was stored with. The table grows first when it has no room for one more
     /// entry, through `try_reserve`, so a refusal of the allocator is `OverBudget`, not an
     /// abort.
+    #[inline]
     pub(crate) fn insert(&mut self, key: K, value: V) -> Result<Option<V>, OverBudget> {
         self.reserve(1)?;
         let hash = self.hasher.hash_one(&key);
         let h2 = h2(hash);
+        let mask = self.bucket_mask;
         let mut probe = self.probe(hash);
         let mut insert_slot = None;
-        for _ in 0..=self.bucket_mask {
+        for _ in 0..=mask {
             let group = self.group(probe.pos);
-            let mut matches = match_byte(group, h2);
-            while matches != 0 {
-                let index = probe.pos.wrapping_add(lowest(matches)) & self.bucket_mask;
-                matches &= matches - 1;
+            for offset in group.candidates(h2) {
+                let index = probe.pos.wrapping_add(offset) & mask;
                 if let Some(Some((stored, old))) = self.slots.get_mut(index)
                     && *stored == key
                 {
                     return Ok(Some(core::mem::replace(old, value)));
                 }
             }
-            if insert_slot.is_none() {
-                let free = match_empty_or_deleted(group);
-                if free != 0 {
-                    insert_slot = Some(probe.pos.wrapping_add(lowest(free)) & self.bucket_mask);
-                }
+            if insert_slot.is_none()
+                && let Some(offset) = group.first_empty_or_deleted()
+            {
+                insert_slot = Some(probe.pos.wrapping_add(offset) & mask);
             }
-            if match_empty(group) != 0 {
+            if group.has_empty() {
                 break;
             }
-            probe.next(self.bucket_mask);
+            probe.next(mask);
         }
         let index = self.fix_insert_slot(insert_slot.ok_or(OverBudget)?);
         if self.ctrl_at(index) == EMPTY {
@@ -231,6 +298,7 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
     /// room than that the table is rehashed: in place while its entries and the new ones fill
     /// at most half of what it holds, else into a table for at least one more entry than it
     /// holds.
+    #[inline]
     pub(crate) fn reserve(&mut self, additional: usize) -> Result<(), OverBudget> {
         if additional <= self.growth_left {
             return Ok(());
@@ -246,12 +314,13 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
     }
 
     /// Remove the entry of `key` and answer its value.
+    #[inline]
     pub(crate) fn remove<Q>(&mut self, key: &Q) -> Option<V>
     where
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        let index = self.find(self.hasher.hash_one(key), key)?;
+        let (index, _) = self.find(self.hasher.hash_one(key), key)?;
         self.erase(index).map(|(_, value)| value)
     }
 
@@ -336,6 +405,7 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
     }
 
     /// The probe of `hash` in this table.
+    #[inline]
     fn probe(&self, hash: u64) -> Probe {
         Probe {
             pos: h1(hash) & self.bucket_mask,
@@ -344,20 +414,25 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
     }
 
     /// The control byte of bucket `index` (or of the repeated group after the last bucket).
+    #[inline]
     fn ctrl_at(&self, index: usize) -> u8 {
         self.ctrl.get(index).copied().unwrap_or(EMPTY)
     }
 
     /// The 16 control bytes from bucket `pos`.
+    #[inline]
     fn group(&self, pos: usize) -> Group {
-        self.ctrl
-            .get(pos..pos.saturating_add(WIDTH))
-            .and_then(|bytes| <[u8; WIDTH]>::try_from(bytes).ok())
-            .map_or(Group::MAX, Group::from_le_bytes)
+        let word = |bytes: Option<&[u8; 8]>| bytes.copied().map_or(u64::MAX, u64::from_le_bytes);
+        let bytes = self.ctrl.get(pos..pos.wrapping_add(WIDTH));
+        Group {
+            low: word(bytes.and_then(<[u8]>::first_chunk)),
+            high: word(bytes.and_then(<[u8]>::last_chunk)),
+        }
     }
 
     /// Set the control byte of bucket `index` and its copy after the last bucket: for a bucket
     /// of the first group, the byte `WIDTH` past the end of the buckets; for any other, itself.
+    #[inline]
     fn set_ctrl(&mut self, index: usize, byte: u8) {
         let mirror = (index.wrapping_sub(WIDTH) & self.bucket_mask).wrapping_add(WIDTH);
         for at in [index, mirror] {
@@ -367,45 +442,41 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
         }
     }
 
-    /// The bucket that holds `key`, whose hash is `hash`.
-    fn find<Q>(&self, hash: u64, key: &Q) -> Option<usize>
+    /// The bucket that holds `key`, whose hash is `hash`, and its entry.
+    #[inline]
+    fn find<Q>(&self, hash: u64, key: &Q) -> Option<(usize, &(K, V))>
     where
         K: Borrow<Q>,
         Q: Eq + ?Sized,
     {
-        if self.ctrl.is_empty() {
-            return None;
-        }
         let h2 = h2(hash);
+        let mask = self.bucket_mask;
         let mut probe = self.probe(hash);
-        for _ in 0..=self.bucket_mask {
+        for _ in 0..=mask {
             let group = self.group(probe.pos);
-            let mut matches = match_byte(group, h2);
-            while matches != 0 {
-                let index = probe.pos.wrapping_add(lowest(matches)) & self.bucket_mask;
-                matches &= matches - 1;
-                if let Some(Some((stored, _))) = self.slots.get(index)
-                    && stored.borrow() == key
+            for offset in group.candidates(h2) {
+                let index = probe.pos.wrapping_add(offset) & mask;
+                if let Some(Some(entry)) = self.slots.get(index)
+                    && entry.0.borrow() == key
                 {
-                    return Some(index);
+                    return Some((index, entry));
                 }
             }
-            if match_empty(group) != 0 {
+            if group.has_empty() {
                 return None;
             }
-            probe.next(self.bucket_mask);
+            probe.next(mask);
         }
         None
     }
 
     /// The first empty or deleted bucket on the probe of `hash`.
+    #[inline]
     fn find_insert_slot(&self, hash: u64) -> usize {
         let mut probe = self.probe(hash);
         for _ in 0..=self.bucket_mask {
-            let free = match_empty_or_deleted(self.group(probe.pos));
-            if free != 0 {
-                return self
-                    .fix_insert_slot(probe.pos.wrapping_add(lowest(free)) & self.bucket_mask);
+            if let Some(offset) = self.group(probe.pos).first_empty_or_deleted() {
+                return self.fix_insert_slot(probe.pos.wrapping_add(offset) & self.bucket_mask);
             }
             probe.next(self.bucket_mask);
         }
@@ -415,9 +486,10 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
     /// In a table of fewer buckets than a group, a group read past the last bucket sees empty
     /// bytes that are not buckets, which the mask maps onto a full bucket: the first empty or
     /// deleted bucket of the first group is taken instead.
+    #[inline]
     fn fix_insert_slot(&self, index: usize) -> usize {
         if self.ctrl_at(index) & 0x80 == 0 {
-            lowest(match_empty_or_deleted(self.group(0)))
+            self.group(0).first_empty_or_deleted().unwrap_or(index)
         } else {
             index
         }
@@ -429,9 +501,9 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
     fn erase(&mut self, index: usize) -> Option<(K, V)> {
         let entry = self.slots.get_mut(index)?.take()?;
         let index_before = index.wrapping_sub(WIDTH) & self.bucket_mask;
-        let empty_before = match_empty(self.group(index_before));
-        let empty_after = match_empty(self.group(index));
-        let byte = if leading_outside(empty_before) + lowest(empty_after) as u32 >= WIDTH as u32 {
+        let taken_before = self.group(index_before).taken_at_end();
+        let taken_after = self.group(index).taken_at_start();
+        let byte = if taken_before + taken_after >= WIDTH as u32 {
             DELETED
         } else {
             self.growth_left = self.growth_left.saturating_add(1);
