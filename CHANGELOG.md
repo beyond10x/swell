@@ -38,6 +38,14 @@ Every number below comes from the gate, `task check`, on the released commit.
   `core::error::Error`, the same trait as `std::error::Error`. Public names and behaviour do not
   change; unit tests inside the crates still link `std`.
 
+### Fixed
+
+- The gate no longer overwrites `website/data/engines.json`: the selftest
+  `site-data-check-refuses-a-percentage-rounded-up-to-100` wrote its planted counts there on
+  every run. Each selftest of `site-data` now writes all its outputs under its own directory,
+  and `gate-selftest` fails, naming the files, when its scripts change a tracked file
+  (`story:gate-selftests-write-no-tracked-file`).
+
 ## [0.12.0] - 2026-11-25
 
 swell has a shell binary, `swell`, and a release ships it for Linux, macOS and Windows. The
