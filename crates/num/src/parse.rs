@@ -26,6 +26,8 @@
 //! length of the text, reserved before the digits are copied. This crate takes no budget: the
 //! engine charges a step per code unit and the bytes of the buffer before it calls.
 
+use alloc::string::String;
+
 /// Whether the code unit `unit` is a `StrWhiteSpaceChar`
 /// (`#sec-tonumber-applied-to-the-string-type`): `WhiteSpace` (12.2: TAB, VT, FF, ZWNBSP and
 /// every code point of General_Category `Zs`) or `LineTerminator` (12.3: LF, CR, LS, PS). `Zs`

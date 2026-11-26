@@ -9,6 +9,8 @@
 //! Every node records its source position.
 
 use crate::ledger::HeapBytes;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 /// The source position of a node or token: code unit offsets `start..end`, and the `line` and
 /// `column` of `start`, both counted from 1 (a column counts UTF-16 code units).

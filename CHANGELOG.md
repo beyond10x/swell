@@ -5,10 +5,114 @@ What changed in each release of swell. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The history starts at the first
 release; what came before it is in the git log and in `docs/plan/`.
 
-A release of swell is a version of its source: swell is a library, and no binary is built yet.
+A release of swell is a version of its source and, from 0.12.0 on, the `swell` shell binary for
+Linux, macOS and Windows (`docs/releasing.md`, "The binary of a release").
 Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
+
+### Changed
+
+- `swell-num` builds without `std` (`#![no_std]` with `alloc`), step 2 of story
+  `core-builds-without-std`: it names no `std::` path outside its unit tests and calls no
+  `f64` method of `std`. The new module `swell_num::fmath` computes `sqrt`, `floor`, `ceil`,
+  `trunc`, `fmod` (the `%` of two `f64`, which the compiler otherwise lowers to a call of the
+  C math library's `fmod`) and `rem_euclid` in integer arithmetic, ported from fdlibm (FreeBSD
+  msun; notice in `NOTICE`); each result is the one IEEE 754 fixes. `sqrt` corrects an `f64`
+  estimate in `u128` integers (the fdlibm root bit by bit stays as the oracle of the lib tests),
+  and `fmod` of two integers below 2^53 takes the `i64` remainder. A million calls on the build
+  node take, `std` against `fmath`: `sqrt` 1.2 ms and 21.0 ms, `floor` 5.6 ms and 5.0 ms,
+  `trunc` 1.6 ms and 1.3 ms, `%` of integers 29.4 ms and 12.8 ms, of fractions 23.9 ms and
+  33.4 ms. A corpus of 2,124 calls
+  (`crates/num/tests/fixtures/fmath/corpus.txt`) holds the results, and exact arithmetic
+  holds them again. Against `std` on x86-64 Linux the corpus differs in no result but the bits
+  of a NaN: `sqrt` 0 of 313 (149 NaN results with other bits: `std` answers the negative
+  default NaN for the root of a negative Number and quiets a signalling NaN, `fmath` answers
+  the positive default NaN and a NaN operand as it is), `floor`, `ceil` and `trunc` 0 of 313
+  each, `fmod` 0 of 436 (10 NaN results with other bits), `rem_euclid` 0 of 436 (12). The lib
+  tests read the longest operand of `Nat` from a value passed in, not from a `thread_local!`.
+  The test262 counts do not change (`test262 total 53801 8982 7 44812 25943 18867 2`).
+- `swell-unicode`, `swell-syntax`, `swell-compiler` and `swell-regexp` are `#![no_std]` with
+  `extern crate alloc`: their library code names `core::` and `alloc::` paths and no `std::`
+  path (step 1 of `story:core-builds-without-std`). `SyntaxError` and `CompileError` implement
+  `core::error::Error`, the same trait as `std::error::Error`. Public names and behaviour do not
+  change; unit tests inside the crates still link `std`.
+
+### Fixed
+
+- The gate no longer overwrites `website/data/engines.json`: the selftest
+  `site-data-check-refuses-a-percentage-rounded-up-to-100` wrote its planted counts there on
+  every run. Each selftest of `site-data` now writes all its outputs under its own directory,
+  and `gate-selftest` fails, naming the files, when its scripts change a tracked file
+  (`story:gate-selftests-write-no-tracked-file`).
+
+## [0.12.0] - 2026-11-25
+
+swell has a shell binary, `swell`, and a release ships it for Linux, macOS and Windows. The
+site compares swell with other engines, and an interrupt set by a host function is read after
+every call from Rust. The test262 counts do not change: 25,943 of the 44,812 selected test262
+cases pass, as in 0.11.0 (`test262 total 53801 8982 7 44812 25943 18867 2`).
+
+### Added
+
+- The shell binary `swell`, package `swell-cli` in `crates/cli`: `swell [flags] <file.js>` or
+  `swell [flags] -e <source>` runs one script and then its promise jobs. The realm has `print`,
+  and `console.log` as the same function. `Date.now()` reads the system clock. There is one flag
+  per field of `Limits` (`--steps`, `--memory`, `--depth`, `--reentry`, `--nesting`,
+  `--string-length`, `--bigint-bits`) and `--timeout <ms>`, which interrupts the run. The exit
+  status gives the outcome: 0 normal, 1 uncaught throw, 2 syntax error, 3 step budget, 4 memory
+  budget, 5 depth limit, 6 interrupted, 64 usage error, 70 engine fault. `swell --version`
+  prints the version. The binary is std only and has `#![forbid(unsafe_code)]`
+  (`story:cli-runs-a-script-file`).
+- Releases ship the binary: a pushed tag runs `.github/workflows/release-build.yml`, which
+  builds, smoke-tests and packages `swell` for `x86_64-unknown-linux-gnu`,
+  `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin` (`.tar.gz`) and
+  `x86_64-pc-windows-msvc` (`.zip`). The release has the five archives and `SHA256SUMS` as
+  assets (`docs/releasing.md`; `story:releases-ship-the-shell-for-three-systems`). The macOS
+  and Windows binaries are not signed; the release's notes say how to check and run them.
+- The test262 sources digest (`task test262-digest`) now covers only the packages of the
+  runner: `swell-test262` and what it depends on in `Cargo.lock`. A change to `crates/cli` or
+  `crates/unicode-gen` no longer requires a full test262 run.
+- The site's compare page, `/compare`: 2 to 4 engine configurations side by side, rows grouped
+  by the KPIs K1 to K8 and the facts, the selection in the URL (`?e=swell,v8-jitless,quickjs,boa`),
+  the best of the picked cells marked among values of one source, "not measured" with its
+  reason, and a source link in every cell. JIT configurations are offered behind a toggle and
+  shown as "JIT reference". The page `/docs/kpis` describes each KPI: definition, unit,
+  direction, gate or compare, how it is measured and where each engine's value comes from.
+- `bench/engines.jsonl`: a catalog of 35 ECMAScript engines, a source URL per field and
+  "unknown" where no source says, the default set of eight marked, and the configurations the
+  page compares.
+- `task bench-import-zoo` (manual, network): javascript-zoo-data's test262 results at test262
+  `4a1e962` for the 35 configurations it has, counted per top directory into
+  `bench/published/zoo-test262-4a1e962.tsv` with the data commit, the sha256 of each fetched
+  file and the fetch date, its MIT notice, and `bench/published/SHA256SUMS`.
+- `task site-data` writes `website/data/engines.json` beside `status.json`, from the catalog,
+  the published tables, result files of format `swell-bench/1` (none yet) and swell's own
+  committed files; every value carries its source, date, revision and method.
+  `site-data-check` holds it, and refuses a published table that differs from its sha256.
+- Two designs, of which nothing is built: `docs/design/quality-and-comparison.md`, what makes
+  swell good and how it is compared with other engines, and `docs/design/native-code.md`, a
+  path that compiles JavaScript ahead of time through codespec's `cir/1` to WebAssembly or
+  x86_64, with a JIT later.
+
+### Fixed
+
+- The interrupt flag is read after every call from Rust into a host function, not only after
+  a call or a construction: a host function reached by a property read or write (a getter, a
+  setter), a conversion (`valueOf`, `toString`), an iterator's `next` or a promise job (a
+  thenable's `then`, a reaction handler) that sets the flag ends the run or the microtask
+  checkpoint in `Terminated(Interrupted)` when it returns or throws, also when it is the
+  script's last operation or the checkpoint's last job, and the thrown value reaches no
+  `catch`.
+- An embedder that calls a host function with `cx.call` and that function sets the flag now
+  gets `Err(Abrupt::Terminated(Termination::Interrupted))` from that call, where it got the
+  function's `Ok` value before and the termination only at the next call.
+
+### Host interface
+
+- `HOST-221` (new, slice 1) has a test: an interrupt set by a host getter, setter, `valueOf`,
+  iterator `next`, thenable `then` or reaction handler that then throws or returns ends the
+  run or the checkpoint, with the flag clear after.
 
 ## [0.11.0] - 2026-11-25
 
@@ -1206,7 +1310,8 @@ language; it is a small part of the standard, and the limits below say how small
   `swell = { git = "https://github.com/beyond10x/swell", tag = "0.1.0" }`.
 - Measured on x86_64 Linux with rustc 1.99.1 only.
 
-[Unreleased]: https://github.com/beyond10x/swell/compare/0.11.0...HEAD
+[Unreleased]: https://github.com/beyond10x/swell/compare/0.12.0...HEAD
+[0.12.0]: https://github.com/beyond10x/swell/releases/tag/0.12.0
 [0.11.0]: https://github.com/beyond10x/swell/releases/tag/0.11.0
 [0.10.0]: https://github.com/beyond10x/swell/releases/tag/0.10.0
 [0.9.1]: https://github.com/beyond10x/swell/releases/tag/0.9.1

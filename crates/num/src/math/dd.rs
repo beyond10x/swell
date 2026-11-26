@@ -23,7 +23,7 @@
 //!
 //! What fixes each result on every platform: `+ - * /` are correctly rounded to nearest (IEEE
 //! 754-2019, 5.4.1); `crate::math` refuses to compile where `f64` arithmetic carries extended
-//! precision, and rustc does not contract `a * b + c` into one fused operation. `f64::sqrt` is
+//! precision, and rustc does not contract `a * b + c` into one fused operation. `fmath::sqrt` is
 //! correctly rounded (5.4.1). `abs`, `to_bits` and `from_bits` are exact, and so are the
 //! comparisons. A multiplication by a power of two is exact when its result is a normal
 //! Number, and is the one rounding of [`Dd::scale2`] otherwise.
@@ -35,6 +35,8 @@
 //! Number the operation's first step computes, and nothing panics.
 
 use core::ops::{Add, Div, Mul, Neg, Sub};
+
+use crate::fmath;
 
 /// 2^27 + 1: Veltkamp's splitter for a 53-bit significand.
 const SPLITTER: f64 = 134_217_729.0;
@@ -173,7 +175,7 @@ impl Dd {
     /// exact by [`two_product`] and the difference in double-double. A zero, a negative or a
     /// non-finite high part gives `(sqrt(hi), 0)`: ±0, NaN or +∞.
     pub fn sqrt(self) -> Dd {
-        let x = self.hi.sqrt();
+        let x = fmath::sqrt(self.hi);
         if self.hi <= 0.0 || !self.hi.is_finite() {
             return Dd { hi: x, lo: 0.0 };
         }

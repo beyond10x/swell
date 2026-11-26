@@ -19,7 +19,9 @@ dir=.out/gate-tests/$name
 status=website/data/status.json
 expected=conformance/test262/expected.txt
 unset SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS \
-  SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES
+  SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES \
+  SITE_DATA_ENGINES SITE_DATA_CATALOG SITE_DATA_PUBLISHED SITE_DATA_RESULTS SITE_DATA_PIN \
+  SITE_DATA_LIMITS SITE_DATA_INTERRUPT
 fail() { echo "$name: FAIL $*"; exit 1; }
 
 rm -rf "$dir" && mkdir -p "$dir" || fail "cannot make $dir"
@@ -27,13 +29,18 @@ rm -rf "$dir" && mkdir -p "$dir" || fail "cannot make $dir"
 [ -s "$expected" ] || fail "no $expected to copy"
 
 # The task file is named, so the script runs whether or not the root Taskfile.yml includes it.
+# This case is about status.json. The compare page's engines.json is compared with its own
+# regeneration (SITE_DATA_ENGINES names the file site-data-check writes), so a change of the
+# engine data elsewhere in the tree, or a case of it run beside this one, does not decide this
+# case; site-data-check-refuses-a-number-typed-into-engines-json covers engines.json.
 check() {
-  task -d . -t taskfiles/site.yml site-data-check SITE_DATA_OUT="$dir/out" "$@"
+  task -d . -t taskfiles/site.yml site-data-check SITE_DATA_OUT="$dir/out" \
+    SITE_DATA_ENGINES="$dir/out/engines.json" "$@"
 }
 
 cp "$status" "$dir/status.json" || fail "cannot copy $status"
 check SITE_DATA_FILE="$dir/status.json" > "$dir/unplanted.out" 2>&1 ||
-  fail "site-data-check refused the unchanged copy of $status ($dir/unplanted.out)"
+  { tail -n 5 "$dir/unplanted.out"; fail "site-data-check refused the unchanged copy of $status ($dir/unplanted.out)"; }
 grep -q '^site-data-check: .* equals its regeneration from ' "$dir/unplanted.out" ||
   fail "site-data-check printed no summary line for the unchanged copy ($dir/unplanted.out)"
 

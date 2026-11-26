@@ -15,7 +15,7 @@
 //! The `f64` operations of this module and of [`dd`], and what fixes each result on every
 //! platform: `+ - * /` (IEEE 754-2019, 5.4.1: correctly rounded to nearest; the
 //! `compile_error!` below refuses a target whose `f64` arithmetic carries extended precision,
-//! and rustc does not contract `a * b + c` into one fused operation), `f64::sqrt` (correctly
+//! and rustc does not contract `a * b + c` into one fused operation), `fmath::sqrt` (correctly
 //! rounded, 5.4.1), `abs`, `to_bits` and `from_bits` (exact), comparisons and the tests
 //! `is_nan`, `is_infinite` and `is_finite`, and a multiplication by a power of two (exact when
 //! the result is a normal Number). No fused multiply-add and no transcendental method of `std`.

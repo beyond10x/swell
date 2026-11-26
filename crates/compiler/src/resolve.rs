@@ -83,7 +83,10 @@
 //! The walk over the tree keeps its work on a stack of its own, so it uses no Rust stack in
 //! proportion to the depth of the tree.
 
-use std::collections::{BTreeMap, BTreeSet};
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
 
 use swell_num::literal::numeric_literal;
 use swell_num::to_string::number_to_string;
@@ -1875,7 +1878,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
             let mut names = m.with_capacity(captured.len())?;
             names.extend(captured.drain(..).map(|(_, n)| n));
             m.release(captured);
-            m.release(std::mem::replace(&mut info.captured, names));
+            m.release(core::mem::replace(&mut info.captured, names));
         }
         info.self_binding = self
             .self_scopes

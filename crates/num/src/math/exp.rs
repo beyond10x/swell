@@ -22,12 +22,13 @@
 //! `crates/num/tests/math_exp_log.rs` holds both against `data/math/reference-exp-log.txt`.
 //!
 //! The `f64` operations, and what fixes each result: `+ - * /` (IEEE 754-2019, 5.4.1: correctly
-//! rounded), `floor`, `abs` and `copysign` (exact: 5.9, 5.5.1), `to_bits` and `from_bits`
+//! rounded), `fmath::floor`, `abs` and `copysign` (exact: 5.9, 5.5.1), `to_bits` and `from_bits`
 //! (exact), comparisons and `is_nan`, `is_infinite`, `is_finite`, and `as i32` of an integral
 //! `f64` after the range test that the line names (the Rust Reference, "Numeric cast": exact for
 //! an integral value in range). No loop depends on the argument.
 
 use super::dd::{self, Dd, pair, two_product};
+use crate::fmath;
 
 /// ln 2 in three parts, L1 + L2 + L3: L1 = floor(ln 2 × 2^32) / 2^32 (32 bits), L2 =
 /// floor((ln 2 - L1) × 2^64) / 2^64 (32 bits) and L3 the Number nearest to ln 2 - L1 - L2.
@@ -125,7 +126,7 @@ fn remainder(x: Dd, k: f64) -> Dd {
 /// remainder's high part lies beyond ±(ln 2 / 2).
 fn reduce(x: Dd) -> (Dd, i32) {
     let quotient = (x * INV_LN2).hi;
-    let mut k = (quotient + 0.5).floor();
+    let mut k = fmath::floor(quotient + 0.5);
     let mut r = remainder(x, k);
     let half = LN2.hi * 0.5;
     if r.hi > half {

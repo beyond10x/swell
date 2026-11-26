@@ -75,6 +75,7 @@ mkdir -p "$root/crates/swell/src" "$root/crates/swell/tests" || fail "cannot mak
 git -C "$root" init -q || fail "git init failed in $root"
 printf '[workspace]\nmembers = ["crates/swell"]\n' > "$root/Cargo.toml"
 printf '[package]\nname = "swell"\n' > "$root/crates/swell/Cargo.toml"
+printf 'version = 4\n\n[[package]]\nname = "swell"\nversion = "0.1.0"\n\n[[package]]\nname = "swell-test262"\nversion = "0.1.0"\ndependencies = [\n "swell",\n]\n' > "$root/Cargo.lock"
 printf 'pub fn answer() -> u32 {\n    42\n}\n' > "$root/crates/swell/src/lib.rs"
 printf '#[test]\nfn answers() {}\n' > "$root/crates/swell/tests/answer.rs"
 rooted="GATE_ROOT=$root $copies"

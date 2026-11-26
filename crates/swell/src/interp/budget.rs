@@ -9,7 +9,8 @@
 //!   rule.
 //! - The interrupt flag is read by [`Agent::check_interrupt`] at every `LoopJump`, every call
 //!   (the frame a call pushes, and right after a builtin or host function returns or throws,
-//!   [`Agent::check_interrupt_after`]), every return and every re-entry (`interp/mod.rs`), and
+//!   [`Agent::check_interrupt_after`]), after every host function whoever called it
+//!   (`Agent::run_host_function`, HOST-221), every return and every re-entry (`interp/mod.rs`), and
 //!   by `Agent::charge_steps`; a set flag ends the run in `Terminated(Interrupted)` and is
 //!   cleared.
 //! - `frame_depth` bounds the frames on the frame stack, a script's own frame included

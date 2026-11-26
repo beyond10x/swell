@@ -196,3 +196,58 @@ fn host_90_interrupt_from_another_thread_ends_the_loop() {
 ```
 
 The tests call `unwrap` on a `Result<_, HostError>`. A host handles the `Err` instead.
+
+## The shell binary
+
+`crates/cli` (package `swell-cli`) is a small host that builds the binary `swell`. It runs one script from the command line, for benchmarks and for comparing swell with other engines. It uses the standard library only and has `#![forbid(unsafe_code)]`, like the engine.
+
+Each [release](https://github.com/beyond10x/swell/releases) from the one that adds the shell on has the binary as an asset for five targets: `swell-<version>-<target>.tar.gz` for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin` and `aarch64-apple-darwin`, and `swell-<version>-x86_64-pc-windows-msvc.zip`. Each archive holds the binary, `README.md`, `LICENSE` and `NOTICE`. The release's `SHA256SUMS` lists the SHA-256 of each archive:
+
+```sh
+sha256sum --check --ignore-missing SHA256SUMS
+tar -xzf swell-<version>-x86_64-unknown-linux-gnu.tar.gz
+swell-<version>-x86_64-unknown-linux-gnu/swell --version
+```
+
+To build it from source:
+
+```sh
+cargo build --release -p swell-cli
+target/release/swell [flags] script.js
+target/release/swell [flags] -e 'print(6 * 7)'
+```
+
+The binary creates one agent and one realm, runs the script, then runs the promise jobs the script queued. It runs the agent on a thread with `Limits::min_stack_bytes()` bytes of stack. The realm has two globals that ECMA-262 does not define:
+
+- `print(...args)` converts each argument to a string, joins them with a space and writes them to standard output, followed by a newline.
+- `console.log` is the same function.
+
+`Date.now()` reads the system clock through `host_system_utc_epoch_nanoseconds`. The seeds are fixed, so `Math.random` gives the same sequence in every run.
+
+| flag | sets |
+|---|---|
+| `--steps <n>` | `steps_per_entry`, shared by the script and its promise jobs |
+| `--memory <bytes>` | `memory_bytes` |
+| `--depth <n>` | `frame_depth` |
+| `--reentry <n>` | `reentry_depth` |
+| `--nesting <n>` | `parser_nesting` |
+| `--string-length <n>` | `string_length` |
+| `--bigint-bits <n>` | `bigint_bits` |
+| `--timeout <ms>` | interrupts the run from another thread after that much wall time |
+| `-e <source>` | runs the source instead of a file |
+| `-h`, `--help` | prints the flags, their defaults and the exit statuses |
+| `--version` | prints `swell <version>` |
+
+A number is decimal, or `max` for the largest value of its type. A limit that is not given takes the value the test262 runner uses (`DEFAULT_LIMITS` in `crates/cli/src/args.rs`). `swell --help` prints these values.
+
+| exit status | outcome |
+|---|---|
+| 0 | the script and its jobs ended normally |
+| 1 | an uncaught throw; its kind, message and position go to standard error |
+| 2 | a syntax error |
+| 3 | `Terminated(StepBudget)` |
+| 4 | `Terminated(MemoryBudget)` |
+| 5 | a depth limit: the `RangeError` of `frame_depth` or `reentry_depth`, or the parse error of `parser_nesting` |
+| 6 | `Terminated(Interrupted)`, after `--timeout` |
+| 64 | a usage error, or a file that cannot be read or is not UTF-8 |
+| 70 | `Terminated(EngineFault)`, or an entry point that answered `Err(HostError)` |

@@ -328,12 +328,14 @@ x86_64, out of process (INFERENCE from research section 3):
 
 ## 6. Open questions
 
-Each has a default. Q1 is a change of architecture and of a rule, so it waits for the owner; the
-others follow "A default proceeds".
+Each has a default. Q1 is decided by the owner; the others follow "A default proceeds".
 
-- **Q1. T1 and the rule "no machine code, no executable memory".** (a) Keep the rule; build T0
-  and T2, keep T1 as this design. (b) Allow one audited crate without `forbid(unsafe_code)` for
-  T1. (c) Allow T1 only out of process. Default: (a). Waits for the owner.
+- **Q1. T1 and the rule "no machine code, no executable memory". Decided by the owner,
+  2026-11-25:** the order is a JIT "at some point" and, now, JavaScript compiled through codespec
+  to WebAssembly or x86_64 and run in a container. So T2 (and T0) are built now; T1 is built
+  later. The rule holds until T1 starts; T1's own design record then chooses between one audited
+  crate without `forbid(unsafe_code)` and a JIT out of process, and changes the rule in
+  `AGENTS.md` and `website/docs/principles.md` in the same change.
 - **Q2. Wasm run host.** (a) A Rust binary on the Wasmtime library in a tooling workspace
   (`bench/`), with the imports `print` (formatted by `swell-num`) and `terminate`, mapping traps to
   swell's outcomes. (b) The Wasmtime CLI and a shell script. (c) wasmi or wazero. Default: (a);

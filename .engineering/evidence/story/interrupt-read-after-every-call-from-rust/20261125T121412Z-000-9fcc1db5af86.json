@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-25T12:14:12Z",
+  "actor": "human:operator",
+  "artifact": "story:interrupt-read-after-every-call-from-rust",
+  "kind": "story",
+  "revision": 12,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner",
+    "reference": "HOST-221 test swell::interrupt::host_221_an_interrupt_set_in_a_host_function_reached_from_rust_ends_the_run; check-runner exit 0, test262 25943 of 44812, expected.txt unchanged"
+  }
+}

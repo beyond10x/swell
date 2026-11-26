@@ -15,6 +15,7 @@
 //! slot or a counter. Each instruction below says what
 //! it does to that state; one that fails hands control to the backtrack stack.
 
+use alloc::vec::Vec;
 use swell_unicode::Property;
 
 use crate::ast::Name;
@@ -166,11 +167,11 @@ impl ClassSet {
         let in_ranges = own
             .binary_search_by(|&(first, last)| {
                 if last < c {
-                    std::cmp::Ordering::Less
+                    core::cmp::Ordering::Less
                 } else if first > c {
-                    std::cmp::Ordering::Greater
+                    core::cmp::Ordering::Greater
                 } else {
-                    std::cmp::Ordering::Equal
+                    core::cmp::Ordering::Equal
                 }
             })
             .is_ok();
@@ -267,7 +268,7 @@ impl Program {
             let text = self
                 .text
                 .get(start..start.saturating_add(name.len as usize))
-                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .and_then(|bytes| core::str::from_utf8(bytes).ok())
                 .unwrap_or("");
             (number, text)
         })

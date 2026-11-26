@@ -826,7 +826,10 @@ impl<H: Host> Agent<H> {
     }
 
     /// The steps of a host function: the `HostFn` with a `Cx`, then the check of what it
-    /// returned (decision 6).
+    /// returned (decision 6), then the interrupt check after its return or throw
+    /// ([`Agent::check_interrupt_after`], decision 12): every caller from Rust, a getter, a
+    /// setter, a conversion or an iterator's `next` as well as `Call` and `New`, sees a set flag
+    /// end the run before it uses the answer (HOST-221).
     fn run_host_function(
         &mut self,
         function: ObjectRef,
@@ -857,7 +860,7 @@ impl<H: Host> Agent<H> {
         self.scope.truncate(start);
         // A terminated run ignores what the host function returned (decision 10).
         self.running()?;
-        match answer {
+        let answer = match answer {
             Ok(value) => {
                 if self.heap.check_value(value).is_err() {
                     return Err(self.fault());
@@ -874,7 +877,8 @@ impl<H: Host> Agent<H> {
                 Err(Abrupt::Throw(value))
             }
             Err(Abrupt::Terminated(termination)) => Err(self.terminate(termination)),
-        }
+        };
+        self.check_interrupt_after(answer)
     }
 }
 

@@ -21,8 +21,9 @@
 //! decomposition and the class 0, so it stays in place. Any `u32` may be given; a value above
 //! U+10FFFF has no decomposition and the class 0.
 
-use std::cmp::Ordering;
-use std::convert::Infallible;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
+use core::convert::Infallible;
 
 use crate::tables::{combining_class, compositions, decompositions};
 

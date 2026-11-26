@@ -27,13 +27,14 @@
 //! `data/math/reference-exp-log.txt`, the draft's table and the exact cases.
 //!
 //! The `f64` operations, and what fixes each result: `+ - * /` (IEEE 754-2019, 5.4.1: correctly
-//! rounded), `floor`, `abs` and `copysign` (exact: 5.9, 5.5.1), `to_bits` and `from_bits`
+//! rounded), `fmath::floor`, `abs` and `copysign` (exact: 5.9, 5.5.1), `to_bits` and `from_bits`
 //! (exact), comparisons and `is_nan`, `is_infinite`, `is_finite`, and `as i32` of an integral
 //! `f64` after a range test (in [`super::exp`]). No loop depends on the argument.
 
 use super::dd::{self, Dd};
 use super::exp::{INV_LN2, LN2, exp_dd, expm1_kernel, small_integer};
 use super::log::log_dd;
+use crate::fmath;
 
 /// 2^53: from here on every Number is an even integer.
 const TWO_53: f64 = 9_007_199_254_740_992.0;
@@ -47,14 +48,14 @@ const T_LIMIT: f64 = 1100.0;
 
 /// Whether a Number is integral: finite and equal to its `floor`.
 fn is_integral(x: f64) -> bool {
-    x.is_finite() && x.floor() == x
+    x.is_finite() && fmath::floor(x) == x
 }
 
 /// Whether a Number is an odd integral Number: integral, below 2^53 in magnitude (above it every
 /// Number is even), and x / 2 not integral (x / 2 is exact for an integer of magnitude at
 /// least 1).
 fn is_odd_integral(x: f64) -> bool {
-    is_integral(x) && x.abs() < TWO_53 && (x * 0.5).floor() != x * 0.5
+    is_integral(x) && x.abs() < TWO_53 && fmath::floor(x * 0.5) != x * 0.5
 }
 
 /// |base|^exponent for a positive finite base and a finite non-zero exponent, as 2^t with
@@ -69,7 +70,7 @@ fn magnitude(base: f64, exponent: f64) -> f64 {
         return 0.0;
     }
     let t = Dd::from_f64(exponent) * log2;
-    let mut k = (t.hi + 0.5).floor();
+    let mut k = fmath::floor(t.hi + 0.5);
     let mut fraction = t - Dd::from_f64(k);
     if fraction.hi > 0.5 {
         k += 1.0;
