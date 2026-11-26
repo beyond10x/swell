@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T19:40:46Z",
+  "actor": "human:operator",
+  "artifact": "story:map-and-set",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/mapset at a2898842, build node, before the merge into wave/big-2",
+    "reference": "swell main 1236 tests run: 1236 passed, 1 skipped, in the default mode and with collect-every-safe-point; swell lib 250 passed; task clippy exit 0; cargo fmt --check exit 0; by the unit on the same head: task test-realm-sizes, realm-sizes: 0 run(s) red; test262 part passed 532 bound 532 B 156 F 376 R 0"
+  }
+}
