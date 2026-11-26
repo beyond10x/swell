@@ -83,6 +83,7 @@ fn binary(op: BinaryOp) -> Instruction {
         BinaryOp::Mul => Instruction::Mul,
         BinaryOp::Div => Instruction::Div,
         BinaryOp::Rem => Instruction::Rem,
+        BinaryOp::Exp => Instruction::Exp,
         BinaryOp::Add => Instruction::Add,
         BinaryOp::Sub => Instruction::Sub,
         BinaryOp::Shl => Instruction::Shl,

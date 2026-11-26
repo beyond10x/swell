@@ -100,8 +100,8 @@ pub const BINDINGS_REALM_HEAP_BYTES: u64 = 506_112;
 pub struct Seeds {
     /// Keys the SipHash of the engine's hash maps (HOST-145).
     pub hash_key: [u8; 16],
-    /// Seeds `Math.random`, each realm's generator taking it with the realm's creation index as
-    /// its stream (slice 4).
+    /// Seeds `Math.random`: each realm's generator takes it with the realm's creation index as
+    /// its stream.
     pub random_seed: [u8; 32],
 }
 

@@ -389,11 +389,10 @@
   ],
   "host_requirements": {
     "total": 221,
-    "test": 159,
-    "pending": 62,
+    "test": 165,
+    "pending": 56,
     "omitted": 0,
     "pending_by_slice": [
-      {"slice": 4, "count": 6},
       {"slice": 8, "count": 1},
       {"slice": 9, "count": 6},
       {"slice": 11, "count": 32},

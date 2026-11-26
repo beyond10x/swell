@@ -105,6 +105,8 @@ pub enum BinaryOp {
     Mul,
     Div,
     Rem,
+    /// `**` (`#sec-exp-operator`), the one right-associative binary operator.
+    Exp,
     Add,
     Sub,
     Shl,

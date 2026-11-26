@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:generator-methods-in-object-literals
 kind: story
-status: active
+status: implemented
 title: Generator methods of object literals and their early errors
 summary: The parse and early errors of GeneratorMethod in an object literal; removes the refusal generator method is not supported before slice 7; no compiler or engine file; 280 cases (525 runs), 34 of them negative parse cases.
 relations:
@@ -34,10 +34,11 @@ scope:
   path: crates/syntax/tests/sources/refused/generator-method.js
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/generator-method.js
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T11:07:28Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T11:07:28Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:46Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

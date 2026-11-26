@@ -1,7 +1,7 @@
 # Wave big-1: the end of slice 4, the core without std, static binaries
 
 One wave of [the wave plan](waves.md), "After slice 4: bigger waves". Opened on 2026-11-26,
-05:40 CET, on the operator's word of about 05:18 CET (`approval-record:wave-big-1`): one pull
+05:24 CET, on the operator's word of about 05:18 CET (`approval-record:wave-big-1`): one pull
 request carries several stories. Skill version 0.26.0 of `aep:implementing`.
 
 The wave branch is `wave/big-1`, cut from `main` at `b11998b5`, with the branch
@@ -15,13 +15,18 @@ directory. The stage is kept current by the coordinator.
 
 | unit | story | branch | worktree id | stage |
 |---|---|---|---|---|
-| core | `story:core-builds-without-std`, step 3 | `impl/nostd-core` | `swell-impl-nostd-core` | committed up to `43e63c70`; its last commits (the timings, the digest) are being made |
-| gate | `story:core-builds-without-std`, step 4 | `impl/nostd-gate` | `swell-impl-nostd-gate` | dispatched |
-| random | `story:math-random` | `impl/math-random` | `swell-impl-math-random` | dispatched |
-| static | `story:releases-ship-static-binaries` | `impl/static-binaries` | `swell-impl-static-binaries` | dispatched |
-| close | `story:slice-04-conformance-close` | `impl/slice-04-close` | `swell-impl-slice-04-close` | waits for `random` and `gate` on the wave branch |
+| core | `story:core-builds-without-std`, step 3 | `impl/nostd-core` | `swell-impl-nostd-core` | merged into the wave branch at `248a031c`; gate on that head: exit 0, `gate-time test-steps 106.5 of 120` at load 65 on the node |
+| gate | `story:core-builds-without-std`, step 4 | `impl/nostd-gate` | `swell-impl-nostd-gate` | green at `c6a7f86c` (13 files; `nostd-build` and `nostd-symbols` are steps of `check`; `gate-selftest: 75 passed`); its two whole-gate runs: exit 201 with `gate-time test-steps 303.3 of 120` at load 59 on the node, then exit 0 with `81.6 of 120` at load 58; pass 1 (`review-result:adversary-gate-pass-1`): 6 failing cases, 10 findings (9 introduced, 1 found on the base too in `code_of`, 2 not reachable while the crates forbid unsafe code); correction 1 with the same implementor takes all ten but the first: the example host with its own allocator stays unbuilt (see the decision below) and the documents say what the emulated host is; the correction also names the bare target and `llvm-tools` in `.github/workflows/check.yml` and makes `forge-check` compare them with `rust-toolchain.toml` |
+| random | `story:math-random` | `impl/math-random` | `swell-impl-math-random` | green at `ed59cd6b`; pass 1 (`review-result:adversary-random-pass-1`): no failing case, 4 findings, 3 of them gaps in the unit's tests; correction 1 at `96fe0ca3` (six of the adversary's cases join the unit; the rotation mutant and the index mutant each fail their new test); the collect-mode counts stay as they are; pass 2 (`review-result:adversary-random-pass-2`): no failing case, 5 planted mutants each caught by a committed test, 1 note on the story's acceptance text (the coordinator's, rewritten at the close); its 4 further cases are not taken (each mutant is already caught, and the gate's test steps are near their bound); merged into the wave branch at `96fe0ca3` |
+| static | `story:releases-ship-static-binaries` | `impl/static-binaries` | `swell-impl-static-binaries` | merged into the wave branch at `6256b323`; pass 1: 7 findings fixed; pass 2: 4 new, 0 carried, fixed; the coordinator read the second correction (the check executes nothing of a workflow; the unit's own script was pinned to the new message and got one case more, no assertion dropped) |
+| exponent | `story:exponentiation-operator` | `impl/exponentiation` | `swell-impl-exponentiation` | green at `b7d34305` (20 files); the claim is verified by the coordinator with the story's `check.sh`: 70 of the 76 listed cases have a failing run on the base, none after, 950 guard cases pass before and after; pass 1 (`review-result:adversary-exponent-pass-1`): no defect, 12 cases added, 1 note (the unit's interrupt test cannot fail); correction 1 at `3771d526` (3 files): the interrupt now comes from another thread into a loop that calls nothing, and the test fails with `Terminated(StepBudget)` when the check at the loop jump is removed; the adversary's cases joined the existing test files, none dropped; pass 2, the last (`review-result:adversary-exponent-pass-2`): no defect, 8 mutants planted in a copy, 7 caught by committed tests, 1 not (a base in (-1, 0) to +Infinity answering -0; the adversary's case catches it), and 1 chain of `exponent_chains_are_bounded` listed twice; correction 2 at `c8f28a47` (2 test files, 23 insertions, 5 deletions): the case is kept with its assertions, the duplicate chain became the chain as the argument of a call; read by the coordinator, no third pass; merged into the wave branch at `992d1c8d` |
+| growth | `story:buffer-growth-outside-the-charged-list-is-listed` | `impl/buffer-growth` | `swell-impl-buffer-growth` | cut from the wave branch after `random` and `exponent` were merged (it adds an attribute at growth calls all over `crates/swell/src`; the `gate` unit writes no file there, so it does not wait for it); dispatched on 2026-11-26, 07:12 CET |
+| close | `story:slice-04-conformance-close` | `impl/slice-04-close` | `swell-impl-slice-04-close` | waits for `random`, `exponent` and `gate` on the wave branch |
 
-Dispatches use the agent type `aep:implementor` on Opus; the adversary is `aep:adversary`.
+Dispatches use the agent type `aep:implementor` on Opus; the adversary is `aep:adversary`. The
+two decomposers of slices 9 and 8 run as `general-purpose` on Opus with the procedure of
+`aep:decomposer`, because that agent type has no tool that writes a file and the shell here
+takes no heredoc.
 
 ## Why these stories
 
@@ -34,6 +39,12 @@ Dispatches use the agent type `aep:implementor` on Opus; the adversary is `aep:a
 - `story:bench-image-and-first-measurements` is accepted and not built. It is not in this
   wave: its runs need the build node alone for the measurement, and its tree holds work that
   is not committed.
+
+Added at 05:30 CET, from the reading of the store's close: `story:exponentiation-operator`
+(the parser still refuses `**`; 1 of 44 cases of `language/expressions/exponentiation` passes)
+and `story:buffer-growth-outside-the-charged-list-is-listed` (`docs/plan/slice-10-wave-1.md`:
+"planned, not built") are accepted and not built. Both are stories of the plan before this
+wave, and the close of slice 4 depends on the first.
 
 ## What the store's check said
 
@@ -73,6 +84,18 @@ Stories that are delivered on `main` and still `active` in the store get their e
 commit that delivered them and the gate's line) and move to `implemented` in this wave. The
 list with its commits is made by a reading agent and checked by the coordinator before any
 move.
+
+The reading agent found 42 stories delivered. The coordinator's check on the wave branch
+(the commit is an ancestor of the branch, the story is `active`, the named test or file is in
+the tree): 40 hold; for one of them (`story:async-function-constructor`) the agent named the
+wrong file and the test is at `crates/swell/tests/dynamic_function.rs:689`. The other two
+(`story:release-0-12-0-with-binaries`, `story:gate-selftests-write-no-tracked-file`) are
+delivered and still `draft`; they are not moved by this check.
+
+The 40 stories are `implemented` in the store since 2026-11-26, 06:55 CET. Each carries one
+`test_result` record: its source is the gate on `wave/big-1` at `248a031c` (exit 0) with the
+commit that delivered the story, an ancestor of that head; its reference is the test or file
+the check found in the tree.
 
 ## The commits of this wave
 

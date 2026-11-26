@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:49Z",
+  "actor": "human:operator",
+  "artifact": "story:swell-num-math-exp-and-log",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit 4a8b544f905f, an ancestor of that head",
+    "reference": "crates/num/tests/math_exp_log.rs:170 reference_lines_hold_group_a_and_group_b"
+  }
+}

@@ -2,13 +2,14 @@
 format: aep.planning-md/3
 id: story:cli-runs-a-script-file
 kind: story
-status: active
+status: implemented
 title: A swell shell binary runs a script file
 summary: crates/cli runs a file with print, a host clock and limit flags, and exits with a status per outcome
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-25T12:46:20Z", actor: "human:operator", revision: 4}
 - {from: "proposed", to: "active", at: "2026-11-25T12:46:20Z", actor: "human:operator", revision: 5}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:44Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"test_result":1}}}
 ---
 Proposed by `docs/design/native-code.md` § 7 (story 2) and `docs/design/quality-and-comparison.md`
 § 7 and § 9 (story 7). swell is a library today and has no binary, so no engine comparison can

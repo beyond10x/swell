@@ -23,8 +23,8 @@ HOST-22 test swell::budgets::host_22_zero_string_length_throws_on_concatenation
 HOST-23 pending slice 12
 HOST-24 pending slice 12
 HOST-25 pending slice 9
-HOST-26 pending slice 4
-HOST-27 pending slice 4
+HOST-26 test swell::math_random::host_26_two_agents_with_one_seed_agree_for_1000_values
+HOST-27 test swell::math_random::host_27_two_realms_of_one_agent_differ_for_64_values
 HOST-28 test swell::collect::host_28_an_object_held_only_by_a_root_survives_collect
 HOST-29 test swell::collect::host_29_dropping_the_last_root_lowers_heap_bytes
 HOST-30 test swell::misuse::host_30_*
@@ -141,10 +141,10 @@ HOST-140 test swell::eval::host_140_indirect_eval_past_parser_nesting_throws_a_s
 HOST-141 test swell::dynamic_function::host_141_function_past_parser_nesting_throws_a_catchable_syntax_error
 HOST-142 test swell::regexp_literal_limits::host_142_a_literal_past_parser_nesting_is_a_parse_error_naming_it
 HOST-143 test swell::regexp_objects::host_143_a_pattern_past_parser_nesting_throws_a_catchable_syntax_error
-HOST-144 pending slice 4
+HOST-144 test swell::math_random::host_144_the_seed_changes_the_stream_and_the_hash_key_does_not
 HOST-145 test swell::lib::heap::map::tests::host_145_hash_is_keyed_by_hash_key_alone
 HOST-146 test swell::source_scan::host_146_only_agent_new_takes_seeds
-HOST-147 pending slice 4
+HOST-147 test swell::math_random::host_147_two_processes_print_the_same_bytes
 HOST-148 test swell::promises::host_148_the_host_can_tell_which_checkpoint_spent_its_budget
 HOST-149 test swell::doc::compile_fail::host_149_hook_cx_cannot_perform_a_microtask_checkpoint
 HOST-150 pending slice 11
@@ -209,8 +209,8 @@ HOST-208 test swell::builtins_array_from_async::host_208_a_from_async_cut_by_a_t
 HOST-209 test swell::date_zone::host_209_an_offset_out_of_range_is_clamped
 HOST-210 test swell::date_zone::host_210_a_host_with_no_instant_for_any_local_time_gets_nan_after_31_calls
 HOST-211 test swell::date_zone::host_211_every_zone_hook_call_is_charged_one_step_before_it_is_made
-HOST-212 pending slice 4
-HOST-213 pending slice 4
+HOST-212 test swell::math_random::host_212_100000_values_are_in_range_with_positive_sign_and_53_bits
+HOST-213 test swell::math_random::host_213_a_realms_stream_is_its_creation_index
 HOST-214 pending slice 9
 HOST-215 test swell::budgets::host_215_a_buffer_held_across_a_call_into_script_is_charged
 HOST-216 test swell::interrupt::host_216_an_interrupt_set_before_a_host_function_throws_ends_the_run

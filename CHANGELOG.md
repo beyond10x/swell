@@ -11,19 +11,86 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Added
+
+- `Math.random`, a story of the fourth slice: each realm holds a xoshiro256** generator
+  (`swell_num::random::Xoshiro256`) whose four words are derived, when the realm is made, from
+  the agent's `Seeds.random_seed` and the realm's creation index by SipHash-2-4. The agent
+  counts every `create_realm` that gets past the check of its state, one that throws or ends
+  in a termination included, so no index is used twice. A call reads nothing from the host,
+  calls no hook, costs the step of the call and allocates nothing; each value is a multiple
+  of 2^-53 in [0, 1 - 2^-53] with positive sign. The function is the last own key of `Math`,
+  after `sumPrecise` (`story:math-random`).
+- The operators `**` and `**=` (`#sec-exp-operator`, `#sec-assignment-operators`): the parser
+  reads `**` right associative and tighter than `*`, `/` and `%`, and a unary expression as its
+  left operand outside parentheses (`-2 ** 2`, `typeof a ** 2`, `await a ** 2`) is the
+  SyntaxError "a unary expression as the left operand of ** needs parentheses"; `**=` takes the
+  targets `*=` takes. The compiler emits one instruction, `Exp`, and the interpreter applies
+  Number::exponentiate through `swell_num::math::exponentiate`, the function `Math.pow` calls,
+  so `a ** b` and `Math.pow(a, b)` answer the same Number. The compiler folds nothing. The
+  refusal "exponentiation operator is not supported before slice 4" is gone
+  (`story:exponentiation-operator`).
+
 ### Changed
 
-- The engine crate `swell` is `#![no_std]` with `alloc`: its library code names no `std` path,
-  and the program that links it provides the allocator. Its keyed hash map (`heap/map.rs`) is
-  written in the crate, a SwissTable with groups of 16 and the SipHash keyed by `hash_key`
-  (HOST-145), with the growth, deletion and rehashing of the standard library's map it
-  replaces, so a table grows and is charged at the same operations as before; a unit test
-  compares it with that map over 20,000 operations. The float functions it called as `std`
-  methods (`trunc`, `floor`, `ceil`, `sqrt`, `rem_euclid`) and the `%` of two Numbers (`fmod`,
-  which a no_std build would take from the C library) come from
-  `swell_num::fmath`. The test-build counters of collections, stored Strings and drains of
-  the release queue are fields of the heap and the root table instead of thread-locals. The
-  public interface and the test262 counts do not change (`story:core-builds-without-std`).
+- Releases ship seven archives of the `swell` binary and `SHA256SUMS`: besides the five
+  targets of 0.12.0, `.github/workflows/release-build.yml` builds `x86_64-unknown-linux-musl`
+  and `aarch64-unknown-linux-musl`, static binaries that load no shared library; the glibc
+  archives stay (glibc 2.34 or newer). The Windows binary links its C runtime in
+  (`-C target-feature=+crt-static`) and needs no Visual C++ runtime. After the smoke test each
+  musl job fails on a dynamic section entry `NEEDED` or a program interpreter and runs the
+  binary in a Docker image that holds nothing but it; the Windows job fails when the import
+  table names a `VCRUNTIME` or `api-ms-win-crt` library. The workflow also runs on a pull
+  request that changes it (labelled with the pull request's head commit, nothing uploaded)
+  and when started by hand. The new gate step `release-targets-check` (part of
+  `forge-check`) reads the workflow and the two documents as text and fails when the matrix
+  is not the release's seven targets, when the Build step's `case "$TARGET"` gives a musl or
+  Windows target no `+crt-static` (or a glibc or macOS target one), when no step that runs
+  for a musl or Windows target checks its linking, or when `docs/releasing.md` or
+  `website/docs/embedding.md` names or counts other archives than the workflow builds
+  (`story:releases-ship-static-binaries`).
+
+- The engine crate `swell` is `#![no_std]` with `alloc`, step 3 of story
+  `core-builds-without-std`: its library code names no `std` path, and the program that links
+  it provides the allocator. The float functions it called as `std` methods (`trunc`,
+  `floor`, `ceil`, `sqrt`, `rem_euclid`) and the `%` of two Numbers (`fmod`, which a no_std
+  build would take from the C library) come from `swell_num::fmath`, whose six functions are
+  `#[inline]`. The test-build counters of collections, stored Strings and drains of the
+  release queue are fields of the heap and the root table instead of thread-locals. The
+  public interface and the test262 counts do not change.
+- The keyed hash map of the engine (`heap/map.rs`) is written in the crate instead of
+  `std`'s `HashMap`: a SwissTable with groups of 16 control bytes, read as two 64-bit words,
+  and the SipHash keyed by `hash_key` (HOST-145). It has the growth, deletion and rehashing
+  of the map it replaces, so a table grows and is charged at the same operations as before; a
+  unit test compares it with `std`'s map over 20,000 operations. Four paths of the engine use
+  it: the index of a property list longer than 8 entries (`object/property.rs`, every
+  property of a large object and every global variable), the atom table of interned Strings
+  (`heap/string.rs`), the registry of `Symbol.for` (`heap/mod.rs`) and the set of visited
+  keys of `for`-`in` (`ops/objects.rs`). The `swell` shell against main (`f27d50d7`), user
+  CPU, best of 7 on the build node, main's binary run twice as the noise floor (load 48 to 56
+  on 32 cores):
+
+  | script | what it does | main | this change | main again |
+  |---|---|---|---|---|
+  | `num_2k` | an object of 2,000 Number keys: add, read 5 times, delete half; 30 rounds | 0.994 s | +7.8 % | +1.5 % |
+  | `num_200k` | the same with 200,000 keys, 1 round | 3.717 s | +4.1 % | -0.8 % |
+  | `str_2k` | 2,000 String keys made once | 1.286 s | +2.6 % | +1.5 % |
+  | `str_200k` | 200,000 String keys made and interned at run time | 6.656 s | +4.1 % | -0.2 % |
+  | `forin_2k` | `for`-`in` over 2,000 keys, 300 rounds | 0.110 s | -11.8 % | -4.5 % |
+  | `control` | arithmetic on local variables and a dense array, no keyed map | 0.229 s | -3.9 % | -0.9 % |
+
+  The map alone against `std`'s with the same hasher, `u32` keys, 2,000 entries, three runs
+  (first version of this change, then this one):
+
+  | operation | first version | this change |
+  |---|---|---|
+  | insert | +12 to +19 % | +3 to +8 % |
+  | lookup, key present | +22 to +24 % | +12 to +18 % |
+  | lookup, key absent | +14 to +17 % | +10 to +14 % |
+  | remove | +31 to +45 % | +1 to +8 % |
+
+  The rest of the lookup gap is `std`'s match of a group with SSE2 instructions, which need
+  `unsafe`; the engine crates have none, also not for speed.
 - `swell-num` builds without `std` (`#![no_std]` with `alloc`), step 2 of story
   `core-builds-without-std`: it names no `std::` path outside its unit tests and calls no
   `f64` method of `std`. The new module `swell_num::fmath` computes `sqrt`, `floor`, `ceil`,
@@ -56,6 +123,15 @@ Every number below comes from the gate, `task check`, on the released commit.
   every run. Each selftest of `site-data` now writes all its outputs under its own directory,
   and `gate-selftest` fails, naming the files, when its scripts change a tracked file
   (`story:gate-selftests-write-no-tracked-file`).
+
+### Host interface
+
+- `HOST-26`, `HOST-27`, `HOST-144`, `HOST-147`, `HOST-212` and `HOST-213` (slice 4) have tests
+  (`swell::math_random::*`): two agents with the same `random_seed` give the same 1,000
+  values; two realms of one agent differ; `random_seed` changes the stream and `hash_key` does
+  not; two child processes print the same 1,000 values and the key order of an object of
+  10,000 keys; 100,000 values are in [0, 1) with positive sign and 53 bits; a realm's stream
+  is its creation index, not the order of calls.
 
 ## [0.12.0] - 2026-11-25
 

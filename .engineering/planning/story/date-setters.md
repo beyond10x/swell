@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:date-setters
 kind: story
-status: active
+status: implemented
 title: Date has its 14 setters, local and UTC, over the two conversions of the zone story, with at most 61 charged hook calls
 summary: The 14 Date setters replacing the interim bodies, the call counts and the coercion order, and 178 cases of slice 4.
 relations:
@@ -16,10 +16,11 @@ scope:
   path: crates/swell/tests/date_clock.rs
 - confidence: inferred
   path: crates/swell/tests/date_setters.rs
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:27Z", actor: "human:operator", revision: 6}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:27Z", actor: "human:operator", revision: 7}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:45Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

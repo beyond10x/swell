@@ -201,12 +201,24 @@ The tests call `unwrap` on a `Result<_, HostError>`. A host handles the `Err` in
 
 `crates/cli` (package `swell-cli`) is a small host that builds the binary `swell`. It runs one script from the command line, for benchmarks and for comparing swell with other engines. It uses the standard library only and has `#![forbid(unsafe_code)]`, like the engine.
 
-Each [release](https://github.com/beyond10x/swell/releases) from the one that adds the shell on has the binary as an asset for five targets: `swell-<version>-<target>.tar.gz` for `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin` and `aarch64-apple-darwin`, and `swell-<version>-x86_64-pc-windows-msvc.zip`. Each archive holds the binary, `README.md`, `LICENSE` and `NOTICE`. The release's `SHA256SUMS` lists the SHA-256 of each archive:
+Each [release](https://github.com/beyond10x/swell/releases) from the one that adds the shell on has the binary as an asset, one archive per target. Each archive holds the binary, `README.md`, `LICENSE` and `NOTICE`:
+
+| archive | runs on |
+|---|---|
+| `swell-<version>-x86_64-unknown-linux-musl.tar.gz` | any x86-64 Linux, also a container image that holds nothing but the binary: it is static and loads no shared library |
+| `swell-<version>-aarch64-unknown-linux-musl.tar.gz` | any 64-bit Arm Linux, also a container image that holds nothing but the binary |
+| `swell-<version>-x86_64-unknown-linux-gnu.tar.gz` | x86-64 Linux with glibc 2.34 or newer |
+| `swell-<version>-aarch64-unknown-linux-gnu.tar.gz` | 64-bit Arm Linux with glibc 2.34 or newer |
+| `swell-<version>-x86_64-apple-darwin.tar.gz` | macOS on Intel |
+| `swell-<version>-aarch64-apple-darwin.tar.gz` | macOS on Apple silicon |
+| `swell-<version>-x86_64-pc-windows-msvc.zip` | 64-bit Windows; the C runtime is linked in, so no Visual C++ runtime needs to be installed |
+
+On Linux, a musl archive runs whatever the C library of the system is; a glibc archive needs glibc 2.34 or newer. Releases up to 0.12.0 have five archives, without the two musl ones, and their Windows binary needs the Visual C++ runtime. The release's `SHA256SUMS` lists the SHA-256 of each archive:
 
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf swell-<version>-x86_64-unknown-linux-gnu.tar.gz
-swell-<version>-x86_64-unknown-linux-gnu/swell --version
+tar -xzf swell-<version>-x86_64-unknown-linux-musl.tar.gz
+swell-<version>-x86_64-unknown-linux-musl/swell --version
 ```
 
 To build it from source:

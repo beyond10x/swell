@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:45Z",
+  "actor": "human:operator",
+  "artifact": "story:date-text-formats",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit 21b3917dcc84, an ancestor of that head",
+    "reference": "crates/swell/tests/date_text.rs:102 host_127_with_the_provided_zone_methods_get_timezone_offset_is_zero_and_to_string_contains_gmt_0000"
+  }
+}

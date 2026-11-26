@@ -15,6 +15,8 @@
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::cell::Cell;
+use swell_num::random::Xoshiro256;
 
 pub(crate) mod global_object;
 pub(crate) mod intrinsics;
@@ -132,11 +134,17 @@ pub(crate) struct RealmRecord {
     /// which may still hold the `RealmRef` its setup closure was handed, is answered as for a
     /// freed realm ([`Agent::host_realm`]).
     pub(crate) unmade: bool,
+    /// The state of the realm's `Math.random` generator (`swell_num::random::Xoshiro256`;
+    /// `docs/design/engine.md`, decision 6, "`Math.random`"): derived from the agent's
+    /// `random_seed` and the realm's creation index when the record is made, and moved only by
+    /// a call of this realm's `Math.random` (`builtins/math.rs`).
+    pub(crate) random: Cell<[u64; 4]>,
 }
 
 impl RealmRecord {
-    /// A realm record with nothing in it yet (CreateRealm, step 1).
-    fn new() -> RealmRecord {
+    /// A realm record with nothing in it yet (CreateRealm, step 1), whose generator starts at
+    /// `random`.
+    fn new(random: [u64; 4]) -> RealmRecord {
         RealmRecord {
             intrinsics: None,
             symbols: None,
@@ -145,6 +153,7 @@ impl RealmRecord {
             host_defined: None,
             global_env: RealmGlobalEnv::new(),
             unmade: false,
+            random: Cell::new(random),
         }
     }
 
@@ -176,12 +185,13 @@ impl RealmRecord {
             .map(|held| HostDefined::clone(&held.0))
     }
 
-    /// A realm record, for the tests of the collector.
+    /// A realm record, for the tests of the collector, whose generator starts at the fixed
+    /// state (1, 2, 3, 4).
     #[cfg(test)]
     pub(crate) fn for_test() -> RealmRecord {
         RealmRecord {
             global_env: RealmGlobalEnv::for_test(),
-            ..RealmRecord::new()
+            ..RealmRecord::new([1, 2, 3, 4])
         }
     }
 }
@@ -307,13 +317,16 @@ impl<H: Host> Agent<H> {
     /// InitializeHostDefinedRealm (`#sec-initializehostdefinedrealm`) with CreateRealm
     /// (`#sec-createrealm`): the intrinsics, then the setup closure, then SetRealmGlobalObject
     /// (`#sec-setrealmglobalobject`) and SetDefaultGlobalBindings. What the closure returns is
-    /// checked before it is used (decision 6). No step is charged: no code runs.
+    /// checked before it is used (decision 6). No step is charged: no code runs. `index` is the
+    /// realm's creation index, which `Agent::create_realm` counted: the record's `Math.random`
+    /// state is derived from it and the agent's `random_seed`.
     pub(crate) fn initialize_host_defined_realm(
         &mut self,
         setup: Option<GlobalSetup<'_, H>>,
         host_defined: Option<HostDefined>,
+        index: u64,
     ) -> Outcome<Realm> {
-        match self.create_realm_steps(setup, host_defined) {
+        match self.create_realm_steps(setup, host_defined, index) {
             Ok(realm) => Outcome::Normal(Realm(self.heap.roots.add_realm(realm))),
             Err(Abrupt::Throw(value)) => Outcome::Throw(self.heap.roots.add(value)),
             Err(Abrupt::Terminated(termination)) => Outcome::Terminated(termination),
@@ -324,8 +337,10 @@ impl<H: Host> Agent<H> {
         &mut self,
         setup: Option<GlobalSetup<'_, H>>,
         host_defined: Option<HostDefined>,
+        index: u64,
     ) -> Completion<Handle> {
         let symbols = self.ensure_well_known()?;
+        let random = Xoshiro256::from_seed(&self.random_seed, index).state();
         let record = RealmRecord {
             symbols: Some(symbols),
             host_defined: host_defined.map(|value| HostObject {
@@ -333,7 +348,7 @@ impl<H: Host> Agent<H> {
                 data: Some(Box::new(RealmHostDefined(value))),
                 error_kind: None,
             }),
-            ..RealmRecord::new()
+            ..RealmRecord::new(random)
         };
         let realm =
             match crate::heap::store(&mut self.heap.accounting, &mut self.heap.realms, record, 0) {

@@ -169,8 +169,13 @@ fn same_thrown(a: Value, b: Value) -> bool {
 pub struct Agent<H: Host> {
     pub(crate) host: H,
     pub(crate) limits: Limits,
-    #[expect(dead_code, reason = "Math.random: slice 4")]
+    /// The seed of every realm's `Math.random` generator (`realm/mod.rs`).
     pub(crate) random_seed: [u8; 32],
+    /// The realms `create_realm` started, the creation index of the next: every call that gets
+    /// past `alive()` takes one, a creation that ends in a termination, a throw or a fault
+    /// included, so that no index is used twice (`docs/design/engine.md`, decision 6,
+    /// "`Math.random`"; HOST-213).
+    pub(crate) realm_count: u64,
     pub(crate) state: AgentState,
     pub(crate) heap: Heap,
     pub(crate) interrupt: InterruptHandle,
@@ -279,6 +284,7 @@ impl<H: Host> Agent<H> {
             heap: Heap::new(key, limits.memory_bytes, &seeds.hash_key),
             limits,
             random_seed: seeds.random_seed,
+            realm_count: 0,
             state: AgentState::Alive,
             interrupt: InterruptHandle::default(),
             scope: Vec::new(),
@@ -420,13 +426,22 @@ impl<H: Host> Agent<H> {
     /// `this` value, then the properties of clause 19. `host_defined` is the realm's
     /// [[HostDefined]]. Over the memory budget it answers `Terminated(MemoryBudget)`; a throw of
     /// `setup` or of SetDefaultGlobalBindings answers `Throw`; a stale or foreign handle in what
-    /// `setup` returns faults the agent (decision 6). It is a safe point.
+    /// `setup` returns faults the agent (decision 6). It is a safe point. The realm's creation
+    /// index is taken first, before any step that can fail, and its `Math.random` state is
+    /// derived from it.
     pub fn create_realm(
         &mut self,
         setup: Option<GlobalSetup<'_, H>>,
         host_defined: Option<HostDefined>,
     ) -> Result<Outcome<Realm>, HostError> {
         self.alive()?;
+        let index = self.realm_count;
+        // 2^64 creations cannot be made; reaching the end of the counter is a broken invariant.
+        let Some(next) = index.checked_add(1) else {
+            self.fault();
+            return Ok(Outcome::Terminated(Termination::EngineFault));
+        };
+        self.realm_count = next;
         self.termination = None;
         self.steps = 0;
         self.clear_error_sites();
@@ -435,7 +450,7 @@ impl<H: Host> Agent<H> {
             return Ok(Outcome::Terminated(Termination::EngineFault));
         }
         let start = self.scope.len();
-        let outcome = self.initialize_host_defined_realm(setup, host_defined);
+        let outcome = self.initialize_host_defined_realm(setup, host_defined, index);
         #[cfg(feature = "fault-injection")]
         let outcome = if self.injected(FaultPoint::CreateRealm) {
             self.fault();

@@ -530,6 +530,49 @@ fn deepest_accepted_tree_compiles_on_a_256_kib_stack() {
         .unwrap_or_else(|_| panic!("the compile on a 256 KiB stack failed"));
 }
 
+/// `**` (`#sec-exp-operator`) is right associative, so its chains are trees that grow on the
+/// right, as no shape of [`deepest_accepted_tree_compiles_on_a_256_kib_stack`] does: the
+/// deepest chain of `**`, of `**=` (`#sec-assignment-operators`, two levels each) and of `**`
+/// over member operands that the parser admits at [`LIMIT`] compile on a 256 KiB stack, to one
+/// `Exp` per operator (the compiler folds no operator).
+#[test]
+fn deepest_exponent_chains_compile_on_a_256_kib_stack() {
+    type Shape = fn(usize) -> String;
+    let shapes: [(&str, Shape); 3] = [
+        ("exp chain", |n| format!("x = a{};", " ** a".repeat(n))),
+        ("exp assignments", |n| format!("{}0;", "a **= ".repeat(n))),
+        ("exp chain of members", |n| {
+            format!("x = a.b{};", " ** a.b".repeat(n))
+        }),
+    ];
+    let mut cases = Vec::new();
+    for (name, shape) in shapes {
+        let n = deepest(&shape).unwrap();
+        println!("{name}: {n} operator(s)");
+        assert!(n > 400, "{name}: {n}");
+        cases.push((name, n, shape(n)));
+    }
+    let worker = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            for (name, n, text) in cases {
+                let script = parse_script(&units(&text), ParseOptions { max_nesting: LIMIT })
+                    .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+                let code = compile_script(&script).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+                let exps = code
+                    .instructions
+                    .iter()
+                    .filter(|i| matches!(i, Instruction::Exp))
+                    .count();
+                assert_eq!(exps, n, "{name}");
+            }
+        })
+        .unwrap_or_else(|e| panic!("spawn: {e}"));
+    worker
+        .join()
+        .unwrap_or_else(|_| panic!("the compile on a 256 KiB stack failed"));
+}
+
 /// The instructions of `f` that read or write a binding, as text, in order.
 fn binding_instructions(code: &Code, f: &FunctionTemplate) -> Vec<String> {
     f.instructions

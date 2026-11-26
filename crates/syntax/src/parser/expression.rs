@@ -26,10 +26,12 @@
 //! `await` is an identifier, and `async` is one wherever no `async` function or arrow function
 //! starts; and the `async` methods of object literals (AsyncMethod). An `async function*` is an
 //! AsyncGeneratorExpression (`#sec-async-generator-function-definitions`), `yield*` in it
-//! included.
+//! included. Slice 4 adds `**` (`#sec-exp-operator`), right associative and tighter than `*`,
+//! with no unary expression as its left operand outside parentheses, and `**=`
+//! (`#sec-assignment-operators`).
 //!
-//! Refused, each with its slice: `**` and `**=` (4), `class`, `super`, `new.target` (8),
-//! `import.meta` and dynamic `import` (11).
+//! Refused, each with its slice: `class`, `super`, `new.target` (8), `import.meta` and dynamic
+//! `import` (11).
 //!
 //! The functions that stay on the Rust stack while the parser recurses (each one an entry of the
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
@@ -65,6 +67,12 @@ const NOT_ESCAPE_SEQUENCE: &str = "invalid escape sequence in a template literal
 /// `OptionalChain TemplateLiteral` or `?. TemplateLiteral`
 /// (`#sec-left-hand-side-expressions-static-semantics-early-errors`).
 const TEMPLATE_AFTER_OPTIONAL_CHAIN: &str = "template literal after an optional chain";
+
+/// A UnaryExpression (`delete`, `void`, `typeof`, `+`, `-`, `~`, `!` or `await` and its operand)
+/// outside parentheses as the left operand of `**`: ExponentiationExpression is
+/// `UpdateExpression ** ExponentiationExpression` (`#sec-exp-operator`), so `-2 ** 2` is no
+/// expression of the grammar.
+const EXPONENT_UNARY_BASE: &str = "a unary expression as the left operand of ** needs parentheses";
 
 /// An operator of a binary expression waiting for its right operand.
 pub(crate) struct Pending {
@@ -374,8 +382,8 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
     }
 
-    /// What follows the operand `left` of an assignment expression; refuses `**=`. An object or
-    /// array literal before `=` is read again as an assignment pattern.
+    /// What follows the operand `left` of an assignment expression. An object or array literal
+    /// before `=` is read again as an assignment pattern.
     fn assign_tail(&mut self, left: ExprId) -> R<AssignTail> {
         let op = match &self.tok.kind {
             TokenKind::Punct(p) => match p {
@@ -393,7 +401,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                 Punct::AmpEq => AssignOp::Compound(BinaryOp::BitAnd),
                 Punct::PipeEq => AssignOp::Compound(BinaryOp::BitOr),
                 Punct::CaretEq => AssignOp::Compound(BinaryOp::BitXor),
-                Punct::StarStarEq => return self.refuse("exponentiation operator", 4),
+                Punct::StarStarEq => AssignOp::Compound(BinaryOp::Exp),
                 Punct::AmpAmpEq => AssignOp::Logical(LogicalOp::And),
                 Punct::PipePipeEq => AssignOp::Logical(LogicalOp::Or),
                 Punct::QuestionQuestionEq => AssignOp::Logical(LogicalOp::Coalesce),
@@ -438,8 +446,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     // ---- binary operators ----------------------------------------------------------------------
 
     /// The binary operator at the current token with its precedence, `in` excepted under
-    /// `no_in`; `**` is refused. `??` takes the precedence of `||`: the grammar lets neither
-    /// stand as an operand of the other, which [`Parser::reduce`] checks.
+    /// `no_in`. `??` takes the precedence of `||`: the grammar lets neither stand as an operand
+    /// of the other, which [`Parser::reduce`] checks. `**` binds most tightly.
     #[inline(never)]
     fn binary_operator(&mut self, no_in: bool) -> R<Option<(Binary, u8)>> {
         use BinaryOp::*;
@@ -467,7 +475,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                 Punct::Star => Mul,
                 Punct::Slash => Div,
                 Punct::Percent => Rem,
-                Punct::StarStar => return self.refuse("exponentiation operator", 4),
+                Punct::StarStar => Exp,
                 _ => return Ok(None),
             },
             TokenKind::Keyword(Keyword::Instanceof) => Instanceof,
@@ -483,6 +491,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             Shl | Shr | UShr => 8,
             Add | Sub => 9,
             Mul | Div | Rem => 10,
+            Exp => 11,
         };
         self.advance()?;
         Ok(Some((Binary::Arithmetic(op), precedence)))
@@ -494,8 +503,8 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(Some((Binary::Logical(op), precedence)))
     }
 
-    /// The binary operators from `||` down to the multiplicative ones (13.6 to 13.13), all left
-    /// associative, by precedence climbing over an operator stack: a chain of operators adds no
+    /// The binary operators from `||` down to `**` (13.6 to 13.13), all left associative but
+    /// `**`, by precedence climbing over an operator stack: a chain of operators adds no
     /// recursion, and its depth in the tree is bounded by the node depth check.
     fn binary(&mut self, no_in: bool) -> R<ExprId> {
         self.enter()?;
@@ -511,12 +520,23 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// Reads the operator after `left`, if any: reduces the pending operators that bind at
     /// least as tightly and pushes it with `left`. False when no operator follows.
+    ///
+    /// `**` is right associative (`UpdateExpression ** ExponentiationExpression`,
+    /// `#sec-exp-operator`): a pending `**` waits for its right operand, so before a `**` only
+    /// the operators that bind more tightly are reduced, which are none. Its left operand is an
+    /// UpdateExpression: a unary expression there outside parentheses is a SyntaxError.
     #[inline(never)]
     fn binary_step(&mut self, base: usize, left: ExprId, no_in: bool) -> R<bool> {
         let Some((op, precedence)) = self.binary_operator(no_in)? else {
             return Ok(false);
         };
-        let left = self.reduce(base, precedence, left)?;
+        let bound = if matches!(op, Binary::Arithmetic(BinaryOp::Exp)) {
+            self.exponent_base(left)?;
+            precedence.saturating_add(1)
+        } else {
+            precedence
+        };
+        let left = self.reduce(base, bound, left)?;
         let m = self.m;
         let pushed = m.push(
             &mut self.operators,
@@ -528,6 +548,20 @@ impl<'a, 'm> Parser<'a, 'm> {
         );
         self.charged(pushed)?;
         Ok(true)
+    }
+
+    /// Fails with [`EXPONENT_UNARY_BASE`] when `left`, the left operand of a `**`, is a unary
+    /// expression (an AwaitExpression included) outside parentheses.
+    #[inline(never)]
+    fn exponent_base(&mut self, left: ExprId) -> R<()> {
+        let unary = self.expr_node(left).is_some_and(|n| {
+            !n.parenthesized && matches!(n.expr, Expr::Unary { .. } | Expr::Await(_))
+        });
+        if unary {
+            let span = self.expr_span(left);
+            return self.fail_at(EXPONENT_UNARY_BASE, span);
+        }
+        Ok(())
     }
 
     /// Combines the pending operators above `base` whose precedence is at least `precedence`

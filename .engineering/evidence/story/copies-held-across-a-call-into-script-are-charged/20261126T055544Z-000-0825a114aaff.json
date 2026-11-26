@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:44Z",
+  "actor": "human:operator",
+  "artifact": "story:copies-held-across-a-call-into-script-are-charged",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit f27c52ecbc5e, an ancestor of that head",
+    "reference": "crates/swell/tests/budgets.rs:1078 host_215_a_buffer_held_across_a_call_into_script_is_charged (HOST-215 test line)"
+  }
+}

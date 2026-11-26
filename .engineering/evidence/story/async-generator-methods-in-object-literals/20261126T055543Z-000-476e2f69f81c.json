@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:43Z",
+  "actor": "human:operator",
+  "artifact": "story:async-generator-methods-in-object-literals",
+  "kind": "story",
+  "revision": 16,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit 2b5b095b18c9, an ancestor of that head",
+    "reference": "crates/swell/tests/async_generator_methods.rs:102 an_async_generator_method_yields_promises_of_iterator_results"
+  }
+}

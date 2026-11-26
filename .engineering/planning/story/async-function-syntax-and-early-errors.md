@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:async-function-syntax-and-early-errors
 kind: story
-status: active
+status: implemented
 title: 'Async function syntax and its early errors: async functions, async arrows and await parse, and a script with an async function ends on the refusal of slice 10 after its early errors'
 summary: The [Await] flag, async declarations, expressions and arrows, await by context, their early errors, Expr::Await and asynchronous on Function, three nesting kinds; the refusal keeps its text and moves behind the early-error pass, await expression leaves the code, async function* and for await get texts of their own; 138 negative parse cases (265 runs) on its list; no runner line moves.
 relations:
@@ -40,10 +40,11 @@ scope:
   path: crates/syntax/tests/sources/refused/for-await.js
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/async-and-await-as-identifiers.js
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T18:19:58Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T18:19:59Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:43Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 
