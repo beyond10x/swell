@@ -284,7 +284,18 @@ pub(crate) fn collect<H: Host>(agent: &mut Agent<H>) -> Result<CollectReport, St
     }
     #[cfg(test)]
     let growths = heap.free_list_growths();
-    let mut credited = heap.objects.sweep();
+    // `story:map-and-set`: before the sweep, every marked Map and Set releases the cursors of
+    // iterators that were not marked, and the bytes of a cursor list that is left empty are
+    // credited with the sweep's.
+    let released = heap
+        .objects
+        .visit_marked_mut(|record, is_marked| match &mut record.kind {
+            crate::object::ObjectKind::Collection(collection) => {
+                collection.release_cursors(is_marked)
+            }
+            _ => 0,
+        });
+    let mut credited = heap.objects.sweep().saturating_add(released);
     credited = credited.saturating_add(heap.strings.sweep());
     credited = credited.saturating_add(heap.symbols.sweep());
     credited = credited.saturating_add(heap.realms.sweep());
@@ -320,6 +331,7 @@ mod tests {
     use crate::object::async_generator::AsyncGenerator;
     use crate::object::bound_function::BoundFunction;
     use crate::object::builtin_function::BuiltinFunction;
+    use crate::object::collection::{Collection, CollectionIterator};
     use crate::object::ecmascript_function::EcmascriptFunction;
     use crate::object::generator::Generator;
     use crate::object::ordinary::Ordinary;
@@ -332,6 +344,7 @@ mod tests {
     use crate::script::ScriptRecord;
     use crate::value::{ObjectRef, StringRef, Value};
     use crate::{Agent, AgentState, Limits, Outcome, Parsed, Seeds, Source, Termination};
+    use alloc::boxed::Box;
     use alloc::format;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -362,6 +375,8 @@ mod tests {
         "object/regexp.rs RegExpObject::trace",
         "object/generator.rs Generator::trace",
         "object/promise.rs Promise::trace",
+        "object/collection.rs Collection::trace",
+        "object/collection.rs CollectionIterator::trace",
         "object/async_function.rs AsyncActivation::trace",
         "builtins/async_iteration.rs AsyncFromSyncIterator::trace",
         "object/async_generator.rs AsyncGenerator::trace",
@@ -416,6 +431,7 @@ mod tests {
             ObjectKind::RegExp(RegExpObject::for_test(StringRef { handle: string })),
             ObjectKind::Generator(Generator::for_test()),
             ObjectKind::Promise(Promise::for_test()),
+            ObjectKind::Collection(Box::new(Collection::for_test())),
         ];
         let mut objects: Vec<_> = kinds
             .into_iter()
@@ -443,6 +459,14 @@ mod tests {
         );
         // An async generator names the value and the capability of its one request: the
         // ordinary object stands for them.
+        // A Map Iterator names the Map it iterates: the ordinary object stands for it.
+        let collection_iterator =
+            ObjectKind::CollectionIterator(CollectionIterator::for_test(named));
+        objects.push(
+            heap.objects
+                .allocate(ObjectRecord::new(None, collection_iterator), 0)
+                .unwrap(),
+        );
         let async_generator = ObjectKind::AsyncGenerator(AsyncGenerator::for_test(named));
         objects.push(
             heap.objects

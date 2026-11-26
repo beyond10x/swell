@@ -453,6 +453,39 @@ impl<T> Arena<T> {
         self.clear_marks();
         credited
     }
+
+    /// For the collector, after the mark phase and before the sweep: call `visit` on every
+    /// marked record, in slot order, with a test whether a handle of this arena is marked (its
+    /// key, and the mark word of its slot for its generation), and answer the sum of what the
+    /// calls answer (`story:map-and-set`: the bytes a collection's table gives back when it
+    /// releases the cursors of iterators that were not marked). Allocates nothing.
+    pub(crate) fn visit_marked_mut(
+        &mut self,
+        mut visit: impl FnMut(&mut T, &dyn Fn(Handle) -> bool) -> u64,
+    ) -> u64 {
+        let key = self.key;
+        let marks = &self.workspace.marks;
+        let is_marked = |handle: Handle| marked_for(key, marks, handle);
+        let mut answered: u64 = 0;
+        for (index, slot) in self.slots.iter_mut().enumerate() {
+            if !marks.get(index).is_some_and(|&word| word != 0) {
+                continue;
+            }
+            if let Some(record) = slot.value.as_mut() {
+                answered = answered.saturating_add(visit(record, &is_marked));
+            }
+        }
+        answered
+    }
+}
+
+/// Whether `handle` names a slot of the arena `key` whose mark word is its generation plus one.
+fn marked_for(key: u32, marks: &[u32], handle: Handle) -> bool {
+    handle.key == key
+        && usize::try_from(handle.index)
+            .ok()
+            .and_then(|index| marks.get(index))
+            .is_some_and(|&word| handle.generation.checked_add(1) == Some(word))
 }
 
 #[cfg(test)]

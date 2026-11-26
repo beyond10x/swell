@@ -74,6 +74,10 @@ pub(crate) enum BuiltinId {
     /// The builtins of `Date` (`story:date-object-clock-and-time-value`).
     Date(crate::builtins::date::DateBuiltin),
     Json(crate::builtins::json::JsonBuiltin),
+    /// The builtins of `Map` and its iterators (`story:map-and-set`).
+    Map(crate::builtins::map::MapBuiltin),
+    /// The builtins of `Set` and its iterators (`story:map-and-set`).
+    Set(crate::builtins::set::SetBuiltin),
     /// The builtins slice 2 takes early (`story:number-boolean-and-global-functions-early`),
     /// each module of `builtins/` with its own ids.
     Number(crate::builtins::number::NumberBuiltin),
@@ -790,6 +794,8 @@ impl<H: Host> Agent<H> {
             BuiltinId::Math(id) => self.run_math_builtin(id, function, this, args, new_target),
             BuiltinId::Date(id) => self.run_date_builtin(id, &this, args, &new_target),
             BuiltinId::Json(id) => self.run_json_builtin(id, function, this, args, new_target),
+            BuiltinId::Map(id) => self.run_map_builtin(id, function, this, args, new_target),
+            BuiltinId::Set(id) => self.run_set_builtin(id, function, this, args, new_target),
             BuiltinId::Number(id) => self.run_number_builtin(id, function, this, args, new_target),
             BuiltinId::Boolean(id) => {
                 self.run_boolean_builtin(id, function, this, args, new_target)

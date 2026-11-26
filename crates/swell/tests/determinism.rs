@@ -818,3 +818,119 @@ fn host_133_children() -> usize {
         2
     }
 }
+
+/// The keys of the key-order tests. HOST-25 and HOST-214 state 10,000 keys: the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`) runs 10,000 in the default mode, and 100 with the feature
+/// `collect-every-safe-point`, where every builtin call collects a heap that holds them all
+/// (the largest count measured under 20 s of wall time on the build node: HOST-25 took 16.2 s
+/// at 100 keys in a run of the whole lane, 21.8 s at 200 run alone); the gate runs 1,000 and
+/// 12. Each of the four counts is past
+/// the size above which a property list and an entry table keep an index map keyed by
+/// `hash_key` (8 entries), so an order that follows the index map, and so `hash_key`, differs
+/// between the two agents of HOST-25 at each of them: an iteration planted to follow the index
+/// map made HOST-25 red at 1,000 and at 12 keys. HOST-214 compares two processes with the same
+/// `Seeds`, so it catches an order that depends on the process, at any count past the index
+/// map. What only the full count adds is a table through more growths of its storage.
+fn ordered_keys() -> u32 {
+    let full = std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1");
+    match (cfg!(feature = "collect-every-safe-point"), full) {
+        (false, true) => 10_000,
+        (false, false) => 1_000,
+        (true, true) => 100,
+        (true, false) => 12,
+    }
+}
+
+/// A script that inserts `count` keys into an object, a `Map` and a `Set` (each third key a
+/// String, a Number or an object), deletes every third and answers the three in iteration
+/// order as one String: the object's own keys by `for`-`in`, then the Map's keys with their
+/// values by `forEach`, then the Set's values by `for`-`of`, an object key by its number.
+fn key_order_script(count: u32) -> String {
+    format!(
+        "var o = {{}}, m = new Map(), s = new Set(), keys = [], out = [];\n\
+         for (var i = 0; i < {count}; i++) {{\n\
+           var key = i % 3 === 0 ? \"k\" + i : i % 3 === 1 ? i * 1.5 : {{ n: i }};\n\
+           keys.push(key); o[\"p\" + i] = i; m.set(key, i); s.add(key);\n\
+         }}\n\
+         for (var i = 0; i < {count}; i += 3) {{ delete o[\"p\" + i]; m.delete(keys[i]); s.delete(keys[i]); }}\n\
+         function shown(key) {{ return typeof key === \"object\" ? \"o\" + key.n : String(key); }}\n\
+         for (var p in o) out.push(p);\n\
+         m.forEach(function (v, k) {{ out.push(shown(k) + \"=\" + v); }});\n\
+         for (var v of s) out.push(shown(v));\n\
+         out.length + \":\" + out.join();"
+    )
+}
+
+/// The limits of the key-order tests: the test limits with a step budget no run reaches.
+fn key_order_limits() -> Limits {
+    let mut limits = limits();
+    limits.steps_per_entry = 1 << 40;
+    limits
+}
+
+/// The text the script of [`key_order_script`] answers in a fresh agent of `seeds`.
+fn key_order(seeds: swell::Seeds) -> String {
+    let mut agent = Agent::new(Transcript::default(), key_order_limits(), seeds).unwrap();
+    let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
+        Outcome::Normal(realm) => realm,
+        other => panic!("create_realm answered {other:?}"),
+    };
+    let script = parse_corpus(&mut agent, &realm, &key_order_script(ordered_keys()));
+    let Outcome::Normal(root) = agent.evaluate_script(&script).unwrap() else {
+        panic!("the key-order script did not answer normally");
+    };
+    agent
+        .with_cx(&realm, |cx| match cx.get(&root).unwrap() {
+            Value::String(string) => cx.to_rust_string_lossy(string).unwrap(),
+            other => panic!("the key-order script answered {other:?}"),
+        })
+        .unwrap()
+}
+
+/// HOST-25 (`docs/design/host-interface.md`, decision 3): the key order of an object, a `Map`
+/// and a `Set` does not depend on `hash_key`. Two agents with equal limits and seeds but
+/// `hash_key` run one script that inserts 10,000 keys into each ([`ordered_keys`]: 1,000 in the
+/// gate), deletes every third and writes them in iteration order: the two transcripts are equal
+/// byte for byte, and each lists the two thirds of the keys left in each of the three.
+#[test]
+fn host_25_key_order_does_not_depend_on_hash_key() {
+    let first = key_order(seeds());
+    let mut other = seeds();
+    other.hash_key = [0x5a; 16];
+    assert_ne!(other.hash_key, seeds().hash_key);
+    let second = key_order(other);
+    let left = ordered_keys() - ordered_keys().div_ceil(3);
+    assert!(
+        first.starts_with(&format!("{}:", 3 * left)),
+        "{}",
+        &first[..first.len().min(200)]
+    );
+    assert!(first == second, "the two transcripts differ");
+}
+
+/// HOST-214 (`docs/design/host-interface.md`, decision 3): two child processes ([`spawn_child`])
+/// whose agents have the same `Seeds` print the key order of a `Map` of 10,000 keys
+/// ([`ordered_keys`]: 1,000 in the gate; with an object and a `Set` beside it), and the two
+/// prints are equal.
+#[test]
+fn host_214_two_processes_print_the_same_map_order() {
+    if std::env::var_os(CHILD).is_some() {
+        let order = key_order(seeds());
+        println!("{BEGIN}\n{order}\n{END}");
+        return;
+    }
+    let test = test_path!("host_214_two_processes_print_the_same_map_order");
+    let setup = CorpusSetup {
+        limits: key_order_limits(),
+        pins: 0,
+    };
+    let children: Vec<_> = (0..2).map(|_| spawn_child(test.clone(), setup)).collect();
+    let prints: Vec<String> = children.into_iter().map(child_transcript).collect();
+    let left = ordered_keys() - ordered_keys().div_ceil(3);
+    assert!(
+        prints[0].starts_with(&format!("{}:", 3 * left)),
+        "{}",
+        &prints[0][..prints[0].len().min(200)]
+    );
+    assert!(prints[0] == prints[1], "the two prints differ");
+}

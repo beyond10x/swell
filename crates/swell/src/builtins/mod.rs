@@ -54,6 +54,7 @@ pub(crate) mod generator;
 pub(crate) mod global;
 pub(crate) mod iterator;
 pub(crate) mod json;
+pub(crate) mod map;
 pub(crate) mod math;
 pub(crate) mod number;
 pub(crate) mod object;
@@ -61,6 +62,7 @@ pub(crate) mod promise;
 pub(crate) mod promise_statics;
 pub(crate) mod reflect;
 pub(crate) mod regexp;
+pub(crate) mod set;
 pub(crate) mod string;
 pub(crate) mod symbol;
 

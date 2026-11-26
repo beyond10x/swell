@@ -166,6 +166,18 @@ pub(crate) enum Intrinsic {
     Promise,
     /// `%Promise.prototype%` (27.5.5).
     PromisePrototype,
+    /// `%Map%` (24.1.1), `story:map-and-set`.
+    Map,
+    /// `%Map.prototype%` (24.1.3).
+    MapPrototype,
+    /// `%MapIteratorPrototype%` (24.1.5.2).
+    MapIteratorPrototype,
+    /// `%Set%` (24.2.2), `story:map-and-set`.
+    Set,
+    /// `%Set.prototype%` (24.2.4).
+    SetPrototype,
+    /// `%SetIteratorPrototype%` (24.2.6.2).
+    SetIteratorPrototype,
     /// `%AsyncFunction.prototype%` (27.7.3), `story:async-functions-and-await`.
     AsyncFunctionPrototype,
     /// `%AsyncFunction%` (`#sec-async-function-constructor`), `story:async-function-constructor`.
@@ -277,6 +289,7 @@ pub(crate) struct Intrinsics {
     generator_function: ObjectRef,
     promise: ObjectRef,
     promise_prototype: ObjectRef,
+    collections: crate::builtins::map::CollectionIntrinsics,
     async_function_prototype: ObjectRef,
     async_function: ObjectRef,
     async_iteration_prototypes: crate::builtins::async_iteration::AsyncIterationPrototypes,
@@ -335,6 +348,12 @@ impl Intrinsics {
             Intrinsic::GeneratorFunction => self.generator_function,
             Intrinsic::Promise => self.promise,
             Intrinsic::PromisePrototype => self.promise_prototype,
+            Intrinsic::Map => self.collections.map,
+            Intrinsic::MapPrototype => self.collections.map_prototype,
+            Intrinsic::MapIteratorPrototype => self.collections.map_iterator_prototype,
+            Intrinsic::Set => self.collections.set,
+            Intrinsic::SetPrototype => self.collections.set_prototype,
+            Intrinsic::SetIteratorPrototype => self.collections.set_iterator_prototype,
             Intrinsic::AsyncFunctionPrototype => self.async_function_prototype,
             Intrinsic::AsyncFunction => self.async_function,
             Intrinsic::AsyncIteratorPrototype => self.async_iteration_prototypes.async_iterator,
@@ -411,6 +430,12 @@ impl Intrinsics {
             self.generator_function,
             self.promise,
             self.promise_prototype,
+            self.collections.map,
+            self.collections.map_prototype,
+            self.collections.map_iterator_prototype,
+            self.collections.set,
+            self.collections.set_prototype,
+            self.collections.set_iterator_prototype,
             self.async_function_prototype,
             self.async_function,
             self.async_iteration_prototypes.async_iterator,
@@ -606,6 +631,8 @@ impl<H: Host> Agent<H> {
             generator_prototypes.function_prototype,
         )?;
         let (promise, promise_prototype) = self.create_promise_constructor(making)?;
+        let collections =
+            self.create_collection_intrinsics(making, iterator_prototypes.iterator)?;
         let async_function_prototype = self.create_async_function_prototype(making)?;
         let async_function =
             self.create_async_function_constructor(making, function, async_function_prototype)?;
@@ -666,6 +693,7 @@ impl<H: Host> Agent<H> {
             generator_function,
             promise,
             promise_prototype,
+            collections,
             async_function_prototype,
             async_function,
             async_iteration_prototypes,

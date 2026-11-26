@@ -88,6 +88,8 @@ impl<H: Host> Agent<H> {
             ("Symbol", Intrinsic::Symbol),
             ("RegExp", Intrinsic::RegExp),
             ("Promise", Intrinsic::Promise),
+            ("Map", Intrinsic::Map),
+            ("Set", Intrinsic::Set),
             (
                 "AggregateError",
                 Intrinsic::Error(ErrorKind::AggregateError),
