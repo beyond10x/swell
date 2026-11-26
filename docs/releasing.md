@@ -122,7 +122,7 @@ deciding session's, from a checkout of the repository:
    tag. Wait until both end with success before step 7:
 
        $gates gh -- run list --workflow shared-gates.yml --limit 1
-       $gates gh -- run list --workflow release-build.yml --branch <version> --limit 1 \
+       $gates gh -- run list --workflow release-build.yml --branch <version> --event push --limit 1 \
          --json databaseId,headSha,status,conclusion
        $gates gh -- run watch <run-id> --exit-status
 
@@ -215,11 +215,15 @@ else and runs the three commands of the smoke test in it, without a network. The
 lists the import table with `dumpbin -dependents` and fails when it names a `VCRUNTIME` or an
 `api-ms-win-crt` library.
 
-A run on a pull request or started by hand
+A run on a pull request or started by hand on a branch
 (`$gates gh -- workflow run release-build.yml --ref <branch>`) builds, packages and
-smoke-tests the seven targets before a tag and publishes nothing; there `<tag>` is the
-workspace version and the first seven characters of the commit (`0.12.0-1a2b3c4`). No run of
-the workflow makes a release: the release is step 7 above.
+smoke-tests the seven targets before a tag. There `<tag>` is the workspace version and the
+first seven characters of the commit: on a pull request the head commit of its branch, not
+the merge commit the forge tests (`0.12.0-1a2b3c4`). A run on a pull request uploads nothing.
+A run started by hand uploads the archives as workflow artifacts, kept 30 days like those of
+a tag's run. A run started by hand on a tag (`--ref <version>`) is labelled with the tag, like
+the run its push started; step 6 picks the push's run with `--event push`. No run of the
+workflow makes a release: the release is step 7 above.
 
 Each job:
 
