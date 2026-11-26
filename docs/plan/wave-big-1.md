@@ -17,9 +17,9 @@ directory. The stage is kept current by the coordinator.
 |---|---|---|---|---|
 | core | `story:core-builds-without-std`, step 3 | `impl/nostd-core` | `swell-impl-nostd-core` | merged into the wave branch at `248a031c`; gate on that head: exit 0, `gate-time test-steps 106.5 of 120` at load 65 on the node |
 | gate | `story:core-builds-without-std`, step 4 | `impl/nostd-gate` | `swell-impl-nostd-gate` | dispatched |
-| random | `story:math-random` | `impl/math-random` | `swell-impl-math-random` | dispatched |
+| random | `story:math-random` | `impl/math-random` | `swell-impl-math-random` | green at `ed59cd6b`; pass 1 (`review-result:adversary-random-pass-1`): no failing case, 4 findings, 3 of them gaps in the unit's tests; correction 1 with the same implementor (the adversary's cases join the unit); the collect-mode counts stay as they are |
 | static | `story:releases-ship-static-binaries` | `impl/static-binaries` | `swell-impl-static-binaries` | merged into the wave branch at `6256b323`; pass 1: 7 findings fixed; pass 2: 4 new, 0 carried, fixed; the coordinator read the second correction (the check executes nothing of a workflow; the unit's own script was pinned to the new message and got one case more, no assertion dropped) |
-| exponent | `story:exponentiation-operator` | `impl/exponentiation` | `swell-impl-exponentiation` | dispatched |
+| exponent | `story:exponentiation-operator` | `impl/exponentiation` | `swell-impl-exponentiation` | green at `b7d34305` (20 files; the 76 listed test262 cases pass); adversary pass 1 running |
 | growth | `story:buffer-growth-outside-the-charged-list-is-listed` | `impl/buffer-growth` | `swell-impl-buffer-growth` | waits for `random`, `exponent` and `gate`: it adds an attribute at growth calls all over `crates/swell/src` |
 | close | `story:slice-04-conformance-close` | `impl/slice-04-close` | `swell-impl-slice-04-close` | waits for `random`, `exponent` and `gate` on the wave branch |
 
@@ -84,6 +84,13 @@ Stories that are delivered on `main` and still `active` in the store get their e
 commit that delivered them and the gate's line) and move to `implemented` in this wave. The
 list with its commits is made by a reading agent and checked by the coordinator before any
 move.
+
+The reading agent found 42 stories delivered. The coordinator's check on the wave branch
+(the commit is an ancestor of the branch, the story is `active`, the named test or file is in
+the tree): 40 hold; for one of them (`story:async-function-constructor`) the agent named the
+wrong file and the test is at `crates/swell/tests/dynamic_function.rs:689`. The other two
+(`story:release-0-12-0-with-binaries`, `story:gate-selftests-write-no-tracked-file`) are
+delivered and still `draft`; they are not moved by this check.
 
 ## The commits of this wave
 
