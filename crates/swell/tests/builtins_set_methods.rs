@@ -91,11 +91,52 @@ fn each_method_answers_its_result_in_insertion_order() {
 /// throw a `TypeError`, and a `size` below 0 a `RangeError`, each after exactly the reads before
 /// it (a log of getters: `size`, its `valueOf`, `has`, `keys`); a this value that is not a Set
 /// throws a `TypeError` before any read. `-0.5` is a size of 0, `"2"` and `Infinity` are sizes.
-/// In sloppy and in strict code; in the collect mode in sloppy code only (both took 4.5 CPU
-/// seconds there in the test profile), since no step of these clauses depends on the mode.
+/// In sloppy and in strict code; in the collect mode in sloppy code only and for `union` and
+/// `isDisjointFrom` only (in sloppy code, all seven took 3.7 CPU seconds there at opt-level 0):
+/// the seven share one GetSetRecord, the method changes only the message, and no step of these
+/// clauses depends on the mode (with a NaN size accepted, the two fail there). Every method is
+/// covered in the default mode.
 #[test]
 fn get_set_record_rejects_a_nan_size_a_negative_size_and_a_non_callable_has_or_keys() {
-    let source = "var log = [];\n\
+    let methods: &[&str] = if collect_mode() {
+        &["union", "isDisjointFrom"]
+    } else {
+        &METHODS
+    };
+    let list: Vec<String> = methods.iter().map(|name| format!("\"{name}\"")).collect();
+    let source = format!(
+        "var methods = [{}];\n{}",
+        list.join(", "),
+        GET_SET_RECORD_ERRORS
+    );
+    let errors = "TypeError ; TypeError get size; TypeError get size,valueOf; TypeError get size; \
+                  RangeError get size,valueOf; RangeError get size; TypeError get size,get has; \
+                  TypeError get size,get has,get keys; TypeError ; TypeError ";
+    let mut expected: Vec<String> = methods
+        .iter()
+        .map(|name| format!("{name}: {errors}"))
+        .collect();
+    expected.extend(
+        [
+            "none get size,valueOf,get has,get keys",
+            "none get size,get has,get keys,has",
+            "none get size,get has,get keys",
+        ]
+        .map(String::from),
+    );
+    let expected = Outcome::Normal(format!("\"{}\"", expected.join(" | ")));
+    if collect_mode() {
+        assert_eq!(support::script::run(limits(), &source), expected);
+    } else {
+        let (sloppy, strict) = run_both(&source);
+        assert_eq!(sloppy, expected, "sloppy");
+        assert_eq!(strict, expected, "strict");
+    }
+}
+
+/// The script of [`get_set_record_rejects_a_nan_size_a_negative_size_and_a_non_callable_has_or_keys`],
+/// over the names in `methods`.
+const GET_SET_RECORD_ERRORS: &str = "var log = [];\n\
          function rec(size, has, keys) {\n\
            var o = {};\n\
            Object.defineProperty(o, \"size\", { get: function () { log.push(\"get size\"); return size; } });\n\
@@ -111,7 +152,7 @@ fn get_set_record_rejects_a_nan_size_a_negative_size_and_a_non_callable_has_or_k
            catch (e) { return (e instanceof RangeError ? \"RangeError\" : e instanceof TypeError ? \"TypeError\" : e) + \" \" + log.join(\",\"); }\n\
          }\n\
          var s = new Set([1]), out = [];\n\
-         [\"union\", \"intersection\", \"difference\", \"symmetricDifference\", \"isSubsetOf\", \"isSupersetOf\", \"isDisjointFrom\"].forEach(function (m) {\n\
+         methods.forEach(function (m) {\n\
            var p = Set.prototype[m];\n\
            out.push(m + \": \" + [\n\
              caught(function () { p.call(s, 1); }),\n\
@@ -130,30 +171,6 @@ fn get_set_record_rejects_a_nan_size_a_negative_size_and_a_non_callable_has_or_k
            caught(function () { s.isSubsetOf(rec(\"2\", function () { log.push(\"has\"); return true; }, f)); }),\n\
            caught(function () { s.isSupersetOf(rec(Infinity, f, f)); }));\n\
          out.join(\" | \");";
-    let errors = "TypeError ; TypeError get size; TypeError get size,valueOf; TypeError get size; \
-                  RangeError get size,valueOf; RangeError get size; TypeError get size,get has; \
-                  TypeError get size,get has,get keys; TypeError ; TypeError ";
-    let mut expected: Vec<String> = METHODS
-        .iter()
-        .map(|name| format!("{name}: {errors}"))
-        .collect();
-    expected.extend(
-        [
-            "none get size,valueOf,get has,get keys",
-            "none get size,get has,get keys,has",
-            "none get size,get has,get keys",
-        ]
-        .map(String::from),
-    );
-    let expected = Outcome::Normal(format!("\"{}\"", expected.join(" | ")));
-    if collect_mode() {
-        assert_eq!(support::script::run(limits(), source), expected);
-    } else {
-        let (sloppy, strict) = run_both(source);
-        assert_eq!(sloppy, expected, "sloppy");
-        assert_eq!(strict, expected, "strict");
-    }
-}
 
 /// `#sec-set.prototype.intersection`, step 5 against step 6, and the same choice of
 /// `difference`, `isDisjointFrom`, `isSubsetOf` and `isSupersetOf`: with `this` not larger than
@@ -390,16 +407,19 @@ fn collected(agent: &mut Agent<TestHost>) -> u64 {
 
 /// The memory budget (`docs/design/engine.md`, "Memory budget"): `union` of a set-like whose
 /// `keys()` never ends, in a function's scope, with a budget of the realm's reading plus
-/// 256 KiB (64 KiB in the collect mode; with 16 KiB there the first script itself ended at the
-/// budget), after a first script of the same shape over 8 keys that grows the arenas a script
-/// needs, fills its result until `Terminated(MemoryBudget)`; once the host dropped the script,
-/// one `collect()` brings `heap_bytes()` back within the reading before the script, the result
-/// and its table credited. `next` reuses one result object, so the object arena does not grow
-/// with the keys (an arena's capacity stays charged after a collection). The readings are
-/// printed.
+/// 256 KiB (32 KiB in the collect mode, where 64 KiB took 2.1 CPU seconds at opt-level 0; with
+/// 16 KiB there the first script itself ended at the budget), after a first script of the same
+/// shape over 8 keys that grows the arenas a script needs, fills its result until
+/// `Terminated(MemoryBudget)`; once the host dropped the script, one `collect()` brings
+/// `heap_bytes()` back within the reading before the script, the result and its table
+/// credited. `next` reuses one result object, so the object arena does not grow with the keys
+/// (an arena's capacity stays charged after a collection). The step budget is half the room in
+/// bytes, about 4.5 times the steps the fill takes in either mode (28,747 at 256 KiB, 3,659 at
+/// 32 KiB), so a growth of the table that is not charged ends the run at the step budget, not
+/// after the test's 60 s. The readings and the steps are printed.
 #[test]
 fn union_with_an_endless_set_like_ends_at_the_memory_budget() {
-    let room: u64 = if collect_mode() { 64 << 10 } else { 256 << 10 };
+    let room: u64 = if collect_mode() { 32 << 10 } else { 256 << 10 };
     let warmed = |agent: &mut Agent<TestHost>, realm: &Realm| {
         assert_eq!(
             eval_text(
@@ -419,7 +439,7 @@ fn union_with_an_endless_set_like_ends_at_the_memory_budget() {
         warmed(&mut probe, &realm)
     };
     let (mut agent, realm) = agent_and_realm(|limits| {
-        limits.steps_per_entry = 1 << 40;
+        limits.steps_per_entry = room / 2;
         limits.memory_bytes = realm_reading + room;
     });
     let before = warmed(&mut agent, &realm);
@@ -431,15 +451,16 @@ fn union_with_an_endless_set_like_ends_at_the_memory_budget() {
     );
     let outcome = agent.evaluate_script(&script).unwrap();
     let at_the_end = agent.heap_bytes().unwrap();
+    let steps = agent.last_entry_steps().unwrap();
     assert!(
         matches!(outcome, HostOutcome::Terminated(Termination::MemoryBudget)),
-        "{outcome:?}"
+        "{outcome:?} after {steps} steps"
     );
     drop(script);
     let after = collected(&mut agent);
     println!(
         "heap_bytes(): {before} before the script, budget {}, {at_the_end} at its end, {after} \
-         after collect()",
+         after collect(); {steps} steps",
         before + room
     );
     assert!(at_the_end > before + room / 2, "{at_the_end}");
@@ -611,11 +632,13 @@ fn a_has_callback_ends_at_an_interrupt() {
 /// ([`CURSOR_PLACE_BYTES`]). A walk's cursor has no owner, so no collection releases one a throw
 /// left: the cursors of `intersection`, `isSubsetOf` and `isDisjointFrom` lie in `s`'s table and
 /// would add 3N places; that of `difference` lies in the table of its result, which the throw
-/// leaves unreachable, so the collection frees it with its table. N is 1,000, 100 in the
-/// collect mode.
+/// leaves unreachable, so the collection frees it with its table. N is 1,000, and 10 in the
+/// collect mode, the smallest N with a bound above 0 (100 took 3.8 to 5.2 CPU seconds there at
+/// opt-level 0); at 10, with the cursor left open on a throw, `live_bytes()` rose there by
+/// 1,024 bytes against the bound of 32.
 #[test]
 fn a_throwing_callback_leaves_no_cursor() {
-    let n: u64 = if collect_mode() { 100 } else { 1_000 };
+    let n: u64 = if collect_mode() { 10 } else { 1_000 };
     let (mut agent, realm) = agent_and_realm(|limits| limits.steps_per_entry = 1 << 40);
     steps_of(
         &mut agent,
@@ -658,10 +681,14 @@ fn a_throwing_callback_leaves_no_cursor() {
 /// a set-like of `size` 1 whose `next` answers each object of `this` in turn and deletes from
 /// `this` the one it answered before; and `difference` with a `has` that deletes its argument
 /// from `this` and answers false. After each call the result holds every key the clause adds,
-/// in its order, each the object the script made, read back by its `i`.
+/// in its order, each the object the script made, read back by its `i`. The story's 50 keys in
+/// the default mode; 2 in the collect mode (50 took 3.7 to 5.9 CPU seconds there at opt-level
+/// 0), where with the result not kept on the kept stack the run ended at 2 in
+/// `Terminated(EngineFault)`.
 #[test]
 fn the_result_keeps_its_keys_across_a_collection() {
-    let all: Vec<String> = (0..50).map(|i| i.to_string()).collect();
+    let count = if collect_mode() { 2 } else { 50 };
+    let all: Vec<String> = (0..count).map(|i| i.to_string()).collect();
     let all = all.join(",");
     let outcome = support::script::run(
         {
@@ -669,7 +696,9 @@ fn the_result_keeps_its_keys_across_a_collection() {
             limits.steps_per_entry = 1 << 40;
             limits
         },
-        "function junk() { return new Array(100).fill(0); }\n\
+        &format!(
+            "var count = {count};\n{}",
+            "function junk() { return new Array(100).fill(0); }\n\
          function made(count) {\n\
            return { size: 0, has: function () { junk(); return false; }, keys: function () {\n\
              junk(); var i = 0;\n\
@@ -677,10 +706,10 @@ fn the_result_keeps_its_keys_across_a_collection() {
            } };\n\
          }\n\
          function back(set) { var out = []; set.forEach(function (o) { out.push(o.i); }); return out.join(); }\n\
-         function fill() { var s = new Set(), k; for (k = 0; k < 50; k++) s.add({ i: k }); return s; }\n\
+         function fill() { var s = new Set(), k; for (k = 0; k < count; k++) s.add({ i: k }); return s; }\n\
          var r = [];\n\
-         r.push(back(new Set().union(made(50))));\n\
-         r.push(back(new Set().symmetricDifference(made(50))));\n\
+         r.push(back(new Set().union(made(count))));\n\
+         r.push(back(new Set().symmetricDifference(made(count))));\n\
          var t = fill(), it = t.values(), prev;\n\
          r.push(back(t.intersection({ size: 1, has: function () { return false; }, keys: function () {\n\
            return { next: function () {\n\
@@ -692,14 +721,16 @@ fn the_result_keeps_its_keys_across_a_collection() {
          } })), t.size);\n\
          var d = fill();\n\
          r.push(back(d.difference({ size: 100, keys: function () {}, has: function (o) { junk(); d.delete(o); return false; } })), d.size);\n\
-         r.join(\"|\");",
+         r.join(\"|\");"
+        ),
     );
     assert_eq!(
         outcome,
         Outcome::Normal(format!("\"{all}|{all}|{all}|0|{all}|0\""))
     );
 }
-/// Adversary pass 1. The steps of `{walked}.clear()` less those of `{control}.clear()`, two
+
+/// The steps of `{walked}.clear()` less those of `{control}.clear()`, two
 /// Sets of the same 3 entries: `clear` charges one step per place of the cursor list
 /// (`object/keyed_entries.rs`, `EntryTable::clear`), and a table whose last cursor was closed
 /// has no list, so the difference counts the places a cursor left open keeps.
@@ -714,7 +745,7 @@ fn cursor_places_left(
     i64::try_from(walked_steps).unwrap() - i64::try_from(control_steps).unwrap()
 }
 
-/// Adversary pass 1, attack 3: every way out of a walk closes its cursor, read exactly by the
+/// Every way out of a walk closes its cursor, read exactly by the
 /// steps of `clear` ([`cursor_places_left`]) on a long-lived Set: a normal answer of each walk
 /// (true, and false early), the result of `difference` kept by the script (its cursor lies on
 /// that result's table), a throw of `has`, the depth refusal (a `RangeError` the script
@@ -827,7 +858,7 @@ fn every_way_out_of_a_walk_closes_its_cursor() {
     assert_eq!(memory, 0, "memory");
 }
 
-/// Adversary pass 1, attack 1: the order of every observable read, after the test262 cases
+/// The order of every observable read, after the test262 cases
 /// `set-like-class-order.js` (on the list `close-later.tsv` since they define a `class`; here
 /// with accessors on plain objects): GetSetRecord (`size`, its `valueOf`, `has`, `keys`), then
 /// at a `size` equal to `this`'s the walk with `has` (`intersection`, `difference`,
@@ -963,7 +994,7 @@ fn answers_once_when_collecting(source: &str, expected: &str) {
     }
 }
 
-/// Adversary pass 1, attack 2: the copy of `this` in `union` and `symmetricDifference` is made
+/// The copy of `this` in `union` and `symmetricDifference` is made
 /// after `keys()` (`#sec-set.prototype.union` steps 4 and 5), so a `keys` that deletes and adds
 /// to `this` is seen in the result; `difference` copies at its step 4, before `keys()`, and
 /// `intersection` reads `this` live at each key. A `next` that deletes from `this` a key it
@@ -994,8 +1025,8 @@ fn a_set_like_that_mutates_this_during_the_call() {
     );
 }
 
-/// Adversary pass 1, attack 1: GetSetRecord's conversions (`#sec-getsetrecord` steps 2 to 7)
-/// on sizes the unit's test does not give: a Symbol (TypeError after the read of `size`), a
+/// GetSetRecord's conversions (`#sec-getsetrecord` steps 2 to 7)
+/// on sizes the test of its errors does not give: a Symbol (TypeError after the read of `size`), a
 /// `valueOf` that throws (its throw), a `valueOf` that empties `this` (the size of `this` is
 /// read after it), `-0` (a size of 0), 2**53 and a String with spaces; a Proxy as the argument
 /// (its `get` trap sees `size`, `has`, `keys` in that order) and a Proxy of a Set as `this`
@@ -1031,7 +1062,7 @@ fn get_set_record_converts_each_kind_of_size() {
     );
 }
 
-/// Adversary pass 1, attack 1: a Set of another realm is a Set (the brand is the slot), and the
+/// A Set of another realm is a Set (the brand is the slot), and the
 /// result of `union` is made with `%Set.prototype%` of the realm of the method called, not of
 /// `this` (`#sec-set.prototype.union` step 8, the current realm).
 #[test]
@@ -1065,7 +1096,7 @@ fn the_result_takes_the_set_prototype_of_the_method_s_realm() {
     );
 }
 
-/// Adversary pass 1, attack 5: keys held only by the frame of a callback while a collection
+/// Keys held only by the frame of a callback while a collection
 /// can run. `intersection`'s walk over `this` (size of `this` not larger) with a `has` that
 /// deletes its argument from `this` and answers true: the entry is then held by nothing but
 /// the method until it is appended. `union` and `symmetricDifference` with a `next` whose
