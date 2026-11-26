@@ -54,9 +54,70 @@ Every number below comes from the gate, `task check`, on the released commit.
   `parts_script_sees_the_sign_of_each_zero` (the four functions of `Math`). Slice 4 is
   delivered: `conformance/slices-delivered.txt` lists it, and no host requirement is pending
   for it.
+- `Reflect`, the first story of the ninth slice (`#sec-reflect-object`): the global `Reflect`,
+  an ordinary object of `%Object.prototype%` with its 13 functions in the order of their
+  clauses (`apply`, `construct`, `defineProperty`, `deleteProperty`, `get`,
+  `getOwnPropertyDescriptor`, `getPrototypeOf`, `has`, `isExtensible`, `ownKeys`,
+  `preventExtensions`, `set`, `setPrototypeOf`) and `Reflect[Symbol.toStringTag]` "Reflect".
+  Each function calls one internal method of its target after the checks of its clause, and
+  throws a TypeError for a target that is no object (for `apply` not callable, for
+  `construct` no constructor) before it reads another argument. `apply` and `construct` copy
+  their argument list as `Function.prototype.apply` does: a step per element, each element
+  charged to the memory budget before it is kept, a re-entry per call; `ownKeys` charges the
+  list of its values before it makes it and a step per element of the Array it answers
+  (`story:reflect-namespace`).
+- `Map` and `Set` with their prototypes, `get [Symbol.species]`, and the Map and Set Iterators
+  (`#sec-map-objects`, `#sec-set-objects`), on one ordered entry table
+  (`object/keyed_entries.rs`, `EntryTable`): entries in insertion order with a hole per
+  deletion, an index map once the table's room passes 8 entries, keys compared by
+  SameValueZero after CanonicalizeKeyedCollectionKey (`-0` as `+0`, every NaN one key, a
+  String as its atom, so `"0"` and `0` stay two keys), and cursors that a compaction and
+  `clear` move, so `forEach` and an iterator visit an entry added before they reach it and
+  skip one deleted before it. Every operation charges its steps before its work and every
+  growth its bytes; the collector drops the cursors of dead iterators. A cursor id carries a
+  generation, so a stale id reaches no cursor (`story:keyed-entry-table`,
+  `story:map-and-set`).
+- Proxy objects (`story:proxy-objects-and-access-traps`): the global `Proxy` (a constructor of
+  `length` 2 with no "prototype"; a call without `new`, or a target or handler that is not an
+  object, is a TypeError) and `Proxy.revocable`, whose `{ proxy, revoke }` object holds a
+  revoke function of `length` 0 and name "" that drops the Proxy's target and handler on its
+  first call. Every internal method of an object has a Proxy arm: `get`, `set`, `has`,
+  `deleteProperty`, `apply` and `construct` call their trap on the handler and check its
+  answer against the invariants of `#sec-proxy-object-internal-methods-and-internal-slots` (a
+  broken one is a TypeError that names the trap and the key), reading the target's descriptor
+  and extensibility only at the step of the clause; the seven other methods check for
+  revocation and forward to the target. A revoked Proxy throws a TypeError from each method.
+  The walks of the prototype chain hand a key over to a Proxy parent's [[Get]],
+  [[HasProperty]] or [[Set]] with the same receiver; IsArray and GetFunctionRealm follow the
+  target. Every internal method of a Proxy is one re-entry for its duration and spends a step
+  before it reads the handler, so a chain of proxies of any length ends in the RangeError of
+  `reentry_depth`, not in a stack overflow.
+- `super.x` and `super[e]` in the methods, getters and setters of object literals, plain,
+  generator, async and async generator ones, and in their parameters
+  (`#sec-super-keyword`, `#sec-makesuperpropertyreference`): the base is the [[Prototype]] of
+  the method's [[HomeObject]] when the reference is made, the receiver is `this`, and ToObject
+  of a `null` base throws a `TypeError` before a computed key is converted. Reads, calls
+  (`this` is the receiver), tagged templates, `?.`, assignment, compound and logical
+  assignment, `++` and `--`, destructuring targets and `for`-`in` heads work on it; `delete`
+  of one throws a `ReferenceError` without converting the key. The compiler emits seven
+  instructions, `SuperBase`, `GetSuperNamed`, `GetSuperIndex`, `PutSuperNamed`,
+  `PutSuperIndex`, `SuperKey` and `DeleteSuper`. A SuperProperty outside a method (a plain
+  function, generator, async function, its parameters, global code, an arrow at the top) is
+  the early SyntaxError "super property outside a method", a SuperCall outside a derived class
+  constructor is "super call outside a derived class constructor". The refusal `super is not
+  supported before slice 8` is gone; `super` in an arrow function inside a method and `super`
+  in eval code stay refused until `story:derived-classes-and-super-call`
+  (`story:super-property-and-super-syntax`).
+- `new.target` parses and runs in functions, arrow functions, generators, `async` functions
+  and direct eval code (`story:new-target-meta-property`).
 
 ### Changed
 
+- `swell_syntax::parse_eval` and `parse_eval_with` take `context: impl Into<EvalContext>` in
+  place of `strict_caller: bool`: the new public `EvalContext` holds the caller's strictness
+  and PerformEval's four flags (`in_function`, `in_method`, `in_derived_constructor`,
+  `in_class_field_initializer`), and `EvalContext: From<bool>` keeps every call with a `bool`
+  compiling (`story:new-target-meta-property`).
 - Releases ship seven archives of the `swell` binary and `SHA256SUMS`: besides the five
   targets of 0.12.0, `.github/workflows/release-build.yml` builds `x86_64-unknown-linux-musl`
   and `aarch64-unknown-linux-musl`, static binaries that load no shared library; the glibc
@@ -190,6 +251,15 @@ Every number below comes from the gate, `task check`, on the released commit.
   not; two child processes print the same 1,000 values and the key order of an object of
   10,000 keys; 100,000 values are in [0, 1) with positive sign and 53 bits; a realm's stream
   is its creation index, not the order of calls.
+- `HOST-25` and `HOST-214` (slice 9) have tests:
+  `swell::determinism::host_25_key_order_does_not_depend_on_hash_key` and
+  `swell::determinism::host_214_two_processes_print_the_same_map_order`. A `Map` and a `Set`
+  give their keys in insertion order under every `hash_key`, and two child processes print
+  the same order (`story:map-and-set`).
+- `HOST-222` (slice 9, pending): an override of a host object whose `Ok` or `Abrupt::Throw`
+  value holds a stale handle or a handle of another agent ends the run with
+  `Terminated(EngineFault)`. It is the start gate of `story:host-object-overrides`, which
+  moves it to a test.
 
 ## [0.12.0] - 2026-11-25
 
