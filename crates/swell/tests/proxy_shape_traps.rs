@@ -16,7 +16,7 @@ use crate::support;
 use std::cell::Cell;
 
 use support::host::{agent_with, limits, realm, stack_with_room};
-use support::script::{Outcome, define_function, eval, eval_text, run, run_both};
+use support::script::{Outcome, define_function, describe, eval, eval_text, run, run_both};
 use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
 use swell::{
     AgentState, Completion, Cx, HostCall, InterruptHandle, Outcome as HostOutcome, Termination,
@@ -594,15 +594,16 @@ fn i21_own_keys_of_a_non_extensible_target_must_list_no_other_key() {
 /// `for`-`in` over a Proxy (EnumerateObjectProperties, `#sec-enumerate-object-properties`, as
 /// test262's `for-in` cases read it): `ownKeys` of the Proxy, then `getOwnPropertyDescriptor`
 /// for each String key in the order of the answer, then `getPrototypeOf`, and the walk goes on
-/// with the prototype the trap answered (here also the target's own, as a key found further up is
-/// visited only while `HasProperty` of the Proxy, which has no `has` trap, still finds it); the body
-/// visits the enumerable keys after the reads.
+/// with the prototype the trap answered, whose `c` is visited though the target has no such
+/// prototype. Before each key's turn the walk of [[GetOwnProperty]] and [[GetPrototypeOf]] along
+/// that chain reads whether it is still a property ("A property that is deleted before it is
+/// processed is ignored"); no `has` trap is called.
 #[test]
 fn for_in_over_a_proxy_calls_own_keys_and_get_own_property_descriptor_in_order() {
     answers(
         r#"var log = [], s = Symbol();
         var proto = { c: 5, a: 6 };
-        var t = Object.create(proto); t.a = 1; t.b = 2; t.hidden = 3;
+        var t = {}; t.a = 1; t.b = 2; t.hidden = 3;
         t[s] = 4;
         Object.defineProperty(t, "hidden", { enumerable: false });
         var p = new Proxy(t, {
@@ -612,7 +613,8 @@ fn for_in_over_a_proxy_calls_own_keys_and_get_own_property_descriptor_in_order()
         });
         for (var k in p) log.push("body:" + k);
         log.join();"#,
-        "ownKeys,gopd:b,gopd:hidden,gopd:a,getPrototypeOf,body:b,body:a,body:c",
+        "ownKeys,gopd:b,gopd:hidden,gopd:a,getPrototypeOf,\
+         gopd:b,body:b,gopd:a,body:a,gopd:c,getPrototypeOf,body:c",
     );
 }
 
@@ -1236,3 +1238,80 @@ fn fresh_answers_are_held_by_the_definitions() {
         "0=m1,1=m2,0=a1,1=b2,length=2,0=x1,length=1,r1=v1",
     );
 }
+
+/// `for`-`in` over a Proxy visits the enumerable keys of the prototype its `getPrototypeOf` trap
+/// answers (`#sec-enumerate-object-properties`: "Enumerating the properties of the target object
+/// includes enumerating properties of its prototype"; only a property deleted before it is
+/// processed is ignored, and `c` is never deleted).
+#[test]
+fn for_in_visits_the_keys_of_the_prototype_the_trap_answers() {
+    answers_once(
+        r#"var proto = { c: 5, a: 6 };
+        var p = new Proxy({ a: 1, b: 2 }, { getPrototypeOf: function () { return proto; } });
+        var r = [];
+        for (var k in p) r.push(k);
+        r.join();"#,
+        "a,b,c",
+    );
+}
+
+/// Whether a key of a `for`-`in` over a Proxy is still a property when its turn comes is read by
+/// [[GetOwnProperty]] and [[GetPrototypeOf]] along the chain the enumeration walked, never by a
+/// `has` trap: a key of the prototype the trap answers is visited, one deleted from it before
+/// its turn is not, and a key of the target shadows the same name of the prototype.
+#[test]
+fn for_in_over_a_proxy_calls_no_has_trap() {
+    answers_once(
+        r#"var proto = { c: 1, d: 2, a: 9 };
+        var p = new Proxy({ a: 1, b: 2 }, {
+          has: function () { throw new Error("has called"); },
+          getPrototypeOf: function () { return proto; }
+        });
+        var r = [];
+        for (var k in p) { if (k === "a") delete proto.d; r.push(k); }
+        r.join();"#,
+        "a,b,c",
+    );
+}
+
+/// The steps of a `for`-`in` over an object with three own keys, and over a chain of three
+/// ordinary objects in which the body deletes a key before its turn: the walk that reads
+/// whether a key is still a property costs, for ordinary objects, what HasProperty cost (91 and
+/// 126, the numbers the unit printed with HasProperty as the filter, the same in both collection
+/// modes).
+#[test]
+fn for_in_over_ordinary_objects_spends_the_steps_it_spent() {
+    let loops = [
+        (
+            "var o = { a: 1, b: 2, c: 3 }; var n = 0; for (var k in o) n++; n;",
+            "3",
+            FOR_IN_STEPS[0],
+        ),
+        (
+            "var p = { x: 1, y: 2 }; var q = Object.create(Object.create(p)); q.z = 3; q.x = 4;\n\
+             var n = 0; for (var k in q) { if (k === \"z\") delete p.y; n++; } n;",
+            "2",
+            FOR_IN_STEPS[1],
+        ),
+    ];
+    let mut read = Vec::new();
+    for (source, answer, steps) in loops {
+        let mut agent = agent_with(limits()).unwrap();
+        let realm = realm(&mut agent);
+        let outcome = eval(&mut agent, &realm, source);
+        // Read before `describe`, whose own entry spends steps of its own.
+        let spent = agent.last_entry_steps().unwrap();
+        assert_eq!(
+            describe(&mut agent, &realm, outcome),
+            Outcome::Normal(answer.to_string())
+        );
+        println!("for-in steps {spent}: {source}");
+        read.push((spent, steps));
+    }
+    for (spent, steps) in read {
+        assert_eq!(spent, steps);
+    }
+}
+
+/// The steps of the two loops of [`for_in_over_ordinary_objects_spends_the_steps_it_spent`].
+const FOR_IN_STEPS: [u64; 2] = [91, 126];

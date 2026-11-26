@@ -798,6 +798,55 @@ impl<H: Host> Agent<H> {
         Ok(())
     }
 
+    /// Whether `key`, found by EnumerateObjectProperties, is still a property when its turn in
+    /// a `for`-`in` comes ("A property that is deleted before it is processed is ignored",
+    /// `#sec-enumerate-object-properties`): [[GetOwnProperty]] of `object` and then of each
+    /// prototype its [[GetPrototypeOf]] answers, the methods the enumeration itself calls. No
+    /// `has` trap runs: unlike HasProperty, the walk does not hand over to a Proxy's
+    /// [[HasProperty]], so a key of the prototype a `getPrototypeOf` trap answers is found where
+    /// the enumeration found it. A step per prototype, as OrdinaryHasProperty charges, so a
+    /// chain of ordinary objects costs what HasProperty cost. The caller holds `object` and
+    /// `key`; a Proxy met on the way is kept while its traps run (one value outside a room, the
+    /// next one replaces it) and released on every way out.
+    pub(crate) fn enumeration_has_property(
+        &mut self,
+        object: ObjectRef,
+        key: Key,
+    ) -> Completion<bool> {
+        let mark = self.kept.len();
+        let found = self.enumeration_chain_has(object, key, mark);
+        self.release(mark);
+        found
+    }
+
+    /// The walk of [`Agent::enumeration_has_property`]; what it kept above `mark` the caller
+    /// releases.
+    fn enumeration_chain_has(
+        &mut self,
+        object: ObjectRef,
+        key: Key,
+        mark: usize,
+    ) -> Completion<bool> {
+        let mut o = object;
+        loop {
+            if self.get_own_property(o, key)?.is_some() {
+                return Ok(true);
+            }
+            match self.get_prototype_of(o)? {
+                Some(parent) => {
+                    self.charge_steps(1)?;
+                    // The object before is no longer read; a Proxy parent runs traps next.
+                    self.release(mark);
+                    if self.kind_of(parent)? == KindTag::Proxy {
+                        self.keep(Value::Object(parent));
+                    }
+                    o = parent;
+                }
+                None => return Ok(false),
+            }
+        }
+    }
+
     /// Keep the keys `visited` holds, in room charged to `room` first: at the first Proxy of
     /// the walk, the keys of the ordinary objects before it, which a trap may delete from
     /// them while the walk still compares names with them; the keys found are among them.

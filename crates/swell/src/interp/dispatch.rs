@@ -1668,8 +1668,9 @@ impl<H: Host> Agent<H> {
 
     /// `ForInNext(t)`: the next key of the enumerator that is still a property of the object
     /// ("A property that is deleted before it is processed is ignored",
-    /// `#sec-enumerate-object-properties`), a step per key passed over, or the jump when none is
-    /// left.
+    /// `#sec-enumerate-object-properties`, read by [[GetOwnProperty]] and [[GetPrototypeOf]]
+    /// along the chain, never a `has` trap: `Agent::enumeration_has_property`), a step per key
+    /// passed over, or the jump when none is left.
     fn for_in_next(&mut self, target: u32) -> Completion<Flow> {
         loop {
             let next = {
@@ -1688,7 +1689,7 @@ impl<H: Host> Agent<H> {
                 Some((None, _)) | Some((Some(_), None)) => return self.jump(target),
                 None => return Err(self.fault()),
             };
-            if self.has_property(object, key)? {
+            if self.enumeration_has_property(object, key)? {
                 let value = self.key_value(key)?;
                 self.push_value(value)?;
                 return Ok(Flow::Next);
