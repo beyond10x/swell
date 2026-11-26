@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:class-element-syntax-and-early-errors
 kind: story
-status: draft
+status: active
 title: 'Fields, private names, static blocks, .#x and #x in: grammar and early errors, held'
 summary: 886 cases (1,756 runs); lifts the lexer's private-name refusal and holds one refusal per element kind.
 relations:
@@ -47,7 +47,10 @@ scope:
   path: crates/syntax/tests/sources/held/private-name-in.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/private-name.js
-revision: 8
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
 ---
 ## Context
 

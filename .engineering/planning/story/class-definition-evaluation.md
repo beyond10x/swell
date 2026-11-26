@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:class-definition-evaluation
 kind: story
-status: draft
+status: active
 title: 'Base classes run: ClassDefinitionEvaluation, class constructors, the class binding, toString and the instance-elements seam'
 summary: 3,297 cases (6,512 runs); lifts the hold class; takes the class part of the global declarative record.
 relations:
@@ -69,7 +69,10 @@ scope:
   path: crates/syntax/src/parser/mod.rs
 - confidence: inferred
   path: crates/syntax/src/scope.rs
-revision: 11
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 13, executor: "agent:coordinator"}
 ---
 ## Context
 

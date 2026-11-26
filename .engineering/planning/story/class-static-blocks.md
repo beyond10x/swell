@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:class-static-blocks
 kind: story
-status: draft
+status: active
 title: Static blocks in the order of the static elements, and the cases where the parts of order 3 meet
 summary: '484 cases (968 runs): 35 of static blocks and 449 where the derived, field and private-method parts meet; lifts class static block.'
 relations:
@@ -31,7 +31,10 @@ scope:
   path: crates/syntax/src/parser/mod.rs
 - confidence: inferred
   path: crates/syntax/src/scope.rs
-revision: 11
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 13, executor: "agent:coordinator"}
 ---
 ## Context
 

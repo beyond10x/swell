@@ -31,8 +31,48 @@ session's scratch directory. The stage is kept current by the coordinator.
 | 4 | overrides | `story:host-object-overrides` | waits for order 3; the design line HOST-222 is merged (`f3d194e2`) |
 | 5 | close9 | `story:slice-09-conformance-close` | waits for every other story and for the close of slice 4 |
 
-The stories of slice 8 join this wave when the plan critics approve them
-(`docs/plan/waves.md`, the table of "After slice 4: bigger waves").
+## The stories of slice 8
+
+The fourteen stories of `epic:slice-08-classes` joined this wave on 2026-11-26
+(`approval-record:wave-big-2-slice-8`; the plan branch `plan/slice-08` merged at `3237cf33`),
+in the orders of [the plan page](waves.md), "Slice 8, `classes`". Order 1 has no edge to a
+story of slice 9 and starts beside slice 9's order 2.
+
+| order | unit | story | stage |
+|---|---|---|---|
+| 8.1 | newtarget | `story:new-target-meta-property` | starts with the base run of `dc310c6c` |
+| 8.1 | super | `story:super-property-and-super-syntax` | starts with the base run of `dc310c6c` |
+| 8.1 | classsyntax | `story:class-syntax-and-early-errors` | starts with the base run of `dc310c6c` |
+| 8.2 | classes | `story:class-definition-evaluation` | waits for order 8.1 |
+| 8.2 | elements | `story:class-element-syntax-and-early-errors` | waits for order 8.1 |
+| 8.3 | derived | `story:derived-classes-and-super-call` | waits for order 8.2 |
+| 8.3 | fields | `story:public-class-fields` | waits for order 8.2 |
+| 8.3 | privatemethods | `story:private-names-and-private-methods` | waits for order 8.2 and for `story:weak-map-and-weak-set` |
+| 8.4 | staticblocks | `story:class-static-blocks` | waits for order 8.3 |
+| 8.4 | evalfields | `story:eval-in-class-field-initializers` | waits for order 8.3 |
+| 8.5 | privatefields | `story:private-fields-and-private-in` | waits for order 8.4 |
+| 8.6 | evalprivate | `story:private-names-in-eval-code` | waits for order 8.5 |
+| 8.6 | hook | `story:host-ensure-can-add-private-element` | waits for order 8.5 and for `story:host-object-overrides` |
+| 8.7 | close8 | `story:slice-08-conformance-close` | waits for every other story and for the close of slice 9 |
+
+`aep plan artifact waves --status active`, read after the moves (aep 0.80.0): the verb puts
+each of the three stories of order 8.1 in a wave of its own, since they name the same files
+of the syntax and compiler crates (`parser/mod.rs`, `parser/expression.rs`, `ast.rs`,
+`early.rs`, `compiler/src/expression.rs`, `resolve.rs`). The decomposition runs them side by
+side: each story names the function or the arm it writes in a shared file and the fix at the
+merge ("keep both"), and the parallel-safety critic read each pair in two rounds
+(`review-result:slice-08-round-2-parallel-safety`; the reader of revision 2 found no site
+with two owners). Between a story of slice 8's order 1 and a story of slice 9's order 2 the
+verb names two shared files: `crates/swell/tests/main.rs`, which is generated, and
+`crates/swell/src/interp/mod.rs` (`story:proxy-objects-and-access-traps` and
+`story:super-property-and-super-syntax`). The unit that merges second merges the wave
+branch into its own first and runs its checks again.
+
+The base run of the join of order 1 (`dc310c6c`, keyed and reflect merged), one job on the
+build node, output under `.out/test262-base`: `test262 total 53801 8982 7 44812 26250 18560
+2`, `test262-slice 09 1785 3541 0 0 1785 480 1305 0`, 85,556 run lines. The plan of slice 8
+changes no file a test262 run reads, so the run is the base of the units cut at `3237cf33`
+and after.
 
 ## Why the units wait for one unit of wave big-1
 

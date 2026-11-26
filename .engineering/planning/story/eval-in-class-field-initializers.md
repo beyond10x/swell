@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:eval-in-class-field-initializers
 kind: story
-status: draft
+status: active
 title: 'Eval in field initializers: [[ClassFieldInitializerName]] and PerformEval''s inClassFieldInitializer'
 summary: 84 cases (164 runs).
 relations:
@@ -20,7 +20,10 @@ scope:
   path: crates/syntax/src/early.rs
 - confidence: cited
   path: crates/syntax/src/lib.rs
-revision: 7
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
 ---
 ## Context
 

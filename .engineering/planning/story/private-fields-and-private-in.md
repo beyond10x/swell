@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:private-fields-and-private-in
 kind: story
-status: draft
+status: active
 title: 'Private fields and #x in, and the cases where a private field meets the other parts'
 summary: 984 cases (1,966 runs); lifts private field and private name in, the last two holds.
 relations:
@@ -40,7 +40,10 @@ scope:
   path: crates/syntax/src/parser/expression.rs
 - confidence: cited
   path: crates/syntax/src/parser/mod.rs
-revision: 10
+revision: 12
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
 ---
 ## Context
 

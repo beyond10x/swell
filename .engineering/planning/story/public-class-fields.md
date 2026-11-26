@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:public-class-fields
 kind: story
-status: draft
+status: active
 title: Public instance and static fields, their initializers run as frames of the run loop
 summary: 515 cases (1,029 runs); lifts class field.
 relations:
@@ -28,7 +28,10 @@ scope:
   path: crates/syntax/src/parser/mod.rs
 - confidence: inferred
   path: crates/syntax/src/scope.rs
-revision: 9
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 ---
 ## Context
 
