@@ -1,0 +1,5 @@
+test/language/statements/class/subclass/builtin-objects/ArrayBuffer/regular-subclassing.js	13
+test/language/statements/class/subclass/builtin-objects/ArrayBuffer/super-must-be-called.js	13
+test/language/statements/class/subclass/builtin-objects/DataView/regular-subclassing.js	13
+test/language/statements/class/subclass/builtin-objects/DataView/super-must-be-called.js	13
+test/language/statements/class/subclass/builtins.js	13
