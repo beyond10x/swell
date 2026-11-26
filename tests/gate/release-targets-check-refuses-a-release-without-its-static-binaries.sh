@@ -6,7 +6,8 @@
 # GATE_ROOT/.github/workflows/release-build.yml and the two documents; here GATE_ROOT is a copy
 # under .out/gate-tests/<name>/. The unchanged copy passes first; then
 #   1. the workflow without its x86_64-unknown-linux-musl entry,
-#   2. the workflow without target-feature=+crt-static for windows-msvc,
+#   2. the workflow without target-feature=+crt-static for windows-msvc, and with it for the
+#      glibc targets too (a branch *-linux-*),
 #   3. docs/releasing.md without the row of aarch64-unknown-linux-musl, and
 #   4. website/docs/embedding.md naming an archive of a target the workflow does not build,
 #   5. website/docs/embedding.md naming a built target's archive with a version and another
@@ -60,7 +61,12 @@ refused musl "release-targets-check: $wf: builds x86_64-unknown-linux-gnu and no
 
 sed 's/ -C target-feature=+crt-static//' .github/workflows/release-build.yml > "$wf" ||
   fail "cannot plant the dynamic C runtime"
-refused crt "release-targets-check: $wf: the Build step runs cargo for x86_64-pc-windows-msvc with RUSTFLAGS \".*\", without -C target-feature=\\+crt-static" E
+refused crt "release-targets-check: $wf: no branch of case \"\$TARGET\" in the Build step adds -C target-feature=+crt-static for x86_64-pc-windows-msvc"
+
+sed 's/^\( *\)\*-windows-msvc | \*-linux-musl) flags=/\1*-windows-msvc | *-linux-*) flags=/' .github/workflows/release-build.yml > "$wf" ||
+  fail "cannot plant the static C library on glibc"
+cmp -s "$wf" .github/workflows/release-build.yml && fail "the workflow has no branch *-windows-msvc | *-linux-musl) to plant on"
+refused glibc "release-targets-check: $wf: the Build step adds -C target-feature=+crt-static for x86_64-unknown-linux-gnu, which links the C library of its system dynamically"
 
 grep -v 'swell-<tag>-aarch64-unknown-linux-musl\.tar\.gz' docs/releasing.md > "$rel" ||
   fail "cannot plant the missing row"
