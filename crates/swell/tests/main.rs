@@ -33,6 +33,7 @@ mod builtins_object_from_entries;
 mod builtins_object_integrity;
 mod builtins_reflect;
 mod builtins_scripts;
+mod builtins_set_methods;
 mod builtins_string;
 mod builtins_string_access;
 mod builtins_string_replace;

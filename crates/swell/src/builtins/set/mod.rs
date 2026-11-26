@@ -14,9 +14,16 @@
 //! collection; the loop of the constructor keeps [[Iterator]], [[NextMethod]], the adder and
 //! each value on the kept stack until it returns, charges a step per iteration before its work,
 //! and closes the iterator on an abrupt completion of the adder (IfAbruptCloseIterator).
+//!
+//! The set methods (`union` and the six beside it, `story:set-methods`) are the group
+//! `set/methods.rs`: the variant [`SetBuiltin::Methods`], its entries in the lists of the
+//! prototype's methods, in the order of the clauses.
+
+pub(crate) mod methods;
 
 use crate::builtins::Method;
 use crate::builtins::object::argument;
+use crate::builtins::set::methods::SetMethodsBuiltin;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
@@ -52,15 +59,53 @@ pub(crate) enum SetBuiltin {
     Values,
     /// `%SetIteratorPrototype%.next ( )` (24.2.6.2.1).
     IteratorNext,
+    /// A builtin of the group `methods.rs`.
+    Methods(SetMethodsBuiltin),
 }
 
 /// The methods of `%Set.prototype%` after `add`, `clear` and `constructor` and before `keys`,
-/// in the order of the clauses (the set methods of `story:set-methods` are not here).
+/// in the order of the clauses.
 const PROTOTYPE_METHODS: &[Method<SetBuiltin>] = &[
     ("delete", 1, SetBuiltin::Delete),
+    (
+        "difference",
+        1,
+        SetBuiltin::Methods(SetMethodsBuiltin::Difference),
+    ),
     ("entries", 0, SetBuiltin::Entries),
     ("forEach", 1, SetBuiltin::ForEach),
     ("has", 1, SetBuiltin::Has),
+    (
+        "intersection",
+        1,
+        SetBuiltin::Methods(SetMethodsBuiltin::Intersection),
+    ),
+    (
+        "isDisjointFrom",
+        1,
+        SetBuiltin::Methods(SetMethodsBuiltin::IsDisjointFrom),
+    ),
+    (
+        "isSubsetOf",
+        1,
+        SetBuiltin::Methods(SetMethodsBuiltin::IsSubsetOf),
+    ),
+    (
+        "isSupersetOf",
+        1,
+        SetBuiltin::Methods(SetMethodsBuiltin::IsSupersetOf),
+    ),
+];
+
+/// The methods of `%Set.prototype%` after `size` and before `values`, in the order of the
+/// clauses.
+const METHODS_AFTER_SIZE: &[Method<SetBuiltin>] = &[
+    (
+        "symmetricDifference",
+        1,
+        SetBuiltin::Methods(SetMethodsBuiltin::SymmetricDifference),
+    ),
+    ("union", 1, SetBuiltin::Methods(SetMethodsBuiltin::Union)),
 ];
 
 impl<H: Host> Agent<H> {
@@ -94,6 +139,7 @@ impl<H: Host> Agent<H> {
         self.define_builtin_property(prototype, "keys", Value::Object(values))?;
         // 24.2.4.14: an accessor whose set accessor function is undefined.
         self.define_size_getter(making, prototype, BuiltinId::Set(SetBuiltin::Size))?;
+        self.define_group_methods(making, prototype, METHODS_AFTER_SIZE, BuiltinId::Set)?;
         self.define_builtin_property(prototype, "values", Value::Object(values))?;
         // 24.2.4.18: "The initial value of the %Symbol.iterator% property is
         // %Set.prototype.values%".
@@ -147,6 +193,7 @@ impl<H: Host> Agent<H> {
                 self.collection_iterator_of(this, set, IterationKind::Value, "Set.prototype.values")
             }
             SetBuiltin::IteratorNext => self.collection_iterator_next(this, set),
+            SetBuiltin::Methods(id) => self.run_set_methods_builtin(id, this, argument(args, 0)),
         }
     }
 
