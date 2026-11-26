@@ -348,7 +348,8 @@ impl<H: Host> Agent<H> {
                 | ObjectKind::AsyncActivation(_)
                 | ObjectKind::AsyncFromSyncIterator(_)
                 | ObjectKind::AsyncGenerator(_)
-                | ObjectKind::AsyncBuiltinActivation(_) => true,
+                | ObjectKind::AsyncBuiltinActivation(_)
+                | ObjectKind::WeakCollection(_) => true,
             };
             if !plain || record.properties.may_hold_index() {
                 return Ok(None);

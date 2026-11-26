@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T23:34:01Z",
+  "actor": "human:operator",
+  "artifact": "story:weak-map-and-weak-set",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/weak at 7d6e94c5, build node, before the merge into wave/big-2",
+    "reference": "swell::main 1322 passed and 1 skipped in both modes; lib 269 passed; clippy 0; fmt 0"
+  }
+}

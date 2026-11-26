@@ -35,6 +35,8 @@ pub(crate) enum TokenKind {
     /// contextual words are names.
     Name(String),
     Keyword(Keyword),
+    /// A `PrivateIdentifier` (`#sec-names-and-keywords`): its StringValue, `#` first.
+    PrivateName(String),
     Punct(Punct),
     Number(NumberLiteral),
     String(StringLiteral),
@@ -59,7 +61,7 @@ impl HeapBytes for TokenKind {
     fn heap_bytes(&self) -> usize {
         match self {
             TokenKind::Eof | TokenKind::Keyword(_) | TokenKind::Punct(_) => 0,
-            TokenKind::Name(name) => name.heap_bytes(),
+            TokenKind::Name(name) | TokenKind::PrivateName(name) => name.heap_bytes(),
             TokenKind::Number(n) => n.heap_bytes(),
             TokenKind::String(s) => s.heap_bytes(),
             TokenKind::RegExp(r) => r.heap_bytes(),

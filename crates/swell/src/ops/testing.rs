@@ -121,6 +121,23 @@ impl<H: Host> Agent<H> {
         }
     }
 
+    /// CanBeHeldWeakly (`#sec-canbeheldweakly`), `story:weak-map-and-weak-set`: an Object, or
+    /// a Symbol that is not in the GlobalSymbolRegistry (a well-known Symbol can be held
+    /// weakly). A Symbol whose record is gone is a broken invariant.
+    pub(crate) fn can_be_held_weakly(&mut self, value: Value) -> Completion<bool> {
+        match value {
+            // 1. If v is an Object, return true.
+            Value::Object(_) => Ok(true),
+            // 2. If v is a Symbol and KeyForSymbol(v) is undefined, return true.
+            Value::Symbol(symbol) => match self.heap.symbols.get(symbol.handle) {
+                Ok(record) => Ok(!record.registered),
+                Err(_) => Err(self.fault()),
+            },
+            // 3. Return false.
+            _ => Ok(false),
+        }
+    }
+
     /// IsStrictlyEqual (`#sec-isstrictlyequal`).
     pub(crate) fn is_strictly_equal(&mut self, x: Value, y: Value) -> Completion<bool> {
         match (x, y) {

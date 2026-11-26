@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T22:18:50Z",
+  "actor": "human:operator",
+  "artifact": "story:realm-size-lane-within-its-share",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/slowlane at 949e906a, build node, before the merge into wave/big-2",
+    "reference": "task gate-selftest on 949e906a: 91 passed, 2 failed (the two site-data-check selftests, red on the base for a stale data file); the five selftests of the lane ok; 0 changed files; the implementor's lane in one task process on the build node: slow-time lane 699.3 of 900, clock 699.4 of 900"
+  }
+}

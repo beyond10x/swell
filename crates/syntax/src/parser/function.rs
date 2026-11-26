@@ -147,10 +147,11 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(())
     }
 
-    /// Saves the current [Yield] and [Await], whether `new.target` stands and the SuperProperty
-    /// flag on the parser's lists and sets `yields` and `awaits`, the growth of each list charged
-    /// first; `new_target` and the SuperProperty flag stay as they are, which an arrow function
-    /// keeps.
+    /// Saves the current [Yield] and [Await], whether `new.target` stands, the SuperProperty
+    /// flag and whether the code is a field initializer's on the parser's lists and sets
+    /// `yields` and `awaits`, the growth of each list charged first; a function's code is no
+    /// field initializer's; `new_target` and the SuperProperty flag stay as they are, which an
+    /// arrow function keeps.
     #[inline(never)]
     fn save_context(&mut self, yields: bool, awaits: bool) -> R<()> {
         let m = self.m;
@@ -162,8 +163,11 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.charged(pushed)?;
         let pushed = m.push(&mut self.outer_super_properties, self.super_property);
         self.charged(pushed)?;
+        let pushed = m.push(&mut self.outer_field_code, self.field_code);
+        self.charged(pushed)?;
         self.yields = yields;
         self.awaits = awaits;
+        self.field_code = false;
         Ok(())
     }
 
@@ -203,6 +207,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
         if let Some(super_property) = self.outer_super_properties.pop() {
             self.super_property = super_property;
+        }
+        if let Some(field_code) = self.outer_field_code.pop() {
+            self.field_code = field_code;
         }
         let mut deepest = 0;
         for s in &body {

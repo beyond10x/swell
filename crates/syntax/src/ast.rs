@@ -405,6 +405,20 @@ pub enum Expr {
         callee: ExprId,
         arguments: Vec<ExprId>,
     },
+    /// `object.#name` (`#sec-left-hand-side-expressions`, MemberExpression : MemberExpression .
+    /// PrivateIdentifier), or with `optional` the link `object?.#name` of an optional chain
+    /// (OptionalChain : ?. PrivateIdentifier). The name's StringValue keeps its `#`.
+    PrivateMember {
+        object: ExprId,
+        name: Name,
+        optional: bool,
+    },
+    /// `#name in right` (`#sec-relational-operators`, RelationalExpression : PrivateIdentifier
+    /// in ShiftExpression).
+    PrivateIn {
+        name: Name,
+        right: ExprId,
+    },
     /// A `TemplateLiteral` without a tag (`#sec-template-literals`): its template strings in
     /// source order, one more than its substitutions, each `Expression` of a `${ }`.
     Template {
@@ -691,6 +705,12 @@ pub struct Class {
     pub constructor: FunctionId,
     /// The ClassElements but the constructor and the empty ones (`;`), in source order.
     pub elements: Vec<ClassElement>,
+    /// The initializer of the instance elements (`docs/design/engine.md`, section 3, "Classes",
+    /// item 4), a function of kind [`FunctionKind::FieldInitializer`] whose body holds the
+    /// initializers of the fields that are not static, each an expression statement, in source
+    /// order; present when the class has a field or a private method that is not static, and
+    /// numbered at the first token of the first such element.
+    pub instance_elements: Option<FunctionId>,
     /// From `class` to the `}` of the body.
     pub span: Span,
 }
@@ -722,12 +742,16 @@ pub enum ClassElement {
         function: FunctionId,
         span: Span,
     },
-    /// A FieldDefinition: its name and its Initializer, if any, which is code of the function
-    /// of kind [`FunctionKind::FieldInitializer`] of its run of fields.
+    /// A FieldDefinition: its name and its Initializer, if any, which is code of `function`,
+    /// the function of kind [`FunctionKind::FieldInitializer`] of its run of fields: for a
+    /// static field the run of consecutive static fields it belongs to, numbered at the first
+    /// token of the run's first field; for any other field [`Class::instance_elements`]. The
+    /// function's body holds the initializer as an expression statement.
     Field {
         is_static: bool,
         key: ClassKey,
         initializer: Option<ExprId>,
+        function: FunctionId,
         span: Span,
     },
     /// A ClassStaticBlock, its function of kind [`FunctionKind::StaticBlock`].
@@ -736,32 +760,64 @@ pub enum ClassElement {
 
 impl Class {
     /// Calls `f` on each child of the class: the heritage, the constructor, then each
-    /// element's computed name, function or initializer, in source order.
+    /// element's computed name and function, in the order of their numbers. A field's
+    /// initializer is code of its run's function, which is visited once, after the computed
+    /// name of the run's first field; the instance elements' function is visited at the first
+    /// element that is not static and is a field or a private method, before its function.
     pub(crate) fn children(&self, f: &mut dyn FnMut(Child)) {
         if let Some(e) = self.heritage {
             f(Child::Expr(e));
         }
         f(Child::Function(self.constructor));
+        let mut instance = self.instance_elements;
+        let mut run = None;
         for element in &self.elements {
             match element {
-                ClassElement::Method { key, function, .. } => {
-                    if let ClassKey::Computed(e) = key {
-                        f(Child::Expr(*e));
-                    }
-                    f(Child::Function(*function));
-                }
-                ClassElement::Field {
-                    key, initializer, ..
+                ClassElement::Method {
+                    is_static,
+                    key,
+                    function,
+                    ..
                 } => {
                     if let ClassKey::Computed(e) = key {
                         f(Child::Expr(*e));
                     }
-                    if let Some(e) = initializer {
+                    if !is_static
+                        && matches!(key, ClassKey::Private(_))
+                        && let Some(id) = instance.take()
+                    {
+                        f(Child::Function(id));
+                    }
+                    f(Child::Function(*function));
+                }
+                ClassElement::Field {
+                    is_static,
+                    key,
+                    function,
+                    ..
+                } => {
+                    if let ClassKey::Computed(e) = key {
                         f(Child::Expr(*e));
+                    }
+                    let first = if *is_static {
+                        run != Some(*function)
+                    } else {
+                        instance.take().is_some()
+                    };
+                    if first {
+                        f(Child::Function(*function));
                     }
                 }
                 ClassElement::StaticBlock { function, .. } => f(Child::Function(*function)),
             }
+            run = match element {
+                ClassElement::Field {
+                    is_static: true,
+                    function,
+                    ..
+                } => Some(*function),
+                _ => None,
+            };
         }
     }
 }
@@ -1174,6 +1230,7 @@ impl HeapBytes for Expr {
             Expr::SuperMember(SuperKey::Name(name)) => name.heap_bytes(),
             Expr::SuperMember(SuperKey::Computed(_)) => 0,
             Expr::SuperCall(arguments) => arguments.heap_bytes(),
+            Expr::PrivateMember { name, .. } | Expr::PrivateIn { name, .. } => name.heap_bytes(),
             Expr::New { arguments, .. } => arguments.heap_bytes(),
             Expr::Template {
                 strings,
@@ -1453,6 +1510,8 @@ impl Expr {
                     f(Child::Expr(*e));
                 }
             }
+            Expr::PrivateMember { object, .. } => f(Child::Expr(*object)),
+            Expr::PrivateIn { right, .. } => f(Child::Expr(*right)),
             Expr::New { callee, arguments } => {
                 f(Child::Expr(*callee));
                 for e in arguments.iter().flatten() {

@@ -54,6 +54,7 @@ pub(crate) mod property;
 pub(crate) mod proxy;
 pub(crate) mod regexp;
 pub(crate) mod string;
+pub(crate) mod weak_collection;
 
 use alloc::rc::Rc;
 use core::cell::Cell;
@@ -227,6 +228,10 @@ pub(crate) enum ObjectKind {
     /// A Proxy exotic object (10.5), `story:proxy-objects-and-access-traps`
     /// (`object/proxy.rs`).
     Proxy(ProxyObject),
+    /// A WeakMap or a WeakSet instance (24.3.4, 24.4.4), with [[WeakMapData]] or
+    /// [[WeakSetData]] in a box of its kind, `story:weak-map-and-weak-set`
+    /// (`object/weak_collection.rs`).
+    WeakCollection(alloc::boxed::Box<weak_collection::WeakCollection>),
 }
 
 /// Which kind an object is, for the dispatch.
@@ -251,6 +256,7 @@ pub(crate) enum KindTag {
     AsyncGenerator,
     AsyncBuiltinActivation,
     Proxy,
+    WeakCollection,
 }
 
 impl ObjectRecord {
@@ -292,6 +298,7 @@ impl ObjectRecord {
             ObjectKind::AsyncGenerator(generator) => generator.trace(mark),
             ObjectKind::AsyncBuiltinActivation(activation) => activation.trace(mark),
             ObjectKind::Proxy(proxy) => proxy.trace(mark),
+            ObjectKind::WeakCollection(table) => table.trace(mark),
         }
     }
 
@@ -319,6 +326,7 @@ impl ObjectRecord {
             ObjectKind::AsyncGenerator(_) => KindTag::AsyncGenerator,
             ObjectKind::AsyncBuiltinActivation(_) => KindTag::AsyncBuiltinActivation,
             ObjectKind::Proxy(_) => KindTag::Proxy,
+            ObjectKind::WeakCollection(_) => KindTag::WeakCollection,
         }
     }
 }
