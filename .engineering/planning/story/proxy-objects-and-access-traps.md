@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:proxy-objects-and-access-traps
 kind: story
-status: draft
+status: active
 title: Proxy objects, revocable, the dispatch arms and the get, set, has, deleteProperty, apply and construct traps
 summary: object/proxy.rs and object/invariants.rs, every internal method with a Proxy arm, the walks of the chain, IsArray and GetFunctionRealm; every Proxy method a re-entry (epic acceptance 5); order 2; 246 cases (1 incoming).
 relations:
@@ -45,7 +45,10 @@ scope:
   path: crates/swell/tests/main.rs
 - confidence: inferred
   path: crates/swell/tests/proxy.rs
-revision: 6
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T06:32:18Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T06:32:18Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 ---
 ## Context
 

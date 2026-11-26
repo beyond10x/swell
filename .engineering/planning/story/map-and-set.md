@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:map-and-set
 kind: story
-status: draft
+status: active
 title: Map and Set with their iterators and species, on the entry table
 summary: Object kinds Map, Set and their iterators, the constructors with AddEntriesFromIterable, the prototypes but the set methods and upsert; HOST-25 and HOST-214; order 2; 376 cases.
 relations:
@@ -44,7 +44,10 @@ scope:
   path: crates/swell/tests/main.rs
 - confidence: cited
   path: website/data/status.json
-revision: 7
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T06:32:17Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T06:32:18Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
 ---
 ## Context
 

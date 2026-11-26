@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:reflect-namespace
 kind: story
-status: draft
+status: active
 title: 'Reflect: the namespace object and its 13 functions'
 summary: builtins/reflect.rs over the internal methods of the dispatch, CreateListFromArrayLike pub(crate); order 1; 480 cases (213 failing, 267 passing that must stay passing).
 relations:
@@ -28,7 +28,10 @@ scope:
   path: crates/swell/tests/builtins_symbol_values.rs
 - confidence: cited
   path: crates/swell/tests/main.rs
-revision: 5
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T06:32:17Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T06:32:17Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:map-upsert-and-group-by
 kind: story
-status: draft
+status: active
 title: Map.prototype.getOrInsert, getOrInsertComputed and Map.groupBy
 summary: builtins/map/upsert.rs and GroupBy with the zero coercion shared with Object.groupBy; order 4; 46 cases.
 relations:
@@ -22,7 +22,10 @@ scope:
   path: crates/swell/tests/builtins_symbol_values.rs
 - confidence: cited
   path: crates/swell/tests/main.rs
-revision: 5
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T06:32:20Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T06:32:20Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 ---
 ## Context
 

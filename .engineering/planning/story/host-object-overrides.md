@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:host-object-overrides
 kind: story
-status: draft
+status: active
 title: 'Host objects with an override table: dispatch, handle checks and invariant checks that fault the agent'
 summary: Overrides<H> and HostObjectSpec<H>.overrides as host-interface.md section 15 states, Host arms of the 11 internal methods, recorded facts checked with object/invariants.rs; HOST-41, 112, 113, 114 and HOST-222; order 4; no case.
 relations:
@@ -79,7 +79,10 @@ scope:
   path: crates/test262/src/host.rs
 - confidence: cited
   path: website/data/status.json
-revision: 6
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T06:32:21Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T06:32:21Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 ---
 ## Context
 
