@@ -737,11 +737,18 @@ session coordinates; this section is its procedure, taken from how surf is run
   at the gate's count (2,500). The same command failed here in 5 s. So: a unit that changes
   `crates/syntax/src/` runs `SWELL_FULL_COUNTS=1 cargo nextest run --locked -p swell-syntax
   --profile default --test main` in its rounds, and a unit that changes a test with a gate
-  count runs that test at its full count in both collection modes; the coordinator runs
-  `slot --timeout 30m task slow-tests` on the wave branch's tip beside the gate and `task slow`
-  whole where the expected file changed, and the hand-over quotes their count lines. A gate
-  count that passes where its full count fails is a defect of the test: it gets a story and
-  is fixed with the fix of what it missed.
+  count runs that test at its full count in both collection modes; a unit that adds anything
+  to the realm (a builtin, an intrinsic, a property of one) runs `slot --timeout 30m task
+  test-realm-sizes` before it reports and names every red test with its size and mode; the
+  coordinator runs every part of `task slow` on the wave branch's tip beside the gate before
+  each push of a wave branch (one pool job per part where the whole exceeds a job's time),
+  and the hand-over quotes their count lines. A gate count that passes where its full count
+  fails is a defect of the test: it gets a story and is fixed with the fix of what it missed.
+  On 2026-11-26 a wave of six stories was pushed with a green gate and `slow-tests` alone:
+  on the forge `test-realm-sizes` ended red at size 200 in both modes. One unit had added
+  `Math.random` to every realm without that run, and two tests that made a String between
+  two readings of `heap_bytes()`, or read an answer as a String in a room of 39,310 bytes,
+  met the arena of Strings growing by 53,248 bytes. The same command failed here.
 - **A merged wave branch is compiled before a unit is based on it.** On 2026-11-22 the twelfth
   unit of slice 3 was merged on its own report into a branch that had moved since its base:
   the merge applied without a conflict and the crate did not compile, because two units had

@@ -179,6 +179,27 @@ the one the unit `close` wrote, line for line. On `main` before the wave the tot
   (`story:release-0-12-0-with-binaries`, `story:gate-selftests-write-no-tracked-file`); a
   draft is accepted by the operator, so they are not moved here.
 
+### After the first push: the lane `slow` was red on the forge
+
+- The wave was pushed at `7754edef` with a green gate and a local run of `slow-tests` alone.
+  On the forge `task slow` ended red in its part `test-realm-sizes`, at size 200 in both
+  modes: `misuse::host_102_reads_change_nothing_and_call_no_hook` and
+  `termination::an_agent_that_ended_in_memory_budget_runs_again_after_a_collection`.
+- The cause is in the two tests, not in the engine. With `Math.random` in the realm (the
+  unit `random`, merge `12a32b66`, the first red commit by bisection) a realm padded by 200
+  host functions leaves the arena of Strings two free slots after a collection; the third
+  String grows it by 53,248 bytes. The first test made a String between two readings of
+  `heap_bytes()` (550,495 and 603,743); the second read a Number as a String in a room of
+  39,310 bytes and ended in `Terminated(MemoryBudget)`.
+- The fix (`5078361a`, tests only): the first test makes and roots its String before the
+  first reading, the second reads its answers as Numbers with no allocation. `task
+  test-realm-sizes` on it: 14 runs green, 1343 passed in the default mode and 1339 in the
+  collect mode at each size.
+- What let it through: the unit `random` added to the realm and did not run `task
+  test-realm-sizes`, and the coordinator ran `slow-tests` where the whole lane was due.
+  `AGENTS.md` ("The lane `slow` runs here before a hand-over") now names both: the unit's
+  run, and every part of `task slow` on the wave branch's tip before each push.
+
 ### The stories
 
 `story:core-builds-without-std`, `story:releases-ship-static-binaries`, `story:math-random`,
