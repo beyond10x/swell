@@ -235,6 +235,10 @@ fn owned_bytes(units: usize, latin1: bool) -> u64 {
 /// A vector of exactly `len` elements' room, or `OverBudget` when the allocator refuses.
 fn room<T>(len: usize) -> Result<Vec<T>, OverBudget> {
     let mut vec = Vec::new();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "each caller checks or charges `owned_bytes` of the units first; the String record or the atom key keeps that charge"
+    )]
     vec.try_reserve_exact(len).map_err(|_| OverBudget)?;
     Ok(vec)
 }

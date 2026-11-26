@@ -442,6 +442,10 @@ impl<H: Host> Agent<H> {
             }
             let storage = self.dense_mut(array)?;
             let length = storage.elements.len();
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "charged by `heap.accounting.charge` before it grows, an `Option<Value>` per added element"
+            )]
             if storage
                 .elements
                 .try_reserve_exact(wanted.saturating_sub(length))
@@ -647,6 +651,10 @@ impl<H: Host> Agent<H> {
             u64::try_from(list_entries.saturating_mul(size_of::<u32>())).unwrap_or(u64::MAX);
         self.charge_bytes(bytes)?;
         let mut listed: Vec<u32> = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `charge_bytes` before it is reserved, a `u32` per entry of the property list"
+        )]
         if listed.try_reserve_exact(list_entries).is_err() {
             self.heap.accounting.credit(bytes);
             return Err(self.terminate(Termination::MemoryBudget));

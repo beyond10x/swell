@@ -430,6 +430,10 @@ impl<H: Host> Agent<H> {
                 return Err(self.terminate(Termination::MemoryBudget));
             }
         }
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the room of a `ChargedVec`, charged by `Charge::grow` before it grows"
+        )]
         if list.list.try_reserve_exact(wanted - length).is_err() {
             list.charge.release(growth);
             return Err(self.terminate(Termination::MemoryBudget));
@@ -457,6 +461,10 @@ impl<H: Host> Agent<H> {
             #[cfg(test)]
             tally: crate::object::string::copies::Tally::default(),
         };
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the room of a new `ChargedVec`, charged by `Accounting::hold` before it is reserved"
+        )]
         if list.list.try_reserve_exact(count).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }

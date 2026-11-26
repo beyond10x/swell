@@ -308,6 +308,10 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let mut slots = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged with the frame before it is reserved, a `Value` per local and kept argument"
+        )]
         if slots.try_reserve_exact(count).is_err() {
             self.heap.accounting.credit(charged);
             return Err(self.terminate(Termination::MemoryBudget));

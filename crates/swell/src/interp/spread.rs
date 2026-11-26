@@ -104,6 +104,10 @@ impl<H: Host> Agent<H> {
         let bytes = u64::from(count).saturating_mul(size);
         self.charge_bytes(bytes)?;
         let mut args = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `charge_bytes` before it is reserved, a `Value` per element; the caller credits it"
+        )]
         if args
             .try_reserve_exact(usize::try_from(count).unwrap_or(usize::MAX))
             .is_err()

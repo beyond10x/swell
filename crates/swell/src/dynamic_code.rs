@@ -347,6 +347,10 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let mut locals = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged with the frame before it is reserved, `vec_bytes::<SlotValue>` of the locals"
+        )]
         if locals.try_reserve_exact(count).is_err() {
             self.heap.accounting.credit(charged);
             return Err(self.terminate(Termination::MemoryBudget));
@@ -752,6 +756,10 @@ impl<H: Host> Agent<H> {
     ) -> Completion<ObjectRef> {
         // Steps 9 and 10: paramStrings, then bodyString, each kept.
         let mut param_strings = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `create_dynamic_function` before these steps, `vec_bytes::<StringRef>` of the parameters"
+        )]
         if param_strings.try_reserve_exact(params.len()).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -814,6 +822,10 @@ impl<H: Host> Agent<H> {
         let bytes = units.saturating_mul(size_of::<u16>());
         let charged = self.heap.accounting.charge(vec_bytes::<u16>(units)).is_ok();
         let mut name = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by the statement above, `vec_bytes::<u16>` of the name, before it is reserved"
+        )]
         if code.functions.is_empty() || !charged || name.try_reserve_exact(units).is_err() {
             let fault = code.functions.is_empty();
             if charged {

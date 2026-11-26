@@ -389,6 +389,10 @@ impl<H: Host> Agent<H> {
         let mark = parser.records.is_none().then(|| self.keep(value));
         let bytes = bytes_of::<Open>(1).saturating_add(bytes_of::<Value>(1));
         self.json_parse_charge(parser, bytes)?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `json_parse_charge`, an `Open` per open value, before it grows"
+        )]
         if parser.stack.try_reserve(1).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -503,6 +507,10 @@ impl<H: Host> Agent<H> {
         // The record and its entry in its parent are in lists charged by their capacity; the
         // two slots of the kept stack are charged here.
         self.json_parse_charge(parser, bytes_of::<Value>(2))?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `json_parse_charge`, the two slots of the kept stack, before it grows"
+        )]
         if self.kept.try_reserve(2).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -719,6 +727,10 @@ impl<H: Host> Agent<H> {
                                 code = code * 16 + digit;
                                 parser.advance(1);
                             }
+                            #[expect(
+                                clippy::disallowed_methods,
+                                reason = "bounded by the charged text, one unit per escape read, dropped before any call into script"
+                            )]
                             if units.try_reserve(1).is_err() {
                                 return Err(self.terminate(Termination::MemoryBudget));
                             }
@@ -732,6 +744,10 @@ impl<H: Host> Agent<H> {
                 _ => unit,
             };
             parser.advance(1);
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "bounded by the charged text, one unit per unit read, dropped before any call into script"
+            )]
             if units.try_reserve(1).is_err() {
                 return Err(self.terminate(Termination::MemoryBudget));
             }

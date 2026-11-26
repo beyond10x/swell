@@ -106,6 +106,10 @@ mod scan {
     /// replaced by spaces (newlines kept), and whitespace around `::` is removed.
     pub(super) fn code_of(source: &str) -> String {
         let chars: Vec<char> = source.chars().collect();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test code: the length of one source file of the repository"
+        )]
         let mut out = String::with_capacity(source.len());
         let mut i = 0;
         while i < chars.len() {
@@ -202,6 +206,10 @@ mod scan {
             }
         }
         // `std :: fs` is `std::fs`.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test code: at most the length of `out`, one source file of the repository"
+        )]
         let mut joined = String::with_capacity(out.len());
         for (k, part) in out.split("::").enumerate() {
             if k == 0 {

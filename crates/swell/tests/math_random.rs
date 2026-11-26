@@ -37,6 +37,10 @@ fn agent_seeded(seeds: Seeds) -> Agent<TestHost> {
 /// `this` and no argument, at most [`CHUNK`] calls in one entry.
 fn stream(agent: &mut Agent<TestHost>, realm: &Realm, count: usize) -> Vec<f64> {
     let global_root = agent.global_object(realm).unwrap();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test code: the `count` values the test asks for"
+    )]
     let mut values = Vec::with_capacity(count);
     while values.len() < count {
         let chunk = (count - values.len()).min(CHUNK);

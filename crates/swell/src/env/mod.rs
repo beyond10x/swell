@@ -357,6 +357,10 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let mut values = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "checked against the budget as `owned` before it is reserved, charged with the record by `store_environment`"
+        )]
         if values.try_reserve_exact(count).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }

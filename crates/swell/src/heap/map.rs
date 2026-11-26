@@ -581,9 +581,17 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
         };
         let mut ctrl = Vec::new();
         let ctrl_bytes = buckets.checked_add(WIDTH).ok_or(OverBudget)?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the control bytes of the new table, charged by the map's owner by `KeyedMap::table_bytes_for` before it grows"
+        )]
         ctrl.try_reserve_exact(ctrl_bytes).map_err(|_| OverBudget)?;
         ctrl.resize(ctrl_bytes, EMPTY);
         let mut slots = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the buckets of the new table, charged by the map's owner by `KeyedMap::table_bytes_for` before it grows"
+        )]
         slots.try_reserve_exact(buckets).map_err(|_| OverBudget)?;
         slots.resize_with(buckets, || None);
         let old = core::mem::replace(&mut self.slots, slots);

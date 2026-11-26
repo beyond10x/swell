@@ -1,0 +1,21 @@
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+disallowed-methods = [
+    { path = "alloc::vec::Vec::with_capacity", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::vec::Vec::reserve", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::vec::Vec::reserve_exact", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::vec::Vec::try_reserve", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::vec::Vec::try_reserve_exact", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::collections::VecDeque::with_capacity", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::collections::VecDeque::reserve", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::collections::VecDeque::reserve_exact", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::collections::VecDeque::try_reserve", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::collections::VecDeque::try_reserve_exact", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::string::String::with_capacity", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::string::String::reserve", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::string::String::reserve_exact", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::string::String::try_reserve", reason = "reserves room outside ChargedVec: name its charge or bound" },
+    { path = "alloc::string::String::try_reserve_exact", reason = "reserves room outside ChargedVec: name its charge or bound" },
+]

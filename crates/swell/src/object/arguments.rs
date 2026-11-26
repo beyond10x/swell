@@ -209,6 +209,10 @@ impl<H: Host> Agent<H> {
         self.charge_bytes(bytes)?;
         let mut slots = Vec::new();
         let mut seen = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the mapped slots and the seen flags, both charged by `charge_bytes` before they are reserved"
+        )]
         if slots.try_reserve_exact(mapped).is_err() || seen.try_reserve_exact(width).is_err() {
             self.heap.accounting.credit(bytes);
             return Err(self.terminate(Termination::MemoryBudget));

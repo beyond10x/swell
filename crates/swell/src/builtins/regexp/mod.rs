@@ -239,6 +239,10 @@ fn parse_and_compile_latin1(
     let copy_bytes = bytes.len().saturating_mul(size_of::<u16>());
     budget.charge(copy_bytes).map_err(Failure::Stopped)?;
     let mut units: Vec<u16> = Vec::new();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "charged by `budget.charge` before it is reserved, two bytes per unit"
+    )]
     if units.try_reserve_exact(bytes.len()).is_err() {
         budget.credit(copy_bytes);
         return Err(Failure::Stopped(Stop::MemoryBudget));
