@@ -290,10 +290,11 @@ pub enum Instruction {
     Decrement,
     /// `[a, b] -> [a * b]`, ApplyStringOrNumericBinaryOperator
     /// (`#sec-applystringornumericbinaryoperator`); likewise `Div` to `UShr` and `BitAnd` to
-    /// `BitOr`.
+    /// `BitOr`, `Exp` the `**` of `#sec-exp-operator`.
     Mul,
     Div,
     Rem,
+    Exp,
     Add,
     Sub,
     Shl,
@@ -821,6 +822,7 @@ impl Instruction {
             | Instruction::Mul
             | Instruction::Div
             | Instruction::Rem
+            | Instruction::Exp
             | Instruction::Add
             | Instruction::Sub
             | Instruction::Shl
