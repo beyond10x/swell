@@ -31,7 +31,9 @@ tasks:
       ("stack-modules: the stack test <test> is in the module <module> (<file>), which
       STACK_MODULES does not compile"). It fails too when STACK_MODULES names a module without
       a file ("stack-modules: STACK_MODULES names <module>, but <dir>/<module>.rs does not
-      exist") and when either list is empty. Passing, it prints "stack-modules: <t> stack
+      exist"), when STACK_TESTS names a test twice ("stack-modules: STACK_TESTS names <test> <n>
+      times": nextest would run it once, so the count of passed tests would miss the list's) and
+      when either list is empty. Passing, it prints "stack-modules: <t> stack
       tests in the modules <list> of STACK_MODULES". The planted script
       tests/gate/stack-modules-check-refuses-a-test-outside-the-list.sh holds it.
     dir: '{{.TASKFILE_DIR}}/..'
@@ -48,6 +50,10 @@ tasks:
         [ -n "$modules" ] || { echo "stack-modules: STACK_MODULES names no module"; exit 1; }
         [ -n "$tests" ] || { echo "stack-modules: STACK_TESTS names no test"; exit 1; }
         bad=0
+        for test in $(printf '%s\n' "$tests" | LC_ALL=C sort | uniq -d); do
+          echo "stack-modules: STACK_TESTS names $test $(printf '%s\n' "$tests" | grep -cxF "$test") times"
+          bad=1
+        done
         for module in $modules; do
           [ -f "$dir/$module.rs" ] || { echo "stack-modules: STACK_MODULES names $module, but $dir/$module.rs does not exist"; bad=1; }
         done
@@ -86,9 +92,9 @@ tasks:
       information, cargo's default for a dev build and so an embedder's, whose frames are the
       largest measured (.cargo/config.toml sets both whatever a user's own cargo configuration
       says: release with debug = false and strip = "debuginfo", stack-debug with debug = true
-      and strip = "none"; the dev profile of the gate has debug = false). A step of the lane
-      slow (task slow), before test-stack-profiles: outside the gate and its test budget of 120
-      s.
+      and strip = "none"; the dev profile of the gate has debug = false). The first step of
+      test-stack-profiles, in the lane slow (task slow): outside the gate and its test budget
+      of 120 s.
 
       First stack-modules-check: each test of STACK_TESTS lies in a module of STACK_MODULES.
       Then, for <profile> release and stack-debug, "cargo rustc --locked --color never --profile
@@ -114,9 +120,10 @@ tasks:
     silent: true
     vars:
       STACK_MODULES: '{{.STACK_MODULES | default .STACK_MODULE_LIST}}'
+      STACK_TESTS: '{{.STACK_TESTS | default .STACK_TEST_LIST}}'
     cmds:
       - task: stack-modules-check
-        vars: {STACK_MODULES: '{{.STACK_MODULES}}'}
+        vars: {STACK_MODULES: '{{.STACK_MODULES}}', STACK_TESTS: '{{.STACK_TESTS}}'}
       - mkdir -p .out
       - |
         modules=$(printf '%s\n' {{shellQuote .STACK_MODULES}} | tr -s ' \t' '\n\n' | grep .)
@@ -195,8 +202,13 @@ tasks:
       without debug information, dev with full debug information (the largest frames, an
       embedder's default) and release. Each runs its subject in a child process on seven eighths
       of min_stack_bytes(), so a frame that is larger in one of these profiles fails here. A
-      step of the lane slow, after build-stack-profiles, whose binaries it runs: it builds
-      nothing and fails when .out/build-stack-profiles-<profile>.binaries.json is missing.
+      step of the lane slow. Its first step is build-stack-profiles, with the same STACK_MODULES
+      and STACK_TESTS, so it never runs a binary older than the sources (correction 1 of story
+      realm-size-lane-within-its-share, F2): after a build of the same tree cargo finds both
+      binaries fresh and builds nothing (0.23 s for the two profiles, measured on 2026-11-27); after
+      a change of a source, a manifest, the lock file or the module list it builds again first.
+      It fails when .out/build-stack-profiles-<profile>.binaries.json is missing after that.
+      The planted script tests/gate/test-stack-profiles-runs-no-stale-binary.sh holds it.
 
       Runs, for <profile> release and stack-debug, "cargo nextest run --color never
       --binaries-metadata .out/build-stack-profiles-<profile>.binaries.json --profile default
@@ -220,8 +232,11 @@ tasks:
     dir: '{{.TASKFILE_DIR}}/..'
     silent: true
     vars:
+      STACK_MODULES: '{{.STACK_MODULES | default .STACK_MODULE_LIST}}'
       STACK_TESTS: '{{.STACK_TESTS | default .STACK_TEST_LIST}}'
     cmds:
+      - task: build-stack-profiles
+        vars: {STACK_MODULES: '{{.STACK_MODULES}}', STACK_TESTS: '{{.STACK_TESTS}}'}
       - mkdir -p .out
       - |
         tests=$(printf '%s\n' {{shellQuote .STACK_TESTS}} | tr -s ' \t' '\n\n' | grep . || true)

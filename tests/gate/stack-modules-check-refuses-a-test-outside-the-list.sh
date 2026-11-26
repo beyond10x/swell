@@ -13,7 +13,9 @@
 #   4. A test in two files: refused with "stack-modules: the stack test deep_one is in 2 files:".
 #   5. STACK_MODULES naming a module without a file: refused with "stack-modules: STACK_MODULES
 #      names third, but <dir>/tests/third.rs does not exist".
-#   6. The tree's own lists and crates/swell/tests: passes.
+#   6. STACK_TESTS naming deep_two twice: refused with "stack-modules: STACK_TESTS names
+#      deep_two 2 times".
+#   7. The tree's own lists and crates/swell/tests: passes.
 # Run from the repository root:
 #   sh tests/gate/stack-modules-check-refuses-a-test-outside-the-list.sh
 # Works only under .out/gate-tests/<name>/; prints "<name>: ok" or "<name>: FAIL <why>".
@@ -70,6 +72,10 @@ printf '#[test]\nfn deep_two() {}\n' > "$dir/tests/second.rs" || fail "cannot re
 refused missing "a module without a file" \
   "stack-modules: STACK_MODULES names third, but $dir/tests/third.rs does not exist" \
   STACK_MODULES='first second third' STACK_TESTS='deep_one deep_two'
+
+refused duplicate "a test named twice" \
+  "stack-modules: STACK_TESTS names deep_two 2 times" \
+  STACK_MODULES='first second' STACK_TESTS='deep_two deep_one deep_two'
 
 task --taskfile "$taskfile" stack-modules-check > "$dir/tree.out" 2>&1 ||
   fail "stack-modules-check refused the tree's own lists ($dir/tree.out)"

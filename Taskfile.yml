@@ -164,9 +164,9 @@ tasks:
       full counts; test-realm-sizes, the tests of swell that read the realm's room with each
       realm padded by k host functions for several k, in the default mode and with a
       collection at every safe point at each k, on the two builds slow-tests made; and
-      build-stack-profiles with test-stack-profiles, the stack tests in the release profile and
-      in stack-debug, the dev profile with full debug information (the gate runs them in the
-      dev profile without it), built with the modules of swell's tests that hold them only
+      test-stack-profiles, which builds first (build-stack-profiles), the stack tests in the
+      release profile and in stack-debug, the dev profile with full debug information (the
+      gate runs them in the dev profile without it), built with the modules of swell's tests that hold them only
       (taskfiles/stack-profiles.yml, STACK_MODULES). The
       workflow .github/workflows/slow.yml runs it on a push to main and on a pull request, each
       only when it changes a path of the workflow's list (a source of the digest, the expected
@@ -190,7 +190,6 @@ tasks:
       - task: test-realm-sizes
       - task: gate-time
         vars: {STEP: test-realm-sizes, LABEL: slow-time}
-      - task: build-stack-profiles
       - task: test-stack-profiles
       - task: gate-time
         vars: {STEP: stack-profiles, LABEL: slow-time}
