@@ -3,6 +3,9 @@
 # list of docs/plan/slice-09/ (the story lists story-*.cases.txt and the list of the close,
 # close-later.tsv, whose first field is the path), and every case of a list is counted in slice 9,
 # or is a line of incoming.tsv (a case another slice's close is to move into slice 9).
+# close-later.tsv holds the decomposition's lines (path, the later slice, the later parts) and the
+# lines the coordinator adds when it takes a case off a story list (path, the slice or the story,
+# story:<name>, that takes it, one reason), in the commit that takes it off; both count as a list.
 # Usage: sh docs/plan/slice-09/lists.sh <runs> [<directory of the lists>]
 # <runs> holds run lines (taskfiles/test262.yml: "test262-run", the slice, the path, the mode, the
 # outcome, the cause; separated by tabs) of a full run. Prints one line per list, "<list> <cases>",
