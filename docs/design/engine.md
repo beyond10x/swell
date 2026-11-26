@@ -280,11 +280,14 @@ tests link `std`. They name no allocator: the program that links them provides i
 system's and an embedder its own. What comes from the system comes through the host trait, and an
 adapter is whatever implements it: with system access (the shell), without, or emulated (a clock
 that stands still, fixed seeds; modules from memory once slice 11 delivers loading)
-(`host-interface.md`, decision 1, "Adapters"). The three binary crates stay `std` programs. The
-gate builds the six crates for `x86_64-unknown-none`, a target without `std`, and refuses an
-undefined symbol in them that neither Rust nor the compiler's runtime supplies, a C library's
-`fmod` or `sqrt` among them (`taskfiles/nostd.yml`); HOST-2's source scan refuses a `std` path
-and a crate root without `#![no_std]`.
+(`host-interface.md`, decision 1, "Adapters"). The repository's emulated host is a test host in
+the integration-test binary of `swell`, a `std` program, that calls no system API; no host here is
+built without `std`, since that needs a global allocator and an entry point, both `unsafe`. The
+three binary crates stay `std` programs. The gate builds `swell` and every crate it depends on
+for `x86_64-unknown-none`, a target without `std`, and refuses an undefined symbol in them that
+neither Rust nor the compiler's runtime supplies, a C library's `fmod` or `sqrt` among them
+(`taskfiles/nostd.yml`); HOST-2's source scan refuses a `std` path and a crate root without
+`#![no_std]`.
 
 ## 3. Execution model
 

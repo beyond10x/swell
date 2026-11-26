@@ -1,14 +1,16 @@
 //! A host of the emulated kind (`docs/design/host-interface.md`, "Adapters";
 //! `story:core-builds-without-std`): the engine core has no access to the system, and an adapter
-//! is whatever implements `Host`. This one answers the clock from a fixed value, gives the agent
-//! fixed seeds and keeps the jobs it is handed in memory. It reaches nothing of the system: the
-//! module names none of the clock, environment, file, network and process modules of the
-//! standard library, which `the_module_names_no_system_api` reads from its source.
+//! is whatever implements `Host`. This one is a test host inside the integration-test binary of
+//! `swell`, which links `std` and its system allocator; it calls no system API. It answers the
+//! clock from a fixed value, gives the agent fixed seeds and keeps the jobs it is handed in
+//! memory. Its source names no `std` path, which `the_module_names_no_system_api` reads with
+//! the scanners of HOST-2.
 //!
 //! Module loading from memory, the third part of such a host, is slice 11 and not delivered: the
 //! load hook keeps nothing.
 #![cfg(test)]
 
+use crate::source_scan::scan::{ambient_authority, code_of, std_paths};
 use swell::{
     Agent, HookCx, Host, Job, Limits, LoadRequest, ObjectRef, Outcome, Parsed, Realm, Seeds,
     Source, Value,
@@ -74,9 +76,9 @@ fn limits() -> Limits {
     }
 }
 
-/// An agent of the emulated host and a realm of it.
-fn agent_and_realm() -> (Agent<EmulatedHost>, Realm) {
-    let mut agent = Agent::new(EmulatedHost::default(), limits(), seeds()).unwrap();
+/// An agent of the emulated host with `seeds`, and a realm of it.
+fn agent_and_realm(seeds: Seeds) -> (Agent<EmulatedHost>, Realm) {
+    let mut agent = Agent::new(EmulatedHost::default(), limits(), seeds).unwrap();
     let realm = match agent.create_realm(None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
@@ -103,30 +105,73 @@ fn number(agent: &mut Agent<EmulatedHost>, realm: &Realm, source: &str) -> f64 {
     }
 }
 
+/// What of the system a Rust source names, read with the scanners of HOST-2
+/// (`source_scan.rs`): the clock, the environment, files, the network, processes and the
+/// random state of `std` (also through a grouped import), and any other `std` path.
+fn system_api(source: &str) -> Vec<String> {
+    let code = code_of(source);
+    let mut named = ambient_authority(&code);
+    named.extend(std_paths(&code));
+    named
+}
+
 /// A script that reads `Date.now()` twice gets the fixed time both times, and two agents of the
 /// host answer the same: the clock is the host's, and this host's does not move.
 #[test]
 fn date_now_reads_the_fixed_clock_twice_with_the_same_answer() {
     let source = "var first = Date.now(); var second = Date.now(); first === second ? first : -1;";
-    let (mut agent, realm) = agent_and_realm();
+    let (mut agent, realm) = agent_and_realm(seeds());
     assert_eq!(number(&mut agent, &realm, source), FIXED_MS);
     assert_eq!(agent.host().clock_reads, 2);
     assert!(agent.host().jobs.is_empty());
 
-    let (mut again, realm) = agent_and_realm();
+    let (mut again, realm) = agent_and_realm(seeds());
     assert_eq!(number(&mut again, &realm, source), FIXED_MS);
     assert_eq!(again.host().clock_reads, 2);
 }
 
-/// The module reaches nothing of the system: its source names none of the clock, environment,
-/// file, network and process modules of the standard library.
+/// The seeds are the host's too: two agents of the host with its fixed seeds draw the same
+/// three values of `Math.random`, bit for bit, and an agent whose random seed differs in one
+/// bit draws others. No call reads the clock.
+#[test]
+fn math_random_draws_the_same_from_the_fixed_seeds() {
+    let draws = |seeds: Seeds| -> [u64; 3] {
+        let (mut agent, realm) = agent_and_realm(seeds);
+        let values = [0, 1, 2].map(|_| number(&mut agent, &realm, "Math.random();"));
+        assert_eq!(agent.host().clock_reads, 0);
+        values.map(f64::to_bits)
+    };
+    let first = draws(seeds());
+    assert!(
+        first
+            .iter()
+            .all(|&bits| (0.0..1.0).contains(&f64::from_bits(bits))),
+        "{first:?}"
+    );
+    assert_eq!(draws(seeds()), first);
+    let mut other = seeds();
+    other.random_seed[0] ^= 1;
+    assert_ne!(draws(other), first);
+}
+
+/// The module reaches nothing of the system: its source names no `std` path, and none of the
+/// items of HOST-2's scan.
 #[test]
 fn the_module_names_no_system_api() {
-    let source = include_str!("emulated_host.rs");
-    let named: Vec<String> = ["time", "env", "fs", "net", "process"]
-        .iter()
-        .map(|module| format!("std::{module}"))
-        .filter(|path| source.contains(path.as_str()))
-        .collect();
+    let named = system_api(include_str!("emulated_host.rs"));
     assert!(named.is_empty(), "{named:?}");
+}
+
+/// The check of `the_module_names_no_system_api` sees a grouped import of `std::env` and of
+/// `std::time::SystemTime` (adversary pass 1 on unit gate: a search for the text `std::time`
+/// did not), and passes text that names `core` and `alloc` only.
+#[test]
+fn the_filter_sees_a_grouped_std_import() {
+    let planted =
+        "use std::{env, time::SystemTime};\nfn now() -> SystemTime { SystemTime::now() }\n";
+    assert_eq!(
+        system_api(planted),
+        ["SystemTime", "std::{env}", "line 1: std"]
+    );
+    assert!(system_api("use core::cell::Cell;\nuse alloc::vec::Vec;\n// std::fs\n").is_empty());
 }

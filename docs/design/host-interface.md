@@ -92,14 +92,18 @@ the operator on 2026-11-26 (`story:core-builds-without-std`): the six engine cra
 `#![no_std]` with `alloc`, so the clock, the time zones, the seeds, the jobs and module loading
 reach the engine only from the host. An adapter may have system access (the shell `crates/cli`
 reads the system clock and files), have none (it answers from what its embedder hands it), or
-emulate it: `crates/swell/tests/emulated_host.rs` is a host whose clock stands still, with fixed
-seeds and its jobs kept in memory, and it names no system API of `std`. Module loading from
+emulate it. `crates/swell/tests/emulated_host.rs` is an emulated host of the last kind: a test
+host in the integration-test binary of `swell`, which links `std` and its system allocator, that
+calls no system API; its clock stands still, its seeds are fixed and its jobs are kept in memory.
+No host of the repository is built without `std`: a program without it needs a global allocator
+and an entry point, both `unsafe`, which no crate here has. Module loading from
 memory, the third part of such a host, is slice 11 and not delivered. The crates name no
 allocator: the program that links them provides it, the shell the system's and an embedder its
-own. The gate holds this three ways: HOST-2's source scan; a build of the six crates for
-`x86_64-unknown-none`, a target without `std` (`task nostd-build`); and a scan of the undefined
-symbols of those libraries that refuses any function of a C library or the system
-(`task nostd-symbols`, `taskfiles/nostd.yml`).
+own. The gate holds this three ways: HOST-2's source scan; a build of `swell` and every crate it
+depends on for `x86_64-unknown-none`, a target without `std` (`task nostd-build`); and a scan of
+the undefined symbols of those libraries, weak ones included, that refuses every symbol that is
+neither a mangled Rust name nor a routine of the compiler's runtime, so any function of a C or
+C++ library or the system (`task nostd-symbols`, `taskfiles/nostd.yml`).
 
 **HOST-1** (swell:D1) The `swell` crate and every crate it depends on declare `#![forbid(unsafe_code)]`, name no package from outside the repository in the root `Cargo.lock`, and never call `std::thread::spawn` or `std::thread::Builder`, which a source scan in the gate checks. [slice 1]
 

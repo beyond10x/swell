@@ -16,7 +16,7 @@ use scan::*;
 /// The scanners. Inside a `cfg(test)` module, so that clippy's test allowances of
 /// `clippy.toml` cover them as they cover the tests.
 #[cfg(test)]
-mod scan {
+pub(crate) mod scan {
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -105,7 +105,7 @@ mod scan {
 
     /// The code of a Rust source: comments and the contents of string and character literals are
     /// replaced by spaces (newlines kept), and whitespace around `::` is removed.
-    pub(super) fn code_of(source: &str) -> String {
+    pub(crate) fn code_of(source: &str) -> String {
         let chars: Vec<char> = source.chars().collect();
         let mut out = String::with_capacity(source.len());
         let mut i = 0;
@@ -136,11 +136,10 @@ mod scan {
                         i += 1;
                     }
                 }
-            } else if c == 'r'
-                && (next == Some('"') || next == Some('#'))
-                && !ident_char(chars.get(i.wrapping_sub(1)).copied())
+            } else if c == 'r' && (next == Some('"') || next == Some('#')) && raw_prefix(&chars, i)
             {
-                // A raw string: r"..." or r#"..."#.
+                // A raw string: r"..." or r#"..."#, also as a byte or C string (br"...",
+                // cr#"..."#).
                 let mut j = i + 1;
                 let mut hashes = 0;
                 while chars.get(j) == Some(&'#') {
@@ -218,6 +217,16 @@ mod scan {
         joined
     }
 
+    /// Whether the `r` at `at` starts a raw string literal: it begins a token, alone or after
+    /// the `b` or `c` of a byte or C string that itself begins one.
+    fn raw_prefix(chars: &[char], at: usize) -> bool {
+        let before = |k: usize| at.checked_sub(k).and_then(|j| chars.get(j)).copied();
+        if !ident_char(before(1)) {
+            return true;
+        }
+        matches!(before(1), Some('b' | 'c')) && !ident_char(before(2))
+    }
+
     pub(super) fn ident_char(c: Option<char>) -> bool {
         c.is_some_and(|c| c.is_alphanumeric() || c == '_')
     }
@@ -277,7 +286,7 @@ mod scan {
     }
 
     /// The faults of HOST-2 in one file's code.
-    pub(super) fn ambient_authority(code: &str) -> Vec<String> {
+    pub(crate) fn ambient_authority(code: &str) -> Vec<String> {
         let mut faults = Vec::new();
         for path in ["std::env", "std::fs", "std::net", "std::process"] {
             if has_word(code, path) {
@@ -299,10 +308,12 @@ mod scan {
     }
 
     /// The code with every item under `#[cfg(test)]` blanked (newlines kept): the attribute and
-    /// what follows it up to the first `;` or `,` outside brackets, or up to the `}` that closes
-    /// the first `{`. That is an item (a module, a function, `extern crate std;`, a macro call
-    /// with braces), a statement, a field or a field of a struct expression. A `}` that closes
-    /// an enclosing block ends it too.
+    /// what follows it up to the first `;` outside brackets, the first `,` outside brackets and
+    /// angle brackets, or the `}` that closes the first `{`. That is an item (a module, a
+    /// function, `extern crate std;`, a macro call with braces), a statement, a field or a field
+    /// of a struct expression; the comma of `Result<u8, E>` in a signature does not end it. A
+    /// `}` that closes an enclosing block ends it too. `<` and `>` count as angle brackets
+    /// except in `->` and `=>`.
     pub(super) fn without_test_items(code: &str) -> String {
         let mut chars: Vec<char> = code.chars().collect();
         let marker: Vec<char> = "#[cfg(test)]".chars().collect();
@@ -313,11 +324,17 @@ mod scan {
                 continue;
             }
             let mut depth = 0usize;
+            let mut angles = 0usize;
             let mut end = chars.len();
             for (j, &c) in chars.iter().enumerate().skip(i + marker.len()) {
                 match c {
                     '(' | '[' | '{' => depth += 1,
                     ')' | ']' => depth = depth.saturating_sub(1),
+                    '<' => angles += 1,
+                    '>' if !matches!(chars.get(j.wrapping_sub(1)), Some('-' | '=')) => {
+                        angles = angles.saturating_sub(1);
+                    }
+                    ',' if depth == 0 && angles > 0 => {}
                     '}' if depth == 0 => {
                         end = j;
                         break;
@@ -354,7 +371,7 @@ mod scan {
 
     /// Each `std` of the code as a whole name, with its line and the path it starts
     /// (`line 3: std::vec::Vec`; `line 1: std` for `extern crate std`).
-    pub(super) fn std_paths(code: &str) -> Vec<String> {
+    pub(crate) fn std_paths(code: &str) -> Vec<String> {
         let mut found = Vec::new();
         for (at, _) in code.match_indices("std") {
             let before = code[..at].chars().next_back();
@@ -372,9 +389,12 @@ mod scan {
         found
     }
 
-    /// Whether a crate root declares `#![no_std]` on a line of its own.
+    /// Whether a crate root declares `#![no_std]` on a line of its own, in its code: a line
+    /// inside a comment declares nothing.
     pub(super) fn declares_no_std(root: &str) -> bool {
-        root.lines().any(|line| line.trim() == "#![no_std]")
+        code_of(root)
+            .lines()
+            .any(|line| line.trim() == "#![no_std]")
     }
 
     /// The faults of HOST-1's thread rule in one file's code.
@@ -692,4 +712,51 @@ fn host_146_only_agent_new_takes_seeds() {
         "Agent::new taking Seeds, found: {allowed:?}"
     );
     assert!(faults.is_empty(), "{faults:#?}");
+}
+
+/// A raw byte or C string with a quote inside (`br#"x"y"#`) is a literal like any other: the
+/// code after it is read, and the `std` of the `extern crate` there, which only a hosted build
+/// compiles, is found (adversary pass 1 on unit gate; the scan read `br` as a name followed by
+/// a plain string before).
+#[test]
+fn a_raw_byte_string_hides_no_std_path_after_it() {
+    let planted = "const A: &[u8] = br#\"x\"y\"#;\n\
+                   #[cfg(not(target_os = \"none\"))]\n\
+                   extern crate std;\n\
+                   const B: u8 = 0;\n";
+    assert_eq!(std_paths(&library_code(planted)), ["line 3: std"]);
+    let planted = "const C: &core::ffi::CStr = cr#\"a\"b\"#;\nextern crate std;\n";
+    assert_eq!(std_paths(&library_code(planted)), ["line 2: std"]);
+    let planted = "let name = br\"std::fs\";\nlet s = std::fs::read;\n";
+    assert_eq!(std_paths(&library_code(planted)), ["line 2: std::fs::read"]);
+}
+
+/// `#![no_std]` inside a block comment declares nothing (adversary pass 1 on unit gate).
+#[test]
+fn no_std_inside_a_block_comment_declares_nothing() {
+    assert!(!declares_no_std(
+        "/*\n#![no_std]\n*/\n#![forbid(unsafe_code)]\n"
+    ));
+}
+
+/// A function under `#[cfg(test)]` whose return type has a comma in its generics is test code
+/// as a whole; its `std` path is not library code (adversary pass 1 on unit gate). A `<` of a
+/// comparison in a test statement does not carry the blanking past the statement's `;`.
+#[test]
+fn a_test_item_with_a_comma_in_its_generics_is_test_code() {
+    let planted = "#[cfg(test)]\n\
+                   fn parse() -> Result<u8, std::num::ParseIntError> {\n    \"1\".parse()\n}\n\
+                   fn kept() {}\n";
+    assert_eq!(std_paths(&library_code(planted)), Vec::<String>::new());
+    let planted = "#[cfg(test)]\nlet small = a < b;\nlet p: std::time::Duration = d;\n";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 3: std::time::Duration"]
+    );
+    let planted =
+        "#[cfg(test)]\nfn f() -> Box<dyn Fn(u8) -> u8> { todo() }\nfn g(x: std::any::TypeId) {}\n";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 3: std::any::TypeId"]
+    );
 }

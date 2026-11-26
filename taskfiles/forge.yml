@@ -365,11 +365,24 @@ tasks:
       taken by anything but a commit hash of 40 hex digits, a RUSTUP_TOOLCHAIN variable, a
       "rustup toolchain install", "rustup install", "rustup default" or "rustup override set",
       and "cargo +<toolchain>" are each named as "toolchain-check: <file>:<line>: names a
-      compiler (<line>)". Then "${RUSTC:-rustc} --version" runs in the repository root, as
-      cargo runs it in the gate; another version than the channel fails with "toolchain-check:
-      rustc in the gate is <version>, <file> pins <channel>". A missing file fails too. It
-      prints "toolchain-check: rustc <version>, the channel <file> pins; <n> workflow file(s),
-      none names a compiler".
+      compiler (<line>)". Then the components and targets the file names (components = [...],
+      targets = [...]; story core-builds-without-std: llvm-tools for nostd-symbols,
+      x86_64-unknown-none for nostd-build) must each be an input of the one dtolnay/rust-toolchain
+      step of GATE_ROOT/.github/workflows/check.yml, the workflow that runs task check
+      (components: and targets:, comma-separated): one it lacks is named as "toolchain-check:
+      <workflow>:<line>: the toolchain step lacks the component|target <name>, which
+      rust-toolchain.toml names", and a check.yml with no such step or two fails too. rustup
+      would install them from the file when cargo first runs, as it did here; the inputs make
+      the forge's install the same, in its toolchain step, whatever its rustup does. slow.yml
+      (components: clippy, task slow, which builds nothing for the bare target) and
+      release-build.yml (targets: the release target of its matrix, no task) are not compared:
+      neither runs a step that needs llvm-tools or x86_64-unknown-none, and rustup installs both
+      from the file there when cargo first runs. Then "${RUSTC:-rustc} --version" runs in the
+      repository root, as cargo runs it in the gate; another version than the channel fails
+      with "toolchain-check: rustc in the gate is <version>, <file> pins <channel>". A missing
+      file fails too. It prints "toolchain-check: rustc <version>, the channel <file> pins; <n>
+      workflow file(s), none names a compiler; <check.yml> installs the <c> component(s) and
+      <t> target(s) <file> names".
     vars:
       GATE_ROOT: '{{.GATE_ROOT | default "."}}'
     env:
@@ -422,13 +435,67 @@ tasks:
           echo "toolchain-check: $named of $workflows workflow file(s) name a compiler; a workflow reads the channel from $file"
           exit 1
         fi
+        list() {
+          awk -v key="$1" '
+            $0 ~ "^[ \t]*" key "[ \t]*=" {
+              line = $0
+              sub(/^[^=]*=/, "", line)
+              while (match(line, /"[^"]*"/)) { print substr(line, RSTART + 1, RLENGTH - 2); line = substr(line, RSTART + RLENGTH) }
+            }
+          ' "$file"
+        }
+        components=$(list components | tr "\n" " ")
+        targets=$(list targets | tr "\n" " ")
+        gate=${prefix}.github/workflows/check.yml
+        [ -f "$gate" ] || { echo "toolchain-check: $gate is missing"; exit 1; }
+        lacking=$(awk -v file="$gate" -v components="$components" -v targets="$targets" '
+          function depth(s) { match(s, /^ */); return RLENGTH }
+          /^[ \t]*#/ || /^[ \t]*$/ { next }
+          {
+            text = $0
+            sub(/[ \t]+#.*$/, "", text)
+            if (text ~ /dtolnay\/rust-toolchain@/) {
+              steps++
+              instep = 1
+              stepdepth = depth(text)
+              if (text ~ /^ *- /) stepdepth += 2
+              at = NR
+              next
+            }
+            if (instep && (depth(text) < stepdepth || (depth(text) == stepdepth - 2 && text ~ /^ *- /))) instep = 0
+            if (instep && text ~ /^ *(components|targets):/) {
+              key = text
+              sub(/^ */, "", key)
+              sub(/:.*$/, "", key)
+              value = text
+              sub(/^[^:]*:[ \t]*/, "", value)
+              gsub(/["\047]/, "", value)
+              n = split(value, words, /[ \t]*,[ \t]*/)
+              for (i = 1; i <= n; i++) if (words[i] != "") has[key, words[i]] = 1
+            }
+          }
+          END {
+            if (steps != 1) { print "toolchain-check: " file " installs the toolchain in " steps+0 " step(s) through dtolnay/rust-toolchain, not one"; exit }
+            n = split(components, want, " ")
+            for (i = 1; i <= n; i++) if (want[i] != "" && !(("components", want[i]) in has)) print "toolchain-check: " file ":" at ": the toolchain step lacks the component " want[i] ", which rust-toolchain.toml names (components:)"
+            n = split(targets, want, " ")
+            for (i = 1; i <= n; i++) if (want[i] != "" && !(("targets", want[i]) in has)) print "toolchain-check: " file ":" at ": the toolchain step lacks the target " want[i] ", which rust-toolchain.toml names (targets:)"
+          }
+        ' "$gate")
+        if [ -n "$lacking" ]; then
+          printf '%s\n' "$lacking"
+          echo "toolchain-check: $gate does not install what $file names; the step that runs task check needs every component and target of it"
+          exit 1
+        fi
+        ncomp=$(printf '%s\n' "$components" | awk '{ n += NF } END { print n + 0 }')
+        ntarg=$(printf '%s\n' "$targets" | awk '{ n += NF } END { print n + 0 }')
         version=$(${RUSTC:-rustc} --version 2>&1) || { echo "toolchain-check: ${RUSTC:-rustc} --version failed: $version"; exit 1; }
         version=$(printf '%s\n' "$version" | awk 'NR == 1 { print $2 }')
         if [ "$version" != "$channel" ]; then
           echo "toolchain-check: rustc in the gate is $version, $file pins $channel"
           exit 1
         fi
-        echo "toolchain-check: rustc $version, the channel $file pins; $workflows workflow file(s), none names a compiler"
+        echo "toolchain-check: rustc $version, the channel $file pins; $workflows workflow file(s), none names a compiler; $gate installs the $ncomp component(s) and $ntarg target(s) $file names"
 
   runner-env-check:
     desc: Fail when check-runner does not set every variable the forge's runner has for task check, or sets one it does not have.
