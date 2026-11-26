@@ -47,9 +47,23 @@ build_tool() {
     cat bench/tool/Cargo.lock >&2
     echo "== Cargo.lock end" >&2
   fi
+  mkdir -p .out/bench
   cargo build --release --locked --manifest-path bench/tool/Cargo.toml --message-format=json \
-    | jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' \
-    | tail -n 1
+    > .out/bench/tool-build.json || die "tool build failed (cargo build of bench/tool)"
+  built=$(jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' \
+    .out/bench/tool-build.json | tail -n 1)
+  [ -x "$built" ] || die "tool build failed: cargo named no executable (.out/bench/tool-build.json)"
+  echo "$built"
+}
+
+# image_build LOG: bench/image/build.sh with its output in LOG; prints the image's directory.
+# A failed build stops the caller: its last line is the image only when the build succeeded.
+image_build() {
+  mkdir -p "$(dirname "$1")"
+  sh bench/image/build.sh > "$1" 2>&1 || die "image build failed; see $1: $(tail -n 1 "$1")"
+  built=$(tail -n 1 "$1")
+  [ -f "$built/manifest.tsv" ] || die "image build failed: no manifest under '$built'; see $1"
+  echo "$built"
 }
 
 median() {
@@ -312,10 +326,11 @@ start() {
 }
 
 prepare() {
-  image=$(sh bench/image/build.sh | tail -n 1)
+  image=$(image_build .out/bench/prepare-image.log) || exit 1
+  cat .out/bench/prepare-image.log
   echo "image $image"
   echo "image_digest sha256:$(sha256sum "$image/manifest.tsv" | cut -d' ' -f1)"
-  tool=$(build_tool)
+  tool=$(build_tool) || exit 1
   echo "tool $tool"
 }
 
@@ -365,9 +380,9 @@ job() {
   started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   load_start=$(cut -d' ' -f1 /proc/loadavg)
 
-  image=$(sh bench/image/build.sh 2> "$work/image.log" | tail -n 1)
+  image=$(image_build "$work/image.log") || exit 1
   image_digest=sha256:$(sha256sum "$image/manifest.tsv" | cut -d' ' -f1)
-  tool=$(build_tool 2> "$work/tool.log")
+  tool=$(build_tool 2> "$work/tool.log") || die "no swell-bench-exec; see $work/tool.log: $(tail -n 1 "$work/tool.log")"
   [ -x "$tool" ] || die "no swell-bench-exec; see $work/tool.log"
   bin=$image/engines/$engine/$binary
   binary_sha=$(sha256sum "$bin" | cut -d' ' -f1)

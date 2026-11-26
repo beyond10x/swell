@@ -6,11 +6,14 @@ mkdir -p .out/bench-probe
 if [ "$(sha256sum /etc/machine-id | cut -c1-16)" = "${1:-}" ]; then echo "smoke: on the machine that started it; refusing"; exit 1; fi
 echo "host: $(nproc) cores, $(sed -n "s/^model name[[:space:]]*: //p" /proc/cpuinfo | head -n 1), $(uname -sr)"
 sh bench/run.sh prepare > .out/bench-probe/prepare.log 2>&1
-echo "prepare exit $?"
+prepared=$?
+echo "prepare exit $prepared"
 cat .out/bench-probe/prepare.log | grep -v '^\s*$' | tail -n 60
+[ "$prepared" -eq 0 ] || exit 1
 image=$(sed -n 's/^image //p' .out/bench-probe/prepare.log)
 tool=$(sed -n 's/^tool //p' .out/bench-probe/prepare.log)
 echo "image=$image tool=$tool"
+[ -f "$image/manifest.tsv" ] || exit 1
 [ -x "$tool" ] || exit 1
 echo "== cgroup"
 cat /proc/self/cgroup
