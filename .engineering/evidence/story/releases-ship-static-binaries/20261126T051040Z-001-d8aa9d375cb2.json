@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:10:40Z",
+  "actor": "human:operator",
+  "artifact": "story:releases-ship-static-binaries",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo build --release --target x86_64-unknown-linux-musl -p swell-cli; readelf -d; readelf -l (unit's run on the build node, 2026-11-26)",
+    "reference": "base 62c7cf59: release-targets-check prints 6 refusal lines, exit 201; unit 6256b323: no NEEDED entry, no INTERP, static-pie linked, forge-check exit 0"
+  }
+}

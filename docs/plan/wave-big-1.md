@@ -18,7 +18,7 @@ directory. The stage is kept current by the coordinator.
 | core | `story:core-builds-without-std`, step 3 | `impl/nostd-core` | `swell-impl-nostd-core` | merged into the wave branch at `248a031c`; gate on that head: exit 0, `gate-time test-steps 106.5 of 120` at load 65 on the node |
 | gate | `story:core-builds-without-std`, step 4 | `impl/nostd-gate` | `swell-impl-nostd-gate` | dispatched |
 | random | `story:math-random` | `impl/math-random` | `swell-impl-math-random` | dispatched |
-| static | `story:releases-ship-static-binaries` | `impl/static-binaries` | `swell-impl-static-binaries` | `d8af68fe`; pass 1: 7 findings, all fixed; pass 2: 4 new, 0 carried (`review-result:adversary-static-pass-2`); second correction with its implementor, the coordinator reads that diff, no third pass |
+| static | `story:releases-ship-static-binaries` | `impl/static-binaries` | `swell-impl-static-binaries` | merged into the wave branch at `6256b323`; pass 1: 7 findings fixed; pass 2: 4 new, 0 carried, fixed; the coordinator read the second correction (the check executes nothing of a workflow; the unit's own script was pinned to the new message and got one case more, no assertion dropped) |
 | exponent | `story:exponentiation-operator` | `impl/exponentiation` | `swell-impl-exponentiation` | dispatched |
 | growth | `story:buffer-growth-outside-the-charged-list-is-listed` | `impl/buffer-growth` | `swell-impl-buffer-growth` | waits for `random`, `exponent` and `gate`: it adds an attribute at growth calls all over `crates/swell/src` |
 | close | `story:slice-04-conformance-close` | `impl/slice-04-close` | `swell-impl-slice-04-close` | waits for `random`, `exponent` and `gate` on the wave branch |
