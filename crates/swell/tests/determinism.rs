@@ -819,16 +819,25 @@ fn host_133_children() -> usize {
     }
 }
 
-/// The keys of the key-order tests: 1,000 in the default mode, 12 with the feature
+/// The keys of the key-order tests. HOST-25 and HOST-214 state 10,000 keys: the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`) runs 10,000 in the default mode, and 100 with the feature
 /// `collect-every-safe-point`, where every builtin call collects a heap that holds them all
-/// (a run of the script took about 0.4 ms of a debug build per key without collections). Both
-/// are past the size above which a property list and an entry table keep an index map keyed by
-/// `hash_key` (8 entries).
+/// (the largest count measured under 20 s of wall time on the build node: HOST-25 took 16.2 s
+/// at 100 keys in a run of the whole lane, 21.8 s at 200 run alone); the gate runs 1,000 and
+/// 12. Each of the four counts is past
+/// the size above which a property list and an entry table keep an index map keyed by
+/// `hash_key` (8 entries), so an order that follows the index map, and so `hash_key`, differs
+/// between the two agents of HOST-25 at each of them: an iteration planted to follow the index
+/// map made HOST-25 red at 1,000 and at 12 keys. HOST-214 compares two processes with the same
+/// `Seeds`, so it catches an order that depends on the process, at any count past the index
+/// map. What only the full count adds is a table through more growths of its storage.
 fn ordered_keys() -> u32 {
-    if cfg!(feature = "collect-every-safe-point") {
-        12
-    } else {
-        1_000
+    let full = std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1");
+    match (cfg!(feature = "collect-every-safe-point"), full) {
+        (false, true) => 10_000,
+        (false, false) => 1_000,
+        (true, true) => 100,
+        (true, false) => 12,
     }
 }
 
@@ -880,9 +889,9 @@ fn key_order(seeds: swell::Seeds) -> String {
 
 /// HOST-25 (`docs/design/host-interface.md`, decision 3): the key order of an object, a `Map`
 /// and a `Set` does not depend on `hash_key`. Two agents with equal limits and seeds but
-/// `hash_key` run one script that inserts 1,000 keys ([`ordered_keys`]) into each, deletes
-/// every third and writes them in iteration order: the two transcripts are equal byte for
-/// byte, and each lists the two thirds of the keys left in each of the three.
+/// `hash_key` run one script that inserts 10,000 keys into each ([`ordered_keys`]: 1,000 in the
+/// gate), deletes every third and writes them in iteration order: the two transcripts are equal
+/// byte for byte, and each lists the two thirds of the keys left in each of the three.
 #[test]
 fn host_25_key_order_does_not_depend_on_hash_key() {
     let first = key_order(seeds());
@@ -900,8 +909,9 @@ fn host_25_key_order_does_not_depend_on_hash_key() {
 }
 
 /// HOST-214 (`docs/design/host-interface.md`, decision 3): two child processes ([`spawn_child`])
-/// whose agents have the same `Seeds` print the key order of a `Map` of 1,000 keys
-/// ([`ordered_keys`], with an object and a `Set` beside it), and the two prints are equal.
+/// whose agents have the same `Seeds` print the key order of a `Map` of 10,000 keys
+/// ([`ordered_keys`]: 1,000 in the gate; with an object and a `Set` beside it), and the two
+/// prints are equal.
 #[test]
 fn host_214_two_processes_print_the_same_map_order() {
     if std::env::var_os(CHILD).is_some() {
