@@ -129,25 +129,31 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// parameters and body: [Yield] set for a generator, [Await] for an `async` function, each
     /// cleared for every other function that reads its parameters here
     /// (`#sec-generator-function-definitions`, `#sec-async-function-definitions`,
-    /// `#sec-function-definitions`, `#sec-method-definitions`). [`Parser::function_end`] puts the
-    /// saved ones back.
+    /// `#sec-function-definitions`, `#sec-method-definitions`), and `new.target` admitted, as in
+    /// every function that is not an arrow function (`#sec-scripts-static-semantics-early-errors`).
+    /// [`Parser::function_end`] puts the saved ones back.
     #[inline(never)]
     fn open_context(&mut self, id: FunctionId) -> R<()> {
         let (generator, asynchronous) = self
             .ast
             .function(id)
             .map_or((false, false), |f| (f.generator, f.asynchronous));
-        self.save_context(generator, asynchronous)
+        self.save_context(generator, asynchronous)?;
+        self.new_target = true;
+        Ok(())
     }
 
-    /// Saves the current [Yield] and [Await] on the parser's lists and sets `yields` and
-    /// `awaits`, the growth of each list charged first.
+    /// Saves the current [Yield] and [Await], and whether `new.target` stands, on the parser's
+    /// lists and sets `yields` and `awaits`, the growth of each list charged first; `new_target`
+    /// stays as it is, which an arrow function keeps.
     #[inline(never)]
     fn save_context(&mut self, yields: bool, awaits: bool) -> R<()> {
         let m = self.m;
         let pushed = m.push(&mut self.outer_yields, self.yields);
         self.charged(pushed)?;
         let pushed = m.push(&mut self.outer_awaits, self.awaits);
+        self.charged(pushed)?;
+        let pushed = m.push(&mut self.outer_new_target, self.new_target);
         self.charged(pushed)?;
         self.yields = yields;
         self.awaits = awaits;
@@ -184,6 +190,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
         if let Some(awaits) = self.outer_awaits.pop() {
             self.awaits = awaits;
+        }
+        if let Some(new_target) = self.outer_new_target.pop() {
+            self.new_target = new_target;
         }
         let mut deepest = 0;
         for s in &body {

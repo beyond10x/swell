@@ -301,6 +301,9 @@ impl BindingTarget {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
     This,
+    /// `new.target`, the MetaProperty NewTarget (`#sec-meta-properties`): only where a function
+    /// that is not an arrow function encloses it, or in eval code whose context admits it.
+    NewTarget,
     /// An `IdentifierReference`.
     Identifier(String),
     Null,
@@ -1013,6 +1016,7 @@ impl HeapBytes for Expr {
     fn heap_bytes(&self) -> usize {
         match self {
             Expr::This
+            | Expr::NewTarget
             | Expr::Null
             | Expr::Boolean(_)
             | Expr::Function(_)
@@ -1185,6 +1189,7 @@ impl Expr {
     pub(crate) fn children(&self, mut f: impl FnMut(Child)) {
         match self {
             Expr::This
+            | Expr::NewTarget
             | Expr::Identifier(_)
             | Expr::Null
             | Expr::Boolean(_)

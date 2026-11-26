@@ -28,10 +28,10 @@
 //! AsyncGeneratorExpression (`#sec-async-generator-function-definitions`), `yield*` in it
 //! included. Slice 4 adds `**` (`#sec-exp-operator`), right associative and tighter than `*`,
 //! with no unary expression as its left operand outside parentheses, and `**=`
-//! (`#sec-assignment-operators`).
+//! (`#sec-assignment-operators`). Slice 8 adds `new.target` (`#sec-meta-properties`) where a
+//! function that is not an arrow function encloses it or eval code admits it.
 //!
-//! Refused, each with its slice: `class`, `super`, `new.target` (8), `import.meta` and dynamic
-//! `import` (11).
+//! Refused, each with its slice: `class`, `super` (8), `import.meta` and dynamic `import` (11).
 //!
 //! The functions that stay on the Rust stack while the parser recurses (each one an entry of the
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
@@ -67,6 +67,11 @@ const NOT_ESCAPE_SEQUENCE: &str = "invalid escape sequence in a template literal
 /// `OptionalChain TemplateLiteral` or `?. TemplateLiteral`
 /// (`#sec-left-hand-side-expressions-static-semantics-early-errors`).
 const TEMPLATE_AFTER_OPTIONAL_CHAIN: &str = "template literal after an optional chain";
+
+/// `new.target` where no function that is not an arrow function encloses it, and not in eval
+/// code whose context has `in_function` (`#sec-scripts-static-semantics-early-errors`; PerformEval,
+/// step 6, `#sec-performeval`).
+const NEW_TARGET_OUTSIDE_FUNCTION: &str = "new.target outside a function";
 
 /// A UnaryExpression (`delete`, `void`, `typeof`, `+`, `-`, `~`, `!` or `await` and its operand)
 /// outside parentheses as the left operand of `**`: ExponentiationExpression is
@@ -891,12 +896,14 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(e)
     }
 
-    /// `new` at the current token: its callee and its `Arguments`, if any.
+    /// `new` at the current token: its callee and its `Arguments`, if any, or `new.target`.
     fn new_rest(&mut self, start: Span) -> R<ExprId> {
         self.enter()?;
         self.advance()?;
         if self.is(Punct::Dot) {
-            return self.refuse_at("new.target", 8, start);
+            let id = self.new_target_rest(start)?;
+            self.leave();
+            return Ok(id);
         }
         let callee = self.member_or_new()?;
         let id = self.reserve_new(callee);
@@ -906,6 +913,27 @@ impl<'a, 'm> Parser<'a, 'm> {
         let id = self.complete_expr(id, start)?;
         self.leave();
         Ok(id)
+    }
+
+    /// `NewTarget : new . target` (`#sec-meta-properties`) at the `.` after the `new` at `start`:
+    /// `target` written without an escape (`#sec-grammar-notation`), where the parser's
+    /// `new_target` admits it; anywhere else it is the early error of
+    /// `#sec-scripts-static-semantics-early-errors`. A leaf, so its locals stay out of
+    /// [`Parser::new_rest`]'s frame.
+    #[inline(never)]
+    fn new_target_rest(&mut self, start: Span) -> R<ExprId> {
+        self.advance()?;
+        if !matches!(&self.tok.kind, TokenKind::Name(n) if n == "target") {
+            return self.unexpected();
+        }
+        if self.tok.escaped {
+            return self.fail_here(crate::early::escaped_keyword("target"));
+        }
+        self.advance()?;
+        if !self.new_target {
+            return self.fail_at(NEW_TARGET_OUTSIDE_FUNCTION, start);
+        }
+        self.make(Expr::NewTarget, start)
     }
 
     /// Reserves the node of a `new` expression with callee `callee`, with arguments when an

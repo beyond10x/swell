@@ -632,6 +632,7 @@ impl<H: Host> Agent<H> {
             pushed_envs: 0,
             this,
             function: None,
+            new_target: None,
             realm,
             script,
             strict,

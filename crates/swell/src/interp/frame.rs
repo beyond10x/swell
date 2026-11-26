@@ -138,8 +138,17 @@ pub(crate) struct Frame {
     pub(crate) pushed_envs: u32,
     /// The `this` binding (ResolveThisBinding, `#sec-resolvethisbinding`).
     pub(crate) this: Value,
-    /// The Function component: the callee, `None` for a script.
+    /// The function GetThisEnvironment answers (`#sec-getthisenvironment`, [[FunctionObject]]):
+    /// the callee; for an arrow function the function its box kept, that of the code that made
+    /// it (`docs/design/engine.md`, decision 3, "`this` and `arguments` in an arrow function",
+    /// item 4); for direct eval code the caller frame's (item 5); `None` for a script, an
+    /// indirect eval's code and an arrow made outside function code.
     pub(crate) function: Option<ObjectRef>,
+    /// [[NewTarget]] (`#sec-function-environment-records`, GetNewTarget `#sec-getnewtarget`):
+    /// the NewTarget of a [[Construct]], set before the code runs and never changed; for an
+    /// arrow function the value its box kept, for direct eval code the caller frame's; `None`
+    /// (`undefined`) for every other frame.
+    pub(crate) new_target: Option<ObjectRef>,
     /// The Realm component.
     pub(crate) realm: Handle,
     /// The ScriptOrModule component.
@@ -228,6 +237,9 @@ impl Frame {
         mark.value(self.this);
         if let Some(function) = self.function {
             mark.object(function);
+        }
+        if let Some(new_target) = self.new_target {
+            mark.object(new_target);
         }
         mark.push(Item::Realm(self.realm));
         mark.push(Item::Script(self.script));

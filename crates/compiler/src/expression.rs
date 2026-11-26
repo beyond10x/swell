@@ -257,6 +257,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
         match &node.expr {
             // `#sec-this-keyword-runtime-semantics-evaluation`.
             Expr::This => t.push(emit(Instruction::This))?,
+            // `#sec-meta-properties-runtime-semantics-evaluation`: GetNewTarget.
+            Expr::NewTarget => t.push(emit(Instruction::NewTarget))?,
             // `#sec-identifiers-runtime-semantics-evaluation`: ResolveBinding, then GetValue.
             Expr::Identifier(_) => {
                 let instruction = match self.binding(Site::Expr(id))? {

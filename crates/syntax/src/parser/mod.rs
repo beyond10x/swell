@@ -25,6 +25,7 @@ mod expression;
 mod function;
 mod statement;
 
+use crate::EvalContext;
 use crate::ast::{
     Ast, Child, Expr, ExprId, ExprNode, Function, FunctionId, NumberLiteral, RegExpLiteral, Span,
     Stmt, StmtId, StmtNode, StringLiteral, TemplateString,
@@ -90,6 +91,15 @@ pub(crate) struct Parser<'a, 'm> {
     /// The [Await] of the code around each function whose parameters or body the parser is in,
     /// beside `outer_yields`, saved and put back with it; the growth charged first.
     outer_awaits: Vec<bool>,
+    /// Whether `new.target` stands at the current position (`#sec-scripts-static-semantics-early-errors`,
+    /// the rule on NewTarget, with PerformEval's `inFunction`, `#sec-performeval`): set in the
+    /// parameters and the body of every function that is not an arrow function, kept in an
+    /// arrow function from the code around it, and at the top of eval code set from the eval
+    /// context's `in_function`. Kept beside [Yield] and [Await] in the same way.
+    new_target: bool,
+    /// Whether `new.target` stood in the code around each function whose parameters or body the
+    /// parser is in, beside `outer_awaits`, saved and put back with it; the growth charged first.
+    outer_new_target: Vec<bool>,
     /// The refusal of a construct whose parse goes on, held back to the end of the parse, at the
     /// first token of the first such construct of the source. No construct holds one: the last,
     /// `yield*` in an async generator, parses and runs since
@@ -105,27 +115,29 @@ pub(crate) struct Parser<'a, 'm> {
 
 /// Parses `source` as a `Script` with nesting limit `max`, charged to `m`.
 pub(crate) fn parse(source: &[u16], max: u32, m: &Meter<'_>) -> Result<Parsed, SyntaxError> {
-    parse_eval(source, max, false, m)
+    parse_eval(source, max, EvalContext::from(false), m)
 }
 
 /// Parses `source` as a `Script` with nesting limit `max` for PerformEval (`#sec-performeval`,
-/// step 9, `ParseText(x, Script)`): the code is strict from its start when `strict` (a strict
-/// caller), and from its directive prologue on when that holds a Use Strict Directive.
+/// step 9, `ParseText(x, Script)`) in the eval context `context` (steps 6 and 7): the code is
+/// strict from its start when the caller is strict, and from its directive prologue on when
+/// that holds a Use Strict Directive; `new.target` stands at its top when `in_function` is set.
 /// [`Parsed::strict`] is whether the eval code is strict. Charged to `m`; after a stop of the
 /// meter the answer is an error the caller does not read.
 pub(crate) fn parse_eval(
     source: &[u16],
     max: u32,
-    strict: bool,
+    context: EvalContext,
     m: &Meter<'_>,
 ) -> Result<Parsed, SyntaxError> {
     let mut parser = Parser::new(source, max, m);
-    parser.strict = strict;
+    parser.strict = context.strict_caller;
+    parser.new_target = context.in_function;
     match parser.script() {
         Ok((body, use_strict)) => Ok(Parsed {
             ast: parser.finish_parse(),
             body,
-            strict: strict || use_strict,
+            strict: context.strict_caller || use_strict,
             held: parser.held.take(),
         }),
         Err(Stop) => Err(parser.into_error()),
@@ -200,6 +212,7 @@ pub(crate) fn parse_dynamic_function(
     let mut alone = Parser::new(parameters, max, m);
     alone.yields = kind.yields();
     alone.awaits = kind.awaits();
+    alone.new_target = true;
     if alone.formal_parameters_text().is_err() {
         return Err(alone.into_error());
     }
@@ -217,6 +230,7 @@ pub(crate) fn parse_dynamic_function(
     let mut alone = Parser::new(&body_text, max, m);
     alone.yields = kind.yields();
     alone.awaits = kind.awaits();
+    alone.new_target = true;
     if alone.function_body_text().is_err() {
         return Err(alone.into_error());
     }
@@ -340,6 +354,8 @@ impl<'a, 'm> Parser<'a, 'm> {
             outer_yields: Vec::new(),
             awaits: false,
             outer_awaits: Vec::new(),
+            new_target: false,
+            outer_new_target: Vec::new(),
             held: None,
             operators: Vec::new(),
             prefixes: Vec::new(),
@@ -360,6 +376,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         m.release(core::mem::take(&mut self.prefixes));
         m.release(core::mem::take(&mut self.outer_yields));
         m.release(core::mem::take(&mut self.outer_awaits));
+        m.release(core::mem::take(&mut self.outer_new_target));
         m.credit(self.tok.kind.heap_bytes());
         self.tok.kind = TokenKind::Eof;
         if let Some(peeked) = self.peeked.take() {
