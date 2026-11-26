@@ -4,10 +4,10 @@ id: epic:slice-04-numbers-and-dates
 kind: epic
 status: active
 title: 'Slice 4, numbers-and-dates: swell-num, Number, Math, Date'
-summary: 'swell-num with Number, Math, Date, the operator **, parseInt and parseFloat, deterministic and host-timed: 1,612 cases and 3,184 runs.'
+summary: 'swell-num with Number, Math, Date, the operator **, parseInt and parseFloat, deterministic and host-timed: delivered on 2026-11-26 with 1,681 cases and 3,320 runs, every run passing.'
 relations:
 - depends_on: epic:slice-03-builtins-core
-revision: 5
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:42Z", actor: "human:operator", revision: 4}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:42Z", actor: "human:operator", revision: 5}
@@ -117,3 +117,15 @@ Source: `docs/design/engine.md`, section 12 and the output under 'How the counts
 7. `Number.prototype.toString` in radix 10 is checked in tests against the digits of Rust's `{:e}` output (decision 6).
 8. With a host that answers a fixed clock and time zone, `new Date()` and `Date.now()` return that clock and nothing else; the engine reads no clock of its own (decisions 6 and 9).
 9. `Date.parse` of a string outside the forms of 21.4.1.32, `toString` and `toUTCString` returns `NaN` (decision 6).
+
+## At the close
+
+Slice 4 is delivered on 2026-11-26 with `story:slice-04-conformance-close` (wave big-1,
+`docs/plan/wave-big-1.md`). The counts above are those of the day the epic was written. At
+the close the slice holds 1,681 cases and 3,320 runs, and every run passes
+(`test262-slice 04 1681 3320 0 0 1681 1681 0 0`): 1,612 cases (3,184 runs) by its rules
+before the close; 3 cases (6 runs) moved to later slices with evidence in
+`conformance/test262/moves.tsv` (2 to slice 9, 1 to slice 12); 72 cases (142 runs) of
+`test/staging/sm/` taken in from slice 19, each failing in every run at the start commit of
+the slice on a part of slice 4 (`docs/plan/slice-04/close-into-4.tsv`). No host requirement
+is pending for slice 4, and `conformance/slices-delivered.txt` lists it.

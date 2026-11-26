@@ -18,10 +18,10 @@
 //! - LexicallyDeclaredNames and LexicallyScopedDeclarations
 //!   (`#sec-static-semantics-lexicallydeclarednames`,
 //!   `#sec-static-semantics-lexicallyscopeddeclarations`) of the top level of the script and of
-//!   each function body ([`Scope::lexical`]): the `let` and `const` declarations standing in the
-//!   list itself, a function declaration there being var scoped
+//!   each function body ([`Scope::lexical`]): the `let`, `const` and class declarations standing
+//!   in the list itself, a function declaration there being var scoped
 //!   (TopLevelLexicallyScopedDeclarations); and of a block's statement list or the clauses of a
-//!   `case` block ([`Ast::lexical_names`]): its `let` and `const` declarations and its function
+//!   `case` block ([`Ast::lexical_names`]): its `let`, `const` and class declarations and its function
 //!   declarations, which are no VarScopedDeclarations of the function or the script
 //!   (`#sec-block-static-semantics-lexicallyscopeddeclarations`,
 //!   `#sec-block-static-semantics-varscopeddeclarations`). The walk below therefore takes a
@@ -73,10 +73,20 @@ impl Ast {
     }
 }
 
-/// The names the statement `s` binds when it is a `let` or `const` declaration or a function
-/// declaration standing in a block.
+/// The names the statement `s` binds when it is a `let`, `const` or class declaration or a
+/// function declaration standing in a block.
 fn push_lexical(ast: &Ast, s: StmtId, names: &mut Vec<LexicalName>) {
     let declaration = ast.stmt(s).map(|n| &n.stmt);
+    if let Some(Stmt::Class(class)) = declaration {
+        if let Some(name) = &class.name {
+            names.push(LexicalName {
+                name: name.clone(),
+                constant: false,
+                declaration: s,
+            });
+        }
+        return;
+    }
     if let Some(Stmt::FunctionDeclaration(f)) = declaration {
         if let Some(name) = ast.function(*f).and_then(|x| x.name.as_ref()) {
             names.push(LexicalName {
@@ -298,10 +308,27 @@ fn push_body(m: &Meter<'_>, stack: &mut Vec<Step>, body: &[StmtId]) -> Result<()
     Ok(())
 }
 
-/// The names the statement `s` binds when it is a `let` or `const` declaration, each a copy
-/// charged to `m`, onto `names`.
+/// The names the statement `s` binds when it is a `let`, `const` or class declaration, each a
+/// copy charged to `m`, onto `names`.
 fn push_lexical_charged(m: &Meter<'_>, ast: &Ast, s: StmtId, names: &mut Vec<LexicalName>) {
-    let Some(Stmt::Var(kind, declarators)) = ast.stmt(s).map(|n| &n.stmt) else {
+    let statement = ast.stmt(s).map(|n| &n.stmt);
+    if let Some(Stmt::Class(class)) = statement {
+        if let Some(bound) = &class.name
+            && let Ok(name) = m.string(&bound.name)
+        {
+            let lexical = LexicalName {
+                name: Name {
+                    name,
+                    span: bound.span,
+                },
+                constant: false,
+                declaration: s,
+            };
+            let _ = m.push(names, lexical);
+        }
+        return;
+    }
+    let Some(Stmt::Var(kind, declarators)) = statement else {
         return;
     };
     if !kind.is_lexical() {

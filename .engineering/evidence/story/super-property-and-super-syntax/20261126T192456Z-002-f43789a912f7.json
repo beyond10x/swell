@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T19:24:56Z",
+  "actor": "human:operator",
+  "artifact": "story:super-property-and-super-syntax",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/super at 96e070c4, build node, before the merge into wave/big-2",
+    "reference": "swell-syntax 60 tests run: 60 passed (60 at the full counts); swell-compiler 17 passed; swell main 1205 passed, 1 skipped, in the default mode and with collect-every-safe-point; task clippy exit 0; cargo fmt --check exit 0"
+  }
+}

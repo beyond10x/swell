@@ -48,6 +48,7 @@ mod parameters;
 mod patterns;
 mod regexp;
 mod spread;
+mod super_ref;
 pub(crate) mod suspend;
 mod template;
 mod templates;

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:exponentiation-operator
 kind: story
-status: active
+status: implemented
 title: The operators ** and **= parse, compile and run over one exponentiate function
 summary: The parser refusal removed with right associativity and the unary-base SyntaxError, one BinaryOperator variant calling swell_num exponentiate, and the lift of 76 test262 cases.
 relations:
@@ -34,10 +34,11 @@ scope:
   path: crates/syntax/tests/sources/refused
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/exponentiation.js
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:28Z", actor: "human:operator", revision: 6}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:28Z", actor: "human:operator", revision: 7}
+- {from: "active", to: "implemented", at: "2026-11-26T10:01:51Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

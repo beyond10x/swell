@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T10:01:50Z",
+  "actor": "human:operator",
+  "artifact": "story:math-random",
+  "kind": "story",
+  "revision": 12,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at a4c1b2e7 with the files of commit 6bd73063 (the run was made on that tree before the commit), exit 0, on the build node; the unit was merged by commit 12a32b66, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/math_random.rs (swell::math_random::*)"
+  }
+}

@@ -15,7 +15,8 @@
 //! An `async` function declaration and an async generator declaration (slice 10) stand where a
 //! function declaration does, and neither stands as the body of a statement or as a labelled
 //! item, in any code (`parser/function.rs`).
-//! Refused are the declarations of later slices: `class` (8), `import`
+//! A class declaration stands where a declaration does and is parsed whole and held
+//! (`parser/class.rs`). Refused are the declarations of later slices: `import`
 //! and `export` (11), and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
 //! `for (var a = 0 in o)` (18); the `var` binding and the duplicate declarations Annex B gives
 //! a function declaration in a block of non-strict code (B.3.2) wait for slice 18 too, so that
@@ -219,7 +220,17 @@ impl<'a, 'm> Parser<'a, 'm> {
                             .fail_here("labelled function declaration as the body of a statement");
                     }
                 },
-                Keyword::Class => return self.refuse("class", 8),
+                // A ClassDeclaration is a Declaration: never the body of a statement or a
+                // labelled item, in any code (`parser/class.rs`).
+                Keyword::Class => match place {
+                    Place::Body | Place::Block => Parser::class_declaration_statement,
+                    Place::Labelled | Place::LabelledInStatement => {
+                        return self.fail_here("labelled class declaration");
+                    }
+                    Place::IfClause | Place::Statement => {
+                        return self.fail_here("class declaration as the body of a statement");
+                    }
+                },
                 Keyword::Const => match place {
                     Place::Body | Place::Block => Parser::var_statement,
                     _ => return self.fail_here(LEXICAL_AS_STATEMENT),
