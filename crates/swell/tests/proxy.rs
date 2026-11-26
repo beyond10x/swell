@@ -828,7 +828,14 @@ fn the_target_is_read_only_at_the_steps_of_each_clause() {
 /// `collect-every-safe-point`) and one of `BUILTINS_REENTRY + 10`, which must throw the
 /// RangeError of `reentry_depth`, then a bisection for the longest chain that answers (its base
 /// calls `parseDeep` when it calls script, so the parser runs at the deepest). Prints the length.
-fn deepest_chain(handler: &str, base: &str, op: &str) {
+/// With `from_above` the search walks down from `BUILTINS_REENTRY + 9` one length at a time
+/// to the first chain that answers: for an `op` whose clause reads the chain below again at
+/// each level after the trap (`getPrototypeOf`'s IsExtensible, `ownKeys`'s keys of the
+/// target), a chain that answers costs the square of its length and one that throws only its
+/// length, and the walk runs one that answers where the bisection runs about ten. With the
+/// feature `collect-every-safe-point`, where the collections of every attempt cost more than
+/// the square, the search is the bisection.
+fn deepest_chain(handler: &str, base: &str, op: &str, from_above: bool) {
     let (mut agent, realm) = stack_agent(BUILTINS_REENTRY);
     let over = BUILTINS_REENTRY + 10;
     let huge = if cfg!(feature = "collect-every-safe-point") {
@@ -836,15 +843,22 @@ fn deepest_chain(handler: &str, base: &str, op: &str) {
     } else {
         10_000
     };
+    let search = if from_above && !cfg!(feature = "collect-every-safe-point") {
+        "var lo = hi - 1, a = attempt(lo);\n\
+         while (a === \"RangeError\" && lo > 0) { lo--; a = attempt(lo); }"
+    } else {
+        "var lo = 0;\n\
+         while (hi - lo > 1) { var mid = (lo + hi) >> 1; var a = attempt(mid); if (a === \"ok\") lo = mid; else if (a === \"RangeError\") hi = mid; else { first = a; break; } }\n\
+         a = attempt(lo);"
+    };
     let script = format!(
         "var h = {handler};\n\
          var base = {base};\n\
          function chain(n) {{ var p = base; for (var i = 0; i < n; i++) p = new Proxy(p, h); return p; }}\n\
          function attempt(n) {{ var p = chain(n); try {{ {op}; return \"ok\"; }} catch (e) {{ return e instanceof RangeError ? \"RangeError\" : String(e); }} }}\n\
-         var huge = attempt({huge}), first = attempt({over});\n\
-         var lo = 0, hi = {over};\n\
-         while (hi - lo > 1) {{ var mid = (lo + hi) >> 1; var a = attempt(mid); if (a === \"ok\") lo = mid; else if (a === \"RangeError\") hi = mid; else {{ first = a; break; }} }}\n\
-         huge + \"/\" + first + \"/\" + lo + \"/\" + attempt(lo);"
+         var huge = attempt({huge}), first = attempt({over}), hi = {over};\n\
+         {search}\n\
+         huge + \"/\" + first + \"/\" + lo + \"/\" + a;"
     );
     let outcome = eval_text(&mut agent, &realm, &script);
     println!("deepest_chain {op} with {handler}: {outcome:?}");
@@ -860,13 +874,20 @@ fn deepest_chain(handler: &str, base: &str, op: &str) {
 }
 
 /// One stack test per operation and handler: `deepest_chain` on seven eighths of
-/// `min_stack_bytes()` in a child process.
+/// `min_stack_bytes()` in a child process; `from_above` after the operation searches from
+/// above.
 macro_rules! deep_chain {
     ($name:ident, $handler:expr, $base:expr, $op:expr) => {
+        deep_chain!($name, $handler, $base, $op, false);
+    };
+    ($name:ident, $handler:expr, $base:expr, $op:expr, from_above) => {
+        deep_chain!($name, $handler, $base, $op, true);
+    };
+    ($name:ident, $handler:expr, $base:expr, $op:expr, $from_above:literal) => {
         #[test]
         fn $name() {
             fn body() {
-                deepest_chain($handler, $base, $op);
+                deepest_chain($handler, $base, $op, $from_above);
             }
             let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
             on_bounded_stack(test_path!(stringify!($name)), stack, body).unwrap();
@@ -960,6 +981,57 @@ deep_chain!(
     "Object.getPrototypeOf(p); Object.isExtensible(p); Object.getOwnPropertyDescriptor(p, \"x\"); \
      Object.defineProperty(p, \"y\", { value: 1, configurable: true }); Object.keys(p); \
      Object.setPrototypeOf(p, Object.prototype); for (var k in p) {}"
+);
+// The seven traps of shape (`story:proxy-descriptor-prototype-and-extensibility-traps`). A
+// trap that forwards through `Reflect` re-enters through its call; where the clause reads the
+// target again after the trap (`isExtensible`, `getOwnPropertyDescriptor`, `ownKeys`), a chain
+// of forwarding traps would read the chain below twice at each level, so those chains answer
+// in the trap and re-enter through the clause's read of the target. The chains of
+// `getPrototypeOf` and `ownKeys` still read the chain below once per level after the trap, so
+// they search from above (`deepest_chain`).
+deep_chain!(
+    builtin_get_prototype_of_trap_chain_on_the_promised_stack,
+    "{ getPrototypeOf: Reflect.getPrototypeOf }",
+    "new Proxy({}, { getPrototypeOf: function () { parseDeep(); return null; } })",
+    "Object.getPrototypeOf(p)",
+    from_above
+);
+deep_chain!(
+    builtin_set_prototype_of_trap_chain_on_the_promised_stack,
+    "{ setPrototypeOf: Reflect.setPrototypeOf }",
+    "new Proxy({}, { setPrototypeOf: function () { parseDeep(); return false; } })",
+    "Reflect.setPrototypeOf(p, null)"
+);
+deep_chain!(
+    is_extensible_trap_chain_on_the_promised_stack,
+    "{ isExtensible: function () { return true; } }",
+    "new Proxy({}, { isExtensible: function () { parseDeep(); return true; } })",
+    "Object.isExtensible(p)"
+);
+deep_chain!(
+    builtin_prevent_extensions_trap_chain_on_the_promised_stack,
+    "{ preventExtensions: Reflect.preventExtensions }",
+    "new Proxy({}, { preventExtensions: function () { parseDeep(); return false; } })",
+    "Reflect.preventExtensions(p)"
+);
+deep_chain!(
+    get_own_property_descriptor_trap_chain_on_the_promised_stack,
+    "{ getOwnPropertyDescriptor: function () { return undefined; } }",
+    "new Proxy({}, { getOwnPropertyDescriptor: function () { parseDeep(); return undefined; } })",
+    "Object.getOwnPropertyDescriptor(p, \"x\")"
+);
+deep_chain!(
+    builtin_define_property_trap_chain_on_the_promised_stack,
+    "{ defineProperty: Reflect.defineProperty }",
+    "new Proxy({}, { defineProperty: function () { parseDeep(); return false; } })",
+    "Reflect.defineProperty(p, \"x\", { value: 1 })"
+);
+deep_chain!(
+    own_keys_trap_chain_on_the_promised_stack,
+    "{ ownKeys: function () { return []; } }",
+    "new Proxy({}, { ownKeys: function () { parseDeep(); return []; } })",
+    "Reflect.ownKeys(p)",
+    from_above
 );
 deep_chain!(
     proxy_prototype_chain_walk_on_the_promised_stack,
@@ -1818,5 +1890,204 @@ fn more_builtins_given_a_proxy() {
            attempt(function () { return Object.keys(Object.getOwnPropertyDescriptors(new Proxy({ m: 1 }, {}))).length; }));\n\
          r.join();",
         "a+hidden,a+hidden,true,true,false,true,true,false,{\"a\":1},{\"a\":2},aXc,123,TypeError,TypeError,true,1,23,6,12,1,x,4,9,TypeError,3,1",
+    );
+}
+
+/// A `super` property read in a method whose home object's prototype is a Proxy reaches its
+/// `get` trap with the method's `this` as the receiver (`#sec-super-keyword-runtime-semantics-evaluation`,
+/// MakeSuperPropertyReference). The adversary's case of `story:proxy-objects-and-access-traps`,
+/// added once `super` and Proxy are both on the branch.
+#[test]
+fn super_property_through_a_proxy_prototype() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "var log = [], o;\n\
+         var P = new Proxy({ x: \"px\" }, { get: function (t, k, r) { log.push(String(k) + \":\" + (r === o)); return Reflect.get(t, k, r); } });\n\
+         o = { m() { return super.x; } };\n\
+         Object.setPrototypeOf(o, P);\n\
+         o.m() + \"|\" + log.join();",
+    );
+    assert_eq!(outcome, Outcome::Normal("\"px|x:true\"".to_string()));
+}
+
+/// The seven traps of shape (`story:proxy-descriptor-prototype-and-extensibility-traps`): a
+/// throw from each trap, and a broken invariant of each, caught at the top and inside a `get`
+/// trap six proxies deep, each under two trapless proxies, leave the count exact: inside the trap a
+/// trapless chain of 14 answers and one of 15 throws the RangeError before and after them, and at
+/// the top one of `reentry_depth` answers and one more throws.
+#[test]
+fn a_throw_of_each_shape_trap_caught_inside_nested_proxies_leaves_the_count_exact() {
+    let mut budget = limits();
+    budget.reentry_depth = EXACT_DEPTH;
+    let mut agent = agent_with(budget).unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "function c(n) { var p = { x: 1 }; for (var i = 0; i < n; i++) p = new Proxy(p, {}); return p; }\n\
+             function bound(k) { var a = []; try { a.push(c(k).x); } catch (e) { a.push(e.name); } try { a.push(c(k + 1).x); } catch (e) { a.push(e.name); } return a.join(\"+\"); }\n\
+             function nest(t, h) { return new Proxy(new Proxy(new Proxy(t, h), {}), {}); }\n\
+             function thrower() { throw new Error(\"t\"); }\n\
+             var fixed = Object.preventExtensions({ a: 1 });\n\
+             var cases = [\n\
+               function () { Object.getPrototypeOf(nest({}, { getPrototypeOf: thrower })); },\n\
+               function () { Object.getPrototypeOf(nest({}, { getPrototypeOf: function () { return 1; } })); },\n\
+               function () { Object.setPrototypeOf(nest({}, { setPrototypeOf: thrower }), null); },\n\
+               function () { Object.setPrototypeOf(nest(fixed, { setPrototypeOf: function () { return true; } }), null); },\n\
+               function () { Object.isExtensible(nest({}, { isExtensible: thrower })); },\n\
+               function () { Object.isExtensible(nest({}, { isExtensible: function () { return false; } })); },\n\
+               function () { Object.preventExtensions(nest({}, { preventExtensions: thrower })); },\n\
+               function () { Object.preventExtensions(nest({}, { preventExtensions: function () { return true; } })); },\n\
+               function () { Object.getOwnPropertyDescriptor(nest({}, { getOwnPropertyDescriptor: thrower }), \"x\"); },\n\
+               function () { Object.getOwnPropertyDescriptor(nest(fixed, { getOwnPropertyDescriptor: function () { return undefined; } }), \"a\"); },\n\
+               function () { Object.defineProperty(nest({}, { defineProperty: thrower }), \"x\", { value: 1 }); },\n\
+               function () { Object.defineProperty(nest(fixed, { defineProperty: function () { return true; } }), \"x\", { value: 1 }); },\n\
+               function () { Object.keys(nest({}, { ownKeys: thrower })); },\n\
+               function () { Object.keys(nest(fixed, { ownKeys: function () { return [\"a\", \"b\"]; } })); }\n\
+             ];\n\
+             function all() { var names = []; for (var i = 0; i < cases.length; i++) { try { cases[i](); names.push(\"none\"); } catch (e) { names.push(e.name); } } return names.join(\"\"); }\n\
+             var before = bound(20), top = all(), report;\n\
+             var trapping = new Proxy({}, { get: function () {\n\
+               var inner = bound(14), names = all();\n\
+               report = [inner, bound(14), names].join(\"/\");\n\
+               return 0;\n\
+             } });\n\
+             var outer = trapping; for (var i = 0; i < 5; i++) outer = new Proxy(outer, {});\n\
+             outer.x;\n\
+             [before, bound(20), report, top].join(\"/\");"
+        ),
+        Outcome::Normal(format!(
+            "\"1+RangeError/1+RangeError/1+RangeError/1+RangeError/{0}/{0}\"",
+            ["Error", "TypeError"].repeat(7).concat()
+        ))
+    );
+}
+
+/// The steps of one `ownKeys` call through the checks of its clause (10.5.11) per key of its
+/// answer, read from `last_entry_steps()` as the difference between an answer of 20 keys and
+/// one of 10 over targets that are not extensible: CreateListFromArrayLike's step per element,
+/// the check of repeated keys (I18), the target's [[OwnPropertyKeys]] (a step per key of an
+/// ordinary object), the loop over the target's keys that reads each descriptor, the check I19
+/// (every key non-configurable, a frozen target) or I20 (every key configurable), and
+/// `Reflect.ownKeys`'s CreateArrayFromList: 6 steps per key. Each charge of the clause is held:
+/// without one of them the difference is 50, not 60.
+#[test]
+fn own_keys_spends_a_step_per_key_at_each_check() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "function made(n, freeze) { var t = {}, keys = []; for (var i = 0; i < n; i++) { t[\"k\" + i] = i; keys.push(\"k\" + i); }\n\
+               if (freeze) Object.freeze(t); else Object.preventExtensions(t);\n\
+               return new Proxy(t, { ownKeys: function () { return keys; } }); }\n\
+             var open10 = made(10, false), open20 = made(20, false), frozen10 = made(10, true), frozen20 = made(20, true);\n\
+             0;"
+        ),
+        Outcome::Normal("0".to_string())
+    );
+    let mut steps = |source: &str| {
+        assert_eq!(
+            eval_text(&mut agent, &realm, source),
+            Outcome::Normal("true".to_string()),
+            "{source}"
+        );
+        agent.last_entry_steps().unwrap()
+    };
+    let open = [
+        steps("Reflect.ownKeys(open10).length === 10;"),
+        steps("Reflect.ownKeys(open20).length === 20;"),
+    ];
+    let frozen = [
+        steps("Reflect.ownKeys(frozen10).length === 10;"),
+        steps("Reflect.ownKeys(frozen20).length === 20;"),
+    ];
+    let configurable = open[1] - open[0];
+    let fixed = frozen[1] - frozen[0];
+    println!(
+        "open {open:?}, frozen {frozen:?}: 10 keys more, {configurable} steps more (I20), {fixed} (I19)"
+    );
+    assert_eq!(configurable, 60);
+    assert_eq!(fixed, 60);
+}
+
+/// The step budget ending at every step of one `ownKeys` call with its invariant checks,
+/// through a forwarding Proxy over a target that is not extensible with a non-configurable key
+/// (I17, I18, IsExtensible, the target's keys, a descriptor per key, I19, I20, I21): every
+/// outcome is the script's answer or `Terminated(StepBudget)`, and after each the next entry
+/// reaches the full bound exactly.
+#[test]
+fn step_budget_at_every_step_of_an_own_keys_call_leaves_no_count() {
+    let op = "var t = { a: 1, b: 2 }; Object.defineProperty(t, \"n\", { value: 3 }); Object.preventExtensions(t);\n\
+         var fwd = new Proxy(t, {});\n\
+         var p = new Proxy(fwd, { ownKeys: function (target) { return [\"n\", \"a\", \"b\"]; } });\n\
+         var deep = p; for (var i = 0; i < 3; i++) deep = new Proxy(deep, {});\n\
+         Reflect.ownKeys(deep).join();";
+    let mut measure = limits();
+    measure.reentry_depth = EXACT_DEPTH;
+    let mut probe = agent_with(measure).unwrap();
+    let probe_realm = realm(&mut probe);
+    let expected = Outcome::Normal("\"n,a,b\"".to_string());
+    assert_eq!(eval_text(&mut probe, &probe_realm, op), expected);
+    let total = probe.last_entry_steps().unwrap();
+    let with_one = format!("0;{op}");
+    assert_eq!(eval_text(&mut probe, &probe_realm, &with_one), expected);
+    let per = probe.last_entry_steps().unwrap() - total;
+    assert!(per > 0, "a `0;` spends no step");
+    reaches_the_full_bound(&mut probe, &probe_realm, "nothing");
+    let check = probe.last_entry_steps().unwrap();
+    println!("op {total} steps, a `0;` {per}, the check {check}");
+    let budget_steps = total.max(check) + 10;
+    let mut budget = measure;
+    budget.steps_per_entry = budget_steps;
+    let mut agent = agent_with(budget).unwrap();
+    let realm = realm(&mut agent);
+    let stride = if cfg!(feature = "collect-every-safe-point") {
+        89
+    } else {
+        1
+    };
+    let mut terminated = 0;
+    let mut normal = 0;
+    let mut residues = Vec::new();
+    for shift in ["", "!0;", "-0;", "void 0;"] {
+        assert_eq!(
+            eval_text(&mut probe, &probe_realm, &format!("{shift}{op}")),
+            expected
+        );
+        let cost = probe.last_entry_steps().unwrap() - total;
+        if residues.contains(&(cost % per)) {
+            continue;
+        }
+        residues.push(cost % per);
+        let mut m = budget_steps.saturating_sub(total + cost) / per;
+        m = m.saturating_sub(1);
+        while m * per + cost <= budget_steps {
+            let source = format!("{shift}{}{op}", "0;".repeat(usize::try_from(m).unwrap()));
+            let outcome = eval_text(&mut agent, &realm, &source);
+            match &outcome {
+                Outcome::Terminated(Termination::StepBudget) => terminated += 1,
+                o if *o == expected => normal += 1,
+                other => panic!("with {shift} and {m} padding statements: {other:?}"),
+            }
+            reaches_the_full_bound(
+                &mut agent,
+                &realm,
+                &format!("{shift} and {m} padding statements"),
+            );
+            m += stride;
+        }
+    }
+    println!("{normal} answered, {terminated} terminated, residues {residues:?} of {per}");
+    assert!(terminated > 0 && normal > 0);
+    assert_eq!(
+        residues.len() as u64,
+        per,
+        "not every step offset was reached"
     );
 }
