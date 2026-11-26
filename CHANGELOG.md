@@ -21,6 +21,15 @@ Every number below comes from the gate, `task check`, on the released commit.
   calls no hook, costs the step of the call and allocates nothing; each value is a multiple
   of 2^-53 in [0, 1 - 2^-53] with positive sign. The function is the last own key of `Math`,
   after `sumPrecise` (`story:math-random`).
+- The operators `**` and `**=` (`#sec-exp-operator`, `#sec-assignment-operators`): the parser
+  reads `**` right associative and tighter than `*`, `/` and `%`, and a unary expression as its
+  left operand outside parentheses (`-2 ** 2`, `typeof a ** 2`, `await a ** 2`) is the
+  SyntaxError "a unary expression as the left operand of ** needs parentheses"; `**=` takes the
+  targets `*=` takes. The compiler emits one instruction, `Exp`, and the interpreter applies
+  Number::exponentiate through `swell_num::math::exponentiate`, the function `Math.pow` calls,
+  so `a ** b` and `Math.pow(a, b)` answer the same Number. The compiler folds nothing. The
+  refusal "exponentiation operator is not supported before slice 4" is gone
+  (`story:exponentiation-operator`).
 
 ### Changed
 
