@@ -57,6 +57,8 @@
 //! head has a record copies it before the first test and before each update
 //! ([`Instruction::CopyEnv`], `#sec-forbodyevaluation`).
 
+use alloc::string::String;
+use alloc::vec::Vec;
 use swell_syntax::ast::{
     BindingTarget, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, IterationKind, Span,
     Stmt, StmtId, VarDeclarator,
@@ -193,7 +195,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 self.reset_completion(span, &mut t)?;
                 let (top, next, exit) = (self.label(), self.label(), self.label());
                 t.push(Task::Bind(top))?;
-                t.push(self.enter_loop(exit, next, self.items, std::mem::take(&mut labels)))?;
+                t.push(self.enter_loop(exit, next, self.items, core::mem::take(&mut labels)))?;
                 t.push(Task::Stmt(*body))?;
                 t.push(Task::PopControl(None))?;
                 t.push(Task::Bind(next))?;
@@ -209,7 +211,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 t.push(Task::Bind(top))?;
                 t.push(Task::Expr(*test))?;
                 t.push(Task::Emit(Instruction::JumpIfFalse(exit), span))?;
-                t.push(self.enter_loop(exit, top, self.items, std::mem::take(&mut labels)))?;
+                t.push(self.enter_loop(exit, top, self.items, core::mem::take(&mut labels)))?;
                 t.push(Task::Stmt(*body))?;
                 t.push(Task::PopControl(None))?;
                 t.push(Task::Goto(top, span))?;
@@ -257,7 +259,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     next,
                     items: self.items,
                     envs: self.envs.saturating_add(u32::from(record)),
-                    labels: std::mem::take(&mut labels),
+                    labels: core::mem::take(&mut labels),
                 }))?;
                 t.push(Task::Stmt(*body))?;
                 t.push(Task::PopControl(None))?;
@@ -319,7 +321,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     exit,
                     top,
                     self.items.saturating_add(1),
-                    std::mem::take(&mut labels),
+                    core::mem::take(&mut labels),
                 ))?;
                 t.push(Task::Stmt(*body))?;
                 t.push(Task::PopControl(None))?;

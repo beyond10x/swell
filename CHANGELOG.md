@@ -11,6 +11,14 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Changed
+
+- `swell-unicode`, `swell-syntax`, `swell-compiler` and `swell-regexp` are `#![no_std]` with
+  `extern crate alloc`: their library code names `core::` and `alloc::` paths and no `std::`
+  path (step 1 of `story:core-builds-without-std`). `SyntaxError` and `CompileError` implement
+  `core::error::Error`, the same trait as `std::error::Error`. Public names and behaviour do not
+  change; unit tests inside the crates still link `std`.
+
 ## [0.12.0] - 2026-11-25
 
 swell has a shell binary, `swell`, and a release ships it for Linux, macOS and Windows. The

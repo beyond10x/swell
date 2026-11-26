@@ -39,6 +39,7 @@
 //! `Σ max(1, |s_i|) + Σ (L_j - 1) + n · C` with `C`, the candidates at the position, at most
 //! `S + Σ (L_j - 1) + 1`, the instruction's step the first of them.
 
+use alloc::vec::Vec;
 use swell_unicode::{LONGEST_STRING, MOST_CASE_FOLD_EQUIVALENTS, Property, StringProperty};
 
 use crate::canonicalize::equivalents;
@@ -167,11 +168,11 @@ fn in_ranges(ranges: &[(u32, u32)], c: u32) -> bool {
     ranges
         .binary_search_by(|&(first, last)| {
             if last < c {
-                std::cmp::Ordering::Less
+                core::cmp::Ordering::Less
             } else if first > c {
-                std::cmp::Ordering::Greater
+                core::cmp::Ordering::Greater
             } else {
-                std::cmp::Ordering::Equal
+                core::cmp::Ordering::Equal
             }
         })
         .is_ok()

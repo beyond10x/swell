@@ -34,7 +34,10 @@
 //! joined, each string of `\q{...}` copied, each property and property of strings named. No set
 //! is built at compile, so the work stays linear in the pattern here too.
 
-use std::fmt;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
+use core::fmt;
 
 use swell_unicode::Property;
 

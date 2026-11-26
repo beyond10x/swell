@@ -125,7 +125,7 @@ pub fn simple_case_fold_equivalents(c: u32) -> CaseFoldEquivalents {
 #[derive(Clone, Debug)]
 pub struct CaseFoldEquivalents {
     folding: Option<u32>,
-    others: std::slice::Iter<'static, (u32, u32)>,
+    others: core::slice::Iter<'static, (u32, u32)>,
 }
 
 impl Iterator for CaseFoldEquivalents {

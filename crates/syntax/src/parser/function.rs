@@ -22,6 +22,7 @@ use crate::ast::{
     Name, PatternKind, Scope, Span, Stmt, StmtId,
 };
 use crate::token::{Keyword, Punct};
+use alloc::vec::Vec;
 
 impl<'a, 'm> Parser<'a, 'm> {
     /// `FunctionDeclaration` at the current `function`, or `AsyncFunctionDeclaration` at the
@@ -586,7 +587,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             let span = self.expr_span(target);
             match self.expr_mut(target) {
                 Some(Expr::Identifier(name)) => {
-                    let name = std::mem::take(name);
+                    let name = core::mem::take(name);
                     params.push(BindingTarget::Identifier(Name { name, span }));
                 }
                 Some(
@@ -622,7 +623,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                 },
             ) = self.expr_mut(left)
             {
-                m.release(std::mem::take(list));
+                m.release(core::mem::take(list));
             }
         } else {
             self.drop_cover(mark);
@@ -835,6 +836,9 @@ enum Element {
 
 #[cfg(test)]
 mod tests {
+    use std::string::String;
+    use std::vec::Vec;
+
     use crate::ast::{Expr, ExprId, FunctionKind};
     use crate::ledger::{Counting, HeapBytes, Meter};
 

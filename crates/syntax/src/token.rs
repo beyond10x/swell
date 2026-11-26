@@ -6,6 +6,8 @@
 
 use crate::ast::{NumberLiteral, RegExpLiteral, StringLiteral, TemplateString};
 use crate::ledger::HeapBytes;
+use alloc::boxed::Box;
+use alloc::string::String;
 
 /// A token with its source position: `start` and `end` are code unit offsets, `line` and
 /// `column` count from 1. `newline_before` says whether a `LineTerminator`, or a

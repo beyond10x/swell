@@ -44,6 +44,7 @@
 //! it is a `LoopJump`; every other jump goes forward. So a loop cannot run without passing a
 //! check.
 
+use alloc::vec::Vec;
 use swell_syntax::ast::{FunctionKind, Span};
 
 /// Tag of a normal completion record.

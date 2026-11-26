@@ -37,6 +37,7 @@ use crate::ast::{
 use crate::early;
 use crate::scope;
 use crate::token::{Keyword, Punct, TokenKind};
+use alloc::vec::Vec;
 
 /// Where a statement stands, which decides what a `function` there is.
 #[derive(Clone, Copy, PartialEq, Eq)]
