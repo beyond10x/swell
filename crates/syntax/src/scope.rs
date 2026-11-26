@@ -45,7 +45,9 @@
 //! The walk does not recurse: its pending work is a stack on the heap, so the Rust stack it uses
 //! is the same at any depth of the tree.
 
-use std::collections::BTreeSet;
+use alloc::collections::BTreeSet;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use crate::ledger::{HeapBytes, Meter, Stop, map_entry_bytes};
 
@@ -121,7 +123,7 @@ pub(crate) fn analyse(ast: &mut Ast, body: &[StmtId], m: &Meter<'_>) -> Scope {
     for (id, scope) in scopes.drain(..) {
         match ast.functions.get_mut(id.0 as usize) {
             Some(f) => {
-                let old = std::mem::replace(&mut f.scope, scope);
+                let old = core::mem::replace(&mut f.scope, scope);
                 m.release(old);
             }
             None => m.release(scope),
@@ -471,6 +473,10 @@ fn collect_stmt(ast: &Ast, id: StmtId, c: &mut Collect, m: &Meter<'_>) {
 
 #[cfg(test)]
 mod tests {
+    use std::string::String;
+    use std::vec::Vec;
+    use std::{format, println};
+
     use crate::ledger::{Counting, Meter, map_entry_bytes};
     use crate::{ParseOptions, parse_script};
 

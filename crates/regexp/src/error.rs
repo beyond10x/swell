@@ -13,7 +13,9 @@
 //! `story:regexp-v-flag-class-sets-and-properties-of-strings` brought the flag `v`, the last
 //! (`docs/design/engine.md`, decision 7, "Refusals until the later stories of slice 5").
 
-use std::fmt;
+use alloc::string::String;
+use alloc::string::ToString;
+use core::fmt;
 
 use crate::budget::Stop;
 

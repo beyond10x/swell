@@ -16,9 +16,11 @@
 //! Slice 1 took radix 10 early and slice 2 the other radices (design, section 12, "A part before
 //! its slice"); `toFixed`, `toExponential` and `toPrecision` are slice 4's.
 
-use std::cmp::Ordering;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 
-use crate::nat::Nat;
+use crate::nat::{Longest, Nat};
 
 /// The digits of every radix, from the clause: "taken from the first r code units of
 /// "0123456789abcdefghijklmnopqrstuvwxyz" in order".
@@ -26,7 +28,7 @@ const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
 /// `Number::toString(x, 10)`.
 pub fn number_to_string(x: f64) -> String {
-    to_string_in_radix(x, 10)
+    to_string_in_radix(x, 10, &mut Longest::default())
 }
 
 /// `Number::toString(x, radix)`, or `None` for a radix outside 2 to 36, which the clause does
@@ -35,11 +37,11 @@ pub fn number_to_string_radix(x: f64, radix: u32) -> Option<String> {
     if !(2..=36).contains(&radix) {
         return None;
     }
-    Some(to_string_in_radix(x, radix))
+    Some(to_string_in_radix(x, radix, &mut Longest::default()))
 }
 
-/// `Number::toString(x, radix)` for a radix from 2 to 36.
-fn to_string_in_radix(x: f64, radix: u32) -> String {
+/// `Number::toString(x, radix)` for a radix from 2 to 36, noting its operands in `longest`.
+pub(crate) fn to_string_in_radix(x: f64, radix: u32, longest: &mut Longest) -> String {
     // Steps 1 to 4.
     if x.is_nan() {
         return "NaN".to_string();
@@ -56,7 +58,7 @@ fn to_string_in_radix(x: f64, radix: u32) -> String {
         out.push_str("Infinity");
         return out;
     }
-    let (digits, n) = shortest_digits(x, radix);
+    let (digits, n) = shortest_digits(x, radix, longest);
     layout(&mut out, &digits, n, radix);
     out
 }
@@ -112,7 +114,7 @@ fn layout(out: &mut String, digits: &[u8], n: i32, radix: u32) {
 /// For a finite positive `x` and a radix from 2 to 36: the digits of s in that radix, most
 /// significant first, and n, of step 5 of `Number::toString`, so that x is the Number nearest to
 /// 0.d₁d₂…d_k × radix^n.
-pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
+pub(crate) fn shortest_digits(x: f64, radix: u32, longest: &mut Longest) -> (Vec<u8>, i32) {
     // The callers pass a radix from 2 to 36; the clamp keeps every loop below finite whatever
     // they pass.
     let base = u64::from(radix.clamp(2, 36));
@@ -136,26 +138,26 @@ pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
     let magnitude = e.unsigned_abs();
     let (mut r, mut s, mut m_plus, mut m_minus) = match (e >= 0, unequal_gaps) {
         (true, true) => (
-            Nat::from_u64(f).shl(magnitude + 2),
+            Nat::from_u64(f).shl(magnitude + 2, longest),
             Nat::from_u64(4),
-            one().shl(magnitude + 1),
-            one().shl(magnitude),
+            one().shl(magnitude + 1, longest),
+            one().shl(magnitude, longest),
         ),
         (true, false) => (
-            Nat::from_u64(f).shl(magnitude + 1),
+            Nat::from_u64(f).shl(magnitude + 1, longest),
             Nat::from_u64(2),
-            one().shl(magnitude),
-            one().shl(magnitude),
+            one().shl(magnitude, longest),
+            one().shl(magnitude, longest),
         ),
         (false, true) => (
-            Nat::from_u64(f).shl(2),
-            one().shl(magnitude + 2),
+            Nat::from_u64(f).shl(2, longest),
+            one().shl(magnitude + 2, longest),
             Nat::from_u64(2),
             one(),
         ),
         (false, false) => (
-            Nat::from_u64(f).shl(1),
-            one().shl(magnitude + 1),
+            Nat::from_u64(f).shl(1, longest),
+            one().shl(magnitude + 1, longest),
             one(),
             one(),
         ),
@@ -175,12 +177,12 @@ pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
         i32::try_from(estimate).unwrap_or(0)
     };
     if n >= 0 {
-        s.mul_pow(base, n.unsigned_abs());
+        s.mul_pow(base, n.unsigned_abs(), longest);
     } else {
         let scale = n.unsigned_abs();
-        r.mul_pow(base, scale);
-        m_plus.mul_pow(base, scale);
-        m_minus.mul_pow(base, scale);
+        r.mul_pow(base, scale, longest);
+        m_plus.mul_pow(base, scale, longest);
+        m_minus.mul_pow(base, scale, longest);
     }
     let upper_reached = |r: &Nat, m_plus: &Nat, s: &Nat| match Nat::cmp_sum(r, m_plus, s) {
         Ordering::Greater => true,
@@ -188,12 +190,12 @@ pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
         Ordering::Less => false,
     };
     while upper_reached(&r, &m_plus, &s) {
-        s.mul_small(base);
+        s.mul_small(base, longest);
         n += 1;
     }
     loop {
-        let mut high = r.add(&m_plus);
-        high.mul_small(base);
+        let mut high = r.add(&m_plus, longest);
+        high.mul_small(base, longest);
         let n_too_large = match high.cmp(&s) {
             Ordering::Less => true,
             Ordering::Equal => !even,
@@ -202,9 +204,9 @@ pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
         if !n_too_large {
             break;
         }
-        r.mul_small(base);
-        m_plus.mul_small(base);
-        m_minus.mul_small(base);
+        r.mul_small(base, longest);
+        m_plus.mul_small(base, longest);
+        m_minus.mul_small(base, longest);
         n -= 1;
     }
 
@@ -215,9 +217,9 @@ pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
     let mut product = Nat::from_u64(0);
     let top_digit = u8::try_from(base - 1).unwrap_or(9);
     loop {
-        r.mul_small(base);
-        m_plus.mul_small(base);
-        m_minus.mul_small(base);
+        r.mul_small(base, longest);
+        m_plus.mul_small(base, longest);
+        m_minus.mul_small(base, longest);
         // The digit is floor(r / s), below the radix. Its estimate from the leading 128 bits of
         // both is off by at most one either way, and corrected.
         let shift = r.bit_len().saturating_sub(128);
@@ -226,7 +228,7 @@ pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
         if digit > 0 {
             product.limbs.clear();
             product.limbs.extend_from_slice(&s.limbs);
-            product.mul_small(u64::from(digit));
+            product.mul_small(u64::from(digit), longest);
             while digit > 0 && product.cmp(&r) == Ordering::Greater {
                 product.sub_assign(&s);
                 digit -= 1;
@@ -260,7 +262,7 @@ pub(crate) fn shortest_digits(x: f64, radix: u32) -> (Vec<u8>, i32) {
                 // Both d and d + 1 read back as x: the closer, and of two equally close the even
                 // s. In an even radix s has the parity of its last digit; in an odd one, every
                 // power of the radix being odd, the parity of the sum of its digits.
-                let twice = r.clone().shl(1);
+                let twice = r.clone().shl(1, longest);
                 let s_with_digit_odd = if base.is_multiple_of(2) {
                     digit % 2 == 1
                 } else {

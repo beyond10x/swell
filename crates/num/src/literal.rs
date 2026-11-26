@@ -19,6 +19,9 @@
 //! Both functions take the code units of the text, Latin-1 (`u8`) or UTF-16 (`u16`); every
 //! character of either grammar is ASCII, so a unit above 0x7F makes the text no literal.
 
+use alloc::string::String;
+use alloc::vec::Vec;
+
 /// Which production of `NumericLiteral` a literal is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LiteralForm {

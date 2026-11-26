@@ -1,3 +1,4 @@
+#![no_std]
 #![forbid(unsafe_code)]
 //! `swell-syntax`: the lexer, parser, early errors and scope analysis of swell (design,
 //! decision 2).
@@ -45,6 +46,10 @@
 //! was charged ([`Script::charged`]); its owner credits that when it drops the tree. An entry
 //! that answers errors or a stop has credited everything it charged.
 
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
+
 pub mod ast;
 mod early;
 pub mod error;
@@ -59,6 +64,8 @@ pub use ast::Scope;
 pub use error::{MessageKind, SyntaxError, message_kind};
 pub use ledger::{Ledger, Stop, Unlimited};
 
+use alloc::vec;
+use alloc::vec::Vec;
 use ast::{Ast, StmtId};
 use ledger::{HeapBytes, Meter};
 

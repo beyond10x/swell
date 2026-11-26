@@ -2,6 +2,7 @@
 mod calendar;
 mod date;
 mod date_text;
+mod fmath;
 mod format;
 mod literal;
 mod math_dd;

@@ -33,6 +33,10 @@ use crate::error::SyntaxError;
 use crate::ledger::{HeapBytes, Meter, Stop as Halt};
 use crate::lexer::Lexer;
 use crate::token::{Keyword, Punct, Token, TokenKind};
+use alloc::format;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
 
 /// The parse stopped; its error is in [`Parser::error`].
 pub(crate) struct Stop;
@@ -352,16 +356,16 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// the parser still holds.
     fn finish_parse(&mut self) -> Ast {
         let m = self.m;
-        m.release(std::mem::take(&mut self.operators));
-        m.release(std::mem::take(&mut self.prefixes));
-        m.release(std::mem::take(&mut self.outer_yields));
-        m.release(std::mem::take(&mut self.outer_awaits));
+        m.release(core::mem::take(&mut self.operators));
+        m.release(core::mem::take(&mut self.prefixes));
+        m.release(core::mem::take(&mut self.outer_yields));
+        m.release(core::mem::take(&mut self.outer_awaits));
         m.credit(self.tok.kind.heap_bytes());
         self.tok.kind = TokenKind::Eof;
         if let Some(peeked) = self.peeked.take() {
             m.credit(peeked.kind.heap_bytes());
         }
-        std::mem::take(&mut self.ast)
+        core::mem::take(&mut self.ast)
     }
 
     /// `Script : ScriptBody?` (`#sec-scripts`).
@@ -484,7 +488,7 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// payload the tree keeps was copied with its own charge).
     #[inline(never)]
     fn replace_token(&mut self, next: Token) {
-        let old = std::mem::replace(&mut self.tok, next);
+        let old = core::mem::replace(&mut self.tok, next);
         self.m.release(old.kind);
     }
 

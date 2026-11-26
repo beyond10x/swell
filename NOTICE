@@ -13,6 +13,18 @@ Third-party material in this repository:
   UTS #51, version 17.0.0, copyright Unicode, Inc., under the Unicode License
   V3 (data/unicode/17.0.0/LICENSE). Each file's address and SHA-256 are in
   data/unicode/17.0.0/SOURCE.
+- crates/num/src/fmath.rs: sqrt, floor, ceil, trunc and fmod, ported to Rust
+  from fdlibm 5.3 as the msun library of FreeBSD carries it (e_sqrt.c,
+  e_fmod.c, s_floor.c, s_ceil.c, s_trunc.c), copyright (C) 1993 Sun
+  Microsystems, Inc., under this notice, which the file keeps for each source:
+
+    Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+
+    Developed at SunSoft, a Sun Microsystems, Inc. business.
+    (s_floor.c, s_ceil.c and s_trunc.c: "Developed at SunPro".)
+    Permission to use, copy, modify, and distribute this
+    software is freely granted, provided that this notice
+    is preserved.
 
 Third-party material used for tests only, fetched by the tooling at a pinned
 commit, not part of this repository and not part of any shipped binary:

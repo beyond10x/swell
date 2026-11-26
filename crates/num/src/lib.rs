@@ -1,6 +1,11 @@
+#![no_std]
 #![forbid(unsafe_code)]
 //! `swell-num`, the number code of swell (design, decisions 2 and 6). It depends on nothing and
 //! holds no engine value: it works on `f64`, integers and code units.
+//!
+//! It is `no_std` with `alloc` (`story:core-builds-without-std`): it takes from the platform
+//! only the allocator of the program that links it. No `f64` method of `std` is called; the
+//! ones `core` lacks are the functions of [`fmath`].
 //!
 //! Slice 1 takes these parts early (design, section 12, "A part before its slice"):
 //!
@@ -20,6 +25,10 @@
 //! `parseFloat`), `random.rs`, `sum.rs` (the exact accumulator of `Math.sumPrecise`) and
 //! `time_value.rs` (`time_clip` and the time-value helpers);
 //! slice 12 adds `bigint.rs`.
+
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 pub mod date;
 pub mod date_text;

@@ -22,6 +22,8 @@
 //! The writers [`date_string`], [`time_string`], [`time_zone_string`], [`utc_string`] and
 //! [`iso_string`] write ASCII into one `String` each, reserved at its final length first.
 
+use alloc::string::String;
+
 use crate::date::{DateFields, make_date, make_day, make_time};
 
 /// What [`parse_date_text`] read.
