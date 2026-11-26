@@ -21,6 +21,7 @@
 //!
 //! The parser stops at its first error: a parse that fails has exactly one error.
 
+mod class;
 mod expression;
 mod function;
 mod statement;
@@ -52,6 +53,20 @@ pub(crate) struct Parsed {
     pub strict: bool,
     pub held: Option<SyntaxError>,
 }
+
+/// The constructs the parser holds ([`Parser::hold`]), one line each: the construct and the
+/// slice that brings it, in the order the stories of slice 8 add them (`docs/plan/waves.md`,
+/// "Slice 8, `classes`"). A source with one of them is parsed to its end, and when it has no
+/// grammar error and no early error its one error is the refusal `<construct> is not supported
+/// before slice <n>` of the first one it holds ([`Parser::held`]). A story that lifts a hold
+/// deletes its `hold` call and its line here in the same change. The test of the sources under
+/// `tests/sources/held/` reads this list to know which construct of a source is still held.
+/// `rustfmt` would join a short list on one line; it is skipped so each hold keeps its own.
+#[rustfmt::skip]
+pub const HOLDS: &[(&str, u32)] = &[
+    ("class", 8),
+    ("class heritage", 8),
+];
 
 pub(crate) struct Parser<'a, 'm> {
     /// The ledger of the parse, shared with the lexer, the walks after the parser and the
@@ -90,10 +105,20 @@ pub(crate) struct Parser<'a, 'm> {
     /// The [Await] of the code around each function whose parameters or body the parser is in,
     /// beside `outer_yields`, saved and put back with it; the growth charged first.
     outer_awaits: Vec<bool>,
+    /// Whether a SuperProperty stands at the current position
+    /// (`#sec-function-definitions-static-semantics-early-errors`,
+    /// `#sec-method-definitions-static-semantics-early-errors`,
+    /// `#sec-scripts-static-semantics-early-errors`): set by the parameters and body of a
+    /// MethodDefinition, cleared by those of every other function that is not an arrow function;
+    /// an arrow function takes the answer of the code around it, which `super` in it is refused
+    /// in before slice 8, as is `super` in eval code outside a function of its own.
+    super_property: SuperProperty,
+    /// The `super_property` of the code around each function whose parameters or body the
+    /// parser is in, beside `outer_awaits`, saved and put back with it; the growth charged first.
+    outer_super_properties: Vec<SuperProperty>,
     /// The refusal of a construct whose parse goes on, held back to the end of the parse, at the
-    /// first token of the first such construct of the source. No construct holds one: the last,
-    /// `yield*` in an async generator, parses and runs since
-    /// `story:yield-star-in-async-generators`. The parse answers it only when it ends without a
+    /// first token of the first such construct of the source ([`Parser::hold`]). The constructs
+    /// held are the lines of [`HOLDS`]. The parse answers it only when it ends without a
     /// grammar error and without an early error (`lib.rs`, `analyse_parsed`).
     held: Option<SyntaxError>,
     /// The operator stack of the binary expression parser, shared by its nested calls.
@@ -103,9 +128,34 @@ pub(crate) struct Parser<'a, 'm> {
     prefixes: Vec<(expression::Prefix, Span)>,
 }
 
+/// Where a SuperProperty (`super.name`, `super[expression]`, `#sec-super-keyword`) stands, as
+/// [`Parser::super_property`] answers it for the current position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SuperProperty {
+    /// The nearest function that is not an arrow function is no MethodDefinition, or there is
+    /// none: a SuperProperty is an early error.
+    Outside,
+    /// The nearest function is a MethodDefinition (an accessor, a method, a generator, `async`
+    /// or async generator method): a SuperProperty stands.
+    Method,
+    /// The nearest function that is not an arrow function is a MethodDefinition, with an arrow
+    /// function between: refused before slice 8.
+    Arrow,
+    /// Eval code outside any function of its own, whose caller the parse does not know: refused
+    /// before slice 8.
+    Eval,
+}
+
+impl HeapBytes for SuperProperty {
+    fn heap_bytes(&self) -> usize {
+        0
+    }
+}
+
 /// Parses `source` as a `Script` with nesting limit `max`, charged to `m`.
 pub(crate) fn parse(source: &[u16], max: u32, m: &Meter<'_>) -> Result<Parsed, SyntaxError> {
-    parse_eval(source, max, false, m)
+    let parser = Parser::new(source, max, m);
+    parse_script_with(parser, false)
 }
 
 /// Parses `source` as a `Script` with nesting limit `max` for PerformEval (`#sec-performeval`,
@@ -121,6 +171,13 @@ pub(crate) fn parse_eval(
 ) -> Result<Parsed, SyntaxError> {
     let mut parser = Parser::new(source, max, m);
     parser.strict = strict;
+    parser.super_property = SuperProperty::Eval;
+    parse_script_with(parser, strict)
+}
+
+/// The parse of a `Script` by `parser`, set up by [`parse`] or [`parse_eval`]: the code is strict
+/// when `strict` or when its directive prologue holds a Use Strict Directive.
+fn parse_script_with(mut parser: Parser<'_, '_>, strict: bool) -> Result<Parsed, SyntaxError> {
     match parser.script() {
         Ok((body, use_strict)) => Ok(Parsed {
             ast: parser.finish_parse(),
@@ -340,6 +397,8 @@ impl<'a, 'm> Parser<'a, 'm> {
             outer_yields: Vec::new(),
             awaits: false,
             outer_awaits: Vec::new(),
+            super_property: SuperProperty::Outside,
+            outer_super_properties: Vec::new(),
             held: None,
             operators: Vec::new(),
             prefixes: Vec::new(),
@@ -360,6 +419,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         m.release(core::mem::take(&mut self.prefixes));
         m.release(core::mem::take(&mut self.outer_yields));
         m.release(core::mem::take(&mut self.outer_awaits));
+        m.release(core::mem::take(&mut self.outer_super_properties));
         m.credit(self.tok.kind.heap_bytes());
         self.tok.kind = TokenKind::Eof;
         if let Some(peeked) = self.peeked.take() {
@@ -419,6 +479,23 @@ impl<'a, 'm> Parser<'a, 'm> {
             span.line,
             span.column,
         ))
+    }
+
+    /// Holds the refusal of `construct`, which slice `slice` brings, at `span` back to the end
+    /// of the parse, which goes on: the first hold of a parse is kept ([`Parser::held`]), and the
+    /// parse answers it only when it ends without a grammar error and without an early error.
+    /// Every construct held is a line of [`HOLDS`]; the story that lifts one deletes its call
+    /// and its line.
+    #[inline(never)]
+    fn hold(&mut self, construct: &str, slice: u32, span: Span) {
+        if self.held.is_none() {
+            self.held = Some(SyntaxError::refused(
+                construct,
+                slice,
+                span.line,
+                span.column,
+            ));
+        }
     }
 
     #[inline(never)]

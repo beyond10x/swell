@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:math-random
 kind: story
-status: active
+status: implemented
 title: 'Math.random: the generator, the realm state and the six host requirements'
 summary: xoshiro256** in swell-num, a per-realm state derived from the agent seed and the creation index, the builtin, and HOST-26, 27, 144, 212, 213 (147 by precondition).
 relations:
@@ -32,10 +32,11 @@ scope:
   path: crates/swell/tests/math_random.rs
 - confidence: cited
   path: website/data/status.json
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:28Z", actor: "human:operator", revision: 10}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:28Z", actor: "human:operator", revision: 11}
+- {from: "active", to: "implemented", at: "2026-11-26T10:01:50Z", actor: "human:operator", revision: 13, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

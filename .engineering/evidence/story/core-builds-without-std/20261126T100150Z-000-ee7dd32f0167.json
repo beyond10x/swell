@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T10:01:50Z",
+  "actor": "human:operator",
+  "artifact": "story:core-builds-without-std",
+  "kind": "story",
+  "revision": 15,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at a4c1b2e7 with the files of commit 6bd73063 (the run was made on that tree before the commit), exit 0, on the build node; the unit was merged by commit cff4bbb5, an ancestor of that head",
+    "reference": "the gate's steps nostd-build and nostd-symbols (taskfiles/nostd.yml) and swell::source_scan::host_2_no_ambient_authority_in_engine_crates"
+  }
+}
