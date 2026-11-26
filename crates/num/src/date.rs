@@ -33,13 +33,15 @@
 /// MillisecondsPerDay (`#sec-time-related-constants`), as an integer.
 const MILLISECONDS_PER_DAY: i128 = 86_400_000;
 
+use crate::fmath;
+
 /// The first day of each month within a common year, January first.
 const MONTH_STARTS: [i128; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
 
 /// ToIntegerOrInfinity (`#sec-tointegerorinfinity`) of a finite Number, as a Number: the
 /// truncated value, with -0 made +0.
 fn to_integer(x: f64) -> f64 {
-    x.trunc() + 0.0
+    fmath::trunc(x) + 0.0
 }
 
 /// `MakeTime ( hour, minute, second, millisecond )`.
@@ -68,7 +70,7 @@ pub fn make_day(year: f64, month: f64, day: f64) -> f64 {
         None => {
             // |monthMV| ≥ 2^127: a multiple of 2^75, so monthMV / 12 is within 1 of an
             // integer only when it is one, and its rounding is that of floor(monthMV / 12).
-            let rest = month_mv.rem_euclid(12.0);
+            let rest = fmath::rem_euclid(month_mv, 12.0);
             (month_mv / 12.0, rest as i128)
         }
     };
@@ -143,7 +145,7 @@ pub fn get_utc_epoch_nanoseconds(date: &IsoDateTime) -> Option<i128> {
 /// The integer `x` is, when it is finite, integral and below 2^127 in magnitude.
 fn exact_integer(x: f64) -> Option<i128> {
     const LIMIT: f64 = 170_141_183_460_469_231_731_687_303_715_884_105_728.0; // 2^127
-    if x.is_finite() && x.trunc() == x && x.abs() < LIMIT {
+    if x.is_finite() && fmath::trunc(x) == x && x.abs() < LIMIT {
         Some(x as i128)
     } else {
         None
@@ -236,7 +238,7 @@ pub fn date_fields(t: f64) -> Option<DateFields> {
 /// `t` as an integer, when it is finite, integral and of magnitude at most
 /// [`LOCAL_TIME_LIMIT`].
 fn time_milliseconds(t: f64) -> Option<i64> {
-    if t.is_finite() && t.trunc() == t && t.abs() <= LOCAL_TIME_LIMIT {
+    if t.is_finite() && fmath::trunc(t) == t && t.abs() <= LOCAL_TIME_LIMIT {
         // The range test is the condition above: `t` is integral and of magnitude at most
         // LOCAL_TIME_LIMIT, below 2^63, so the cast (truncation toward zero) is exact.
         Some(t as i64)

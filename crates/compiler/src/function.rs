@@ -49,6 +49,7 @@
 //!   ([`Instruction::AsyncGeneratorReject`]); a `return` and the end of the body settle it with
 //!   their value ([`Instruction::AsyncGeneratorReturn`]).
 
+use alloc::vec::Vec;
 use swell_syntax::Script;
 use swell_syntax::ast::{Ast, BindingTarget, ExprId, Function, FunctionId, Span};
 use swell_syntax::ledger::Meter;

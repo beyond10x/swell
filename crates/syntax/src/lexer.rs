@@ -28,6 +28,10 @@ use crate::ast::{NumberForm, NumberLiteral, RegExpLiteral, StringLiteral, Templa
 use crate::error::SyntaxError;
 use crate::ledger::{Meter, POLL_INTERVAL, Stop};
 use crate::token::{Keyword, Punct, TemplatePart, Token, TokenKind};
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 /// A template token with no closing `` ` `` or `${` before the end of the source.
 const UNTERMINATED_TEMPLATE: &str = "unterminated template literal";

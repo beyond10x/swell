@@ -26,7 +26,7 @@
 //! `data/math/reference-trig.txt` and a denser walk of its own.
 //!
 //! The operations and what fixes each result: the pair operations of [`super::dd`] (among them
-//! [`Dd::sqrt`], on the correctly rounded `f64::sqrt`), `abs` and `copysign` (exact, IEEE
+//! [`Dd::sqrt`], on the correctly rounded `fmath::sqrt`), `abs` and `copysign` (exact, IEEE
 //! 754-2019, 5.5.1), comparisons, `is_nan`, `is_infinite`, a multiplication by 2 or 1/2
 //! (exact) and the one rounding `hi + lo` (5.4.1).
 

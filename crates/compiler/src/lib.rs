@@ -1,3 +1,4 @@
+#![no_std]
 #![forbid(unsafe_code)]
 //! `swell-compiler`: the compile step of swell (`docs/design/engine.md`, decisions 2 and 3). It
 //! turns a `Script` that `swell-syntax` parsed and analysed into the stack bytecode of
@@ -29,6 +30,10 @@
 //! compile time is bounded by the size of the tree; nothing the compiler does runs for a
 //! script, and no budget applies to it.
 
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
+
 pub mod bytecode;
 pub mod disasm;
 mod expression;
@@ -36,8 +41,11 @@ mod function;
 mod resolve;
 mod statement;
 
-use std::collections::BTreeMap;
-use std::fmt;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
+use core::fmt;
 
 use swell_syntax::Script;
 use swell_syntax::ast::{Ast, ExprId, Span, StmtId};
@@ -82,7 +90,7 @@ impl fmt::Display for CompileError {
     }
 }
 
-impl std::error::Error for CompileError {}
+impl core::error::Error for CompileError {}
 
 impl From<Stop> for CompileError {
     fn from(stop: Stop) -> CompileError {
@@ -576,7 +584,7 @@ impl<'a, 'm, T> List<'a, 'm, T> {
     }
 
     /// The items, in order, taken out of the list; its capacity stays charged until it drops.
-    pub(crate) fn drain(&mut self) -> std::vec::Drain<'_, T> {
+    pub(crate) fn drain(&mut self) -> alloc::vec::Drain<'_, T> {
         self.items.drain(..)
     }
 }
@@ -1170,7 +1178,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::string::String;
+    use std::vec::Vec;
+    use std::{format, println, vec};
+
+    use core::cell::Cell;
 
     use swell_syntax::ledger::{Ledger, Meter, POLL_INTERVAL, Stop, map_entry_bytes};
     use swell_syntax::{ParseOptions, Script, parse_script};

@@ -19,10 +19,13 @@
 //! that the bound holds whatever a caller passes; the builtins have already thrown the
 //! RangeError of a count outside them.
 
-use std::cmp::Ordering;
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 
-use crate::nat::Nat;
-use crate::to_string::{number_to_string, shortest_digits};
+use crate::nat::{Longest, Nat};
+use crate::to_string::{shortest_digits, to_string_in_radix};
 
 /// The most fraction digits `toFixed` and `toExponential` take, and the most digits
 /// `toPrecision` takes.
@@ -63,13 +66,13 @@ fn parts(x: f64) -> Option<Parts> {
 /// N = f × 10^max(s, 0) × 2^max(e, 0) and D = 10^max(-s, 0) × 2^max(-e, 0). The quotient q is
 /// the floor of N / D, made by divisions by `u64` powers of ten and a right shift; the
 /// remainder is N - q × D, and q + 1 is taken when twice the remainder is at least D.
-fn nearest_integer(f: u64, e: i32, s: i32) -> Nat {
+fn nearest_integer(f: u64, e: i32, s: i32, longest: &mut Longest) -> Nat {
     let mut numerator = Nat::from_u64(f);
     if s > 0 {
-        numerator.mul_pow(10, s.unsigned_abs());
+        numerator.mul_pow(10, s.unsigned_abs(), longest);
     }
     if e > 0 {
-        numerator = numerator.shl(e.unsigned_abs());
+        numerator = numerator.shl(e.unsigned_abs(), longest);
     }
     let tens = if s < 0 { s.unsigned_abs() } else { 0 };
     let twos = if e < 0 { e.unsigned_abs() } else { 0 };
@@ -85,12 +88,12 @@ fn nearest_integer(f: u64, e: i32, s: i32) -> Nat {
         left -= chunk;
     }
     let quotient = quotient.shr(twos);
-    let divisor = Nat::pow_u64(10, tens).shl(twos);
-    let remainder = numerator.sub(&quotient.mul(&divisor));
-    if remainder.shl(1).cmp(&divisor) == Ordering::Less {
+    let divisor = Nat::pow_u64(10, tens, longest).shl(twos, longest);
+    let remainder = numerator.sub(&quotient.mul(&divisor, longest));
+    if remainder.shl(1, longest).cmp(&divisor) == Ordering::Less {
         quotient
     } else {
-        quotient.add(&Nat::from_u64(1))
+        quotient.add(&Nat::from_u64(1), longest)
     }
 }
 
@@ -108,7 +111,7 @@ fn decimal_exponent_estimate(f: u64, e: i32) -> i32 {
 /// `toPrecision`). The exponent starts at the estimate of floor(log10 x), which is that floor
 /// or one less, and moves while n has a digit too many or too few; a rounding up to 10^p moves
 /// it once more, to n = 10^(p-1).
-fn rounded_digits(f: u64, e: i32, p: u32) -> (Vec<u8>, i32) {
+fn rounded_digits(f: u64, e: i32, p: u32, longest: &mut Longest) -> (Vec<u8>, i32) {
     let wanted = usize::try_from(p).unwrap_or(1);
     let digits_minus_one = i32::try_from(p).unwrap_or(1) - 1;
     let mut exponent = decimal_exponent_estimate(f, e);
@@ -116,7 +119,7 @@ fn rounded_digits(f: u64, e: i32, p: u32) -> (Vec<u8>, i32) {
     // The estimate is at most one too small; each pass moves the exponent toward the answer,
     // so four passes always end on it.
     for _ in 0..4 {
-        digits = nearest_integer(f, e, digits_minus_one - exponent).to_decimal_digits();
+        digits = nearest_integer(f, e, digits_minus_one - exponent, longest).to_decimal_digits();
         match digits.len().cmp(&wanted) {
             Ordering::Greater => exponent += 1,
             Ordering::Less => exponent -= 1,
@@ -156,13 +159,18 @@ fn push_exponential(out: &mut String, digits: &[u8], exponent: i32) {
 /// abs(x) ≥ 10^21 answer `Number::toString(x)`, as the clause does; `fraction_digits` above
 /// 100 is taken as 100.
 pub fn to_fixed(x: f64, fraction_digits: u32) -> String {
+    to_fixed_noting(x, fraction_digits, &mut Longest::default())
+}
+
+/// [`to_fixed`], noting its operands in `longest`.
+fn to_fixed_noting(x: f64, fraction_digits: u32, longest: &mut Longest) -> String {
     let Some(parts) = parts(x) else {
-        return number_to_string(x);
+        return to_string_in_radix(x, 10, longest);
     };
     // Step 10: "If number ≥ 10^21, then let digitString be ! ToString(𝔽(number))", with the sign
     // of step 9 before it.
     if x.abs() >= 1e21 {
-        return number_to_string(x);
+        return to_string_in_radix(x, 10, longest);
     }
     let fraction_digits = fraction_digits.min(MOST_DIGITS);
     let mut out = String::new();
@@ -172,7 +180,7 @@ pub fn to_fixed(x: f64, fraction_digits: u32) -> String {
     // Step 11.a: n, an integer for which n / 10^f - x is as close to zero as possible, the
     // larger n of two. 11.b: its digits, "0" for 0.
     let s = i32::try_from(fraction_digits).unwrap_or(0);
-    let mut digits = nearest_integer(parts.f, parts.e, s).to_decimal_digits();
+    let mut digits = nearest_integer(parts.f, parts.e, s, longest).to_decimal_digits();
     // Step 11.c: with f digits after the point, at least one before it.
     let wanted = usize::try_from(fraction_digits).unwrap_or(0);
     if wanted == 0 {
@@ -199,8 +207,13 @@ pub fn to_fixed(x: f64, fraction_digits: u32) -> String {
 /// of `Number::toString`). NaN and the infinities answer `Number::toString(x)`;
 /// `fraction_digits` above 100 is taken as 100.
 pub fn to_exponential(x: f64, fraction_digits: Option<u32>) -> String {
+    to_exponential_noting(x, fraction_digits, &mut Longest::default())
+}
+
+/// [`to_exponential`], noting its operands in `longest`.
+fn to_exponential_noting(x: f64, fraction_digits: Option<u32>, longest: &mut Longest) -> String {
     let Some(parts) = parts(x) else {
-        return number_to_string(x);
+        return to_string_in_radix(x, 10, longest);
     };
     let mut out = String::new();
     if parts.negative {
@@ -214,13 +227,16 @@ pub fn to_exponential(x: f64, fraction_digits: Option<u32>) -> String {
         }
         // Step 11.b: the shortest digits that read back as x.
         (_, None) => {
-            let (digits, n) = shortest_digits(x.abs(), 10);
+            let (digits, n) = shortest_digits(x.abs(), 10, longest);
             (digits, n - 1)
         }
         // Step 11.a: f + 1 digits, the nearest, the larger of two.
-        (_, Some(fraction_digits)) => {
-            rounded_digits(parts.f, parts.e, fraction_digits.min(MOST_DIGITS) + 1)
-        }
+        (_, Some(fraction_digits)) => rounded_digits(
+            parts.f,
+            parts.e,
+            fraction_digits.min(MOST_DIGITS) + 1,
+            longest,
+        ),
     };
     push_exponential(&mut out, &digits, exponent);
     out
@@ -231,8 +247,13 @@ pub fn to_exponential(x: f64, fraction_digits: Option<u32>) -> String {
 /// not below `precision`, in fixed notation otherwise. NaN and the infinities answer
 /// `Number::toString(x)`; `precision` is taken in the range from 1 to 100.
 pub fn to_precision(x: f64, precision: u32) -> String {
+    to_precision_noting(x, precision, &mut Longest::default())
+}
+
+/// [`to_precision`], noting its operands in `longest`.
+fn to_precision_noting(x: f64, precision: u32, longest: &mut Longest) -> String {
     let Some(parts) = parts(x) else {
-        return number_to_string(x);
+        return to_string_in_radix(x, 10, longest);
     };
     let precision = precision.clamp(1, MOST_DIGITS);
     let p = i32::try_from(precision).unwrap_or(1);
@@ -245,7 +266,7 @@ pub fn to_precision(x: f64, precision: u32) -> String {
         (vec![0u8; usize::try_from(precision).unwrap_or(1)], 0)
     } else {
         // Step 11.a: p digits, the nearest, the larger of two.
-        rounded_digits(parts.f, parts.e, precision)
+        rounded_digits(parts.f, parts.e, precision, longest)
     };
     // Step 11.c: the exponential form.
     if exponent < -6 || exponent >= p {
@@ -277,11 +298,14 @@ pub fn to_precision(x: f64, precision: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{to_exponential, to_fixed, to_precision};
-    use crate::nat::{longest_bits, reset_longest};
+    use alloc::string::String;
+    use std::println;
+
+    use super::{to_exponential_noting, to_fixed_noting, to_precision_noting};
+    use crate::nat::Longest;
 
     /// A call of the six extremes and its name.
-    type Extreme = (&'static str, fn() -> String);
+    type Extreme = (&'static str, fn(&mut Longest) -> String);
 
     /// The design's bound: after the six extremes (101 digits of 2^-1074 and of the largest
     /// Number in both exponent forms, 100 fraction digits of 10^20 and of 2^-1074) the longest
@@ -289,29 +313,35 @@ mod tests {
     #[test]
     fn no_operand_passes_2048_bits_at_the_extremes() {
         let extremes: [Extreme; 6] = [
-            ("toExponential(100) of 2^-1074", || {
-                to_exponential(5e-324, Some(100))
+            ("toExponential(100) of 2^-1074", |longest| {
+                to_exponential_noting(5e-324, Some(100), longest)
             }),
-            ("toPrecision(100) of 2^-1074", || to_precision(5e-324, 100)),
-            ("toExponential(100) of the largest Number", || {
-                to_exponential(f64::MAX, Some(100))
+            ("toPrecision(100) of 2^-1074", |longest| {
+                to_precision_noting(5e-324, 100, longest)
             }),
-            ("toPrecision(100) of the largest Number", || {
-                to_precision(f64::MAX, 100)
+            ("toExponential(100) of the largest Number", |longest| {
+                to_exponential_noting(f64::MAX, Some(100), longest)
             }),
-            ("toFixed(100) of 10^20", || to_fixed(1e20, 100)),
-            ("toFixed(100) of 2^-1074", || to_fixed(5e-324, 100)),
+            ("toPrecision(100) of the largest Number", |longest| {
+                to_precision_noting(f64::MAX, 100, longest)
+            }),
+            ("toFixed(100) of 10^20", |longest| {
+                to_fixed_noting(1e20, 100, longest)
+            }),
+            ("toFixed(100) of 2^-1074", |longest| {
+                to_fixed_noting(5e-324, 100, longest)
+            }),
         ];
         let mut longest = 0;
         for (name, call) in extremes {
-            reset_longest();
-            let text = call();
+            let mut reading = Longest::default();
+            let text = call(&mut reading);
             println!(
                 "{name}: longest operand {} bits, {} code units",
-                longest_bits(),
+                reading.bits(),
                 text.len()
             );
-            longest = longest.max(longest_bits());
+            longest = longest.max(reading.bits());
         }
         println!("longest operand of the six: {longest} bits, the bound 2048");
         assert!(longest <= 2_048, "{longest}");
@@ -323,21 +353,21 @@ mod tests {
     /// 100 fraction digits of `toFixed` below 10^21.
     #[test]
     fn no_operand_passes_2048_bits_for_any_exponent() {
-        reset_longest();
+        let mut longest = Longest::default();
         for biased in 0u64..0x7ff {
             for fraction in [0u64, (1 << 52) - 1, 1] {
                 let x = f64::from_bits((biased << 52) | fraction);
-                let _ = to_precision(x, 100);
-                let _ = to_exponential(x, Some(100));
+                let _ = to_precision_noting(x, 100, &mut longest);
+                let _ = to_exponential_noting(x, Some(100), &mut longest);
                 if x < 1e21 {
-                    let _ = to_fixed(x, 100);
+                    let _ = to_fixed_noting(x, 100, &mut longest);
                 }
             }
         }
         println!(
             "longest operand over every exponent: {} bits",
-            longest_bits()
+            longest.bits()
         );
-        assert!(longest_bits() <= 2_048, "{}", longest_bits());
+        assert!(longest.bits() <= 2_048, "{}", longest.bits());
     }
 }

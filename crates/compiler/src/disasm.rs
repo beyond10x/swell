@@ -25,7 +25,11 @@
 //! source position. `PushNamedEnv <t>`, `PushLexicalEnv <t>` and `PushVarEnv <t>` are followed by
 //! the names of the slots of their table entry, a `const` one after `const`.
 
-use std::fmt::Write;
+use alloc::format;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
+use core::fmt::Write;
 
 use swell_num::to_string::number_to_string;
 use swell_syntax::ast::{FunctionKind, Span};

@@ -113,7 +113,10 @@
 //! The walk does not recurse: its pending work is a stack on the heap, so the Rust stack it uses
 //! is the same at any depth of the tree.
 
-use std::collections::BTreeSet;
+use alloc::collections::BTreeSet;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use crate::ast::{
     Ast, BindingTarget, Child, DeclKind, Expr, ExprId, ForInTarget, ForInit, Function, FunctionId,

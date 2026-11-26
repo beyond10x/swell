@@ -16,7 +16,8 @@
 //! - **Polls.** The parser reads the interrupt at least once per [`POLL_INTERVAL`] code units it
 //!   reads and per [`POLL_INTERVAL`] nodes it makes.
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 /// Why the crate stopped: the budget refused, or the interrupt was read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

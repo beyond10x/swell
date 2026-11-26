@@ -16,7 +16,8 @@
 //! levels (`docs/design/engine.md`, decision 7, "What one step of the matcher is"), and no step
 //! of it recurses.
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 
 use crate::ast::{ClassEscape, ClassItem};
 use crate::budget::{Meter, Stop};

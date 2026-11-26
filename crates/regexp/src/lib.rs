@@ -1,3 +1,4 @@
+#![no_std]
 #![forbid(unsafe_code)]
 //! `swell-regexp`, the regular expressions of swell (`docs/design/engine.md`, decision 7;
 //! `#sec-regexp-regular-expression-objects`): the pattern parser with its early errors, the
@@ -30,6 +31,8 @@
 //! Nothing is refused: ParsePattern and CompilePattern refuse no construct since the last story
 //! of slice 5 that brought one, the flag `v` ([`Refusal`] and [`CompileRefusal`] have no
 //! value).
+
+extern crate alloc;
 
 mod ast;
 mod budget;

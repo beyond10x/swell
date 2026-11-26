@@ -432,7 +432,7 @@ pub fn string_property(name: &[u16]) -> Option<StringProperty> {
 
 impl StringProperty {
     /// The tables the property is made of: its own, or the six of `RGI_Emoji`.
-    fn parts(self) -> std::ops::Range<usize> {
+    fn parts(self) -> core::ops::Range<usize> {
         if self.0 == properties_of_strings::UNION {
             0..properties_of_strings::SINGLES.len()
         } else {
