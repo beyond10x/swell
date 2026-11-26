@@ -113,6 +113,31 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Changed
 
+- The lane `slow` states its bound: `task slow` fails when it ran over 900 s or one of its
+  parts over 600 s, naming the part and its seconds (`slow-time-sum`); it also fails a lane
+  whose clock ran over 900 s, so a step without its own time line is bounded. `test-realm-sizes`
+  runs the tests that read the realm's room (by the rule of `taskfiles/realm-room-tests.awk`)
+  in the default mode and with a collection at every safe point at every size of
+  `REALM_SIZES`, on the builds `slow-tests` makes; it no longer builds the profile `collect`,
+  and it hands nextest its list of tests in a generated configuration file, so it runs at any
+  count of tests. `builtins_json_parse::parse_gives_back_its_charges_on_every_way_out` nests
+  200 levels in the collect mode without `SWELL_FULL_COUNTS` (2,000 with it and in the
+  default mode). The workflow `slow` starts on a change of `taskfiles/gate-time.yml`,
+  `taskfiles/realm-room-tests.awk` and `.config/nextest.toml` too
+  (`story:realm-size-lane-within-its-share`).
+- The lane `slow` builds the stack tests' binary with their modules only:
+  `build-stack-profiles` passes `--cfg test_modules` and the modules of `STACK_MODULE_LIST`
+  (`taskfiles/stack-profiles.yml`) to the test target of `swell` through `cargo rustc`, so
+  the release and `stack-debug` builds compile `limits_scripts`, `eval_stack` and `support`
+  (9 tests) and not every test, and the library's release build stays the test262 runner's.
+  `test-stack-profiles` builds them first and runs them through cargo-nextest.
+  `stack-modules-check` refuses a stack test outside the listed modules and a test named
+  twice. The generator `taskfiles/test-main.sh` writes the module cfgs into `swell`'s
+  `tests/main.rs`, and `crates/swell/Cargo.toml` declares the cfg `test_modules`, so the lint
+  `unexpected_cfgs` still refuses a misspelled feature in a test module; every build of the
+  gate compiles every module, as before, and `gate-vars` fails when a caller's `RUSTFLAGS`
+  (or `CARGO_ENCODED_RUSTFLAGS`, `CARGO_BUILD_RUSTFLAGS`, `CARGO_TARGET_<triple>_RUSTFLAGS`)
+  names `test_modules`.
 - `swell_syntax::parse_eval` and `parse_eval_with` take `context: impl Into<EvalContext>` in
   place of `strict_caller: bool`: the new public `EvalContext` holds the caller's strictness
   and PerformEval's four flags (`in_function`, `in_method`, `in_derived_constructor`,
