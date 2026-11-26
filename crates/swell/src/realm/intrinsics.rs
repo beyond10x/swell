@@ -148,6 +148,8 @@ pub(crate) enum Intrinsic {
     RegExpPrototype,
     /// `%RegExpStringIteratorPrototype%` (22.2.9.2), `story:regexp-match-all-and-escape`.
     RegExpStringIteratorPrototype,
+    /// `%Proxy%` (28.2.1), `story:proxy-objects-and-access-traps`.
+    Proxy,
     /// `%GeneratorFunction.prototype%` (27.3.3), `story:generator-functions-and-suspended-frames`.
     GeneratorFunctionPrototype,
     /// `%GeneratorPrototype%` (27.5.1).
@@ -273,6 +275,7 @@ pub(crate) struct Intrinsics {
     regexp: ObjectRef,
     regexp_prototype: ObjectRef,
     regexp_string_iterator_prototype: ObjectRef,
+    proxy: ObjectRef,
     generator_prototypes: crate::builtins::generator::GeneratorPrototypes,
     generator_function: ObjectRef,
     promise: ObjectRef,
@@ -330,6 +333,7 @@ impl Intrinsics {
             Intrinsic::RegExp => self.regexp,
             Intrinsic::RegExpPrototype => self.regexp_prototype,
             Intrinsic::RegExpStringIteratorPrototype => self.regexp_string_iterator_prototype,
+            Intrinsic::Proxy => self.proxy,
             Intrinsic::GeneratorFunctionPrototype => self.generator_prototypes.function_prototype,
             Intrinsic::GeneratorPrototype => self.generator_prototypes.prototype,
             Intrinsic::GeneratorFunction => self.generator_function,
@@ -406,6 +410,7 @@ impl Intrinsics {
             self.regexp,
             self.regexp_prototype,
             self.regexp_string_iterator_prototype,
+            self.proxy,
             self.generator_prototypes.function_prototype,
             self.generator_prototypes.prototype,
             self.generator_function,
@@ -598,6 +603,7 @@ impl<H: Host> Agent<H> {
         let iterator_prototypes = self.create_iterator_prototypes(making)?;
         let regexp_string_iterator_prototype =
             self.create_regexp_string_iterator_prototype(making, iterator_prototypes.iterator)?;
+        let proxy = self.create_proxy_constructor(making)?;
         let generator_prototypes =
             self.create_generator_prototypes(making, iterator_prototypes.iterator)?;
         let generator_function = self.create_generator_function_constructor(
@@ -662,6 +668,7 @@ impl<H: Host> Agent<H> {
             regexp,
             regexp_prototype,
             regexp_string_iterator_prototype,
+            proxy,
             generator_prototypes,
             generator_function,
             promise,

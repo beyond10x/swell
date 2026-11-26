@@ -11,7 +11,7 @@
 //! (`object/async_function.rs`), which does too, as does the activation of a built-in async
 //! function (`object/async_builtin.rs`, `story:array-from-async`).
 //!
-//! Every kind but the Array, String and arguments exotic objects uses the ordinary internal
+//! Every kind but the Array, String, arguments and Proxy exotic objects uses the ordinary internal
 //! methods (`object/ordinary.rs`); host objects too, until the overrides of slice 9. [[Call]] and
 //! [[Construct]] have an arm for each function kind, the bound function and ECMAScript function
 //! arms calling into files their own stories fill.
@@ -44,10 +44,12 @@ pub(crate) mod bound_function;
 pub(crate) mod builtin_function;
 pub(crate) mod ecmascript_function;
 pub(crate) mod generator;
+pub(crate) mod invariants;
 pub(crate) mod keyed_entries;
 pub(crate) mod ordinary;
 pub(crate) mod promise;
 pub(crate) mod property;
+pub(crate) mod proxy;
 pub(crate) mod regexp;
 pub(crate) mod string;
 
@@ -71,6 +73,7 @@ use generator::Generator;
 use ordinary::Ordinary;
 use promise::Promise;
 use property::{Descriptor, Key, Properties, Property, Room, sort_indices};
+use proxy::ProxyObject;
 use regexp::RegExpObject;
 use string::StringObject;
 
@@ -214,6 +217,9 @@ pub(crate) enum ObjectKind {
     /// The activation of a built-in async function (`docs/design/engine.md`, decision 3, "A
     /// built-in async function", item 1), `story:array-from-async` (`object/async_builtin.rs`).
     AsyncBuiltinActivation(AsyncBuiltinActivation),
+    /// A Proxy exotic object (10.5), `story:proxy-objects-and-access-traps`
+    /// (`object/proxy.rs`).
+    Proxy(ProxyObject),
 }
 
 /// Which kind an object is, for the dispatch.
@@ -235,6 +241,7 @@ pub(crate) enum KindTag {
     AsyncFromSyncIterator,
     AsyncGenerator,
     AsyncBuiltinActivation,
+    Proxy,
 }
 
 impl ObjectRecord {
@@ -273,6 +280,7 @@ impl ObjectRecord {
             ObjectKind::AsyncFromSyncIterator(iterator) => iterator.trace(mark),
             ObjectKind::AsyncGenerator(generator) => generator.trace(mark),
             ObjectKind::AsyncBuiltinActivation(activation) => activation.trace(mark),
+            ObjectKind::Proxy(proxy) => proxy.trace(mark),
         }
     }
 
@@ -297,6 +305,7 @@ impl ObjectRecord {
             ObjectKind::AsyncFromSyncIterator(_) => KindTag::AsyncFromSyncIterator,
             ObjectKind::AsyncGenerator(_) => KindTag::AsyncGenerator,
             ObjectKind::AsyncBuiltinActivation(_) => KindTag::AsyncBuiltinActivation,
+            ObjectKind::Proxy(_) => KindTag::Proxy,
         }
     }
 }
@@ -401,7 +410,10 @@ impl<H: Host> Agent<H> {
 
     /// [[GetPrototypeOf]] (`#sec-ordinary-object-internal-methods-and-internal-slots-getprototypeof`).
     pub(crate) fn get_prototype_of(&mut self, object: ObjectRef) -> Completion<Option<ObjectRef>> {
-        self.ordinary_get_prototype_of(object)
+        match self.kind_of(object)? {
+            KindTag::Proxy => self.proxy_get_prototype_of(object),
+            _ => self.ordinary_get_prototype_of(object),
+        }
     }
 
     /// [[SetPrototypeOf]]: SetImmutablePrototype for `%Object.prototype%` (10.4.7.1,
@@ -411,22 +423,31 @@ impl<H: Host> Agent<H> {
         object: ObjectRef,
         prototype: Option<ObjectRef>,
     ) -> Completion<bool> {
-        if self.kind_of(object)? == KindTag::ImmutablePrototype {
-            // SetImmutablePrototype: "Let current be ? O.[[GetPrototypeOf]](). If SameValue(V,
-            // current) is true, return true. Return false."
-            return Ok(self.get_prototype_of(object)? == prototype);
+        match self.kind_of(object)? {
+            KindTag::ImmutablePrototype => {
+                // SetImmutablePrototype: "Let current be ? O.[[GetPrototypeOf]](). If
+                // SameValue(V, current) is true, return true. Return false."
+                Ok(self.get_prototype_of(object)? == prototype)
+            }
+            KindTag::Proxy => self.proxy_set_prototype_of(object, prototype),
+            _ => self.ordinary_set_prototype_of(object, prototype),
         }
-        self.ordinary_set_prototype_of(object, prototype)
     }
 
     /// [[IsExtensible]].
     pub(crate) fn is_extensible(&mut self, object: ObjectRef) -> Completion<bool> {
-        self.ordinary_is_extensible(object)
+        match self.kind_of(object)? {
+            KindTag::Proxy => self.proxy_is_extensible(object),
+            _ => self.ordinary_is_extensible(object),
+        }
     }
 
     /// [[PreventExtensions]].
     pub(crate) fn prevent_extensions(&mut self, object: ObjectRef) -> Completion<bool> {
-        self.ordinary_prevent_extensions(object)
+        match self.kind_of(object)? {
+            KindTag::Proxy => self.proxy_prevent_extensions(object),
+            _ => self.ordinary_prevent_extensions(object),
+        }
     }
 
     /// [[GetOwnProperty]]: the String (10.4.3.1) and arguments (10.4.4.1) exotic methods,
@@ -441,6 +462,7 @@ impl<H: Host> Agent<H> {
             KindTag::Array => self.array_get_own_property(object, key),
             KindTag::String => self.string_get_own_property_method(object, key),
             KindTag::Arguments => self.arguments_get_own_property(object, key),
+            KindTag::Proxy => self.proxy_get_own_property(object, key),
             _ => self.ordinary_get_own_property(object, key),
         }
     }
@@ -457,13 +479,17 @@ impl<H: Host> Agent<H> {
             KindTag::Array => self.array_define_own_property(object, key, descriptor),
             KindTag::String => self.string_define_own_property(object, key, descriptor),
             KindTag::Arguments => self.arguments_define_own_property(object, key, descriptor),
+            KindTag::Proxy => self.proxy_define_own_property(object, key, descriptor),
             _ => self.ordinary_define_own_property(object, key, descriptor),
         }
     }
 
     /// [[HasProperty]].
     pub(crate) fn has_property(&mut self, object: ObjectRef, key: Key) -> Completion<bool> {
-        self.ordinary_has_property(object, key)
+        match self.kind_of(object)? {
+            KindTag::Proxy => self.proxy_has_property(object, key),
+            _ => self.ordinary_has_property(object, key),
+        }
     }
 
     /// [[Get]]: ordinary for every kind; that of an arguments object (10.4.4.3) answers what
@@ -474,7 +500,10 @@ impl<H: Host> Agent<H> {
         key: Key,
         receiver: Value,
     ) -> Completion<Value> {
-        self.ordinary_get(object, key, receiver)
+        match self.kind_of(object)? {
+            KindTag::Proxy => self.proxy_get(object, key, receiver),
+            _ => self.ordinary_get(object, key, receiver),
+        }
     }
 
     /// [[Set]]: ordinary for every kind; that of an arguments object (10.4.4.4) does what
@@ -486,7 +515,10 @@ impl<H: Host> Agent<H> {
         value: Value,
         receiver: Value,
     ) -> Completion<bool> {
-        self.ordinary_set(object, key, value, receiver)
+        match self.kind_of(object)? {
+            KindTag::Proxy => self.proxy_set(object, key, value, receiver),
+            _ => self.ordinary_set(object, key, value, receiver),
+        }
     }
 
     /// [[Delete]]: the arguments exotic method (10.4.4.5), OrdinaryDelete over both storages of
@@ -495,6 +527,7 @@ impl<H: Host> Agent<H> {
         match self.kind_of(object)? {
             KindTag::Arguments => self.arguments_delete(object, key),
             KindTag::Array => self.array_delete(object, key),
+            KindTag::Proxy => self.proxy_delete(object, key),
             _ => self.ordinary_delete(object, key),
         }
     }
@@ -507,6 +540,7 @@ impl<H: Host> Agent<H> {
         match self.kind_of(object)? {
             KindTag::String => self.string_own_property_keys(object),
             KindTag::Array => self.array_own_property_keys(object),
+            KindTag::Proxy => self.proxy_own_property_keys(object),
             _ => self.ordinary_own_property_keys(object),
         }
     }
@@ -653,6 +687,7 @@ impl<H: Host> Agent<H> {
             KindTag::BuiltinFunction => self.builtin_call(function, this, args, None),
             KindTag::BoundFunction => bound_function::call(self, function, this, args),
             KindTag::EcmascriptFunction => ecmascript_function::call(self, function, this, args),
+            KindTag::Proxy => self.proxy_call(function, this, args),
             _ => Err(self.fault()),
         }
     }
@@ -673,6 +708,7 @@ impl<H: Host> Agent<H> {
             KindTag::EcmascriptFunction => {
                 ecmascript_function::construct(self, function, args, new_target)
             }
+            KindTag::Proxy => self.proxy_construct(function, args, new_target),
             _ => Err(self.fault()),
         }
     }
@@ -683,6 +719,7 @@ impl<H: Host> Agent<H> {
             ObjectKind::BuiltinFunction(_) => true,
             ObjectKind::BoundFunction(function) => function.has_call(),
             ObjectKind::EcmascriptFunction(function) => function.has_call(),
+            ObjectKind::Proxy(proxy) => proxy.has_call(),
             _ => false,
         })
     }
@@ -693,6 +730,7 @@ impl<H: Host> Agent<H> {
             ObjectKind::BuiltinFunction(function) => function.constructor,
             ObjectKind::BoundFunction(function) => function.has_construct(),
             ObjectKind::EcmascriptFunction(function) => function.has_construct(),
+            ObjectKind::Proxy(proxy) => proxy.has_construct(),
             _ => false,
         })
     }

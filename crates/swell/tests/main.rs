@@ -81,6 +81,7 @@ mod promise_reads;
 mod promise_statics;
 mod promises;
 mod property_index;
+mod proxy;
 mod realm_padding;
 mod realms;
 mod regexp_literal_limits;

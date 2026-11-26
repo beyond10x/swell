@@ -473,9 +473,10 @@ impl<H: Host> Agent<H> {
                 promise,
                 already_resolved,
             } => Ok((*promise, Rc::clone(already_resolved))),
-            Slots::Executor { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => {
-                Err(self.fault())
-            }
+            Slots::Executor { .. }
+            | Slots::Await { .. }
+            | Slots::AsyncFromSync(_)
+            | Slots::Revocable { .. } => Err(self.fault()),
         }
     }
 
@@ -576,7 +577,10 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Value> {
         let (resolve_slot, reject_slot) = match self.closure_slots(function)? {
             Slots::Executor { resolve, reject } => (*resolve, *reject),
-            Slots::Resolving { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => {
+            Slots::Resolving { .. }
+            | Slots::Await { .. }
+            | Slots::AsyncFromSync(_)
+            | Slots::Revocable { .. } => {
                 return Err(self.fault());
             }
         };
@@ -598,7 +602,10 @@ impl<H: Host> Agent<H> {
                 *resolve_slot = resolve;
                 *reject_slot = reject;
             }
-            Slots::Resolving { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => {
+            Slots::Resolving { .. }
+            | Slots::Await { .. }
+            | Slots::AsyncFromSync(_)
+            | Slots::Revocable { .. } => {
                 return Err(self.fault());
             }
         }

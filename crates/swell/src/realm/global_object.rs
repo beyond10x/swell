@@ -85,6 +85,7 @@ impl<H: Host> Agent<H> {
             ("Number", Intrinsic::Number),
             ("eval", Intrinsic::Eval),
             ("Function", Intrinsic::Function),
+            ("Proxy", Intrinsic::Proxy),
             ("Symbol", Intrinsic::Symbol),
             ("RegExp", Intrinsic::RegExp),
             ("Promise", Intrinsic::Promise),
