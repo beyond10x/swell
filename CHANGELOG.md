@@ -133,9 +133,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   still, fixed seeds, no system API and no output macro of the `std` prelude) reads `Date.now()`
   twice and gets the fixed time, and two agents of it draw the same `Math.random` values; module
   loading from memory is slice 11 and not delivered. Step 4 of `story:core-builds-without-std`.
+- The engine crate lists the methods that reserve room in a `Vec`, `VecDeque` or `String`
+  (`with_capacity`, `reserve`, `reserve_exact`, `try_reserve`, `try_reserve_exact`) as
+  disallowed in `crates/swell/clippy.toml`. Each of the 58 calls clippy found (54 in the
+  engine, 4 in its integration tests) carries an `expect` whose reason names the charge or
+  the limit of its buffer, so a new call without one turns the gate red. The crate denies
+  `clippy::allow_attributes` and `clippy::allow_attributes_without_reason`, and a source scan
+  refuses what those let through: an inner `allow` of the lint, an `allow` or `expect` of a
+  group that holds it, an `expect` with a blank reason, and an attribute naming the lint in
+  another crate of the workspace (`story:buffer-growth-outside-the-charged-list-is-listed`).
 
 ### Fixed
 
+- `JSON.parse` frees the room of its stack of open values when the parse ends, before the
+  reviver is called; before, that room stayed allocated, uncharged, while the reviver ran
+  (found by the review of `story:buffer-growth-outside-the-charged-list-is-listed`).
 - The gate no longer overwrites `website/data/engines.json`: the selftest
   `site-data-check-refuses-a-percentage-rounded-up-to-100` wrote its planted counts there on
   every run. Each selftest of `site-data` now writes all its outputs under its own directory,

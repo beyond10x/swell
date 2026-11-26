@@ -128,6 +128,24 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   (`Accounting::hold`, `ChargedVec`, `string_units_in`), or it is not made: a String is read in
   its own storage. HOST-215 and the tests named `*_across_a_call` hold it; a unit that adds
   such a buffer states its measured charge in its report.
+- A call in `crates/swell/src` outside test code that reserves room in a `Vec`, `VecDeque` or
+  `String` (`with_capacity`, `reserve`, `reserve_exact`, `try_reserve`, `try_reserve_exact`)
+  outside `ChargedVec` needs `#[expect(clippy::disallowed_methods, reason = "…")]` on its
+  statement, whose reason names the charge that covers the buffer or the limit that bounds it;
+  `crates/swell/clippy.toml` holds the list, and a change of one of its four `allow-*-in-tests`
+  keys is made in the root `clippy.toml` too. Two checks hold the form. `crates/swell/Cargo.toml`
+  denies `clippy::allow_attributes` (an outer `allow`) and
+  `clippy::allow_attributes_without_reason` (an `allow` or `expect` without `reason`). The test
+  `source_scan::growth_attributes_are_expects_with_a_reason` reads every `.rs` file of
+  `crates/swell/src` and `crates/swell/tests`, `cfg_attr` at any depth and `macro_rules!`
+  bodies included, and refuses what clippy lets through: an `allow` of
+  `clippy::disallowed_methods` in any position, inner ones included; an `allow` or `expect` of
+  a group that holds it (`clippy::style`, `clippy::all`, `warnings`); and an `expect` of it
+  whose reason is empty or blank. The one `allow` it takes is the attribute of `src/lib.rs`
+  for test code, once. `source_scan::no_other_crate_names_the_listed_lint` refuses an
+  attribute that names the lint in another crate of the workspace, so a macro of another crate
+  cannot carry one. The list guards the points of reservation only, not every growth
+  (`docs/design/engine.md`, "Memory budget").
 - No panics on any input: no `unwrap`, `expect` or unchecked indexing in engine crates.
 - Spec first: ECMA-262 states the language and test262 holds it. The host interface is stated as
   an ESS model under `spec/` before its code (decision 10). Do not restate language semantics in
