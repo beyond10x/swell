@@ -77,6 +77,18 @@
 //!   declares lexically, duplicate parameters and the redeclaration of an async generator
 //!   declaration in a block or a `case` block are those of every function;
 //! - `#sec-static-semantics-assignmenttargettype`: an AwaitExpression is no assignment target;
+//! - `#sec-class-definitions-static-semantics-early-errors` for the elements of a class
+//!   ([`Checker::class_element_early_errors`]): a field named `constructor`, a static one named
+//!   `prototype` or `constructor`, `#constructor`, a private name declared twice but for a
+//!   getter and setter pair; a field initializer and a static block contain no `arguments`
+//!   (ContainsArguments, which looks into arrow functions only), a static block's statements
+//!   have [Await] set (`await` is no identifier there) and their own var and lexical names; a
+//!   SuperCall in either is the parser's error, as everywhere before derived classes;
+//! - `#sec-static-semantics-allprivateidentifiersvalid`: each `a.#x`, `a?.#x` and `#x in a`
+//!   names a private name a class body around it declares; the names in scope enter after the
+//!   heritage of a class and leave after its `}`, with no enclosing names in a script, a
+//!   function body, `Function` code or eval code;
+//! - `#sec-delete-operator-static-semantics-early-errors`: `delete` of a private reference;
 //! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`:
 //!   IsValidRegularExpressionLiteral, the flags and then ParsePattern of `swell-regexp` with
 //!   them and the limit `parser_nesting`, charged to the meter of the parse ([`crate::regexp`]);
@@ -113,13 +125,13 @@
 //! The walk does not recurse: its pending work is a stack on the heap, so the Rust stack it uses
 //! is the same at any depth of the tree.
 
-use alloc::collections::BTreeSet;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::ast::{
-    Ast, BindingTarget, Child, ClassElement, ClassKey, DeclKind, Expr, ExprId, ForInTarget,
+    Ast, BindingTarget, Child, Class, ClassElement, ClassKey, DeclKind, Expr, ExprId, ForInTarget,
     ForInit, Function, FunctionId, FunctionKind, Name, NumberForm, NumberLiteral, PatternKind,
     PatternTarget, PropertyKey, PropertyValue, RegExpLiteral, Span, Stmt, StmtId, StringLiteral,
     SwitchCase, UnaryOp, VarDeclarator,
@@ -193,6 +205,38 @@ const YIELD_IN_ARROW_PARAMETERS: &str = "yield expression in the parameters of a
 /// (`#sec-identifiers-static-semantics-early-errors`).
 const AWAIT_IDENTIFIER: &str = "await may not be an identifier in an async function";
 
+/// The message of `await` as an identifier in a class static block, whose statements have
+/// [Await] set (`ClassStaticBlockStatementList : StatementList[~Yield, +Await, ~Return]`) and
+/// contain no AwaitExpression, which the parser reads as an identifier there
+/// (`#sec-class-definitions-static-semantics-early-errors`).
+const AWAIT_IN_STATIC_BLOCK: &str = "await may not be an identifier in a class static block";
+
+/// ContainsArguments of a field's Initializer
+/// (`#sec-class-definitions-static-semantics-early-errors`).
+const ARGUMENTS_IN_FIELD: &str = "arguments in a class field initializer";
+
+/// ContainsArguments of a ClassStaticBlockStatementList
+/// (`#sec-class-definitions-static-semantics-early-errors`).
+const ARGUMENTS_IN_STATIC_BLOCK: &str = "arguments in a class static block";
+
+/// What a private name of a class body declares, for the rule on duplicates of
+/// `#sec-class-definitions-static-semantics-early-errors`: a getter or a setter, each with
+/// whether it is static, both of them (a pair of the same placement), or anything else.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PrivateKind {
+    Getter(bool),
+    Setter(bool),
+    Pair,
+    Other,
+}
+
+/// The bytes an entry of the private names in scope is charged: the name is the tree's.
+const PRIVATE_ENTRY: usize = map_entry_bytes::<&str, u32>();
+
+/// The bytes an entry of the private names one class body declares is charged, while its
+/// duplicates are looked for.
+const DECLARED_ENTRY: usize = map_entry_bytes::<&str, PrivateKind>();
+
 /// The message of an AwaitExpression in the FormalParameters of an `async` function
 /// (`#sec-async-function-definitions-static-semantics-early-errors`). Its text does not say
 /// "await expression", the text of the refusal of the base, so a search of the runs for that
@@ -249,6 +293,8 @@ pub(crate) fn check(
         label_base: 0,
         lexical: Vec::new(),
         lexical_base: 0,
+        private: BTreeMap::new(),
+        arguments: None,
     };
     let frame = checker.frame(Names::List(body), &[], "");
     checker.push_frame(frame);
@@ -257,10 +303,12 @@ pub(crate) fn check(
         errors: mut found,
         labels,
         lexical,
+        private,
         ..
     } = checker;
     m.release(labels);
     m.release(lexical);
+    m.credit(private.len().saturating_mul(PRIVATE_ENTRY));
     // The stable sort may take a buffer as long as the list: charged for the sort.
     let scratch = found.len().saturating_mul(size_of::<SyntaxError>());
     if m.charge(scratch).is_ok() {
@@ -321,7 +369,14 @@ enum Step {
         breakables: u32,
         label_base: usize,
         lexical_base: usize,
+        arguments: Option<&'static str>,
     },
+    /// Adds the private names the body of the class `Child` declares to those in scope, once
+    /// its heritage is walked (AllPrivateIdentifiersValid,
+    /// `#sec-static-semantics-allprivateidentifiersvalid`).
+    EnterPrivate(Child),
+    /// Takes them away again, once the class is walked.
+    LeavePrivate(Child),
     /// Sets the [Yield] and [Await] of what follows, and whether it is the parameters of a
     /// function, with the messages of a YieldExpression and an AwaitExpression there: between
     /// the parameters and the body of a function.
@@ -376,6 +431,12 @@ struct Checker<'a, 'm> {
     /// `lexical_base` on are the current function's.
     lexical: Vec<BTreeSet<String>>,
     lexical_base: usize,
+    /// The private names the class bodies around the current position declare, each with how
+    /// many of them declare it; an entry charged as it is inserted.
+    private: BTreeMap<&'a str, u32>,
+    /// Inside a field initializer or a static block, and the arrow functions in them: the
+    /// message of `arguments` there (ContainsArguments); `None` elsewhere.
+    arguments: Option<&'static str>,
 }
 
 impl<'a, 'm> Checker<'a, 'm> {
@@ -641,7 +702,7 @@ impl<'a, 'm> Checker<'a, 'm> {
             return;
         }
         if self.awaits && name.name == "await" {
-            self.error(AWAIT_IDENTIFIER, name.span);
+            self.error(self.await_identifier(), name.span);
             return;
         }
         if !self.strict {
@@ -679,7 +740,10 @@ impl<'a, 'm> Checker<'a, 'm> {
                     );
                 }
             }
-            Expr::Member { .. } | Expr::Index { .. } | Expr::SuperMember { .. } => {}
+            Expr::Member { .. }
+            | Expr::Index { .. }
+            | Expr::SuperMember { .. }
+            | Expr::PrivateMember { .. } => {}
             _ => self.error("invalid assignment target", node.span),
         }
     }
@@ -782,10 +846,20 @@ impl<'a, 'm> Checker<'a, 'm> {
                     breakables,
                     label_base,
                     lexical_base,
+                    arguments,
                 } => {
                     (self.strict, self.loops, self.breakables) = (strict, loops, breakables);
                     (self.label_base, self.lexical_base) = (label_base, lexical_base);
                     (self.yields, self.awaits, self.parameters) = (yields, awaits, parameters);
+                    self.arguments = arguments;
+                    continue;
+                }
+                Step::EnterPrivate(class) => {
+                    self.enter_private(class);
+                    continue;
+                }
+                Step::LeavePrivate(class) => {
+                    self.leave_private(class);
                     continue;
                 }
                 Step::Context {
@@ -825,11 +899,15 @@ impl<'a, 'm> Checker<'a, 'm> {
                 breakables: self.breakables,
                 label_base: self.label_base,
                 lexical_base: self.lexical_base,
+                arguments: self.arguments,
             };
-            // A class is strict mode code from `class` to its `}`, the walk of its children too.
-            if self.class_early_errors(node) {
+            // A class is strict mode code from `class` to its `}`, the walk of its children too;
+            // its private names are in scope from its body on, its heritage excepted.
+            let class = self.class_early_errors(node);
+            if class {
                 let back = self.restore_step();
                 self.push_step(&mut stack, back);
+                self.push_step(&mut stack, Step::LeavePrivate(node));
                 self.strict = true;
             }
             match node {
@@ -863,6 +941,13 @@ impl<'a, 'm> Checker<'a, 'm> {
                     self.breakables = 0;
                     self.label_base = self.labels.len();
                     self.check_function(id, outer);
+                    // ContainsArguments looks into arrow functions and no other function.
+                    self.arguments = match f.kind {
+                        FunctionKind::FieldInitializer => Some(ARGUMENTS_IN_FIELD),
+                        FunctionKind::StaticBlock => Some(ARGUMENTS_IN_STATIC_BLOCK),
+                        FunctionKind::Arrow => self.arguments,
+                        _ => None,
+                    };
                     self.lexical_base = self.lexical.len();
                     let frame = self.frame(Names::List(&f.body), &f.params, "a parameter");
                     self.push_step(&mut stack, Step::PopLexical);
@@ -879,6 +964,9 @@ impl<'a, 'm> Checker<'a, 'm> {
                 .is_err()
             {
                 break;
+            }
+            if class {
+                self.enter_private_after_heritage(node, &mut stack);
             }
         }
         m.release(stack);
@@ -914,9 +1002,16 @@ impl<'a, 'm> Checker<'a, 'm> {
             .saturating_add(2);
         self.m.grow_by(stack, count)?;
         stack.extend(f.body.iter().rev().map(|s| Step::Node(Child::Stmt(*s))));
+        // A field's Initializer has the [Yield] and [Await] of the class body
+        // (`FieldDefinition[?Yield, ?Await]`); a static block's statements [Await] alone.
+        let (yields_in_body, awaits_in_body) = match f.kind {
+            FunctionKind::FieldInitializer => outer,
+            FunctionKind::StaticBlock => (false, true),
+            _ => (f.generator, f.asynchronous),
+        };
         stack.push(Step::Context {
-            yields: f.generator,
-            awaits: f.asynchronous,
+            yields: yields_in_body,
+            awaits: awaits_in_body,
             parameters: None,
         });
         for (i, p) in f.params.iter().enumerate().rev() {
@@ -1075,7 +1170,7 @@ impl<'a, 'm> Checker<'a, 'm> {
         if self.yields && label.name == "yield" {
             self.error(YIELD_IDENTIFIER, label.span);
         } else if self.awaits && label.name == "await" {
-            self.error(AWAIT_IDENTIFIER, label.span);
+            self.error(self.await_identifier(), label.span);
         } else if self.strict && STRICT_RESERVED.contains(&label.name.as_str()) {
             self.reserved(&label.name, label.span);
         }
@@ -1109,10 +1204,17 @@ impl<'a, 'm> Checker<'a, 'm> {
                 if self.yields && n == "yield" {
                     self.error(YIELD_IDENTIFIER, span);
                 } else if self.awaits && n == "await" {
-                    self.error(AWAIT_IDENTIFIER, span);
+                    self.error(self.await_identifier(), span);
                 } else if self.strict && STRICT_RESERVED.contains(&n.as_str()) {
                     self.reserved(n, span);
+                } else if let Some(message) = self.arguments
+                    && n == "arguments"
+                {
+                    self.error(message, span);
                 }
+            }
+            Expr::PrivateMember { name, .. } | Expr::PrivateIn { name, .. } => {
+                self.private_reference(name);
             }
             // Contains YieldExpression and Contains AwaitExpression of the parameters around it,
             // which the walk does not look for inside a nested function.
@@ -1185,6 +1287,9 @@ impl<'a, 'm> Checker<'a, 'm> {
                         span,
                     );
                 }
+                if self.is_private_reference(*operand) {
+                    self.error("delete of a private reference", span);
+                }
             }
             Expr::Update { operand, .. } => self.target(*operand),
             // A pattern's targets are checked with the pattern.
@@ -1195,6 +1300,133 @@ impl<'a, 'm> Checker<'a, 'm> {
             // `#sec-static-semantics-template-early-errors` reads a template without a tag only.
             Expr::TaggedTemplate { .. } => {}
             _ => {}
+        }
+    }
+
+    /// Whether `e`, the operand of a `delete`, is a private reference
+    /// (`#sec-delete-operator-static-semantics-early-errors`): `a.#x`, or an optional chain whose
+    /// last link is `.#x` or `?.#x`; parentheses around it change nothing, the rule is applied
+    /// through them.
+    fn is_private_reference(&self, e: ExprId) -> bool {
+        let mut e = e;
+        if let Some(Expr::OptionalChain(inner)) = self.ast.expr(e).map(|n| &n.expr) {
+            e = *inner;
+        }
+        matches!(
+            self.ast.expr(e).map(|n| &n.expr),
+            Some(Expr::PrivateMember { .. })
+        )
+    }
+
+    /// The message of `await` as an identifier where [Await] is set: in a static block (and an
+    /// arrow function's parameters there) its own, elsewhere that of an `async` function.
+    fn await_identifier(&self) -> &'static str {
+        if self.arguments == Some(ARGUMENTS_IN_STATIC_BLOCK) {
+            AWAIT_IN_STATIC_BLOCK
+        } else {
+            AWAIT_IDENTIFIER
+        }
+    }
+
+    /// A reference to the private name `name`, `a.#x` or `#x in a`: AllPrivateIdentifiersValid
+    /// (`#sec-static-semantics-allprivateidentifiersvalid`), a class body around it declares the
+    /// name. Applied in a script, a function body, `Function` code and eval code, which has no
+    /// enclosing names before `story:private-names-in-eval-code`.
+    fn private_reference(&mut self, name: &Name) {
+        if !self.private.contains_key(name.name.as_str()) {
+            self.error(
+                format!(
+                    "private name {} is not declared in an enclosing class",
+                    name.name
+                ),
+                name.span,
+            );
+        }
+    }
+
+    /// The private names the body of the class `node` declares, each once per declaration.
+    fn declared_private_names(
+        ast: &'a Ast,
+        node: Child,
+    ) -> impl Iterator<Item = &'a str> + use<'a, 'm> {
+        let class = match node {
+            Child::Stmt(id) => match ast.stmt(id).map(|n| &n.stmt) {
+                Some(Stmt::Class(class)) => Some(&**class),
+                _ => None,
+            },
+            Child::Expr(id) => match ast.expr(id).map(|n| &n.expr) {
+                Some(Expr::Class(class)) => Some(&**class),
+                _ => None,
+            },
+            Child::Function(_) => None,
+        };
+        class
+            .into_iter()
+            .flat_map(|class| class.elements.iter())
+            .filter_map(|element| match element {
+                ClassElement::Method {
+                    key: ClassKey::Private(name),
+                    ..
+                }
+                | ClassElement::Field {
+                    key: ClassKey::Private(name),
+                    ..
+                } => Some(name.name.as_str()),
+                _ => None,
+            })
+    }
+
+    /// Adds the private names the body of the class `node` declares to those in scope, an entry
+    /// charged for each new one.
+    fn enter_private(&mut self, node: Child) {
+        for name in Checker::declared_private_names(self.ast, node) {
+            if let Some(count) = self.private.get_mut(name) {
+                *count = count.saturating_add(1);
+            } else if self.m.charge(PRIVATE_ENTRY).is_ok() {
+                self.private.insert(name, 1);
+            }
+        }
+    }
+
+    /// Takes the private names of the class `node` out of those in scope, an entry credited for
+    /// each name no class body around declares any more.
+    fn leave_private(&mut self, node: Child) {
+        for name in Checker::declared_private_names(self.ast, node) {
+            let gone = match self.private.get_mut(name) {
+                Some(count) => {
+                    *count = count.saturating_sub(1);
+                    *count == 0
+                }
+                None => false,
+            };
+            if gone {
+                self.private.remove(name);
+                self.m.credit(PRIVATE_ENTRY);
+            }
+        }
+    }
+
+    /// Pushes the step that enters the private names of the class `node`, whose children are
+    /// on top of `stack`, after its heritage, the first of them when it has one.
+    fn enter_private_after_heritage(&self, node: Child, stack: &mut Vec<Step>) {
+        let heritage = match node {
+            Child::Stmt(id) => match self.ast.stmt(id).map(|n| &n.stmt) {
+                Some(Stmt::Class(class)) => class.heritage,
+                _ => None,
+            },
+            Child::Expr(id) => match self.ast.expr(id).map(|n| &n.expr) {
+                Some(Expr::Class(class)) => class.heritage,
+                _ => None,
+            },
+            Child::Function(_) => None,
+        };
+        let walked_first = match (heritage, stack.last()) {
+            (Some(h), Some(Step::Node(Child::Expr(top)))) if *top == h => stack.pop(),
+            _ => None,
+        };
+        self.push_step(stack, Step::EnterPrivate(node));
+        if let Some(step) = walked_first {
+            self.push_step(stack, step);
         }
     }
 
@@ -1298,6 +1530,7 @@ impl<'a, 'm> Checker<'a, 'm> {
             breakables: self.breakables,
             label_base: self.label_base,
             lexical_base: self.lexical_base,
+            arguments: self.arguments,
         }
     }
 
@@ -1369,8 +1602,91 @@ impl<'a, 'm> Checker<'a, 'm> {
             };
             self.error(format!("a class constructor may not be {what}"), *span);
         }
+        self.class_element_early_errors(class);
         self.strict = outer;
         true
+    }
+
+    /// The early errors of the fields and private names of `class`
+    /// (`#sec-class-definitions-static-semantics-early-errors`): a field that is not static may
+    /// not be named `constructor` by a literal, nor a static one `prototype` or `constructor`;
+    /// no private name is `#constructor`; and the PrivateBoundIdentifiers of the body hold no
+    /// name twice, but for one getter and one setter of the same placement. The names seen are
+    /// a list charged an entry each, credited when the class is checked.
+    fn class_element_early_errors(&mut self, class: &'a Class) {
+        let mut declared: BTreeMap<&'a str, PrivateKind> = BTreeMap::new();
+        for element in &class.elements {
+            let (is_static, key, kind, span) = match element {
+                ClassElement::Method {
+                    is_static,
+                    key,
+                    kind,
+                    span,
+                    ..
+                } => (*is_static, key, Some(*kind), *span),
+                ClassElement::Field {
+                    is_static,
+                    key,
+                    span,
+                    ..
+                } => (*is_static, key, None, *span),
+                ClassElement::StaticBlock { .. } => continue,
+            };
+            match key {
+                ClassKey::Literal(literal) if kind.is_none() => {
+                    self.property_key(literal, span);
+                    if !is_static && Checker::is_named(literal, "constructor") {
+                        self.error("a class field may not be named constructor", span);
+                    }
+                    for name in ["prototype", "constructor"] {
+                        if is_static && Checker::is_named(literal, name) {
+                            self.error(
+                                format!("a static class field may not be named {name}"),
+                                span,
+                            );
+                        }
+                    }
+                }
+                ClassKey::Private(name) => {
+                    if name.name == "#constructor" {
+                        self.error("a private name may not be #constructor", name.span);
+                    }
+                    let placed = match kind {
+                        Some(FunctionKind::Getter) => PrivateKind::Getter(is_static),
+                        Some(FunctionKind::Setter) => PrivateKind::Setter(is_static),
+                        _ => PrivateKind::Other,
+                    };
+                    self.declare_private(&mut declared, name, placed);
+                }
+                ClassKey::Literal(_) | ClassKey::Computed(_) => {}
+            }
+        }
+        self.m.credit(declared.len().saturating_mul(DECLARED_ENTRY));
+    }
+
+    /// The private name `name` declared as `placed` in a class body whose names so far are
+    /// `declared`: a duplicate is an error unless it completes a getter and setter pair.
+    fn declare_private(
+        &mut self,
+        declared: &mut BTreeMap<&'a str, PrivateKind>,
+        name: &'a Name,
+        placed: PrivateKind,
+    ) {
+        let Some(seen) = declared.get_mut(name.name.as_str()) else {
+            if self.m.charge(DECLARED_ENTRY).is_ok() {
+                declared.insert(name.name.as_str(), placed);
+            }
+            return;
+        };
+        match (*seen, placed) {
+            (PrivateKind::Getter(a), PrivateKind::Setter(b))
+            | (PrivateKind::Setter(a), PrivateKind::Getter(b))
+                if a == b =>
+            {
+                *seen = PrivateKind::Pair;
+            }
+            _ => self.error(format!("duplicate private name {}", name.name), name.span),
+        }
     }
 
     /// Whether `key` is the literal PropertyName whose StringValue is `name`.
@@ -1380,5 +1696,52 @@ impl<'a, 'm> Checker<'a, 'm> {
             PropertyKey::String(s) => s.value.iter().copied().eq(name.encode_utf16()),
             PropertyKey::Number(_) | PropertyKey::Computed(_) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::format;
+    use std::string::String;
+    use std::vec::Vec;
+
+    use super::PrivateKind;
+    use crate::ledger::{Counting, Meter, map_entry_bytes};
+
+    /// The private names of a class body are lists charged to the ledger, each bounded by the
+    /// source: a class of 2,000 private fields is checked with an entry per name in the list of
+    /// PrivateBoundIdentifiers of its body (the duplicates) and an entry per name in the names in
+    /// scope (AllPrivateIdentifiersValid; the names are the tree's). The check charges at least
+    /// both; without either charge it charges less than the floor.
+    #[test]
+    fn the_private_names_of_a_class_body_are_charged() {
+        const NAMES: usize = 2_000;
+        let mut text = String::from("class C {");
+        for i in 0..NAMES {
+            text.push_str(&format!(" #p{i};"));
+        }
+        text.push_str(" }");
+        let source: Vec<u16> = text.encode_utf16().collect();
+        let mut ledger = Counting::default();
+        let parsed = {
+            let meter = Meter::new(&mut ledger);
+            crate::parser::parse(&source, 100, &meter).ok()
+        };
+        let Some(parsed) = parsed else {
+            panic!("the class did not parse");
+        };
+        let before = ledger.charged;
+        let errors = {
+            let meter = Meter::new(&mut ledger);
+            super::check(&parsed.ast, &parsed.body, parsed.strict, 100, &meter)
+        };
+        assert!(errors.is_empty(), "{errors:?}");
+        let charged = ledger.charged - before;
+        let floor =
+            NAMES * (map_entry_bytes::<&str, PrivateKind>() + map_entry_bytes::<&str, u32>());
+        assert!(
+            charged >= floor,
+            "the check charged {charged}, under {floor}"
+        );
     }
 }

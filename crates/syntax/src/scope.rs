@@ -228,8 +228,9 @@ impl Collect {
     }
 
     /// The scope of the body whose walk ends; `function` is the function, `None` for the
-    /// script; an arrow function has no arguments object
-    /// (`#sec-functiondeclarationinstantiation`, step 16). The scratch is credited.
+    /// script; an arrow function has no arguments object (`#sec-functiondeclarationinstantiation`,
+    /// step 16), nor has a field initializer or a static block, where `arguments` is an early
+    /// error (`#sec-class-definitions-static-semantics-early-errors`). The scratch is credited.
     fn finish(self, function: Option<&Function>, m: &Meter<'_>) -> Scope {
         // `#sec-functiondeclarationinstantiation`, steps 15 to 18: no arguments object when a
         // parameter is named `arguments`, or, in a list with no initializer, a function
@@ -237,10 +238,12 @@ impl Collect {
         // direct `eval` may reference it in code no analysis sees (decision 3, "Names", item
         // 4), and an arrow in the body may use it.
         let arguments_object = function.is_some_and(|f| {
-            f.kind != FunctionKind::Arrow
-                && (self.reference_seen.contains("arguments")
-                    || self.contains_direct_eval
-                    || self.inner_arguments)
+            !matches!(
+                f.kind,
+                FunctionKind::Arrow | FunctionKind::FieldInitializer | FunctionKind::StaticBlock
+            ) && (self.reference_seen.contains("arguments")
+                || self.contains_direct_eval
+                || self.inner_arguments)
                 && !f.parameter_names().any(|p| p.name == "arguments")
                 && (f.has_parameter_expressions()
                     || (!self

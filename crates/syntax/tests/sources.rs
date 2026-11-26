@@ -316,26 +316,138 @@ fn held_sources_answer_their_first_construct_still_held() {
     );
 }
 
-/// A field and a static block of a class are refused at their first token until
-/// `story:class-element-syntax-and-early-errors` parses them and makes them holds: each source
-/// answers its refusal alone, before the hold of the class is answered.
+/// The answer of a class source that the parser reads whole: the one error of a source with a
+/// grammar or an early error, or the refusal it holds (`class` first, while that is held).
+fn class_answer(text: &str) -> Result<String, String> {
+    match parse(text) {
+        Ok(_) => Ok("parses".to_string()),
+        Err(errors) => match errors.as_slice() {
+            [error] if error.message.contains("is not supported before slice") => {
+                Ok(error.message.clone())
+            }
+            [error] => Err(error.message.clone()),
+            _ => Err(format!("{errors:?}")),
+        },
+    }
+}
+
+/// A field ends at `;`, before `}`, or where `#sec-rules-of-automatic-semicolon-insertion` inserts
+/// a `;`: before a token on a new line that its initializer or its name cannot take
+/// (`language/statements/class/elements/fields-asi-*.js`). `static`, `get`, `set` and `async`
+/// are field names where no element follows them on their line, and a name with an escape is
+/// never the word (`escaped-*-field-*.js`). Each source of the first list parses to the hold of
+/// its class; each of the second is a grammar error.
 #[test]
-fn a_field_and_a_static_block_are_refused_at_their_token() {
-    for (text, message) in [
-        (
-            "x = class { x = 1; };",
-            "class field is not supported before slice 8",
-        ),
-        (
-            "x = class { static {} };",
-            "class static block is not supported before slice 8",
-        ),
+fn fields_end_where_a_semicolon_is_inserted() {
+    let held = "class is not supported before slice 8";
+    for text in [
+        "class C { x\n y }",
+        "class C { x = 1\n ['a'] = 2 }",
+        "class C { x = a\n in\n z\n y = b }",
+        "class C { get\n *a() {} }",
+        "class C { \\u0067et\n *a() {} }",
+        "class C { static\n x }",
+        "class C { static }",
+        "class C { static = 1; get; set; async\n x }",
+        "class C { static\n async\n *m() {} }",
+        "class C { #x\n #y }",
+        "class C { static #x = 1; static y; z }",
+        "x = class { 'a'; 1 = 2; [b]; }",
     ] {
-        let errors = parse(text)
-            .err()
-            .unwrap_or_else(|| panic!("{text:?}: parsed"));
-        assert_eq!(messages(&errors), vec![message.to_string()], "{text:?}");
-        assert_eq!((errors[0].line, errors[0].column), (1, 13), "{text:?}");
+        assert_eq!(class_answer(text), Ok(held.to_string()), "{text:?}");
+    }
+    for (text, message) in [
+        ("class C { x y }", "unexpected token y"),
+        ("class C { #x #y }", "unexpected private name #y"),
+        ("class C { x = 1 m() {} }", "unexpected token m"),
+        ("class C { x = \"s\"\n [0]() {} }", "unexpected token {"),
+        ("class C { x = 42\n *gen() {} }", "unexpected token {"),
+        ("class C { g\\u0065t value() {} }", "unexpected token value"),
+        (
+            "class C { static st\\u0061tic value() {} }",
+            "unexpected token value",
+        ),
+        ("class C { *x = 1 }", "unexpected token ="),
+        ("class C { get x = 1 }", "unexpected token ="),
+        ("class C { # x }", "unexpected character #"),
+    ] {
+        assert_eq!(class_answer(text), Err(message.to_string()), "{text:?}");
+    }
+}
+
+/// `PrivateIdentifier in ShiftExpression` is a RelationalExpression
+/// (`#sec-relational-operators`): a private name stands only directly before `in`, where `in`
+/// is an operator, as the left operand at the precedence of `<`; its right operand is a
+/// ShiftExpression. Every source of the first list parses to the hold of its class; each of the
+/// second is a grammar error at the private name.
+#[test]
+fn a_private_name_stands_only_before_in() {
+    let held = "class is not supported before slice 8";
+    let class = |body: &str| format!("class C {{ #x; m(o, p) {{ {body} }} }}");
+    for body in [
+        "return #x in o;",
+        "return #x in o in p;",
+        "return #x in o < 1;",
+        "return a == #x in o;",
+        "return a && #x in o || #x in p;",
+        "return #x in a + b * c;",
+        "return #x in a ** 2;",
+        "return (#x in o);",
+        "for (; #x in o;);",
+        "return a ? #x in o : #x in p;",
+    ] {
+        assert_eq!(class_answer(&class(body)), Ok(held.to_string()), "{body:?}");
+    }
+    for body in [
+        "return #x in #x in o;",
+        "return (#x) in o;",
+        "return a < #x in o;",
+        "return 1 + #x in o;",
+        "return a in #x in o;",
+        "return !#x in o;",
+        "return #x;",
+        "return #x + 1;",
+        "for (#x in o;;);",
+        "for (#x in o);",
+        "return o[#x];",
+    ] {
+        assert_eq!(
+            class_answer(&class(body)),
+            Err("unexpected private name #x".to_string()),
+            "{body:?}"
+        );
+    }
+}
+
+/// AllPrivateIdentifiersValid (`#sec-static-semantics-allprivateidentifiersvalid`) holds for a
+/// script, eval code and `Function` code, none of which has an enclosing class body with names
+/// for it (`#sec-performeval`, `#sec-createdynamicfunction`): through each entry a private
+/// reference outside a class is the early error, and one inside a class that declares the name
+/// answers the hold of the class.
+#[test]
+fn a_private_name_outside_a_class_is_an_early_error_through_every_entry() {
+    let undeclared = "private name #x is not declared in an enclosing class";
+    let held = "class is not supported before slice 8";
+    for (text, message) in [
+        ("o.#x;", undeclared),
+        ("o?.#x;", undeclared),
+        ("o?.a.#x();", undeclared),
+        ("#x in o;", undeclared),
+        ("(function () { return this.#x; });", undeclared),
+        ("x = () => o.#x;", undeclared),
+        ("class C { #y; m() { o.#x; } }", undeclared),
+        ("class C { #x; m() { class D { n() { o.#x; } } } }", held),
+        ("class C { #x; static { o.#x; } }", held),
+        ("class C { #x; y = o.#x; }", held),
+    ] {
+        for entry in ENTRIES {
+            let answer = parse_through(entry, &units(text), LIMIT).map(|_| ());
+            assert_eq!(
+                answer.map_err(|errors| messages(&errors)),
+                Err(vec![message.to_string()]),
+                "{entry:?} {text:?}"
+            );
+        }
     }
 }
 
@@ -888,6 +1000,8 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "async_generator_method" => ("x = ", "{async *m(){ return ", "0", "; }}", ";"),
         "class_computed_key" => ("x = ", "class { [", "0", "] () {} }", ";"),
         "class_heritage" => ("x = ", "class extends (", "0", ") {}", ";"),
+        "class_field" => ("x = ", "class { x = ", "0", " }", ";"),
+        "class_static_block" => ("x = ", "class { static { x = ", "0", " } }", ";"),
         _ => return None,
     };
     let mut source = units(before);
@@ -898,7 +1012,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 64] = [
+const NESTING_KINDS: [&str; 66] = [
     "array",
     "paren",
     "block",
@@ -963,6 +1077,8 @@ const NESTING_KINDS: [&str; 64] = [
     "exp_chain",
     "class_computed_key",
     "class_heritage",
+    "class_field",
+    "class_static_block",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict

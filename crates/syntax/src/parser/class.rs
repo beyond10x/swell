@@ -18,13 +18,28 @@
 //!
 //! A class is parsed whole and held ([`Parser::hold`], [`super::HOLDS`]): `class` at its first
 //! token and `class heritage` at `extends`, so the parse goes on and the early errors of the
-//! source come first. A field and a static block, which `story:class-element-syntax-and-early-errors`
-//! parses, are refused at their first token; a private name keeps the refusal of the lexer.
+//! source come first.
+//!
+//! The other elements (`#sec-class-definitions`, ClassElement), each held at its first token:
+//! a field (FieldDefinition, `class field`, or with a private name `private field`), a private
+//! method or accessor (`private method`) and a static block (ClassStaticBlock, `class static
+//! block`). A field ends at `;`, before `}`, or where a line terminator lets a semicolon be
+//! inserted (`#sec-rules-of-automatic-semicolon-insertion`); `static`, `get`, `set` and `async`
+//! name a field where no other element can start with them. The functions of item 1 of
+//! "Classes" are made here: one of kind [`FunctionKind::FieldInitializer`] per run of
+//! consecutive static fields, numbered at its first field, and one for the instance elements
+//! ([`Class::instance_elements`]), numbered at the first field or private method that is not
+//! static; each initializer is an expression statement of its function's body. A static block
+//! is a function of kind [`FunctionKind::StaticBlock`], numbered at `static`. An initializer
+//! and a static block are read with `new.target` and a SuperProperty admitted, [Yield] and
+//! [Await] cleared (`await` and `yield` are identifiers there, which the early errors refuse
+//! where the class body or the block reserves them, `early.rs`), and a static block with no
+//! `return`.
 //!
 //! As in `expression.rs`, the functions on the recursion (each an entry of the depth counter)
 //! hold ids and a span; the helpers that look at tokens and build the record are not inlined.
 
-use super::{Parser, R};
+use super::{Parser, R, SuperProperty, copy_name};
 use crate::ast::{
     Child, Class, ClassElement, ClassKey, Expr, ExprId, FunctionId, FunctionKind, Name,
     PropertyKey, Span, Stmt, StmtId,
@@ -32,6 +47,26 @@ use crate::ast::{
 use crate::token::{Keyword, Punct, TokenKind};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+
+/// What a class element starts with, its modifiers consumed.
+#[derive(Clone, Copy)]
+enum Start {
+    /// `;`.
+    Empty,
+    /// `static {`, at the `{`.
+    StaticBlock,
+    /// A method or a field, at its name.
+    Named(Modifiers),
+}
+
+/// What the name of a class element starts.
+#[derive(Clone, Copy)]
+enum Head {
+    /// A method, at its `(`, with its function.
+    Method(FunctionId),
+    /// A field, after its name, with the function of its initializer.
+    Field(FunctionId),
+}
 
 /// What precedes the name of a class element: `static`, and a getter, a setter, or the `async`
 /// and `*` of a method.
@@ -131,6 +166,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             heritage: None,
             constructor: FunctionId(u32::MAX),
             elements: Vec::new(),
+            instance_elements: None,
             span: Span::default(),
         });
         self.charged(class)
@@ -233,29 +269,37 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
     }
 
-    /// One `ClassElement` of the class `target`: `;`, or a MethodDefinition, `static` or not,
-    /// appended to its elements or made its constructor.
+    /// One `ClassElement` of the class `target`: `;`, a MethodDefinition, a FieldDefinition or
+    /// a ClassStaticBlock, `static` or not, appended to its elements or made its constructor.
     fn class_element(&mut self, target: Child) -> R<()> {
         self.enter()?;
         let start = self.start();
-        if let Some(modifiers) = self.element_modifiers()? {
-            let computed = self.computed_name()?;
-            let id = self.element_head(target, modifiers, start, computed)?;
-            self.function_rest(id)?;
-            self.class_element_end(target, id);
+        match self.element_modifiers()? {
+            Start::Empty => {}
+            Start::StaticBlock => self.static_block(target, start)?,
+            Start::Named(modifiers) => {
+                let computed = self.computed_name()?;
+                match self.element_head(target, modifiers, start, computed)? {
+                    Head::Method(id) => {
+                        self.function_rest(id)?;
+                        self.class_element_end(target, id);
+                    }
+                    Head::Field(id) => self.field(target, id)?,
+                }
+            }
         }
         self.leave();
         Ok(())
     }
 
-    /// What precedes the name of the element at the current token, consumed; `None` for an
-    /// empty element, `;`. `static` is a modifier unless `(`, `=`, `;` or `}` follows it (a
-    /// method or a field named `static`), and `static {` starts a static block, refused here.
-    /// `get`, `set` and `async` are read as in an object literal ([`Parser::accessor_kind`]).
+    /// What precedes the name of the element at the current token, consumed. `static` is a
+    /// modifier unless `(`, `=`, `;` or `}` follows it (a method or a field named `static`), and
+    /// `static {` starts a static block. `get`, `set` and `async` are read as in an object
+    /// literal ([`Parser::accessor_kind`]), a private name counting as a name after them.
     #[inline(never)]
-    fn element_modifiers(&mut self) -> R<Option<Modifiers>> {
+    fn element_modifiers(&mut self) -> R<Start> {
         if self.eat(Punct::Semicolon)? {
-            return Ok(None);
+            return Ok(Start::Empty);
         }
         let mut is_static = false;
         if self.is_name("static") {
@@ -270,7 +314,8 @@ impl<'a, 'm> Parser<'a, 'm> {
                 _ => (false, false),
             };
             if block {
-                return self.refuse("class static block", 8);
+                self.advance()?;
+                return Ok(Start::StaticBlock);
             }
             if !named {
                 is_static = true;
@@ -291,15 +336,16 @@ impl<'a, 'm> Parser<'a, 'm> {
         if modifiers.kind == FunctionKind::Method && self.eat(Punct::Star)? {
             modifiers.generator = true;
         }
-        Ok(Some(modifiers))
+        Ok(Start::Named(modifiers))
     }
 
     /// The `ClassElementName` of the element that started at `start` (the ComputedPropertyName
-    /// `computed` read before, or the PropertyName at the current token) and the `(` that
-    /// follows it: numbers the element's function and appends the element to `target`, or,
-    /// for the constructor, answers the function numbered at the `{`. A name not followed by
-    /// `(` is a field, refused at the element's first token, when a field may end there (at
-    /// `=`, `;`, `}` or a line terminator); otherwise it is a grammar error.
+    /// `computed` read before, or the PropertyName or PrivateIdentifier at the current token)
+    /// and what follows it. Before `(` it is a method: numbers the element's function and
+    /// appends the element to `target`, or, for the constructor, answers the function numbered
+    /// at the `{`; a private method holds `private method`. A plain name (no `get`, `set`,
+    /// `async` or `*` before it) followed by `=`, `;`, `}` or a line terminator is a field
+    /// ([`Parser::field_head`]). Anything else is a grammar error.
     #[inline(never)]
     fn element_head(
         &mut self,
@@ -307,20 +353,26 @@ impl<'a, 'm> Parser<'a, 'm> {
         modifiers: Modifiers,
         start: Span,
         computed: Option<ExprId>,
-    ) -> R<FunctionId> {
-        let key = self.key_or(computed)?;
+    ) -> R<Head> {
+        let key = self.class_key(computed)?;
         if !self.is(Punct::LParen) {
-            self.m.release(key);
             let ends_field = self.is(Punct::Eq)
                 || self.is(Punct::Semicolon)
                 || self.is(Punct::RBrace)
                 || self.tok.newline_before;
             if modifiers.plain() && ends_field {
-                return self.refuse_at("class field", 8, start);
+                return self
+                    .field_head(target, modifiers.is_static, key, start)
+                    .map(Head::Field);
             }
+            self.m.release(key);
             return self.unexpected();
         }
-        if !modifiers.is_static && modifiers.plain() && named(&key, "constructor") {
+        if let ClassKey::Literal(literal) = &key
+            && !modifiers.is_static
+            && modifiers.plain()
+            && named(literal, "constructor")
+        {
             let constructor = self.class_mut(target).map(|class| class.constructor);
             if let Some(id) = constructor
                 && self.is_default_constructor(id)
@@ -329,7 +381,13 @@ impl<'a, 'm> Parser<'a, 'm> {
                 if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {
                     f.span = start;
                 }
-                return Ok(id);
+                return Ok(Head::Method(id));
+            }
+        }
+        if matches!(key, ClassKey::Private(_)) {
+            self.hold("private method", 8, start);
+            if !modifiers.is_static {
+                self.instance_elements(target, start);
             }
         }
         let id = self.begin_function(modifiers.kind, start, None);
@@ -337,10 +395,6 @@ impl<'a, 'm> Parser<'a, 'm> {
             f.generator = modifiers.generator;
             f.asynchronous = modifiers.asynchronous;
         }
-        let key = match key {
-            PropertyKey::Computed(e) => ClassKey::Computed(e),
-            literal => ClassKey::Literal(literal),
-        };
         let element = ClassElement::Method {
             is_static: modifiers.is_static,
             key,
@@ -348,6 +402,36 @@ impl<'a, 'm> Parser<'a, 'm> {
             function: id,
             span: start,
         };
+        self.push_element(target, element)?;
+        Ok(Head::Method(id))
+    }
+
+    /// The name of a class element: the ComputedPropertyName `computed` read before, or the
+    /// PrivateIdentifier or the PropertyName at the current token, consumed.
+    #[inline(never)]
+    fn class_key(&mut self, computed: Option<ExprId>) -> R<ClassKey> {
+        if let Some(e) = computed {
+            return Ok(ClassKey::Computed(e));
+        }
+        let span = self.start();
+        let private = match &self.tok.kind {
+            TokenKind::PrivateName(n) => Some(copy_name(self.m, n)),
+            _ => None,
+        };
+        if let Some(name) = private {
+            let name = self.charged(name)?;
+            self.advance()?;
+            return Ok(ClassKey::Private(Name { name, span }));
+        }
+        Ok(match self.key_or(None)? {
+            PropertyKey::Computed(e) => ClassKey::Computed(e),
+            literal => ClassKey::Literal(literal),
+        })
+    }
+
+    /// Appends `element` to the elements of `target`, the growth charged first.
+    #[inline(never)]
+    fn push_element(&mut self, target: Child, element: ClassElement) -> R<()> {
         let m = self.m;
         let pushed = match self.class_mut(target) {
             Some(class) => m.push(&mut class.elements, element),
@@ -356,8 +440,249 @@ impl<'a, 'm> Parser<'a, 'm> {
                 Ok(())
             }
         };
+        self.charged(pushed)
+    }
+
+    /// A function the class body makes for its elements, of kind `kind`, numbered at `start`:
+    /// strict, as all class code is.
+    fn element_function(&mut self, kind: FunctionKind, start: Span) -> FunctionId {
+        let id = self.begin_function(kind, start, None);
+        if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {
+            f.strict = true;
+        }
+        id
+    }
+
+    /// The function of the instance elements of `target` ([`Class::instance_elements`]),
+    /// numbered at `start` when this is the first such element.
+    fn instance_elements(&mut self, target: Child, start: Span) -> FunctionId {
+        if let Some(id) = self
+            .class_mut(target)
+            .and_then(|class| class.instance_elements)
+        {
+            return id;
+        }
+        let id = self.element_function(FunctionKind::FieldInitializer, start);
+        if let Some(class) = self.class_mut(target) {
+            class.instance_elements = Some(id);
+        }
+        id
+    }
+
+    /// The FieldDefinition named `key` of `target`, which started at `start`, appended to its
+    /// elements; holds `class field`, or `private field` for a private name, at `start`.
+    /// Answers the function its initializer belongs to: for a static field the function of the
+    /// run of static fields the element before it began, or a new one; for any other field the
+    /// function of the instance elements.
+    #[inline(never)]
+    fn field_head(
+        &mut self,
+        target: Child,
+        is_static: bool,
+        key: ClassKey,
+        start: Span,
+    ) -> R<FunctionId> {
+        if matches!(key, ClassKey::Private(_)) {
+            self.hold("private field", 8, start);
+        } else {
+            self.hold("class field", 8, start);
+        }
+        let function = if is_static {
+            let run = self
+                .class_mut(target)
+                .and_then(|class| match class.elements.last() {
+                    Some(ClassElement::Field {
+                        is_static: true,
+                        function,
+                        ..
+                    }) => Some(*function),
+                    _ => None,
+                });
+            match run {
+                Some(id) => id,
+                None => self.element_function(FunctionKind::FieldInitializer, start),
+            }
+        } else {
+            self.instance_elements(target, start)
+        };
+        let element = ClassElement::Field {
+            is_static,
+            key,
+            initializer: None,
+            function,
+            span: start,
+        };
+        self.push_element(target, element)?;
+        Ok(function)
+    }
+
+    /// The rest of the field just appended to `target`, after its name: its Initializer, if
+    /// any, read as code of `function`, and its end: `;`, consumed, or a `}` or a line
+    /// terminator before the current token, where a semicolon is inserted.
+    fn field(&mut self, target: Child, function: FunctionId) -> R<()> {
+        if self.is(Punct::Eq) {
+            self.enter()?;
+            self.advance()?;
+            self.element_context_open()?;
+            let e = self.assignment(false)?;
+            self.element_context_close();
+            self.field_initializer(target, function, e)?;
+            self.leave();
+        }
+        self.field_end(target, function)
+    }
+
+    /// Saves the [Yield] and [Await], `new.target` and the SuperProperty flag of the class body
+    /// and sets those of a field initializer or a static block: [Yield] and [Await] cleared,
+    /// `new.target` and a SuperProperty admitted
+    /// (`#sec-class-definitions-static-semantics-early-errors`: both are code of a function with
+    /// a [[HomeObject]]). As `function.rs` saves them for a function, on the same lists, the
+    /// growth charged first.
+    #[inline(never)]
+    fn element_context_open(&mut self) -> R<()> {
+        let m = self.m;
+        let pushed = m.push(&mut self.outer_yields, self.yields);
         self.charged(pushed)?;
-        Ok(id)
+        let pushed = m.push(&mut self.outer_awaits, self.awaits);
+        self.charged(pushed)?;
+        let pushed = m.push(&mut self.outer_new_target, self.new_target);
+        self.charged(pushed)?;
+        let pushed = m.push(&mut self.outer_super_properties, self.super_property);
+        self.charged(pushed)?;
+        self.yields = false;
+        self.awaits = false;
+        self.new_target = true;
+        self.super_property = SuperProperty::Method;
+        Ok(())
+    }
+
+    /// Puts back what [`Parser::element_context_open`] saved.
+    #[inline(never)]
+    fn element_context_close(&mut self) {
+        if let Some(yields) = self.outer_yields.pop() {
+            self.yields = yields;
+        }
+        if let Some(awaits) = self.outer_awaits.pop() {
+            self.awaits = awaits;
+        }
+        if let Some(new_target) = self.outer_new_target.pop() {
+            self.new_target = new_target;
+        }
+        if let Some(super_property) = self.outer_super_properties.pop() {
+            self.super_property = super_property;
+        }
+    }
+
+    /// The initializer `e` of the field just appended to `target`: the field's, and an
+    /// expression statement appended to the body of `function`, whose depth grows to hold it.
+    #[inline(never)]
+    fn field_initializer(&mut self, target: Child, function: FunctionId, e: ExprId) -> R<()> {
+        let span = self.expr_span(e);
+        let stmt = self.push_stmt(Stmt::Expression(e), span)?;
+        let depth = self.ast.depth(Child::Stmt(stmt)).saturating_add(1);
+        self.check_depth(depth, span)?;
+        let m = self.m;
+        let pushed = match self.ast.functions.get_mut(function.0 as usize) {
+            Some(f) => {
+                f.depth = f.depth.max(depth);
+                m.push(&mut f.body, stmt)
+            }
+            None => Ok(()),
+        };
+        self.charged(pushed)?;
+        if let Some(ClassElement::Field { initializer, .. }) = self
+            .class_mut(target)
+            .and_then(|class| class.elements.last_mut())
+        {
+            *initializer = Some(e);
+        }
+        Ok(())
+    }
+
+    /// The end of the field just appended to `target`, whose initializer belongs to
+    /// `function`: the field and the function end at the previous token, and a `;` is
+    /// consumed; without one, a `}` or a line terminator must come next.
+    #[inline(never)]
+    fn field_end(&mut self, target: Child, function: FunctionId) -> R<()> {
+        let end = self.prev_end;
+        if let Some(ClassElement::Field { span, .. }) = self
+            .class_mut(target)
+            .and_then(|class| class.elements.last_mut())
+        {
+            span.end = end.max(span.start);
+        }
+        if let Some(f) = self.ast.functions.get_mut(function.0 as usize) {
+            f.span.end = end.max(f.span.start);
+        }
+        if self.eat(Punct::Semicolon)? || self.is(Punct::RBrace) || self.tok.newline_before {
+            return Ok(());
+        }
+        self.unexpected()
+    }
+
+    /// `ClassStaticBlock : static { ClassStaticBlockBody }` of `target`, which started at
+    /// `start`, at its `{`.
+    fn static_block(&mut self, target: Child, start: Span) -> R<()> {
+        self.enter()?;
+        let (id, functions) = self.static_block_open(target, start)?;
+        let (body, _) = self.body(false)?;
+        self.static_block_close(target, id, functions, body)?;
+        self.leave();
+        Ok(())
+    }
+
+    /// The `{` of the static block that started at `start`: holds `class static block` there,
+    /// numbers its function, appends the element to `target` and opens its context, in which
+    /// no `return` stands. Answers the function and the count of enclosing functions to put back.
+    #[inline(never)]
+    fn static_block_open(&mut self, target: Child, start: Span) -> R<(FunctionId, u32)> {
+        self.expect(Punct::LBrace)?;
+        self.hold("class static block", 8, start);
+        let id = self.element_function(FunctionKind::StaticBlock, start);
+        self.push_element(
+            target,
+            ClassElement::StaticBlock {
+                function: id,
+                span: start,
+            },
+        )?;
+        self.element_context_open()?;
+        Ok((id, core::mem::take(&mut self.functions)))
+    }
+
+    /// The `}` of the static block `id` of `target`: its body, span and depth recorded as a
+    /// function's, the context and the count of enclosing `functions` put back.
+    #[inline(never)]
+    fn static_block_close(
+        &mut self,
+        target: Child,
+        id: FunctionId,
+        functions: u32,
+        body: Vec<StmtId>,
+    ) -> R<()> {
+        self.expect(Punct::RBrace)?;
+        self.functions = functions;
+        self.element_context_close();
+        let mut deepest = 0;
+        for s in &body {
+            deepest = deepest.max(self.ast.depth(Child::Stmt(*s)));
+        }
+        let depth = deepest.saturating_add(1);
+        let start = self.ast.function(id).map_or(Span::default(), |f| f.span);
+        let span = self.finish(start);
+        self.check_depth(depth, span)?;
+        if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {
+            f.body = body;
+            f.span = span;
+            f.depth = depth;
+        }
+        if let Some(ClassElement::StaticBlock { span: element, .. }) = self
+            .class_mut(target)
+            .and_then(|class| class.elements.last_mut())
+        {
+            element.end = span.end;
+        }
+        Ok(())
     }
 
     /// Whether the constructor `id` is still the default one the `{` numbered: its span starts
@@ -380,5 +705,132 @@ impl<'a, 'm> Parser<'a, 'm> {
         {
             span.end = end.max(span.start);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::vec::Vec;
+
+    use crate::ast::{ClassElement, Expr, ExprId, FunctionId, FunctionKind, Stmt, StmtId};
+    use crate::ledger::{Counting, HeapBytes, Meter};
+
+    /// The tree of the class elements (`docs/design/engine.md`, section 3, "Classes", item 1):
+    /// the functions in the order of their first tokens, one `FieldInitializer` per run of
+    /// static fields and one for the instance elements, each initializer an expression
+    /// statement of its function's body, a `StaticBlock` with its statements; `#x in` with its
+    /// right operand; the class held; and what the ledger holds after the parse is the tree's
+    /// capacity, so every name, list and body the element parse made is charged and nothing it
+    /// dropped stays charged.
+    #[test]
+    fn the_elements_of_a_class_are_functions_of_the_tree() {
+        let text = "class C {\n\
+                    static a = 1; static b = () => 2;\n\
+                    m() {}\n\
+                    static c;\n\
+                    x = 3;\n\
+                    #p() { return #q in this && this.#q; }\n\
+                    #q = this?.#p;\n\
+                    static { var v = 1; }\n\
+                    }";
+        let source: Vec<u16> = text.encode_utf16().collect();
+        let mut ledger = Counting::default();
+        let meter = Meter::new(&mut ledger);
+        let parsed = match super::super::parse(&source, 1_000, &meter) {
+            Ok(parsed) => parsed,
+            Err(error) => panic!("{error:?}"),
+        };
+        let kinds: Vec<FunctionKind> = parsed.ast.functions().iter().map(|f| f.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                FunctionKind::ClassConstructor,
+                FunctionKind::FieldInitializer,
+                FunctionKind::Arrow,
+                FunctionKind::Method,
+                FunctionKind::FieldInitializer,
+                FunctionKind::FieldInitializer,
+                FunctionKind::Method,
+                FunctionKind::StaticBlock,
+            ]
+        );
+        let bodies: Vec<usize> = parsed
+            .ast
+            .functions()
+            .iter()
+            .map(|f| f.body.len())
+            .collect();
+        assert_eq!(bodies, [0, 2, 1, 0, 0, 2, 1, 1]);
+        assert!(parsed.ast.functions().iter().all(|f| f.strict));
+        let Some(Stmt::Class(class)) = parsed
+            .body
+            .first()
+            .and_then(|s| parsed.ast.stmt(*s))
+            .map(|n| &n.stmt)
+        else {
+            panic!("no class declaration");
+        };
+        assert_eq!(class.instance_elements, Some(FunctionId(5)));
+        let runs: Vec<(bool, u32, bool)> = class
+            .elements
+            .iter()
+            .filter_map(|e| match e {
+                ClassElement::Field {
+                    is_static,
+                    function,
+                    initializer,
+                    ..
+                } => Some((*is_static, function.0, initializer.is_some())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            runs,
+            [
+                (true, 1, true),
+                (true, 1, true),
+                (true, 4, false),
+                (false, 5, true),
+                (false, 5, true)
+            ]
+        );
+        let statement = |f: usize, i: usize| {
+            parsed
+                .ast
+                .functions()
+                .get(f)
+                .and_then(|f| f.body.get(i))
+                .and_then(|s: &StmtId| parsed.ast.stmt(*s))
+                .map(|n| matches!(n.stmt, Stmt::Expression(_)))
+        };
+        assert_eq!(statement(5, 0), Some(true));
+        assert_eq!(statement(5, 1), Some(true));
+        let private_in = (0..)
+            .map_while(|i| parsed.ast.expr(ExprId(i)))
+            .find_map(|n| match &n.expr {
+                Expr::PrivateIn { name, right } => Some((name.name.as_str(), *right)),
+                _ => None,
+            });
+        let Some(("#q", right)) = private_in else {
+            panic!("no #q in: {private_in:?}");
+        };
+        assert!(matches!(
+            parsed.ast.expr(right).map(|n| &n.expr),
+            Some(Expr::This)
+        ));
+        let members = (0..)
+            .map_while(|i| parsed.ast.expr(ExprId(i)))
+            .filter_map(|n| match &n.expr {
+                Expr::PrivateMember { name, optional, .. } => Some((name.name.as_str(), *optional)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(members, [("#q", false), ("#p", true)]);
+        assert!(parsed.held.is_some(), "the class is held");
+        let tree = parsed
+            .ast
+            .heap_bytes()
+            .saturating_add(parsed.body.heap_bytes());
+        assert_eq!(meter.held(), tree, "held against the tree");
     }
 }

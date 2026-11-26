@@ -656,6 +656,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
             // A SuperCall is an early error of every source the parser admits before
             // `story:derived-classes-and-super-call`.
             Expr::SuperCall(_) => return Err(malformed("a SuperCall")),
+            // No source with a private name reaches the compiler while its element is held:
+            // `story:private-names-and-private-methods` replaces this arm.
+            Expr::PrivateMember { .. } => return Err(malformed("a private member")),
+            // `story:private-fields-and-private-in` replaces this arm.
+            Expr::PrivateIn { .. } => return Err(malformed("a private name in")),
             // `#sec-new-operator-runtime-semantics-evaluation`.
             Expr::New { callee, arguments } => {
                 t.push(Task::Expr(*callee))?;

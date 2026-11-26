@@ -67,6 +67,11 @@ pub(crate) struct Parsed {
 pub const HOLDS: &[(&str, u32)] = &[
     ("class", 8),
     ("class heritage", 8),
+    ("class field", 8),
+    ("private method", 8),
+    ("private field", 8),
+    ("private name in", 8),
+    ("class static block", 8),
 ];
 
 pub(crate) struct Parser<'a, 'm> {
@@ -521,6 +526,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             TokenKind::Eof => "unexpected end of input".to_string(),
             TokenKind::Name(n) => format!("unexpected token {n}"),
             TokenKind::Keyword(k) => format!("unexpected token {}", k.as_str()),
+            TokenKind::PrivateName(n) => format!("unexpected private name {n}"),
             TokenKind::Punct(p) => format!("unexpected token {}", p.as_str()),
             TokenKind::Number(n) => format!("unexpected number {}", n.text),
             TokenKind::String(_) => "unexpected string literal".to_string(),
