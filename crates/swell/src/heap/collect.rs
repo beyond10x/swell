@@ -348,7 +348,7 @@ mod tests {
 
     /// The trace function of each kind of the layout but the common object record, which is
     /// called once per object.
-    const KIND_SITES: [&str; 21] = [
+    const KIND_SITES: &[&str] = &[
         "heap/string.rs HeapString::trace",
         "heap/mod.rs SymbolRecord::trace",
         "host/host_object.rs HostObject::trace",
@@ -494,7 +494,7 @@ mod tests {
         );
         let count = |site: &str| calls.iter().filter(|call| **call == site).count();
         let strings = "heap/string.rs HeapString::trace";
-        for site in ROOT_SITES.iter().chain(&KIND_SITES) {
+        for site in ROOT_SITES.iter().chain(KIND_SITES) {
             let once = if *site == strings { 3 } else { 1 };
             assert_eq!(count(site), once, "{site}: {calls:#?}");
         }
