@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T19:51:03Z",
+  "actor": "human:operator",
+  "artifact": "story:proxy-objects-and-access-traps",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/proxy at cb029fbd, build node, before the merge into wave/big-2",
+    "reference": "swell main 1256 passed, 1 skipped in the default and the collect-every-safe-point mode; swell lib 251 passed; clippy exit 0; fmt 0 changed files (coordinator's run). The unit's runs on the same head: realm-sizes 0 run(s) red; test262 part passed 1325 bound 1325 B 1081 F 244 R 0; stack profiles release and stack-debug 4 passed each"
+  }
+}
