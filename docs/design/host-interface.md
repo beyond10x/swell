@@ -87,9 +87,31 @@ impl<'a, H: Host> HookCx<'a, H> {
 so a call on the agent from code running inside it does not compile; inside, the host reaches
 the engine only through `Cx` or `HookCx`.
 
+**Adapters. The engine core has no `std`; an adapter is whatever implements `Host`.** Decided by
+the operator on 2026-11-26 (`story:core-builds-without-std`): the six engine crates are
+`#![no_std]` with `alloc`, so the clock, the time zones, the seeds, the jobs and module loading
+reach the engine only from the host. An adapter may have system access (the shell `crates/cli`
+reads the system clock and files), have none (it answers from what its embedder hands it), or
+emulate it. `crates/swell/tests/emulated_host.rs` is an emulated host of the last kind: a test
+host in the integration-test binary of `swell`, which links `std` and its system allocator, that
+calls no system API (its source names no `std` path, nothing of HOST-2's scan and no output
+macro of the `std` prelude); its clock stands still, its seeds are fixed and its jobs are kept
+in memory. No host of the repository is built without `std`: a program that runs the engine
+without `std` needs a global allocator, and one over a fixed block needs `unsafe impl
+GlobalAlloc`, which `#![forbid(unsafe_code)]` rules out in every crate here; a host library
+without `std` would need neither an allocator nor an entry point, and would run nothing. Module
+loading from memory, the third part of such a host, is slice 11 and not delivered. The crates
+name no allocator: the program that links them provides it, the shell the system's and an
+embedder its own. In place of such a host the gate holds: HOST-2's source scan; a build of
+`swell` and every crate it depends on for `x86_64-unknown-none`, a target without `std` (`task
+nostd-build`); a scan of the undefined symbols of those libraries, weak ones included, that
+refuses every symbol that is neither a mangled Rust name nor a routine of the compiler's runtime,
+so any function of a C or C++ library or the system (`task nostd-symbols`,
+`taskfiles/nostd.yml`); and the emulated host above, run in the `std` test binary.
+
 **HOST-1** (swell:D1) The `swell` crate and every crate it depends on declare `#![forbid(unsafe_code)]`, name no package from outside the repository in the root `Cargo.lock`, and never call `std::thread::spawn` or `std::thread::Builder`, which a source scan in the gate checks. [slice 1]
 
-**HOST-2** (swell:D1) The engine crates use none of `std::time::SystemTime`, `std::time::Instant`, `std::env`, `std::fs`, `std::net`, `std::process` and `std::collections::hash_map::RandomState`, which a source scan in the gate checks. [slice 1]
+**HOST-2** (swell:D1) The engine crates use none of `std::time::SystemTime`, `std::time::Instant`, `std::env`, `std::fs`, `std::net`, `std::process` and `std::collections::hash_map::RandomState`, each declares `#![no_std]` in its crate root, and none names a `std` path in its library code (an item under `#[cfg(test)]` is test code and may), which a source scan in the gate checks. [slice 1]
 
 **HOST-3** (swell:D1) No entry point, read or hook dispatch panics for any argument: a fuzz test that issues seeded random sequences of interface calls with arbitrary arguments (stale, foreign and wrong-kind handles included) counts a panic or an abort as a failure. [slice 1]
 

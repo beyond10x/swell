@@ -30,6 +30,7 @@ use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Descriptor, Key};
 use crate::ops::objects::IntegrityLevel;
 use crate::value::{ObjectRef, Value};
+use alloc::vec::Vec;
 
 /// The builtins of this group, by their steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -285,6 +286,10 @@ impl<H: Host> Agent<H> {
         descriptors: &mut Vec<(Key, Descriptor)>,
         count: usize,
     ) -> Completion<()> {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged with the keys by `hold_define_properties_keys`, `define_properties_bytes` of the keys"
+        )]
         if descriptors.try_reserve(count).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }

@@ -5,7 +5,10 @@
 //!
 //! Each test file is a module of `tests/main.rs` and reaches this one with `use crate::support;`.
 //! A file uses a part of it, so an item one file does not use is not dead code of the suite.
-#![allow(dead_code)]
+#![expect(
+    dead_code,
+    reason = "each test file uses a part of the support module, so the suite leaves some items unused"
+)]
 
 pub mod host;
 pub mod script;

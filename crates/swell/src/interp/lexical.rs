@@ -20,6 +20,7 @@ use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::interp::frame::SlotValue;
 use crate::object::property::Key;
+use alloc::string::String;
 
 impl<H: Host> Agent<H> {
     /// String constant `index` of the running code as Rust text, for a message.
@@ -92,7 +93,7 @@ impl<H: Host> Agent<H> {
                 .map(|names| u32::try_from(names.len()).unwrap_or(u32::MAX));
             let names = SlotNames {
                 script: frame.script,
-                compiled: std::rc::Rc::clone(&frame.compiled),
+                compiled: alloc::rc::Rc::clone(&frame.compiled),
                 table: NameTable::Scope {
                     template: frame.template,
                     index: table,
@@ -129,7 +130,7 @@ impl<H: Host> Agent<H> {
                 *outer,
                 SlotNames {
                     script: names.script,
-                    compiled: std::rc::Rc::clone(&names.compiled),
+                    compiled: alloc::rc::Rc::clone(&names.compiled),
                     table: names.table,
                 },
                 slots.clone(),

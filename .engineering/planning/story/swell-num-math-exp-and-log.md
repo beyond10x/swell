@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:swell-num-math-exp-and-log
 kind: story
-status: active
+status: implemented
 title: swell-num has exp, expm1, sinh, cosh, tanh, log, log2, log10, log1p, asinh, acosh, atanh, cbrt and exponentiate in double-double, held to 1 or 2 ulp by committed reference data
 summary: The exponential and logarithmic families and Number::exponentiate in crates/num, with data/math/reference-exp-log.txt and the accuracy and the series degrees measured; lifts no case.
 relations:
@@ -25,10 +25,11 @@ scope:
   path: data/math/SOURCE
 - confidence: inferred
   path: data/math/reference-exp-log.txt
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:26Z", actor: "human:operator", revision: 6}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:27Z", actor: "human:operator", revision: 7}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:49Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

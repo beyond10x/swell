@@ -11,8 +11,110 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Added
+
+- `Math.random`, a story of the fourth slice: each realm holds a xoshiro256** generator
+  (`swell_num::random::Xoshiro256`) whose four words are derived, when the realm is made, from
+  the agent's `Seeds.random_seed` and the realm's creation index by SipHash-2-4. The agent
+  counts every `create_realm` that gets past the check of its state, one that throws or ends
+  in a termination included, so no index is used twice. A call reads nothing from the host,
+  calls no hook, costs the step of the call and allocates nothing; each value is a multiple
+  of 2^-53 in [0, 1 - 2^-53] with positive sign. The function is the last own key of `Math`,
+  after `sumPrecise` (`story:math-random`).
+- The operators `**` and `**=` (`#sec-exp-operator`, `#sec-assignment-operators`): the parser
+  reads `**` right associative and tighter than `*`, `/` and `%`, and a unary expression as its
+  left operand outside parentheses (`-2 ** 2`, `typeof a ** 2`, `await a ** 2`) is the
+  SyntaxError "a unary expression as the left operand of ** needs parentheses"; `**=` takes the
+  targets `*=` takes. The compiler emits one instruction, `Exp`, and the interpreter applies
+  Number::exponentiate through `swell_num::math::exponentiate`, the function `Math.pow` calls,
+  so `a ** b` and `Math.pow(a, b)` answer the same Number. The compiler folds nothing. The
+  refusal "exponentiation operator is not supported before slice 4" is gone
+  (`story:exponentiation-operator`).
+- The close of slice 4, `numbers-and-dates` (`story:slice-04-conformance-close`): every case
+  of the slice passes in every run, `test262-slice 04 1681 3320 0 0 1681 1681 0 0`. Three
+  cases that need a later slice move with evidence in `conformance/test262/moves.tsv`: the
+  `Proxy` cases `Array/prototype/reverse/length-exceeding-integer-limit-with-proxy` and
+  `Array/prototype/slice/length-exceeding-integer-limit-proxied-array` to slice 9, and
+  `Math/sumPrecise/throws-on-non-number` (`0n`) to slice 12. 72 cases of
+  `test/staging/sm/` that failed at the start of the slice and pass now come into slice 4
+  from slice 19 by lines of the block (`docs/plan/slice-04/close-into-4.tsv`), each read
+  case by case against the full run at the start commit of the slice. A test holds the
+  nine references of the first consumer to `Date` and `Math` in one script, with the
+  consumer's own calls and argument values
+  (`consumer_slice_04::consumer_nine_references_of_surf_resolve_as_the_standard_says`). A
+  second script calls the five parts of slice 4 the consumer calls (`Date.now`,
+  `Math.floor`, `Math.min`, `Math.abs`, `Math.ceil`) with arguments that tell each one
+  from its absence, and that show the sign of a zero; the four functions of `Math` are told
+  from the identity, and `floor` and `ceil` from their rounding neighbours. Five tests run
+  it: `parts_script_answers_as_the_standard_says`,
+  `parts_script_fails_without_each_part_of_slice_4` (all five parts),
+  `parts_script_tells_each_math_function_from_the_identity` (the four functions of
+  `Math`), `parts_script_tells_each_rounding_function_from_its_neighbours` (`floor` and
+  `ceil`, each against the other three of `floor`, `ceil`, `round` and `trunc`) and
+  `parts_script_sees_the_sign_of_each_zero` (the four functions of `Math`). Slice 4 is
+  delivered: `conformance/slices-delivered.txt` lists it, and no host requirement is pending
+  for it.
+
 ### Changed
 
+- Releases ship seven archives of the `swell` binary and `SHA256SUMS`: besides the five
+  targets of 0.12.0, `.github/workflows/release-build.yml` builds `x86_64-unknown-linux-musl`
+  and `aarch64-unknown-linux-musl`, static binaries that load no shared library; the glibc
+  archives stay (glibc 2.34 or newer). The Windows binary links its C runtime in
+  (`-C target-feature=+crt-static`) and needs no Visual C++ runtime. After the smoke test each
+  musl job fails on a dynamic section entry `NEEDED` or a program interpreter and runs the
+  binary in a Docker image that holds nothing but it; the Windows job fails when the import
+  table names a `VCRUNTIME` or `api-ms-win-crt` library. The workflow also runs on a pull
+  request that changes it (labelled with the pull request's head commit, nothing uploaded)
+  and when started by hand. The new gate step `release-targets-check` (part of
+  `forge-check`) reads the workflow and the two documents as text and fails when the matrix
+  is not the release's seven targets, when the Build step's `case "$TARGET"` gives a musl or
+  Windows target no `+crt-static` (or a glibc or macOS target one), when no step that runs
+  for a musl or Windows target checks its linking, or when `docs/releasing.md` or
+  `website/docs/embedding.md` names or counts other archives than the workflow builds
+  (`story:releases-ship-static-binaries`).
+
+- The engine crate `swell` is `#![no_std]` with `alloc`, step 3 of story
+  `core-builds-without-std`: its library code names no `std` path, and the program that links
+  it provides the allocator. The float functions it called as `std` methods (`trunc`,
+  `floor`, `ceil`, `sqrt`, `rem_euclid`) and the `%` of two Numbers (`fmod`, which a no_std
+  build would take from the C library) come from `swell_num::fmath`, whose six functions are
+  `#[inline]`. The test-build counters of collections, stored Strings and drains of the
+  release queue are fields of the heap and the root table instead of thread-locals. The
+  public interface and the test262 counts do not change.
+- The keyed hash map of the engine (`heap/map.rs`) is written in the crate instead of
+  `std`'s `HashMap`: a SwissTable with groups of 16 control bytes, read as two 64-bit words,
+  and the SipHash keyed by `hash_key` (HOST-145). It has the growth, deletion and rehashing
+  of the map it replaces, so a table grows and is charged at the same operations as before; a
+  unit test compares it with `std`'s map over 20,000 operations. Four paths of the engine use
+  it: the index of a property list longer than 8 entries (`object/property.rs`, every
+  property of a large object and every global variable), the atom table of interned Strings
+  (`heap/string.rs`), the registry of `Symbol.for` (`heap/mod.rs`) and the set of visited
+  keys of `for`-`in` (`ops/objects.rs`). The `swell` shell against main (`f27d50d7`), user
+  CPU, best of 7 on the build node, main's binary run twice as the noise floor (load 48 to 56
+  on 32 cores):
+
+  | script | what it does | main | this change | main again |
+  |---|---|---|---|---|
+  | `num_2k` | an object of 2,000 Number keys: add, read 5 times, delete half; 30 rounds | 0.994 s | +7.8 % | +1.5 % |
+  | `num_200k` | the same with 200,000 keys, 1 round | 3.717 s | +4.1 % | -0.8 % |
+  | `str_2k` | 2,000 String keys made once | 1.286 s | +2.6 % | +1.5 % |
+  | `str_200k` | 200,000 String keys made and interned at run time | 6.656 s | +4.1 % | -0.2 % |
+  | `forin_2k` | `for`-`in` over 2,000 keys, 300 rounds | 0.110 s | -11.8 % | -4.5 % |
+  | `control` | arithmetic on local variables and a dense array, no keyed map | 0.229 s | -3.9 % | -0.9 % |
+
+  The map alone against `std`'s with the same hasher, `u32` keys, 2,000 entries, three runs
+  (first version of this change, then this one):
+
+  | operation | first version | this change |
+  |---|---|---|
+  | insert | +12 to +19 % | +3 to +8 % |
+  | lookup, key present | +22 to +24 % | +12 to +18 % |
+  | lookup, key absent | +14 to +17 % | +10 to +14 % |
+  | remove | +31 to +45 % | +1 to +8 % |
+
+  The rest of the lookup gap is `std`'s match of a group with SSE2 instructions, which need
+  `unsafe`; the engine crates have none, also not for speed.
 - `swell-num` builds without `std` (`#![no_std]` with `alloc`), step 2 of story
   `core-builds-without-std`: it names no `std::` path outside its unit tests and calls no
   `f64` method of `std`. The new module `swell_num::fmath` computes `sqrt`, `floor`, `ceil`,
@@ -37,14 +139,57 @@ Every number below comes from the gate, `task check`, on the released commit.
   path (step 1 of `story:core-builds-without-std`). `SyntaxError` and `CompileError` implement
   `core::error::Error`, the same trait as `std::error::Error`. Public names and behaviour do not
   change; unit tests inside the crates still link `std`.
+- The gate builds `swell` and every crate it depends on, the six engine crates, for
+  `x86_64-unknown-none`, a target without `std` (`task nostd-build`, `taskfiles/nostd.yml`), and
+  reads the undefined symbols of their libraries, weak ones included, with `llvm-nm` of the pinned
+  toolchain (`task nostd-symbols`): a symbol that is neither a mangled Rust name (legacy names are
+  checked down to their hash, v0 names by their form) nor a routine of the compiler runtime (a C
+  library's `fmod` or `sqrt`, a C++ library's `_ZNSt9exceptionD2Ev`, an I/O call) fails it, named
+  with its object. `rust-toolchain.toml` adds the target and the component `llvm-tools`; the
+  toolchain step of `.github/workflows/check.yml` installs both, and `toolchain-check` fails when
+  that step lacks a component or target the file names (arrays on one line or several, strings
+  in "" or ''), or reads no value from a key that names them. `HOST-2`'s source scan also refuses a
+  `std` path in library code and a crate root without `#![no_std]`; its reading of source now
+  takes raw byte and C strings (`br"..."`, `cr#"..."#`) as literals and removes the blanks before
+  every `::`, and its blanking of `#[cfg(test)]` items ends at the `,` of a variant or arm with a
+  comparison or shift in it and at the `)` after a parameter. A test host of the emulated kind in
+  the `std` test binary of `swell` (`crates/swell/tests/emulated_host.rs`: a clock that stands
+  still, fixed seeds, no system API and no output macro of the `std` prelude) reads `Date.now()`
+  twice and gets the fixed time, and two agents of it draw the same `Math.random` values; module
+  loading from memory is slice 11 and not delivered. Step 4 of `story:core-builds-without-std`.
+- The engine crate lists the methods that reserve room in a `Vec`, `VecDeque` or `String`
+  (`with_capacity`, `reserve`, `reserve_exact`, `try_reserve`, `try_reserve_exact`) as
+  disallowed in `crates/swell/clippy.toml`. Each of the 58 calls clippy found (54 in the
+  engine, 4 in its integration tests) carries an `expect` whose reason names the charge or
+  the limit of its buffer, so a new call without one turns the gate red. The crate denies
+  `clippy::allow_attributes` and `clippy::allow_attributes_without_reason`, and a source scan
+  refuses what those let through: an inner `allow` of the lint, an `allow` or `expect` of a
+  group that holds it, an `expect` with a blank reason, and an attribute naming the lint in
+  another crate of the workspace (`story:buffer-growth-outside-the-charged-list-is-listed`).
 
 ### Fixed
 
+- `JSON.parse` frees the room of its stack of open values when the parse ends, before the
+  reviver is called; before, that room stayed allocated, uncharged, while the reviver ran
+  (found by the review of `story:buffer-growth-outside-the-charged-list-is-listed`).
 - The gate no longer overwrites `website/data/engines.json`: the selftest
   `site-data-check-refuses-a-percentage-rounded-up-to-100` wrote its planted counts there on
   every run. Each selftest of `site-data` now writes all its outputs under its own directory,
   and `gate-selftest` fails, naming the files, when its scripts change a tracked file
   (`story:gate-selftests-write-no-tracked-file`).
+
+### Host interface
+
+- `HOST-2` (changed, slice 1) also states that each engine crate declares `#![no_std]` in its
+  crate root and names no `std` path in its library code (an item under `#[cfg(test)]` is test
+  code); its source scan, `swell::source_scan::host_2_no_ambient_authority_in_engine_crates`,
+  refuses both. No public item of `value.rs` or of `host/*.rs` is added or changed.
+- `HOST-26`, `HOST-27`, `HOST-144`, `HOST-147`, `HOST-212` and `HOST-213` (slice 4) have tests
+  (`swell::math_random::*`): two agents with the same `random_seed` give the same 1,000
+  values; two realms of one agent differ; `random_seed` changes the stream and `hash_key` does
+  not; two child processes print the same 1,000 values and the key order of an object of
+  10,000 keys; 100,000 values are in [0, 1) with positive sign and 53 bits; a realm's stream
+  is its creation index, not the order of calls.
 
 ## [0.12.0] - 2026-11-25
 

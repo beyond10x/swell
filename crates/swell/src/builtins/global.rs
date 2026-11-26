@@ -491,7 +491,7 @@ impl<H: Host> Agent<H> {
             // make the n octets one code point or none).
             let decoded = octets
                 .get(..n as usize)
-                .and_then(|octets| std::str::from_utf8(octets).ok())
+                .and_then(|octets| core::str::from_utf8(octets).ok())
                 .and_then(|text| text.chars().next());
             let Some(scalar) = decoded else {
                 return Err(self.uri_error("URI malformed: not the UTF-8 of a code point"));
@@ -511,6 +511,7 @@ impl<H: Host> Agent<H> {
 #[cfg(test)]
 mod tests {
     use super::{escape_octet, hex_digit_value, is_unescaped, parse_hex_octet};
+    use alloc::vec::Vec;
 
     /// The white space `parseFloat` and `parseInt` skip in `swell-num` is the engine's
     /// `StrWhiteSpaceChar` (`ops/conversion.rs`, with `Zs` from `swell-unicode`), over every

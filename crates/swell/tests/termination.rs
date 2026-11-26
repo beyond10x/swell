@@ -213,6 +213,15 @@ fn next_object_doubling(agent: &mut Agent<TestHost>, realm: &Realm) -> (u64, u64
 /// `memory_bytes` after the termination (HOST-171), the collection lowers it, and the credit
 /// lowers it by that much.
 ///
+/// `n` and the answer of the second script are read with no allocation
+/// (`support::host::number_answer`): `eval_text` writes a Number as a String the engine makes,
+/// and where the arena of Strings has no free slot left that String needs the arena to grow,
+/// which the room cannot hold. Measured on 2026-11-26 with `Math.random` in the realm: at
+/// `SWELL_TEST_REALM_FUNCTIONS` 200 the padded realm leaves that arena two free slots after a
+/// collection and the third String grows it by 53,248 bytes; in the collect mode the room after
+/// the credit was 39,310 bytes, and the String of the second script's `10` ended in
+/// `Terminated(MemoryBudget)`.
+///
 /// The budget is not taken from the realm's own reading plus a constant: the fill ends where
 /// the arena of objects runs out of slots, and how many it has free above a realm moves with
 /// every object a realm gains. Measured on 2026-11-24 in the collect mode: the realm's charge
@@ -262,21 +271,20 @@ fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
     let after = budget - agent.heap_bytes().unwrap();
     assert!(after >= AFTER_FILL_ROOM, "room {after}");
     let live = agent.live_bytes().unwrap();
-    let Outcome::Normal(made) = eval_text(&mut agent, &realm, "n;") else {
-        panic!("n did not answer");
-    };
+    let made = support::host::number_answer(&mut agent, &realm, "n;")
+        .unwrap_or_else(|outcome| panic!("n did not answer: {outcome}"));
     println!(
         "the arena of objects grows by {doubling} bytes at {doubles_at}; budget {budget}; the \
          fill ended at {ended_at} and made {made} objects; after the collection and the credit: \
          room {after} bytes, live_bytes {live}"
     );
     assert_eq!(
-        eval_text(
+        support::host::number_answer(
             &mut agent,
             &realm,
             "(function () { var a = []; for (var i = 0; i < 10; i++) a.push({}); return a.length; })()"
         ),
-        Outcome::Normal("10".to_string())
+        Ok(10.0)
     );
     assert_eq!(agent.state(), AgentState::Alive);
 }

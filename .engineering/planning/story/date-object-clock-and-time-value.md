@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:date-object-clock-and-time-value
 kind: story
-status: active
+status: implemented
 title: 'Date exists as an object with a time value: Date.now, new Date() and new Date(value) over the host clock, TimeClip, and the two Date references of the first consumer answer as the standard says'
 summary: The Date object with the clock hook charged, TimeClip in swell-num, HOST-125 and 126, 164 cases of slice 4, and the consumer test of the two Date reads.
 relations:
@@ -38,10 +38,11 @@ scope:
   path: crates/swell/tests/support/host.rs
 - confidence: cited
   path: website/data/status.json
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:24Z", actor: "human:operator", revision: 10}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:24Z", actor: "human:operator", revision: 11}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:45Z", actor: "human:operator", revision: 12, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

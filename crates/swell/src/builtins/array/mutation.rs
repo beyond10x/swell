@@ -32,6 +32,9 @@ use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
 use crate::object::builtin_function::KeptRoom;
 use crate::value::{ObjectRef, Value};
+use alloc::format;
+use alloc::vec::Vec;
+use swell_num::fmath;
 
 use super::MAX_SAFE_LENGTH;
 
@@ -262,7 +265,7 @@ impl<H: Host> Agent<H> {
         // 2. Let len be ? LengthOfArrayLike(O).
         let length = self.length_of_array_like(object)?;
         // 3, 4. Let middle be floor(len / 2); let lower be 0.
-        let middle = (length / 2.0).floor();
+        let middle = fmath::floor(length / 2.0);
         let mut lower = 0.0;
         // 5. Repeat, while lower ≠ middle.
         while lower != middle {
@@ -712,7 +715,7 @@ impl<H: Host> Agent<H> {
                 }
                 low = high;
             }
-            std::mem::swap(&mut source, &mut target);
+            core::mem::swap(&mut source, &mut target);
             width = width.saturating_mul(2);
         }
         // After an odd number of passes the sorted values are in the buffer.
@@ -783,9 +786,9 @@ impl<H: Host> Agent<H> {
                 .map(|(x, y)| x.cmp_string(y)),
         };
         Ok(match ordering {
-            Some(std::cmp::Ordering::Less) => -1.0,
-            Some(std::cmp::Ordering::Greater) => 1.0,
-            Some(std::cmp::Ordering::Equal) => 0.0,
+            Some(core::cmp::Ordering::Less) => -1.0,
+            Some(core::cmp::Ordering::Greater) => 1.0,
+            Some(core::cmp::Ordering::Equal) => 0.0,
             None => return Err(self.fault()),
         })
     }
@@ -825,6 +828,9 @@ mod tests {
     use crate::ops::objects::IntegrityLevel;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
+    use alloc::string::ToString;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     fn number(n: f64) -> Value {
         Value::Number(n)

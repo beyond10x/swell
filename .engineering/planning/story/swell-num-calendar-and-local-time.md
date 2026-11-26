@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:swell-num-calendar-and-local-time
 kind: story
-status: active
+status: implemented
 title: swell-num has the calendar of a time value, MakeFullYear, LocalTime and UTC with a bounded search at a time zone transition, and the time zone offset strings, tested without an engine
 summary: DateFields from a time value, make_full_year, LocalTime and UTC over host closures with at most 57 asks, the offset clamp and offset strings, and MakeDay beyond 2^53, all in crates/num.
 relations:
@@ -14,10 +14,11 @@ scope:
   path: crates/num/tests/calendar.rs
 - confidence: inferred
   path: crates/num/tests/main.rs
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:24Z", actor: "human:operator", revision: 11}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:24Z", actor: "human:operator", revision: 12}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:49Z", actor: "human:operator", revision: 13, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

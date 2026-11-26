@@ -16,6 +16,7 @@
 //! body, entered with a completion record; a termination enters no handler, so it calls no
 //! `return`.
 
+use alloc::boxed::Box;
 use swell_compiler::bytecode::TAG_THROW;
 
 use super::dispatch::Flow;

@@ -18,9 +18,14 @@
 //! holds across code (the wrapper, the property list, each open frame's object and keys) is
 //! on the agent's kept stack (decision 4).
 
+use alloc::format;
+use alloc::string::ToString;
+use alloc::vec;
+use alloc::vec::Vec;
+
 mod parse;
 
-use std::collections::BTreeSet;
+use alloc::collections::BTreeSet;
 
 use crate::builtins::object::argument;
 use crate::builtins::string::{StringBuilder, units_of};
@@ -236,7 +241,7 @@ impl<H: Host> Agent<H> {
             serialized => self.json_write(state, serialized)?,
         }
         self.json_walk(state)?;
-        let out = std::mem::take(&mut state.out);
+        let out = core::mem::take(&mut state.out);
         Ok(Value::String(self.finish_string(out)?))
     }
 
@@ -710,7 +715,7 @@ impl<H: Host> Agent<H> {
         )?;
         if !state.gap.is_empty() {
             self.append_str(&mut state.out, "\n")?;
-            let indent = std::mem::take(&mut state.indent);
+            let indent = core::mem::take(&mut state.indent);
             let appended = self.append_units(&mut state.out, &indent);
             state.indent = indent;
             appended?;
@@ -733,7 +738,7 @@ impl<H: Host> Agent<H> {
         if frame.written {
             if !state.gap.is_empty() {
                 self.append_str(&mut state.out, "\n")?;
-                let indent = std::mem::take(&mut state.indent);
+                let indent = core::mem::take(&mut state.indent);
                 let appended = self.append_units(&mut state.out, &indent);
                 state.indent = indent;
                 appended?;
@@ -755,6 +760,8 @@ impl<H: Host> Agent<H> {
 mod tests {
     use crate::Termination;
     use crate::builtins::string::transform::tests::{Answer, FEW_STEPS, LONG, with_long};
+    use alloc::string::ToString;
+    use alloc::vec;
 
     /// `#sec-json.stringify`, step 8: a String space gives its first 10 code units, and no
     /// more of it is read.

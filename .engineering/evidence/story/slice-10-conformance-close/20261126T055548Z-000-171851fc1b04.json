@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:48Z",
+  "actor": "human:operator",
+  "artifact": "story:slice-10-conformance-close",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit b825e55ee79a, an ancestor of that head",
+    "reference": "conformance/test262/expected.txt:232 test262-slice 10 3759 7258 0 0 3759 3759 0 0"
+  }
+}

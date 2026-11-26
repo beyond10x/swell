@@ -26,6 +26,7 @@ use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
 use crate::object::property::Key;
 use crate::value::{ObjectRef, SymbolRef, Value};
+use alloc::format;
 
 /// The code unit 0x0067 (LATIN SMALL LETTER G).
 const FLAG_G: u16 = 0x0067;

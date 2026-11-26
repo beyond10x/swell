@@ -25,6 +25,7 @@ use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Descriptor, Key, Property};
 use crate::realm::intrinsics::{ErrorIntrinsics, Intrinsic};
 use crate::value::{ObjectRef, Value};
+use alloc::vec::Vec;
 
 impl<H: Host> Agent<H> {
     /// The Error intrinsics of a realm (20.5.2, 20.5.3, 20.5.6.2, 20.5.6.3), in the order of
@@ -467,6 +468,8 @@ pub(crate) fn error_data(kind: &ObjectKind) -> Option<ErrorKind> {
 #[cfg(test)]
 mod tests {
     use crate::builtins::string::transform::tests::{Answer, Counting, FEW_STEPS, LONG};
+    use alloc::string::ToString;
+    use alloc::vec;
 
     /// `Error.prototype.toString` (`#sec-error.prototype.tostring`), step 9, builds its result
     /// from other values, so it is bounded by `string_length` (`docs/design/host-interface.md`,

@@ -24,6 +24,7 @@ use crate::object::property::Key;
 use crate::ops::iteration::IteratorRecord;
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, Value};
+use alloc::vec::Vec;
 
 impl<H: Host> Agent<H> {
     /// `SpreadArray`: GetIterator of the value on top, which stays there, rooted, while the
@@ -103,6 +104,10 @@ impl<H: Host> Agent<H> {
         let bytes = u64::from(count).saturating_mul(size);
         self.charge_bytes(bytes)?;
         let mut args = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `charge_bytes` before it is reserved, a `Value` per element; the caller credits it"
+        )]
         if args
             .try_reserve_exact(usize::try_from(count).unwrap_or(usize::MAX))
             .is_err()

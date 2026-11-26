@@ -23,7 +23,9 @@
 //! The map lookup is no step of its own (item 6); a binding is charged when it is created and
 //! credited with the realm.
 
-use std::rc::Rc;
+use alloc::boxed::Box;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
 
 use crate::env::{Added, EnvironmentRecord, GlobalBindings, LexicalBinding, RecordNames};
 use crate::heap::arena::Handle;

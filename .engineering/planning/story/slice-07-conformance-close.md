@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slice-07-conformance-close
 kind: story
-status: active
+status: implemented
 title: 'Every run of slice 7 passes: the cases that need class or super move to slice 8, and passing cases of later slices come in by rule lines'
 summary: 40 cases (80 runs) move to slice 8 with evidence in moves.tsv, the 2 cases that need yield* in a generator method are checked, cases of slices delivered after 7 that pass come in by dir lines or keep their slice; section 12 and expected.txt.
 relations:
@@ -22,10 +22,11 @@ scope:
   path: docs/design/engine.md
 - confidence: cited
   path: docs/plan/slice-07/close-into-7.tsv
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T11:15:33Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T11:15:34Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:48Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

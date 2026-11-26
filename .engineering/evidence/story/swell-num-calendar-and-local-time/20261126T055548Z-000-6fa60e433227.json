@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:48Z",
+  "actor": "human:operator",
+  "artifact": "story:swell-num-calendar-and-local-time",
+  "kind": "story",
+  "revision": 12,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit c297c51a2a0a, an ancestor of that head",
+    "reference": "crates/num/tests/date.rs:38 epoch_nanoseconds_of_known_dates"
+  }
+}

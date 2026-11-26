@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:async-functions-and-await
 kind: story
-status: active
+status: implemented
 title: 'Async functions run: await moves the frame into an activation the promise''s reaction resumes, and the consumer''s fetch_json runs to its end'
 summary: 'Async declarations, expressions and arrows compiled and run on the suspended frame of slice 7: the activation as holder, await through PromiseResolve and a reaction that names it, one re-entry per resumption, the charge and the terminations; %AsyncFunction.prototype%; the held refusal lifted, the async method reworded; the test of the consumer''s shape (two awaits on host promises, drained by the host); 207 cases (338 runs) on its list.'
 relations:
@@ -106,10 +106,11 @@ scope:
   path: crates/syntax/tests/sources/valid/async-function.js
 - confidence: cited
   path: website/data/status.json
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T18:20:00Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T18:20:01Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:43Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

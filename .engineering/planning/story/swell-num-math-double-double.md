@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:swell-num-math-double-double
 kind: story
-status: active
+status: implemented
 title: 'swell-num has double-double arithmetic, hypot, and the two gates that keep Math off the platform libm: libm-check and math-data-check'
 summary: dd.rs with two_sum, two_product and the pair operations, math::hypot, the libm-check and math-data-check tasks, with the error measured against exact arithmetic; lifts no case.
 relations:
@@ -34,10 +34,11 @@ scope:
   path: taskfiles/libm.yml
 - confidence: inferred
   path: taskfiles/math-data.yml
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:25Z", actor: "human:operator", revision: 10}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:26Z", actor: "human:operator", revision: 11}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:49Z", actor: "human:operator", revision: 12, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

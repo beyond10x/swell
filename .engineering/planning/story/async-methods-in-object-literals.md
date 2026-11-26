@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:async-methods-in-object-literals
 kind: story
-status: active
+status: implemented
 title: Async methods of object literals and their early errors
 summary: async m() {} parses, compiles and runs as an async function with a home object; async *m() gets a refusal of its own; 52 cases.
 relations:
@@ -38,10 +38,11 @@ scope:
   path: crates/syntax/tests/sources/refused/async-method.js
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/async-method.js
-revision: 19
+revision: 20
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T19:58:13Z", actor: "human:operator", revision: 18, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T19:58:13Z", actor: "human:operator", revision: 19, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:44Z", actor: "human:operator", revision: 20, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

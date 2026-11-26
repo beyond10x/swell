@@ -35,6 +35,8 @@ use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host, Termination};
 use crate::object::property::Key;
 use crate::value::{ObjectRef, StringRef, Value};
+use alloc::format;
+use alloc::vec::Vec;
 
 /// The builtins of this group, by their steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -434,6 +436,10 @@ impl<H: Host> Agent<H> {
             self.charge_bytes(bytes)?;
             positions.charged = positions.charged.saturating_add(bytes);
             let length = positions.list.len();
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "charged by `charge_bytes` into `positions.charged` before it grows"
+            )]
             if positions.list.try_reserve_exact(wanted - length).is_err() {
                 return Err(self.terminate(Termination::MemoryBudget));
             }
@@ -815,7 +821,7 @@ impl<H: Host> Agent<H> {
             .min(string_length);
         let head = self.read_units(string, 0, out_length)?;
         for (index, unit) in head.iter().enumerate() {
-            self.push_part(array, index, std::slice::from_ref(unit))?;
+            self.push_part(array, index, core::slice::from_ref(unit))?;
         }
         Ok(())
     }
@@ -911,6 +917,11 @@ mod tests {
     use crate::object::ordinary::OrdinaryData;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{StringRef, Value};
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::string::ToString;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     /// A new String of `text`, kept for the rest of the test.
     fn string(agent: &mut Agent<NoHooks>, text: &str) -> StringRef {

@@ -5,18 +5,349 @@ set: [pipefail]
 vars:
   RUNNER_FORM: CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0
   CPU_BOUNDS_BY_CORES: "16:245"
+  RELEASE_TARGETS: x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc
 
 tasks:
   forge-check:
-    desc: Fail when the gate's compiler or check-runner's variables differ from what the forge's runner has; runs toolchain-check and runner-env-check.
+    desc: Fail when the gate's compiler or check-runner's variables differ from what the forge's runner has, or when the release workflow and its documents disagree; runs toolchain-check, runner-env-check and release-targets-check.
     summary: |
       The local gate equals the forge (the organization's rule of that name; story
-      local-gate-equals-forge). Runs toolchain-check, then runner-env-check; each prints its
-      line, and the first that fails stops it. Reads no build output and builds nothing.
+      local-gate-equals-forge). Runs toolchain-check, then runner-env-check, then
+      release-targets-check (story releases-ship-static-binaries); each prints its line, and
+      the first that fails stops it. Reads no build output and builds nothing.
     silent: true
     cmds:
       - task: toolchain-check
       - task: runner-env-check
+      - task: release-targets-check
+
+  release-targets-check:
+    desc: Fail when the release workflow does not build the release's seven targets, a musl and a Windows binary with the C runtime linked in and checked so, or when docs/releasing.md or website/docs/embedding.md names or counts other archives than it builds.
+    summary: |
+      Fail when the release workflow does not build the release's targets with the C runtime
+      linked in where it must be and checked so, or when the documents name or count other
+      archives than it builds (story releases-ship-static-binaries). Reads, under GATE_ROOT
+      (default .), .github/workflows/release-build.yml, docs/releasing.md and
+      website/docs/embedding.md as text, in one awk program; it executes nothing of them and
+      writes no file.
+
+      The workflow is read as written in this repository, two blanks per level; comment lines,
+      also those of a run block, count as nothing. The targets are the "- target:" lines of
+      the build matrix, each with the "archive:" line of its entry. It fails, one line each,
+      when:
+        - the matrix has no target, or differs from RELEASE_TARGETS of taskfiles/forge.yml
+          (the seven targets of a release): "...: the build matrix lacks <target>" or "...:
+          builds <target>, which is not a target of a release";
+        - a target <arch>-unknown-linux-gnu has no <arch>-unknown-linux-musl beside it:
+          "release-targets-check: <file>: builds <gnu> and not <musl>; a static musl binary
+          goes beside each glibc one";
+        - the Build step, the one step of the build job whose run has "cargo build", does not
+          have this shape: a branch of 'case "$TARGET" in ... esac' whose line is
+          'flags="$flags ... -C target-feature=+crt-static ..."' (the blank after -C
+          optional), then 'export RUSTFLAGS="$flags"' after that esac, then the cargo build
+          line, and no 'flags=' that starts anew after that esac. The patterns of the branches
+          that add +crt-static are matched, as shell patterns, against each target of the
+          matrix: a -linux-musl or -windows-msvc target that meets none, or another target
+          that meets one, fails, and so does +crt-static on a line outside such a branch.
+          Other lines of the step (an echo, rustc -vV, an expression in the cargo call) are
+          not read;
+        - no step checks the linking: for each -linux-musl target a step whose env TARGET is
+          the matrix target, whose if: holds for the target, which has no continue-on-error
+          but false (nor its job), and whose run has a branch of 'case "$TARGET" in' with a
+          pattern that matches the target and that runs "readelf -d", looks for "(NEEDED)"
+          and runs "docker run"; for each -windows-msvc target the same with "dumpbin",
+          "VCRUNTIME" and "api-ms-win-crt". An if: is read when it is
+          endsWith(matrix.target, '<suffix>') joined by ||, and fails otherwise;
+        - one of the two documents names no archive swell-<placeholder>-<target>.<archive>
+          for a target of the matrix: "release-targets-check: <doc>: names no archive
+          swell-<version>-<target>.<archive>, which <file> builds";
+        - one of the two documents names a file swell-<placeholder or x.y.z>-<name>.<ext>, any
+          extension, that the matrix does not build: "release-targets-check: <doc>:<line>:
+          names the archive swell-<version>-<name>.<ext>, which <file> does not build";
+        - docs/releasing.md lacks one of the six sentences that count this release, or one
+          counts another number. They are fixed phrases, each on one line, and no other
+          sentence is read (one about earlier releases, or "two targets" for the musl pair,
+          is not a count of this release): "from it for <n> targets", "Its assets are the <n>
+          archives", "Download the <n> archives", "`ls` counts <n> archives" with n the
+          number of targets of the matrix, and "with the <n> files as assets", "its assets are
+          <n>:" with n that number and one (SHA256SUMS); n in words up to twenty or in digits.
+          The lines: "release-targets-check: <doc>: lacks the sentence "<phrase>"" and
+          "release-targets-check: <doc>:<line>: says "<phrase>"; <file> builds <n> archives,
+          so it is <word>".
+      It prints "release-targets-check: <n> target(s) in <file>, the release's targets; musl
+      and Windows built with +crt-static and their linking checked; <doc> and <doc> name each
+      archive and no other, and <doc> counts <n> archives and <n+1> assets".
+    vars:
+      GATE_ROOT: '{{.GATE_ROOT | default "."}}'
+    env:
+      GATE_ROOT: '{{.GATE_ROOT}}'
+      RELEASE_TARGETS: '{{.RELEASE_TARGETS}}'
+    silent: true
+    cmds:
+      - |
+        if [ "$GATE_ROOT" = . ]; then prefix=; else prefix=$GATE_ROOT/; fi
+        wf=${prefix}.github/workflows/release-build.yml
+        rel=${prefix}docs/releasing.md
+        emb=${prefix}website/docs/embedding.md
+        for file in "$wf" "$rel" "$emb"; do
+          [ -f "$file" ] || { echo "release-targets-check: $file is missing"; exit 1; }
+        done
+        awk -v wf="$wf" -v rel="$rel" -v emb="$emb" -v want="$RELEASE_TARGETS" '
+          function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+          function unquote(s) {
+            s = trim(s)
+            sub(/[ \t]+#.*$/, "", s)
+            if (s ~ /^".*"$/ || s ~ /^\047.*\047$/) s = substr(s, 2, length(s) - 2)
+            return s
+          }
+          function depth(s) { match(s, /^ */); return RLENGTH }
+          function glob(p, s,    re, i, c) {
+            p = unquote(p)
+            re = ""
+            for (i = 1; i <= length(p); i++) {
+              c = substr(p, i, 1)
+              if (c == "*") re = re ".*"
+              else if (c == "?") re = re "."
+              else if (c ~ /[A-Za-z0-9_-]/) re = re c
+              else re = re "[" c "]"
+            }
+            return s ~ ("^" re "$")
+          }
+          function globany(pats, s,    ps, np, q) {
+            np = split(pats, ps, /[ \t]*[|][ \t]*/)
+            for (q = 1; q <= np; q++) if (glob(ps[q], s)) return 1
+            return 0
+          }
+          # runsfor(step, target): 1 when the step runs for the target, 0 when not, -1 when
+          # its if: is not of the form the check reads.
+          function runsfor(s, t,    cond, parts, k, i, part, suffix, any) {
+            if (!(s in sif)) return 1
+            cond = sif[s]
+            sub(/^\$[{][{][ \t]*/, "", cond)
+            sub(/[ \t]*[}][}]$/, "", cond)
+            k = split(cond, parts, /[|][|]/)
+            any = 0
+            for (i = 1; i <= k; i++) {
+              part = trim(parts[i])
+              if (part !~ /^endsWith\(matrix\.target,[ \t]*\047[^\047]*\047\)$/) return -1
+              suffix = part
+              sub(/^endsWith\(matrix\.target,[ \t]*\047/, "", suffix)
+              sub(/\047\)$/, "", suffix)
+              if (suffix != "" && length(t) >= length(suffix) && substr(t, length(t) - length(suffix) + 1) == suffix) any = 1
+            }
+            return any
+          }
+          function word(k) { return k in words ? words[k] : k }
+          function fail(msg) { print "release-targets-check: " msg; bad++ }
+          BEGIN {
+            split("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty", w, " ")
+            for (i = 1; i <= 20; i++) { words[i] = w[i]; value[w[i]] = i }
+            # The sentences of docs/releasing.md that count this release: the text before the
+            # number, the text after it, and how many more than the targets it counts.
+            na = split("from it for |Its assets are the |Download the |`ls` counts |with the |its assets are ", apre, "|")
+            split(" targets| archives| archives| archives| files as assets|:", apost, "|")
+            split("0 0 0 0 1 1", aextra, " ")
+            pat_case = "^[^ ()]+([ \t]*[|][ \t]*[^ ()]+)*[)]"
+            pat_crt = "-C[ \t]*target-feature=([^ \"]*,)?[+]crt-static"
+          }
+          FILENAME == wf {
+            raw = $0
+            if (inrun) {
+              if (raw ~ /^[ \t]*$/ || depth(raw) >= 10) {
+                nrun[step]++
+                runline[step, nrun[step]] = substr(raw, 11)
+                next
+              }
+              inrun = 0
+            }
+            if (raw ~ /^[ \t]*#/ || raw ~ /^[ \t]*$/) next
+            d = depth(raw)
+            text = trim(raw)
+            sub(/[ \t]+#.*$/, "", text)
+            if (text ~ /^- target:/) {
+              t = text
+              sub(/^- target:/, "", t)
+              t = unquote(t)
+              if (!(t in built)) { order[++n] = t; built[t] = "" }
+              next
+            }
+            if (text ~ /^archive:/ && t != "") {
+              a = text
+              sub(/^archive:/, "", a)
+              built[t] = unquote(a)
+              next
+            }
+            if (d == 0) { injobs = (text == "jobs:"); next }
+            if (!injobs) next
+            if (d == 2) { job = text; sub(/:.*$/, "", job); next }
+            if (d == 4 && text ~ /^continue-on-error:/) { v = text; sub(/^continue-on-error:/, "", v); jobcoe[job] = unquote(v); next }
+            if (d == 6 && text ~ /^- /) { step++; stepjob[step] = job; text = trim(substr(text, 3)); d = 8; inenv = 0 }
+            if (!step) next
+            if (d == 8) {
+              inenv = (text == "env:")
+              if (text ~ /^name:/) { v = text; sub(/^name:/, "", v); sname[step] = unquote(v) }
+              if (text ~ /^if:/) { v = text; sub(/^if:/, "", v); sif[step] = trim(v) }
+              if (text ~ /^continue-on-error:/) { v = text; sub(/^continue-on-error:/, "", v); scoe[step] = unquote(v) }
+              if (text ~ /^run:[ \t]*[|>][-+]?$/) inrun = 1
+              else if (text ~ /^run:/) { v = text; sub(/^run:/, "", v); nrun[step] = 1; runline[step, 1] = unquote(v) }
+              next
+            }
+            if (d == 10 && inenv && text ~ /^TARGET:/) { v = text; sub(/^TARGET:/, "", v); senv[step] = trim(v) }
+            next
+          }
+          {
+            line = $0
+            while (match(line, /swell-(<[^<>]+>|[0-9]+\.[0-9]+\.[0-9]+)-[A-Za-z0-9_]+(-[A-Za-z0-9_]+)+\.[A-Za-z0-9]+(\.[A-Za-z0-9]+)*/)) {
+              name = substr(line, RSTART, RLENGTH)
+              line = substr(line, RSTART + RLENGTH)
+              sub(/^swell-(<[^<>]+>|[0-9]+\.[0-9]+\.[0-9]+)-/, "", name)
+              dot = index(name, ".")
+              target = substr(name, 1, dot - 1)
+              ext = substr(name, dot + 1)
+              named[FILENAME, target "." ext] = 1
+              if (!(target in built) || built[target] != ext)
+                fail(FILENAME ":" FNR ": names the archive swell-<version>-" target "." ext ", which " wf " does not build")
+            }
+            if (FILENAME != rel) next
+            for (k = 1; k <= na; k++) {
+              if (!match($0, apre[k] "([a-z]+|[0-9]+)" apost[k])) continue
+              phrase = substr($0, RSTART, RLENGTH)
+              count = substr(phrase, length(apre[k]) + 1)
+              count = substr(count, 1, length(count) - length(apost[k]))
+              seen[k]++
+              if (count ~ /^[0-9]+$/) c = count + 0
+              else if (count in value) c = value[count]
+              else c = -1
+              if (c != n + aextra[k]) fail(rel ":" FNR ": says \"" phrase "\"; " wf " builds " n " archives, so it is " word(n + aextra[k]))
+            }
+          }
+          END {
+            if (n == 0) { fail(wf ": no target in the build matrix"); exit 1 }
+            k = split(want, wants, /[ \t]+/)
+            for (i = 1; i <= k; i++) {
+              if (wants[i] == "") continue
+              wanted[wants[i]] = 1
+              if (!(wants[i] in built)) fail(wf ": the build matrix lacks " wants[i] "; a release has the targets of RELEASE_TARGETS (taskfiles/forge.yml)")
+            }
+            for (i = 1; i <= n; i++) {
+              t = order[i]
+              if (!(t in wanted)) fail(wf ": builds " t ", which is not a target of a release (RELEASE_TARGETS, taskfiles/forge.yml)")
+              if (t ~ /-unknown-linux-gnu$/) {
+                musl = t
+                sub(/-gnu$/, "-musl", musl)
+                if (!(musl in built)) fail(wf ": builds " t " and not " musl "; a static musl binary goes beside each glibc one")
+              }
+            }
+            # The run of each step without its comment lines.
+            builds = 0
+            for (s = 1; s <= step; s++) {
+              body = ""
+              for (j = 1; j <= nrun[s]; j++) if (trim(runline[s, j]) !~ /^#/) body = body runline[s, j] "\n"
+              runtext[s] = body
+              if (body ~ /cargo[ \t]+build/) { builds++; buildstep = s }
+            }
+            # The Build step, read as text: the branches of case "$TARGET" that add +crt-static.
+            if (builds != 1) fail(wf ": " builds " step(s) of the build job run cargo build; the check reads one")
+            else {
+              s = buildstep
+              cd = 0; td = 0; br = 0; crtn = 0; casecrt = 0; crtesac = 0; exportat = 0; cargoat = 0; resetat = 0
+              for (j = 1; j <= nrun[s]; j++) {
+                l = trim(runline[s, j])
+                if (l == "" || l ~ /^#/) continue
+                if (l ~ /^case[ \t].*[ \t]in$/) { cd++; if (cd == 1 && l ~ /^case[ \t]+"?\$[{]?TARGET[}]?"?[ \t]+in$/) td = 1; continue }
+                if (l == "esac") { if (cd == 1 && td) { if (casecrt) crtesac = j; td = 0; br = 0; casecrt = 0 }; cd--; continue }
+                if (td && cd == 1 && l ~ pat_case) {
+                  br++
+                  pats = l
+                  sub(/\).*$/, "", pats)
+                  l = trim(substr(l, length(pats) + 2))
+                }
+                if (l ~ pat_crt) {
+                  if (td && cd == 1 && br && l ~ /^flags="\$flags[ \t][^"]*"[ \t]*(;;)?$/) { crtpats[++crtn] = pats; casecrt = 1 }
+                  else fail(wf ": the Build step sets -C target-feature=+crt-static outside a branch of case \"$TARGET\" that adds it to flags (" l ")")
+                }
+                if (l ~ /^export[ \t]+RUSTFLAGS="\$flags"$/) exportat = j
+                if (l ~ /^flags=/ && l !~ /^flags="\$flags/) resetat = j
+                if (l ~ /cargo[ \t]+build/) cargoat = j
+              }
+              for (i = 1; i <= n; i++) {
+                t = order[i]
+                m = 0
+                for (c = 1; c <= crtn; c++) if (globany(crtpats[c], t)) m = 1
+                if ((t ~ /-linux-musl$/ || t ~ /-windows-msvc$/) && !m)
+                  fail(wf ": no branch of case \"$TARGET\" in the Build step adds -C target-feature=+crt-static for " t)
+                if (t !~ /-linux-musl$/ && t !~ /-windows-msvc$/ && m)
+                  fail(wf ": the Build step adds -C target-feature=+crt-static for " t ", which links the C library of its system dynamically")
+              }
+              if (crtn) {
+                if (exportat <= crtesac) fail(wf ": the Build step has no export RUSTFLAGS=\"$flags\" after the case that adds +crt-static")
+                else if (cargoat <= exportat) fail(wf ": the Build step runs cargo build before it exports RUSTFLAGS")
+                if (resetat > crtesac) fail(wf ": the Build step sets flags anew after the case that adds +crt-static")
+              }
+            }
+            # The steps that check the linking, and which branch of their case on TARGET does what.
+            checks = 0
+            for (s = 1; s <= step; s++) {
+              if (runtext[s] !~ /\(NEEDED\)/ && runtext[s] !~ /dumpbin/) continue
+              checks++
+              cd = 0; td = 0; br = 0
+              for (j = 1; j <= nrun[s]; j++) {
+                l = trim(runline[s, j])
+                if (l == "" || l ~ /^#/) continue
+                if (l ~ /^case[ \t].*[ \t]in$/) { cd++; if (l ~ /^case[ \t]+"?\$[{]?TARGET[}]?"?[ \t]+in$/ && !td) td = cd; continue }
+                if (l == "esac") { if (cd == td) { td = 0; br = 0 }; cd--; continue }
+                if (td && cd == td && l ~ pat_case) {
+                  br++
+                  pats = l
+                  sub(/\).*$/, "", pats)
+                  bpats[s, br] = pats
+                  nbr[s] = br
+                  l = substr(l, length(pats) + 2)
+                }
+                if (td && cd >= td && br) {
+                  low = tolower(l)
+                  if (l ~ /readelf[ \t]+-d/) has[s, br, "readelf"] = 1
+                  if (l ~ /\(NEEDED\)/) has[s, br, "needed"] = 1
+                  if (l ~ /docker[ \t]+run/) has[s, br, "docker"] = 1
+                  if (l ~ /dumpbin/) has[s, br, "dumpbin"] = 1
+                  if (low ~ /vcruntime/) has[s, br, "vcruntime"] = 1
+                  if (low ~ /api-ms-win-crt/) has[s, br, "apicrt"] = 1
+                }
+              }
+            }
+            if (checks == 0) fail(wf ": no step checks the linking of the binary (readelf -d and (NEEDED), or dumpbin)")
+            for (i = 1; checks && i <= n; i++) {
+              t = order[i]
+              if (t ~ /-linux-musl$/) { need1 = "readelf"; need2 = "needed"; need3 = "docker"; what = "readelf -d, (NEEDED) and docker run in a branch of case \"$TARGET\" that matches it" }
+              else if (t ~ /-windows-msvc$/) { need1 = "dumpbin"; need2 = "vcruntime"; need3 = "apicrt"; what = "dumpbin, VCRUNTIME and api-ms-win-crt in a branch of case \"$TARGET\" that matches it" }
+              else continue
+              found = 0
+              for (s = 1; s <= step; s++) {
+                if (runtext[s] !~ /\(NEEDED\)/ && runtext[s] !~ /dumpbin/) continue
+                r = runsfor(s, t)
+                if (r < 0) { fail(wf ": the step \"" sname[s] "\" has an if: the check does not read (" sif[s] "); it reads endsWith(matrix.target, \047<suffix>\047) joined by ||"); continue }
+                if (r == 0) { fail(wf ": the step \"" sname[s] "\" does not run for " t ": its if: is " sif[s]); continue }
+                if (senv[s] !~ /^\$[{][{][ \t]*matrix\.target[ \t]*[}][}]$/) { fail(wf ": the step \"" sname[s] "\" does not set TARGET to the matrix target"); continue }
+                if ((s in scoe) && scoe[s] != "false") { fail(wf ": the step \"" sname[s] "\" has continue-on-error: " scoe[s] "; a failed check would not fail the job"); continue }
+                if ((stepjob[s] in jobcoe) && jobcoe[stepjob[s]] != "false") { fail(wf ": the job " stepjob[s] " has continue-on-error: " jobcoe[stepjob[s]] "; a failed check would not fail the run"); continue }
+                for (b = 1; b <= nbr[s]; b++)
+                  if (globany(bpats[s, b], t) && has[s, b, need1] && has[s, b, need2] && has[s, b, need3]) found = 1
+              }
+              if (!found) fail(wf ": no step checks " t " (" what ")")
+            }
+            for (i = 1; i <= n; i++) {
+              t = order[i]
+              split(rel "|" emb, docs, "|")
+              for (dd = 1; dd <= 2; dd++)
+                if (!((docs[dd], t "." built[t]) in named))
+                  fail(docs[dd] ": names no archive swell-<version>-" t "." built[t] ", which " wf " builds")
+            }
+            for (k = 1; k <= na; k++)
+              if (!seen[k]) fail(rel ": lacks the sentence \"" apre[k] word(n + aextra[k]) apost[k] "\"")
+            if (bad) exit 1
+            print "release-targets-check: " n " target(s) in " wf ", the release\047s targets; musl and Windows built with +crt-static and their linking checked; " rel " and " emb " name each archive and no other, and " rel " counts " n " archives and " n + 1 " assets"
+          }
+        ' "$wf" "$rel" "$emb"
 
   toolchain-check:
     desc: Fail when a workflow names a compiler version, or when rustc in the gate is not the channel rust-toolchain.toml pins.
@@ -34,11 +365,27 @@ tasks:
       taken by anything but a commit hash of 40 hex digits, a RUSTUP_TOOLCHAIN variable, a
       "rustup toolchain install", "rustup install", "rustup default" or "rustup override set",
       and "cargo +<toolchain>" are each named as "toolchain-check: <file>:<line>: names a
-      compiler (<line>)". Then "${RUSTC:-rustc} --version" runs in the repository root, as
-      cargo runs it in the gate; another version than the channel fails with "toolchain-check:
-      rustc in the gate is <version>, <file> pins <channel>". A missing file fails too. It
-      prints "toolchain-check: rustc <version>, the channel <file> pins; <n> workflow file(s),
-      none names a compiler".
+      compiler (<line>)". Then the components and targets the file names (components = [...],
+      targets = [...], on one line or over several, strings in "" or ''; story
+      core-builds-without-std: llvm-tools for nostd-symbols, x86_64-unknown-none for
+      nostd-build; a key from which the check reads no string fails with "toolchain-check:
+      <file>: the key <key> names no value the check reads") must each be an input of the one
+      dtolnay/rust-toolchain step of GATE_ROOT/.github/workflows/check.yml, the workflow that
+      runs task check
+      (components: and targets:, comma-separated): one it lacks is named as "toolchain-check:
+      <workflow>:<line>: the toolchain step lacks the component|target <name>, which
+      rust-toolchain.toml names", and a check.yml with no such step or two fails too. rustup
+      would install them from the file when cargo first runs, as it did here; the inputs make
+      the forge's install the same, in its toolchain step, whatever its rustup does. slow.yml
+      (components: clippy, task slow, which builds nothing for the bare target) and
+      release-build.yml (targets: the release target of its matrix, no task) are not compared:
+      neither runs a step that needs llvm-tools or x86_64-unknown-none, and rustup installs both
+      from the file there when cargo first runs. Then "${RUSTC:-rustc} --version" runs in the
+      repository root, as cargo runs it in the gate; another version than the channel fails
+      with "toolchain-check: rustc in the gate is <version>, <file> pins <channel>". A missing
+      file fails too. It prints "toolchain-check: rustc <version>, the channel <file> pins; <n>
+      workflow file(s), none names a compiler; <check.yml> installs the <c> component(s) and
+      <t> target(s) <file> names".
     vars:
       GATE_ROOT: '{{.GATE_ROOT | default "."}}'
     env:
@@ -91,13 +438,83 @@ tasks:
           echo "toolchain-check: $named of $workflows workflow file(s) name a compiler; a workflow reads the channel from $file"
           exit 1
         fi
+        list() {
+          awk -v key="$1" '
+            function scan(s,   tok) {
+              while (match(s, /"[^"]*"|\047[^\047]*\047|#|\]/)) {
+                tok = substr(s, RSTART, RLENGTH)
+                s = substr(s, RSTART + RLENGTH)
+                if (tok == "#") return
+                if (tok == "]") { inside = 0; return }
+                print substr(tok, 2, length(tok) - 2)
+              }
+            }
+            inside { scan($0); next }
+            $0 ~ "^[ \t]*" key "[ \t]*=" {
+              line = $0
+              sub(/^[^=]*=[ \t]*/, "", line)
+              inside = (substr(line, 1, 1) == "[")
+              scan(line)
+            }
+          ' "$file"
+        }
+        components=$(list components | tr "\n" " ")
+        targets=$(list targets | tr "\n" " ")
+        for key in components targets; do
+          grep -Eq "^[[:space:]]*$key[[:space:]]*=" "$file" || continue
+          [ -n "$(list "$key")" ] ||
+            { echo "toolchain-check: $file: the key $key names no value the check reads (a string in \"\" or '' of the array)"; exit 1; }
+        done
+        gate=${prefix}.github/workflows/check.yml
+        [ -f "$gate" ] || { echo "toolchain-check: $gate is missing"; exit 1; }
+        lacking=$(awk -v file="$gate" -v components="$components" -v targets="$targets" '
+          function depth(s) { match(s, /^ */); return RLENGTH }
+          /^[ \t]*#/ || /^[ \t]*$/ { next }
+          {
+            text = $0
+            sub(/[ \t]+#.*$/, "", text)
+            if (text ~ /dtolnay\/rust-toolchain@/) {
+              steps++
+              instep = 1
+              stepdepth = depth(text)
+              if (text ~ /^ *- /) stepdepth += 2
+              at = NR
+              next
+            }
+            if (instep && (depth(text) < stepdepth || (depth(text) == stepdepth - 2 && text ~ /^ *- /))) instep = 0
+            if (instep && text ~ /^ *(components|targets):/) {
+              key = text
+              sub(/^ */, "", key)
+              sub(/:.*$/, "", key)
+              value = text
+              sub(/^[^:]*:[ \t]*/, "", value)
+              gsub(/["\047]/, "", value)
+              n = split(value, words, /[ \t]*,[ \t]*/)
+              for (i = 1; i <= n; i++) if (words[i] != "") has[key, words[i]] = 1
+            }
+          }
+          END {
+            if (steps != 1) { print "toolchain-check: " file " installs the toolchain in " steps+0 " step(s) through dtolnay/rust-toolchain, not one"; exit }
+            n = split(components, want, " ")
+            for (i = 1; i <= n; i++) if (want[i] != "" && !(("components", want[i]) in has)) print "toolchain-check: " file ":" at ": the toolchain step lacks the component " want[i] ", which rust-toolchain.toml names (components:)"
+            n = split(targets, want, " ")
+            for (i = 1; i <= n; i++) if (want[i] != "" && !(("targets", want[i]) in has)) print "toolchain-check: " file ":" at ": the toolchain step lacks the target " want[i] ", which rust-toolchain.toml names (targets:)"
+          }
+        ' "$gate")
+        if [ -n "$lacking" ]; then
+          printf '%s\n' "$lacking"
+          echo "toolchain-check: $gate does not install what $file names; the step that runs task check needs every component and target of it"
+          exit 1
+        fi
+        ncomp=$(printf '%s\n' "$components" | awk '{ n += NF } END { print n + 0 }')
+        ntarg=$(printf '%s\n' "$targets" | awk '{ n += NF } END { print n + 0 }')
         version=$(${RUSTC:-rustc} --version 2>&1) || { echo "toolchain-check: ${RUSTC:-rustc} --version failed: $version"; exit 1; }
         version=$(printf '%s\n' "$version" | awk 'NR == 1 { print $2 }')
         if [ "$version" != "$channel" ]; then
           echo "toolchain-check: rustc in the gate is $version, $file pins $channel"
           exit 1
         fi
-        echo "toolchain-check: rustc $version, the channel $file pins; $workflows workflow file(s), none names a compiler"
+        echo "toolchain-check: rustc $version, the channel $file pins; $workflows workflow file(s), none names a compiler; $gate installs the $ncomp component(s) and $ntarg target(s) $file names"
 
   runner-env-check:
     desc: Fail when check-runner does not set every variable the forge's runner has for task check, or sets one it does not have.

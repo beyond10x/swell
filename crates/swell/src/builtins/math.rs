@@ -21,8 +21,7 @@
 //! `sinh`, `tan` and `tanh`, convert their arguments here and answer what the function of
 //! `swell_num::math` of the same name answers (`exponentiate` for `pow`): it fixes the special
 //! values of its clause and computes the rest in plain `f64` arithmetic, so that a script prints
-//! the same bytes on every platform (HOST-135). `random` is a later story of slice 4; its row
-//! goes after `sumPrecise` in the tables, in the order of definition of `%Math%`.
+//! the same bytes on every platform (HOST-135).
 //!
 //! `Math.sumPrecise` (`#sec-math.sumprecise`, `story:math-sum-precise`) iterates its argument as
 //! `docs/design/engine.md`, decision 3, "Iterators held by a builtin" has it and sums each Number
@@ -30,6 +29,12 @@
 //! "`Math.sumPrecise`"): a step per item through `charge_steps` beside the step of the call of
 //! `next`, 34 steps once before the sum is rounded, and nothing on the heap. Its row goes after
 //! the 22 functions.
+//!
+//! `Math.random` (`#sec-math.random`, `story:math-random`) takes the next Number of the
+//! xoshiro256** generator of the current realm (`swell_num::random::Xoshiro256`), whose state
+//! the realm record holds (decision 6, "`Math.random`"): it reads nothing from the host, calls
+//! no hook, costs the step of the call and allocates nothing. Its row is the last, after
+//! `sumPrecise`, in the order of definition of `%Math%`.
 
 use crate::builtins::object::argument;
 use crate::host::agent::Agent;
@@ -41,6 +46,9 @@ use crate::object::property::Property;
 use crate::ops::iteration::IteratorRecord;
 use crate::realm::intrinsics::Making;
 use crate::value::{ObjectRef, Value};
+use alloc::vec::Vec;
+use swell_num::fmath;
+use swell_num::random::Xoshiro256;
 use swell_num::sum::{MAX_ITEMS, Sum};
 
 /// The steps `Math.sumPrecise` charges once before it rounds its sum: one per limb of the
@@ -120,6 +128,8 @@ pub(crate) enum MathBuiltin {
     Tanh,
     /// `Math.sumPrecise ( items )` (21.3.2.34).
     SumPrecise,
+    /// `Math.random ( )` (21.3.2.28).
+    Random,
 }
 
 /// The value properties of `Math` (21.3.1.1 to 21.3.1.8), by name, in the order of definition:
@@ -199,9 +209,11 @@ const APPROXIMATED: [(&str, u32, MathBuiltin); 22] = [
 
 /// The functions of `Math` after those of `APPROXIMATED`, by name, "length" and steps, in the
 /// order of definition (21.3.2) the stories of slice 4 share.
-const LATER_FUNCTIONS: [(&str, u32, MathBuiltin); 1] = [
+const LATER_FUNCTIONS: [(&str, u32, MathBuiltin); 2] = [
     // 21.3.2.34 (`story:math-sum-precise`).
     ("sumPrecise", 1, MathBuiltin::SumPrecise),
+    // 21.3.2.28 (`story:math-random`): no parameter, "length" 0.
+    ("random", 0, MathBuiltin::Random),
 ];
 
 /// Which end of the coerced arguments `Math.max` and `Math.min` answer.
@@ -258,13 +270,13 @@ impl<H: Host> Agent<H> {
             MathBuiltin::Abs => self.to_number(x)?.abs(),
             // `#sec-math.ceil`: 1. Let n be ? ToNumber(x). 2 to 5: roundToIntegralTowardPositive,
             // which keeps NaN, the zeros and the infinities and gives -0 in (-1, -0).
-            MathBuiltin::Ceil => self.to_number(x)?.ceil(),
+            MathBuiltin::Ceil => fmath::ceil(self.to_number(x)?),
             // `#sec-math.clz32`: 1. Let n be ? ToUint32(x). 2. The leading zero bits of n.
             MathBuiltin::Clz32 => f64::from(self.to_uint32(x)?.leading_zeros()),
             // `#sec-math.floor`: 1. Let n be ? ToNumber(x). 2 to 5:
             // roundToIntegralTowardNegative, which keeps NaN, the zeros and the infinities and
             // gives +0 in (+0, 1).
-            MathBuiltin::Floor => self.to_number(x)?.floor(),
+            MathBuiltin::Floor => fmath::floor(self.to_number(x)?),
             // `#sec-math.fround`: 1. Let n be ? ToNumber(x). 2 to 6: to binary32 with
             // roundTiesToEven and back; NaN, the zeros and the infinities stay.
             MathBuiltin::Fround => f64::from(self.to_number(x)? as f32),
@@ -291,10 +303,10 @@ impl<H: Host> Agent<H> {
             }
             // `#sec-math.sqrt`: 1. Let n be ? ToNumber(x). 2 to 4: squareRoot, which keeps NaN,
             // the zeros and +∞ and gives NaN below -0.
-            MathBuiltin::Sqrt => self.to_number(x)?.sqrt(),
+            MathBuiltin::Sqrt => fmath::sqrt(self.to_number(x)?),
             // `#sec-math.trunc`: 1. Let n be ? ToNumber(x). 2 to 5: roundToIntegralTowardZero,
             // which keeps NaN, the zeros and the infinities and the sign of a zero answer.
-            MathBuiltin::Trunc => self.to_number(x)?.trunc(),
+            MathBuiltin::Trunc => fmath::trunc(self.to_number(x)?),
             // `#sec-math.acos` to `#sec-math.tanh`, each of one argument: 1. Let n be ?
             // ToNumber(x). The steps after it, the special values and the approximation, are
             // the function of `swell_num::math` of the same name.
@@ -322,7 +334,23 @@ impl<H: Host> Agent<H> {
             MathBuiltin::Tan => return self.math_unary(x, swell_num::math::tan),
             MathBuiltin::Tanh => return self.math_unary(x, swell_num::math::tanh),
             MathBuiltin::SumPrecise => return self.sum_precise(x),
+            MathBuiltin::Random => return self.math_random(),
         };
+        Ok(Value::Number(number))
+    }
+
+    /// `Math.random ( )` (`#sec-math.random`): "a Number value with positive sign, greater than
+    /// or equal to +0𝔽 but strictly less than 1𝔽", and "Each Math.random function created for
+    /// distinct realms must produce a distinct sequence of values from successive calls". The
+    /// generator of the current realm (9.4.1, the realm of this function's activation) takes one
+    /// step, its state is stored back, and the Number of the word is the answer. The arguments
+    /// are not read; no hook is called and nothing is charged but the step of the call.
+    fn math_random(&mut self) -> Completion<Value> {
+        let realm = self.current_realm()?;
+        let record = self.realm_record(realm)?;
+        let mut generator = Xoshiro256::from_state(record.random.get());
+        let number = generator.next_f64();
+        record.random.set(generator.state());
         Ok(Value::Number(number))
     }
 
@@ -491,6 +519,10 @@ impl<H: Host> Agent<H> {
         then: impl FnOnce(&mut Self, &[f64]) -> Completion<Value>,
     ) -> Completion<Value> {
         let mut coerced = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `coerce_all`, 8 bytes per argument"
+        )]
         if coerced.try_reserve_exact(args.len()).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -507,7 +539,7 @@ impl<H: Host> Agent<H> {
 /// `copysign`.
 fn round(n: f64) -> f64 {
     // 2. If n is not a finite Number or n is an integral Number, return n.
-    let r = n.floor();
+    let r = fmath::floor(n);
     if !n.is_finite() || n == r {
         return n;
     }
@@ -533,6 +565,8 @@ mod tests {
     use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, enter, limits};
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
+    use alloc::vec;
+    use std::println;
 
     /// The function `Math[name]` of the agent's realm.
     fn math_function(agent: &mut Agent<NoHooks>, math: ObjectRef, name: &str) -> ObjectRef {

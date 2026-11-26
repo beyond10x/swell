@@ -3,7 +3,7 @@
 //! `story:heap-values-and-host-surface`; `Limits::min_stack_bytes` is
 //! `story:interpreter-and-script-entry-points`.
 
-use std::fmt;
+use core::fmt;
 
 /// The limits of an agent (decision 2). Each has a unit, a meaning at 0 and one outcome when it
 /// is reached; 0 is a limit of zero, never "no limit", and a host that wants no practical limit
@@ -100,8 +100,8 @@ pub const BINDINGS_REALM_HEAP_BYTES: u64 = 506_112;
 pub struct Seeds {
     /// Keys the SipHash of the engine's hash maps (HOST-145).
     pub hash_key: [u8; 16],
-    /// Seeds `Math.random`, each realm's generator taking it with the realm's creation index as
-    /// its stream (slice 4).
+    /// Seeds `Math.random`: each realm's generator takes it with the realm's creation index as
+    /// its stream.
     pub random_seed: [u8; 32],
 }
 

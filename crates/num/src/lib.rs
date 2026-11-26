@@ -38,6 +38,7 @@ pub mod literal;
 pub mod math;
 mod nat;
 pub mod parse;
+pub mod random;
 pub mod siphash;
 pub mod sum;
 pub mod time_value;

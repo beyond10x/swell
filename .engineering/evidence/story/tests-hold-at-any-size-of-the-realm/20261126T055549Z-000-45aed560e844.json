@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:49Z",
+  "actor": "human:operator",
+  "artifact": "story:tests-hold-at-any-size-of-the-realm",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit e51191af36f2, an ancestor of that head",
+    "reference": "crates/swell/tests/realm_padding.rs:67 a_padded_realm_holds_k_functions_more"
+  }
+}

@@ -135,6 +135,10 @@ fn uri_error() -> Answer {
 /// digits per octet.
 fn expected_encode(scalars: &[char], extra: &str) -> Vec<u16> {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test code: at most 12 units per scalar value of the test's list"
+    )]
     let mut out = Vec::with_capacity(scalars.len() * 12);
     for &scalar in scalars {
         if scalar.is_ascii_alphanumeric() || "_-.!~*'()".contains(scalar) || extra.contains(scalar)

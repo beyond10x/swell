@@ -39,6 +39,8 @@ use crate::heap::accounting::{Accounting, OverBudget};
 use crate::heap::collect::Mark;
 use crate::heap::map::KeyedMap;
 use crate::value::{ObjectRef, StringRef, SymbolRef, Value};
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use swell_num::siphash::SipBuildHasher;
 
 /// A property key inside the engine.
@@ -56,8 +58,8 @@ pub(crate) enum Key {
 /// the generation of the atom's or the Symbol's handle. Keys that are equal hash alike; two
 /// that differ in the bits left out only collide, which the map's equality tells apart. One
 /// word is one block of the hash, where the derived hash wrote up to four pieces.
-impl std::hash::Hash for Key {
-    fn hash<S: std::hash::Hasher>(&self, state: &mut S) {
+impl core::hash::Hash for Key {
+    fn hash<S: core::hash::Hasher>(&self, state: &mut S) {
         let (kind, high, low): (u64, u32, u32) = match *self {
             Key::Index(index) => (0, 0, index),
             Key::String(string) => (1, string.handle.generation, string.handle.index),
@@ -217,10 +219,10 @@ pub(crate) struct KeyedList<V> {
     last_index: Option<u32>,
     /// The entries lookups visited, in the counting build of the tests.
     #[cfg(test)]
-    visited: std::cell::Cell<u64>,
+    visited: core::cell::Cell<u64>,
     /// The comparisons sorts of its index keys made, in the counting build of the tests.
     #[cfg(test)]
-    compared: std::cell::Cell<u64>,
+    compared: core::cell::Cell<u64>,
 }
 
 impl<V> Default for KeyedList<V> {
@@ -231,9 +233,9 @@ impl<V> Default for KeyedList<V> {
             ascending: true,
             last_index: None,
             #[cfg(test)]
-            visited: std::cell::Cell::new(0),
+            visited: core::cell::Cell::new(0),
             #[cfg(test)]
-            compared: std::cell::Cell::new(0),
+            compared: core::cell::Cell::new(0),
         }
     }
 }
@@ -398,6 +400,10 @@ impl<V> KeyedList<V> {
             accounting.credit(list_bytes);
             return Err(over);
         }
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged as `list_bytes` before it grows"
+        )]
         if self
             .entries
             .try_reserve_exact(wanted.saturating_sub(length))
@@ -454,7 +460,7 @@ impl<V> KeyedList<V> {
         let expected = before.saturating_add(charged);
         let table = to_u64(size_of::<Index>()).saturating_add(index.map.table_bytes());
         let answer = if table > expected {
-            // The standard library's map took more than its layout says: charged now.
+            // The map took more than its layout says: charged now.
             match accounting.charge(table - expected) {
                 Ok(()) => {
                     index.charged = table;
@@ -553,7 +559,7 @@ pub(crate) fn sort_indices<E>(
             let (left, right) = pair.split_at(width.min(pair.len()));
             merge(left, right, out, compared);
         }
-        std::mem::swap(indices, buffer);
+        core::mem::swap(indices, buffer);
         width = run;
     }
     Ok(())
@@ -646,6 +652,9 @@ mod tests {
     use crate::host::outcome::{Abrupt, Termination};
     use crate::object::ordinary::OrdinaryData;
     use crate::value::{ObjectRef, Value};
+    use alloc::format;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     fn units(text: &str) -> Vec<u16> {
         text.encode_utf16().collect()

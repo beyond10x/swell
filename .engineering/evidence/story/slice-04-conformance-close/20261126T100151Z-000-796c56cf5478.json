@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T10:01:51Z",
+  "actor": "human:operator",
+  "artifact": "story:slice-04-conformance-close",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at a4c1b2e7 with the files of commit 6bd73063 (the run was made on that tree before the commit), exit 0, on the build node; the unit was merged by commit a4c1b2e7, an ancestor of that head",
+    "reference": "test262-slice 04 1681 3320 0 0 1681 1681 0 0 in conformance/test262/expected.txt and the six tests of crates/swell/tests/consumer_slice_04.rs"
+  }
+}

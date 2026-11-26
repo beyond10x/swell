@@ -43,7 +43,12 @@
 //! Kind site of the collector: [`ScriptRecord::trace`] (the realm, the constants' atoms and the
 //! template objects).
 
-use std::rc::Rc;
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::string::ToString;
+use alloc::vec;
+use alloc::vec::Vec;
 
 use swell_compiler::CompileError;
 use swell_compiler::bytecode::Code;
@@ -130,7 +135,7 @@ impl ScriptRecord {
 
     /// The host-defined value.
     pub(crate) fn host_defined(&self) -> Option<HostDefined> {
-        let data: &dyn std::any::Any = self.host_defined.as_ref()?.data.as_deref()?;
+        let data: &dyn core::any::Any = self.host_defined.as_ref()?.data.as_deref()?;
         data.downcast_ref::<ScriptHostDefined>()
             .map(|held| HostDefined::clone(&held.0))
     }
@@ -157,7 +162,10 @@ pub(crate) enum ParseAnswer {
 
 /// What a charged parse answers inside the engine when it was not stopped. The tree is not boxed:
 /// a box would be an allocation the budget does not see, for a value that lives one call.
-#[allow(clippy::large_enum_variant)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a box would be an allocation the budget does not see, for a value that lives one call"
+)]
 pub(crate) enum ParsedTree {
     /// The tree, whose parse charged [`swell_syntax::Script::charged`], with the copy of its
     /// source.
@@ -237,6 +245,10 @@ fn record_bytes(strings: usize, functions: usize, host_defined: bool) -> u64 {
 /// allocator refuses.
 fn exact<T>(n: usize) -> Option<Vec<T>> {
     let mut v = Vec::new();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "charged by `make_script_record` with the record before it is reserved (`record_bytes`, the template sites)"
+    )]
     v.try_reserve_exact(n).ok()?;
     Some(v)
 }
@@ -352,6 +364,10 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let mut units = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged before it is reserved, `vec_bytes::<u16>` of the copy"
+        )]
         if units.try_reserve_exact(length).is_err() {
             self.heap.accounting.credit(charged);
             return Err(self.terminate(Termination::MemoryBudget));
@@ -523,7 +539,10 @@ impl<H: Host> Agent<H> {
     /// The atoms of the String constants of `code` and of its templates' names, with their
     /// property keys, in vectors whose bytes [`record_bytes`] charged. The atoms are reported by
     /// no site until the record holds them; no safe point comes before it does.
-    #[allow(clippy::type_complexity)]
+    #[expect(
+        clippy::type_complexity,
+        reason = "the four vectors of one record, answered together and taken apart by the one caller"
+    )]
     fn record_atoms(
         &mut self,
         code: &Code,
@@ -592,6 +611,10 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let mut locals = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged with the frame before it is reserved, `vec_bytes::<SlotValue>` of the locals"
+        )]
         if locals.try_reserve_exact(count).is_err() {
             self.heap.accounting.credit(charged);
             return Err(self.terminate(Termination::MemoryBudget));
@@ -757,6 +780,10 @@ pub(crate) fn parse_termination(abrupt: Abrupt) -> Termination {
 
 #[cfg(test)]
 mod tests {
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+    use std::println;
     use swell_syntax::ledger::{Ledger, Stop};
     use swell_syntax::{ParseOptions, Script as Tree};
 

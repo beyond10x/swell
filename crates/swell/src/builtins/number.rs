@@ -37,6 +37,9 @@ use crate::object::ordinary::OrdinaryData;
 use crate::object::property::Property;
 use crate::realm::intrinsics::{Intrinsic, Making};
 use crate::value::{ObjectRef, Value};
+use alloc::format;
+use alloc::string::String;
+use swell_num::fmath;
 
 /// The builtins of this module, by their steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,7 +87,7 @@ fn number_predicate(id: NumberBuiltin, value: Value) -> bool {
         return false;
     };
     // An integral Number: finite, and its truncation is itself.
-    let integral = number.is_finite() && number.trunc() == number;
+    let integral = number.is_finite() && fmath::trunc(number) == number;
     match id {
         // `#sec-number.isfinite`: 1. If number is a finite Number, return true. 2. Return false.
         NumberBuiltin::IsFinite => number.is_finite(),
@@ -483,7 +486,7 @@ impl<H: Host> Agent<H> {
         }
         // 3. Let mv be ℝ(number). 4. If nonIntHandling is truncate, set mv to truncate(mv).
         // 5. mv is an integer.
-        let mv = number.trunc();
+        let mv = fmath::trunc(number);
         // 6, 7. If mv < minimum or mv > maximum, throw a RangeError exception.
         if mv < f64::from(minimum) || mv > f64::from(maximum) {
             return Err(self.throw_error(

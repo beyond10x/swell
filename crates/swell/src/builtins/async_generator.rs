@@ -493,6 +493,10 @@ impl<H: Host> Agent<H> {
             if self.heap.accounting.charge(bytes).is_err() {
                 return Err(self.terminate(Termination::MemoryBudget));
             }
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "charged by `heap.accounting.charge` before it grows, recorded in the object's `Grown`"
+            )]
             let reserved = self
                 .async_generator_mut(generator)?
                 .queue

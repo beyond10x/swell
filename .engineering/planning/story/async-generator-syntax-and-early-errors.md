@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:async-generator-syntax-and-early-errors
 kind: story
-status: active
+status: implemented
 title: 'Async generator syntax and its early errors: async function* parses, and a script with one ends on the refusal of slice 10 after its early errors'
 summary: The grammar of async generator declarations and expressions with [+Yield, +Await], their early errors, and the refusal held back to the end of the parse; 154 negative parse cases.
 relations:
@@ -25,10 +25,11 @@ scope:
   path: crates/syntax/tests/sources.rs
 - confidence: inferred
   path: crates/syntax/tests/sources/refused/async-generator-forms.js
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T19:58:14Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T19:58:14Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:43Z", actor: "human:operator", revision: 13, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

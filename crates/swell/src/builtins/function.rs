@@ -27,7 +27,8 @@
 //! The work of each is a function of its own, not inlined into the dispatch, whose frame every
 //! re-entry through a builtin of this module pays.
 
-use std::rc::Rc;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
 
 use crate::builtins::object::argument;
 use crate::builtins::string::StringBuilder;
@@ -233,6 +234,10 @@ impl<H: Host> Agent<H> {
         }
         // 7. Return list.
         let mut list = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by the loop above, a `Value` per element into `charged`, which the caller credits"
+        )]
         if list
             .try_reserve_exact(self.kept.len().saturating_sub(start))
             .is_err()

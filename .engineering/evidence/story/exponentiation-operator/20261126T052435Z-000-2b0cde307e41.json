@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:24:35Z",
+  "actor": "human:operator",
+  "artifact": "story:exponentiation-operator",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "sh docs/plan/slice-04/check.sh docs/plan/slice-04/story-exponentiation.cases.txt .out/test262-base/runs.tsv .out/test262-part/runs.tsv, run by the coordinator on impl/exponentiation at b7d34305",
+    "reference": "VERIFIED: 70 of the 76 listed cases have a failing run on the base, 0 after; 950 guard cases pass before and after, 0 regressed; outputs base-check.txt and verify-story-after.txt, verify-guard-after.txt in the unit's scratch directory wave/exponentiation"
+  }
+}

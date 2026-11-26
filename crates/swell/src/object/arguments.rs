@@ -24,6 +24,7 @@
 //! The map's slots are charged to the memory budget with the object and credited when the
 //! collector frees it.
 
+use alloc::vec::Vec;
 use swell_compiler::bytecode::Slot as ParamSlot;
 
 use super::property::{Descriptor, Key, Property, Slot};
@@ -208,6 +209,10 @@ impl<H: Host> Agent<H> {
         self.charge_bytes(bytes)?;
         let mut slots = Vec::new();
         let mut seen = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the mapped slots and the seen flags, both charged by `charge_bytes` before they are reserved"
+        )]
         if slots.try_reserve_exact(mapped).is_err() || seen.try_reserve_exact(width).is_err() {
             self.heap.accounting.credit(bytes);
             return Err(self.terminate(Termination::MemoryBudget));
@@ -338,14 +343,14 @@ impl<H: Host> Agent<H> {
 }
 
 #[cfg(test)]
-thread_local! {
+std::thread_local! {
     /// `accounting.used()` at the entry of the last `parameter_map` and, once its `slots` and
     /// `seen` are reserved, after that (0 until then), in the counting build of the tests; a
     /// test resets it before it reads it.
-    static MAP_READINGS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0, 0]) };
+    static MAP_READINGS: core::cell::Cell<[u64; 2]> = const { core::cell::Cell::new([0, 0]) };
     /// The parameter maps reserved, in the counting build of the tests; a test resets it before
     /// it reads it.
-    static MAPS_RESERVED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static MAPS_RESERVED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -356,6 +361,9 @@ mod tests {
     use crate::host::outcome::HostError;
     use crate::value::{Root, Value};
     use crate::{Outcome, Parsed, Realm, Source, Termination};
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec::Vec;
 
     /// The number of parameters of `f` and of arguments of its call.
     const PARAMETERS: u32 = 1_000;
@@ -450,7 +458,7 @@ mod tests {
         let before = prepared.agent.heap_bytes().unwrap();
         MAP_READINGS.with(|readings| readings.set([0, 0]));
         prepared.answers_the_count();
-        let [first, second] = MAP_READINGS.with(std::cell::Cell::get);
+        let [first, second] = MAP_READINGS.with(core::cell::Cell::get);
         assert!(
             second >= first + map_bytes(),
             "{second} once the map is reserved, {first} before, {} the map's bytes at least",
@@ -475,7 +483,7 @@ mod tests {
         let mut first_run = Prepared::new();
         MAP_READINGS.with(|readings| readings.set([0, 0]));
         first_run.answers_the_count();
-        let [entry, _] = MAP_READINGS.with(std::cell::Cell::get);
+        let [entry, _] = MAP_READINGS.with(core::cell::Cell::get);
         drop(first_run);
         let mut prepared = Prepared::new();
         let before = prepared.agent.heap_bytes().unwrap();
@@ -492,12 +500,12 @@ mod tests {
             "{outcome:?}"
         );
         assert_eq!(
-            MAP_READINGS.with(std::cell::Cell::get)[0],
+            MAP_READINGS.with(core::cell::Cell::get)[0],
             entry,
             "the map's making was entered at another reading"
         );
         assert_eq!(
-            MAPS_RESERVED.with(std::cell::Cell::get),
+            MAPS_RESERVED.with(core::cell::Cell::get),
             0,
             "a map reserved past the memory budget"
         );
@@ -505,7 +513,7 @@ mod tests {
         let roomy_limit = prepared.roomy_limit;
         prepared.agent.heap.accounting.set_limit(roomy_limit);
         prepared.answers_the_count();
-        assert_eq!(MAPS_RESERVED.with(std::cell::Cell::get), 1);
+        assert_eq!(MAPS_RESERVED.with(core::cell::Cell::get), 1);
         assert!(prepared.agent.collect().is_ok());
         assert_eq!(
             prepared.agent.heap_bytes().unwrap(),

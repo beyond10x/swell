@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:44Z",
+  "actor": "human:operator",
+  "artifact": "story:compare-page-with-published-data",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit eb494646295f, an ancestor of that head",
+    "reference": "website/data/engines.json (format swell-engines/1) and task site-data-check in Taskfile.yml:118 check list"
+  }
+}

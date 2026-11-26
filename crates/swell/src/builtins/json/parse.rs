@@ -39,6 +39,9 @@ use crate::object::property::{Key, array_index};
 use crate::ops::objects::IntegrityLevel;
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, StringRef, Value};
+use alloc::format;
+use alloc::string::ToString;
+use alloc::vec::Vec;
 
 /// The values made between two charges of the step budget.
 const STEP_CHUNK: u64 = 4_096;
@@ -224,6 +227,10 @@ impl<H: Host> Agent<H> {
             charged: 0,
         };
         let parsed = self.json_parse_text(&mut parser);
+        // The parse has ended (a parse that succeeds leaves its stack of open values empty): the
+        // stack's room is freed here, before InternalizeJSONProperty calls the reviver, since a
+        // close credits the charge of its entry and leaves the room.
+        parser.stack = Vec::new();
         *charged = charged.saturating_add(parser.charged);
         let parsed = parsed?;
         let Some(records) = parser.records else {
@@ -280,7 +287,7 @@ impl<H: Host> Agent<H> {
 
     /// Charge the steps read so far.
     fn json_pay(&mut self, parser: &mut Parser<'_>) -> Completion<()> {
-        let unpaid = std::mem::take(&mut parser.unpaid);
+        let unpaid = core::mem::take(&mut parser.unpaid);
         self.charge_steps(unpaid)
     }
 
@@ -386,6 +393,10 @@ impl<H: Host> Agent<H> {
         let mark = parser.records.is_none().then(|| self.keep(value));
         let bytes = bytes_of::<Open>(1).saturating_add(bytes_of::<Value>(1));
         self.json_parse_charge(parser, bytes)?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "each entry is charged by `json_parse_charge` before the stack grows; `try_reserve(1)` leaves a capacity of at most max(4, 2(d - 1)) entries of `size_of::<Open>()` bytes for a deepest nesting d, so the spare room, uncharged while the parse runs, is at most the charged entries again or 4 entries; no script runs during the parse, and `json_parse_with` frees the stack before the reviver is called"
+        )]
         if parser.stack.try_reserve(1).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -500,6 +511,10 @@ impl<H: Host> Agent<H> {
         // The record and its entry in its parent are in lists charged by their capacity; the
         // two slots of the kept stack are charged here.
         self.json_parse_charge(parser, bytes_of::<Value>(2))?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `json_parse_charge`, the two slots of the kept stack, before it grows"
+        )]
         if self.kept.try_reserve(2).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -716,6 +731,10 @@ impl<H: Host> Agent<H> {
                                 code = code * 16 + digit;
                                 parser.advance(1);
                             }
+                            #[expect(
+                                clippy::disallowed_methods,
+                                reason = "bounded by the charged text, one unit per escape read, dropped before any call into script"
+                            )]
                             if units.try_reserve(1).is_err() {
                                 return Err(self.terminate(Termination::MemoryBudget));
                             }
@@ -729,6 +748,10 @@ impl<H: Host> Agent<H> {
                 _ => unit,
             };
             parser.advance(1);
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "bounded by the charged text, one unit per unit read, dropped before any call into script"
+            )]
             if units.try_reserve(1).is_err() {
                 return Err(self.terminate(Termination::MemoryBudget));
             }
@@ -1098,6 +1121,7 @@ mod tests {
     use crate::host::hooks::test_host::{agent_with_realm, enter};
     use crate::ops::objects::IntegrityLevel;
     use crate::value::Value;
+    use alloc::vec;
 
     /// `#sec-json.rawjson` step 10: the object `JSON.rawJSON` answers is frozen, by
     /// TestIntegrityLevel (`#sec-testintegritylevel`), and has the slot [[IsRawJSON]].
