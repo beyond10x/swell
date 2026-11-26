@@ -12,12 +12,13 @@
 //! The transcendental functions are not here: they are `swell_num::math` (design, decision 6).
 //!
 //! The algorithms are those of fdlibm 5.3 as the msun library of FreeBSD carries them, ported to
-//! safe Rust with the two 32-bit words of a double held as one `u64`: `sqrt` from `e_sqrt.c`
-//! (the square root bit by bit), `floor`, `ceil` and `trunc` from `s_floor.c`, `s_ceil.c` and
-//! `s_trunc.c` (the fraction bits cleared, one unit added toward the rounding direction first),
-//! and `fmod` from `e_fmod.c` (shift and subtract, fixed point). The parts of the C code that
-//! raise the inexact flag of the floating-point environment are left out: Rust reads no flag.
-//! The notices those files carry, which their terms ask to keep:
+//! safe Rust with the two 32-bit words of a double held as one `u64`: the root bit by bit of
+//! `e_sqrt.c` (the lib tests' oracle of [`sqrt`], which corrects a fast estimate in integers);
+//! `floor`, `ceil` and `trunc` from `s_floor.c`, `s_ceil.c` and `s_trunc.c` (the fraction bits
+//! cleared, one unit added toward the rounding direction first); and `fmod` from `e_fmod.c`
+//! (shift and subtract, fixed point), after an `i64` path for two integers below 2^53. The
+//! parts of the C code that raise the inexact flag of the floating-point environment are left
+//! out: Rust reads no flag. The notices those files carry, which their terms ask to keep:
 //!
 //! ```text
 //! e_sqrt.c and e_fmod.c:
@@ -72,16 +73,84 @@ fn normalized(magnitude: u64) -> (u64, i32) {
 }
 
 /// The square root of `x`, correctly rounded to nearest (IEEE 754-2019, 5.4.1; `f64::sqrt`):
-/// ±0 for ±0, +∞ for +∞, NaN for a NaN and for every x below zero.
+/// ±0 for ±0, +∞ for +∞, NaN for a NaN (x itself) and [`f64::NAN`] for every x below zero.
 ///
-/// `e_sqrt.c`: x = m × 2^(e - 52) with e made even (m doubled when it is odd), so that
+/// x = m × 2^(e - 52) with e made even (m doubled when e is odd), so that sqrt(x) =
+/// sqrt(t) × 2^(e/2 - 52) with t = m × 2^52 and sqrt(t) from 2^52 to 2^53: the result's
+/// significand is the integer q nearest to sqrt(t). An estimate of q comes from `f64` arithmetic
+/// alone (a first reciprocal square root from the bits, three Newton steps, one Heron step); it
+/// is within a few units of q, and it is then corrected in `u128` integers until
+/// (2q - 1)² < 4t < (2q + 1)², which is exactly "q is the nearest" (the root of an integer that
+/// is not a square is irrational, so it never lies on a half). The estimate decides only how
+/// many corrections run, never the result, and no instruction of a processor is asked for a
+/// root: the crate forbids `unsafe`, which the processors' square-root intrinsics need on the
+/// pinned compiler (1.99.1: calling them is unsafe even where SSE2 is in the target's
+/// baseline), and `libm-check` refuses `core::arch`. About 4 times faster than the bit-by-bit
+/// root of `e_sqrt.c`, which the lib tests keep as the oracle of this one.
+pub fn sqrt(x: f64) -> f64 {
+    let bits = x.to_bits();
+    if x.is_nan() || x == 0.0 || bits == f64::INFINITY.to_bits() {
+        return x;
+    }
+    if bits & SIGN != 0 {
+        return f64::NAN;
+    }
+    let (mut m, mut e) = normalized(bits);
+    if e & 1 != 0 {
+        m += m;
+    }
+    e >>= 1;
+    // t = m × 2^52 < 2^106, and 4t and (2q + 1)² for q ≤ 2^53 stay below 2^128.
+    let four_t = u128::from(m) << 54;
+    // The estimate: m below 2^54 and even when it has 54 bits, so m as f64 is exact.
+    let v = (m as f64) * TWO_52;
+    let mut r = f64::from_bits(0x5fe6_eb50_c7b5_37a9 - (v.to_bits() >> 1));
+    for _ in 0..3 {
+        r *= 1.5 - 0.5 * v * r * r;
+    }
+    let y = v * r;
+    let y = 0.5 * (y + v / y);
+    // Clamped to [2^52, 2^53], where both corrections below stop: (2^53 - 1)² < 2^106 ≤ 4t and
+    // (2^54 + 1)² > 2^108 > 4t.
+    let mut q = ((y + 0.5) as u64).clamp(IMPLICIT, IMPLICIT << 1);
+    // The estimate is within one of q (measured over the lib tests' inputs): one correction each
+    // way without a branch, then the loops, which then run no pass and cost no mispredicted
+    // branch.
+    q += u64::from(square(2 * q + 1) <= four_t);
+    q -= u64::from(square(2 * q - 1) > four_t);
+    while square(2 * q + 1) <= four_t {
+        q += 1;
+    }
+    while square(2 * q - 1) > four_t {
+        q -= 1;
+    }
+    // q × 2^(e - 52): the biased exponent e + 1023 is added one below, so that the leading bit of
+    // q (2^52, or 2^53 after rounding up, which moves the exponent) adds the last one.
+    f64::from_bits((((i64::from(e) + 1022) as u64) << 52).wrapping_add(q))
+}
+
+/// 2^52.
+const TWO_52: f64 = 4_503_599_627_370_496.0;
+/// 2^53.
+const TWO_53: f64 = 9_007_199_254_740_992.0;
+
+/// n², for n below 2^55.
+fn square(n: u64) -> u128 {
+    u128::from(n) * u128::from(n)
+}
+
+/// The bit-by-bit square root of `e_sqrt.c`, the oracle of [`sqrt`] in the lib tests: ±0 for
+/// ±0, +∞ for +∞, x for a NaN and [`f64::NAN`] for every x below zero.
+///
+/// x = m × 2^(e - 52) with e made even (m doubled when it is odd), so that
 /// sqrt(x) = sqrt(m × 2^-52) × 2^(e/2); the 54 bits of q = floor(sqrt(2m × 2^54) / 2^27), one
 /// more than the result has, are made one at a time from the top, each the larger bit for which
 /// q² stays at or below the operand, with the running remainder kept exactly. The last bit
 /// rounds: with a remainder left the exact root lies strictly between two 54-bit values, never
 /// on a half of the 53-bit ones, so adding the last bit to q before it is dropped rounds to
 /// nearest.
-pub fn sqrt(x: f64) -> f64 {
+#[cfg(test)]
+fn sqrt_bit_by_bit(x: f64) -> f64 {
     let bits = x.to_bits();
     if x.is_nan() || x == 0.0 || bits == f64::INFINITY.to_bits() {
         return x;
@@ -193,7 +262,28 @@ pub fn trunc(x: f64) -> f64 {
 /// then ix - iy times my is taken from mx when it fits and mx is doubled, which leaves
 /// mx × 2^iy ≡ x modulo y with mx < 2my; one last subtraction and a shift back to a normal (or
 /// a subnormal) significand give the result, which is always a double.
+///
+/// Before it, the common case of a script: x and y integers of magnitude below 2^53 and y not
+/// zero. Both are exact as `i64`, and the `i64` remainder, which has the sign of the dividend,
+/// is the result, exact as `f64`; a zero remainder is +0 or -0 with the sign of x.
 pub fn fmod(x: f64, y: f64) -> f64 {
+    if x.abs() < TWO_53 && y.abs() < TWO_53 && y != 0.0 {
+        let (a, b) = (x as i64, y as i64);
+        if a as f64 == x && b as f64 == y {
+            let r = a % b;
+            return if r == 0 {
+                f64::from_bits(x.to_bits() & SIGN)
+            } else {
+                r as f64
+            };
+        }
+    }
+    shift_and_subtract(x, y)
+}
+
+/// [`fmod`] by `e_fmod.c` for every pair: the part after its `i64` path, and in the lib tests
+/// the oracle of that path.
+fn shift_and_subtract(x: f64, y: f64) -> f64 {
     if x.is_nan() {
         return x;
     }
@@ -248,4 +338,103 @@ pub fn fmod(x: f64, y: f64) -> f64 {
 pub fn rem_euclid(x: f64, y: f64) -> f64 {
     let r = fmod(x, y);
     if r < 0.0 { r + y.abs() } else { r }
+}
+
+/// The fast paths against the ports they stand for, with equal bits, NaN results included:
+/// both roots answer x for a NaN and `f64::NAN` below zero, and the `i64` path of `fmod` takes
+/// no NaN.
+#[cfg(test)]
+mod tests {
+    use super::{fmod, shift_and_subtract, sqrt, sqrt_bit_by_bit};
+
+    /// The corpus of `tests/fmath.rs`.
+    const CORPUS: &str = include_str!("../tests/fixtures/fmath/corpus.txt");
+
+    /// Knuth's 64-bit linear congruential generator, the design's.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            self.0
+        }
+    }
+
+    fn number(hex: &str) -> f64 {
+        f64::from_bits(u64::from_str_radix(hex, 16).unwrap_or(0))
+    }
+
+    /// Both roots over every `sqrt` input of the corpus and 100,000 drawn bit patterns (every
+    /// exponent, NaN, ±∞ and the subnormals among them), and over the 2^16 bit patterns on each side
+    /// of 1, 2, 2^-1022 and 2^-1074, where a carry or a short significand is likeliest to show.
+    #[test]
+    fn the_fast_root_equals_the_root_bit_by_bit() {
+        let mut inputs: alloc::vec::Vec<f64> = CORPUS
+            .lines()
+            .filter_map(|line| line.strip_prefix("sqrt "))
+            .filter_map(|rest| rest.split(' ').nth(1).map(number))
+            .collect();
+        assert!(
+            inputs.len() > 300,
+            "{} sqrt lines in the corpus",
+            inputs.len()
+        );
+        let mut draw = Lcg(11);
+        inputs.extend((0..100_000).map(|_| f64::from_bits(draw.next())));
+        for start in [1.0f64, 2.0, f64::MIN_POSITIVE, 5e-324] {
+            inputs.extend((0..1u64 << 16).map(|i| f64::from_bits(start.to_bits() + i)));
+            inputs.extend((1..1u64 << 16).map(|i| f64::from_bits(start.to_bits().wrapping_sub(i))));
+        }
+        for x in inputs {
+            let (fast, oracle) = (sqrt(x), sqrt_bit_by_bit(x));
+            assert_eq!(
+                fast.to_bits(),
+                oracle.to_bits(),
+                "sqrt of {:016x}",
+                x.to_bits()
+            );
+        }
+    }
+
+    /// The `i64` path of `fmod` against the port for integer pairs below 2^53: drawn pairs of
+    /// every magnitude up to 2^53 - 1, both signs, the divisors ±1 and ±2, zero dividends of
+    /// both signs, dividends smaller than the divisor, and remainders of zero.
+    #[test]
+    fn the_integer_remainder_equals_the_port() {
+        let mut draw = Lcg(12);
+        let mut pairs = alloc::vec::Vec::new();
+        for _ in 0..100_000 {
+            let (a, b) = (draw.next(), draw.next());
+            let x = ((a >> (11 + a % 53)) as i64) as f64;
+            let y = ((b >> (11 + b % 53)) as i64).max(1) as f64;
+            let signs = draw.next();
+            let x = if signs & 1 == 0 { x } else { -x };
+            let y = if signs & 2 == 0 { y } else { -y };
+            pairs.extend([(x, y), (y, x), (x * y, y)]);
+        }
+        let largest = 9_007_199_254_740_991.0;
+        for x in [
+            0.0, -0.0, 1.0, -1.0, 3.0, -3.0, 6.0, -6.0, largest, -largest,
+        ] {
+            for y in [1.0, -1.0, 2.0, -2.0, 3.0, -3.0, 7.0, largest, -largest] {
+                pairs.push((x, y));
+            }
+        }
+        for (x, y) in pairs {
+            if y == 0.0 || x.abs() > largest || y.abs() > largest {
+                continue;
+            }
+            let (fast, port) = (fmod(x, y), shift_and_subtract(x, y));
+            assert_eq!(
+                fast.to_bits(),
+                port.to_bits(),
+                "fmod({:016x}, {:016x})",
+                x.to_bits(),
+                y.to_bits()
+            );
+        }
+    }
 }

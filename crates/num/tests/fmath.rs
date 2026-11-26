@@ -7,7 +7,8 @@
 //! bits. The edge inputs are the list [`EDGES`] and the pairs [`EDGE_PAIRS`] (±0, ±∞, NaN, the
 //! subnormals, exact powers and squares, halves, the integers around 2^52 and 2^53, values near
 //! multiples of π/2, large arguments); the drawn inputs come from Knuth's 64-bit linear
-//! congruential generator below, 256 per function. The test makes every line again from the
+//! congruential generator below, 256 per function, and for `fmod` and `rem_euclid` 128 pairs of
+//! integers below 2^53 after them, the case of the integer path of `fmod`. The test makes every line again from the
 //! inputs and compares the file byte for byte, so the inputs are those of this file and the
 //! results are the crate's. To print the lines of the current code in place of the comparison,
 //! run the test with `SWELL_FMATH_CORPUS_PRINT=1` and `--nocapture`; the lines are between
@@ -39,6 +40,9 @@ const CORPUS: &str = include_str!("fixtures/fmath/corpus.txt");
 
 /// The drawn inputs per function.
 const DRAWN: usize = 256;
+
+/// The drawn pairs of integers below 2^53 per two-argument function, after the other drawn pairs.
+const INTEGER_PAIRS: usize = 128;
 
 /// The smallest subnormal, 2^-1074.
 const TINY: f64 = 5e-324;
@@ -139,6 +143,28 @@ const EDGE_PAIRS: &[(f64, f64)] = &[
     (4_294_967_296.0 * 3.5, 4_294_967_296.0),
     (-4_294_967_297.0, 4_294_967_296.0),
     (-65_537.0, 65_536.0),
+    // The integer path of `fmod`: zero remainders of both signs, the divisors ±1, a dividend
+    // smaller than the divisor, the largest integers below 2^53, and 2^53 itself, which takes
+    // the port.
+    (-6.0, 3.0),
+    (6.0, -3.0),
+    (-6.0, -3.0),
+    (-0.0, 5.0),
+    (0.0, -5.0),
+    (7.0, 1.0),
+    (-7.0, 1.0),
+    (7.0, -1.0),
+    (-7.0, -1.0),
+    (3.0, 7.0),
+    (-3.0, 7.0),
+    (3.0, -7.0),
+    (9_007_199_254_740_991.0, 2.0),
+    (-9_007_199_254_740_991.0, 1e15),
+    (5.0, 9_007_199_254_740_991.0),
+    (-9_007_199_254_740_991.0, -9_007_199_254_740_991.0),
+    (9_007_199_254_740_992.0, 3.0),
+    (-9_007_199_254_740_992.0, 7.0),
+    (1e15 + 1.0, 1000.0),
 ];
 
 /// Knuth's 64-bit linear congruential generator (multiplier 6364136223846793005, increment
@@ -164,6 +190,14 @@ impl Lcg {
         }
         let exponent = 1023 - 60 + (self.next() % 121);
         f64::from_bits((bits & ((1 << 63) | ((1 << 52) - 1))) | (exponent << 52))
+    }
+
+    /// An integer of magnitude below 2^53, of either sign, of 0 to 53 bits.
+    fn integer(&mut self) -> f64 {
+        let bits = self.next();
+        let magnitude = (bits >> 11) >> (self.next() % 54);
+        let x = magnitude as f64;
+        if bits & 1 == 0 { x } else { -x }
     }
 }
 
@@ -213,6 +247,11 @@ fn calls() -> Vec<(Call, &'static str)> {
         for i in 0..DRAWN {
             let wide = i % 2 == 0;
             let (x, y) = (draw.number(wide), draw.number(wide));
+            calls.push((Call::Binary(name, f, x, y), "drawn"));
+        }
+        let mut draw = Lcg(seed + 100);
+        for _ in 0..INTEGER_PAIRS {
+            let (x, y) = (draw.integer(), draw.integer());
             calls.push((Call::Binary(name, f, x, y), "drawn"));
         }
     }

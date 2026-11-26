@@ -18,13 +18,18 @@ Every number below comes from the gate, `task check`, on the released commit.
   `f64` method of `std`. The new module `swell_num::fmath` computes `sqrt`, `floor`, `ceil`,
   `trunc`, `fmod` (the `%` of two `f64`, which the compiler otherwise lowers to a call of the
   C math library's `fmod`) and `rem_euclid` in integer arithmetic, ported from fdlibm (FreeBSD
-  msun; notice in `NOTICE`); each result is the one IEEE 754 fixes. A corpus of 1,830 calls
+  msun; notice in `NOTICE`); each result is the one IEEE 754 fixes. `sqrt` corrects an `f64`
+  estimate in `u128` integers (the fdlibm root bit by bit stays as the oracle of the lib tests),
+  and `fmod` of two integers below 2^53 takes the `i64` remainder. A million calls on the build
+  node take, `std` against `fmath`: `sqrt` 1.2 ms and 21.0 ms, `floor` 5.6 ms and 5.0 ms,
+  `trunc` 1.6 ms and 1.3 ms, `%` of integers 29.4 ms and 12.8 ms, of fractions 23.9 ms and
+  33.4 ms. A corpus of 2,124 calls
   (`crates/num/tests/fixtures/fmath/corpus.txt`) holds the results, and exact arithmetic
   holds them again. Against `std` on x86-64 Linux the corpus differs in no result but the bits
   of a NaN: `sqrt` 0 of 313 (149 NaN results with other bits: `std` answers the negative
   default NaN for the root of a negative Number and quiets a signalling NaN, `fmath` answers
   the positive default NaN and a NaN operand as it is), `floor`, `ceil` and `trunc` 0 of 313
-  each, `fmod` and `rem_euclid` 0 of 289 each (4 NaN results with other bits each). The lib
+  each, `fmod` 0 of 436 (10 NaN results with other bits), `rem_euclid` 0 of 436 (12). The lib
   tests read the longest operand of `Nat` from a value passed in, not from a `thread_local!`.
   The test262 counts do not change (`test262 total 53801 8982 7 44812 25943 18867 2`).
 
