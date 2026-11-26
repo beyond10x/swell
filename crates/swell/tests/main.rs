@@ -91,6 +91,7 @@ mod regexp_symbol_methods;
 mod scripts;
 mod source_scan;
 mod spread;
+mod super_property;
 mod support;
 mod tagged_templates;
 mod template_literals;

@@ -295,8 +295,8 @@ fn async_functions_parse_through_every_entry() {
 /// AssignmentExpression, `#sec-generator-function-definitions-runtime-semantics-evaluation`)
 /// parses through each entry, the dynamic ones too (`story:yield-star-in-async-generators`
 /// lifted the refusal of slice 10 that held it back to the end of the parse); an early error or
-/// a grammar error anywhere ends the source on that error alone, and so does a refusal that
-/// stops the parse at its token (`super` in a method of an object literal). An async generator
+/// a grammar error anywhere ends the source on that error alone, and so does an early error
+/// that stops the parse at its token (`super.x` in a plain function). An async generator
 /// without it parses, and so does a `yield*` in a generator, also inside an async generator.
 #[test]
 fn yield_star_in_an_async_generator_parses_through_every_entry() {
@@ -332,8 +332,8 @@ fn yield_star_in_an_async_generator_parses_through_every_entry() {
             vec!["unexpected token ;"],
         ),
         (
-            "async function* f() { yield* a; }\nx = { m() { super.x; } };",
-            vec!["super is not supported before slice 8"],
+            "async function* f() { yield* a; }\nfunction g() { super.x; }",
+            vec!["super property outside a method"],
         ),
     ] {
         assert_eq!(messages(&parse(text).err().unwrap()), expected, "{text:?}");
@@ -465,6 +465,41 @@ fn message_kind_tells_refusals_from_early_errors() {
         refused.len(),
         early.len()
     );
+}
+
+/// Every source under `eval/` is eval code: parsed through `parse_eval` as the code of a
+/// non-strict caller with no flag set (`#sec-performeval`, step 9), it answers its header:
+/// `parses`, `SyntaxError "<message>"` (the first error) or `refused "<message>"` (the one
+/// error). The tests of scripts do not read these sources: `super.x` at the top of a script is
+/// an early error, at the top of eval code a refusal (`story:super-property-and-super-syntax`).
+#[test]
+fn eval_sources_answer_their_header() {
+    let options = ParseOptions { max_nesting: LIMIT };
+    let files = sources("eval").unwrap();
+    for (path, text) in &files {
+        let (_, result) = header(path, text).unwrap();
+        let answer = parse_eval(&units(text), false, options);
+        if result == "parses" {
+            assert!(answer.is_ok(), "{}: {:?}", path.display(), answer.err());
+            continue;
+        }
+        let errors = answer
+            .err()
+            .unwrap_or_else(|| panic!("{}: parsed, expected {result}", path.display()));
+        if result.starts_with("SyntaxError") {
+            let expected = quoted(path, &result, "SyntaxError").unwrap();
+            assert_eq!(
+                messages(&errors).first(),
+                Some(&expected),
+                "{}",
+                path.display()
+            );
+        } else {
+            let expected = quoted(path, &result, "refused").unwrap();
+            assert_eq!(messages(&errors), vec![expected], "{}", path.display());
+        }
+    }
+    println!("eval: {} file(s)", files.len());
 }
 
 /// The full path of a test in the crate's one test binary, `sources::<name>`, which a test

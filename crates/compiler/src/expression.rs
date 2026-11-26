@@ -26,7 +26,8 @@
 use swell_num::literal::numeric_literal;
 use swell_syntax::ast::{
     AssignOp, BinaryOp, Expr, ExprId, FunctionKind, LogicalOp, PatternElement, PatternKind,
-    PatternProperty, PatternTarget, Property, PropertyKey, PropertyValue, Span, UnaryOp, UpdateOp,
+    PatternProperty, PatternTarget, Property, PropertyKey, PropertyValue, Span, SuperKey, UnaryOp,
+    UpdateOp,
 };
 
 use crate::bytecode::{HandlerKind, Instruction, TAG_NORMAL, TAG_RETURN};
@@ -46,6 +47,14 @@ pub(crate) enum Target {
         object: ExprId,
         key: ExprId,
     },
+    /// `super.name`, the name a `strings` index: the reference `[this, base]`.
+    SuperNamed {
+        name: u32,
+    },
+    /// `super[key]`: the reference `[this, key, base]`.
+    SuperIndex {
+        key: ExprId,
+    },
 }
 
 impl Target {
@@ -54,7 +63,8 @@ impl Target {
         match self {
             Target::Binding(Binding::Global(_) | Binding::Dynamic(_)) | Target::Member { .. } => 1,
             Target::Binding(_) => 0,
-            Target::Index { .. } => 2,
+            Target::Index { .. } | Target::SuperNamed { .. } => 2,
+            Target::SuperIndex { .. } => 3,
         }
     }
 }
@@ -123,13 +133,19 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 object: *object,
                 key: *index,
             }),
+            Expr::SuperMember(SuperKey::Name(name)) => Ok(Target::SuperNamed {
+                name: self.string(name)?,
+            }),
+            Expr::SuperMember(SuperKey::Computed(key)) => Ok(Target::SuperIndex { key: *key }),
             _ => Err(malformed("an assignment target that is no reference")),
         }
     }
 
     /// The tasks that evaluate a reference onto the stack; with `convert`, the key of a property
     /// access with an expression is converted at once ([`Instruction::PropertyKey`]), because
-    /// the reference is read before it is written.
+    /// the reference is read before it is written. A Super Reference is the receiver, the key
+    /// and the base, in that order (`#sec-super-keyword-runtime-semantics-evaluation`); its key
+    /// is converted by [`Instruction::SuperKey`] where [`Compiler::get_keeping`] reads it.
     pub(crate) fn reference(
         &mut self,
         target: &Target,
@@ -155,6 +171,15 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     t.push(Task::Emit(Instruction::PropertyKey, span))?;
                 }
             }
+            Target::SuperNamed { .. } => {
+                t.push(Task::Emit(Instruction::This, span))?;
+                t.push(Task::Emit(Instruction::SuperBase, span))?;
+            }
+            Target::SuperIndex { key } => {
+                t.push(Task::Emit(Instruction::This, span))?;
+                t.push(Task::Expr(*key))?;
+                t.push(Task::Emit(Instruction::SuperBase, span))?;
+            }
         }
         Ok(t)
     }
@@ -174,6 +199,14 @@ impl<'a, 'm> Compiler<'a, 'm> {
             Target::Index { .. } => {
                 t.push(Task::Emit(Instruction::Dup2, span))?;
                 t.push(Task::Emit(Instruction::GetIndex, span))?;
+            }
+            Target::SuperNamed { name } => {
+                t.push(Task::Emit(Instruction::Dup2, span))?;
+                t.push(Task::Emit(Instruction::GetSuperNamed(*name), span))?;
+            }
+            Target::SuperIndex { .. } => {
+                t.push(Task::Emit(Instruction::SuperKey, span))?;
+                t.push(Task::Emit(Instruction::GetSuperIndex, span))?;
             }
         }
         Ok(t)
@@ -223,6 +256,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
             Target::Binding(Binding::Dynamic(name)) => Instruction::PutNameRef(self.string(name)?),
             Target::Member { name, .. } => Instruction::PutNamed(*name),
             Target::Index { .. } => Instruction::PutIndex,
+            Target::SuperNamed { name } => Instruction::PutSuperNamed(*name),
+            Target::SuperIndex { .. } => Instruction::PutSuperIndex,
             // A `const` binding throws for every assignment, a `let` one before its declaration.
             Target::Binding(Binding::Lexical {
                 at, name, constant, ..
@@ -597,6 +632,26 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     t.push(emit(Instruction::Call(n)))?;
                 }
             }
+            // `#sec-super-keyword-runtime-semantics-evaluation`: the receiver (the `this` of
+            // GetThisEnvironment), the key's value, GetSuperBase, then GetValue of the Super
+            // Reference.
+            Expr::SuperMember(key) => {
+                t.push(emit(Instruction::This))?;
+                match key {
+                    SuperKey::Name(name) => {
+                        t.push(emit(Instruction::SuperBase))?;
+                        t.push(emit(Instruction::GetSuperNamed(self.string(name)?)))?;
+                    }
+                    SuperKey::Computed(e) => {
+                        t.push(Task::Expr(*e))?;
+                        t.push(emit(Instruction::SuperBase))?;
+                        t.push(emit(Instruction::GetSuperIndex))?;
+                    }
+                }
+            }
+            // A SuperCall is an early error of every source the parser admits before
+            // `story:derived-classes-and-super-call`.
+            Expr::SuperCall(_) => return Err(malformed("a SuperCall")),
             // `#sec-new-operator-runtime-semantics-evaluation`.
             Expr::New { callee, arguments } => {
                 t.push(Task::Expr(*callee))?;
@@ -1483,6 +1538,25 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 t.push(Task::Expr(*index))?;
                 t.push(Task::Emit(Instruction::GetIndex, span))?;
             }
+            // GetThisValue of a Super Reference is its receiver (`#sec-getthisvalue`).
+            Expr::SuperMember(key) if chain.is_none() => {
+                t.push(Task::Emit(Instruction::This, span))?;
+                t.push(Task::Emit(Instruction::Dup, span))?;
+                match key {
+                    SuperKey::Name(name) => {
+                        t.push(Task::Emit(Instruction::SuperBase, span))?;
+                        t.push(Task::Emit(
+                            Instruction::GetSuperNamed(self.string(name)?),
+                            span,
+                        ))?;
+                    }
+                    SuperKey::Computed(e) => {
+                        t.push(Task::Expr(*e))?;
+                        t.push(Task::Emit(Instruction::SuperBase, span))?;
+                        t.push(Task::Emit(Instruction::GetSuperIndex, span))?;
+                    }
+                }
+            }
             // A name looked up by name gives its record's WithBaseObject as this value.
             Expr::Identifier(_) if chain.is_none() => match self.binding(Site::Expr(callee))? {
                 Binding::Dynamic(name) => {
@@ -1583,6 +1657,18 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     t.push(Task::Expr(*object))?;
                     t.push(Task::Expr(*index))?;
                     t.push(emit(Instruction::DeleteIndex))?;
+                }
+                // Step 5.a: a Super Reference throws a `ReferenceError` once it is made; the key
+                // is evaluated and not converted.
+                Expr::SuperMember(key) => {
+                    t.push(emit(Instruction::This))?;
+                    match key {
+                        SuperKey::Name(name) => {
+                            t.push(emit(Instruction::String(self.string(name)?)))?;
+                        }
+                        SuperKey::Computed(e) => t.push(Task::Expr(*e))?,
+                    }
+                    t.push(emit(Instruction::DeleteSuper))?;
                 }
                 Expr::OptionalChain(inner) => {
                     match self.delete_chain(*inner, operand_node.span, span)? {

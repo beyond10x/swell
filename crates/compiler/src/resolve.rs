@@ -93,7 +93,7 @@ use swell_num::to_string::number_to_string;
 use swell_syntax::Script;
 use swell_syntax::ast::{
     Ast, BindingTarget, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind,
-    LexicalName, PatternTarget, PropertyKey, PropertyValue, Stmt, StmtId,
+    LexicalName, PatternTarget, PropertyKey, PropertyValue, Stmt, StmtId, SuperKey,
 };
 use swell_syntax::ledger::{HeapBytes, Meter, Stop, map_entry_bytes};
 
@@ -1299,6 +1299,9 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 children.push(Walk::Expr(*callee));
                 children.extend(arguments.iter().map(|e| Walk::Expr(*e)));
             }
+            Expr::SuperMember(SuperKey::Name(_)) => {}
+            Expr::SuperMember(SuperKey::Computed(key)) => children.push(Walk::Expr(*key)),
+            Expr::SuperCall(arguments) => children.extend(arguments.iter().map(|e| Walk::Expr(*e))),
             Expr::New { callee, arguments } => {
                 children.push(Walk::Expr(*callee));
                 children.extend(arguments.iter().flatten().map(|e| Walk::Expr(*e)));
