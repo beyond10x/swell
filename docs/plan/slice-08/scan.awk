@@ -45,9 +45,11 @@
 #   the other cases with B:
 #     eval-private    EV with PM or PF
 #     eval-fields     EV with D
-#     then the first of these keys whose story holds every part of the case (its closure through its edges):
-#     classes {B NT SP}, derived {B NT SP C A}, public-fields {B NT SP D}, static-blocks {B NT SP D E},
-#     private-methods {B NT SP PM}, private-fields {B NT SP C D PM E PF A}
+#     then the first of these keys, in the order of the edges, whose story holds every part of the case (its
+#     closure: its own parts and those of every story it depends on, directly or through other stories):
+#     classes {B NT SP}, derived {B NT SP C A}, public-fields {B NT SP D}, private-methods {B NT SP PM},
+#     static-blocks {B NT SP C D PM E A} (after public-fields, derived and private-methods by edges),
+#     private-fields {B NT SP C D PM E PF A}
 # The list of a story, sorted (LC_ALL=C sort), read from scan.tsv:
 #   LC_ALL=C awk -F"\t" '$2 == "<key>" { print $1 }' docs/plan/slice-08/scan.tsv
 function slurp(f,   s, save) { save = RS; RS = "^$"; s = ""; if ((getline s < f) <= 0) s = ""; close(f); RS = save; return s }
@@ -56,10 +58,10 @@ BEGIN { FS = "\t"; OFS = "\t"
   cl["classes"] = " B NT SP "
   cl["derived"] = " B NT SP C A "
   cl["public-fields"] = " B NT SP D "
-  cl["static-blocks"] = " B NT SP D E "
+  cl["static-blocks"] = " B NT SP C D PM E A "
   cl["private-methods"] = " B NT SP PM "
   cl["private-fields"] = " B NT SP C D PM E PF A "
-  no = split("classes derived public-fields static-blocks private-methods private-fields", ord, " ")
+  no = split("classes derived public-fields private-methods static-blocks private-fields", ord, " ")
 }
 { p = $1; st = $2; f = feat[p]; ph = neg[p]
   t = slurp(root "/" p); n = split(inc[p], a, ",")
