@@ -109,6 +109,12 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   only. Build and test tooling is not covered. The root `Cargo.lock` lists no package from outside
   the repository, and the gate checks it. A third-party crate is allowed only in a separate
   workspace of tooling that nothing shipped depends on (an ESS conformance runner, a fuzzer).
+  One such workspace is the benchmark tool `bench/tool` (`swell-bench-exec`), with a lock file
+  of its own: it takes `nix` and what `nix` pulls in (`libc`, `bitflags`, `cfg-if`,
+  `cfg_aliases`) for `getrusage` and `kill`, which the standard library does not have without
+  `unsafe` (decided by the operator on 2026-11-26). No engine crate depends on it, and the
+  task `lock-check` of the gate fails, naming the package, when the root `Cargo.lock` gains
+  one from outside (selftest `tests/gate/lock-check-refuses-an-outside-package.sh`).
 - `#![forbid(unsafe_code)]` in every crate. No just-in-time compiler, no machine code
   generation, no executable memory.
 - No ambient authority: no file, network, clock, randomness or environment access in the engine.
@@ -380,8 +386,9 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 - Task facts, measured in wave 1 (Task 3.54):
   - Task takes a variable from the environment when none is passed on the command line. A
     gate variable therefore carries a prefix (`GATE_`, `TEST262_`, `UNICODE_DATA_`, `SPEC_`,
-    `HOST_REQ_`, `HOST_SURFACE_`, `ESS_`, `SITE_DATA_`, `LIBM_`, `MATH_DATA_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
-    ones that have a value as the gate's first line.
+    `HOST_REQ_`, `HOST_SURFACE_`, `ESS_`, `SITE_DATA_`, `LIBM_`, `MATH_DATA_`, `BENCH_`) and is
+    listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the ones that have a value
+    as the gate's first line.
   - A variable is written as `'{{.X | default "..."}}'`: in an included file a plain value
     ignores the command line.
   - A command script stops at the first failing command, and a `grep` that matches nothing
