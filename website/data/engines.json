@@ -305,13 +305,13 @@
         },
         "K1.built-ins": {
           "status": "measured",
-          "value": 12581,
+          "value": 12587,
           "of": 23885,
           "percent": "52.6",
           "unit": "cases",
           "basis": "swell-runner-2a1ade30",
           "secondary": {
-            "value": 12581,
+            "value": 12587,
             "of": 18861,
             "percent": "66.7",
             "label": "of the cases swell's runner runs"
@@ -368,13 +368,13 @@
         },
         "K1.language": {
           "status": "measured",
-          "value": 12361,
+          "value": 12362,
           "of": 23832,
           "percent": "51.8",
           "unit": "cases",
           "basis": "swell-runner-2a1ade30",
           "secondary": {
-            "value": 12361,
+            "value": 12362,
             "of": 23300,
             "percent": "53.0",
             "label": "of the cases swell's runner runs"
@@ -389,15 +389,15 @@
         },
         "K1.staging": {
           "status": "measured",
-          "value": 709,
+          "value": 712,
           "of": 1487,
-          "percent": "47.6",
+          "percent": "47.8",
           "unit": "cases",
           "basis": "swell-runner-2a1ade30",
           "secondary": {
-            "value": 709,
+            "value": 712,
             "of": 1474,
-            "percent": "48.1",
+            "percent": "48.3",
             "label": "of the cases swell's runner runs"
           },
           "source": {
@@ -410,15 +410,15 @@
         },
         "K1.total": {
           "status": "measured",
-          "value": 25943,
+          "value": 25953,
           "of": 53801,
           "percent": "48.2",
           "unit": "cases",
           "basis": "swell-runner-2a1ade30",
           "secondary": {
-            "value": 25943,
+            "value": 25953,
             "of": 44812,
-            "percent": "57.8",
+            "percent": "57.9",
             "label": "of the cases swell's runner runs"
           },
           "source": {
