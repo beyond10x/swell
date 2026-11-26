@@ -81,8 +81,9 @@ const APPROXIMATED: [(&str, u32); 22] = [
 
 /// The functions of `Math` after those of `APPROXIMATED`, in the order `%Math%` defines them:
 /// those whose argument is not a Number, which the tables of this file do not call
-/// (`Math.sumPrecise`, `story:math-sum-precise`, held by `tests/math_sum_precise.rs`).
-const LATER_FUNCTIONS: [&str; 1] = ["sumPrecise"];
+/// (`Math.sumPrecise`, `story:math-sum-precise`, held by `tests/math_sum_precise.rs`; and
+/// `Math.random`, `story:math-random`, held by `tests/math_random.rs`).
+const LATER_FUNCTIONS: [&str; 2] = ["sumPrecise", "random"];
 
 /// A valueOf that records its call and answers 1.
 fn value_of(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value> {
