@@ -176,9 +176,12 @@ fn answer_their_expected_outcome(paths: &[PathBuf]) {
 
 /// The tests of the scripts of `tests/language/`, one per part, and the list of their parts,
 /// [`LANGUAGE_PARTS`], whose length is the number of parts. Each part runs in a process of its
-/// own under cargo-nextest.
+/// own under cargo-nextest. The invocation writes each test as `#[test]` and `fn <name> =
+/// <part>;`, a line that declares the function by its name, so that
+/// `taskfiles/realm-room-tests.awk` sees each part (it does not see a function whose name a
+/// macro writes, and runs such a test at every size of the realm).
 macro_rules! language_parts {
-    ($($name:ident = $part:literal),* $(,)?) => {
+    ($(#[test] fn $name:ident = $part:literal;)*) => {
         /// The parts of the scripts of `tests/language/`, one test each ([`language_part`]).
         const LANGUAGE_PARTS: &[usize] = &[$($part),*];
         $(
@@ -195,37 +198,125 @@ macro_rules! language_parts {
 // The scripts of `tests/language/` are split over `language_scripts_answer_their_expected_outcome`,
 // the first part, and `language_scripts_answer_their_expected_outcome_part_<n>`: a script lands in
 // the part of its position in `language_scripts` ([`language_part`]), so a new script needs no
-// edit here, and `the_parts_cover_every_script` shows each is in exactly one part. Thirteen
-// parts: in the collect mode the scripts took 38 s together (166 scripts, at a load of 43 on 20
-// cores), 0.23 s a script; 250 such scripts take 57 s, under 5 s a part in 13. A prime, so
-// that two scripts share a part only when they stand 13 apart. A script costs its part the
-// whole of its time, which no number of parts shortens: three scripts took 10 to 12 s each in
-// that mode and made their parts take 43 to 60 s at a load of 100 to 110 on 17 cores
-// (cargo-nextest), so `function-recursion.js` computes `fib(7)` rather than `fib(15)` (`fib(10)`,
-// 177 calls, took 0.39 CPU seconds a run there, and with a `try-completion-*.js` its part 2.1,
-// measured on 2026-11-22; 41 calls still recurse through both branches), and the
-// two scripts of the completion value of a `try` statement left by `break` or `continue` are
-// one script per statement (`try-completion-finally-abrupt-*.js`,
-// `try-completion-try-and-catch-abrupt-*.js`), whose names stand next to each other and so
-// land in different parts. Measured again with 240 scripts at a load of 60 on 20 cores, each
-// part run alone: the scripts took 18.7 CPU seconds together in that mode (1.9 in the default
-// one), the costliest 0.5 s a run (a `try-completion-*.js`, 26 `eval` calls), a part 1.1 to
-// 2.4 s; part_12, 2.4 CPU seconds, took 18.5 s of wall time. `SWELL_SCRIPT_TIMES=1` with
-// `--no-capture` prints the wall and CPU seconds of each run.
+// edit here, and `the_parts_cover_every_script` shows each is in exactly one part. A prime number
+// of parts, so that two scripts share a part only when they stand that many apart. A script
+// costs its part the whole of its time, which no number of parts shortens: three scripts took 10
+// to 12 s each in the collect mode and made their parts take 43 to 60 s at a load of 100 to 110
+// on 17 cores (cargo-nextest), so `function-recursion.js` computes `fib(7)` rather than
+// `fib(15)` (`fib(10)`, 177 calls, took 0.39 CPU seconds a run there, measured on 2026-11-22; 41
+// calls still recurse through both branches), and the scripts of the completion value of a
+// `try` statement left by `break` or `continue` are one script per statement and way out
+// (`try-completion-finally-abrupt-*-break.js` and `-continue.js`,
+// `try-completion-try-and-catch-abrupt-*-break.js` and `-continue.js`), whose names stand next
+// to each other and so land in different parts.
+//
+// Forty-seven parts: every test stays under 2 CPU seconds alone with a collection at every safe
+// point in the test profile (opt-level 0) too. Measured there on 2026-11-27 with
+// `SWELL_SCRIPT_TIMES=1` (build node, load 9 to 12 on 32 cores), 286 scripts and 539 runs: 34.5
+// CPU seconds together; each of the 13 `try-completion-*-abrupt-*.js` scripts, one per statement
+// then, 1.2 to 1.56 s over its two runs (26 `eval` calls a run), one other script 1.0 s, every
+// other under 0.42 s. With 13 parts a part took 2.1 to 4.1 s alone; split by way out, with 47
+// parts, the parts sum to at most 1.3 s by those times.
+//
+// No part reads the realm's room: every script runs under the test limits
+// (`support::host::limits`), whose 64 MiB budget no script nears, and none reads `heap_bytes()`.
+// So `task test-realm-sizes` does not run them; they run with a collection at every safe point
+// in the gate's step `test-collect`.
 language_parts!(
-    language_scripts_answer_their_expected_outcome = 0,
-    language_scripts_answer_their_expected_outcome_part_2 = 1,
-    language_scripts_answer_their_expected_outcome_part_3 = 2,
-    language_scripts_answer_their_expected_outcome_part_4 = 3,
-    language_scripts_answer_their_expected_outcome_part_5 = 4,
-    language_scripts_answer_their_expected_outcome_part_6 = 5,
-    language_scripts_answer_their_expected_outcome_part_7 = 6,
-    language_scripts_answer_their_expected_outcome_part_8 = 7,
-    language_scripts_answer_their_expected_outcome_part_9 = 8,
-    language_scripts_answer_their_expected_outcome_part_10 = 9,
-    language_scripts_answer_their_expected_outcome_part_11 = 10,
-    language_scripts_answer_their_expected_outcome_part_12 = 11,
-    language_scripts_answer_their_expected_outcome_part_13 = 12,
+    #[test]
+    fn language_scripts_answer_their_expected_outcome = 0;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_2 = 1;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_3 = 2;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_4 = 3;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_5 = 4;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_6 = 5;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_7 = 6;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_8 = 7;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_9 = 8;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_10 = 9;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_11 = 10;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_12 = 11;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_13 = 12;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_14 = 13;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_15 = 14;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_16 = 15;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_17 = 16;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_18 = 17;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_19 = 18;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_20 = 19;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_21 = 20;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_22 = 21;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_23 = 22;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_24 = 23;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_25 = 24;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_26 = 25;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_27 = 26;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_28 = 27;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_29 = 28;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_30 = 29;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_31 = 30;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_32 = 31;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_33 = 32;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_34 = 33;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_35 = 34;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_36 = 35;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_37 = 36;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_38 = 37;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_39 = 38;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_40 = 39;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_41 = 40;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_42 = 41;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_43 = 42;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_44 = 43;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_45 = 44;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_46 = 45;
+    #[test]
+    fn language_scripts_answer_their_expected_outcome_part_47 = 46;
 );
 
 /// The parts together hold every script of `tests/language/` exactly once, and are numbered

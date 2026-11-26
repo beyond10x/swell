@@ -3,6 +3,7 @@
 // normally or absent: the try statement gives UpdateEmpty(C, undefined), the value of the block
 // left, or undefined. Each statement is put into each place, the exit between the halves of the
 // statement, and run through eval once as it is and once with "42; " before the exit.
+// The places left by `continue` only; the script of this name ending in `-break.js` has the rest.
 var bad = [];
 function check(source, expected) {
   var found;
@@ -10,21 +11,14 @@ function check(source, expected) {
   if (found !== expected) bad.push(source + " => " + found);
 }
 var statements = [
-  ["try { throw 0 } catch (e) { ", " -2 }"]
+  ["try { ", " -2 } catch (e) { -1 } finally { 7 }"]
 ];
 var places = [
-  ["99; do { -99; ", "; -77 } while (false);", "break;"],
-  ["99; while (true) { -99; ", "; -77 }", "break;"],
-  ["99; for (var i = 0; i < 1; i++) { -99; ", "; -77 }", "break;"],
-  ["99; for (var k in { a: 1 }) { -99; ", "; -77 }", "break;"],
-  ["99; switch (1) { case 1: -99; ", "; -77 }", "break;"],
   ["99; do { -99; ", "; -77 } while (false);", "continue;"],
   ["99; var n = 0; while (n++ < 1) { -99; ", "; -77 }", "continue;"],
   ["99; for (var i = 0; i < 1; i++) { -99; ", "; -77 }", "continue;"],
   ["99; for (var k in { a: 1 }) { -99; ", "; -77 }", "continue;"],
   ["99; do { switch (1) { case 1: -99; ", "; -77 } } while (false);", "continue;"],
-  ["99; L: { -99; ", "; -77 }", "break L;"],
-  ["99; L: do { -99; do { -98; ", "; -77 } while (false); -76 } while (false);", "break L;"],
   ["99; L: do { -99; do { -98; ", "; -77 } while (false); -76 } while (false);", "continue L;"]
 ];
 for (var s = 0; s < statements.length; s++) {

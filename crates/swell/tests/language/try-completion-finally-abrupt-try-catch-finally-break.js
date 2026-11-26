@@ -1,8 +1,9 @@
 // sec-try-statement-runtime-semantics-evaluation: normal "ok"
-// A break or continue out of the try block or the catch block, the finally block completing
-// normally or absent: the try statement gives UpdateEmpty(C, undefined), the value of the block
-// left, or undefined. Each statement is put into each place, the exit between the halves of the
-// statement, and run through eval once as it is and once with "42; " before the exit.
+// A finally block that completes abruptly gives the try statement UpdateEmpty(F, undefined): its
+// own value, or undefined, never the value of the try block or the catch block. Each statement
+// is put into each place, the exit between the halves of the statement, and run through eval
+// once as it is and once with "42; " before the exit.
+// The places left by `break` only; the script of this name ending in `-continue.js` has the rest.
 var bad = [];
 function check(source, expected) {
   var found;
@@ -10,7 +11,7 @@ function check(source, expected) {
   if (found !== expected) bad.push(source + " => " + found);
 }
 var statements = [
-  ["try { 39; throw 0 } catch (e) { ", " -2 }"]
+  ["try { 39 } catch (e) { -1 } finally { ", " -2 }"]
 ];
 var places = [
   ["99; do { -99; ", "; -77 } while (false);", "break;"],
@@ -18,14 +19,8 @@ var places = [
   ["99; for (var i = 0; i < 1; i++) { -99; ", "; -77 }", "break;"],
   ["99; for (var k in { a: 1 }) { -99; ", "; -77 }", "break;"],
   ["99; switch (1) { case 1: -99; ", "; -77 }", "break;"],
-  ["99; do { -99; ", "; -77 } while (false);", "continue;"],
-  ["99; var n = 0; while (n++ < 1) { -99; ", "; -77 }", "continue;"],
-  ["99; for (var i = 0; i < 1; i++) { -99; ", "; -77 }", "continue;"],
-  ["99; for (var k in { a: 1 }) { -99; ", "; -77 }", "continue;"],
-  ["99; do { switch (1) { case 1: -99; ", "; -77 } } while (false);", "continue;"],
   ["99; L: { -99; ", "; -77 }", "break L;"],
-  ["99; L: do { -99; do { -98; ", "; -77 } while (false); -76 } while (false);", "break L;"],
-  ["99; L: do { -99; do { -98; ", "; -77 } while (false); -76 } while (false);", "continue L;"]
+  ["99; L: do { -99; do { -98; ", "; -77 } while (false); -76 } while (false);", "break L;"]
 ];
 for (var s = 0; s < statements.length; s++) {
   for (var p = 0; p < places.length; p++) {
