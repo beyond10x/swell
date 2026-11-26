@@ -94,16 +94,20 @@ reach the engine only from the host. An adapter may have system access (the shel
 reads the system clock and files), have none (it answers from what its embedder hands it), or
 emulate it. `crates/swell/tests/emulated_host.rs` is an emulated host of the last kind: a test
 host in the integration-test binary of `swell`, which links `std` and its system allocator, that
-calls no system API; its clock stands still, its seeds are fixed and its jobs are kept in memory.
-No host of the repository is built without `std`: a program without it needs a global allocator
-and an entry point, both `unsafe`, which no crate here has. Module loading from
-memory, the third part of such a host, is slice 11 and not delivered. The crates name no
-allocator: the program that links them provides it, the shell the system's and an embedder its
-own. The gate holds this three ways: HOST-2's source scan; a build of `swell` and every crate it
-depends on for `x86_64-unknown-none`, a target without `std` (`task nostd-build`); and a scan of
-the undefined symbols of those libraries, weak ones included, that refuses every symbol that is
-neither a mangled Rust name nor a routine of the compiler's runtime, so any function of a C or
-C++ library or the system (`task nostd-symbols`, `taskfiles/nostd.yml`).
+calls no system API (its source names no `std` path, nothing of HOST-2's scan and no output
+macro of the `std` prelude); its clock stands still, its seeds are fixed and its jobs are kept
+in memory. No host of the repository is built without `std`: a program that runs the engine
+without `std` needs a global allocator, and one over a fixed block needs `unsafe impl
+GlobalAlloc`, which `#![forbid(unsafe_code)]` rules out in every crate here; a host library
+without `std` would need neither an allocator nor an entry point, and would run nothing. Module
+loading from memory, the third part of such a host, is slice 11 and not delivered. The crates
+name no allocator: the program that links them provides it, the shell the system's and an
+embedder its own. In place of such a host the gate holds: HOST-2's source scan; a build of
+`swell` and every crate it depends on for `x86_64-unknown-none`, a target without `std` (`task
+nostd-build`); a scan of the undefined symbols of those libraries, weak ones included, that
+refuses every symbol that is neither a mangled Rust name nor a routine of the compiler's runtime,
+so any function of a C or C++ library or the system (`task nostd-symbols`,
+`taskfiles/nostd.yml`); and the emulated host above, run in the `std` test binary.
 
 **HOST-1** (swell:D1) The `swell` crate and every crate it depends on declare `#![forbid(unsafe_code)]`, name no package from outside the repository in the root `Cargo.lock`, and never call `std::thread::spawn` or `std::thread::Builder`, which a source scan in the gate checks. [slice 1]
 

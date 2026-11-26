@@ -281,13 +281,16 @@ system's and an embedder its own. What comes from the system comes through the h
 adapter is whatever implements it: with system access (the shell), without, or emulated (a clock
 that stands still, fixed seeds; modules from memory once slice 11 delivers loading)
 (`host-interface.md`, decision 1, "Adapters"). The repository's emulated host is a test host in
-the integration-test binary of `swell`, a `std` program, that calls no system API; no host here is
-built without `std`, since that needs a global allocator and an entry point, both `unsafe`. The
-three binary crates stay `std` programs. The gate builds `swell` and every crate it depends on
-for `x86_64-unknown-none`, a target without `std`, and refuses an undefined symbol in them that
-neither Rust nor the compiler's runtime supplies, a C library's `fmod` or `sqrt` among them
-(`taskfiles/nostd.yml`); HOST-2's source scan refuses a `std` path and a crate root without
-`#![no_std]`.
+the integration-test binary of `swell`, a `std` program, that calls no system API. No host here is
+built without `std`: a program that runs the engine without `std` needs a global allocator, and
+one over a fixed block needs `unsafe impl GlobalAlloc`, which `#![forbid(unsafe_code)]` rules
+out; a host library without `std` would need neither an allocator nor an entry point, and would
+run nothing. The three binary crates stay `std` programs. In place of such a host the gate builds
+`swell` and every crate it depends on for `x86_64-unknown-none`, a target without `std` (`task
+nostd-build`), refuses an undefined symbol in them that neither Rust nor the compiler's runtime
+supplies, a C library's `fmod` or `sqrt` among them (`task nostd-symbols`,
+`taskfiles/nostd.yml`), and runs the emulated host in the `std` test binary; HOST-2's source scan
+refuses a `std` path and a crate root without `#![no_std]`.
 
 ## 3. Execution model
 

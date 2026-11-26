@@ -232,7 +232,7 @@ pub(crate) mod scan {
     }
 
     /// Whether `word` occurs in `code` as a whole identifier or path (not as part of a longer name).
-    pub(super) fn has_word(code: &str, word: &str) -> bool {
+    pub(crate) fn has_word(code: &str, word: &str) -> bool {
         code.match_indices(word).any(|(at, _)| {
             let before = code[..at].chars().next_back();
             let after = code[at + word.len()..].chars().next();
@@ -311,9 +311,12 @@ pub(crate) mod scan {
     /// what follows it up to the first `;` outside brackets, the first `,` outside brackets and
     /// angle brackets, or the `}` that closes the first `{`. That is an item (a module, a
     /// function, `extern crate std;`, a macro call with braces), a statement, a field or a field
-    /// of a struct expression; the comma of `Result<u8, E>` in a signature does not end it. A
-    /// `}` that closes an enclosing block ends it too. `<` and `>` count as angle brackets
-    /// except in `->` and `=>`.
+    /// of a struct expression, a parameter, a variant or a match arm; the comma of
+    /// `Result<u8, E>` in a signature does not end it. A `)`, `]` or `}` that closes an
+    /// enclosing bracket ends it too. A `<` is an angle bracket only right after a name or `::`
+    /// and not as `<<` or `<=`, a `>` only right after a non-blank that is not `-` or `=`: the
+    /// form rustfmt writes for generics and never for a comparison or a shift. A `<` the scan
+    /// takes for a comparison lets a comma end the item early, which leaves code scanned.
     pub(super) fn without_test_items(code: &str) -> String {
         let mut chars: Vec<char> = code.chars().collect();
         let marker: Vec<char> = "#[cfg(test)]".chars().collect();
@@ -327,11 +330,21 @@ pub(crate) mod scan {
             let mut angles = 0usize;
             let mut end = chars.len();
             for (j, &c) in chars.iter().enumerate().skip(i + marker.len()) {
+                let before = chars.get(j.wrapping_sub(1)).copied();
+                let after = chars.get(j + 1).copied();
                 match c {
                     '(' | '[' | '{' => depth += 1,
-                    ')' | ']' => depth = depth.saturating_sub(1),
-                    '<' => angles += 1,
-                    '>' if !matches!(chars.get(j.wrapping_sub(1)), Some('-' | '=')) => {
+                    ')' | ']' if depth == 0 => {
+                        end = j;
+                        break;
+                    }
+                    ')' | ']' => depth -= 1,
+                    '<' if (ident_char(before) || before == Some(':'))
+                        && !matches!(after, Some('<' | '=')) =>
+                    {
+                        angles += 1;
+                    }
+                    '>' if before.is_some_and(|b| !b.is_whitespace() && b != '-' && b != '=') => {
                         angles = angles.saturating_sub(1);
                     }
                     ',' if depth == 0 && angles > 0 => {}
@@ -758,5 +771,65 @@ fn a_test_item_with_a_comma_in_its_generics_is_test_code() {
     assert_eq!(
         std_paths(&library_code(planted)),
         ["line 3: std::any::TypeId"]
+    );
+}
+
+/// A `<<` in the discriminant of a test-only variant is no angle bracket: the variant's `,`
+/// ends it, and the next variant is library code (adversary pass 2 on unit gate: it was
+/// blanked up to the enum's `}`).
+#[test]
+fn a_shift_in_a_test_variant_leaves_the_next_variant_scanned() {
+    let planted = "enum Flags {\n\
+                   \x20   #[cfg(test)]\n\
+                   \x20   Probe = 1 << 7,\n\
+                   \x20   Hosted(std::string::String),\n\
+                   }\n";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 4: std::string::String"]
+    );
+}
+
+/// A `<` in the guard of a test-only match arm is no angle bracket: the arm's `,` ends it, and
+/// the next arm's block, with an `extern crate std` behind a feature the bare build does not
+/// enable, is library code (adversary pass 2 on unit gate: it was blanked).
+#[test]
+fn a_comparison_in_a_test_match_arm_leaves_the_next_arm_scanned() {
+    let planted = "fn f(n: u8) -> u8 {\n\
+                   \x20   match n {\n\
+                   \x20       #[cfg(test)]\n\
+                   \x20       0 if n < 3 => 1,\n\
+                   \x20       _ => {\n\
+                   \x20           #[cfg(feature = \"fault-injection\")]\n\
+                   \x20           {\n\
+                   \x20               extern crate std;\n\
+                   \x20               std::eprintln!(\"hosted\");\n\
+                   \x20           }\n\
+                   \x20           0\n\
+                   \x20       }\n\
+                   \x20   }\n\
+                   }\n";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 8: std", "line 9: std::eprintln"]
+    );
+}
+
+/// `#[cfg(test)]` on a function parameter blanks the parameter up to the `)`; the rest of the
+/// signature and the body are library code (adversary pass 2 on unit gate: a `)` at depth 0 did
+/// not end the item, and the body was blanked).
+#[test]
+fn a_test_parameter_leaves_the_function_body_scanned() {
+    let planted = "pub fn hosted(#[cfg(test)] probe: u8) -> u8 {\n\
+                   \x20   #[cfg(feature = \"fault-injection\")]\n\
+                   \x20   {\n\
+                   \x20       extern crate std;\n\
+                   \x20       std::eprintln!(\"hosted\");\n\
+                   \x20   }\n\
+                   \x20   0\n\
+                   }\n";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 4: std", "line 5: std::eprintln"]
     );
 }

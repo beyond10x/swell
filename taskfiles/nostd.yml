@@ -16,13 +16,13 @@ tasks:
       build. A build step of the gate, before the clock of the test steps: it runs nothing.
 
       The engine crates are named in one place: NOSTD_PACKAGES (default "swell") names the top
-      package, and the libraries are every library cargo built for the target, which is that
-      package and every crate it reaches through a normal dependency. That is the set the HOST-2
-      scan reads (engine_crates() of crates/swell/tests/source_scan.rs: swell and every crate it
-      reaches through a normal or build dependency, read from the manifests; the engine crates
-      have no build dependency), so a seventh engine crate is built and read with no list to
-      edit, and none can be left out of the list. On this tree they are the six of
-      docs/design/engine.md, section 2.
+      package, and the libraries are every library cargo built for the target without features,
+      which is that package and every crate it reaches through a normal dependency, so a
+      seventh engine crate is built and read with no list to edit, and none can be left out of a
+      list. The HOST-2 scan (engine_crates() of crates/swell/tests/source_scan.rs, read from the
+      manifests) also reads the target-specific and optional dependencies, which this build does
+      not make and whose symbols are not read; no engine crate has one today. On this tree the
+      libraries are the six of docs/design/engine.md, section 2.
 
       Writes cargo's messages to NOSTD_OUT/build.json and its log to NOSTD_OUT/build.log (NOSTD_OUT
       default .out/nostd). When cargo fails it prints the log and "nostd-build: cargo build

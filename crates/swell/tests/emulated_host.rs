@@ -3,14 +3,14 @@
 //! is whatever implements `Host`. This one is a test host inside the integration-test binary of
 //! `swell`, which links `std` and its system allocator; it calls no system API. It answers the
 //! clock from a fixed value, gives the agent fixed seeds and keeps the jobs it is handed in
-//! memory. Its source names no `std` path, which `the_module_names_no_system_api` reads with
-//! the scanners of HOST-2.
+//! memory. Its source names no `std` path and no output macro of the `std` prelude, which
+//! `the_module_names_no_system_api` reads with the scanners of HOST-2.
 //!
 //! Module loading from memory, the third part of such a host, is slice 11 and not delivered: the
 //! load hook keeps nothing.
 #![cfg(test)]
 
-use crate::source_scan::scan::{ambient_authority, code_of, std_paths};
+use crate::source_scan::scan::{ambient_authority, code_of, has_word, std_paths};
 use swell::{
     Agent, HookCx, Host, Job, Limits, LoadRequest, ObjectRef, Outcome, Parsed, Realm, Seeds,
     Source, Value,
@@ -107,11 +107,17 @@ fn number(agent: &mut Agent<EmulatedHost>, realm: &Realm, source: &str) -> f64 {
 
 /// What of the system a Rust source names, read with the scanners of HOST-2
 /// (`source_scan.rs`): the clock, the environment, files, the network, processes and the
-/// random state of `std` (also through a grouped import), and any other `std` path.
+/// random state of `std` (also through a grouped import), any other `std` path, and the macros
+/// of the `std` prelude that write to the process's standard streams.
 fn system_api(source: &str) -> Vec<String> {
     let code = code_of(source);
     let mut named = ambient_authority(&code);
     named.extend(std_paths(&code));
+    for name in ["print!", "println!", "eprint!", "eprintln!", "dbg!"] {
+        if has_word(&code, name) {
+            named.push(name.to_string());
+        }
+    }
     named
 }
 
@@ -174,4 +180,13 @@ fn the_filter_sees_a_grouped_std_import() {
         ["SystemTime", "std::{env}", "line 1: std"]
     );
     assert!(system_api("use core::cell::Cell;\nuse alloc::vec::Vec;\n// std::fs\n").is_empty());
+}
+
+/// The module is part of a `std` test binary, whose prelude brings `eprintln!` and `print!`
+/// (writes to the process's standard streams) without a `std` path; the check names both
+/// (adversary pass 2 on unit gate).
+#[test]
+fn the_filter_sees_an_output_macro_of_the_std_prelude() {
+    let planted = "fn host_enqueue_generic_job() { eprintln!(\"job\"); print!(\"x\"); }\n";
+    assert_eq!(system_api(planted), ["print!", "eprintln!"], "{planted}");
 }

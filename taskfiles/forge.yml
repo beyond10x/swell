@@ -366,9 +366,12 @@ tasks:
       "rustup toolchain install", "rustup install", "rustup default" or "rustup override set",
       and "cargo +<toolchain>" are each named as "toolchain-check: <file>:<line>: names a
       compiler (<line>)". Then the components and targets the file names (components = [...],
-      targets = [...]; story core-builds-without-std: llvm-tools for nostd-symbols,
-      x86_64-unknown-none for nostd-build) must each be an input of the one dtolnay/rust-toolchain
-      step of GATE_ROOT/.github/workflows/check.yml, the workflow that runs task check
+      targets = [...], on one line or over several, strings in "" or ''; story
+      core-builds-without-std: llvm-tools for nostd-symbols, x86_64-unknown-none for
+      nostd-build; a key from which the check reads no string fails with "toolchain-check:
+      <file>: the key <key> names no value the check reads") must each be an input of the one
+      dtolnay/rust-toolchain step of GATE_ROOT/.github/workflows/check.yml, the workflow that
+      runs task check
       (components: and targets:, comma-separated): one it lacks is named as "toolchain-check:
       <workflow>:<line>: the toolchain step lacks the component|target <name>, which
       rust-toolchain.toml names", and a check.yml with no such step or two fails too. rustup
@@ -437,15 +440,31 @@ tasks:
         fi
         list() {
           awk -v key="$1" '
+            function scan(s,   tok) {
+              while (match(s, /"[^"]*"|\047[^\047]*\047|#|\]/)) {
+                tok = substr(s, RSTART, RLENGTH)
+                s = substr(s, RSTART + RLENGTH)
+                if (tok == "#") return
+                if (tok == "]") { inside = 0; return }
+                print substr(tok, 2, length(tok) - 2)
+              }
+            }
+            inside { scan($0); next }
             $0 ~ "^[ \t]*" key "[ \t]*=" {
               line = $0
-              sub(/^[^=]*=/, "", line)
-              while (match(line, /"[^"]*"/)) { print substr(line, RSTART + 1, RLENGTH - 2); line = substr(line, RSTART + RLENGTH) }
+              sub(/^[^=]*=[ \t]*/, "", line)
+              inside = (substr(line, 1, 1) == "[")
+              scan(line)
             }
           ' "$file"
         }
         components=$(list components | tr "\n" " ")
         targets=$(list targets | tr "\n" " ")
+        for key in components targets; do
+          grep -Eq "^[[:space:]]*$key[[:space:]]*=" "$file" || continue
+          [ -n "$(list "$key")" ] ||
+            { echo "toolchain-check: $file: the key $key names no value the check reads (a string in \"\" or '' of the array)"; exit 1; }
+        done
         gate=${prefix}.github/workflows/check.yml
         [ -f "$gate" ] || { echo "toolchain-check: $gate is missing"; exit 1; }
         lacking=$(awk -v file="$gate" -v components="$components" -v targets="$targets" '
