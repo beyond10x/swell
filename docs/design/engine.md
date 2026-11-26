@@ -534,7 +534,8 @@ The mechanism:
    Reason: the copies equal the standard, since a function environment's [[NewTarget]] and
    [[FunctionObject]] are set when its call starts and never change (`sec-newfunctionenvironment`).
    The field is set and traced today (`frame.rs:141`, `:229`; `ecmascript_function.rs:361`) and
-   read nowhere else, so the change costs no byte of a frame.
+   read at one other site (`interp/generator.rs:79`, the prototype of a generator object), so the
+   change costs no byte of a frame.
 
    Rejected:
    - The three in the function environment record of the surrounding function. `env/function.rs`
@@ -1851,14 +1852,19 @@ mechanism.
    - a base construction, with its object;
    - a derived construction.
 
-   After the pop and after the caller's realm is restored, `return_from_frame` (`dispatch.rs:78`)
-   decides by the clause. For a derived frame:
+   The clause is applied with the caller's realm current, in one of two places. For a frame that
+   is not the base of its run, `return_from_frame` (`dispatch.rs:78`) applies it after the pop
+   and after it has set the caller's realm. For the base frame of a run (a [[Construct]] from
+   Rust: a bound function, `Reflect.construct`, the host's construct call) the callee's realm is
+   still current when `return_from_frame` returns, and `run_frame` restores the caller's only
+   after `run` returns; there `return_from_frame` makes no error, and `construct_function` makes
+   it after `run_frame` returned. For a derived frame:
    - an object is the result;
    - any value other than `undefined` throws a `TypeError`;
    - otherwise the frame's `this`, when it is an object;
    - otherwise a `ReferenceError`.
 
-   Both errors are made in the realm that runs after the pop, as the realm cases above require.
+   Both errors are made in the caller's realm in either place, as the realm cases above require.
    The frame-bytes test measures the new field, which is expected at the size of
    `Option<ObjectRef>`.
 
