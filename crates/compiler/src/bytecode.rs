@@ -268,6 +268,53 @@ pub enum Instruction {
     /// `[o, v] -> [o]`: `__proto__: v` in an object literal: o.[[SetPrototypeOf]](v) when `v` is
     /// an Object or `null`, nothing otherwise.
     InitProto,
+    /// `[] -> [p]`: the prototype of ClassDefinitionEvaluation
+    /// (`#sec-runtime-semantics-classdefinitionevaluation`, step 8 for a class without
+    /// heritage): OrdinaryObjectCreate(protoParent), protoParent `%Object.prototype%` of the
+    /// current realm.
+    ClassPrototype,
+    /// `[p] -> [p, F]`: the class constructor F made from template `functions[function]` in the
+    /// LexicalEnvironment (steps 14 to 18): its [[HomeObject]] `p`, its name and `length` from
+    /// the template, its box of kind derived when `derived` and base otherwise (MakeClassConstructor,
+    /// `#sec-makeclassconstructor`); then MakeConstructor(F, false, p), F's `prototype`
+    /// { [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: false }, and
+    /// CreateMethodProperty(p, "constructor", F) (step 19).
+    MakeClassConstructor {
+        function: u32,
+        derived: bool,
+    },
+    /// `[h, f] -> [h]`: ClassElementEvaluation of a method (`#sec-runtime-semantics-classelementevaluation`,
+    /// `#sec-runtime-semantics-methoddefinitionevaluation`): MakeMethod(f, h), then
+    /// DefineMethodProperty(h, `strings[k]`, f, false): a data property { [[Writable]]: true,
+    /// [[Enumerable]]: false, [[Configurable]]: true } by DefinePropertyOrThrow. `h` is the
+    /// prototype, or F for a static method.
+    DefineClassMethod(u32),
+    /// `[h, f] -> [h]`: the getter `f` of a class as property `strings[k]` of `h`, MakeMethod
+    /// with `h`, { [[Enumerable]]: false, [[Configurable]]: true }, by DefinePropertyOrThrow.
+    DefineClassGetter(u32),
+    /// `[h, f] -> [h]`: the setter `f` of a class, as [`Instruction::DefineClassGetter`].
+    DefineClassSetter(u32),
+    /// `[h, k, f] -> [h]`: [`Instruction::DefineClassMethod`] with the property key `k`
+    /// [`Instruction::ToPropertyKey`] made, after SetFunctionName(f, k).
+    DefineClassComputedMethod,
+    /// `[h, k, f] -> [h]`: [`Instruction::DefineClassGetter`] with the key `k`, after
+    /// SetFunctionName(f, k, "get").
+    DefineClassComputedGetter,
+    /// `[h, k, f] -> [h]`: [`Instruction::DefineClassSetter`] with the key `k`, after
+    /// SetFunctionName(f, k, "set").
+    DefineClassComputedSetter,
+    /// `[F] -> [F]`: the initializer of the instance elements of the class (`docs/design/engine.md`,
+    /// "Classes", item 4), made from template `functions[f]` as a method whose home object is
+    /// F's [[HomeObject]], the prototype, and stored in F's box.
+    StoreInitializer(u32),
+    /// `[h] -> [h, m]`: a method of template `functions[f]` with [[HomeObject]] `h`, made in the
+    /// LexicalEnvironment: the function of a run of static fields or of a static block, which
+    /// the class-definition code calls with `this` F ("Classes", item 4).
+    MakeMethod(u32),
+    /// `[o] -> [r]`: InitializeInstanceElements(o, F) (`#sec-initializeinstanceelements`), F the
+    /// running frame's function: a call frame of the initializer in F's box with `this` o and no
+    /// arguments, whose return pushes `undefined`; `undefined` at once when the box holds none.
+    InitInstance,
     /// `[a, v] -> [a]`: CreateDataPropertyOrThrow(a, ToString(n), v)
     /// (`#sec-runtime-semantics-arrayaccumulation`).
     DefineIndex(u32),
@@ -857,6 +904,17 @@ impl Instruction {
             | Instruction::DefineSetter(_)
             | Instruction::DefineMethod(_)
             | Instruction::InitProto
+            | Instruction::ClassPrototype
+            | Instruction::MakeClassConstructor { .. }
+            | Instruction::DefineClassMethod(_)
+            | Instruction::DefineClassGetter(_)
+            | Instruction::DefineClassSetter(_)
+            | Instruction::DefineClassComputedMethod
+            | Instruction::DefineClassComputedGetter
+            | Instruction::DefineClassComputedSetter
+            | Instruction::StoreInitializer(_)
+            | Instruction::MakeMethod(_)
+            | Instruction::InitInstance
             | Instruction::DefineIndex(_)
             | Instruction::ArrayLength(_)
             | Instruction::Typeof

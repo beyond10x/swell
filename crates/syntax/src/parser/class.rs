@@ -111,12 +111,10 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok((self.reserve_expr(Expr::Class(class)), outer))
     }
 
-    /// The current `class`: holds the refusal `class` at it, makes the code strict and consumes
-    /// it; answers the strictness of the code around.
+    /// The current `class`: makes the code strict and consumes it; answers the strictness of the
+    /// code around.
     #[inline(never)]
     fn class_keyword(&mut self) -> R<bool> {
-        let span = self.start();
-        self.hold("class", 8, span);
         let outer = self.strict;
         self.strict = true;
         self.advance()?;

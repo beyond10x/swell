@@ -29,6 +29,7 @@
 
 use alloc::rc::Rc;
 use alloc::vec::Vec;
+use swell_syntax::ast::FunctionKind;
 
 use crate::builtins::object::argument;
 use crate::builtins::string::StringBuilder;
@@ -42,6 +43,87 @@ use crate::object::property::{Key, Property};
 use crate::realm::intrinsics::Making;
 use crate::script::{Compiled, vec_bytes};
 use crate::value::{ObjectRef, StringRef, Value};
+
+/// The start of the [[SourceText]] of the method, getter or setter whose function spans
+/// `source[start..end]`. The function of a static element starts at `static`, but its source
+/// text is the MethodDefinition after it (`ClassElement : static MethodDefinition`,
+/// `#sec-class-definitions`; `story:class-definition-evaluation`): `static`, a whole token
+/// that a `(` does not follow (which makes it a method's name), is skipped with the white space,
+/// line terminators and comments after it. Any other function starts where it starts. Runs over
+/// the code units of the trivia once, a part of the text the step per code unit of the String
+/// it makes covers.
+fn method_definition_start(source: &[u16], start: u32, end: u32) -> u32 {
+    let first = usize::try_from(start).unwrap_or(usize::MAX);
+    let last = usize::try_from(end).unwrap_or(usize::MAX).min(source.len());
+    let text = source.get(first..last).unwrap_or_default();
+    let Some(rest) = text.strip_prefix(&[0x73, 0x74, 0x61, 0x74, 0x69, 0x63][..]) else {
+        return start;
+    };
+    // `static` followed by an identifier part is the start of a longer name.
+    match rest.first() {
+        Some(&unit) if is_identifier_part_unit(unit) => return start,
+        None => return start,
+        Some(_) => {}
+    }
+    let mut at = 0usize;
+    loop {
+        match (
+            rest.get(at).copied(),
+            rest.get(at.saturating_add(1)).copied(),
+        ) {
+            (Some(unit), _) if is_white_space_or_line_terminator(unit) => at = at.saturating_add(1),
+            // `//`: a comment to the end of the line.
+            (Some(0x2F), Some(0x2F)) => {
+                at = at.saturating_add(2);
+                while rest
+                    .get(at)
+                    .is_some_and(|&u| !matches!(u, 0x0A | 0x0D | 0x2028 | 0x2029))
+                {
+                    at = at.saturating_add(1);
+                }
+            }
+            // `/*`: a comment to its `*/`.
+            (Some(0x2F), Some(0x2A)) => {
+                at = at.saturating_add(2);
+                while rest.get(at).is_some()
+                    && !(rest.get(at) == Some(&0x2A)
+                        && rest.get(at.saturating_add(1)) == Some(&0x2F))
+                {
+                    at = at.saturating_add(1);
+                }
+                at = at.saturating_add(2);
+            }
+            // `static (`: a method named `static`.
+            (Some(0x28), _) | (None, _) => return start,
+            (Some(_), _) => break,
+        }
+    }
+    let skipped = u32::try_from(at.saturating_add(6)).unwrap_or(0);
+    start.saturating_add(skipped).min(end)
+}
+
+/// Whether the code unit `unit` right after `static` continues an IdentifierName: an ASCII
+/// letter, digit, `$`, `_` or `\` (a Unicode escape), or a unit outside ASCII that is neither
+/// white space nor a line terminator (in a source the parser accepted, such a unit there is a
+/// part of the name).
+fn is_identifier_part_unit(unit: u16) -> bool {
+    match u8::try_from(unit) {
+        Ok(byte) if byte.is_ascii() => {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'$' | b'_' | b'\\')
+        }
+        _ => !is_white_space_or_line_terminator(unit),
+    }
+}
+
+/// WhiteSpace and LineTerminator (`#sec-white-space`, `#sec-line-terminators`): TAB, VT, FF,
+/// SP, NBSP, ZWNBSP and the other code points of category Zs, LF, CR, LS and PS.
+fn is_white_space_or_line_terminator(unit: u16) -> bool {
+    matches!(
+        unit,
+        0x09 | 0x0A | 0x0B | 0x0C | 0x0D | 0x20 | 0xA0 | 0x1680 | 0x2000
+            ..=0x200A | 0x2028 | 0x2029 | 0x202F | 0x205F | 0x3000 | 0xFEFF
+    )
+}
 
 /// What `Function.prototype.toString` reads of a function object.
 enum Shape {
@@ -257,11 +339,18 @@ impl<H: Host> Agent<H> {
             ObjectKind::EcmascriptFunction(function) => {
                 function.compiled.as_ref().and_then(|compiled| {
                     let position = usize::try_from(function.template).unwrap_or(usize::MAX);
-                    let span = compiled.code.functions.get(position)?.source_text;
+                    let template = compiled.code.functions.get(position)?;
+                    let span = template.source_text;
+                    let start = match template.kind {
+                        FunctionKind::Method | FunctionKind::Getter | FunctionKind::Setter => {
+                            method_definition_start(&compiled.source, span.start, span.end)
+                        }
+                        _ => span.start,
+                    };
                     Some(Shape::Ecmascript(
                         func,
                         Rc::clone(compiled),
-                        span.start,
+                        start,
                         span.end,
                     ))
                 })

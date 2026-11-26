@@ -65,7 +65,6 @@ pub(crate) struct Parsed {
 /// `rustfmt` would join a short list on one line; it is skipped so each hold keeps its own.
 #[rustfmt::skip]
 pub const HOLDS: &[(&str, u32)] = &[
-    ("class", 8),
     ("class heritage", 8),
 ];
 

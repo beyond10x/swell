@@ -42,6 +42,7 @@ pub(crate) mod async_function;
 pub(crate) mod async_generator;
 pub(crate) mod bound_function;
 pub(crate) mod builtin_function;
+pub(crate) mod class_constructor;
 pub(crate) mod collection;
 pub(crate) mod ecmascript_function;
 pub(crate) mod generator;

@@ -316,6 +316,18 @@ impl<H: Host> Agent<H> {
             I::DefineSetter(index) => self.define_accessor(index, false),
             I::DefineMethod(index) => self.define_method(index),
             I::InitProto => self.init_proto(),
+            // ---- classes (`interp/class.rs`) ----
+            I::ClassPrototype
+            | I::MakeClassConstructor { .. }
+            | I::DefineClassMethod(_)
+            | I::DefineClassGetter(_)
+            | I::DefineClassSetter(_)
+            | I::DefineClassComputedMethod
+            | I::DefineClassComputedGetter
+            | I::DefineClassComputedSetter
+            | I::StoreInitializer(_)
+            | I::MakeMethod(_)
+            | I::InitInstance => self.class_instruction(),
             I::DefineIndex(index) => self.define_index(index),
             I::ArrayLength(length) => self.set_array_length(length),
             // ---- computed keys and spreads (`interp/object_literal.rs`) ----
@@ -1549,7 +1561,8 @@ impl<H: Host> Agent<H> {
     }
 
     /// The call of the ECMAScript function `function` of `Call(count)` on this loop: its frame
-    /// replaces the `count + 2` entries of the call.
+    /// replaces the `count + 2` entries of the call. A class constructor throws the `TypeError`
+    /// of its [[Call]] instead ([`Agent::make_frame`]).
     pub(super) fn push_call_frame(
         &mut self,
         function: ObjectRef,
@@ -1595,26 +1608,30 @@ impl<H: Host> Agent<H> {
         count: usize,
     ) -> Completion<Flow> {
         let args = self.peek_arguments(count)?;
-        self.push_construct_frame(constructor, &args, count)
+        self.push_construct_frame(constructor, constructor, &args, count)
     }
 
-    /// The construction by the ECMAScript function `constructor` of `New(count)` on this loop:
-    /// its frame, with the new object as its `this` and `constructor` as its NewTarget, replaces
-    /// the `count + 1` entries of the call.
+    /// The construction by the ECMAScript function `constructor` with NewTarget `new_target` on
+    /// this loop ([[Construct]] of a base constructor,
+    /// `#sec-ecmascript-function-objects-construct-argumentslist-newtarget`): its frame, with
+    /// the object OrdinaryCreateFromConstructor(newTarget, "%Object.prototype%") made as its
+    /// `this` and `new_target` as its NewTarget, replaces the `count + 1` entries of the call.
+    /// `New` and `NewSpread` pass the callee as `new_target`.
     pub(super) fn push_construct_frame(
         &mut self,
         constructor: ObjectRef,
+        new_target: ObjectRef,
         args: &[Value],
         count: usize,
     ) -> Completion<Flow> {
         self.check_frame_depth()?;
         let this = self.ordinary_create_from_constructor(
-            constructor,
+            new_target,
             Intrinsic::ObjectPrototype,
             OrdinaryData::Plain,
         )?;
         let keep = self.keep(Value::Object(this));
-        let new_target = Some(constructor);
+        let new_target = Some(new_target);
         let frame = self.step().and_then(|()| {
             self.make_frame(constructor, Value::Undefined, args, Some(this), new_target)
         });

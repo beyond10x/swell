@@ -41,6 +41,7 @@ mod builtins_symbol;
 mod builtins_symbol_values;
 mod builtins_uri;
 mod calls;
+mod classes;
 mod collect;
 mod computed_names_and_object_spread;
 mod consumer_slice_04;

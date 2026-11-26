@@ -293,6 +293,15 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::DefineGetter(k) => format!("DefineGetter {}", s(k)),
         I::DefineSetter(k) => format!("DefineSetter {}", s(k)),
         I::DefineMethod(k) => format!("DefineMethod {}", s(k)),
+        I::MakeClassConstructor { function, derived } => {
+            let kind = if derived { "derived" } else { "base" };
+            format!("MakeClassConstructor {function} {kind}")
+        }
+        I::DefineClassMethod(k) => format!("DefineClassMethod {}", s(k)),
+        I::DefineClassGetter(k) => format!("DefineClassGetter {}", s(k)),
+        I::DefineClassSetter(k) => format!("DefineClassSetter {}", s(k)),
+        I::StoreInitializer(f) => format!("StoreInitializer {f}"),
+        I::MakeMethod(f) => format!("MakeMethod {f}"),
         I::DefineIndex(n) => format!("DefineIndex {n}"),
         I::ArrayLength(n) => format!("ArrayLength {n}"),
         I::Call(n) => format!("Call {n}"),

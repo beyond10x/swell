@@ -35,6 +35,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod bytecode;
+mod class;
 pub mod disasm;
 mod expression;
 mod function;

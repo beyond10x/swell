@@ -646,7 +646,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// GlobalDeclarationInstantiation (`#sec-globaldeclarationinstantiation`) of a script, with
-    /// the compiler's `lexical` as its LexicallyDeclaredNames (`let` and `const`),
+    /// the compiler's `lexical` as its LexicallyDeclaredNames (`let`, `const` and class),
     /// `function_declarations` as functionsToInitialize and `var_names` as declaredVarNames. A
     /// step per declaration and per check (decision 3, "Lexical bindings", item 6). Steps 3 and
     /// 4 throw before anything is bound, so a script whose names clash with an earlier one's

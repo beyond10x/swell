@@ -62,6 +62,7 @@ use crate::host::{CompilationType, CompileStrings, Cx, HookCx, Host};
 use crate::interp::frame::{Frame, SlotValue, frame_bytes};
 use crate::object::ObjectKind;
 use crate::object::builtin_function::{Activation, KeptRoom};
+use crate::object::class_constructor::ConstructorKind;
 use crate::realm::intrinsics::Intrinsic;
 use crate::script::{Compiled, ParsedTree, SourceCopy, vec_bytes};
 use crate::value::{ObjectRef, RealmRef, StringRef, Value};
@@ -329,27 +330,32 @@ impl<H: Host> Agent<H> {
     /// PerformEval, steps 7 to 11 (`#sec-performeval`): the eval context of eval code whose
     /// caller's strictness is `strict_caller` and whose GetThisEnvironment's [[FunctionObject]]
     /// is `function` (decision 3, item 5): inFunc when there is one, inMethod when it has a
-    /// [[HomeObject]] (HasSuperBinding). inDerivedCtor stays false until
-    /// `story:class-definition-evaluation` gives a function the box that answers it, and
-    /// inClassFieldInitializer until `story:eval-in-class-field-initializers` reads it from the
-    /// template kind `FieldInitializer`.
+    /// [[HomeObject]] (HasSuperBinding), inDerivedCtor when it is a class constructor whose box
+    /// says derived ([[ConstructorKind]], `object/class_constructor.rs`).
+    /// inClassFieldInitializer stays false until `story:eval-in-class-field-initializers` reads
+    /// it from the template kind `FieldInitializer`.
     fn eval_context(
         &mut self,
         strict_caller: bool,
         function: Option<ObjectRef>,
     ) -> Completion<EvalContext> {
-        let in_method = match function {
+        let (in_method, in_derived_constructor) = match function {
             Some(function) => match &self.engine_object(function)?.kind {
-                ObjectKind::EcmascriptFunction(f) => f.home_object.is_some(),
-                _ => false,
+                ObjectKind::EcmascriptFunction(f) => (
+                    f.home_object.is_some(),
+                    f.class
+                        .as_ref()
+                        .is_some_and(|c| c.kind == ConstructorKind::Derived),
+                ),
+                _ => (false, false),
             },
-            None => false,
+            None => (false, false),
         };
         Ok(EvalContext {
             strict_caller,
             in_function: function.is_some(),
             in_method,
-            in_derived_constructor: false,
+            in_derived_constructor,
             in_class_field_initializer: false,
         })
     }

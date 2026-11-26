@@ -316,6 +316,34 @@ fn held_sources_answer_their_first_construct_still_held() {
     );
 }
 
+/// The hold `class heritage` is answered at its `extends`, the first one of the source, as
+/// long as it is a line of `HOLDS`.
+#[test]
+fn the_heritage_hold_stands_at_extends() {
+    if !swell_syntax::HOLDS
+        .iter()
+        .any(|(c, _)| *c == "class heritage")
+    {
+        return;
+    }
+    for (text, at) in [
+        ("class A\n  extends B {}", (2, 3)),
+        ("x = class\n  extends B {};", (2, 3)),
+        ("class A {}\nclass B extends C {}", (2, 9)),
+        ("x = class extends (class {}) {};", (1, 11)),
+    ] {
+        let errors = parse(text)
+            .err()
+            .unwrap_or_else(|| panic!("{text:?}: parsed"));
+        assert_eq!(
+            messages(&errors),
+            vec!["class heritage is not supported before slice 8".to_string()],
+            "{text:?}"
+        );
+        assert_eq!((errors[0].line, errors[0].column), at, "{text:?}");
+    }
+}
+
 /// A field and a static block of a class are refused at their first token until
 /// `story:class-element-syntax-and-early-errors` parses them and makes them holds: each source
 /// answers its refusal alone, before the hold of the class is answered.
@@ -342,21 +370,21 @@ fn a_field_and_a_static_block_are_refused_at_their_token() {
 /// A class is strict mode code from `class` to its `}` and no further (`#sec-strict-mode-code`):
 /// the parser and the walk of the early errors both give the code after a class declaration or
 /// expression the strictness of the code around it. So, through each entry, a source with a
-/// class and, after it, code that only non-strict code admits answers the hold of the class
-/// alone; an `if` clause that is a function declaration answers its refusal of slice 18, which
+/// class and, after it, code that only non-strict code admits parses (`None`);
+/// an `if` clause that is a function declaration answers its refusal of slice 18, which
 /// stops the parse at its token, as it does in non-strict code without a class.
 #[test]
 fn code_after_a_class_is_not_strict() {
-    let held = "class is not supported before slice 8";
-    let if_clause = "function declaration as an if clause is not supported before slice 18";
-    let mut cases: Vec<(String, &str)> = Vec::new();
+    let parses = None;
+    let if_clause = Some("function declaration as an if clause is not supported before slice 18");
+    let mut cases: Vec<(String, Option<&str>)> = Vec::new();
     for class in ["class A {}", "x = class {};", "x = class { m() {} };"] {
         for (tail, message) in [
-            ("with (a) {}", held),
-            ("x = 010;", held),
-            ("delete x;", held),
-            ("var eval;", held),
-            ("function f(a, a) {}", held),
+            ("with (a) {}", parses),
+            ("x = 010;", parses),
+            ("delete x;", parses),
+            ("var eval;", parses),
+            ("function f(a, a) {}", parses),
             ("if (a) function f() {}", if_clause),
         ] {
             cases.push((format!("{class} {tail}"), message));
@@ -367,8 +395,8 @@ fn code_after_a_class_is_not_strict() {
     for (text, message) in &cases {
         for entry in ENTRIES {
             let answer = parse_through(entry, &units(text), LIMIT).map(|_| ());
-            if answer.as_ref().map_err(|errors| messages(errors)) != Err(vec![message.to_string()])
-            {
+            let expected = message.map(|m| vec![m.to_string()]);
+            if answer.as_ref().err().map(|errors| messages(errors)) != expected {
                 wrong.push(format!("{entry:?} {text:?}: {answer:?}"));
             }
         }

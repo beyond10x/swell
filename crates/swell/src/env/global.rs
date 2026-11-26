@@ -6,8 +6,9 @@
 //! A Global Environment Record is its [[ObjectRecord]], its [[GlobalThisValue]] and its
 //! [[DeclarativeRecord]]. The first two are the realm record's `global` and `global_this`
 //! (`realm/mod.rs`, set by SetRealmGlobalObject, `#sec-setrealmglobalobject`); the
-//! [[DeclarativeRecord]] holds the `let` and `const` bindings of the realm's scripts (slice 6;
-//! `class` comes with slice 8): a declarative record of the `environments` arena whose bindings
+//! [[DeclarativeRecord]] holds the `let`, `const` and class bindings of the realm's scripts
+//! (slice 6; a class declaration of a script binds here since `story:class-definition-evaluation`,
+//! mutable as a `let` binding, and its evaluation initializes it): a declarative record of the `environments` arena whose bindings
 //! are kept by name, each with its state (uninitialized until its declaration ran, the temporal
 //! dead zone) and whether it is `const`, found through a keyed list and never deleted
 //! (`docs/design/engine.md`, decision 3, "Lexical bindings", item 4). [`RealmGlobalEnv`] holds

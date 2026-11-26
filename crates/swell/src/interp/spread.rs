@@ -208,7 +208,7 @@ impl<H: Host> Agent<H> {
         }
         let object = self.expect_object(constructor)?;
         if self.is_ecmascript_function(object)? {
-            return self.push_construct_frame(object, args, 1);
+            return self.push_construct_frame(object, object, args, 1);
         }
         let result = self.construct_value(object, args, None);
         let result = self.check_interrupt_after(result)?;
