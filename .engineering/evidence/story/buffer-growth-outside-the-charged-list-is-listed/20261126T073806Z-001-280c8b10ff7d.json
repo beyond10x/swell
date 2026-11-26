@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T07:38:06Z",
+  "actor": "human:operator",
+  "artifact": "story:buffer-growth-outside-the-charged-list-is-listed",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/buffer-growth at 058eba11, build node, before the merge into wave/big-1",
+    "reference": "task clippy exit 0; 29 tests run: 29 passed (source_scan, builtins_json_parse)"
+  }
+}

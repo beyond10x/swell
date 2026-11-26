@@ -227,6 +227,10 @@ impl<H: Host> Agent<H> {
             charged: 0,
         };
         let parsed = self.json_parse_text(&mut parser);
+        // The parse has ended (a parse that succeeds leaves its stack of open values empty): the
+        // stack's room is freed here, before InternalizeJSONProperty calls the reviver, since a
+        // close credits the charge of its entry and leaves the room.
+        parser.stack = Vec::new();
         *charged = charged.saturating_add(parser.charged);
         let parsed = parsed?;
         let Some(records) = parser.records else {
@@ -391,7 +395,7 @@ impl<H: Host> Agent<H> {
         self.json_parse_charge(parser, bytes)?;
         #[expect(
             clippy::disallowed_methods,
-            reason = "charged by `json_parse_charge`, an `Open` per open value, before it grows"
+            reason = "each entry is charged by `json_parse_charge` before the stack grows; `try_reserve(1)` leaves a capacity of at most max(4, 2(d - 1)) entries of `size_of::<Open>()` bytes for a deepest nesting d, so the spare room, uncharged while the parse runs, is at most the charged entries again or 4 entries; no script runs during the parse, and `json_parse_with` frees the stack before the reviver is called"
         )]
         if parser.stack.try_reserve(1).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
