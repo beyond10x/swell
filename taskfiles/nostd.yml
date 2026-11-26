@@ -92,9 +92,9 @@ tasks:
       that wrote the objects, and it reads the archive members of an .rlib (a system nm differs
       between machines). "llvm-nm -A -u" lists every undefined symbol with its library and object.
       A symbol passes when it is
-        - Rust's own: a mangled Rust name (_R for the v0 scheme, _ZN for the legacy one, which
-          covers the allocator shims and the panic entry of this toolchain), or an unmangled
-          __rust_* name, rust_begin_unwind or rust_eh_personality;
+        - Rust's own: a mangled Rust name (_R for the v0 scheme this toolchain uses, _ZN for
+          the legacy one), or an unmangled allocator shim or panic entry: a __rust_* name,
+          rust_begin_unwind or rust_eh_personality;
         - a memory function the compiler emits and its runtime supplies: memcpy, memmove, memset,
           memcmp, bcmp;
         - a routine of the compiler runtime (compiler_builtins) by its compiler-rt name: integer
