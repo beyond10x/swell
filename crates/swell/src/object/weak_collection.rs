@@ -9,7 +9,8 @@
 //! object before either exists (the slot's owned bytes, which the sweep that frees the object
 //! credits), so the record of every object keeps its size (`object/generator.rs`,
 //! `RECORD_BYTES`). Each growth of the map is charged before it, by
-//! [`KeyedMap::table_bytes_for`] of its room for one more entry, and the table's bytes are
+//! [`KeyedMap::table_bytes_for`] of the room [`KeyedMap::growth_for`] answers for one more
+//! entry (a rehash in place takes no byte and is charged none), and the table's bytes are
 //! recorded with the object (`Agent::record_grown`), so the sweep that frees it credits them.
 //! The map never shrinks: an entry deleted or cleared leaves its room charged.
 //!
@@ -329,10 +330,11 @@ impl<H: Host> Agent<H> {
     }
 
     /// Set the value of the entry of `key` in `collection` to `value`, or append the entry. A
-    /// map with no spare room grows: the bytes of its table for one more entry than its room
-    /// ([`KeyedMap::table_bytes_for`]), less what it holds charged, are charged before it is
-    /// made; once it is made, what its room then says is kept charged, the rest credited, and
-    /// what was kept is recorded with the object for the sweep that frees it. Over the budget
+    /// map that makes a new table for it grows: the bytes of the table of the room
+    /// [`KeyedMap::growth_for`] answers ([`KeyedMap::table_bytes_for`]), less what it holds
+    /// charged, are charged before it is made; once it is made, what its room then says is kept
+    /// charged, the rest credited, and what was kept is recorded with the object for the sweep
+    /// that frees it. A map rehashed in place takes no byte and is charged none. Over the budget
     /// the run ends in `Terminated(MemoryBudget)` and nothing stays charged.
     pub(crate) fn weak_insert(
         &mut self,
@@ -345,11 +347,11 @@ impl<H: Host> Agent<H> {
                 entry.value.set(value);
                 return None;
             }
-            Some(if table.table.spare() == 0 {
-                KeyedMap::<WeakKey, WeakEntry>::table_bytes_for(table.room.saturating_add(1))
-                    .saturating_sub(table.charged)
-            } else {
-                0
+            Some(match table.table.growth_for(1) {
+                Ok(Some(room)) => KeyedMap::<WeakKey, WeakEntry>::table_bytes_for(room)
+                    .saturating_sub(table.charged),
+                Ok(None) => 0,
+                Err(_) => u64::MAX,
             })
         })?;
         let Some(precharged) = precharged else {
@@ -545,6 +547,157 @@ mod tests {
             let after = agent.heap_bytes().unwrap();
             assert_eq!(after - before, WeakCollection::box_bytes(), "{kind:?}");
         }
+    }
+
+    /// The full room of a table of 1,024 buckets ([`KeyedMap::full_capacity_for`]).
+    const ROOM: usize = 896;
+
+    /// The keys of one generation of [`churn`]; 8 of them fill [`ROOM`].
+    const GENERATION: usize = 112;
+
+    /// The generations [`churn`] keeps alive after its fill.
+    const LIVE: usize = 2;
+
+    /// The rounds of [`churn`], one generation each.
+    const ROUNDS: usize = 100;
+
+    /// The spare room of the table of `table`.
+    fn spare_of(agent: &Agent<NoHooks>, table: ObjectRef) -> usize {
+        match &agent.heap.objects.get(table.handle).unwrap().kind {
+            ObjectKind::WeakCollection(table) => table.table.spare(),
+            _ => panic!("{table:?} is no weak table"),
+        }
+    }
+
+    /// The bytes charged for the table of `table`.
+    fn charged_of(agent: &Agent<NoHooks>, table: ObjectRef) -> u64 {
+        match &agent.heap.objects.get(table.handle).unwrap().kind {
+            ObjectKind::WeakCollection(table) => table.charged,
+            _ => panic!("{table:?} is no weak table"),
+        }
+    }
+
+    /// What [`churn`] read.
+    #[derive(Debug, PartialEq)]
+    struct Churned {
+        /// The most `heap_bytes()` read after an insertion.
+        peak: u64,
+        /// Insertions that found no spare room below half the room and left the room at
+        /// [`ROOM`]: rehashes of the table in place.
+        in_place: usize,
+        /// The most bytes an insertion that rehashed the table in place added to the count of
+        /// bytes charged since the last collection, which starts the next one.
+        in_place_counted: u64,
+        /// The least and the most bytes charged for the table after an insertion once the fill
+        /// is done.
+        charged: (u64, u64),
+        /// The round and the insertion that failed, if one did.
+        ended: Option<(usize, usize)>,
+    }
+
+    /// A WeakMap used as a cache whose keys die, in an agent of `memory_bytes`: 8 generations
+    /// of [`GENERATION`] rooted keys fill the room of a table of 1,024 buckets; from then on
+    /// each round drops the roots of the oldest generations until `LIVE - 1` are left,
+    /// collects (which drops the entries of the dropped keys), and inserts a new generation.
+    /// The map's entries stay at most `LIVE * GENERATION` (224), a quarter of its room.
+    fn churn(memory_bytes: u64) -> Churned {
+        let mut limits = test_host::limits();
+        limits.memory_bytes = memory_bytes;
+        let mut agent = test_host::agent_with(limits);
+        let map = new_table(&mut agent, WeakKind::Map);
+        let _map_root = agent.heap.roots.add(Value::Object(map));
+        let mut generations: Vec<Vec<crate::Root>> = Vec::new();
+        let mut churned = Churned {
+            peak: 0,
+            in_place: 0,
+            in_place_counted: 0,
+            charged: (u64::MAX, 0),
+            ended: None,
+        };
+        for round in 0..ROUNDS {
+            if round >= 8 {
+                while generations.len() >= LIVE {
+                    generations.remove(0);
+                }
+                assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+            }
+            let mut roots = Vec::new();
+            for n in 0..GENERATION {
+                let key = ordinary(&mut agent);
+                roots.push(agent.heap.roots.add(Value::Object(key)));
+                let (len, spare) = (entries_of(&agent, map), spare_of(&agent, map));
+                let since = agent.heap.accounting.since_collection();
+                let inserted =
+                    agent.weak_insert(map, WeakKey::Object(key.handle), Value::Number(1.0));
+                if inserted.is_err() {
+                    churned.ended = Some((round, n));
+                    return churned;
+                }
+                let room = entries_of(&agent, map) + spare_of(&agent, map);
+                if spare == 0 && len < ROOM / 2 && room == ROOM {
+                    churned.in_place += 1;
+                    churned.in_place_counted = churned
+                        .in_place_counted
+                        .max(agent.heap.accounting.since_collection() - since);
+                }
+                if round >= 8 {
+                    let charged = charged_of(&agent, map);
+                    churned.charged = (
+                        churned.charged.0.min(charged),
+                        churned.charged.1.max(charged),
+                    );
+                }
+                churned.peak = churned.peak.max(agent.heap_bytes().unwrap());
+            }
+            generations.push(roots);
+        }
+        churned
+    }
+
+    /// "The map never shrinks: an entry deleted or cleared leaves its room charged", and an
+    /// insertion into that room charges nothing. A WeakMap used as a cache ([`churn`]) never
+    /// grows past the room of its fill, and its table is rehashed in place once the deleted
+    /// buckets the collections leave use up its spare room. With a large budget the churn reads
+    /// its most `heap_bytes()`; in an agent whose budget is that reading plus half the bytes of
+    /// the table, the same churn needs no byte more and must run to its end.
+    #[test]
+    fn a_weak_map_used_as_a_cache_rehashes_in_place_within_its_budget() {
+        let table = KeyedMap::<WeakKey, WeakEntry>::table_bytes_for(ROOM);
+        let probe = churn(1 << 26);
+        assert_eq!(probe.ended, None, "{probe:?}");
+        assert_eq!(
+            probe.charged,
+            (table, table),
+            "the table never grows past its fill: {probe:?}"
+        );
+        assert!(
+            probe.in_place > 0,
+            "precondition: the table is rehashed in place: {probe:?}"
+        );
+        let budget = probe.peak + table / 2;
+        let tight = churn(budget);
+        assert_eq!(
+            tight.ended,
+            None,
+            "the same churn with the budget {budget} ({} more than its most heap_bytes() with a \
+             large budget, the table {table} bytes) ended at (round, insertion); {probe:?}",
+            table / 2
+        );
+    }
+
+    /// A rehash in place takes no byte, so it charges none: over the churn of [`churn`] with a
+    /// large budget, each insertion that rehashed the table in place added nothing to the bytes
+    /// counted since the last collection, which start the next one
+    /// (`Accounting::since_collection`), not even for a moment.
+    #[test]
+    fn a_rehash_in_place_counts_no_byte_toward_the_next_collection() {
+        let probe = churn(1 << 26);
+        assert_eq!(probe.ended, None, "{probe:?}");
+        assert!(
+            probe.in_place > 0,
+            "precondition: the table is rehashed in place: {probe:?}"
+        );
+        assert_eq!(probe.in_place_counted, 0, "{probe:?}");
     }
 
     /// Evaluate `source` in a fresh realm's agent after `setup`; the steps of the entry of

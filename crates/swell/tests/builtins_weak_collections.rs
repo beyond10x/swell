@@ -11,7 +11,9 @@ use crate::support;
 
 use support::host::{TestHost, agent_with, limits, realm, stack_with_room};
 use support::script::{Outcome, eval, eval_text, run_both};
-use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
+use support::stack::{
+    BUILTINS_REENTRY, is_range_error_of, on_bounded_stack, reach_through, stack_limits, test_path,
+};
 use swell::{Agent, Limits, Outcome as HostOutcome, Realm, Termination, Value};
 
 /// `source` answers the String `expected` in sloppy and in strict code.
@@ -365,4 +367,109 @@ fn get_or_insert_computed_reaches_the_reentry_limit_on_the_promised_stack() {
         body,
     )
     .unwrap();
+}
+
+/// `#sec-weakmap.prototype.getorinsertcomputed` re-entered on one map (decision 3, "Depth
+/// bounds"): a callback that calls `getOrInsertComputed` of the same WeakMap with the same key
+/// re-enters from Rust at each level, so the run ends in the `RangeError` of `reentry_depth`,
+/// which the host reads as the script's throw. With the limit 10 and 20 the callback ran that
+/// many times, and the map holds no entry of the key, since every callback ended abruptly.
+#[test]
+fn get_or_insert_computed_reentered_on_one_map_ends_at_the_reentry_limit() {
+    for depth in [10u32, 20] {
+        let (mut agent, realm) = agent_and_realm(|limits| limits.reentry_depth = depth);
+        let outcome = eval(
+            &mut agent,
+            &realm,
+            "var wm = new WeakMap(), k = {}, n = 0;\n\
+             function f(key) { n++; return wm.getOrInsertComputed(key, f); }\n\
+             wm.getOrInsertComputed(k, f);",
+        );
+        assert!(
+            is_range_error_of(&mut agent, &realm, outcome),
+            "depth {depth}"
+        );
+        assert_eq!(
+            eval_text(&mut agent, &realm, "[n, wm.has(k)].join();"),
+            Outcome::Normal(format!("\"{depth},false\"")),
+            "depth {depth}"
+        );
+    }
+}
+
+/// Keys and receivers at the edges of the clauses. A Proxy, a revoked
+/// Proxy, a function and the map itself are keys (CanBeHeldWeakly: objects); a Proxy of a
+/// WeakMap or a WeakSet and `WeakMap.prototype` fail RequireInternalSlot; a String iterable
+/// gives entries that are no object (WeakMap) or no weak key (WeakSet); an adder that is not
+/// callable is refused before the iterable is opened; an adder that throws and an entry that is
+/// no object close the iterator; `getOrInsertComputed` re-entered with the same key returns
+/// and stores the outermost answer; a callback that grows the map through several rehashes and
+/// deletes and sets the key again leaves every other entry and the callback's answer.
+#[test]
+fn weak_collections_at_the_edges_of_their_clauses() {
+    let grown = if collect_mode() { 16 } else { 2_000 };
+    answers(
+        &format!(
+            "{CAUGHT}var r = [], wm = new WeakMap(), ws = new WeakSet();\n\
+             var p = Proxy.revocable({{}}, {{}}); wm.set(p.proxy, \"p\"); p.revoke(); ws.add(p.proxy);\n\
+             var fn = function () {{}}; wm.set(fn, \"f\"); wm.set(wm, wm);\n\
+             r.push([wm.get(p.proxy), ws.has(p.proxy), wm.get(fn), wm.get(wm) === wm].join());\n\
+             r.push([caught(function () {{ WeakMap.prototype.get.call(new Proxy(new WeakMap(), {{}}), {{}}); }}),\n\
+               caught(function () {{ WeakSet.prototype.has.call(new Proxy(new WeakSet(), {{}}), {{}}); }}),\n\
+               caught(function () {{ WeakMap.prototype.has.call(WeakMap.prototype, {{}}); }})].join());\n\
+             r.push([caught(function () {{ new WeakMap(\"ab\"); }}), caught(function () {{ new WeakSet(\"ab\"); }})].join());\n\
+             var opened = 0, iterable = {{}};\n\
+             iterable[Symbol.iterator] = function () {{ opened++; return {{ next: function () {{ return {{ done: true }}; }} }}; }};\n\
+             var set = WeakMap.prototype.set, add = WeakSet.prototype.add;\n\
+             WeakMap.prototype.set = 1; WeakSet.prototype.add = undefined;\n\
+             r.push([caught(function () {{ new WeakMap(iterable); }}), caught(function () {{ new WeakSet(iterable); }}), opened].join());\n\
+             WeakMap.prototype.set = set; WeakSet.prototype.add = add;\n\
+             var closed = 0;\n\
+             function endless(value) {{ var it = {{}}; it[Symbol.iterator] = function () {{ return {{ next: function () {{ return {{ done: false, value: value }}; }}, \"return\": function () {{ closed++; return {{}}; }} }}; }}; return it; }}\n\
+             WeakMap.prototype.set = function () {{ throw new RangeError(\"adder\"); }};\n\
+             var thrown = caught(function () {{ new WeakMap(endless([{{}}, 1])); }});\n\
+             WeakMap.prototype.set = set;\n\
+             r.push([thrown, caught(function () {{ new WeakMap(endless(1)); }}), caught(function () {{ new WeakSet(endless(1)); }}), closed].join());\n\
+             var k = {{}}, depth = 0;\n\
+             var got = wm.getOrInsertComputed(k, function f() {{ depth++; return depth < 3 ? \"v\" + wm.getOrInsertComputed(k, f) : \"leaf\"; }});\n\
+             r.push([got, wm.get(k), depth].join());\n\
+             var keep = [], k2 = {{}};\n\
+             var got2 = wm.getOrInsertComputed(k2, function () {{ for (var i = 0; i < {grown}; i++) {{ var o = {{}}; keep.push(o); wm.set(o, i); }} wm.set(k2, \"inner\"); wm.delete(k2); wm.set(k2, \"again\"); return \"outer\"; }});\n\
+             var all = true; for (var i = 0; i < {grown}; i++) {{ if (wm.get(keep[i]) !== i) all = false; }}\n\
+             r.push([got2, wm.get(k2), all].join());\n\
+             r.join(\"|\");"
+        ),
+        "p,true,f,true|TypeError,TypeError,TypeError|TypeError,TypeError|TypeError,TypeError,0|\
+         RangeError,TypeError,TypeError,3|vvleaf,vvleaf,3|outer,outer,true",
+    );
+}
+
+/// The ledger over rounds of WeakMaps and WeakSets made and dropped, and of
+/// a WeakMap that lives across the rounds and is given a new key each round that nothing else
+/// keeps. The same script run three times, each run followed by `collect()`: `heap_bytes()`
+/// after the second and the third run equals the reading after the first, so no byte stays
+/// charged per round. The readings are printed.
+#[test]
+fn weak_maps_filled_and_dropped_leave_the_ledger_where_it_was() {
+    let rounds = if collect_mode() { 16 } else { 2_000 };
+    let (mut agent, realm) = agent_and_realm(|limits| limits.steps_per_entry = 1 << 40);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "var lasting = new WeakMap(); 1;"),
+        Outcome::Normal("1".to_string())
+    );
+    let script = format!(
+        "(function () {{ for (var i = 0; i < {rounds}; i++) {{ var m = new WeakMap(), k = {{}}; \
+         m.set(k, [i]); new WeakSet([k]); lasting.set({{}}, i); }} }})(); 1;"
+    );
+    let mut readings = Vec::new();
+    for _ in 0..3 {
+        assert_eq!(
+            eval_text(&mut agent, &realm, &script),
+            Outcome::Normal("1".to_string())
+        );
+        readings.push(collected(&mut agent));
+    }
+    println!("{rounds} rounds: heap_bytes() after each run and collect(): {readings:?}");
+    assert_eq!(readings[1], readings[0], "{readings:?}");
+    assert_eq!(readings[2], readings[0], "{readings:?}");
 }

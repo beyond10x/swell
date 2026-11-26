@@ -976,10 +976,16 @@ mod tests {
         assert!(keys.iter().all(|&key| !lives(&agent, key)));
     }
 
-    /// As [`a_collection_allocates_nothing`], with weak tables: the counting build counts no
-    /// vector made or grown in two collections of a heap whose script left WeakMaps and
-    /// WeakSets with entries kept and dropped, nor in the two collections of the chain of
-    /// [`chain`], one with its first key rooted and one without.
+    /// As [`a_collection_allocates_nothing`], with weak tables: the counting build's
+    /// `collect_allocations` is 0 in two collections of a heap whose script left WeakMaps and
+    /// WeakSets with entries kept and dropped, and in the two collections of the chain of
+    /// [`chain`], one with its first key rooted and one without. It counts two things and no
+    /// more: pushes a worklist had no room for, and pushes past capacity onto the free lists of
+    /// the sweep. A vector made in the ephemeron pass is not counted, so this test cannot see
+    /// one. What holds the rest is the code: the pass makes no vector, because a pending list
+    /// is linked through the head words of the arenas' workspace (one per slot, charged with
+    /// the arena's capacity) and the `next` link of each entry of a weak table
+    /// (`WeakCollection::release`), and `release_pending` walks it in a loop over those links.
     #[test]
     fn the_ephemeron_pass_allocates_nothing() {
         let (mut agent, realm) = test_host::agent_with_realm();
@@ -1032,6 +1038,285 @@ mod tests {
             assert!(!lives(&agent, object), "{object:?}");
         }
         assert!(lives(&agent, reached_key));
+    }
+
+    /// A Symbol key that only an object reaches, rooted before the WeakMap so
+    /// the map is traced first and its entry waits on the pending list of the Symbol's slot,
+    /// keeps its entry and its value; the other root order reaches the same state.
+    #[test]
+    fn a_symbol_key_marked_after_its_map_was_traced_keeps_its_value() {
+        for holder_first in [true, false] {
+            let mut agent = test_host::agent_with(test_host::limits());
+            let symbol = new_symbol(&mut agent);
+            let value = agent.heap.new_object(ordinary(), 0).unwrap();
+            let map = weak_table(
+                &mut agent,
+                WeakKind::Map,
+                &[(WeakKey::Symbol(symbol.handle), Value::Object(value))],
+            );
+            let holder = holding(&mut agent, Value::Symbol(symbol));
+            let roots = if holder_first {
+                [
+                    agent.heap.roots.add(Value::Object(holder)),
+                    agent.heap.roots.add(Value::Object(map)),
+                ]
+            } else {
+                [
+                    agent.heap.roots.add(Value::Object(map)),
+                    agent.heap.roots.add(Value::Object(holder)),
+                ]
+            };
+            assert!(
+                matches!(agent.collect(), Ok(Outcome::Normal(_))),
+                "holder first {holder_first}"
+            );
+            assert_eq!(entries_of(&agent, map), 1, "holder first {holder_first}");
+            assert!(
+                lives(&agent, value),
+                "holder first {holder_first}: the value of a live Symbol key was freed"
+            );
+            assert!(agent.heap.symbols.get(symbol.handle).is_ok());
+            drop(roots);
+        }
+    }
+
+    /// One object key in 2 and in 1,000 WeakMaps, each map traced before the
+    /// key is marked, so the key's pending list runs through every table; once an object traced
+    /// after the maps reaches the key, every table keeps its entry and every value lives; with
+    /// nothing reaching the key, every entry is dropped and every value freed.
+    #[test]
+    fn one_key_pending_in_many_tables_releases_every_table() {
+        for tables in [2usize, CHAIN] {
+            for reached in [true, false] {
+                let mut limits = test_host::limits();
+                limits.memory_bytes = 1 << 26;
+                let mut agent = test_host::agent_with(limits);
+                let key = agent.heap.new_object(ordinary(), 0).unwrap();
+                let values: Vec<ObjectRef> = (0..tables)
+                    .map(|_| agent.heap.new_object(ordinary(), 0).unwrap())
+                    .collect();
+                let maps: Vec<ObjectRef> = values
+                    .iter()
+                    .map(|&value| {
+                        weak_table(
+                            &mut agent,
+                            WeakKind::Map,
+                            &[(key_of(key), Value::Object(value))],
+                        )
+                    })
+                    .collect();
+                let holder = holding(&mut agent, Value::Object(key));
+                let mut roots = Vec::new();
+                if reached {
+                    roots.push(agent.heap.roots.add(Value::Object(holder)));
+                }
+                for &map in &maps {
+                    roots.push(agent.heap.roots.add(Value::Object(map)));
+                }
+                assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+                let expected = if reached { tables } else { 0 };
+                let kept = maps
+                    .iter()
+                    .filter(|&&map| entries_of(&agent, map) == 1)
+                    .count();
+                let living = values.iter().filter(|&&value| lives(&agent, value)).count();
+                assert_eq!(
+                    kept, expected,
+                    "{tables} tables, reached {reached}: entries"
+                );
+                assert_eq!(
+                    living, expected,
+                    "{tables} tables, reached {reached}: values"
+                );
+                assert_eq!(lives(&agent, key), reached);
+                drop(roots);
+            }
+        }
+    }
+
+    /// A cycle of ephemerons across three tables, `a` → `b` in one map, `b` →
+    /// `inner` in a second, and `inner`, a WeakMap reachable only as that value, with `a` as
+    /// the value of a key that is rooted. Nothing else reaching `a` or `b`, both entries are
+    /// dropped and `a`, `b` and `inner` freed; with `a` reached by an object traced after the
+    /// maps, every entry is kept.
+    #[test]
+    fn a_cycle_of_ephemerons_across_tables_is_kept_or_cleared_whole() {
+        for reached in [false, true] {
+            let mut agent = test_host::agent_with(test_host::limits());
+            let a = agent.heap.new_object(ordinary(), 0).unwrap();
+            let b = agent.heap.new_object(ordinary(), 0).unwrap();
+            let inner_key = agent.heap.new_object(ordinary(), 0).unwrap();
+            let inner = weak_table(
+                &mut agent,
+                WeakKind::Map,
+                &[(key_of(inner_key), Value::Object(a))],
+            );
+            let first = weak_table(&mut agent, WeakKind::Map, &[(key_of(a), Value::Object(b))]);
+            let second = weak_table(
+                &mut agent,
+                WeakKind::Map,
+                &[(key_of(b), Value::Object(inner))],
+            );
+            let holder = holding(&mut agent, Value::Object(a));
+            let mut roots = Vec::new();
+            if reached {
+                roots.push(agent.heap.roots.add(Value::Object(holder)));
+            }
+            roots.push(agent.heap.roots.add(Value::Object(inner_key)));
+            roots.push(agent.heap.roots.add(Value::Object(first)));
+            roots.push(agent.heap.roots.add(Value::Object(second)));
+            assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+            let expected = usize::from(reached);
+            assert_eq!(entries_of(&agent, first), expected, "reached {reached}");
+            assert_eq!(entries_of(&agent, second), expected, "reached {reached}");
+            for object in [a, b, inner] {
+                assert_eq!(
+                    lives(&agent, object),
+                    reached,
+                    "reached {reached}: {object:?}"
+                );
+            }
+            if reached {
+                assert_eq!(entries_of(&agent, inner), 1);
+            }
+            drop(roots);
+        }
+    }
+
+    /// One WeakMap of `entries` entries, key i to key i + 1, traced before its first key is
+    /// marked (the object that reaches it is rooted first): one collection keeps every entry
+    /// and key; once that root is dropped, one collection drops every entry and frees every key.
+    fn one_table_chain(entries: usize) {
+        let mut limits = test_host::limits();
+        limits.memory_bytes = 1 << 28;
+        let mut agent = test_host::agent_with(limits);
+        let keys: Vec<ObjectRef> = (0..=entries)
+            .map(|_| agent.heap.new_object(ordinary(), 0).unwrap())
+            .collect();
+        let pairs: Vec<(WeakKey, Value)> = keys
+            .windows(2)
+            .map(|pair| (key_of(pair[0]), Value::Object(pair[1])))
+            .collect();
+        let map = weak_table(&mut agent, WeakKind::Map, &pairs);
+        let holder = holding(&mut agent, Value::Object(keys[0]));
+        let holder_root = agent.heap.roots.add(Value::Object(holder));
+        let _map_root = agent.heap.roots.add(Value::Object(map));
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        assert_eq!(entries_of(&agent, map), entries);
+        assert!(keys.iter().all(|&key| lives(&agent, key)));
+        drop(holder_root);
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        assert_eq!(entries_of(&agent, map), 0);
+        assert!(keys.iter().all(|&key| !lives(&agent, key)));
+    }
+
+    /// [`one_table_chain`] of 1,000 entries.
+    #[test]
+    fn one_table_chain_of_1000_entries() {
+        one_table_chain(1_000);
+    }
+
+    /// [`one_table_chain`] of 10,000 entries.
+    #[test]
+    fn one_table_chain_of_10000_entries() {
+        one_table_chain(10_000);
+    }
+
+    /// A collection leaves an object key and a Symbol key on their pending
+    /// lists (nothing reaches either, so both are freed with their entries); the next records
+    /// made take their slots again and are rooted, and the next collection marks them: it
+    /// ends normally and keeps them, so no head word of the first collection is read again.
+    #[test]
+    fn a_slot_left_pending_is_clean_when_it_is_used_again() {
+        let mut agent = test_host::agent_with(test_host::limits());
+        let symbol = new_symbol(&mut agent);
+        let key = agent.heap.new_object(ordinary(), 0).unwrap();
+        let object_value = agent.heap.new_object(ordinary(), 0).unwrap();
+        let symbol_value = agent.heap.new_object(ordinary(), 0).unwrap();
+        let map = weak_table(
+            &mut agent,
+            WeakKind::Map,
+            &[
+                (key_of(key), Value::Object(object_value)),
+                (WeakKey::Symbol(symbol.handle), Value::Object(symbol_value)),
+            ],
+        );
+        let _map_root = agent.heap.roots.add(Value::Object(map));
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        assert_eq!(entries_of(&agent, map), 0);
+        let objects: Vec<ObjectRef> = (0..4)
+            .map(|_| agent.heap.new_object(ordinary(), 0).unwrap())
+            .collect();
+        let symbols: Vec<SymbolRef> = (0..2).map(|_| new_symbol(&mut agent)).collect();
+        assert!(objects.iter().any(|o| o.handle.index == key.handle.index));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.handle.index == symbol.handle.index)
+        );
+        let mut roots: Vec<crate::Root> = objects
+            .iter()
+            .map(|&o| agent.heap.roots.add(Value::Object(o)))
+            .collect();
+        roots.extend(
+            symbols
+                .iter()
+                .map(|&s| agent.heap.roots.add(Value::Symbol(s))),
+        );
+        assert!(
+            matches!(agent.collect(), Ok(Outcome::Normal(_))),
+            "the second collection"
+        );
+        assert!(objects.iter().all(|&o| lives(&agent, o)));
+        assert!(
+            symbols
+                .iter()
+                .all(|s| agent.heap.symbols.get(s.handle).is_ok())
+        );
+        drop(roots);
+    }
+
+    /// A Symbol key whose description String is rooted, the Symbol itself
+    /// reached by nothing: the String does not reach the Symbol, so the entry is dropped and
+    /// the Symbol and the value freed; the String lives.
+    #[test]
+    fn a_symbol_reached_only_through_its_description_is_cleared() {
+        let mut agent = test_host::agent_with(test_host::limits());
+        let description = StringRef {
+            handle: agent
+                .heap
+                .strings
+                .allocate(HeapString::for_test(), 0)
+                .unwrap(),
+        };
+        let symbol = SymbolRef {
+            handle: agent
+                .heap
+                .symbols
+                .allocate(
+                    SymbolRecord {
+                        description: Some(description),
+                        registered: false,
+                    },
+                    0,
+                )
+                .unwrap(),
+        };
+        let value = agent.heap.new_object(ordinary(), 0).unwrap();
+        let map = weak_table(
+            &mut agent,
+            WeakKind::Map,
+            &[(WeakKey::Symbol(symbol.handle), Value::Object(value))],
+        );
+        let _roots = [
+            agent.heap.roots.add(Value::String(description)),
+            agent.heap.roots.add(Value::Object(map)),
+        ];
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        assert_eq!(entries_of(&agent, map), 0);
+        assert!(!lives(&agent, value));
+        assert!(agent.heap.symbols.get(symbol.handle).is_err());
+        assert!(agent.heap.strings.get(description.handle).is_ok());
     }
 
     /// The lane `slow` sets `SWELL_FULL_COUNTS=1` for the full counts of a test.
