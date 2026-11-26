@@ -237,7 +237,6 @@ test/language/expressions/class/elements/static-as-valid-static-field.js
 test/language/expressions/class/elements/static-field-declaration.js
 test/language/expressions/class/elements/static-field-init-this-inside-arrow-function.js
 test/language/expressions/class/elements/static-field-redeclaration.js
-test/language/expressions/class/elements/super-access-from-arrow-func-on-field.js
 test/language/expressions/class/elements/syntax/valid/grammar-field-classelementname-initializer-alt.js
 test/language/expressions/class/elements/syntax/valid/grammar-field-classelementname-initializer.js
 test/language/expressions/class/elements/syntax/valid/grammar-field-identifier-alt.js
@@ -499,7 +498,6 @@ test/language/statements/class/elements/static-field-init-this-inside-arrow-func
 test/language/statements/class/elements/static-field-initializer-error.js
 test/language/statements/class/elements/static-field-redeclaration.js
 test/language/statements/class/elements/static-fielddefinition-initializer-abrupt-completion.js
-test/language/statements/class/elements/super-access-from-arrow-func-on-field.js
 test/language/statements/class/elements/syntax/valid/grammar-field-classelementname-initializer-alt.js
 test/language/statements/class/elements/syntax/valid/grammar-field-classelementname-initializer.js
 test/language/statements/class/elements/syntax/valid/grammar-field-identifier-alt.js

@@ -16,6 +16,8 @@
 #   PM  a private method or accessor (class-methods-private, class-static-methods-private)
 #   PF  a private field or #x in (class-fields-private, class-static-fields-private, class-fields-private-in)
 #   EV  a call of eval (eval then (, or (0, eval))
+#   A   super inside an arrow function (=> then super, with no } between them): the derived story lifts its
+#       refusal, so a case with A is on the derived list or on the list of a story after it
 #   L9  a part of slice 9 (Proxy, Reflect., Map, Set, WeakMap, WeakSet in the text, extends of one of the four
 #       collections, or the features Map, Set, WeakMap, WeakSet, Proxy, Reflect, Reflect.construct)
 #   L<n> a part of a later slice: a BigInt literal (12), binary data (13), Atomics (14), Iterator helpers or
@@ -35,8 +37,8 @@
 #   the other cases without B:
 #     element-syntax  D, E, PM or PF, or a private name in the text (eval and Function given a private name)
 #     derived         EV with SP or C (super in eval code: the flags of PerformEval, step 7, are the new.target
-#                     story's and the rules that read them for super the derived story's), or SP with super
-#                     inside an arrow function (the arrow takes [[HomeObject]] through the new.target story's box)
+#                     story's and the rules that read them for super the derived story's), or SP with A
+#                     (the arrow takes [[HomeObject]] through the new.target story's box)
 #     super           SP or C (super in functions and object literals)
 #     new-target      NT
 #     classes         none of these and class in the path (a class name written with an escape)
@@ -44,19 +46,19 @@
 #     eval-private    EV with PM or PF
 #     eval-fields     EV with D
 #     then the first of these keys whose story holds every part of the case (its closure through its edges):
-#     classes {B NT SP}, derived {B NT SP C}, public-fields {B NT SP D}, static-blocks {B NT SP D E},
-#     private-methods {B NT SP PM}, private-fields {B NT SP C D PM E PF}
+#     classes {B NT SP}, derived {B NT SP C A}, public-fields {B NT SP D}, static-blocks {B NT SP D E},
+#     private-methods {B NT SP PM}, private-fields {B NT SP C D PM E PF A}
 # The list of a story, sorted (LC_ALL=C sort), read from scan.tsv:
 #   LC_ALL=C awk -F"\t" '$2 == "<key>" { print $1 }' docs/plan/slice-08/scan.tsv
 function slurp(f,   s, save) { save = RS; RS = "^$"; s = ""; if ((getline s < f) <= 0) s = ""; close(f); RS = save; return s }
 BEGIN { FS = "\t"; OFS = "\t"
   while ((getline line < meta) > 0) { split(line, m, "\t"); inc[m[1]] = m[6]; feat[m[1]] = "," m[3] ","; neg[m[1]] = m[4] }
   cl["classes"] = " B NT SP "
-  cl["derived"] = " B NT SP C "
+  cl["derived"] = " B NT SP C A "
   cl["public-fields"] = " B NT SP D "
   cl["static-blocks"] = " B NT SP D E "
   cl["private-methods"] = " B NT SP PM "
-  cl["private-fields"] = " B NT SP C D PM E PF "
+  cl["private-fields"] = " B NT SP C D PM E PF A "
   no = split("classes derived public-fields static-blocks private-methods private-fields", ord, " ")
 }
 { p = $1; st = $2; f = feat[p]; ph = neg[p]
@@ -73,6 +75,7 @@ BEGIN { FS = "\t"; OFS = "\t"
   if (f ~ /,class-methods-private,|,class-static-methods-private,/) s = s "PM "
   if (f ~ /,class-fields-private,|,class-static-fields-private,|,class-fields-private-in,/) s = s "PF "
   if (c ~ /\<eval[ \t\n]*\(|\(0, *eval\)/) s = s "EV "
+  if (c ~ /=>[ \t\n]*(\{[^}]*)?\<super\>/) s = s "A "
   if (c ~ /\<Proxy\>|\<Reflect\.|new (Weak)?(Map|Set)\>|\<(Weak)?(Map|Set)(\[|\.|\()|\<extends[ \t\n]+(Weak)?(Map|Set)\>/ || f ~ /,(Map|Set|WeakMap|WeakSet|Proxy|Reflect|Reflect\.construct),/) s = s "L9 "
   later = ""
   if (match(c, /\<[0-9]+n\>|ArrayBuffer|\<(Int8|Uint8|Uint8Clamped|Int16|Uint16|Int32|Uint32|Float16|Float32|Float64|BigInt64|BigUint64)Array\>|DataView|\<Atomics\>|\<WeakRef\>|FinalizationRegistry|\<Iterator\.(from|prototype\.[a-z])|DisposableStack|\<import *\(|\<import\.meta\>|__(lookup|define)(Getter|Setter)__/)) {
@@ -92,7 +95,7 @@ BEGIN { FS = "\t"; OFS = "\t"
     else k = "class-syntax"
   } else if (s !~ / B /) {
     if (s ~ / (D|E|PM|PF) / || c ~ /#[A-Za-z_$]/) k = "element-syntax"
-    else if ((s ~ / EV / && s ~ / (SP|C) /) || (s ~ / SP / && c ~ /=>[ \t\n]*(\{[^}]*)?\<super\>/)) k = "derived"
+    else if ((s ~ / EV / && s ~ / (SP|C) /) || (s ~ / SP / && s ~ / A /)) k = "derived"
     else if (s ~ / (SP|C) /) k = "super"
     else if (s ~ / NT /) k = "new-target"
     else if (p ~ /\/class\//) k = "classes"

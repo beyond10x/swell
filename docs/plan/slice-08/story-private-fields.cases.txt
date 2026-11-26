@@ -579,6 +579,7 @@ test/language/expressions/class/elements/static-field-anonymous-function-name.js
 test/language/expressions/class/elements/static-private-getter-access-on-inner-class.js
 test/language/expressions/class/elements/static-private-method-subclass-receiver.js
 test/language/expressions/class/elements/static-private-setter-access-on-inner-class.js
+test/language/expressions/class/elements/super-access-from-arrow-func-on-field.js
 test/language/expressions/class/elements/syntax/valid/grammar-privatename-classelementname-initializer-alt.js
 test/language/expressions/class/elements/syntax/valid/grammar-privatename-classelementname-initializer.js
 test/language/expressions/class/elements/syntax/valid/grammar-privatename-identifier.js
@@ -1385,6 +1386,7 @@ test/language/statements/class/elements/static-field-anonymous-function-name.js
 test/language/statements/class/elements/static-private-getter-access-on-inner-class.js
 test/language/statements/class/elements/static-private-method-subclass-receiver.js
 test/language/statements/class/elements/static-private-setter-access-on-inner-class.js
+test/language/statements/class/elements/super-access-from-arrow-func-on-field.js
 test/language/statements/class/elements/super-access-inside-a-private-getter.js
 test/language/statements/class/elements/super-access-inside-a-private-method.js
 test/language/statements/class/elements/super-access-inside-a-private-setter.js

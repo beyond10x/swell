@@ -286,10 +286,10 @@ test/language/expressions/arrow-function/dstr/dflt-obj-ptrn-id-init-fn-name-clas
 test/language/expressions/arrow-function/dstr/obj-ptrn-id-init-fn-name-class.js	classes	B	-
 test/language/expressions/arrow-function/lexical-new.target-closure-returned.js	new-target	NT	-
 test/language/expressions/arrow-function/lexical-new.target.js	new-target	NT	-
-test/language/expressions/arrow-function/lexical-super-call-from-within-constructor.js	derived	B C	-
-test/language/expressions/arrow-function/lexical-super-property-from-within-constructor.js	derived	B C SP	-
-test/language/expressions/arrow-function/lexical-super-property.js	derived	B C SP	-
-test/language/expressions/arrow-function/lexical-supercall-from-immediately-invoked-arrow.js	derived	B C	-
+test/language/expressions/arrow-function/lexical-super-call-from-within-constructor.js	derived	B C A	-
+test/language/expressions/arrow-function/lexical-super-property-from-within-constructor.js	derived	B C SP A	-
+test/language/expressions/arrow-function/lexical-super-property.js	derived	B C SP A	-
+test/language/expressions/arrow-function/lexical-supercall-from-immediately-invoked-arrow.js	derived	B C A	-
 test/language/expressions/arrow-function/static-init-await-binding.js	element-syntax	B E	parse
 test/language/expressions/arrow-function/static-init-await-reference.js	element-syntax	B E	parse
 test/language/expressions/assignment/dstr/array-elem-init-fn-name-class.js	classes	B	-
@@ -304,8 +304,8 @@ test/language/expressions/assignment/target-super-computed-reference.js	derived	
 test/language/expressions/assignment/target-super-identifier-reference-null.js	classes	B SP	-
 test/language/expressions/assignmenttargettype/direct-primaryexpression-classexpression.js	class-syntax	B	parse
 test/language/expressions/assignmenttargettype/parenthesized-primaryexpression-classexpression.js	class-syntax	B	parse
-test/language/expressions/async-arrow-function/early-errors-arrow-body-contains-super-call.js	super	C	parse
-test/language/expressions/async-arrow-function/early-errors-arrow-body-contains-super-property.js	super	SP	parse
+test/language/expressions/async-arrow-function/early-errors-arrow-body-contains-super-call.js	super	C A	parse
+test/language/expressions/async-arrow-function/early-errors-arrow-body-contains-super-property.js	super	SP A	parse
 test/language/expressions/async-arrow-function/early-errors-arrow-formals-contains-super-call.js	super	C	parse
 test/language/expressions/async-arrow-function/early-errors-arrow-formals-contains-super-property.js	super	SP	parse
 test/language/expressions/async-function/early-errors-expression-body-contains-super-call.js	super	C	parse
@@ -2923,34 +2923,34 @@ test/language/expressions/class/elements/after-same-line-static-method-static-pr
 test/language/expressions/class/elements/after-same-line-static-method-static-private-methods-with-fields.js	private-fields	B D PM PF	-
 test/language/expressions/class/elements/after-same-line-static-method-static-private-methods.js	private-fields	B D PM	-
 test/language/expressions/class/elements/after-same-line-static-method-string-literal-names.js	public-fields	B D	-
-test/language/expressions/class/elements/arrow-body-derived-cls-direct-eval-contains-superproperty-1.js	eval-fields	B C SP D EV	-
-test/language/expressions/class/elements/arrow-body-derived-cls-direct-eval-contains-superproperty-2.js	eval-fields	B C SP D EV	-
-test/language/expressions/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall-1.js	eval-fields	B C D EV	-
-test/language/expressions/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall-2.js	eval-fields	B C D EV	-
-test/language/expressions/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall.js	eval-fields	B C D EV	-
-test/language/expressions/class/elements/arrow-body-derived-cls-indirect-eval-contains-superproperty-1.js	eval-fields	B C SP D EV	-
-test/language/expressions/class/elements/arrow-body-derived-cls-indirect-eval-contains-superproperty-2.js	eval-fields	B C SP D EV	-
-test/language/expressions/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall-1.js	eval-fields	B C D EV	-
-test/language/expressions/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall-2.js	eval-fields	B C D EV	-
-test/language/expressions/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall.js	eval-fields	B C D EV	-
+test/language/expressions/class/elements/arrow-body-derived-cls-direct-eval-contains-superproperty-1.js	eval-fields	B C SP D EV A	-
+test/language/expressions/class/elements/arrow-body-derived-cls-direct-eval-contains-superproperty-2.js	eval-fields	B C SP D EV A	-
+test/language/expressions/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall-1.js	eval-fields	B C D EV A	-
+test/language/expressions/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall-2.js	eval-fields	B C D EV A	-
+test/language/expressions/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall.js	eval-fields	B C D EV A	-
+test/language/expressions/class/elements/arrow-body-derived-cls-indirect-eval-contains-superproperty-1.js	eval-fields	B C SP D EV A	-
+test/language/expressions/class/elements/arrow-body-derived-cls-indirect-eval-contains-superproperty-2.js	eval-fields	B C SP D EV A	-
+test/language/expressions/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall-1.js	eval-fields	B C D EV A	-
+test/language/expressions/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall-2.js	eval-fields	B C D EV A	-
+test/language/expressions/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall.js	eval-fields	B C D EV A	-
 test/language/expressions/class/elements/arrow-body-direct-eval-err-contains-arguments.js	eval-fields	B D EV	-
 test/language/expressions/class/elements/arrow-body-direct-eval-err-contains-newtarget.js	eval-fields	NT B D EV	-
 test/language/expressions/class/elements/arrow-body-indirect-eval-err-contains-newtarget.js	eval-fields	NT B D EV	-
-test/language/expressions/class/elements/arrow-body-private-derived-cls-direct-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV	-
-test/language/expressions/class/elements/arrow-body-private-derived-cls-direct-eval-contains-superproperty-2.js	eval-private	B C SP D PF EV	-
-test/language/expressions/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall-1.js	eval-private	B C D PF EV	-
-test/language/expressions/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall-2.js	eval-private	B C D PF EV	-
-test/language/expressions/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall.js	eval-private	B C D PF EV	-
-test/language/expressions/class/elements/arrow-body-private-derived-cls-indirect-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV	-
-test/language/expressions/class/elements/arrow-body-private-derived-cls-indirect-eval-contains-superproperty-2.js	eval-private	B C SP D PF EV	-
-test/language/expressions/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall-1.js	eval-private	B C D PF EV	-
-test/language/expressions/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall-2.js	eval-private	B C D PF EV	-
-test/language/expressions/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall.js	eval-private	B C D PF EV	-
+test/language/expressions/class/elements/arrow-body-private-derived-cls-direct-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV A	-
+test/language/expressions/class/elements/arrow-body-private-derived-cls-direct-eval-contains-superproperty-2.js	eval-private	B C SP D PF EV A	-
+test/language/expressions/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall-1.js	eval-private	B C D PF EV A	-
+test/language/expressions/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall-2.js	eval-private	B C D PF EV A	-
+test/language/expressions/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall.js	eval-private	B C D PF EV A	-
+test/language/expressions/class/elements/arrow-body-private-derived-cls-indirect-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV A	-
+test/language/expressions/class/elements/arrow-body-private-derived-cls-indirect-eval-contains-superproperty-2.js	eval-private	B C SP D PF EV A	-
+test/language/expressions/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall-1.js	eval-private	B C D PF EV A	-
+test/language/expressions/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall-2.js	eval-private	B C D PF EV A	-
+test/language/expressions/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall.js	eval-private	B C D PF EV A	-
 test/language/expressions/class/elements/arrow-body-private-direct-eval-err-contains-arguments.js	eval-private	B D PF EV	-
 test/language/expressions/class/elements/arrow-body-private-direct-eval-err-contains-newtarget.js	eval-private	NT B PF EV	-
 test/language/expressions/class/elements/arrow-body-private-indirect-eval-err-contains-newtarget.js	eval-private	NT B PF EV	-
 test/language/expressions/class/elements/arrow-fnc-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/expressions/class/elements/arrow-fnc-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/expressions/class/elements/arrow-fnc-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/expressions/class/elements/async-gen-private-method-static/await-as-binding-identifier-escaped.js	element-syntax	B PM	parse
 test/language/expressions/class/elements/async-gen-private-method-static/await-as-binding-identifier.js	element-syntax	B PM	parse
 test/language/expressions/class/elements/async-gen-private-method-static/await-as-identifier-reference-escaped.js	element-syntax	B PM	parse
@@ -3226,7 +3226,7 @@ test/language/expressions/class/elements/fields-literal-name-propname-constructo
 test/language/expressions/class/elements/fields-literal-name-static-propname-constructor.js	element-syntax	B D	parse
 test/language/expressions/class/elements/fields-literal-name-static-propname-prototype.js	element-syntax	B D	parse
 test/language/expressions/class/elements/fields-multiple-definitions-static-private-methods-proxy.js	slice-9	B PM L9	-
-test/language/expressions/class/elements/fields-run-once-on-double-super.js	private-fields	B C D	-
+test/language/expressions/class/elements/fields-run-once-on-double-super.js	private-fields	B C D A	-
 test/language/expressions/class/elements/fields-string-name-propname-constructor.js	element-syntax	B D	parse
 test/language/expressions/class/elements/fields-string-name-static-propname-constructor.js	element-syntax	B D	parse
 test/language/expressions/class/elements/fields-string-name-static-propname-prototype.js	element-syntax	B D	parse
@@ -3342,9 +3342,9 @@ test/language/expressions/class/elements/multiple-stacked-definitions-static-pri
 test/language/expressions/class/elements/multiple-stacked-definitions-static-private-methods.js	private-fields	B D PM	-
 test/language/expressions/class/elements/multiple-stacked-definitions-string-literal-names.js	public-fields	B D	-
 test/language/expressions/class/elements/nested-arrow-fnc-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/expressions/class/elements/nested-arrow-fnc-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/expressions/class/elements/nested-arrow-fnc-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/expressions/class/elements/nested-comp-name-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/expressions/class/elements/nested-comp-name-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/expressions/class/elements/nested-comp-name-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/expressions/class/elements/nested-derived-cls-direct-eval-contains-superproperty-1.js	eval-fields	B C SP D EV	-
 test/language/expressions/class/elements/nested-derived-cls-direct-eval-contains-superproperty-2.js	eval-fields	B C SP D EV	-
 test/language/expressions/class/elements/nested-derived-cls-direct-eval-err-contains-supercall-1.js	eval-fields	B C D EV	-
@@ -3362,9 +3362,9 @@ test/language/expressions/class/elements/nested-equality-init-err-contains-super
 test/language/expressions/class/elements/nested-indirect-eval-contains-arguments.js	eval-fields	B D EV	-
 test/language/expressions/class/elements/nested-indirect-eval-err-contains-newtarget.js	eval-fields	NT B D EV	-
 test/language/expressions/class/elements/nested-literal-name-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/expressions/class/elements/nested-literal-name-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/expressions/class/elements/nested-literal-name-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/expressions/class/elements/nested-private-arrow-fnc-init-err-contains-arguments.js	element-syntax	B D PF	parse
-test/language/expressions/class/elements/nested-private-arrow-fnc-init-err-contains-super.js	element-syntax	B C D PF	parse
+test/language/expressions/class/elements/nested-private-arrow-fnc-init-err-contains-super.js	element-syntax	B C D PF A	parse
 test/language/expressions/class/elements/nested-private-derived-cls-direct-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV	-
 test/language/expressions/class/elements/nested-private-derived-cls-direct-eval-contains-superproperty-2.js	eval-private	B C SP D PF EV	-
 test/language/expressions/class/elements/nested-private-derived-cls-direct-eval-err-contains-supercall-1.js	eval-private	B C D PF EV	-
@@ -3380,21 +3380,21 @@ test/language/expressions/class/elements/nested-private-direct-eval-err-contains
 test/language/expressions/class/elements/nested-private-indirect-eval-contains-arguments.js	eval-private	B D PF EV	-
 test/language/expressions/class/elements/nested-private-indirect-eval-err-contains-newtarget.js	eval-private	NT B PF EV	-
 test/language/expressions/class/elements/nested-private-literal-name-init-err-contains-arguments.js	element-syntax	B D PF	parse
-test/language/expressions/class/elements/nested-private-literal-name-init-err-contains-super.js	element-syntax	B C D PF	parse
+test/language/expressions/class/elements/nested-private-literal-name-init-err-contains-super.js	element-syntax	B C D PF A	parse
 test/language/expressions/class/elements/nested-private-ternary-init-err-contains-arguments.js	element-syntax	B D PF	parse
 test/language/expressions/class/elements/nested-private-ternary-init-err-contains-super.js	element-syntax	B C D PF	parse
 test/language/expressions/class/elements/nested-private-typeof-init-err-contains-arguments.js	element-syntax	B D PF	parse
 test/language/expressions/class/elements/nested-private-typeof-init-err-contains-super.js	element-syntax	B C D PF	parse
 test/language/expressions/class/elements/nested-static-comp-name-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/expressions/class/elements/nested-static-comp-name-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/expressions/class/elements/nested-static-comp-name-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/expressions/class/elements/nested-static-literal-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/expressions/class/elements/nested-static-literal-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/expressions/class/elements/nested-static-literal-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/expressions/class/elements/nested-static-private-init-err-contains-arguments.js	element-syntax	B D PF	parse
-test/language/expressions/class/elements/nested-static-private-init-err-contains-super.js	element-syntax	B C D PF	parse
+test/language/expressions/class/elements/nested-static-private-init-err-contains-super.js	element-syntax	B C D PF A	parse
 test/language/expressions/class/elements/nested-static-string-literal-name-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/expressions/class/elements/nested-static-string-literal-name-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/expressions/class/elements/nested-static-string-literal-name-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/expressions/class/elements/nested-string-literal-name-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/expressions/class/elements/nested-string-literal-name-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/expressions/class/elements/nested-string-literal-name-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/expressions/class/elements/nested-ternary-init-err-contains-arguments.js	element-syntax	B D	parse
 test/language/expressions/class/elements/nested-ternary-init-err-contains-super.js	element-syntax	B C D	parse
 test/language/expressions/class/elements/nested-typeof-init-err-contains-arguments.js	element-syntax	B D	parse
@@ -3540,7 +3540,7 @@ test/language/expressions/class/elements/private-accessor-name/static-private-na
 test/language/expressions/class/elements/private-accessor-name/static-private-name-u2118.js	private-methods	B PM	-
 test/language/expressions/class/elements/private-accessor-name/static-private-name-underscore.js	private-methods	B PM	-
 test/language/expressions/class/elements/private-arrow-fnc-init-err-contains-arguments.js	element-syntax	B D PF	parse
-test/language/expressions/class/elements/private-arrow-fnc-init-err-contains-super.js	element-syntax	B C D PF	parse
+test/language/expressions/class/elements/private-arrow-fnc-init-err-contains-super.js	element-syntax	B C D PF A	parse
 test/language/expressions/class/elements/private-async-generator-method-name.js	private-methods	B PM	-
 test/language/expressions/class/elements/private-async-method-name.js	private-methods	B PM	-
 test/language/expressions/class/elements/private-derived-cls-direct-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV	-
@@ -3864,7 +3864,7 @@ test/language/expressions/class/elements/static-string-literal-name-init-err-con
 test/language/expressions/class/elements/static-string-literal-name-init-err-contains-super.js	element-syntax	B C D	parse
 test/language/expressions/class/elements/string-literal-name-init-err-contains-arguments.js	element-syntax	B D	parse
 test/language/expressions/class/elements/string-literal-name-init-err-contains-super.js	element-syntax	B C D	parse
-test/language/expressions/class/elements/super-access-from-arrow-func-on-field.js	public-fields	B SP D	-
+test/language/expressions/class/elements/super-access-from-arrow-func-on-field.js	private-fields	B SP D A	-
 test/language/expressions/class/elements/syntax/early-errors/class-heritage-array-literal-arrow-heritage.js	class-syntax	B C	parse
 test/language/expressions/class/elements/syntax/early-errors/class-heritage-array-literal-async-arrow-heritage.js	class-syntax	B C	parse
 test/language/expressions/class/elements/syntax/early-errors/delete/field-delete-covered-err-delete-call-expression-private-method-accessor-get.js	element-syntax	B D PM PF	parse
@@ -4649,14 +4649,14 @@ test/language/expressions/super/prop-dot-cls-null-proto.js	derived	B C SP	-
 test/language/expressions/super/prop-dot-cls-ref-strict.js	classes	B SP	-
 test/language/expressions/super/prop-dot-cls-ref-this.js	derived	B C SP	-
 test/language/expressions/super/prop-dot-cls-this-uninit.js	derived	B C SP	-
-test/language/expressions/super/prop-dot-cls-val-from-arrow.js	derived	B C SP	-
+test/language/expressions/super/prop-dot-cls-val-from-arrow.js	derived	B C SP A	-
 test/language/expressions/super/prop-dot-cls-val-from-eval.js	derived	B C SP EV	-
 test/language/expressions/super/prop-dot-cls-val.js	derived	B C SP	-
 test/language/expressions/super/prop-dot-obj-null-proto.js	super	SP	-
 test/language/expressions/super/prop-dot-obj-ref-non-strict.js	super	SP	-
 test/language/expressions/super/prop-dot-obj-ref-strict.js	super	SP	-
 test/language/expressions/super/prop-dot-obj-ref-this.js	super	SP	-
-test/language/expressions/super/prop-dot-obj-val-from-arrow.js	derived	SP	-
+test/language/expressions/super/prop-dot-obj-val-from-arrow.js	derived	SP A	-
 test/language/expressions/super/prop-dot-obj-val-from-eval.js	derived	SP EV	-
 test/language/expressions/super/prop-dot-obj-val.js	super	SP	-
 test/language/expressions/super/prop-expr-cls-err.js	classes	B SP	-
@@ -4666,7 +4666,7 @@ test/language/expressions/super/prop-expr-cls-ref-strict.js	classes	B SP	-
 test/language/expressions/super/prop-expr-cls-ref-this.js	derived	B C SP	-
 test/language/expressions/super/prop-expr-cls-this-uninit.js	derived	B C SP	-
 test/language/expressions/super/prop-expr-cls-unresolvable.js	classes	B SP	-
-test/language/expressions/super/prop-expr-cls-val-from-arrow.js	derived	B C SP	-
+test/language/expressions/super/prop-expr-cls-val-from-arrow.js	derived	B C SP A	-
 test/language/expressions/super/prop-expr-cls-val-from-eval.js	derived	B C SP EV	-
 test/language/expressions/super/prop-expr-cls-val.js	derived	B C SP	-
 test/language/expressions/super/prop-expr-getsuperbase-before-topropertykey-getvalue.js	super	SP	-
@@ -4680,7 +4680,7 @@ test/language/expressions/super/prop-expr-obj-ref-non-strict.js	super	SP	-
 test/language/expressions/super/prop-expr-obj-ref-strict.js	super	SP	-
 test/language/expressions/super/prop-expr-obj-ref-this.js	super	SP	-
 test/language/expressions/super/prop-expr-obj-unresolvable.js	super	SP	-
-test/language/expressions/super/prop-expr-obj-val-from-arrow.js	derived	SP	-
+test/language/expressions/super/prop-expr-obj-val-from-arrow.js	derived	SP A	-
 test/language/expressions/super/prop-expr-obj-val-from-eval.js	derived	SP EV	-
 test/language/expressions/super/prop-expr-obj-val.js	super	SP	-
 test/language/expressions/super/prop-expr-uninitialized-this-getvalue.js	derived	B C SP	-
@@ -4702,9 +4702,9 @@ test/language/global-code/script-decl-lex-deletion.js	classes	B	-
 test/language/global-code/script-decl-lex-lex.js	classes	B	-
 test/language/global-code/script-decl-lex.js	classes	B	-
 test/language/global-code/script-decl-var-collision.js	classes	B	-
-test/language/global-code/super-call-arrow.js	super	C	parse
+test/language/global-code/super-call-arrow.js	super	C A	parse
 test/language/global-code/super-call.js	super	C	parse
-test/language/global-code/super-prop-arrow.js	super	SP	parse
+test/language/global-code/super-prop-arrow.js	super	SP A	parse
 test/language/global-code/super-prop.js	super	SP	parse
 test/language/identifier-resolution/static-init-invalid-await.js	element-syntax	B E	parse
 test/language/identifiers/part-unicode-10.0.0-class-escaped.js	private-fields	B PF	-
@@ -7470,34 +7470,34 @@ test/language/statements/class/elements/after-same-line-static-method-static-pri
 test/language/statements/class/elements/after-same-line-static-method-static-private-methods.js	private-fields	B D PM	-
 test/language/statements/class/elements/after-same-line-static-method-string-literal-names.js	public-fields	B D	-
 test/language/statements/class/elements/arrow-body-arguments-label.js	public-fields	B D	-
-test/language/statements/class/elements/arrow-body-derived-cls-direct-eval-contains-superproperty-1.js	eval-fields	B C SP D EV	-
-test/language/statements/class/elements/arrow-body-derived-cls-direct-eval-contains-superproperty-2.js	eval-fields	B C SP D EV	-
-test/language/statements/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall-1.js	eval-fields	B C D EV	-
-test/language/statements/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall-2.js	eval-fields	B C D EV	-
-test/language/statements/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall.js	eval-fields	B C D EV	-
-test/language/statements/class/elements/arrow-body-derived-cls-indirect-eval-contains-superproperty-1.js	eval-fields	B C SP D EV	-
-test/language/statements/class/elements/arrow-body-derived-cls-indirect-eval-contains-superproperty-2.js	eval-fields	B C SP D EV	-
-test/language/statements/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall-1.js	eval-fields	B C D EV	-
-test/language/statements/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall-2.js	eval-fields	B C D EV	-
-test/language/statements/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall.js	eval-fields	B C D EV	-
+test/language/statements/class/elements/arrow-body-derived-cls-direct-eval-contains-superproperty-1.js	eval-fields	B C SP D EV A	-
+test/language/statements/class/elements/arrow-body-derived-cls-direct-eval-contains-superproperty-2.js	eval-fields	B C SP D EV A	-
+test/language/statements/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall-1.js	eval-fields	B C D EV A	-
+test/language/statements/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall-2.js	eval-fields	B C D EV A	-
+test/language/statements/class/elements/arrow-body-derived-cls-direct-eval-err-contains-supercall.js	eval-fields	B C D EV A	-
+test/language/statements/class/elements/arrow-body-derived-cls-indirect-eval-contains-superproperty-1.js	eval-fields	B C SP D EV A	-
+test/language/statements/class/elements/arrow-body-derived-cls-indirect-eval-contains-superproperty-2.js	eval-fields	B C SP D EV A	-
+test/language/statements/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall-1.js	eval-fields	B C D EV A	-
+test/language/statements/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall-2.js	eval-fields	B C D EV A	-
+test/language/statements/class/elements/arrow-body-derived-cls-indirect-eval-err-contains-supercall.js	eval-fields	B C D EV A	-
 test/language/statements/class/elements/arrow-body-direct-eval-err-contains-arguments.js	eval-fields	B D EV	-
 test/language/statements/class/elements/arrow-body-direct-eval-err-contains-newtarget.js	eval-fields	NT B D EV	-
 test/language/statements/class/elements/arrow-body-indirect-eval-err-contains-newtarget.js	eval-fields	NT B D EV	-
-test/language/statements/class/elements/arrow-body-private-derived-cls-direct-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV	-
-test/language/statements/class/elements/arrow-body-private-derived-cls-direct-eval-contains-superproperty-2.js	eval-private	B C SP D PF EV	-
-test/language/statements/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall-1.js	eval-private	B C D PF EV	-
-test/language/statements/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall-2.js	eval-private	B C D PF EV	-
-test/language/statements/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall.js	eval-private	B C D PF EV	-
-test/language/statements/class/elements/arrow-body-private-derived-cls-indirect-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV	-
-test/language/statements/class/elements/arrow-body-private-derived-cls-indirect-eval-contains-superproperty-2.js	eval-private	B C SP D PF EV	-
-test/language/statements/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall-1.js	eval-private	B C D PF EV	-
-test/language/statements/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall-2.js	eval-private	B C D PF EV	-
-test/language/statements/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall.js	eval-private	B C D PF EV	-
+test/language/statements/class/elements/arrow-body-private-derived-cls-direct-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV A	-
+test/language/statements/class/elements/arrow-body-private-derived-cls-direct-eval-contains-superproperty-2.js	eval-private	B C SP D PF EV A	-
+test/language/statements/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall-1.js	eval-private	B C D PF EV A	-
+test/language/statements/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall-2.js	eval-private	B C D PF EV A	-
+test/language/statements/class/elements/arrow-body-private-derived-cls-direct-eval-err-contains-supercall.js	eval-private	B C D PF EV A	-
+test/language/statements/class/elements/arrow-body-private-derived-cls-indirect-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV A	-
+test/language/statements/class/elements/arrow-body-private-derived-cls-indirect-eval-contains-superproperty-2.js	eval-private	B C SP D PF EV A	-
+test/language/statements/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall-1.js	eval-private	B C D PF EV A	-
+test/language/statements/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall-2.js	eval-private	B C D PF EV A	-
+test/language/statements/class/elements/arrow-body-private-derived-cls-indirect-eval-err-contains-supercall.js	eval-private	B C D PF EV A	-
 test/language/statements/class/elements/arrow-body-private-direct-eval-err-contains-arguments.js	eval-private	B D PF EV	-
 test/language/statements/class/elements/arrow-body-private-direct-eval-err-contains-newtarget.js	eval-private	NT B PF EV	-
 test/language/statements/class/elements/arrow-body-private-indirect-eval-err-contains-newtarget.js	eval-private	NT B PF EV	-
 test/language/statements/class/elements/arrow-fnc-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/statements/class/elements/arrow-fnc-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/statements/class/elements/arrow-fnc-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/statements/class/elements/async-gen-private-method-static/await-as-binding-identifier-escaped.js	element-syntax	B PM	parse
 test/language/statements/class/elements/async-gen-private-method-static/await-as-binding-identifier.js	element-syntax	B PM	parse
 test/language/statements/class/elements/async-gen-private-method-static/await-as-identifier-reference-escaped.js	element-syntax	B PM	parse
@@ -7896,9 +7896,9 @@ test/language/statements/class/elements/multiple-stacked-definitions-static-priv
 test/language/statements/class/elements/multiple-stacked-definitions-static-private-methods.js	private-fields	B D PM	-
 test/language/statements/class/elements/multiple-stacked-definitions-string-literal-names.js	public-fields	B D	-
 test/language/statements/class/elements/nested-arrow-fnc-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/statements/class/elements/nested-arrow-fnc-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/statements/class/elements/nested-arrow-fnc-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/statements/class/elements/nested-comp-name-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/statements/class/elements/nested-comp-name-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/statements/class/elements/nested-comp-name-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/statements/class/elements/nested-derived-cls-direct-eval-contains-superproperty-1.js	eval-fields	B C SP D EV	-
 test/language/statements/class/elements/nested-derived-cls-direct-eval-contains-superproperty-2.js	eval-fields	B C SP D EV	-
 test/language/statements/class/elements/nested-derived-cls-direct-eval-err-contains-supercall-1.js	eval-fields	B C D EV	-
@@ -7916,9 +7916,9 @@ test/language/statements/class/elements/nested-equality-init-err-contains-super.
 test/language/statements/class/elements/nested-indirect-eval-contains-arguments.js	eval-fields	B D EV	-
 test/language/statements/class/elements/nested-indirect-eval-err-contains-newtarget.js	eval-fields	NT B D EV	-
 test/language/statements/class/elements/nested-literal-name-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/statements/class/elements/nested-literal-name-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/statements/class/elements/nested-literal-name-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/statements/class/elements/nested-private-arrow-fnc-init-err-contains-arguments.js	element-syntax	B D PF	parse
-test/language/statements/class/elements/nested-private-arrow-fnc-init-err-contains-super.js	element-syntax	B C D PF	parse
+test/language/statements/class/elements/nested-private-arrow-fnc-init-err-contains-super.js	element-syntax	B C D PF A	parse
 test/language/statements/class/elements/nested-private-derived-cls-direct-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV	-
 test/language/statements/class/elements/nested-private-derived-cls-direct-eval-contains-superproperty-2.js	eval-private	B C SP D PF EV	-
 test/language/statements/class/elements/nested-private-derived-cls-direct-eval-err-contains-supercall-1.js	eval-private	B C D PF EV	-
@@ -7934,21 +7934,21 @@ test/language/statements/class/elements/nested-private-direct-eval-err-contains-
 test/language/statements/class/elements/nested-private-indirect-eval-contains-arguments.js	eval-private	B D PF EV	-
 test/language/statements/class/elements/nested-private-indirect-eval-err-contains-newtarget.js	eval-private	NT B PF EV	-
 test/language/statements/class/elements/nested-private-literal-name-init-err-contains-arguments.js	element-syntax	B D PF	parse
-test/language/statements/class/elements/nested-private-literal-name-init-err-contains-super.js	element-syntax	B C D PF	parse
+test/language/statements/class/elements/nested-private-literal-name-init-err-contains-super.js	element-syntax	B C D PF A	parse
 test/language/statements/class/elements/nested-private-ternary-init-err-contains-arguments.js	element-syntax	B D PF	parse
 test/language/statements/class/elements/nested-private-ternary-init-err-contains-super.js	element-syntax	B C D PF	parse
 test/language/statements/class/elements/nested-private-typeof-init-err-contains-arguments.js	element-syntax	B D PF	parse
 test/language/statements/class/elements/nested-private-typeof-init-err-contains-super.js	element-syntax	B C D PF	parse
 test/language/statements/class/elements/nested-static-comp-name-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/statements/class/elements/nested-static-comp-name-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/statements/class/elements/nested-static-comp-name-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/statements/class/elements/nested-static-literal-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/statements/class/elements/nested-static-literal-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/statements/class/elements/nested-static-literal-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/statements/class/elements/nested-static-private-init-err-contains-arguments.js	element-syntax	B D PF	parse
-test/language/statements/class/elements/nested-static-private-init-err-contains-super.js	element-syntax	B C D PF	parse
+test/language/statements/class/elements/nested-static-private-init-err-contains-super.js	element-syntax	B C D PF A	parse
 test/language/statements/class/elements/nested-static-string-literal-name-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/statements/class/elements/nested-static-string-literal-name-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/statements/class/elements/nested-static-string-literal-name-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/statements/class/elements/nested-string-literal-name-init-err-contains-arguments.js	element-syntax	B D	parse
-test/language/statements/class/elements/nested-string-literal-name-init-err-contains-super.js	element-syntax	B C D	parse
+test/language/statements/class/elements/nested-string-literal-name-init-err-contains-super.js	element-syntax	B C D A	parse
 test/language/statements/class/elements/nested-ternary-init-err-contains-arguments.js	element-syntax	B D	parse
 test/language/statements/class/elements/nested-ternary-init-err-contains-super.js	element-syntax	B C D	parse
 test/language/statements/class/elements/nested-typeof-init-err-contains-arguments.js	element-syntax	B D	parse
@@ -8095,7 +8095,7 @@ test/language/statements/class/elements/private-accessor-name/static-private-nam
 test/language/statements/class/elements/private-accessor-name/static-private-name-u2118.js	private-methods	B PM	-
 test/language/statements/class/elements/private-accessor-name/static-private-name-underscore.js	private-methods	B PM	-
 test/language/statements/class/elements/private-arrow-fnc-init-err-contains-arguments.js	element-syntax	B D PF	parse
-test/language/statements/class/elements/private-arrow-fnc-init-err-contains-super.js	element-syntax	B C D PF	parse
+test/language/statements/class/elements/private-arrow-fnc-init-err-contains-super.js	element-syntax	B C D PF A	parse
 test/language/statements/class/elements/private-async-generator-method-name.js	private-methods	B PM	-
 test/language/statements/class/elements/private-async-method-name.js	private-methods	B PM	-
 test/language/statements/class/elements/private-derived-cls-direct-eval-contains-superproperty-1.js	eval-private	B C SP D PF EV	-
@@ -8224,7 +8224,7 @@ test/language/statements/class/elements/privatefieldget-typeerror-2.js	private-f
 test/language/statements/class/elements/privatefieldget-typeerror-3.js	private-fields	B C PF	-
 test/language/statements/class/elements/privatefieldget-typeerror-4.js	private-fields	B PF	-
 test/language/statements/class/elements/privatefieldget-typeerror-5.js	private-fields	B C PF	-
-test/language/statements/class/elements/privatefieldset-evaluation-order-1.js	private-fields	B C PF	-
+test/language/statements/class/elements/privatefieldset-evaluation-order-1.js	private-fields	B C PF A	-
 test/language/statements/class/elements/privatefieldset-evaluation-order-2.js	private-fields	B PF	-
 test/language/statements/class/elements/privatefieldset-evaluation-order-3.js	private-fields	B C PF	-
 test/language/statements/class/elements/privatefieldset-typeerror-1.js	private-fields	B D PF	-
@@ -8508,7 +8508,7 @@ test/language/statements/class/elements/static-string-literal-name-init-err-cont
 test/language/statements/class/elements/static-string-literal-name-init-err-contains-super.js	element-syntax	B C D	parse
 test/language/statements/class/elements/string-literal-name-init-err-contains-arguments.js	element-syntax	B D	parse
 test/language/statements/class/elements/string-literal-name-init-err-contains-super.js	element-syntax	B C D	parse
-test/language/statements/class/elements/super-access-from-arrow-func-on-field.js	public-fields	B SP D	-
+test/language/statements/class/elements/super-access-from-arrow-func-on-field.js	private-fields	B SP D A	-
 test/language/statements/class/elements/super-access-inside-a-private-getter.js	private-fields	B C SP PM	-
 test/language/statements/class/elements/super-access-inside-a-private-method.js	private-fields	B C SP PM	-
 test/language/statements/class/elements/super-access-inside-a-private-setter.js	private-fields	B C SP PM	-
@@ -9134,14 +9134,14 @@ test/language/statements/class/subclass/class-definition-parent-proto-null.js	de
 test/language/statements/class/subclass/default-constructor-2.js	derived	B C	-
 test/language/statements/class/subclass/default-constructor-spread-override.js	derived	B C	-
 test/language/statements/class/subclass/default-constructor.js	derived	B C	-
-test/language/statements/class/subclass/derived-class-return-override-catch-finally-arrow.js	derived	B C	-
+test/language/statements/class/subclass/derived-class-return-override-catch-finally-arrow.js	derived	B C A	-
 test/language/statements/class/subclass/derived-class-return-override-catch-finally.js	derived	B C	-
-test/language/statements/class/subclass/derived-class-return-override-catch-super-arrow.js	derived	B C	-
+test/language/statements/class/subclass/derived-class-return-override-catch-super-arrow.js	derived	B C A	-
 test/language/statements/class/subclass/derived-class-return-override-catch-super.js	derived	B C	-
 test/language/statements/class/subclass/derived-class-return-override-catch.js	derived	B C	-
-test/language/statements/class/subclass/derived-class-return-override-finally-super-arrow.js	derived	B C	-
+test/language/statements/class/subclass/derived-class-return-override-finally-super-arrow.js	derived	B C A	-
 test/language/statements/class/subclass/derived-class-return-override-finally-super.js	derived	B C	-
-test/language/statements/class/subclass/derived-class-return-override-for-of-arrow.js	derived	B C	-
+test/language/statements/class/subclass/derived-class-return-override-for-of-arrow.js	derived	B C A	-
 test/language/statements/class/subclass/derived-class-return-override-for-of.js	derived	B C	-
 test/language/statements/class/subclass/derived-class-return-override-with-boolean.js	derived	B C	-
 test/language/statements/class/subclass/derived-class-return-override-with-empty.js	derived	B C	-

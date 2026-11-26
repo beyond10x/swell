@@ -3,8 +3,8 @@ format: aep.planning-md/3
 id: story:slice-08-conformance-close
 kind: story
 status: draft
-title: 'Every run of slice 8 passes: 5 cases move to slice 13, the slice-9 and passing cases are checked, passing cases of later slices come in'
-summary: 5 cases (10 runs) to slice 13 with evidence in moves.tsv; 38 slice-9 and 5 passing cases checked; section 12 and expected.txt.
+title: 'Every run of slice 8 passes: 9 cases move to later slices (5 to slice 13, 4 to slice 18), the slice-9 and passing cases are checked, passing cases of later slices come in'
+summary: 9 cases (18 runs) moved, 5 to slice 13 and 4 to slice 18, with evidence in moves.tsv; 91 cases of slice 9's parts and 5 passing cases checked; section 12 and expected.txt.
 relations:
 - decomposes: epic:slice-08-classes
 - depends_on: story:new-target-meta-property
@@ -35,13 +35,13 @@ scope:
   path: docs/design/engine.md
 - confidence: inferred
   path: docs/plan/slice-08/close-into-08.tsv
-revision: 4
+revision: 6
 ---
 ## Context
 
 The epic asks every run of slice 8 to pass, and a case that needs a later slice is moved by a rule line of the `swell-slices` block with its reason, in the change that moves both slices' counts, each move with its evidence in `conformance/test262/moves.tsv` (`AGENTS.md`, "A case that cannot pass in its slice"; `docs/design/engine.md`, section 12), as `story:slice-10-conformance-close`, `story:slice-04-conformance-close` and `story:slice-09-conformance-close` do for their slices. This story makes that move for slice 8 once every other story of the slice has landed, owns the block, its paragraph and its table for these lines, and writes no engine file.
 
-Measured by the decomposition on `62c7cf59` with the full run of 2026-11-26 on `149e12f1` (its slice line `test262-slice 08 9302 18455 0 0 9302 5 9297 0` equals `conformance/test262/expected.txt` on `62c7cf59`; fields 3 and 4 of its slice lines sum to `53801 103360`). The 9,302 cases of slice 8 and the 37 that slice 9's close is to move into it are partitioned by the lists of `docs/plan/slice-08/` (`docs/plan/slice-08/scan.awk` gives the assignment, `scan.tsv`; `sh docs/plan/slice-08/lists.sh <runs>` prints one line per list and then `slice 9302 lists 9339 incoming 37`, exit 0, over that run): 9,234 on the 12 story lists and four close lists:
+Measured by the decomposition on `62c7cf59` with the full run of 2026-11-26 on `149e12f1` (its slice line `test262-slice 08 9302 18455 0 0 9302 5 9297 0` equals `conformance/test262/expected.txt` on `62c7cf59`; fields 3 and 4 of its slice lines sum to `53801 103360`). The 9,302 cases of slice 8 and the 37 that slice 9's close is to move into it are partitioned by the lists of `docs/plan/slice-08/` (`docs/plan/slice-08/scan.awk` gives the assignment, `scan.tsv`; `sh docs/plan/slice-08/lists.sh <runs>` prints one line per list and then `slice 9302 lists 9339 incoming 37`, exit 0, over that run): 9,234 on the 12 story lists and 105 on the three close lists (68 of slice 8, 37 incoming), and `incoming.tsv` beside them:
 
 - `close-later.tsv`: 9 cases (18 runs), three fields (path, the later slice, the parts): 5 that need slice 13 (binary data: `language/statements/class/subclass/builtin-objects/{ArrayBuffer,DataView}/{regular-subclassing,super-must-be-called}.js` and `language/statements/class/subclass/builtins.js`; tokens `ArrayBuffer` and `DataView`, `conformance/test262/later-parts.tsv`) and 4 that need slice 18 (annex B: `language/{statements,expressions}/class/elements/private-{getter,setter}-is-not-a-own-property.js`, which call `__lookupGetter__` or `__lookupSetter__`; tokens of the same names, `later-parts.tsv`), the 4 taken off the list of `story:private-names-and-private-methods` by the coordinator's decision 1 of revision 1. The coordinator adds to it, in the same commit, each case it takes off a story list during the wave (path, the slice or the story, `story:<name>`, that takes it, one reason). This story settles each line, Acceptance (7).
 - `close-slice-9.cases.txt`: 91 cases (182 runs) that need a part of slice 9: 54 of slice 8 (`Proxy`, `Reflect`, `Map`, `Set`, `WeakMap`, `WeakSet`; among them the 16 that subclass `Map`, `Set`, `WeakMap` or `WeakSet`, taken off the list of `story:derived-classes-and-super-call` by the coordinator's decision 2) and the 37 of `docs/plan/slice-08/incoming.tsv` (36 of `built-ins/Set/prototype/<set method>` and 1 of `language/expressions/optional-chaining`, which `story:slice-09-conformance-close` moves from slice 9 to slice 8: `class` or `super`, or a refusal of slice 8 in their first failure; 74 runs, each failed on the plan's run). Slice 9 is delivered before slice 8, so these stay in slice 8 and must pass: a case that fails on a part of slice 8 goes back to the story whose part it needs (by `scan.tsv`'s parts) and this story waits; one that fails on a part of slice 9 is reported to the coordinator as a defect of slice 9, and this story waits.
