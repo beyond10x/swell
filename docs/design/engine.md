@@ -472,8 +472,9 @@ constructor) and no `prototype`. A direct `eval` in an arrow sees the same `this
 The mechanism:
 
 1. `this` is taken when the arrow is made. The closure instruction of an arrow stores the
-   `this` value of the frame that makes it in the function object, which the collector traces;
-   a call of the arrow puts that value in its frame's `this` and runs no OrdinaryCallBindThis.
+   `this` value of the frame that makes it in a box of the function object (item 4), which the
+   collector traces; a call of the arrow puts that value in its frame's `this` and runs no
+   OrdinaryCallBindThis.
    The `This` instruction and the `this` a direct `eval` takes from its caller's frame
    (`dynamic_code.rs`) stay as they are, so an arrow in an arrow, and eval code in an arrow,
    get it too. This equals the standard while every function's `this` binding is initialized
@@ -502,7 +503,76 @@ The mechanism:
    Slice 8 therefore changes item 1 for the arrows of a derived constructor only: there `this`
    becomes a slot of the constructor's function environment, uninitialized until `super()`
    returns (the state of item 2 of "Lexical bindings"), which those arrows read and a `super()`
-   in one of them initializes, in place of a value copied when the arrow is made.
+   in one of them initializes, in place of a value copied when the arrow is made; item 6 of
+   "Classes" says how they read it.
+4. What an arrow takes, and where each lives. Added on 2026-11-26 for slice 8. An arrow takes
+   four things from the code around it:
+   - `this`. Copied, as item 1 says. In a derived constructor, the arrow's code reads the
+     constructor's `this` binding instead (item 6 of "Classes").
+   - `new.target`. Copied: the NewTarget of the frame that makes the arrow, which a [[Construct]]
+     frame holds and every other frame does not, eval code taking its caller's.
+   - The function its `this` comes from. Copied: the `function` of the frame that makes the arrow.
+     That is the nearest enclosing function that is not an arrow, or none at the top of a script
+     or in a function made by `Function`.
+   - The home object. Not copied: it is read as that function's `home_object`, which MakeMethod
+     fixes before any code of the method runs.
+
+   `arguments` stays a name (item 2), and the private environment comes through the arrow's
+   [[Environment]] ("Private names", item 3).
+
+   The mechanism: `lexical_this` (`crates/swell/src/object/ecmascript_function.rs:76`) gives way
+   to `arrow: Option<Box<ArrowContext>>`, where `ArrowContext` holds `this: Value`,
+   `new_target: Option<ObjectRef>` and `function: Option<ObjectRef>`. The box is charged with the
+   record as owned bytes when the arrow is made and traced by `EcmascriptFunction::trace`
+   (`ecmascript_function.rs:82`). A call of the arrow puts the box's `this` and NewTarget in its
+   frame, and the box's function as the frame's `function`. So the `function` of every frame
+   (`interp/frame.rs:141`) is the function whose environment GetThisEnvironment answers
+   (`sec-getthisenvironment`): the callee for a function that is not an arrow, the box's function
+   for an arrow, the caller's for eval code (item 5), and none for a script. The super instructions,
+   SuperCall and PerformEval read only that field.
+
+   Reason: the copies equal the standard, since a function environment's [[NewTarget]] and
+   [[FunctionObject]] are set when its call starts and never change (`sec-newfunctionenvironment`).
+   The field is set and traced today (`frame.rs:141`, `:229`; `ecmascript_function.rs:361`) and
+   read nowhere else, so the change costs no byte of a frame.
+
+   Rejected:
+   - The three in the function environment record of the surrounding function. `env/function.rs`
+     keeps them on the frame, and it would need a record per call of every function that makes an
+     arrow.
+   - Three fields inline in `EcmascriptFunction`, where every function would carry them.
+   - The arrow itself as its frame's `function`. Every reader would then have to step from an
+     arrow to its box.
+5. Eval code: which function its frame stands for, and PerformEval's four flags. Added on
+   2026-11-26 for slice 8. PerformEval reads four facts of GetThisEnvironment (`sec-performeval`):
+   - inFunction: it is a function environment;
+   - inMethod: HasSuperBinding, its function's [[HomeObject]] is not undefined;
+   - inDerivedConstructor: its function's [[ConstructorKind]] is derived;
+   - inClassFieldInitializer: its function's [[ClassFieldInitializerName]] is not empty.
+
+   The mechanism: the eval frame's `function` (`crates/swell/src/dynamic_code.rs:374`, `None`
+   today) becomes the caller frame's `function` for a direct `eval`, and stays `None` for an
+   indirect one. By item 4, that is the function GetThisEnvironment answers. `eval_code_of` and
+   `parse_eval_code` derive the flags from it:
+   - inFunction: the function is there;
+   - inMethod: its `home_object` is set;
+   - inDerivedConstructor: its class box (item 3 of "Classes") says derived;
+   - inClassFieldInitializer: its template's field flag (`FunctionTemplate`,
+     `crates/compiler/src/bytecode.rs:1071`) is set, on the template of a `FieldInitializer`
+     function.
+
+   An indirect `eval` has all four false. The four reach `swell_syntax::parse_eval_with`
+   (`dynamic_code.rs:325`) as one value with the strictness of the caller, and the eval frame
+   takes its caller's NewTarget too. [[ClassFieldInitializerName]] is that one bit: PerformEval is
+   its only reader and asks only whether it is empty. The name a field gives an anonymous function
+   is compiled in (item 4 of "Classes").
+
+   Reason: the frame's `function` is there, traced and unread, and a template flag costs no byte
+   of a frame or an object.
+
+   Rejected:
+   - The flag on the initializer's frame, which grows every frame's charged bytes.
+   - [[FunctionObject]] in the function environment record, a record per call.
 
 **A parameter list that is not simple.** Added on 2026-11-22 for slice 6. What a script sees, the
 standard's (`sec-functiondeclarationinstantiation`, steps 19 to 30;
@@ -1487,6 +1557,423 @@ host sees is the draft's: `host_make_job_callback` for each callable handler Per
 gets (one or two), and a reaction job per settlement. A call of one of these methods spends the
 step of a builtin call; the call of the sync iterator's method is a re-entry as any call from a
 builtin, and a sync generator resumed by it is resumed from Rust (item 6 of "Suspended frames").
+
+**Classes.** Added on 2026-11-26 for slice 8. Its place: the paragraphs of this decision follow
+the order of delivery (slices 2, 6, 7 and 10 above), and section 12 delivers slice 8 after slices
+10, 4 and 9, so classes come last; "Private names" follows because a class body is the scope its
+private names belong to. What a script sees, the standard's:
+
+- ClassDefinitionEvaluation (`sec-runtime-semantics-classdefinitionevaluation`) evaluates the
+  heritage in a scope that holds the class's own name uninitialized, with the PrivateEnvironment
+  around the class (`class C extends C {}` throws a `ReferenceError`). It makes the prototype and
+  the constructor F and evaluates the elements in source order: methods are defined, computed keys
+  are evaluated and converted by ToPropertyKey, field initializers and static blocks become
+  functions that do not run yet. Then it initializes the class's own name, adds the static private
+  methods to F, and runs the static elements in source order: each static field is defined and
+  each static block is called with `this` F (`language/statements/class/static-init-sequence.js`:
+  field, block, field, block).
+- Class code is strict (`sec-strict-mode-code`). F's [[Call]] throws a `TypeError` of F's realm
+  (`sec-ecmascript-function-objects-call-thisargument-argumentslist`, step 2).
+- A base constructor's [[Construct]] makes `this` from NewTarget and runs InitializeInstanceElements
+  before its parameters are bound (`sec-ecmascript-function-objects-construct-argumentslist-newtarget`,
+  OrdinaryCallBindThis and InitializeInstanceElements before OrdinaryCallEvaluateBody).
+  InitializeInstanceElements adds the private methods first and then defines the fields in order
+  (`sec-initializeinstanceelements`).
+- A derived constructor's `this` is uninitialized until `super(...)` returns
+  (`sec-super-keyword-runtime-semantics-evaluation`). Its result:
+  - the object its code returns;
+  - its `this` when it returns `undefined` or ends;
+  - a `TypeError` for any other returned value;
+  - a `ReferenceError` when `this` is still uninitialized.
+
+  Both errors are of the caller's realm, because [[Construct]] removes the callee's context
+  before these checks (`built-ins/Function/internals/Construct/derived-return-val-realm.js`,
+  `derived-this-uninitialized-realm.js`).
+
+What a host sees: only the hook of "Private names". Each item states the rule first and then the
+mechanism.
+
+1. The class tree. The parser gives the compiler `Stmt::Class` and `Expr::Class`, each with one
+   `Class` record:
+   - the BindingIdentifier, if any;
+   - the heritage, if any;
+   - the constructor;
+   - the elements in source order;
+   - the span of the whole class.
+
+   An element is static or not. It is one of:
+   - a method (its key, its function, and whether it is a method, a getter or a setter);
+   - a field (its key and its initializer);
+   - a static block.
+
+   A key is a literal, a computed expression or a private name.
+
+   Every piece of code that the standard makes a function is a `Function` record with a
+   `FunctionId` (`crates/syntax/src/ast.rs:34`, `:686`). Three kinds join those of `FunctionKind`
+   (`ast.rs:620`):
+   - `ClassConstructor`: the written constructor, or the default one the parser makes when there
+     is none. Its span is the class's, since F's [[SourceText]] is the source text of the class.
+   - `FieldInitializer`: the initializers of one run of fields (item 4), not of one field. Scope
+     analysis reads them as one body, the function's own code.
+   - `StaticBlock`.
+
+   A function the parser makes takes the number of its first token: a run of fields at the first
+   token of its first field, a default constructor at the class's `{`. Rejected: one function per
+   field in the tree. Item 4 rejects that form at run time, so the tree would number functions the
+   compiler never makes.
+2. ClassDefinitionEvaluation is compiled code. The class is a sequence of instructions in the code
+   around it, each a step, in the clause's order:
+   1. The class scope: the class's own name, uninitialized and immutable, and one hidden binding
+      per computed field key, placed by the rules of "Lexical bindings" (a record when a function
+      of the class or a lookup by name reaches it, which the field initializers do). Then the
+      heritage, evaluated in it. Then the private record of "Private names" (item 3), with a new
+      Private Name per private identifier the class declares.
+   2. The prototype, with protoParent as its [[Prototype]]. F, made from the constructor's
+      template with the prototype as its [[HomeObject]], constructorParent as its [[Prototype]],
+      its name at creation and the class box of item 3. F's `prototype` property (not writable)
+      and the prototype's `constructor`.
+   3. The elements in source order:
+      - a method is made with its home object (MakeMethod, as `DefineMethod` does today,
+        `crates/compiler/src/bytecode.rs:227`) and defined on the prototype or on F, not
+        enumerable;
+      - a private method's function is made and stored in its hidden binding of the private
+        record;
+      - a computed field key is evaluated, converted by `ToPropertyKey` (`bytecode.rs:239`) and
+        stored in its hidden binding;
+      - a field initializer or a static block makes nothing yet.
+   4. The class's own name is initialized with F. If the class has instance elements, their
+      initializer (item 4) is made and stored in F's box. The static private methods are added to
+      F. Each static run of fields and each static block is called, in source order (item 4).
+   5. The private record and the class scope are left, and F is the value. A throw in any step
+      leaves the two records as a throw leaves a block's.
+3. The class constructor's box (decision 7 of slice 8). A class constructor is an
+   `EcmascriptFunction` (`crates/swell/src/object/ecmascript_function.rs:52`) whose new field
+   `class: Option<Box<ClassConstructor>>` is set. The struct lives in a new file,
+   `object/class_constructor.rs`. The story that creates it gives it every slot slice 8 needs:
+   - `kind`, base or derived: [[ConstructorKind]];
+   - `instance_elements: Option<ObjectRef>`: the instance elements' initializer of item 4, which
+     stands for [[Fields]] and [[PrivateMethods]] together.
+
+   The other slots live elsewhere:
+   - [[IsClassConstructor]] is the presence of the box.
+   - [[HomeObject]] stays in `home_object` (`ecmascript_function.rs:62`), as for every method.
+   - [[ClassFieldInitializerName]] is a flag of the template (item 5 of "`this` and `arguments` in
+     an arrow function").
+
+   The box is charged with the record as owned bytes and credited by the sweep that frees it, as
+   the slots of a built-in function are ("A built-in function with slots", decision 4). The kind
+   site, `EcmascriptFunction::trace` (`ecmascript_function.rs:82`), traces the initializer.
+
+   Size: `lexical_this: Option<Value>` (`ecmascript_function.rs:76`) gives way to the arrow's box
+   (item 4 of the arrow paragraph), so two boxes of 8 bytes each replace one field of 16 bytes.
+   `EcmascriptFunction` keeps its size, and the record its 200 bytes (`object/generator.rs:62`),
+   until [[PrivateElements]] makes it 208. That `Option<Value>` takes 16 bytes, through a niche of
+   `Value`'s tag, is the expected layout, not a measurement.
+
+   Reason: one story owns the struct, so the later stories fill its slots and add no field.
+
+   Rejected:
+   - [[Fields]] and [[PrivateMethods]] as two lists in the box that Rust walks at construction.
+     Rust cannot run an initializer and go on (item 4). The lists would also need the Private Name
+     type at order 2, before private names exist.
+   - The slots inline in `EcmascriptFunction`, where every function would carry them.
+4. Field initializers and static elements are compiled calls (decision 3 of slice 8). The rule:
+   - The instance elements of a class are one function, their initializer. It is made once per
+     evaluation of the class, as a method whose home object is the prototype, from a
+     `FieldInitializer` template with the field flag set. It is stored in the box. Its code:
+     1. Every private method and accessor of the class is added to `this` (item 5 of "Private
+        names").
+     2. Every field that is not static is defined in source order. The initializer is evaluated,
+        or `undefined`. An anonymous function is named by the field's name (NamedEvaluation,
+        `sec-runtime-semantics-classfielddefinitionevaluation`). The value is defined by
+        `DefineField` or `DefineComputedField` (`bytecode.rs:217`, `:242`) for a public key, the
+        computed one read from its hidden binding, and by the private add for a private key.
+     3. The code returns `undefined`.
+   - `InitInstance`, `[o] -> [r]`, reads the box of the running frame's function (item 4 of the
+     arrow paragraph). It pushes a call frame of the initializer with `this` o and no arguments, at
+     the step and the depth check of any call (`push_call_frame`,
+     `crates/swell/src/interp/dispatch.rs:1533`). When the box holds no initializer, it pushes
+     `undefined`. The compiler follows it with `Pop`. The return of that frame pushes `undefined`
+     on the caller's operand stack (`return_from_frame`, `dispatch.rs:78`), and the `Pop` discards
+     it.
+   - A base class constructor's template begins with `This; InitInstance; Pop` when its class has
+     instance elements, before its parameters are bound. A derived constructor runs the same after
+     every SuperCall (item 7).
+   - Static elements: the class-definition code (item 2, step 4) calls, in source order, one
+     function per run of consecutive static fields and one per static block. Each is called as
+     `<F>; <the function, made as a method with home object F>; Call(0); Pop` (`Call`'s stack
+     `[this, f, args]`, `dispatch.rs:1415`).
+     - A run's function is a `FieldInitializer` template with the field flag set. It defines the
+       run's fields on `this` and adds no private methods: those are added to F before the first
+       run.
+     - A static block's function is a `StaticBlock` template without the flag. It is the body
+       function of ClassStaticBlockDefinitionEvaluation
+       (`sec-runtime-semantics-classstaticblockdefinitionevaluation`), with a `var` scope of its
+       own. It makes an arguments object when its code can observe one: only through a direct
+       `eval` ("Names", item 4), because `arguments` in the block is an early error
+       (`language/statements/class/static-init-invalid-arguments.js`).
+   - A `FieldInitializer` template makes no arguments object: every reference to `arguments` in
+     it is an early error, and eval code there refuses it (PerformEval's inClassFieldInitializer).
+
+   The forms against each other, for n fields that are not static, of a class evaluated once and
+   constructed k times:
+   - (a) One function per field, each called and popped by compiled code: n function objects per
+     evaluation, each a record of 200 bytes and its template; n frames per construction, each
+     `frame_bytes()` (`interp/frame.rs:159`) and its locals; per field at least 2 steps (the call
+     and its `Pop`) on top of the field's own instructions.
+   - (b) One function per run, chosen: one function object per evaluation for the instance
+     elements; one frame per construction, with 3 steps (`This` or `Dup`, `InitInstance`, `Pop`)
+     and the initializer's `Return`. Each field costs its own instructions, at least 2
+     (the value and `DefineField`). On the static side, one function object per run, made, called
+     once and left to the collector: one record and 4 steps per run.
+   - (c) One function per placement, all static fields and blocks of a class in one function with
+     the blocks inlined: rejected, for a reason other than cost. One function gives
+     PerformEval's inClassFieldInitializer one answer, but eval code must see true in a static
+     field and false in a static block, and a block needs its own `var` scope and arguments
+     object.
+
+   Reason for (b): no script can tell (b) from (a).
+   - Class code is strict, so a field initializer's own `var` scope is reachable only by a direct
+     `eval`, whose `var` names stay in its own record (`sec-performeval`, strictEval).
+   - An initializer has no `arguments`.
+   - No script gets hold of an initializer function: it is no value of a binding or a property,
+     and strict code has no `caller`.
+
+   (b) spends the same instructions per field as (a), and one frame per construction where (a)
+   spends n. A script lengthens n only by its source text, and every instruction is a step.
+   `static-init-sequence.js` holds by construction: the order of the calls is the order of the
+   source.
+
+   Decision 7 of slice 8: no list of static elements and no walk of one exist. The order is
+   compiled code, emitted by the story that compiles the class. [[ClassFieldInitializerName]] is
+   the field flag of the template.
+
+   Rejected: a seam in Rust that pushes the initializers' frames from a loop over a list of fields.
+   `return_from_frame` (`dispatch.rs:78-92`) pushes every returned value on the caller's operand
+   stack, and a Rust loop cannot push the next frame after the first returns.
+5. `super.x` finds [[HomeObject]] through the running frame's function. GetThisEnvironment and
+   GetSuperBase (`sec-super-keyword-runtime-semantics-evaluation`, MakeSuperPropertyReference)
+   read the function whose environment answers GetThisEnvironment. With item 4 of the arrow
+   paragraph, that is the `function` of every frame: the method, or for an arrow and eval code the
+   function they stand for. The base is that function's `home_object` and its [[GetPrototypeOf]],
+   which is ordinary: a home object is an object literal, a prototype or a class constructor. The
+   receiver is the `this` binding, read before the key as the clause orders; in a derived
+   constructor that is the checked read of item 6. Object literals (order 1) and classes use the
+   same instructions.
+
+   Who makes `super.x` legal (decision 6 of slice 8): the production MethodDefinition admits a
+   SuperProperty in its code, for object literals and classes alike, the class constructor
+   included (`sec-method-definitions-static-semantics-early-errors` holds no rule against it; the
+   rules of FunctionBody refuse it elsewhere). The parser's flag is set in one place,
+   `method_head`, which every MethodDefinition passes. So the story of `super` owns it for class
+   methods too. The flag for field initializers and static blocks belongs to the story of class
+   element syntax. The flag that admits a SuperCall in the constructor of a class with a heritage
+   (`sec-class-definitions-static-semantics-early-errors`) belongs to the story of derived classes.
+6. The `this` of a derived constructor is a binding (decision 1 of slice 8). It is a hidden
+   binding of the derived constructor's function scope, named `this`, a reserved word that no
+   IdentifierReference spells. It is placed by the rules that exist:
+   - a checked local slot (`GetLocalChecked`, `bytecode.rs:488`);
+   - a slot of the function environment (`GetEnvChecked`, `bytecode.rs:501`), when an arrow or a
+     direct `eval` in the constructor reaches it ("Lexical bindings", item 1). A direct eval makes
+     its record named ("Names", item 3).
+
+   How code reaches it:
+   - The template's first instruction makes it uninitialized, before the parameters are bound,
+     since `constructor(a = super())` is legal and records start `undefined`
+     (`crates/swell/src/env/mod.rs:341`). `Uninitialize` has a local form
+     (`bytecode.rs:474`); a record form joins it.
+   - Every `this` in the constructor's own code and in the arrows within it is a checked read of
+     the binding. An arrow's read crosses its [[Environment]] by hops and slot, so an arrow made
+     before `super()` reads the object after the constructor returned
+     (`language/expressions/class/constructor-this-tdz-during-initializers.js`).
+   - Eval code in the constructor (inDerivedConstructor) looks the name `this` up ("Names",
+     rule 1). Class code is strict, so no `with` record lies on the way.
+   - The frame's `this` field is not read in a derived constructor.
+
+   Reason: the binding is the standard's [[ThisBindingStatus]] of the constructor's function
+   environment, kept where the engine keeps every binding that a closure or eval code reaches.
+
+   Rejected:
+   - The slot on the constructor's frame, reached through the arrow's box: a heap object cannot
+     hold a frame, and a frame index goes stale when the frame is popped (the case above calls the
+     arrow after that).
+   - The arrow's box holding the constructor's record: a second path to a record that the arrow's
+     [[Environment]] already reaches, 16 more bytes per arrow and a line of trace, and eval code
+     would still need its own way.
+7. SuperCall without a re-entry (decision 2 of slice 8). `super(args)` compiles to:
+   1. `GetSuperConstructor`, `[] -> [c]`: the running frame's function's [[GetPrototypeOf]]
+      (`sec-getsuperconstructor`), before the arguments are evaluated (the clause's order; no
+      test262 case fixes it).
+   2. The arguments.
+   3. `SuperCall(n)`, or `SuperCallSpread` for a spread. It checks IsConstructor after the
+      arguments (`language/expressions/super/call-proto-not-ctor.js`). It pushes c's construct
+      frame on the running loop with the running frame's NewTarget, as `New` pushes one
+      (`push_construct_frame`, `dispatch.rs:1584`, which gets the NewTarget as a parameter):
+      - a base parent gets `this` from OrdinaryCreateFromConstructor(NewTarget,
+        "%Object.prototype%");
+      - a derived parent gets no object.
+      A built-in, bound, proxy or host constructor is constructed from Rust, as `New` constructs
+      it today.
+   4. `BindThis`, `[r] -> [r]`: it initializes the binding of item 6 in its form (local, record,
+      or by name in eval code), and throws the `ReferenceError` of BindThisValue when the binding
+      is already initialized (`sec-bindthisvalue`).
+   5. `Dup; InitInstance; Pop`, with the initializer of the running frame's function's box.
+      InitializeInstanceElements takes F from GetThisEnvironment, the class whose constructor runs
+      `super()`, not the parent.
+
+   Each level of a chain is one frame of the loop (`frame_depth`) and no re-entry. A chain of
+   1,000 derived classes holds at most one frame per class and one initializer's frame at once,
+   and spends at least 5 steps per level. The default derived constructor is a template that
+   keeps its arguments (`binds_parameters`, `bytecode.rs:1104`, with no parameter, so the call
+   keeps every argument in its locals). It runs `GetSuperConstructor`, then `SuperCallKept(0)`,
+   which passes the kept arguments from local slot 0 on as the list, with no iterator
+   (`language/statements/class/subclass/default-constructor-spread-override.js`) and a step per
+   argument as `RestArguments` (`bytecode.rs:463`). Then it runs `BindThis; Dup; InitInstance;
+   Pop; Return`. The default base constructor is `This; InitInstance; Pop`, then the return of
+   `undefined`.
+
+   The standard makes both default constructors built-in functions (CreateBuiltinFunction in
+   ClassDefinitionEvaluation), and no script tells a template from one:
+   - [[Call]] throws the same `TypeError` of F's realm;
+   - `Function.prototype.toString` gives the source text of the class;
+   - the realm is the same.
+
+   Rejected: one instruction that constructs from Rust and then binds and initializes. It is a
+   re-entry per level (`reentry_depth`, `STACK_BYTES_PER_REENTRY`), which the chain of 1,000
+   would pay 1,000 times.
+8. The derived return. Every `Return` the compiler emits for a derived constructor, at the end of
+   the body and as the last instruction of `exit_return` (`crates/compiler/src/lib.rs:864`), after
+   the `finally` blocks, follows a `KeepThis`. `KeepThis` copies the binding of item 6, when it is
+   initialized, into the frame's `this`.
+
+   The frame's `constructed` (`interp/frame.rs:152`) records which [[Construct]] the frame runs:
+   - none, for a call;
+   - a base construction, with its object;
+   - a derived construction.
+
+   After the pop and after the caller's realm is restored, `return_from_frame` (`dispatch.rs:78`)
+   decides by the clause. For a derived frame:
+   - an object is the result;
+   - any value other than `undefined` throws a `TypeError`;
+   - otherwise the frame's `this`, when it is an object;
+   - otherwise a `ReferenceError`.
+
+   Both errors are made in the realm that runs after the pop, as the realm cases above require.
+   The frame-bytes test measures the new field, which is expected at the size of
+   `Option<ObjectRef>`.
+
+   Rejected: the checks in an instruction before `Return`. It runs in the callee's realm.
+9. Budgets. Every instruction above is a step. The class box, the instance elements' initializer
+   and the private record are charged when made. A static run's function is charged when made and
+   credited by the sweep that frees it. No buffer lives across a call into script. The number of
+   elements is bounded by the source and compiled; no loop in Rust runs over them.
+
+**Private names.** Added on 2026-11-26 for slice 8. What a script sees, the standard's:
+
+- Each evaluation of a class makes a new Private Name per private identifier it declares
+  (`sec-private-names`, ClassDefinitionEvaluation). A getter and a setter of one name share it.
+- `o.#x` finds the element of o whose key is that Private Name (`sec-privateelementfind`,
+  `sec-privateget`, `sec-privateset`), and throws a `TypeError` when there is none. `#x in o`
+  answers whether there is one, and throws a `TypeError` when o is no object
+  (`sec-relational-operators-runtime-semantics-evaluation`).
+- Adding the same field or method twice to one object throws a `TypeError` (`sec-privatefieldadd`,
+  `sec-privatemethodoraccessoradd`). The add does not read [[Extensible]].
+- Private elements are no properties: no [[OwnPropertyKeys]], no trap of a `Proxy` and no listing
+  of a host sees them.
+- A private identifier that no enclosing class declares is an early error
+  (`sec-static-semantics-allprivateidentifiersvalid`). In eval code it is checked against the names
+  of the running PrivateEnvironment and its outer ones (`sec-performeval`).
+
+What a host sees: `host_ensure_can_add_private_element` (HOST-119) before an add to a host object
+with an override table, and nowhere else. The requirement that the story of the hook adds is
+`HOST-223`.
+
+1. The Private Name and its arena. A Private Name is a `PrivateNameRef`: a handle
+   (`crates/swell/src/heap/arena.rs:33`) into an arena of its own, `Heap.private_names`, beside the
+   arenas of `heap/mod.rs:278`. Its record holds its description, a `StringRef`. It is no `Value`
+   (`value.rs:21`), which is the host's type: a host and every `match` over values would see it. A
+   binding holds it as a third variant of `SlotValue`, `PrivateName(PrivateNameRef)`
+   (`interp/frame.rs:83`). Only the slots of a private record hold that variant, and their names
+   start with `#`, which no IdentifierName does, so no lookup by name reaches them.
+
+   Size: the variant is expected to keep `SlotValue` at 16 bytes, with the handle laid out beside
+   the niche of `Value`'s tag. This was not built; the test `a_slot_is_as_large_as_a_value`
+   (`frame.rs:249`) decides. If it shows 24 bytes, the private record keeps its Private Names in a
+   boxed list of its own beside its slots, and `SlotValue` stays as it is.
+
+   Rejected: a Symbol, which is a `Value` a script or host can be handed.
+2. [[PrivateElements]]. `ObjectRecord` (`object/mod.rs:168`) gets
+   `private_elements: Option<Box<PrivateElements>>`, so the record grows from 200 to 208 bytes:
+   `RECORD_BYTES` in `object/generator.rs:62` and in `object/async_generator.rs:135` both change.
+   The box holds a list of entries, each a Private Name with one of:
+   - a field (its value);
+   - a method (its function);
+   - an accessor (an optional getter and an optional setter).
+
+   The list is charged before it grows and recorded in `Grown` (`object/mod.rs:144`), as a
+   property map's growth is. PrivateElementFind compares in order and spends a step per comparison
+   past `SMALL` (`object/property.rs:188`). Every object has the box: ordinary, proxy and host
+   objects alike, since the adds act on the object itself, through no trap.
+
+   One add function in a new file, `object/private_names.rs`, serves both adds:
+   1. For a host object with an override table, it calls the hook (HOST-119), and a `Throw` from it
+      is the add's throw (`HOST-223`).
+   2. An entry that is already there is a `TypeError`.
+   3. The entry is appended.
+
+   Rejected: private elements in the property map under a key of a new kind. Every listing, every
+   trap and every host walk of the map would have to filter them.
+3. The private environment is a record of the environment chain. ClassDefinitionEvaluation's
+   classPrivateEnvironment is a declarative record, the private record. Item 2 of "Classes" pushes
+   it inside the class scope after the heritage, because the heritage sees the PrivateEnvironment
+   around the class. Its slots:
+   - one per private identifier, holding the Private Name;
+   - one per private method, getter or setter, holding its function, made once per evaluation of
+     the class (PrivateMethodOrAccessorAdd adds that one function to every instance).
+
+   It is a record whenever the class declares a private name. Code in the class body after the
+   heritage resolves `#x` at compile time to hops and a slot, as a captured name. That covers the
+   methods, the initializers, the static blocks, the computed keys and the arrows in them. An
+   arrow reads it through its [[Environment]], as it reads any captured name.
+
+   Reason: for every code that can name a private identifier, the standard's PrivateEnvironment
+   runs beside the LexicalEnvironment and is captured with it. Inside the class body both are the
+   class's, in the heritage both are the outer ones, and a function captures both when it is made.
+   So one chain carries both. `Function` code has the global environment and no
+   PrivateEnvironment (`sec-createdynamicfunction`), so it has no private names.
+
+   Rejected: a PrivateEnvironment chain of its own, beside the frame's and in every function
+   object. It costs a field per frame and per function, and a second chain to trace.
+4. Resolution in eval code (decision 5 of slice 8). PerformEval walks the caller's LexicalEnvironment
+   chain once, a step per record, and lists each slot whose name starts with `#` as its text, its
+   hops and its slot; an inner name hides an outer one of the same text. The list is charged
+   while it lives.
+   - The parse gets the texts, for AllPrivateIdentifiersValid.
+   - The compile entry of eval code gets the positions. Eval code then uses the same instructions
+     as other code, with hops counted as the eval code's own records plus the caller's hops.
+   - The list holds no handle, so nothing in it needs a root, and it is dropped after the compile.
+
+   Rejected:
+   - An instruction that looks a private name up by its text at run time: n steps per access, and
+     a second form of every private instruction.
+   - The private environment of the function an arrow's `this` comes from. For an arrow in an inner
+     class's heritage or computed key, that function lies outside the inner class and misses its
+     names.
+5. Instructions. Each names the private name's hops and slot:
+   - `GetPrivate`, `[o] -> [v]` (PrivateGet);
+   - `SetPrivate`, `[o, v] -> [v]` (PrivateSet);
+   - `PrivateIn`, `[o] -> [b]`;
+   - `AddPrivateField`, `[o, v] -> [o]`;
+   - `AddPrivateMethod`, `[o] -> [o]`, which names the hops and slot of the function too.
+
+   A private getter or setter is called as a getter of a property is called today.
+6. What the collector traces. A `SlotValue::PrivateName` is marked wherever a `SlotValue` is
+   traced, in a record and in a frame. The record of a Private Name marks its description. Each
+   entry of [[PrivateElements]] marks its Private Name and its values at the object record's site
+   (`object/mod.rs ObjectRecord::trace`). For that, the collector gets `Item::PrivateName`
+   (`heap/collect.rs:46`) and a workspace in `Mark`, and `PrivateNameRecord::trace` becomes the
+   22nd entry of `KIND_SITES` (21 today, `heap/collect.rs:351`). No Private Name is a root. It
+   lives while a record, a frame, a suspended frame or an object's elements hold it.
 
 ## 4. Values and the heap without unsafe code
 
