@@ -124,6 +124,8 @@ pub(crate) enum BuiltinId {
     /// to 6), with the slots [`Slots::Await`] that hold its activation
     /// (`object/async_builtin.rs`, `story:array-from-async`).
     AsyncBuiltinAwait(crate::object::promise::ReactionType),
+    /// The functions of `%Reflect%` (`story:reflect-namespace`), none a constructor.
+    Reflect(crate::builtins::reflect::ReflectBuiltin),
 }
 
 /// What a built-in function does when called.
@@ -828,6 +830,7 @@ impl<H: Host> Agent<H> {
             BuiltinId::AsyncBuiltinAwait(kind) => {
                 self.async_builtin_await_function(kind, function, args)
             }
+            BuiltinId::Reflect(id) => self.run_reflect_builtin(id, args),
         }
     }
 

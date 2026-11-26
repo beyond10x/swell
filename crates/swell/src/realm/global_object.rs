@@ -93,6 +93,7 @@ impl<H: Host> Agent<H> {
                 Intrinsic::Error(ErrorKind::AggregateError),
             ),
             ("Date", Intrinsic::Date),
+            ("Reflect", Intrinsic::Reflect),
         ] {
             let value = self.intrinsic(realm, which)?;
             let key = self.name_key(name)?;

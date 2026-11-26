@@ -30,6 +30,7 @@ mod builtins_object;
 mod builtins_object_enumeration;
 mod builtins_object_from_entries;
 mod builtins_object_integrity;
+mod builtins_reflect;
 mod builtins_scripts;
 mod builtins_string;
 mod builtins_string_access;

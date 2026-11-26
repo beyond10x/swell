@@ -197,7 +197,7 @@ impl<H: Host> Agent<H> {
     /// until the caller releases it; `charged` counts the bytes charged for the elements' slots
     /// of the list, which the caller credits.
     #[inline(never)]
-    fn create_list_from_array_like(
+    pub(crate) fn create_list_from_array_like(
         &mut self,
         value: Value,
         charged: &mut u64,
