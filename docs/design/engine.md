@@ -273,6 +273,19 @@ clause (each needs the heap's private interface, so it would have to be public).
 Every crate has `#![forbid(unsafe_code)]`, and the root `Cargo.lock` lists no package from outside
 the repository (decision 14).
 
+**The engine core has no `std`.** Decided by the operator on 2026-11-26
+(`story:core-builds-without-std`): the six library crates are `#![no_std]` with
+`extern crate alloc`, and their library code names `core::` and `alloc::` paths only; their unit
+tests link `std`. They name no allocator: the program that links them provides it, the shell the
+system's and an embedder its own. What comes from the system comes through the host trait, and an
+adapter is whatever implements it: with system access (the shell), without, or emulated (a clock
+that stands still, fixed seeds; modules from memory once slice 11 delivers loading)
+(`host-interface.md`, decision 1, "Adapters"). The three binary crates stay `std` programs. The
+gate builds the six crates for `x86_64-unknown-none`, a target without `std`, and refuses an
+undefined symbol in them that neither Rust nor the compiler's runtime supplies, a C library's
+`fmod` or `sqrt` among them (`taskfiles/nostd.yml`); HOST-2's source scan refuses a `std` path
+and a crate root without `#![no_std]`.
+
 ## 3. Execution model
 
 **A stack-based bytecode interpreter, with every ECMAScript frame on the engine's own frame stack,
@@ -2766,7 +2779,8 @@ draft's hooks: `HostCallJobCallback`, `HostEnqueueFinalizationRegistryCleanupJob
 `HostGetImportMetaProperties`, `HostGetSupportedImportAttributes`, `HostLoadImportedModule`.
 Beside the hooks, the trait answers the clock, the time zone operations of decision 6, and random
 bytes; the engine has no other way to reach time, randomness, files, the network or the
-environment. Module loading is asynchronous as the draft has it: `HostLoadImportedModule` returns
+environment, and whatever implements the trait is an adapter, with system access or emulated
+(section 2, "The engine core has no `std`"). Module loading is asynchronous as the draft has it: `HostLoadImportedModule` returns
 at once, and the host later calls `finish_loading_imported_module` with the module's source or
 an error.
 

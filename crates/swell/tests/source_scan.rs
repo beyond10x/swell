@@ -1,6 +1,7 @@
 //! Source scans of the engine crates (`docs/design/host-interface.md`, decisions 1 and 3):
-//! `HOST-1` (no unsafe code, no outside package, no thread), `HOST-2` (no ambient authority) and
-//! `HOST-146` (only `Agent::new` takes the seeds).
+//! `HOST-1` (no unsafe code, no outside package, no thread), `HOST-2` (no ambient authority,
+//! `#![no_std]` in each crate root, no `std` path in library code) and `HOST-146` (only
+//! `Agent::new` takes the seeds).
 //!
 //! The engine crates are `swell` and every crate it reaches through a normal or build
 //! dependency, read from the manifests. A scan reads the code of `src/` with comments and the
@@ -201,15 +202,18 @@ mod scan {
                 i += 1;
             }
         }
-        // `std :: fs` is `std::fs`.
+        // `std :: fs` is `std::fs`, wherever it stands: the blanks before each `::` go as well
+        // as those after it.
+        let parts: Vec<&str> = out.split("::").collect();
+        let last = parts.len().saturating_sub(1);
         let mut joined = String::with_capacity(out.len());
-        for (k, part) in out.split("::").enumerate() {
-            if k == 0 {
-                joined.push_str(part.trim_end());
-            } else {
+        for (k, part) in parts.iter().enumerate() {
+            let part = if k == 0 { part } else { part.trim_start() };
+            let part = if k == last { part } else { part.trim_end() };
+            if k > 0 {
                 joined.push_str("::");
-                joined.push_str(part.trim_start());
             }
+            joined.push_str(part);
         }
         joined
     }
@@ -292,6 +296,85 @@ mod scan {
             }
         }
         faults
+    }
+
+    /// The code with every item under `#[cfg(test)]` blanked (newlines kept): the attribute and
+    /// what follows it up to the first `;` or `,` outside brackets, or up to the `}` that closes
+    /// the first `{`. That is an item (a module, a function, `extern crate std;`, a macro call
+    /// with braces), a statement, a field or a field of a struct expression. A `}` that closes
+    /// an enclosing block ends it too.
+    pub(super) fn without_test_items(code: &str) -> String {
+        let mut chars: Vec<char> = code.chars().collect();
+        let marker: Vec<char> = "#[cfg(test)]".chars().collect();
+        let mut i = 0;
+        while i + marker.len() <= chars.len() {
+            if chars[i..i + marker.len()] != marker[..] {
+                i += 1;
+                continue;
+            }
+            let mut depth = 0usize;
+            let mut end = chars.len();
+            for (j, &c) in chars.iter().enumerate().skip(i + marker.len()) {
+                match c {
+                    '(' | '[' | '{' => depth += 1,
+                    ')' | ']' => depth = depth.saturating_sub(1),
+                    '}' if depth == 0 => {
+                        end = j;
+                        break;
+                    }
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = j + 1;
+                            break;
+                        }
+                    }
+                    ';' | ',' if depth == 0 => {
+                        end = j + 1;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            for c in &mut chars[i..end] {
+                if *c != '\n' {
+                    *c = ' ';
+                }
+            }
+            i = end;
+        }
+        chars.into_iter().collect()
+    }
+
+    /// The library code of a Rust source: its code (`code_of`) without the items under
+    /// `#[cfg(test)]`.
+    pub(super) fn library_code(source: &str) -> String {
+        without_test_items(&code_of(source))
+    }
+
+    /// Each `std` of the code as a whole name, with its line and the path it starts
+    /// (`line 3: std::vec::Vec`; `line 1: std` for `extern crate std`).
+    pub(super) fn std_paths(code: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for (at, _) in code.match_indices("std") {
+            let before = code[..at].chars().next_back();
+            let after = code[at + 3..].chars().next();
+            if ident_char(before) || ident_char(after) {
+                continue;
+            }
+            let path: String = code[at..]
+                .chars()
+                .take_while(|&c| ident_char(Some(c)) || c == ':')
+                .collect();
+            let line = code[..at].matches('\n').count() + 1;
+            found.push(format!("line {line}: {}", path.trim_end_matches(':')));
+        }
+        found
+    }
+
+    /// Whether a crate root declares `#![no_std]` on a line of its own.
+    pub(super) fn declares_no_std(root: &str) -> bool {
+        root.lines().any(|line| line.trim() == "#![no_std]")
     }
 
     /// The faults of HOST-1's thread rule in one file's code.
@@ -431,6 +514,56 @@ fn the_scans_find_planted_text() {
     );
     assert!(thread_spawn(&code_of("// thread::spawn\nlet x = 1;")).is_empty());
 
+    // HOST-2's `std` rule: a `std` path of library code is found with its line, one in an item
+    // under `#[cfg(test)]` is not, and neither is one in a comment, a string or a longer name.
+    assert_eq!(
+        std_paths(&library_code("use std::vec::Vec;\nfn f() {}")),
+        ["line 1: std::vec::Vec"]
+    );
+    assert_eq!(
+        std_paths(&library_code("extern crate std;")),
+        ["line 1: std"]
+    );
+    assert_eq!(
+        std_paths(&library_code(
+            "let a = 1;\nlet pi = ::std::f64::consts::PI;"
+        )),
+        ["line 2: std::f64::consts::PI"]
+    );
+    let planted = "#[cfg(test)]\nextern crate std;\n\
+                   #[cfg(test)]\nmod tests {\n    use std::println;\n    fn g() { println!(); }\n}\n\
+                   #[cfg(test)]\nstd::thread_local! { static X: u8 = const { 0 }; }\n\
+                   struct S {\n    #[cfg(test)]\n    seen: std::vec::Vec<u8>,\n    kept: u8,\n}\n\
+                   fn h() -> std :: string :: String { make() }";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 15: std::string::String"]
+    );
+    assert_eq!(
+        std_paths(&library_code(
+            "struct S {\n    #[cfg(test)]\n    a: u8,\n    b: std::boxed::Box<u8>,\n}"
+        )),
+        ["line 4: std::boxed::Box"]
+    );
+    assert_eq!(
+        std_paths(&library_code(
+            "#[cfg(test)]\nconst N: [u8; 2] = [1, 2];\nconst M: std::primitive::u8 = 1;"
+        )),
+        ["line 3: std::primitive::u8"]
+    );
+    assert!(
+        std_paths(&library_code(
+            "// std::fs\nlet s = \"std::x\"; let stdout = 1; let x = mystd::a; let c = core::fmt::Error;"
+        ))
+        .is_empty()
+    );
+    assert!(declares_no_std(
+        "#![forbid(unsafe_code)]\n//! Text.\n#![no_std]\n"
+    ));
+    assert!(!declares_no_std(
+        "#![forbid(unsafe_code)]\n// #![no_std]\n#![cfg_attr(not(test), no_std)]\n"
+    ));
+
     // Public functions, a trait's functions, and not restricted ones.
     let code = code_of(
         "pub fn new(host: H, seeds: Seeds) -> Self {}\n\
@@ -491,15 +624,30 @@ fn host_1_forbid_unsafe_no_outside_package_no_thread_spawn() {
 }
 
 /// HOST-2: the engine crates use none of `SystemTime`, `Instant`, `std::env`, `std::fs`,
-/// `std::net`, `std::process` and `RandomState`.
+/// `std::net`, `std::process` and `RandomState`; each crate root declares `#![no_std]`, and no
+/// library code names a `std` path. An item under `#[cfg(test)]` (a test module, the
+/// `extern crate std` of the unit tests, a counter of the test build) is not library code.
 #[test]
 fn host_2_no_ambient_authority_in_engine_crates() {
+    let crates = engine_crates();
+    assert!(
+        crates.len() >= 6,
+        "swell and the five crates below it at least: {crates:?}"
+    );
     let mut faults = Vec::new();
     let mut files = 0;
-    for dir in engine_crates() {
-        for file in source_files(&dir) {
+    for dir in &crates {
+        let lib = dir.join("src").join("lib.rs");
+        if !declares_no_std(&fs::read_to_string(&lib).unwrap()) {
+            faults.push(format!("{}: no #![no_std]", lib.display()));
+        }
+        for file in source_files(dir) {
             files += 1;
-            for fault in ambient_authority(&read_code(&file)) {
+            let code = read_code(&file);
+            for fault in ambient_authority(&code) {
+                faults.push(format!("{}: {fault}", file.display()));
+            }
+            for fault in std_paths(&without_test_items(&code)) {
                 faults.push(format!("{}: {fault}", file.display()));
             }
         }

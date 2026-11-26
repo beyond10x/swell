@@ -49,6 +49,13 @@ Every number below comes from the gate, `task check`, on the released commit.
   `core::error::Error`, the same trait as `std::error::Error`. Public names and behaviour do not
   change; unit tests inside the crates still link `std`.
 
+### Host interface
+
+- `HOST-2` (changed, slice 1) also states that each engine crate declares `#![no_std]` in its
+  crate root and names no `std` path in its library code (an item under `#[cfg(test)]` is test
+  code); its source scan, `swell::source_scan::host_2_no_ambient_authority_in_engine_crates`,
+  refuses both. No public item of `value.rs` or of `host/*.rs` is added or changed.
+
 ### Fixed
 
 - The gate no longer overwrites `website/data/engines.json`: the selftest
