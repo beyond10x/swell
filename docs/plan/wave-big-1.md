@@ -1,7 +1,7 @@
 # Wave big-1: the end of slice 4, the core without std, static binaries
 
 One wave of [the wave plan](waves.md), "After slice 4: bigger waves". Opened on 2026-11-26,
-05:40 CET, on the operator's word of about 05:18 CET (`approval-record:wave-big-1`): one pull
+05:24 CET, on the operator's word of about 05:18 CET (`approval-record:wave-big-1`): one pull
 request carries several stories. Skill version 0.26.0 of `aep:implementing`.
 
 The wave branch is `wave/big-1`, cut from `main` at `b11998b5`, with the branch
@@ -15,13 +15,18 @@ directory. The stage is kept current by the coordinator.
 
 | unit | story | branch | worktree id | stage |
 |---|---|---|---|---|
-| core | `story:core-builds-without-std`, step 3 | `impl/nostd-core` | `swell-impl-nostd-core` | committed up to `43e63c70`; its last commits (the timings, the digest) are being made |
+| core | `story:core-builds-without-std`, step 3 | `impl/nostd-core` | `swell-impl-nostd-core` | merged into the wave branch at `248a031c`; gate on that head: exit 0, `gate-time test-steps 106.5 of 120` at load 65 on the node |
 | gate | `story:core-builds-without-std`, step 4 | `impl/nostd-gate` | `swell-impl-nostd-gate` | dispatched |
 | random | `story:math-random` | `impl/math-random` | `swell-impl-math-random` | dispatched |
-| static | `story:releases-ship-static-binaries` | `impl/static-binaries` | `swell-impl-static-binaries` | dispatched |
-| close | `story:slice-04-conformance-close` | `impl/slice-04-close` | `swell-impl-slice-04-close` | waits for `random` and `gate` on the wave branch |
+| static | `story:releases-ship-static-binaries` | `impl/static-binaries` | `swell-impl-static-binaries` | `662e3ea8`; adversary pass 1 red, 7 findings introduced (`review-result:adversary-static-pass-1`); back with its implementor |
+| exponent | `story:exponentiation-operator` | `impl/exponentiation` | `swell-impl-exponentiation` | dispatched |
+| growth | `story:buffer-growth-outside-the-charged-list-is-listed` | `impl/buffer-growth` | `swell-impl-buffer-growth` | waits for `random`, `exponent` and `gate`: it adds an attribute at growth calls all over `crates/swell/src` |
+| close | `story:slice-04-conformance-close` | `impl/slice-04-close` | `swell-impl-slice-04-close` | waits for `random`, `exponent` and `gate` on the wave branch |
 
-Dispatches use the agent type `aep:implementor` on Opus; the adversary is `aep:adversary`.
+Dispatches use the agent type `aep:implementor` on Opus; the adversary is `aep:adversary`. The
+two decomposers of slices 9 and 8 run as `general-purpose` on Opus with the procedure of
+`aep:decomposer`, because that agent type has no tool that writes a file and the shell here
+takes no heredoc.
 
 ## Why these stories
 
@@ -34,6 +39,12 @@ Dispatches use the agent type `aep:implementor` on Opus; the adversary is `aep:a
 - `story:bench-image-and-first-measurements` is accepted and not built. It is not in this
   wave: its runs need the build node alone for the measurement, and its tree holds work that
   is not committed.
+
+Added at 05:30 CET, from the reading of the store's close: `story:exponentiation-operator`
+(the parser still refuses `**`; 1 of 44 cases of `language/expressions/exponentiation` passes)
+and `story:buffer-growth-outside-the-charged-list-is-listed` (`docs/plan/slice-10-wave-1.md`:
+"planned, not built") are accepted and not built. Both are stories of the plan before this
+wave, and the close of slice 4 depends on the first.
 
 ## What the store's check said
 

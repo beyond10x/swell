@@ -13,17 +13,47 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Changed
 
-- The engine crate `swell` is `#![no_std]` with `alloc`: its library code names no `std` path,
-  and the program that links it provides the allocator. Its keyed hash map (`heap/map.rs`) is
-  written in the crate, a SwissTable with groups of 16 and the SipHash keyed by `hash_key`
-  (HOST-145), with the growth, deletion and rehashing of the standard library's map it
-  replaces, so a table grows and is charged at the same operations as before; a unit test
-  compares it with that map over 20,000 operations. The float functions it called as `std`
-  methods (`trunc`, `floor`, `ceil`, `sqrt`, `rem_euclid`) and the `%` of two Numbers (`fmod`,
-  which a no_std build would take from the C library) come from
-  `swell_num::fmath`. The test-build counters of collections, stored Strings and drains of
-  the release queue are fields of the heap and the root table instead of thread-locals. The
-  public interface and the test262 counts do not change (`story:core-builds-without-std`).
+- The engine crate `swell` is `#![no_std]` with `alloc`, step 3 of story
+  `core-builds-without-std`: its library code names no `std` path, and the program that links
+  it provides the allocator. The float functions it called as `std` methods (`trunc`,
+  `floor`, `ceil`, `sqrt`, `rem_euclid`) and the `%` of two Numbers (`fmod`, which a no_std
+  build would take from the C library) come from `swell_num::fmath`, whose six functions are
+  `#[inline]`. The test-build counters of collections, stored Strings and drains of the
+  release queue are fields of the heap and the root table instead of thread-locals. The
+  public interface and the test262 counts do not change.
+- The keyed hash map of the engine (`heap/map.rs`) is written in the crate instead of
+  `std`'s `HashMap`: a SwissTable with groups of 16 control bytes, read as two 64-bit words,
+  and the SipHash keyed by `hash_key` (HOST-145). It has the growth, deletion and rehashing
+  of the map it replaces, so a table grows and is charged at the same operations as before; a
+  unit test compares it with `std`'s map over 20,000 operations. Four paths of the engine use
+  it: the index of a property list longer than 8 entries (`object/property.rs`, every
+  property of a large object and every global variable), the atom table of interned Strings
+  (`heap/string.rs`), the registry of `Symbol.for` (`heap/mod.rs`) and the set of visited
+  keys of `for`-`in` (`ops/objects.rs`). The `swell` shell against main (`f27d50d7`), user
+  CPU, best of 7 on the build node, main's binary run twice as the noise floor (load 48 to 56
+  on 32 cores):
+
+  | script | what it does | main | this change | main again |
+  |---|---|---|---|---|
+  | `num_2k` | an object of 2,000 Number keys: add, read 5 times, delete half; 30 rounds | 0.994 s | +7.8 % | +1.5 % |
+  | `num_200k` | the same with 200,000 keys, 1 round | 3.717 s | +4.1 % | -0.8 % |
+  | `str_2k` | 2,000 String keys made once | 1.286 s | +2.6 % | +1.5 % |
+  | `str_200k` | 200,000 String keys made and interned at run time | 6.656 s | +4.1 % | -0.2 % |
+  | `forin_2k` | `for`-`in` over 2,000 keys, 300 rounds | 0.110 s | -11.8 % | -4.5 % |
+  | `control` | arithmetic on local variables and a dense array, no keyed map | 0.229 s | -3.9 % | -0.9 % |
+
+  The map alone against `std`'s with the same hasher, `u32` keys, 2,000 entries, three runs
+  (first version of this change, then this one):
+
+  | operation | first version | this change |
+  |---|---|---|
+  | insert | +12 to +19 % | +3 to +8 % |
+  | lookup, key present | +22 to +24 % | +12 to +18 % |
+  | lookup, key absent | +14 to +17 % | +10 to +14 % |
+  | remove | +31 to +45 % | +1 to +8 % |
+
+  The rest of the lookup gap is `std`'s match of a group with SSE2 instructions, which need
+  `unsafe`; the engine crates have none, also not for speed.
 - `swell-num` builds without `std` (`#![no_std]` with `alloc`), step 2 of story
   `core-builds-without-std`: it names no `std::` path outside its unit tests and calls no
   `f64` method of `std`. The new module `swell_num::fmath` computes `sqrt`, `floor`, `ceil`,
