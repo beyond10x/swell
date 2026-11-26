@@ -3742,18 +3742,20 @@ All are under `test/staging/sm/`: `Date/` 23, `Number/` 16, `Math/` 13, `RegExp/
 `Function/` 3, `JSON/` 3, `global/` 3, `String/` 2, and 1 each of `expressions/` and `object/`.
 Each gets a line `dir <file> 4` (no directory has every case come in), listed in
 `docs/plan/slice-04/close-into-4.tsv` with the slice it leaves, the runner's message of its failed
-runs at the start and the part of slice 4 that message names; each passes in every one of its runs
-(the close's check (4) over that file), and none has a line of `moves.tsv`. The failure at the
-start is read case by case from the run lines of the full run of `a46fe885`, whose lines equal
-the expected file committed there: every run of each of the 72 failed, and its message names a
-part of slice 4 the start did not have: `Date` is not defined 26 (2 of them inside the
-`Test262Error` of an assertion), `parseInt` or `parseFloat` is not defined 3, the refusal of `**`
-2 and a counted refusal of the `**` the case compiles with `Function` 1, a call of a member of
-`Math` or of `parseInt`, `parseFloat` or `Number.parseInt` that is not there 30 (`the value is
-not a function`), a read of a property (`length`, `call`, `apply`) of a function of `Math`,
-`Number` or `Number.prototype` that is not there 9 (`Cannot use a property of undefined`), and
-`Number/conversion-invalid-precision`, whose `Number.prototype[method].call` throws a
-`TypeError` where it expects a `RangeError` 1. In that run slice 19 passes 604 cases; on the
+runs at the start and the part of slice 4 it failed on; each passes in every one of its runs (the
+close's check (4) over that file), and none has a line of `moves.tsv`. The failure at the start
+is read case by case from the run lines of the full run of `a46fe885`, whose lines equal the
+expected file committed there: every run of each of the 72 failed on a part of slice 4 the start
+did not have. The message of 31 names the part: `Date` is not defined 26 (2 of them inside the
+`Test262Error` of an assertion), `parseInt` or `parseFloat` is not defined 3, and the refusal of
+`**` 2. The message of 41 names none, and the part is read from the case's source (the fifth
+field of `close-into-4.tsv`): a call of a member of `Math` or of `parseInt`, `parseFloat` or
+`Number.parseInt` that is not there 30 (`the value is not a function`), a read of a property
+(`length`, `call`, `apply`) of a function of `Math`, `Number` or `Number.prototype` that is not
+there 9 (`Cannot use a property of undefined`), the `**` the case compiles with `Function` 1
+(`counted refusal: 26 refusal(s)`), and `Number/conversion-invalid-precision`, whose
+`Number.prototype[method].call` throws a `TypeError` where it expects a `RangeError` 1 (`Expected
+a RangeError but got a TypeError`). In that run slice 19 passes 604 cases; on the
 base of this close, 676: 72 cases went from failed to passed and none the other way, and they
 are the 72. Eight cases of slice 19 hold a token of slice 4 and pass in every run at the start
 and now: the part is not reached, is called inside a `try` whose error is dropped, or its
@@ -3763,7 +3765,7 @@ absence throws the `TypeError` the case expects
 `JSON/stringify-nonarray-noncallable-replacer`, `Function/15.3.4.3-01`, `regress/regress-449627`
 and `regress/regress-596805-2`); they stay in slice 19 with no line. 98 cases of slice 9 failed at
 the start on a part of slice 4 (`Date` is not defined 47, `parseInt` or `parseFloat` is not
-defined 7, `isConstructor invoked with a non-function value` 44) and pass in every run now, 93
+defined 7, `isConstructor invoked with a non-function value` 44) and pass in every run now, 92
 of them the `not-a-constructor` cases of the directories of slice 4; they stay in slice 9 with no
 line, since each has the line `feature Reflect.construct 9` (slice 9 passes 170 cases at the
 start and 268 now). No case of another slice delivered after 4 failed at the start and passes
