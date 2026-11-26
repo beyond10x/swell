@@ -1,0 +1,12 @@
+config engine mode flags env verified
+v8-jitless v8 interpreter --jitless - yes
+v8 v8 jit - - yes
+spidermonkey-interp spidermonkey interpreter --no-ion,--no-baseline,--no-blinterp,--no-native-regexp - no
+spidermonkey spidermonkey jit - - yes
+jsc-nojit javascriptcore interpreter - JSC_useJIT=false,JSC_useRegExpJIT=false no
+jsc javascriptcore jit - - yes
+hermes hermes interpreter - - yes
+quickjs quickjs interpreter - - yes
+quickjs-ng quickjs-ng interpreter - - yes
+boa boa interpreter - - yes
+xs xs interpreter - - yes
