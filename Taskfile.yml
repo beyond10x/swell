@@ -369,7 +369,7 @@ tasks:
         HOST_SURFACE_ROOT HOST_SURFACE_OUT HOST_SURFACE_SNAPSHOT HOST_SURFACE_CHANGELOG HOST_SURFACE_VERSION
         TEST262_DESIGN TEST262_FEATURES TEST262_SECTIONS TEST262_EXPECTED TEST262_DIGEST TEST262_OUT TEST262_WORKERS TEST262_RUN TEST262_PART TEST262_FROM_PARTS
         TEST262_MOVES TEST262_LATER_PARTS
-        GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_CPU_BOUNDS GATE_SELFTEST_DIR GATE_SELFTEST_JOBS
+        GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_CPU_BOUNDS GATE_SELFTEST_DIR GATE_SELFTEST_JOBS GATE_SELFTEST_TREE
         GATE_RUNNER_ENV GATE_TEST_BUILD_JSON
         REALM_SIZES
         SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES SITE_DATA_ENGINES SITE_DATA_CATALOG SITE_DATA_PUBLISHED SITE_DATA_RESULTS SITE_DATA_PIN SITE_DATA_LIMITS SITE_DATA_INTERRUPT
@@ -691,8 +691,19 @@ tasks:
       script must turn both off itself, and does it in its first lines; each script runs once,
       and this is the check that it is colour-proof (gate-selftest-is-colour-proof shows that
       the environment does colour task's output and that a script that does not turn it off is
-      refused). No script at all fails too. The last line is "gate-selftest: <p> passed, <f>
-      failed", also written to .out/gate-selftest.log.
+      refused). No script at all fails too.
+      A script writes no tracked file. Before the scripts run, the task records each tracked
+      file of the git work tree GATE_SELFTEST_TREE (default .) that differs from its commit at
+      HEAD, with the git digest of its content; afterwards it records them again and fails when
+      the two records differ, printing "gate-selftest: the scripts changed tracked files of
+      <tree> (compared with before they ran): <files>" (story
+      gate-selftests-write-no-tracked-file: one script overwrote website/data/engines.json with
+      planted counts on every run). A change that was there before the step and stays as it was
+      does not count; one the scripts change further, or undo, does. Untracked and ignored files
+      (.out/, target/) are not read. GATE_SELFTEST_TREE is not put in the scripts' environment,
+      for the reason given for GATE_SELFTEST_DIR (gate-selftest-refuses-a-script-that-writes-a-tracked-file
+      runs the task on a git repository of its own). The last line is "gate-selftest: <p>
+      passed, <f> failed", also written to .out/gate-selftest.log.
       Most scripts start go-task several times, each a short process that reads the task
       files and ends; they run with GOGC=off and GOMEMLIMIT=1GiB, so that the Go runtime
       of each collects only if its heap nears 1 GiB rather than while it starts: the 65
@@ -702,6 +713,7 @@ tasks:
     vars:
       GATE_SELFTEST_DIR: '{{.GATE_SELFTEST_DIR | default "tests/gate"}}'
       GATE_SELFTEST_JOBS: '{{.GATE_SELFTEST_JOBS | default "4"}}'
+      GATE_SELFTEST_TREE: '{{.GATE_SELFTEST_TREE | default "."}}'
     cmds:
       - mkdir -p .out/gate-tests
       - |
@@ -715,6 +727,20 @@ tasks:
         scripts=$(find "$GATE_SELFTEST_DIR" -maxdepth 1 -type f -name '*.sh' | LC_ALL=C sort)
         jobs={{shellQuote .GATE_SELFTEST_JOBS}}
         case "$jobs" in ''|*[!0-9]*|0) echo "gate-selftest: GATE_SELFTEST_JOBS $jobs is not a positive number"; exit 1 ;; esac
+        tree={{shellQuote .GATE_SELFTEST_TREE}}
+        top=$(git -C "$tree" rev-parse --show-toplevel 2>/dev/null) && base=$(git -C "$top" rev-parse --verify -q HEAD) ||
+          { echo "gate-selftest: git cannot read the tracked files of $tree (GATE_SELFTEST_TREE)"; exit 1; }
+        tracked() {
+          git -C "$top" --no-optional-locks -c core.quotePath=false diff --no-ext-diff --no-renames --name-only "$base" -- |
+            while IFS= read -r path; do
+              if [ -e "$top/$path" ]; then
+                printf '%s\t%s\n' "$path" "$(git -C "$top" hash-object -- "$path")"
+              else
+                printf '%s\tgone\n' "$path"
+              fi
+            done
+        }
+        before=$(tracked) || { echo "gate-selftest: git cannot list the changed tracked files of $tree"; exit 1; }
         for script in $scripts; do
           name=${script##*/}
           rm -f ".out/gate-tests/${name%.sh}.log.status"
@@ -774,5 +800,17 @@ tasks:
           fi
         done
         if [ $((passed + failed)) -eq 0 ]; then echo "gate-selftest: no script under $GATE_SELFTEST_DIR"; fi
+        after=$(tracked) || { echo "gate-selftest: git cannot list the changed tracked files of $tree"; exit 1; }
+        written=$(
+          { printf '%s\n' "$before" | sed 's/^/before\t/'; printf '%s\n' "$after" | sed 's/^/after\t/'; } |
+            awk -F '\t' '
+              $2 == "" { next }
+              { seen[$2] = 1; state[$1, $2] = $3 }
+              END { for (p in seen) if (state["before", p] != state["after", p]) print p }
+            ' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'
+        )
+        if [ -n "$written" ]; then
+          echo "gate-selftest: the scripts changed tracked files of $tree (compared with before they ran): $written"
+        fi
         echo "gate-selftest: $passed passed, $failed failed" | tee .out/gate-selftest.log
-        test "$((passed + failed))" -gt 0 && test "$failed" -eq 0
+        test "$((passed + failed))" -gt 0 && test "$failed" -eq 0 && test -z "$written"
