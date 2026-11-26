@@ -162,11 +162,12 @@ tasks:
       conformance/test262/expected.txt, and the digest of its sources checked against
       conformance/test262/expected.digest; slow-tests, the tests with a gate count at their
       full counts; test-realm-sizes, the tests of swell that read the realm's room with each
-      realm padded by k host functions for several k, in the default mode at each k and with a
-      collection at every safe point at the smallest and the largest, on the two builds
-      slow-tests made; and build-stack-profiles with test-stack-profiles, the
-      stack tests in the release profile and in stack-debug, the dev profile with full debug
-      information (the gate runs them in the dev profile without it). The
+      realm padded by k host functions for several k, in the default mode and with a
+      collection at every safe point at each k, on the two builds slow-tests made; and
+      build-stack-profiles with test-stack-profiles, the stack tests in the release profile and
+      in stack-debug, the dev profile with full debug information (the gate runs them in the
+      dev profile without it), built with the modules of swell's tests that hold them only
+      (taskfiles/stack-profiles.yml, STACK_MODULES). The
       workflow .github/workflows/slow.yml runs it on a push to main and on a pull request, each
       only when it changes a path of the workflow's list (a source of the digest, the expected
       file or the digest file among them), and on a run started by hand on a branch.
@@ -320,18 +321,19 @@ tasks:
       tests run too, whole). Each test found red for the size of the realm before (the eight of
       story tests-hold-at-any-size-of-the-realm, the two of 5078361a) is a "room" test.
 
-      The modes: the default mode at every k, the collect mode at the ends of the list, its
-      smallest and its largest k (REALM_COLLECT, default "ends"; "all" runs the collect mode at
-      every k as before). The two of 5078361a were red at 200, one of them in the collect mode
-      only, so 200 keeps both modes; a test turned red at 128 in both modes on 2026-11-26, and
-      the default mode there finds it. What the collect mode no longer runs is the sizes between
-      the ends, for a test that only that mode turns red there and the default mode at the
-      same k does not. Why: the collect mode runs in the test profile with the feature
-      (opt-level 0), the build slow-tests makes, not in the profile collect of the step
-      test-collect (opt-level 1), which the lane would build for this part alone (point 2); at
-      opt-level 0 a collect run costs about four times a default one, most of it one test
-      (builtins_json_parse::parse_gives_back_its_charges_on_every_way_out, 24 to 28 s alone),
-      and five of them cost more than the lane's room. build-realm-sizes builds both.
+      The modes: the default mode and the collect mode at every k (REALM_COLLECT, default
+      "all"; "ends" runs the collect mode at the smallest and the largest k only, for a quicker
+      look by hand). The collect mode keeps every size because the defects this step exists for
+      show at single sizes, and most of them in that mode alone: seven of the eight of story
+      tests-hold-at-any-size-of-the-realm were red in the collect mode only, each at one growth
+      of the realm; of the two of 5078361a, termination was red at 200 in the collect mode only;
+      the proxy test of 2026-11-26 is red at 128 alone. Both modes run in the test profile
+      (opt-level 0), the builds slow-tests makes, not in the profile collect of the step
+      test-collect (opt-level 1), which the lane would build for this part alone (story
+      realm-size-lane-within-its-share, point 2). There a test stays under 2 CPU seconds in
+      the collect mode too: builtins_json_parse::parse_gives_back_its_charges_on_every_way_out,
+      21.5 s of the 22.7 s collect run at k = 4 before, nests 200 levels in that mode and 2,000
+      under SWELL_FULL_COUNTS=1 (its way_out_depth). build-realm-sizes builds both.
       First it prints "realm-sizes: <r> of <n> tests of swell::main read the realm's room
       (taskfiles/realm-room-tests.awk); <o> others do not run here" and fails when r is 0,
       then "realm-sizes: the default mode at k = <list>, the collect mode at k = <list>".
@@ -346,7 +348,7 @@ tasks:
       before any run.
     vars:
       REALM_SIZES: '{{.REALM_SIZES | default "4 11 17 38 64 128 200"}}'
-      REALM_COLLECT: '{{.REALM_COLLECT | default "ends"}}'
+      REALM_COLLECT: '{{.REALM_COLLECT | default "all"}}'
     env:
       RUSTFLAGS: -D warnings
     silent: true
@@ -461,7 +463,7 @@ tasks:
         TEST262_MOVES TEST262_LATER_PARTS
         GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_CPU_BOUNDS GATE_SELFTEST_DIR GATE_SELFTEST_JOBS GATE_SELFTEST_TREE
         GATE_RUNNER_ENV GATE_TEST_BUILD_JSON
-        REALM_SIZES REALM_COLLECT SLOW_LANE_BUDGET SLOW_PART_BUDGET
+        REALM_SIZES REALM_COLLECT SLOW_LANE_BUDGET SLOW_PART_BUDGET STACK_MODULES STACK_TESTS STACK_TESTS_DIR
         SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES SITE_DATA_ENGINES SITE_DATA_CATALOG SITE_DATA_PUBLISHED SITE_DATA_RESULTS SITE_DATA_PIN SITE_DATA_LIMITS SITE_DATA_INTERRUPT
     silent: true
     cmds:

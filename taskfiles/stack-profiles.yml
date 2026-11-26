@@ -2,91 +2,239 @@ version: '3'
 
 set: [pipefail]
 
-tasks:
-  build-stack-profiles:
-    desc: Build the one test binary of swell, which holds the stack tests, in the release profile and in the profile stack-debug (dev with full debug information).
-    summary: |
-      Build the one test binary of swell, tests/main.rs, whose modules limits_scripts and
-      eval_stack hold the stack tests (story one-integration-test-binary-per-crate), in the two
-      profiles whose frames the dev build of the gate does not show: release, and
-      stack-debug, the dev profile with full debug information, cargo's default for a dev build
-      and so an embedder's, whose frames are the largest measured (.cargo/config.toml sets both
-      whatever a user's own cargo configuration says: release with debug = false and strip =
-      "debuginfo", stack-debug with debug = true and strip = "none"; the dev profile of the gate
-      has debug = false). A step of the lane slow (task slow), before test-stack-profiles:
-      outside the gate and its test budget of 120 s.
+vars:
+  STACK_MODULE_LIST: |
+    limits_scripts
+    eval_stack
+  STACK_TEST_LIST: |
+    host_17_deepest_reentry_parses_at_full_nesting
+    min_stack_bytes_is_enough_through_builtins
+    host_152_deepest_reentry_evals_at_full_nesting
+    host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting
 
-      Runs, for <profile> release and stack-debug, "cargo nextest run --locked --color never -p swell
-      --cargo-profile <profile> --test main --no-run", with no RUSTFLAGS of its own, so that the
-      release build of swell is the one cargo run --release of taskfiles/test262.yml builds.
-      The log is .out/build-stack-profiles-<profile>.log; it is printed when the build fails.
-      Prints "build-stack-profiles <profile>: <cargo's Finished line>" for each. It fails when
-      a build fails.
+tasks:
+  stack-modules-check:
+    desc: Fail, naming it, when a stack test of STACK_TESTS lies in a module of swell's tests that STACK_MODULES does not compile, or in no module or several; builds nothing.
+    summary: |
+      The stack builds of the lane slow compile only the modules of swell's one test binary
+      (tests/main.rs) that STACK_MODULES names, and support (build-stack-profiles);
+      STACK_TESTS names the stack tests test-stack-profiles runs. Their one place is the two
+      lists at the top of this file, one name per line: STACK_MODULE_LIST, the default of
+      STACK_MODULES, and STACK_TEST_LIST, the default of STACK_TESTS (a value given on the
+      command line replaces a list, names separated by blanks). A story that adds a stack test
+      in another module adds the module's line to STACK_MODULE_LIST and the test's line to
+      STACK_TEST_LIST. This check reads the files of STACK_TESTS_DIR (default crates/swell/tests)
+      and builds nothing. For each test it finds the files <dir>/<module>.rs (main.rs left out)
+      with a line "fn <test>(" and fails when that is none ("stack-modules: the stack test
+      <test> is in no file <dir>/<module>.rs"), several ("stack-modules: the stack test <test>
+      is in <n> files: <files>"), or a module that STACK_MODULES does not name
+      ("stack-modules: the stack test <test> is in the module <module> (<file>), which
+      STACK_MODULES does not compile"). It fails too when STACK_MODULES names a module without
+      a file ("stack-modules: STACK_MODULES names <module>, but <dir>/<module>.rs does not
+      exist") and when either list is empty. Passing, it prints "stack-modules: <t> stack
+      tests in the modules <list> of STACK_MODULES". The planted script
+      tests/gate/stack-modules-check-refuses-a-test-outside-the-list.sh holds it.
     dir: '{{.TASKFILE_DIR}}/..'
     silent: true
+    vars:
+      STACK_MODULES: '{{.STACK_MODULES | default .STACK_MODULE_LIST}}'
+      STACK_TESTS: '{{.STACK_TESTS | default .STACK_TEST_LIST}}'
+      STACK_TESTS_DIR: '{{.STACK_TESTS_DIR | default "crates/swell/tests"}}'
     cmds:
+      - |
+        dir={{shellQuote .STACK_TESTS_DIR}}
+        modules=$(printf '%s\n' {{shellQuote .STACK_MODULES}} | tr -s ' \t' '\n\n' | grep . || true)
+        tests=$(printf '%s\n' {{shellQuote .STACK_TESTS}} | tr -s ' \t' '\n\n' | grep . || true)
+        [ -n "$modules" ] || { echo "stack-modules: STACK_MODULES names no module"; exit 1; }
+        [ -n "$tests" ] || { echo "stack-modules: STACK_TESTS names no test"; exit 1; }
+        bad=0
+        for module in $modules; do
+          [ -f "$dir/$module.rs" ] || { echo "stack-modules: STACK_MODULES names $module, but $dir/$module.rs does not exist"; bad=1; }
+        done
+        n=0
+        for test in $tests; do
+          n=$((n + 1))
+          files=$(grep -l -E "^[[:space:]]*fn[[:space:]]+$test[[:space:]]*\(" "$dir"/*.rs | grep -v '/main\.rs$' || true)
+          count=$(printf '%s\n' "$files" | grep -c . || true)
+          if [ "$count" -eq 0 ]; then
+            echo "stack-modules: the stack test $test is in no file $dir/<module>.rs"
+            bad=1
+            continue
+          fi
+          if [ "$count" -gt 1 ]; then
+            echo "stack-modules: the stack test $test is in $count files: $(echo $files)"
+            bad=1
+            continue
+          fi
+          module=${files##*/}
+          module=${module%.rs}
+          if ! printf '%s\n' "$modules" | grep -qxF "$module"; then
+            echo "stack-modules: the stack test $test is in the module $module ($files), which STACK_MODULES does not compile"
+            bad=1
+          fi
+        done
+        [ "$bad" -eq 0 ] || exit 1
+        echo "stack-modules: $n stack tests in the modules $(echo $modules) of STACK_MODULES"
+
+  build-stack-profiles:
+    desc: Build the one test binary of swell with the modules of STACK_MODULES only, in the release profile and in the profile stack-debug (dev with full debug information).
+    summary: |
+      Build the one test binary of swell, tests/main.rs, whose modules of STACK_MODULES (today
+      limits_scripts and eval_stack) hold the stack tests (story
+      one-integration-test-binary-per-crate), in the two profiles whose frames the dev build of
+      the gate does not show: release, and stack-debug, the dev profile with full debug
+      information, cargo's default for a dev build and so an embedder's, whose frames are the
+      largest measured (.cargo/config.toml sets both whatever a user's own cargo configuration
+      says: release with debug = false and strip = "debuginfo", stack-debug with debug = true
+      and strip = "none"; the dev profile of the gate has debug = false). A step of the lane
+      slow (task slow), before test-stack-profiles: outside the gate and its test budget of 120
+      s.
+
+      First stack-modules-check: each test of STACK_TESTS lies in a module of STACK_MODULES.
+      Then, for <profile> release and stack-debug, "cargo rustc --locked --color never --profile
+      <profile> -p swell --test main --message-format json-render-diagnostics -- --cfg
+      test_modules=\"<module>\" ..." with one --cfg per module of STACK_MODULES. cargo rustc
+      passes the arguments after -- to the test target alone, so the library swell and its
+      dependencies build as in any other build of the profile: the release build of swell is
+      the one cargo run --release of taskfiles/test262.yml builds, and the gate's builds,
+      which pass no such cfg, compile every module (taskfiles/test-main.sh says how
+      tests/main.rs reads the cfg). The test binary so compiles those modules and support, not
+      the about 1,300 tests of the others (story realm-size-lane-within-its-share: the release
+      build of the whole binary took 3 min 40 s of the lane on the forge on 2026-11-26). The
+      log is .out/build-stack-profiles-<profile>.log (cargo's lines; printed when the build
+      fails), the messages .out/build-stack-profiles-<profile>.json. From them it writes
+      .out/build-stack-profiles-<profile>.binaries.json, the binaries-metadata file with which
+      cargo-nextest runs a binary built before (its own form, as "cargo nextest list
+      --list-type binaries-only --message-format json" writes it): the target directory, the
+      profile's output directory, the host's triple and library directory (rustc -vV, rustc
+      --print target-libdir) and the one binary swell::main. Prints "build-stack-profiles
+      <profile>: <cargo's Finished line>" for each. It fails when a build fails and when the
+      messages name not exactly one test executable main of swell.
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    vars:
+      STACK_MODULES: '{{.STACK_MODULES | default .STACK_MODULE_LIST}}'
+    cmds:
+      - task: stack-modules-check
+        vars: {STACK_MODULES: '{{.STACK_MODULES}}'}
       - mkdir -p .out
       - |
+        modules=$(printf '%s\n' {{shellQuote .STACK_MODULES}} | tr -s ' \t' '\n\n' | grep .)
+        set -- --cfg test_modules
+        for module in $modules; do set -- "$@" --cfg "test_modules=\"$module\""; done
+        triple=$(rustc -vV | awk '$1 == "host:" { print $2 }')
+        libdir=$(rustc --print target-libdir)
+        [ -n "$triple" ] && [ -n "$libdir" ] || { echo "build-stack-profiles: rustc names no host triple or library directory"; exit 1; }
         for profile in release stack-debug; do
           log=.out/build-stack-profiles-$profile.log
-          if ! cargo nextest run --locked --color never -p swell --cargo-profile "$profile" --test main --no-run > "$log" 2>&1; then
+          json=.out/build-stack-profiles-$profile.json
+          meta=.out/build-stack-profiles-$profile.binaries.json
+          rm -f "$meta"
+          if ! cargo rustc --locked --color never --profile "$profile" -p swell --test main --message-format json-render-diagnostics -- "$@" > "$json" 2> "$log"; then
             cat "$log"
             echo "build-stack-profiles: the build of the test binary of swell in the profile $profile failed"
             exit 1
           fi
+          artifacts=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "main" and (.target.kind | index("test")) and .executable != null) | [.package_id, .executable] | @tsv' "$json") ||
+            { echo "build-stack-profiles: $json is not a file of cargo's JSON messages"; exit 1; }
+          count=$(printf '%s\n' "$artifacts" | grep -c . || true)
+          if [ "$count" -ne 1 ]; then
+            echo "build-stack-profiles: cargo's messages name $count test executables main of swell in the profile $profile, not 1 ($json)"
+            exit 1
+          fi
+          package=$(printf '%s\n' "$artifacts" | cut -f 1)
+          binary=$(printf '%s\n' "$artifacts" | cut -f 2)
+          out=${binary%/deps/*}
+          target=${out%/*}
+          jq -n --arg target "$target" --arg out "${out##*/}" --arg triple "$triple" --arg libdir "$libdir" \
+            --arg package "$package" --arg binary "$binary" '{
+              "rust-build-meta": {
+                "target-directory": $target,
+                "build-directory": $target,
+                "base-output-directories": [$out],
+                "non-test-binaries": {},
+                "build-script-out-dirs": {},
+                "build-script-info": {},
+                "linked-paths": [],
+                "platforms": {
+                  "host": {
+                    "platform": {"triple": $triple, "target-features": "unknown"},
+                    "libdir": {"status": "available", "path": $libdir}
+                  },
+                  "targets": []
+                },
+                "target-platforms": [{"triple": $triple, "target-features": "unknown"}],
+                "target-platform": null
+              },
+              "rust-binaries": {
+                "swell::main": {
+                  "binary-id": "swell::main",
+                  "binary-name": "main",
+                  "package-id": $package,
+                  "kind": "test",
+                  "binary-path": $binary,
+                  "build-platform": "target"
+                }
+              }
+            }' > "$meta" || { echo "build-stack-profiles: cannot write $meta"; exit 1; }
           finished=$(grep 'Finished' "$log" | tail -n 1 | sed 's/^ *//')
           echo "build-stack-profiles $profile: ${finished:-built}"
         done
 
   test-stack-profiles:
-    desc: Run the four stack tests of HOST-17, HOST-152, HOST-163 and the builtins in the release profile and in stack-debug, refuse a release binary of theirs with debug sections and a stack-debug one without.
+    desc: Run the stack tests of STACK_TESTS (HOST-17, HOST-152, HOST-163 and the builtins) in the release profile and in stack-debug, refuse a release binary of theirs with debug sections and a stack-debug one without.
     summary: |
-      Run the four tests that say Limits::min_stack_bytes() is enough (HOST-17
-      host_17_deepest_reentry_parses_at_full_nesting and min_stack_bytes_is_enough_through_builtins
-      of the module limits_scripts, HOST-152 host_152_deepest_reentry_evals_at_full_nesting and
-      HOST-163 host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting
-      of the module eval_stack, both in the one test binary of swell, tests/main.rs) in the
-      release profile and in stack-debug, the dev profile with full debug information; the step
-      test runs them in the dev profile without it. The promise
-      is so shown in three builds: dev without debug information, dev with full debug
-      information (the largest frames, an embedder's default) and release. Each runs its subject
-      in a child process on seven eighths of min_stack_bytes(), so a frame that is larger in one
-      of these profiles fails here. A step of the lane slow, which prints its slow-time line.
+      Run the tests of STACK_TESTS, the four that say Limits::min_stack_bytes() is enough
+      (HOST-17 host_17_deepest_reentry_parses_at_full_nesting and
+      min_stack_bytes_is_enough_through_builtins of the module limits_scripts, HOST-152
+      host_152_deepest_reentry_evals_at_full_nesting and HOST-163
+      host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting of the
+      module eval_stack, both in the one test binary of swell, tests/main.rs) in the release
+      profile and in stack-debug, the dev profile with full debug information; the step test
+      runs them in the dev profile without it. The promise is so shown in three builds: dev
+      without debug information, dev with full debug information (the largest frames, an
+      embedder's default) and release. Each runs its subject in a child process on seven eighths
+      of min_stack_bytes(), so a frame that is larger in one of these profiles fails here. A
+      step of the lane slow, after build-stack-profiles, whose binaries it runs: it builds
+      nothing and fails when .out/build-stack-profiles-<profile>.binaries.json is missing.
 
-      Runs, for <profile> release and stack-debug, "cargo nextest run --locked --color never -p swell
-      --cargo-profile <profile> --profile default --test main -E <the four tests by name>": every
-      test in a process of its own, terminated at 60 s and counted failed (.config/nextest.toml);
-      without colour, since awk reads its lines and the runner's CARGO_TERM_COLOR=always puts
-      escape bytes into them. The log is .out/test-stack-profiles-<profile>.log; it is printed
-      when the run fails. Prints "test-stack-profiles <profile>: <b> test
-      binaries: <p> passed, <f> failed, <s> skipped" from nextest's own lines (skipped: the other
-      tests of the binary), then a line "gate-slowest test-stack-profiles-<profile>
-      <seconds> <binary> <test>" for each test run, slowest first. Then it reads the path of the
-      binary from "cargo nextest list --list-type binaries-only". For release it runs
-      taskfiles/no-debug-sections.sh on it, which prints a line for the binary; for stack-debug,
-      whose binary has debug sections by design, it prints "stack-profiles: <binary>: <n>
-      debug sections (stack-debug, full debug information)" from readelf -S -W. It fails when
-      nextest fails, when not exactly 4 tests passed in a profile, when a profile does not have
-      exactly one binary, when a release binary has a section whose name starts with .debug_
+      Runs, for <profile> release and stack-debug, "cargo nextest run --color never
+      --binaries-metadata .out/build-stack-profiles-<profile>.binaries.json --profile default
+      -E <the tests of STACK_TESTS by name>": every test in a process of its own, terminated at
+      60 s and counted failed (.config/nextest.toml); without colour, since awk reads its lines
+      and the runner's CARGO_TERM_COLOR=always puts escape bytes into them. The log is
+      .out/test-stack-profiles-<profile>.log; it is printed when the run fails. Prints
+      "test-stack-profiles <profile>: <b> test binaries: <p> passed, <f> failed, <s> skipped"
+      from nextest's own lines (skipped: the other tests of the modules the binary compiles),
+      then a line "gate-slowest test-stack-profiles-<profile> <seconds> <binary> <test>" for
+      each test run, slowest first. Then it reads the path of the binary from the
+      binaries-metadata file. For release it runs taskfiles/no-debug-sections.sh on it, which
+      prints a line for the binary; for stack-debug, whose binary has debug sections by design,
+      it prints "stack-profiles: <binary>: <n> debug sections (stack-debug, full debug
+      information)" from readelf -S -W. It fails when nextest fails, when not exactly as many
+      tests as STACK_TESTS names passed in a profile, when a profile does not have exactly one
+      binary, when a release binary has a section whose name starts with .debug_
       ("stack-profiles: <binary> has debug sections"), and when a stack-debug binary has none
       ("stack-profiles: <binary> has no debug section; stack-debug builds with full debug
       information").
     dir: '{{.TASKFILE_DIR}}/..'
     silent: true
     vars:
-      STACK_TESTS: >-
-        test(host_17_deepest_reentry_parses_at_full_nesting)
-        | test(min_stack_bytes_is_enough_through_builtins)
-        | test(host_152_deepest_reentry_evals_at_full_nesting)
-        | test(host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting)
+      STACK_TESTS: '{{.STACK_TESTS | default .STACK_TEST_LIST}}'
     cmds:
       - mkdir -p .out
       - |
+        tests=$(printf '%s\n' {{shellQuote .STACK_TESTS}} | tr -s ' \t' '\n\n' | grep . || true)
+        want=$(printf '%s\n' "$tests" | grep -c . || true)
+        [ "$want" -gt 0 ] || { echo "test-stack-profiles: STACK_TESTS names no test"; exit 1; }
+        filter=$(printf '%s\n' "$tests" | awk '{ printf "%stest(%s)", sep, $0; sep = " | " }')
         for profile in release stack-debug; do
           log=.out/test-stack-profiles-$profile.log
+          meta=.out/build-stack-profiles-$profile.binaries.json
+          [ -f "$meta" ] || { echo "test-stack-profiles: $meta is missing; task build-stack-profiles builds the binaries this task runs"; exit 1; }
           status=0
-          cargo nextest run --locked --color never -p swell --cargo-profile "$profile" --profile default --test main -E {{shellQuote .STACK_TESTS}} > "$log" 2>&1 || status=$?
-          if ! LC_ALL=C awk -v status="$status" -v profile="$profile" '
+          cargo nextest run --color never --binaries-metadata "$meta" --profile default -E "$filter" > "$log" 2>&1 || status=$?
+          if ! LC_ALL=C awk -v status="$status" -v profile="$profile" -v want="$want" '
             /^ *Starting [0-9]+ tests? across [0-9]+ binar/ {
               for (i = 1; i <= NF; i++) if ($i == "across") binaries = $(i + 1)
             }
@@ -101,12 +249,12 @@ tasks:
             }
             END {
               printf "test-stack-profiles %s: %d test binaries: %d passed, %d failed, %d skipped\n", profile, binaries, passed, run - passed, skipped
-              exit (status != 0 || !summary || passed != 4 || run != 4)
+              exit (status != 0 || !summary || passed != want || run != want)
             }
           ' "$log" > "$log.summary"; then
             cat "$log"
             cat "$log.summary"
-            echo "test-stack-profiles: the four stack tests did not all pass in the profile $profile (nextest exit $status; 4 must pass)"
+            echo "test-stack-profiles: the $want stack tests did not all pass in the profile $profile (nextest exit $status; $want must pass)"
             exit 1
           fi
           cat "$log.summary"
@@ -116,11 +264,10 @@ tasks:
               n = NF; printf "%s %s %s\n", t, $(n - 1), $n
             }
           ' "$log" | LC_ALL=C sort -k1,1gr -k2,2 -k3,3 | awk -v profile="$profile" '{ printf "gate-slowest test-stack-profiles-%s %.2f %s %s\n", profile, $1, $2, $3 }'
-          binaries=$(cargo nextest list --locked --color never -p swell --cargo-profile "$profile" --test main --list-type binaries-only --message-format json-pretty 2> "$log.list" | LC_ALL=C awk -F '"' '$2 == "binary-path" { print $4 }') || { cat "$log.list"; echo "test-stack-profiles: cargo nextest list failed in the profile $profile"; exit 1; }
+          binaries=$(jq -r '."rust-binaries"[]."binary-path"' "$meta") || { echo "test-stack-profiles: cannot read the binaries of $meta"; exit 1; }
           count=$(printf '%s\n' "$binaries" | grep -c . || true)
           if [ "$count" -ne 1 ]; then
-            cat "$log.list"
-            echo "test-stack-profiles: $count test binaries of swell listed in the profile $profile, not 1"
+            echo "test-stack-profiles: $count test binaries of swell in $meta in the profile $profile, not 1"
             exit 1
           fi
           nl=$(printf '\nx')
