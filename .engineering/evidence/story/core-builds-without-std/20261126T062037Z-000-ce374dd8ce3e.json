@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T06:20:37Z",
+  "actor": "human:operator",
+  "artifact": "story:core-builds-without-std",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "VERIFIED by the coordinator, step 4 (unit gate): origin/main has no task nostd-build and no taskfiles/nostd.yml; on impl/nostd-gate at 4503978a, run on the build node, task nostd-build exits 0 with 6 libraries for x86_64-unknown-none and task nostd-symbols exits 0 with 6 libraries, 53 objects, 9030 undefined symbols, none from a C library or the system",
+    "reference": "taskfiles/nostd.yml"
+  }
+}

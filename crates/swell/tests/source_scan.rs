@@ -1,6 +1,7 @@
 //! Source scans of the engine crates (`docs/design/host-interface.md`, decisions 1 and 3):
-//! `HOST-1` (no unsafe code, no outside package, no thread), `HOST-2` (no ambient authority) and
-//! `HOST-146` (only `Agent::new` takes the seeds).
+//! `HOST-1` (no unsafe code, no outside package, no thread), `HOST-2` (no ambient authority,
+//! `#![no_std]` in each crate root, no `std` path in library code) and `HOST-146` (only
+//! `Agent::new` takes the seeds).
 //!
 //! The engine crates are `swell` and every crate it reaches through a normal or build
 //! dependency, read from the manifests. A scan reads the code of `src/` with comments and the
@@ -15,7 +16,7 @@ use scan::*;
 /// The scanners. Inside a `cfg(test)` module, so that clippy's test allowances of
 /// `clippy.toml` cover them as they cover the tests.
 #[cfg(test)]
-mod scan {
+pub(crate) mod scan {
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -104,7 +105,7 @@ mod scan {
 
     /// The code of a Rust source: comments and the contents of string and character literals are
     /// replaced by spaces (newlines kept), and whitespace around `::` is removed.
-    pub(super) fn code_of(source: &str) -> String {
+    pub(crate) fn code_of(source: &str) -> String {
         let chars: Vec<char> = source.chars().collect();
         #[expect(
             clippy::disallowed_methods,
@@ -139,11 +140,10 @@ mod scan {
                         i += 1;
                     }
                 }
-            } else if c == 'r'
-                && (next == Some('"') || next == Some('#'))
-                && !ident_char(chars.get(i.wrapping_sub(1)).copied())
+            } else if c == 'r' && (next == Some('"') || next == Some('#')) && raw_prefix(&chars, i)
             {
-                // A raw string: r"..." or r#"..."#.
+                // A raw string: r"..." or r#"..."#, also as a byte or C string (br"...",
+                // cr#"..."#).
                 let mut j = i + 1;
                 let mut hashes = 0;
                 while chars.get(j) == Some(&'#') {
@@ -205,21 +205,34 @@ mod scan {
                 i += 1;
             }
         }
-        // `std :: fs` is `std::fs`.
+        // `std :: fs` is `std::fs`, wherever it stands: the blanks before each `::` go as well
+        // as those after it.
+        let parts: Vec<&str> = out.split("::").collect();
+        let last = parts.len().saturating_sub(1);
         #[expect(
             clippy::disallowed_methods,
             reason = "test code: at most the length of `out`, one source file of the repository"
         )]
         let mut joined = String::with_capacity(out.len());
-        for (k, part) in out.split("::").enumerate() {
-            if k == 0 {
-                joined.push_str(part.trim_end());
-            } else {
+        for (k, part) in parts.iter().enumerate() {
+            let part = if k == 0 { part } else { part.trim_start() };
+            let part = if k == last { part } else { part.trim_end() };
+            if k > 0 {
                 joined.push_str("::");
-                joined.push_str(part.trim_start());
             }
+            joined.push_str(part);
         }
         joined
+    }
+
+    /// Whether the `r` at `at` starts a raw string literal: it begins a token, alone or after
+    /// the `b` or `c` of a byte or C string that itself begins one.
+    fn raw_prefix(chars: &[char], at: usize) -> bool {
+        let before = |k: usize| at.checked_sub(k).and_then(|j| chars.get(j)).copied();
+        if !ident_char(before(1)) {
+            return true;
+        }
+        matches!(before(1), Some('b' | 'c')) && !ident_char(before(2))
     }
 
     pub(super) fn ident_char(c: Option<char>) -> bool {
@@ -227,7 +240,7 @@ mod scan {
     }
 
     /// Whether `word` occurs in `code` as a whole identifier or path (not as part of a longer name).
-    pub(super) fn has_word(code: &str, word: &str) -> bool {
+    pub(crate) fn has_word(code: &str, word: &str) -> bool {
         code.match_indices(word).any(|(at, _)| {
             let before = code[..at].chars().next_back();
             let after = code[at + word.len()..].chars().next();
@@ -281,7 +294,7 @@ mod scan {
     }
 
     /// The faults of HOST-2 in one file's code.
-    pub(super) fn ambient_authority(code: &str) -> Vec<String> {
+    pub(crate) fn ambient_authority(code: &str) -> Vec<String> {
         let mut faults = Vec::new();
         for path in ["std::env", "std::fs", "std::net", "std::process"] {
             if has_word(code, path) {
@@ -300,6 +313,109 @@ mod scan {
             }
         }
         faults
+    }
+
+    /// The code with every item under `#[cfg(test)]` blanked (newlines kept): the attribute and
+    /// what follows it up to the first `;` outside brackets, the first `,` outside brackets and
+    /// angle brackets, or the `}` that closes the first `{`. That is an item (a module, a
+    /// function, `extern crate std;`, a macro call with braces), a statement, a field or a field
+    /// of a struct expression, a parameter, a variant or a match arm; the comma of
+    /// `Result<u8, E>` in a signature does not end it. A `)`, `]` or `}` that closes an
+    /// enclosing bracket ends it too. A `<` is an angle bracket only right after a name or `::`
+    /// and not as `<<` or `<=`, a `>` only right after a non-blank that is not `-` or `=`: the
+    /// form rustfmt writes for generics and never for a comparison or a shift. A `<` the scan
+    /// takes for a comparison lets a comma end the item early, which leaves code scanned.
+    pub(super) fn without_test_items(code: &str) -> String {
+        let mut chars: Vec<char> = code.chars().collect();
+        let marker: Vec<char> = "#[cfg(test)]".chars().collect();
+        let mut i = 0;
+        while i + marker.len() <= chars.len() {
+            if chars[i..i + marker.len()] != marker[..] {
+                i += 1;
+                continue;
+            }
+            let mut depth = 0usize;
+            let mut angles = 0usize;
+            let mut end = chars.len();
+            for (j, &c) in chars.iter().enumerate().skip(i + marker.len()) {
+                let before = chars.get(j.wrapping_sub(1)).copied();
+                let after = chars.get(j + 1).copied();
+                match c {
+                    '(' | '[' | '{' => depth += 1,
+                    ')' | ']' if depth == 0 => {
+                        end = j;
+                        break;
+                    }
+                    ')' | ']' => depth -= 1,
+                    '<' if (ident_char(before) || before == Some(':'))
+                        && !matches!(after, Some('<' | '=')) =>
+                    {
+                        angles += 1;
+                    }
+                    '>' if before.is_some_and(|b| !b.is_whitespace() && b != '-' && b != '=') => {
+                        angles = angles.saturating_sub(1);
+                    }
+                    ',' if depth == 0 && angles > 0 => {}
+                    '}' if depth == 0 => {
+                        end = j;
+                        break;
+                    }
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = j + 1;
+                            break;
+                        }
+                    }
+                    ';' | ',' if depth == 0 => {
+                        end = j + 1;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            for c in &mut chars[i..end] {
+                if *c != '\n' {
+                    *c = ' ';
+                }
+            }
+            i = end;
+        }
+        chars.into_iter().collect()
+    }
+
+    /// The library code of a Rust source: its code (`code_of`) without the items under
+    /// `#[cfg(test)]`.
+    pub(super) fn library_code(source: &str) -> String {
+        without_test_items(&code_of(source))
+    }
+
+    /// Each `std` of the code as a whole name, with its line and the path it starts
+    /// (`line 3: std::vec::Vec`; `line 1: std` for `extern crate std`).
+    pub(crate) fn std_paths(code: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for (at, _) in code.match_indices("std") {
+            let before = code[..at].chars().next_back();
+            let after = code[at + 3..].chars().next();
+            if ident_char(before) || ident_char(after) {
+                continue;
+            }
+            let path: String = code[at..]
+                .chars()
+                .take_while(|&c| ident_char(Some(c)) || c == ':')
+                .collect();
+            let line = code[..at].matches('\n').count() + 1;
+            found.push(format!("line {line}: {}", path.trim_end_matches(':')));
+        }
+        found
+    }
+
+    /// Whether a crate root declares `#![no_std]` on a line of its own, in its code: a line
+    /// inside a comment declares nothing.
+    pub(super) fn declares_no_std(root: &str) -> bool {
+        code_of(root)
+            .lines()
+            .any(|line| line.trim() == "#![no_std]")
     }
 
     /// The faults of HOST-1's thread rule in one file's code.
@@ -439,6 +555,56 @@ fn the_scans_find_planted_text() {
     );
     assert!(thread_spawn(&code_of("// thread::spawn\nlet x = 1;")).is_empty());
 
+    // HOST-2's `std` rule: a `std` path of library code is found with its line, one in an item
+    // under `#[cfg(test)]` is not, and neither is one in a comment, a string or a longer name.
+    assert_eq!(
+        std_paths(&library_code("use std::vec::Vec;\nfn f() {}")),
+        ["line 1: std::vec::Vec"]
+    );
+    assert_eq!(
+        std_paths(&library_code("extern crate std;")),
+        ["line 1: std"]
+    );
+    assert_eq!(
+        std_paths(&library_code(
+            "let a = 1;\nlet pi = ::std::f64::consts::PI;"
+        )),
+        ["line 2: std::f64::consts::PI"]
+    );
+    let planted = "#[cfg(test)]\nextern crate std;\n\
+                   #[cfg(test)]\nmod tests {\n    use std::println;\n    fn g() { println!(); }\n}\n\
+                   #[cfg(test)]\nstd::thread_local! { static X: u8 = const { 0 }; }\n\
+                   struct S {\n    #[cfg(test)]\n    seen: std::vec::Vec<u8>,\n    kept: u8,\n}\n\
+                   fn h() -> std :: string :: String { make() }";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 15: std::string::String"]
+    );
+    assert_eq!(
+        std_paths(&library_code(
+            "struct S {\n    #[cfg(test)]\n    a: u8,\n    b: std::boxed::Box<u8>,\n}"
+        )),
+        ["line 4: std::boxed::Box"]
+    );
+    assert_eq!(
+        std_paths(&library_code(
+            "#[cfg(test)]\nconst N: [u8; 2] = [1, 2];\nconst M: std::primitive::u8 = 1;"
+        )),
+        ["line 3: std::primitive::u8"]
+    );
+    assert!(
+        std_paths(&library_code(
+            "// std::fs\nlet s = \"std::x\"; let stdout = 1; let x = mystd::a; let c = core::fmt::Error;"
+        ))
+        .is_empty()
+    );
+    assert!(declares_no_std(
+        "#![forbid(unsafe_code)]\n//! Text.\n#![no_std]\n"
+    ));
+    assert!(!declares_no_std(
+        "#![forbid(unsafe_code)]\n// #![no_std]\n#![cfg_attr(not(test), no_std)]\n"
+    ));
+
     // Public functions, a trait's functions, and not restricted ones.
     let code = code_of(
         "pub fn new(host: H, seeds: Seeds) -> Self {}\n\
@@ -499,15 +665,30 @@ fn host_1_forbid_unsafe_no_outside_package_no_thread_spawn() {
 }
 
 /// HOST-2: the engine crates use none of `SystemTime`, `Instant`, `std::env`, `std::fs`,
-/// `std::net`, `std::process` and `RandomState`.
+/// `std::net`, `std::process` and `RandomState`; each crate root declares `#![no_std]`, and no
+/// library code names a `std` path. An item under `#[cfg(test)]` (a test module, the
+/// `extern crate std` of the unit tests, a counter of the test build) is not library code.
 #[test]
 fn host_2_no_ambient_authority_in_engine_crates() {
+    let crates = engine_crates();
+    assert!(
+        crates.len() >= 6,
+        "swell and the five crates below it at least: {crates:?}"
+    );
     let mut faults = Vec::new();
     let mut files = 0;
-    for dir in engine_crates() {
-        for file in source_files(&dir) {
+    for dir in &crates {
+        let lib = dir.join("src").join("lib.rs");
+        if !declares_no_std(&fs::read_to_string(&lib).unwrap()) {
+            faults.push(format!("{}: no #![no_std]", lib.display()));
+        }
+        for file in source_files(dir) {
             files += 1;
-            for fault in ambient_authority(&read_code(&file)) {
+            let code = read_code(&file);
+            for fault in ambient_authority(&code) {
+                faults.push(format!("{}: {fault}", file.display()));
+            }
+            for fault in std_paths(&without_test_items(&code)) {
                 faults.push(format!("{}: {fault}", file.display()));
             }
         }
@@ -552,4 +733,111 @@ fn host_146_only_agent_new_takes_seeds() {
         "Agent::new taking Seeds, found: {allowed:?}"
     );
     assert!(faults.is_empty(), "{faults:#?}");
+}
+
+/// A raw byte or C string with a quote inside (`br#"x"y"#`) is a literal like any other: the
+/// code after it is read, and the `std` of the `extern crate` there, which only a hosted build
+/// compiles, is found (adversary pass 1 on unit gate; the scan read `br` as a name followed by
+/// a plain string before).
+#[test]
+fn a_raw_byte_string_hides_no_std_path_after_it() {
+    let planted = "const A: &[u8] = br#\"x\"y\"#;\n\
+                   #[cfg(not(target_os = \"none\"))]\n\
+                   extern crate std;\n\
+                   const B: u8 = 0;\n";
+    assert_eq!(std_paths(&library_code(planted)), ["line 3: std"]);
+    let planted = "const C: &core::ffi::CStr = cr#\"a\"b\"#;\nextern crate std;\n";
+    assert_eq!(std_paths(&library_code(planted)), ["line 2: std"]);
+    let planted = "let name = br\"std::fs\";\nlet s = std::fs::read;\n";
+    assert_eq!(std_paths(&library_code(planted)), ["line 2: std::fs::read"]);
+}
+
+/// `#![no_std]` inside a block comment declares nothing (adversary pass 1 on unit gate).
+#[test]
+fn no_std_inside_a_block_comment_declares_nothing() {
+    assert!(!declares_no_std(
+        "/*\n#![no_std]\n*/\n#![forbid(unsafe_code)]\n"
+    ));
+}
+
+/// A function under `#[cfg(test)]` whose return type has a comma in its generics is test code
+/// as a whole; its `std` path is not library code (adversary pass 1 on unit gate). A `<` of a
+/// comparison in a test statement does not carry the blanking past the statement's `;`.
+#[test]
+fn a_test_item_with_a_comma_in_its_generics_is_test_code() {
+    let planted = "#[cfg(test)]\n\
+                   fn parse() -> Result<u8, std::num::ParseIntError> {\n    \"1\".parse()\n}\n\
+                   fn kept() {}\n";
+    assert_eq!(std_paths(&library_code(planted)), Vec::<String>::new());
+    let planted = "#[cfg(test)]\nlet small = a < b;\nlet p: std::time::Duration = d;\n";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 3: std::time::Duration"]
+    );
+    let planted =
+        "#[cfg(test)]\nfn f() -> Box<dyn Fn(u8) -> u8> { todo() }\nfn g(x: std::any::TypeId) {}\n";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 3: std::any::TypeId"]
+    );
+}
+
+/// A `<<` in the discriminant of a test-only variant is no angle bracket: the variant's `,`
+/// ends it, and the next variant is library code (adversary pass 2 on unit gate: it was
+/// blanked up to the enum's `}`).
+#[test]
+fn a_shift_in_a_test_variant_leaves_the_next_variant_scanned() {
+    let planted = "enum Flags {\n\
+                   \x20   #[cfg(test)]\n\
+                   \x20   Probe = 1 << 7,\n\
+                   \x20   Hosted(std::string::String),\n\
+                   }\n";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 4: std::string::String"]
+    );
+}
+
+/// A `<` in the guard of a test-only match arm is no angle bracket: the arm's `,` ends it, and
+/// the next arm's block, with an `extern crate std` behind a feature the bare build does not
+/// enable, is library code (adversary pass 2 on unit gate: it was blanked).
+#[test]
+fn a_comparison_in_a_test_match_arm_leaves_the_next_arm_scanned() {
+    let planted = "fn f(n: u8) -> u8 {\n\
+                   \x20   match n {\n\
+                   \x20       #[cfg(test)]\n\
+                   \x20       0 if n < 3 => 1,\n\
+                   \x20       _ => {\n\
+                   \x20           #[cfg(feature = \"fault-injection\")]\n\
+                   \x20           {\n\
+                   \x20               extern crate std;\n\
+                   \x20               std::eprintln!(\"hosted\");\n\
+                   \x20           }\n\
+                   \x20           0\n\
+                   \x20       }\n\
+                   \x20   }\n\
+                   }\n";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 8: std", "line 9: std::eprintln"]
+    );
+}
+
+/// `#[cfg(test)]` on a function parameter blanks the parameter up to the `)`; the rest of the
+/// signature and the body are library code (adversary pass 2 on unit gate: a `)` at depth 0 did
+/// not end the item, and the body was blanked).
+#[test]
+fn a_test_parameter_leaves_the_function_body_scanned() {
+    let planted = "pub fn hosted(#[cfg(test)] probe: u8) -> u8 {\n\
+                   \x20   #[cfg(feature = \"fault-injection\")]\n\
+                   \x20   {\n\
+                   \x20       extern crate std;\n\
+                   \x20       std::eprintln!(\"hosted\");\n\
+                   \x20   }\n\
+                   \x20   0\n\
+                   }\n";
+    assert_eq!(
+        std_paths(&library_code(planted)),
+        ["line 4: std", "line 5: std::eprintln"]
+    );
 }

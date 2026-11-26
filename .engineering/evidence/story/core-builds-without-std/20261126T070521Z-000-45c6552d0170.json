@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T07:05:21Z",
+  "actor": "human:operator",
+  "artifact": "story:core-builds-without-std",
+  "kind": "story",
+  "revision": 15,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "wave/big-1 at d3965280, build node, after the merge of impl/nostd-gate",
+    "reference": "15 tests run: 15 passed (source_scan, emulated_host); gate-selftest: 88 passed, 0 failed; forge-check exit 0"
+  }
+}

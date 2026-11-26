@@ -26,7 +26,7 @@ scope:
   path: taskfiles/nostd.yml
 - confidence: inferred
   path: tests/gate
-revision: 14
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T04:21:48Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T04:21:48Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
@@ -94,8 +94,21 @@ the design documents change with it.
 - `test262 total` prints the same seven numbers as before the change.
 - The gate's test steps stay within 120 s; the bare-target build is a build step, outside that
   clock.
-- An example host built without `std` runs a script and reads its result (a test on the
-  workstation's own target, with a fixed block as its allocator).
+- The six libraries built for the bare target reference no symbol of a C library or of the
+  system: `task nostd-symbols`, a step of the gate, reads their undefined symbols, weak ones
+  included, and fails on any that is neither a mangled Rust name nor a routine of the compiler
+  runtime (`nostd-symbols: 6 libraries, 53 object(s), 9030 undefined symbol(s): 8890 Rust's own,
+  55 memory functions, 85 compiler runtime routines; none from a C library or the system` on the
+  unit's head). An emulated test host in the `std` test binary of `swell`
+  (`crates/swell/tests/emulated_host.rs`: a clock that stands still, fixed seeds) runs a script,
+  reads its result and names no system API.
+
+  Rewritten by the coordinator on 2026-11-26. The line first asked for "an example host built
+  without `std` ... with a fixed block as its allocator". A global allocator is an `unsafe impl`
+  and a program without `std` needs an `unsafe` entry attribute; every crate of the repository
+  forbids `unsafe`, and the operator decided on 2026-11-26 that the engine takes none. No host
+  in the repository is built without `std`; the symbol scan proves the same independence of a C
+  library and of the system for the six libraries.
 
 ## Not in this story
 

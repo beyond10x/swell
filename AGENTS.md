@@ -222,8 +222,14 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   variables (`GATE_RUNNER_ENV`: `CI`, `GITHUB_ACTIONS`, `CARGO_TERM_COLOR`, `CARGO_INCREMENTAL=0`)
   and keeps the host's compile cache: `RUSTC_WRAPPER` is never set empty. `forge-check`, a
   step of `check`, fails when rustc is not the channel `rust-toolchain.toml` pins (1.99.1), when
-  a workflow names a compiler, or when `GATE_RUNNER_ENV` differs from the variables of
-  `.github/workflows/check.yml`. A forge run that goes red after a green local gate is fixed
+  a workflow names a compiler, when the toolchain step of `.github/workflows/check.yml` lacks a
+  component or target that `rust-toolchain.toml` names (`clippy`, `llvm-tools`;
+  `x86_64-unknown-none`) or reads no value from that file's `components` or `targets` key, when
+  `GATE_RUNNER_ENV` differs from the variables of `.github/workflows/check.yml`, or when
+  `.github/workflows/release-build.yml` is not the release's seven targets (`RELEASE_TARGETS`
+  of `taskfiles/forge.yml`) built and checked with the C runtime linked in on musl and Windows,
+  or names or counts other archives than `docs/releasing.md` and `website/docs/embedding.md`
+  do (`release-targets-check`). A forge run that goes red after a green local gate is fixed
   together with the change that makes the local gate catch it.
 - Tests run under cargo-nextest (`.config/nextest.toml`): a test is terminated at 60 s and
   counts as failed, and each test runs in a process of its own, so a `static` shares nothing
@@ -380,7 +386,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 - Task facts, measured in wave 1 (Task 3.54):
   - Task takes a variable from the environment when none is passed on the command line. A
     gate variable therefore carries a prefix (`GATE_`, `TEST262_`, `UNICODE_DATA_`, `SPEC_`,
-    `HOST_REQ_`, `HOST_SURFACE_`, `ESS_`, `SITE_DATA_`, `LIBM_`, `MATH_DATA_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
+    `HOST_REQ_`, `HOST_SURFACE_`, `ESS_`, `SITE_DATA_`, `LIBM_`, `MATH_DATA_`, `NOSTD_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
     ones that have a value as the gate's first line.
   - A variable is written as `'{{.X | default "..."}}'`: in an included file a plain value
     ignores the command line.
