@@ -16,7 +16,7 @@
 //! a Use Strict Directive (`#sec-strict-mode-code`); the parser tracks that while it reads the
 //! body, and the early errors that depend on it are checked afterwards (`src/early.rs`).
 
-use super::{Parser, R};
+use super::{Parser, R, SuperProperty};
 use crate::ast::{
     AssignOp, BindingTarget, Child, Expr, ExprId, ExprNode, Function, FunctionId, FunctionKind,
     Name, PatternKind, Scope, Span, Stmt, StmtId,
@@ -133,21 +133,28 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// saved ones back.
     #[inline(never)]
     fn open_context(&mut self, id: FunctionId) -> R<()> {
-        let (generator, asynchronous) = self
+        let (generator, asynchronous, kind) = self
             .ast
             .function(id)
-            .map_or((false, false), |f| (f.generator, f.asynchronous));
-        self.save_context(generator, asynchronous)
+            .map_or((false, false, FunctionKind::Expression), |f| {
+                (f.generator, f.asynchronous, f.kind)
+            });
+        self.save_context(generator, asynchronous)?;
+        self.super_property = super_property_of(kind);
+        Ok(())
     }
 
     /// Saves the current [Yield] and [Await] on the parser's lists and sets `yields` and
-    /// `awaits`, the growth of each list charged first.
+    /// `awaits`, the growth of each list charged first; the SuperProperty flag is saved beside
+    /// them and kept.
     #[inline(never)]
     fn save_context(&mut self, yields: bool, awaits: bool) -> R<()> {
         let m = self.m;
         let pushed = m.push(&mut self.outer_yields, self.yields);
         self.charged(pushed)?;
         let pushed = m.push(&mut self.outer_awaits, self.awaits);
+        self.charged(pushed)?;
+        let pushed = m.push(&mut self.outer_super_properties, self.super_property);
         self.charged(pushed)?;
         self.yields = yields;
         self.awaits = awaits;
@@ -184,6 +191,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
         if let Some(awaits) = self.outer_awaits.pop() {
             self.awaits = awaits;
+        }
+        if let Some(super_property) = self.outer_super_properties.pop() {
+            self.super_property = super_property;
         }
         let mut deepest = 0;
         for s in &body {
@@ -432,6 +442,11 @@ impl<'a, 'm> Parser<'a, 'm> {
         if self.tok.newline_before {
             return self.fail_here(LINE_TERMINATOR_BEFORE_ARROW);
         }
+        if self.super_property == SuperProperty::Method
+            && let Some(at) = self.super_in_cover(start)
+        {
+            return self.refuse_super_in_arrow(at);
+        }
         let asynchronous = self.is_async_head(left, start);
         let (params, initializers, rest) = self.arrow_parameters(left, asynchronous)?;
         self.advance()?;
@@ -449,6 +464,22 @@ impl<'a, 'm> Parser<'a, 'm> {
             }
         }
         Ok(id)
+    }
+
+    /// Where a SuperProperty stands among the nodes read from `start` on, the operand before
+    /// the `=>` of an arrow function in a method, read in the method's code before it was known
+    /// to be the arrow's parameters: the nodes the parser made since its first token, the last
+    /// ones of the arena. A SuperProperty of a method nested in a parameter's initializer is
+    /// found too, and the arrow refused with it.
+    #[inline(never)]
+    fn super_in_cover(&self, start: Span) -> Option<Span> {
+        self.ast
+            .exprs
+            .iter()
+            .rev()
+            .take_while(|n| n.span.start >= start.start)
+            .find(|n| matches!(n.expr, Expr::SuperMember(_)))
+            .map(|n| n.span)
     }
 
     /// Whether the operand `left` before `=>`, whose `AssignmentExpression` started at `start`,
@@ -778,7 +809,11 @@ impl<'a, 'm> Parser<'a, 'm> {
     #[inline(never)]
     fn open_arrow_body(&mut self, id: FunctionId) -> R<()> {
         let asynchronous = self.ast.function(id).is_some_and(|f| f.asynchronous);
-        self.save_context(false, asynchronous)
+        self.save_context(false, asynchronous)?;
+        if self.super_property == SuperProperty::Method {
+            self.super_property = SuperProperty::Arrow;
+        }
+        Ok(())
     }
 
     /// The body of the arrow function `id` from its `ExpressionBody` `e`: one `return`
@@ -792,6 +827,31 @@ impl<'a, 'm> Parser<'a, 'm> {
         let mut body = Vec::new();
         self.push_item(&mut body, stmt)?;
         self.function_end(id, outer, body, false)
+    }
+}
+
+/// The SuperProperty flag of the parameters and body of a function of kind `kind` that is not an
+/// arrow function: set for a MethodDefinition (an accessor or a method, `#sec-method-definitions`,
+/// `#sec-method-definitions-static-semantics-early-errors`), a class's constructor (a
+/// MethodDefinition, `#sec-class-definitions`, ClassElement : MethodDefinition), the initializer
+/// of a field and a static block (`#sec-class-definitions-static-semantics-early-errors`: an
+/// Initializer and a ClassStaticBlockStatementList may not contain a SuperCall and may contain a
+/// SuperProperty; both are functions with a [[HomeObject]], ClassFieldDefinitionEvaluation and
+/// ClassStaticBlockDefinitionEvaluation); cleared for every other
+/// (`#sec-function-definitions-static-semantics-early-errors`). A SuperCall is decided apart
+/// ([`Parser::super_admitted`]). Every kind is listed, so a new kind does not compile until it
+/// is placed here.
+fn super_property_of(kind: FunctionKind) -> SuperProperty {
+    match kind {
+        FunctionKind::Method
+        | FunctionKind::Getter
+        | FunctionKind::Setter
+        | FunctionKind::ClassConstructor
+        | FunctionKind::FieldInitializer
+        | FunctionKind::StaticBlock => SuperProperty::Method,
+        FunctionKind::Declaration | FunctionKind::Expression | FunctionKind::Arrow => {
+            SuperProperty::Outside
+        }
     }
 }
 

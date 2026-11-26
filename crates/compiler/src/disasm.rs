@@ -287,6 +287,8 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::GetNamed(k) => format!("GetNamed {}", s(k)),
         I::PutNamed(k) => format!("PutNamed {}", s(k)),
         I::DeleteNamed(k) => format!("DeleteNamed {}", s(k)),
+        I::GetSuperNamed(k) => format!("GetSuperNamed {}", s(k)),
+        I::PutSuperNamed(k) => format!("PutSuperNamed {}", s(k)),
         I::DefineField(k) => format!("DefineField {}", s(k)),
         I::DefineGetter(k) => format!("DefineGetter {}", s(k)),
         I::DefineSetter(k) => format!("DefineSetter {}", s(k)),

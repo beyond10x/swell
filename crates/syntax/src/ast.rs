@@ -157,6 +157,17 @@ pub enum PropertyKey {
     Computed(ExprId),
 }
 
+/// The property of a [`Expr::SuperMember`] (`#sec-super-keyword`): `super . IdentifierName` or
+/// `super [ Expression ]`, whose value is converted by ToPropertyKey where the reference is read
+/// or written.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SuperKey {
+    /// An `IdentifierName`, reserved words included.
+    Name(String),
+    /// The `Expression` of `super [ Expression ]`.
+    Computed(ExprId),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum PropertyValue {
     /// `PropertyName : AssignmentExpression`.
@@ -361,6 +372,11 @@ pub enum Expr {
         callee: ExprId,
         arguments: Vec<ExprId>,
     },
+    /// A SuperProperty (`#sec-super-keyword`): `super.name` or `super[expression]`. It stands
+    /// only where the nearest function that is not an arrow function is a MethodDefinition.
+    SuperMember(SuperKey),
+    /// A SuperCall (`#sec-super-keyword`), `super(arguments)`, its arguments as a call's.
+    SuperCall(Vec<ExprId>),
     /// `new callee(arguments)`; `None` when the `Arguments` are absent (`new X`).
     New {
         callee: ExprId,
@@ -1151,6 +1167,9 @@ impl HeapBytes for Expr {
             Expr::Call { arguments, .. } | Expr::OptionalCall { arguments, .. } => {
                 arguments.heap_bytes()
             }
+            Expr::SuperMember(SuperKey::Name(name)) => name.heap_bytes(),
+            Expr::SuperMember(SuperKey::Computed(_)) => 0,
+            Expr::SuperCall(arguments) => arguments.heap_bytes(),
             Expr::New { arguments, .. } => arguments.heap_bytes(),
             Expr::Template {
                 strings,
@@ -1418,6 +1437,13 @@ impl Expr {
             }
             Expr::Call { callee, arguments } | Expr::OptionalCall { callee, arguments } => {
                 f(Child::Expr(*callee));
+                for e in arguments {
+                    f(Child::Expr(*e));
+                }
+            }
+            Expr::SuperMember(SuperKey::Name(_)) => {}
+            Expr::SuperMember(SuperKey::Computed(key)) => f(Child::Expr(*key)),
+            Expr::SuperCall(arguments) => {
                 for e in arguments {
                     f(Child::Expr(*e));
                 }

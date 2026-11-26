@@ -679,7 +679,7 @@ impl<'a, 'm> Checker<'a, 'm> {
                     );
                 }
             }
-            Expr::Member { .. } | Expr::Index { .. } => {}
+            Expr::Member { .. } | Expr::Index { .. } | Expr::SuperMember { .. } => {}
             _ => self.error("invalid assignment target", node.span),
         }
     }
@@ -1250,9 +1250,10 @@ impl<'a, 'm> Checker<'a, 'm> {
             // `#sec-async-generator-function-definitions-static-semantics-early-errors`: no
             // YieldExpression and no AwaitExpression in its parameters, no Use Strict Directive
             // with a list that is not simple, no parameter its body declares lexically) are those
-            // of every async generator, which has both flags set. HasDirectSuper needs `super`,
-            // which the parser refuses before slice 8, in a method as anywhere. A class's
-            // constructor is a method (`#sec-class-definitions`, ClassElement : MethodDefinition).
+            // of every async generator, which has both flags set. HasDirectSuper is a SuperCall,
+            // which the parser answers as an early error where it reads it, in a method as
+            // anywhere before derived classes. A class's constructor is a method
+            // (`#sec-class-definitions`, ClassElement : MethodDefinition).
             if matches!(
                 f.kind,
                 FunctionKind::Method | FunctionKind::ClassConstructor
