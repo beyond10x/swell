@@ -37,7 +37,8 @@
 //! closed or released, the id reaches nothing, also after its place holds another cursor or the
 //! list was freed and made again. The counter would wrap after 2^64 opens, each charged a step:
 //! at 10^10 steps a second that is about 58 years of steps, so the wrap is out of reach; at its
-//! last value `open_cursor` ends the run with `Terminated(MemoryBudget)` instead of wrapping.
+//! last value `open_cursor` ends the run with `Terminated(EngineFault)` and faults the agent
+//! instead of wrapping, as `Agent::create_realm` does at the end of its counter.
 //! The list keeps a closed cursor's place free for the next open (a free list through the free
 //! places), so a close is one step and no cursor ever changes its place.
 //!
@@ -187,7 +188,10 @@ struct Index {
 }
 
 /// A cursor of a table, as [`EntryTable::open_cursor`] answers it: its place in the cursor list
-/// and the generation it was opened with, which no other open of the table takes.
+/// and the generation it was opened with, which no other open of the table takes. An id is
+/// good for the table that made it only: the table carries no id of its own, so the caller
+/// keeps an id beside its table (`story:map-and-set`: an iterator holds its collection and
+/// its id).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CursorId {
     place: u32,
@@ -693,8 +697,8 @@ impl EntryTable {
     /// none, by a walk in Rust that closes it: one step, and a growth of the cursor list
     /// (doubling, at least 4) charged with `Agent::charge_bytes` before it is made. The id
     /// carries the next generation of the table's counter; at its last value, out of reach
-    /// (module documentation), and at a place past `u32::MAX`, the run ends in
-    /// `Terminated(MemoryBudget)`.
+    /// (module documentation), the run ends in `Terminated(EngineFault)` and the agent is
+    /// faulted, and at a place past `u32::MAX` in `Terminated(MemoryBudget)`.
     pub(crate) fn open_cursor<H: Host>(
         &mut self,
         agent: &mut Agent<H>,
@@ -702,8 +706,9 @@ impl EntryTable {
     ) -> Completion<CursorId> {
         agent.charge_steps(1)?;
         let generation = self.next_generation;
+        // 2^64 opens cannot be made; reaching the end of the counter is a broken invariant.
         let Some(next_generation) = generation.checked_add(1) else {
-            return Err(agent.terminate(Termination::MemoryBudget));
+            return Err(agent.fault());
         };
         let cursor = CursorSlot::Open(Cursor {
             position: 0,
@@ -2571,5 +2576,301 @@ mod tests {
         let spent = agent.last_entry_steps().unwrap() - before;
         assert_eq!(next, Some((num(999.0), Value::Null)));
         assert!(spent >= 999, "advance passed 999 holes for {spent} steps");
+    }
+
+    /// A forced compaction with a cursor at every position, under every step budget below its
+    /// charge. Tables of 8 positions without an index map (every
+    /// hole pattern) and of 16 and 32 positions with one (fixed patterns and 250 of a fixed
+    /// seed); a cursor at every position from 0 to the end, holes included, and two free
+    /// places in the cursor list. Under each budget below the charge the compaction ends in
+    /// `Terminated(StepBudget)`, spends nothing and leaves the entries, the index map, the
+    /// cursor list and every cursor as they were; at the charge it runs and spends exactly
+    /// `entries moved + places`; then every key is found as the model says, and every cursor
+    /// visits what the model list visits from its position, an entry added after the
+    /// compaction last.
+    #[test]
+    fn a_compaction_at_every_cursor_position_and_every_budget_matches_the_model() {
+        let mut rng = Rng(0x00ad_5e12_0000_0002);
+        let mut patterns: Vec<(u32, u64)> = (1..(1u64 << 8)).map(|mask| (8, mask)).collect();
+        for mask in [
+            1u64,
+            1 << 15,
+            0x7fff,
+            0xfffe,
+            0xffff,
+            0x5555,
+            0xaaaa,
+            0x00ff,
+            0xff00,
+            0x8001,
+        ] {
+            patterns.push((16, mask));
+        }
+        for _ in 0..200 {
+            patterns.push((16, rng.below((1 << 16) - 1) + 1));
+        }
+        for _ in 0..50 {
+            patterns.push((32, rng.below((1 << 32) - 1) + 1));
+        }
+        let mut agent = agent();
+        for (n, mask) in patterns {
+            let mut table = EntryTable::new();
+            for k in 0..n {
+                table
+                    .insert(&mut agent, num(f64::from(k)), num(f64::from(k + 100)))
+                    .unwrap();
+            }
+            let mut model: Vec<Option<u32>> = (0..n).map(Some).collect();
+            for k in 0..n {
+                if mask & (1 << k) != 0 {
+                    assert!(table.delete(&mut agent, num(f64::from(k))).unwrap());
+                    model[usize::try_from(k).unwrap()] = None;
+                }
+            }
+            assert_eq!(table.index.is_some(), n > 8, "{n} {mask:#x}");
+            let spares = [
+                table.open_cursor(&mut agent, None).unwrap(),
+                table.open_cursor(&mut agent, None).unwrap(),
+            ];
+            let ids: Vec<CursorId> = (0..=model.len())
+                .map(|p| {
+                    let id = table.open_cursor(&mut agent, None).unwrap();
+                    table.set_cursor(id, p);
+                    id
+                })
+                .collect();
+            for spare in spares {
+                table.close_cursor(&mut agent, spare);
+            }
+            let state = |table: &EntryTable| {
+                let order: Vec<Option<EntryKey>> = table
+                    .entries
+                    .iter()
+                    .map(|slot| match slot {
+                        Slot::Live(entry) => Some(entry.key),
+                        Slot::Hole(_) => None,
+                    })
+                    .collect();
+                let mapped: Vec<Option<u32>> = (0..n)
+                    .map(|k| {
+                        table.index.as_ref().and_then(|index| {
+                            index.map.get(&EntryKey::number(f64::from(k))).copied()
+                        })
+                    })
+                    .collect();
+                let positions: Vec<Option<usize>> =
+                    ids.iter().map(|&id| table.cursor(id)).collect();
+                (
+                    order,
+                    (table.live, table.holes, table.first_hole),
+                    mapped,
+                    (table.cursors.len(), table.free_cursor, table.open_cursors),
+                    positions,
+                )
+            };
+            let before = state(&table);
+            let mut budget = 0u64;
+            loop {
+                let steps = agent.steps;
+                agent.limits.steps_per_entry = steps + budget;
+                match table.compact(&mut agent) {
+                    Ok(()) => {
+                        assert_eq!(agent.steps - steps, budget, "{n} {mask:#x}");
+                        break;
+                    }
+                    Err(abrupt) => {
+                        assert_eq!(
+                            abrupt,
+                            Abrupt::Terminated(Termination::StepBudget),
+                            "{n} {mask:#x} under {budget}"
+                        );
+                        assert_eq!(agent.steps, steps, "{n} {mask:#x} under {budget}");
+                        assert_eq!(state(&table), before, "{n} {mask:#x} under {budget}");
+                        go_on(&mut agent);
+                        budget += 1;
+                        assert!(budget < 200, "{n} {mask:#x}: no budget let it run");
+                    }
+                }
+            }
+            go_on(&mut agent);
+            let live = model.iter().flatten().count();
+            let first_hole = model.iter().position(Option::is_none).unwrap();
+            let moved = if n > 8 {
+                live
+            } else {
+                model[first_hole..].iter().flatten().count()
+            };
+            let places = ids.len() + 2;
+            assert_eq!(
+                budget,
+                u64::try_from(moved + places).unwrap(),
+                "{n} {mask:#x}: the charge"
+            );
+            assert_eq!(
+                (table.entries.len(), table.holes, table.first_hole),
+                (live, 0, None),
+                "{n} {mask:#x}"
+            );
+            if let Some(index) = &table.index {
+                assert_eq!(index.map.len(), live, "{n} {mask:#x}");
+                for (position, slot) in table.entries.iter().enumerate() {
+                    let Slot::Live(entry) = slot else {
+                        panic!("{n} {mask:#x}: a hole at {position} after the compaction");
+                    };
+                    assert_eq!(
+                        index.map.get(&entry.key).copied(),
+                        u32::try_from(position).ok(),
+                        "{n} {mask:#x}: the index map at {position}"
+                    );
+                }
+            }
+            for k in 0..n {
+                let found = table.find(&mut agent, num(f64::from(k))).unwrap();
+                assert_eq!(
+                    found.is_some(),
+                    model[usize::try_from(k).unwrap()].is_some(),
+                    "{n} {mask:#x}: find {k}"
+                );
+            }
+            let added = n + 1_000;
+            table
+                .insert(&mut agent, num(f64::from(added)), Value::Null)
+                .unwrap();
+            assert_eq!(table.entries.len(), live + 1, "{n} {mask:#x}");
+            for (p, &id) in ids.iter().enumerate() {
+                let mut visited = Vec::new();
+                while let Some((key, _)) = table.advance(&mut agent, id).unwrap() {
+                    visited.push(key);
+                }
+                let mut want: Vec<Value> = model[p..]
+                    .iter()
+                    .flatten()
+                    .map(|&k| num(f64::from(k)))
+                    .collect();
+                want.push(num(f64::from(added)));
+                assert_eq!(visited, want, "{n} {mask:#x}: the cursor at {p}");
+            }
+        }
+    }
+
+    /// The end of the generation counter, set near it since 2^64 opens cannot be made. The
+    /// open that takes `u64::MAX - 1` succeeds; at `u64::MAX` an open that would push a place,
+    /// and one through the free list, each end the run in `Terminated(EngineFault)` and fault
+    /// the agent, with the cursors, the free list, the counter and the agent's count as they
+    /// were. A counter that wrapped (`wrapping_add`) fails here. Each path runs on an agent of
+    /// its own: a faulted agent stays faulted.
+    #[test]
+    fn the_generation_counter_ends_the_run_at_its_last_value() {
+        for through_free_list in [false, true] {
+            let mut agent = agent();
+            let mut table = EntryTable::new();
+            table.insert(&mut agent, num(1.0), Value::Null).unwrap();
+            let first = table.open_cursor(&mut agent, None).unwrap();
+            let spare = table.open_cursor(&mut agent, None).unwrap();
+            table.close_cursor(&mut agent, spare);
+            table.next_generation = u64::MAX - 1;
+            let last = table.open_cursor(&mut agent, None).unwrap();
+            assert_eq!(last.generation, u64::MAX - 1);
+            assert_eq!(table.free_cursor, None);
+            if through_free_list {
+                table.close_cursor(&mut agent, last);
+                assert!(table.free_cursor.is_some());
+            }
+            let reading = |agent: &Agent<NoHooks>, table: &EntryTable| {
+                (
+                    agent.heap.bytes(),
+                    table.open_cursors,
+                    table.cursors.len(),
+                    table.free_cursor,
+                    table.next_generation,
+                )
+            };
+            let before = reading(&agent, &table);
+            assert_eq!(
+                table.open_cursor(&mut agent, None),
+                Err(Abrupt::Terminated(Termination::EngineFault)),
+                "through the free list: {through_free_list}"
+            );
+            assert_eq!(agent.termination, Some(Termination::EngineFault));
+            assert!(agent.alive().is_err(), "the agent is faulted");
+            assert_eq!(reading(&agent, &table), before);
+            let last_open = (!through_free_list).then_some(0);
+            assert_eq!(table.cursor(last), last_open);
+            assert_eq!(table.cursor(first), Some(0));
+        }
+    }
+
+    /// One place handed out twice by the free list takes two generations, so the first id is
+    /// stale while the second is open; ids stay stale across a compaction, across `clear`, and
+    /// after the list is freed and made again, and closing every old id closes none of the new
+    /// cursors. An open through the free list that does not advance the counter fails here at
+    /// `assert_ne!(t, u)`.
+    #[test]
+    fn an_id_stays_stale_through_reuse_compaction_clear_and_a_remade_list() {
+        let mut agent = agent();
+        let mut table = table_with_holes(&mut agent);
+        let a = table.open_cursor(&mut agent, None).unwrap();
+        let keep = table.open_cursor(&mut agent, None).unwrap();
+        table.close_cursor(&mut agent, a);
+        let t = table.open_cursor(&mut agent, None).unwrap();
+        assert_eq!(t.place, a.place);
+        table.close_cursor(&mut agent, t);
+        let u = table.open_cursor(&mut agent, None).unwrap();
+        assert_eq!(u.place, a.place);
+        assert_ne!(t, u, "two opens at one place took one id");
+        assert_eq!(table.cursor(t), None);
+        assert_eq!(table.cursor(u), Some(0));
+        table.close_cursor(&mut agent, u);
+        skip(&mut agent, &mut table, keep, 3);
+        table.compact(&mut agent).unwrap();
+        assert_eq!(next_key(&mut agent, &table, keep), Some(num(7.0)));
+        for id in [a, t, u] {
+            assert_eq!(table.cursor(id), None, "{id:?} after the compaction");
+            assert_eq!(table.advance(&mut agent, id), Ok(None));
+        }
+        table.clear(&mut agent).unwrap();
+        for id in [a, t, u] {
+            assert_eq!(table.cursor(id), None, "{id:?} after clear");
+        }
+        assert_eq!(table.cursor(keep), Some(0));
+        table.close_cursor(&mut agent, keep);
+        assert!(table.cursors.is_empty());
+        let fresh: Vec<CursorId> = (0..3)
+            .map(|_| table.open_cursor(&mut agent, None).unwrap())
+            .collect();
+        for id in [a, t, u, keep] {
+            assert_eq!(
+                table.cursor(id),
+                None,
+                "{id:?} after the list was made again"
+            );
+            assert!(!fresh.contains(&id), "{id:?} handed out again");
+        }
+        for id in [a, t, u, keep] {
+            table.close_cursor(&mut agent, id);
+        }
+        assert_eq!(table.open_cursors, 3);
+        assert!(fresh.iter().all(|&id| table.cursor(id) == Some(0)));
+    }
+
+    /// `clear` charges its positions, holes included, by 64: 1,000 entries, 999 of them
+    /// deleted, no cursor: ceil(1,000 / 64) = 16 steps, where the live entries alone would
+    /// give 1 (`clear_charges_its_positions_by_64_and_every_cursor_place` reads 16 for either).
+    #[test]
+    fn clear_charges_its_holes_by_64() {
+        let mut agent = agent();
+        let mut table = EntryTable::new();
+        for i in 0..1_000u32 {
+            table
+                .insert(&mut agent, num(f64::from(i)), Value::Null)
+                .unwrap();
+        }
+        for i in 0..999u32 {
+            assert!(table.delete(&mut agent, num(f64::from(i))).unwrap());
+        }
+        assert_eq!((table.live, table.holes, table.cursors.len()), (1, 999, 0));
+        let before = agent.steps;
+        table.clear(&mut agent).unwrap();
+        assert_eq!(agent.steps - before, 16);
     }
 }
