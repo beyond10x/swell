@@ -115,6 +115,24 @@ Every number below comes from the gate, `task check`, on the released commit.
   path (step 1 of `story:core-builds-without-std`). `SyntaxError` and `CompileError` implement
   `core::error::Error`, the same trait as `std::error::Error`. Public names and behaviour do not
   change; unit tests inside the crates still link `std`.
+- The gate builds `swell` and every crate it depends on, the six engine crates, for
+  `x86_64-unknown-none`, a target without `std` (`task nostd-build`, `taskfiles/nostd.yml`), and
+  reads the undefined symbols of their libraries, weak ones included, with `llvm-nm` of the pinned
+  toolchain (`task nostd-symbols`): a symbol that is neither a mangled Rust name (legacy names are
+  checked down to their hash, v0 names by their form) nor a routine of the compiler runtime (a C
+  library's `fmod` or `sqrt`, a C++ library's `_ZNSt9exceptionD2Ev`, an I/O call) fails it, named
+  with its object. `rust-toolchain.toml` adds the target and the component `llvm-tools`; the
+  toolchain step of `.github/workflows/check.yml` installs both, and `toolchain-check` fails when
+  that step lacks a component or target the file names (arrays on one line or several, strings
+  in "" or ''), or reads no value from a key that names them. `HOST-2`'s source scan also refuses a
+  `std` path in library code and a crate root without `#![no_std]`; its reading of source now
+  takes raw byte and C strings (`br"..."`, `cr#"..."#`) as literals and removes the blanks before
+  every `::`, and its blanking of `#[cfg(test)]` items ends at the `,` of a variant or arm with a
+  comparison or shift in it and at the `)` after a parameter. A test host of the emulated kind in
+  the `std` test binary of `swell` (`crates/swell/tests/emulated_host.rs`: a clock that stands
+  still, fixed seeds, no system API and no output macro of the `std` prelude) reads `Date.now()`
+  twice and gets the fixed time, and two agents of it draw the same `Math.random` values; module
+  loading from memory is slice 11 and not delivered. Step 4 of `story:core-builds-without-std`.
 
 ### Fixed
 
@@ -126,6 +144,10 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Host interface
 
+- `HOST-2` (changed, slice 1) also states that each engine crate declares `#![no_std]` in its
+  crate root and names no `std` path in its library code (an item under `#[cfg(test)]` is test
+  code); its source scan, `swell::source_scan::host_2_no_ambient_authority_in_engine_crates`,
+  refuses both. No public item of `value.rs` or of `host/*.rs` is added or changed.
 - `HOST-26`, `HOST-27`, `HOST-144`, `HOST-147`, `HOST-212` and `HOST-213` (slice 4) have tests
   (`swell::math_random::*`): two agents with the same `random_seed` give the same 1,000
   values; two realms of one agent differ; `random_seed` changes the stream and `hash_key` does

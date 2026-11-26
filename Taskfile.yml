@@ -31,6 +31,10 @@ includes:
     taskfile: taskfiles/math-data.yml
     flatten: true
     optional: true
+  nostd:
+    taskfile: taskfiles/nostd.yml
+    flatten: true
+    optional: true
   fault-injection:
     taskfile: taskfiles/fault-injection.yml
     flatten: true
@@ -104,6 +108,8 @@ tasks:
       - task: python-check
       - task: forbid-unsafe-check
       - task: libm-check
+      - task: nostd-build
+      - task: nostd-symbols
       - task: lock-check
       - task: forge-check
       - task: nextest-check
@@ -363,6 +369,7 @@ tasks:
         TEST262_URL TEST262_COMMIT TEST262_TREE TEST262_LS_TREE_SHA256 TEST262_CACHE
         UNICODE_DATA_DIR UNICODE_DATA_REQUIRED
         LIBM_ROOT MATH_DATA_DIR
+        NOSTD_ROOT NOSTD_TARGET NOSTD_PACKAGES NOSTD_OUT NOSTD_LIBS NOSTD_NM_OUTPUT
         SPEC_REFUSALS_MAX SPEC_OUT SPEC_SYNTHESIZE_LOG SPEC_CONFORM_LOG
         ESS_SUITE ESS_UNSUPPORTED_MAX
         HOST_REQ_DOC HOST_REQ_LIST HOST_REQ_SPEC HOST_REQ_DELIVERED HOST_REQ_TEST_LIST

@@ -1,0 +1,242 @@
+version: '3'
+
+set: [pipefail]
+
+tasks:
+  nostd-build:
+    desc: Build swell and every crate it depends on, the engine crates, for a target without std (x86_64-unknown-none), so that a use of std fails the build; lists their libraries for nostd-symbols.
+    summary: |
+      Build the engine crates for a target that has no std (story core-builds-without-std): "cargo
+      build --locked --target <NOSTD_TARGET> -p <package> ..." with RUSTFLAGS="-D warnings", run
+      in NOSTD_ROOT (default ., the tree; the planted scripts point it at a workspace of their
+      own). NOSTD_TARGET (default x86_64-unknown-none) is installed by rust-toolchain.toml, which
+      rustup reads here, on the pool's build node and on the forge alike (toolchain-check holds
+      the forge's workflow to it). For that target the compiler has core and alloc and no std, so
+      a crate root without #![no_std], a std:: path and a dependency that needs std each fail the
+      build. A build step of the gate, before the clock of the test steps: it runs nothing.
+
+      The engine crates are named in one place: NOSTD_PACKAGES (default "swell") names the top
+      package, and the libraries are every library cargo built for the target without features,
+      which is that package and every crate it reaches through a normal dependency, so a
+      seventh engine crate is built and read with no list to edit, and none can be left out of a
+      list. The HOST-2 scan (engine_crates() of crates/swell/tests/source_scan.rs, read from the
+      manifests) also reads the target-specific and optional dependencies, which this build does
+      not make and whose symbols are not read; no engine crate has one today. On this tree the
+      libraries are the six of docs/design/engine.md, section 2.
+
+      Writes cargo's messages to NOSTD_OUT/build.json and its log to NOSTD_OUT/build.log (NOSTD_OUT
+      default .out/nostd). When cargo fails it prints the log and "nostd-build: cargo build
+      --target <target> of <packages> failed, exit <n>; ..." and fails. Otherwise it writes
+      NOSTD_OUT/libs.txt, one line "<crate> <path of its .rlib>" per library, sorted, read from
+      cargo's compiler-artifact messages (jq; an artifact counts when its file lies under the
+      target's own directory), and prints "nostd-build: <cargo's Finished line>" and
+      "nostd-build: <n> librar(y|ies) for <target>: <crates>". It fails when a named package
+      built no library, and on an empty NOSTD_PACKAGES.
+    silent: true
+    vars:
+      NOSTD_ROOT: '{{.NOSTD_ROOT | default "."}}'
+      NOSTD_TARGET: '{{.NOSTD_TARGET | default "x86_64-unknown-none"}}'
+      NOSTD_PACKAGES: '{{.NOSTD_PACKAGES | default "swell"}}'
+      NOSTD_OUT: '{{.NOSTD_OUT | default ".out/nostd"}}'
+    env:
+      RUSTFLAGS: -D warnings
+    cmds:
+      - |
+        root={{shellQuote .NOSTD_ROOT}}
+        target={{shellQuote .NOSTD_TARGET}}
+        packages={{shellQuote .NOSTD_PACKAGES}}
+        out={{shellQuote .NOSTD_OUT}}
+        mkdir -p "$out" && out=$(cd "$out" && pwd) || { echo "nostd-build: cannot make $out"; exit 1; }
+        rm -f "$out/libs.txt"
+        set --
+        for p in $packages; do set -- "$@" -p "$p"; done
+        [ "$#" -gt 0 ] || { echo "nostd-build: NOSTD_PACKAGES names no package"; exit 1; }
+        status=0
+        (cd "$root" && cargo build --locked --target "$target" "$@" --message-format=json-render-diagnostics) \
+          > "$out/build.json" 2> "$out/build.log" || status=$?
+        if [ "$status" -ne 0 ]; then
+          cat "$out/build.log"
+          echo "nostd-build: cargo build --target $target of $packages failed, exit $status; an engine crate is #![no_std] with alloc and names no std path, nor does a crate it depends on (story core-builds-without-std)"
+          exit 1
+        fi
+        jq -r --arg dir "/$target/" '
+          select(.reason == "compiler-artifact" and any(.target.kind[]; . == "lib" or . == "rlib"))
+          | .target.name as $crate
+          | .filenames[] | select(endswith(".rlib") and contains($dir))
+          | $crate + " " + .
+        ' "$out/build.json" | LC_ALL=C sort -u > "$out/libs.txt.new" ||
+          { echo "nostd-build: jq cannot read $out/build.json"; exit 1; }
+        missing=0
+        for p in $packages; do
+          crate=$(printf '%s' "$p" | tr - _)
+          if ! awk -v crate="$crate" '$1 == crate { found = 1 } END { exit !found }' "$out/libs.txt.new"; then
+            echo "nostd-build: $p built no library for $target (cargo's messages: $out/build.json)"
+            missing=$((missing + 1))
+          fi
+        done
+        [ "$missing" -eq 0 ] || exit 1
+        while read -r crate lib; do
+          [ -f "$lib" ] || { echo "nostd-build: cargo named $lib for $crate, which is not there"; exit 1; }
+        done < "$out/libs.txt.new"
+        mv "$out/libs.txt.new" "$out/libs.txt"
+        n=$(awk 'END { print NR }' "$out/libs.txt")
+        esc=$(printf '\033')
+        LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" "$out/build.log" | awk '/^ *Finished / { sub(/^ */, ""); line = $0 } END { print "nostd-build: " line }'
+        if [ "$n" -eq 1 ]; then noun=library; else noun=libraries; fi
+        echo "nostd-build: $n $noun for $target:" $(awk '{ print $1 }' "$out/libs.txt")
+
+  nostd-symbols:
+    desc: Fail, naming the symbol and the object, when a library nostd-build built leaves a symbol undefined, weak ones included, that is neither Rust's own nor the compiler runtime's (a C or C++ library's function, an I/O call).
+    summary: |
+      Read the undefined symbols of the libraries nostd-build built for the target without std, and
+      fail on any that neither Rust nor the compiler's runtime supplies (story
+      core-builds-without-std): such a symbol is a function of a C or C++ library or of the
+      system, which a program on that target does not have. The engine crates take float
+      functions from swell_num::fmath and swell_num::math (libm-check holds the source); this
+      check holds the code the compiler made, where an f64 % f64 is a call of fmod although the
+      source names none.
+
+      The libraries are NOSTD_LIBS, paths separated by blanks, or, when it is empty, the second
+      field of each line of NOSTD_OUT/libs.txt (NOSTD_OUT default .out/nostd), which nostd-build
+      writes. The reader is llvm-nm of the pinned toolchain, <sysroot>/lib/rustlib/<host>/bin/llvm-nm,
+      which the component llvm-tools of rust-toolchain.toml installs here, on the pool's build node
+      and on the forge alike: the same program at the same version everywhere, built with the LLVM
+      that wrote the objects, and it reads the archive members of an .rlib (a system nm differs
+      between machines). "llvm-nm -A -u" lists every undefined symbol with its library and object,
+      as "<library>:<object>: <type> <symbol>"; the types U (undefined), w and v (weak
+      undefined) are read alike, and a line of another form fails the check. NOSTD_NM_OUTPUT, when
+      set, names a file of such lines that is read in place of llvm-nm's output, and then no
+      library is read: the planted scripts feed it symbols that a crate under
+      #![forbid(unsafe_code)] cannot leave (a weak undefined symbol needs global_asm!, a foreign
+      name an unsafe extern block).
+      A symbol passes when it is
+        - Rust's own: a mangled Rust name or an unmangled allocator shim or panic entry (a
+          __rust_* name, rust_begin_unwind or rust_eh_personality). A legacy mangled name is
+          _ZN, then length-prefixed parts, the last of them the hash h followed by 16 hex digits,
+          then E, and nothing after (_ZN4core9panicking5panic17h0123456789abcdefE); a C++ name
+          such as _ZNSt9exceptionD2Ev fails it. A v0 mangled name, the scheme this toolchain
+          uses, is _R, an optional decimal version, a path tag (C, M, X, Y, N, I or B), then
+          letters, digits and underscores only, with at least one crate root in it (C, an
+          optional disambiguator s<base 62>_, a decimal length);
+        - a memory function the compiler emits and its runtime supplies: memcpy, memmove, memset,
+          memcmp, bcmp;
+        - a routine of the compiler runtime (compiler_builtins) by its compiler-rt name: integer
+          arithmetic, shifts and bit counts of a mode (__udivti3, __muloti4), and the arithmetic,
+          comparisons and conversions of floats, which x86_64-unknown-none, a target without a
+          floating-point unit in its ABI, calls for every f64 operation (__adddf3, __eqdf2,
+          __floatsidf, __fixdfti, __powidf2).
+      Every other symbol is named, once per object, as "nostd-symbols: <library>(<object>):
+      <symbol> is neither Rust's own nor the compiler runtime's" (<library> is the file name, for
+      a dependency of the named package cargo's lib<crate>-<hash>.rlib), then "nostd-symbols: <n>
+      undefined symbol(s) of <k> librar(y|ies) outside Rust and the compiler runtime; ..." and it
+      fails. Passing, it prints "nostd-symbols: <k> librar(y|ies), <o> object(s), <u> undefined
+      symbol(s): <r> Rust's own, <m> memory functions, <c> compiler runtime routines; none from a
+      C library or the system". It fails too when no library is given, a library is missing,
+      llvm-nm is missing or fails, or no undefined symbol is read. Writes NOSTD_OUT/nm.txt.
+      awk only; nothing compiles.
+    silent: true
+    vars:
+      NOSTD_LIBS: '{{.NOSTD_LIBS | default ""}}'
+      NOSTD_OUT: '{{.NOSTD_OUT | default ".out/nostd"}}'
+      NOSTD_NM_OUTPUT: '{{.NOSTD_NM_OUTPUT | default ""}}'
+    cmds:
+      - |
+        out={{shellQuote .NOSTD_OUT}}
+        libs={{shellQuote .NOSTD_LIBS}}
+        given={{shellQuote .NOSTD_NM_OUTPUT}}
+        mkdir -p "$out" || { echo "nostd-symbols: cannot make $out"; exit 1; }
+        if [ -n "$given" ]; then
+          [ -f "$given" ] || { echo "nostd-symbols: no file $given (NOSTD_NM_OUTPUT)"; exit 1; }
+          cp "$given" "$out/nm.txt" || { echo "nostd-symbols: cannot copy $given"; exit 1; }
+          k=
+        else
+          if [ -z "$libs" ]; then
+            [ -f "$out/libs.txt" ] || { echo "nostd-symbols: no $out/libs.txt; task nostd-build writes it"; exit 1; }
+            libs=$(awk '{ print $2 }' "$out/libs.txt")
+          fi
+          k=0
+          for lib in $libs; do
+            [ -f "$lib" ] || { echo "nostd-symbols: no library $lib"; exit 1; }
+            k=$((k + 1))
+          done
+          [ "$k" -gt 0 ] || { echo "nostd-symbols: no library to read (NOSTD_LIBS and $out/libs.txt are empty)"; exit 1; }
+          sysroot=$(rustc --print sysroot) || { echo "nostd-symbols: rustc --print sysroot failed"; exit 1; }
+          host=$(rustc -vV | awk '$1 == "host:" { print $2 }')
+          nm=$sysroot/lib/rustlib/$host/bin/llvm-nm
+          [ -x "$nm" ] || { echo "nostd-symbols: no llvm-nm at <sysroot>/lib/rustlib/$host/bin; the component llvm-tools of rust-toolchain.toml installs it"; exit 1; }
+          status=0
+          # shellcheck disable=SC2086
+          "$nm" -A -u $libs > "$out/nm.txt" 2> "$out/nm.err" || status=$?
+          if [ "$status" -ne 0 ]; then
+            cat "$out/nm.err"
+            echo "nostd-symbols: llvm-nm failed, exit $status"
+            exit 1
+          fi
+        fi
+        LC_ALL=C awk -v libs="$k" '
+          function legacy(s,   i, n, last) {
+            if (substr(s, 1, 3) != "_ZN") return 0
+            i = 4
+            last = ""
+            while (1) {
+              if (substr(s, i, 1) == "E") return (i == length(s) && last ~ /^h[0-9a-f]+$/ && length(last) == 17)
+              if (!match(substr(s, i), /^[0-9]+/)) return 0
+              n = substr(s, i, RLENGTH) + 0
+              i += RLENGTH
+              if (n == 0 || i + n - 1 > length(s)) return 0
+              last = substr(s, i, n)
+              i += n
+            }
+          }
+          function v0(s) {
+            return s ~ /^_R[0-9]*[CMXYNIB][A-Za-z0-9_]*$/ && s ~ /C(s[0-9A-Za-z]*_)?[0-9]/
+          }
+          function kind(s) {
+            if (legacy(s) || v0(s) || s ~ /^__rust_[a-z0-9_]+$/ || s == "rust_begin_unwind" || s == "rust_eh_personality") return "rust"
+            if (s == "memcpy" || s == "memmove" || s == "memset" || s == "memcmp" || s == "bcmp") return "memory"
+            if (s ~ /^__(u?(add|sub|mul|div|mod|neg|cmp|divmod|mulo|ashl|ashr|lshr|clz|ctz|ffs|popcount|bswap|parity|abs)|eq|ne|lt|le|gt|ge|unord|powi|float|floatun|fix|fixuns|extend|trunc)(si|di|ti|sf|df|tf|xf|hf)+[0-9]?$/) return "runtime"
+            return ""
+          }
+          NF == 0 { next }
+          NF != 3 || $1 !~ /:$/ || $2 !~ /^[Uwv]$/ {
+            print "nostd-symbols: llvm-nm wrote a line this check does not read: " $0
+            unread++
+            next
+          }
+          {
+            file = $1
+            sub(/:$/, "", file)
+            sym = $3
+            if (match(file, /\.(rlib|a):/)) {
+              lib = substr(file, 1, RSTART + RLENGTH - 2)
+              member = substr(file, RSTART + RLENGTH)
+            } else {
+              lib = file
+              member = ""
+            }
+            sub(/^.*\//, "", lib)
+            seen[lib] = 1
+            where = (member == "" ? lib : lib "(" member ")")
+            objects[where] = 1
+            total++
+            k = kind(sym)
+            if (k != "") { count[k]++; next }
+            if (!((where, sym) in named)) {
+              named[where, sym] = 1
+              print "nostd-symbols: " where ": " sym " is neither Rust'"'"'s own nor the compiler runtime'"'"'s"
+              bad++
+            }
+          }
+          END {
+            if (libs == "") for (l in seen) libs++
+            noun = (libs == 1 ? "library" : "libraries")
+            for (o in objects) nobj++
+            if (unread) { print "nostd-symbols: " unread " line(s) of llvm-nm not read; each is \"<library>:<object>: <U|w|v> <symbol>\""; exit 1 }
+            if (bad) {
+              print "nostd-symbols: " bad " undefined symbol(s) of " libs " " noun " outside Rust and the compiler runtime; an engine crate takes no function from a C library or the system (story core-builds-without-std)"
+              exit 1
+            }
+            if (!total) { print "nostd-symbols: read no undefined symbol from " libs+0 " " noun "; a library of Rust code calls at least one"; exit 1 }
+            print "nostd-symbols: " libs " " noun ", " nobj " object(s), " total " undefined symbol(s): " count["rust"]+0 " Rust'"'"'s own, " count["memory"]+0 " memory functions, " count["runtime"]+0 " compiler runtime routines; none from a C library or the system"
+          }
+        ' "$out/nm.txt"
