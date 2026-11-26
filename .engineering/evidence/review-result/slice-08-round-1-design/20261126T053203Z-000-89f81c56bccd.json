@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-26T05:32:03Z",
+  "actor": "human:operator",
+  "artifact": "review-result:slice-08-round-1-design",
+  "kind": "review-result",
+  "revision": 2,
+  "change": {
+    "change": "redaction",
+    "literal_sha256": "17673e94e08a4ce6e772c0ba63bef735c58a054fb7471db12c40b338b7ff480a",
+    "literal_chars": 99,
+    "replacement": "critic-design-edges.txt in the coordinating session scratch directory",
+    "count": 1,
+    "reason": "a home path of the workstation; the repository holds no private path"
+  }
+}

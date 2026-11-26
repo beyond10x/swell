@@ -1,0 +1,9 @@
+test/language/expressions/class/elements/private-getter-is-not-a-own-property.js	18	B PM L18
+test/language/expressions/class/elements/private-setter-is-not-a-own-property.js	18	B PM L18
+test/language/statements/class/elements/private-getter-is-not-a-own-property.js	18	B PM L18
+test/language/statements/class/elements/private-setter-is-not-a-own-property.js	18	B PM L18
+test/language/statements/class/subclass/builtin-objects/ArrayBuffer/regular-subclassing.js	13	B C L13
+test/language/statements/class/subclass/builtin-objects/ArrayBuffer/super-must-be-called.js	13	B C L13
+test/language/statements/class/subclass/builtin-objects/DataView/regular-subclassing.js	13	B C L13
+test/language/statements/class/subclass/builtin-objects/DataView/super-must-be-called.js	13	B C L13
+test/language/statements/class/subclass/builtins.js	13	B C L13
