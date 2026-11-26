@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use swell_syntax::ast::{Expr, FunctionId, FunctionKind, Stmt};
+use swell_syntax::ast::{Ast, Expr, ExprId, FunctionId, FunctionKind, Stmt};
 use swell_syntax::{
     MessageKind, ParseOptions, Script, SyntaxError, message_kind, parse_dynamic_async_function,
     parse_dynamic_function, parse_dynamic_generator_function, parse_eval, parse_script,
@@ -619,6 +619,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "conditional" => ("", "a ? b : ", "c;", "", ""),
         "conditional_middle" => ("", "a ? ", "b", " : c", ";"),
         "sum_chain" => ("x = a", "+a", ";", "", ""),
+        "exp_chain" => ("x = a", " ** a", ";", "", ""),
         "member_chain" => ("x = a", ".b", ";", "", ""),
         "call_chain" => ("f", "()", ";", "", ""),
         "function_declaration" => ("", "function f(){", "", "}", ""),
@@ -676,7 +677,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 61] = [
+const NESTING_KINDS: [&str; 62] = [
     "array",
     "paren",
     "block",
@@ -738,6 +739,7 @@ const NESTING_KINDS: [&str; 61] = [
     "async_generator_expression",
     "for_await",
     "async_generator_method",
+    "exp_chain",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict
@@ -1492,6 +1494,103 @@ fn regexp_literal_is_lexed_to_its_end() {
         script.ast.expr(*value).unwrap().expr,
         Expr::Binary { .. }
     ));
+}
+
+/// The shape of the expression `e`: each binary operation in parentheses with its `BinaryOp`
+/// between its operands, a prefix operator by its `UnaryOp` or `UpdateOp` before its operand
+/// in brackets, a postfix one after it, a literal by its text and an identifier by its name.
+fn shape(ast: &Ast, e: ExprId) -> String {
+    let Some(node) = ast.expr(e) else {
+        return "<no node>".to_string();
+    };
+    match &node.expr {
+        Expr::Binary { op, left, right } => {
+            format!("({} {op:?} {})", shape(ast, *left), shape(ast, *right))
+        }
+        Expr::Unary { op, operand } => format!("{op:?}[{}]", shape(ast, *operand)),
+        Expr::Update {
+            op,
+            prefix: true,
+            operand,
+        } => format!("{op:?}[{}]", shape(ast, *operand)),
+        Expr::Update { op, operand, .. } => format!("[{}]{op:?}", shape(ast, *operand)),
+        Expr::Number(n) => n.text.clone(),
+        Expr::Identifier(name) => name.clone(),
+        other => format!("{other:?}"),
+    }
+}
+
+/// The shape ([`shape`]) of the expression of the first statement of `text`; the errors of a
+/// parse, or the statement when it is no expression statement, as their debug text.
+fn statement_shape(text: &str) -> String {
+    let script = match parse(text) {
+        Ok(script) => script,
+        Err(errors) => return format!("{errors:?}"),
+    };
+    let first = script
+        .body
+        .first()
+        .and_then(|&s| script.ast.stmt(s))
+        .map(|s| &s.stmt);
+    match first {
+        Some(Stmt::Expression(e)) => shape(&script.ast, *e),
+        other => format!("{other:?}"),
+    }
+}
+
+/// `**` (`#sec-exp-operator`): ExponentiationExpression is `UpdateExpression **
+/// ExponentiationExpression`, so the operator is right associative and binds more tightly than
+/// `*`, `/` and `%`; a unary operator binds its own operand before `**` on the right and is a
+/// SyntaxError as the left operand outside parentheses, while an update expression is a left
+/// operand. A chain of 2,000 `**` builds a tree 2,001 nodes deep by a loop, as a chain of `+`
+/// does: at `parser_nesting` 1,000 it is the nesting error alone, and at 2,100 it parses.
+#[test]
+fn exponentiation_is_right_associative_and_binds_tightest() {
+    for (text, expected) in [
+        ("2 ** 3 ** 2;", "(2 Exp (3 Exp 2))"),
+        ("2 * 3 ** 2;", "(2 Mul (3 Exp 2))"),
+        ("2 ** 3 * 2;", "((2 Exp 3) Mul 2)"),
+        ("a ** b * c ** d;", "((a Exp b) Mul (c Exp d))"),
+        ("a % b ** c ** d;", "(a Rem (b Exp (c Exp d)))"),
+        ("a - b ** c;", "(a Sub (b Exp c))"),
+        ("2 ** -2;", "(2 Exp Minus[2])"),
+        ("(-2) ** 2;", "(Minus[2] Exp 2)"),
+        ("-(2 ** 2);", "Minus[(2 Exp 2)]"),
+        ("++a ** 2;", "(Increment[a] Exp 2)"),
+        ("a-- ** 2;", "([a]Decrement Exp 2)"),
+    ] {
+        assert_eq!(statement_shape(text), expected, "{text}");
+    }
+    for text in [
+        "-2 ** 2;",
+        "2 ** -2 ** 2;",
+        "a * typeof b ** 2;",
+        "!a ** 2;",
+    ] {
+        assert_eq!(
+            parse(text).err().map(|e| messages(&e)),
+            Some(vec![
+                "a unary expression as the left operand of ** needs parentheses".to_string()
+            ]),
+            "{text}"
+        );
+    }
+    let chain = format!("x = a{};", " ** a".repeat(2_000));
+    let errors = parse_units(&units(&chain), LIMIT).err().unwrap();
+    assert_eq!(
+        messages(&errors),
+        vec!["nesting deeper than parser_nesting (1000)".to_string()]
+    );
+    let script = parse_units(&units(&chain), 2_100).unwrap();
+    let Some(Stmt::Expression(e)) = script.ast.stmt(script.body[0]).map(|s| &s.stmt) else {
+        panic!("not an expression statement");
+    };
+    let Expr::Assign { value, .. } = &script.ast.expr(*e).unwrap().expr else {
+        panic!("not an assignment");
+    };
+    let depth = script.ast.expr(*value).unwrap().depth;
+    println!("a chain of 2,000 **: depth {depth}");
+    assert_eq!(depth, 2_001);
 }
 
 /// The text of each function's span, in source order; a span outside `source` reads as

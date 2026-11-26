@@ -337,6 +337,7 @@ impl<H: Host> Agent<H> {
             I::Mul => self.binary(BinaryOperator::Multiply),
             I::Div => self.binary(BinaryOperator::Divide),
             I::Rem => self.binary(BinaryOperator::Remainder),
+            I::Exp => self.binary(BinaryOperator::Exponentiate),
             I::Add => self.binary(BinaryOperator::Add),
             I::Sub => self.binary(BinaryOperator::Subtract),
             I::Shl => self.binary(BinaryOperator::LeftShift),
