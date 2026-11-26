@@ -12,7 +12,9 @@ use crate::support;
 
 use support::host::{TestHost, agent, agent_with, limits, realm, stack_with_room};
 use support::script::{Outcome, define_function, eval, eval_text, run_both};
-use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
+use support::stack::{
+    BUILTINS_REENTRY, TestPath, on_bounded_stack, reach_through, stack_limits, test_path,
+};
 use swell::{
     Agent, Completion, Cx, HostCall, InterruptHandle, Limits, Outcome as HostOutcome, Realm,
     Termination, Value,
@@ -444,10 +446,28 @@ fn union_with_an_endless_set_like_ends_at_the_memory_budget() {
     assert!(after <= before, "{after} after collect(), {before} before");
 }
 
+/// Run `body`, a [`reach_through`] at [`BUILTINS_REENTRY`], on seven eighths of
+/// `min_stack_bytes()` (decision 3, "Depth bounds") in a child process: the form of every test
+/// `*_on_the_promised_stack` of this module, one per way the methods call the set-like's code
+/// from Rust (the getter of `size`, `has`, `keys`, `next`, `return`), each for the method whose
+/// frames on that way are the largest. What they hold, read from the stack per re-entry
+/// measured by bisection of the thread stack at depths 200 and 1,000 in the dev profile (the
+/// fixed part, the need at 200 less 200 re-entries, is about 152,000 bytes): in the default
+/// mode, depth 1,000 on 12,838,560 bytes, a test fails above about 12,690 bytes per re-entry.
+/// In the collect mode the depth is 50, on 921,760 bytes, and a test fails only above about
+/// 15,390 bytes per re-entry, more than the promise itself (`STACK_BYTES_PER_REENTRY`, 14,336):
+/// there no test of this form can fail for a frame over the bound, and the default mode holds
+/// it.
+fn on_the_promised_stack(test: TestPath, body: fn()) {
+    let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
+    on_bounded_stack(test, stack, body).unwrap();
+}
+
 /// `Limits::min_stack_bytes` through `isSubsetOf` (decision 3, "Depth bounds"): the set-like's
 /// `has` is a call from Rust, a re-entry, so `f` re-enters itself through it until the re-entry
-/// limit, on seven eighths of `min_stack_bytes()`, in a child process. In the collect mode the
-/// depth is [`BUILTINS_REENTRY`].
+/// limit, on seven eighths of `min_stack_bytes()`, in a child process
+/// ([`on_the_promised_stack`]): 12,463 bytes per re-entry when the seven methods ran in one
+/// function, 9,648 after.
 #[test]
 fn is_subset_of_reaches_the_reentry_limit_on_the_promised_stack() {
     fn body() {
@@ -456,13 +476,84 @@ fn is_subset_of_reaches_the_reentry_limit_on_the_promised_stack() {
             BUILTINS_REENTRY,
         );
     }
-    let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
-    on_bounded_stack(
+    on_the_promised_stack(
         test_path!("is_subset_of_reaches_the_reentry_limit_on_the_promised_stack"),
-        stack,
         body,
-    )
-    .unwrap();
+    );
+}
+
+/// The same through `has` for `intersection`, whose frames on this way are the largest (with
+/// those of `difference`): 12,463 bytes per re-entry before, 9,824 after
+/// ([`on_the_promised_stack`]).
+#[test]
+fn intersection_reaches_the_reentry_limit_through_has_on_the_promised_stack() {
+    fn body() {
+        reach_through(
+            "new Set([0]).intersection({ size: 1, has: f, keys() {} })",
+            BUILTINS_REENTRY,
+        );
+    }
+    on_the_promised_stack(
+        test_path!("intersection_reaches_the_reentry_limit_through_has_on_the_promised_stack"),
+        body,
+    );
+}
+
+/// The same through `keys`, which `intersection` calls from Rust with `this` larger than the
+/// set-like (GetIteratorFromMethod, `#sec-set.prototype.intersection` step 6.a); its frames on
+/// this way are the largest (with those of `difference`): 11,792 bytes per re-entry before,
+/// 9,503 after ([`on_the_promised_stack`]).
+#[test]
+fn intersection_reaches_the_reentry_limit_through_keys_on_the_promised_stack() {
+    fn body() {
+        reach_through(
+            "new Set([0]).intersection({ size: 0, has() {}, keys: f })",
+            BUILTINS_REENTRY,
+        );
+    }
+    on_the_promised_stack(
+        test_path!("intersection_reaches_the_reentry_limit_through_keys_on_the_promised_stack"),
+        body,
+    );
+}
+
+/// The same through `next` for `intersection`, whose frames on this way are the largest (with
+/// those of `difference`): 13,568 bytes per re-entry before, 10,287 after
+/// ([`on_the_promised_stack`]).
+#[test]
+fn intersection_reaches_the_reentry_limit_through_next_on_the_promised_stack() {
+    fn body() {
+        reach_through(
+            "new Set([0]).intersection({ size: 0, has() {}, keys() { return { next: f }; } })",
+            BUILTINS_REENTRY,
+        );
+    }
+    on_the_promised_stack(
+        test_path!("intersection_reaches_the_reentry_limit_through_next_on_the_promised_stack"),
+        body,
+    );
+}
+
+/// The same through `return`, which `isDisjointFrom` calls from Rust when a key of the set-like
+/// is in `this` (IteratorClose, `#sec-set.prototype.isdisjointfrom` step 5.b.iii.1); its frames
+/// on this way are larger than those of `isSupersetOf`, the other method that closes:
+/// 13,375 bytes per re-entry before, 9,999 after ([`on_the_promised_stack`]).
+#[test]
+fn is_disjoint_from_reaches_the_reentry_limit_through_return_on_the_promised_stack() {
+    fn body() {
+        reach_through(
+            "new Set([0]).isDisjointFrom({ size: 0, has() {}, keys() {\n\
+               return { next() { return { value: 0, done: false }; }, return: f };\n\
+             } })",
+            BUILTINS_REENTRY,
+        );
+    }
+    on_the_promised_stack(
+        test_path!(
+            "is_disjoint_from_reaches_the_reentry_limit_through_return_on_the_promised_stack"
+        ),
+        body,
+    );
 }
 
 thread_local! {
@@ -606,5 +697,442 @@ fn the_result_keeps_its_keys_across_a_collection() {
     assert_eq!(
         outcome,
         Outcome::Normal(format!("\"{all}|{all}|{all}|0|{all}|0\""))
+    );
+}
+/// Adversary pass 1. The steps of `{walked}.clear()` less those of `{control}.clear()`, two
+/// Sets of the same 3 entries: `clear` charges one step per place of the cursor list
+/// (`object/keyed_entries.rs`, `EntryTable::clear`), and a table whose last cursor was closed
+/// has no list, so the difference counts the places a cursor left open keeps.
+fn cursor_places_left(
+    agent: &mut Agent<TestHost>,
+    realm: &Realm,
+    walked: &str,
+    control: &str,
+) -> i64 {
+    let walked_steps = steps_of(agent, realm, &format!("{walked}.clear();"));
+    let control_steps = steps_of(agent, realm, &format!("{control}.clear();"));
+    i64::try_from(walked_steps).unwrap() - i64::try_from(control_steps).unwrap()
+}
+
+/// Adversary pass 1, attack 3: every way out of a walk closes its cursor, read exactly by the
+/// steps of `clear` ([`cursor_places_left`]) on a long-lived Set: a normal answer of each walk
+/// (true, and false early), the result of `difference` kept by the script (its cursor lies on
+/// that result's table), a throw of `has`, the depth refusal (a `RangeError` the script
+/// catches), the step budget, the interrupt, and the memory budget (a second agent).
+#[test]
+fn every_way_out_of_a_walk_closes_its_cursor() {
+    let budget = if collect_mode() { 2_000 } else { 100_000 };
+    let (mut agent, realm) = agent_and_realm(|limits| {
+        limits.steps_per_entry = budget;
+        limits.reentry_depth = 16;
+    });
+    define_function(&mut agent, &realm, "interruptNow", 0, interrupt_now, false);
+    steps_of(
+        &mut agent,
+        &realm,
+        "var s1 = new Set([0, 1, 2]), c1 = new Set([0, 1, 2]), s2 = new Set([0, 1, 2]), c2 = new Set([0, 1, 2]);\n\
+         var s3 = new Set([0, 1, 2]), c3 = new Set([0, 1, 2]), s4 = new Set([0, 1, 2]), c4 = new Set([0, 1, 2]);\n\
+         var s5 = new Set([0, 1, 2]), c5 = new Set([0, 1, 2]), s0 = new Set([0, 1, 2]), dw, dc;\n\
+         var yes = { size: 10, has: function () { return true; }, keys: function () {} };\n\
+         var no = { size: 10, has: function () { return false; }, keys: function () {} };\n\
+         var none = { size: 0, has: function () { return false; }, keys: function () { return { next: function () { return { done: true }; } }; } };\n\
+         var thrower = { size: 10, has: function () { throw 0; }, keys: function () {} };\n\
+         var deep = { size: 10, has: function () { return s3.isSubsetOf(deep); }, keys: function () {} };\n\
+         var spin = { size: 10, has: function () { for (;;) {} }, keys: function () {} };\n\
+         var stop = { size: 10, has: function () { interruptNow(); return true; }, keys: function () {} };",
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "[s1.intersection(yes).size, s1.intersection(no).size, s1.isSubsetOf(yes), s1.isSubsetOf(no),\n\
+              s1.isDisjointFrom(yes), s1.isDisjointFrom(no)].join() + \"|\" +\n\
+             [(dw = s0.difference(no)).size, (dc = s0.difference(none)).size].join();"
+        ),
+        Outcome::Normal("\"3,0,true,false,false,true|3,3\"".to_string())
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "[s2.intersection, s2.isSubsetOf, s2.isDisjointFrom].map(function (m) {\n\
+               try { m.call(s2, thrower); return \"none\"; } catch (e) { return e; } }).join();"
+        ),
+        Outcome::Normal("\"0,0,0\"".to_string())
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "try { s3.isSubsetOf(deep); \"none\"; } catch (e) { e instanceof RangeError; }"
+        ),
+        Outcome::Normal("true".to_string())
+    );
+    assert_eq!(
+        eval_text(&mut agent, &realm, "s4.isSubsetOf(spin);"),
+        Outcome::Terminated(Termination::StepBudget)
+    );
+    HANDLE.with(|slot| slot.set(Some(agent.interrupt_handle())));
+    assert_eq!(
+        eval_text(&mut agent, &realm, "s5.intersection(stop);"),
+        Outcome::Terminated(Termination::Interrupted)
+    );
+    let left: Vec<i64> = [
+        ("s1", "c1"),
+        ("dw", "dc"),
+        ("s2", "c2"),
+        ("s3", "c3"),
+        ("s4", "c4"),
+        ("s5", "c5"),
+    ]
+    .iter()
+    .map(|(walked, control)| cursor_places_left(&mut agent, &realm, walked, control))
+    .collect();
+
+    println!(
+        "places left: normal {}, difference kept {}, throw {}, depth {}, steps {}, interrupt {}",
+        left[0], left[1], left[2], left[3], left[4], left[5]
+    );
+    assert_eq!(
+        left,
+        [0, 0, 0, 0, 0, 0],
+        "normal, difference, throw, depth, steps, interrupt"
+    );
+    // The memory budget, in the default mode only (the way out is the one of the step budget;
+    // a fill of the room collecting at every safe point took most of 3.6 s): the reading of an
+    // agent made alike after the same first script, so the arenas that script grows are grown
+    // before the room is set.
+    if collect_mode() {
+        return;
+    }
+    let room: u64 = 256 << 10;
+    let setup = "var s6 = new Set([0, 1, 2]), c6 = new Set([0, 1, 2]);\n\
+         var fill = { size: 10, has: function () { var big = new Set(), i = 0; for (;;) big.add(i++); }, keys: function () {} };";
+    let reading = {
+        let (mut probe, realm) = agent_and_realm(|limits| limits.steps_per_entry = 1 << 40);
+        steps_of(&mut probe, &realm, setup);
+        collected(&mut probe)
+    };
+    let (mut agent, realm) = agent_and_realm(|limits| {
+        limits.steps_per_entry = 1 << 40;
+        limits.memory_bytes = reading + room;
+    });
+    steps_of(&mut agent, &realm, setup);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "s6.isDisjointFrom(fill);"),
+        Outcome::Terminated(Termination::MemoryBudget)
+    );
+    let memory = cursor_places_left(&mut agent, &realm, "s6", "c6");
+    println!("places left: memory {memory}");
+    assert_eq!(memory, 0, "memory");
+}
+
+/// Adversary pass 1, attack 1: the order of every observable read, after the test262 cases
+/// `set-like-class-order.js` (on the list `close-later.tsv` since they define a `class`; here
+/// with accessors on plain objects): GetSetRecord (`size`, its `valueOf`, `has`, `keys`), then
+/// at a `size` equal to `this`'s the walk with `has` (`intersection`, `difference`,
+/// `isDisjointFrom`, `isSubsetOf`) and for `isSupersetOf` the keys; with `this` larger the
+/// keys: `keys()`, `next` read once, then per key `next()`, `done`, `value`; IteratorClose
+/// reads `return` and calls it where `isDisjointFrom` and `isSupersetOf` stop early, and
+/// neither when `next` throws nor when it answers a primitive. In the collect mode the six
+/// cases at an equal size and of one close only (all 15 took 2.1 to 2.7 CPU seconds there in
+/// the test profile; no step of these clauses depends on the mode).
+#[test]
+fn every_read_of_a_set_like_in_the_order_of_the_clauses() {
+    let p = "size,valueOf,get has,get keys";
+    let o = "keys,get next";
+    let key = "next,done,value";
+    let end = "next,done";
+    let close = "get return,return";
+    let cases = [
+        (
+            "\"intersection\", 3, [\"c\", \"x\", \"a\"]",
+            format!("[a,c] {p},has a,has b,has c"),
+        ),
+        (
+            "\"intersection\", 2, [\"c\", \"x\", \"a\"]",
+            format!("[c,a] {p},{o},{key},{key},{key},{end}"),
+        ),
+        (
+            "\"difference\", 3, [\"c\", \"x\"]",
+            format!("[a,b] {p},has a,has b,has c"),
+        ),
+        (
+            "\"difference\", 2, [\"c\", \"x\"]",
+            format!("[a,b] {p},{o},{key},{key},{end}"),
+        ),
+        (
+            "\"isDisjointFrom\", 3, [\"x\", \"y\"]",
+            format!("true {p},has a,has b,has c"),
+        ),
+        (
+            "\"isDisjointFrom\", 3, [\"b\"]",
+            format!("false {p},has a,has b"),
+        ),
+        (
+            "\"isDisjointFrom\", 2, [\"x\", \"b\", \"y\"]",
+            format!("false {p},{o},{key},{key},{close}"),
+        ),
+        (
+            "\"isSubsetOf\", 3, [\"a\", \"b\", \"c\"]",
+            format!("true {p},has a,has b,has c"),
+        ),
+        (
+            "\"isSubsetOf\", 3, [\"a\", \"c\"]",
+            format!("false {p},has a,has b"),
+        ),
+        (
+            "\"isSupersetOf\", 3, [\"a\", \"b\", \"c\"]",
+            format!("true {p},{o},{key},{key},{key},{end}"),
+        ),
+        (
+            "\"isSupersetOf\", 2, [\"a\", \"z\"]",
+            format!("false {p},{o},{key},{key},{close}"),
+        ),
+        (
+            "\"union\", 0, [\"d\", \"a\"]",
+            format!("[a,b,c,d] {p},{o},{key},{key},{end}"),
+        ),
+        (
+            "\"symmetricDifference\", 9, [\"d\", \"a\"]",
+            format!("[b,c,d] {p},{o},{key},{key},{end}"),
+        ),
+        (
+            "\"isSupersetOf\", 1, [\"a\", \"THROW\"]",
+            format!("next threw {p},{o},{key},next"),
+        ),
+        (
+            "\"isDisjointFrom\", 1, [\"x\", \"PRIM\"]",
+            format!("TypeError {p},{o},{key},next"),
+        ),
+    ];
+    let taken: Vec<usize> = if collect_mode() {
+        vec![0, 2, 4, 5, 6, 9]
+    } else {
+        (0..cases.len()).collect()
+    };
+    let calls: Vec<String> = taken
+        .iter()
+        .map(|&i| format!("run({})", cases[i].0))
+        .collect();
+    let expected: Vec<&str> = taken.iter().map(|&i| cases[i].1.as_str()).collect();
+    let source = format!("{}\n[{}].join(\"|\");", ORDER_LIKE, calls.join(", "));
+    answers_once_when_collecting(&source, &expected.join("|"));
+}
+
+/// The set-like of [`every_read_of_a_set_like_in_the_order_of_the_clauses`]: every read and
+/// call logged, `THROW` and `PRIM` as items make `next` throw or answer a primitive.
+const ORDER_LIKE: &str = "var log = [], s = new Set([\"a\", \"b\", \"c\"]);\n\
+         function getter(o, name, f) { Object.defineProperty(o, name, { get: f }); return o; }\n\
+         function like(size, items) {\n\
+           var o = {};\n\
+           getter(o, \"size\", function () { log.push(\"size\"); return { valueOf: function () { log.push(\"valueOf\"); return size; } }; });\n\
+           getter(o, \"has\", function () { log.push(\"get has\"); return function (v) { log.push(\"has \" + v); return items.indexOf(v) >= 0; }; });\n\
+           getter(o, \"keys\", function () { log.push(\"get keys\"); return function () {\n\
+             log.push(\"keys\"); var i = 0, it = {};\n\
+             getter(it, \"next\", function () { log.push(\"get next\"); return function () {\n\
+               log.push(\"next\");\n\
+               if (items[i] === \"THROW\") { i++; throw \"next threw\"; }\n\
+               if (items[i] === \"PRIM\") { i++; return 1; }\n\
+               var r = {};\n\
+               getter(r, \"done\", function () { log.push(\"done\"); return i >= items.length; });\n\
+               return getter(r, \"value\", function () { log.push(\"value\"); return items[i++]; });\n\
+             }; });\n\
+             return getter(it, \"return\", function () { log.push(\"get return\"); return function () { log.push(\"return\"); return {}; }; });\n\
+           }; });\n\
+           return o;\n\
+         }\n\
+         function run(m, size, items) {\n\
+           log = []; var x;\n\
+           try { x = s[m](like(size, items)); x = typeof x === \"boolean\" ? String(x) : \"[\" + [...x].join() + \"]\"; }\n\
+           catch (e) { x = typeof e === \"string\" ? e : e instanceof TypeError ? \"TypeError\" : String(e); }\n\
+           return x + \" \" + log.join(\",\");\n\
+         }";
+
+/// [`answers`], in the collect mode in sloppy code only (no step of these clauses depends on
+/// the mode; both took 5.2 CPU seconds there in the test profile).
+fn answers_once_when_collecting(source: &str, expected: &str) {
+    if collect_mode() {
+        assert_eq!(
+            support::script::run(limits(), source),
+            Outcome::Normal(format!("\"{expected}\"")),
+            "{source}"
+        );
+    } else {
+        answers(source, expected);
+    }
+}
+
+/// Adversary pass 1, attack 2: the copy of `this` in `union` and `symmetricDifference` is made
+/// after `keys()` (`#sec-set.prototype.union` steps 4 and 5), so a `keys` that deletes and adds
+/// to `this` is seen in the result; `difference` copies at its step 4, before `keys()`, and
+/// `intersection` reads `this` live at each key. A `next` that deletes from `this` a key it
+/// then yields again makes `symmetricDifference` append it (not in `this`, not in the result
+/// any more); `intersection`'s walk sees a `clear()` in `has` and the keys it adds after.
+#[test]
+fn a_set_like_that_mutates_this_during_the_call() {
+    answers_once_when_collecting(
+        "var s, r = [];\n\
+         function after(size, items, mutate, step) {\n\
+           return { size: size, has: function (v) { return items.indexOf(v) >= 0; }, keys: function () {\n\
+             mutate(); var i = 0;\n\
+             return { next: function () { if (step) step(i); return i < items.length ? { value: items[i++], done: false } : { done: true }; } };\n\
+           } };\n\
+         }\n\
+         function show(x) { return [...x].join(); }\n\
+         s = new Set([1, 2]); r.push(show(s.union(after(0, [5], function () { s.delete(1); s.add(3); }))));\n\
+         s = new Set([1, 2]); r.push(show(s.symmetricDifference(after(0, [2, 5], function () { s.delete(1); s.add(3); }))));\n\
+         s = new Set([1, 2, 3]); r.push(show(s.difference(after(1, [2], function () { s.delete(1); s.add(4); }))));\n\
+         s = new Set([1, 2, 3]); r.push(show(s.intersection(after(1, [1, 2, 4], function () { s.delete(1); s.add(4); }))));\n\
+         s = new Set([1, 2]); r.push(show(s.symmetricDifference(after(0, [2, 2], function () {}, function (i) { if (i === 1) s.delete(2); }))));\n\
+         s = new Set([1, 2, 3]); r.push(s.isSupersetOf(after(2, [1, 2], function () {}, function (i) { if (i === 1) s.delete(2); })));\n\
+         s = new Set([1, 2, 3]); var once = false, seen = [];\n\
+         r.push(show(s.intersection({ size: 10, keys: function () {}, has: function (v) {\n\
+           seen.push(v); if (!once) { once = true; s.clear(); s.add(7); s.add(1); } return true; } })), seen.join());\n\
+         r.join(\"|\");",
+        "2,3,5|3,5|1,3|2,4|1,2|false|1,7|1,7,1",
+    );
+}
+
+/// Adversary pass 1, attack 1: GetSetRecord's conversions (`#sec-getsetrecord` steps 2 to 7)
+/// on sizes the unit's test does not give: a Symbol (TypeError after the read of `size`), a
+/// `valueOf` that throws (its throw), a `valueOf` that empties `this` (the size of `this` is
+/// read after it), `-0` (a size of 0), 2**53 and a String with spaces; a Proxy as the argument
+/// (its `get` trap sees `size`, `has`, `keys` in that order) and a Proxy of a Set as `this`
+/// (a TypeError before any read).
+#[test]
+fn get_set_record_converts_each_kind_of_size() {
+    answers_once_when_collecting(
+        "var log = [];\n\
+         function rec(size, has, keys) {\n\
+           var o = {};\n\
+           Object.defineProperty(o, \"size\", { get: function () { log.push(\"size\"); return size; } });\n\
+           o.has = has; o.keys = keys || function () { log.push(\"keys\"); return { next: function () { return { done: true }; } }; };\n\
+           return o;\n\
+         }\n\
+         function f() { log.push(\"has\"); return true; }\n\
+         function caught(g) { log = []; try { return \"none \" + g() + \" \" + log.join(); }\n\
+           catch (e) { return (typeof e === \"string\" ? e : e instanceof TypeError ? \"TypeError\" : e instanceof RangeError ? \"RangeError\" : String(e)) + \" \" + log.join(); } }\n\
+         var s = new Set([1, 2, 3]), r = [];\n\
+         r.push(caught(function () { return s.union(rec(Symbol(), f)).size; }));\n\
+         r.push(caught(function () { return s.union(rec({ valueOf: function () { log.push(\"valueOf\"); throw \"v\"; } }, f)).size; }));\n\
+         r.push(caught(function () { var t = new Set([1, 2, 3]); return t.isSubsetOf(rec({ valueOf: function () { log.push(\"valueOf\"); t.clear(); return 1; } }, f)); }));\n\
+         r.push(caught(function () { return new Set().isSubsetOf(rec(-0, f)) + \",\" + new Set([1]).isSubsetOf(rec(-0, f)); }));\n\
+         r.push(caught(function () { return s.isSupersetOf(rec(Math.pow(2, 53), f)); }));\n\
+         r.push(caught(function () { return s.isSupersetOf(rec(\" 3 \", f)); }));\n\
+         r.push(caught(function () {\n\
+           var p = new Proxy({ size: 1, has: f, keys: function () { log.push(\"keys\"); return { next: function () { return { done: true }; } }; } },\n\
+             { get: function (t, k) { log.push(\"get \" + String(k)); return t[k]; } });\n\
+           return [...s.union(p)].join(\"\"); }));\n\
+         r.push(caught(function () { return Set.prototype.union.call(new Proxy(new Set([1]), {}), rec(1, f)); }));\n\
+         r.join(\"|\");",
+        "TypeError size|v size,valueOf|none true size,valueOf|none true,false size,size|\
+         none false size|none true size,keys|none 123 get size,get has,get keys,keys|TypeError ",
+    );
+}
+
+/// Adversary pass 1, attack 1: a Set of another realm is a Set (the brand is the slot), and the
+/// result of `union` is made with `%Set.prototype%` of the realm of the method called, not of
+/// `this` (`#sec-set.prototype.union` step 8, the current realm).
+#[test]
+fn the_result_takes_the_set_prototype_of_the_method_s_realm() {
+    let (mut agent, a) = agent_and_realm(|limits| limits.steps_per_entry = 1 << 40);
+    let b = realm(&mut agent);
+    let root =
+        |agent: &mut Agent<TestHost>, realm: &Realm, source: &str| match eval(agent, realm, source)
+        {
+            HostOutcome::Normal(root) => root,
+            other => panic!("{source}: {other:?}"),
+        };
+    let set_b = root(&mut agent, &b, "new Set([1, 2]);");
+    let probe = root(
+        &mut agent,
+        &a,
+        "(function (sb) {\n\
+           var u = Set.prototype.union.call(sb, new Set([3])), v = sb.union(new Set([3]));\n\
+           return [Object.getPrototypeOf(sb) !== Set.prototype, Object.getPrototypeOf(u) === Set.prototype,\n\
+             Object.getPrototypeOf(v) === Object.getPrototypeOf(sb), [...u].join(), [...v].join(),\n\
+             Set.prototype.isSubsetOf.call(sb, new Set([1, 2, 3]))].join();\n\
+         });",
+    );
+    let undefined = agent
+        .with_cx(&a, |cx| cx.root(Value::Undefined).unwrap())
+        .unwrap();
+    let outcome = agent.call(&a, &probe, &undefined, &[&set_b]).unwrap();
+    assert_eq!(
+        support::script::describe(&mut agent, &a, outcome),
+        Outcome::Normal("\"true,true,true,1,2,3,1,2,3,true\"".to_string())
+    );
+}
+
+/// Adversary pass 1, attack 5: keys held only by the frame of a callback while a collection
+/// can run. `intersection`'s walk over `this` (size of `this` not larger) with a `has` that
+/// deletes its argument from `this` and answers true: the entry is then held by nothing but
+/// the method until it is appended. `union` and `symmetricDifference` with a `next` whose
+/// result has a `done` and a `value` getter, the `value` getter making the key, `{ i }`,
+/// referenced from nowhere else. Each callback and getter allocates; the reading is made with
+/// `collect-every-safe-point`.
+#[test]
+fn keys_held_only_by_a_callback_survive_a_collection() {
+    let outcome = support::script::run(
+        {
+            let mut limits = limits();
+            limits.steps_per_entry = 1 << 40;
+            limits
+        },
+        "function junk() { return new Array(20).fill(0); }\n\
+         function back(set) { var out = []; set.forEach(function (o) { out.push(o.i); }); return out.join(); }\n\
+         var t = new Set(), k; for (k = 0; k < 10; k++) t.add({ i: k });\n\
+         var r = [];\n\
+         r.push(back(t.intersection({ size: 100, keys: function () {}, has: function (o) { junk(); t.delete(o); junk(); return true; } })), t.size);\n\
+         function made() { return { size: 0, has: function () { return false; }, keys: function () {\n\
+           var i = 0;\n\
+           return { next: function () { junk(); var n = i++, res = {};\n\
+             Object.defineProperty(res, \"done\", { get: function () { junk(); return n >= 10; } });\n\
+             Object.defineProperty(res, \"value\", { get: function () { junk(); return { i: n }; } });\n\
+             return res; } };\n\
+         } }; }\n\
+         r.push(back(new Set().union(made())), back(new Set().symmetricDifference(made())));\n\
+         r.join(\"|\");",
+    );
+    let all = "0,1,2,3,4,5,6,7,8,9";
+    assert_eq!(outcome, Outcome::Normal(format!("\"{all}|0|{all}|{all}\"")));
+}
+
+/// `Limits::min_stack_bytes` through the set-like's `next`, which `union` calls from Rust
+/// (IteratorStepValue, `#sec-set.prototype.union` step 7.a): `f` re-enters itself through it
+/// until the re-entry limit, on seven eighths of `min_stack_bytes()`, in a child process
+/// ([`on_the_promised_stack`]). 13,568 bytes per re-entry when the seven methods ran in one
+/// function (13,720,540 at 1,000 against seven eighths, 12,838,560: the test failed),
+/// 10,031 since each runs in its own.
+#[test]
+fn union_reaches_the_reentry_limit_through_next_on_the_promised_stack() {
+    fn body() {
+        reach_through(
+            "new Set().union({ size: 0, has() {}, keys() { return { next: f }; } })",
+            BUILTINS_REENTRY,
+        );
+    }
+    on_the_promised_stack(
+        test_path!("union_reaches_the_reentry_limit_through_next_on_the_promised_stack"),
+        body,
+    );
+}
+
+/// The same through the getter of `size`, which GetSetRecord reads from Rust
+/// (`#sec-getsetrecord` step 2), for `union`, whose frames on this way are the largest (with
+/// those of `intersection`, `difference` and `symmetricDifference`): 13,503 bytes per re-entry
+/// before (13,656,091 at 1,000: the test failed), 10,304 after ([`on_the_promised_stack`]).
+#[test]
+fn union_reaches_the_reentry_limit_through_the_size_getter_on_the_promised_stack() {
+    fn body() {
+        reach_through(
+            "new Set().union({ get size() { return f(); }, has() {}, keys() {} })",
+            BUILTINS_REENTRY,
+        );
+    }
+    on_the_promised_stack(
+        test_path!("union_reaches_the_reentry_limit_through_the_size_getter_on_the_promised_stack"),
+        body,
     );
 }

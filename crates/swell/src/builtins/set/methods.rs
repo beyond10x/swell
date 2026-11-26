@@ -30,7 +30,7 @@
 //! call path, which counts it against the depth bounds.
 
 use crate::host::agent::Agent;
-use crate::host::outcome::Completion;
+use crate::host::outcome::{Abrupt, Completion};
 use crate::host::{ErrorKind, Host, Termination};
 use crate::object::collection::{Collection, CollectionKind};
 use crate::object::keyed_entries::CursorId;
@@ -117,6 +117,35 @@ enum Read {
     IsDisjointFrom,
 }
 
+/// What GetSetRecord throws, for [`Agent::set_record_error`].
+#[derive(Clone, Copy)]
+enum SetRecordError {
+    /// Step 1: a `TypeError`.
+    NotAnObject,
+    /// Step 5: a `TypeError`.
+    SizeIsNaN,
+    /// Step 7: a `RangeError`.
+    SizeIsNegative,
+    /// Steps 9 and 11, with the name read: a `TypeError`.
+    NotCallable(&'static str),
+}
+
+// The stack of a re-entry. Every call of the set-like's code (the getters and the `valueOf` read
+// by GetSetRecord, `keys`, `next`, `has` and `return`) is a re-entry, which
+// `STACK_BYTES_PER_REENTRY` (`host/limits.rs`) bounds; in the dev profile, which keeps every
+// local of a function in its frame, a frame live across such a call holds the locals of every
+// branch of its function. So GetSetRecord, the step the seven share, runs before any method's
+// own function is called; each method's later steps run in a function of its own, called from
+// the match of `run_set_methods_builtin`; the work done with a key or an entry, which runs no
+// code, is in a function of its own that returns before the next call ([`Agent::take_key`],
+// [`Agent::take_entry`]); and the messages of GetSetRecord are made in
+// [`Agent::set_record_error`]. None of them is inlined, so the release build keeps the same
+// frames apart. Measured by bisection of the thread stack at depths 200 and 1,000 in the dev
+// profile, bytes per re-entry with all seven methods in one function and after, the largest of
+// the seven on each way: the getter of `size` 13,503 and 10,304, `has` 12,463 and 9,824, `keys`
+// 11,792 and 9,503, `next` 13,568 and 10,287, `return` 13,375 and 9,999, the `valueOf` of the
+// size 14,336 and 11,135 (`new Set(iterable)` through `next`: 10,287). The tests
+// `*_on_the_promised_stack` of `tests/builtins_set_methods.rs` hold the promise, one per way.
 impl<H: Host> Agent<H> {
     /// The steps of the builtin `id` of this module on the this value `this` and the argument
     /// `other`: what the steps keep on the kept stack is released on every way out.
@@ -129,114 +158,131 @@ impl<H: Host> Agent<H> {
         // 1. Let set be the this value. 2. Perform ? RequireInternalSlot(set, [[SetData]]).
         let set = self.set_data(this, id.name())?;
         let mark = self.keep(this);
-        let answer = self.set_method_steps(id, set, other);
+        // 3. Let otherRecord be ? GetSetRecord(other). Then the steps of the method.
+        let answer = match self.get_set_record(other, id) {
+            Ok(record) => match id {
+                SetMethodsBuiltin::Union => self.union_steps(set, &record),
+                SetMethodsBuiltin::Intersection => self.intersection_steps(set, &record),
+                SetMethodsBuiltin::Difference => self.difference_steps(set, &record),
+                SetMethodsBuiltin::SymmetricDifference => {
+                    self.symmetric_difference_steps(set, &record)
+                }
+                SetMethodsBuiltin::IsSubsetOf => self.is_subset_of_steps(set, &record),
+                SetMethodsBuiltin::IsSupersetOf => self.is_superset_of_steps(set, &record),
+                SetMethodsBuiltin::IsDisjointFrom => self.is_disjoint_from_steps(set, &record),
+            },
+            Err(abrupt) => Err(abrupt),
+        };
         self.release(mark);
         answer
     }
 
-    /// Steps 3 and after of the method `id`, on the Set `set`.
-    fn set_method_steps(
-        &mut self,
-        id: SetMethodsBuiltin,
-        set: ObjectRef,
-        other: Value,
-    ) -> Completion<Value> {
-        // 3. Let otherRecord be ? GetSetRecord(other).
-        let record = self.get_set_record(other, id.name())?;
-        match id {
-            SetMethodsBuiltin::Union => {
-                // 4. Let keysIterator be ? GetIteratorFromMethod(otherRecord.[[SetObject]],
-                // otherRecord.[[Keys]]). 5. Let resultSetData be a copy of set.[[SetData]].
-                let mut keys = self.open_keys(&record)?;
-                let result = self.new_result_set(Some(set))?;
-                // 6. and 7.
-                self.read_keys(&mut keys, set, Read::Union(result))?;
-                // 8. Let result be OrdinaryObjectCreate(%Set.prototype%, « [[SetData]] »). 9.
-                // Set result.[[SetData]] to resultSetData. 10. Return result.
-                Ok(Value::Object(result))
-            }
-            SetMethodsBuiltin::Intersection => {
-                // 4. Let resultSetData be a new empty List.
-                let result = self.new_result_set(None)?;
-                // 5. If SetDataSize(set.[[SetData]]) ≤ otherRecord.[[Size]], walk set.[[SetData]].
-                if self.set_data_size(set)? <= record.size {
-                    self.walk_with_has(set, &record, Walk::Intersection(result))?;
-                } else {
-                    // 6. Else, iterate the keys of the other.
-                    let mut keys = self.open_keys(&record)?;
-                    self.read_keys(&mut keys, set, Read::Intersection(result))?;
-                }
-                // 7. to 9.
-                Ok(Value::Object(result))
-            }
-            SetMethodsBuiltin::Difference => {
-                // 4. Let resultSetData be a copy of set.[[SetData]].
-                let result = self.new_result_set(Some(set))?;
-                // 5. If SetDataSize(set.[[SetData]]) ≤ otherRecord.[[Size]], walk
-                // resultSetData by index (step 5.c reads resultSetData[index]).
-                if self.set_data_size(set)? <= record.size {
-                    self.walk_with_has(result, &record, Walk::Difference(result))?;
-                } else {
-                    // 6. Else, iterate the keys of the other.
-                    let mut keys = self.open_keys(&record)?;
-                    self.read_keys(&mut keys, set, Read::Difference(result))?;
-                }
-                // 7. to 9.
-                Ok(Value::Object(result))
-            }
-            SetMethodsBuiltin::SymmetricDifference => {
-                // 4. Let keysIterator be ? GetIteratorFromMethod(otherRecord.[[SetObject]],
-                // otherRecord.[[Keys]]). 5. Let resultSetData be a copy of set.[[SetData]].
-                let mut keys = self.open_keys(&record)?;
-                let result = self.new_result_set(Some(set))?;
-                // 6. and 7.
-                self.read_keys(&mut keys, set, Read::SymmetricDifference(result))?;
-                // 8. to 10.
-                Ok(Value::Object(result))
-            }
-            SetMethodsBuiltin::IsSubsetOf => {
-                // 4. If SetDataSize(set.[[SetData]]) > otherRecord.[[Size]], return false.
-                if self.set_data_size(set)? > record.size {
-                    return Ok(Value::Boolean(false));
-                }
-                // 5. to 8.
-                let answer = self.walk_with_has(set, &record, Walk::IsSubsetOf)?;
-                Ok(Value::Boolean(answer))
-            }
-            SetMethodsBuiltin::IsSupersetOf => {
-                // 4. If SetDataSize(set.[[SetData]]) < otherRecord.[[Size]], return false.
-                if self.set_data_size(set)? < record.size {
-                    return Ok(Value::Boolean(false));
-                }
-                // 5. Let keysIterator be ? GetIteratorFromMethod(otherRecord.[[SetObject]],
-                // otherRecord.[[Keys]]). 6. to 8.
-                let mut keys = self.open_keys(&record)?;
-                let answer = self.read_keys(&mut keys, set, Read::IsSupersetOf)?;
-                Ok(Value::Boolean(answer))
-            }
-            SetMethodsBuiltin::IsDisjointFrom => {
-                // 4. If SetDataSize(set.[[SetData]]) ≤ otherRecord.[[Size]], walk
-                // set.[[SetData]].
-                let answer = if self.set_data_size(set)? <= record.size {
-                    self.walk_with_has(set, &record, Walk::IsDisjointFrom)?
-                } else {
-                    // 5. Else, iterate the keys of the other.
-                    let mut keys = self.open_keys(&record)?;
-                    self.read_keys(&mut keys, set, Read::IsDisjointFrom)?
-                };
-                // 6. Return true.
-                Ok(Value::Boolean(answer))
-            }
-        }
+    /// `union`, steps 4 to 10, on the Set `set`, with otherRecord of step 3.
+    #[inline(never)]
+    fn union_steps(&mut self, set: ObjectRef, record: &SetRecord) -> Completion<Value> {
+        // 4. Let keysIterator be ? GetIteratorFromMethod(otherRecord.[[SetObject]],
+        // otherRecord.[[Keys]]). 5. Let resultSetData be a copy of set.[[SetData]].
+        let mut keys = self.open_keys(record)?;
+        let result = self.new_result_set(Some(set))?;
+        // 6. and 7.
+        self.read_keys(&mut keys, set, Read::Union(result))?;
+        // 8. Let result be OrdinaryObjectCreate(%Set.prototype%, « [[SetData]] »). 9. Set
+        // result.[[SetData]] to resultSetData. 10. Return result.
+        Ok(Value::Object(result))
     }
 
-    /// GetSetRecord ( obj ) (`#sec-getsetrecord`); `method` names the caller in the messages.
+    /// `intersection`, steps 4 to 9, on the Set `set`, with otherRecord of step 3.
+    #[inline(never)]
+    fn intersection_steps(&mut self, set: ObjectRef, record: &SetRecord) -> Completion<Value> {
+        // 4. Let resultSetData be a new empty List.
+        let result = self.new_result_set(None)?;
+        // 5. If SetDataSize(set.[[SetData]]) ≤ otherRecord.[[Size]], walk set.[[SetData]].
+        // 6. Else, iterate the keys of the other.
+        if self.set_data_size(set)? <= record.size {
+            self.walk_with_has(set, record, Walk::Intersection(result))?;
+        } else {
+            self.open_and_read_keys(record, set, Read::Intersection(result))?;
+        }
+        // 7. to 9.
+        Ok(Value::Object(result))
+    }
+
+    /// `difference`, steps 4 to 9, on the Set `set`, with otherRecord of step 3.
+    #[inline(never)]
+    fn difference_steps(&mut self, set: ObjectRef, record: &SetRecord) -> Completion<Value> {
+        // 4. Let resultSetData be a copy of set.[[SetData]].
+        let result = self.new_result_set(Some(set))?;
+        // 5. If SetDataSize(set.[[SetData]]) ≤ otherRecord.[[Size]], walk resultSetData by
+        // index (step 5.c reads resultSetData[index]). 6. Else, iterate the keys of the other.
+        if self.set_data_size(set)? <= record.size {
+            self.walk_with_has(result, record, Walk::Difference(result))?;
+        } else {
+            self.open_and_read_keys(record, set, Read::Difference(result))?;
+        }
+        // 7. to 9.
+        Ok(Value::Object(result))
+    }
+
+    /// `symmetricDifference`, steps 4 to 10, on the Set `set`, with otherRecord of step 3.
+    #[inline(never)]
+    fn symmetric_difference_steps(
+        &mut self,
+        set: ObjectRef,
+        record: &SetRecord,
+    ) -> Completion<Value> {
+        // 4. Let keysIterator be ? GetIteratorFromMethod(otherRecord.[[SetObject]],
+        // otherRecord.[[Keys]]). 5. Let resultSetData be a copy of set.[[SetData]].
+        let mut keys = self.open_keys(record)?;
+        let result = self.new_result_set(Some(set))?;
+        // 6. and 7.
+        self.read_keys(&mut keys, set, Read::SymmetricDifference(result))?;
+        // 8. to 10.
+        Ok(Value::Object(result))
+    }
+
+    /// `isSubsetOf`, steps 4 to 8, on the Set `set`, with otherRecord of step 3.
+    #[inline(never)]
+    fn is_subset_of_steps(&mut self, set: ObjectRef, record: &SetRecord) -> Completion<Value> {
+        // 4. If SetDataSize(set.[[SetData]]) > otherRecord.[[Size]], return false. 5. to 8.
+        if self.set_data_size(set)? > record.size {
+            return Ok(Value::Boolean(false));
+        }
+        let answer = self.walk_with_has(set, record, Walk::IsSubsetOf)?;
+        Ok(Value::Boolean(answer))
+    }
+
+    /// `isSupersetOf`, steps 4 to 8, on the Set `set`, with otherRecord of step 3.
+    #[inline(never)]
+    fn is_superset_of_steps(&mut self, set: ObjectRef, record: &SetRecord) -> Completion<Value> {
+        // 4. If SetDataSize(set.[[SetData]]) < otherRecord.[[Size]], return false.
+        if self.set_data_size(set)? < record.size {
+            return Ok(Value::Boolean(false));
+        }
+        // 5. Let keysIterator be ? GetIteratorFromMethod(otherRecord.[[SetObject]],
+        // otherRecord.[[Keys]]). 6. to 8.
+        let answer = self.open_and_read_keys(record, set, Read::IsSupersetOf)?;
+        Ok(Value::Boolean(answer))
+    }
+
+    /// `isDisjointFrom`, steps 4 to 6, on the Set `set`, with otherRecord of step 3.
+    #[inline(never)]
+    fn is_disjoint_from_steps(&mut self, set: ObjectRef, record: &SetRecord) -> Completion<Value> {
+        // 4. If SetDataSize(set.[[SetData]]) ≤ otherRecord.[[Size]], walk set.[[SetData]].
+        // 5. Else, iterate the keys of the other. 6. Return true.
+        let answer = if self.set_data_size(set)? <= record.size {
+            self.walk_with_has(set, record, Walk::IsDisjointFrom)?
+        } else {
+            self.open_and_read_keys(record, set, Read::IsDisjointFrom)?
+        };
+        Ok(Value::Boolean(answer))
+    }
+
+    /// GetSetRecord ( obj ) (`#sec-getsetrecord`) for the method `id`, which the messages name.
     /// [[Has]] and [[Keys]] are kept on the kept stack for the caller, which releases them.
-    fn get_set_record(&mut self, other: Value, method: &str) -> Completion<SetRecord> {
+    fn get_set_record(&mut self, other: Value, id: SetMethodsBuiltin) -> Completion<SetRecord> {
         // 1. If obj is not an Object, throw a TypeError exception.
         let Value::Object(object) = other else {
-            let message = alloc::format!("{method}: the argument is not an object");
-            return Err(self.throw_error(ErrorKind::TypeError, &message));
+            return Err(self.set_record_error(id, SetRecordError::NotAnObject));
         };
         // 2. Let rawSize be ? Get(obj, "size").
         let key = self.name_key("size")?;
@@ -250,23 +296,21 @@ impl<H: Host> Agent<H> {
         // 4. NOTE: If rawSize is undefined, then numberSize will be NaN. 5. If numberSize is
         // NaN, throw a TypeError exception.
         if number_size.is_nan() {
-            let message = alloc::format!("{method}: the size of the argument is not a number");
-            return Err(self.throw_error(ErrorKind::TypeError, &message));
+            return Err(self.set_record_error(id, SetRecordError::SizeIsNaN));
         }
         // 6. Let intSize be ! ToIntegerOrInfinity(numberSize).
         let size = self.to_integer_or_infinity(Value::Number(number_size))?;
         // 7. If intSize < 0, throw a RangeError exception.
         if size < 0.0 {
-            let message = alloc::format!("{method}: the size of the argument is negative");
-            return Err(self.throw_error(ErrorKind::RangeError, &message));
+            return Err(self.set_record_error(id, SetRecordError::SizeIsNegative));
         }
         // 8. Let has be ? Get(obj, "has"). 9. If IsCallable(has) is false, throw a TypeError
         // exception.
-        let has = self.callable_property(object, "has", method)?;
+        let has = self.callable_property(object, "has", id)?;
         self.keep(has);
         // 10. Let keys be ? Get(obj, "keys"). 11. If IsCallable(keys) is false, throw a
         // TypeError exception.
-        let keys = self.callable_property(object, "keys", method)?;
+        let keys = self.callable_property(object, "keys", id)?;
         self.keep(keys);
         // 12. Return a new Set Record { [[SetObject]]: obj, [[Size]]: intSize, [[Has]]: has,
         // [[Keys]]: keys }.
@@ -282,17 +326,41 @@ impl<H: Host> Agent<H> {
     fn callable_property(
         &mut self,
         object: ObjectRef,
-        name: &str,
-        method: &str,
+        name: &'static str,
+        id: SetMethodsBuiltin,
     ) -> Completion<Value> {
         let key = self.name_key(name)?;
         let value = self.get(object, key)?;
         if !self.is_callable(value)? {
-            let message =
-                alloc::format!("{method}: the '{name}' of the argument is not a function");
-            return Err(self.throw_error(ErrorKind::TypeError, &message));
+            return Err(self.set_record_error(id, SetRecordError::NotCallable(name)));
         }
         Ok(value)
+    }
+
+    /// The error GetSetRecord throws for the method `id`, its message made here, in a frame
+    /// that is gone before any code of the set-like runs.
+    #[inline(never)]
+    fn set_record_error(&mut self, id: SetMethodsBuiltin, error: SetRecordError) -> Abrupt {
+        let method = id.name();
+        let (kind, message) = match error {
+            SetRecordError::NotAnObject => (
+                ErrorKind::TypeError,
+                alloc::format!("{method}: the argument is not an object"),
+            ),
+            SetRecordError::SizeIsNaN => (
+                ErrorKind::TypeError,
+                alloc::format!("{method}: the size of the argument is not a number"),
+            ),
+            SetRecordError::SizeIsNegative => (
+                ErrorKind::RangeError,
+                alloc::format!("{method}: the size of the argument is negative"),
+            ),
+            SetRecordError::NotCallable(name) => (
+                ErrorKind::TypeError,
+                alloc::format!("{method}: the '{name}' of the argument is not a function"),
+            ),
+        };
+        self.throw_error(kind, &message)
     }
 
     /// SetDataSize ( set.[[SetData]] ) (`#sec-setdatasize`) as a Number, for the comparisons
@@ -353,12 +421,25 @@ impl<H: Host> Agent<H> {
         Ok(keys)
     }
 
+    /// [`Agent::open_keys`], then [`Agent::read_keys`] over the keys opened, for the methods
+    /// that open the keys as their last step before the loop.
+    fn open_and_read_keys(
+        &mut self,
+        record: &SetRecord,
+        set: ObjectRef,
+        read: Read,
+    ) -> Completion<bool> {
+        let mut keys = self.open_keys(record)?;
+        self.read_keys(&mut keys, set, read)
+    }
+
     /// The loop "Repeat, while next is not done" over the keys of the set-like: one step per
     /// key, before IteratorStepValue reads it (`#sec-iteratorstepvalue`), then what `read`
-    /// does with it. Answers false where `isSupersetOf` or `isDisjointFrom` answers false, after
-    /// IteratorClose ( keysIterator, NormalCompletion(unused) ) (`#sec-iteratorclose`), and true
-    /// at the end of the keys. No other way out closes the iterator: a throw of `next` or of
-    /// reading its result is answered as it is, and a termination closes nothing.
+    /// does with it ([`Agent::take_key`]). Answers false where `isSupersetOf` or
+    /// `isDisjointFrom` answers false, after IteratorClose ( keysIterator,
+    /// NormalCompletion(unused) ) (`#sec-iteratorclose`), and true at the end of the keys. No
+    /// other way out closes the iterator: a throw of `next` or of reading its result is answered
+    /// as it is, and a termination closes nothing.
     fn read_keys(
         &mut self,
         keys: &mut IteratorRecord,
@@ -371,65 +452,64 @@ impl<H: Host> Agent<H> {
             let Some(next) = self.iterator_step_value(keys)? else {
                 return Ok(true);
             };
-            // Set next to CanonicalizeKeyedCollectionKey(next): the table canonicalizes every
-            // key it reads or stores. From here to the next call no code runs.
-            match read {
-                Read::Union(result) => {
-                    // If SetDataHas(resultSetData, next) is false, append next to resultSetData.
+            if self.take_key(set, read, next)? {
+                // Perform ? IteratorClose(keysIterator, NormalCompletion(unused)). Return false.
+                self.iterator_close(keys, Ok(Value::Undefined))?;
+                return Ok(false);
+            }
+        }
+    }
+
+    /// What `read` does with the key `next` read from the set-like: true where `isSupersetOf`
+    /// or `isDisjointFrom` closes the iterator and answers false. Runs no code and passes no
+    /// safe point, so `next` needs no root here.
+    #[inline(never)]
+    fn take_key(&mut self, set: ObjectRef, read: Read, next: Value) -> Completion<bool> {
+        // Set next to CanonicalizeKeyedCollectionKey(next): the table canonicalizes every key it
+        // reads or stores.
+        match read {
+            Read::Union(result) => {
+                // If SetDataHas(resultSetData, next) is false, append next to resultSetData.
+                self.with_entry_table(result, |agent, table| {
+                    table.insert(agent, next, Value::Undefined)
+                })?;
+            }
+            Read::Intersection(result) => {
+                // Let inThis be SetDataHas(set.[[SetData]], next). If inThis is true and
+                // SetDataHas(resultSetData, next) is false, append next to resultSetData.
+                if self.set_data_has(set, next)? {
                     self.with_entry_table(result, |agent, table| {
                         table.insert(agent, next, Value::Undefined)
                     })?;
                 }
-                Read::Intersection(result) => {
-                    // Let inThis be SetDataHas(set.[[SetData]], next). If inThis is true and
-                    // SetDataHas(resultSetData, next) is false, append next to resultSetData.
-                    if self.set_data_has(set, next)? {
-                        self.with_entry_table(result, |agent, table| {
-                            table.insert(agent, next, Value::Undefined)
-                        })?;
+            }
+            Read::Difference(result) => {
+                // Let valueIndex be SetDataIndex(resultSetData, next). If valueIndex is not
+                // not-found, set resultSetData[valueIndex] to empty.
+                self.with_entry_table(result, |agent, table| table.delete(agent, next))?;
+            }
+            Read::SymmetricDifference(result) => {
+                // Let resultIndex be SetDataIndex(resultSetData, next); alreadyInResult.
+                let already_in_result = self.set_data_has(result, next)?;
+                if self.set_data_has(set, next)? {
+                    // If SetDataHas(set.[[SetData]], next) is true and alreadyInResult is true,
+                    // set resultSetData[resultIndex] to empty.
+                    if already_in_result {
+                        self.with_entry_table(result, |agent, table| table.delete(agent, next))?;
                     }
-                }
-                Read::Difference(result) => {
-                    // Let valueIndex be SetDataIndex(resultSetData, next). If valueIndex is not
-                    // not-found, set resultSetData[valueIndex] to empty.
-                    self.with_entry_table(result, |agent, table| table.delete(agent, next))?;
-                }
-                Read::SymmetricDifference(result) => {
-                    // Let resultIndex be SetDataIndex(resultSetData, next); alreadyInResult.
-                    let already_in_result = self.set_data_has(result, next)?;
-                    if self.set_data_has(set, next)? {
-                        // If SetDataHas(set.[[SetData]], next) is true and alreadyInResult is
-                        // true, set resultSetData[resultIndex] to empty.
-                        if already_in_result {
-                            self.with_entry_table(result, |agent, table| {
-                                table.delete(agent, next)
-                            })?;
-                        }
-                    } else if !already_in_result {
-                        // Else, if alreadyInResult is false, append next to resultSetData.
-                        self.with_entry_table(result, |agent, table| {
-                            table.insert(agent, next, Value::Undefined)
-                        })?;
-                    }
-                }
-                Read::IsSupersetOf => {
-                    // If SetDataHas(set.[[SetData]], next) is false, then perform ?
-                    // IteratorClose(keysIterator, NormalCompletion(unused)) and return false.
-                    if !self.set_data_has(set, next)? {
-                        self.iterator_close(keys, Ok(Value::Undefined))?;
-                        return Ok(false);
-                    }
-                }
-                Read::IsDisjointFrom => {
-                    // If SetDataHas(set.[[SetData]], next) is true, then perform ?
-                    // IteratorClose(keysIterator, NormalCompletion(unused)) and return false.
-                    if self.set_data_has(set, next)? {
-                        self.iterator_close(keys, Ok(Value::Undefined))?;
-                        return Ok(false);
-                    }
+                } else if !already_in_result {
+                    // Else, if alreadyInResult is false, append next to resultSetData.
+                    self.with_entry_table(result, |agent, table| {
+                        table.insert(agent, next, Value::Undefined)
+                    })?;
                 }
             }
+            // If SetDataHas(set.[[SetData]], next) is false, close and return false.
+            Read::IsSupersetOf => return Ok(!self.set_data_has(set, next)?),
+            // If SetDataHas(set.[[SetData]], next) is true, close and return false.
+            Read::IsDisjointFrom => return self.set_data_has(set, next),
         }
+        Ok(false)
     }
 
     /// SetDataHas ( set.[[SetData]], value ) (`#sec-setdatahas`) of the Set `set`.
@@ -483,35 +563,38 @@ impl<H: Host> Agent<H> {
             // « entry »)). The call holds entry; after it no code runs until the next call.
             let answer = self.call_value(record.has, Value::Object(record.object), &[entry])?;
             let in_other = self.to_boolean(answer)?;
-            match walk {
-                Walk::Intersection(result) => {
-                    // If inOther is true and SetDataHas(resultSetData, entry) is false, append
-                    // entry to resultSetData.
-                    if in_other {
-                        self.with_entry_table(result, |agent, table| {
-                            table.insert(agent, entry, Value::Undefined)
-                        })?;
-                    }
-                }
-                Walk::Difference(result) => {
-                    // If inOther is true, set resultSetData[index] to empty.
-                    if in_other {
-                        self.with_entry_table(result, |agent, table| table.delete(agent, entry))?;
-                    }
-                }
-                Walk::IsSubsetOf => {
-                    // If inOther is false, return false.
-                    if !in_other {
-                        return Ok(false);
-                    }
-                }
-                Walk::IsDisjointFrom => {
-                    // If inOther is true, return false.
-                    if in_other {
-                        return Ok(false);
-                    }
-                }
+            if let Some(early) = self.take_entry(walk, entry, in_other)? {
+                return Ok(early);
             }
         }
+    }
+
+    /// What `walk` does with `entry` and the answer `in_other` of [[Has]]: the answer of the
+    /// walk where it ends early. Runs no code and passes no safe point.
+    #[inline(never)]
+    fn take_entry(&mut self, walk: Walk, entry: Value, in_other: bool) -> Completion<Option<bool>> {
+        match walk {
+            Walk::Intersection(result) => {
+                // If inOther is true and SetDataHas(resultSetData, entry) is false, append entry
+                // to resultSetData.
+                if in_other {
+                    self.with_entry_table(result, |agent, table| {
+                        table.insert(agent, entry, Value::Undefined)
+                    })?;
+                }
+            }
+            Walk::Difference(result) => {
+                // If inOther is true, set resultSetData[index] to empty.
+                if in_other {
+                    self.with_entry_table(result, |agent, table| table.delete(agent, entry))?;
+                }
+            }
+            // If inOther is false, return false.
+            Walk::IsSubsetOf if !in_other => return Ok(Some(false)),
+            // If inOther is true, return false.
+            Walk::IsDisjointFrom if in_other => return Ok(Some(false)),
+            Walk::IsSubsetOf | Walk::IsDisjointFrom => {}
+        }
+        Ok(None)
     }
 }
