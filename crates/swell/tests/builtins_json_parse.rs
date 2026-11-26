@@ -902,3 +902,84 @@ fn reviver_reaches_the_reentry_limit_on_the_promised_stack() {
     )
     .unwrap();
 }
+
+/// What one `JSON.parse` call answers ("normal", "thrown" or the termination) and
+/// `heap_bytes()` after a collection, for four calls of the same text in one agent. The first
+/// call may grow the arenas; every call after it must read the same.
+fn parse_readings(limits: Limits, units: &[u16], reviver: Option<&str>) -> Vec<(String, u64)> {
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    let reviver = reviver.map(|source| match eval(&mut agent, &realm, source) {
+        swell::Outcome::Normal(root) => root,
+        other => panic!("{source}: {other:?}"),
+    });
+    let mut readings = Vec::new();
+    for _ in 0..4 {
+        let kind = agent
+            .with_cx(&realm, |cx| {
+                let global = object(cx, &global_root);
+                let text = units_value(cx, units);
+                let mut args = vec![text];
+                if let Some(root) = &reviver {
+                    args.push(cx.get(root).unwrap());
+                }
+                match parse_call(cx, global, &args) {
+                    Ok(_) => "normal".to_string(),
+                    Err(Abrupt::Throw(_)) => "thrown".to_string(),
+                    Err(Abrupt::Terminated(termination)) => format!("{termination:?}"),
+                }
+            })
+            .unwrap();
+        assert!(matches!(
+            agent.collect().unwrap(),
+            swell::Outcome::Normal(_)
+        ));
+        readings.push((kind, agent.heap_bytes().unwrap()));
+    }
+    readings
+}
+
+/// The bytes `JSON.parse` charges for its open values, its records and its copy of the text
+/// are given back on every way out, so the charged reading after a call and a collection is the
+/// same from the second call on: (i) a deep valid text with a reviver, (ii) a deep text that
+/// ends in the middle, (iii) a deep text under a memory budget that ends the parse at depth,
+/// (iv) the same with a reviver (adversary pass 2 on unit growth).
+#[test]
+fn parse_gives_back_its_charges_on_every_way_out() {
+    let deep = 2_000;
+    let unclosed = vec![u16::from(b'['); deep];
+    let reviver = "(function (key, value) { return value; })";
+    let mut small = limits();
+    small.memory_bytes = setup_charge(DEPTH) + PARSE_ROOM;
+    let mut small_reviver = limits();
+    small_reviver.memory_bytes = setup_charge(DEPTH) + 2 * PARSE_ROOM;
+    let cases = [
+        (
+            "valid with reviver",
+            limits(),
+            nested_text(deep),
+            Some(reviver),
+            "normal",
+        ),
+        ("ends in the middle", limits(), unclosed, None, "thrown"),
+        ("budget", small, nested_text(DEPTH), None, "MemoryBudget"),
+        (
+            "budget with reviver",
+            small_reviver,
+            nested_text(DEPTH),
+            Some(reviver),
+            "MemoryBudget",
+        ),
+    ];
+    for (name, limits, units, reviver, expected) in cases {
+        let readings = parse_readings(limits, &units, reviver);
+        for (kind, _) in &readings {
+            assert_eq!(kind, expected, "{name}: {readings:?}");
+        }
+        let settled = readings[1].1;
+        for (call, (_, bytes)) in readings.iter().enumerate().skip(1) {
+            assert_eq!(*bytes, settled, "{name}: call {call}: {readings:?}");
+        }
+    }
+}

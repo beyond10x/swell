@@ -395,7 +395,7 @@ impl<H: Host> Agent<H> {
         self.json_parse_charge(parser, bytes)?;
         #[expect(
             clippy::disallowed_methods,
-            reason = "an open value's entry is charged by `json_parse_charge` before it grows; the room a close leaves is at most twice the deepest nesting, one unit of the charged text per open value, while no script runs; `json_parse_with` frees it before the reviver is called"
+            reason = "each entry is charged by `json_parse_charge` before the stack grows; `try_reserve(1)` leaves a capacity of at most max(4, 2(d - 1)) entries of `size_of::<Open>()` bytes for a deepest nesting d, so the spare room, uncharged while the parse runs, is at most the charged entries again or 4 entries; no script runs during the parse, and `json_parse_with` frees the stack before the reviver is called"
         )]
         if parser.stack.try_reserve(1).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
