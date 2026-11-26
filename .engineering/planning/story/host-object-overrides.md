@@ -1,0 +1,131 @@
+---
+format: aep.planning-md/3
+id: story:host-object-overrides
+kind: story
+status: draft
+title: 'Host objects with an override table: dispatch, handle checks and invariant checks that fault the agent'
+summary: Overrides<H> and HostObjectSpec<H>.overrides as host-interface.md section 15 states, Host arms of the 11 internal methods, recorded facts checked with object/invariants.rs; HOST-41, 112, 113, 114 and HOST-222; order 4; no case.
+relations:
+- decomposes: epic:slice-09-collections-proxy-reflect
+- depends_on: story:proxy-descriptor-prototype-and-extensibility-traps
+scope:
+- confidence: cited
+  path: conformance/host/requirements.txt
+- confidence: cited
+  path: crates/cli/src/shell.rs
+- confidence: cited
+  path: crates/swell/src/heap/arena.rs
+- confidence: cited
+  path: crates/swell/src/host/host_object.rs
+- confidence: cited
+  path: crates/swell/src/host/mod.rs
+- confidence: inferred
+  path: crates/swell/src/object/host_overrides.rs
+- confidence: cited
+  path: crates/swell/src/object/mod.rs
+- confidence: cited
+  path: crates/swell/src/object/ordinary.rs
+- confidence: cited
+  path: crates/swell/tests/async_functions.rs
+- confidence: cited
+  path: crates/swell/tests/budgets.rs
+- confidence: cited
+  path: crates/swell/tests/builtins_global_this.rs
+- confidence: cited
+  path: crates/swell/tests/calls.rs
+- confidence: cited
+  path: crates/swell/tests/collect.rs
+- confidence: cited
+  path: crates/swell/tests/conversion.rs
+- confidence: cited
+  path: crates/swell/tests/determinism.rs
+- confidence: cited
+  path: crates/swell/tests/errors.rs
+- confidence: cited
+  path: crates/swell/tests/eval.rs
+- confidence: cited
+  path: crates/swell/tests/for_await.rs
+- confidence: cited
+  path: crates/swell/tests/fuzz.rs
+- confidence: cited
+  path: crates/swell/tests/hooks.rs
+- confidence: cited
+  path: crates/swell/tests/host_objects.rs
+- confidence: inferred
+  path: crates/swell/tests/host_overrides.rs
+- confidence: cited
+  path: crates/swell/tests/interrupt.rs
+- confidence: cited
+  path: crates/swell/tests/jobs.rs
+- confidence: cited
+  path: crates/swell/tests/limits_scripts.rs
+- confidence: cited
+  path: crates/swell/tests/main.rs
+- confidence: cited
+  path: crates/swell/tests/misuse.rs
+- confidence: cited
+  path: crates/swell/tests/promise_statics.rs
+- confidence: cited
+  path: crates/swell/tests/property_index.rs
+- confidence: cited
+  path: crates/swell/tests/realms.rs
+- confidence: cited
+  path: crates/swell/tests/scripts.rs
+- confidence: cited
+  path: crates/swell/tests/support/host.rs
+- confidence: cited
+  path: crates/test262/src/host.rs
+- confidence: cited
+  path: website/data/status.json
+revision: 3
+---
+## Context
+
+Slice 9 brings `Map`, `Set`, `WeakMap`, `WeakSet`, `Proxy` and `Reflect` (`epic:slice-09-collections-proxy-reflect`; `docs/design/engine.md`, section 12, item 9). The epic names decision 9 ("host objects override the same internal methods as a `Proxy`") among its governing decisions, and four host requirements are pending for slice 9 in `conformance/host/requirements.txt` that only host objects with an override table satisfy: HOST-41 (line 41; `docs/design/host-interface.md` line 632), HOST-112, HOST-113 and HOST-114 (lines 112 to 114; design lines 1838 to 1842). This story builds that table: `Overrides<H>` and the field `overrides` of `HostObjectSpec` as `docs/design/host-interface.md` section 15 states them (lines 1748 to 1777), the Host arms of the internal methods, which run the override where one is given and the ordinary method where none is, and the checks of each override's result: the handles it holds (decision 6, "A handle the host returns", line 663: an override's result is one of the return sites) and the invariants of 6.1.7.3 with the checks the Proxy internal methods use (section 15), a broken one ending the run in `Terminated(EngineFault)`. It is in order 4 and depends on `story:proxy-descriptor-prototype-and-extensibility-traps` (the complete `object/invariants.rs`) and through it on `story:proxy-objects-and-access-traps` (the walks of the chain that hand over to a parent's own method). It has no case of test262 (the runner makes no host object with overrides).
+
+The epic's "Out of scope" lists "host overrides of the internal methods: surf's binding layer (decision 9, 'Not in scope')", which contradicts the four requirements above (`[slice 9]` in the design, `pending slice 9` in the requirements file) and section 15 of the host interface design. Read with the design: what is surf's is the Web IDL binding that uses the table (legacy platform objects, `WindowProxy`); the table itself, the dispatch and the checks are the engine's, and `host-requirements-check` with slice 9 delivered fails while the four lines are pending. The decomposition's report puts this to the operator (question D5, default: this story stays in slice 9).
+
+Two places of the base say this story is next: `crates/swell/src/host/host_object.rs` line 7 ("`overrides` (slice 9) ... are added to [`HostObjectSpec`] by the slices of their requirements") and `crates/swell/src/object/mod.rs` line 15 ("host objects too, until the overrides of slice 9"). And `docs/plan/waves.md`, "What later slices take over": "Slices 2, 9 and 11: a requirement for a stale or foreign handle returned by the host at the return sites of that slice (... an override's result ...)". This story takes that entry for slice 9: the requirement HOST-222 (the next free number on `62c7cf59`, whose highest is HOST-221) is written into the design before the unit starts (Acceptance, "Start gate"; the sentence the decomposition proposes: "**HOST-222** (swell:D6) An override of a host object whose `Ok` value or `Abrupt::Throw` value holds a stale handle or a handle of another agent ends the run with `Terminated(EngineFault)`; `state()` then reads `Faulted` and nothing panics. [slice 9]"; question D6).
+
+Design it builds on, by name: `docs/design/host-interface.md` section 15 ("Host objects: brand, host data, `trace`, overrides", lines 1715 to 1777: `Overrides<H>`, `HostObjectSpec<H>` with `overrides: Option<&'static Overrides<H>>`; "Rejected: throwing a `TypeError` to the script on a broken invariant"), decision 6 ("A handle the host returns", line 663), the paragraph on `Cx::get_prototype_of` and `set_prototype_of` (line 1636: "once a host object has an override table (slice 9) they run host code, which `HookCx` cannot"), HOST-48 (`Faulted`), "What a host object costs" (`HOST_OBJECT_LIVE_BYTES` 256, `crates/swell/src/host/limits.rs` line 83); `docs/design/engine.md` decision 9 ("Host objects for the DOM": "the engine checks what an override returns against the invariants of 6.1.7.3 and ends the run with `EngineFault`"), decision 3 ("Depth bounds"). The design does not say what the engine compares an override's answer with, since a host object has no target: this story takes the default of question D4 (Change).
+
+## What later stories reuse
+
+The override table and its dispatch: slice 8's HOST-119 (`docs/design/host-interface.md` line 1920: `host_ensure_can_add_private_element` is called "only for host objects with an override table") reads whether a host object has one, so `epic:slice-08-classes`'s story of private names depends on this story (reported to the decomposition of slice 8); slice 18's `is_html_dda` is the next field of `HostObjectSpec`.
+
+## Domain relations
+
+- A host object → its override table: many to zero or one, a `&'static` table fixed at creation, shared by every object of one interface — inferable (inferred from `docs/design/host-interface.md` section 15; `spec/domains/host.yaml` line 1300 marks host objects and their overrides as not mapped, so no ess/1 document declares it, and this story does not change `spec/`).
+- A host object → the facts its overrides reported: one to zero or one, made at the first override answer that fixes a fact, freed with the object — inferable (inferred from `#sec-invariants-of-the-essential-internal-methods`, which states the invariants over the history of answers; no ess/1 document declares it).
+
+## Change
+
+Failing tests first: the tests below are written before the code and fail to compile on the base (`Overrides` and the field do not exist).
+
+- `crates/swell/src/host/host_object.rs`: `pub struct Overrides<H: Host>` with the 11 fields of section 15 (`get_prototype_of` to `own_property_keys`, each `Option<fn(&mut Cx<'_, H>, ...) -> Completion<...>>` as stated), and `HostObjectSpec<H: Host>` with `pub overrides: Option<&'static Overrides<H>>` (the type gains the parameter `H`; a literal infers it from the `Cx` it is passed to). `HostObject` keeps the table type-erased (`&'static dyn Any`, downcast to `Overrides<H>` where the agent's `H` is known, as the steps of a host function are, `crates/swell/src/object/builtin_function.rs` line 846) and a box of the facts (below), `None` until the first fact; the comment of line 7 says the field exists. `new_host_object` on `Cx` and `HookCx` (`crates/swell/src/host/mod.rs` line 563, in `scoped_methods!`) takes `HostObjectSpec<H>`. Every literal of `HostObjectSpec` names the field (`overrides: None`): 55 literals in 26 files on `62c7cf59` (`grep -rln 'HostObjectSpec {' crates` lists them: 22 files under `crates/swell/tests/`, `tests/support/host.rs` among them, and `crates/swell/src/host/host_object.rs`, `crates/swell/src/heap/arena.rs`, `crates/cli/src/shell.rs` and `crates/test262/src/host.rs`), as the field `error_kind` was added.
+- Dispatch, `crates/swell/src/object/mod.rs` lines 402 to 690 and `object/host_overrides.rs` (new, beside `object/proxy.rs`): a `KindTag::Host` arm in each of the 11 internal methods: with the override given, a re-entry (as each Proxy method is, decision D3 of the decomposition), one step, a `Cx` over the agent, the call, the check of every handle in its `Ok` or `Abrupt::Throw` value (stale or foreign: `Terminated(EngineFault)`, `Faulted`, HOST-222), then the invariant checks, then the answer; with none, the ordinary method. The walks of `crates/swell/src/object/ordinary.rs` (OrdinaryHasProperty, OrdinaryGet, OrdinarySet) hand over to a host parent with a `has_property`, `get` or `set` override as they do to a Proxy (`story:proxy-objects-and-access-traps`). The comment of `object/mod.rs` line 15 says host objects run their overrides.
+- The checks (decision D4, default A): the engine records, per host object, the facts its overrides reported that an invariant holds it to (a property reported non-configurable, with its descriptor, and non-writable with its value; the object reported non-extensible, with the keys and the prototype it then reported), in a box of the host object charged before it grows (`Agent::charge_bytes`) and credited when the object is freed; every later answer of an override is checked against these facts with the functions of `crates/swell/src/object/invariants.rs` (the checks of the Proxy traps, the recorded facts in place of the target's answers), and a descriptor from `get_own_property` that is not fully populated (HOST-113) or that breaks a recorded fact (HOST-112) ends the run with `Terminated(EngineFault)` and `state()` then reads `Faulted` (HOST-48), never a `TypeError` (section 15, "Rejected"). An override that answers `Abrupt::Throw` throws its value to the script after the handle check.
+- `create_realm` (HOST-41): the global object a host object whose `define_own_property` override answers `false` for a property of clause 19: SetDefaultGlobalBindings's DefinePropertyOrThrow (`crates/swell/src/realm/global_object.rs` line 31) throws a `TypeError`, and `create_realm` answers `Throw` of it; no change of `global_object.rs` is expected (it calls [[DefineOwnProperty]] through the dispatch), and the unit reports where the throw is made.
+- Bounds. Steps: one per override call, before the call. Memory: the facts box charged before it grows; `HOST_OBJECT_LIVE_BYTES` (256) still bounds a host object without facts (`host_objects::` compares it), the facts charged beside it. Depth: each override call is one re-entry, counted against `reentry_depth`, so a host object whose `get` override reads a property of another such object ends at the `RangeError` of "Depth bounds", not a Rust stack overflow; `STACK_BYTES_PER_REENTRY` (`crates/swell/src/host/limits.rs` line 46) does not change and the stack tests pass on seven eighths of `min_stack_bytes()`, or the unit gives the measured change and the constant follows it. Run loop: no instruction is added. Termination: a termination inside an override ends the operation as section 10 of `docs/design/host-interface.md` states.
+- Tests, each in both collection modes, in `crates/swell/tests/host_overrides.rs` (new): the tests of the requirements, each the text of its requirement: `host_41_a_global_object_that_refuses_a_clause_19_property_fails_create_realm`; `host_112_a_non_configurable_property_reported_absent_later_faults_the_agent` (the first answer non-configurable, the second `None`: the run that reads the second ends `Terminated(EngineFault)`, `state()` reads `Faulted`, and every entry point but `state()` and `refusals()` answers `Err(HostError::Faulted)`); `host_113_a_descriptor_that_is_not_fully_populated_faults_the_agent`; `host_114_each_override_runs_and_a_missing_one_runs_the_ordinary_method` (a table with one override per method, each logging its call, reached by `Object.getPrototypeOf`, `Object.setPrototypeOf`, `Object.isExtensible`, `Object.preventExtensions`, `Object.getOwnPropertyDescriptor`, `Object.defineProperty`, `in`, a read, a write, `delete` and `Reflect.ownKeys`; and a table with none, where each answers what an ordinary object answers); `host_222_an_override_result_with_a_stale_handle_faults_the_agent` (a stale handle and a handle of another agent, each in an `Ok` value and in an `Abrupt::Throw` value); and `an_override_throw_reaches_the_script_as_its_value`; `a_host_object_with_a_get_override_in_a_prototype_chain_gets_the_receiver`; `overrides_recursing_through_each_other_end_at_the_reentry_limit` (with `stack_agent` of `crates/swell/tests/support/stack.rs`, on its bounded stack: a catchable `RangeError`); `an_override_loop_ends_at_the_step_budget` (`Terminated(StepBudget)`, `last_entry_steps()` at most N); `the_facts_of_a_host_object_are_charged_and_credited` (1,000 non-configurable properties reported: `heap_bytes()` grows by at least 1,000 times a fact's bytes, which the unit names, and falls back after the object is freed and `collect()` runs; the readings printed); `cx_get_prototype_of_runs_the_override`. Every existing literal of `HostObjectSpec` gets `overrides: None` and its test passes as it is. `host_objects::` (HOST-108 to HOST-111, HOST-186, HOST-187 and the `HOST_OBJECT_LIVE_BYTES` comparison) runs in both modes and passes, and the reading of HOST-187 is reported before and after. `crates/swell/tests/main.rs` generated again (`sh taskfiles/test-main.sh write`).
+- Stale text found by a command that prints nothing after the change: `grep -rn "until the overrides of slice 9\|\`overrides\` (slice 9)" crates/swell/src` (two lines on `62c7cf59`).
+- Time ("Tests stay fast", the `AGENTS.md` of the folder that holds the repository, and `AGENTS.md`, "Commands and the gate"): a test is terminated at 60 s and counts as failed, and the gate fails when the wall time of its test steps passes 120 s. A test stays under 1.5 CPU seconds alone in the default mode, under 2 with a collection at every safe point and under 2.5 at its full count (`SWELL_FULL_COUNTS=1`), measured with the test binary run directly with `--exact <name> --test-threads 1` under `time` of the shell (user plus system); the unit times each test before it adds it and names each one over 1 CPU second with its time; no loop of a test runs more than 10,000 iterations. A product several tests share is built once inside one test function or is a committed file, never in a `static`; no test makes a network request or a model call; the unit runs the test binaries of its own change, never the whole gate and never a whole-workspace test run. Builds and tests go through the pool: `cargo` is the shim of the pool, anything else that compiles or tests is prefixed `slot`; a pool job ends after 10 minutes unless it names its time (`slot --timeout 30m` or `SLOT_TIMEOUT=30m`, the most); a script that measures, probes or waits runs without the prefix. No `unsafe` (the crate forbids it), no third-party crate, no panic, `unwrap`, `expect` or unchecked indexing; no Python in any tool, test or command; intermediate files in the scratch directory.
+- Size: about 1,300 lines (the table, the spec and the dispatch 350, the facts and their checks 250, the literals 60, the tests 640): one session.
+
+## Requirements
+
+HOST-41, HOST-112, HOST-113, HOST-114 and HOST-222: lines 41, 112, 113 and 114 of `conformance/host/requirements.txt` move from `pending slice 9` to `HOST-<n> test swell::host_overrides::<test of Change>`, and the line of HOST-222, which the design change writes as `HOST-222 pending slice 9`, moves the same way. `website/data/status.json` is written again (`slot --local task site-data`). For the coordinator, in the change that merges this story (this story does not write `CHANGELOG.md`, and `conformance/host/surface.txt` is the coordinator's, written at a release only): under `### Host interface` of `## [Unreleased]`, `Overrides`, `HostObjectSpec` (changed: the parameter `H` and the field `overrides`), `HOST-41`, `HOST-112`, `HOST-113`, `HOST-114` and `HOST-222`, and `HostObjectSpec` under `**Breaking**` (a host that names the type or writes a literal stops compiling once). Between releases `slot task host-surface-check` compares the scan of the tree with `surface.txt` and asks the changelog to name each name that moved; the unit reports the lines it prints.
+
+Writes: `crates/swell/src/host/host_object.rs` (`Overrides`, `HostObjectSpec`, `HostObject`, the comment of line 7), `crates/swell/src/host/mod.rs` (`new_host_object` and the agent's method behind it), `crates/swell/src/object/host_overrides.rs` (new), `crates/swell/src/object/mod.rs` (the `mod` line, the Host arm of each of the 11 internal methods, the comment of line 15), `crates/swell/src/object/ordinary.rs` (the hand-over of the three walks to a host parent), `crates/swell/src/heap/arena.rs`, `crates/cli/src/shell.rs` and `crates/test262/src/host.rs` (their literal), `crates/swell/tests/host_overrides.rs` (new), the 22 test files with a literal (`overrides: None` in each literal and nothing else), `crates/swell/tests/main.rs` (generated), `conformance/host/requirements.txt` (lines 41, 112, 113, 114 and the line of HOST-222), `website/data/status.json` (generated). Order 4, built at the same time as `story:map-upsert-and-group-by`, which shares only `tests/main.rs` (generated; the coordinator generates it again on the join). No path of edges orders this story against `story:keyed-entry-table`, `story:map-and-set`, `story:weak-map-and-weak-set` and `story:set-methods`, so in a wave they may be built beside it; shared, each in hunks of its own: `object/mod.rs` (their `mod` lines and kinds; here the Host arms of the dispatch), `tests/determinism.rs` (`story:map-and-set` appends HOST-25 and HOST-214 after the last test; here `overrides: None` in the one literal), `conformance/host/requirements.txt` (there lines 25 and 214; here 41, 112 to 114 and HOST-222), `website/data/status.json` (generated again by the second to merge), `heap/arena.rs` (`story:weak-map-and-weak-set`, the workspace words of a slot; here the one literal), `tests/main.rs` (generated). The other test files with a literal are written by no other story of this slice; in wave big-2 the stories of slice 8 (`epic:slice-08-classes`), which no edge orders against this one, may add tests to the same files (`tests/calls.rs`, `tests/misuse.rs`, `tests/host_objects.rs`, `tests/realms.rs` are the likeliest) and `object/mod.rs`, `object/ordinary.rs` and `host/mod.rs` in hunks of their own: the second to merge adds `overrides: None` to any literal the first added. Not written: `crates/swell/src/object/invariants.rs` and `object/proxy.rs` (called as the Proxy stories leave them), `crates/swell/src/realm/global_object.rs` (Change), `spec/` (the host model marks overrides not mapped), `docs/design/` (the line of HOST-222 is the design change of the start gate, not this story's), `conformance/host/surface.txt`, `CHANGELOG.md`, `crates/test262` but its literal. A unit that meets a file outside this line that its change cannot compile or pass without makes the smallest change there and reports it.
+
+## Acceptance
+
+Start gate, before the unit starts (each prints 1): `grep -c '^\*\*HOST-222\*\* .*override.*\[slice 9\]' docs/design/host-interface.md` and `grep -c '^HOST-222 pending slice 9$' conformance/host/requirements.txt` (the design change of Context, made by the design author or the coordinator).
+
+The tests named in Change pass in both collection modes, run by the binaries of this change and not as a whole step: `slot cargo nextest run --locked -p swell --test main -E 'test(/^host_overrides::/) | test(/^host_objects::/) | test(/^misuse::/) | test(/^calls::/) | test(/^realms::/) | test(/^faults::/) | test(/^hooks::/) | test(/^proxy::/) | test(/^proxy_shape_traps::/) | test(/^eval_stack::/) | test(/^limits_scripts::/) | test(/^budgets::/) | test(/^termination::/) | test(/^interrupt::/) | test(/^collect::/) | test(/^determinism::/)'` and the same with `--features collect-every-safe-point`; `slot cargo nextest run --locked -p swell --lib` and the same with `--features collect-every-safe-point` (`object::generator::tests::a_generator_keeps_the_object_record_at_its_size` and `heap::collect` among them); `slot cargo nextest run --locked -p swell-test262 --test main` (its host builds with the new field); each exits 0. `slot task clippy` exits 0; `slot task forbid-unsafe-check` exits 0; `git diff --stat "$BASE" -- Cargo.lock "*/Cargo.toml"` prints nothing (`BASE` the join the unit starts from); `sh taskfiles/test-main.sh check` exits 0; the stale-text grep of Change prints nothing (two lines on its base); `git diff --quiet "$BASE" -- crates/swell/src/object/invariants.rs crates/swell/src/object/proxy.rs spec conformance/host/surface.txt` exits 0. Before the coordinator writes the changelog, `slot task host-surface-check` names `Overrides` and `HostObjectSpec` and no other name, and the report quotes its lines. `grep -c '^HOST-\(41\|112\|113\|114\|222\) pending slice 9$' conformance/host/requirements.txt` prints `0` (5 on its base after the start gate); `grep -c 'pending slice 9$' conformance/host/requirements.txt` prints `0` once `story:map-and-set` has moved HOST-25 and HOST-214 (the count the unit reads on its base, less 5); `slot task -d . -t taskfiles/host-requirements.yml host-requirements-check` exits 0; `slot --local task site-data-check` exits 0. The report gives the readings of `host_186` and `host_187` before and after in both modes and the readings of the facts test. Time: every test this story adds stays under 1.5 CPU seconds alone in the default mode and under 2 with `collect-every-safe-point`, as the unit measured them (Change, "Time"); the report lists each measured time and the sum, and a time over its bound fails this acceptance.
+
+test262: no case (Context).
+
+## Out of scope
+
+`is_html_dda` (slice 18, HOST-115); the Web IDL bindings that use the table (surf); `host_ensure_can_add_private_element` (slice 8, HOST-119); the Proxy traps (`story:proxy-objects-and-access-traps`, `story:proxy-descriptor-prototype-and-extensibility-traps`); a change of `spec/domains/host.yaml`.
