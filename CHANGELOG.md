@@ -32,6 +32,11 @@ Every number below comes from the gate, `task check`, on the released commit.
   each, `fmod` 0 of 436 (10 NaN results with other bits), `rem_euclid` 0 of 436 (12). The lib
   tests read the longest operand of `Nat` from a value passed in, not from a `thread_local!`.
   The test262 counts do not change (`test262 total 53801 8982 7 44812 25943 18867 2`).
+- `swell-unicode`, `swell-syntax`, `swell-compiler` and `swell-regexp` are `#![no_std]` with
+  `extern crate alloc`: their library code names `core::` and `alloc::` paths and no `std::`
+  path (step 1 of `story:core-builds-without-std`). `SyntaxError` and `CompileError` implement
+  `core::error::Error`, the same trait as `std::error::Error`. Public names and behaviour do not
+  change; unit tests inside the crates still link `std`.
 
 ## [0.12.0] - 2026-11-25
 

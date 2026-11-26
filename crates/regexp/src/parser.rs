@@ -27,6 +27,7 @@
 //! The parser charges no step; it polls the interrupt before it reads the pattern and then at
 //! least once per 4,096 code units it reads and per 4,096 nodes it makes or visits.
 
+use alloc::vec::Vec;
 use swell_unicode::StringProperty;
 
 use crate::ast::{

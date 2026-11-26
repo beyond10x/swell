@@ -12,6 +12,7 @@
 
 use crate::budget::{Budget, capacity_bytes};
 use crate::flags::Flags;
+use alloc::vec::Vec;
 
 /// The index of a node of a [`Pattern`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -42,7 +43,7 @@ impl List {
         self.len == 0
     }
 
-    fn range(self) -> std::ops::Range<usize> {
+    fn range(self) -> core::ops::Range<usize> {
         let start = self.start as usize;
         start..start.saturating_add(self.len as usize)
     }
@@ -300,7 +301,7 @@ impl Pattern {
         let start = name.start as usize;
         self.text
             .get(start..start.saturating_add(name.len as usize))
-            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            .and_then(|bytes| core::str::from_utf8(bytes).ok())
             .unwrap_or("")
     }
 

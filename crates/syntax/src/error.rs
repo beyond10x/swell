@@ -14,7 +14,9 @@
 //! `message` of a `SyntaxError` object (the conformance runner) can tell an error ECMA-262 asks
 //! for from a construct this parser declines or a limit it reaches.
 
-use std::fmt;
+use alloc::format;
+use alloc::string::String;
+use core::fmt;
 
 /// What stands between the construct and the slice in a refusal.
 const REFUSED: &str = " is not supported before slice ";
@@ -108,4 +110,4 @@ impl fmt::Display for SyntaxError {
     }
 }
 
-impl std::error::Error for SyntaxError {}
+impl core::error::Error for SyntaxError {}

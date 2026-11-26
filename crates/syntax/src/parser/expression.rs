@@ -44,6 +44,9 @@ use crate::ast::{
 use crate::error::SyntaxError;
 use crate::ledger::HeapBytes;
 use crate::token::{Keyword, Punct, TokenKind};
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 /// A property of an object literal read again as a binding pattern that is no
 /// `BindingProperty`, or a target there that is no name and no nested pattern
@@ -1794,7 +1797,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         let m = self.m;
         let mut rest = false;
         let (mut literal, mut read) = match self.expr_mut(node) {
-            Some(Expr::Object(list)) => (std::mem::take(list), Vec::new()),
+            Some(Expr::Object(list)) => (core::mem::take(list), Vec::new()),
             Some(Expr::ObjectPattern {
                 properties,
                 kind: k,
@@ -1804,7 +1807,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                     return Ok(());
                 }
                 rest = *r;
-                (Vec::new(), std::mem::take(properties))
+                (Vec::new(), core::mem::take(properties))
             }
             Some(Expr::Array(_) | Expr::ArrayPattern { .. }) => {
                 return self.array_pattern_node(node, kind, work);
@@ -1909,7 +1912,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         let m = self.m;
         let mut rest = false;
         let (mut literal, mut read) = match self.expr_mut(node) {
-            Some(Expr::Array(list)) => (std::mem::take(list), Vec::new()),
+            Some(Expr::Array(list)) => (core::mem::take(list), Vec::new()),
             Some(Expr::ArrayPattern {
                 elements,
                 kind: k,
@@ -1919,7 +1922,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                     return Ok(());
                 }
                 rest = *r;
-                (Vec::new(), std::mem::take(elements))
+                (Vec::new(), core::mem::take(elements))
             }
             _ => return self.unexpected(),
         };
@@ -2108,7 +2111,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             }
             Expr::Identifier(_) if !parenthesized => {
                 let name = match self.expr_mut(t) {
-                    Some(Expr::Identifier(name)) => std::mem::take(name),
+                    Some(Expr::Identifier(name)) => core::mem::take(name),
                     _ => String::new(),
                 };
                 Ok(PatternTarget::Binding(Name { name, span }))

@@ -22,8 +22,11 @@
 //!   once per [`POLL_INTERVAL`] code units it advances, and the walks after the parser poll once
 //!   per [`POLL_INTERVAL`] nodes they visit ([`Meter::visit`]).
 
-use std::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet};
+use alloc::boxed::Box;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cell::Cell;
 
 /// Why a step of the frontend stopped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -442,7 +445,7 @@ impl<'a> Meter<'a> {
         value: V,
     ) -> Result<(), Stop> {
         if let Some(slot) = map.get_mut(&key) {
-            let old = std::mem::replace(slot, value);
+            let old = core::mem::replace(slot, value);
             self.release(old);
             self.release(key);
             return Ok(());
@@ -517,6 +520,10 @@ impl Ledger for Counting {
 
 #[cfg(test)]
 mod tests {
+    use std::string::String;
+    use std::vec::Vec;
+    use std::{format, println};
+
     use super::{Counting, Meter, POLL_INTERVAL, Stop};
     use crate::{Failure, ParseOptions, parse_script_with};
 

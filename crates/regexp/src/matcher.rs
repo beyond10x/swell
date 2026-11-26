@@ -50,7 +50,8 @@
 //! on every way out: a match, no match and a stop. The captures a match answers are the
 //! caller's from then on, as the match array is (RegExpBuiltinExec charges it).
 
-use std::ops::Range;
+use alloc::vec::Vec;
+use core::ops::Range;
 
 use swell_unicode::LONGEST_STRING;
 
@@ -322,7 +323,7 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
     fn push(&mut self, entry: Entry) -> Result<(), Stop> {
         if self.stack.len() == self.stack.capacity() {
             let wanted = self.stack.capacity().saturating_mul(2).max(4);
-            let mut stack = std::mem::take(&mut self.stack);
+            let mut stack = core::mem::take(&mut self.stack);
             let grown = self.reserve(&mut stack, wanted);
             self.stack = stack;
             grown?;
@@ -393,7 +394,7 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
     /// The captures of the match, moved out; their bytes are credited with the rest.
     fn captures(&mut self) -> Captures {
         Captures {
-            slots: std::mem::take(&mut self.slots),
+            slots: core::mem::take(&mut self.slots),
         }
     }
 
@@ -410,13 +411,13 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
         }
         let bytes = self.held;
         self.held = 0;
-        drop(std::mem::take(&mut self.stack));
-        drop(std::mem::take(&mut self.slots));
-        drop(std::mem::take(&mut self.counters));
-        drop(std::mem::take(&mut self.looks));
-        drop(std::mem::take(&mut self.truth));
-        drop(std::mem::take(&mut self.matched));
-        drop(std::mem::take(&mut self.found));
+        drop(core::mem::take(&mut self.stack));
+        drop(core::mem::take(&mut self.slots));
+        drop(core::mem::take(&mut self.counters));
+        drop(core::mem::take(&mut self.looks));
+        drop(core::mem::take(&mut self.truth));
+        drop(core::mem::take(&mut self.matched));
+        drop(core::mem::take(&mut self.found));
         if bytes > 0 {
             self.budget.credit(bytes);
         }
@@ -957,7 +958,7 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
             self.candidate(1, window.units_of(1));
         }
         self.found
-            .sort_unstable_by_key(|candidate| std::cmp::Reverse(candidate.0));
+            .sort_unstable_by_key(|candidate| core::cmp::Reverse(candidate.0));
         self.found.dedup_by_key(|candidate| candidate.0);
         let operands = set.operands as usize;
         let mut charge = operands.saturating_sub(1);
