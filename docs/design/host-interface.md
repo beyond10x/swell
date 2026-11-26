@@ -679,7 +679,8 @@ hooks whose answer holds a handle) get their own requirement when their slice is
 Slice 2's two, both reached from `eval` or `Function`, are HOST-162: the `Some` of
 `host_get_code_for_eval`, an `Option<StringRef>` that cannot throw, so only a stale or a
 foreign String handle can reach the engine; and the thrown value of an `Abrupt::Throw` from
-`host_ensure_can_compile_strings`, whose answer is a `Completion<()>` (decision 16).
+`host_ensure_can_compile_strings`, whose answer is a `Completion<()>` (decision 16). Slice 9's,
+the `Ok` or `Abrupt::Throw` value of an override (decision 15), is HOST-222.
 
 **HOST-162** (swell:D6) A `host_get_code_for_eval` whose `Some` value is a stale String handle or a String handle of another agent ends the run of the script that called `eval(o)` with `Terminated(EngineFault)`, and a `host_ensure_can_compile_strings` whose `Abrupt::Throw` value holds a stale handle or a handle of another agent ends the run of the script that called `eval` or `Function` with `Terminated(EngineFault)`; in both cases no code of a string runs, `state()` then reads `Faulted`, every entry point and read but `state()` and `refusals()` answers `Err(HostError::Faulted)`, and nothing panics. [slice 2]
 
@@ -1735,6 +1736,10 @@ Rejected: throwing a `TypeError` to the script on a broken invariant, as a `Prox
 script did nothing wrong, and continuing with a host object known to be broken is the security
 issue the clause names).
 
+Every handle in an override's `Ok` or `Abrupt::Throw` value is checked first, as decision 6 says
+of a handle the host returns: a stale handle or a handle of another agent ends the run with
+`Terminated(EngineFault)` before any invariant is checked (HOST-222).
+
 ```rust
 #[derive(Clone, Copy, PartialEq, Eq)] pub struct Brand(pub u32);
 pub trait HostData: std::any::Any {
@@ -1840,6 +1845,8 @@ box is the host's to charge with `charge_host_bytes` (decision 14). Making one s
 **HOST-113** (ecma262:sec-invariants-of-the-essential-internal-methods) A `get_own_property` override that returns a descriptor that is not fully populated ends the run in `Terminated(EngineFault)`. [slice 9]
 
 **HOST-114** (ecma262:sec-invariants-of-the-essential-internal-methods) Every internal method of a host object with an override table runs the override where one is given and the ordinary method where none is, which a test with one override per method observes. [slice 9]
+
+**HOST-222** (swell:D6) An override of a host object whose `Ok` value or `Abrupt::Throw` value holds a stale handle or a handle of another agent ends the run with `Terminated(EngineFault)`; `state()` then reads `Faulted` and nothing panics. [slice 9]
 
 **HOST-115** (ecma262:sec-IsHTMLDDA-internal-slot) For a host object with `is_html_dda`, the script `typeof o` answers `"undefined"`, `!o` answers `true` and `o == null` answers `true`. [slice 18]
 
