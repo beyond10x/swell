@@ -162,7 +162,10 @@ pub(crate) enum ParseAnswer {
 
 /// What a charged parse answers inside the engine when it was not stopped. The tree is not boxed:
 /// a box would be an allocation the budget does not see, for a value that lives one call.
-#[allow(clippy::large_enum_variant)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a box would be an allocation the budget does not see, for a value that lives one call"
+)]
 pub(crate) enum ParsedTree {
     /// The tree, whose parse charged [`swell_syntax::Script::charged`], with the copy of its
     /// source.
@@ -536,7 +539,10 @@ impl<H: Host> Agent<H> {
     /// The atoms of the String constants of `code` and of its templates' names, with their
     /// property keys, in vectors whose bytes [`record_bytes`] charged. The atoms are reported by
     /// no site until the record holds them; no safe point comes before it does.
-    #[allow(clippy::type_complexity)]
+    #[expect(
+        clippy::type_complexity,
+        reason = "the four vectors of one record, answered together and taken apart by the one caller"
+    )]
     fn record_atoms(
         &mut self,
         code: &Code,
