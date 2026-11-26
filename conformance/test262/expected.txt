@@ -2,7 +2,7 @@ test262 annexB/built-ins 241 26 0 215 12 203 0
 test262 annexB/language 845 0 0 845 178 667 0
 test262 built-ins/AbstractModuleSource 8 8 0 0 0 0 0
 test262 built-ins/AggregateError 25 0 0 25 21 4 0
-test262 built-ins/Array 3083 0 0 3083 2911 172 0
+test262 built-ins/Array 3083 0 0 3083 2933 150 0
 test262 built-ins/ArrayBuffer 221 29 0 192 0 192 0
 test262 built-ins/ArrayIteratorPrototype 27 0 0 27 17 10 0
 test262 built-ins/AsyncDisposableStack 104 0 0 104 0 104 0
@@ -27,21 +27,21 @@ test262 built-ins/Iterator 684 18 0 666 16 650 0
 test262 built-ins/JSON 166 0 0 166 140 26 0
 test262 built-ins/Map 204 0 0 204 0 204 0
 test262 built-ins/MapIteratorPrototype 11 0 0 11 0 11 0
-test262 built-ins/Math 327 0 0 327 316 11 0
+test262 built-ins/Math 327 0 0 327 321 6 0
 test262 built-ins/NaN 6 0 0 6 6 0 0
 test262 built-ins/NativeErrors 94 0 0 94 82 12 0
 test262 built-ins/Number 340 0 0 340 336 4 0
-test262 built-ins/Object 3411 0 0 3411 3245 166 0
+test262 built-ins/Object 3411 0 0 3411 3246 165 0
 test262 built-ins/Promise 732 89 0 643 603 40 0
 test262 built-ins/Proxy 311 0 0 311 0 311 0
 test262 built-ins/Reflect 153 0 0 153 0 153 0
-test262 built-ins/RegExp 1879 0 0 1879 1862 17 0
+test262 built-ins/RegExp 1879 0 0 1879 1863 16 0
 test262 built-ins/RegExpStringIteratorPrototype 17 0 0 17 17 0 0
 test262 built-ins/Set 383 0 0 383 0 383 0
 test262 built-ins/SetIteratorPrototype 11 0 0 11 0 11 0
 test262 built-ins/ShadowRealm 64 64 0 0 0 0 0
 test262 built-ins/SharedArrayBuffer 104 0 0 104 0 104 0
-test262 built-ins/String 1223 0 0 1223 1205 18 0
+test262 built-ins/String 1223 0 0 1223 1207 16 0
 test262 built-ins/StringIteratorPrototype 7 0 0 7 7 0 0
 test262 built-ins/SuppressedError 22 0 0 22 0 22 0
 test262 built-ins/Symbol 98 0 0 98 90 8 0
@@ -99,7 +99,7 @@ test262 language/expressions/addition 48 0 0 48 42 6 0
 test262 language/expressions/array 52 0 0 52 52 0 0
 test262 language/expressions/arrow-function 343 0 0 343 331 12 0
 test262 language/expressions/assignment 485 0 0 485 473 12 0
-test262 language/expressions/assignmenttargettype 324 4 0 320 308 12 0
+test262 language/expressions/assignmenttargettype 324 4 0 320 314 6 0
 test262 language/expressions/async-arrow-function 60 0 0 60 56 4 0
 test262 language/expressions/async-function 93 0 0 93 87 6 0
 test262 language/expressions/async-generator 623 0 0 623 611 12 0
@@ -112,7 +112,7 @@ test262 language/expressions/call 92 0 0 92 86 6 0
 test262 language/expressions/class 4109 10 0 4099 0 4099 0
 test262 language/expressions/coalesce 24 0 0 24 22 2 0
 test262 language/expressions/comma 6 0 0 6 5 1 0
-test262 language/expressions/compound-assignment 455 0 0 455 406 49 0
+test262 language/expressions/compound-assignment 455 0 0 455 407 48 0
 test262 language/expressions/concatenation 5 0 0 5 5 0 0
 test262 language/expressions/conditional 22 0 0 22 20 2 0
 test262 language/expressions/delete 69 0 0 69 64 5 0
@@ -120,7 +120,7 @@ test262 language/expressions/division 45 0 0 45 39 6 0
 test262 language/expressions/does-not-equals 38 0 0 38 30 8 0
 test262 language/expressions/dynamic-import 1005 385 0 620 22 598 0
 test262 language/expressions/equals 47 0 0 47 39 8 0
-test262 language/expressions/exponentiation 44 0 0 44 1 43 0
+test262 language/expressions/exponentiation 44 0 0 44 37 7 0
 test262 language/expressions/function 264 0 0 264 250 14 0
 test262 language/expressions/generators 290 0 0 290 284 6 0
 test262 language/expressions/greater-than 49 0 0 49 41 8 0
@@ -141,13 +141,13 @@ test262 language/expressions/modulus 40 0 0 40 34 6 0
 test262 language/expressions/multiplication 40 0 0 40 35 5 0
 test262 language/expressions/new 59 0 0 59 59 0 0
 test262 language/expressions/new.target 14 0 0 14 1 13 0
-test262 language/expressions/object 1170 0 0 1170 1107 63 0
+test262 language/expressions/object 1170 0 0 1170 1109 61 0
 test262 language/expressions/optional-chaining 38 0 0 38 33 5 0
 test262 language/expressions/postfix-decrement 37 0 0 37 34 3 0
 test262 language/expressions/postfix-increment 38 0 0 38 35 3 0
 test262 language/expressions/prefix-decrement 34 0 0 34 31 3 0
 test262 language/expressions/prefix-increment 33 0 0 33 30 3 0
-test262 language/expressions/property-accessors 21 0 0 21 20 1 0
+test262 language/expressions/property-accessors 21 0 0 21 21 0 0
 test262 language/expressions/relational 1 0 0 1 1 0 0
 test262 language/expressions/right-shift 37 0 0 37 31 6 0
 test262 language/expressions/strict-does-not-equals 30 0 0 30 22 8 0
@@ -216,45 +216,45 @@ test262 staging/built-ins 8 0 0 8 5 3 0
 test262 staging/decorators 7 7 0 0 0 0 0
 test262 staging/explicit-resource-management 53 0 0 53 6 47 0
 test262 staging/set-methods 3 0 0 3 0 3 0
-test262 staging/sm 1406 2 0 1404 698 704 2
+test262 staging/sm 1406 2 0 1404 704 698 2
 test262 staging/source-phase-imports 2 2 0 0 0 0 0
 test262 staging/top-level-await 1 0 0 1 0 1 0
-test262 total 53801 8982 7 44812 25943 18867 2
+test262 total 53801 8982 7 44812 26026 18784 2
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
-test262-slice 04 1612 3184 0 0 1612 1533 79 0
+test262-slice 04 1681 3320 0 0 1681 1681 0 0
 test262-slice 05 2724 5441 0 0 2724 2724 0 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
 test262-slice 07 1472 2801 0 0 1472 1472 0 0
 test262-slice 08 9302 18455 0 0 9302 5 9297 0
-test262-slice 09 1785 3541 0 0 1785 267 1518 0
+test262-slice 09 1787 3545 0 0 1787 268 1519 0
 test262-slice 10 3759 7258 0 0 3759 3759 0 0
 test262-slice 11 1281 1833 0 0 1281 22 1259 0
-test262-slice 12 358 714 0 0 358 39 319 0
+test262-slice 12 359 716 0 0 359 39 320 0
 test262-slice 13 3061 6078 0 0 3061 0 3061 0
 test262-slice 14 598 1192 112 7 479 0 479 0
 test262-slice 15 1094 2170 0 0 1094 84 1010 0
 test262-slice 16 82 164 0 0 82 0 82 0
 test262-slice 17 35 35 0 0 35 0 35 0
 test262-slice 18 1134 1451 0 0 1134 170 964 0
-test262-slice 19 1435 2692 0 0 1435 670 763 2
+test262-slice 19 1363 2550 0 0 1363 604 757 2
 test262-slice 20 4617 9234 4617 0 0 0 0 0
 test262-slice 21 1662 3324 1662 0 0 0 0 0
 test262-slice x-stage3 2591 5008 2591 0 0 0 0 0
 test262-errors 0
-test262-section sec-object-objects incomplete 3411 3245 0
+test262-section sec-object-objects incomplete 3411 3246 0
 test262-section sec-function-objects incomplete 509 425 0
 test262-section sec-boolean-objects incomplete 51 49 0
 test262-section sec-symbol-objects incomplete 98 90 0
 test262-section sec-error-objects incomplete 93 53 0
 test262-section sec-number-objects incomplete 340 336 0
 test262-section sec-bigint-objects incomplete 77 0 0
-test262-section sec-math-object incomplete 327 316 0
+test262-section sec-math-object incomplete 327 321 0
 test262-section sec-date-objects incomplete 610 597 0
-test262-section sec-string-objects incomplete 1223 1205 2
-test262-section sec-regexp-regular-expression-objects incomplete 1879 1862 2
-test262-section sec-array-objects incomplete 3083 2911 1
+test262-section sec-string-objects incomplete 1223 1207 2
+test262-section sec-regexp-regular-expression-objects incomplete 1879 1863 2
+test262-section sec-array-objects incomplete 3083 2933 1
 test262-section sec-typedarray-objects incomplete 1453 0 0
 test262-section sec-uint8array incomplete 70 0 0
 test262-section sec-map-objects incomplete 204 0 0
