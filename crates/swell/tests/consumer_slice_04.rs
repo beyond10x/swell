@@ -8,14 +8,15 @@
 //! argument values the script gives them
 //! (`builtins_math::consumer_calls_of_the_harness_answer_as_the_standard_says`,
 //! `story:math-constants-and-exact-functions`). Its test holds one thing: the consumer's calls
-//! answer what the standard gives. Three of the nine cannot fail when slice 4 is taken out or
-//! answers wrongly: the two calls of `Math.max`, a function older than the slice, and
-//! `Math.ceil(300 / 100)`, whose argument is an integer.
+//! answer what the standard gives. The two calls of `Math.max` cannot fail when slice 4 is taken
+//! out or answers wrongly, since the function is older than the slice. `Math.ceil(300 / 100)`
+//! fails when `ceil` is absent, and cannot fail when `ceil` answers as the identity or as
+//! `floor`, `round` or `trunc`, since its argument is an integer.
 //!
-//! The parts script holds that instead: the parts of slice 4 the consumer calls (`Date.now`,
-//! `Math.floor`, `Math.min`, `Math.abs` and `Math.ceil`), each with arguments that tell it from
-//! its absence, from the identity, from each rounding neighbour (`floor`, `ceil`, `round`,
-//! `trunc`) and that show the sign of a zero.
+//! The parts script holds what the consumer's script cannot: wrong answers of the parts of slice
+//! 4 the consumer calls (`Date.now`, `Math.floor`, `Math.min`, `Math.abs` and `Math.ceil`), each
+//! with arguments that tell it from its absence, from the identity, from each rounding neighbour
+//! (`floor`, `ceil`, `round`, `trunc`) and that show the sign of a zero.
 //!
 //! Run also with the feature `collect-every-safe-point`.
 #![cfg(test)]
