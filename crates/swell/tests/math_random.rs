@@ -112,10 +112,13 @@ fn host_144_the_seed_changes_the_stream_and_the_hash_key_does_not() {
     assert_eq!(values_base, values_key, "hash_key differs");
 }
 
-/// The values HOST-212 checks: 100,000 in the default mode; 1,000 with the feature
-/// `collect-every-safe-point`, in the gate and in the lane `slow` alike, where every call is a
-/// safe point that marks the whole heap and the claim, a property of each value, shows at any
-/// count.
+/// The values HOST-212 checks: 100,000, the count of the requirement's sentence, in the default
+/// mode, which holds the sentence; a reduced count of 1,000 with the feature
+/// `collect-every-safe-point`, in the gate and in the lane `slow` alike (`SWELL_FULL_COUNTS`
+/// does not raise it). There every call is a safe point that marks the whole heap: 1,000 calls
+/// took 0.41 CPU seconds alone (build node, test profile), so the full count would take about
+/// 41, over the bound of a test in that mode and near the kill at 60 s. The claim, a property
+/// of each value, shows at any count.
 fn host_212_count() -> usize {
     if cfg!(feature = "collect-every-safe-point") {
         1_000
@@ -429,10 +432,12 @@ const BEGIN: &str = "--- math_random output begin ---";
 const END: &str = "--- math_random output end ---";
 
 /// The counts of HOST-147's script, values of `Math.random()` and keys of the object: 1,000
-/// and 10,000 in the default mode; 25 and 25 with the feature `collect-every-safe-point`, in
-/// the gate and in the lane `slow` alike, where every instruction of the script's loops is a
-/// safe point that marks the whole heap: at 100 and 100 one process's run of the script took
-/// 2.5 CPU seconds there (measured on the build node, test profile), over the bound of 2.
+/// and 10,000, the counts of the requirement's sentence, in the default mode, which holds the
+/// sentence; reduced counts of 25 and 25 with the feature `collect-every-safe-point`, in the
+/// gate and in the lane `slow` alike (`SWELL_FULL_COUNTS` does not raise them). There every
+/// instruction of the script's loops is a safe point that marks the whole heap: at 100 and 100
+/// one process's run of the script took 2.5 CPU seconds (build node, test profile), over the
+/// bound of 2, and the full counts would be far over the kill at 60 s.
 fn host_147_counts() -> (u32, u32) {
     if cfg!(feature = "collect-every-safe-point") {
         (25, 25)
@@ -525,4 +530,184 @@ fn host_147_two_processes_print_the_same_bytes() {
         own.len(),
         started.elapsed().as_millis()
     );
+}
+
+/// The bits of the first `count` Numbers of the generator of creation index `n` for the tests'
+/// `random_seed`, from `swell_num::random` directly.
+fn expected_bits(n: u64, count: usize) -> Vec<u64> {
+    let mut generator = swell_num::random::Xoshiro256::from_seed(&seeds().random_seed, n);
+    (0..count).map(|_| generator.next_f64().to_bits()).collect()
+}
+
+/// The bits of the Numbers a script printed joined by commas, each read back from its shortest
+/// round-trip text.
+fn numbers_shown(shown: Shown) -> Vec<u64> {
+    let Shown::Normal(text) = shown else {
+        panic!("the script answered {shown:?}");
+    };
+    text.trim_matches('"')
+        .split(',')
+        .map(|number| number.parse::<f64>().unwrap().to_bits())
+        .collect()
+}
+
+/// HOST-213 and the design (decision 6, "`Math.random`": the creation index n is "0 for the
+/// first, and one more for each later call of `create_realm` that starts"): the stream of the
+/// realm of creation index n is the generator `from_seed(random_seed, n)`, after allocations and
+/// a collection, after a failed creation, after a realm was dropped and collected, and in an
+/// agent of other limits and another `hash_key`. The other tests of this file compare two engine
+/// streams with each other, which a derivation from `n + 1`, or any fixed shift of the index,
+/// passes; this one pins the index.
+#[test]
+fn the_realm_of_creation_index_n_streams_from_seed_n() {
+    let mut agent = agent_seeded(seeds());
+    let r0 = new_realm(&mut agent);
+    let made = eval_text(
+        &mut agent,
+        &r0,
+        "var a = []; for (var i = 0; i < 20; i++) a.push({ x: i, s: 'k' + i }); a.length",
+    );
+    assert_eq!(made, Shown::Normal("20".to_string()));
+    agent.collect().unwrap();
+    let r1 = new_realm(&mut agent);
+    let mut setup = |_cx: &mut HookCx<'_, TestHost>,
+                     _realm: RealmRef|
+     -> Completion<GlobalObjects> { Err(Abrupt::Throw(Value::Number(7.0))) };
+    let failed = create_realm(&mut agent, Some(&mut setup), None).unwrap();
+    assert!(matches!(failed, Outcome::Throw(_)), "{failed:?}");
+    let r3 = new_realm(&mut agent);
+    drop(r3);
+    agent.collect().unwrap();
+    let r4 = new_realm(&mut agent);
+    assert_eq!(
+        bits(&stream(&mut agent, &r4, 16)),
+        expected_bits(4, 16),
+        "realm 4"
+    );
+    assert_eq!(
+        bits(&stream(&mut agent, &r1, 16)),
+        expected_bits(1, 16),
+        "realm 1"
+    );
+    assert_eq!(
+        bits(&stream(&mut agent, &r0, 16)),
+        expected_bits(0, 16),
+        "realm 0"
+    );
+
+    let mut other = seeds();
+    other.hash_key = [0xa5; 16];
+    let mut b = Agent::new(
+        TestHost::default(),
+        Limits {
+            memory_bytes: 8 * 1024 * 1024,
+            ..limits()
+        },
+        other,
+    )
+    .unwrap();
+    let first = new_realm(&mut b);
+    assert_eq!(
+        bits(&stream(&mut b, &first, 16)),
+        expected_bits(0, 16),
+        "agent b"
+    );
+}
+
+/// `#sec-math.random` ("Each Math.random function created for distinct realms must produce a
+/// distinct sequence of values from successive calls") with 9.4.1 and 10.3.1 (the realm of a
+/// built-in function's execution context is its [[Realm]]): a call of another realm's
+/// `Math.random`, from a script of this realm and from the host in an entry of this realm, takes
+/// the next values of that realm's generator and moves no value of this realm's.
+#[test]
+fn another_realms_math_random_moves_only_its_stream() {
+    let mut agent = agent_seeded(seeds());
+    let r0 = new_realm(&mut agent);
+    let r1 = new_realm(&mut agent);
+    let global_0 = agent.global_object(&r0).unwrap();
+    let global_1 = agent.global_object(&r1).unwrap();
+    agent
+        .with_cx(&r0, |cx| {
+            let g0 = object(cx, &global_0);
+            let g1 = object(cx, &global_1);
+            let math_1 = get_object(cx, g1, "Math");
+            let random_1 = get(cx, math_1, "random");
+            let name = support::host::key(cx, "other");
+            assert!(matches!(
+                cx.set(g0, name, random_1, true).unwrap(),
+                Ok(true)
+            ));
+        })
+        .unwrap();
+    let from_script = numbers_shown(eval_text(
+        &mut agent,
+        &r0,
+        "var v = []; for (var i = 0; i < 8; i++) v.push(other()); v.join()",
+    ));
+    let expected_1 = expected_bits(1, 17);
+    assert_eq!(
+        from_script,
+        expected_1[..8],
+        "realm 1's values called from realm 0's script"
+    );
+    let from_host = agent
+        .with_cx(&r0, |cx| {
+            let g1 = object(cx, &global_1);
+            let math_1 = get_object(cx, g1, "Math");
+            let random_1 = get(cx, math_1, "random");
+            match cx.call(random_1, Value::Object(math_1), &[]).unwrap() {
+                Ok(Value::Number(number)) => number.to_bits(),
+                other => panic!("Math.random() answered {other:?}"),
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        from_host, expected_1[8],
+        "realm 1's function called in an entry of realm 0"
+    );
+    assert_eq!(
+        bits(&stream(&mut agent, &r0, 8)),
+        expected_bits(0, 8),
+        "realm 0"
+    );
+    assert_eq!(
+        bits(&stream(&mut agent, &r1, 8)),
+        expected_1[9..17],
+        "realm 1"
+    );
+}
+
+/// `#sec-math.random` and clause 18: `call`, `apply`, `bind` and
+/// `Function.prototype.call.call` each take the next value of the realm's stream with their
+/// arguments ignored; `Math.random` has no "prototype", has `%Function.prototype%` as its
+/// prototype and is extensible; `new` on a bound `Math.random` throws a TypeError and takes no
+/// value of the stream.
+#[test]
+fn math_random_through_call_apply_bind_and_new() {
+    let mut agent = agent_seeded(seeds());
+    let realm = new_realm(&mut agent);
+    let expected = expected_bits(0, 6);
+    let through = numbers_shown(eval_text(
+        &mut agent,
+        &realm,
+        "[Math.random(), Math.random.call(null, 1), Math.random.apply(undefined, [1, 2]), \
+         Math.random.bind(null, 3)(), Function.prototype.call.call(Math.random)].join()",
+    ));
+    assert_eq!(through, expected[..5]);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "[Math.random.hasOwnProperty('prototype'), \
+              Object.getPrototypeOf(Math.random) === Function.prototype, \
+              Object.isExtensible(Math.random)].join()"
+        ),
+        Shown::Normal("\"false,true,true\"".to_string())
+    );
+    assert_eq!(
+        eval_text(&mut agent, &realm, "new (Math.random.bind(null))();"),
+        Shown::Throw("TypeError".to_string())
+    );
+    let next = numbers_shown(eval_text(&mut agent, &realm, "String(Math.random())"));
+    assert_eq!(next, expected[5..6], "the value after a refused construct");
 }

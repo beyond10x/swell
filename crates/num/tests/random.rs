@@ -4,7 +4,9 @@
 //! SipHash-2-4 (decision 4).
 //!
 //! Where the numbers come from: the three words from the state (1, 2, 3, 4) were worked by hand
-//! from the step of the design on 2026-11-24 (the design's "What a test asserts"); the sixteen
+//! from the step of the design on 2026-11-24 (the design's "What a test asserts"), and the ten
+//! words from that state are the reference implementation's output, as `rand_xoshiro` 0.7.0
+//! holds them in its test `reference`; the sixteen
 //! derived words were printed by `from_seed` of this crate and are checked here against
 //! `siphash24`, which `tests/siphash.rs` holds to the reference vectors, over the message the
 //! design writes, built byte by byte in [`message`].
@@ -17,13 +19,29 @@ use swell_num::siphash::siphash24;
 /// 2^-53, the weight of the lowest of the 53 bits a Number is made of.
 const ULP: f64 = 1.0 / 9_007_199_254_740_992.0;
 
-/// The design's step, worked by hand: from (1, 2, 3, 4) the words 11,520, 0 and 1,509,978,240.
+/// The design's step (decision 6, "`Math.random`", "What a test asserts"): from (1, 2, 3, 4)
+/// the first three words are 11,520, 0 and 1,509,978,240, worked by hand, and the first ten
+/// are the output of the reference implementation (`xoshiro256starstar.c`, Blackman and Vigna),
+/// as the crate `rand_xoshiro` 0.7.0 holds them in its test `reference`
+/// (`src/xoshiro256starstar.rs`). The three hand-worked words never read `s3` after its
+/// rotation, so a wrong rotation constant passes them; the fourth word and after do not.
 #[test]
-fn the_first_three_words_from_one_two_three_four() {
+fn the_first_ten_words_from_one_two_three_four() {
+    const REFERENCE: [u64; 10] = [
+        11_520,
+        0,
+        1_509_978_240,
+        1_215_971_899_390_074_240,
+        1_216_172_134_540_287_360,
+        607_988_272_756_665_600,
+        16_172_922_978_634_559_625,
+        8_476_171_486_693_032_832,
+        10_595_114_339_597_558_777,
+        2_904_607_092_377_533_576,
+    ];
     let mut generator = Xoshiro256::from_state([1, 2, 3, 4]);
-    assert_eq!(generator.next_u64(), 11_520);
-    assert_eq!(generator.next_u64(), 0);
-    assert_eq!(generator.next_u64(), 1_509_978_240);
+    let words: Vec<u64> = (0..10).map(|_| generator.next_u64()).collect();
+    assert_eq!(words, REFERENCE);
 }
 
 /// The Number of a word is its top 53 bits times 2^-53: 11,520 is 5 × 2^-53 (11,520 >> 11 is
@@ -181,4 +199,41 @@ fn each_bit_is_set_in_49_to_51_percent_of_100000_words() {
         set.iter().max().unwrap(),
         started.elapsed().as_millis()
     );
+}
+
+/// The design's derivation (decision 6, "`Math.random`"): word i of realm n is SipHash-2-4 over
+/// `random_seed[16..32]`, n as 8 bytes little-endian and the byte i. At indices whose high bytes
+/// are set (255, 256, 2^16, 2^32, 2^56, 2^64 - 2 and 2^64 - 1) the state equals that message
+/// built by hand, so a derivation that reads fewer than the 8 bytes of the index fails; the
+/// table of `the_derived_states_of_two_seeds_at_index_0_and_1` holds only indices whose bytes
+/// but the lowest are zero.
+#[test]
+fn the_derived_state_at_large_indices_is_the_designs_message() {
+    let seed: [u8; 32] = core::array::from_fn(|i| u8::try_from(i).unwrap().wrapping_mul(29) ^ 0x5c);
+    for index in [255, 256, 65_536, 1 << 32, 1 << 56, u64::MAX - 1, u64::MAX] {
+        assert_eq!(
+            Xoshiro256::from_seed(&seed, index).state(),
+            by_hand(&seed, index),
+            "index {index}"
+        );
+    }
+    assert_ne!(
+        Xoshiro256::from_seed(&seed, 256).state(),
+        Xoshiro256::from_seed(&seed, 0).state()
+    );
+}
+
+/// The design's Number of a word (decision 6, "`Math.random`": "a multiple of 2^-53 in
+/// [0, 1 - 2^-53], with positive sign (0 gives +0)"), at the ends of the word range: a word below
+/// 2^11 has no bit in its top 53 and is +0, never -0; 2^11 is 2^-53; a word whose top 53 bits are
+/// all set is 1 - 2^-53, below 1.
+#[test]
+fn the_numbers_at_the_ends_of_the_word_range() {
+    assert_eq!(word_to_number(2_047).to_bits(), 0);
+    assert_eq!(word_to_number(2_048).to_bits(), ULP.to_bits());
+    assert_eq!(
+        word_to_number(u64::MAX - 2_047).to_bits(),
+        (1.0 - ULP).to_bits()
+    );
+    assert!(word_to_number(u64::MAX - 2_047) < 1.0);
 }
