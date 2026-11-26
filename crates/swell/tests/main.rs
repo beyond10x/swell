@@ -48,6 +48,7 @@ mod date_text;
 mod date_zone;
 mod determinism;
 mod dynamic_function;
+mod emulated_host;
 mod errors;
 mod eval;
 mod eval_stack;
