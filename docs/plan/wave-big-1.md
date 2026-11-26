@@ -19,7 +19,9 @@ directory. The stage is kept current by the coordinator.
 | gate | `story:core-builds-without-std`, step 4 | `impl/nostd-gate` | `swell-impl-nostd-gate` | dispatched |
 | random | `story:math-random` | `impl/math-random` | `swell-impl-math-random` | dispatched |
 | static | `story:releases-ship-static-binaries` | `impl/static-binaries` | `swell-impl-static-binaries` | dispatched |
-| close | `story:slice-04-conformance-close` | `impl/slice-04-close` | `swell-impl-slice-04-close` | waits for `random` and `gate` on the wave branch |
+| exponent | `story:exponentiation-operator` | `impl/exponentiation` | `swell-impl-exponentiation` | dispatched |
+| growth | `story:buffer-growth-outside-the-charged-list-is-listed` | `impl/buffer-growth` | `swell-impl-buffer-growth` | waits for `random`, `exponent` and `gate`: it adds an attribute at growth calls all over `crates/swell/src` |
+| close | `story:slice-04-conformance-close` | `impl/slice-04-close` | `swell-impl-slice-04-close` | waits for `random`, `exponent` and `gate` on the wave branch |
 
 Dispatches use the agent type `aep:implementor` on Opus; the adversary is `aep:adversary`. The
 two decomposers of slices 9 and 8 run as `general-purpose` on Opus with the procedure of
@@ -37,6 +39,12 @@ takes no heredoc.
 - `story:bench-image-and-first-measurements` is accepted and not built. It is not in this
   wave: its runs need the build node alone for the measurement, and its tree holds work that
   is not committed.
+
+Added at 05:33 CET, from the reading of the store's close: `story:exponentiation-operator`
+(the parser still refuses `**`; 1 of 44 cases of `language/expressions/exponentiation` passes)
+and `story:buffer-growth-outside-the-charged-list-is-listed` (`docs/plan/slice-10-wave-1.md`:
+"planned, not built") are accepted and not built. Both are stories of the plan before this
+wave, and the close of slice 4 depends on the first.
 
 ## What the store's check said
 
