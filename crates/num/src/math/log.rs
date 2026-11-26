@@ -29,7 +29,7 @@
 //! are in group A, less than 1 ulp; `log1p`, `asinh`, `acosh` and `atanh` in group B, at most 2
 //! ulp. `crates/num/tests/math_exp_log.rs` holds both against `data/math/reference-exp-log.txt`.
 //!
-//! The `f64` operations, and what fixes each result: `+ - * /` and `sqrt` (IEEE 754-2019, 5.4.1:
+//! The `f64` operations, and what fixes each result: `+ - * /` and `fmath::sqrt` (IEEE 754-2019, 5.4.1:
 //! correctly rounded), `abs` and `copysign` (exact: 5.5.1), `to_bits` and `from_bits` (exact),
 //! comparisons and `is_nan`, `is_finite`, and `f64::from` of an `i32` (exact: every `i32` is a
 //! Number). No loop depends on the argument.

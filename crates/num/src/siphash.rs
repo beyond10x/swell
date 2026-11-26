@@ -7,7 +7,7 @@
 //! with the final word carrying the length modulo 256 in its top byte, as the reference
 //! implementation does.
 
-use std::hash::{BuildHasher, Hasher};
+use core::hash::{BuildHasher, Hasher};
 
 /// One SipHash-2-4 computation: [`Hasher::write`] the message in any number of pieces, then
 /// [`Hasher::finish`].
@@ -92,9 +92,9 @@ impl SipHasher24 {
     }
 }
 
-impl std::fmt::Debug for SipHasher24 {
+impl core::fmt::Debug for SipHasher24 {
     /// Never prints the state, which is derived from the key.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("SipHasher24")
     }
 }
@@ -160,9 +160,9 @@ impl SipBuildHasher {
     }
 }
 
-impl std::fmt::Debug for SipBuildHasher {
+impl core::fmt::Debug for SipBuildHasher {
     /// Never prints the key.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("SipBuildHasher")
     }
 }

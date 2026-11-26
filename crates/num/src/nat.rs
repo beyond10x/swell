@@ -8,26 +8,39 @@
 //! No operand of these uses is longer than 2,048 bits (32 limbs; the design's bound), so every
 //! loop here runs over at most 32 limbs: `swell-num` takes no budget, and the builtins charge
 //! the temporaries of a call as one temporary of 2,048 bytes. The lib tests read the longest
-//! operand made, in bits (`longest_bits`).
+//! operand made, in bits: every operation that can make a longer `Nat` takes the caller's
+//! [`Longest`] and notes its result there (a value passed in, not a per-thread global, so that
+//! the crate builds without `std`).
 
-use std::cmp::Ordering;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 
-#[cfg(test)]
-thread_local! {
-    /// The longest operand made on this thread, in bits, in the lib tests.
-    static LONGEST: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+/// The longest operand made in one call, in bits. The caller makes one, passes it to every
+/// operation that can make a longer [`Nat`] and reads it after. Outside the lib tests it holds
+/// nothing and noting costs nothing, so the code the engine runs is the code without it.
+#[derive(Default)]
+pub(crate) struct Longest {
+    #[cfg(test)]
+    bits: u32,
 }
 
-/// The longest operand made on this thread since `reset_longest`, in bits.
-#[cfg(test)]
-pub(crate) fn longest_bits() -> u32 {
-    LONGEST.with(std::cell::Cell::get)
-}
+impl Longest {
+    /// Record the length of a result that may have grown.
+    #[inline]
+    fn note(&mut self, nat: &Nat) {
+        #[cfg(test)]
+        {
+            self.bits = self.bits.max(nat.bit_len());
+        }
+        let _ = nat;
+    }
 
-/// Count the longest operand from 0 again.
-#[cfg(test)]
-pub(crate) fn reset_longest() {
-    LONGEST.with(|longest| longest.set(0));
+    /// The longest operand noted, in bits.
+    #[cfg(test)]
+    pub(crate) fn bits(&self) -> u32 {
+        self.bits
+    }
 }
 
 /// An unsigned integer of any size: 64-bit limbs, least significant first, with no zero limb at
@@ -38,19 +51,13 @@ pub(crate) struct Nat {
 }
 
 impl Nat {
-    /// In the lib tests, record the length of a result that may have grown.
-    fn note(&self) {
-        #[cfg(test)]
-        LONGEST.with(|longest| longest.set(longest.get().max(self.bit_len())));
-    }
-
     /// base^exponent: 1 for the exponent 0, 0 for the base 0 and any other exponent.
-    pub(crate) fn pow_u64(base: u64, exponent: u32) -> Nat {
+    pub(crate) fn pow_u64(base: u64, exponent: u32, longest: &mut Longest) -> Nat {
         let mut power = Nat::from_u64(1);
         match base {
             0 if exponent > 0 => power.limbs.clear(),
             0 | 1 => {}
-            _ => power.mul_pow(base, exponent),
+            _ => power.mul_pow(base, exponent, longest),
         }
         power
     }
@@ -58,7 +65,7 @@ impl Nat {
     /// self × other, the schoolbook product: each limb of one by each limb of the other, with
     /// `u128` intermediates. a × b + c + carry stays below 2^128 for limbs a, b, c and a carry
     /// below 2^64.
-    pub(crate) fn mul(&self, other: &Nat) -> Nat {
+    pub(crate) fn mul(&self, other: &Nat, longest: &mut Longest) -> Nat {
         if self.limbs.is_empty() || other.limbs.is_empty() {
             return Nat::from_u64(0);
         }
@@ -79,7 +86,7 @@ impl Nat {
         }
         let mut product = Nat { limbs };
         product.trim();
-        product.note();
+        longest.note(&product);
         product
     }
 
@@ -198,7 +205,7 @@ impl Nat {
         }
     }
 
-    pub(crate) fn shl(mut self, bits: u32) -> Nat {
+    pub(crate) fn shl(mut self, bits: u32, longest: &mut Longest) -> Nat {
         let words = (bits / 64) as usize;
         let bits = bits % 64;
         if bits != 0 {
@@ -213,13 +220,13 @@ impl Nat {
             }
         }
         if words != 0 && !self.limbs.is_empty() {
-            self.limbs.splice(0..0, std::iter::repeat_n(0, words));
+            self.limbs.splice(0..0, core::iter::repeat_n(0, words));
         }
-        self.note();
+        longest.note(&self);
         self
     }
 
-    pub(crate) fn mul_small(&mut self, factor: u64) {
+    pub(crate) fn mul_small(&mut self, factor: u64, longest: &mut Longest) {
         let mut carry = 0u128;
         for limb in &mut self.limbs {
             let product = u128::from(*limb) * u128::from(factor) + carry;
@@ -230,12 +237,12 @@ impl Nat {
             self.limbs.push(carry as u64);
         }
         self.trim();
-        self.note();
+        longest.note(self);
     }
 
     /// self × base^exponent, for a base from 2 to 36: by the largest power of the base that fits
     /// in a limb (10^19 for radix 10), then by the rest.
-    pub(crate) fn mul_pow(&mut self, base: u64, mut exponent: u32) {
+    pub(crate) fn mul_pow(&mut self, base: u64, mut exponent: u32, longest: &mut Longest) {
         let base = base.max(2);
         let (mut chunk, mut factor) = (0u32, 1u64);
         while let Some(next) = factor.checked_mul(base) {
@@ -243,7 +250,7 @@ impl Nat {
             chunk += 1;
         }
         while exponent >= chunk {
-            self.mul_small(factor);
+            self.mul_small(factor, longest);
             exponent -= chunk;
         }
         // base^exponent < factor, so it fits.
@@ -252,11 +259,11 @@ impl Nat {
             rest *= base;
         }
         if rest > 1 {
-            self.mul_small(rest);
+            self.mul_small(rest, longest);
         }
     }
 
-    pub(crate) fn add(&self, other: &Nat) -> Nat {
+    pub(crate) fn add(&self, other: &Nat, longest: &mut Longest) -> Nat {
         let (long, short) = if self.limbs.len() >= other.limbs.len() {
             (self, other)
         } else {
@@ -276,7 +283,7 @@ impl Nat {
             limbs.push(1);
         }
         let sum = Nat { limbs };
-        sum.note();
+        longest.note(&sum);
         sum
     }
 
@@ -331,9 +338,11 @@ impl Nat {
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
+    use alloc::string::{String, ToString};
+    use alloc::vec;
+    use core::cmp::Ordering;
 
-    use super::{Nat, longest_bits, reset_longest};
+    use super::{Longest, Nat};
 
     /// Knuth's 64-bit linear congruential generator, the design's (decision 6, the arguments of
     /// the reference data): multiplier 6364136223846793005, increment 1442695040888963407,
@@ -384,6 +393,7 @@ mod tests {
     /// ways, the decimal digits and powers.
     #[test]
     fn arithmetic_agrees_with_u128_for_2000_pairs() {
+        let mut longest = Longest::default();
         let mut draw = Lcg(1);
         let mut other = Lcg(2);
         for _ in 0..2_000 {
@@ -391,15 +401,18 @@ mod tests {
             let (wide_a, wide_b) = (draw.wide(), other.wide());
             let product = u128::from(a) * u128::from(b);
             let mut small = nat(u128::from(a));
-            small.mul_small(b);
+            small.mul_small(b, &mut longest);
             assert_eq!(value(&small), product, "{a} × {b}");
             assert_eq!(
-                value(&nat(u128::from(a)).mul(&nat(u128::from(b)))),
+                value(&nat(u128::from(a)).mul(&nat(u128::from(b)), &mut longest)),
                 product,
                 "{a} × {b}"
             );
             let (half_a, half_b) = (wide_a >> 1, wide_b >> 1);
-            assert_eq!(value(&nat(half_a).add(&nat(half_b))), half_a + half_b);
+            assert_eq!(
+                value(&nat(half_a).add(&nat(half_b), &mut longest)),
+                half_a + half_b
+            );
             assert_eq!(nat(wide_a).cmp(&nat(wide_b)), wide_a.cmp(&wide_b));
             let (large, small) = if wide_a >= wide_b {
                 (wide_a, wide_b)
@@ -416,16 +429,19 @@ mod tests {
             assert_eq!(value(&nat(wide_a).shr(shift)), wide_a >> shift);
             let shift = (b % 64) as u32;
             assert_eq!(
-                value(&nat(u128::from(a)).shl(shift)),
+                value(&nat(u128::from(a)).shl(shift, &mut longest)),
                 u128::from(a) << shift
             );
             assert_eq!(decimal(&nat(wide_a)), wide_a.to_string());
             let exponent = (a % 39) as u32;
-            assert_eq!(value(&Nat::pow_u64(10, exponent)), 10u128.pow(exponent));
+            assert_eq!(
+                value(&Nat::pow_u64(10, exponent, &mut longest)),
+                10u128.pow(exponent)
+            );
             let base = b % 1_000;
             let exponent = (a % 5) as u32;
             assert_eq!(
-                value(&Nat::pow_u64(base, exponent)),
+                value(&Nat::pow_u64(base, exponent, &mut longest)),
                 u128::from(base).pow(exponent),
                 "{base}^{exponent}"
             );
@@ -436,8 +452,9 @@ mod tests {
     /// open a limb, a difference that closes one, and shifts by 0, 1, 63, 64 and 65 bits.
     #[test]
     fn carry_edges() {
+        let mut longest = Longest::default();
         let ones = u128::MAX;
-        assert_eq!(nat(ones).add(&nat(1)).limbs, vec![0, 0, 1]);
+        assert_eq!(nat(ones).add(&nat(1), &mut longest).limbs, vec![0, 0, 1]);
         assert_eq!(
             value(
                 &Nat {
@@ -449,28 +466,32 @@ mod tests {
         );
         assert_eq!(value(&nat(1u128 << 64).sub(&nat(1))), u128::from(u64::MAX));
         assert_eq!(
-            value(&nat(u128::from(u64::MAX)).mul(&nat(u128::from(u64::MAX)))),
+            value(&nat(u128::from(u64::MAX)).mul(&nat(u128::from(u64::MAX)), &mut longest)),
             u128::from(u64::MAX) * u128::from(u64::MAX)
         );
         assert_eq!(
-            nat(ones).mul(&nat(ones)).limbs,
+            nat(ones).mul(&nat(ones), &mut longest).limbs,
             vec![1, 0, u64::MAX - 1, u64::MAX]
         );
         let mut sum = nat(ones);
-        sum.mul_small(u64::MAX);
+        sum.mul_small(u64::MAX, &mut longest);
         assert_eq!(sum.limbs, vec![1, u64::MAX, u64::MAX - 1]);
         for shift in [0u32, 1, 63, 64, 65] {
             let wide = Nat {
                 limbs: vec![u64::MAX, u64::MAX, u64::MAX],
             };
-            let back = wide.clone().shl(shift).shr(shift);
+            let back = wide.clone().shl(shift, &mut longest).shr(shift);
             assert_eq!(back.limbs, wide.limbs, "shl and shr by {shift}");
             if shift < 128 {
                 assert_eq!(value(&nat(ones).shr(shift)), ones >> shift, "shr {shift}");
             }
             if shift < 64 {
                 let top = u128::from(u64::MAX);
-                assert_eq!(value(&nat(top).shl(shift)), top << shift, "shl {shift}");
+                assert_eq!(
+                    value(&nat(top).shl(shift, &mut longest)),
+                    top << shift,
+                    "shl {shift}"
+                );
             }
         }
         assert!(nat(ones).shr(128).limbs.is_empty());
@@ -484,16 +505,20 @@ mod tests {
         assert_eq!(value(&kept), 12_345);
         assert_eq!(decimal(&Nat::from_u64(0)), "0");
         assert_eq!(decimal(&nat(10u128.pow(19))), "10000000000000000000");
-        assert!(Nat::pow_u64(0, 3).limbs.is_empty());
-        assert_eq!(value(&Nat::pow_u64(0, 0)), 1);
-        assert_eq!(value(&Nat::pow_u64(1, 4_000)), 1);
-        assert_eq!(value(&Nat::pow_u64(u64::MAX, 1)), u128::from(u64::MAX));
+        assert!(Nat::pow_u64(0, 3, &mut longest).limbs.is_empty());
+        assert_eq!(value(&Nat::pow_u64(0, 0, &mut longest)), 1);
+        assert_eq!(value(&Nat::pow_u64(1, 4_000, &mut longest)), 1);
+        assert_eq!(
+            value(&Nat::pow_u64(u64::MAX, 1, &mut longest)),
+            u128::from(u64::MAX)
+        );
     }
 
     /// The difference is the larger operand minus the smaller: the caller compares first. A
     /// difference of equal values is zero, with no limb.
     #[test]
     fn sub_takes_the_larger_first() {
+        let mut longest = Longest::default();
         let mut draw = Lcg(3);
         for _ in 0..200 {
             let (a, b) = (nat(draw.wide()), nat(draw.wide()));
@@ -503,7 +528,10 @@ mod tests {
                 (a, b)
             };
             let difference = large.sub(&small);
-            assert_eq!(difference.add(&small).cmp(&large), Ordering::Equal);
+            assert_eq!(
+                difference.add(&small, &mut longest).cmp(&large),
+                Ordering::Equal
+            );
         }
         let same = nat(u128::MAX);
         assert!(same.sub(&same).limbs.is_empty());
@@ -514,19 +542,20 @@ mod tests {
     /// longest operand reads at least the longest one made.
     #[test]
     fn long_products_and_the_counter() {
-        reset_longest();
-        let power = Nat::pow_u64(10, 424);
+        let mut longest = Longest::default();
+        let power = Nat::pow_u64(10, 424, &mut longest);
         assert_eq!(power.bit_len(), 1_409);
         let text = decimal(&power);
         assert_eq!(text.len(), 425);
         assert!(text.starts_with('1') && text[1..].bytes().all(|b| b == b'0'));
-        let product = Nat::pow_u64(10, 200).mul(&Nat::pow_u64(10, 224));
+        let product = Nat::pow_u64(10, 200, &mut longest)
+            .mul(&Nat::pow_u64(10, 224, &mut longest), &mut longest);
         assert_eq!(product.cmp(&power), Ordering::Equal);
         let mut quotient = power.clone();
         for _ in 0..22 {
             assert_eq!(quotient.div_rem_u64(10_000_000_000_000_000_000), 0);
         }
         assert_eq!(decimal(&quotient), "1000000");
-        assert!(longest_bits() >= 1_409, "longest {}", longest_bits());
+        assert!(longest.bits() >= 1_409, "longest {}", longest.bits());
     }
 }
