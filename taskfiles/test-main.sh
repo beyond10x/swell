@@ -13,15 +13,17 @@
 # "use crate::support;".
 #
 # A package named in TEST_MAIN_SELECT (default "swell", names separated by blanks; "" names none)
-# lets one build compile a part of its modules: after the first line its tests/main.rs has
-# "#![expect(unexpected_cfgs, ...)]" (the cfg is not one cargo declares) and before each
-# "mod <name>;" but support the line "#[cfg(any(not(test_modules), test_modules = "<name>"))]".
-# A build without the cfg test_modules (every build of the gate) compiles every module, as
-# before; a build that passes rustc "--cfg test_modules" and "--cfg test_modules=\"<name>\"" for
-# some names (the bare name too: cfg(test_modules) does not hold for a name set only with a
-# value), which only "cargo rustc ... --test main -- <args>" passes to the test target alone and
-# not to the library, compiles those modules and support (taskfiles/stack-profiles.yml,
-# STACK_MODULES).
+# lets one build compile a part of its modules: before each "mod <name>;" but support its
+# tests/main.rs has the line "#[cfg(any(not(test_modules), test_modules = "<name>"))]". The
+# package declares the cfg in its manifest, [lints.rust] unexpected_cfgs with check-cfg
+# "cfg(test_modules, values(any()))" (crates/swell/Cargo.toml), so the lint unexpected_cfgs stays
+# on for every other name: a misspelled feature or cfg name in a test module fails a build with
+# -D warnings (tests/gate/build-refuses-a-misspelled-feature-in-a-test-module.sh). A build
+# without the cfg test_modules (every build of the gate) compiles every module, as before; a
+# build that passes rustc "--cfg test_modules" and "--cfg test_modules=\"<name>\"" for some
+# names (the bare name too: cfg(test_modules) does not hold for a name set only with a value),
+# which only "cargo rustc ... --test main -- <args>" passes to the test target alone and not to
+# the library, compiles those modules and support (taskfiles/stack-profiles.yml, STACK_MODULES).
 #
 # write: writes tests/main.rs of every crate with tests where it differs from the generated text,
 #   and prints "test-main: wrote <file>" for each, then "test-main: <n> crate(s) with tests, <w>
@@ -82,8 +84,6 @@ selectable() {
 generate() {
   printf '%s\n' "$header"
   if selectable "$1"; then
-    printf '%s\n' '#![expect(' '    unexpected_cfgs,' \
-      '    reason = "the cfg test_modules names the modules a build compiles (taskfiles/test-main.sh)"' ')]'
     modules "$1" | awk '
       $0 != "support" { printf "#[cfg(any(not(test_modules), test_modules = \"%s\"))]\n", $0 }
       { printf "mod %s;\n", $0 }

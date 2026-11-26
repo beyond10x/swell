@@ -20,6 +20,9 @@ swell-unicode = { path = "../unicode" }
 collect-every-safe-point = []
 fault-injection = []
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(test_modules, values(any()))"] }
+
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
