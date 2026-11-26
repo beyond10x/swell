@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:buffer-growth-outside-the-charged-list-is-listed
 kind: story
-status: active
+status: implemented
 title: A growth call outside the charged list is listed with its charge or its bound
 summary: A disallowed-methods list of clippy for the engine crate and an expect with a reason at each remaining growth call, so that a later builtin cannot hold a plain buffer the memory budget does not see.
 relations:
 - depends_on: story:copies-held-across-a-call-into-script-are-charged
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T12:36:28Z", actor: "human:operator", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-24T13:13:52Z", actor: "human:operator", revision: 4}
+- {from: "active", to: "implemented", at: "2026-11-26T10:01:51Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}, executor: "agent:coordinator"}
 ---
 Waits for: `story:copies-held-across-a-call-into-script-are-charged`, the only recorded edge. The
 coordinator starts the unit on a base that holds that story and every unit of slice 4 merged by

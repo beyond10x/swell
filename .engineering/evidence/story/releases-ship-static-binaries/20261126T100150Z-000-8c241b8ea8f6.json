@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T10:01:50Z",
+  "actor": "human:operator",
+  "artifact": "story:releases-ship-static-binaries",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at a4c1b2e7 with the files of commit 6bd73063 (the run was made on that tree before the commit), exit 0, on the build node; the unit was merged by commit b129bb2e, an ancestor of that head",
+    "reference": "release-targets-check, run by the gate's step forge-check (taskfiles/forge.yml), and .github/workflows/release-build.yml"
+  }
+}
