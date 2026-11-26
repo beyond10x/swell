@@ -487,8 +487,21 @@ tasks:
       task prints each of them that has a value from the command line, the environment or a
       task file's own defaults, as "gate: variables in effect: NAME=value ...". The SPEC_ ones and
       the SITE_DATA_ ones (taskfiles/site.yml, included flat) always show, with their defaults;
-      any other name on the line was set by the caller. It never
-      fails. A new gate variable is added to GATE_VARIABLES in the change that adds it.
+      any other name on the line was set by the caller. A new gate variable is added to
+      GATE_VARIABLES in the change that adds it.
+
+      It fails in one case, after that line: a flag variable of cargo in the environment
+      (RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS or a
+      CARGO_TARGET_<triple>_RUSTFLAGS) whose value names test_modules, the cfg that makes swell's
+      one test binary compile only some of its modules (taskfiles/test-main.sh). go-task lets an
+      exported variable win over a task's own env, so such a value would reach every build of
+      the gate and of the lane slow, which run gate-vars first, and leave swell::main with a
+      part of its tests in silence. It prints "gate: <variable> names test_modules (<value>);
+      the gate and the lane slow build every module of swell's tests, and only
+      build-stack-profiles selects some, by cargo rustc arguments" for each. build-stack-profiles
+      passes the cfg after "cargo rustc ... --", not in the environment, and is not refused.
+      The planted script tests/gate/gate-vars-refuses-rustflags-naming-test-modules.sh holds
+      it.
     vars:
       GATE_VARIABLES: >-
         GATE_ROOT GATE_CRATES GATE_LOCK
@@ -511,6 +524,20 @@ tasks:
       - |
         set="{{range $n := splitList " " .GATE_VARIABLES}}{{with index $ $n}} {{$n}}={{.}}{{end}}{{end}}"
         if [ -n "$set" ]; then echo "gate: variables in effect:$set"; else echo "gate: variables in effect: none"; fi
+        env | LC_ALL=C awk '
+          {
+            eq = index($0, "=")
+            if (eq == 0) next
+            n = substr($0, 1, eq - 1)
+            v = substr($0, eq + 1)
+            if (n != "RUSTFLAGS" && n != "CARGO_ENCODED_RUSTFLAGS" && n != "CARGO_BUILD_RUSTFLAGS" && n !~ /^CARGO_TARGET_[A-Z0-9_]+_RUSTFLAGS$/) next
+            if (index(v, "test_modules") == 0) next
+            gsub(/\037/, " ", v)
+            printf "gate: %s names test_modules (%s); the gate and the lane slow build every module of swell'"'"'s tests, and only build-stack-profiles selects some, by cargo rustc arguments\n", n, v
+            bad = 1
+          }
+          END { exit bad }
+        '
 
   python-check:
     desc: Fail, naming each, when a file of the tree is a Python file.
