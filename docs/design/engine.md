@@ -3738,26 +3738,36 @@ at the start of the slice (`a46fe885`, the close of slice 10) on a part of slice
 run on the code of the slice, has no `feature` or `flag` line of a slice delivered after 4, and
 neither it nor a harness file it includes holds a token of a later slice of
 `conformance/test262/later-parts.tsv` (comments removed, as `test262-moves-check` reads a case).
-All are under `test/staging/sm/`: `Date/` 23, `Number/` 15, `Math/` 13, `RegExp/` 4, `Array/` 3,
-`Function/` 3, `JSON/` 3, `global/` 3, `String/` 2, and 1 each of `expressions/`, `object/` and
-`regress/`. Each gets a line `dir <file> 4` (no directory has every case come in), listed with the
-slice it leaves in `docs/plan/slice-04/close-into-4.tsv`; each passes in every one of its runs
-(the close's check (4) over that file), and none has a line of `moves.tsv`. How the failure at the
-start was read: 6 failed on the commit the last wave of the slice started from, on `**` (3) or
-`Math.random` (3), in the run lines of that commit; the other 66 passed there already, and each
-calls a part of slice 4 the start did not have (`Date`, a member of `Math` other than `max`,
-`parseInt`, `parseFloat`, `toFixed`, `toExponential`, `toPrecision`, the functions of `Number`):
-the line of slice 19 of `conformance/test262/expected.txt` went from 604 passed at the start to
-670 on that commit, these 66. Seven other cases of slice 19 hold a token of slice 4 and pass, and
-passed at the start too, since the part is not reached or its absence throws the `TypeError` the
-case expects: `extensions/new-cross-compartment`,
-`extensions/extension-methods-reject-null-undefined-this`,
+All are under `test/staging/sm/`: `Date/` 23, `Number/` 16, `Math/` 13, `RegExp/` 4, `Array/` 3,
+`Function/` 3, `JSON/` 3, `global/` 3, `String/` 2, and 1 each of `expressions/` and `object/`.
+Each gets a line `dir <file> 4` (no directory has every case come in), listed in
+`docs/plan/slice-04/close-into-4.tsv` with the slice it leaves, the runner's message of its failed
+runs at the start and the part of slice 4 that message names; each passes in every one of its runs
+(the close's check (4) over that file), and none has a line of `moves.tsv`. The failure at the
+start is read case by case from the run lines of the full run of `a46fe885`, whose lines equal
+the expected file committed there: every run of each of the 72 failed, and its message names a
+part of slice 4 the start did not have: `Date` is not defined 26 (2 of them inside the
+`Test262Error` of an assertion), `parseInt` or `parseFloat` is not defined 3, the refusal of `**`
+2 and a counted refusal of the `**` the case compiles with `Function` 1, a call of a member of
+`Math` or of `parseInt`, `parseFloat` or `Number.parseInt` that is not there 30 (`the value is
+not a function`), a read of a property (`length`, `call`, `apply`) of a function of `Math`,
+`Number` or `Number.prototype` that is not there 9 (`Cannot use a property of undefined`), and
+`Number/conversion-invalid-precision`, whose `Number.prototype[method].call` throws a
+`TypeError` where it expects a `RangeError` 1. In that run slice 19 passes 604 cases; on the
+base of this close, 676: 72 cases went from failed to passed and none the other way, and they
+are the 72. Eight cases of slice 19 hold a token of slice 4 and pass in every run at the start
+and now: the part is not reached, is called inside a `try` whose error is dropped, or its
+absence throws the `TypeError` the case expects
+(`extensions/new-cross-compartment`, `extensions/extension-methods-reject-null-undefined-this`,
 `misc/builtin-methods-reject-null-undefined-this`, `extensions/decompile-for-of`,
-`JSON/stringify-nonarray-noncallable-replacer`, `Function/15.3.4.3-01` and
-`regress/regress-449627`; they stay in slice 19 with no line. 99 cases of slice 9 pass on the code
-of the slice and hold a token of slice 4, 93 of them the `not-a-constructor` cases of the
-directories of slice 4, and stay in slice 9 with no line: each has the line `feature
-Reflect.construct 9` (the line of slice 9 went from 170 passed at the start to 268).
+`JSON/stringify-nonarray-noncallable-replacer`, `Function/15.3.4.3-01`, `regress/regress-449627`
+and `regress/regress-596805-2`); they stay in slice 19 with no line. 98 cases of slice 9 failed at
+the start on a part of slice 4 (`Date` is not defined 47, `parseInt` or `parseFloat` is not
+defined 7, `isConstructor invoked with a non-function value` 44) and pass in every run now, 93
+of them the `not-a-constructor` cases of the directories of slice 4; they stay in slice 9 with no
+line, since each has the line `feature Reflect.construct 9` (slice 9 passes 170 cases at the
+start and 268 now). No case of another slice delivered after 4 failed at the start and passes
+in every run now.
 
 ```swell-slices
 order delivery 1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21
@@ -5686,6 +5696,7 @@ dir test/staging/sm/Number/20.1.2.6-MAX_SAFE_INTEGER.js 4
 dir test/staging/sm/Number/20.1.3.2-toExponential.js 4
 dir test/staging/sm/Number/20.1.3.2-toPrecision.js 4
 dir test/staging/sm/Number/20.1.3.3-toFixed.js 4
+dir test/staging/sm/Number/conversion-invalid-precision.js 4
 dir test/staging/sm/Number/isSafeInteger-01.js 4
 dir test/staging/sm/Number/parseFloat-01.js 4
 dir test/staging/sm/Number/parseInt-01.js 4
@@ -5705,7 +5716,6 @@ dir test/staging/sm/global/parseFloat-01.js 4
 dir test/staging/sm/global/parseInt-01.js 4
 dir test/staging/sm/global/parseInt-default-to-decimal.js 4
 dir test/staging/sm/object/toPrimitive-callers.js 4
-dir test/staging/sm/regress/regress-596805-2.js 4
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
