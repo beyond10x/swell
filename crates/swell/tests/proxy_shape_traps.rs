@@ -792,7 +792,7 @@ fn interrupt_answer(
 /// run ends in `Terminated(Interrupted)` (`docs/design/host-interface.md`, section 10), the
 /// statement after it does not run, the agent runs the next entry, and no Proxy count is left
 /// behind (a trapless chain of `reentry_depth` proxies answers, one of `reentry_depth + 1`
-/// throws the RangeError, as `FULL_BOUND` of `tests/proxy.rs` reads it).
+/// throws the RangeError, as `full_bound` of `tests/proxy.rs` reads it).
 #[test]
 fn an_own_keys_trap_ends_at_an_interrupt() {
     let mut budget = limits();
@@ -1315,3 +1315,246 @@ fn for_in_over_ordinary_objects_spends_the_steps_it_spent() {
 
 /// The steps of the two loops of [`for_in_over_ordinary_objects_spends_the_steps_it_spent`].
 const FOR_IN_STEPS: [u64; 2] = [91, 126];
+
+/// The target's descriptor, read from a target that is a Proxy whose answer holds a String made
+/// at run time, stays held while IsExtensible of that target runs a trap that collects, and
+/// SameValue of I9 and I14 then reads it. It catches `keep_property(current)` dropped in
+/// [[GetOwnProperty]] or in [[DefineOwnProperty]] (mutants 2 and 3 of the adversary's report).
+#[test]
+fn the_target_descriptor_is_held_across_is_extensible() {
+    answers_with_junk(
+        r#"var t = {};
+        Object.defineProperty(t, "s", { value: "ab" });
+        var inner = new Proxy(t, {
+          getOwnPropertyDescriptor: function () {
+            return { value: "a" + "b", writable: false, enumerable: false, configurable: false }; },
+          isExtensible: function (target) { junk(); return Reflect.isExtensible(target); }
+        });
+        var p = new Proxy(inner, { getOwnPropertyDescriptor: function () {
+          return { value: "a".concat("b"), writable: false, enumerable: false, configurable: false }; } });
+        var d = Object.getOwnPropertyDescriptor(p, "s");
+        var q = new Proxy(inner, { defineProperty: function () { return true; } });
+        [d.value, d.configurable, Reflect.defineProperty(q, "s", { value: "ab".slice(0) + "" }),
+         outcome(function () { return Reflect.defineProperty(q, "s", { value: "a" + "c" }); }, 14, "defineProperty", "s")].join();"#,
+        "ab,false,true,I14",
+    );
+}
+
+/// IsCompatiblePropertyDescriptor (`#sec-iscompatiblepropertydescriptor`) through I14
+/// for the inputs the invariant tests do not give it: a generic descriptor against a
+/// non-configurable accessor (only `enumerable` decides), a descriptor of no fields, another
+/// getter, a data descriptor against an accessor, and an accessor against a configurable data
+/// property.
+#[test]
+fn is_compatible_for_generic_and_accessor_descriptors() {
+    answers_once(
+        r#"var t = {}, g2 = function () {};
+        Object.defineProperty(t, "acc", { get: function () {}, enumerable: false, configurable: false });
+        Object.defineProperty(t, "conf", { value: 1, writable: true, enumerable: true, configurable: true });
+        var p = new Proxy(t, { defineProperty: function () { return true; } });
+        function define(k, d) { return outcome(function () { return Reflect.defineProperty(p, k, d); }, 14, "defineProperty", k); }
+        [define("acc", { enumerable: true }), define("acc", { enumerable: false }), define("acc", {}),
+         define("acc", { get: g2 }), define("acc", { value: 1 }),
+         define("conf", { get: g2, configurable: true })].join();"#,
+        "I14,true,true,I14,I14,true",
+    );
+}
+
+/// The count of `enter_proxy` after the unit's change, read through each builtin of
+/// the seven methods and through two instructions: a trapless chain of exactly `reentry_depth`
+/// proxies answers and one more throws the RangeError, the same bound whether a builtin or the
+/// running loop reaches the first Proxy.
+#[test]
+fn a_trapless_chain_reaches_the_same_bound_through_each_builtin() {
+    let mut budget = limits();
+    budget.reentry_depth = 20;
+    let mut agent = agent_with(budget).unwrap();
+    let realm = realm(&mut agent);
+    let script = r#"function c(n) { var q = { x: 1 }; for (var i = 0; i < n; i++) q = new Proxy(q, {}); return q; }
+        var ops = [
+          function (p) { return Object.getPrototypeOf(p); },
+          function (p) { return Object.keys(p); },
+          function (p) { return Reflect.ownKeys(p); },
+          function (p) { return Object.isExtensible(p); },
+          function (p) { return Reflect.getOwnPropertyDescriptor(p, "x"); },
+          function (p) { return Reflect.defineProperty(p, "y", { value: 1, configurable: true }); },
+          function (p) { return Reflect.setPrototypeOf(p, Object.prototype); },
+          function (p) { for (var k in p) {} return 1; },
+          function (p) { return p.x; },
+          function (p) { return Reflect.preventExtensions(p); }
+        ];
+        var r = [], twenty = c(20), more = c(21);
+        for (var i = 0; i < ops.length; i++) {
+          var a, b;
+          try { ops[i](twenty); a = "ok"; } catch (e) { a = e.name; }
+          try { ops[i](more); b = "ok"; } catch (e) { b = e.name; }
+          r.push(a + "/" + b);
+        }
+        r.join();"#;
+    let expected = ["ok/RangeError"; 10].join(",");
+    assert_eq!(
+        eval_text(&mut agent, &realm, script),
+        Outcome::Normal(format!("\"{expected}\""))
+    );
+}
+
+/// `super[k] = v` with a Proxy as `this` (OrdinarySetWithOwnDescriptor, steps 2.c and
+/// 2.e: Receiver.[[GetOwnProperty]], then CreateDataProperty on the receiver) holds a key made at
+/// run time while the receiver's `getOwnPropertyDescriptor` trap collects.
+#[test]
+fn super_set_holds_its_key_across_the_receivers_trap() {
+    answers_with_junk(
+        r#"var log = [];
+        var obj = { m(k, v) { super[k] = v; } };
+        var p = new Proxy({}, {
+          getOwnPropertyDescriptor: function () { junk(); return undefined; },
+          defineProperty: function (t, k, d) { log.push(k + "=" + d.value); return Reflect.defineProperty(t, k, d); }
+        });
+        obj.m.call(p, "k" + 1, "v" + 2);
+        log.join();"#,
+        "k1=v2",
+    );
+}
+
+/// A key the target lists whose [[GetOwnProperty]] answers undefined goes to
+/// targetConfigurableKeys (step 16.c), so an extensible target needs no I19. It catches such a
+/// key counted as non-configurable in step 16 of [[OwnPropertyKeys]] (mutant 1 of the
+/// adversary's report).
+#[test]
+fn a_target_key_without_a_descriptor_is_configurable() {
+    answers_once(
+        r#"var inner = new Proxy({}, { ownKeys: function () { return ["ghost"]; } });
+        var p = new Proxy(inner, { ownKeys: function () { return []; } });
+        [Reflect.ownKeys(inner).join(), Reflect.ownKeys(p).length, Object.keys(p).length].join();"#,
+        "ghost,0,0",
+    );
+}
+
+/// The order of the trap calls of the walks of builtins over a Proxy whose handler
+/// logs every trap and forwards through `Reflect`, each against its clause.
+#[test]
+fn each_builtin_walk_calls_the_traps_in_the_order_of_its_clause() {
+    answers_once(
+        r#"var log = [], h = {};
+        ["getPrototypeOf", "setPrototypeOf", "isExtensible", "preventExtensions",
+         "getOwnPropertyDescriptor", "defineProperty", "has", "get", "set", "deleteProperty",
+         "ownKeys"].forEach(function (n) {
+          h[n] = function (target, k) {
+            log.push(n + (typeof k === "string" ? ":" + k : ""));
+            return Reflect[n].apply(null, arguments);
+          };
+        });
+        function logged(t) { return new Proxy(t, h); }
+        var r = [];
+        function op(name, t, f) {
+          var p = logged(t);
+          log.length = 0;
+          var v;
+          try { v = f(p); } catch (e) { v = e.name; }
+          r.push(name + "=" + String(v) + "[" + log.join("+") + "]");
+        }
+        op("keys", { a: 1 }, function (p) { return Object.keys(p).join(); });
+        op("values", { a: 1 }, function (p) { return Object.values(p).join(); });
+        op("entries", { a: 1 }, function (p) { return Object.entries(p).join(); });
+        op("assign", { a: 1 }, function (p) { return Object.assign({}, p).a; });
+        op("spread", { a: 1 }, function (p) { return ({ ...p }).a; });
+        op("rest", { a: 1, b: 2 }, function (p) { var { a, ...rest } = p; return Object.keys(rest).join(); });
+        op("names", { a: 1 }, function (p) { return Object.getOwnPropertyNames(p).join(); });
+        op("descriptors", { a: 1 }, function (p) { return Object.keys(Object.getOwnPropertyDescriptors(p)).join(); });
+        op("freeze", { a: 1 }, function (p) { return Object.freeze(p) === p; });
+        op("isFrozen", Object.freeze({ a: 1 }), function (p) { return Object.isFrozen(p); });
+        op("seal", { a: 1 }, function (p) { return Object.seal(p) === p; });
+        op("isSealed", Object.seal({ a: 1 }), function (p) { return Object.isSealed(p); });
+        op("json", { a: 1 }, function (p) { return JSON.stringify(p).length; });
+        op("instanceof", {}, function (p) { return p instanceof function F() {}; });
+        op("isPrototypeOf", {}, function (p) { return Object.prototype.isPrototypeOf(p); });
+        op("setPrototypeOf", {}, function (p) { return Object.setPrototypeOf(p, null) === p; });
+        op("push", [1, 2], function (p) { return Array.prototype.push.call(p, 3); });
+        r.join(" ");"#,
+        "keys=a[ownKeys+getOwnPropertyDescriptor:a] \
+         values=1[ownKeys+getOwnPropertyDescriptor:a+get:a] \
+         entries=a,1[ownKeys+getOwnPropertyDescriptor:a+get:a] \
+         assign=1[ownKeys+getOwnPropertyDescriptor:a+get:a] \
+         spread=1[ownKeys+getOwnPropertyDescriptor:a+get:a] \
+         rest=b[get:a+ownKeys+getOwnPropertyDescriptor:b+get:b] \
+         names=a[ownKeys] \
+         descriptors=a[ownKeys+getOwnPropertyDescriptor:a] \
+         freeze=true[preventExtensions+ownKeys+getOwnPropertyDescriptor:a+defineProperty:a] \
+         isFrozen=true[isExtensible+ownKeys+getOwnPropertyDescriptor:a] \
+         seal=true[preventExtensions+ownKeys+defineProperty:a] \
+         isSealed=true[isExtensible+ownKeys+getOwnPropertyDescriptor:a] \
+         json=7[get:toJSON+ownKeys+getOwnPropertyDescriptor:a+get:a] \
+         instanceof=false[getPrototypeOf] \
+         isPrototypeOf=true[getPrototypeOf] \
+         setPrototypeOf=true[setPrototypeOf] \
+         push=3[get:length+set:2+getOwnPropertyDescriptor:2+defineProperty:2+set:length+getOwnPropertyDescriptor:length+defineProperty:length]",
+    );
+}
+
+/// The reads of a trap's answer, in the order of their clauses: ToPropertyDescriptor
+/// of a `getOwnPropertyDescriptor` answer that is a Proxy (HasProperty, then Get, of each field
+/// in the order enumerable, configurable, value, writable, get, set); CreateListFromArrayLike of
+/// an `ownKeys` answer that is a Proxy (`length` once, then each index); a String object as the
+/// answer; a `length` getter that grows the array-like.
+#[test]
+fn the_answer_of_a_trap_is_read_in_the_order_of_its_clause() {
+    answers_once(
+        r#"var log = [];
+        var desc = new Proxy({ value: 1, configurable: true }, {
+          has: function (t, k) { log.push("has:" + k); return k in t; },
+          get: function (t, k) { log.push("get:" + k); return t[k]; }
+        });
+        var p = new Proxy({}, { getOwnPropertyDescriptor: function () { return desc; } });
+        var d = Object.getOwnPropertyDescriptor(p, "x");
+        var r = [log.join("+"), Object.keys(d).join("+")];
+        log.length = 0;
+        var like = new Proxy(["a", "b"], { get: function (t, k) { log.push("get:" + String(k)); return t[k]; } });
+        r.push(Reflect.ownKeys(new Proxy({}, { ownKeys: function () { return like; } })).join("+"), log.join("+"));
+        r.push(Reflect.ownKeys(new Proxy({}, { ownKeys: function () { return new String("ab"); } })).join("+"));
+        var grows = { 0: "a", 1: "b", get length() { this[2] = "c"; this[3] = "d"; return 2; } };
+        r.push(Reflect.ownKeys(new Proxy({}, { ownKeys: function () { return grows; } })).join("+"));
+        r.join(" ");"#,
+        "has:enumerable+has:configurable+get:configurable+has:value+get:value+has:writable+has:get+has:set \
+         value+writable+enumerable+configurable \
+         a+b get:length+get:0+get:1 \
+         a+b \
+         a+b",
+    );
+}
+
+/// Keys that are Strings of numbers keep their text and their order through
+/// `ownKeys` (an index, a String that is not one), and a non-extensible target's index key is
+/// the String of its number for I20 and I21.
+#[test]
+fn own_keys_keeps_strings_of_numbers_as_listed() {
+    answers_once(
+        r#"var q = new Proxy({}, { ownKeys: function () {
+          return ["01", "1", "4294967295", "-0", "1.5", "4294967294", "0"]; } });
+        var t = Object.preventExtensions({ 1: "a", "01": "b" });
+        var answer, c = new Proxy(t, { ownKeys: function () { return answer; } });
+        function keys(a, k) { answer = a; return outcome(function () { return Reflect.ownKeys(c).join("+"); }, k === "01" ? 20 : 21, "ownKeys", k); }
+        [Reflect.ownKeys(q).join("+"), keys(["01", String(1)]), keys(["1", "1.0"], "01"),
+         keys(["1", "01", "1.0"], "1.0")].join(" ");"#,
+        "01+1+4294967295+-0+1.5+4294967294+0 01+1 I20 I21",
+    );
+}
+
+/// The order of the checks of [[DefineOwnProperty]] for a property the target lacks:
+/// a target that is not extensible breaks I12 before `configurable: false` breaks I13 (step 14.a
+/// before 14.b); a descriptor of only `undefined` fields reaches the trap with those fields.
+/// It catches the setter read before the getter in FromPropertyDescriptor (mutant 4 of the
+/// adversary's report).
+#[test]
+fn define_property_checks_i12_before_i13() {
+    answers_once(
+        r#"var seen, closed = new Proxy(Object.preventExtensions({}), { defineProperty: function () { return true; } });
+        var open = new Proxy({}, { defineProperty: function (t, k, d) { seen = d; return true; } });
+        var r = [outcome(function () { return Reflect.defineProperty(closed, "x", { value: 1, configurable: false }); }, 12, "defineProperty", "x")];
+        Reflect.defineProperty(open, "y", { value: undefined });
+        r.push(Object.keys(seen).join("+"), "value" in seen);
+        Reflect.defineProperty(open, "y", { get: undefined, set: undefined });
+        r.push(Object.keys(seen).join("+"));
+        r.join();"#,
+        "I12,value,true,get+set",
+    );
+}
