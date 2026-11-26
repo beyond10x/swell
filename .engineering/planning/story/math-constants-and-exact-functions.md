@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:math-constants-and-exact-functions
 kind: story
-status: active
+status: implemented
 title: 'Math has its constants and the functions that IEEE 754 makes exact: abs, ceil, floor, trunc, round, sign, fround, clz32, imul, min and sqrt, and the first consumer calls of Math answer as the standard says'
 summary: The 8 Math constants and 11 exact Math functions with the max/min helper, the seven Math calls of surf testharness, and 133 cases of slice 4, with no libm call.
 relations:
@@ -14,10 +14,11 @@ scope:
   path: crates/swell/src/object/builtin_function.rs
 - confidence: cited
   path: crates/swell/tests/builtins_math.rs
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:24Z", actor: "human:operator", revision: 9}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:24Z", actor: "human:operator", revision: 10}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:46Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

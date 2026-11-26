@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:promise-constructor-then-and-jobs
 kind: story
-status: active
+status: implemented
 title: 'Promise runs: the constructor, its resolving functions, then, catch, resolve and reject, with promise jobs in the queue of the agent and the host''s hooks around each'
 summary: Promise objects and their abstract operations, builtin closures with slots in a box, the promise job in the queue (rooted from trace_roots, charged while queued, one step per job and per reaction), HostEnqueuePromiseJob, make/call job callback, prepare and clean-up hooks, Cx::new_promise_capability; HOST-78, 80, 82, 83, 84, 148; 187 cases (368 runs) on its list; no finally, statics, AggregateError or rejection tracker.
 relations:
@@ -55,10 +55,11 @@ scope:
   path: crates/test262/tests/run.rs
 - confidence: cited
   path: website/data/status.json
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T18:19:59Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T18:20:00Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:47Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

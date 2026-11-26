@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:44Z",
+  "actor": "human:operator",
+  "artifact": "story:async-methods-in-object-literals",
+  "kind": "story",
+  "revision": 19,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit 88123834e69d, an ancestor of that head",
+    "reference": "crates/swell/tests/async_methods.rs:57 an_async_method_returns_a_promise_and_awaits"
+  }
+}

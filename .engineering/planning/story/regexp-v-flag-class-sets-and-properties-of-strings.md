@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:regexp-v-flag-class-sets-and-properties-of-strings
 kind: story
-status: active
+status: implemented
 title: 'The flag v: class set expressions, strings in classes and the properties of strings'
 summary: 185 failing cases (370 runs); the emoji sequence tables; the last refusal of slice 5 goes and HOST-191's test holds its delivered form.
 relations:
@@ -61,10 +61,11 @@ scope:
   path: crates/unicode/src/tables/properties_of_strings.rs
 - confidence: cited
   path: crates/unicode/tests/property.rs
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T03:24:25Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T03:24:26Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:48Z", actor: "human:operator", revision: 7, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:49Z",
+  "actor": "human:operator",
+  "artifact": "story:swell-num-date-text",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit 1e7092d66852, an ancestor of that head",
+    "reference": "crates/num/tests/date_text.rs:43 the_date_time_string_format_reads_its_forms"
+  }
+}

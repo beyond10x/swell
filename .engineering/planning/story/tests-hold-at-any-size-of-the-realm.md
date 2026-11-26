@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:tests-hold-at-any-size-of-the-realm
 kind: story
-status: active
+status: implemented
 title: 'No test of swell turns on the size of the realm: each takes its room from its own readings, and a realm padded by k functions shows it'
 summary: The tests' support code pads every realm of a test by k host functions (SWELL_TEST_REALM_FUNCTIONS); every test red for the realm's size takes its room from readings of its own agents; the task test-realm-sizes runs swell in both modes at k up to 200 in the lane slow and before a unit that adds to the realm reports.
 relations:
 - decomposes: epic:slice-04-numbers-and-dates
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T15:13:19Z", actor: "human:operator", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-24T15:13:19Z", actor: "human:operator", revision: 3}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:50Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}}
 ---
 Waits for: `story:math-constants-and-exact-functions` (its changes of `termination.rs`,
 `determinism.rs`, `builtins_array_from_async.rs` and `async_functions.rs`). Base: the wave tip

@@ -2,13 +2,14 @@
 format: aep.planning-md/3
 id: story:copies-held-across-a-call-into-script-are-charged
 kind: story
-status: active
+status: implemented
 title: A buffer whose size a script controls is charged while the engine calls into script, or is not made
 summary: Copies of a String's units, String builders, lists of values, the argument copy of call and new, the kept stack's room and the queue of jobs are charged to memory_bytes by capacity before they are made and credited when dropped, or the code reads in place; HOST-215 and HostError::MemoryBudget.
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T12:36:28Z", actor: "human:operator", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-24T12:36:28Z", actor: "human:operator", revision: 3}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:44Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}}
 ---
 Waits for: nothing; starts on `wave/s10-1` at `76aa4fc`. Consumer: the browser that embeds the
 engine. Its condition for running page scripts is that no buffer of the engine stays alive without

@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:46Z",
+  "actor": "human:operator",
+  "artifact": "story:math-sum-precise",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit 90f3e7752462, an ancestor of that head",
+    "reference": "crates/swell/tests/math_sum_precise.rs:105 an_array_a_generator_and_an_iterator_give_the_same_sum"
+  }
+}

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:math-functions
 kind: story
-status: active
+status: implemented
 title: Math functions that need an algorithm, over the swell-num math stories
 summary: The 22 Math functions that need an algorithm (acos to tanh, hypot and pow), the platform-equality test of HOST-135, and the lift of 189 test262 cases.
 relations:
@@ -26,10 +26,11 @@ scope:
   path: crates/swell/tests/math_platform.rs
 - confidence: cited
   path: website/data/status.json
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:27Z", actor: "human:operator", revision: 8}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:27Z", actor: "human:operator", revision: 9}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:46Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

@@ -92,6 +92,11 @@ wrong file and the test is at `crates/swell/tests/dynamic_function.rs:689`. The 
 (`story:release-0-12-0-with-binaries`, `story:gate-selftests-write-no-tracked-file`) are
 delivered and still `draft`; they are not moved by this check.
 
+The 40 stories are `implemented` in the store since 2026-11-26, 07:00 CET. Each carries one
+`test_result` record: its source is the gate on `wave/big-1` at `248a031c` (exit 0) with the
+commit that delivered the story, an ancestor of that head; its reference is the test or file
+the check found in the tree.
+
 ## The commits of this wave
 
 The unit commits on the unit branches, the merges into `wave/big-1`, the coordinator's commits

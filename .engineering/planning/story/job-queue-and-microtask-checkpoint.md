@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:job-queue-and-microtask-checkpoint
 kind: story
-status: active
+status: implemented
 title: 'The microtask queue of the agent and its checkpoint: host microtasks run in one order under one step budget, and the runner judges async cases by what $DONE prints'
 summary: The queue and perform_microtask_checkpoint of host-interface.md decision 11 without Promise (host microtasks only; one outermost entry, one step per entry dequeued, the nested checkpoint, what a termination leaves); HOST-77, 79, 81, 149; doneprintHandle.js, the checkpoint and the async judgement of the runner with a fixture tree of its own; lifts no case (the 160 runs on $DONE is not defined end elsewhere).
 relations:
@@ -52,10 +52,11 @@ scope:
   path: crates/test262/tests/run.rs
 - confidence: cited
   path: website/data/status.json
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T18:19:57Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T18:19:58Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:46Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

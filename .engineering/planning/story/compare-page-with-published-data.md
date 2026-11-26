@@ -2,13 +2,14 @@
 format: aep.planning-md/3
 id: story:compare-page-with-published-data
 kind: story
-status: active
+status: implemented
 title: The compare page and the KPI page, with published data and swell's own values
 summary: engines.json from the catalog, javascript-zoo test262 counts and swell's committed files; /compare and /docs/kpis
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-25T12:46:20Z", actor: "human:operator", revision: 3}
 - {from: "proposed", to: "active", at: "2026-11-25T12:46:35Z", actor: "human:operator", revision: 4}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:44Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"test_result":1}}}
 ---
 The owner, 2026-11-25: evaluate the KPIs for other ECMAScript engines and for swell, show them
 side by side on a page where one picks engines, and describe every KPI on a page of its own.

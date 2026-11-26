@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:date-object-constructor-now-utc-and-getters
 kind: story
-status: active
+status: implemented
 title: 'Date reads the time zone: the constructor with components, Date.UTC and the 17 getters in local time and in UTC over the zone hooks, charged, with the clamp, the offset strings and the bounded search'
 summary: The constructor with components, Date.UTC and 17 getters over the zone hooks charged, HOST-128, 209, 210, 211 and the first half of 127, 197 cases of slice 4.
 relations:
@@ -22,10 +22,11 @@ scope:
   path: crates/swell/tests/support/host.rs
 - confidence: cited
   path: website/data/status.json
-revision: 16
+revision: 17
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:25Z", actor: "human:operator", revision: 15}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:25Z", actor: "human:operator", revision: 16}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:45Z", actor: "human:operator", revision: 17, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

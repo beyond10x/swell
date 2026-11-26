@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:43Z",
+  "actor": "human:operator",
+  "artifact": "story:async-functions-and-await",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit 1be065ff8cf6, an ancestor of that head",
+    "reference": "crates/swell/tests/async_functions.rs:428 the_consumer_shape_runs_to_its_end"
+  }
+}

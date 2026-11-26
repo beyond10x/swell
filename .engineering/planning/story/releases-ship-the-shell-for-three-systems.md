@@ -2,13 +2,14 @@
 format: aep.planning-md/3
 id: story:releases-ship-the-shell-for-three-systems
 kind: story
-status: active
+status: implemented
 title: Every release ships the swell binary for Linux, macOS and Windows
 summary: A tag builds, smoke-tests and packages swell-cli for five targets on the forge's runners
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-25T14:03:47Z", actor: "human:operator", revision: 3}
 - {from: "proposed", to: "active", at: "2026-11-25T14:03:47Z", actor: "human:operator", revision: 4}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:48Z", actor: "human:operator", revision: 5, decided_on: {"recorded":{"test_result":1}}}
 ---
 The owner, 2026-11-25: "make sure swell ships as binary: linux, mac, windows". Every release
 from the next one on carries the `swell` shell binary of `story:cli-runs-a-script-file` for
