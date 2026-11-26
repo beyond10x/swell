@@ -5,7 +5,7 @@
 #
 # Run from the repository root:
 #   sh bench/run.sh all [WORKERS]           on the workstation: one pool job per (config, suite),
-#                                           WORKERS (default 6) at a time, then assemble; stops
+#                                           WORKERS (default 1) at a time, then assemble; stops
 #                                           at the first job the pool refuses
 #   sh bench/run.sh prepare                 in a pool job: the image and the tool
 #   sh bench/run.sh job CONFIG SUITE WORKER ORIGIN [RUNS] [ITERATIONS_FILE]
@@ -413,7 +413,7 @@ job() {
 # by a later `all` with the same date (jobs with rows are kept); the first job the pool refuses
 # ("did not run") stops every worker, and nothing is assembled.
 all() {
-  workers=${1:-6}
+  workers=${1:-1}
   stamp=$(date -u +%Y-%m-%d)
   out=.out/bench/run-$stamp
   mkdir -p "$out/logs"

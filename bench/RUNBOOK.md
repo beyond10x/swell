@@ -26,11 +26,13 @@ Run from the repository root of a managed worktree, in this order:
    slot --timeout 30m --tokens 2 sh bench/run.sh job quickjs are-we-fast-yet 1 "$o" 1
    ```
 
-3. The run: one pool job per (configuration, suite), six at a time. The orchestrator itself only
-   waits, so it starts without the `slot` prefix; each job it starts carries it.
+3. The run: one pool job per (configuration, suite), one at a time. The orchestrator itself only
+   waits, so it starts without the `slot` prefix; each job it starts carries it. This host admits
+   one benchmark job at a time, and a run starts only when `slot status` shows no other job of
+   this repository on the node.
 
    ```sh
-   sh bench/run.sh all 6
+   sh bench/run.sh all 1
    ```
 
    It writes `bench/results/<date>-<commit>.json` and stops at the first job the pool refuses.

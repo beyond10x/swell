@@ -52,7 +52,8 @@ tasks:
   bench-run:
     desc: Measure K2 to K5 of the engines of bench/image/configs.tsv on the build node, one pool job per (config, suite), and write bench/results/<date>-<commit>.json. Manual; not in the gate.
     summary: |
-      Runs sh bench/run.sh all BENCH_WORKERS (default 6): one pool job that builds the image
+      Runs sh bench/run.sh all BENCH_WORKERS (default 1, the one benchmark job at a time this
+      host admits): one pool job that builds the image
       (bench/image/build.sh: the pinned engines and suite files, each checked by sha256) and the
       tool (bench/tool), then one job per (config, suite) with slot --timeout 30m, BENCH_WORKERS
       at a time, each on two CPUs of its own, and then assembles the rows the jobs print into
@@ -62,6 +63,6 @@ tasks:
       from the workstation, not inside a pool job; logs go to .out/bench/run-<date>/logs/.
     dir: '{{.TASKFILE_DIR}}/..'
     vars:
-      BENCH_WORKERS: '{{.BENCH_WORKERS | default "6"}}'
+      BENCH_WORKERS: '{{.BENCH_WORKERS | default "1"}}'
     cmds:
       - sh bench/run.sh all {{shellQuote .BENCH_WORKERS}}
