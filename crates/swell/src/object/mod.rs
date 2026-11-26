@@ -44,6 +44,7 @@ pub(crate) mod bound_function;
 pub(crate) mod builtin_function;
 pub(crate) mod ecmascript_function;
 pub(crate) mod generator;
+pub(crate) mod keyed_entries;
 pub(crate) mod ordinary;
 pub(crate) mod promise;
 pub(crate) mod property;
