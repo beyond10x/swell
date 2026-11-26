@@ -554,10 +554,12 @@ fn a_frame_suspended_in_an_async_generator_is_charged_until_its_object_is_freed(
 
 /// The requests of [`host_206_requests_are_charged_until_the_generator_is_freed_and_bounded_by_the_memory_budget`]
 /// and [`settling_a_request_credits_nothing_until_the_generator_is_freed`]: 1,000, HOST-206's
-/// count; 100 with the feature `collect-every-safe-point`, where every safe point collects the
-/// whole heap, which grows with each request (at 1,000 the second test passed 60 s there).
+/// count; 40 with the feature `collect-every-safe-point`, where every safe point collects the
+/// whole heap, which grows with each request (at 1,000 the second test passed 60 s there; at 100
+/// HOST-206 took 2.5 s and the second test 2.2 s alone in the test profile, opt-level 0, on
+/// 2026-11-27, with a [`QUEUE_ROOM`] of 64 KiB).
 const REQUESTS: u64 = if cfg!(feature = "collect-every-safe-point") {
-    100
+    40
 } else {
     1_000
 };
@@ -901,10 +903,10 @@ const QUEUE_BUDGET: u64 = if cfg!(feature = "collect-every-safe-point") {
 };
 
 /// The room of the memory rounds of [`a_script_that_queues_requests_without_end_ends_at_a_budget`]
-/// and of HOST-206 above the reading of a fresh realm: 256 KiB; 64 KiB with the feature
-/// `collect-every-safe-point`.
+/// and of HOST-206 above the reading of a fresh realm: 256 KiB; 16 KiB with the feature
+/// `collect-every-safe-point`, where every request of the loop that fills it collects the heap.
 const QUEUE_ROOM: u64 = if cfg!(feature = "collect-every-safe-point") {
-    64 * 1024
+    16 * 1024
 } else {
     256 * 1024
 };

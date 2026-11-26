@@ -827,11 +827,14 @@ fn arrows_bytes(kind: &str, n: u32) -> (u64, u64) {
 
 /// Decision 4, "Memory budget": arrows (with and without a kept NewTarget) and methods, kept and
 /// then dropped, leave the same reading after a collection in two rounds: every box is charged
-/// and credited.
+/// and credited. The loop makes 4,000 of each; 20 with the feature `collect-every-safe-point`,
+/// where every instruction marks the heap (40 took 2.0 s alone there in the test profile,
+/// opt-level 0, on 2026-11-27): a box that is not credited moves the reading after the drop
+/// by its bytes, whatever the count.
 #[test]
 fn arrow_boxes_are_charged_and_credited() {
     let n: u32 = if cfg!(feature = "collect-every-safe-point") {
-        40
+        20
     } else {
         4_000
     };
@@ -853,12 +856,13 @@ fn arrow_boxes_are_charged_and_credited() {
 #[test]
 fn the_budgets_around_new_end_and_leak_nothing() {
     // With a collection at every safe point each instruction marks the whole heap: smaller
-    // limits, and no memory case (its loop runs until the heap is full).
+    // limits, and no memory case (its loop runs until the heap is full). 3,000 steps and a
+    // frame depth of 60 took 2.9 s alone there in the test profile (opt-level 0) on 2026-11-27.
     let collect = cfg!(feature = "collect-every-safe-point");
     let mut limits = limits();
-    limits.steps_per_entry = if collect { 3_000 } else { 300_000 };
+    limits.steps_per_entry = if collect { 1_000 } else { 300_000 };
     limits.memory_bytes = 2 * 1024 * 1024;
-    limits.frame_depth = if collect { 60 } else { 500 };
+    limits.frame_depth = if collect { 30 } else { 500 };
     limits.reentry_depth = if collect { 6 } else { 32 };
     let mut agent = agent_with(limits).unwrap();
     let realm = realm(&mut agent);

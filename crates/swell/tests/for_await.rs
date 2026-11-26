@@ -655,8 +655,15 @@ fn a_for_await_at_frame_depth_throws_a_range_error() {
     }
 }
 
-/// The `steps_per_entry` of the step-budget test.
-const LOOP_BUDGET: u64 = 10_000;
+/// The `steps_per_entry` of the step-budget test: 10,000; 2,000 with the feature
+/// `collect-every-safe-point`, where every step collects (10,000 took 2.6 s alone in that mode
+/// in the test profile, opt-level 0, on 2026-11-27). Each is many turns of the loop, each a
+/// job that queues the next.
+const LOOP_BUDGET: u64 = if cfg!(feature = "collect-every-safe-point") {
+    2_000
+} else {
+    10_000
+};
 
 /// "`async` functions on suspended frames", items 4 and 5, and HOST-199: a `for await` over an
 /// async iterable whose `next` answers a resolved promise of `{ done: false }` for ever runs

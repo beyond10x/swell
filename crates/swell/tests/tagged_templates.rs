@@ -446,16 +446,17 @@ fn many_sites(n: u32) -> String {
 ///
 /// The count ([`mode_count`]): 1,000 sites in the default mode, gate and lane alike (0.35 to
 /// 0.69 CPU seconds alone; the reading of none 191,253 bytes, the 1,000 add 1,737,682, the
-/// room 868,841); 100 with the feature `collect-every-safe-point`, gate and lane alike. 1,000
+/// room 868,841); 40 with the feature `collect-every-safe-point`, gate and lane alike. 1,000
 /// took 30.9 to 43.4 CPU seconds alone in that mode at the full count, where every instruction
 /// marks a heap that grows with the kept objects, and the lane's collect half killed the test
-/// at 60 s at a load of 155; 100 take 0.94 to 1.44 (measured on 2026-11-23, this unit's runs
-/// at loads of 18 to 129). What 100 still show: the budget is still a measured reading plus a
-/// room of half what the sites add (the 100 add 145,936 bytes, the room 72,968), the script of
-/// 100 sites passes it and ends at it, and the script of none completes under it.
+/// at 60 s at a load of 155; 100 took 0.94 to 1.44 (measured on 2026-11-23, this unit's runs
+/// at loads of 18 to 129), and 2.2 s alone in the test profile (opt-level 0) on 2026-11-27.
+/// What 40 still show: the budget is still a measured reading plus a room of half what the
+/// sites add (the 100 added 196,112 bytes on 2026-11-27), the script of 40 sites passes it and
+/// ends at it, and the script of none completes under it.
 #[test]
 fn many_sites_end_at_the_memory_budget() {
-    let n = mode_count(1_000, 100);
+    let n = mode_count(1_000, 40);
     let (none_outcome, none) = heap_after(&many_sites(0));
     let (kept_outcome, kept) = heap_after(&many_sites(n));
     assert_eq!(none_outcome, Outcome::Normal("0".to_string()));
