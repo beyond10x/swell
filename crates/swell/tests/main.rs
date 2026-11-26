@@ -67,6 +67,8 @@ mod builtins_object_integrity;
 mod builtins_reflect;
 #[cfg(any(not(test_modules), test_modules = "builtins_scripts"))]
 mod builtins_scripts;
+#[cfg(any(not(test_modules), test_modules = "builtins_set_methods"))]
+mod builtins_set_methods;
 #[cfg(any(not(test_modules), test_modules = "builtins_string"))]
 mod builtins_string;
 #[cfg(any(not(test_modules), test_modules = "builtins_string_access"))]
