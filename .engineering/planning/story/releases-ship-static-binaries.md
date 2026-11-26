@@ -2,10 +2,20 @@
 format: aep.planning-md/3
 id: story:releases-ship-static-binaries
 kind: story
-status: draft
+status: active
 title: Releases ship static musl Linux binaries and a Windows binary with its runtime linked in
 summary: Two musl archives beside the glibc ones, the static C runtime on Windows, seven archives per release
-revision: 2
+scope:
+- confidence: cited
+  path: .github/workflows/release-build.yml
+- confidence: cited
+  path: docs/releasing.md
+- confidence: cited
+  path: website/docs/embedding.md
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T04:21:49Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T04:21:49Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
 ---
 Decided by the owner on 2026-11-25, about 23:10 CET, for every Rust tool of the organization:
 releases carry static musl Linux binaries ("A: all Rust tools"; relayed by the operator session
