@@ -1,0 +1,72 @@
+test/staging/sm/Array/change-array-by-copy-errors-from-correct-realm.js	19	dir test/staging/sm/Array/change-array-by-copy-errors-from-correct-realm.js 4	parse: refused: SyntaxError: exponentiation operator is not supported before slice 4	**
+test/staging/sm/Array/toSpliced-dense.js	19	dir test/staging/sm/Array/toSpliced-dense.js 4	threw TypeError: the value is not a function	Math.min
+test/staging/sm/Array/unshift-01.js	19	dir test/staging/sm/Array/unshift-01.js 4	parse: refused: SyntaxError: exponentiation operator is not supported before slice 4	**
+test/staging/sm/Date/UTC-convert-all-arguments.js	19	dir test/staging/sm/Date/UTC-convert-all-arguments.js 4	threw Test262Error: index 0: expected 42, got ReferenceError: Date is not defined Expected SameValue(«ReferenceError: Date is not defined», «42») to be true	Date
+test/staging/sm/Date/constructor-convert-all-arguments.js	19	dir test/staging/sm/Date/constructor-convert-all-arguments.js 4	threw Test262Error: index undefined: expected 42, got ReferenceError: Date is not defined Expected SameValue(«ReferenceError: Date is not defined», «42») to be true	Date
+test/staging/sm/Date/constructor-one-Date-argument.js	19	dir test/staging/sm/Date/constructor-one-Date-argument.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/constructor-one-argument.js	19	dir test/staging/sm/Date/constructor-one-argument.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/defaultvalue.js	19	dir test/staging/sm/Date/defaultvalue.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/dst-offset-caching-1-of-8.js	19	dir test/staging/sm/Date/dst-offset-caching-1-of-8.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/dst-offset-caching-2-of-8.js	19	dir test/staging/sm/Date/dst-offset-caching-2-of-8.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/dst-offset-caching-3-of-8.js	19	dir test/staging/sm/Date/dst-offset-caching-3-of-8.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/dst-offset-caching-4-of-8.js	19	dir test/staging/sm/Date/dst-offset-caching-4-of-8.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/dst-offset-caching-5-of-8.js	19	dir test/staging/sm/Date/dst-offset-caching-5-of-8.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/dst-offset-caching-6-of-8.js	19	dir test/staging/sm/Date/dst-offset-caching-6-of-8.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/dst-offset-caching-7-of-8.js	19	dir test/staging/sm/Date/dst-offset-caching-7-of-8.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/dst-offset-caching-8-of-8.js	19	dir test/staging/sm/Date/dst-offset-caching-8-of-8.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/equality-to-boolean.js	19	dir test/staging/sm/Date/equality-to-boolean.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/fractions.js	19	dir test/staging/sm/Date/fractions.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/makeday-year-month-is-infinity.js	19	dir test/staging/sm/Date/makeday-year-month-is-infinity.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/time-components-negative-zero.js	19	dir test/staging/sm/Date/time-components-negative-zero.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/timeclip.js	19	dir test/staging/sm/Date/timeclip.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/toISOString-01.js	19	dir test/staging/sm/Date/toISOString-01.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/toISOString.js	19	dir test/staging/sm/Date/toISOString.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/toJSON-01.js	19	dir test/staging/sm/Date/toJSON-01.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/toPrimitive.js	19	dir test/staging/sm/Date/toPrimitive.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Date/two-digit-years.js	19	dir test/staging/sm/Date/two-digit-years.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Function/builtin-no-prototype.js	19	dir test/staging/sm/Function/builtin-no-prototype.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Function/configurable-length-builtins.js	19	dir test/staging/sm/Function/configurable-length-builtins.js 4	threw TypeError: Cannot use a property of undefined	Math.hypot, Math.sin
+test/staging/sm/Function/strict-arguments.js	19	dir test/staging/sm/Function/strict-arguments.js 4	threw TypeError: the value is not a function	Math.random
+test/staging/sm/JSON/parse-mega-huge-array.js	19	dir test/staging/sm/JSON/parse-mega-huge-array.js 4	threw TypeError: the value is not a function	Math.pow
+test/staging/sm/JSON/stringify-replacer-array-duplicated-element.js	19	dir test/staging/sm/JSON/stringify-replacer-array-duplicated-element.js 4	threw TypeError: the value is not a function	Math.pow, Math.random
+test/staging/sm/JSON/stringify.js	19	dir test/staging/sm/JSON/stringify.js 4	threw ReferenceError: Date is not defined	Date
+test/staging/sm/Math/20.2.2.ToNumber.js	19	dir test/staging/sm/Math/20.2.2.ToNumber.js 4	threw TypeError: Cannot use a property of undefined	Math.atan2, Math.min, Math.pow
+test/staging/sm/Math/asinh-exact.js	19	dir test/staging/sm/Math/asinh-exact.js 4	threw TypeError: the value is not a function	Math.asinh
+test/staging/sm/Math/cbrt-exact.js	19	dir test/staging/sm/Math/cbrt-exact.js 4	threw TypeError: the value is not a function	Math.cbrt
+test/staging/sm/Math/clz32.js	19	dir test/staging/sm/Math/clz32.js 4	threw TypeError: the value is not a function	Math.clz32
+test/staging/sm/Math/cosh-exact.js	19	dir test/staging/sm/Math/cosh-exact.js 4	threw TypeError: the value is not a function	Math.cosh
+test/staging/sm/Math/exp-exact.js	19	dir test/staging/sm/Math/exp-exact.js 4	threw TypeError: the value is not a function	Math.E, Math.exp
+test/staging/sm/Math/expm1-exact.js	19	dir test/staging/sm/Math/expm1-exact.js 4	threw TypeError: the value is not a function	Math.expm1
+test/staging/sm/Math/expm1-monotonicity.js	19	dir test/staging/sm/Math/expm1-monotonicity.js 4	threw TypeError: the value is not a function	Math.expm1
+test/staging/sm/Math/log10-exact.js	19	dir test/staging/sm/Math/log10-exact.js 4	threw TypeError: the value is not a function	Math.log10
+test/staging/sm/Math/log2-exact.js	19	dir test/staging/sm/Math/log2-exact.js 4	threw TypeError: the value is not a function	Math.log2
+test/staging/sm/Math/sign.js	19	dir test/staging/sm/Math/sign.js 4	threw TypeError: the value is not a function	Math.sign
+test/staging/sm/Math/sinh-exact.js	19	dir test/staging/sm/Math/sinh-exact.js 4	threw TypeError: the value is not a function	Math.sinh
+test/staging/sm/Math/tanh-exact.js	19	dir test/staging/sm/Math/tanh-exact.js 4	threw TypeError: the value is not a function	Math.tanh
+test/staging/sm/Number/15.7.3.7-EPSILON.js	19	dir test/staging/sm/Number/15.7.3.7-EPSILON.js 4	threw TypeError: the value is not a function	Math.pow
+test/staging/sm/Number/15.7.4.2.js	19	dir test/staging/sm/Number/15.7.4.2.js 4	threw TypeError: the value is not a function	parseInt, Math.pow
+test/staging/sm/Number/20.1.2.10-MIN_SAFE_INTEGER.js	19	dir test/staging/sm/Number/20.1.2.10-MIN_SAFE_INTEGER.js 4	threw TypeError: the value is not a function	Math.pow
+test/staging/sm/Number/20.1.2.6-MAX_SAFE_INTEGER.js	19	dir test/staging/sm/Number/20.1.2.6-MAX_SAFE_INTEGER.js 4	threw TypeError: the value is not a function	Math.pow
+test/staging/sm/Number/20.1.3.2-toExponential.js	19	dir test/staging/sm/Number/20.1.3.2-toExponential.js 4	threw TypeError: Cannot use a property of undefined	Number.prototype.toExponential
+test/staging/sm/Number/20.1.3.2-toPrecision.js	19	dir test/staging/sm/Number/20.1.3.2-toPrecision.js 4	threw TypeError: Cannot use a property of undefined	Number.prototype.toPrecision
+test/staging/sm/Number/20.1.3.3-toFixed.js	19	dir test/staging/sm/Number/20.1.3.3-toFixed.js 4	threw TypeError: Cannot use a property of undefined	Number.prototype.toFixed
+test/staging/sm/Number/conversion-invalid-precision.js	19	dir test/staging/sm/Number/conversion-invalid-precision.js 4	threw Test262Error: Expected a RangeError but got a TypeError	toExponential, toFixed, toPrecision
+test/staging/sm/Number/isSafeInteger-01.js	19	dir test/staging/sm/Number/isSafeInteger-01.js 4	threw TypeError: Cannot use a property of undefined	Number.isSafeInteger, Math.pow
+test/staging/sm/Number/parseFloat-01.js	19	dir test/staging/sm/Number/parseFloat-01.js 4	threw TypeError: the value is not a function	parseFloat, Number.parseFloat
+test/staging/sm/Number/parseInt-01.js	19	dir test/staging/sm/Number/parseInt-01.js 4	threw TypeError: the value is not a function	parseInt, Number.parseInt
+test/staging/sm/Number/parseInt-default-to-decimal.js	19	dir test/staging/sm/Number/parseInt-default-to-decimal.js 4	threw TypeError: the value is not a function	parseInt, Number.parseInt
+test/staging/sm/Number/toExponential-values.js	19	dir test/staging/sm/Number/toExponential-values.js 4	threw TypeError: Cannot use a property of undefined	Number.prototype.toExponential
+test/staging/sm/Number/toFixed-values.js	19	dir test/staging/sm/Number/toFixed-values.js 4	threw TypeError: Cannot use a property of undefined	Number.prototype.toFixed
+test/staging/sm/Number/toPrecision-values.js	19	dir test/staging/sm/Number/toPrecision-values.js 4	threw TypeError: Cannot use a property of undefined	Number.prototype.toPrecision
+test/staging/sm/Number/toString-radix-handling.js	19	dir test/staging/sm/Number/toString-radix-handling.js 4	threw TypeError: the value is not a function	Math.pow
+test/staging/sm/RegExp/exec-lastIndex-negative.js	19	dir test/staging/sm/RegExp/exec-lastIndex-negative.js 4	threw TypeError: the value is not a function	Math.pow
+test/staging/sm/RegExp/instance-property-storage-introspection.js	19	dir test/staging/sm/RegExp/instance-property-storage-introspection.js 4	threw TypeError: the value is not a function	Math.random
+test/staging/sm/RegExp/unicode-braced.js	19	dir test/staging/sm/RegExp/unicode-braced.js 4	threw TypeError: the value is not a function	Math.pow
+test/staging/sm/RegExp/unicode-class-braced.js	19	dir test/staging/sm/RegExp/unicode-class-braced.js 4	threw TypeError: the value is not a function	Math.pow
+test/staging/sm/String/fromCodePoint.js	19	dir test/staging/sm/String/fromCodePoint.js 4	threw TypeError: the value is not a function	Math.pow
+test/staging/sm/String/unicode-braced.js	19	dir test/staging/sm/String/unicode-braced.js 4	threw TypeError: the value is not a function	Math.pow
+test/staging/sm/expressions/exponentiation-unparenthesised-unary.js	19	dir test/staging/sm/expressions/exponentiation-unparenthesised-unary.js 4	counted refusal: 26 refusal(s)	** (compiled by Function)
+test/staging/sm/global/parseFloat-01.js	19	dir test/staging/sm/global/parseFloat-01.js 4	threw ReferenceError: parseFloat is not defined	parseFloat
+test/staging/sm/global/parseInt-01.js	19	dir test/staging/sm/global/parseInt-01.js 4	threw ReferenceError: parseInt is not defined	parseInt
+test/staging/sm/global/parseInt-default-to-decimal.js	19	dir test/staging/sm/global/parseInt-default-to-decimal.js 4	threw ReferenceError: parseInt is not defined	parseInt
+test/staging/sm/object/toPrimitive-callers.js	19	dir test/staging/sm/object/toPrimitive-callers.js 4	threw ReferenceError: Date is not defined	Date

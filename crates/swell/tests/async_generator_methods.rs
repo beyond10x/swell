@@ -204,37 +204,43 @@ fn an_async_generator_method_ends_at_each_budget_and_at_an_interrupt() {
     );
 }
 
-/// MakeMethod (`#sec-makemethod`) gives the method its object as [[HomeObject]], which only
-/// `super` reads (`#sec-super-keyword-runtime-semantics-evaluation`); `super` is refused before
-/// slice 8, in an `async *` method as in every method, so through `eval` the refusal is what a
-/// script sees, and `refusals()` moves by 1 for each. DefineMethodProperty
+/// MakeMethod (`#sec-makemethod`) gives the method its object as [[HomeObject]], which `super`
+/// reads (`#sec-super-keyword-runtime-semantics-evaluation`): in an `async *` method, also when
+/// the literal is eval code, `super.x` in a `return` and in a `yield` reads the property of the
+/// prototype of that object, and nothing is refused. DefineMethodProperty
 /// (`#sec-definemethodproperty`) with enumerable true defines the method on that object: a data
 /// property, writable, enumerable and configurable, in the order of the literal among the
-/// others. The read of [[HomeObject]] through `super` is tested when slice 8 brings `super`.
+/// others.
 #[test]
 fn an_async_generator_method_has_its_object_as_home_object() {
     let (mut agent, realm) = new_agent(limits());
     let before = agent.refusals();
-    for (source, column) in [
-        ("({ async *m() { return super.x; } })", 24),
-        ("({ async *m() { yield super.x; } })", 23),
+    for source in [
+        "({ __proto__: { x: 'p' }, async *m() { return super.x; } })",
+        "({ __proto__: { x: 'p' }, async *m() { yield super.x; } })",
     ] {
         assert_eq!(
             eval_text(
                 &mut agent,
                 &realm,
                 &format!(
-                    "(function () {{ try {{ eval('{source}'); return 'parsed'; }}\n\
-                       catch (e) {{ return e.name + ': ' + e.message; }} }})()"
+                    "var read = 'pending';\n\
+                     (function () {{ eval(\"{source}\").m().next()\n\
+                       .then(function (r) {{ read = r.value; }}); }})();\n\
+                     read;"
                 ),
             ),
-            Shown::Normal(format!(
-                "\"SyntaxError: super is not supported before slice 8 (1:{column})\""
-            )),
+            Shown::Normal("\"pending\"".to_string()),
+            "{source}"
+        );
+        normal(&mut agent);
+        assert_eq!(
+            eval_text(&mut agent, &realm, "read"),
+            Shown::Normal("\"p\"".to_string()),
             "{source}"
         );
     }
-    assert_eq!(agent.refusals(), before + 2);
+    assert_eq!(agent.refusals(), before);
     both_settle(
         "var o = { a: 1, async *g() { yield this === o; }, b: 2 }, seen = 'pending';\n\
          var d = Object.getOwnPropertyDescriptor(o, 'g');\n\

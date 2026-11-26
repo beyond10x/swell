@@ -202,6 +202,42 @@ pub enum Instruction {
     /// `[o, key] -> [b]`: `delete o[key]`.
     DeleteIndex,
 
+    // ---- SuperProperty (`#sec-super-keyword`) -----------------------------------------------
+    // A Super Reference on the stack is the receiver, the key of `super[expression]` and the
+    // base: `[this, base]` for `super.name`, `[this, key, base]` for `super[expression]`, made
+    // by `This`, the key's expression and `SuperBase`, in that order
+    // (`#sec-super-keyword-runtime-semantics-evaluation`).
+    /// `[] -> [base]`: GetSuperBase (`#sec-getsuperbase`) in MakeSuperPropertyReference
+    /// (`#sec-makesuperpropertyreference`): the [[Prototype]] of the [[HomeObject]] of the
+    /// running frame's function, an object or `null`; a frame whose function has none is an
+    /// engine fault, which no source the parser admits reaches.
+    SuperBase,
+    /// `[this, base] -> [v]`: GetValue of the Super Reference `super.strings[k]`: a `TypeError`
+    /// when the base is `null` (ToObject), then [[Get]] of the base with `this` as receiver.
+    GetSuperNamed(u32),
+    /// `[this, key, base] -> [v]`: GetValue of `super[key]`: a `TypeError` when the base is
+    /// `null`, then ToPropertyKey of `key`, then [[Get]] with `this` as receiver.
+    GetSuperIndex,
+    /// `[this, base, v] -> [v]`: PutValue of `super.strings[k]`: a `TypeError` when the base is
+    /// `null`, then [[Set]] of the base with `this` as receiver; a failed [[Set]] is a
+    /// `TypeError` in strict code.
+    PutSuperNamed(u32),
+    /// `[this, key, base, v] -> [v]`: PutValue of `super[key]`: a `TypeError` when the base is
+    /// `null`, then ToPropertyKey of `key` (after the value was evaluated), then [[Set]] with
+    /// `this` as receiver; a failed [[Set]] is a `TypeError` in strict code.
+    PutSuperIndex,
+    /// `[this, key, base] -> [this, key', base, this, key', base]`: the first steps of GetValue
+    /// of `super[key]` before a compound assignment or an update reads and writes it, as
+    /// [`Instruction::PropertyKey`] does for `o[key]`: a `TypeError` when the base is `null`,
+    /// then `key'` is ToPropertyKey of `key`, so the key is converted once and after the base
+    /// was read; the reference is copied for the read.
+    SuperKey,
+    /// `[this, key] -> [b]`: `delete` of a Super Reference
+    /// (`#sec-delete-operator-runtime-semantics-evaluation`, step 5.a): a `ReferenceError`,
+    /// after the key expression was evaluated and without converting it; `super.name` pushes
+    /// its name as the key.
+    DeleteSuper,
+
     // ---- literals -------------------------------------------------------------------------
     /// `[] -> [o]`: OrdinaryObjectCreate(%Object.prototype%).
     NewObject,
@@ -806,6 +842,13 @@ impl Instruction {
             | Instruction::PropertyKey
             | Instruction::DeleteNamed(_)
             | Instruction::DeleteIndex
+            | Instruction::SuperBase
+            | Instruction::GetSuperNamed(_)
+            | Instruction::GetSuperIndex
+            | Instruction::PutSuperNamed(_)
+            | Instruction::PutSuperIndex
+            | Instruction::SuperKey
+            | Instruction::DeleteSuper
             | Instruction::NewObject
             | Instruction::NewArray
             | Instruction::NewRegExp { .. }

@@ -1,0 +1,41 @@
+script locals 0
+  0000 2:2 NewObject
+  0001 2:4 Closure 0
+  0002 2:4 DefineMethod "m"
+  0003 2:1 StoreCompletion
+  0004 0:0 LoadCompletion
+  0005 0:0 Return
+
+function 0 method "m" length 1 locals 1
+  params local 0
+  0000 3:3 This
+  0001 3:3 SuperBase
+  0002 3:3 GetSuperNamed "x"
+  0003 3:3 Pop
+  0004 4:3 This
+  0005 4:9 GetLocal 0
+  0006 4:3 SuperBase
+  0007 4:14 Number 1
+  0008 4:3 PutSuperIndex
+  0009 4:3 Pop
+  0010 5:3 This
+  0011 5:9 GetLocal 0
+  0012 5:3 SuperBase
+  0013 5:3 SuperKey
+  0014 5:3 GetSuperIndex
+  0015 5:15 Number 2
+  0016 5:3 Add
+  0017 5:3 PutSuperIndex
+  0018 5:3 Pop
+  0019 6:3 This
+  0020 6:3 Dup
+  0021 6:3 SuperBase
+  0022 6:3 GetSuperNamed "f"
+  0023 6:3 Call 0
+  0024 6:3 Pop
+  0025 7:3 This
+  0026 7:16 GetLocal 0
+  0027 7:3 DeleteSuper
+  0028 7:3 Pop
+  0029 2:4 Undefined
+  0030 2:4 Return

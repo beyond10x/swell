@@ -93,7 +93,7 @@ use swell_num::to_string::number_to_string;
 use swell_syntax::Script;
 use swell_syntax::ast::{
     Ast, BindingTarget, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind,
-    LexicalName, PatternTarget, PropertyKey, PropertyValue, Stmt, StmtId,
+    LexicalName, PatternTarget, PropertyKey, PropertyValue, Stmt, StmtId, SuperKey,
 };
 use swell_syntax::ledger::{HeapBytes, Meter, Stop, map_entry_bytes};
 
@@ -1043,6 +1043,8 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 self.push_lexical_list(ScopeKey::Try(id), block);
             }
             Stmt::FunctionDeclaration(f) => self.work.push(Walk::Function(*f)),
+            // The parse holds a class back (`swell_syntax::HOLDS`): no tree to compile has one.
+            Stmt::Class(_) => return Err(malformed("a class declaration")),
             // The object is evaluated outside the scope of the body.
             Stmt::With { object, body } => {
                 self.work.push(Walk::Leave);
@@ -1251,6 +1253,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 children.extend(argument.iter().map(|e| Walk::Expr(*e)))
             }
             Expr::Function(f) => children.push(Walk::Function(*f)),
+            Expr::Class(_) => return Err(malformed("a class expression")),
             Expr::Unary { operand, .. } | Expr::Update { operand, .. } => {
                 children.push(Walk::Expr(*operand));
             }
@@ -1300,6 +1303,9 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 children.push(Walk::Expr(*callee));
                 children.extend(arguments.iter().map(|e| Walk::Expr(*e)));
             }
+            Expr::SuperMember(SuperKey::Name(_)) => {}
+            Expr::SuperMember(SuperKey::Computed(key)) => children.push(Walk::Expr(*key)),
+            Expr::SuperCall(arguments) => children.extend(arguments.iter().map(|e| Walk::Expr(*e))),
             Expr::New { callee, arguments } => {
                 children.push(Walk::Expr(*callee));
                 children.extend(arguments.iter().flatten().map(|e| Walk::Expr(*e)));

@@ -31,17 +31,25 @@
 //! (`#sec-assignment-operators`). Slice 8 adds `new.target` (`#sec-meta-properties`) where a
 //! function that is not an arrow function encloses it or eval code admits it.
 //!
-//! Refused, each with its slice: `class`, `super` (8), `import.meta` and dynamic `import` (11).
+//! Slice 8 adds `super` (`#sec-super-keyword`): a SuperProperty, `super.name` or
+//! `super[expression]`, where the nearest function that is not an arrow function is a
+//! MethodDefinition, and a SuperCall, an early error before derived classes.
+//!
+//! A ClassExpression is parsed whole and held (`parser/class.rs`). Refused, each with its slice:
+//! `super` in an arrow function in a method and in eval code (8), `import.meta` and dynamic
+//! `import` (11).
 //!
 //! The functions that stay on the Rust stack while the parser recurses (each one an entry of the
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
 //! and build nodes through helpers, so their own frames hold little more than ids and one span.
 
-use super::{Halt, Parser, R, copy_name, copy_number, copy_regexp, copy_string, copy_template};
+use super::{
+    Halt, Parser, R, SuperProperty, copy_name, copy_number, copy_regexp, copy_string, copy_template,
+};
 use crate::ast::{
     AssignOp, BinaryOp, BoundName, Expr, ExprId, FunctionId, FunctionKind, LogicalOp, Name,
     Pattern, PatternElement, PatternKind, PatternProperty, PatternTarget, Property, PropertyKey,
-    PropertyValue, Span, UnaryOp, UpdateOp,
+    PropertyValue, Span, SuperKey, UnaryOp, UpdateOp,
 };
 use crate::error::SyntaxError;
 use crate::ledger::HeapBytes;
@@ -63,6 +71,17 @@ const INVALID_ASSIGNMENT_PATTERN_TARGET: &str = "invalid destructuring assignmen
 /// A template string of a template without a tag holds a NotEscapeSequence, whose TV is
 /// undefined (`#sec-static-semantics-template-early-errors`).
 const NOT_ESCAPE_SEQUENCE: &str = "invalid escape sequence in a template literal without a tag";
+
+/// A SuperCall, which stands only in the constructor of a derived class
+/// (`#sec-method-definitions-static-semantics-early-errors`, HasDirectSuper;
+/// `#sec-function-definitions-static-semantics-early-errors`,
+/// `#sec-scripts-static-semantics-early-errors`): no source parsed before slice 8 has one.
+const SUPER_CALL: &str = "super call outside a derived class constructor";
+
+/// A SuperProperty where the nearest function that is not an arrow function is no
+/// MethodDefinition (`#sec-function-definitions-static-semantics-early-errors`,
+/// `#sec-scripts-static-semantics-early-errors`).
+const SUPER_PROPERTY: &str = "super property outside a method";
 
 /// `OptionalChain TemplateLiteral` or `?. TemplateLiteral`
 /// (`#sec-left-hand-side-expressions-static-semantics-early-errors`).
@@ -222,6 +241,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                     | Expr::OptionalCall {
                         arguments: list, ..
                     }
+                    | Expr::SuperCall(list)
                     | Expr::New {
                         arguments: Some(list),
                         ..
@@ -808,7 +828,7 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// (`#sec-optional-chains`), which a first `?.` starts: the expression is then wrapped in
     /// [`Expr::OptionalChain`], so the chain ends where this expression ends (a parenthesized
     /// chain is a chain of its own).
-    fn left_hand_side(&mut self) -> R<ExprId> {
+    pub(super) fn left_hand_side(&mut self) -> R<ExprId> {
         self.enter()?;
         let start = self.start();
         let mut e = self.member_or_new()?;
@@ -1082,8 +1102,8 @@ impl<'a, 'm> Parser<'a, 'm> {
             TokenKind::Keyword(k) => match *k {
                 Keyword::This | Keyword::Null | Keyword::True | Keyword::False => Parser::leaf,
                 Keyword::Function => Parser::function_expression_node,
-                Keyword::Class => return self.refuse("class", 8),
-                Keyword::Super => return self.refuse("super", 8),
+                Keyword::Class => Parser::class_expression_node,
+                Keyword::Super => self.super_admitted()?,
                 Keyword::Import => {
                     let next = match &self.peek()?.kind {
                         TokenKind::Punct(p) => Some(*p),
@@ -1119,6 +1139,76 @@ impl<'a, 'm> Parser<'a, 'm> {
             TokenKind::NoSubstitutionTemplate(_) | TokenKind::TemplateHead(_) => Parser::template,
             _ => return self.unexpected(),
         })
+    }
+
+    /// Whether the `super` at the current token stands here, and as what (`#sec-super-keyword`):
+    /// followed by `.` or `[` a SuperProperty, by `(` a SuperCall, by anything else a grammar
+    /// error. A SuperCall is an early error (no derived constructor is parsed before slice 8,
+    /// `#sec-method-definitions-static-semantics-early-errors`), and so is a SuperProperty where
+    /// the nearest function that is not an arrow function is no MethodDefinition
+    /// (`#sec-function-definitions-static-semantics-early-errors`,
+    /// `#sec-scripts-static-semantics-early-errors`); in an arrow function in a method and in
+    /// eval code outside a function of its own `super` is refused before slice 8.
+    #[inline(never)]
+    fn super_admitted(&mut self) -> R<ExprParser<'a, 'm>> {
+        let start = self.start();
+        let call = match &self.peek()?.kind {
+            TokenKind::Punct(Punct::Dot | Punct::LBracket) => false,
+            TokenKind::Punct(Punct::LParen) => true,
+            _ => return self.unexpected(),
+        };
+        match self.super_property {
+            SuperProperty::Eval => self.refuse_at("super in eval code", 8, start),
+            _ if call => self.fail_at(SUPER_CALL, start),
+            SuperProperty::Outside => self.fail_at(SUPER_PROPERTY, start),
+            SuperProperty::Arrow => self.refuse_super_in_arrow(start),
+            SuperProperty::Method => Ok(Parser::super_expression),
+        }
+    }
+
+    /// The refusal of `super` in an arrow function whose nearest function that is not an arrow
+    /// function is a method, at `at`: `story:derived-classes-and-super-call` gives such an arrow
+    /// the function of its code (`docs/design/engine.md`, decision 3, "`this` and `arguments` in
+    /// an arrow function", item 4).
+    #[inline(never)]
+    pub(super) fn refuse_super_in_arrow<T>(&mut self, at: Span) -> R<T> {
+        self.refuse_at("super in an arrow function", 8, at)
+    }
+
+    /// `super . IdentifierName`, `super [ Expression ]` or `super Arguments` at the current
+    /// `super`, which [`Parser::super_admitted`] admitted.
+    fn super_expression(&mut self) -> R<ExprId> {
+        self.enter()?;
+        let start = self.start();
+        self.advance()?;
+        let e = if self.is(Punct::LParen) {
+            let id = self.reserve_expr(Expr::SuperCall(Vec::new()));
+            self.arguments(id)?;
+            self.complete_expr(id, start)?
+        } else if self.eat(Punct::Dot)? {
+            self.super_name(start)?
+        } else {
+            self.advance()?;
+            let key = self.expression(false)?;
+            self.expect(Punct::RBracket)?;
+            self.make(Expr::SuperMember(SuperKey::Computed(key)), start)?
+        };
+        self.leave();
+        Ok(e)
+    }
+
+    /// The `IdentifierName` of `super . IdentifierName`, at the current token.
+    #[inline(never)]
+    fn super_name(&mut self, start: Span) -> R<ExprId> {
+        let m = self.m;
+        let name = match &self.tok.kind {
+            TokenKind::Name(n) => copy_name(m, n),
+            TokenKind::Keyword(k) => copy_name(m, k.as_str()),
+            _ => return self.unexpected(),
+        };
+        let name = self.charged(name)?;
+        self.advance()?;
+        self.make(Expr::SuperMember(SuperKey::Name(name)), start)
     }
 
     /// `TemplateLiteral[~Tagged]` (`#sec-template-literals`): its template strings and, after
@@ -1446,7 +1536,7 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// The key of a property: the ComputedPropertyName `computed` read before, or the
     /// `PropertyName` at the current token, consumed.
-    fn key_or(&mut self, computed: Option<ExprId>) -> R<PropertyKey> {
+    pub(super) fn key_or(&mut self, computed: Option<ExprId>) -> R<PropertyKey> {
         match computed {
             Some(e) => Ok(PropertyKey::Computed(e)),
             None => self.property_key(),
@@ -1456,7 +1546,7 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// A ComputedPropertyName `[ AssignmentExpression ]` at the current token, consumed, or
     /// `None` at any other token (`#sec-object-initializer`). One entry of the depth counter whose
     /// frame holds the id alone.
-    fn computed_name(&mut self) -> R<Option<ExprId>> {
+    pub(super) fn computed_name(&mut self) -> R<Option<ExprId>> {
         if !self.is(Punct::LBracket) {
             return Ok(None);
         }
@@ -1539,7 +1629,7 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// (AsyncGeneratorMethod, `#sec-async-generator-function-definitions`), whose `*`
     /// [`Parser::async_method`] reads.
     #[inline(never)]
-    fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
+    pub(super) fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
         let plain = !self.tok.escaped;
         let word = match &self.tok.kind {
             TokenKind::Name(n) if plain && n == "get" => FunctionKind::Getter,
@@ -2168,7 +2258,12 @@ impl<'a, 'm> Parser<'a, 'm> {
                 self.charged(pushed)?;
                 Ok(PatternTarget::Expr(t))
             }
-            Expr::Identifier(_) | Expr::Member { .. } | Expr::Index { .. } if assignment => {
+            Expr::Identifier(_)
+            | Expr::Member { .. }
+            | Expr::Index { .. }
+            | Expr::SuperMember(_)
+                if assignment =>
+            {
                 Ok(PatternTarget::Expr(t))
             }
             Expr::Identifier(_) if !parenthesized => {

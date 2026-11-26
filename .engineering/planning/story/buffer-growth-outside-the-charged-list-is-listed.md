@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:buffer-growth-outside-the-charged-list-is-listed
 kind: story
-status: active
+status: implemented
 title: A growth call outside the charged list is listed with its charge or its bound
 summary: A disallowed-methods list of clippy for the engine crate and an expect with a reason at each remaining growth call, so that a later builtin cannot hold a plain buffer the memory budget does not see.
 relations:
 - depends_on: story:copies-held-across-a-call-into-script-are-charged
-revision: 4
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T12:36:28Z", actor: "human:operator", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-24T13:13:52Z", actor: "human:operator", revision: 4}
+- {from: "active", to: "implemented", at: "2026-11-26T10:01:51Z", actor: "human:operator", revision: 6, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}, executor: "agent:coordinator"}
 ---
 Waits for: `story:copies-held-across-a-call-into-script-are-charged`, the only recorded edge. The
 coordinator starts the unit on a base that holds that story and every unit of slice 4 merged by
@@ -239,3 +240,45 @@ Where the list does not reach, each with its reason:
   builds no feature, so the gate does not hold it after this story; only acceptance item 3
   reads it once.
 - Whether a reason is true. Item 8 reads them once; no check holds that later.
+
+## As delivered
+
+The unit of wave big-1 delivered the story in three commits (`3a16be13`, `1d48bbcd`,
+`058eba11`) after two passes of the adversary. Where the delivered state differs from the
+text above, this section holds and the text above is the story as it was approved.
+
+- **Acceptance, item 7, first bullet.** The filter no longer prints only the lines of
+  `lib.rs`. Read with the story's own filter over the unit's commits, it leaves lines in
+  these files, each a change a correction ordered:
+  - `crates/swell/Cargo.toml`: 2 lines, `allow_attributes = "deny"` and
+    `allow_attributes_without_reason = "deny"` under `[lints.clippy]` (correction 1: an
+    `allow` of the listed lint would otherwise pass in silence).
+  - `crates/swell/src/object/async_generator.rs` (2 lines), `crates/swell/src/script.rs`
+    (4 lines) and `crates/swell/tests/support/mod.rs` (3 lines): four `allow` attributes of
+    other lints became `expect` with a reason, which the two denied lints require.
+  - `crates/swell/src/lib.rs`: 10 lines, the `cfg_attr` and the header sentence, as the
+    story names.
+  - `crates/swell/src/builtins/json/parse.rs`: 4 lines in correction 1 and 1 in
+    correction 2. This is a change of behaviour: the stack of open values of `JSON.parse` is
+    freed when the parse has ended, before the reviver is called, and the reason at its
+    `try_reserve` states the bound the code holds. The changelog names it under "Fixed".
+  - `crates/swell/tests/builtins_json_parse.rs` (79 lines) and
+    `crates/swell/tests/source_scan.rs` (532 lines): the tests of the two corrections.
+  The other three bullets of item 7 (the `Summary` lines of the package on the base and
+  after, in both modes) hold with the count of tests raised by the tests named here.
+- **"Not in this story", the bullet on features.** It says the gate does not hold code behind
+  `collect-every-safe-point` or `fault-injection`. That is still so for clippy. The source
+  scan reads every `.rs` file of `crates/swell/src` and `crates/swell/tests` whatever the
+  feature, so an `allow` of the listed lint behind a feature is refused by the gate's test
+  step.
+- **"Not in this story", the bullet on other crates.** The scan
+  `source_scan::no_other_crate_names_the_listed_lint` refuses an attribute that names the
+  lint in a crate that has no list, where it would hold nothing.
+- **What holds the rule after the story**, beyond item 2: the tests
+  `source_scan::growth_attributes_are_expects_with_a_reason`,
+  `source_scan::no_other_crate_names_the_listed_lint` and
+  `source_scan::the_growth_scan_finds_planted_attributes`, and the rule in `AGENTS.md`
+  ("Rules", the bullet after "A buffer whose size a script controls"). Two limits of a scan
+  of text are stated in `review-result:growth-correction-2-coordinator-read`.
+- **Left to the backlog:** three sites reserve before they charge
+  (`story:charge-comes-before-the-reservation`).

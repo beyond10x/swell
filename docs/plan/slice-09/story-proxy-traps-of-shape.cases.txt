@@ -4,6 +4,7 @@ test/built-ins/Array/prototype/indexOf/calls-only-has-on-prototype-after-length-
 test/built-ins/Array/prototype/lastIndexOf/calls-only-has-on-prototype-after-length-zeroed.js
 test/built-ins/Array/prototype/reverse/length-exceeding-integer-limit-with-proxy.js
 test/built-ins/Array/prototype/splice/create-species-length-exceeding-integer-limit.js
+test/built-ins/Array/prototype/splice/property-traps-order-with-species.js
 test/built-ins/Function/prototype/Symbol.hasInstance/value-get-prototype-of-err.js
 test/built-ins/JSON/parse/reviver-array-define-prop-err.js
 test/built-ins/JSON/parse/reviver-object-define-prop-err.js
@@ -32,6 +33,7 @@ test/built-ins/Object/getOwnPropertySymbols/proxy-invariant-not-extensible-absen
 test/built-ins/Object/getOwnPropertySymbols/proxy-invariant-not-extensible-extra-string-key.js
 test/built-ins/Object/isFrozen/proxy-no-ownkeys-returned-keys-order.js
 test/built-ins/Object/isSealed/proxy-no-ownkeys-returned-keys-order.js
+test/built-ins/Object/keys/property-traps-order-with-proxied-array.js
 test/built-ins/Object/keys/proxy-keys.js
 test/built-ins/Object/keys/proxy-non-enumerable-prop-invariant-1.js
 test/built-ins/Object/keys/proxy-non-enumerable-prop-invariant-2.js

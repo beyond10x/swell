@@ -298,6 +298,14 @@ impl<H: Host> Agent<H> {
             I::PropertyKey => self.property_key(),
             I::DeleteNamed(index) => self.delete_named(index, strict),
             I::DeleteIndex => self.delete_index(strict),
+            // ---- Super References (`interp/super_ref.rs`) ----
+            I::SuperBase => self.super_base(),
+            I::GetSuperNamed(index) => self.get_super_named(index),
+            I::GetSuperIndex => self.get_super_index(),
+            I::PutSuperNamed(index) => self.put_super_named(index, strict),
+            I::PutSuperIndex => self.put_super_index(strict),
+            I::SuperKey => self.super_key(),
+            I::DeleteSuper => self.delete_super(),
 
             // ---- literals ----
             I::NewObject => self.new_object_literal(),
