@@ -125,6 +125,39 @@ fn sloppy_only(text: &str) -> bool {
         .any(|line| line.trim() == "// sloppy-only")
 }
 
+/// The checks of a source that parses, under `valid/` or under `held/` once nothing in it is
+/// held: it parses as written and, with a `"use strict";` prologue, as strict code; a
+/// `// sloppy-only` source is instead an early error (not a refusal) in strict code. Answers
+/// whether the source is sloppy-only, or what failed.
+fn parses_in_both_modes(path: &Path, text: &str) -> Result<bool, String> {
+    let path = path.display();
+    match parse(text) {
+        Ok(script) if script.strict && !text.contains("\"use strict\"") => {
+            return Err(format!("{path}: strict without a directive"));
+        }
+        Ok(_) => {}
+        Err(errors) => return Err(format!("{path} as written: {errors:?}")),
+    }
+    let strict = with_use_strict(text);
+    if sloppy_only(text) {
+        let Err(errors) = parse(&strict) else {
+            return Err(format!("{path}: parses as strict code"));
+        };
+        if !errors
+            .iter()
+            .all(|e| message_kind(&e.message) == MessageKind::Grammar)
+        {
+            return Err(format!("{path}: {errors:?}"));
+        }
+        return Ok(true);
+    }
+    match parse(&strict) {
+        Ok(script) if !script.strict => Err(format!("{path}: not strict with the prologue")),
+        Ok(_) => Ok(false),
+        Err(errors) => Err(format!("{path} with \"use strict\": {errors:?}")),
+    }
+}
+
 /// Every source under `valid/` parses as written and, with a `"use strict";` prologue, as
 /// strict code; a `// sloppy-only` source is instead an early error (not a refusal) in strict
 /// code.
@@ -135,36 +168,8 @@ fn valid_sources_parse_in_both_modes() {
     for (path, text) in &files {
         let (_, result) = header(path, text).unwrap();
         assert_eq!(result, "parses", "{}", path.display());
-        match parse(text) {
-            Ok(script) => assert!(
-                !script.strict || text.contains("\"use strict\""),
-                "{}: strict without a directive",
-                path.display()
-            ),
-            Err(errors) => panic!("{} as written: {:?}", path.display(), errors),
-        }
-        let strict = with_use_strict(text);
-        if sloppy_only(text) {
+        if parses_in_both_modes(path, text).unwrap() {
             sloppy += 1;
-            let errors = parse(&strict)
-                .err()
-                .unwrap_or_else(|| panic!("{}: parses as strict code", path.display()));
-            assert!(
-                errors
-                    .iter()
-                    .all(|e| message_kind(&e.message) == MessageKind::Grammar),
-                "{}: {errors:?}",
-                path.display()
-            );
-            continue;
-        }
-        match parse(&strict) {
-            Ok(script) => assert!(
-                script.strict,
-                "{}: not strict with the prologue",
-                path.display()
-            ),
-            Err(errors) => panic!("{} with \"use strict\": {:?}", path.display(), errors),
         }
     }
     println!(
@@ -233,6 +238,147 @@ fn refused_sources_name_their_slice() {
         }
     }
     println!("refused: {} file(s)", files.len());
+}
+
+/// The constructs a header result `held "<construct>", "<construct>", ...` names, in its
+/// order, or what is wrong with it.
+fn held_constructs(path: &Path, result: &str) -> Result<Vec<String>, String> {
+    let list = result
+        .strip_prefix("held ")
+        .ok_or_else(|| format!("{}: header result is not held \"...\"", path.display()))?;
+    list.split(", ")
+        .map(|quoted| {
+            quoted
+                .strip_prefix('"')
+                .and_then(|c| c.strip_suffix('"'))
+                .filter(|c| !c.is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| format!("{}: {quoted:?} is no quoted construct", path.display()))
+        })
+        .collect()
+}
+
+/// A source under `held/` holds constructs a story of slice 8 parses whole and refuses at the
+/// end of the parse (`Parser::hold`; "Held sources" of `story:class-syntax-and-early-errors`).
+/// Its header names each of them, `held "<construct>", ...`, in the order of their first
+/// tokens. The first one that is still a line of [`swell_syntax::HOLDS`] is the one the source
+/// answers, as written and with a `"use strict";` prologue: exactly `<construct> is not
+/// supported before slice <n>`, a refusal of slice n for [`message_kind`]. A source none of
+/// whose constructs is held any more parses as a source under `valid/` does. Every line of
+/// `HOLDS` is named by a header, so a hold without a held source fails. Which construct is
+/// still held is read from the parser's list, never from the fixture.
+#[test]
+fn held_sources_answer_their_first_construct_still_held() {
+    let files = sources("held").unwrap();
+    let mut named: Vec<String> = Vec::new();
+    let (mut held, mut parsed) = (0, 0);
+    for (path, text) in &files {
+        let (_, result) = header(path, text).unwrap();
+        let constructs = held_constructs(path, &result).unwrap();
+        let still = constructs
+            .iter()
+            .find_map(|c| swell_syntax::HOLDS.iter().find(|(h, _)| h == c));
+        named.extend(constructs);
+        let Some(&(construct, slice)) = still else {
+            parsed += 1;
+            parses_in_both_modes(path, text).unwrap();
+            continue;
+        };
+        held += 1;
+        let expected = vec![format!("{construct} is not supported before slice {slice}")];
+        for (mode, source) in [
+            ("as written", text.to_string()),
+            ("with \"use strict\"", with_use_strict(text)),
+        ] {
+            let errors = parse(&source).err().unwrap_or_else(|| {
+                panic!("{} {mode}: parsed, expected {expected:?}", path.display())
+            });
+            assert_eq!(messages(&errors), expected, "{} {mode}", path.display());
+            assert_eq!(
+                message_kind(&errors[0].message),
+                MessageKind::Refusal { slice },
+                "{} {mode}",
+                path.display()
+            );
+        }
+    }
+    for (construct, _) in swell_syntax::HOLDS {
+        assert!(
+            named.iter().any(|n| n == construct),
+            "the hold {construct:?} of HOLDS has no held source"
+        );
+    }
+    println!(
+        "held: {} file(s), {held} answering a hold, {parsed} parsing; {} hold(s)",
+        files.len(),
+        swell_syntax::HOLDS.len()
+    );
+}
+
+/// A field and a static block of a class are refused at their first token until
+/// `story:class-element-syntax-and-early-errors` parses them and makes them holds: each source
+/// answers its refusal alone, before the hold of the class is answered.
+#[test]
+fn a_field_and_a_static_block_are_refused_at_their_token() {
+    for (text, message) in [
+        (
+            "x = class { x = 1; };",
+            "class field is not supported before slice 8",
+        ),
+        (
+            "x = class { static {} };",
+            "class static block is not supported before slice 8",
+        ),
+    ] {
+        let errors = parse(text)
+            .err()
+            .unwrap_or_else(|| panic!("{text:?}: parsed"));
+        assert_eq!(messages(&errors), vec![message.to_string()], "{text:?}");
+        assert_eq!((errors[0].line, errors[0].column), (1, 13), "{text:?}");
+    }
+}
+
+/// A class is strict mode code from `class` to its `}` and no further (`#sec-strict-mode-code`):
+/// the parser and the walk of the early errors both give the code after a class declaration or
+/// expression the strictness of the code around it. So, through each entry, a source with a
+/// class and, after it, code that only non-strict code admits answers the hold of the class
+/// alone; an `if` clause that is a function declaration answers its refusal of slice 18, which
+/// stops the parse at its token, as it does in non-strict code without a class.
+#[test]
+fn code_after_a_class_is_not_strict() {
+    let held = "class is not supported before slice 8";
+    let if_clause = "function declaration as an if clause is not supported before slice 18";
+    let mut cases: Vec<(String, &str)> = Vec::new();
+    for class in ["class A {}", "x = class {};", "x = class { m() {} };"] {
+        for (tail, message) in [
+            ("with (a) {}", held),
+            ("x = 010;", held),
+            ("delete x;", held),
+            ("var eval;", held),
+            ("function f(a, a) {}", held),
+            ("if (a) function f() {}", if_clause),
+        ] {
+            cases.push((format!("{class} {tail}"), message));
+            cases.push((format!("function g() {{ {class} {tail} }}"), message));
+        }
+    }
+    let mut wrong: Vec<String> = Vec::new();
+    for (text, message) in &cases {
+        for entry in ENTRIES {
+            let answer = parse_through(entry, &units(text), LIMIT).map(|_| ());
+            if answer.as_ref().map_err(|errors| messages(errors)) != Err(vec![message.to_string()])
+            {
+                wrong.push(format!("{entry:?} {text:?}: {answer:?}"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} of {} answers wrong:\n{}",
+        wrong.len(),
+        cases.len() * ENTRIES.len(),
+        wrong.join("\n")
+    );
 }
 
 /// `async` functions and arrow functions parse whole (`#sec-async-function-definitions`,
@@ -702,6 +848,8 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
         "async_generator_expression" => ("x = ", "async function* (){ return ", "0", "; }", ";"),
         "for_await" => ("async function f(){ ", "for await (x of y) ", ";", "", " }"),
         "async_generator_method" => ("x = ", "{async *m(){ return ", "0", "; }}", ";"),
+        "class_computed_key" => ("x = ", "class { [", "0", "] () {} }", ";"),
+        "class_heritage" => ("x = ", "class extends (", "0", ") {}", ";"),
         _ => return None,
     };
     let mut source = units(before);
@@ -712,7 +860,7 @@ fn nested(kind: &str, n: usize) -> Option<Vec<u16>> {
     Some(source)
 }
 
-const NESTING_KINDS: [&str; 62] = [
+const NESTING_KINDS: [&str; 64] = [
     "array",
     "paren",
     "block",
@@ -775,6 +923,8 @@ const NESTING_KINDS: [&str; 62] = [
     "for_await",
     "async_generator_method",
     "exp_chain",
+    "class_computed_key",
+    "class_heritage",
 ];
 
 /// The parse entries a source goes through: `parse_script`, `parse_eval` with a non-strict
@@ -799,12 +949,20 @@ fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec
 }
 
 /// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
-/// nesting error alone (`Some(false)`), or fail otherwise (`None`).
+/// nesting error alone (`Some(false)`), or fail otherwise (`None`). A source whose one error is
+/// the refusal of a line of [`swell_syntax::HOLDS`] counts as parsed: the parse and the early
+/// errors reached the end of the source before the hold was answered (`Parser::hold`).
 fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     let source = nested(kind, n)?;
+    let held = |message: &str| {
+        swell_syntax::HOLDS.iter().any(|(construct, slice)| {
+            message == format!("{construct} is not supported before slice {slice}")
+        })
+    };
     match parse_through(entry, &source, limit) {
         Ok(_) => Some(true),
         Err(e) if e.len() == 1 && e.first()?.message.contains("parser_nesting") => Some(false),
+        Err(e) if e.len() == 1 && held(&e.first()?.message) => Some(true),
         Err(_) => None,
     }
 }

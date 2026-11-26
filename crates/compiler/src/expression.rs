@@ -448,6 +448,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 };
                 t.push(emit(make))?;
             }
+            // The parse holds a class back (`swell_syntax::HOLDS`): no tree to compile has one.
+            Expr::Class(_) => return Err(malformed("a class expression")),
             Expr::Unary { op, operand } => self.unary(*op, *operand, span, &mut t)?,
             Expr::Update {
                 op,

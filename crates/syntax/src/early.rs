@@ -119,10 +119,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::ast::{
-    Ast, BindingTarget, Child, DeclKind, Expr, ExprId, ForInTarget, ForInit, Function, FunctionId,
-    FunctionKind, Name, NumberForm, NumberLiteral, PatternKind, PatternTarget, PropertyKey,
-    PropertyValue, RegExpLiteral, Span, Stmt, StmtId, StringLiteral, SwitchCase, UnaryOp,
-    VarDeclarator,
+    Ast, BindingTarget, Child, ClassElement, ClassKey, DeclKind, Expr, ExprId, ForInTarget,
+    ForInit, Function, FunctionId, FunctionKind, Name, NumberForm, NumberLiteral, PatternKind,
+    PatternTarget, PropertyKey, PropertyValue, RegExpLiteral, Span, Stmt, StmtId, StringLiteral,
+    SwitchCase, UnaryOp, VarDeclarator,
 };
 use crate::error::{MessageKind, SyntaxError, message_kind};
 use crate::ledger::{HeapBytes, Meter, map_entry_bytes};
@@ -434,6 +434,13 @@ impl<'a, 'm> Checker<'a, 'm> {
     ) {
         let ast = self.ast;
         let statement = ast.stmt(s).map(|n| &n.stmt);
+        // A class declaration binds its name as `let` does, at the top of a body too.
+        if let Some(Stmt::Class(class)) = statement {
+            if let Some(name) = &class.name {
+                self.frame_name(frame, name, others, what);
+            }
+            return;
+        }
         if let Some(Stmt::FunctionDeclaration(f)) = statement {
             if functions && let Some(name) = ast.function(*f).and_then(|x| x.name.as_ref()) {
                 self.frame_name(frame, name, others, what);
@@ -819,6 +826,12 @@ impl<'a, 'm> Checker<'a, 'm> {
                 label_base: self.label_base,
                 lexical_base: self.lexical_base,
             };
+            // A class is strict mode code from `class` to its `}`, the walk of its children too.
+            if self.class_early_errors(node) {
+                let back = self.restore_step();
+                self.push_step(&mut stack, back);
+                self.strict = true;
+            }
             match node {
                 Child::Stmt(id) => {
                     let (loops, breakables) = self.check_stmt(id);
@@ -1239,8 +1252,12 @@ impl<'a, 'm> Checker<'a, 'm> {
             // with a list that is not simple, no parameter its body declares lexically) are those
             // of every async generator, which has both flags set. HasDirectSuper is a SuperCall,
             // which the parser answers as an early error where it reads it, in a method as
-            // anywhere before derived classes.
-            if f.kind == FunctionKind::Method {
+            // anywhere before derived classes. A class's constructor is a method
+            // (`#sec-class-definitions`, ClassElement : MethodDefinition).
+            if matches!(
+                f.kind,
+                FunctionKind::Method | FunctionKind::ClassConstructor
+            ) {
                 self.error(
                     format!("duplicate parameter name {} in a method", p.name),
                     p.span,
@@ -1268,5 +1285,100 @@ impl<'a, 'm> Checker<'a, 'm> {
             }
         }
         self.m.credit(seen.len().saturating_mul(entry));
+    }
+
+    /// A step that puts the current context back, once the children pushed after it are walked.
+    fn restore_step(&self) -> Step {
+        Step::Restore {
+            strict: self.strict,
+            yields: self.yields,
+            awaits: self.awaits,
+            parameters: self.parameters,
+            loops: self.loops,
+            breakables: self.breakables,
+            label_base: self.label_base,
+            lexical_base: self.lexical_base,
+        }
+    }
+
+    /// The early errors of the class `node` itself, a ClassDeclaration or a ClassExpression
+    /// (`#sec-class-definitions-static-semantics-early-errors`); whether it is one, so that the
+    /// walk reads its children as strict mode code (`#sec-strict-mode-code`: all parts of a
+    /// class are). Its name is a BindingIdentifier of strict code with the [Yield] and [Await]
+    /// around the class (`#sec-identifiers-static-semantics-early-errors`); a literal name of an
+    /// element is read as strict code; an element that is not `static` and whose name is the
+    /// literal `constructor` is a second constructor when it is a plain method (the parser made
+    /// the first one the class's constructor) and a special method otherwise; and an element
+    /// that is `static` may not be named `prototype` by a literal (a computed one is a
+    /// `TypeError` at run time). Its methods, the constructor included, have the early errors of
+    /// every function, with the strictness the parser gave them ([`Checker::check_function`]),
+    /// and the name of a declaration is a lexical name of the list it stands in
+    /// ([`Checker::frame_statement`]).
+    fn class_early_errors(&mut self, node: Child) -> bool {
+        let ast = self.ast;
+        let class = match node {
+            Child::Stmt(id) => match ast.stmt(id).map(|n| &n.stmt) {
+                Some(Stmt::Class(class)) => class,
+                _ => return false,
+            },
+            Child::Expr(id) => match ast.expr(id).map(|n| &n.expr) {
+                Some(Expr::Class(class)) => class,
+                _ => return false,
+            },
+            Child::Function(_) => return false,
+        };
+        let outer = self.strict;
+        self.strict = true;
+        if let Some(name) = &class.name {
+            self.binding(name);
+        }
+        for element in &class.elements {
+            let ClassElement::Method {
+                is_static,
+                key: ClassKey::Literal(key),
+                kind,
+                function,
+                span,
+            } = element
+            else {
+                continue;
+            };
+            self.property_key(key, *span);
+            if *is_static {
+                if Checker::is_named(key, "prototype") {
+                    self.error("a static class method may not be named prototype", *span);
+                }
+                continue;
+            }
+            if !Checker::is_named(key, "constructor") {
+                continue;
+            }
+            let (generator, asynchronous) = ast
+                .function(*function)
+                .map_or((false, false), |f| (f.generator, f.asynchronous));
+            let what = match (kind, generator, asynchronous) {
+                (FunctionKind::Getter, ..) => "a getter",
+                (FunctionKind::Setter, ..) => "a setter",
+                (_, true, true) => "an async generator method",
+                (_, true, false) => "a generator method",
+                (_, false, true) => "an async method",
+                (_, false, false) => {
+                    self.error("a class may have only one constructor", *span);
+                    continue;
+                }
+            };
+            self.error(format!("a class constructor may not be {what}"), *span);
+        }
+        self.strict = outer;
+        true
+    }
+
+    /// Whether `key` is the literal PropertyName whose StringValue is `name`.
+    fn is_named(key: &PropertyKey, name: &str) -> bool {
+        match key {
+            PropertyKey::Identifier(n) => n == name,
+            PropertyKey::String(s) => s.value.iter().copied().eq(name.encode_utf16()),
+            PropertyKey::Number(_) | PropertyKey::Computed(_) => false,
+        }
     }
 }

@@ -1043,6 +1043,8 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 self.push_lexical_list(ScopeKey::Try(id), block);
             }
             Stmt::FunctionDeclaration(f) => self.work.push(Walk::Function(*f)),
+            // The parse holds a class back (`swell_syntax::HOLDS`): no tree to compile has one.
+            Stmt::Class(_) => return Err(malformed("a class declaration")),
             // The object is evaluated outside the scope of the body.
             Stmt::With { object, body } => {
                 self.work.push(Walk::Leave);
@@ -1250,6 +1252,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 children.extend(argument.iter().map(|e| Walk::Expr(*e)))
             }
             Expr::Function(f) => children.push(Walk::Function(*f)),
+            Expr::Class(_) => return Err(malformed("a class expression")),
             Expr::Unary { operand, .. } | Expr::Update { operand, .. } => {
                 children.push(Walk::Expr(*operand));
             }

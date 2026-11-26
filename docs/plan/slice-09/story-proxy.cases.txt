@@ -25,7 +25,6 @@ test/built-ins/Array/prototype/slice/length-exceeding-integer-limit-proxied-arra
 test/built-ins/Array/prototype/splice/create-proxy.js
 test/built-ins/Array/prototype/splice/create-revoked-proxy.js
 test/built-ins/Array/prototype/splice/create-species-undef-invalid-len.js
-test/built-ins/Array/prototype/splice/property-traps-order-with-species.js
 test/built-ins/Error/cause_abrupt.js
 test/built-ins/Function/internals/Construct/base-ctor-revoked-proxy-realm.js
 test/built-ins/Function/internals/Construct/base-ctor-revoked-proxy.js
@@ -54,7 +53,6 @@ test/built-ins/JSON/stringify/value-array-abrupt.js
 test/built-ins/JSON/stringify/value-array-proxy-revoked.js
 test/built-ins/JSON/stringify/value-array-proxy.js
 test/built-ins/JSON/stringify/value-object-proxy-revoked.js
-test/built-ins/Object/keys/property-traps-order-with-proxied-array.js
 test/built-ins/Object/prototype/toString/proxy-array.js
 test/built-ins/Object/prototype/toString/proxy-function-async.js
 test/built-ins/Object/prototype/toString/proxy-function.js

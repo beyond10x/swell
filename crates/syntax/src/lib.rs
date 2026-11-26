@@ -63,6 +63,7 @@ mod token;
 pub use ast::Scope;
 pub use error::{MessageKind, SyntaxError, message_kind};
 pub use ledger::{Ledger, Stop, Unlimited};
+pub use parser::HOLDS;
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -155,7 +156,10 @@ impl Failure {
 /// `Script`: the tree, or every `SyntaxError` the parse found, at least one. A grammar error or a
 /// refusal stops the parse and is the only error; the early errors of a source that parses are
 /// all reported, in source order. Generator functions and methods, and `async` functions and
-/// arrow functions, and async generators with `yield*` in them, parse.
+/// arrow functions, and async generators with `yield*` in them, parse. So does a class, with its
+/// early errors: a construct the parse holds back ([`HOLDS`], each with the slice that delivers
+/// it) is refused at its first token only once the whole source parsed with no early error, as
+/// the one error.
 pub fn parse_script(source: &[u16], options: ParseOptions) -> Result<Script, Vec<SyntaxError>> {
     parse_script_with(source, options, &mut Unlimited).map_err(Failure::into_errors)
 }

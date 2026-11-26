@@ -103,6 +103,9 @@ pub fn disassemble(code: &Code) -> String {
             FunctionKind::Setter => "setter",
             FunctionKind::Method => "method",
             FunctionKind::Arrow => "arrow",
+            FunctionKind::ClassConstructor => "class constructor",
+            FunctionKind::FieldInitializer => "field initializer",
+            FunctionKind::StaticBlock => "static block",
         };
         let _ = write!(
             out,

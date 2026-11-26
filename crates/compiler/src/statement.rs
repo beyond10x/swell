@@ -163,6 +163,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
             // entry of the block ([`Compiler::block_functions`]) instantiates
             // (`#sec-function-definitions-runtime-semantics-evaluation`).
             Stmt::Empty | Stmt::Debugger | Stmt::FunctionDeclaration(_) => {}
+            // The parse holds a class back (`swell_syntax::HOLDS`): no tree to compile has one.
+            Stmt::Class(_) => return Err(malformed("a class declaration")),
             // `#sec-expression-statement-runtime-semantics-evaluation`.
             Stmt::Expression(e) => {
                 t.push(Task::Expr(*e))?;

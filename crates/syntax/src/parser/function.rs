@@ -238,7 +238,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     fn parameters(&mut self, id: FunctionId, kind: FunctionKind) -> R<()> {
         self.expect(Punct::LParen)?;
         match kind {
-            FunctionKind::Getter => {}
+            // A field initializer and a static block have no parameter list of their own.
+            FunctionKind::Getter | FunctionKind::FieldInitializer | FunctionKind::StaticBlock => {}
             FunctionKind::Setter => {
                 if self.is(Punct::Ellipsis) {
                     return self.fail_here(SETTER_REST);
@@ -248,7 +249,8 @@ impl<'a, 'm> Parser<'a, 'm> {
             FunctionKind::Declaration
             | FunctionKind::Expression
             | FunctionKind::Method
-            | FunctionKind::Arrow => self.parameter_list(id, Some(Punct::RParen))?,
+            | FunctionKind::Arrow
+            | FunctionKind::ClassConstructor => self.parameter_list(id, Some(Punct::RParen))?,
         }
         self.expect(Punct::RParen)
     }
@@ -830,11 +832,23 @@ impl<'a, 'm> Parser<'a, 'm> {
 
 /// The SuperProperty flag of the parameters and body of a function of kind `kind` that is not an
 /// arrow function: set for a MethodDefinition (an accessor or a method, `#sec-method-definitions`,
-/// `#sec-method-definitions-static-semantics-early-errors`), cleared for every other
-/// (`#sec-function-definitions-static-semantics-early-errors`).
+/// `#sec-method-definitions-static-semantics-early-errors`), a class's constructor (a
+/// MethodDefinition, `#sec-class-definitions`, ClassElement : MethodDefinition), the initializer
+/// of a field and a static block (`#sec-class-definitions-static-semantics-early-errors`: an
+/// Initializer and a ClassStaticBlockStatementList may not contain a SuperCall and may contain a
+/// SuperProperty; both are functions with a [[HomeObject]], ClassFieldDefinitionEvaluation and
+/// ClassStaticBlockDefinitionEvaluation); cleared for every other
+/// (`#sec-function-definitions-static-semantics-early-errors`). A SuperCall is decided apart
+/// ([`Parser::super_admitted`]). Every kind is listed, so a new kind does not compile until it
+/// is placed here.
 fn super_property_of(kind: FunctionKind) -> SuperProperty {
     match kind {
-        FunctionKind::Method | FunctionKind::Getter | FunctionKind::Setter => SuperProperty::Method,
+        FunctionKind::Method
+        | FunctionKind::Getter
+        | FunctionKind::Setter
+        | FunctionKind::ClassConstructor
+        | FunctionKind::FieldInitializer
+        | FunctionKind::StaticBlock => SuperProperty::Method,
         FunctionKind::Declaration | FunctionKind::Expression | FunctionKind::Arrow => {
             SuperProperty::Outside
         }

@@ -34,8 +34,9 @@
 //! `super[expression]`, where the nearest function that is not an arrow function is a
 //! MethodDefinition, and a SuperCall, an early error before derived classes.
 //!
-//! Refused, each with its slice: `class`, `new.target` (8), `super` in an arrow function in a
-//! method and in eval code (8), `import.meta` and dynamic `import` (11).
+//! A ClassExpression is parsed whole and held (`parser/class.rs`). Refused, each with its slice:
+//! `new.target` (8), `super` in an arrow function in a method and in eval code (8),
+//! `import.meta` and dynamic `import` (11).
 //!
 //! The functions that stay on the Rust stack while the parser recurses (each one an entry of the
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
@@ -821,7 +822,7 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// (`#sec-optional-chains`), which a first `?.` starts: the expression is then wrapped in
     /// [`Expr::OptionalChain`], so the chain ends where this expression ends (a parenthesized
     /// chain is a chain of its own).
-    fn left_hand_side(&mut self) -> R<ExprId> {
+    pub(super) fn left_hand_side(&mut self) -> R<ExprId> {
         self.enter()?;
         let start = self.start();
         let mut e = self.member_or_new()?;
@@ -1072,7 +1073,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             TokenKind::Keyword(k) => match *k {
                 Keyword::This | Keyword::Null | Keyword::True | Keyword::False => Parser::leaf,
                 Keyword::Function => Parser::function_expression_node,
-                Keyword::Class => return self.refuse("class", 8),
+                Keyword::Class => Parser::class_expression_node,
                 Keyword::Super => self.super_admitted()?,
                 Keyword::Import => {
                     let next = match &self.peek()?.kind {
@@ -1506,7 +1507,7 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// The key of a property: the ComputedPropertyName `computed` read before, or the
     /// `PropertyName` at the current token, consumed.
-    fn key_or(&mut self, computed: Option<ExprId>) -> R<PropertyKey> {
+    pub(super) fn key_or(&mut self, computed: Option<ExprId>) -> R<PropertyKey> {
         match computed {
             Some(e) => Ok(PropertyKey::Computed(e)),
             None => self.property_key(),
@@ -1516,7 +1517,7 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// A ComputedPropertyName `[ AssignmentExpression ]` at the current token, consumed, or
     /// `None` at any other token (`#sec-object-initializer`). One entry of the depth counter whose
     /// frame holds the id alone.
-    fn computed_name(&mut self) -> R<Option<ExprId>> {
+    pub(super) fn computed_name(&mut self) -> R<Option<ExprId>> {
         if !self.is(Punct::LBracket) {
             return Ok(None);
         }
@@ -1599,7 +1600,7 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// (AsyncGeneratorMethod, `#sec-async-generator-function-definitions`), whose `*`
     /// [`Parser::async_method`] reads.
     #[inline(never)]
-    fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
+    pub(super) fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
         let plain = !self.tok.escaped;
         let word = match &self.tok.kind {
             TokenKind::Name(n) if plain && n == "get" => FunctionKind::Getter,
