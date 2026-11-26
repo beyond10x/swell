@@ -40,6 +40,7 @@ mod builtins_string_transform;
 mod builtins_symbol;
 mod builtins_symbol_values;
 mod builtins_uri;
+mod builtins_weak_collections;
 mod calls;
 mod collect;
 mod computed_names_and_object_spread;
