@@ -5,8 +5,8 @@
 //! `story:interpreter-and-script-entry-points`. Setting the flag of a faulted agent, or of one
 //! that was dropped, is a store nobody reads. Written by `story:heap-values-and-host-surface`.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use alloc::sync::Arc;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 /// The interrupt flag of one agent. `Send` and `Sync`; every clone shares the flag.
 #[derive(Clone, Debug, Default)]

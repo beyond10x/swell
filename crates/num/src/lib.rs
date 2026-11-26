@@ -23,6 +23,7 @@
 
 pub mod date;
 pub mod date_text;
+pub mod fmath;
 pub mod format;
 pub mod literal;
 pub mod math;

@@ -6,6 +6,7 @@
 use super::hooks::HostDefined;
 use crate::host::ErrorKind;
 use crate::value::{Root, Value};
+use alloc::vec::Vec;
 
 /// Why a run ended without a completion (decision 2 and decision 10).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -104,8 +105,8 @@ pub struct ErrorSite {
     pub host_defined: Option<HostDefined>,
 }
 
-impl std::fmt::Debug for ErrorSite {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for ErrorSite {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ErrorSite")
             .field("line", &self.line)
             .field("column", &self.column)

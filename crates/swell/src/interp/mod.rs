@@ -31,6 +31,8 @@
 //! environments, function and realm of each frame). A suspended frame (`interp/suspend.rs`) is
 //! off the frame stack and no root: the kind site of the object that holds it traces it.
 
+use alloc::vec::Vec;
+
 mod array_patterns;
 mod arrow;
 mod async_function;

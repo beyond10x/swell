@@ -24,6 +24,7 @@ use crate::object::property::Key;
 use crate::ops::iteration::IteratorRecord;
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, Value};
+use alloc::vec::Vec;
 
 impl<H: Host> Agent<H> {
     /// `SpreadArray`: GetIterator of the value on top, which stays there, rooted, while the

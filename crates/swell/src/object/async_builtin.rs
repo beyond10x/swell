@@ -49,6 +49,7 @@ use crate::object::promise::ReactionType;
 use crate::object::{ObjectKind, ObjectRecord};
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, Value};
+use alloc::boxed::Box;
 
 /// The state of an activation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

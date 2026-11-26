@@ -11,10 +11,10 @@
 //! The agent credits the queue after each sweep (`Agent::collect_now`) and before each charge
 //! here, so a credit is always the bytes of one charge, as resized, given back once.
 
-use std::cell::Cell;
-use std::cmp::Ordering;
-use std::fmt;
-use std::rc::Rc;
+use alloc::rc::Rc;
+use core::cell::Cell;
+use core::cmp::Ordering;
+use core::fmt;
 
 use super::Host;
 use super::agent::Agent;

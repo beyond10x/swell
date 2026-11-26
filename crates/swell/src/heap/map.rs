@@ -1,38 +1,136 @@
 //! The keyed hash map of the engine (`docs/design/engine.md`, decision 4, "Objects";
-//! `docs/design/host-interface.md`, decision 3, HOST-145): `std`'s `HashMap` with the SipHash of
-//! `swell-num` keyed by `Seeds::hash_key` and by nothing else, never `std`'s default hasher,
-//! which reads the operating system's random source. The key decides only which keys collide;
-//! no order the script can observe comes from a map's iteration. The atom table, the
+//! `docs/design/host-interface.md`, decision 3, HOST-145): a hash map written here, with the
+//! SipHash of `swell-num` keyed by `Seeds::hash_key` and by nothing else, never a hasher that
+//! reads the operating system's random source. The key decides only which keys collide; no
+//! order the script can observe comes from a map's iteration. The atom table, the
 //! GlobalSymbolRegistry (`heap/mod.rs`, `SymbolRegistry`) and the index
 //! maps of property lists and of the bindings eval code adds (`object/property.rs`) are such
 //! maps; the latter take the heap's hasher (`Heap::hasher`) and charge their table by
 //! [`KeyedMap::table_bytes_for`] before it is made.
+//!
+//! The table is open addressing with a control byte per bucket, in groups of 16 buckets probed
+//! triangularly: the layout and the policy of growth, deletion and rehashing of the map the
+//! standard library had here before (a SwissTable, with the group of 16 of x86-64), so that a
+//! table grows at the same insertion, is rehashed in place at the same point, and has the same
+//! room ([`KeyedMap::spare`]) and charge ([`KeyedMap::table_bytes`]) after every operation. A
+//! control byte is `EMPTY`, `DELETED` (a removal inside a run of full groups, which a probe must
+//! walk past) or the top 7 bits of the hash of the entry it holds; the 16 bytes after the last
+//! bucket repeat the first 16, so a group read near the end needs no wrap.
 
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::hash::Hash;
+use alloc::vec::Vec;
+use core::borrow::Borrow;
+use core::hash::{BuildHasher, Hash};
 
 use swell_num::siphash::SipBuildHasher;
 
 use super::accounting::OverBudget;
 
+/// The buckets of a group: one probe reads the control bytes of 16 buckets.
+const WIDTH: usize = 16;
+/// The control byte of a bucket that never held an entry since the table was made or cleared.
+const EMPTY: u8 = 0xFF;
+/// The control byte of a bucket whose entry was removed while a probe may need to walk past it.
+const DELETED: u8 = 0x80;
+
+/// The control byte of a full bucket: the top 7 bits of its entry's hash.
+fn h2(hash: u64) -> u8 {
+    // The shift leaves 7 bits.
+    u8::try_from(hash >> 57).unwrap_or(0)
+}
+
+/// The bucket where the probe of `hash` starts, before the mask.
+fn h1(hash: u64) -> usize {
+    // The low bits of the hash: on a 32-bit target the high half is dropped.
+    hash as usize
+}
+
+/// The entries a table with the mask `bucket_mask` holds before it grows: seven eighths of its
+/// buckets, or its buckets less one below 8.
+fn bucket_mask_to_capacity(bucket_mask: usize) -> usize {
+    if bucket_mask < 8 {
+        bucket_mask
+    } else {
+        bucket_mask.saturating_add(1) / 8 * 7
+    }
+}
+
+/// The 16 control bytes of a group, byte `i` in bits `8 i` to `8 i + 7`. A set of the group's
+/// buckets is a mask of the same shape with the top bit of each member's byte set.
+type Group = u128;
+
+/// The byte 0x80 in every byte of a group: the top bits.
+const TOPS: Group = Group::from_le_bytes([0x80; WIDTH]);
+/// The byte 0x7F in every byte of a group: the low bits.
+const LOWS: Group = Group::from_le_bytes([0x7F; WIDTH]);
+
+/// The buckets of `group` whose control byte is `byte`. Exact: `(x & 0x7F) + 0x7F` has its top
+/// bit set for every byte of `x` but 0 and carries into no other byte.
+fn match_byte(group: Group, byte: u8) -> Group {
+    let x = group ^ Group::from_le_bytes([byte; WIDTH]);
+    !((x & LOWS).wrapping_add(LOWS) | x) & TOPS
+}
+
+/// The buckets of `group` that are empty: of the three kinds of byte only `EMPTY` has bits 6
+/// and 7 both set.
+fn match_empty(group: Group) -> Group {
+    group & (group << 1) & TOPS
+}
+
+/// The buckets of `group` that are empty or deleted: the bytes with bit 7 set.
+fn match_empty_or_deleted(group: Group) -> Group {
+    group & TOPS
+}
+
+/// The lowest member of the set `mask` as a bucket offset in its group; 16 for none.
+fn lowest(mask: Group) -> usize {
+    (mask.trailing_zeros() / 8) as usize
+}
+
+/// The buckets at the end of a group before the last member of the set `mask`; 16 for none.
+fn leading_outside(mask: Group) -> u32 {
+    mask.leading_zeros() / 8
+}
+
+/// The sequence of groups a probe reads: from the bucket of the hash, then 16, 32, 48 and so
+/// on buckets further, wrapping, which reaches every group of a table of a power of two.
+struct Probe {
+    pos: usize,
+    stride: usize,
+}
+
+impl Probe {
+    fn next(&mut self, bucket_mask: usize) {
+        self.stride = self.stride.wrapping_add(WIDTH);
+        self.pos = self.pos.wrapping_add(self.stride) & bucket_mask;
+    }
+}
+
 /// A hash map whose hasher is keyed by the agent's `hash_key`.
 pub(crate) struct KeyedMap<K, V> {
-    map: HashMap<K, V, SipBuildHasher>,
+    hasher: SipBuildHasher,
+    /// A control byte per bucket and 16 more, or none while the map has no table.
+    ctrl: Vec<u8>,
+    /// The entry of each bucket; `Some` exactly where the control byte is a full one.
+    slots: Vec<Option<(K, V)>>,
+    /// The buckets less one; 0 while the map has no table.
+    bucket_mask: usize,
+    /// The entries.
+    items: usize,
+    /// The entries the table takes before it is rehashed: its capacity less the entries and
+    /// the deleted buckets.
+    growth_left: usize,
 }
 
 impl<K: Hash + Eq, V> KeyedMap<K, V> {
     /// An empty map keyed by `hash_key`.
     pub(crate) fn new(hash_key: &[u8; 16]) -> KeyedMap<K, V> {
-        KeyedMap {
-            map: HashMap::with_hasher(SipBuildHasher::new(hash_key)),
-        }
+        KeyedMap::with_hasher(SipBuildHasher::new(hash_key))
     }
 
     /// The hash this map gives `key`.
     #[cfg(test)]
     pub(crate) fn hash_of<Q: Hash + ?Sized>(&self, key: &Q) -> u64 {
-        std::hash::BuildHasher::hash_one(self.map.hasher(), key)
+        self.hasher.hash_one(key)
     }
 
     /// The value stored under `key`.
@@ -41,45 +139,110 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.map.get(key)
+        let index = self.find(self.hasher.hash_one(key), key)?;
+        self.slots.get(index)?.as_ref().map(|(_, value)| value)
     }
 
-    /// Store `value` under `key` and answer the value it replaces. The table grows through
-    /// `try_reserve`, so a refusal of the allocator is `OverBudget`, not an abort.
+    /// Store `value` under `key` and answer the value it replaces; a key already stored keeps
+    /// the key it was stored with. The table grows first when it has no room for one more
+    /// entry, through `try_reserve`, so a refusal of the allocator is `OverBudget`, not an
+    /// abort.
     pub(crate) fn insert(&mut self, key: K, value: V) -> Result<Option<V>, OverBudget> {
-        self.map.try_reserve(1).map_err(|_| OverBudget)?;
-        Ok(self.map.insert(key, value))
+        self.reserve(1)?;
+        let hash = self.hasher.hash_one(&key);
+        let h2 = h2(hash);
+        let mut probe = self.probe(hash);
+        let mut insert_slot = None;
+        for _ in 0..=self.bucket_mask {
+            let group = self.group(probe.pos);
+            let mut matches = match_byte(group, h2);
+            while matches != 0 {
+                let index = probe.pos.wrapping_add(lowest(matches)) & self.bucket_mask;
+                matches &= matches - 1;
+                if let Some(Some((stored, old))) = self.slots.get_mut(index)
+                    && *stored == key
+                {
+                    return Ok(Some(core::mem::replace(old, value)));
+                }
+            }
+            if insert_slot.is_none() {
+                let free = match_empty_or_deleted(group);
+                if free != 0 {
+                    insert_slot = Some(probe.pos.wrapping_add(lowest(free)) & self.bucket_mask);
+                }
+            }
+            if match_empty(group) != 0 {
+                break;
+            }
+            probe.next(self.bucket_mask);
+        }
+        let index = self.fix_insert_slot(insert_slot.ok_or(OverBudget)?);
+        if self.ctrl_at(index) == EMPTY {
+            self.growth_left = self.growth_left.saturating_sub(1);
+        }
+        let slot = self.slots.get_mut(index).ok_or(OverBudget)?;
+        *slot = Some((key, value));
+        self.set_ctrl(index, h2);
+        self.items = self.items.saturating_add(1);
+        Ok(None)
     }
 
     /// Keep the entries for which `keep` answers true.
-    pub(crate) fn retain(&mut self, keep: impl FnMut(&K, &mut V) -> bool) {
-        self.map.retain(keep);
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&K, &mut V) -> bool) {
+        for index in 0..self.slots.len() {
+            let Some(Some((key, value))) = self.slots.get_mut(index) else {
+                continue;
+            };
+            if !keep(key, value) {
+                self.erase(index);
+            }
+        }
     }
 
     /// The number of entries.
     pub(crate) fn len(&self) -> usize {
-        self.map.len()
+        self.items
     }
 
     /// The values, in no order a script can observe: for a tracer, which reports each one and
     /// whose result does not depend on the order (the GlobalSymbolRegistry, `heap/mod.rs`).
     /// Allocates nothing.
     pub(crate) fn values(&self) -> impl Iterator<Item = &V> {
-        self.map.values()
+        self.slots
+            .iter()
+            .filter_map(|slot| slot.as_ref().map(|(_, value)| value))
     }
 
     /// An empty map whose hasher is `hasher`, the one the heap keeps (`Heap::hasher`, keyed by
-    /// `hash_key`).
+    /// `hash_key`). It has no table until it is given room.
     pub(crate) fn with_hasher(hasher: SipBuildHasher) -> KeyedMap<K, V> {
         KeyedMap {
-            map: HashMap::with_hasher(hasher),
+            hasher,
+            ctrl: Vec::new(),
+            slots: Vec::new(),
+            bucket_mask: 0,
+            items: 0,
+            growth_left: 0,
         }
     }
 
     /// Room for `additional` more entries, through `try_reserve`: a refusal of the allocator
-    /// is `OverBudget`, not an abort. The caller charged the table's growth first.
+    /// is `OverBudget`, not an abort. The caller charged the table's growth first. With less
+    /// room than that the table is rehashed: in place while its entries and the new ones fill
+    /// at most half of what it holds, else into a table for at least one more entry than it
+    /// holds.
     pub(crate) fn reserve(&mut self, additional: usize) -> Result<(), OverBudget> {
-        self.map.try_reserve(additional).map_err(|_| OverBudget)
+        if additional <= self.growth_left {
+            return Ok(());
+        }
+        let new_items = self.items.checked_add(additional).ok_or(OverBudget)?;
+        let full_capacity = bucket_mask_to_capacity(self.bucket_mask);
+        if new_items <= full_capacity / 2 {
+            self.rehash_in_place();
+            Ok(())
+        } else {
+            self.resize(new_items.max(full_capacity.saturating_add(1)))
+        }
     }
 
     /// Remove the entry of `key` and answer its value.
@@ -88,24 +251,34 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.map.remove(key)
+        let index = self.find(self.hasher.hash_one(key), key)?;
+        self.erase(index).map(|(_, value)| value)
     }
 
-    /// Remove every entry; the table keeps its room.
+    /// Remove every entry; the table keeps its room. A map with no entry is left as it is,
+    /// deleted buckets included.
     pub(crate) fn clear(&mut self) {
-        self.map.clear();
+        if self.items == 0 {
+            return;
+        }
+        for slot in &mut self.slots {
+            *slot = None;
+        }
+        self.ctrl.fill(EMPTY);
+        self.items = 0;
+        self.growth_left = bucket_mask_to_capacity(self.bucket_mask);
     }
 
     /// The bytes of the table of a map with room for `capacity` entries, charged before the
-    /// table is made: the layout of `std`'s map, a slot of an entry and a control byte per
-    /// bucket and a group of 16 control bytes more, with a power of two of buckets at most
-    /// seven eighths full (four buckets below 4 entries, eight below 8).
+    /// table is made: a slot of an entry and a control byte per bucket and a group of 16
+    /// control bytes more, with a power of two of buckets at most seven eighths full (four
+    /// buckets below 4 entries, eight below 8).
     pub(crate) fn table_bytes_for(capacity: usize) -> u64 {
         Self::bytes_of_buckets(Self::buckets_for(capacity))
     }
 
     /// The entries the table [`KeyedMap::table_bytes_for`] charges for `capacity` holds before
-    /// `std`'s map grows it: seven eighths of its buckets, or its buckets less one below 8.
+    /// the map grows it: seven eighths of its buckets, or its buckets less one below 8.
     pub(crate) fn full_capacity_for(capacity: usize) -> usize {
         let buckets = Self::buckets_for(capacity);
         if buckets < 8 {
@@ -115,13 +288,13 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
         }
     }
 
-    /// The entries the map takes before its next insertion rehashes its table: `std`'s
-    /// `capacity` less the entries, where a bucket a removal marked as deleted counts against
-    /// the room until the table is rehashed. At 0 the next insertion rehashes the table, in
-    /// place while its entries and the new one fill at most half of what it holds, else into a
-    /// table of twice the buckets.
+    /// The entries the map takes before its next insertion rehashes its table: its capacity
+    /// less the entries, where a bucket a removal marked as deleted counts against the room
+    /// until the table is rehashed. At 0 the next insertion rehashes the table, in place while
+    /// its entries and the new one fill at most half of what it holds, else into a table of
+    /// twice the buckets.
     pub(crate) fn spare(&self) -> usize {
-        self.map.capacity().saturating_sub(self.map.len())
+        self.growth_left
     }
 
     /// The buckets of the table of a map with room for `capacity` entries.
@@ -137,10 +310,11 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
         }
     }
 
-    /// The bytes of the table the map has now, by the same layout: its room answers its
-    /// buckets (`capacity` is the buckets less one below 8, seven eighths of them above).
+    /// The bytes of the table the map has now, by the same layout, read from its room (its
+    /// entries and [`KeyedMap::spare`]) as the charges have always read it: the room answers
+    /// the buckets (the buckets less one below 8, seven eighths of them above).
     pub(crate) fn table_bytes(&self) -> u64 {
-        let capacity = self.map.capacity();
+        let capacity = self.items.saturating_add(self.growth_left);
         let buckets = match capacity {
             0 => 0,
             1..8 => capacity.saturating_add(1),
@@ -160,11 +334,208 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
         let bytes = slots.saturating_add(buckets).saturating_add(16);
         u64::try_from(bytes).unwrap_or(u64::MAX)
     }
+
+    /// The probe of `hash` in this table.
+    fn probe(&self, hash: u64) -> Probe {
+        Probe {
+            pos: h1(hash) & self.bucket_mask,
+            stride: 0,
+        }
+    }
+
+    /// The control byte of bucket `index` (or of the repeated group after the last bucket).
+    fn ctrl_at(&self, index: usize) -> u8 {
+        self.ctrl.get(index).copied().unwrap_or(EMPTY)
+    }
+
+    /// The 16 control bytes from bucket `pos`.
+    fn group(&self, pos: usize) -> Group {
+        self.ctrl
+            .get(pos..pos.saturating_add(WIDTH))
+            .and_then(|bytes| <[u8; WIDTH]>::try_from(bytes).ok())
+            .map_or(Group::MAX, Group::from_le_bytes)
+    }
+
+    /// Set the control byte of bucket `index` and its copy after the last bucket: for a bucket
+    /// of the first group, the byte `WIDTH` past the end of the buckets; for any other, itself.
+    fn set_ctrl(&mut self, index: usize, byte: u8) {
+        let mirror = (index.wrapping_sub(WIDTH) & self.bucket_mask).wrapping_add(WIDTH);
+        for at in [index, mirror] {
+            if let Some(slot) = self.ctrl.get_mut(at) {
+                *slot = byte;
+            }
+        }
+    }
+
+    /// The bucket that holds `key`, whose hash is `hash`.
+    fn find<Q>(&self, hash: u64, key: &Q) -> Option<usize>
+    where
+        K: Borrow<Q>,
+        Q: Eq + ?Sized,
+    {
+        if self.ctrl.is_empty() {
+            return None;
+        }
+        let h2 = h2(hash);
+        let mut probe = self.probe(hash);
+        for _ in 0..=self.bucket_mask {
+            let group = self.group(probe.pos);
+            let mut matches = match_byte(group, h2);
+            while matches != 0 {
+                let index = probe.pos.wrapping_add(lowest(matches)) & self.bucket_mask;
+                matches &= matches - 1;
+                if let Some(Some((stored, _))) = self.slots.get(index)
+                    && stored.borrow() == key
+                {
+                    return Some(index);
+                }
+            }
+            if match_empty(group) != 0 {
+                return None;
+            }
+            probe.next(self.bucket_mask);
+        }
+        None
+    }
+
+    /// The first empty or deleted bucket on the probe of `hash`.
+    fn find_insert_slot(&self, hash: u64) -> usize {
+        let mut probe = self.probe(hash);
+        for _ in 0..=self.bucket_mask {
+            let free = match_empty_or_deleted(self.group(probe.pos));
+            if free != 0 {
+                return self
+                    .fix_insert_slot(probe.pos.wrapping_add(lowest(free)) & self.bucket_mask);
+            }
+            probe.next(self.bucket_mask);
+        }
+        0
+    }
+
+    /// In a table of fewer buckets than a group, a group read past the last bucket sees empty
+    /// bytes that are not buckets, which the mask maps onto a full bucket: the first empty or
+    /// deleted bucket of the first group is taken instead.
+    fn fix_insert_slot(&self, index: usize) -> usize {
+        if self.ctrl_at(index) & 0x80 == 0 {
+            lowest(match_empty_or_deleted(self.group(0)))
+        } else {
+            index
+        }
+    }
+
+    /// Remove the entry of bucket `index`. Its bucket becomes empty when no probe can have
+    /// walked past it, that is when fewer than 16 full or deleted buckets run through it;
+    /// else it is marked deleted and its room comes back at the next rehash.
+    fn erase(&mut self, index: usize) -> Option<(K, V)> {
+        let entry = self.slots.get_mut(index)?.take()?;
+        let index_before = index.wrapping_sub(WIDTH) & self.bucket_mask;
+        let empty_before = match_empty(self.group(index_before));
+        let empty_after = match_empty(self.group(index));
+        let byte = if leading_outside(empty_before) + lowest(empty_after) as u32 >= WIDTH as u32 {
+            DELETED
+        } else {
+            self.growth_left = self.growth_left.saturating_add(1);
+            EMPTY
+        };
+        self.set_ctrl(index, byte);
+        self.items = self.items.saturating_sub(1);
+        Some(entry)
+    }
+
+    /// The hash of the entry of bucket `index`.
+    fn hash_at(&self, index: usize) -> Option<u64> {
+        let (key, _) = self.slots.get(index)?.as_ref()?;
+        Some(self.hasher.hash_one(key))
+    }
+
+    /// Rehash the table into its own buckets, which drops every deleted mark: each full bucket
+    /// is marked deleted and each deleted one empty, then each entry so marked moves to the
+    /// first free bucket of its probe, unless that is in the group its probe reached it by.
+    fn rehash_in_place(&mut self) {
+        let buckets = self.slots.len();
+        for byte in self.ctrl.iter_mut().take(buckets.max(WIDTH)) {
+            *byte = if *byte & 0x80 != 0 { EMPTY } else { DELETED };
+        }
+        let (from, to, count) = if buckets < WIDTH {
+            (0, WIDTH, buckets)
+        } else {
+            (0, buckets, WIDTH)
+        };
+        let head: Vec<u8> = self.ctrl.iter().skip(from).take(count).copied().collect();
+        for (byte, value) in self.ctrl.iter_mut().skip(to).zip(head) {
+            *byte = value;
+        }
+        for index in 0..buckets {
+            if self.ctrl_at(index) != DELETED {
+                continue;
+            }
+            // Each pass places one entry for good or swaps the bucket's entry with a deleted
+            // one, which is placed at a later pass; a table has fewer entries than buckets.
+            for _ in 0..=buckets {
+                let Some(hash) = self.hash_at(index) else {
+                    self.set_ctrl(index, EMPTY);
+                    break;
+                };
+                let new_index = self.find_insert_slot(hash);
+                let start = self.probe(hash).pos;
+                let bucket_mask = self.bucket_mask;
+                let probe_index = |pos: usize| (pos.wrapping_sub(start) & bucket_mask) / WIDTH;
+                if probe_index(index) == probe_index(new_index) {
+                    self.set_ctrl(index, h2(hash));
+                    break;
+                }
+                let previous = self.ctrl_at(new_index);
+                self.set_ctrl(new_index, h2(hash));
+                self.slots.swap(index, new_index);
+                if previous == EMPTY {
+                    self.set_ctrl(index, EMPTY);
+                    break;
+                }
+            }
+        }
+        self.growth_left = bucket_mask_to_capacity(self.bucket_mask).saturating_sub(self.items);
+    }
+
+    /// Move every entry into a new table with room for `capacity` entries, taken in the order
+    /// of their buckets. The new table is allocated first, through `try_reserve`: a refusal
+    /// leaves the map as it was.
+    fn resize(&mut self, capacity: usize) -> Result<(), OverBudget> {
+        let buckets = if capacity < 8 {
+            Self::buckets_for(capacity)
+        } else {
+            (capacity.checked_mul(8).ok_or(OverBudget)? / 7)
+                .checked_next_power_of_two()
+                .ok_or(OverBudget)?
+        };
+        let mut ctrl = Vec::new();
+        let ctrl_bytes = buckets.checked_add(WIDTH).ok_or(OverBudget)?;
+        ctrl.try_reserve_exact(ctrl_bytes).map_err(|_| OverBudget)?;
+        ctrl.resize(ctrl_bytes, EMPTY);
+        let mut slots = Vec::new();
+        slots.try_reserve_exact(buckets).map_err(|_| OverBudget)?;
+        slots.resize_with(buckets, || None);
+        let old = core::mem::replace(&mut self.slots, slots);
+        self.ctrl = ctrl;
+        self.bucket_mask = buckets.saturating_sub(1);
+        for (key, value) in old.into_iter().flatten() {
+            let hash = self.hasher.hash_one(&key);
+            let index = self.find_insert_slot(hash);
+            if let Some(slot) = self.slots.get_mut(index) {
+                *slot = Some((key, value));
+            }
+            self.set_ctrl(index, h2(hash));
+        }
+        self.growth_left = bucket_mask_to_capacity(self.bucket_mask).saturating_sub(self.items);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::hash::BuildHasher;
+    use alloc::format;
+    use alloc::vec::Vec;
+    use core::hash::BuildHasher;
+    use std::collections::HashMap;
 
     use swell_num::siphash::SipBuildHasher;
 
@@ -261,6 +632,12 @@ mod tests {
             map.get(&"key 17".encode_utf16().collect::<Vec<u16>>()),
             None
         );
+        assert_eq!(
+            map.get(&"key 18".encode_utf16().collect::<Vec<u16>>()),
+            Some(&18)
+        );
+        assert_eq!(map.values().count(), 500);
+        assert!(map.values().all(|value| value % 2 == 0));
     }
 
     /// The bytes charged for a table before it is made are those of the table the map then
@@ -292,5 +669,81 @@ mod tests {
         map.clear();
         assert_eq!(map.len(), 0);
         assert_eq!(map.table_bytes(), bytes);
+    }
+
+    /// A step of the comparison with the standard library's map.
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        Insert(u32),
+        Remove(u32),
+        Reserve(usize),
+        RetainOdd,
+        Clear,
+    }
+
+    /// The map answers as the standard library's map with the same hasher does, over 20,000
+    /// steps of insertions, replacements, removals, reservations, `retain` and `clear` drawn
+    /// from a fixed generator over a few hundred keys: every answer, the entries, and, on
+    /// x86-64, whose standard library map has groups of 16 as this one, the room after each
+    /// step, which is what the charges read ([`KeyedMap::spare`], [`KeyedMap::table_bytes`]).
+    #[test]
+    fn the_map_answers_as_the_standard_library_map_did() {
+        let hasher = SipBuildHasher::new(&[7; 16]);
+        let mut ours: KeyedMap<u32, u64> = KeyedMap::with_hasher(hasher);
+        let mut std_map: HashMap<u32, u64, SipBuildHasher> = HashMap::with_hasher(hasher);
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut draw = |bound: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % bound
+        };
+        for step_number in 0..20_000u64 {
+            let range = if step_number % 5_000 < 2_500 { 64 } else { 600 };
+            let step = match draw(100) {
+                0..=54 => Step::Insert(u32::try_from(draw(range)).unwrap()),
+                55..=94 => Step::Remove(u32::try_from(draw(range)).unwrap()),
+                95..=97 => Step::Reserve(usize::try_from(draw(40)).unwrap()),
+                98 => Step::RetainOdd,
+                _ => Step::Clear,
+            };
+            match step {
+                Step::Insert(key) => {
+                    assert_eq!(
+                        ours.insert(key, step_number),
+                        Ok(std_map.insert(key, step_number)),
+                        "{step:?}"
+                    );
+                }
+                Step::Remove(key) => assert_eq!(ours.remove(&key), std_map.remove(&key)),
+                Step::Reserve(additional) => {
+                    ours.reserve(additional).unwrap();
+                    std_map.try_reserve(additional).unwrap();
+                }
+                Step::RetainOdd => {
+                    ours.retain(|key, _| key % 2 == 1);
+                    std_map.retain(|key, _| key % 2 == 1);
+                }
+                Step::Clear => {
+                    ours.clear();
+                    std_map.clear();
+                }
+            }
+            assert_eq!(ours.len(), std_map.len(), "{step_number} {step:?}");
+            #[cfg(target_arch = "x86_64")]
+            assert_eq!(
+                ours.spare(),
+                std_map.capacity() - std_map.len(),
+                "{step_number} {step:?}"
+            );
+        }
+        for key in 0..600 {
+            assert_eq!(ours.get(&key), std_map.get(&key), "{key}");
+        }
+        let mut values: Vec<u64> = ours.values().copied().collect();
+        let mut expected: Vec<u64> = std_map.values().copied().collect();
+        values.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(values, expected);
     }
 }

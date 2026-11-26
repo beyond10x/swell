@@ -11,6 +11,20 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Changed
+
+- The engine crate `swell` is `#![no_std]` with `alloc`: its library code names no `std` path,
+  and the program that links it provides the allocator. Its keyed hash map (`heap/map.rs`) is
+  written in the crate, a SwissTable with groups of 16 and the SipHash keyed by `hash_key`
+  (HOST-145), with the growth, deletion and rehashing of the standard library's map it
+  replaces, so a table grows and is charged at the same operations as before; a unit test
+  compares it with that map over 20,000 operations. The float functions it called as `std`
+  methods (`trunc`, `floor`, `ceil`, `sqrt`, `rem_euclid`) and the `%` of two Numbers (`fmod`,
+  which a no_std build would take from the C library) come from
+  `swell_num::fmath`. The test-build counters of collections, stored Strings and drains of
+  the release queue are fields of the heap and the root table instead of thread-locals. The
+  public interface and the test262 counts do not change (`story:core-builds-without-std`).
+
 ## [0.12.0] - 2026-11-25
 
 swell has a shell binary, `swell`, and a release ships it for Linux, macOS and Windows. The

@@ -16,8 +16,9 @@
 //! one entry", and decision 4, "Queued jobs"). The checkpoint runs it with
 //! [`Agent::run_promise_job`].
 
-use std::cell::Cell;
-use std::rc::Rc;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+use core::cell::Cell;
 
 use crate::builtins::promise::PromiseBuiltin;
 use crate::heap::arena::Handle;

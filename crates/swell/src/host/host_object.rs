@@ -8,7 +8,8 @@
 //! (slice 18) are added to [`HostObjectSpec`] by the slices of their requirements. Written by
 //! `story:heap-values-and-host-surface`.
 
-use std::any::Any;
+use alloc::boxed::Box;
+use core::any::Any;
 
 use crate::heap::collect::Mark;
 use crate::host::ErrorKind;

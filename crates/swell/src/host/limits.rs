@@ -3,7 +3,7 @@
 //! `story:heap-values-and-host-surface`; `Limits::min_stack_bytes` is
 //! `story:interpreter-and-script-entry-points`.
 
-use std::fmt;
+use core::fmt;
 
 /// The limits of an agent (decision 2). Each has a unit, a meaning at 0 and one outcome when it
 /// is reached; 0 is a limit of zero, never "no limit", and a host that wants no practical limit

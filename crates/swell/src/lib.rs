@@ -23,6 +23,15 @@
 //!   (19.2.1, 20.2.1).
 //! - `builtins`: one module per clause of the builtins.
 //! - `compile_fail`: the requirements the compiler holds, as `compile_fail` doc tests.
+//!
+//! The crate is `no_std` with `alloc`: it names no allocator and uses no API of the operating
+//! system; the program that links it provides the allocator. Its unit tests use `std`.
+
+#![no_std]
+
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 mod builtins;
 mod compile_fail;

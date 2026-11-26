@@ -45,7 +45,9 @@
 //! call of an ECMAScript function is (`interp/dispatch.rs`), with no Rust recursion; the
 //! indirect `eval` is a builtin, whose code is a re-entry (`interp/mod.rs`).
 
-use std::rc::Rc;
+use alloc::rc::Rc;
+use alloc::vec;
+use alloc::vec::Vec;
 
 use swell_compiler::bytecode::Slot;
 use swell_syntax::ParseOptions;
@@ -827,7 +829,7 @@ impl<H: Host> Agent<H> {
         }
         name.extend("anonymous".encode_utf16());
         if let Some(template) = code.functions.first_mut() {
-            let old = std::mem::replace(&mut template.name, name);
+            let old = core::mem::replace(&mut template.name, name);
             let old_bytes = old.capacity().saturating_mul(size_of::<u16>());
             drop(old);
             code.charged = code.charged.saturating_sub(old_bytes).saturating_add(bytes);

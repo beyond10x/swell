@@ -12,6 +12,7 @@ use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
 use crate::value::Value;
+use alloc::format;
 
 impl<H: Host> Agent<H> {
     /// `RequireObjectCoercible`: a `TypeError` when the value on top is `undefined` or `null`;

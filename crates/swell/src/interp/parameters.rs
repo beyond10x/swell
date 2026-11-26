@@ -20,6 +20,7 @@ use crate::host::agent::Agent;
 use crate::host::outcome::{Completion, Termination};
 use crate::interp::frame::SlotValue;
 use crate::value::{ObjectRef, Value};
+use alloc::vec::Vec;
 
 impl<H: Host> Agent<H> {
     /// `Argument(n)`: the argument the call kept at local slot `n`, `undefined` past the last.
@@ -91,7 +92,7 @@ impl<H: Host> Agent<H> {
                 .map(|names| u32::try_from(names.len()).unwrap_or(u32::MAX));
             let names = SlotNames {
                 script: frame.script,
-                compiled: std::rc::Rc::clone(&frame.compiled),
+                compiled: alloc::rc::Rc::clone(&frame.compiled),
                 table: NameTable::Scope {
                     template: frame.template,
                     index: table,

@@ -28,6 +28,9 @@
 //! its units would pass it, asks the memory budget before it grows, and charges a step per code
 //! unit it copies, so the copy is part of the step budget.
 
+use alloc::format;
+use alloc::vec::Vec;
+
 pub(crate) mod access;
 pub(crate) mod pattern;
 pub(crate) mod replace;
@@ -571,6 +574,10 @@ mod tests {
     use crate::object::builtin_function::BuiltinId;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::Value;
+    use alloc::string::String;
+    use alloc::string::ToString;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     /// The order of keys of `String` and `String.prototype` (`story:builtin-group-modules`):
     /// the keys of the base in the base's order, then the keys of the groups `access`,
