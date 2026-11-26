@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T08:06:54Z",
+  "actor": "human:operator",
+  "artifact": "story:reflect-namespace",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/reflect at 8a2c03f4, build node, before the merge into wave/big-2",
+    "reference": "builtins_reflect: 28 tests run: 28 passed (default and collect-every-safe-point); task clippy exit 0; cargo fmt --check exit 0"
+  }
+}
