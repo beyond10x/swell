@@ -3031,22 +3031,22 @@ The rule:
 | 1 | `harness` | 31 | 62 |
 | 2 | `language-core` | 4,259 | 7,543 |
 | 3 | `builtins-core` | 7,011 | 13,829 |
-| 4 | `numbers-and-dates` | 1,612 | 3,184 |
+| 4 | `numbers-and-dates` | 1,681 | 3,320 |
 | 5 | `regexp` | 2,724 | 5,441 |
 | 6 | `bindings-and-iteration` | 3,898 | 7,351 |
 | 7 | `generators` | 1,472 | 2,801 |
 | 8 | `classes` | 9,302 | 18,455 |
-| 9 | `collections-proxy-reflect` | 1,785 | 3,541 |
+| 9 | `collections-proxy-reflect` | 1,787 | 3,545 |
 | 10 | `promises-and-async` | 3,759 | 7,258 |
 | 11 | `modules` | 1,281 | 1,833 |
-| 12 | `bigint` | 358 | 714 |
+| 12 | `bigint` | 359 | 716 |
 | 13 | `binary-data` | 3,061 | 6,078 |
 | 14 | `shared-memory` | 598 | 1,192 |
 | 15 | `iterator-helpers-and-resources` | 1,094 | 2,170 |
 | 16 | `weak-references` | 82 | 164 |
 | 17 | `tail-calls` | 35 | 35 |
 | 18 | `annex-b` | 1,134 | 1,451 |
-| 19 | `staging` | 1,435 | 2,692 |
+| 19 | `staging` | 1,363 | 2,550 |
 | | slices 1 to 19 | 44,931 | 85,794 |
 | 20 | `temporal` (excluded at first) | 4,617 | 9,234 |
 | 21 | `intl402` (excluded at first) | 1,662 | 3,324 |
@@ -3122,6 +3122,18 @@ inventory's `meta.tsv`, counting slice `10`): `10 3759 7258`, the slice line of 
 test262` on the code of the slice, every run passed. Every moved case goes to slice 8, 9, 12 or
 13 and every case that comes in leaves slice 18 or 19, so slices 1 to 19 still hold 44,931 cases
 and 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
+
+Slice 4 had 1,612 cases and 3,184 runs by its rules (its `dir` lines, `feature exponentiation 4`,
+the lines of the closes of slices 1, 2, 3, 5 and 6 that gave it cases, and the order of
+delivery). 1,681 cases and 3,320 runs are what slice 4 counts after its close: 3 cases (6 runs)
+that need a later slice move by the lines of the paragraph "Slice 4's cases that need a later
+slice", 2 to slice 9 and 1 to 12, and 72 cases (142 runs) come into it from slice 19 by the lines
+of the same paragraph ("A case that comes into a slice from one delivered later" above). Measured
+on 2026-11-26 with the same check (`awk -f slices.awk` over this block and the inventory's
+`meta.tsv`, counting slice `04`): `04 1681 3320`, the slice line of `slot task test262` on the
+code of the slice, every run passed. Every moved case goes to slice 9 or 12 and every case that
+comes in leaves slice 19, so slices 1 to 19 still hold 44,931 cases and 85,794 runs and the 22
+lines still sum to 53,801 and 103,360.
 
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
@@ -3712,6 +3724,72 @@ with no line: 65 have a `feature` line of a later slice (`explicit-resource-mana
 `staging/sm/async-functions/inner-caller`, reads the `caller` property of a function (`feature
 caller 18`): it reaches the accessor of `%Function.prototype%` that throws, so its assertions never
 run.
+
+**Slice 4's cases that need a later slice.** Measured at the close of slice 4 (2026-11-26,
+`story:slice-04-conformance-close`), with the run lines of the runner on the code of the slice
+(`slot --timeout 30m task test262-expected`, its `runs.tsv`): 3 of the 1,612 cases of slice 4
+fail, each in every one of its runs (6 runs), and none on a part of slice 4: the first failure of
+each run is a `ReferenceError` for `Proxy` (4 runs) or the refusal `BigInt literal is not
+supported before slice 12` (2). Each was read: with its later part it needs nothing of slice 4
+that its sibling cases without that part do not pass with.
+`Array/prototype/reverse/length-exceeding-integer-limit-with-proxy` and
+`Array/prototype/slice/length-exceeding-integer-limit-proxied-array` read the traps of a `Proxy`
+over an object of length 2^53 - 1, which `**` writes (the line `feature exponentiation 4` gave
+them slice 4); their siblings `-with-object` and `length-exceeding-integer-limit` pass.
+`Math/sumPrecise/throws-on-non-number` calls `Math.sumPrecise([0n])`; the other cases of
+`Math/sumPrecise/` pass. All 3 move, each a line of `conformance/test262/moves.tsv` with kind
+`part` and a token of `conformance/test262/later-parts.tsv` as its evidence, held by
+`test262-moves-check`: 1 line is new, with `from` 4; 2 are lines of cases moved to slice 4
+earlier (`from` 3, by `feature exponentiation 4` at the close of slice 2), which keep their `from`
+and get the new `to` and evidence. The later parts gain no token. The block gains 3 lines `dir
+<file> <slice>`, one for a single file each, since every directory that holds one of them holds
+cases of slice 4 that stay. The groups, by target slice (lines of the list; in brackets the lines
+with `from` 4):
+
+- to slice 9, 2 (0): `Proxy` (`Array/prototype/reverse/length-exceeding-integer-limit-with-proxy`
+  and `Array/prototype/slice/length-exceeding-integer-limit-proxied-array`, `from` 3);
+- to slice 12, 1 (1): `0n` (`Math/sumPrecise/throws-on-non-number`).
+
+The counts sum to the 3 lines this change adds to or changes in the list, 1 of them with `from` 4.
+
+72 cases (142 runs) come into slice 4, by the rule "A case that comes into a slice from one
+delivered later" above. Each is counted by the block in slice 19 (`dir test/staging/ 19`), failed
+at the start of the slice (`a46fe885`, the close of slice 10) on a part of slice 4, passes in every
+run on the code of the slice, has no `feature` or `flag` line of a slice delivered after 4, and
+neither it nor a harness file it includes holds a token of a later slice of
+`conformance/test262/later-parts.tsv` (comments removed, as `test262-moves-check` reads a case).
+All are under `test/staging/sm/`: `Date/` 23, `Number/` 16, `Math/` 13, `RegExp/` 4, `Array/` 3,
+`Function/` 3, `JSON/` 3, `global/` 3, `String/` 2, and 1 each of `expressions/` and `object/`.
+Each gets a line `dir <file> 4` (no directory has every case come in), listed in
+`docs/plan/slice-04/close-into-4.tsv` with the slice it leaves, the runner's message of its failed
+runs at the start and the part of slice 4 it failed on; each passes in every one of its runs (the
+close's check (4) over that file), and none has a line of `moves.tsv`. The failure at the start
+is read case by case from the run lines of the full run of `a46fe885`, whose lines equal the
+expected file committed there: every run of each of the 72 failed on a part of slice 4 the start
+did not have. The message of 31 names the part: `Date` is not defined 26 (2 of them inside the
+`Test262Error` of an assertion), `parseInt` or `parseFloat` is not defined 3, and the refusal of
+`**` 2. The message of 41 names none, and the part is read from the case's source (the fifth
+field of `close-into-4.tsv`): a call of a member of `Math` or of `parseInt`, `parseFloat` or
+`Number.parseInt` that is not there 30 (`the value is not a function`), a read of a property
+(`length`, `call`, `apply`) of a function of `Math`, `Number` or `Number.prototype` that is not
+there 9 (`Cannot use a property of undefined`), the `**` the case compiles with `Function` 1
+(`counted refusal: 26 refusal(s)`), and `Number/conversion-invalid-precision`, whose
+`Number.prototype[method].call` throws a `TypeError` where it expects a `RangeError` 1 (`Expected
+a RangeError but got a TypeError`). In that run slice 19 passes 604 cases; on the
+base of this close, 676: 72 cases went from failed to passed and none the other way, and they
+are the 72. Eight cases of slice 19 hold a token of slice 4 and pass in every run at the start
+and now: the part is not reached, is called inside a `try` whose error is dropped, or its
+absence throws the `TypeError` the case expects
+(`extensions/new-cross-compartment`, `extensions/extension-methods-reject-null-undefined-this`,
+`misc/builtin-methods-reject-null-undefined-this`, `extensions/decompile-for-of`,
+`JSON/stringify-nonarray-noncallable-replacer`, `Function/15.3.4.3-01`, `regress/regress-449627`
+and `regress/regress-596805-2`); they stay in slice 19 with no line. 98 cases of slice 9 failed at
+the start on a part of slice 4 (`Date` is not defined 47, `parseInt` or `parseFloat` is not
+defined 7, `isConstructor invoked with a non-function value` 44) and pass in every run now, 92
+of them the `not-a-constructor` cases of the directories of slice 4; they stay in slice 9 with no
+line, since each has the line `feature Reflect.construct 9` (slice 9 passes 170 cases at the
+start and 268 now). No case of another slice delivered after 4 failed at the start and passes
+in every run now.
 
 ```swell-slices
 order delivery 1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21
@@ -5585,6 +5663,81 @@ dir test/staging/sm/async-functions/length.js 10
 dir test/staging/sm/async-functions/no-expression-closure.js 10
 dir test/staging/sm/async-functions/toString.js 10
 dir test/staging/sm/extensions/expression-closure-syntax.js 10
+dir test/built-ins/Array/prototype/reverse/length-exceeding-integer-limit-with-proxy.js 9
+dir test/built-ins/Array/prototype/slice/length-exceeding-integer-limit-proxied-array.js 9
+dir test/built-ins/Math/sumPrecise/throws-on-non-number.js 12
+dir test/staging/sm/Array/change-array-by-copy-errors-from-correct-realm.js 4
+dir test/staging/sm/Array/toSpliced-dense.js 4
+dir test/staging/sm/Array/unshift-01.js 4
+dir test/staging/sm/Date/UTC-convert-all-arguments.js 4
+dir test/staging/sm/Date/constructor-convert-all-arguments.js 4
+dir test/staging/sm/Date/constructor-one-Date-argument.js 4
+dir test/staging/sm/Date/constructor-one-argument.js 4
+dir test/staging/sm/Date/defaultvalue.js 4
+dir test/staging/sm/Date/dst-offset-caching-1-of-8.js 4
+dir test/staging/sm/Date/dst-offset-caching-2-of-8.js 4
+dir test/staging/sm/Date/dst-offset-caching-3-of-8.js 4
+dir test/staging/sm/Date/dst-offset-caching-4-of-8.js 4
+dir test/staging/sm/Date/dst-offset-caching-5-of-8.js 4
+dir test/staging/sm/Date/dst-offset-caching-6-of-8.js 4
+dir test/staging/sm/Date/dst-offset-caching-7-of-8.js 4
+dir test/staging/sm/Date/dst-offset-caching-8-of-8.js 4
+dir test/staging/sm/Date/equality-to-boolean.js 4
+dir test/staging/sm/Date/fractions.js 4
+dir test/staging/sm/Date/makeday-year-month-is-infinity.js 4
+dir test/staging/sm/Date/time-components-negative-zero.js 4
+dir test/staging/sm/Date/timeclip.js 4
+dir test/staging/sm/Date/toISOString-01.js 4
+dir test/staging/sm/Date/toISOString.js 4
+dir test/staging/sm/Date/toJSON-01.js 4
+dir test/staging/sm/Date/toPrimitive.js 4
+dir test/staging/sm/Date/two-digit-years.js 4
+dir test/staging/sm/Function/builtin-no-prototype.js 4
+dir test/staging/sm/Function/configurable-length-builtins.js 4
+dir test/staging/sm/Function/strict-arguments.js 4
+dir test/staging/sm/JSON/parse-mega-huge-array.js 4
+dir test/staging/sm/JSON/stringify-replacer-array-duplicated-element.js 4
+dir test/staging/sm/JSON/stringify.js 4
+dir test/staging/sm/Math/20.2.2.ToNumber.js 4
+dir test/staging/sm/Math/asinh-exact.js 4
+dir test/staging/sm/Math/cbrt-exact.js 4
+dir test/staging/sm/Math/clz32.js 4
+dir test/staging/sm/Math/cosh-exact.js 4
+dir test/staging/sm/Math/exp-exact.js 4
+dir test/staging/sm/Math/expm1-exact.js 4
+dir test/staging/sm/Math/expm1-monotonicity.js 4
+dir test/staging/sm/Math/log10-exact.js 4
+dir test/staging/sm/Math/log2-exact.js 4
+dir test/staging/sm/Math/sign.js 4
+dir test/staging/sm/Math/sinh-exact.js 4
+dir test/staging/sm/Math/tanh-exact.js 4
+dir test/staging/sm/Number/15.7.3.7-EPSILON.js 4
+dir test/staging/sm/Number/15.7.4.2.js 4
+dir test/staging/sm/Number/20.1.2.10-MIN_SAFE_INTEGER.js 4
+dir test/staging/sm/Number/20.1.2.6-MAX_SAFE_INTEGER.js 4
+dir test/staging/sm/Number/20.1.3.2-toExponential.js 4
+dir test/staging/sm/Number/20.1.3.2-toPrecision.js 4
+dir test/staging/sm/Number/20.1.3.3-toFixed.js 4
+dir test/staging/sm/Number/conversion-invalid-precision.js 4
+dir test/staging/sm/Number/isSafeInteger-01.js 4
+dir test/staging/sm/Number/parseFloat-01.js 4
+dir test/staging/sm/Number/parseInt-01.js 4
+dir test/staging/sm/Number/parseInt-default-to-decimal.js 4
+dir test/staging/sm/Number/toExponential-values.js 4
+dir test/staging/sm/Number/toFixed-values.js 4
+dir test/staging/sm/Number/toPrecision-values.js 4
+dir test/staging/sm/Number/toString-radix-handling.js 4
+dir test/staging/sm/RegExp/exec-lastIndex-negative.js 4
+dir test/staging/sm/RegExp/instance-property-storage-introspection.js 4
+dir test/staging/sm/RegExp/unicode-braced.js 4
+dir test/staging/sm/RegExp/unicode-class-braced.js 4
+dir test/staging/sm/String/fromCodePoint.js 4
+dir test/staging/sm/String/unicode-braced.js 4
+dir test/staging/sm/expressions/exponentiation-unparenthesised-unary.js 4
+dir test/staging/sm/global/parseFloat-01.js 4
+dir test/staging/sm/global/parseInt-01.js 4
+dir test/staging/sm/global/parseInt-default-to-decimal.js 4
+dir test/staging/sm/object/toPrimitive-callers.js 4
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
@@ -6054,22 +6207,22 @@ Its output on this document:
 01 31 62
 02 4259 7543
 03 7011 13829
-04 1612 3184
+04 1681 3320
 05 2724 5441
 06 3898 7351
 07 1472 2801
 08 9302 18455
-09 1785 3541
+09 1787 3545
 10 3759 7258
 11 1281 1833
-12 358 714
+12 359 716
 13 3061 6078
 14 598 1192
 15 1094 2170
 16 82 164
 17 35 35
 18 1134 1451
-19 1435 2692
+19 1363 2550
 20 4617 9234
 21 1662 3324
 x-stage3 2591 5008

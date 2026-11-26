@@ -41,6 +41,7 @@ mod builtins_uri;
 mod calls;
 mod collect;
 mod computed_names_and_object_spread;
+mod consumer_slice_04;
 mod conversion;
 mod date_clock;
 mod date_setters;
