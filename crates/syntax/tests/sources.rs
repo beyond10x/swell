@@ -1864,10 +1864,10 @@ fn exponentiation_tree_shapes() {
 }
 
 /// Long chains end in one error each at `parser_nesting` 1,000 (`#sec-exp-operator`,
-/// `#sec-assignment-operators`): a right-deep chain of 5,000 `**=` and chains of 100,000 `**`,
-/// written either way round, in the nesting error alone; a chain of 5,000 `**` with a unary
-/// right operand on each level in the unary-base SyntaxError alone, at its second `**`, whose
-/// left operand is `-a`.
+/// `#sec-assignment-operators`): a right-deep chain of 5,000 `**=`, a chain of 100,000 `**` as
+/// the value of an assignment and the same chain as the argument of a call, in the nesting error
+/// alone; a chain of 5,000 `**` with a unary right operand on each level in the unary-base
+/// SyntaxError alone, at its second `**`, whose left operand is `-a`.
 #[test]
 fn exponent_chains_are_bounded() {
     let nesting = "nesting deeper than parser_nesting (1000)";
@@ -1876,7 +1876,7 @@ fn exponent_chains_are_bounded() {
         (format!("x = a{};", " ** -a".repeat(5_000)), unary),
         (format!("{}0;", "a **= ".repeat(5_000)), nesting),
         (format!("x = a{};", " ** a".repeat(100_000)), nesting),
-        (format!("x = {}a;", "a ** ".repeat(100_000)), nesting),
+        (format!("f(a{});", " ** a".repeat(100_000)), nesting),
     ] {
         let result = parse(&text);
         let Err(errors) = result else {

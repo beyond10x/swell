@@ -509,3 +509,21 @@ fn the_deepest_chain_runs_through_a_script_eval_and_function() {
         &expected,
     );
 }
+
+/// Number::exponentiate (6.1.6.1.3, `#sec-numeric-types-number-exponentiate`), an infinite
+/// exponent against a base with 0 < |base| < 1: +0 for +Infinity and +Infinity for -Infinity,
+/// whatever the sign of the base. The pairs of [`each_pair_answers_as_math_pow`] hold no base strictly
+/// between -1 and 1 but the zeros, and [`values_of_the_clause_written_as_literals`] no negative
+/// base with +Infinity, so an operator that answers -0 for `(-0.5) ** Infinity` passes both.
+/// Each value is shown by `String` with -0 as `-0`, and compared with `Math.pow` by `Object.is`.
+#[test]
+fn a_base_inside_minus_one_and_one_to_an_infinite_exponent() {
+    answers(
+        "function s(x) { return x === 0 && 1 / x < 0 ? '-0' : String(x); }\n\
+         var is = Object.is, p = Math.pow;\n\
+         [s((-0.5) ** Infinity), s((-1e-300) ** Infinity), s((-0.999) ** Infinity),\n\
+          s(0.5 ** Infinity), s((-0.5) ** -Infinity), s(0.25 ** -Infinity),\n\
+          is((-0.5) ** Infinity, p(-0.5, Infinity)), is(0.5 ** Infinity, p(0.5, Infinity))].join();",
+        "0,0,0,0,Infinity,Infinity,true,true",
+    );
+}
