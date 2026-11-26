@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T10:01:51Z",
+  "actor": "human:operator",
+  "artifact": "story:buffer-growth-outside-the-charged-list-is-listed",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at a4c1b2e7 with the files of commit 6bd73063 (the run was made on that tree before the commit), exit 0, on the build node; the unit was merged by commit 07c4a8f6, an ancestor of that head",
+    "reference": "swell::source_scan::growth_attributes_are_expects_with_a_reason and the gate's clippy step with crates/swell/clippy.toml"
+  }
+}

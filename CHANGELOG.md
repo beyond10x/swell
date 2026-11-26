@@ -30,6 +30,30 @@ Every number below comes from the gate, `task check`, on the released commit.
   so `a ** b` and `Math.pow(a, b)` answer the same Number. The compiler folds nothing. The
   refusal "exponentiation operator is not supported before slice 4" is gone
   (`story:exponentiation-operator`).
+- The close of slice 4, `numbers-and-dates` (`story:slice-04-conformance-close`): every case
+  of the slice passes in every run, `test262-slice 04 1681 3320 0 0 1681 1681 0 0`. Three
+  cases that need a later slice move with evidence in `conformance/test262/moves.tsv`: the
+  `Proxy` cases `Array/prototype/reverse/length-exceeding-integer-limit-with-proxy` and
+  `Array/prototype/slice/length-exceeding-integer-limit-proxied-array` to slice 9, and
+  `Math/sumPrecise/throws-on-non-number` (`0n`) to slice 12. 72 cases of
+  `test/staging/sm/` that failed at the start of the slice and pass now come into slice 4
+  from slice 19 by lines of the block (`docs/plan/slice-04/close-into-4.tsv`), each read
+  case by case against the full run at the start commit of the slice. A test holds the
+  nine references of the first consumer to `Date` and `Math` in one script, with the
+  consumer's own calls and argument values
+  (`consumer_slice_04::consumer_nine_references_of_surf_resolve_as_the_standard_says`). A
+  second script calls the five parts of slice 4 the consumer calls (`Date.now`,
+  `Math.floor`, `Math.min`, `Math.abs`, `Math.ceil`) with arguments that tell each one
+  from its absence, and that show the sign of a zero; the four functions of `Math` are told
+  from the identity, and `floor` and `ceil` from their rounding neighbours. Five tests run
+  it: `parts_script_answers_as_the_standard_says`,
+  `parts_script_fails_without_each_part_of_slice_4` (all five parts),
+  `parts_script_tells_each_math_function_from_the_identity` (the four functions of
+  `Math`), `parts_script_tells_each_rounding_function_from_its_neighbours` (`floor` and
+  `ceil`, each against the other three of `floor`, `ceil`, `round` and `trunc`) and
+  `parts_script_sees_the_sign_of_each_zero` (the four functions of `Math`). Slice 4 is
+  delivered: `conformance/slices-delivered.txt` lists it, and no host requirement is pending
+  for it.
 
 ### Changed
 

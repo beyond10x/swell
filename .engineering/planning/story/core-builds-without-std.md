@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:core-builds-without-std
 kind: story
-status: active
+status: implemented
 title: The engine core builds without std; the host injects every adapter
 summary: 'The six engine crates are no_std with alloc: allocator, clock, randomness and modules come from the host, which may have system access or emulate it'
 scope:
@@ -26,10 +26,11 @@ scope:
   path: taskfiles/nostd.yml
 - confidence: inferred
   path: tests/gate
-revision: 15
+revision: 16
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T04:21:48Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T04:21:48Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-26T10:01:50Z", actor: "human:operator", revision: 16, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":2}}, executor: "agent:coordinator"}
 ---
 Decided by the owner on 2026-11-26, 02:51 CET: "I think it should be no STD for the core, and
 then we'll just inject the adapters from the outside, and they can have, of course, system
