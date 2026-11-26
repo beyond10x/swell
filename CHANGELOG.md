@@ -11,7 +11,35 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ## [Unreleased]
 
+### Added
+
+- `Math.random`, a story of the fourth slice: each realm holds a xoshiro256** generator
+  (`swell_num::random::Xoshiro256`) whose four words are derived, when the realm is made, from
+  the agent's `Seeds.random_seed` and the realm's creation index by SipHash-2-4. The agent
+  counts every `create_realm` that gets past the check of its state, one that throws or ends
+  in a termination included, so no index is used twice. A call reads nothing from the host,
+  calls no hook, costs the step of the call and allocates nothing; each value is a multiple
+  of 2^-53 in [0, 1 - 2^-53] with positive sign. The function is the last own key of `Math`,
+  after `sumPrecise` (`story:math-random`).
+
 ### Changed
+
+- Releases ship seven archives of the `swell` binary and `SHA256SUMS`: besides the five
+  targets of 0.12.0, `.github/workflows/release-build.yml` builds `x86_64-unknown-linux-musl`
+  and `aarch64-unknown-linux-musl`, static binaries that load no shared library; the glibc
+  archives stay (glibc 2.34 or newer). The Windows binary links its C runtime in
+  (`-C target-feature=+crt-static`) and needs no Visual C++ runtime. After the smoke test each
+  musl job fails on a dynamic section entry `NEEDED` or a program interpreter and runs the
+  binary in a Docker image that holds nothing but it; the Windows job fails when the import
+  table names a `VCRUNTIME` or `api-ms-win-crt` library. The workflow also runs on a pull
+  request that changes it (labelled with the pull request's head commit, nothing uploaded)
+  and when started by hand. The new gate step `release-targets-check` (part of
+  `forge-check`) reads the workflow and the two documents as text and fails when the matrix
+  is not the release's seven targets, when the Build step's `case "$TARGET"` gives a musl or
+  Windows target no `+crt-static` (or a glibc or macOS target one), when no step that runs
+  for a musl or Windows target checks its linking, or when `docs/releasing.md` or
+  `website/docs/embedding.md` names or counts other archives than the workflow builds
+  (`story:releases-ship-static-binaries`).
 
 - The engine crate `swell` is `#![no_std]` with `alloc`, step 3 of story
   `core-builds-without-std`: its library code names no `std` path, and the program that links
@@ -86,6 +114,15 @@ Every number below comes from the gate, `task check`, on the released commit.
   every run. Each selftest of `site-data` now writes all its outputs under its own directory,
   and `gate-selftest` fails, naming the files, when its scripts change a tracked file
   (`story:gate-selftests-write-no-tracked-file`).
+
+### Host interface
+
+- `HOST-26`, `HOST-27`, `HOST-144`, `HOST-147`, `HOST-212` and `HOST-213` (slice 4) have tests
+  (`swell::math_random::*`): two agents with the same `random_seed` give the same 1,000
+  values; two realms of one agent differ; `random_seed` changes the stream and `hash_key` does
+  not; two child processes print the same 1,000 values and the key order of an object of
+  10,000 keys; 100,000 values are in [0, 1) with positive sign and 53 bits; a realm's stream
+  is its creation index, not the order of calls.
 
 ## [0.12.0] - 2026-11-25
 
