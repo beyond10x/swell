@@ -597,10 +597,10 @@ fn eval_sees_new_target_in_every_context() {
 }
 
 /// Where `new.target` parses: `(0, eval)` parses its text as a script, `Function` as a function
-/// body; a text inside `if (0) { }` is parsed and never run. A function that ends before a
-/// `new.target` of the script puts back the flag it found (`Parser::function_end`).
-#[test]
-fn new_target_parses_only_inside_a_function() {
+/// body; a text inside `if (0) { }` is parsed and never run. Each case of `cases` is
+/// `t(text, parses as a script, parses as a function body)`; the script answers the cases that
+/// parsed otherwise, one per line.
+fn parses_only_inside_a_function(cases: &str) {
     let prelude = r##"
         function inScript(src) { try { (0, eval)("if (0) {\n" + src + "\n}"); return true; } catch (e) { if (e instanceof SyntaxError) return false; throw e; } }
         function inFunction(src) { try { Function(src); return true; } catch (e) { if (e instanceof SyntaxError) return false; throw e; } }
@@ -610,7 +610,21 @@ fn new_target_parses_only_inside_a_function() {
           if (s !== script || f !== fn) bad.push(src + " script " + s + " function " + f);
         }
     "##;
-    let cases = r##"
+    let source = format!("{prelude}{cases}\nbad.join(\"\\n\");");
+    let (sloppy, strict) = run_both(&source);
+    assert_eq!(sloppy, Outcome::Normal("\"\"".to_string()), "sloppy");
+    // `with` is not strict code, but the texts are parsed by `(0, eval)` and `Function`, which
+    // are not strict either way.
+    assert_eq!(strict, Outcome::Normal("\"\"".to_string()), "strict");
+}
+
+/// The forms of `new.target` itself and the places it is no target: it parses in a function
+/// body and nowhere else in a script. Split from the nested forms below so that each part
+/// stays under 2 s alone with a collection at every safe point (2.0 s as one test).
+#[test]
+fn new_target_parses_only_inside_a_function() {
+    parses_only_inside_a_function(
+        r##"
         t("new.target", false, true);
         t("new . target", false, true);
         t("new\n.\ntarget", false, true);
@@ -640,6 +654,17 @@ fn new_target_parses_only_inside_a_function() {
         t("var o = {[new.target]: 1}", false, true);
         t("var o = {[new.target]() {}}", false, true);
         t("var o = { get [new.target]() {} }", false, true);
+    "##,
+    );
+}
+
+/// `new.target` inside and after nested functions, arrows, methods and blocks: a function that
+/// ends before a `new.target` of the script puts back the flag it found
+/// (`Parser::function_end`), and an arrow takes the flag of the code around it.
+#[test]
+fn new_target_parses_only_inside_a_function_in_nested_forms() {
+    parses_only_inside_a_function(
+        r##"
         t("var o = { m() { return new.target; } }", true, true);
         t("var o = { m(a = new.target) {} }", true, true);
         t("var o = { set x(v = new.target) {} }", true, true);
@@ -665,14 +690,8 @@ fn new_target_parses_only_inside_a_function() {
         t("var o = { m() {} }; new.target", false, true);
         t("(async () => { await 0; }); new.target", false, true);
         t("(function () { return async () => { await new.target; }; })", true, true);
-        bad.join("\n");
-    "##;
-    let source = format!("{prelude}{cases}");
-    let (sloppy, strict) = run_both(&source);
-    assert_eq!(sloppy, Outcome::Normal("\"\"".to_string()), "sloppy");
-    // `with` is not strict code, but the texts are parsed by `(0, eval)` and `Function`, which
-    // are not strict either way.
-    assert_eq!(strict, Outcome::Normal("\"\"".to_string()), "strict");
+    "##,
+    );
 }
 
 /// `async` code across `await` (a resumed frame keeps its NewTarget), the handlers of a promise
