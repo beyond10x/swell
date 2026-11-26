@@ -48,6 +48,7 @@
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
 //! and build nodes through helpers, so their own frames hold little more than ids and one span.
 
+use super::class::{AWAIT_IN_FIELD, YIELD_IN_FIELD};
 use super::{
     Halt, Parser, R, SuperProperty, copy_name, copy_number, copy_regexp, copy_string, copy_template,
 };
@@ -342,9 +343,13 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// so that the test stays out of its frame, which every nesting of an expression holds; this
     /// function enters the counter twice, once for the `AssignmentExpression` it stands as and
     /// once for itself, and so a nesting of `yield` takes two levels, as the frames of the two
-    /// functions on its path do.
+    /// functions on its path do. In the code of a field initializer it is refused at the `yield`
+    /// ([`YIELD_IN_FIELD`]).
     #[inline(never)]
     fn yield_expression(&mut self, no_in: bool) -> R<ExprId> {
+        if self.field_code {
+            return self.fail_here(YIELD_IN_FIELD);
+        }
         self.enter()?;
         self.enter()?;
         let start = self.start();
@@ -757,10 +762,15 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(e)
     }
 
-    /// Pushes the prefix operators at the current token, each with where it starts.
+    /// Pushes the prefix operators at the current token, each with where it starts; the `await`
+    /// of an AwaitExpression in the code of a field initializer is refused at it
+    /// ([`AWAIT_IN_FIELD`]).
     #[inline(never)]
     fn prefix_operators(&mut self) -> R<()> {
         while let Some(prefix) = self.prefix() {
+            if self.field_code && matches!(prefix, Prefix::Await) {
+                return self.fail_here(AWAIT_IN_FIELD);
+            }
             let start = self.start();
             let m = self.m;
             let pushed = m.push(&mut self.prefixes, (prefix, start));

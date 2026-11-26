@@ -295,6 +295,7 @@ pub(crate) fn check(
         lexical_base: 0,
         private: BTreeMap::new(),
         arguments: None,
+        static_block_await: false,
     };
     let frame = checker.frame(Names::List(body), &[], "");
     checker.push_frame(frame);
@@ -370,6 +371,7 @@ enum Step {
         label_base: usize,
         lexical_base: usize,
         arguments: Option<&'static str>,
+        static_block_await: bool,
     },
     /// Adds the private names the body of the class `Child` declares to those in scope, once
     /// its heritage is walked (AllPrivateIdentifiersValid,
@@ -437,6 +439,10 @@ struct Checker<'a, 'm> {
     /// Inside a field initializer or a static block, and the arrow functions in them: the
     /// message of `arguments` there (ContainsArguments); `None` elsewhere.
     arguments: Option<&'static str>,
+    /// Whether the [Await] at the current position is a static block's: in the block, in a
+    /// class nested in it and its field initializers (which keep the [Await] around the class),
+    /// and in an arrow function there that is not `async`; cleared by every other function.
+    static_block_await: bool,
 }
 
 impl<'a, 'm> Checker<'a, 'm> {
@@ -847,11 +853,12 @@ impl<'a, 'm> Checker<'a, 'm> {
                     label_base,
                     lexical_base,
                     arguments,
+                    static_block_await,
                 } => {
                     (self.strict, self.loops, self.breakables) = (strict, loops, breakables);
                     (self.label_base, self.lexical_base) = (label_base, lexical_base);
                     (self.yields, self.awaits, self.parameters) = (yields, awaits, parameters);
-                    self.arguments = arguments;
+                    (self.arguments, self.static_block_await) = (arguments, static_block_await);
                     continue;
                 }
                 Step::EnterPrivate(class) => {
@@ -900,6 +907,7 @@ impl<'a, 'm> Checker<'a, 'm> {
                 label_base: self.label_base,
                 lexical_base: self.lexical_base,
                 arguments: self.arguments,
+                static_block_await: self.static_block_await,
             };
             // A class is strict mode code from `class` to its `}`, the walk of its children too;
             // its private names are in scope from its body on, its heritage excepted.
@@ -947,6 +955,15 @@ impl<'a, 'm> Checker<'a, 'm> {
                         FunctionKind::StaticBlock => Some(ARGUMENTS_IN_STATIC_BLOCK),
                         FunctionKind::Arrow => self.arguments,
                         _ => None,
+                    };
+                    // A field initializer keeps the [Await] around its class, an arrow function
+                    // that is not `async` that around it; a static block sets its own, and every
+                    // other function its own or none.
+                    self.static_block_await = match f.kind {
+                        FunctionKind::StaticBlock => true,
+                        FunctionKind::FieldInitializer => self.static_block_await,
+                        FunctionKind::Arrow if !f.asynchronous => self.static_block_await,
+                        _ => false,
                     };
                     self.lexical_base = self.lexical.len();
                     let frame = self.frame(Names::List(&f.body), &f.params, "a parameter");
@@ -1318,10 +1335,11 @@ impl<'a, 'm> Checker<'a, 'm> {
         )
     }
 
-    /// The message of `await` as an identifier where [Await] is set: in a static block (and an
-    /// arrow function's parameters there) its own, elsewhere that of an `async` function.
+    /// The message of `await` as an identifier where [Await] is set: where the [Await] is a
+    /// static block's (in the block, a class nested in it and its field initializers, and an
+    /// arrow function's parameters there) the block's own, elsewhere that of an `async` function.
     fn await_identifier(&self) -> &'static str {
-        if self.arguments == Some(ARGUMENTS_IN_STATIC_BLOCK) {
+        if self.static_block_await {
             AWAIT_IN_STATIC_BLOCK
         } else {
             AWAIT_IDENTIFIER
@@ -1531,6 +1549,7 @@ impl<'a, 'm> Checker<'a, 'm> {
             label_base: self.label_base,
             lexical_base: self.lexical_base,
             arguments: self.arguments,
+            static_block_await: self.static_block_await,
         }
     }
 

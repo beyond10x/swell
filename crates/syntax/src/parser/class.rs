@@ -31,10 +31,15 @@
 //! ([`Class::instance_elements`]), numbered at the first field or private method that is not
 //! static; each initializer is an expression statement of its function's body. A static block
 //! is a function of kind [`FunctionKind::StaticBlock`], numbered at `static`. An initializer
-//! and a static block are read with `new.target` and a SuperProperty admitted, [Yield] and
-//! [Await] cleared (`await` and `yield` are identifiers there, which the early errors refuse
-//! where the class body or the block reserves them, `early.rs`), and a static block with no
-//! `return`.
+//! and a static block are read with `new.target` and a SuperProperty admitted, and a static
+//! block with no `return`. A static block is read with [Yield] and [Await] cleared (`await` is
+//! an identifier there, which the early errors refuse, `early.rs`). An initializer keeps the
+//! [Yield] and [Await] of the class body, as the grammar's `Initializer[+In, ?Yield, ?Await]`
+//! does, but its code (a class nested in it included, the functions in it not) holds no
+//! YieldExpression and no AwaitExpression: each is refused at its first token
+//! ([`YIELD_IN_FIELD`], [`AWAIT_IN_FIELD`]), a stated difference from the pinned draft, which
+//! has no early error against them. The initializer is the body of a function of its own that
+//! is neither a generator nor an `async` function, so nothing could run one there.
 //!
 //! As in `expression.rs`, the functions on the recursion (each an entry of the depth counter)
 //! hold ids and a span; the helpers that look at tokens and build the record are not inlined.
@@ -47,6 +52,12 @@ use crate::ast::{
 use crate::token::{Keyword, Punct, TokenKind};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+
+/// The message of a YieldExpression in the code of a field initializer, at its `yield`.
+pub(super) const YIELD_IN_FIELD: &str = "yield expression in a class field initializer";
+
+/// The message of an AwaitExpression in the code of a field initializer, at its `await`.
+pub(super) const AWAIT_IN_FIELD: &str = "await expression in a class field initializer";
 
 /// What a class element starts with, its modifiers consumed.
 #[derive(Clone, Copy)]
@@ -523,7 +534,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         if self.is(Punct::Eq) {
             self.enter()?;
             self.advance()?;
-            self.element_context_open()?;
+            self.element_context_open(true)?;
             let e = self.assignment(false)?;
             self.element_context_close();
             self.field_initializer(target, function, e)?;
@@ -532,14 +543,17 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.field_end(target, function)
     }
 
-    /// Saves the [Yield] and [Await], `new.target` and the SuperProperty flag of the class body
-    /// and sets those of a field initializer or a static block: [Yield] and [Await] cleared,
-    /// `new.target` and a SuperProperty admitted
+    /// Saves the [Yield] and [Await], `new.target`, the SuperProperty flag and whether the code
+    /// is a field initializer's, of the class body, and sets those of a field initializer
+    /// (`field`) or a static block: `new.target` and a SuperProperty admitted
     /// (`#sec-class-definitions-static-semantics-early-errors`: both are code of a function with
-    /// a [[HomeObject]]). As `function.rs` saves them for a function, on the same lists, the
-    /// growth charged first.
+    /// a [[HomeObject]]). A field initializer keeps the [Yield] and [Await] of the class body
+    /// (`Initializer[+In, ?Yield, ?Await]`) and refuses the YieldExpression and the
+    /// AwaitExpression they admit ([`YIELD_IN_FIELD`], [`AWAIT_IN_FIELD`]); a static block
+    /// clears both. As `function.rs` saves them for a function, on the same lists, the growth
+    /// charged first.
     #[inline(never)]
-    fn element_context_open(&mut self) -> R<()> {
+    fn element_context_open(&mut self, field: bool) -> R<()> {
         let m = self.m;
         let pushed = m.push(&mut self.outer_yields, self.yields);
         self.charged(pushed)?;
@@ -549,8 +563,13 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.charged(pushed)?;
         let pushed = m.push(&mut self.outer_super_properties, self.super_property);
         self.charged(pushed)?;
-        self.yields = false;
-        self.awaits = false;
+        let pushed = m.push(&mut self.outer_field_code, self.field_code);
+        self.charged(pushed)?;
+        if !field {
+            self.yields = false;
+            self.awaits = false;
+        }
+        self.field_code = field;
         self.new_target = true;
         self.super_property = SuperProperty::Method;
         Ok(())
@@ -570,6 +589,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
         if let Some(super_property) = self.outer_super_properties.pop() {
             self.super_property = super_property;
+        }
+        if let Some(field_code) = self.outer_field_code.pop() {
+            self.field_code = field_code;
         }
     }
 
@@ -646,7 +668,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                 span: start,
             },
         )?;
-        self.element_context_open()?;
+        self.element_context_open(false)?;
         Ok((id, core::mem::take(&mut self.functions)))
     }
 
@@ -832,5 +854,56 @@ mod tests {
             .heap_bytes()
             .saturating_add(parsed.body.heap_bytes());
         assert_eq!(meter.held(), tree, "held against the tree");
+    }
+
+    /// The function of the instance elements comes with the first private method that is not
+    /// static and with no static one (`docs/design/engine.md`, section 3, "Classes", item 1):
+    /// a class with a static private method alone has none, and one with both has it once.
+    #[test]
+    fn a_static_private_method_makes_no_instance_elements() {
+        use FunctionKind::{ClassConstructor, FieldInitializer, Method};
+        let cases: [(&str, Option<FunctionId>, &[FunctionKind]); 3] = [
+            (
+                "class C { static #s() {} }",
+                None,
+                &[ClassConstructor, Method],
+            ),
+            (
+                "class C { #m() {} }",
+                Some(FunctionId(1)),
+                &[ClassConstructor, FieldInitializer, Method],
+            ),
+            (
+                "class C { static #s() {} #m() {} }",
+                Some(FunctionId(2)),
+                &[ClassConstructor, Method, FieldInitializer, Method],
+            ),
+        ];
+        let mut wrong = Vec::new();
+        for (text, instance, expected) in cases {
+            let source: Vec<u16> = text.encode_utf16().collect();
+            let mut ledger = Counting::default();
+            let meter = Meter::new(&mut ledger);
+            let parsed = match super::super::parse(&source, 1_000, &meter) {
+                Ok(parsed) => parsed,
+                Err(error) => panic!("{text}: {error:?}"),
+            };
+            let kinds: Vec<FunctionKind> = parsed.ast.functions().iter().map(|f| f.kind).collect();
+            let found = match parsed
+                .body
+                .first()
+                .and_then(|s| parsed.ast.stmt(*s))
+                .map(|n| &n.stmt)
+            {
+                Some(Stmt::Class(class)) => class.instance_elements,
+                _ => panic!("{text}: no class declaration"),
+            };
+            if found != instance || kinds != expected {
+                wrong.push(std::format!(
+                    "{text}: instance elements {found:?}, functions {kinds:?}"
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     }
 }

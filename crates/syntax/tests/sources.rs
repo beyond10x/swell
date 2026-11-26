@@ -2304,3 +2304,1038 @@ fn function_spans_are_their_source_text() {
         ]
     );
 }
+
+// The class elements of `story:class-element-syntax-and-early-errors`, each source against the
+// verdict of the pinned ECMA-262 draft, through every parse entry. `H` is a source the standard
+// admits, which answers the hold of its class; `E` is a SyntaxError of the standard, a grammar
+// or an early error and never a refusal. Every mismatch of a list is reported at once.
+
+/// The expected answer of a source of these lists.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Verdict {
+    /// Admitted by the standard: the one error is the hold of `class`.
+    H,
+    /// A SyntaxError of the standard: an error that is no refusal.
+    E,
+}
+
+/// The mismatches of `cases` through `entries`, each with what the parser answered.
+fn verdict_mismatches(entries: &[Entry], cases: &[(&str, Verdict)]) -> Vec<String> {
+    let held = "class is not supported before slice 8";
+    let mut wrong = Vec::new();
+    for &(text, verdict) in cases {
+        for &entry in entries {
+            let answer = parse_through(entry, &units(text), LIMIT).map(|_| ());
+            let ok = match (&answer, verdict) {
+                (Err(errors), Verdict::H) => messages(errors) == vec![held.to_string()],
+                (Err(errors), Verdict::E) => errors
+                    .iter()
+                    .all(|e| !e.message.contains("is not supported before slice")),
+                (Ok(()), _) => false,
+            };
+            if !ok {
+                let got = answer.map_err(|errors| messages(&errors));
+                wrong.push(format!(
+                    "{entry:?} {text:?}: expected {verdict:?}, got {got:?}"
+                ));
+            } else if verdict == Verdict::E && matches!(entry, Entry::Script) {
+                let got = answer.map_err(|errors| messages(&errors));
+                println!("E {text:?}: {got:?}");
+            }
+        }
+    }
+    wrong
+}
+
+fn check_verdicts(cases: &[(&str, Verdict)]) {
+    let wrong = verdict_mismatches(&ENTRIES, cases);
+    assert!(
+        wrong.is_empty(),
+        "{} mismatch(es):\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Point 6 of the unit's notes: [Yield] and [Await] cleared in a field initializer and a static
+/// block, then refused by an early error. `FieldDefinition[?Yield, ?Await]` with
+/// `Initializer[+In, ?Yield, ?Await]`; `ClassStaticBlockStatementList : StatementList[~Yield,
+/// +Await, ~Return]` and "Contains await" (`#sec-class-definitions-static-semantics-early-errors`),
+/// where Contains looks into no function, arrow function included, for `await`
+/// (`#sec-static-semantics-contains`); an arrow's ConciseBody is `[~Await]`
+/// (`#sec-arrow-function-definitions`).
+#[test]
+fn await_and_yield_in_class_elements_answer_the_standard() {
+    use Verdict::{E, H};
+    check_verdicts(&[
+        ("var await; class C { x = await; }", H),
+        ("var await; class C { static x = await; }", H),
+        ("var await; class C { [await] = 1; }", H),
+        ("var await; class C { x = class { [await] = 1; }; }", H),
+        ("async function f() { class C { [await 1] = 2; } }", H),
+        ("function* g() { class C { [yield 1] = 2; } }", H),
+        ("function* g() { class C { [yield] = 2; } }", H),
+        ("async function f() { class C { x = () => await; } }", H),
+        (
+            "async function f() { class C { x = function () { await; }; } }",
+            H,
+        ),
+        (
+            "async function f() { class C { x = async () => await 1; } }",
+            H,
+        ),
+        (
+            "function* g() { class C { x = function* () { yield 1; }; } }",
+            H,
+        ),
+        ("class C { static { (() => { class await {} }); } }", H),
+        ("class C { static { (() => ({ await })); } }", H),
+        ("class C { static { (() => await); } }", H),
+        ("class C { static { () => { await: ; }; } }", H),
+        ("class C { static { (function await(await) {}); } }", H),
+        ("class C { static { ({ await: 0 }); } }", H),
+        ("class C { static { ({ method(await) {} }); } }", H),
+        ("class C { static { ({ get await() {} }); } }", H),
+        (
+            "var await = 0; class C { static { new (class { constructor(x = await) { await; } }); } }",
+            H,
+        ),
+        ("class C { static { async () => await 1; } }", H),
+        (
+            "class C { static { (async function () { await 1; }); } }",
+            H,
+        ),
+        ("async function f() { class C { x = await; } }", E),
+        ("async function f() { class C { x = (await) => 1; } }", E),
+        (
+            "async function f() { class C { x = class { [await] = 1; }; } }",
+            E,
+        ),
+        ("function* g() { class C { x = yield; } }", E),
+        ("class C { x = yield; }", E),
+        ("class C { static { await; } }", E),
+        ("class C { static { (await); } }", E),
+        ("class C { static { function await() {} } }", E),
+        ("class C { static { function* await() {} } }", E),
+        ("class C { static { async function await() {} } }", E),
+        ("class C { static { class await {} } }", E),
+        ("class C { static { ({ await }); } }", E),
+        ("class C { static { (await) => 0; } }", E),
+        ("class C { static { await => 0; } }", E),
+        ("class C { static { (x = await) => 0; } }", E),
+        ("class C { static { async (x = await 1) => x; } }", E),
+        ("class C { static { class D { [await 1]; } } }", E),
+        ("class C { static { class D { [await] = 1; } } }", E),
+        ("class C { static { class D extends await {} } }", E),
+        ("class C { static { await: ; } }", E),
+        ("class C { static { x = { [await]: 1 }; } }", E),
+        ("class C { static { var await; } }", E),
+        ("class C { static { try {} catch (await) {} } }", E),
+        ("class C { static { let [await] = []; } }", E),
+        ("class C { static { for await (x of y); } }", E),
+        ("function* g() { class C { static { yield; } } }", E),
+    ]);
+}
+
+/// ContainsArguments (`#sec-static-semantics-containsarguments`) looks into everything but a
+/// function and a method's body: into arrow functions, and into class bodies (a nested class's
+/// computed keys and heritage) too; a SuperCall in an initializer or a static block is an
+/// error, a SuperProperty and `new.target` are not (`#sec-class-definitions-static-semantics-early-errors`,
+/// `#sec-static-semantics-contains`).
+#[test]
+fn arguments_and_super_in_class_elements_answer_the_standard() {
+    use Verdict::{E, H};
+    check_verdicts(&[
+        ("class C { x = arguments; }", E),
+        ("class C { static x = arguments; }", E),
+        ("class C { #x = arguments; }", E),
+        ("class C { x = () => arguments; }", E),
+        ("class C { x = async () => arguments; }", E),
+        ("class C { x = (a = arguments) => a; }", E),
+        ("class C { x = { arguments }; }", E),
+        ("class C { x = typeof arguments; }", E),
+        ("class C { x = `${arguments}`; }", E),
+        ("class C { x = argument\\u0073; }", E),
+        ("class C { x = { [arguments]: 1 }; }", E),
+        ("class C { x = { [arguments]() {} }; }", E),
+        ("class C { x = class { [arguments] = 1; }; }", E),
+        ("class C { x = class { [arguments]() {} }; }", E),
+        ("class C { x = class extends arguments {}; }", E),
+        ("class C { static { arguments; } }", E),
+        ("class C { static { () => arguments; } }", E),
+        ("class C { static { class D { [arguments] = 1; } } }", E),
+        (
+            "class C { static { class D { static [arguments]() {} } } }",
+            E,
+        ),
+        ("class C { x = function () { arguments; }; }", H),
+        ("class C { x = { m() { arguments; } }; }", H),
+        ("class C { x = class { m() { arguments; } }; }", H),
+        ("function f() { class C { [arguments] = 1; } }", H),
+        ("function f() { class C { static [arguments] = 1; } }", H),
+        ("class C { static { function f() { arguments; } } }", H),
+        (
+            "class C { static { (function () { return arguments; }); } }",
+            H,
+        ),
+        ("class C extends B { x = super(); }", E),
+        ("class C extends B { x = () => super(); }", E),
+        ("class C extends B { static { super(); } }", E),
+        ("class C extends B { static { () => super(); } }", E),
+        ("class C { x = function () { super.y; }; }", E),
+        ("class C { static { function f() { super.y; } } }", E),
+        ("class C { x = super.y; }", H),
+        ("class C { x = super[0]; }", H),
+        // `super` in an arrow function answers the refusal of slice 8 of
+        // `story:super-property-and-super-syntax` at its token, in an initializer and a static
+        // block as in a method: no source of this list.
+        ("class C { static { super.y; } }", H),
+        ("class C { x = { m() { super.y; } }; }", H),
+        ("class C { x = new.target; }", H),
+        ("class C { x = () => new.target; }", H),
+        ("class C { static { new.target; } }", H),
+    ]);
+}
+
+/// The rules of `ClassStaticBlockBody` (`#sec-class-definitions-static-semantics-early-errors`):
+/// its own var and top-level lexical names (TopLevelLexicallyDeclaredNames: a function
+/// declaration at its top level is a var name, `#sec-static-semantics-toplevellexicallydeclarednames`),
+/// labels, `break` and `continue` targets and no `return`; and class code is strict.
+#[test]
+fn static_block_statements_answer_the_standard() {
+    use Verdict::{E, H};
+    check_verdicts(&[
+        ("class C { static { return; } }", E),
+        ("function f() { class C { static { return; } } }", E),
+        ("while (0) { class C { static { break; } } }", E),
+        ("while (0) { class C { static { continue; } } }", E),
+        ("L: { class C { static { break L; } } }", E),
+        ("class C { static { var x; let x; } }", E),
+        ("class C { static { let x; var x; } }", E),
+        ("class C { static { let x; let x; } }", E),
+        ("class C { static { L: L: ; } }", E),
+        ("class C { static { function f() {} let f; } }", E),
+        ("class C { static { class D {} var D; } }", E),
+        ("class C { static { with (o) {} } }", E),
+        ("class C { static { var eval; } }", E),
+        ("class C { static { x = 010; } }", E),
+        ("class C { x = 010; }", E),
+        ("class C { x = function () { with (o) {} }; }", E),
+        ("class C { 01 = 1; }", E),
+        ("class C { static { L: ; } static { L: ; } }", H),
+        ("L: { class C { static { L: ; } } }", H),
+        ("class C { static { L: { break L; } } }", H),
+        ("class C { static { L: while (0) { continue L; } } }", H),
+        ("class C { static { var x; } static { var x; } }", H),
+        ("class C { static { var x; { let x; } } }", H),
+        ("let x; class C { static { var x; } }", H),
+        ("class C { static { function f() {} var f; } }", H),
+        ("class C { static { function f() {} function f() {} } }", H),
+        ("class C { static { async function f() {} var f; } }", H),
+        ("class C { static { function f() { return 1; } } }", H),
+        ("class C { static { x = () => { return 1; }; } }", H),
+    ]);
+}
+
+/// The names of fields and private names: `constructor` and `prototype`
+/// (PropName, a StringValue, escapes included; a computed key has none), `#constructor`, and the
+/// duplicates of PrivateBoundIdentifiers but for one getter and one setter of the same placement
+/// (`#sec-class-definitions-static-semantics-early-errors`); `static` with a private name named
+/// `#prototype` has no PropName "prototype".
+#[test]
+fn element_names_and_duplicates_answer_the_standard() {
+    use Verdict::{E, H};
+    check_verdicts(&[
+        ("class C { constructor; }", E),
+        ("class C { 'constructor' = 1; }", E),
+        ("class C { \"constructor\"; }", E),
+        ("class C { c\\u006fnstructor = 1; }", E),
+        ("class C { static constructor = 1; }", E),
+        ("class C { static 'constructor'; }", E),
+        ("class C { static prototype; }", E),
+        ("class C { static 'prototype' = 1; }", E),
+        ("class C { static pr\\u006ftotype; }", E),
+        ("class C { ['constructor'] = 1; }", H),
+        ("class C { static ['prototype'] = 1; }", H),
+        ("class C { static ['constructor']; }", H),
+        ("class C { prototype = 1; }", H),
+        ("class C { static constructor() {} }", H),
+        ("class C { static #prototype; }", H),
+        ("class C { static #prototype() {} }", H),
+        ("class C { #constructor; }", E),
+        ("class C { static #constructor; }", E),
+        ("class C { #constructor() {} }", E),
+        ("class C { get #constructor() {} }", E),
+        ("class C { static async *#constructor() {} }", E),
+        ("class C { #\\u0063onstructor; }", E),
+        ("class C { #x; #x; }", E),
+        ("class C { #x; #x() {} }", E),
+        ("class C { #x() {} #x; }", E),
+        ("class C { #x; static #x; }", E),
+        ("class C { #x() {} static #x() {} }", E),
+        ("class C { get #x() {} get #x() {} }", E),
+        ("class C { set #x(v) {} set #x(v) {} }", E),
+        ("class C { get #x() {} static set #x(v) {} }", E),
+        ("class C { static get #x() {} set #x(v) {} }", E),
+        ("class C { get #x() {} set #x(v) {} get #x() {} }", E),
+        ("class C { get #x() {} set #x(v) {} #x; }", E),
+        ("class C { #x; get #x() {} }", E),
+        ("class C { get #x() {} #x() {} }", E),
+        ("class C { #\\u0078; #x; }", E),
+        ("class C { get #x() {} set #x(v) {} }", H),
+        ("class C { set #x(v) {} get #x() {} }", H),
+        ("class C { static get #x() {} static set #x(v) {} }", H),
+        (
+            "class C { get #x() {} set #x(v) {} static get #y() {} static set #y(v) {} }",
+            H,
+        ),
+        ("class C { #x; m() { class D { #x; } } }", H),
+        ("class C { #a; #b; }", H),
+    ]);
+}
+
+/// AllPrivateIdentifiersValid (`#sec-static-semantics-allprivateidentifiersvalid`): the names of a
+/// ClassBody are in scope in all of that body, its computed keys included, and in nothing outside
+/// it, its own ClassHeritage included; a class in a heritage or a key brings its own.
+#[test]
+fn private_names_are_in_scope_in_their_class_body_only() {
+    use Verdict::{E, H};
+    check_verdicts(&[
+        ("class C { m() { this.#x; } #x; }", H),
+        ("class C { #x; m() { class D { n() { this.#x; } } } }", H),
+        (
+            "class C { #x; m() { class D extends (o => o.#x, Object) {} } }",
+            H,
+        ),
+        ("class C { #x; [o.#x] = 1; }", H),
+        ("class C { #x; static [o.#x]() {} }", H),
+        ("class C { #x; [class { m() { o.#x; } }] = 1; }", H),
+        ("class C { #x; m() { class D { [o.#x] = 1; } } }", H),
+        ("class C { #x; static f = () => o.#x; }", H),
+        ("class C { #x; static { (function () { o.#x; }); } }", H),
+        ("class C { #x; m() { o?.a.#x; } }", H),
+        ("class C extends (class { #x; m() { this.#x; } }) {}", H),
+        ("class C extends (class { #x; m() { o.#x; } }) { #x; }", H),
+        ("x = class { #x; m() { return #x in this; } };", H),
+        ("class C extends (o => o.#x, Object) { #x; }", E),
+        ("class C extends (class { m() { o.#x; } }) { #x; }", E),
+        ("class C extends (function () { o.#x; }) { #x; }", E),
+        ("x = class C extends (o => o.#x, Object) { #x; };", E),
+        ("class C extends (class { #x; }) { m() { this.#x; } }", E),
+        ("class A { #x; } class B { m() { this.#x; } }", E),
+        ("class C { #x; } o.#x;", E),
+        ("class C { #x; } (function () { o.#x; });", E),
+        ("class C { [o.#x] = 1; }", E),
+        ("class C { #x; m() { o?.#y; } }", E),
+        ("class C { m() { return #y in o; } }", E),
+        ("class C { #x; m() { class D { #y; } o.#y; } }", E),
+    ]);
+}
+
+/// `delete` of a private reference, through parentheses and in an optional chain
+/// (`#sec-delete-operator-static-semantics-early-errors`); `#x in` where a RelationalExpression
+/// with [+In] may stand (`#sec-relational-operators`).
+#[test]
+fn delete_and_private_in_answer_the_standard() {
+    use Verdict::{E, H};
+    let class = |body: &str| format!("class C {{ #x; *m(o, p) {{ {body} }} }}");
+    let mut cases: Vec<(String, Verdict)> = Vec::new();
+    for (body, verdict) in [
+        ("delete this.#x;", E),
+        ("delete (this.#x);", E),
+        ("delete ((this.#x));", E),
+        ("delete this?.#x;", E),
+        ("delete (this?.#x);", E),
+        ("delete o?.b.#x;", E),
+        ("delete this.#x.y;", H),
+        ("delete this.#x?.y;", H),
+        ("delete this.#x[0];", H),
+        ("delete this.#x();", H),
+        ("for ((#x in o);;);", H),
+        ("for (var y = (#x in o);;);", H),
+        ("for (var y = #x in o;;);", E),
+        ("for (() => #x in o;;);", E),
+        ("return () => #x in o;", H),
+        ("return a | #x in o;", H),
+        ("return a ?? #x in o;", H),
+        ("return #x in o ?? a;", H),
+        ("return #x in o instanceof p;", H),
+        ("return (#x in o) in p;", H),
+        ("return 1 == #x in o;", H),
+        ("return 1 + (#x in o);", H),
+        ("return !(#x in o);", H),
+        ("return [#x in o];", H),
+        ("return a(#x in o);", H),
+        ("return { [#x in o]: 1 };", H),
+        ("return `${#x in o}`;", H),
+        ("return #x\nin o;", H),
+        ("return #x in o, #x in p;", H),
+        ("yield #x in o;", H),
+        ("x += #x in o;", H),
+        ("if (#x in o) {}", H),
+        ("return #x in /re/g;", H),
+        ("return typeof #x in o;", E),
+        ("return 1 << #x in o;", E),
+        ("return #x in;", E),
+        ("return #x in #x;", E),
+        ("return #x i\\u006e o;", E),
+        ("return -#x in o;", E),
+        ("return #x ** 2 in o;", E),
+    ] {
+        cases.push((class(body), verdict));
+    }
+    cases.push(("class C { #x; m(a = #x in this) {} }".to_string(), H));
+    let cases: Vec<(&str, Verdict)> = cases.iter().map(|(t, v)| (t.as_str(), *v)).collect();
+    check_verdicts(&cases);
+}
+
+/// The PrivateIdentifier token (`#sec-names-and-keywords`): `#` and an IdentifierName, escapes
+/// included, with no white space between; the member forms and their assignment targets
+/// (`#sec-left-hand-side-expressions`, `#sec-static-semantics-assignmenttargettype`), an optional
+/// chain with a template (`#sec-left-hand-side-expressions-static-semantics-early-errors`) and no
+/// PrivateIdentifier in an object literal, a pattern or after `super.`.
+#[test]
+fn private_name_tokens_and_member_forms_answer_the_standard() {
+    use Verdict::{E, H};
+    let class = |body: &str| format!("class C {{ #x; #xa; m(a, o) {{ {body} }} }}");
+    let mut cases: Vec<(String, Verdict)> = Vec::new();
+    for (body, verdict) in [
+        ("a. /* c */ #x;", H),
+        ("a.\n#x;", H),
+        ("a.#x\\u0061;", H),
+        ("a?.#x;", H),
+        ("a?.[0].#x;", H),
+        ("a.#x?.b;", H),
+        ("a.#x.#x;", H),
+        ("a?.#x.#x?.#x;", H),
+        ("a.#x(); a?.#x();", H),
+        ("(a?.#x)();", H),
+        ("a.#x`t`;", H),
+        ("new a.#x;", H),
+        ("new a.#x();", H),
+        ("a.#x++; --a.#x;", H),
+        ("a.#x = 1; a.#x += 1; a.#x ??= 1;", H),
+        ("[a.#x] = o;", H),
+        ("({ y: a.#x } = o);", H),
+        ("[...a.#x] = o;", H),
+        ("for (a.#x of o);", H),
+        ("for (a.#x in o);", H),
+        ("return a.#x / 2 / 1;", H),
+        ("return a.#x\n/1/g;", H),
+        ("a?.#x`t`;", E),
+        ("a?.b.#x`t`;", E),
+        ("a?.#x = 1;", E),
+        ("a?.#x++;", E),
+        ("[a?.#x] = o;", E),
+        ("a.# x;", E),
+        ("a.#\nx;", E),
+        ("a.#!x;", E),
+        ("a.#1;", E),
+        ("a.#;", E),
+        ("super.#x;", E),
+        ("({ #x: 1 });", E),
+        ("({ #x });", E),
+        ("({ #x() {} });", E),
+        ("({ get #x() {} });", E),
+        ("({ async #x() {} });", E),
+        ("var { #x: y } = o;", E),
+        ("#x;", E),
+        ("a[#x];", E),
+        ("a.#y;", E),
+        ("a.#X;", E),
+    ] {
+        cases.push((class(body), verdict));
+    }
+    for (text, verdict) in [
+        ("class C { #\\u{61}; m() { this.#a; } }", H),
+        ("class C { #a; m() { this.#\\u0061; } }", H),
+        ("class C { #\\u{1D49C}; m() { this.#\\u{1D49C}; } }", H),
+        ("class C { #\u{e9}; m() { this.#\u{e9}; } }", H),
+        ("class C { #a\\u200C; m() { this.#a\\u200C; } }", H),
+        (
+            "class C { #class; #in; m() { this.#class; return #in in this; } }",
+            H,
+        ),
+        ("class C { #\\u0030; }", E),
+        ("class C { #\\u200C; }", E),
+        ("class C { #1; }", E),
+        ("class C { # x; }", E),
+        ("class C { #\nx; }", E),
+        ("class C { #", E),
+        ("class C { #x", E),
+        ("class C { #x = ", E),
+        ("class C { static {", E),
+        ("class C { static { #!x } }", E),
+    ] {
+        cases.push((text.to_string(), verdict));
+    }
+    let cases: Vec<(&str, Verdict)> = cases.iter().map(|(t, v)| (t.as_str(), *v)).collect();
+    check_verdicts(&cases);
+}
+
+/// Where a field ends (`#sec-rules-of-automatic-semicolon-insertion`): a semicolon is inserted
+/// only before a token that no production allows, so a token that continues the element (`(`
+/// after a name, a name after `get`, `static`, `*` after `static`) is no field end; `async` has
+/// [no LineTerminator here] (`#sec-async-function-definitions`).
+#[test]
+fn field_ends_answer_the_standard() {
+    use Verdict::{E, H};
+    check_verdicts(&[
+        ("class C { x\n() {} }", H),
+        ("class C { get\nx() {} }", H),
+        ("class C { static\nx() {} }", H),
+        ("class C { static\n*x() {} }", H),
+        ("class C { static\n{} }", H),
+        ("class C { static\nstatic }", H),
+        ("class C { async\nx() {} }", H),
+        ("class C { static async\nx }", H),
+        ("class C { x\n[y] }", H),
+        ("class C { x\n*y() {} }", H),
+        ("class C { x = a\n[b] }", H),
+        ("class C { x\n= 1 }", H),
+        ("class C { x =\n1 }", H),
+        ("class C { x = 1;; y }", H),
+        ("class C { x = function () {}\n(1) }", H),
+        ("class C { x = () => {}\ny }", H),
+        ("class C { x = /re/\ny }", H),
+        ("class C { x = a in b }", H),
+        ("class C { x = a\n?.b }", H),
+        ("class C { 1 = 1; 'a' = 2; 1.5; 0x10 = 3 }", H),
+        ("class C { if = 1; class; new = 2 }", H),
+        ("class C { \\u0069f = 1 }", H),
+        ("class C { get\nx }", E),
+        ("class C { x = () => {} y }", E),
+        ("class C { x = 1, y = 2 }", E),
+        ("class C { x = 1\n++y }", E),
+        ("class C { x = 1 y = 2 }", E),
+        ("class C { static x = 1 static y }", E),
+        ("class C { x = }", E),
+        ("class C { x = ; }", E),
+    ]);
+}
+
+/// The parameters of `Function` and the bodies of a generator and an `async` function made by the
+/// constructors (`#sec-createdynamicfunction`): AllPrivateIdentifiersValid of the parameters, and
+/// the [Yield] and [Await] of the body around a class.
+#[test]
+fn dynamic_function_entries_read_class_elements() {
+    let options = ParseOptions { max_nesting: LIMIT };
+    let held = vec!["class is not supported before slice 8".to_string()];
+    let undeclared = vec!["private name #x is not declared in an enclosing class".to_string()];
+    let mut wrong = Vec::new();
+    let mut check =
+        |what: &str, got: Result<Script, Vec<SyntaxError>>, expected: Option<&Vec<String>>| {
+            let got = got.map(|_| ()).map_err(|errors| messages(&errors));
+            let ok = match (&got, expected) {
+                (Err(m), Some(e)) => m == e,
+                (Err(m), None) => m
+                    .iter()
+                    .all(|m| !m.contains("is not supported before slice")),
+                (Ok(()), _) => false,
+            };
+            if !ok {
+                wrong.push(format!("{what}: expected {expected:?}, got {got:?}"));
+            }
+        };
+    check(
+        "Function(\"a = o.#x\", \"\")",
+        parse_dynamic_function(&units("a = o.#x"), &units(""), options),
+        Some(&undeclared),
+    );
+    check(
+        "Function(\"a = #x in o\", \"\")",
+        parse_dynamic_function(&units("a = #x in o"), &units(""), options),
+        None,
+    );
+    check(
+        "AsyncFunction(\"\", \"class C { x = await; }\")",
+        parse_dynamic_async_function(&units(""), &units("class C { x = await; }"), options),
+        None,
+    );
+    check(
+        "AsyncFunction(\"\", \"class C { [await 1] = 1; }\")",
+        parse_dynamic_async_function(&units(""), &units("class C { [await 1] = 1; }"), options),
+        Some(&held),
+    );
+    check(
+        "AsyncFunction(\"\", \"class C { x = () => await; }\")",
+        parse_dynamic_async_function(&units(""), &units("class C { x = () => await; }"), options),
+        Some(&held),
+    );
+    check(
+        "GeneratorFunction(\"\", \"class C { x = yield; }\")",
+        parse_dynamic_generator_function(&units(""), &units("class C { x = yield; }"), options),
+        None,
+    );
+    check(
+        "GeneratorFunction(\"\", \"class C { [yield] = 1; }\")",
+        parse_dynamic_generator_function(&units(""), &units("class C { [yield] = 1; }"), options),
+        Some(&held),
+    );
+    assert!(
+        wrong.is_empty(),
+        "{} mismatch(es):\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// A ledger of the scale test of class elements: every byte charged, and the most held at once.
+#[derive(Default)]
+struct PeakLedger {
+    charged: usize,
+    held: usize,
+    peak: usize,
+}
+
+impl swell_syntax::Ledger for PeakLedger {
+    fn charge(&mut self, bytes: usize) -> Result<(), swell_syntax::Stop> {
+        self.charged += bytes;
+        self.held += bytes;
+        self.peak = self.peak.max(self.held);
+        Ok(())
+    }
+
+    fn credit(&mut self, bytes: usize) {
+        self.held = self.held.saturating_sub(bytes);
+    }
+
+    fn poll(&mut self) -> Result<(), swell_syntax::Stop> {
+        Ok(())
+    }
+}
+
+/// The answer, the processor-independent cost (bytes charged, most held) and the wall time of
+/// one parse of `text`.
+fn parse_cost(text: &str) -> (Vec<String>, usize, usize, std::time::Duration) {
+    let source = units(text);
+    let mut ledger = PeakLedger::default();
+    let start = std::time::Instant::now();
+    let answer =
+        swell_syntax::parse_script_with(&source, ParseOptions { max_nesting: LIMIT }, &mut ledger);
+    let time = start.elapsed();
+    let errors = match answer {
+        Ok(_) => Vec::new(),
+        Err(swell_syntax::Failure::Errors(errors)) => messages(&errors),
+        Err(other) => vec![format!("{other:?}")],
+    };
+    (errors, ledger.charged, ledger.peak, time)
+}
+
+/// A named shape of a class source and the source of it with n elements.
+type Shape = (&'static str, fn(usize) -> String);
+
+/// Hostile sizes of class elements: a class of n private fields each used once, one private
+/// name used n times, n public fields, n static blocks, n undeclared private references. Each
+/// answers what a small one answers, and the bytes it charges grow linearly: four times the
+/// elements charge at most five times the bytes, hold at most five times the peak, and take at
+/// most ten times the time.
+#[test]
+fn class_elements_scale_linearly() {
+    let held = vec!["class is not supported before slice 8".to_string()];
+    let shapes: [Shape; 5] = [
+        ("private fields used once", |n| {
+            let fields: String = (0..n).map(|i| format!("#p{i};")).collect();
+            let uses: String = (0..n).map(|i| format!("this.#p{i};")).collect();
+            format!("class C {{ {fields} m() {{ {uses} }} }}")
+        }),
+        ("one private name used n times", |n| {
+            format!("class C {{ #x; m() {{ {} }} }}", "this.#x;".repeat(n))
+        }),
+        ("public fields with initializers", |n| {
+            let fields: String = (0..n).map(|i| format!("f{i} = {i};")).collect();
+            format!("class C {{ {fields} }}")
+        }),
+        ("static blocks", |n| {
+            format!("class C {{ {} }}", "static { var v = 1; }".repeat(n))
+        }),
+        ("private names in nested classes", |n| {
+            let inner: String = (0..n)
+                .map(|i| format!("class D{i} {{ #y; m() {{ this.#x; this.#y; }} }}"))
+                .collect();
+            format!("class C {{ #x; m() {{ {inner} }} }}")
+        }),
+    ];
+    let mut wrong = Vec::new();
+    for (name, make) in shapes {
+        let n = 2_500;
+        let (small, small_charged, small_peak, small_time) = parse_cost(&make(n));
+        let (large, large_charged, large_peak, large_time) = parse_cost(&make(4 * n));
+        println!(
+            "{name}: n {n}: charged {small_charged}, peak {small_peak}, {small_time:?}; \
+             4n: charged {large_charged}, peak {large_peak}, {large_time:?}"
+        );
+        if small != held || large != held {
+            wrong.push(format!("{name}: answers {small:?} and {large:?}"));
+        }
+        if large_charged > 5 * small_charged || large_peak > 5 * small_peak {
+            wrong.push(format!(
+                "{name}: charged {small_charged} -> {large_charged}, peak {small_peak} -> {large_peak}"
+            ));
+        }
+        if large_time > 10 * small_time + std::time::Duration::from_millis(50) {
+            wrong.push(format!("{name}: {small_time:?} -> {large_time:?}"));
+        }
+    }
+    let undeclared = "this.#z;".repeat(10_000);
+    let (errors, _, _, time) = parse_cost(&format!("class C {{ m() {{ {undeclared} }} }}"));
+    println!(
+        "10,000 undeclared references: {} error(s), {time:?}",
+        errors.len()
+    );
+    if errors.first().map(String::as_str)
+        != Some("private name #z is not declared in an enclosing class")
+    {
+        wrong.push(format!("undeclared: {:?}", errors.first()));
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The two nesting kinds of this story in turn with the class kinds before them, 100,000 deep:
+/// through each entry the answer is the nesting error alone, on the stack the deep limit of the
+/// stack-bound check gives ([`deep_stack`]), never an overflow of the stack.
+#[test]
+fn class_element_kinds_nest_in_turn_within_the_bound() {
+    let test = test_path!("class_element_kinds_nest_in_turn_within_the_bound");
+    let limit = deep_limit();
+    on_stack(test, limit, deep_stack(limit), |limit| {
+        let kinds = [
+            ("class { x = ", " }"),
+            ("class { static { x = ", " } }"),
+            ("class { [", "] () {} }"),
+            ("class extends (", ") {}"),
+            ("class { static #p = ", "; m() { return this.#p; } }"),
+            ("class { #q; static { x = #q in ", "; } }"),
+        ];
+        let depth = 100_000;
+        let mut text = String::from("x = ");
+        for i in 0..depth {
+            text.push_str(kinds[i % kinds.len()].0);
+        }
+        text.push('0');
+        for i in (0..depth).rev() {
+            text.push_str(kinds[i % kinds.len()].1);
+        }
+        text.push(';');
+        let source = units(&text);
+        for entry in ENTRIES {
+            let errors = parse_through(entry, &source, limit)
+                .err()
+                .unwrap_or_default();
+            assert_eq!(
+                messages(&errors),
+                vec![format!("nesting deeper than parser_nesting ({limit})")],
+                "{entry:?}"
+            );
+        }
+    })
+    .unwrap();
+}
+
+/// What a field initializer and a static block set for their code ([Yield], [Await],
+/// `new.target`, SuperProperty, no `return`, ContainsArguments) is put back after them: the code
+/// after the class, after the element and in the next element has the context around the class
+/// (`#sec-class-definitions`, `#sec-static-semantics-containsarguments`). Each mutant that drops
+/// one of the puts-back in `element_context_close`, `static_block_close` or the walk's `Restore`
+/// turns a line of this list.
+#[test]
+fn the_context_is_put_back_after_class_elements() {
+    use Verdict::{E, H};
+    check_verdicts(&[
+        ("async function f() { class C { x = 1; } await 1; }", H),
+        ("async function f() { class C { static {} } await 1; }", H),
+        (
+            "async function f() { class C { x = 1; [await 1] = 2; } }",
+            H,
+        ),
+        ("function* g() { class C { x = 1; } yield 1; }", H),
+        ("function* g() { class C { static {} } yield 1; }", H),
+        ("function* g() { class C { x = 1; [yield 1] = 2; } }", H),
+        ("function f() { class C { static {} } return 1; }", H),
+        (
+            "function f() { class C { static { function g() {} } } return 1; }",
+            H,
+        ),
+        ("class C { x = 1; } arguments;", H),
+        ("class C { static {} } arguments;", H),
+        ("function f() { class C { x = 1; } arguments; }", H),
+        (
+            "function f() { class C { static x = 1; static [arguments] = 2; } }",
+            H,
+        ),
+        ("function f() { class C { static {} [arguments]() {} } }", H),
+        (
+            "function f() { class C { x = () => 1; [arguments] = 2; } }",
+            H,
+        ),
+        ("var await; class C { static {} } await;", H),
+        ("var await; class C { static {} [await] = 1; }", H),
+    ]);
+    // A script only: a dynamic function's body admits `new.target`, and eval code refuses
+    // `super` at its token before slice 8.
+    let wrong = verdict_mismatches(
+        &[Entry::Script],
+        &[
+            ("class C { x = 1; } new.target;", E),
+            ("class C { static {} } new.target;", E),
+            ("class C { x = 1; } super.x;", E),
+            ("class C { static {} } super.x;", E),
+            ("class C { x = 1; [new.target] = 2; }", E),
+            ("class C { static {} [super.x] = 2; }", E),
+        ],
+    );
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// More sources at the edges of the element grammar: `#x in` at the start of a statement and in
+/// each element kind, functions and classes nested in a static block (their own [Await]), the
+/// strict string keys of a field, the names of static methods, and an escaped `static`.
+#[test]
+fn element_edges_answer_the_standard() {
+    use Verdict::{E, H};
+    check_verdicts(&[
+        ("class C { #x; m(o) { #x in o; } }", H),
+        ("class C { #x; y = #x in this; }", H),
+        ("class C { #x; [#x in o] = 1; }", H),
+        ("class C { #x; static { #x in o; } }", H),
+        (
+            "class C { #x; m(o) { return async (a = #x in this) => a; } }",
+            H,
+        ),
+        (
+            "class C { #x; m(o) { return #x in o ? #x in o : #x in o; } }",
+            H,
+        ),
+        ("class C { #x; m(o) { #x: ; } }", E),
+        ("class C { static { class D { x = () => await; } } }", H),
+        ("class C { static { class D { x = await; } } }", E),
+        ("class C { static { (class { [await] = 1; }); } }", E),
+        ("class C { static { function f(x = await) { await; } } }", H),
+        ("class C { static { ({ *m() { await; } }); } }", H),
+        (
+            "class C { static { (async function () { var await; }); } }",
+            E,
+        ),
+        ("class C { static { async => 1; } }", H),
+        ("class C { static { var C; } }", H),
+        ("class C { static { let C; } }", H),
+        ("class C { x = async () => await 1; }", H),
+        ("async () => { class C { x = await; } };", E),
+        ("async () => class C { [await 1] = 1; };", H),
+        ("L: while (0) { class C { static { continue L; } } }", E),
+        ("switch (0) { case 0: class C { static { break; } } }", E),
+        ("class C { '\\01' = 1; }", E),
+        ("class C { '\\8' = 1; }", E),
+        ("class C { static '\\01'() {} }", E),
+        ("class C { static prototype() {} }", E),
+        ("class C { static get prototype() {} }", E),
+        ("class C { static async *prototype() {} }", E),
+        ("class C { get constructor() {} }", E),
+        ("class C { async constructor() {} }", E),
+        ("class C { *constructor() {} }", E),
+        ("class C { constructor() {} constructor() {} }", E),
+        ("class C { constructor() {} 'constructor' = 1; }", E),
+        ("class C { 'constructor'() {} }", H),
+        ("class C { st\\u0061tic {} }", E),
+        ("class C { st\\u0061tic x() {} }", E),
+        ("class C { st\\u0061tic = 1; }", H),
+        ("class C { static st\\u0061tic = 1; }", H),
+    ]);
+}
+
+/// A YieldExpression or an AwaitExpression in a field initializer is a SyntaxError of this engine
+/// at its `yield` or `await`, a stated difference from the pinned draft, whose
+/// `FieldDefinition[?Yield, ?Await]` reads `Initializer[+In, ?Yield, ?Await]` and has no early
+/// error against either (`#sec-class-definitions`). A field initializer is the body of a function
+/// of its own that is neither a generator nor an `async` function, so no runtime of this engine
+/// and no step of ClassFieldDefinitionEvaluation can run one there.
+///
+/// The code of the initializer is all of it but the functions in it: a class nested in it, its
+/// computed keys and its own initializers included. A computed key beside the initializer reads
+/// `yield` and `await` with the [Yield] and [Await] around the class, as the draft does; in an
+/// arrow function or a function in the initializer they are that function's, as in the draft.
+#[test]
+fn a_field_initializer_refuses_yield_and_await_expressions() {
+    use Verdict::{E, H};
+    // Each source is refused at the first `yield` or `await` it holds, which names the message.
+    let refused = [
+        ("async function f() { class C { x = await 1; } }", "await"),
+        (
+            "async function f() { class C { static x = await 1; } }",
+            "await",
+        ),
+        ("function* g() { class C { x = yield 1; } }", "yield"),
+        ("function* g() { class C { #x = yield; } }", "yield"),
+        ("async function f() { class C { x = await; } }", "await"),
+        (
+            "async function f() { class C { #x = 1; static y = (await 0); } }",
+            "await",
+        ),
+        (
+            "async function* g() { class C { x = yield await 1; } }",
+            "yield",
+        ),
+        (
+            "async function* g() { class C { x = await (yield); } }",
+            "await",
+        ),
+        (
+            "async function f() { class C { x = class { y = await 1; }; } }",
+            "await",
+        ),
+        (
+            "async function f() { class C { x = class { [await 1] = 0; }; } }",
+            "await",
+        ),
+        (
+            "function* g() { class C { x = class { static [yield] () {} }; } }",
+            "yield",
+        ),
+        (
+            "async function f() { class C { x = class extends (await 0) {}; } }",
+            "await",
+        ),
+        (
+            "async function f() { class C { x = (a = await 0) => a; } }",
+            "await",
+        ),
+        ("function* g() { class C { x = [...yield]; } }", "yield"),
+    ];
+    let mut wrong = Vec::new();
+    for (text, word) in refused {
+        let column = text.find(word).map_or(0, |i| i + 1);
+        let message = format!("{word} expression in a class field initializer");
+        for entry in ENTRIES {
+            let line = if matches!(entry, Entry::FunctionBody) {
+                2
+            } else {
+                1
+            };
+            let got = parse_through(entry, &units(text), LIMIT).map(|_| ());
+            let ok = matches!(&got, Err(errors) if errors.len() == 1
+                && errors[0].message == message
+                && (errors[0].line, errors[0].column) == (line, column as u32));
+            if !ok {
+                let got = got.map_err(|errors| {
+                    errors
+                        .iter()
+                        .map(|e| format!("{}:{} {}", e.line, e.column, e.message))
+                        .collect::<Vec<_>>()
+                });
+                wrong.push(format!(
+                    "{entry:?} {text:?}: expected {line}:{column} {message:?}, got {got:?}"
+                ));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} mismatch(es):\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+    check_verdicts(&[
+        ("async function f() { class C { [await 1] = 0; } }", H),
+        (
+            "async function f() { class C { static [await 1] = await; } }",
+            E,
+        ),
+        ("function* g() { class C { [yield 1] = 0; x = 1; } }", H),
+        (
+            "async function f() { class C { x = async () => await 1; } }",
+            H,
+        ),
+        (
+            "async function f() { class C { x = async function () { await 1; }; } }",
+            H,
+        ),
+        (
+            "function* g() { class C { x = function* () { yield 1; }; } }",
+            H,
+        ),
+        (
+            "async function f() { class C { x = class { m() { await; } }; } }",
+            H,
+        ),
+        (
+            "async function f() { class C { x = class { async m() { await 1; } }; } }",
+            H,
+        ),
+        ("class C { x = await; }", H),
+        ("async function f() { class C { x = () => await 1; } }", E),
+        (
+            "async function f() { class C { x = function () { await 1; }; } }",
+            E,
+        ),
+        ("function* g() { class C { x = () => yield 1; } }", E),
+        (
+            "function* g() { class C { x = function () { yield 1; }; } }",
+            E,
+        ),
+    ]);
+}
+
+/// `await` as an identifier where [Await] is set is named by the code that sets it: a static
+/// block, through a class nested in the block and that class's field initializers and through an
+/// arrow function that is not `async` (`ClassStaticBlockStatementList : StatementList[~Yield,
+/// +Await, ~Return]`, `#sec-class-definitions-static-semantics-early-errors`), or else an `async`
+/// function or arrow function (`#sec-identifiers-static-semantics-early-errors`). In a field
+/// initializer of a class inside an `async` function, the pinned grammar reads `await` as the
+/// start of an AwaitExpression, which the parser refuses at the token before the early errors
+/// run ([`a_field_initializer_refuses_yield_and_await_expressions`]).
+#[test]
+fn await_as_an_identifier_names_the_code_that_reserves_it() {
+    let block = "await may not be an identifier in a class static block";
+    let function = "await may not be an identifier in an async function";
+    let field = "await expression in a class field initializer";
+    let cases = [
+        ("class C { static { await; } }", block),
+        ("class C { static { class D { x = await; } } }", block),
+        (
+            "class C { static { class D { static x = await; } } }",
+            block,
+        ),
+        (
+            "class C { static { class D { x = class { y = await; }; } } }",
+            block,
+        ),
+        ("class C { static { class D { [await] = 1; } } }", block),
+        ("class C { static { (x = await) => 0; } }", block),
+        (
+            "class C { static { class D { x = (y = await) => y; } } }",
+            block,
+        ),
+        ("class C { static { async (x = await) => x; } }", function),
+        (
+            "class C { static { async () => { var await; }; } }",
+            function,
+        ),
+        (
+            "class C { static { (async function () { var await; }); } }",
+            function,
+        ),
+        (
+            "async function f() { class C { x = class await {}; } }",
+            function,
+        ),
+        ("async function f() { class C { x = await; } }", field),
+    ];
+    let mut wrong = Vec::new();
+    for (text, message) in cases {
+        for entry in ENTRIES {
+            let got = parse_through(entry, &units(text), LIMIT).map(|_| ());
+            if got.as_ref().map_err(|errors| messages(errors)) != Err(vec![message.to_string()]) {
+                let got = got.map_err(|errors| messages(&errors));
+                wrong.push(format!(
+                    "{entry:?} {text:?}: expected {message:?}, got {got:?}"
+                ));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} mismatch(es):\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
