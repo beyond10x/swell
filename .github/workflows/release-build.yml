@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+*"
+  pull_request:
+    paths:
+      - ".github/workflows/release-build.yml"
+  workflow_dispatch:
 
 concurrency:
   group: release-build-${{ github.ref }}
@@ -31,6 +35,12 @@ jobs:
             runner: ubuntu-22.04
             archive: tar.gz
           - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+            archive: tar.gz
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-22.04
+            archive: tar.gz
+          - target: aarch64-unknown-linux-musl
             runner: ubuntu-22.04-arm
             archive: tar.gz
           - target: x86_64-apple-darwin
@@ -73,6 +83,9 @@ jobs:
           case "$TARGET" in
             *-windows-msvc) flags="$flags -C link-arg=/PDBALTPATH:%_PDB%" ;;
           esac
+          case "$TARGET" in
+            *-windows-msvc | *-linux-musl) flags="$flags -C target-feature=+crt-static" ;;
+          esac
           export RUSTFLAGS="$flags"
           cargo build --release --locked -p swell-cli --target "$TARGET"
 
@@ -84,6 +97,14 @@ jobs:
           ARCHIVE: ${{ matrix.archive }}
         run: |
           set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/tags/*) ;;
+            *)
+              workspace=$(awk -F '"' '/^\[/ { section = $0 } section == "[workspace.package]" && /^version[ \t]*=/ { print $2; exit }' Cargo.toml)
+              test -n "$workspace"
+              TAG="$workspace-${GITHUB_SHA:0:7}"
+              ;;
+          esac
           name="swell-$TAG-$TARGET"
           exe=swell
           if [ "$ARCHIVE" = zip ]; then exe=swell.exe; fi
@@ -115,6 +136,14 @@ jobs:
           FILE: ${{ steps.package.outputs.file }}
         run: |
           set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/tags/*) ;;
+            *)
+              workspace=$(awk -F '"' '/^\[/ { section = $0 } section == "[workspace.package]" && /^version[ \t]*=/ { print $2; exit }' Cargo.toml)
+              test -n "$workspace"
+              TAG="$workspace-${GITHUB_SHA:0:7}"
+              ;;
+          esac
           smoke="$RUNNER_TEMP/smoke"
           rm -rf "$smoke"
           mkdir -p "$smoke"
@@ -139,6 +168,68 @@ jobs:
           "$swell" --steps 10000 -e "for (;;) {}" 2> "$smoke/stderr" || status=$?
           test "$status" -eq 3 || { echo "release-build: a step budget exited $status, not 3"; cat "$smoke/stderr"; exit 1; }
           echo "release-build: $FILE: $version, print(1 + 1) printed 2, a step budget exited 3"
+
+      - name: Check that the C runtime is linked in
+        if: endsWith(matrix.target, '-linux-musl') || endsWith(matrix.target, '-windows-msvc')
+        env:
+          TARGET: ${{ matrix.target }}
+          NAME: ${{ steps.package.outputs.name }}
+          FILE: ${{ steps.package.outputs.file }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/smoke/$NAME"
+          case "$TARGET" in
+            *-linux-musl)
+              swell="$dir/swell"
+              readelf -d "$swell" > "$RUNNER_TEMP/dynamic"
+              cat "$RUNNER_TEMP/dynamic"
+              if grep -q '(NEEDED)' "$RUNNER_TEMP/dynamic"; then
+                echo "release-build: $FILE: swell has a dynamic section entry NEEDED; it is not static"
+                exit 1
+              fi
+              readelf -l "$swell" > "$RUNNER_TEMP/program-headers"
+              if grep -q 'INTERP' "$RUNNER_TEMP/program-headers"; then
+                echo "release-build: $FILE: swell names a program interpreter; it is not static"
+                exit 1
+              fi
+              image="swell-static-smoke:$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+              tar -cf "$RUNNER_TEMP/image.tar" -C "$dir" swell
+              held=$(tar -tf "$RUNNER_TEMP/image.tar")
+              test "$held" = swell || { echo "release-build: the image would hold $held, not swell alone"; exit 1; }
+              docker import "$RUNNER_TEMP/image.tar" "$image" > /dev/null
+              status=0
+              version=$(docker run --rm --network none "$image" /swell --version) || status=$?
+              test "$status" -eq 0 || { echo "release-build: swell --version exited $status in an image that holds nothing but swell"; exit 1; }
+              case "$version" in
+                "swell "*) ;;
+                *) echo "release-build: swell --version printed \"$version\" in an image that holds nothing but swell"; exit 1 ;;
+              esac
+              printed=$(docker run --rm --network none "$image" /swell -e "print(1 + 1)")
+              test "$printed" = 2 || { echo "release-build: print(1 + 1) printed \"$printed\" in an image that holds nothing but swell"; exit 1; }
+              status=0
+              docker run --rm --network none "$image" /swell --steps 10000 -e "for (;;) {}" 2> "$RUNNER_TEMP/stderr" || status=$?
+              test "$status" -eq 3 || { echo "release-build: a step budget exited $status, not 3, in an image that holds nothing but swell"; cat "$RUNNER_TEMP/stderr"; exit 1; }
+              docker image rm "$image" > /dev/null
+              echo "release-build: $FILE: no NEEDED entry, no interpreter; in an image that holds nothing but swell, $version, print(1 + 1) printed 2, a step budget exited 3"
+              ;;
+            *-windows-msvc)
+              swell="$dir/swell.exe"
+              vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+              dumpbin=$("$vswhere" -latest -products '*' -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | tr -d '\r' | awk 'NR == 1')
+              test -n "$dumpbin" || { echo "release-build: vswhere found no dumpbin.exe"; exit 1; }
+              "$(cygpath -u "$dumpbin")" -nologo -dependents "$swell" | tr -d '\r' > "$RUNNER_TEMP/dependents"
+              cat "$RUNNER_TEMP/dependents"
+              grep -q 'Image has the following dependencies' "$RUNNER_TEMP/dependents" ||
+                { echo "release-build: dumpbin listed no dependencies of swell.exe"; exit 1; }
+              grep -qi '^ *kernel32\.dll$' "$RUNNER_TEMP/dependents" ||
+                { echo "release-build: dumpbin did not list KERNEL32.dll; the list is not the import table"; exit 1; }
+              if grep -Eqi 'vcruntime|api-ms-win-crt' "$RUNNER_TEMP/dependents"; then
+                echo "release-build: $FILE: swell.exe imports a C runtime library (VCRUNTIME or api-ms-win-crt)"
+                exit 1
+              fi
+              echo "release-build: $FILE: the import table names no VCRUNTIME and no api-ms-win-crt library"
+              ;;
+          esac
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

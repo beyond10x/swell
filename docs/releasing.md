@@ -1,9 +1,9 @@
 # Releasing swell
 
 A release of swell is a version of its source and the shell binary `swell` (`crates/cli`) built
-from it for five targets. Nothing is uploaded to a package registry. The release is a tag on
+from it for seven targets. Nothing is uploaded to a package registry. The release is a tag on
 the public repository and a GitHub Release whose text is a short summary that links to the
-version's section of [`CHANGELOG.md`](../CHANGELOG.md). Its assets are the five archives of the
+version's section of [`CHANGELOG.md`](../CHANGELOG.md). Its assets are the seven archives of the
 binary and a `SHA256SUMS` file ("The binary of a release" below).
 
 - The tag is annotated, made by the organization bot (`b10x-bot[bot]`), and named exactly as
@@ -129,8 +129,8 @@ deciding session's, from a checkout of the repository:
    A red job of "Release build" holds the release. Its cause is fixed on `main` and released
    as the next patch version; the tag is not moved.
 
-7. **Release.** Download the five archives of the tag's "Release build" run, write
-   `SHA256SUMS`, create the release as the bot with the six files as assets, and view it
+7. **Release.** Download the seven archives of the tag's "Release build" run, write
+   `SHA256SUMS`, create the release as the bot with the eight files as assets, and view it
    ("The binary of a release" names the archives):
 
        rm -rf .out/release-<version> && mkdir -p .out/release-<version>
@@ -147,8 +147,8 @@ deciding session's, from a checkout of the repository:
        $gates gh -- release view <version> --repo beyond10x/swell \
          --json author,tagName,isDraft,assets --jq '{author: .author.login, tagName, isDraft, assets: [.assets[].name]}'
 
-   `ls` counts five archives. The release is done when its author is `b10x-bot[bot]`, its tag
-   is `<version>`, it is not a draft and its assets are six: the five archives and
+   `ls` counts seven archives. The release is done when its author is `b10x-bot[bot]`, its tag
+   is `<version>`, it is not a draft and its assets are eight: the seven archives and
    `SHA256SUMS`.
 8. **Report.** The deciding session reports the version, the tag's commit and the release's
    address to the coordinating session, which merges `main` into the open wave branch.
@@ -182,16 +182,44 @@ found:
 ## The binary of a release
 
 `.github/workflows/release-build.yml` runs on every pushed tag of the form
-`<major>.<minor>.<patch>`, with anything after it. It has one job per target, each on a runner
-of that system, with the compiler of `rust-toolchain.toml`:
+`<major>.<minor>.<patch>`, with anything after it, on a pull request that changes the
+workflow, and when started by hand. It has one job per target, each on a runner of that
+system, with the compiler of `rust-toolchain.toml`:
 
 | target | runner | archive |
 |---|---|---|
 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | `swell-<tag>-x86_64-unknown-linux-gnu.tar.gz` |
 | `aarch64-unknown-linux-gnu` | `ubuntu-22.04-arm` | `swell-<tag>-aarch64-unknown-linux-gnu.tar.gz` |
+| `x86_64-unknown-linux-musl` | `ubuntu-22.04` | `swell-<tag>-x86_64-unknown-linux-musl.tar.gz` |
+| `aarch64-unknown-linux-musl` | `ubuntu-22.04-arm` | `swell-<tag>-aarch64-unknown-linux-musl.tar.gz` |
 | `x86_64-apple-darwin` | `macos-15-intel` | `swell-<tag>-x86_64-apple-darwin.tar.gz` |
 | `aarch64-apple-darwin` | `macos-15` | `swell-<tag>-aarch64-apple-darwin.tar.gz` |
 | `x86_64-pc-windows-msvc` | `windows-2022` | `swell-<tag>-x86_64-pc-windows-msvc.zip` |
+
+Which archive to take:
+
+- `-linux-musl`: any Linux of that architecture, also a container image that holds nothing
+  but the binary. The binary is static: musl's C library is linked in
+  (`-C target-feature=+crt-static`) and it loads no shared library.
+- `-linux-gnu`: a Linux with glibc 2.34 or newer; the binary loads `libc.so.6` and
+  `libgcc_s.so.1`.
+- `-apple-darwin`: macOS; the binary links the system libraries, the only supported form
+  there.
+- `-pc-windows-msvc`: Windows; the C runtime is linked in (`-C target-feature=+crt-static`),
+  so the binary needs no Visual C++ runtime (`VCRUNTIME140.dll`, `api-ms-win-crt-*`).
+
+After the smoke test, the musl and Windows jobs check the linking of the unpacked binary. A
+musl job fails when `readelf -d` shows a dynamic section entry `NEEDED` or `readelf -l` a
+program interpreter; it then imports an image into Docker that holds the binary and nothing
+else and runs the three commands of the smoke test in it, without a network. The Windows job
+lists the import table with `dumpbin -dependents` and fails when it names a `VCRUNTIME` or an
+`api-ms-win-crt` library.
+
+A run on a pull request or started by hand
+(`$gates gh -- workflow run release-build.yml --ref <branch>`) builds, packages and
+smoke-tests the seven targets before a tag and publishes nothing; there `<tag>` is the
+workspace version and the first seven characters of the commit (`0.12.0-1a2b3c4`). No run of
+the workflow makes a release: the release is step 7 above.
 
 Each job:
 

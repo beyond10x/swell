@@ -8,15 +8,132 @@ vars:
 
 tasks:
   forge-check:
-    desc: Fail when the gate's compiler or check-runner's variables differ from what the forge's runner has; runs toolchain-check and runner-env-check.
+    desc: Fail when the gate's compiler or check-runner's variables differ from what the forge's runner has, or when the release workflow and its documents disagree; runs toolchain-check, runner-env-check and release-targets-check.
     summary: |
       The local gate equals the forge (the organization's rule of that name; story
-      local-gate-equals-forge). Runs toolchain-check, then runner-env-check; each prints its
-      line, and the first that fails stops it. Reads no build output and builds nothing.
+      local-gate-equals-forge). Runs toolchain-check, then runner-env-check, then
+      release-targets-check (story releases-ship-static-binaries); each prints its line, and
+      the first that fails stops it. Reads no build output and builds nothing.
     silent: true
     cmds:
       - task: toolchain-check
       - task: runner-env-check
+      - task: release-targets-check
+
+  release-targets-check:
+    desc: Fail when the release workflow lacks a static musl target beside a glibc one or the static C runtime on Windows, or when docs/releasing.md or website/docs/embedding.md names another set of archives than it builds.
+    summary: |
+      Fail when the release workflow lacks a static musl target beside a glibc one or the
+      static C runtime on Windows, or when the documents name another set of archives than it
+      builds (story releases-ship-static-binaries). Reads, under GATE_ROOT (default .),
+      .github/workflows/release-build.yml, docs/releasing.md and website/docs/embedding.md;
+      builds nothing.
+
+      The targets are the "- target:" lines of the workflow's build matrix, each with the
+      "archive:" line of its entry (tar.gz or zip); comment lines are skipped. It fails, one
+      line each, when:
+        - the matrix has no target: "release-targets-check: <file>: no target in the build
+          matrix";
+        - a target <arch>-unknown-linux-gnu has no <arch>-unknown-linux-musl beside it:
+          "release-targets-check: <file>: builds <gnu> and not <musl>; a static musl binary
+          goes beside each glibc one";
+        - a target *-windows-msvc is in the matrix and no line of the workflow outside a
+          comment names both windows-msvc and target-feature=+crt-static:
+          "release-targets-check: <file>: builds <target> without -C
+          target-feature=+crt-static on a line that names windows-msvc";
+        - one of the two documents names no archive swell-<placeholder>-<target>.<archive>
+          for a target of the matrix: "release-targets-check: <doc>: names no archive
+          swell-<version>-<target>.<archive>, which <file> builds";
+        - one of the two documents names an archive swell-<placeholder>-<name>.tar.gz or .zip
+          (the placeholder is <tag> or <version>, any word in angle brackets) that the matrix
+          does not build: "release-targets-check: <doc>:<line>: names the archive
+          swell-<version>-<name>.<ext>, which <file> does not build".
+      It prints "release-targets-check: <n> target(s) in <file>, a musl target beside each
+      glibc one, the Windows C runtime linked in; <doc> and <doc> name each archive and no
+      other".
+    vars:
+      GATE_ROOT: '{{.GATE_ROOT | default "."}}'
+    env:
+      GATE_ROOT: '{{.GATE_ROOT}}'
+    silent: true
+    cmds:
+      - |
+        if [ "$GATE_ROOT" = . ]; then prefix=; else prefix=$GATE_ROOT/; fi
+        wf=${prefix}.github/workflows/release-build.yml
+        rel=${prefix}docs/releasing.md
+        emb=${prefix}website/docs/embedding.md
+        for file in "$wf" "$rel" "$emb"; do
+          [ -f "$file" ] || { echo "release-targets-check: $file is missing"; exit 1; }
+        done
+        awk -v wf="$wf" -v rel="$rel" -v emb="$emb" '
+          function unquote(s) {
+            sub(/^[ \t]+/, "", s)
+            sub(/[ \t]+#.*$/, "", s)
+            sub(/[ \t]+$/, "", s)
+            if (s ~ /^".*"$/ || s ~ /^\047.*\047$/) s = substr(s, 2, length(s) - 2)
+            return s
+          }
+          FILENAME == wf {
+            if ($0 ~ /^[ \t]*#/) next
+            if ($0 ~ /^[ \t]*- target:/) {
+              t = $0
+              sub(/^[ \t]*- target:/, "", t)
+              t = unquote(t)
+              if (!(t in built)) { order[++n] = t; built[t] = "" }
+              next
+            }
+            if ($0 ~ /^[ \t]*archive:/ && t != "") {
+              a = $0
+              sub(/^[ \t]*archive:/, "", a)
+              built[t] = unquote(a)
+              next
+            }
+            if ($0 ~ /windows-msvc/ && $0 ~ /target-feature=\+crt-static/) crtstatic = 1
+            next
+          }
+          {
+            line = $0
+            while (match(line, /swell-<[^<>]+>-[A-Za-z0-9_]+(-[A-Za-z0-9_]+)*\.(tar\.gz|zip)/)) {
+              name = substr(line, RSTART, RLENGTH)
+              line = substr(line, RSTART + RLENGTH)
+              sub(/^swell-<[^<>]+>-/, "", name)
+              ext = name ~ /\.tar\.gz$/ ? "tar.gz" : "zip"
+              target = substr(name, 1, length(name) - length(ext) - 1)
+              named[FILENAME, target "." ext] = 1
+              if (!((target) in built) || built[target] != ext) {
+                print "release-targets-check: " FILENAME ":" FNR ": names the archive swell-<version>-" target "." ext ", which " wf " does not build"
+                bad++
+              }
+            }
+          }
+          END {
+            if (n == 0) { print "release-targets-check: " wf ": no target in the build matrix"; exit 1 }
+            for (i = 1; i <= n; i++) {
+              t = order[i]
+              if (t ~ /-unknown-linux-gnu$/) {
+                musl = t
+                sub(/-gnu$/, "-musl", musl)
+                if (!(musl in built)) {
+                  print "release-targets-check: " wf ": builds " t " and not " musl "; a static musl binary goes beside each glibc one"
+                  bad++
+                }
+              }
+              if (t ~ /-windows-msvc$/ && !crtstatic) {
+                print "release-targets-check: " wf ": builds " t " without -C target-feature=+crt-static on a line that names windows-msvc"
+                bad++
+              }
+              split(rel "|" emb, docs, "|")
+              for (k = 1; k <= 2; k++) {
+                if (!((docs[k], t "." built[t]) in named)) {
+                  print "release-targets-check: " docs[k] ": names no archive swell-<version>-" t "." built[t] ", which " wf " builds"
+                  bad++
+                }
+              }
+            }
+            if (bad) exit 1
+            print "release-targets-check: " n " target(s) in " wf ", a musl target beside each glibc one, the Windows C runtime linked in; " rel " and " emb " name each archive and no other"
+          }
+        ' "$wf" "$rel" "$emb"
 
   toolchain-check:
     desc: Fail when a workflow names a compiler version, or when rustc in the gate is not the channel rust-toolchain.toml pins.
