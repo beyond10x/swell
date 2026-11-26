@@ -6,4 +6,4 @@ hermes 0.13.0 tar.gz aead6eb0b8f563bb022354352eae32dad96c933330b6c1941b6db17674c
 quickjs 2026-06-04 zip d98289c8ec9580eb206575c52c76693bc0fd6ce04ffac2dbd4f518b62a774938 qjs qjs https://bellard.org/quickjs/binary_releases/quickjs-linux-x86_64-2026-06-04.zip
 quickjs-ng 0.18.0 bin 85ded23b9fabe8c1644fc40a8d2bbdd71157affcbd807359c618cc717ee24d7d qjs qjs https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-linux-x86_64
 xs 10.1.0 zip 990a943827d91fb2e4ff292fe2e64e0d411cad97a7b8d6f5c99d20c1b4a7b187 xst xst https://github.com/Moddable-OpenSource/moddable/releases/download/10.1.0/xst-lin64.zip
-boa 0.22 bin d3484a63c9ee5f025de11379d055285a0bc015cf6d1d45b895e0d0f93566d671 boa boa https://github.com/boa-dev/boa/releases/download/v0.22/boa-x86_64-unknown-linux-gnu
+boa 0.20 bin 9dff0bf942ab01cef2bc1bca1383c9c5a16498646485146c3f607b1a6494c5c2 boa boa https://github.com/boa-dev/boa/releases/download/v0.20/boa-linux-amd64
