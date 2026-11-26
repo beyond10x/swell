@@ -338,6 +338,49 @@ fn a_field_and_a_static_block_are_refused_at_their_token() {
     }
 }
 
+/// A class is strict mode code from `class` to its `}` and no further (`#sec-strict-mode-code`):
+/// the parser and the walk of the early errors both give the code after a class declaration or
+/// expression the strictness of the code around it. So, through each entry, a source with a
+/// class and, after it, code that only non-strict code admits answers the hold of the class
+/// alone; an `if` clause that is a function declaration answers its refusal of slice 18, which
+/// stops the parse at its token, as it does in non-strict code without a class.
+#[test]
+fn code_after_a_class_is_not_strict() {
+    let held = "class is not supported before slice 8";
+    let if_clause = "function declaration as an if clause is not supported before slice 18";
+    let mut cases: Vec<(String, &str)> = Vec::new();
+    for class in ["class A {}", "x = class {};", "x = class { m() {} };"] {
+        for (tail, message) in [
+            ("with (a) {}", held),
+            ("x = 010;", held),
+            ("delete x;", held),
+            ("var eval;", held),
+            ("function f(a, a) {}", held),
+            ("if (a) function f() {}", if_clause),
+        ] {
+            cases.push((format!("{class} {tail}"), message));
+            cases.push((format!("function g() {{ {class} {tail} }}"), message));
+        }
+    }
+    let mut wrong: Vec<String> = Vec::new();
+    for (text, message) in &cases {
+        for entry in ENTRIES {
+            let answer = parse_through(entry, &units(text), LIMIT).map(|_| ());
+            if answer.as_ref().map_err(|errors| messages(errors)) != Err(vec![message.to_string()])
+            {
+                wrong.push(format!("{entry:?} {text:?}: {answer:?}"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} of {} answers wrong:\n{}",
+        wrong.len(),
+        cases.len() * ENTRIES.len(),
+        wrong.join("\n")
+    );
+}
+
 /// `async` functions and arrow functions parse whole (`#sec-async-function-definitions`,
 /// `#sec-async-arrow-function-definitions`; `story:async-functions-and-await` lifted the refusal
 /// of slice 10 that held them back to the end of the parse): through each entry, the dynamic ones
