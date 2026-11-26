@@ -133,11 +133,12 @@ impl<H: Host> Agent<H> {
     }
 
     /// Continue at `handler` of the running frame with the thrown `value`: the operand stack and
-    /// the environments as they were at the try statement, then the exception (a `catch`
-    /// block) or the throw completion record (a `finally` block, and the close of an array
-    /// pattern, whose stack is cut above its record, `interp/array_patterns.rs`). A `catch`
-    /// block ends the throw's site record; the others keep it, since their end throws the
-    /// value again.
+    /// the environments as they were at the try statement, the strictness of the handler's
+    /// place (a throw from the code of a class can reach a handler outside it), then the
+    /// exception (a `catch` block) or the throw completion record (a `finally` block, and the
+    /// close of an array pattern, whose stack is cut above its record,
+    /// `interp/array_patterns.rs`). A `catch` block ends the throw's site record; the others
+    /// keep it, since their end throws the value again.
     fn enter_handler(
         &mut self,
         handler: swell_compiler::bytecode::Handler,
@@ -162,6 +163,7 @@ impl<H: Host> Agent<H> {
         let frame = self.top_frame()?;
         frame.env = env;
         frame.pushed_envs = pushed;
+        frame.strict = handler.strict;
         frame.pc = usize::try_from(handler.target).unwrap_or(usize::MAX);
         let realm = frame.realm;
         self.set_realm_slot(Some(realm));
@@ -327,7 +329,9 @@ impl<H: Host> Agent<H> {
             | I::DefineClassComputedSetter
             | I::StoreInitializer(_)
             | I::MakeMethod(_)
-            | I::InitInstance => self.class_instruction(),
+            | I::InitInstance
+            | I::SetStrict(_)
+            | I::SetClassName => self.class_instruction(),
             I::DefineIndex(index) => self.define_index(index),
             I::ArrayLength(length) => self.set_array_length(length),
             // ---- computed keys and spreads (`interp/object_literal.rs`) ----

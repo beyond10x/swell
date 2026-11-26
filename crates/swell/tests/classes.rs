@@ -10,7 +10,8 @@
 //! `story:class-definition-evaluation`. Run also with the feature `collect-every-safe-point`.
 //!
 //! Each script compares its results with `===` and answers `true`, as written and with a
-//! `"use strict";` prologue.
+//! `"use strict";` prologue; a script that checks that the code around a class stays
+//! non-strict runs as written only.
 #![cfg(test)]
 
 use crate::support;
@@ -568,13 +569,17 @@ fn a_class_with_1000_methods() {
 /// A method, a static method, a getter and a constructor that recurse without end stop at the
 /// frame depth or the re-entry depth with a `RangeError` (decision 4), which a `catch` sees;
 /// the class works after it. The test's limits; with a collection at every safe point, which
-/// marks every frame at each instruction, a frame depth of 100 and a re-entry depth of 8.
+/// marks every frame at each instruction, a frame depth of 100, a re-entry depth of 8 and
+/// 5,000 steps, twice what the script takes there (2,500 pass, 2,000 do not): a construction
+/// that misses the frame-depth check then ends on the step budget in about 3 s, where it ran
+/// into the 60 s bound before (in the default mode it ends on the memory budget).
 #[test]
 fn a_method_recursion_stops_at_frame_depth() {
     let mut limits = limits();
     if cfg!(feature = "collect-every-safe-point") {
         limits.frame_depth = 100;
         limits.reentry_depth = 8;
+        limits.steps_per_entry = 5_000;
     }
     let source = "class A { m(n) { return this.m(n + 1); } static s(n) { return A.s(n + 1); }\n\
                    get g() { return this.g; } }\n\
@@ -586,4 +591,343 @@ fn a_method_recursion_stops_at_frame_depth() {
     assert_eq!(run(limits, source), passed(), "{source}");
     let strict = format!("\"use strict\";\n{source}");
     assert_eq!(run(limits, &strict), passed(), "{strict}");
+}
+
+/// `#sec-strict-mode-code`: "All parts of a ClassDeclaration or a ClassExpression are strict
+/// mode code", the computed keys included. In a class written in non-strict code, a key that
+/// assigns an undeclared name throws a `ReferenceError` (PutValue, `#sec-putvalue`, step 3.a),
+/// a failed [[Set]] throws a `TypeError` (step 5.d), and a direct `eval` in a key is strict
+/// (PerformEval, `#sec-performeval`, step 10), so its `var` stays in the eval's own
+/// environment. Found by the adversary's first pass.
+#[test]
+fn computed_keys_are_strict_code() {
+    both_pass(
+        "var r = [];\n\
+         try { class A { [(undeclaredInKey = 1, \"k\")]() {} } r.push(\"no\"); } catch (e) { r.push(e instanceof ReferenceError); }\n\
+         var frozen = Object.freeze({ x: 1 });\n\
+         try { class B { [(frozen.x = 2, \"k\")]() {} } r.push(\"no\"); } catch (e) { r.push(e instanceof TypeError); }\n\
+         class C { [eval(\"var leaked = 1; 'k'\")]() {} }\n\
+         r.push(typeof leaked === \"undefined\", typeof undeclaredInKey === \"undefined\");\n\
+         r.join() === \"true,true,true,true\";",
+    );
+}
+
+/// NamedEvaluation of an anonymous class under a computed key of an object literal
+/// (`#sec-runtime-semantics-propertydefinitionevaluation`, step 5 of `PropertyDefinition :
+/// PropertyName : AssignmentExpression`) passes the key into ClassDefinitionEvaluation, whose
+/// SetFunctionName(F, className) runs before the static elements; a static `name` method or
+/// accessor of the class then replaces it, as it does under a literal key. Found by the
+/// adversary's first pass.
+#[test]
+fn a_static_name_wins_over_a_computed_key_name() {
+    both_pass(
+        "var o = {\n\
+           [\"a\"]: class { static name() { return 1; } },\n\
+           [\"b\"]: class { static get name() { return \"getter\"; } },\n\
+           [\"c\"]: class { static [\"na\" + \"me\"]() {} },\n\
+           [\"d\"]: class {}\n\
+         };\n\
+         var p = { e: class { static name() { return 1; } } };\n\
+         typeof o.a.name === \"function\" && o.b.name === \"getter\" && typeof o.c.name === \"function\"\n\
+           && o.d.name === \"d\" && typeof p.e.name === \"function\"\n\
+           && Object.getOwnPropertyNames(o.a).join() === \"length,name,prototype\";",
+    );
+}
+
+/// `source` answers `true` as written, in non-strict code: what it checks holds there only
+/// (the code around a class stays non-strict).
+fn sloppy_passes(source: &str) {
+    assert_eq!(run(limits(), source), passed(), "{source}");
+}
+
+/// `source` run as written in a fresh agent, then `probe` read after one microtask checkpoint:
+/// `true`.
+fn sloppy_settles(source: &str, probe: &str) {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let ran = eval_text(&mut agent, &realm, source);
+    assert!(matches!(ran, Outcome::Normal(_)), "{source}: {ran:?}");
+    let checkpoint = agent.perform_microtask_checkpoint().unwrap();
+    assert!(
+        matches!(checkpoint, HostOutcome::Normal(_)),
+        "{checkpoint:?}"
+    );
+    assert_eq!(eval_text(&mut agent, &realm, probe), passed(), "{source}");
+}
+
+/// The head of the scripts of the strictness tests: the list of results, a frozen object and
+/// a key that throws.
+const STRICT_HEAD: &str = "var r = [], frozen = Object.freeze({ x: 1 });\n\
+     function thrower() { throw new Error(\"key\"); }\n";
+
+/// The answer of the strictness tests: `true` when every result is `true`, the results
+/// otherwise.
+const STRICT_ANSWER: &str = "r.every(function (x) { return x === true; }) || r.join();";
+
+/// Statements that run without an error only in non-strict code, numbered `n`: an assignment
+/// to an undeclared name, a write to a frozen object, `delete` of a non-configurable property,
+/// a direct `eval` that declares a `var` and one that assigns an undeclared name; then the
+/// push of whether each did what it does in non-strict code.
+fn sloppy_statements(n: u32) -> String {
+    "a@ = 1; frozen.x = 2; delete Object.prototype; eval(\"var b@ = 1\"); eval(\"c@ = 1\");\n\
+     r.push(typeof a@ === \"number\" && frozen.x === 1 && typeof b@ === \"number\"\n\
+       && typeof c@ === \"number\" || \"strict at @\");\n"
+        .replace('@', &n.to_string())
+}
+
+/// `#sec-strict-mode-code`, the computed key of every kind of class element in non-strict
+/// code, at the top of a script and in a non-strict function: an assignment to an undeclared
+/// name throws a `ReferenceError` (PutValue, step 3.a), a write to a frozen object and
+/// `delete` of a non-configurable property a `TypeError` (step 5.d,
+/// `#sec-delete-operator-runtime-semantics-evaluation`, step 5.d), an assignment to the name of
+/// a named function expression a `TypeError` (SetMutableBinding of an immutable binding,
+/// `#sec-declarative-environment-records-setmutablebinding-n-v-s`, step 4), a direct `eval`
+/// is strict eval code (PerformEval, step 10): its `var` stays in its own environment and its
+/// assignment to an undeclared name throws a `ReferenceError`.
+#[test]
+fn every_strict_operation_in_a_computed_key_is_strict() {
+    let positions = [
+        ("", "() {}"),
+        ("get ", "() {}"),
+        ("set ", "(v) {}"),
+        ("static ", "() {}"),
+        ("static get ", "() {}"),
+        ("static set ", "(v) {}"),
+    ];
+    let mut n = 0;
+    let mut source = String::from(STRICT_HEAD);
+    for context in ["script", "function"] {
+        let mut body = String::new();
+        for (before, after) in positions {
+            let class = |key: &str| format!("class C {{ {before}[{key}]{after} }}");
+            let threw = |n: u32, code: String, error: &str| {
+                format!(
+                    "try {{ {code} r.push(\"none {n}\"); }} catch (e) {{ r.push(e instanceof {error} || \"wrong {n} \" + e); }}\n"
+                )
+            };
+            n += 1;
+            body.push_str(&threw(
+                n,
+                class(&format!("(u{n} = 1, \"k\")")),
+                "ReferenceError",
+            ));
+            n += 1;
+            body.push_str(&threw(n, class("(frozen.x = 2, \"k\")"), "TypeError"));
+            n += 1;
+            body.push_str(&threw(
+                n,
+                class("(delete Object.prototype, \"k\")"),
+                "TypeError",
+            ));
+            n += 1;
+            let nfe = format!(
+                "(function nfe{n}() {{ {} }})();",
+                class(&format!("(nfe{n} = 1, \"k\")"))
+            );
+            body.push_str(&threw(n, nfe, "TypeError"));
+            n += 1;
+            body.push_str(&threw(
+                n,
+                class(&format!("eval(\"ue{n} = 1; 'k'\")")),
+                "ReferenceError",
+            ));
+            n += 1;
+            let leak = class(&format!("eval(\"var leaked{n} = 1; 'k'\")"));
+            body.push_str(&format!(
+                "{{ {leak} }}\nr.push(typeof leaked{n} === \"undefined\" || \"leaked {n}\");\n"
+            ));
+        }
+        if context == "script" {
+            source.push_str(&body);
+        } else {
+            source.push_str(&format!("(function () {{\n{body}}})();\n"));
+        }
+    }
+    source.push_str(&format!("r.length === {n} && {STRICT_ANSWER}"));
+    both_pass(&source);
+}
+
+/// The code around a class in non-strict code stays non-strict (`#sec-strict-mode-code`: only
+/// the parts of the class are strict): after a class that completed, in the `catch` and the
+/// `finally` that a throw of a key enters, in a `finally` that returns after a key threw, in
+/// the `finally` of a `return` of a class, and after the call of such a function; at the top
+/// of a script and in a non-strict function, whose own name stays immutable without an error.
+#[test]
+fn the_code_around_a_class_stays_non_strict() {
+    let mut source = String::from(STRICT_HEAD);
+    for context in ["script", "function"] {
+        let base = if context == "script" { 0 } else { 10 };
+        let s = |k: u32| sloppy_statements(base + k);
+        let mut body = String::new();
+        body.push_str(&format!(
+            "class A {{ [(\"m\")]() {{}} static [\"s\"]() {{}} }}\n{}",
+            s(1)
+        ));
+        body.push_str(&format!(
+            "try {{ class B {{ [thrower()]() {{}} }} }} catch (e) {{ {} }}\n",
+            s(2)
+        ));
+        body.push_str(&format!(
+            "try {{ try {{ class B {{ [thrower()]() {{}} }} }} finally {{ {} }} }} catch (e) {{}}\n",
+            s(3)
+        ));
+        if context == "function" {
+            body.push_str(&format!(
+                "function f() {{ try {{ class D {{ [thrower()]() {{}} }} }} finally {{ {} return 1; }} }}\n\
+                 r.push(f() === 1);\n{}",
+                s(4),
+                s(5)
+            ));
+            body.push_str(&format!(
+                "function g() {{ try {{ return class {{ [\"k\"]() {{}} }}; }} finally {{ {} }} }}\n\
+                 r.push(typeof g() === \"function\");\n{}",
+                s(6),
+                s(7)
+            ));
+            body.push_str(
+                "outer = 1; r.push(typeof outer === \"function\" || \"outer assigned\");\n",
+            );
+            source.push_str(&format!("(function outer() {{\n{body}}})();\n"));
+        } else {
+            source.push_str(&body);
+        }
+    }
+    source.push_str(&format!("r.length === 13 && {STRICT_ANSWER}"));
+    sloppy_passes(&source);
+}
+
+/// A handler inside class code keeps the class's strictness, and one outside it the code's:
+/// in a non-strict generator, `throw()` sent into `yield*` in a key is forwarded to the inner
+/// generator, which answers, and the rest of the key and a second key are strict; the inner
+/// generator that does not answer makes the handler of the `yield*` throw again into a `catch`
+/// outside the class, which is non-strict; a destructuring assignment in a key completes and
+/// the rest of the key is strict, and one whose default throws enters its handler, which closes
+/// the iterator and throws again into a non-strict `catch`.
+#[test]
+fn a_handler_keeps_the_strictness_of_its_place() {
+    let source = format!(
+        "{STRICT_HEAD}\
+         function* inner() {{ try {{ yield 1; }} catch (e) {{ return \"k\"; }} }}\n\
+         function* g1() {{ class C {{ [(yield* inner(), u1 = 1, \"a\")]() {{}} }} }}\n\
+         var it = g1(); it.next();\n\
+         try {{ it.throw(new Error(\"in\")); r.push(\"none 1\"); }} catch (e) {{ r.push(e instanceof ReferenceError || \"wrong 1 \" + e); }}\n\
+         function* g2() {{ class C {{ [yield* inner()]() {{}} [(u2 = 1, \"b\")]() {{}} }} }}\n\
+         it = g2(); it.next();\n\
+         try {{ it.throw(new Error(\"in\")); r.push(\"none 2\"); }} catch (e) {{ r.push(e instanceof ReferenceError || \"wrong 2 \" + e); }}\n\
+         function* inner2() {{ yield 1; }}\n\
+         function* g3() {{ try {{ class C {{ [yield* inner2()]() {{}} }} }} catch (e) {{ {} yield \"caught\"; }} }}\n\
+         it = g3(); it.next(); r.push(it.throw(new Error(\"x\")).value === \"caught\");\n\
+         var a, b, closed = 0;\n\
+         try {{ class D {{ [([a, b] = [1, 2], u4 = 1, \"d\")]() {{}} }} r.push(\"none 4\"); }} catch (e) {{ r.push(e instanceof ReferenceError && a === 1 || \"wrong 4 \" + e); }}\n\
+         var iterable = {{ [Symbol.iterator]() {{ return {{ next() {{ return {{ value: undefined, done: false }}; }}, return() {{ closed++; return {{}}; }} }}; }} }};\n\
+         try {{ class E {{ [([a = thrower()] = iterable, \"e\")]() {{}} }} }} catch (e) {{ {} }}\n\
+         r.push(closed === 1);\n\
+         r.length === 7 && {STRICT_ANSWER}",
+        sloppy_statements(3),
+        sloppy_statements(5),
+    );
+    sloppy_passes(&source);
+}
+
+/// A generator, an `async` function and an async generator suspended in a computed key resume
+/// in strict code: by `next` (or a fulfilled `await`), the rest of the key is strict; by
+/// `throw` (or a rejected `await`) caught outside the class, the `catch` is non-strict; by
+/// `return`, the `finally` outside the class is non-strict.
+#[test]
+fn a_frame_suspended_in_a_key_resumes_strict() {
+    let source = format!(
+        "{STRICT_HEAD}\
+         function* g1() {{ class C {{ [(yield 1, u1 = 1, \"a\")]() {{}} }} }}\n\
+         var it = g1(); it.next();\n\
+         try {{ it.next(); r.push(\"none 1\"); }} catch (e) {{ r.push(e instanceof ReferenceError || \"wrong 1 \" + e); }}\n\
+         function* g2() {{ try {{ class C {{ [(yield 1, \"a\")]() {{}} }} }} catch (e) {{ {} }} }}\n\
+         it = g2(); it.next(); it.throw(new Error(\"t\"));\n\
+         function* g3() {{ try {{ class C {{ [(yield 1, \"a\")]() {{}} }} }} finally {{ {} }} }}\n\
+         it = g3(); it.next(); r.push(it.return(7).value === 7);\n\
+         async function af1() {{ class C {{ [(await 0, u4 = 1, \"a\")]() {{}} }} }}\n\
+         af1().then(function () {{ r.push(\"none 4\"); }}, function (e) {{ r.push(e instanceof ReferenceError || \"wrong 4 \" + e); }});\n\
+         async function af2() {{ try {{ class C {{ [(await Promise.reject(new Error(\"r\")), \"a\")]() {{}} }} }} catch (e) {{ {} }} }}\n\
+         af2();\n\
+         async function* ag() {{ try {{ class C {{ [(yield 1, \"a\")]() {{}} }} }} finally {{ {} }} }}\n\
+         var ai = ag(); ai.next().then(function () {{ return ai.return(8); }}).then(function (x) {{ r.push(x.value === 8); }});\n\
+         0;",
+        sloppy_statements(2),
+        sloppy_statements(3),
+        sloppy_statements(5),
+        sloppy_statements(6),
+    );
+    sloppy_settles(&source, &format!("r.length === 8 && {STRICT_ANSWER}"));
+}
+
+/// A class in a computed key of a class, and a function there, are class code, strict: the key
+/// of the inner class and the rest of the outer key after the inner class are strict, and the
+/// code after the outer class is not; a function in a key is strict, so `this` in its call is
+/// `undefined` (OrdinaryCallBindThis, `#sec-ordinarycallbindthis`, step 5); at the top of a
+/// script and in a non-strict function.
+#[test]
+fn a_class_or_function_in_a_key_is_strict() {
+    let mut source = String::from(STRICT_HEAD);
+    for context in ["script", "function"] {
+        let n = if context == "script" { 0 } else { 10 };
+        let body = format!(
+            "try {{ class O {{ [(class I {{ [(u{a} = 1, \"i\")]() {{}} }}, \"o\")]() {{}} }} r.push(\"none {a}\"); }}\n\
+               catch (e) {{ r.push(e instanceof ReferenceError || \"wrong {a} \" + e); }}\n\
+             try {{ class O {{ [(class I {{ [\"i\"]() {{}} }}, u{b} = 1, \"o\")]() {{}} }} r.push(\"none {b}\"); }}\n\
+               catch (e) {{ r.push(e instanceof ReferenceError || \"wrong {b} \" + e); }}\n\
+             class O3 {{ [(class I {{ [\"i\"]() {{}} }}, \"o\")]() {{}} }}\n\
+             {}\
+             class F {{ [(function () {{ return this; }})() === undefined ? \"yes\" : \"no\"]() {{}} }}\n\
+             r.push(typeof F.prototype.yes === \"function\" || \"a non-strict function in a key\");\n",
+            sloppy_statements(n + 3),
+            a = n + 1,
+            b = n + 2,
+        );
+        if context == "script" {
+            source.push_str(&body);
+        } else {
+            source.push_str(&format!("(function () {{\n{body}}})();\n"));
+        }
+    }
+    source.push_str(&format!("r.length === 8 && {STRICT_ANSWER}"));
+    sloppy_passes(&source);
+}
+
+/// NamedEvaluation under a computed key of an object literal: ClassDefinitionEvaluation gives F
+/// its name before any element is defined (SetFunctionName(F, className) after
+/// MakeClassConstructor, `#sec-runtime-semantics-classdefinitionevaluation`), so F's own keys
+/// are `length`, `name`, `prototype`, then its static elements: a Symbol key gives
+/// `[description]`, a Symbol without one the empty String, a number its String; a static `name`
+/// replaces it. An anonymous function expression and an arrow function there keep their name
+/// from the key (`#sec-setfunctionname`) and their own keys.
+#[test]
+fn a_computed_key_names_its_anonymous_class_before_the_elements() {
+    both_pass(
+        "var s1 = Symbol(\"desc\"), s2 = Symbol();\n\
+         var o = { [s1]: class { static m() {} }, [s2]: class {}, [1]: class { static name() {} },\n\
+                   [2]: class { static get name() { return \"g\"; } }, [3]: class { static z() {} } };\n\
+         var f = { [s1]: function () {}, [s2]: () => {}, [\"g\"]: function () {}, [4]: () => {} };\n\
+         var keys = function (x) { return Reflect.ownKeys(x).map(String).join(); };\n\
+         o[s1].name === \"[desc]\" && keys(o[s1]) === \"length,name,prototype,m\"\n\
+           && o[s2].name === \"\" && keys(o[s2]) === \"length,name,prototype\"\n\
+           && typeof o[1].name === \"function\" && keys(o[1]) === \"length,name,prototype\"\n\
+           && o[2].name === \"g\" && keys(o[2]) === \"length,name,prototype\"\n\
+           && o[3].name === \"3\" && keys(o[3]) === \"length,name,prototype,z\"\n\
+           && f[s1].name === \"[desc]\" && keys(f[s1]) === \"length,name,prototype\"\n\
+           && f[s2].name === \"\" && keys(f[s2]) === \"length,name\"\n\
+           && f.g.name === \"g\" && f[4].name === \"4\" && keys(f[4]) === \"length,name\";",
+    );
+}
+
+/// `Function.prototype.toString` of a static method (`#sec-function.prototype.tostring`, the
+/// MethodDefinition after `static`): `static` and the trivia after it are left out, a line
+/// comment and a white space outside ASCII (U+00A0) among them; `static` followed by an escape
+/// is the start of a longer name, and that method's text keeps it. Holds three changes of
+/// `method_definition_start` that the adversary's first pass found no test for.
+#[test]
+fn to_string_of_a_static_method_skips_static_and_its_trivia() {
+    both_pass(
+        "class A { static // c\n m() {} static\u{A0}n() {} static\\u0061b() {} }\n\
+         A.m.toString() === \"m() {}\" && A.n.toString() === \"n() {}\"\n\
+           && A.prototype.staticab.toString() === \"static\\\\u0061b() {}\";",
+    );
 }

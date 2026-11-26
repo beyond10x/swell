@@ -12,7 +12,10 @@
 //! keeps the initializer of the instance elements in F's box, [`Agent::make_method_instruction`]
 //! makes the function of a static element for its call, and [`Agent::init_instance`] runs
 //! InitializeInstanceElements (`#sec-initializeinstanceelements`) as a call frame on this loop,
-//! no re-entry. Every object here is charged before it exists, as every object is
+//! no re-entry. `SetStrict` sets the running frame's strictness where the code of a class in
+//! non-strict code starts and ends (`#sec-strict-mode-code`; the run loop reads it at every
+//! instruction), and [`Agent::set_class_name`] names an anonymous class from the computed key
+//! under it before its elements. Every object here is charged before it exists, as every object is
 //! (`Agent::ordinary_object_create`, `Agent::instantiate_function`), the box of F with F's
 //! record; each instruction is a step of the loop.
 
@@ -70,8 +73,34 @@ impl<H: Host> Agent<H> {
             I::StoreInitializer(index) => self.store_initializer(index),
             I::MakeMethod(index) => self.make_method_instruction(index),
             I::InitInstance => self.init_instance(),
+            I::SetStrict(strict) => self.set_strict(strict),
+            I::SetClassName => self.set_class_name(),
             _ => Err(self.fault()),
         }
+    }
+
+    /// `SetStrict`: the running frame's code is strict mode code from here on, or not
+    /// (`#sec-strict-mode-code`): where the code of a class starts in non-strict code and where
+    /// it ends (decision D61). A function of its own, so its error path adds nothing to the frame
+    /// of the class arm.
+    #[inline(never)]
+    pub(super) fn set_strict(&mut self, strict: bool) -> Completion<Flow> {
+        self.top_frame()?.strict = strict;
+        Ok(Flow::Next)
+    }
+
+    /// `SetClassName`: SetFunctionName(F, k) (`#sec-setfunctionname`) of F on top with the
+    /// property key `k` two entries under it, which `ToPropertyKey` made, before any element
+    /// of the class is defined (`#sec-runtime-semantics-classdefinitionevaluation`). F's `name`,
+    /// made with F, is defined again, so its own keys stay `length`, `name`, `prototype`.
+    #[inline(never)]
+    pub(super) fn set_class_name(&mut self) -> Completion<Flow> {
+        let function = self.peek_value(0)?;
+        let function = self.expect_object(function)?;
+        let key = self.peek_value(2)?;
+        let key = self.to_property_key(key)?;
+        self.set_function_name(function, key, None)?;
+        Ok(Flow::Next)
     }
 
     /// `ClassPrototype`:OrdinaryObjectCreate(protoParent), `%Object.prototype%` of the current

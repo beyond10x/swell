@@ -35,7 +35,8 @@
 //! `super[expression]`, where the nearest function that is not an arrow function is a
 //! MethodDefinition, and a SuperCall, an early error before derived classes.
 //!
-//! A ClassExpression is parsed whole and held (`parser/class.rs`). Refused, each with its slice:
+//! A ClassExpression is parsed whole, its heritage held (`parser/class.rs`). Refused, each with
+//! its slice:
 //! `super` in an arrow function in a method and in eval code (8), `import.meta` and dynamic
 //! `import` (11).
 //!

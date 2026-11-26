@@ -23,6 +23,16 @@
 //! 5. The class scope left; F is the value. A throw in any step leaves the scope as a throw
 //!    leaves a block's.
 //!
+//! All parts of a class are strict mode code (`#sec-strict-mode-code`). Its computed keys run in
+//! the frame of the code around it, whose strictness the run loop reads at every instruction,
+//! so in non-strict code the class's code is enclosed by [`Instruction::SetStrict`] `true` and
+//! `false` ([`Task::Strict`]); a handler records the strictness of its place
+//! ([`crate::bytecode::Handler::strict`]), and a return completion that leaves the class (the
+//! `return` of a `yield` in a key) puts the code's own back first (`Compiler::exit_return`).
+//! An anonymous class whose name NamedEvaluation gives at run time, under a computed key of an
+//! object literal, gets it by [`Instruction::SetClassName`] right after F is made
+//! ([`crate::resolve::Resolution::named_by_key`]).
+//!
 //! The instance elements are one function, their initializer ("Classes", item 4), whose code
 //! [`instance_initializer`] emits in two passes, each a function of its own that emits nothing
 //! here: [`initializer_private_methods`], then [`initializer_fields`]. A base class constructor
@@ -97,7 +107,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
             return Err(malformed("a class heritage"));
         }
         let ctor = class.constructor;
-        // Step 1, steps 1 to 6 of the clause: the class scope.
+        // All parts of a class are strict mode code (`#sec-strict-mode-code`): in non-strict
+        // code the class's code is enclosed by `SetStrict(true)` and `SetStrict(false)`; a
+        // class inside the code of a class, which is strict, emits neither.
+        let enclosing = self.strict;
+        if !enclosing {
+            t.push(Task::Strict(true, span))?;
+        }
+        // Step 1, steps 1 to 6 of the clause: the class scope. The heritage, evaluated in it
+        // (`story:derived-classes-and-super-call`), goes after it and before the prototype,
+        // inside the class's strict code.
         let record = self.enter_scope(ScopeKey::Class(ctor), span, t)?;
         // Step 2, steps 7 to 19: the prototype, then F with `prototype` and `constructor`.
         t.push(Task::Emit(Instruction::ClassPrototype, span))?;
@@ -108,6 +127,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
             },
             span,
         ))?;
+        // SetFunctionName(F, className) when NamedEvaluation gives the name at run time, before
+        // any element is defined.
+        if self.resolution.named_by_key.contains(&ctor) {
+            t.push(Task::Emit(Instruction::SetClassName, span))?;
+        }
         // Step 3, steps 20 to 26: the elements, in source order, `[p, F]` before and after each.
         for element in &class.elements {
             match element {
@@ -134,8 +158,13 @@ impl<'a, 'm> Compiler<'a, 'm> {
         }
         self.static_private_adds(class, t)?;
         self.static_calls(class, span, t)?;
-        // Step 5: the scope left; F is the value.
-        leave_scope(record, span, t)
+        // Step 5: the scope left; F is the value. The code after the class has the strictness
+        // of the code around it.
+        leave_scope(record, span, t)?;
+        if !enclosing {
+            t.push(Task::Strict(false, span))?;
+        }
+        Ok(())
     }
 
     /// The instruction that initializes the binding of `site` through its plain place: a slot

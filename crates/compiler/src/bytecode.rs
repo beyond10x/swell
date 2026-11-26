@@ -315,6 +315,21 @@ pub enum Instruction {
     /// running frame's function: a call frame of the initializer in F's box with `this` o and no
     /// arguments, whose return pushes `undefined`; `undefined` at once when the box holds none.
     InitInstance,
+    /// `[] -> []`: the running frame's code is strict mode code from the next instruction on
+    /// when the operand is `true`, and not when it is `false` (`#sec-strict-mode-code`: "All
+    /// parts of a ClassDeclaration or a ClassExpression are strict mode code";
+    /// `docs/design/engine.md`, "Classes"). Emitted only in non-strict code: `true` where the
+    /// code of a class starts, `false` where it ends and where a return completion leaves it
+    /// for a `finally` block or the end of the frame (the `return` of a `yield` in a computed
+    /// key). A class inside the code of a class emits none. The heritage, once compiled, lies
+    /// between the two.
+    SetStrict(bool),
+    /// `[k, p, F] -> [k, p, F]`: SetFunctionName(F, k) of the anonymous class F whose name
+    /// NamedEvaluation gives at run time, the property key `k` under its prototype `p`
+    /// (`#sec-runtime-semantics-classdefinitionevaluation`, SetFunctionName(F, className) after
+    /// MakeClassConstructor(F) and before any element is defined): the class under a computed
+    /// key of an object literal.
+    SetClassName,
     /// `[a, v] -> [a]`: CreateDataPropertyOrThrow(a, ToString(n), v)
     /// (`#sec-runtime-semantics-arrayaccumulation`).
     DefineIndex(u32),
@@ -915,6 +930,8 @@ impl Instruction {
             | Instruction::StoreInitializer(_)
             | Instruction::MakeMethod(_)
             | Instruction::InitInstance
+            | Instruction::SetStrict(_)
+            | Instruction::SetClassName
             | Instruction::DefineIndex(_)
             | Instruction::ArrayLength(_)
             | Instruction::Typeof
@@ -1067,7 +1084,7 @@ pub enum HandlerKind {
 ///
 /// Before it continues at `target` the interpreter drops the operand stack down to `items`
 /// entries and the environments down to `envs` [`Instruction::PushEnv`]s made in this frame,
-/// the state of the frame at the try statement.
+/// the state of the frame at the try statement, and sets the frame's strictness to `strict`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Handler {
     pub kind: HandlerKind,
@@ -1076,6 +1093,11 @@ pub struct Handler {
     pub target: u32,
     pub items: u32,
     pub envs: u32,
+    /// Whether the code at `target` is strict mode code (`#sec-strict-mode-code`): the code's
+    /// own strictness, or `true` inside the code of a class in non-strict code
+    /// ([`Instruction::SetStrict`]). A throw from class code can reach a handler outside it,
+    /// and one inside it can be entered from a frame resumed there.
+    pub strict: bool,
 }
 
 /// The name of a slot of an environment the code makes ([`Instruction::PushNamedEnv`],

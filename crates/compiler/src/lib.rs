@@ -445,7 +445,12 @@ pub(crate) enum Task {
     Return(Span),
     /// The tag dispatch after the `finally` block whose exits were kept under the key.
     FinallyDispatch(u32, Span),
-    /// A handler table entry, its labels bound by then.
+    /// The code from here on is strict mode code, or no longer is: emits
+    /// [`Instruction::SetStrict`] and sets [`Compiler::strict`] (the code of a class in
+    /// non-strict code, `class.rs`).
+    Strict(bool, Span),
+    /// A handler table entry, its labels bound by then; its strictness is that of the place
+    /// where the task runs ([`Compiler::strict`]).
     Handler {
         kind: HandlerKind,
         start: Label,
@@ -489,6 +494,12 @@ pub(crate) struct Compiler<'a, 'm> {
     pub(crate) constants: &'a mut Constants,
     /// Script code: expression statements store into the completion value register.
     pub(crate) script: bool,
+    /// Whether the template's code is strict mode code: the script's, eval code's or the
+    /// function's own strictness, which the frame that runs it starts with.
+    pub(crate) code_strict: bool,
+    /// Whether the code being emitted is strict mode code: [`Compiler::code_strict`], or `true`
+    /// inside the code of a class ([`Task::Strict`]).
+    pub(crate) strict: bool,
     pub(crate) instructions: Vec<Instruction>,
     pub(crate) positions: Vec<Span>,
     handlers: Vec<Handler>,
@@ -616,6 +627,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
         resolution: &'a Resolution,
         constants: &'a mut Constants,
         script: bool,
+        strict: bool,
         m: &'a Meter<'m>,
     ) -> Compiler<'a, 'm> {
         Compiler {
@@ -624,6 +636,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
             resolution,
             constants,
             script,
+            code_strict: strict,
+            strict,
             instructions: Vec::new(),
             positions: Vec::new(),
             handlers: Vec::new(),
@@ -659,6 +673,12 @@ impl<'a, 'm> Compiler<'a, 'm> {
     /// body, the growth charged first: inner handlers come first, as their tasks end first.
     pub(crate) fn handler(&mut self, h: Handler) -> Result<(), CompileError> {
         Ok(self.m.push(&mut self.handlers, h)?)
+    }
+
+    /// [`Task::Strict`]: the code from here on is strict, or no longer is.
+    pub(crate) fn set_strict(&mut self, strict: bool, span: Span) -> Result<(), CompileError> {
+        self.strict = strict;
+        self.emit(Instruction::SetStrict(strict), span)
     }
 
     pub(crate) fn string(&mut self, s: &str) -> Result<u32, CompileError> {
@@ -833,6 +853,10 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     self.finally_dispatch(key, span)?;
                     continue;
                 }
+                Task::Strict(strict, span) => {
+                    self.set_strict(strict, span)?;
+                    continue;
+                }
                 Task::Handler {
                     kind,
                     start,
@@ -848,6 +872,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
                         target,
                         items,
                         envs,
+                        strict: self.strict,
                     })?;
                     continue;
                 }
@@ -861,8 +886,13 @@ impl<'a, 'm> Compiler<'a, 'm> {
     }
 
     /// `return` of the value on top of the operand stack (`#sec-return-statement`): through the
-    /// innermost enclosing `finally` block, or out of the frame.
+    /// innermost enclosing `finally` block, or out of the frame. A return completion inside
+    /// the code of a class (the `return` of a `yield` in a computed key) first puts the code's
+    /// own strictness back, since every `finally` block lies outside the class.
     fn exit_return(&mut self, span: Span) -> Result<(), CompileError> {
+        if self.strict != self.code_strict {
+            self.emit(Instruction::SetStrict(self.code_strict), span)?;
+        }
         let (items, envs) = (self.items, self.envs);
         let finally = self.control.iter_mut().rev().find_map(|c| match c {
             Control::Finally {
@@ -1407,7 +1437,14 @@ mod tests {
         let meter = Meter::new(&mut ledger);
         let resolution = resolve::resolve(&script, false, &meter).unwrap();
         let mut constants = Constants::default();
-        let mut c = Compiler::new(&script.ast, &resolution, &mut constants, true, &meter);
+        let mut c = Compiler::new(
+            &script.ast,
+            &resolution,
+            &mut constants,
+            true,
+            script.strict,
+            &meter,
+        );
         let before = held.get();
         high.set(before);
         c.run(&script.body).unwrap();

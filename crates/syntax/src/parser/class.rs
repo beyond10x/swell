@@ -16,9 +16,8 @@
 //! (F's [[SourceText]]). A second such method, and a getter, a setter, a generator or an `async`
 //! method named `constructor`, stays an element, which the early errors refuse (`early.rs`).
 //!
-//! A class is parsed whole and held ([`Parser::hold`], [`super::HOLDS`]): `class` at its first
-//! token and `class heritage` at `extends`, so the parse goes on and the early errors of the
-//! source come first. A field and a static block, which `story:class-element-syntax-and-early-errors`
+//! A class is parsed whole; its heritage is held ([`Parser::hold`], [`super::HOLDS`]): `class
+//! heritage` at `extends`, so the parse goes on and the early errors of the source come first. A field and a static block, which `story:class-element-syntax-and-early-errors`
 //! parses, are refused at their first token; a private name keeps the refusal of the lexer.
 //!
 //! As in `expression.rs`, the functions on the recursion (each an entry of the depth counter)

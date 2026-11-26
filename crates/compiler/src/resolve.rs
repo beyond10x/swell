@@ -258,6 +258,11 @@ pub(crate) struct Resolution {
     /// method that is not static): their template begins with `This; InitInstance; Pop`
     /// (`class.rs`).
     pub instance_elements: BTreeSet<FunctionId>,
+    /// The constructors of the anonymous classes whose name NamedEvaluation gives at run time,
+    /// from the property key right under the class's value on the operand stack: the value of
+    /// a computed key of an object literal. Their class code names F right after it is made
+    /// ([`crate::bytecode::Instruction::SetClassName`]).
+    pub named_by_key: BTreeSet<FunctionId>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -373,6 +378,8 @@ struct Resolver<'a, 'm> {
     checked_locals: BTreeSet<usize>,
     /// [`Resolution::instance_elements`].
     instance_elements: BTreeSet<FunctionId>,
+    /// [`Resolution::named_by_key`].
+    named_by_key: BTreeSet<FunctionId>,
 }
 
 fn malformed(what: &str) -> CompileError {
@@ -414,6 +421,7 @@ pub(crate) fn resolve(
         work: Vec::new(),
         checked_locals: BTreeSet::new(),
         instance_elements: BTreeSet::new(),
+        named_by_key: BTreeSet::new(),
     };
     let resolution = resolve_with(&mut r, script, eval_code);
     // The resolver's own structures are dropped with it; on a stop the compile step credits
@@ -497,6 +505,7 @@ fn resolve_with(
         eval_lexical,
         eval_env,
         instance_elements: core::mem::take(&mut r.instance_elements),
+        named_by_key: core::mem::take(&mut r.named_by_key),
     })
 }
 
@@ -1270,6 +1279,14 @@ impl<'a, 'm> Resolver<'a, 'm> {
                             {
                                 let key = property_key(&p.key, self.m)?;
                                 self.give_name(f, key)?;
+                            }
+                            // An anonymous class under a computed key is named from the key
+                            // before its elements (`class.rs`).
+                            if computed
+                                && let Some(Expr::Class(class)) = self.ast.expr(e).map(|n| &n.expr)
+                                && class.name.is_none()
+                            {
+                                self.m.insert(&mut self.named_by_key, class.constructor)?;
                             }
                             children.push(Walk::Expr(e));
                         }
