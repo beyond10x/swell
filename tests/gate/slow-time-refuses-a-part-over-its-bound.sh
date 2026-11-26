@@ -39,6 +39,8 @@ awk -v lane="$lane" -v part="$part" 'BEGIN { exit !(part + 0.4 <= lane + 0) }' |
 printf "version: '3'\n\nincludes:\n  gate:\n    taskfile: %s\n    flatten: true\n" "$(pwd)/taskfiles/gate-time.yml" > "$dir/run/Taskfile.yml" ||
   fail "cannot write the planted Taskfile.yml"
 t() { task -d "$dir/run" "$@"; }
+# The lane's clock, started now as gate-time-start does, so that only the planted lines decide.
+date +%s > "$dir/run/.out/gate-time/start" || fail "cannot write the lane's clock"
 
 # Four parts, 0.1 s each but one: with "within" slow-test262 is at the part bound; with "over"
 # slow-tests is 0.1 s over it. The lane is the part bound plus 0.3 or 0.4 s, within its own.

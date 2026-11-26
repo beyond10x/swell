@@ -346,6 +346,22 @@ tasks:
       build-realm-sizes. Last it prints "realm-sizes: <n> run(s) red" and fails when n is not
       0. A k that is not a whole number, and a REALM_COLLECT other than ends or all, fail
       before any run.
+
+      How the tests printed "other" reach nextest: in a file, never on a command line or in a
+      variable of the environment, so the task runs at any count of tests (Linux takes at most
+      131,072 bytes in one argument, and their filter was 75,099 bytes for 996 tests on
+      2026-11-26). Before the runs the task writes .out/realm-sizes-nextest.toml, a copy of
+      .config/nextest.toml with one line added under [profile.default]: "default-filter =
+      'not (binary_id(swell::main) & (test(=<module>::<test>) | ...))'", one term per test
+      printed "other" ('all()' when there is none). Each run passes it with --config-file and
+      keeps --profile default and -E binary_id(swell::main) (with " | binary_id(swell)" when the
+      library's unit tests run too); nextest intersects the two, so the same tests run, and
+      every other rule of the profile default (the 60 s bound with terminate-after, the JUnit
+      file target/nextest/default/junit.xml) holds as in .config/nextest.toml. The task fails
+      before any run when it cannot write .out/realm-sizes-tests.txt or the file is empty, and
+      when it cannot write .out/realm-sizes-nextest.toml or that file does not hold one
+      default-filter line naming every test printed "other", each with a line that names the
+      file. tests/gate/test-realm-sizes-hands-nextest-a-long-list-of-tests.sh holds this.
     vars:
       REALM_SIZES: '{{.REALM_SIZES | default "4 11 17 38 64 128 200"}}'
       REALM_COLLECT: '{{.REALM_COLLECT | default "all"}}'
@@ -373,17 +389,43 @@ tasks:
         set --
         for f in crates/swell/tests/support/*.rs; do [ -f "$f" ] && set -- "$@" "$f"; done
         for f in crates/swell/tests/*.rs; do [ "$f" = crates/swell/tests/main.rs ] || set -- "$@" "$f"; done
-        awk -f taskfiles/realm-room-tests.awk "$@" > .out/realm-sizes-tests.txt || { echo "realm-sizes: taskfiles/realm-room-tests.awk failed"; exit 1; }
-        room=$(grep -c '^room ' .out/realm-sizes-tests.txt || true)
-        other=$(grep -c '^other ' .out/realm-sizes-tests.txt || true)
+        list=.out/realm-sizes-tests.txt
+        awk -f taskfiles/realm-room-tests.awk "$@" > "$list" || { echo "realm-sizes: taskfiles/realm-room-tests.awk failed, or $list cannot be written"; exit 1; }
+        [ -s "$list" ] || { echo "realm-sizes: $list is empty: taskfiles/realm-room-tests.awk finds no test in crates/swell/tests"; exit 1; }
+        room=$(grep -c '^room ' "$list" || true)
+        other=$(grep -c '^other ' "$list" || true)
         echo "realm-sizes: $room of $((room + other)) tests of swell::main read the realm's room (taskfiles/realm-room-tests.awk); $other others do not run here"
-        [ "$room" -gt 0 ] || { echo "realm-sizes: taskfiles/realm-room-tests.awk finds no test that reads the realm's room"; exit 1; }
-        filter=$(awk '$1 == "other" { printf "%s%s", sep, "test(=" $2 ")"; sep = " | " }' .out/realm-sizes-tests.txt)
-        filter="binary_id(swell::main)${filter:+ & not ($filter)}"
+        [ "$room" -gt 0 ] || { echo "realm-sizes: taskfiles/realm-room-tests.awk finds no test that reads the realm's room ($list)"; exit 1; }
+        cfg=.out/realm-sizes-nextest.toml
+        if [ -f .config/nextest.toml ]; then set -- "$list" .config/nextest.toml; else set -- "$list"; fi
+        awk '
+          function put(i) {
+            printf "default-filter = '\''"
+            if (!n) printf "all()"
+            else {
+              printf "not (binary_id(swell::main) & ("
+              for (i = 1; i <= n; i++) printf "%s%s", (i > 1 ? " | " : ""), "test(=" name[i] ")"
+              printf "))"
+            }
+            printf "'\''\n"
+          }
+          FILENAME == ARGV[1] { if ($1 == "other") name[++n] = $2; next }
+          { print }
+          /^[ \t]*\[profile\.default\][ \t]*$/ { put() }
+          END { if (ARGC == 2) { print "[profile.default]"; put() } }
+        ' "$@" > "$cfg" || { echo "realm-sizes: cannot write $cfg, the nextest configuration that holds the $other tests that do not run here"; exit 1; }
+        lines=$(awk '/^[ \t]*default-filter[ \t]*=/ { n++ } END { print n + 0 }' "$cfg")
+        named=$(awk '/^default-filter = / { c += gsub(/test\(=/, "&") } END { print c + 0 }' "$cfg")
+        if [ ! -s "$cfg" ] || [ "$lines" != 1 ] || [ "$named" != "$other" ]; then
+          echo "realm-sizes: $cfg holds $lines default-filter line(s) naming $named of the $other tests that do not run here, not one line naming all of them (.config/nextest.toml has no line [profile.default], or a default-filter of its own)"
+          exit 1
+        fi
+        cfg="$(pwd)/$cfg"
+        filter="binary_id(swell::main)"
         targets="--test main"
         if grep -rqs SWELL_TEST_REALM_FUNCTIONS crates/swell/src; then
           targets="--lib --test main"
-          filter="($filter) | binary_id(swell)"
+          filter="binary_id(swell::main) | binary_id(swell)"
           echo "realm-sizes: a file under crates/swell/src reads SWELL_TEST_REALM_FUNCTIONS; the library's unit tests run too"
         fi
         echo "realm-sizes: the default mode at k = $(echo $sizes), the collect mode at k = $both (REALM_COLLECT=$collect)"
@@ -397,10 +439,10 @@ tasks:
             status=0
             if [ "$mode" = default ]; then
               # shellcheck disable=SC2086
-              SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run --locked -p swell --profile default $targets -E "$filter" > "$log" 2>&1 || status=$?
+              SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run --locked -p swell --config-file "$cfg" --profile default $targets -E "$filter" > "$log" 2>&1 || status=$?
             else
               # shellcheck disable=SC2086
-              SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run --locked -p swell --features collect-every-safe-point --profile default $targets -E "$filter" > "$log" 2>&1 || status=$?
+              SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run --locked -p swell --features collect-every-safe-point --config-file "$cfg" --profile default $targets -E "$filter" > "$log" 2>&1 || status=$?
             fi
             cp target/nextest/default/junit.xml ".out/realm-sizes-$k-$mode.junit.xml" 2>/dev/null || :
             LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" "$log" > "$log.plain"
