@@ -1,8 +1,11 @@
 #!/bin/sh
-# Planted defect of taskfiles/bench.yml, task bench-schema-check: a result file of bench/results/
-# whose first row has no version, one whose first row has no runs, and a directory without a
-# result file. `task bench-schema-check` must pass on copies of the committed result files and
-# exit non-zero on each planted case, naming the missing field. No network, no engine run.
+# Planted defect of taskfiles/bench.yml, task bench-schema-check: a result file whose first row
+# has no version, one whose first row has no runs, and a directory without a result file.
+# `task bench-schema-check` must pass on a planted valid result file (one measured row, one
+# refused row) and on copies of the committed result files of bench/results, if there are any,
+# and exit non-zero on each planted defect, naming the missing field. The defects are planted
+# in the committed file when there is one, else in the planted valid file. No network, no
+# engine run.
 # Run from the repository root: sh tests/gate/bench-schema-check-refuses-a-row-without-version-or-runs.sh
 # Works only under .out/gate-tests/<name>/; prints "<name>: ok" or "<name>: FAIL <why>".
 
@@ -15,21 +18,35 @@ dir=.out/gate-tests/$name
 unset BENCH_RESULTS BENCH_SCHEMA
 fail() { echo "$name: FAIL $*"; exit 1; }
 
-rm -rf "$dir" && mkdir -p "$dir/committed" "$dir/no-version" "$dir/no-runs" "$dir/empty" ||
+rm -rf "$dir" && mkdir -p "$dir/planted" "$dir/committed" "$dir/no-version" "$dir/no-runs" "$dir/empty" ||
   fail "cannot make $dir"
-first=$(find bench/results -maxdepth 1 -type f -name '*.json' | LC_ALL=C sort | head -n 1)
-[ -n "$first" ] || fail "no committed result file in bench/results to copy"
 
 # The task file is named, so the script runs whether or not the root Taskfile.yml includes it.
 check() {
   task -d . -t taskfiles/bench.yml bench-schema-check "$@"
 }
 
-cp bench/results/*.json "$dir/committed/" || fail "cannot copy bench/results"
-check BENCH_RESULTS="$dir/committed" > "$dir/committed.out" 2>&1 ||
-  fail "bench-schema-check refused the committed result files ($dir/committed.out)"
-grep -q '^bench-schema-check: [0-9]* result file(s) hold to ' "$dir/committed.out" ||
-  fail "bench-schema-check printed no summary line for the committed files ($dir/committed.out)"
+hex40=0123456789abcdef0123456789abcdef01234567
+printf '%s\n' '{"format":"swell-bench/1","date":"2026-11-25","commit":"'"$hex40"'",' \
+  '"host":{"arch":"x86_64","cpus":4,"runner":"planted"},"rows":[' \
+  '{"engine":"quickjs","version":"1","mode":"interpreter","flags":[],"kpi":"K2","measurement":"bench-v8/Richards","unit":"ms","runs":3,"values":[39,40,41],"median":40,"min":39,"max":41,"status":"measured","reason":""},' \
+  '{"engine":"boa","version":"1","mode":"interpreter","flags":[],"kpi":"K2","measurement":"bench-v8/Richards","unit":"ms","runs":0,"values":[],"median":null,"status":"refused","reason":"SyntaxError: planted"}' \
+  ']}' > "$dir/planted/result.json" || fail "cannot plant the valid result file"
+check BENCH_RESULTS="$dir/planted" > "$dir/planted.out" 2>&1 ||
+  fail "bench-schema-check refused the planted valid result file ($dir/planted.out)"
+grep -q '^bench-schema-check: 1 result file(s) hold to ' "$dir/planted.out" ||
+  fail "bench-schema-check printed no summary line for the planted file ($dir/planted.out)"
+
+first=$(find bench/results -maxdepth 1 -type f -name '*.json' 2>/dev/null | LC_ALL=C sort | head -n 1)
+if [ -n "$first" ]; then
+  cp bench/results/*.json "$dir/committed/" || fail "cannot copy bench/results"
+  check BENCH_RESULTS="$dir/committed" > "$dir/committed.out" 2>&1 ||
+    fail "bench-schema-check refused the committed result files ($dir/committed.out)"
+  grep -q '^bench-schema-check: [0-9]* result file(s) hold to ' "$dir/committed.out" ||
+    fail "bench-schema-check printed no summary line for the committed files ($dir/committed.out)"
+else
+  first=$dir/planted/result.json
+fi
 
 jq 'del(.rows[0].version)' "$first" > "$dir/no-version/result.json" || fail "cannot plant the row without version"
 if check BENCH_RESULTS="$dir/no-version" > "$dir/no-version.out" 2>&1; then

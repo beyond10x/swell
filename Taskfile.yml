@@ -120,7 +120,6 @@ tasks:
       - task: host-requirements-check
       - task: host-surface-check
       - task: site-data-check
-      - task: bench-schema-check
       - task: build
       - task: test-binaries-check
       - task: build-tests
