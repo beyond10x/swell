@@ -22,6 +22,7 @@ mod builtins_global_this;
 mod builtins_iterators;
 mod builtins_json;
 mod builtins_json_parse;
+mod builtins_map_and_set;
 mod builtins_math;
 mod builtins_number;
 mod builtins_number_format;

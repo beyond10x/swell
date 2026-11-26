@@ -42,6 +42,7 @@ pub(crate) mod async_function;
 pub(crate) mod async_generator;
 pub(crate) mod bound_function;
 pub(crate) mod builtin_function;
+pub(crate) mod collection;
 pub(crate) mod ecmascript_function;
 pub(crate) mod generator;
 pub(crate) mod keyed_entries;
@@ -201,6 +202,11 @@ pub(crate) enum ObjectKind {
     Generator(Generator),
     /// A Promise instance (27.5.6), `story:promise-constructor-then-and-jobs`.
     Promise(Promise),
+    /// A Map or a Set instance (24.1.4, 24.2.5), with [[MapData]] or [[SetData]] in a box of
+    /// its kind, `story:map-and-set` (`object/collection.rs`).
+    Collection(alloc::boxed::Box<collection::Collection>),
+    /// A Map or Set Iterator (24.1.5, 24.2.6), `story:map-and-set` (`object/collection.rs`).
+    CollectionIterator(collection::CollectionIterator),
     /// The activation of an `async` function (`docs/design/engine.md`, decision 3, "`async`
     /// functions on suspended frames", item 1), `story:async-functions-and-await`.
     AsyncActivation(AsyncActivation),
@@ -231,6 +237,8 @@ pub(crate) enum KindTag {
     RegExp,
     Generator,
     Promise,
+    Collection,
+    CollectionIterator,
     AsyncActivation,
     AsyncFromSyncIterator,
     AsyncGenerator,
@@ -269,6 +277,8 @@ impl ObjectRecord {
             ObjectKind::RegExp(regexp) => regexp.trace(mark),
             ObjectKind::Generator(generator) => generator.trace(mark),
             ObjectKind::Promise(promise) => promise.trace(mark),
+            ObjectKind::Collection(collection) => collection.trace(mark),
+            ObjectKind::CollectionIterator(iterator) => iterator.trace(mark),
             ObjectKind::AsyncActivation(activation) => activation.trace(mark),
             ObjectKind::AsyncFromSyncIterator(iterator) => iterator.trace(mark),
             ObjectKind::AsyncGenerator(generator) => generator.trace(mark),
@@ -293,6 +303,8 @@ impl ObjectRecord {
             ObjectKind::RegExp(_) => KindTag::RegExp,
             ObjectKind::Generator(_) => KindTag::Generator,
             ObjectKind::Promise(_) => KindTag::Promise,
+            ObjectKind::Collection(_) => KindTag::Collection,
+            ObjectKind::CollectionIterator(_) => KindTag::CollectionIterator,
             ObjectKind::AsyncActivation(_) => KindTag::AsyncActivation,
             ObjectKind::AsyncFromSyncIterator(_) => KindTag::AsyncFromSyncIterator,
             ObjectKind::AsyncGenerator(_) => KindTag::AsyncGenerator,

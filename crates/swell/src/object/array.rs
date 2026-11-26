@@ -341,6 +341,8 @@ impl<H: Host> Agent<H> {
                 | ObjectKind::RegExp(_)
                 | ObjectKind::Generator(_)
                 | ObjectKind::Promise(_)
+                | ObjectKind::Collection(_)
+                | ObjectKind::CollectionIterator(_)
                 | ObjectKind::AsyncActivation(_)
                 | ObjectKind::AsyncFromSyncIterator(_)
                 | ObjectKind::AsyncGenerator(_)

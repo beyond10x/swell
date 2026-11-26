@@ -22,7 +22,7 @@ HOST-21 test swell::builtins_string_transform::host_21_repeat_at_and_past_string
 HOST-22 test swell::budgets::host_22_zero_string_length_throws_on_concatenation
 HOST-23 pending slice 12
 HOST-24 pending slice 12
-HOST-25 pending slice 9
+HOST-25 test swell::determinism::host_25_key_order_does_not_depend_on_hash_key
 HOST-26 test swell::math_random::host_26_two_agents_with_one_seed_agree_for_1000_values
 HOST-27 test swell::math_random::host_27_two_realms_of_one_agent_differ_for_64_values
 HOST-28 test swell::collect::host_28_an_object_held_only_by_a_root_survives_collect
@@ -211,7 +211,7 @@ HOST-210 test swell::date_zone::host_210_a_host_with_no_instant_for_any_local_ti
 HOST-211 test swell::date_zone::host_211_every_zone_hook_call_is_charged_one_step_before_it_is_made
 HOST-212 test swell::math_random::host_212_100000_values_are_in_range_with_positive_sign_and_53_bits
 HOST-213 test swell::math_random::host_213_a_realms_stream_is_its_creation_index
-HOST-214 pending slice 9
+HOST-214 test swell::determinism::host_214_two_processes_print_the_same_map_order
 HOST-215 test swell::budgets::host_215_a_buffer_held_across_a_call_into_script_is_charged
 HOST-216 test swell::interrupt::host_216_an_interrupt_set_before_a_host_function_throws_ends_the_run
 HOST-217 test swell::interrupt::host_217_a_host_function_answering_interrupted_ends_the_run
