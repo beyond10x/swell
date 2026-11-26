@@ -161,8 +161,9 @@ tasks:
       slow-test262, the full test262 run compared byte for byte with
       conformance/test262/expected.txt, and the digest of its sources checked against
       conformance/test262/expected.digest; slow-tests, the tests with a gate count at their
-      full counts; test-realm-sizes, the tests of swell that read the realm's room, in both
-      modes, with each realm padded by k host functions for several k, on the two builds
+      full counts; test-realm-sizes, the tests of swell that read the realm's room with each
+      realm padded by k host functions for several k, in the default mode at each k and with a
+      collection at every safe point at the smallest and the largest, on the two builds
       slow-tests made; and build-stack-profiles with test-stack-profiles, the
       stack tests in the release profile and in stack-debug, the dev profile with full debug
       information (the gate runs them in the dev profile without it). The
@@ -173,7 +174,8 @@ tasks:
       (taskfiles/gate-time.yml) prints "slow-time lane <sum> of 900, longest part <part>
       <seconds> of 600" and fails the lane when a part ran over 600 s or the lane over 900 s,
       the operator's bounds of 2026-11-26 (story realm-size-lane-within-its-share), naming the
-      part and its seconds or the lane's sum; a red part does not stop the parts after it.
+      part and its seconds or the lane's sum. A part that fails stops the lane there, as
+      before, and slow-time-sum does not run.
     silent: true
     cmds:
       - task: gate-vars
