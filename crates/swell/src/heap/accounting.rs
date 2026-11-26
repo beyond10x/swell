@@ -544,7 +544,7 @@ mod tests {
         let activations = 257 * size_of::<crate::object::builtin_function::Activation>();
         let frames = 10_000 * size_of::<crate::interp::frame::Frame>();
         let kept = 257 * KEPT_OUTSIDE_A_ROOM * size_of::<Value>();
-        assert_eq!((activations, frames, kept), (22_616, 2_080_000, 41_120));
+        assert_eq!((activations, frames, kept), (22_616, 2_240_000, 41_120));
     }
 
     #[test]

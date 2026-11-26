@@ -76,6 +76,7 @@ mod math_random;
 mod math_sum_precise;
 mod misuse;
 mod names;
+mod new_target;
 mod object_patterns;
 mod objects;
 mod parameters;

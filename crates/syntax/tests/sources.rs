@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 
 use swell_syntax::ast::{Ast, Expr, ExprId, FunctionId, FunctionKind, Stmt};
 use swell_syntax::{
-    MessageKind, ParseOptions, Script, SyntaxError, message_kind, parse_dynamic_async_function,
-    parse_dynamic_function, parse_dynamic_generator_function, parse_eval, parse_script,
+    EvalContext, MessageKind, ParseOptions, Script, SyntaxError, message_kind,
+    parse_dynamic_async_function, parse_dynamic_function, parse_dynamic_generator_function,
+    parse_eval, parse_script,
 };
 
 const LIMIT: u32 = 1_000;
@@ -646,6 +647,43 @@ fn eval_sources_answer_their_header() {
         }
     }
     println!("eval: {} file(s)", files.len());
+}
+
+/// `parse_script` parses a script, never eval code of a caller with every flag false: at the top
+/// of a script `super.x` is the early error of `#sec-scripts-static-semantics-early-errors`,
+/// while at the top of such eval code it is the refusal of slice 8; `new.target` is the early
+/// error of its own rule through both entries, and admitted in eval code only with
+/// `in_function`.
+#[test]
+fn a_script_is_not_parsed_as_eval_code() {
+    let options = ParseOptions { max_nesting: LIMIT };
+    let eval = |text: &str, context: EvalContext| {
+        parse_eval(&units(text), context, options).map_err(|errors| messages(&errors))
+    };
+    let script = |text: &str| parse(text).map(|_| ()).map_err(|errors| messages(&errors));
+    let super_property = vec!["super property outside a method".to_string()];
+    let new_target = vec!["new.target outside a function".to_string()];
+    assert_eq!(script("super.x;"), Err(super_property.clone()));
+    assert_eq!(script("new.target;"), Err(new_target.clone()));
+    assert_eq!(
+        eval("super.x;", EvalContext::from(false)).map(|_| ()),
+        Err(vec![
+            "super in eval code is not supported before slice 8".to_string()
+        ])
+    );
+    assert_eq!(
+        eval("new.target;", EvalContext::from(false)).map(|_| ()),
+        Err(new_target)
+    );
+    let in_function = EvalContext {
+        in_function: true,
+        ..EvalContext::from(false)
+    };
+    assert!(eval("new.target;", in_function).is_ok());
+    assert_eq!(
+        script("var o = { m() { return super.x; } }; super.y;"),
+        Err(super_property)
+    );
 }
 
 /// The full path of a test in the crate's one test binary, `sources::<name>`, which a test

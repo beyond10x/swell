@@ -50,7 +50,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use swell_compiler::bytecode::Slot;
-use swell_syntax::ParseOptions;
+use swell_syntax::{EvalContext, ParseOptions};
 
 use crate::builtins::object::argument;
 use crate::builtins::string::StringBuilder;
@@ -60,6 +60,7 @@ use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{CompilationType, CompileStrings, Cx, HookCx, Host};
 use crate::interp::frame::{Frame, SlotValue, frame_bytes};
+use crate::object::ObjectKind;
 use crate::object::builtin_function::{Activation, KeptRoom};
 use crate::realm::intrinsics::Intrinsic;
 use crate::script::{Compiled, ParsedTree, SourceCopy, vec_bytes};
@@ -113,6 +114,20 @@ impl DynamicFunctionKind {
             DynamicFunctionKind::AsyncGenerator => Intrinsic::AsyncGeneratorFunctionPrototype,
         }
     }
+}
+
+/// What an eval code's frame takes from the code that called `eval` (PerformEval,
+/// `#sec-performeval`; `docs/design/engine.md`, decision 3, "`this` and `arguments` in an arrow
+/// function", item 5).
+#[derive(Clone, Copy)]
+struct EvalCaller {
+    /// The caller's ThisBinding, or the global `this` for an indirect `eval`.
+    this: Value,
+    /// GetThisEnvironment's [[FunctionObject]] for a direct `eval`: the caller frame's function;
+    /// `None` for an indirect `eval` and outside function code.
+    function: Option<ObjectRef>,
+    /// The caller frame's NewTarget for a direct `eval`; `None` for an indirect one.
+    new_target: Option<ObjectRef>,
 }
 
 /// The environments of an eval code's frame (PerformEval, steps 16 to 18).
@@ -230,11 +245,12 @@ impl<H: Host> Agent<H> {
     /// parse of steps 9 to 15: HostGetCodeForEval of an object, the return of a value that is no
     /// String, HostEnsureCanCompileStrings, then the parse and compile step of eval code in the
     /// current realm (`compilation`: `DirectEval` with `strict_caller` and the activation the
-    /// hook runs under, or `IndirectEval`). The script record of the code holds `host_defined`.
+    /// hook runs under, or `IndirectEval`; `function` the function GetThisEnvironment answers for
+    /// a direct `eval`, `None` otherwise). The script record of the code holds `host_defined`.
     fn eval_start(
         &mut self,
         source: Value,
-        strict_caller: bool,
+        (strict_caller, function): (bool, Option<ObjectRef>),
         compilation: (CompilationType, Option<Activation>),
         host_defined: Option<crate::host::HostDefined>,
     ) -> Completion<EvalStart> {
@@ -248,17 +264,24 @@ impl<H: Host> Agent<H> {
             _ => return Ok(EvalStart::Done(source)),
         };
         let keep = self.keep(Value::String(string));
-        let started = self.eval_code_of(string, source, strict_caller, compilation, host_defined);
+        let started = self.eval_code_of(
+            string,
+            source,
+            (strict_caller, function),
+            compilation,
+            host_defined,
+        );
         self.release(keep);
         started
     }
 
-    /// Steps 4 to 15 of PerformEval for the String `string`, made from `source`.
+    /// Steps 4 to 15 of PerformEval for the String `string`, made from `source`, the eval context
+    /// derived from the caller's strictness and its function ([`Agent::eval_context`]).
     fn eval_code_of(
         &mut self,
         string: StringRef,
         source: Value,
-        strict_caller: bool,
+        (strict_caller, function): (bool, Option<ObjectRef>),
         compilation: (CompilationType, Option<Activation>),
         host_defined: Option<crate::host::HostDefined>,
     ) -> Completion<EvalStart> {
@@ -278,8 +301,9 @@ impl<H: Host> Agent<H> {
             },
             activation,
         )?;
-        // Steps 9 to 15.
-        let (script, copy) = self.parse_eval_code(realm, string, strict_caller)?;
+        // Steps 7 to 11: the flags; then the parse of steps 12 to 15.
+        let context = self.eval_context(strict_caller, function)?;
+        let (script, copy) = self.parse_eval_code(realm, string, context)?;
         // Step 11: a source with no statement.
         if script.body.is_empty() {
             self.drop_tree(script);
@@ -302,7 +326,35 @@ impl<H: Host> Agent<H> {
         })
     }
 
-    /// `ParseText(x, Script)` of PerformEval (steps 9 and 10) through
+    /// PerformEval, steps 7 to 11 (`#sec-performeval`): the eval context of eval code whose
+    /// caller's strictness is `strict_caller` and whose GetThisEnvironment's [[FunctionObject]]
+    /// is `function` (decision 3, item 5): inFunc when there is one, inMethod when it has a
+    /// [[HomeObject]] (HasSuperBinding). inDerivedCtor stays false until
+    /// `story:class-definition-evaluation` gives a function the box that answers it, and
+    /// inClassFieldInitializer until `story:eval-in-class-field-initializers` reads it from the
+    /// template kind `FieldInitializer`.
+    fn eval_context(
+        &mut self,
+        strict_caller: bool,
+        function: Option<ObjectRef>,
+    ) -> Completion<EvalContext> {
+        let in_method = match function {
+            Some(function) => match &self.engine_object(function)?.kind {
+                ObjectKind::EcmascriptFunction(f) => f.home_object.is_some(),
+                _ => false,
+            },
+            None => false,
+        };
+        Ok(EvalContext {
+            strict_caller,
+            in_function: function.is_some(),
+            in_method,
+            in_derived_constructor: false,
+            in_class_field_initializer: false,
+        })
+    }
+
+    /// `ParseText(x, Script)` of PerformEval (step 12) in the eval context `context` through
     /// `swell_syntax::parse_eval_with` on the agent's ledger, with the agent's `parser_nesting`:
     /// the script with the charged copy of its source, or the throw of its first `SyntaxError` in
     /// `realm`, the copy credited. A step per code unit of the String is charged before the copy
@@ -313,7 +365,7 @@ impl<H: Host> Agent<H> {
         &mut self,
         realm: Handle,
         string: StringRef,
-        strict_caller: bool,
+        context: EvalContext,
     ) -> Completion<(swell_syntax::Script, SourceCopy)> {
         let options = ParseOptions {
             max_nesting: self.limits.parser_nesting,
@@ -322,23 +374,25 @@ impl<H: Host> Agent<H> {
         self.charge_steps(u64::try_from(length).unwrap_or(u64::MAX))?;
         let copy = self.charged_source(string)?;
         let parsed =
-            swell_syntax::parse_eval_with(&copy.units, strict_caller, options, &mut self.ledger());
+            swell_syntax::parse_eval_with(&copy.units, context, options, &mut self.ledger());
         match self.parsed_tree(parsed, copy)? {
             ParsedTree::Tree(script, copy) => Ok((script, copy)),
             ParsedTree::Errors(errors) => Err(self.throw_parse_errors(realm, errors)),
         }
     }
 
-    /// The frame of eval code (PerformEval, steps 16 to 26), not yet pushed: Function null, the
-    /// current realm, the environments `envs`, `this` the caller's ThisBinding, and the code of
-    /// the script record `script`. Its locals and its own bytes are charged with it.
+    /// The frame of eval code (PerformEval, steps 16 to 26), not yet pushed: the current realm,
+    /// the environments `envs`, from `caller` the `this` (the caller's ThisBinding), the function
+    /// GetThisEnvironment answers and the NewTarget (decision 3, item 5; the evalContext's own
+    /// Function component is null, and nothing reads it but through GetThisEnvironment), and
+    /// the code of the script record `script`. Its locals and its own bytes are charged with it.
     fn eval_frame(
         &mut self,
         script: Handle,
         compiled: Rc<Compiled>,
         strict: bool,
         envs: EvalEnvironments,
-        this: Value,
+        caller: EvalCaller,
     ) -> Completion<Frame> {
         let realm = self.current_realm()?;
         let count = usize::try_from(compiled.code.locals).unwrap_or(usize::MAX);
@@ -374,8 +428,9 @@ impl<H: Host> Agent<H> {
             env: envs.lexical,
             var_env: envs.variable,
             pushed_envs: 0,
-            this,
-            function: None,
+            this: caller.this,
+            function: caller.function,
+            new_target: caller.new_target,
             realm,
             script,
             strict,
@@ -443,14 +498,18 @@ impl<H: Host> Agent<H> {
         source: Value,
         strict_caller: bool,
     ) -> Completion<Option<Value>> {
-        let (script, realm, lexical, variable, this) = {
+        let (script, realm, lexical, variable, caller) = {
             let frame = self.top_frame()?;
             (
                 frame.script,
                 frame.realm,
                 frame.env,
                 frame.var_env,
-                frame.this,
+                EvalCaller {
+                    this: frame.this,
+                    function: frame.function,
+                    new_target: frame.new_target,
+                },
             )
         };
         // The evalContext's ScriptOrModule is the caller's (step 22): its [[HostDefined]] is
@@ -465,7 +524,7 @@ impl<H: Host> Agent<H> {
         };
         let start = self.eval_start(
             source,
-            strict_caller,
+            (strict_caller, caller.function),
             (CompilationType::DirectEval, Some(activation)),
             host_defined,
         )?;
@@ -480,7 +539,7 @@ impl<H: Host> Agent<H> {
         self.check_frame_depth()?;
         self.step()?;
         let envs = self.eval_environments(&compiled, script, strict, (lexical, variable))?;
-        let frame = self.eval_frame(script, Rc::clone(&compiled), strict, envs, this)?;
+        let frame = self.eval_frame(script, Rc::clone(&compiled), strict, envs, caller)?;
         let base = self.interp.frames.len();
         self.push_frame(frame);
         // Step 27, with the eval code's frame running: a throw drops it, before any of its code
@@ -500,7 +559,12 @@ impl<H: Host> Agent<H> {
     /// is the builtin's, whose ScriptOrModule is null).
     pub(crate) fn indirect_eval(&mut self, args: &[Value]) -> Completion<Value> {
         let source = argument(args, 0);
-        let start = self.eval_start(source, false, (CompilationType::IndirectEval, None), None)?;
+        let start = self.eval_start(
+            source,
+            (false, None),
+            (CompilationType::IndirectEval, None),
+            None,
+        )?;
         let (script, compiled, strict) = match start {
             EvalStart::Done(value) => return Ok(value),
             EvalStart::Code {
@@ -527,7 +591,12 @@ impl<H: Host> Agent<H> {
         let realm = self.current_realm()?;
         let this = self.global_this_binding(realm)?;
         let envs = self.eval_environments(&compiled, script, strict, (None, None))?;
-        let frame = self.eval_frame(script, Rc::clone(&compiled), strict, envs, this)?;
+        let caller = EvalCaller {
+            this,
+            function: None,
+            new_target: None,
+        };
+        let frame = self.eval_frame(script, Rc::clone(&compiled), strict, envs, caller)?;
         self.run_frame(frame, |agent| {
             agent.eval_declaration_instantiation(&compiled, script, envs)
         })

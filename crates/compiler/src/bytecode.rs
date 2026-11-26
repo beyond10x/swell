@@ -76,6 +76,10 @@ pub enum Instruction {
     /// bound by OrdinaryCallBindThis (`#sec-ordinarycallbindthis`); an arrow function's is the
     /// value its [`Instruction::ArrowClosure`] kept.
     This,
+    /// `[] -> [t]`: GetNewTarget (`#sec-getnewtarget`): the NewTarget of the running frame, the
+    /// constructor of a [[Construct]] or `undefined` for a call; an arrow function's is the
+    /// value its [`Instruction::ArrowClosure`] kept, and eval code's the caller's.
+    NewTarget,
     /// `[] -> [f]`: a function object made from `functions[k]` with the LexicalEnvironment as
     /// its environment: InstantiateOrdinaryFunctionObject for a declaration
     /// (`#sec-runtime-semantics-instantiateordinaryfunctionobject`), MakeMethod with
@@ -805,6 +809,7 @@ impl Instruction {
             | Instruction::Number(_)
             | Instruction::String(_)
             | Instruction::This
+            | Instruction::NewTarget
             | Instruction::Closure(_)
             | Instruction::ArrowClosure(_)
             | Instruction::Pop

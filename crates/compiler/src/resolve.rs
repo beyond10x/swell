@@ -1108,6 +1108,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
         let mut children: Vec<Walk> = self.m.with_capacity(self.ast.expr_child_count(id))?;
         match &node.expr {
             Expr::This
+            | Expr::NewTarget
             | Expr::Null
             | Expr::Boolean(_)
             | Expr::Number(_)

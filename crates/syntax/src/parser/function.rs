@@ -129,8 +129,10 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// parameters and body: [Yield] set for a generator, [Await] for an `async` function, each
     /// cleared for every other function that reads its parameters here
     /// (`#sec-generator-function-definitions`, `#sec-async-function-definitions`,
-    /// `#sec-function-definitions`, `#sec-method-definitions`). [`Parser::function_end`] puts the
-    /// saved ones back.
+    /// `#sec-function-definitions`, `#sec-method-definitions`), and `new.target` admitted, as in
+    /// every function that is not an arrow function (`#sec-scripts-static-semantics-early-errors`),
+    /// and the SuperProperty flag of its kind ([`super_property_of`]). [`Parser::function_end`]
+    /// puts the saved ones back.
     #[inline(never)]
     fn open_context(&mut self, id: FunctionId) -> R<()> {
         let (generator, asynchronous, kind) = self
@@ -140,19 +142,23 @@ impl<'a, 'm> Parser<'a, 'm> {
                 (f.generator, f.asynchronous, f.kind)
             });
         self.save_context(generator, asynchronous)?;
+        self.new_target = true;
         self.super_property = super_property_of(kind);
         Ok(())
     }
 
-    /// Saves the current [Yield] and [Await] on the parser's lists and sets `yields` and
-    /// `awaits`, the growth of each list charged first; the SuperProperty flag is saved beside
-    /// them and kept.
+    /// Saves the current [Yield] and [Await], whether `new.target` stands and the SuperProperty
+    /// flag on the parser's lists and sets `yields` and `awaits`, the growth of each list charged
+    /// first; `new_target` and the SuperProperty flag stay as they are, which an arrow function
+    /// keeps.
     #[inline(never)]
     fn save_context(&mut self, yields: bool, awaits: bool) -> R<()> {
         let m = self.m;
         let pushed = m.push(&mut self.outer_yields, self.yields);
         self.charged(pushed)?;
         let pushed = m.push(&mut self.outer_awaits, self.awaits);
+        self.charged(pushed)?;
+        let pushed = m.push(&mut self.outer_new_target, self.new_target);
         self.charged(pushed)?;
         let pushed = m.push(&mut self.outer_super_properties, self.super_property);
         self.charged(pushed)?;
@@ -191,6 +197,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
         if let Some(awaits) = self.outer_awaits.pop() {
             self.awaits = awaits;
+        }
+        if let Some(new_target) = self.outer_new_target.pop() {
+            self.new_target = new_target;
         }
         if let Some(super_property) = self.outer_super_properties.pop() {
             self.super_property = super_property;

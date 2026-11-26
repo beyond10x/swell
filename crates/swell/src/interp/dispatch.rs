@@ -257,6 +257,7 @@ impl<H: Host> Agent<H> {
             I::Number(index) => self.number_constant(index),
             I::String(index) => self.string_constant(index),
             I::This => self.this_value(),
+            I::NewTarget => self.new_target_value(),
             I::Closure(index) => self.closure(index),
             I::ArrowClosure(index) => self.arrow_closure(index),
 
@@ -496,6 +497,16 @@ impl<H: Host> Agent<H> {
     fn this_value(&mut self) -> Completion<Flow> {
         let this = self.top_frame()?.this;
         self.replace(0, this)
+    }
+
+    /// `NewTarget`: GetNewTarget (`#sec-getnewtarget`), the running frame's NewTarget or
+    /// `undefined`.
+    fn new_target_value(&mut self) -> Completion<Flow> {
+        let new_target = self
+            .top_frame()?
+            .new_target
+            .map_or(Value::Undefined, Value::Object);
+        self.replace(0, new_target)
     }
 
     // ---- the operand stack ----
@@ -1548,7 +1559,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Flow> {
         self.check_frame_depth()?;
         self.step()?;
-        let frame = self.make_frame(function, this, args, None)?;
+        let frame = self.make_frame(function, this, args, None, None)?;
         self.drop_entries(count.saturating_add(2))?;
         self.push_frame(frame);
         self.check_interrupt()?;
@@ -1588,8 +1599,8 @@ impl<H: Host> Agent<H> {
     }
 
     /// The construction by the ECMAScript function `constructor` of `New(count)` on this loop:
-    /// its frame, with the new object as its `this`, replaces the `count + 1` entries of the
-    /// call.
+    /// its frame, with the new object as its `this` and `constructor` as its NewTarget, replaces
+    /// the `count + 1` entries of the call.
     pub(super) fn push_construct_frame(
         &mut self,
         constructor: ObjectRef,
@@ -1603,9 +1614,10 @@ impl<H: Host> Agent<H> {
             OrdinaryData::Plain,
         )?;
         let keep = self.keep(Value::Object(this));
-        let frame = self
-            .step()
-            .and_then(|()| self.make_frame(constructor, Value::Undefined, args, Some(this)));
+        let new_target = Some(constructor);
+        let frame = self.step().and_then(|()| {
+            self.make_frame(constructor, Value::Undefined, args, Some(this), new_target)
+        });
         self.release(keep);
         let frame = frame?;
         self.drop_entries(count.saturating_add(1))?;
@@ -1854,8 +1866,10 @@ mod tests {
     }
 
     /// The rise of `used()` from before the call of the ECMAScript callee to its first
-    /// statement on the base, before the story.
-    const CALLEE_RISE: u64 = 2_032;
+    /// statement on the base, before the story: 2,032 bytes; 2,048 since
+    /// `story:new-target-meta-property` added the frame's NewTarget (`size_of::<Frame>()` from
+    /// 208 to 224 bytes).
+    const CALLEE_RISE: u64 = 2_048;
 
     /// The steps of the four scripts of
     /// [`call_and_new_hold_one_charged_copy_of_their_arguments_across_a_call`] on the base.
