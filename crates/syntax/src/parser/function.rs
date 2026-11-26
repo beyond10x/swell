@@ -228,7 +228,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     fn parameters(&mut self, id: FunctionId, kind: FunctionKind) -> R<()> {
         self.expect(Punct::LParen)?;
         match kind {
-            FunctionKind::Getter => {}
+            // A field initializer and a static block have no parameter list of their own.
+            FunctionKind::Getter | FunctionKind::FieldInitializer | FunctionKind::StaticBlock => {}
             FunctionKind::Setter => {
                 if self.is(Punct::Ellipsis) {
                     return self.fail_here(SETTER_REST);
@@ -238,7 +239,8 @@ impl<'a, 'm> Parser<'a, 'm> {
             FunctionKind::Declaration
             | FunctionKind::Expression
             | FunctionKind::Method
-            | FunctionKind::Arrow => self.parameter_list(id, Some(Punct::RParen))?,
+            | FunctionKind::Arrow
+            | FunctionKind::ClassConstructor => self.parameter_list(id, Some(Punct::RParen))?,
         }
         self.expect(Punct::RParen)
     }

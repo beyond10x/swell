@@ -144,6 +144,66 @@ fn disassembly_matches_for_each_source() {
     println!("disassembly: {} source(s) match", sources.len());
 }
 
+/// The held sources of `swell-syntax` (`../syntax/tests/sources/held`, each with the header
+/// `// <anchor>: held "<construct>", ...`): a source one of whose constructs is still a line of
+/// `swell_syntax::HOLDS` answers the refusal of the first such construct and is never compiled;
+/// every other source compiles. So no source reaches an arm of the compiler that answers a held
+/// kind of the tree with `CompileError::Tree`, and the story that lifts a hold is the one whose
+/// sources must compile from then on.
+#[test]
+fn held_sources_compile_once_nothing_in_them_is_held() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../syntax/tests/sources/held");
+    let mut paths: Vec<PathBuf> = fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|x| x == "js"))
+        .collect();
+    paths.sort();
+    assert!(!paths.is_empty(), "{}: no .js file to read", dir.display());
+    let (mut held, mut compiled) = (0, 0);
+    for path in &paths {
+        let text = fs::read_to_string(path).unwrap();
+        let list = text
+            .lines()
+            .next()
+            .and_then(|first| first.split_once(": held "))
+            .map(|(_, list)| list)
+            .unwrap_or_else(|| panic!("{}: no header `// <anchor>: held ...`", path.display()));
+        let still = list.split(", ").find_map(|quoted| {
+            let construct = quoted.trim_matches('"');
+            swell_syntax::HOLDS.iter().find(|(h, _)| *h == construct)
+        });
+        let answer = parse_script(&units(&text), ParseOptions { max_nesting: LIMIT });
+        match still {
+            Some((construct, slice)) => {
+                held += 1;
+                let errors = answer.err().unwrap_or_else(|| {
+                    panic!("{}: parsed although {construct:?} is held", path.display())
+                });
+                let messages: Vec<&str> = errors.iter().map(|e| e.message.as_str()).collect();
+                assert_eq!(
+                    messages,
+                    vec![format!("{construct} is not supported before slice {slice}").as_str()],
+                    "{}",
+                    path.display()
+                );
+            }
+            None => {
+                compiled += 1;
+                let script =
+                    answer.unwrap_or_else(|e| panic!("{}: does not parse: {e:?}", path.display()));
+                if let Err(error) = compile_script(&script) {
+                    panic!("{}: does not compile: {error}", path.display());
+                }
+            }
+        }
+    }
+    println!(
+        "held: {} source(s), {held} answering a hold, {compiled} compiled",
+        paths.len()
+    );
+}
+
 #[test]
 fn numeric_literal_values() {
     // `#sec-numericvalue`: a hexadecimal literal, a legacy octal one in non-strict code, a decimal
