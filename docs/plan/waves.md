@@ -479,3 +479,20 @@ that slice reads its entries first.
 - Slice 6: the declarative part of the global environment (`RealmGlobalEnv` in
   `crates/swell/src/realm/mod.rs` is an empty record until `let`, `const` and `class` arrive;
   `crates/swell/src/env/global.rs` says what to add).
+
+## After slice 4: bigger waves
+
+The operator, 2026-11-26, about 05:18 CET: "now, move in way bigger /aep:wave and deliver PRs
+with more stories + gap-closures at once". From here a wave is one branch and one pull request
+that carries every story that can be built on it, in the order of the stories' edges, and not
+one depth of the edges per branch.
+
+| wave | stories | what it closes |
+|---|---|---|
+| [big-1](wave-big-1.md) | `math-random`, `slice-04-conformance-close`, `core-builds-without-std` (steps 3 and 4), `releases-ship-static-binaries`, the store's close | the 79 cases of slice 4 that do not pass and its 6 pending host requirements; the engine core without `std`; static Linux and Windows binaries |
+| big-2 | every story of slice 9, `collections-proxy-reflect`, and of slice 8, `classes`, once the plan critics approve them | 1,518 cases of slice 9 and 9,297 cases of slice 8 that do not pass (`conformance/test262/expected.txt` on `main` at `b11998b5`) |
+
+Slice 9 is next in the order of delivery ("The order after slice 3"); slice 8 follows in the
+design's order and holds the most cases that do not pass. Both are decomposed while big-1 is
+built. A story of big-2 starts as soon as its critics approve it (the organization's rule
+"Goal first").

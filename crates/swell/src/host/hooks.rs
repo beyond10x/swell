@@ -8,7 +8,11 @@
 //! before slices 10 and 11; their agent key and roots come with the requirements that read them
 //! (`HOST-153`, `HOST-154`).
 
-use std::rc::Rc;
+use alloc::rc::Rc;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec;
+use alloc::vec::Vec;
 
 use super::host_object::HostData;
 use super::outcome::Completion;
@@ -99,8 +103,8 @@ impl LoadRequest {
     }
 }
 
-impl std::fmt::Debug for LoadRequest {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for LoadRequest {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("LoadRequest")
             .field("referrer", &self.referrer)
             .field("specifier", &self.specifier)

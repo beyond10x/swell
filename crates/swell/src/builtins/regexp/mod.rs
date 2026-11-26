@@ -32,6 +32,10 @@
 //! `RegExp.escape` (`#sec-regexp.escape`, `regexp/escape.rs`) are
 //! `story:regexp-match-all-and-escape`.
 
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::vec::Vec;
+
 mod budget;
 mod escape;
 mod exec;

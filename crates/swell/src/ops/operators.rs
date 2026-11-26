@@ -16,6 +16,7 @@ use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
 use crate::value::{StringRef, Value};
+use swell_num::fmath;
 
 /// A binary operator of ApplyStringOrNumericBinaryOperator, ES5's set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,9 +44,9 @@ pub(crate) fn number_operation(operator: BinaryOperator, x: f64, y: f64) -> f64 
         BinaryOperator::Subtract => x - y,
         BinaryOperator::Multiply => x * y,
         BinaryOperator::Divide => x / y,
-        // Number::remainder truncates like C's fmod, which Rust's `%` on f64 is, with the
+        // Number::remainder truncates like C's fmod, which `fmath::fmod` computes in Rust, with the
         // clause's NaN, infinity and zero cases.
-        BinaryOperator::Remainder => x % y,
+        BinaryOperator::Remainder => fmath::fmod(x, y),
         BinaryOperator::LeftShift => f64::from(number_to_int32(x).wrapping_shl(shift)),
         BinaryOperator::SignedRightShift => f64::from(number_to_int32(x) >> shift),
         BinaryOperator::UnsignedRightShift => f64::from(number_to_uint32(x) >> shift),
@@ -177,11 +178,12 @@ mod tests {
     use crate::object::ordinary::OrdinaryData;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
+    use alloc::string::String;
 
     /// `value`, held by a root for the rest of the test, so that a collection at a safe point
     /// (the feature `collect-every-safe-point`) keeps it.
     fn held(agent: &mut Agent<NoHooks>, value: Value) -> Value {
-        std::mem::forget(agent.heap.roots.add(value));
+        core::mem::forget(agent.heap.roots.add(value));
         value
     }
 

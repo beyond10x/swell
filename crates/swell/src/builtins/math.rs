@@ -41,6 +41,8 @@ use crate::object::property::Property;
 use crate::ops::iteration::IteratorRecord;
 use crate::realm::intrinsics::Making;
 use crate::value::{ObjectRef, Value};
+use alloc::vec::Vec;
+use swell_num::fmath;
 use swell_num::sum::{MAX_ITEMS, Sum};
 
 /// The steps `Math.sumPrecise` charges once before it rounds its sum: one per limb of the
@@ -258,13 +260,13 @@ impl<H: Host> Agent<H> {
             MathBuiltin::Abs => self.to_number(x)?.abs(),
             // `#sec-math.ceil`: 1. Let n be ? ToNumber(x). 2 to 5: roundToIntegralTowardPositive,
             // which keeps NaN, the zeros and the infinities and gives -0 in (-1, -0).
-            MathBuiltin::Ceil => self.to_number(x)?.ceil(),
+            MathBuiltin::Ceil => fmath::ceil(self.to_number(x)?),
             // `#sec-math.clz32`: 1. Let n be ? ToUint32(x). 2. The leading zero bits of n.
             MathBuiltin::Clz32 => f64::from(self.to_uint32(x)?.leading_zeros()),
             // `#sec-math.floor`: 1. Let n be ? ToNumber(x). 2 to 5:
             // roundToIntegralTowardNegative, which keeps NaN, the zeros and the infinities and
             // gives +0 in (+0, 1).
-            MathBuiltin::Floor => self.to_number(x)?.floor(),
+            MathBuiltin::Floor => fmath::floor(self.to_number(x)?),
             // `#sec-math.fround`: 1. Let n be ? ToNumber(x). 2 to 6: to binary32 with
             // roundTiesToEven and back; NaN, the zeros and the infinities stay.
             MathBuiltin::Fround => f64::from(self.to_number(x)? as f32),
@@ -291,10 +293,10 @@ impl<H: Host> Agent<H> {
             }
             // `#sec-math.sqrt`: 1. Let n be ? ToNumber(x). 2 to 4: squareRoot, which keeps NaN,
             // the zeros and +∞ and gives NaN below -0.
-            MathBuiltin::Sqrt => self.to_number(x)?.sqrt(),
+            MathBuiltin::Sqrt => fmath::sqrt(self.to_number(x)?),
             // `#sec-math.trunc`: 1. Let n be ? ToNumber(x). 2 to 5: roundToIntegralTowardZero,
             // which keeps NaN, the zeros and the infinities and the sign of a zero answer.
-            MathBuiltin::Trunc => self.to_number(x)?.trunc(),
+            MathBuiltin::Trunc => fmath::trunc(self.to_number(x)?),
             // `#sec-math.acos` to `#sec-math.tanh`, each of one argument: 1. Let n be ?
             // ToNumber(x). The steps after it, the special values and the approximation, are
             // the function of `swell_num::math` of the same name.
@@ -507,7 +509,7 @@ impl<H: Host> Agent<H> {
 /// `copysign`.
 fn round(n: f64) -> f64 {
     // 2. If n is not a finite Number or n is an integral Number, return n.
-    let r = n.floor();
+    let r = fmath::floor(n);
     if !n.is_finite() || n == r {
         return n;
     }
@@ -533,6 +535,8 @@ mod tests {
     use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, enter, limits};
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
+    use alloc::vec;
+    use std::println;
 
     /// The function `Math[name]` of the agent's realm.
     fn math_function(agent: &mut Agent<NoHooks>, math: ObjectRef, name: &str) -> ObjectRef {

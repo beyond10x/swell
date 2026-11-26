@@ -32,10 +32,11 @@
 //! reads of a promise, `promise_state`, `promise_is_handled` and `mark_promise_as_handled`, are
 //! written by `story:promise-rejection-tracker-and-promise-reads`.
 
-use std::cell::Cell;
-use std::collections::VecDeque;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use alloc::collections::VecDeque;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+use core::cell::Cell;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use swell_compiler::bytecode::Instruction;
 
@@ -397,7 +398,7 @@ impl<H: Host> Agent<H> {
             return Err(HostError::ForeignHandle);
         }
         let mut charge = charge;
-        let bytes = std::mem::take(&mut charge.bytes);
+        let bytes = core::mem::take(&mut charge.bytes);
         self.heap.accounting.credit(bytes);
         Ok(bytes)
     }

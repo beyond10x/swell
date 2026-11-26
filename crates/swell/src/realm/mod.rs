@@ -13,6 +13,9 @@
 //! Two sites of the collector: the kind site [`RealmRecord::trace`] and the root site
 //! [`trace_roots`] (the agent-wide values: none is held strongly, by the paragraph above).
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+
 pub(crate) mod global_object;
 pub(crate) mod intrinsics;
 
@@ -168,7 +171,7 @@ impl RealmRecord {
 
     /// The host-defined value.
     pub(crate) fn host_defined(&self) -> Option<HostDefined> {
-        let data: &dyn std::any::Any = self.host_defined.as_ref()?.data.as_deref()?;
+        let data: &dyn core::any::Any = self.host_defined.as_ref()?.data.as_deref()?;
         data.downcast_ref::<RealmHostDefined>()
             .map(|held| HostDefined::clone(&held.0))
     }
@@ -421,6 +424,7 @@ mod tests {
     use crate::object::KindTag;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Realm, Value};
+    use alloc::string::String;
 
     /// HOST-51 (`#sec-initializehostdefinedrealm`, step 7: "Let global be
     /// OrdinaryObjectCreate(realm.[[Intrinsics]].[[%Object.prototype%]])"): without a setup

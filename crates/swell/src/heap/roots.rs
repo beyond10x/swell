@@ -9,8 +9,9 @@
 //! The table is a root site of the collector: [`trace_roots`] reports every value, realm
 //! record and script record it holds.
 
-use std::cell::Cell;
-use std::rc::Rc;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+use core::cell::Cell;
 
 use super::arena::Handle;
 use super::collect::{Item, Mark};
@@ -57,6 +58,10 @@ pub(crate) struct RootTable {
     slots: Vec<RootSlot>,
     free: Vec<u32>,
     released: Rc<ReleaseQueue>,
+    /// The counting build: the drains that took the release queue; a test resets it before
+    /// it reads it.
+    #[cfg(test)]
+    pub(crate) queue_taken: u64,
 }
 
 impl RootTable {
@@ -67,6 +72,8 @@ impl RootTable {
             slots: Vec::new(),
             free: Vec::new(),
             released: Rc::new(ReleaseQueue::default()),
+            #[cfg(test)]
+            queue_taken: 0,
         }
     }
 
@@ -172,7 +179,9 @@ impl RootTable {
     fn drain_queue(&mut self) {
         self.released.pending.set(false);
         #[cfg(test)]
-        QUEUE_TAKEN.with(|taken| taken.set(taken.get().saturating_add(1)));
+        {
+            self.queue_taken = self.queue_taken.saturating_add(1);
+        }
         for (index, generation) in self.released.entries.take() {
             let Some(slot) = usize::try_from(index)
                 .ok()
@@ -200,13 +209,6 @@ impl RootTable {
     }
 }
 
-#[cfg(test)]
-thread_local! {
-    /// The drains that took the release queue, in the counting build of the tests; a test
-    /// resets it before it reads it.
-    pub(crate) static QUEUE_TAKEN: Cell<u64> = const { Cell::new(0) };
-}
-
 /// Root site of the collector: every value, realm record and script record of the root table.
 pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
     mark.count("heap/roots.rs trace_roots");
@@ -222,7 +224,7 @@ pub(crate) fn trace_roots<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
 
 #[cfg(test)]
 mod tests {
-    use super::{QUEUE_TAKEN, RootTable};
+    use super::RootTable;
     use crate::heap::arena::Handle;
     use crate::host::hooks::test_host::agent_with_realm;
     use crate::{HostError, Outcome, Parsed, Source, Value};
@@ -275,11 +277,6 @@ mod tests {
         assert_eq!(table.held(), 1);
     }
 
-    /// The drains that took the release queue since the count was reset.
-    fn queue_taken() -> u64 {
-        QUEUE_TAKEN.with(std::cell::Cell::get)
-    }
-
     /// A safe point with no root dropped since the last drain does no work for the release
     /// queue (`story:an-index-store-does-not-go-through-text`): a script whose loop runs 20
     /// times, every instruction a safe point, takes the queue 0 times (2,815 times for 200 on
@@ -299,13 +296,12 @@ mod tests {
         let global = agent.global_object(&realm).unwrap();
         // Whatever the setup dropped is released here.
         assert!(agent.collect().is_ok());
-        QUEUE_TAKEN.with(|taken| taken.set(0));
+        agent.heap.roots.queue_taken = 0;
         let Ok(Outcome::Normal(first)) = agent.evaluate_script(&script) else {
             panic!("the first run did not complete");
         };
         assert_eq!(
-            queue_taken(),
-            0,
+            agent.heap.roots.queue_taken, 0,
             "drains that took the queue, nothing dropped"
         );
         let held = agent.heap.roots.held();
@@ -320,8 +316,7 @@ mod tests {
             panic!("the second run did not complete");
         };
         assert_eq!(
-            queue_taken(),
-            1,
+            agent.heap.roots.queue_taken, 1,
             "drains that took the queue, two roots dropped"
         );
         assert_eq!(

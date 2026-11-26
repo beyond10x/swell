@@ -31,6 +31,7 @@ use crate::object::property::{Key, Property, Slot};
 use crate::realm::WellKnown;
 use crate::realm::intrinsics::Making;
 use crate::value::{ObjectRef, SymbolRef, Value};
+use alloc::format;
 
 /// The builtins of this module, by their steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -20,6 +20,7 @@ use crate::object::builtin_function::BuiltinId;
 use crate::object::ordinary::OrdinaryData;
 use crate::realm::intrinsics::{Intrinsic, Making};
 use crate::value::{ObjectRef, Value};
+use alloc::format;
 
 /// The builtins of this module, by their steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

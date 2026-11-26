@@ -17,6 +17,7 @@ use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion};
 use crate::host::{ErrorKind, Host};
 use crate::interp::frame::SlotValue;
+use alloc::format;
 
 impl<H: Host> Agent<H> {
     /// NewDeclarativeEnvironment (`#sec-newdeclarativeenvironment`) with `slots` bindings, each

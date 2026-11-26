@@ -22,8 +22,9 @@
 //!   runs it in a run loop of its own, one re-entry. A caller with a run loop of its own (the
 //!   instruction of `yield*`) calls the first and goes on in its own loop.
 
-use std::cell::Cell;
-use std::rc::Rc;
+use alloc::boxed::Box;
+use alloc::rc::Rc;
+use core::cell::Cell;
 
 use super::frame::{Entry, Frame};
 use crate::heap::arena::Handle;

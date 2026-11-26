@@ -38,6 +38,7 @@ use crate::object::{ObjectKind, ObjectRecord};
 use crate::ops::iteration::IteratorRecord;
 use crate::realm::intrinsics::{Intrinsic, Making};
 use crate::value::{ObjectRef, Value};
+use alloc::boxed::Box;
 
 /// The builtins of this module, by their steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

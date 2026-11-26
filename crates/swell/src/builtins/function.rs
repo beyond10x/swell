@@ -27,7 +27,8 @@
 //! The work of each is a function of its own, not inlined into the dispatch, whose frame every
 //! re-entry through a builtin of this module pays.
 
-use std::rc::Rc;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
 
 use crate::builtins::object::argument;
 use crate::builtins::string::StringBuilder;

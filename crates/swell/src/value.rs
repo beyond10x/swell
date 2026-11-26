@@ -10,8 +10,8 @@
 //! answered `Err(HostError::StaleHandle)`, one of another agent `Err(HostError::ForeignHandle)`.
 //! Written by `story:heap-values-and-host-surface`.
 
-use std::fmt;
-use std::rc::Rc;
+use alloc::rc::Rc;
+use core::fmt;
 
 use crate::heap::arena::Handle;
 use crate::heap::roots::ReleaseQueue;
@@ -127,6 +127,6 @@ mod tests {
     /// and a tag, aligned to 8; a handle is three `u32`s and fits beside the tag).
     #[test]
     fn value_is_16_bytes() {
-        assert_eq!(std::mem::size_of::<Value>(), 16);
+        assert_eq!(core::mem::size_of::<Value>(), 16);
     }
 }

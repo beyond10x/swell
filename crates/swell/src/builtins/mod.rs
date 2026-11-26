@@ -143,6 +143,8 @@ pub(crate) mod group_testing {
     use crate::object::builtin_function::{Behaviour, BuiltinId};
     use crate::object::property::{Key, Slot};
     use crate::value::{ObjectRef, Value};
+    use alloc::string::String;
+    use alloc::vec::Vec;
 
     use super::Method;
 
@@ -246,6 +248,7 @@ mod tests {
     use crate::object::property::{Key, Property, Slot};
     use crate::realm::intrinsics::{Intrinsic, Making};
     use crate::value::Value;
+    use alloc::vec;
 
     /// The value of the test group's property: an object with a null prototype whose "at" is
     /// true, as `Array.prototype[%Symbol.unscopables%]` is made.

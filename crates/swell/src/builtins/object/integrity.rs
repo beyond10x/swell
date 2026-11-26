@@ -30,6 +30,7 @@ use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Descriptor, Key};
 use crate::ops::objects::IntegrityLevel;
 use crate::value::{ObjectRef, Value};
+use alloc::vec::Vec;
 
 /// The builtins of this group, by their steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

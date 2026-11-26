@@ -16,6 +16,9 @@
 //! of the collector ([`trace_registry`]), charged to the memory budget as it grows, and never
 //! gives an entry back.
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+
 pub(crate) mod accounting;
 pub(crate) mod arena;
 pub(crate) mod collect;
@@ -23,8 +26,8 @@ pub(crate) mod map;
 pub(crate) mod roots;
 pub(crate) mod string;
 
-use std::borrow::Borrow;
-use std::hash::{Hash, Hasher};
+use core::borrow::Borrow;
+use core::hash::{Hash, Hasher};
 
 use crate::env::EnvironmentRecord;
 use crate::host::Host;
@@ -271,16 +274,6 @@ pub(crate) fn trace_registry<H: Host>(agent: &Agent<H>, mark: &mut Mark) {
 /// Triggers count bytes, never time.
 pub(crate) const MIN_TRIGGER_BYTES: u64 = 1 << 20;
 
-#[cfg(test)]
-thread_local! {
-    /// The collections run, counted in [`Heap::collected`], in the counting build of the tests;
-    /// a test resets it before it reads it.
-    pub(crate) static COLLECTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    /// The String records stored, counted in [`Heap::new_string_record`], in the counting build
-    /// of the tests; a test resets it before it reads it.
-    pub(crate) static STRINGS_MADE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
 /// The heap of one agent.
 pub(crate) struct Heap {
     /// The agent's key, carried by every handle into this heap.
@@ -308,6 +301,14 @@ pub(crate) struct Heap {
     /// The counting build: the most entries the last collection's worklists held at once.
     #[cfg(test)]
     pub(crate) collect_peak_work: usize,
+    /// The counting build: the collections run, counted in [`Heap::collected`]; a test resets
+    /// it before it reads it.
+    #[cfg(test)]
+    pub(crate) collections: u64,
+    /// The counting build: the String records stored, counted in [`Heap::new_string_record`];
+    /// a test resets it before it reads it.
+    #[cfg(test)]
+    pub(crate) strings_made: u64,
 }
 
 impl Heap {
@@ -332,6 +333,10 @@ impl Heap {
             collect_allocations: 0,
             #[cfg(test)]
             collect_peak_work: 0,
+            #[cfg(test)]
+            collections: 0,
+            #[cfg(test)]
+            strings_made: 0,
         }
     }
 
@@ -438,7 +443,9 @@ impl Heap {
     /// of the live reading, which counts neither what was freed nor the arenas' room.
     pub(crate) fn collected(&mut self) {
         #[cfg(test)]
-        COLLECTIONS.with(|collections| collections.set(collections.get().saturating_add(1)));
+        {
+            self.collections = self.collections.saturating_add(1);
+        }
         self.accounting.collected();
         self.trigger_bytes = self.live_bytes().max(MIN_TRIGGER_BYTES);
     }
@@ -473,7 +480,9 @@ impl Heap {
     ) -> Result<StringRef, OverBudget> {
         let handle = store(&mut self.accounting, &mut self.strings, string, owned_bytes)?;
         #[cfg(test)]
-        STRINGS_MADE.with(|made| made.set(made.get().saturating_add(1)));
+        {
+            self.strings_made = self.strings_made.saturating_add(1);
+        }
         Ok(StringRef { handle })
     }
 
@@ -630,6 +639,8 @@ mod tests {
     use crate::host::hooks::test_host;
     use crate::value::StringRef;
     use crate::{Outcome, Value};
+    use alloc::format;
+    use alloc::vec::Vec;
 
     /// The GlobalSymbolRegistry (`engine.md`, decision 4, "Symbols", items 2 and 3): 1,000 keys
     /// registered through `Heap::symbol_for`, held by nothing else, one entry each; after every

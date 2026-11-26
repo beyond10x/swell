@@ -16,9 +16,12 @@
 //! Kind site of the collector: [`HeapString::trace`] reports nothing, since a String holds no
 //! handle.
 
-use std::borrow::Borrow;
-use std::cmp::Ordering;
-use std::hash::{Hash, Hasher};
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::borrow::Borrow;
+use core::cmp::Ordering;
+use core::hash::{Hash, Hasher};
 
 use super::Heap;
 use super::accounting::{Accounting, OverBudget};
@@ -449,7 +452,7 @@ type Table = KeyedMap<AtomKey, (Handle, u64)>;
 /// key owns. The table is charged by capacity, like an arena (`engine.md`, "Memory budget"):
 /// before it grows its room doubles and the table's growth is charged
 /// ([`KeyedMap::table_bytes_for`]); those bytes stay charged while the agent lives. It is not
-/// shrunk on sweep: shrinking a `HashMap` moves it to a new table, an allocation inside a
+/// shrunk on sweep: shrinking a `KeyedMap` would move it to a new table, an allocation inside a
 /// collection.
 pub(crate) struct Atoms {
     map: Table,
@@ -475,7 +478,7 @@ impl Atoms {
     }
 
     /// Whether the next insertion would move the table to a larger one by itself: a sweep
-    /// leaves buckets marked deleted, which `std`'s map counts against its room
+    /// leaves buckets marked deleted, which the map counts against its room
     /// ([`KeyedMap::spare`]), so it can grow before it holds the entries it was charged for.
     /// With no spare room it rehashes in place, without an allocation, while its entries and
     /// the new one fill at most half of what the table holds ([`KeyedMap::full_capacity_for`]),
@@ -550,6 +553,8 @@ impl Atoms {
 mod tests {
     use super::HeapString;
     use crate::{Agent, Limits, Outcome, Seeds, Value};
+    use alloc::format;
+    use alloc::vec::Vec;
 
     use crate::host::hooks::test_host::NoHooks;
 
@@ -639,7 +644,7 @@ mod tests {
     }
 
     /// The atom table never grows past the room it was charged for. A collection that drops
-    /// entries leaves buckets marked deleted, which `std`'s map counts against its room, so
+    /// entries leaves buckets marked deleted, which the map counts against its room, so
     /// with fewer entries than the room charged an insertion can find no spare room. Here the
     /// table is charged room for 32 entries (64 buckets); 28 atoms whose hash starts at bucket
     /// 0 fill buckets 0 to 27, and their collection leaves 28 deleted buckets; 31 atoms whose
