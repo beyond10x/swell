@@ -64,8 +64,14 @@ while read -r suite repo commit dir; do
   awk -v s="$suite" 'NR > 1 && $1 == s { print $2, $3 }' bench/suites/files.tsv > "$tmp/files.list"
   [ -s "$tmp/files.list" ] || { echo "image: $suite: no file in bench/suites/files.tsv" >&2; exit 1; }
   while read -r file sha; do
-    curl -fsSL --retry 3 -o "$tmp/suites/$suite/$file" "$raw/$file"
-    check "$tmp/suites/$suite/$file" "$sha" "$suite $file ($raw/$file)"
+    # A name with a leading / is a path from the suite repository's root (a licence file
+    # beside the suite's directory); it is stored under its base name.
+    case $file in
+      /*) url=https://raw.githubusercontent.com/${repo#https://github.com/}/$commit$file ;;
+      *) url=$raw/$file ;;
+    esac
+    curl -fsSL --retry 3 -o "$tmp/suites/$suite/${file##*/}" "$url"
+    check "$tmp/suites/$suite/${file##*/}" "$sha" "$suite $file ($url)"
   done < "$tmp/files.list"
   echo "image: $suite at $commit: $(wc -l < "$tmp/files.list") file(s)"
 done < "$tmp/suites.list"

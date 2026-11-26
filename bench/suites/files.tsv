@@ -9,7 +9,7 @@ bench-v8 earley-boyer.js 7bfa888839dee0939798d0f5da251f0ecb30fc5ea2ee52747b4adc5
 bench-v8 regexp.js f04a1b4817e5d687363e99d941cc78de9b29b722b46cc034d877f59a269bdfdf BSD-3-Clause
 bench-v8 splay.js 1f875cec579d03af40d256ceaeb6823f3ef16c883652650ca51d183472a8185d BSD-3-Clause
 bench-v8 navier-stokes.js ce241465ffeee77b5c4f7119f522aa971fe1fe92c3aed76f7514ea43e07fec84 MIT
-are-we-fast-yet LICENSE.md d04bd9676d6569e74da03bf58582cbf46ac6fcb348757d92ee53b9e46b9bf992 per-benchmark
+are-we-fast-yet /LICENSE.md d04bd9676d6569e74da03bf58582cbf46ac6fcb348757d92ee53b9e46b9bf992 per-benchmark
 are-we-fast-yet benchmark.js 78f9885e38de580aac46dbdb65e78be4ac0974d7e2d2807dca8f77faae43eca7 MIT
 are-we-fast-yet som.js 0bafab9b216476b3ea13735b96ca8302015c35c04ad2119cd48d8a4b4c47212c MIT
 are-we-fast-yet bounce.js 0aeeb84313960f6403943c470858cc27d64b1d629975d3bfdc62c68019d3a7e0 MIT
