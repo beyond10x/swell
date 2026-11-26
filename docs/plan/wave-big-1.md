@@ -15,10 +15,10 @@ directory. The stage is kept current by the coordinator.
 
 | unit | story | branch | worktree id | stage |
 |---|---|---|---|---|
-| core | `story:core-builds-without-std`, step 3 | `impl/nostd-core` | `swell-impl-nostd-core` | committed up to `43e63c70`; its last commits (the timings, the digest) are being made |
+| core | `story:core-builds-without-std`, step 3 | `impl/nostd-core` | `swell-impl-nostd-core` | merged into the wave branch at `248a031c`; gate on that head: exit 0, `gate-time test-steps 106.5 of 120` at load 65 on the node |
 | gate | `story:core-builds-without-std`, step 4 | `impl/nostd-gate` | `swell-impl-nostd-gate` | dispatched |
 | random | `story:math-random` | `impl/math-random` | `swell-impl-math-random` | dispatched |
-| static | `story:releases-ship-static-binaries` | `impl/static-binaries` | `swell-impl-static-binaries` | dispatched |
+| static | `story:releases-ship-static-binaries` | `impl/static-binaries` | `swell-impl-static-binaries` | `662e3ea8`; adversary pass 1 red, 7 findings introduced (`review-result:adversary-static-pass-1`); back with its implementor |
 | exponent | `story:exponentiation-operator` | `impl/exponentiation` | `swell-impl-exponentiation` | dispatched |
 | growth | `story:buffer-growth-outside-the-charged-list-is-listed` | `impl/buffer-growth` | `swell-impl-buffer-growth` | waits for `random`, `exponent` and `gate`: it adds an attribute at growth calls all over `crates/swell/src` |
 | close | `story:slice-04-conformance-close` | `impl/slice-04-close` | `swell-impl-slice-04-close` | waits for `random`, `exponent` and `gate` on the wave branch |
@@ -40,7 +40,7 @@ takes no heredoc.
   wave: its runs need the build node alone for the measurement, and its tree holds work that
   is not committed.
 
-Added at 05:33 CET, from the reading of the store's close: `story:exponentiation-operator`
+Added at 05:30 CET, from the reading of the store's close: `story:exponentiation-operator`
 (the parser still refuses `**`; 1 of 44 cases of `language/expressions/exponentiation` passes)
 and `story:buffer-growth-outside-the-charged-list-is-listed` (`docs/plan/slice-10-wave-1.md`:
 "planned, not built") are accepted and not built. Both are stories of the plan before this
