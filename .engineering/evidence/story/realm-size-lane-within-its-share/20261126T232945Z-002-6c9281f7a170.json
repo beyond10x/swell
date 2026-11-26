@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T23:29:45Z",
+  "actor": "human:operator",
+  "artifact": "story:realm-size-lane-within-its-share",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/lanebuilds at d80db027, build node, before the merge into wave/big-2",
+    "reference": "swell::main 1308 passed and 1 skipped in both modes; lib 251 passed; test-main check 0; gate-selftest 97 passed, 2 failed (the two site-data-check cases red on the base); test-stack-profiles 4 passed in each profile; clippy 0; fmt 0"
+  }
+}
