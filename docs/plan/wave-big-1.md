@@ -1,7 +1,7 @@
 # Wave big-1: the end of slice 4, the core without std, static binaries
 
 One wave of [the wave plan](waves.md), "After slice 4: bigger waves". Opened on 2026-11-26,
-05:40 CET, on the operator's word of about 05:18 CET (`approval-record:wave-big-1`): one pull
+05:24 CET, on the operator's word of about 05:18 CET (`approval-record:wave-big-1`): one pull
 request carries several stories. Skill version 0.26.0 of `aep:implementing`.
 
 The wave branch is `wave/big-1`, cut from `main` at `b11998b5`, with the branch
@@ -21,7 +21,10 @@ directory. The stage is kept current by the coordinator.
 | static | `story:releases-ship-static-binaries` | `impl/static-binaries` | `swell-impl-static-binaries` | dispatched |
 | close | `story:slice-04-conformance-close` | `impl/slice-04-close` | `swell-impl-slice-04-close` | waits for `random` and `gate` on the wave branch |
 
-Dispatches use the agent type `aep:implementor` on Opus; the adversary is `aep:adversary`.
+Dispatches use the agent type `aep:implementor` on Opus; the adversary is `aep:adversary`. The
+two decomposers of slices 9 and 8 run as `general-purpose` on Opus with the procedure of
+`aep:decomposer`, because that agent type has no tool that writes a file and the shell here
+takes no heredoc.
 
 ## Why these stories
 
