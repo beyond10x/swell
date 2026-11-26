@@ -1496,8 +1496,8 @@ fn regexp_literal_is_lexed_to_its_end() {
     ));
 }
 
-/// The shape of the expression `e`: each binary operation in parentheses with its `BinaryOp`
-/// between its operands, a prefix operator by its `UnaryOp` or `UpdateOp` before its operand
+/// The shape of the expression `e`: each binary, logical or assignment operation in parentheses
+/// with its `BinaryOp`, `LogicalOp` or `AssignOp` between its operands, a prefix operator by its `UnaryOp` or `UpdateOp` before its operand
 /// in brackets, a postfix one after it, a literal by its text and an identifier by its name.
 fn shape(ast: &Ast, e: ExprId) -> String {
     let Some(node) = ast.expr(e) else {
@@ -1506,6 +1506,12 @@ fn shape(ast: &Ast, e: ExprId) -> String {
     match &node.expr {
         Expr::Binary { op, left, right } => {
             format!("({} {op:?} {})", shape(ast, *left), shape(ast, *right))
+        }
+        Expr::Logical { op, left, right } => {
+            format!("({} {op:?} {})", shape(ast, *left), shape(ast, *right))
+        }
+        Expr::Assign { op, target, value } => {
+            format!("({} {op:?} {})", shape(ast, *target), shape(ast, *value))
         }
         Expr::Unary { op, operand } => format!("{op:?}[{}]", shape(ast, *operand)),
         Expr::Update {
@@ -1591,6 +1597,293 @@ fn exponentiation_is_right_associative_and_binds_tightest() {
     let depth = script.ast.expr(*value).unwrap().depth;
     println!("a chain of 2,000 **: depth {depth}");
     assert_eq!(depth, 2_001);
+}
+
+/// Sources ExponentiationExpression (`#sec-exp-operator`: UnaryExpression | UpdateExpression
+/// `**` ExponentiationExpression) and `**=` (`#sec-assignment-operators`) admit, with their
+/// neighbours of every precedence, `await` and `yield` as operands and as names, templates,
+/// optional chains, arrow functions and regular expressions: each parses.
+#[test]
+fn exponentiation_sources_the_grammar_admits_parse() {
+    let admitted = [
+        "(-a) ** b;",
+        "(+a) ** b;",
+        "(!a) ** b;",
+        "(~a) ** b;",
+        "(typeof a) ** b;",
+        "(void a) ** b;",
+        "(delete a.b) ** c;",
+        "async function f() { (await a) ** b; }",
+        "async function f() { a ** await b; }",
+        "async function f() { a ** -await b; }",
+        "await ** 2;",
+        "async function f() { function g() { return await ** 2; } }",
+        "a ** -b;",
+        "a ** typeof b;",
+        "a ** void b;",
+        "a ** !b;",
+        "a ** ~b;",
+        "a ** delete b.c;",
+        "a ** b ** c;",
+        "(a ** b) ** c;",
+        "a * b ** c;",
+        "a ** b * c;",
+        "new a ** b;",
+        "new a() ** b;",
+        "a() ** b;",
+        "a.b ** c;",
+        "a[0] ** b;",
+        "`t` ** 2;",
+        "a`t` ** 2;",
+        "2 ** `${a ** b}`;",
+        "a?.b ** c;",
+        "a ** b?.c;",
+        "a ?? b ** c;",
+        "a ** b ?? c;",
+        "a ** b in c;",
+        "a in b ** c;",
+        "a ** b instanceof c;",
+        "function* g() { yield a ** b; }",
+        "function* g() { (yield) ** 2; }",
+        "async () => a ** b;",
+        "x => x ** 2;",
+        "a ** b ? c : d;",
+        "x = a ** b, c;",
+        "a++ ** b;",
+        "a-- ** b;",
+        "++a ** b;",
+        "--a ** b;",
+        "a ** ++b;",
+        "a ** b++;",
+        "a ** (-b) ** c;",
+        "a**b;",
+        "2**-1;",
+        "a ** /re/.source.length;",
+        "a **= /re/.lastIndex;",
+        ".5 ** 2;",
+        "1. ** 2;",
+        "a **= b **= c;",
+        "a **= -b;",
+        "a **= b ** c;",
+        "x.y **= 2;",
+        "x[i] **= 2;",
+        "(a) **= 2;",
+        "(x.y) **= 2;",
+        "((a)) **= 2;",
+        "for (x of a ** b);",
+        "for (var i = 2 ** 3; i < 1; i++);",
+        "with (o) a **= 2;",
+        "eval **= 2;",
+        "arguments **= 2;",
+        "-(a ** b);",
+        "typeof (a ** b);",
+        "(a, b) ** c;",
+        "(x = 2 ** 3) => x;",
+        "async (x = 2 ** 3) => x;",
+        "({ m() { return a ** b; } });",
+        "a ** function () {};",
+        "a ** (0);",
+        "a ** [1];",
+        "a ** ({}).b;",
+    ];
+    let mut wrong = Vec::new();
+    for text in admitted {
+        if let Err(errors) = parse(text) {
+            wrong.push(format!("{text} -> {errors:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "refused:\n{}", wrong.join("\n"));
+}
+
+/// Sources the grammar does not admit (`#sec-exp-operator`; for `**=` the early errors of
+/// `#sec-assignment-operators-static-semantics-early-errors`): a unary expression or `await` as
+/// the left operand, a `**` expression as an assignment target or arrow parameter, targets that
+/// are not simple, `yield` as an operand of `**`, and broken tokens: each fails.
+#[test]
+fn exponentiation_sources_the_grammar_refuses_fail() {
+    let refused = [
+        "-a ** b;",
+        "+a ** b;",
+        "!a ** b;",
+        "~a ** b;",
+        "typeof a ** b;",
+        "void a ** b;",
+        "delete a.b ** c;",
+        "async function f() { await a ** b; }",
+        "async () => await a ** b;",
+        "async function f() { a ** await b ** c; }",
+        "a ** -b ** c;",
+        "-a ** -b;",
+        "- -a ** b;",
+        "-(a) ** b;",
+        "typeof (a) ** b;",
+        "a * -b ** c;",
+        "-++a ** b;",
+        "!a-- ** b;",
+        "a ** b = c;",
+        "a ** b **= c;",
+        "(a ** b) = c;",
+        "(a ** b) **= c;",
+        "a ** b => c;",
+        "a ** () => b;",
+        "a ** async () => b;",
+        "a ** async x => b;",
+        "a ?. b **= c;",
+        "a?.[b] **= c;",
+        "[a] **= b;",
+        "({a} **= b);",
+        "({a}) **= b;",
+        "\"use strict\"; eval **= 2;",
+        "\"use strict\"; arguments **= 2;",
+        "\"use strict\"; (eval) **= 2;",
+        "a++ **= 2;",
+        "++a **= 2;",
+        "a ** b++ **= 2;",
+        "this **= 2;",
+        "1 **= 2;",
+        "'s' **= 2;",
+        "function* g() { yield ** 2; }",
+        "function* g() { a ** yield b; }",
+        "a ** ** b;",
+        "a *** b;",
+        "a ** = b;",
+        "a * * b;",
+        "a ** b ** ;",
+        "a **;",
+        "** a;",
+        "x = a ?? b ** c || d;",
+        "for (a ** b of c);",
+        "for (a ** b in c);",
+        "(-a ** b) => 1;",
+        "(x = -a ** b) => x;",
+    ];
+    let mut wrong = Vec::new();
+    for text in refused {
+        if parse(text).is_ok() {
+            wrong.push(text.to_string());
+        }
+    }
+    assert!(wrong.is_empty(), "accepted:\n{}", wrong.join("\n"));
+}
+
+/// `**=` takes exactly the targets `*=` takes (`#sec-assignment-operators-static-semantics-early-errors`:
+/// AssignmentTargetType of the LeftHandSideExpression is simple for both): over 35 targets, in
+/// sloppy and strict code, each source with `*=` and with `**=` parses or fails alike.
+#[test]
+fn exponent_assignment_takes_the_targets_of_multiplication_assignment() {
+    let targets = [
+        "a",
+        "(a)",
+        "((a))",
+        "a.b",
+        "a[b]",
+        "(a.b)",
+        "(a[b])",
+        "a.b.c",
+        "a()",
+        "a().b",
+        "new a",
+        "new a().b",
+        "a?.b",
+        "a?.b.c",
+        "(a?.b)",
+        "[a]",
+        "({a})",
+        "this",
+        "this.a",
+        "1",
+        "a++",
+        "++a",
+        "-a",
+        "(a, b)",
+        "a = b",
+        "(a = b)",
+        "eval",
+        "arguments",
+        "`t`",
+        "a`t`",
+        "async",
+        "await",
+        "yield",
+        "let",
+        "static",
+    ];
+    let mut wrong = Vec::new();
+    for prefix in ["", "\"use strict\"; "] {
+        for target in targets {
+            let star = format!("{prefix}{target} *= 2;");
+            let exp = format!("{prefix}{target} **= 2;");
+            let (s, e) = (parse(&star).is_ok(), parse(&exp).is_ok());
+            if s != e {
+                wrong.push(format!("{star} -> {s}, {exp} -> {e}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "differ:\n{}", wrong.join("\n"));
+}
+
+/// The tree shapes ([`shape`]) of 24 sources (`#sec-exp-operator`, and the clauses of the
+/// neighbouring operators 13.7 to 13.15): right associativity of `**` and `**=`, and the
+/// precedence of `**` over every binary, logical and assignment neighbour.
+#[test]
+fn exponentiation_tree_shapes() {
+    let cases = [
+        ("a ** b ** c ** d;", "(a Exp (b Exp (c Exp d)))"),
+        ("a * b ** c * d;", "((a Mul (b Exp c)) Mul d)"),
+        ("a ** b * c ** d ** e;", "((a Exp b) Mul (c Exp (d Exp e)))"),
+        ("a + b ** c * d;", "(a Add ((b Exp c) Mul d))"),
+        ("a ** b + c;", "((a Exp b) Add c)"),
+        ("a / b ** c / d;", "((a Div (b Exp c)) Div d)"),
+        ("a ?? b ** c;", "(a Coalesce (b Exp c))"),
+        ("a ** b ?? c;", "((a Exp b) Coalesce c)"),
+        ("a ** b < c ** d;", "((a Exp b) Lt (c Exp d))"),
+        ("a ** b == c;", "((a Exp b) Eq c)"),
+        ("a | b ** c & d;", "(a BitOr ((b Exp c) BitAnd d))"),
+        ("a ** b << c;", "((a Exp b) Shl c)"),
+        ("a << b ** c;", "(a Shl (b Exp c))"),
+        ("a ** -b;", "(a Exp Minus[b])"),
+        ("a ** typeof b;", "(a Exp Typeof[b])"),
+        ("a ** (b ** c);", "(a Exp (b Exp c))"),
+        ("(a ** b) ** c;", "((a Exp b) Exp c)"),
+        ("(-(a ** b)) ** c;", "(Minus[(a Exp b)] Exp c)"),
+        ("a **= b ** c;", "(a Compound(Exp) (b Exp c))"),
+        ("a **= b **= c;", "(a Compound(Exp) (b Compound(Exp) c))"),
+        ("a = b ** c ** d;", "(a Assign (b Exp (c Exp d)))"),
+        ("a || b ** c && d;", "(a Or ((b Exp c) And d))"),
+        ("a ** b ** c * d ** e;", "((a Exp (b Exp c)) Mul (d Exp e))"),
+        ("a - b ** c ** d - e;", "((a Sub (b Exp (c Exp d))) Sub e)"),
+    ];
+    let mut wrong = Vec::new();
+    for (text, expected) in cases {
+        let got = statement_shape(text);
+        if got != expected {
+            wrong.push(format!("{text}: got {got}, expected {expected}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Long chains end in one error each at `parser_nesting` 1,000 (`#sec-exp-operator`,
+/// `#sec-assignment-operators`): a right-deep chain of 5,000 `**=` and chains of 100,000 `**`,
+/// written either way round, in the nesting error alone; a chain of 5,000 `**` with a unary
+/// right operand on each level in the unary-base SyntaxError alone, at its second `**`, whose
+/// left operand is `-a`.
+#[test]
+fn exponent_chains_are_bounded() {
+    let nesting = "nesting deeper than parser_nesting (1000)";
+    let unary = "a unary expression as the left operand of ** needs parentheses";
+    for (text, expected) in [
+        (format!("x = a{};", " ** -a".repeat(5_000)), unary),
+        (format!("{}0;", "a **= ".repeat(5_000)), nesting),
+        (format!("x = a{};", " ** a".repeat(100_000)), nesting),
+        (format!("x = {}a;", "a ** ".repeat(100_000)), nesting),
+    ] {
+        let result = parse(&text);
+        let Err(errors) = result else {
+            panic!("a chain of 5,000 or 100,000 parsed at {LIMIT}");
+        };
+        assert_eq!(messages(&errors), vec![expected.to_string()]);
+    }
 }
 
 /// The text of each function's span, in source order; a span outside `source` reads as
