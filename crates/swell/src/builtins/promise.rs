@@ -30,7 +30,7 @@
 //! activation of its own, so that a job whose handler threw at the re-entry bound still settles
 //! its derived promise; any other function is called as every function is.
 
-use std::rc::Rc;
+use alloc::rc::Rc;
 
 use crate::builtins::promise_statics::PromiseStaticsBuiltin;
 use crate::host::agent::Agent;
@@ -467,7 +467,7 @@ impl<H: Host> Agent<H> {
     fn resolving_slots(
         &mut self,
         function: ObjectRef,
-    ) -> Completion<(ObjectRef, Rc<std::cell::Cell<bool>>)> {
+    ) -> Completion<(ObjectRef, Rc<core::cell::Cell<bool>>)> {
         match self.closure_slots(function)? {
             Slots::Resolving {
                 promise,

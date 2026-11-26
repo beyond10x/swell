@@ -12,7 +12,7 @@
 //! SetIntegrityLevel. No code runs and no safe point comes between the first allocation and the
 //! entry that holds the object, so the Arrays need no root.
 
-use std::rc::Rc;
+use alloc::rc::Rc;
 
 use super::dispatch::Flow;
 use crate::host::Host;

@@ -613,6 +613,8 @@ mod tests {
     use crate::ops::objects::IntegrityLevel;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
+    use alloc::string::String;
+    use alloc::vec;
 
     /// What a species constructor of these tests does to the object it makes before it answers
     /// it.

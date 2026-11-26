@@ -15,7 +15,9 @@
 //! `for`-`in` enumerator on its operand stack holds and the box of a `for`-`of` Iterator
 //! Record there, each credited earlier when its entry leaves the stack.
 
-use std::rc::Rc;
+use alloc::boxed::Box;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
 
 use swell_compiler::bytecode::{Handler, Instruction};
 

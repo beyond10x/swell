@@ -45,7 +45,9 @@
 //! unit past 32 before the first is read. Every call of a clock or time zone hook is charged
 //! one step before it is made (decision 17, item 6).
 
-use std::cell::RefCell;
+use alloc::string::String;
+use core::cell::RefCell;
+use swell_num::fmath;
 
 use swell_num::date::{
     DateFields, date_fields, local_time, make_date, make_day, make_full_year, make_time,
@@ -690,7 +692,7 @@ impl<H: Host> Agent<H> {
         let local = self.local_time_of(tv)?;
         let offset = local - tv;
         // Range test of the cast: |offset| < msPerDay and integral, so `as i64` is exact.
-        if !(offset.abs() < MS_PER_DAY && offset.trunc() == offset) {
+        if !(offset.abs() < MS_PER_DAY && fmath::trunc(offset) == offset) {
             return Err(self.fault());
         }
         let offset_ms = offset as i64;
@@ -1069,7 +1071,7 @@ impl<H: Host> Agent<H> {
             }
         }
         let mut fields = fields_of_time(t);
-        let numbers = std::iter::once(first).chain(rest);
+        let numbers = core::iter::once(first).chain(rest);
         for (field, number) in fields
             .iter_mut()
             .skip(setter.first)

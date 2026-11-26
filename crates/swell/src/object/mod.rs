@@ -33,6 +33,8 @@
 //! of order are sorted by a bottom-up merge sort over a second buffer charged with the list, n
 //! steps charged before each pass ([`Agent::listed_indices`]).
 
+use alloc::vec::Vec;
+
 pub(crate) mod arguments;
 pub(crate) mod array;
 pub(crate) mod async_builtin;
@@ -48,8 +50,8 @@ pub(crate) mod property;
 pub(crate) mod regexp;
 pub(crate) mod string;
 
-use std::cell::Cell;
-use std::rc::Rc;
+use alloc::rc::Rc;
+use core::cell::Cell;
 
 use crate::heap::collect::Mark;
 use crate::host::agent::Agent;
@@ -85,7 +87,7 @@ pub(crate) struct KeyList {
     pub(crate) bytes: u64,
 }
 
-impl std::ops::Deref for KeyList {
+impl core::ops::Deref for KeyList {
     type Target = [Key];
 
     fn deref(&self) -> &[Key] {

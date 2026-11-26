@@ -25,7 +25,10 @@
 //! value of an earlier one that did. This is what the steps over `matchedGroupNames` answer,
 //! since at most one group of a name captures in a match.
 
-use std::ops::Range;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
+use core::ops::Range;
 
 use swell_regexp::{Budget, Stop, Subject, search};
 

@@ -563,6 +563,10 @@ mod tests {
     use crate::object::property::{Key, Slot};
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::Value;
+    use alloc::string::String;
+    use alloc::string::ToString;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     /// The order of keys the next wave's stories agree on (`story:builtin-group-modules`): on a
     /// new realm the own String keys of `Array` and of `Array.prototype` are the keys of the

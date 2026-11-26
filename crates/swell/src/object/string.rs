@@ -12,6 +12,8 @@ use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{Host, Termination};
 use crate::value::{ObjectRef, StringRef, Value};
+#[cfg(test)]
+use alloc::vec::Vec;
 
 /// A copy of a String's code units, charged by its capacity while it lives.
 pub(crate) type Units = ChargedVec<u16>;
@@ -275,9 +277,9 @@ impl<H: Host> Agent<H> {
 /// a `ChargedVec` is not seen.
 #[cfg(test)]
 pub(crate) mod copies {
-    use std::cell::Cell;
+    use core::cell::Cell;
 
-    thread_local! {
+    std::thread_local! {
         static LONGEST: Cell<usize> = const { Cell::new(0) };
         static CAPACITY: Cell<u64> = const { Cell::new(0) };
         static CHARGED: Cell<u64> = const { Cell::new(0) };
@@ -366,6 +368,7 @@ pub(crate) mod across {
     use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, limits};
     use crate::host::{Cx, HostFn};
     use crate::{Limits, Outcome, Parsed, PropertyKey, Realm, Root, Source, Value};
+    use alloc::format;
 
     /// The limits of the story's tests: 64 MiB, 1,000,000 steps, `reentry_depth` 256,
     /// `frame_depth` 10,000, `string_length` 2^24.
@@ -520,6 +523,11 @@ mod tests {
     use crate::host::outcome::{Abrupt, Termination};
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::string::ToString;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     /// The code units of the long String.
     const UNITS: usize = 1_000_000;

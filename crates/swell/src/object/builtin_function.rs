@@ -35,9 +35,11 @@
 //! Two sites of the collector: the kind site [`BuiltinFunction::trace`] and the root site
 //! [`trace_roots`] (the activations and the kept stack).
 
-use std::any::Any;
-use std::cell::Cell;
-use std::rc::Rc;
+use alloc::boxed::Box;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+use core::any::Any;
+use core::cell::Cell;
 
 use super::ObjectKind;
 use super::property::Property;
@@ -883,11 +885,11 @@ impl<H: Host> Agent<H> {
 }
 
 #[cfg(test)]
-thread_local! {
+std::thread_local! {
     /// The argument values the activations of builtin calls copied, in the counting build of the
     /// tests; a test resets it before it reads it.
-    pub(crate) static ACTIVATION_ARGUMENTS_COPIED: std::cell::Cell<u64> =
-        const { std::cell::Cell::new(0) };
+    pub(crate) static ACTIVATION_ARGUMENTS_COPIED: core::cell::Cell<u64> =
+        const { core::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -899,6 +901,9 @@ mod tests {
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::Value;
     use crate::{Realm, Termination};
+    use alloc::format;
+    use alloc::string::ToString;
+    use alloc::vec::Vec;
 
     /// An agent with no step budget to speak of and a memory budget of what its realm holds
     /// plus 256 MiB, with its realm entered.
@@ -943,7 +948,7 @@ mod tests {
             "{answer:?}"
         );
         assert_eq!(
-            ACTIVATION_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            ACTIVATION_ARGUMENTS_COPIED.with(core::cell::Cell::get),
             0,
             "arguments copied before the memory budget ended the run"
         );
@@ -953,7 +958,7 @@ mod tests {
         let answer = agent.builtin_call(prototype, Value::Undefined, &arguments, None);
         assert!(matches!(answer, Ok(Value::Undefined)), "{answer:?}");
         assert_eq!(
-            ACTIVATION_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            ACTIVATION_ARGUMENTS_COPIED.with(core::cell::Cell::get),
             u64::from(N)
         );
         assert!(agent.collect().is_ok());
@@ -970,7 +975,7 @@ mod tests {
     #[cfg(not(feature = "collect-every-safe-point"))]
     #[test]
     fn a_loop_of_builtin_calls_collects_within_its_bound() {
-        use crate::heap::{COLLECTIONS, MIN_TRIGGER_BYTES};
+        use crate::heap::MIN_TRIGGER_BYTES;
         use crate::{Outcome, Parsed, Source};
         const ARGUMENTS: u64 = 100_000;
         const ON_THE_BASE: u64 = 0;
@@ -980,7 +985,7 @@ mod tests {
         else {
             panic!("{SOURCE} did not parse");
         };
-        COLLECTIONS.with(|collections| collections.set(0));
+        agent.heap.collections = 0;
         let outcome = agent.evaluate_script(&script);
         let Ok(Outcome::Normal(answer)) = outcome else {
             panic!("{outcome:?}");
@@ -990,7 +995,7 @@ mod tests {
             matches!(answer, Ok(Value::Number(n)) if n == 12_500.0),
             "{answer:?}"
         );
-        let collections = COLLECTIONS.with(std::cell::Cell::get);
+        let collections = agent.heap.collections;
         let charged = ARGUMENTS * size_of::<Value>() as u64;
         let bound = ON_THE_BASE + charged.div_ceil(MIN_TRIGGER_BYTES);
         assert!(
@@ -1007,7 +1012,7 @@ mod tests {
     #[cfg(not(feature = "collect-every-safe-point"))]
     #[test]
     fn a_loop_of_math_min_calls_collects_within_its_bound() {
-        use crate::heap::{COLLECTIONS, MIN_TRIGGER_BYTES};
+        use crate::heap::MIN_TRIGGER_BYTES;
         use crate::{Outcome, Parsed, Source};
         const ARGUMENTS: u64 = 100_000;
         const ON_THE_BASE: u64 = 0;
@@ -1017,7 +1022,7 @@ mod tests {
         else {
             panic!("{SOURCE} did not parse");
         };
-        COLLECTIONS.with(|collections| collections.set(0));
+        agent.heap.collections = 0;
         let outcome = agent.evaluate_script(&script);
         let Ok(Outcome::Normal(answer)) = outcome else {
             panic!("{outcome:?}");
@@ -1027,7 +1032,7 @@ mod tests {
             matches!(answer, Ok(Value::Number(n)) if n == 12_500.0),
             "{answer:?}"
         );
-        let collections = COLLECTIONS.with(std::cell::Cell::get);
+        let collections = agent.heap.collections;
         let charged = ARGUMENTS * size_of::<Value>() as u64;
         let bound = ON_THE_BASE + charged.div_ceil(MIN_TRIGGER_BYTES);
         assert!(
@@ -1045,7 +1050,7 @@ mod tests {
     #[cfg(not(feature = "collect-every-safe-point"))]
     #[test]
     fn a_loop_of_math_hypot_calls_collects_within_its_bound() {
-        use crate::heap::{COLLECTIONS, MIN_TRIGGER_BYTES};
+        use crate::heap::MIN_TRIGGER_BYTES;
         use crate::{Outcome, Parsed, Source};
         const ARGUMENTS: u64 = 100_000;
         const ON_THE_BASE: u64 = 0;
@@ -1056,7 +1061,7 @@ mod tests {
         else {
             panic!("{SOURCE} did not parse");
         };
-        COLLECTIONS.with(|collections| collections.set(0));
+        agent.heap.collections = 0;
         let outcome = agent.evaluate_script(&script);
         let Ok(Outcome::Normal(answer)) = outcome else {
             panic!("{outcome:?}");
@@ -1066,7 +1071,7 @@ mod tests {
             matches!(answer, Ok(Value::Number(n)) if n == 12_500.0),
             "{answer:?}"
         );
-        let collections = COLLECTIONS.with(std::cell::Cell::get);
+        let collections = agent.heap.collections;
         let charged = ARGUMENTS * size_of::<Value>() as u64;
         let bound = ON_THE_BASE + charged.div_ceil(MIN_TRIGGER_BYTES);
         assert!(
@@ -1088,7 +1093,7 @@ mod tests {
             .unwrap();
         let resolving = Slots::Resolving {
             promise: object,
-            already_resolved: std::rc::Rc::new(std::cell::Cell::new(false)),
+            already_resolved: alloc::rc::Rc::new(core::cell::Cell::new(false)),
         };
         let executor = Slots::Executor {
             resolve: Value::Undefined,
@@ -1122,15 +1127,15 @@ mod tests {
             .unwrap();
         let element = PromiseSlots::Element {
             index: 0,
-            already_called: std::rc::Rc::new(std::cell::Cell::new(false)),
-            record: std::rc::Rc::new(ElementRecord {
+            already_called: alloc::rc::Rc::new(core::cell::Cell::new(false)),
+            record: alloc::rc::Rc::new(ElementRecord {
                 values: object,
                 capability: crate::host::PromiseCapability {
                     promise: object,
                     resolve: Value::Undefined,
                     reject: Value::Undefined,
                 },
-                remaining: std::cell::Cell::new(1),
+                remaining: core::cell::Cell::new(1),
             }),
         };
         let finally = PromiseSlots::Finally {

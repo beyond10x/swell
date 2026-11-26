@@ -25,6 +25,8 @@
 //! charged while the agent lives; an arena does not shrink, and a freed slot is used again. A
 //! record is charged what it owns beside its slot, and the sweep credits that.
 
+use alloc::vec::Vec;
+
 /// A handle into an arena: the key of the agent that made it, the slot index and the slot's
 /// generation when the record was stored.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -347,7 +349,7 @@ impl<T> Arena<T> {
         let value = slot.value.take()?;
         #[cfg(test)]
         let kept_generation = slot.generation;
-        let bytes = std::mem::take(&mut slot.bytes);
+        let bytes = core::mem::take(&mut slot.bytes);
         self.live = self.live.saturating_sub(1);
         #[cfg(test)]
         {
@@ -402,7 +404,7 @@ impl<T> Arena<T> {
     /// Take the collector's workspace out of the arena for a mark phase; moves it, allocates
     /// nothing.
     pub(crate) fn take_workspace(&mut self) -> Workspace {
-        std::mem::take(&mut self.workspace)
+        core::mem::take(&mut self.workspace)
     }
 
     /// Give the workspace back after a mark phase, its worklist empty (the room stays); the
@@ -444,6 +446,8 @@ mod tests {
         Abrupt, Agent, AgentState, Brand, HostError, HostObjectSpec, Limits, Prototype, Seeds,
         Termination, Value,
     };
+    use alloc::vec::Vec;
+    use std::println;
 
     use crate::host::hooks::test_host::{NoHooks, new_realm};
 

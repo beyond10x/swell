@@ -39,6 +39,9 @@ use crate::object::property::{Key, array_index};
 use crate::ops::objects::IntegrityLevel;
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, StringRef, Value};
+use alloc::format;
+use alloc::string::ToString;
+use alloc::vec::Vec;
 
 /// The values made between two charges of the step budget.
 const STEP_CHUNK: u64 = 4_096;
@@ -280,7 +283,7 @@ impl<H: Host> Agent<H> {
 
     /// Charge the steps read so far.
     fn json_pay(&mut self, parser: &mut Parser<'_>) -> Completion<()> {
-        let unpaid = std::mem::take(&mut parser.unpaid);
+        let unpaid = core::mem::take(&mut parser.unpaid);
         self.charge_steps(unpaid)
     }
 
@@ -1098,6 +1101,7 @@ mod tests {
     use crate::host::hooks::test_host::{agent_with_realm, enter};
     use crate::ops::objects::IntegrityLevel;
     use crate::value::Value;
+    use alloc::vec;
 
     /// `#sec-json.rawjson` step 10: the object `JSON.rawJSON` answers is frozen, by
     /// TestIntegrityLevel (`#sec-testintegritylevel`), and has the slot [[IsRawJSON]].

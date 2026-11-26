@@ -29,8 +29,8 @@
 //! `%Promise%`, its resolving function runs at once, so that a combined promise whose call
 //! threw at the re-entry bound is still rejected with that `RangeError`.
 
-use std::cell::Cell;
-use std::rc::Rc;
+use alloc::rc::Rc;
+use core::cell::Cell;
 
 use crate::builtins::object::argument;
 use crate::heap::arena::Handle;

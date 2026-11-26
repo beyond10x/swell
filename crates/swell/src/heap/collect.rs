@@ -38,6 +38,8 @@ use super::arena::{Access, Handle, Marked, Workspace};
 use crate::host::agent::Agent;
 use crate::host::{CollectReport, Host};
 use crate::value::{ObjectRef, Value};
+#[cfg(test)]
+use alloc::vec::Vec;
 
 /// What a site reports: a handle into one of the arenas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -330,6 +332,9 @@ mod tests {
     use crate::script::ScriptRecord;
     use crate::value::{ObjectRef, StringRef, Value};
     use crate::{Agent, AgentState, Limits, Outcome, Parsed, Seeds, Source, Termination};
+    use alloc::format;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     /// The root sites, in the order the mark phase calls them.
     const ROOT_SITES: [&str; 6] = [

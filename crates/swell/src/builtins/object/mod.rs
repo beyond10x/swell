@@ -23,6 +23,9 @@
 //! the agent's kept stack, which the root site of `object/builtin_function.rs` reports
 //! (decision 4); a key's atom is kept the same way, since atoms are held weakly.
 
+use alloc::format;
+use alloc::vec::Vec;
+
 pub(crate) mod enumeration;
 pub(crate) mod from_entries;
 pub(crate) mod integrity;
@@ -586,6 +589,8 @@ mod tests {
     use crate::object::property::Key;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
+    use alloc::string::String;
+    use alloc::vec::Vec;
 
     /// The order of keys of `Object` and `Object.prototype` (`story:builtin-group-modules`):
     /// the keys of the base in the base's order, then the keys of the groups `integrity` and

@@ -35,6 +35,8 @@ use crate::object::property::Key;
 use crate::object::string::Units;
 use crate::ops::conversion::clamp_index;
 use crate::value::{ObjectRef, StringRef, Value};
+use alloc::format;
+use swell_num::fmath;
 
 /// The builtins of this group, by their steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -277,7 +279,7 @@ impl<H: Host> Agent<H> {
             // b. If nextCP is not an integral Number, throw a RangeError exception.
             // c. If ℝ(nextCP) < 0 or ℝ(nextCP) > 0x10FFFF, throw a RangeError exception.
             if !number.is_finite()
-                || number.trunc() != number
+                || fmath::trunc(number) != number
                 || !(0.0..=1_114_111.0).contains(&number)
             {
                 return Err(self.throw_error(
@@ -777,6 +779,10 @@ mod tests {
     use crate::object::property::Key;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::string::ToString;
+    use alloc::vec;
 
     /// The text of a String value.
     fn text(agent: &mut Agent<NoHooks>, value: Value) -> String {

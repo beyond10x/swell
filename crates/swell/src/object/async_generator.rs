@@ -17,7 +17,8 @@
 //! [`AsyncGenerator::trace`], traces the frame and every value of every request, never as a
 //! root: a queued request keeps nothing alive but through the object (item 1).
 
-use std::collections::VecDeque;
+use alloc::boxed::Box;
+use alloc::collections::VecDeque;
 
 use crate::heap::collect::Mark;
 use crate::interp::suspend::SuspendedFrame;

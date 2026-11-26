@@ -12,9 +12,10 @@
 //! [`ChargedVec`], grown only by [`Agent::reserve_vec`], or as a [`Charge`], whose drop gives
 //! its bytes back at once through a cell of the accounting that every reading subtracts.
 
-use std::cell::Cell;
-use std::ops::{Deref, DerefMut};
-use std::rc::Rc;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+use core::cell::Cell;
+use core::ops::{Deref, DerefMut};
 
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
@@ -109,9 +110,9 @@ impl<T> DerefMut for ChargedVec<T> {
 
 impl<'a, T> IntoIterator for &'a ChargedVec<T> {
     type Item = &'a T;
-    type IntoIter = std::slice::Iter<'a, T>;
+    type IntoIter = core::slice::Iter<'a, T>;
 
-    fn into_iter(self) -> std::slice::Iter<'a, T> {
+    fn into_iter(self) -> core::slice::Iter<'a, T> {
         self.list.iter()
     }
 }
@@ -166,7 +167,7 @@ impl<T> ChargedVec<T> {
     }
 
     /// Append the elements `range` of the list itself in room reserved before.
-    pub(crate) fn extend_from_within(&mut self, range: std::ops::Range<usize>) -> Result<(), Full>
+    pub(crate) fn extend_from_within(&mut self, range: core::ops::Range<usize>) -> Result<(), Full>
     where
         T: Clone,
     {
@@ -203,7 +204,7 @@ impl<T> ChargedVec<T> {
     /// The elements as a plain list; the charge drops with this call, so it is credited at
     /// once. For an owner that hands the elements to a charged record right away.
     pub(crate) fn into_vec(mut self) -> Vec<T> {
-        std::mem::take(&mut self.list)
+        core::mem::take(&mut self.list)
     }
 
     /// The counting build: report the capacity and the charge to the tallies of `copies`.

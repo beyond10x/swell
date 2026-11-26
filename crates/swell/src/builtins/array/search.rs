@@ -252,7 +252,7 @@ impl<H: Host> Agent<H> {
         // 3. Let nextIndex be 0.
         let mut next = 0.0;
         // 4, 5. Prepend obj to items; for each element item of items:
-        for item in std::iter::once(Value::Object(object)).chain(items.iter().copied()) {
+        for item in core::iter::once(Value::Object(object)).chain(items.iter().copied()) {
             // 5.a. Let spreadable be ? IsConcatSpreadable(item).
             match item {
                 Value::Object(spread) if self.is_concat_spreadable(spread)? => {
@@ -733,6 +733,7 @@ mod tests {
     use crate::object::property::{Descriptor, Key, Property, Slot};
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
+    use alloc::vec::Vec;
 
     /// The method `name` of `%Array.prototype%` of the entered realm, kept.
     fn method(agent: &mut Agent<NoHooks>, name: &str) -> Value {

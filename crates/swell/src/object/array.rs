@@ -20,7 +20,8 @@
 //! budget before it is made and credited when the Array is freed (`Grown`, `object/mod.rs`); a
 //! walk over it (the keys, a truncation) charges a step per position it visits, holes included.
 
-use std::cmp::Ordering;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 
 use super::ordinary::applied_property;
 use super::property::{Descriptor, Key, Property, SMALL, Slot};
@@ -703,10 +704,10 @@ impl<H: Host> Agent<H> {
 }
 
 #[cfg(test)]
-thread_local! {
+std::thread_local! {
     /// The entries of the list the walk of `truncate_elements` visited, in the counting build of
     /// the tests; a test resets it before it reads it.
-    static TRUNCATION_VISITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static TRUNCATION_VISITS: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -720,6 +721,8 @@ mod tests {
     use crate::object::property::{Descriptor, Key, Property, SMALL};
     use crate::value::{ObjectRef, Value};
     use crate::{Outcome, Parsed, Realm, Source};
+    use alloc::format;
+    use alloc::vec::Vec;
 
     fn number(i: u32) -> Value {
         Value::Number(f64::from(i))
@@ -1059,7 +1062,7 @@ mod tests {
 
     /// The entries the walks of `truncate_elements` visited since the count was reset.
     fn truncation_visits() -> u64 {
-        TRUNCATION_VISITS.with(std::cell::Cell::get)
+        TRUNCATION_VISITS.with(core::cell::Cell::get)
     }
 
     /// An Array with the dense elements 0 to 2 and `keys` index keys in its list from 2,000 up,

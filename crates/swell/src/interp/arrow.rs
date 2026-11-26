@@ -9,7 +9,7 @@
 //! enclosing code, resolved by the compiler as any other name. It has no [[Construct]] and no
 //! `prototype` property.
 
-use std::rc::Rc;
+use alloc::rc::Rc;
 
 use super::dispatch::Flow;
 use crate::host::Host;

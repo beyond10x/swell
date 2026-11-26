@@ -43,7 +43,12 @@
 //! Kind site of the collector: [`ScriptRecord::trace`] (the realm, the constants' atoms and the
 //! template objects).
 
-use std::rc::Rc;
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::string::ToString;
+use alloc::vec;
+use alloc::vec::Vec;
 
 use swell_compiler::CompileError;
 use swell_compiler::bytecode::Code;
@@ -130,7 +135,7 @@ impl ScriptRecord {
 
     /// The host-defined value.
     pub(crate) fn host_defined(&self) -> Option<HostDefined> {
-        let data: &dyn std::any::Any = self.host_defined.as_ref()?.data.as_deref()?;
+        let data: &dyn core::any::Any = self.host_defined.as_ref()?.data.as_deref()?;
         data.downcast_ref::<ScriptHostDefined>()
             .map(|held| HostDefined::clone(&held.0))
     }
@@ -757,6 +762,10 @@ pub(crate) fn parse_termination(abrupt: Abrupt) -> Termination {
 
 #[cfg(test)]
 mod tests {
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec::Vec;
+    use std::println;
     use swell_syntax::ledger::{Ledger, Stop};
     use swell_syntax::{ParseOptions, Script as Tree};
 

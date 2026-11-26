@@ -27,6 +27,7 @@ use crate::object::builtin_function::KeptRoom;
 use crate::object::property::{Descriptor, Key, Property, Slot};
 use crate::object::{KeyList, ObjectKind, key_list_bytes};
 use crate::value::{ObjectRef, Value};
+use alloc::vec::Vec;
 
 /// The level of SetIntegrityLevel and TestIntegrityLevel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -775,7 +776,7 @@ impl<H: Host> Agent<H> {
             }
             let table = visited.keys.table_bytes();
             if table > visited.bytes {
-                // The standard library's map took more than its layout says: charged now.
+                // The map took more than its layout says: charged now.
                 self.charge_bytes(table - visited.bytes)?;
             } else {
                 self.heap.accounting.credit(visited.bytes - table);
@@ -826,6 +827,11 @@ mod tests {
     use crate::object::property::{Descriptor, Key, Property, Slot};
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Realm, Value};
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::string::ToString;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     fn constructor(_cx: &mut Cx<'_, NoHooks>, _call: HostCall<'_>) -> Completion<Value> {
         Ok(Value::Undefined)
@@ -954,7 +960,7 @@ mod tests {
     }
 
     /// Whether `completion` is a throw of a TypeError of the current realm.
-    fn is_type_error<T: std::fmt::Debug>(
+    fn is_type_error<T: core::fmt::Debug>(
         agent: &mut Agent<NoHooks>,
         completion: Completion<T>,
     ) -> bool {
@@ -2038,6 +2044,8 @@ mod tests {
     /// way out of EnumerateObjectProperties itself.
     mod every_exit_of_a_for_in_credits_its_key_list {
         use super::{Ends, assert_every_exit_credits};
+        use alloc::format;
+        use alloc::vec::Vec;
 
         #[test]
         fn normal_end() {

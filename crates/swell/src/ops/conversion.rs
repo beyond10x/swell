@@ -19,6 +19,9 @@ use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Key, array_index};
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, StringRef, Value};
+use alloc::string::ToString;
+use alloc::vec::Vec;
+use swell_num::fmath;
 
 /// The code units of a property name [`Agent::name_key`] encodes on the stack.
 const NAME_UNITS: usize = 64;
@@ -50,7 +53,7 @@ pub(crate) fn number_to_uint32(number: f64) -> u32 {
         return 0;
     }
     // rem_euclid answers an integer from 0 to 2^32 - 1, which the cast keeps exactly.
-    number.trunc().rem_euclid(4_294_967_296.0) as u32
+    fmath::rem_euclid(fmath::trunc(number), 4_294_967_296.0) as u32
 }
 
 /// ToFixedSizeInteger(int, unsigned, 16) (`#sec-tofixedsizeinteger`) of what
@@ -62,7 +65,7 @@ pub(crate) fn integer_to_uint16(int: f64) -> u16 {
     }
     // 2. Let fixedInt be int modulo 2^16. rem_euclid of an integer answers an integer from 0 to
     // 2^16 - 1, which the cast keeps exactly. 4. Return fixedInt.
-    int.trunc().rem_euclid(65_536.0) as u16
+    fmath::rem_euclid(fmath::trunc(int), 65_536.0) as u16
 }
 
 /// The result of clamping the integer, +∞ or -∞ `int` between 0 and `upper` (5.2.6,
@@ -214,7 +217,7 @@ impl<H: Host> Agent<H> {
         }
         // Truncation keeps the sign of a value above -1, so -0.5 would give -0: step 4 answers
         // +0 for it.
-        let integer = number.trunc();
+        let integer = fmath::trunc(number);
         Ok(if integer == 0.0 { 0.0 } else { integer })
     }
 
@@ -341,7 +344,7 @@ impl<H: Host> Agent<H> {
     pub(crate) fn to_property_key(&mut self, value: Value) -> Completion<Key> {
         if let Value::Number(number) = value
             && (0.0..ARRAY_INDEX_END).contains(&number)
-            && number.trunc() == number
+            && fmath::trunc(number) == number
         {
             // A non-negative integer below 2^32 - 1, which the cast keeps exactly; -0 is 0.
             return Ok(Key::Index(number as u32));
@@ -449,16 +452,12 @@ impl<H: Host> Agent<H> {
 #[cfg(test)]
 mod tests {
     use super::{clamp_index, number_to_int32, number_to_uint32};
-    use crate::heap::STRINGS_MADE;
     use crate::host::hooks::test_host::{agent_with_realm, enter};
     use crate::object::property::Key;
     use crate::value::Value;
     use crate::{Outcome, Parsed, Source};
-
-    /// The String records the heap stored since the count was reset.
-    fn strings_made() -> u64 {
-        STRINGS_MADE.with(std::cell::Cell::get)
-    }
+    use alloc::format;
+    use alloc::string::ToString;
 
     /// ToPropertyKey (`#sec-topropertykey`) of a Number: an integral Number from +0 to
     /// 2^32 - 2, and -0, whose ToString is "0", is the array index its ToString names, and no
@@ -473,13 +472,16 @@ mod tests {
             (7.0, 7),
             (4_294_967_294.0, 4_294_967_294),
         ] {
-            STRINGS_MADE.with(|made| made.set(0));
+            agent.heap.strings_made = 0;
             assert_eq!(
                 agent.to_property_key(Value::Number(number)),
                 Ok(Key::Index(index)),
                 "{number}"
             );
-            assert_eq!(strings_made(), 0, "Strings made for the key of {number}");
+            assert_eq!(
+                agent.heap.strings_made, 0,
+                "Strings made for the key of {number}"
+            );
         }
         for (number, text) in [
             (4_294_967_295.0, "4294967295"),
@@ -525,7 +527,7 @@ mod tests {
 
     /// The loop of `story:an-index-store-does-not-go-through-text`: `a[i] = i` for n = 8 and
     /// for 4n iterations stores the same number of Strings, none per store, read from the
-    /// heap's count of the String records it stored (`STRINGS_MADE`) around each run. On its
+    /// heap's count of the String records it stored (`Heap::strings_made`) around each run. On its
     /// base the loops stored n and 4n Strings. n is small for the mode with a collection at
     /// every safe point, where 64 and 256 took 4.1 s at a load of 77.
     #[test]
@@ -537,13 +539,13 @@ mod tests {
             else {
                 panic!("{source} did not parse");
             };
-            STRINGS_MADE.with(|made| made.set(0));
+            agent.heap.strings_made = 0;
             let outcome = agent.evaluate_script(&script);
             assert!(
                 matches!(outcome, Ok(Outcome::Normal(_))),
                 "{source}: {outcome:?}"
             );
-            strings_made()
+            agent.heap.strings_made
         };
         run("function f(n) { var a = []; for (var i = 0; i < n; i++) a[i] = i; return a.length; }");
         let made = [run(&format!("f({N})")), run(&format!("f({})", 4 * N))];
