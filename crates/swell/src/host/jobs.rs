@@ -162,6 +162,10 @@ impl<H: Host> Agent<H> {
             {
                 return Err(NoRoom::Budget);
             }
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "charged to `queue_charge` by `Charge::grow` before it grows"
+            )]
             if self.microtasks.try_reserve_exact(more).is_err() {
                 self.queue_charge.release(growth);
                 self.fault();

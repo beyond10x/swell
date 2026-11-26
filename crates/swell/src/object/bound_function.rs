@@ -91,6 +91,10 @@ pub(crate) fn bound_function_create<H: Host>(
     let owned = u64::try_from(size_of_val(arguments)).unwrap_or(u64::MAX);
     agent.charge_bytes(owned)?;
     let mut kept = Vec::new();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "charged by `charge_bytes` before it is reserved; the record owns it and its sweep credits it"
+    )]
     if kept.try_reserve_exact(arguments.len()).is_err() {
         agent.heap.accounting.credit(owned);
         return Err(agent.terminate(Termination::MemoryBudget));
@@ -253,6 +257,10 @@ fn call_gathered<H: Host>(
     invocation: Invocation,
 ) -> Completion<Value> {
     let mut gathered = Vec::new();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "charged by `walk` before it is reserved, a `Value` per gathered argument"
+    )]
     if gathered.try_reserve_exact(count).is_err() {
         return Err(agent.terminate(Termination::MemoryBudget));
     }

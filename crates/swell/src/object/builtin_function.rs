@@ -435,6 +435,10 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let length = self.kept.len();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged to the room's `Charge` by `Charge::grow` before it grows"
+        )]
         if self.kept.try_reserve_exact(wanted - length).is_err() {
             room.charge.release(bytes);
             return Err(self.terminate(Termination::MemoryBudget));

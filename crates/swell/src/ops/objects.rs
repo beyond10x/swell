@@ -492,6 +492,10 @@ impl<H: Host> Agent<H> {
         let bytes =
             u64::try_from(own_keys.len().saturating_mul(size_of::<Value>())).unwrap_or(u64::MAX);
         self.charge_bytes(bytes)?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `charge_bytes` before it is reserved, a `Value` per key; the caller credits it"
+        )]
         if results.try_reserve_exact(own_keys.len()).is_err() {
             self.heap.accounting.credit(bytes);
             return Err(self.terminate(Termination::MemoryBudget));
@@ -803,6 +807,10 @@ impl<H: Host> Agent<H> {
         let more = key_list_bytes(wanted).saturating_sub(list.bytes);
         self.charge_bytes(more)?;
         list.bytes = list.bytes.saturating_add(more);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `charge_bytes` into `list.bytes` before it grows"
+        )]
         if list
             .keys
             .try_reserve_exact(wanted.saturating_sub(length))

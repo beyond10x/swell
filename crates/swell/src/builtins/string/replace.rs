@@ -436,6 +436,10 @@ impl<H: Host> Agent<H> {
             self.charge_bytes(bytes)?;
             positions.charged = positions.charged.saturating_add(bytes);
             let length = positions.list.len();
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "charged by `charge_bytes` into `positions.charged` before it grows"
+            )]
             if positions.list.try_reserve_exact(wanted - length).is_err() {
                 return Err(self.terminate(Termination::MemoryBudget));
             }

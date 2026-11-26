@@ -58,6 +58,10 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let mut values = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged before it is reserved, a `Value` per rest argument"
+        )]
         if values.try_reserve_exact(count).is_err() {
             self.heap.accounting.credit(bytes);
             return Err(self.terminate(Termination::MemoryBudget));

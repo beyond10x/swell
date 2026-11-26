@@ -653,6 +653,10 @@ impl<H: Host> Agent<H> {
             }
             return self.new_string_str(INVALID_DATE);
         }
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "at most `TEXT_BYTES` bytes, dropped once its String is made"
+        )]
         let mut text = String::with_capacity(TEXT_BYTES);
         match form {
             Form::Iso | Form::Utc => {
@@ -843,6 +847,10 @@ impl<H: Host> Agent<H> {
         if let Some(time) = self.date_value(value)? {
             return Ok(time);
         }
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "at most the engine's name of a Date method and `REQUIRES`, dropped once the TypeError is made"
+        )]
         let mut message = String::with_capacity(method.len() + REQUIRES.len());
         message.push_str(method);
         message.push_str(REQUIRES);

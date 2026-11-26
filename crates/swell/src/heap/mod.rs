@@ -537,6 +537,10 @@ impl Heap {
             return Ok(Err(OverBudget));
         }
         let mut copy: Vec<u16> = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the key's copy, charged as `entry_bytes` before it is reserved"
+        )]
         if copy.try_reserve_exact(length).is_err() {
             self.accounting.credit(entry_bytes);
             return Ok(Err(OverBudget));

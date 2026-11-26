@@ -242,6 +242,10 @@ fn record_bytes(strings: usize, functions: usize, host_defined: bool) -> u64 {
 /// allocator refuses.
 fn exact<T>(n: usize) -> Option<Vec<T>> {
     let mut v = Vec::new();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "charged by `make_script_record` with the record before it is reserved (`record_bytes`, the template sites)"
+    )]
     v.try_reserve_exact(n).ok()?;
     Some(v)
 }
@@ -357,6 +361,10 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let mut units = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged before it is reserved, `vec_bytes::<u16>` of the copy"
+        )]
         if units.try_reserve_exact(length).is_err() {
             self.heap.accounting.credit(charged);
             return Err(self.terminate(Termination::MemoryBudget));
@@ -597,6 +605,10 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let mut locals = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged with the frame before it is reserved, `vec_bytes::<SlotValue>` of the locals"
+        )]
         if locals.try_reserve_exact(count).is_err() {
             self.heap.accounting.credit(charged);
             return Err(self.terminate(Termination::MemoryBudget));

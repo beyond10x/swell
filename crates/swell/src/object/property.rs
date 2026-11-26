@@ -400,6 +400,10 @@ impl<V> KeyedList<V> {
             accounting.credit(list_bytes);
             return Err(over);
         }
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged as `list_bytes` before it grows"
+        )]
         if self
             .entries
             .try_reserve_exact(wanted.saturating_sub(length))
