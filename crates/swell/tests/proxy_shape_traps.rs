@@ -940,3 +940,299 @@ fn the_target_is_read_only_at_the_steps_of_each_clause() {
          deleteProperty:true:[getOwnPropertyDescriptor+isExtensible]",
     );
 }
+
+/// [`answers_once`] with steps for [`JUNK`], whose String in the default mode spends a step per
+/// code unit it copies.
+fn answers_with_junk(source: &str, expected: &str) {
+    let mut budget = limits();
+    budget.steps_per_entry = 1 << 40;
+    let source = format!("{PRELUDE}{JUNK}{FRESH}{source}");
+    let expected = Outcome::Normal(format!("\"{expected}\""));
+    assert_eq!(run(budget, &source), expected, "{source}");
+}
+
+/// `junk()`, called first in a trap, makes a collection run inside that trap in both modes, so
+/// that a value the engine holds only in a Rust local across the trap is freed and its next use
+/// ends in `Terminated(EngineFault)` or a wrong answer. With `collect-every-safe-point` every safe
+/// point collects, and the loop passes a few. In the default mode it makes and drops Strings of
+/// up to 2^19 code units by doubling (2 MiB in all, past the 1 MiB threshold `MIN_TRIGGER_BYTES`,
+/// which is above the live reading of a test realm), passing a safe point after each, at which
+/// the collection that falls due runs.
+const JUNK: &str = if cfg!(feature = "collect-every-safe-point") {
+    "function junk() { var n = 0; for (var j = 0; j < 3; j++) n = n + j; return n; }\n"
+} else {
+    "function junk() {\n\
+       var s = \"xy\";\n\
+       for (var i = 0; i < 18; i++) s = s + s;\n\
+       s = null;\n\
+       var n = 0;\n\
+       for (var j = 0; j < 3; j++) n = n + j;\n\
+       return n;\n\
+     }\n"
+};
+
+/// `fresh(depth)` is a Proxy over an empty extensible target whose every trap runs `junk()` and
+/// answers what it makes there, held by nothing else: `ownKeys` new Strings `d<depth>a` and
+/// `d<depth>b` and a new Symbol; `getOwnPropertyDescriptor` a new descriptor object, enumerable,
+/// whose value is a new String, for those keys (`mine`) and for any Symbol; `getPrototypeOf` a
+/// new `fresh(depth - 1)`, `null` at depth 0; `has` and `get` answer for those keys and ask a new
+/// `fresh(depth - 1)` for others; `get` answers `g<key>`, or with `descs` a new descriptor object
+/// `{ value: "w<key>", enumerable: true }`; `defineProperty`, `deleteProperty` and
+/// `setPrototypeOf` answer true, `isExtensible` true and `preventExtensions` false. Every answer
+/// keeps the invariants of an extensible target that has no property.
+const FRESH: &str = r#"
+function fresh(depth, descs) {
+  function mine(k) { return typeof k === "symbol" || String(k).slice(0, 2) === "d" + depth; }
+  return new Proxy({}, {
+    ownKeys: function () { junk(); return ["d" + depth + "a", "d" + depth + "b", Symbol("s" + depth)]; },
+    getOwnPropertyDescriptor: function (t, k) {
+      junk();
+      return mine(k) ? { value: "v" + String(k), writable: true, enumerable: true, configurable: true } : undefined;
+    },
+    getPrototypeOf: function () { junk(); return depth > 0 ? fresh(depth - 1, descs) : null; },
+    has: function (t, k) { junk(); return mine(k) || (depth > 0 && k in fresh(depth - 1, descs)); },
+    get: function (t, k, r) {
+      junk();
+      if (!mine(k)) return depth > 0 ? Reflect.get(fresh(depth - 1, descs), k, r) : undefined;
+      return descs ? { value: "w" + String(k), enumerable: true } : "g" + String(k);
+    },
+    defineProperty: function () { junk(); return true; },
+    deleteProperty: function () { junk(); return true; },
+    isExtensible: function () { junk(); return true; },
+    preventExtensions: function () { junk(); return false; },
+    setPrototypeOf: function () { junk(); return true; }
+  });
+}
+"#;
+
+/// `JSON.stringify` of a Proxy (SerializeJSONObject, EnumerableOwnProperties of kind key) holds
+/// the keys an `ownKeys` trap made at run time while the `getOwnPropertyDescriptor` trap of each
+/// key runs code that collects (`ops/objects.rs`, `enumerable_own_keys`).
+#[test]
+fn json_stringify_holds_the_keys_an_own_keys_trap_made() {
+    answers_with_junk(
+        r#"var p = new Proxy({}, {
+          ownKeys: function () { return ["k" + 1, "k" + 2, "k" + 3]; },
+          getOwnPropertyDescriptor: function () {
+            junk(); return { value: 1, writable: true, enumerable: true, configurable: true }; },
+          get: function (t, k) { return "v" + k; }
+        });
+        [JSON.stringify(p).split("\"").join("|"), JSON.stringify(fresh(0)).split("\"").join("|")].join(" ");"#,
+        "{|k1|:|vk1|,|k2|:|vk2|,|k3|:|vk3|} {|d0a|:|gd0a|,|d0b|:|gd0b|}",
+    );
+}
+
+/// The reviver walk of `JSON.parse` (InternalizeJSONProperty, EnumerableOwnProperties of kind
+/// key) over a Proxy the reviver put in place holds the keys its `ownKeys` trap made while its
+/// `getOwnPropertyDescriptor` trap collects; the reviver's answers are defined on the Proxy.
+#[test]
+fn json_parse_reviver_walk_holds_the_keys_an_own_keys_trap_made() {
+    answers_with_junk(
+        r#"var p = new Proxy({}, {
+          ownKeys: function () { return ["k" + 1, "k" + 2]; },
+          getOwnPropertyDescriptor: function () {
+            junk(); return { value: 1, writable: true, enumerable: true, configurable: true }; },
+          get: function () { return 7; }
+        });
+        var log = [];
+        JSON.parse('{"a":1,"b":2,"c":3}', function (k, v) {
+          if (k === "a") this.b = p;
+          if (k === "b") this.c = fresh(0);
+          log.push(k);
+          return v;
+        });
+        log.join();"#,
+        "a,k1,k2,b,d0a,d0b,c,",
+    );
+}
+
+/// `for`-`in` over a Proxy (EnumerateObjectProperties) holds the keys its `ownKeys` trap made at
+/// run time while its `getOwnPropertyDescriptor` trap collects.
+#[test]
+fn for_in_holds_the_keys_an_own_keys_trap_made() {
+    answers_with_junk(
+        r#"var p = new Proxy({}, {
+          ownKeys: function () { return ["k" + 1, "k" + 2, "k" + 3]; },
+          getOwnPropertyDescriptor: function () {
+            junk(); return { value: 1, enumerable: true, configurable: true }; },
+          has: function () { return true; }
+        });
+        var r = [];
+        for (var k in p) r.push(k);
+        r.join();"#,
+        "k1,k2,k3",
+    );
+}
+
+/// `for`-`in` holds the prototype a `getPrototypeOf` trap made (a new Proxy, held by nothing
+/// else) while that prototype's own traps collect; its keys are literals, so only the object is
+/// at stake.
+#[test]
+fn for_in_holds_a_prototype_a_get_prototype_of_trap_made() {
+    answers_with_junk(
+        r#"function made() {
+          return new Proxy({}, {
+            ownKeys: function () { junk(); return ["z1", "z2"]; },
+            getOwnPropertyDescriptor: function () {
+              junk(); return { value: 1, enumerable: true, configurable: true }; },
+            getPrototypeOf: function () { junk(); return null; }
+          });
+        }
+        var p = new Proxy({}, {
+          ownKeys: function () { return []; },
+          getPrototypeOf: function () { return made(); },
+          has: function () { return true; }
+        });
+        var r = [];
+        for (var k in p) r.push(k);
+        r.join();"#,
+        "z1,z2",
+    );
+}
+
+/// `for`-`in` over an ordinary object whose chain runs through [`FRESH`] Proxies: the keys of
+/// the object itself (made at run time, one of them deleted by the body before it is reached),
+/// then those of each Proxy, each name once, a name of the object shadowing the same name
+/// further up.
+#[test]
+fn fresh_answers_are_held_by_for_in() {
+    answers_with_junk(
+        r#"var o = Object.create(fresh(1));
+        o["o" + 1] = 1; o["o" + 2] = 2; o["d0" + "a"] = 3;
+        var r = [];
+        for (var k in o) { if (k === "o1") delete o.o2; r.push(k); }
+        var q = [];
+        for (var k in fresh(2)) q.push(k);
+        r.join("+") + " " + q.join("+");"#,
+        "o1+d0a+d1a+d1b+d0b d2a+d2b+d1a+d1b+d0a+d0b",
+    );
+}
+
+/// EnumerableOwnProperties of kind key, value and key+value (`Object.keys`, `values`,
+/// `entries`) over a [`FRESH`] Proxy.
+#[test]
+fn fresh_answers_are_held_by_enumerable_own_properties() {
+    answers_with_junk(
+        r#"[Object.keys(fresh(0)).join("+"), Object.values(fresh(0)).join("+"),
+         Object.entries(fresh(0)).join("+")].join(" ");"#,
+        "d0a+d0b gd0a+gd0b d0a,gd0a+d0b,gd0b",
+    );
+}
+
+/// CopyDataProperties and `Object.assign` from a [`FRESH`] Proxy: the String keys and the Symbol
+/// it answers are copied with the values its `get` trap made.
+#[test]
+fn fresh_answers_are_held_by_copy_data_properties() {
+    answers_with_junk(
+        r#"function shown(o) {
+          return Object.keys(o).join("+") + "/" + Object.getOwnPropertySymbols(o).length + "/" + o.d0b;
+        }
+        var assigned = Object.assign({}, fresh(0));
+        var spread = { ...fresh(0) };
+        var { d0a, ...rest } = fresh(0);
+        [shown(assigned), shown(spread), d0a, shown(rest)].join(" ");"#,
+        "d0a+d0b/1/gd0b d0a+d0b/1/gd0b gd0a d0b/1/gd0b",
+    );
+}
+
+/// SetIntegrityLevel and TestIntegrityLevel over a Proxy of a non-extensible target whose traps
+/// collect and answer new descriptor objects with values made at run time.
+#[test]
+fn fresh_answers_are_held_by_the_integrity_levels() {
+    answers_with_junk(
+        r#"function closed() {
+          var t = {};
+          t["c" + 1] = "x" + 1;
+          Object.defineProperty(t, "c" + 2, { get: function () { return 1; }, configurable: true, enumerable: true });
+          Object.preventExtensions(t);
+          return new Proxy(t, {
+            ownKeys: function (t) { junk(); return Reflect.ownKeys(t); },
+            getOwnPropertyDescriptor: function (t, k) {
+              junk();
+              var d = Reflect.getOwnPropertyDescriptor(t, k);
+              if (d && "value" in d) {
+                d = { value: d.value + "", writable: d.writable, enumerable: d.enumerable, configurable: d.configurable };
+              }
+              return d;
+            },
+            defineProperty: function (t, k, d) { junk(); return Reflect.defineProperty(t, k, d); },
+            isExtensible: function (t) { junk(); return Reflect.isExtensible(t); },
+            preventExtensions: function (t) { junk(); return Reflect.preventExtensions(t); }
+          });
+        }
+        [Object.isFrozen(closed()), Object.isSealed(closed()),
+         Object.isFrozen(Object.freeze(closed())), Object.isSealed(Object.seal(closed())),
+         outcome(function () { return Object.freeze(fresh(0)); })].join();"#,
+        "false,false,true,true,TypeError(the object cannot be made non-extensible)",
+    );
+}
+
+/// The lists of own keys and what is read for them: `Reflect.ownKeys`,
+/// `Object.getOwnPropertyNames` and `getOwnPropertySymbols`, `getOwnPropertyDescriptors`,
+/// `Object.defineProperties` and `Object.create` with a [`FRESH`] Proxy of descriptor objects.
+#[test]
+fn fresh_answers_are_held_by_the_lists_of_own_keys() {
+    answers_with_junk(
+        r#"var defined = Object.defineProperties({}, fresh(0, true));
+        var created = Object.create(null, fresh(1, true));
+        var descriptors = Object.getOwnPropertyDescriptors(fresh(0));
+        [Reflect.ownKeys(fresh(0)).length, Object.getOwnPropertyNames(fresh(0)).join("+"),
+         Object.getOwnPropertySymbols(fresh(0)).length,
+         Object.keys(descriptors).join("+") + "=" + descriptors.d0b.value,
+         Object.keys(defined).join("+") + "=" + defined.d0b,
+         Object.keys(created).join("+") + "=" + created.d1a].join(" ");"#,
+        "3 d0a+d0b 1 d0a+d0b=vd0b d0a+d0b=wd0b d1a+d1b=wd1a",
+    );
+}
+
+/// The walks of a prototype chain through Proxies whose `getPrototypeOf` traps answer new
+/// Proxies: `instanceof` (OrdinaryHasInstance, the constructor's `prototype` made by a `get`
+/// trap), `isPrototypeOf` with a primitive this value, [[Get]] and [[HasProperty]] of an
+/// ordinary object whose parent is a [`FRESH`] Proxy, and `bind` of a callable Proxy.
+#[test]
+fn fresh_answers_are_held_by_the_walks_of_a_prototype_chain() {
+    answers_with_junk(
+        r#"var C = new Proxy(function () {}, {
+          get: function (t, k) { junk(); return k === "prototype" ? {} : Reflect.get(t, k); }
+        });
+        function F() {}
+        var v = new Proxy({}, { getPrototypeOf: function () {
+          junk();
+          return new Proxy({}, { getPrototypeOf: function () { junk(); return F.prototype; } });
+        } });
+        var g = new Proxy(function () { return 7; }, {
+          getPrototypeOf: function () { junk(); return fresh(0); }
+        });
+        var b = g.bind(null);
+        var o = Object.create(fresh(1));
+        [fresh(2) instanceof C, v instanceof F, Object.prototype.isPrototypeOf.call("s", fresh(2)),
+         F.prototype.isPrototypeOf(v), Object.getPrototypeOf(b) !== null, o.d0b, "d0a" in o,
+         b()].join();"#,
+        "false,true,false,true,true,gd0b,true,7",
+    );
+}
+
+/// CreateDataProperty and the ordinary [[Set]] on a Proxy whose `defineProperty` trap collects:
+/// the array `map` makes through `@@species`, the object `Array.of` and `Array.from` construct,
+/// and a Proxy receiver of `Reflect.set`; keys and values made at run time.
+#[test]
+fn fresh_answers_are_held_by_the_definitions() {
+    answers_with_junk(
+        r#"var log = [];
+        function logged() {
+          return new Proxy({}, {
+            getOwnPropertyDescriptor: function () { junk(); return undefined; },
+            defineProperty: function (t, k, d) { junk(); log.push(k + "=" + d.value); return true; }
+          });
+        }
+        var a = [1, 2];
+        a.constructor = {};
+        a.constructor[Symbol.species] = function () { return logged(); };
+        a.map(function (x) { return "m" + x; });
+        Array.of.call(function () { return logged(); }, "a" + 1, "b" + 2);
+        Array.from.call(function () { return logged(); }, ["x" + 1]);
+        Reflect.set({}, "r" + 1, "v" + 1, logged());
+        log.join();"#,
+        "0=m1,1=m2,0=a1,1=b2,length=2,0=x1,length=1,r1=v1",
+    );
+}

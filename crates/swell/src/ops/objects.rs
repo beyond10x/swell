@@ -25,7 +25,7 @@ use crate::host::outcome::{Completion, Termination};
 use crate::host::{ErrorKind, Host};
 use crate::object::builtin_function::KeptRoom;
 use crate::object::property::{Descriptor, Key, Property, Slot};
-use crate::object::{KeyList, ObjectKind, key_list_bytes};
+use crate::object::{KeyList, KindTag, ObjectKind, key_list_bytes};
 use crate::value::{ObjectRef, Value};
 use alloc::vec::Vec;
 
@@ -245,7 +245,8 @@ impl<H: Host> Agent<H> {
     /// Run `steps` over the own keys of `object`, held as [`Agent::held_own_keys`] holds them;
     /// whatever `steps` answers, the list is credited, what was kept is released and the kept
     /// stack is given back its room. The integrity levels and
-    /// `Object.getOwnPropertyDescriptors` hold their keys this way; no code runs in their steps.
+    /// `Object.getOwnPropertyDescriptors` hold their keys this way: over a Proxy, their steps
+    /// run its traps.
     pub(crate) fn with_held_own_keys<T>(
         &mut self,
         object: ObjectRef,
@@ -377,10 +378,13 @@ impl<H: Host> Agent<H> {
     /// EnumerableOwnProperties ( O, kind ) (`#sec-enumerableownproperties`) of kind key, the
     /// keys as the property keys they are (a String key, an array index as `Key::Index`): the
     /// String keys of `object` whose own property is enumerable, in the order of
-    /// [[OwnPropertyKeys]]. A step per key; each key answered is kept on the kept stack, in room
-    /// charged to `room`, which the caller ends with the mark it took before the call. The list
-    /// answered is charged before it is reserved; the caller credits it or takes its charge
-    /// over. The list of own keys is credited when it drops, on every way out. No code runs.
+    /// [[OwnPropertyKeys]]. A step per key; every own key, the keys answered among them, is kept
+    /// on the kept stack before the first [[GetOwnProperty]], in room charged to `room`, which
+    /// the caller ends with the mark it took before the call: of a Proxy, [[OwnPropertyKeys]]
+    /// answers keys its trap made, held by nothing else, and [[GetOwnProperty]] runs a trap that
+    /// may collect. The list answered is charged before it is reserved; the caller credits it or
+    /// takes its charge over. The list of own keys is credited when it drops, on every way out.
+    /// The caller holds `object`.
     pub(crate) fn enumerable_own_keys(
         &mut self,
         object: ObjectRef,
@@ -412,7 +416,9 @@ impl<H: Host> Agent<H> {
     }
 
     /// Step 3 of EnumerableOwnProperties of kind key: the enumerable String keys of
-    /// `own_keys` pushed to `keys`, which has room for all, and kept in room charged to `room`.
+    /// `own_keys` pushed to `keys`, which has room for all. Every key of `own_keys` is kept
+    /// first, in room charged to `room` (a slot per key, as many as the keys answered could
+    /// take), so that a trap of [[GetOwnProperty]] cannot collect one the loop still reads.
     fn push_enumerable_keys(
         &mut self,
         object: ObjectRef,
@@ -421,6 +427,9 @@ impl<H: Host> Agent<H> {
         keys: &mut Vec<Key>,
     ) -> Completion<()> {
         self.reserve_kept(room, own_keys.len())?;
+        for &key in own_keys {
+            self.keep_key(key);
+        }
         // 3. For each element key of ownKeys: a. If key is a String.
         for &key in own_keys {
             self.charge_steps(1)?;
@@ -433,7 +442,6 @@ impl<H: Host> Agent<H> {
                 .get_own_property(object, key)?
                 .is_some_and(|property| property.enumerable)
             {
-                self.keep_key(key);
                 keys.push(key);
             }
         }
@@ -650,7 +658,7 @@ impl<H: Host> Agent<H> {
             }
             constructor = target;
         };
-        let Value::Object(mut object) = value else {
+        let Value::Object(object) = value else {
             return Ok(false);
         };
         let key = self.name_key("prototype")?;
@@ -660,6 +668,25 @@ impl<H: Host> Agent<H> {
                 "the prototype of the right-hand side is not an object",
             ));
         };
+        // 6. Repeat: the walk runs the `getPrototypeOf` trap of each Proxy on the chain, which
+        // may collect, and P, which a `get` trap may have made, is compared after each: kept.
+        let mark = self.keep(Value::Object(prototype));
+        let found = self.prototype_chain_holds(object, prototype);
+        self.release(mark);
+        found
+    }
+
+    /// Whether `prototype` is on the prototype chain of `object`, above it: a step per object,
+    /// then its [[GetPrototypeOf]] (step 6 of OrdinaryHasInstance, step 3 of
+    /// `Object.prototype.isPrototypeOf`). Each object of the walk is used only by the call that
+    /// reads its prototype, at once; the caller holds `prototype`, which is compared after each
+    /// call, since a Proxy's `getPrototypeOf` trap runs code that may collect.
+    pub(crate) fn prototype_chain_holds(
+        &mut self,
+        object: ObjectRef,
+        prototype: ObjectRef,
+    ) -> Completion<bool> {
+        let mut object = object;
         loop {
             self.charge_steps(1)?;
             match self.get_prototype_of(object)? {
@@ -705,6 +732,15 @@ impl<H: Host> Agent<H> {
     /// keys visited are charged by capacity before each grows. The set is credited when the
     /// call returns, on every way out of it; the list is answered with its charge, which the
     /// caller holds, and credited here on an abrupt completion.
+    ///
+    /// Until the walk meets a Proxy no code runs, and the keys found and visited are atoms the
+    /// objects of the chain hold. From the first Proxy on, the methods of each object may run
+    /// traps that collect, answer keys and prototypes held by nothing else, or delete what an
+    /// earlier object held: the keys visited so far, then each object of the chain and every
+    /// key of its own keys are kept on the kept stack, each in room charged before it is kept
+    /// ([`Agent::reserve_kept`]), until the walk ends; the keys found are among them. The room
+    /// is given back and its charge credited on every way out. A chain of ordinary objects
+    /// keeps nothing and costs what it cost.
     pub(crate) fn enumerate_object_properties(&mut self, object: ObjectRef) -> Completion<KeyList> {
         let mut found = KeyList {
             keys: Vec::new(),
@@ -714,7 +750,10 @@ impl<H: Host> Agent<H> {
             keys: KeyedMap::with_hasher(self.heap.hasher),
             bytes: 0,
         };
-        let walked = self.enumerate_chain(object, &mut found, &mut visited);
+        let mark = self.kept.len();
+        let mut room = self.kept_room();
+        let walked = self.enumerate_chain(object, &mut found, &mut visited, &mut room);
+        self.end_kept_room(mark, &room);
         self.heap.accounting.credit(visited.bytes);
         match walked {
             Ok(()) => Ok(found),
@@ -727,22 +766,48 @@ impl<H: Host> Agent<H> {
 
     /// The objects of EnumerateObjectProperties, `object` and its prototype chain, each with a
     /// step before its own keys are asked for; each list of own keys is credited once it is
-    /// consumed, on every way out.
+    /// consumed, on every way out. From the first Proxy on, what the walk holds is kept in
+    /// `room` ([`Agent::enumerate_object_properties`]).
     fn enumerate_chain(
         &mut self,
         object: ObjectRef,
         found: &mut KeyList,
         visited: &mut Visited,
+        room: &mut KeptRoom,
     ) -> Completion<()> {
+        let mut held = false;
         let mut current = Some(object);
         while let Some(o) = current {
             self.charge_steps(1)?;
-            let own_keys = self.own_property_keys(o)?;
+            if !held && self.kind_of(o)? == KindTag::Proxy {
+                held = true;
+                self.keep_visited(visited, room)?;
+            }
+            let own_keys = if held {
+                self.reserve_kept(room, 1)?;
+                self.keep(Value::Object(o));
+                self.held_own_keys(o, room)?
+            } else {
+                self.own_property_keys(o)?
+            };
             let walked = self.enumerate_own_keys(o, &own_keys, visited, found);
             self.drop_key_list(own_keys);
             walked?;
             current = self.get_prototype_of(o)?;
         }
+        Ok(())
+    }
+
+    /// Keep the keys `visited` holds, in room charged to `room` first: at the first Proxy of
+    /// the walk, the keys of the ordinary objects before it, which a trap may delete from
+    /// them while the walk still compares names with them; the keys found are among them.
+    fn keep_visited(&mut self, visited: &mut Visited, room: &mut KeptRoom) -> Completion<()> {
+        self.reserve_kept(room, visited.keys.len())?;
+        // A pass over the entries that keeps every one; the map's only walk over its keys.
+        visited.keys.retain(|&key, _| {
+            self.keep_key(key);
+            true
+        });
         Ok(())
     }
 
