@@ -250,3 +250,64 @@ tasks:
           fi
         fi
         exit "$bad"
+
+  slow-time-sum:
+    desc: Internal, the last step of the lane slow. Print the lane's seconds and its longest part; fail when a part ran over SLOW_PART_BUDGET (600 s) or the lane over SLOW_LANE_BUDGET (900 s).
+    summary: |
+      Internal, the last step of the lane slow (task slow; story
+      realm-size-lane-within-its-share, point 4). It reads the lines "slow-time <part>
+      <seconds>" that gate-time writes with LABEL slow-time to .out/gate-time/steps after each
+      part, and prints "slow-time lane <sum> of <lane bound>, longest part <part> <seconds> of
+      <part bound>". The bounds are the operator's of 2026-11-26 (D53): SLOW_LANE_BUDGET, 900
+      seconds for the lane on the forge, and SLOW_PART_BUDGET, 600 seconds for each of its
+      parts. The defaults of this task are the one place that holds them; a value given on the
+      command line or in the environment replaces one, and gate-vars prints it on the lane's
+      first line. It fails, after printing every line, with "slow-time: the part <part> ran
+      <seconds> s, over the bound of <part bound> s for a part" for each part over its bound,
+      and with "slow-time: the lane ran <sum> s, over its bound of <lane bound> s; the slowest:
+      <part> <s>, <part> <s>, <part> <s>" when the sum is over the lane's. A bound that is not a
+      number of seconds fails, and so does a missing file or one without a slow-time line. The
+      planted scripts tests/gate/slow-time-refuses-a-part-over-its-bound.sh and
+      tests/gate/slow-time-refuses-the-lane-over-its-bound.sh hold both refusals with planted
+      lines, no part run.
+    silent: true
+    vars:
+      SLOW_LANE_BUDGET: '{{.SLOW_LANE_BUDGET | default "900"}}'
+      SLOW_PART_BUDGET: '{{.SLOW_PART_BUDGET | default "600"}}'
+    cmds:
+      - |
+        [ -f .out/gate-time/steps ] || { echo "slow-time: no file .out/gate-time/steps; gate-time-start and gate-time write it"; exit 1; }
+        awk -v lane='{{.SLOW_LANE_BUDGET}}' -v part='{{.SLOW_PART_BUDGET}}' '
+          BEGIN {
+            if (lane !~ /^[0-9]+(\.[0-9]+)?$/) { print "slow-time: SLOW_LANE_BUDGET " lane " is not a number of seconds"; bad = 1 }
+            if (part !~ /^[0-9]+(\.[0-9]+)?$/) { print "slow-time: SLOW_PART_BUDGET " part " is not a number of seconds"; bad = 1 }
+            if (bad) exit 1
+          }
+          $1 == "slow-time" {
+            n++; step[n] = $2; secs[n] = $3 + 0; s += $3
+            if (longest == 0 || secs[n] > secs[longest]) longest = n
+          }
+          END {
+            if (bad) exit 1
+            if (!n) { print "slow-time: no part was timed in .out/gate-time/steps"; exit 1 }
+            printf "slow-time lane %.1f of %s, longest part %s %.1f of %s\n", s, lane, step[longest], secs[longest], part
+            for (i = 1; i <= n; i++) {
+              if (sprintf("%.1f", secs[i]) + 0 > part + 0) {
+                printf "slow-time: the part %s ran %.1f s, over the bound of %s s for a part\n", step[i], secs[i], part
+                bad = 1
+              }
+            }
+            if (sprintf("%.1f", s) + 0 > lane + 0) {
+              line = ""
+              for (k = 1; k <= 3 && k <= n; k++) {
+                best = 0
+                for (i = 1; i <= n; i++) if (!(i in used) && (best == 0 || secs[i] > secs[best])) best = i
+                used[best] = 1
+                line = line (k > 1 ? ", " : "") step[best] " " sprintf("%.1f", secs[best])
+              }
+              printf "slow-time: the lane ran %.1f s, over its bound of %s s; the slowest: %s\n", s, lane, line
+              bad = 1
+            }
+            exit bad
+          }
+        ' .out/gate-time/steps
