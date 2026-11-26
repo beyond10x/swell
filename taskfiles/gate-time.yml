@@ -8,7 +8,8 @@ tasks:
     summary: |
       Internal. Starts the clock of the gate's test steps (.out/gate-time/mark, and
       .out/gate-time/start, written here only, whose modification time gate-time-sum compares
-      the files of the cargo target directories with) and writes to .out/gate-time/cpu the PID
+      the files of the cargo target directories with, and whose time slow-time-sum reads as the
+      clock of the lane slow, which runs this task first) and writes to .out/gate-time/cpu the PID
       of this task process and the CPU time, user and system, of every process it has waited
       for: fields cutime and cstime of /proc/<pid>/stat, in clock ticks, and the same ticks to
       .out/gate-time/cpu-mark. A child counts there once it has ended and been waited for, with
@@ -270,6 +271,27 @@ tasks:
       planted scripts tests/gate/slow-time-refuses-a-part-over-its-bound.sh and
       tests/gate/slow-time-refuses-the-lane-over-its-bound.sh hold both refusals with planted
       lines, no part run.
+
+      The lane's clock. The sum holds only the parts that have a slow-time line; a step of slow
+      without one (added after stack-profiles, or a wait between two parts) is in no sum. So it
+      reads the lane's clock too: .out/gate-time/start, the time gate-time-start wrote as the
+      first step of slow, and prints "slow-time clock <seconds> of <lane bound>, from the lane's
+      start in .out/gate-time/start", its seconds from that start to now. It fails with
+      "slow-time: the lane ran <clock> s by its clock, over its bound of <lane bound> s; its
+      timed parts sum to <sum> s, <clock - sum> s of it in no part's slow-time line" when the
+      clock is over the lane's bound, and it fails when there is no clock to read (no file, or
+      one that holds no time in seconds). A clock and slow-time lines left by an earlier run
+      never pass a lane: gate-time-start writes .out/gate-time/cpu with the PID of its task
+      process beside the clock, and when that PID is not the one of slow-time-sum's own task
+      process (slow-time-sum called on its own, after parts run one by one as their own jobs,
+      or after another task wrote the clock) it fails with "slow-time: the lane's clock
+      .out/gate-time/start was started by the task process <pid>, not by this one (<pid>) ...".
+      A part run on its own (task slow-test262, task slow-tests, task test-realm-sizes, the
+      stack profiles) does not run slow-time-sum and reads no clock, so no clock fails it; it
+      has no lane sum either. A planted script without the file .out/gate-time/cpu, as gate-time
+      reads it too, is not checked for the PID.
+      tests/gate/slow-time-refuses-a-lane-whose-untimed-part-ran-over-its-bound.sh holds the
+      refusal by the clock.
     silent: true
     vars:
       SLOW_LANE_BUDGET: '{{.SLOW_LANE_BUDGET | default "900"}}'
@@ -277,7 +299,25 @@ tasks:
     cmds:
       - |
         [ -f .out/gate-time/steps ] || { echo "slow-time: no file .out/gate-time/steps; gate-time-start and gate-time write it"; exit 1; }
-        awk -v lane='{{.SLOW_LANE_BUDGET}}' -v part='{{.SLOW_PART_BUDGET}}' '
+        now=$(date +%s.%N)
+        pid=$(sh -c 'echo $PPID')
+        clock=""
+        why=""
+        start=$(cat .out/gate-time/start 2>/dev/null) || start=""
+        if [ ! -f .out/gate-time/start ]; then
+          why="slow-time: no lane clock .out/gate-time/start; gate-time-start writes it as the first step of task slow"
+        elif ! printf '%s\n' "$start" | grep -Eqx '[0-9]+(\.[0-9]+)?'; then
+          why="slow-time: the lane clock .out/gate-time/start holds \"$start\", not a time in seconds"
+        else
+          pid0=""
+          if [ -f .out/gate-time/cpu ]; then read -r pid0 _ < .out/gate-time/cpu || :; fi
+          if [ -n "$pid0" ] && [ "$pid0" != "$pid" ]; then
+            why="slow-time: the lane's clock .out/gate-time/start was started by the task process $pid0, not by this one ($pid): slow-time-sum reads the clock and the slow-time lines of the run of task slow it ends, and a part run on its own has no lane sum"
+          else
+            clock=$(awk -v a="$start" -v b="$now" 'BEGIN { printf "%.1f", b - a }')
+          fi
+        fi
+        awk -v lane='{{.SLOW_LANE_BUDGET}}' -v part='{{.SLOW_PART_BUDGET}}' -v clock="$clock" -v why="$why" '
           BEGIN {
             if (lane !~ /^[0-9]+(\.[0-9]+)?$/) { print "slow-time: SLOW_LANE_BUDGET " lane " is not a number of seconds"; bad = 1 }
             if (part !~ /^[0-9]+(\.[0-9]+)?$/) { print "slow-time: SLOW_PART_BUDGET " part " is not a number of seconds"; bad = 1 }
@@ -291,6 +331,7 @@ tasks:
             if (bad) exit 1
             if (!n) { print "slow-time: no part was timed in .out/gate-time/steps"; exit 1 }
             printf "slow-time lane %.1f of %s, longest part %s %.1f of %s\n", s, lane, step[longest], secs[longest], part
+            if (clock != "") printf "slow-time clock %s of %s, from the lane'\''s start in .out/gate-time/start\n", clock, lane
             for (i = 1; i <= n; i++) {
               if (sprintf("%.1f", secs[i]) + 0 > part + 0) {
                 printf "slow-time: the part %s ran %.1f s, over the bound of %s s for a part\n", step[i], secs[i], part
@@ -306,6 +347,11 @@ tasks:
                 line = line (k > 1 ? ", " : "") step[best] " " sprintf("%.1f", secs[best])
               }
               printf "slow-time: the lane ran %.1f s, over its bound of %s s; the slowest: %s\n", s, lane, line
+              bad = 1
+            }
+            if (why != "") { print why; bad = 1 }
+            else if (clock + 0 > lane + 0) {
+              printf "slow-time: the lane ran %.1f s by its clock, over its bound of %s s; its timed parts sum to %.1f s, %.1f s of it in no part'\''s slow-time line\n", clock, lane, s, clock - s
               bad = 1
             }
             exit bad

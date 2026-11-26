@@ -42,6 +42,8 @@ awk -v lane="$lane" -v part="$part" 'BEGIN { exit !(lane / 4 + 0.1 <= part + 0) 
 printf "version: '3'\n\nincludes:\n  gate:\n    taskfile: %s\n    flatten: true\n" "$(pwd)/taskfiles/gate-time.yml" > "$dir/run/Taskfile.yml" ||
   fail "cannot write the planted Taskfile.yml"
 t() { task -d "$dir/run" "$@"; }
+# The lane's clock, started now as gate-time-start does, so that only the planted lines decide.
+date +%s > "$dir/run/.out/gate-time/start" || fail "cannot write the lane's clock"
 
 plant() {
   awk -v lane="$lane" -v how="$1" 'BEGIN {
