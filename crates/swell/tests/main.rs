@@ -67,6 +67,7 @@ mod language;
 mod lexical_declarations;
 mod limits_scripts;
 mod math_platform;
+mod math_random;
 mod math_sum_precise;
 mod misuse;
 mod names;
