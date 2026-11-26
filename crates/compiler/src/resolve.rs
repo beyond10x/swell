@@ -1306,6 +1306,11 @@ impl<'a, 'm> Resolver<'a, 'm> {
             Expr::SuperMember(SuperKey::Name(_)) => {}
             Expr::SuperMember(SuperKey::Computed(key)) => children.push(Walk::Expr(*key)),
             Expr::SuperCall(arguments) => children.extend(arguments.iter().map(|e| Walk::Expr(*e))),
+            // No source with a private name reaches the compiler while its element is held:
+            // `story:private-names-and-private-methods` and `story:private-fields-and-private-in`
+            // replace these arms.
+            Expr::PrivateMember { .. } => return Err(malformed("a private member")),
+            Expr::PrivateIn { .. } => return Err(malformed("a private name in")),
             Expr::New { callee, arguments } => {
                 children.push(Walk::Expr(*callee));
                 children.extend(arguments.iter().flatten().map(|e| Walk::Expr(*e)));
