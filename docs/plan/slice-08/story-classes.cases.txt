@@ -129,6 +129,8 @@ test/language/expressions/assignment/dstr/array-elem-init-fn-name-class.js
 test/language/expressions/assignment/dstr/obj-id-init-fn-name-class.js
 test/language/expressions/assignment/dstr/obj-prop-elem-init-fn-name-class.js
 test/language/expressions/assignment/fn-name-class.js
+test/language/expressions/assignment/target-super-computed-reference-null.js
+test/language/expressions/assignment/target-super-identifier-reference-null.js
 test/language/expressions/async-generator/dstr/ary-ptrn-elem-id-init-fn-name-class.js
 test/language/expressions/async-generator/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js
 test/language/expressions/async-generator/dstr/dflt-obj-ptrn-id-init-fn-name-class.js
@@ -1629,6 +1631,7 @@ test/language/expressions/class/scope-static-setter-paramsbody-var-close.js
 test/language/expressions/class/scope-static-setter-paramsbody-var-open.js
 test/language/expressions/class/setter-length-dflt.js
 test/language/expressions/class/static-method-length-dflt.js
+test/language/expressions/delete/super-property-null-base.js
 test/language/expressions/function/dstr/ary-ptrn-elem-id-init-fn-name-class.js
 test/language/expressions/function/dstr/dflt-ary-ptrn-elem-id-init-fn-name-class.js
 test/language/expressions/function/dstr/dflt-obj-ptrn-id-init-fn-name-class.js
@@ -1653,6 +1656,11 @@ test/language/expressions/object/dstr/meth-dflt-ary-ptrn-elem-id-init-fn-name-cl
 test/language/expressions/object/dstr/meth-dflt-obj-ptrn-id-init-fn-name-class.js
 test/language/expressions/object/dstr/meth-obj-ptrn-id-init-fn-name-class.js
 test/language/expressions/object/fn-name-class.js
+test/language/expressions/super/prop-dot-cls-ref-strict.js
+test/language/expressions/super/prop-expr-cls-err.js
+test/language/expressions/super/prop-expr-cls-key-err.js
+test/language/expressions/super/prop-expr-cls-ref-strict.js
+test/language/expressions/super/prop-expr-cls-unresolvable.js
 test/language/global-code/decl-lex-deletion.js
 test/language/global-code/decl-lex.js
 test/language/global-code/script-decl-lex-deletion.js
@@ -3215,6 +3223,7 @@ test/language/statements/class/setter-length-dflt.js
 test/language/statements/class/static-method-gen-non-configurable-err.js
 test/language/statements/class/static-method-length-dflt.js
 test/language/statements/class/static-method-non-configurable-err.js
+test/language/statements/class/syntax/class-body-method-definition-super-property.js
 test/language/statements/class/syntax/class-declaration-binding-identifier-class-element-list.js
 test/language/statements/class/syntax/class-declaration-computed-method-definition.js
 test/language/statements/class/syntax/class-declaration-computed-method-generator-definition.js

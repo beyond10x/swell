@@ -2,9 +2,9 @@
 format: aep.planning-md/3
 id: story:instance-elements-initialization-order
 kind: story
-status: draft
+status: archived
 title: 'InitializeInstanceElements as a whole: private methods before fields, at a base construct and after super()'
-summary: 448 cases (896 runs) that need fields with private methods, or either in a derived class.
+summary: 'Folded in revision 1 after round 1 of the plan critics: its 448 cases went to private-fields-and-private-in (446) and public-class-fields (2); no story names it.'
 relations:
 - decomposes: epic:slice-08-classes
 - depends_on: story:derived-classes-and-super-call
@@ -23,7 +23,9 @@ scope:
   path: crates/swell/tests/class_elements.rs
 - confidence: cited
   path: crates/swell/tests/main.rs
-revision: 3
+revision: 5
+transitions:
+- {from: "draft", to: "archived", at: "2026-11-26T07:08:46Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 ---
 ## Context
 

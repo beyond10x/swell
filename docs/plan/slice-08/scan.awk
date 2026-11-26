@@ -16,9 +16,11 @@
 #   PM  a private method or accessor (class-methods-private, class-static-methods-private)
 #   PF  a private field or #x in (class-fields-private, class-static-fields-private, class-fields-private-in)
 #   EV  a call of eval (eval then (, or (0, eval))
-#   L9  a part of slice 9 (Proxy, Reflect., Map, Set, WeakMap, WeakSet)
+#   L9  a part of slice 9 (Proxy, Reflect., Map, Set, WeakMap, WeakSet in the text, extends of one of the four
+#       collections, or the features Map, Set, WeakMap, WeakSet, Proxy, Reflect, Reflect.construct)
 #   L<n> a part of a later slice: a BigInt literal (12), binary data (13), Atomics (14), Iterator helpers or
-#       DisposableStack (15), WeakRef or FinalizationRegistry (16), import (11)
+#       DisposableStack (15), WeakRef or FinalizationRegistry (16), import (11), __lookupGetter__,
+#       __lookupSetter__, __defineGetter__ or __defineSetter__ (18, Annex B)
 # Keys, a case taking the first rule that matches:
 #   later <n>         a part of slice <n> delivered after 8 (the close moves it)
 #   slice-9           a part of slice 9 (the close checks it once slice 9 is delivered)
@@ -42,21 +44,20 @@
 #     eval-private    EV with PM or PF
 #     eval-fields     EV with D
 #     then the first of these keys whose story holds every part of the case (its closure through its edges):
-#     classes {B NT}, derived {B NT SP C}, public-fields {B NT D}, static-blocks {B NT E}, private-methods
-#     {B NT PM}, instance-elements {B NT SP C D PM}, private-fields {B NT SP C D PM E PF}
+#     classes {B NT SP}, derived {B NT SP C}, public-fields {B NT SP D}, static-blocks {B NT SP D E},
+#     private-methods {B NT SP PM}, private-fields {B NT SP C D PM E PF}
 # The list of a story, sorted (LC_ALL=C sort), read from scan.tsv:
 #   LC_ALL=C awk -F"\t" '$2 == "<key>" { print $1 }' docs/plan/slice-08/scan.tsv
 function slurp(f,   s, save) { save = RS; RS = "^$"; s = ""; if ((getline s < f) <= 0) s = ""; close(f); RS = save; return s }
 BEGIN { FS = "\t"; OFS = "\t"
   while ((getline line < meta) > 0) { split(line, m, "\t"); inc[m[1]] = m[6]; feat[m[1]] = "," m[3] ","; neg[m[1]] = m[4] }
-  cl["classes"] = " B NT "
+  cl["classes"] = " B NT SP "
   cl["derived"] = " B NT SP C "
-  cl["public-fields"] = " B NT D "
-  cl["static-blocks"] = " B NT E "
-  cl["private-methods"] = " B NT PM "
-  cl["instance-elements"] = " B NT SP C D PM "
+  cl["public-fields"] = " B NT SP D "
+  cl["static-blocks"] = " B NT SP D E "
+  cl["private-methods"] = " B NT SP PM "
   cl["private-fields"] = " B NT SP C D PM E PF "
-  no = split("classes derived public-fields static-blocks private-methods instance-elements private-fields", ord, " ")
+  no = split("classes derived public-fields static-blocks private-methods private-fields", ord, " ")
 }
 { p = $1; st = $2; f = feat[p]; ph = neg[p]
   t = slurp(root "/" p); n = split(inc[p], a, ",")
@@ -72,11 +73,11 @@ BEGIN { FS = "\t"; OFS = "\t"
   if (f ~ /,class-methods-private,|,class-static-methods-private,/) s = s "PM "
   if (f ~ /,class-fields-private,|,class-static-fields-private,|,class-fields-private-in,/) s = s "PF "
   if (c ~ /\<eval[ \t\n]*\(|\(0, *eval\)/) s = s "EV "
-  if (c ~ /\<Proxy\>|\<Reflect\.|new (Weak)?(Map|Set)\>|\<(Weak)?(Map|Set)(\[|\.|\()/) s = s "L9 "
+  if (c ~ /\<Proxy\>|\<Reflect\.|new (Weak)?(Map|Set)\>|\<(Weak)?(Map|Set)(\[|\.|\()|\<extends[ \t\n]+(Weak)?(Map|Set)\>/ || f ~ /,(Map|Set|WeakMap|WeakSet|Proxy|Reflect|Reflect\.construct),/) s = s "L9 "
   later = ""
-  if (match(c, /\<[0-9]+n\>|ArrayBuffer|\<(Int8|Uint8|Uint8Clamped|Int16|Uint16|Int32|Uint32|Float16|Float32|Float64|BigInt64|BigUint64)Array\>|DataView|\<Atomics\>|\<WeakRef\>|FinalizationRegistry|\<Iterator\.(from|prototype\.[a-z])|DisposableStack|\<import *\(|\<import\.meta\>/)) {
+  if (match(c, /\<[0-9]+n\>|ArrayBuffer|\<(Int8|Uint8|Uint8Clamped|Int16|Uint16|Int32|Uint32|Float16|Float32|Float64|BigInt64|BigUint64)Array\>|DataView|\<Atomics\>|\<WeakRef\>|FinalizationRegistry|\<Iterator\.(from|prototype\.[a-z])|DisposableStack|\<import *\(|\<import\.meta\>|__(lookup|define)(Getter|Setter)__/)) {
     x = substr(c, RSTART, RLENGTH)
-    later = (x ~ /^[0-9]+n$/) ? 12 : (x ~ /Atomics/) ? 14 : (x ~ /Iterator\.|Disposable/) ? 15 : (x ~ /WeakRef|Finalization/) ? 16 : (x ~ /import/) ? 11 : 13
+    later = (x ~ /^[0-9]+n$/) ? 12 : (x ~ /Atomics/) ? 14 : (x ~ /Iterator\.|Disposable/) ? 15 : (x ~ /WeakRef|Finalization/) ? 16 : (x ~ /import/) ? 11 : (x ~ /^__/) ? 18 : 13
     s = s "L" later " " }
   parts = substr(s, 2, length(s) - 2); if (parts == "") parts = "-"
   if (later != "") k = "later " later

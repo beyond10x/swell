@@ -11,6 +11,7 @@ test/language/expressions/object/method-definition/static-init-await-binding-nor
 test/language/expressions/object/method-definition/static-init-await-reference-accessor.js
 test/language/expressions/object/method-definition/static-init-await-reference-generator.js
 test/language/expressions/object/method-definition/static-init-await-reference-normal.js
+test/language/statements/class/static-init-abrupt.js
 test/language/statements/class/static-init-arguments-functions.js
 test/language/statements/class/static-init-arguments-label.js
 test/language/statements/class/static-init-arguments-methods.js
@@ -23,6 +24,7 @@ test/language/statements/class/static-init-scope-lex-open.js
 test/language/statements/class/static-init-scope-var-close.js
 test/language/statements/class/static-init-scope-var-derived.js
 test/language/statements/class/static-init-scope-var-open.js
+test/language/statements/class/static-init-sequence.js
 test/language/statements/class/static-init-statement-list-optional.js
 test/language/statements/const/static-init-await-binding-valid.js
 test/language/statements/function/static-init-await-binding-valid.js
