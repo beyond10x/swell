@@ -118,6 +118,10 @@ fn search_in_place(
         return Searched::Stopped(stop);
     }
     let mut captures = Vec::new();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "charged by `budget.charge` before it is reserved, a range per capture"
+    )]
     if captures.try_reserve_exact(count).is_err() {
         budget.credit(bytes);
         return Searched::Stopped(Stop::MemoryBudget);
@@ -326,6 +330,10 @@ impl<H: Host> Agent<H> {
         let bytes = u64::try_from(bytes).unwrap_or(u64::MAX);
         self.charge_bytes(bytes)?;
         let mut names = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `charge_bytes` with the names' text before it is reserved"
+        )]
         if names.try_reserve_exact(count).is_err() {
             self.heap.accounting.credit(bytes);
             return Err(self.terminate(crate::host::Termination::MemoryBudget));

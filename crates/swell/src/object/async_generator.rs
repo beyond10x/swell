@@ -73,7 +73,10 @@ pub(crate) struct AsyncGenerator {
     pub(crate) frame: Option<SuspendedFrame>,
     /// [[AsyncGeneratorQueue]], in a box: the kind holds one pointer for it, so the record of
     /// every object keeps its size (item 1).
-    #[allow(clippy::box_collection)]
+    #[expect(
+        clippy::box_collection,
+        reason = "the kind holds one pointer for the queue, so the record of every object keeps its size"
+    )]
     pub(crate) queue: Box<VecDeque<Request>>,
 }
 

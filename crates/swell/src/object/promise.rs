@@ -322,6 +322,10 @@ impl<H: Host> Agent<H> {
                 queue,
             })
         });
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "both lists of reactions, charged by `charge_bytes` as `growth` before they grow"
+        )]
         let reserved = reactions
             .fulfill
             .try_reserve_exact(fulfill_wanted.saturating_sub(reactions.fulfill.len()))

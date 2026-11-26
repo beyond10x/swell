@@ -142,6 +142,10 @@ impl<H: Host> Agent<H> {
                     let bytes = u64::try_from(size_of_val(args)).unwrap_or(u64::MAX);
                     self.charge_bytes(bytes)?;
                     let mut kept = Vec::new();
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "charged by `charge_bytes` before it is reserved, credited by `leave_code`"
+                    )]
                     if kept.try_reserve_exact(args.len()).is_err() {
                         self.heap.accounting.credit(bytes);
                         return Err(self.terminate(Termination::MemoryBudget));
@@ -247,6 +251,10 @@ impl<H: Host> Agent<H> {
             let wanted = capacity.saturating_mul(2).max(8);
             let added = u64::try_from(wanted.saturating_sub(capacity)).unwrap_or(u64::MAX);
             let bytes = added.saturating_mul(entry_bytes());
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "charged by the next statement, `entry_bytes` per added entry, before an entry is pushed; a refusal ends the run"
+            )]
             let reserved = frame
                 .stack
                 .try_reserve_exact(wanted.saturating_sub(frame.stack.len()))

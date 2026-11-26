@@ -234,6 +234,10 @@ impl<H: Host> Agent<H> {
         }
         // 7. Return list.
         let mut list = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by the loop above, a `Value` per element into `charged`, which the caller credits"
+        )]
         if list
             .try_reserve_exact(self.kept.len().saturating_sub(start))
             .is_err()

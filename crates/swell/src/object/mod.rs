@@ -526,6 +526,10 @@ impl<H: Host> Agent<H> {
         let bytes = key_list_bytes(count);
         self.charge_bytes(bytes)?;
         let mut keys = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `charge_bytes` before it is reserved, `key_list_bytes` of the keys"
+        )]
         if keys.try_reserve_exact(count).is_err() {
             self.heap.accounting.credit(bytes);
             return Err(self.terminate(Termination::MemoryBudget));
@@ -579,6 +583,10 @@ impl<H: Host> Agent<H> {
         self.charge_bytes(bytes)?;
         let mut indices: Vec<u32> = Vec::new();
         let mut buffer: Vec<u32> = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the indices and the merge's buffer, both charged by `charge_bytes` before they are reserved, a `u32` per index each"
+        )]
         if indices.try_reserve_exact(count).is_err() || buffer.try_reserve_exact(count).is_err() {
             self.heap.accounting.credit(bytes);
             return Err(self.terminate(Termination::MemoryBudget));

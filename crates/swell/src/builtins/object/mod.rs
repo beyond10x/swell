@@ -413,6 +413,10 @@ impl<H: Host> Agent<H> {
             u64::try_from(keys.len().saturating_mul(size_of::<Value>())).unwrap_or(u64::MAX);
         self.charge_bytes(bytes)?;
         let mut names = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `charge_bytes` before it is reserved, a `Value` per key"
+        )]
         if names.try_reserve_exact(keys.len()).is_err() {
             self.heap.accounting.credit(bytes);
             return Err(self.terminate(Termination::MemoryBudget));

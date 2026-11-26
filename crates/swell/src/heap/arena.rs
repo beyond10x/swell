@@ -244,18 +244,34 @@ impl<T> Arena<T> {
         if to <= self.capacity {
             return Err(Full);
         }
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `store` before the arena grows: the slots, in `Arena::growth_bytes`"
+        )]
         self.slots
             .try_reserve_exact(to.saturating_sub(self.slots.len()))
             .map_err(|_| Full)?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `store` before the arena grows: a `u32` of the free list per slot, in `Arena::growth_bytes`"
+        )]
         self.free
             .try_reserve_exact(to.saturating_sub(self.free.len()))
             .map_err(|_| Full)?;
         let marks = &mut self.workspace.marks;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `store` before the arena grows: a mark word per slot, in `Arena::growth_bytes`"
+        )]
         marks
             .try_reserve_exact(to.saturating_sub(marks.len()))
             .map_err(|_| Full)?;
         marks.resize(to, 0);
         let work = &mut self.workspace.work;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `store` before the arena grows: a worklist entry per slot, in `Arena::growth_bytes`"
+        )]
         work.try_reserve_exact(to.saturating_sub(work.len()))
             .map_err(|_| Full)?;
         self.capacity = to;

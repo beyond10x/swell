@@ -519,6 +519,10 @@ impl<H: Host> Agent<H> {
         then: impl FnOnce(&mut Self, &[f64]) -> Completion<Value>,
     ) -> Completion<Value> {
         let mut coerced = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `coerce_all`, 8 bytes per argument"
+        )]
         if coerced.try_reserve_exact(args.len()).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }

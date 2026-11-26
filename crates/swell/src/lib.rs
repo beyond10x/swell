@@ -4,8 +4,10 @@
 //! model under `spec/` and the `HOST-<n>` requirements).
 //!
 //! The public interface is the glob re-export of `value` and `host` below and nothing else: a
-//! type becomes public by being `pub` in `value.rs` or in a file of `host/`, so no later story
-//! edits this file. Every other item of the crate is `pub(crate)`.
+//! type becomes public by being `pub` in `value.rs` or in a file of `host/`, so no story edits
+//! this file for the interface. Every other item of the crate is `pub(crate)`. The file's one
+//! crate attribute besides `forbid(unsafe_code)` and `no_std` lets test code call the methods
+//! `crates/swell/clippy.toml` disallows.
 //!
 //! The layout, one module per clause or decision, and the story that fills each:
 //!
@@ -28,6 +30,13 @@
 //! system; the program that links it provides the allocator. Its unit tests use `std`.
 
 #![no_std]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::disallowed_methods,
+        reason = "test code is not held to the charged list"
+    )
+)]
 
 extern crate alloc;
 #[cfg(test)]
