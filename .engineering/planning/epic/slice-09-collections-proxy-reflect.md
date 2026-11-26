@@ -5,8 +5,6 @@ kind: epic
 status: draft
 title: 'Slice 9, collections-proxy-reflect: Map, Set, Proxy, Reflect'
 summary: 'Map, Set, WeakMap, WeakSet, Proxy and Reflect: 1,744 cases and 3,459 runs.'
-relations:
-- depends_on: epic:slice-08-classes
 revision: 1
 ---
 ## Context
