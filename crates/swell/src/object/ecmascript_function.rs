@@ -241,7 +241,12 @@ impl<H: Host> Agent<H> {
 
     /// [[Realm]] of the ECMAScript function `function`, which [`call`] and [`construct`] enter
     /// the code in; a fault where [`Agent::function_parts`] answers one. Not inlined, so that
-    /// those two, on the path of every re-entry, hold no [`Callee`] in their frames.
+    /// those two, on the path of every re-entry, hold no [`Callee`] in their frames. The stack
+    /// margin of the dev profile rests on it: measured on the replacer path of
+    /// `regexp_symbol_methods::a_replacer_re_enters_on_the_promised_stack`, a re-entry takes
+    /// 12,400 bytes of stack with the attribute and 12,783 without, against
+    /// `STACK_BYTES_PER_REENTRY` of 14,336; inlined, that test is 96,608 bytes short at depth
+    /// 1,000 on seven eighths of `min_stack_bytes`.
     #[inline(never)]
     fn realm_of_function(&mut self, function: ObjectRef) -> Completion<Handle> {
         let realm = match &self.engine_object(function)?.kind {
