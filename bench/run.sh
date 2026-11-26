@@ -488,7 +488,8 @@ assemble() {
     def swell($kpi; $measurement; $unit):
       {engine: "swell", config: "swell", version: "none", mode: "interpreter", flags: [],
        kpi: $kpi, measurement: $measurement, unit: $unit, runs: 0, values: [], median: null,
-       status: "not-measured", reason: "no binary yet"};
+       status: "not-measured",
+       reason: "not in this run; swell gets its configuration with story swell-in-the-benchmarks"};
     {format: "swell-bench/1", date: $date, commit: $commit,
      host: (($hosts | group_by(.) | max_by(length) | .[0]) as $h
        | ($h + {runner: "build node, \($h.cpus) cores, \($h.cpu_model), through the shared build pool (slot --timeout 30m)",
