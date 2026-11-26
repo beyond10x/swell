@@ -60,6 +60,7 @@ pub(crate) mod number;
 pub(crate) mod object;
 pub(crate) mod promise;
 pub(crate) mod promise_statics;
+pub(crate) mod proxy;
 pub(crate) mod reflect;
 pub(crate) mod regexp;
 pub(crate) mod set;

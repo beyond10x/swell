@@ -96,6 +96,9 @@ pub(crate) enum BuiltinId {
     GeneratorFunction,
     /// The builtins of `RegExp` (`story:regexp-objects-exec-and-literals`).
     RegExp(crate::builtins::regexp::RegExpBuiltin),
+    /// The builtins of `Proxy`: the constructor, `Proxy.revocable` and the revoke function it
+    /// makes, with the slots [`Slots::Revocable`] (`story:proxy-objects-and-access-traps`).
+    Proxy(crate::builtins::proxy::ProxyBuiltin),
     /// The builtins of `Promise` and the built-in functions with slots its abstract operations
     /// make (`story:promise-constructor-then-and-jobs`).
     Promise(crate::builtins::promise::PromiseBuiltin),
@@ -259,6 +262,9 @@ pub(crate) enum Slots {
     /// AsyncFromSyncIteratorContinuation (`#sec-asyncfromsynciteratorcontinuation`;
     /// `builtins/async_iteration.rs`).
     AsyncFromSync(crate::builtins::async_iteration::AsyncFromSyncSlots),
+    /// revokerClosure of `Proxy.revocable` (`#sec-proxy.revocable`, step 3): [[RevocableProxy]],
+    /// the Proxy it revokes, `None` once it has run.
+    Revocable { proxy: Option<ObjectRef> },
 }
 
 impl Slots {
@@ -272,6 +278,11 @@ impl Slots {
             }
             Slots::Await { activation, .. } => mark.object(*activation),
             Slots::AsyncFromSync(slots) => slots.trace(mark),
+            Slots::Revocable { proxy } => {
+                if let Some(proxy) = proxy {
+                    mark.object(*proxy);
+                }
+            }
         }
     }
 
@@ -281,7 +292,10 @@ impl Slots {
     pub(crate) fn bytes(&self) -> u64 {
         let shared = match self {
             Slots::Resolving { .. } => size_of::<(Cell<usize>, Cell<usize>, Cell<bool>)>() / 2,
-            Slots::Executor { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => 0,
+            Slots::Executor { .. }
+            | Slots::Await { .. }
+            | Slots::AsyncFromSync(_)
+            | Slots::Revocable { .. } => 0,
         };
         u64::try_from(size_of::<Slots>().saturating_add(shared)).unwrap_or(u64::MAX)
     }
@@ -806,6 +820,7 @@ impl<H: Host> Agent<H> {
                 self.run_iterator_builtin(id, function, this, args, new_target)
             }
             BuiltinId::RegExp(id) => self.run_regexp_builtin(id, function, this, args, new_target),
+            BuiltinId::Proxy(id) => self.run_proxy_builtin(id, function, args, new_target),
             BuiltinId::Generator(id) => {
                 self.run_generator_builtin(id, function, this, args, new_target)
             }

@@ -11,8 +11,10 @@
 //! (10.4.7) whose other methods are ordinary. Written by `story:object-model-and-realms`.
 //!
 //! A walk up the prototype chain is a loop, never a Rust recursion, and charges one step per
-//! object it passes (decision 2): no proxy exists before slice 9, so every [[Get]],
-//! [[HasProperty]] and [[Set]] of the chain is the ordinary one.
+//! object it passes (decision 2). A parent whose [[Get]], [[HasProperty]] and [[Set]] are not
+//! the ordinary ones, a Proxy (`story:proxy-objects-and-access-traps`), ends the loop: the walk
+//! answers that parent's own method, with the same receiver, as the clauses' "Return ?
+//! parent.[[Get]](P, Receiver)" order.
 
 use super::property::{Descriptor, Key, Property, Slot};
 use super::{KeyList, ObjectKind};
@@ -318,6 +320,12 @@ impl<H: Host> Agent<H> {
         Ok(true)
     }
 
+    /// Whether a walk of the chain hands over to `parent`'s own [[HasProperty]], [[Get]] or
+    /// [[Set]] instead of going on: a Proxy.
+    fn walk_hands_over_to(&mut self, parent: ObjectRef) -> Completion<bool> {
+        Ok(self.kind_of(parent)? == super::KindTag::Proxy)
+    }
+
     /// OrdinaryHasProperty (`#sec-ordinaryhasproperty`), as a loop over the chain.
     pub(crate) fn ordinary_has_property(
         &mut self,
@@ -332,6 +340,10 @@ impl<H: Host> Agent<H> {
             match self.get_prototype_of(o)? {
                 Some(parent) => {
                     self.charge_steps(1)?;
+                    // 4.a. Return ? parent.[[HasProperty]](P).
+                    if self.walk_hands_over_to(parent)? {
+                        return self.has_property(parent, key);
+                    }
                     o = parent;
                 }
                 None => return Ok(false),
@@ -352,6 +364,10 @@ impl<H: Host> Agent<H> {
                 None => match self.get_prototype_of(o)? {
                     Some(parent) => {
                         self.charge_steps(1)?;
+                        // 2.c. Return ? parent.[[Get]](P, Receiver).
+                        if self.walk_hands_over_to(parent)? {
+                            return self.internal_get(parent, key, receiver);
+                        }
                         o = parent;
                     }
                     None => return Ok(Value::Undefined),
@@ -393,6 +409,11 @@ impl<H: Host> Agent<H> {
                 None => match self.get_prototype_of(o)? {
                     Some(parent) => {
                         self.charge_steps(1)?;
+                        // OrdinarySetWithOwnDescriptor, 1.c. Return ? parent.[[Set]](P, V,
+                        // Receiver).
+                        if self.walk_hands_over_to(parent)? {
+                            return self.internal_set(parent, key, value, receiver);
+                        }
                         o = parent;
                     }
                     None => break Property::data(Value::Undefined, true, true, true),

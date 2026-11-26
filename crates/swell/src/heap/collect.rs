@@ -337,6 +337,7 @@ mod tests {
     use crate::object::ordinary::Ordinary;
     use crate::object::promise::Promise;
     use crate::object::property::{Key, Property};
+    use crate::object::proxy::ProxyObject;
     use crate::object::regexp::RegExpObject;
     use crate::object::string::StringObject;
     use crate::object::{ObjectKind, ObjectRecord};
@@ -381,6 +382,7 @@ mod tests {
         "builtins/async_iteration.rs AsyncFromSyncIterator::trace",
         "object/async_generator.rs AsyncGenerator::trace",
         "object/async_builtin.rs AsyncBuiltinActivation::trace",
+        "object/proxy.rs ProxyObject::trace",
         "realm/mod.rs RealmRecord::trace",
         "env/global.rs RealmGlobalEnv::trace",
         "env/mod.rs EnvironmentRecord::trace",
@@ -479,6 +481,13 @@ mod tests {
         objects.push(
             heap.objects
                 .allocate(ObjectRecord::new(None, builtin), 0)
+                .unwrap(),
+        );
+        // A Proxy names its target and its handler: the ordinary object stands for both.
+        let proxy = ObjectKind::Proxy(ProxyObject::for_test(named));
+        objects.push(
+            heap.objects
+                .allocate(ObjectRecord::new(None, proxy), 0)
                 .unwrap(),
         );
         let array = heap.objects.get_mut(objects[1]).unwrap();

@@ -72,6 +72,10 @@ pub(crate) struct Interp {
     /// The number of activations when the innermost running loop started; `None` while no loop
     /// runs.
     pub(crate) running: Option<usize>,
+    /// The internal methods of Proxy exotic objects running now, each one re-entry for its
+    /// duration (`object/proxy.rs`, "Bounds"; `story:proxy-objects-and-access-traps`), added to
+    /// the re-entries [`Agent::enter_code`] compares with `reentry_depth`.
+    pub(crate) proxy_nesting: u32,
 }
 
 /// How code reached from Rust was entered, for [`Agent::leave_code`].
@@ -133,7 +137,11 @@ impl<H: Host> Agent<H> {
                 Some(_) if depth == base => depth.saturating_add(1),
                 _ => depth,
             };
-            if u32::try_from(reentries).unwrap_or(u32::MAX) > self.limits.reentry_depth {
+            // The methods of proxies running now count too (`object/proxy.rs`, "Bounds").
+            let reentries = u32::try_from(reentries)
+                .unwrap_or(u32::MAX)
+                .saturating_add(self.interp.proxy_nesting);
+            if reentries > self.limits.reentry_depth {
                 return Err(self.throw_error(ErrorKind::RangeError, "reentry_depth exceeded"));
             }
             match activation {

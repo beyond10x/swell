@@ -327,6 +327,8 @@ impl<H: Host> Agent<H> {
                 // Exotic [[GetOwnProperty]] for indices: the String's code units, the
                 // arguments object's mapped parameters.
                 ObjectKind::String(_) | ObjectKind::Arguments(_) => false,
+                // Its [[Set]] and [[GetOwnProperty]] may run a trap.
+                ObjectKind::Proxy(_) => false,
                 // Its dense elements are not in its list.
                 ObjectKind::Array(storage) => storage.elements.is_empty(),
                 // Ordinary [[GetOwnProperty]], [[DefineOwnProperty]] and [[Set]]: its list

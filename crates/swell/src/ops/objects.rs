@@ -574,19 +574,29 @@ impl<H: Host> Agent<H> {
     /// GetFunctionRealm (`#sec-getfunctionrealm`): step 1, the [[Realm]] of a built-in or an
     /// ECMAScript function object; step 2, for a bound function exotic object its target's
     /// ("Return ? GetFunctionRealm(boundTargetFunc)"), as a loop with a step per bound function,
-    /// since a chain of bound functions is as long as a script makes it; step 4, the current
-    /// realm. Proxies (step 3) come with their story.
+    /// since a chain of bound functions is as long as a script makes it; step 3, for a Proxy
+    /// exotic object its [[ProxyTarget]]'s, a revoked one a TypeError, in the same loop with a
+    /// step per Proxy; step 4, the current realm.
     pub(crate) fn get_function_realm(&mut self, object: ObjectRef) -> Completion<Handle> {
         let mut function = object;
         loop {
             // 1. If obj has a [[Realm]] internal slot, return obj.[[Realm]].
-            let realm = match &self.engine_object(function)?.kind {
-                ObjectKind::BuiltinFunction(builtin) => builtin.realm,
-                ObjectKind::EcmascriptFunction(function) => function.realm,
-                _ => None,
+            let (realm, proxy) = match &self.engine_object(function)?.kind {
+                ObjectKind::BuiltinFunction(builtin) => (builtin.realm, false),
+                ObjectKind::EcmascriptFunction(function) => (function.realm, false),
+                ObjectKind::Proxy(_) => (None, true),
+                _ => (None, false),
             };
             if let Some(realm) = realm {
                 return Ok(realm);
+            }
+            // 3. If obj is a Proxy exotic object, then: a. Perform ?
+            // ValidateNonRevokedProxy(obj). b. Let proxyTarget be obj.[[ProxyTarget]]. c.
+            // Return ? GetFunctionRealm(proxyTarget).
+            if proxy {
+                self.charge_steps(1)?;
+                function = self.proxy_target(function)?;
+                continue;
             }
             match self.bound_target(function)? {
                 Some(target) => {
