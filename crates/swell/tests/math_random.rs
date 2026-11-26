@@ -715,3 +715,196 @@ fn math_random_through_call_apply_bind_and_new() {
     let next = numbers_shown(eval_text(&mut agent, &realm, "String(Math.random())"));
     assert_eq!(next, expected[5..6], "the value after a refused construct");
 }
+
+/// SipHash-2-4 of the Rust standard library (`std::hash::SipHasher`), independent of
+/// `swell_num::siphash`, keyed by the 16 bytes as two little-endian words.
+#[expect(
+    deprecated,
+    reason = "the standard library's SipHash-2-4 is the independent implementation the test compares with"
+)]
+fn std_siphash24(key: &[u8; 16], message: &[u8]) -> u64 {
+    use std::hash::{Hasher, SipHasher};
+    let k0 = u64::from_le_bytes(key[0..8].try_into().unwrap());
+    let k1 = u64::from_le_bytes(key[8..16].try_into().unwrap());
+    let mut hasher = SipHasher::new_with_keys(k0, k1);
+    hasher.write(message);
+    hasher.finish()
+}
+
+/// The bits of the first `count` Numbers of realm `index` of an agent seeded with `seed`, by
+/// the design's text alone (decision 6, "`Math.random`"), with nothing of `swell_num`: the four
+/// words by [`std_siphash24`] over `seed[16..32]`, `index` little-endian and the byte
+/// i under the key `seed[0..16]`; the step of xoshiro256** as the design writes it; the Number
+/// `(word >> 11) × 2^-53`.
+fn bits_by_the_designs_text(seed: &[u8; 32], index: u64, count: usize) -> Vec<u64> {
+    let key: [u8; 16] = seed[0..16].try_into().unwrap();
+    let mut s: [u64; 4] = core::array::from_fn(|i| {
+        let mut message = [0_u8; 25];
+        message[..16].copy_from_slice(&seed[16..32]);
+        message[16..24].copy_from_slice(&index.to_le_bytes());
+        message[24] = u8::try_from(i).unwrap();
+        std_siphash24(&key, &message)
+    });
+    if s == [0; 4] {
+        s[0] = 1;
+    }
+    (0..count)
+        .map(|_| {
+            let [mut s0, mut s1, mut s2, mut s3] = s;
+            let result = s1.wrapping_mul(5).rotate_left(7).wrapping_mul(9);
+            let t = s1 << 17;
+            s2 ^= s0;
+            s3 ^= s1;
+            s1 ^= s2;
+            s0 ^= s3;
+            s2 ^= t;
+            s3 = s3.rotate_left(45);
+            s = [s0, s1, s2, s3];
+            ((result >> 11) as f64 / TWO_TO_THE_53).to_bits()
+        })
+        .collect()
+}
+
+/// The engine's `Math.random` against the design's text, end to end and
+/// independent of `swell_num::random` and `swell_num::siphash`: for the all-zero seed, the
+/// all-0xff seed and the seed `00..1f`, the first 16 values of realms 0 and 1 equal
+/// [`bits_by_the_designs_text`].
+#[test]
+fn the_first_16_values_of_realms_0_and_1_equal_the_designs_text() {
+    let counting: [u8; 32] = core::array::from_fn(|i| u8::try_from(i).unwrap());
+    for random_seed in [[0_u8; 32], [0xff; 32], counting] {
+        let mut agent = agent_seeded(Seeds {
+            hash_key: [7; 16],
+            random_seed,
+        });
+        let r0 = new_realm(&mut agent);
+        let r1 = new_realm(&mut agent);
+        assert_eq!(
+            bits(&stream(&mut agent, &r1, 16)),
+            bits_by_the_designs_text(&random_seed, 1, 16),
+            "seed {:02x}{:02x} realm 1",
+            random_seed[0],
+            random_seed[1]
+        );
+        assert_eq!(
+            bits(&stream(&mut agent, &r0, 16)),
+            bits_by_the_designs_text(&random_seed, 0, 16),
+            "seed {:02x}{:02x} realm 0",
+            random_seed[0],
+            random_seed[1]
+        );
+    }
+}
+
+/// The steps of the last entry and the change of `heap_bytes()` and `live_bytes()` over the
+/// evaluation of `source` (parsed before the first reading).
+fn steps_and_bytes(agent: &mut Agent<TestHost>, realm: &Realm, source: &str) -> (u64, i128, i128) {
+    let script = support::script::parse(agent, realm, source);
+    let heap_before = agent.heap_bytes().unwrap();
+    let live_before = agent.live_bytes().unwrap();
+    let outcome = agent.evaluate_script(&script).unwrap();
+    assert!(
+        matches!(outcome, Outcome::Normal(_)),
+        "{source}: {outcome:?}"
+    );
+    let steps = agent.last_entry_steps().unwrap();
+    let heap_after = agent.heap_bytes().unwrap();
+    let live_after = agent.live_bytes().unwrap();
+    drop(outcome);
+    (
+        steps,
+        i128::from(heap_after) - i128::from(heap_before),
+        i128::from(live_after) - i128::from(live_before),
+    )
+}
+
+/// Decision 6, "`Math.random`" ("costs the step of the call; it calls no hook
+/// and charges nothing else") and the module text of `builtins/math.rs` ("costs the step of the
+/// call and allocates nothing"), over a loop: 10,000 calls of `Math.random()` (40 with
+/// `collect-every-safe-point`, where each instruction marks the heap) cost the steps of the same
+/// loop over `Math.max()` and change `heap_bytes()` and `live_bytes()` by what that loop does;
+/// and each call moved the stream by one value.
+#[test]
+fn a_loop_of_calls_costs_the_steps_and_bytes_of_a_loop_of_math_max() {
+    let calls: usize = if cfg!(feature = "collect-every-safe-point") {
+        40
+    } else {
+        10_000
+    };
+    let mut agent = agent_seeded(seeds());
+    let realm = new_realm(&mut agent);
+    assert_eq!(
+        numbers_shown(eval_text(
+            &mut agent,
+            &realm,
+            "var i = 0; Math.max(); String(Math.random())"
+        )),
+        expected_bits(0, 1)
+    );
+    let max = steps_and_bytes(
+        &mut agent,
+        &realm,
+        &format!("for (i = 0; i < {calls}; i++) Math.max(); 0"),
+    );
+    let random = steps_and_bytes(
+        &mut agent,
+        &realm,
+        &format!("for (i = 0; i < {calls}; i++) Math.random(); 0"),
+    );
+    println!("{calls} calls: Math.max {max:?}, Math.random {random:?} (steps, heap, live)");
+    assert_eq!(random.0, max.0, "steps");
+    assert_eq!(random.1, max.1, "heap_bytes");
+    assert_eq!(random.2, max.2, "live_bytes");
+    let next = numbers_shown(eval_text(&mut agent, &realm, "String(Math.random())"));
+    assert_eq!(
+        next,
+        expected_bits(0, calls + 2)[calls + 1..],
+        "the value after the loop"
+    );
+}
+
+thread_local! {
+    /// The handle `interrupt_now` sets.
+    static INTERRUPT_HANDLE: std::cell::Cell<Option<swell::InterruptHandle>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// A host function that sets its agent's interrupt flag and returns `1`.
+fn interrupt_now(_cx: &mut Cx<'_, TestHost>, _call: swell::HostCall<'_>) -> Completion<Value> {
+    INTERRUPT_HANDLE.with(|slot| {
+        if let Some(handle) = slot.take() {
+            handle.interrupt();
+        }
+    });
+    Ok(Value::Number(1.0))
+}
+
+/// An entry that ends in `Terminated(Interrupted)` (HOST-96: the statement
+/// after the host function does not run) keeps the values it took, and the next entry's
+/// `Math.random()` is the next value of the realm's stream: the interrupted call that never ran
+/// takes none.
+#[test]
+fn the_stream_resumes_after_an_interrupted_entry() {
+    let mut agent = agent_seeded(seeds());
+    let realm = new_realm(&mut agent);
+    support::script::define_function(&mut agent, &realm, "interruptNow", 0, interrupt_now, false);
+    INTERRUPT_HANDLE.with(|slot| slot.set(Some(agent.interrupt_handle())));
+    let expected = expected_bits(0, 3);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var a = [Math.random(), Math.random()]; interruptNow(); a.push(Math.random());"
+        ),
+        Shown::Terminated(swell::Termination::Interrupted)
+    );
+    assert_eq!(
+        numbers_shown(eval_text(&mut agent, &realm, "a.join()")),
+        expected[..2]
+    );
+    assert_eq!(
+        numbers_shown(eval_text(&mut agent, &realm, "String(Math.random())")),
+        expected[2..3],
+        "the value after the interrupted entry"
+    );
+}
