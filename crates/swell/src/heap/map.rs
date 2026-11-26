@@ -294,22 +294,39 @@ impl<K: Hash + Eq, V> KeyedMap<K, V> {
     }
 
     /// Room for `additional` more entries, through `try_reserve`: a refusal of the allocator
-    /// is `OverBudget`, not an abort. The caller charged the table's growth first. With less
-    /// room than that the table is rehashed: in place while its entries and the new ones fill
-    /// at most half of what it holds, else into a table for at least one more entry than it
-    /// holds.
+    /// is `OverBudget`, not an abort. The caller charged the table's growth first
+    /// ([`KeyedMap::growth_for`]). With less room than that the table is rehashed: in place
+    /// while its entries and the new ones fill at most half of what it holds, else into a table
+    /// for at least one more entry than it holds.
     #[inline]
     pub(crate) fn reserve(&mut self, additional: usize) -> Result<(), OverBudget> {
         if additional <= self.growth_left {
             return Ok(());
         }
+        match self.growth_for(additional)? {
+            None => {
+                self.rehash_in_place();
+                Ok(())
+            }
+            Some(capacity) => self.resize(capacity),
+        }
+    }
+
+    /// The room of the new table [`KeyedMap::reserve`] makes for `additional` more entries, whose
+    /// bytes [`KeyedMap::table_bytes_for`] answers; `None` when it makes none, which takes no
+    /// byte: the table has the room, or it is rehashed in place because its entries and the new
+    /// ones fill at most half of what it holds. `reserve` takes its decision from here; an owner
+    /// charges the growth before it by this answer. `OverBudget` when the count overflows.
+    pub(crate) fn growth_for(&self, additional: usize) -> Result<Option<usize>, OverBudget> {
+        if additional <= self.growth_left {
+            return Ok(None);
+        }
         let new_items = self.items.checked_add(additional).ok_or(OverBudget)?;
         let full_capacity = bucket_mask_to_capacity(self.bucket_mask);
         if new_items <= full_capacity / 2 {
-            self.rehash_in_place();
-            Ok(())
+            Ok(None)
         } else {
-            self.resize(new_items.max(full_capacity.saturating_add(1)))
+            Ok(Some(new_items.max(full_capacity.saturating_add(1))))
         }
     }
 

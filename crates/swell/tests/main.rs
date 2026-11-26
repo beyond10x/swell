@@ -81,6 +81,8 @@ mod builtins_symbol;
 mod builtins_symbol_values;
 #[cfg(any(not(test_modules), test_modules = "builtins_uri"))]
 mod builtins_uri;
+#[cfg(any(not(test_modules), test_modules = "builtins_weak_collections"))]
+mod builtins_weak_collections;
 #[cfg(any(not(test_modules), test_modules = "calls"))]
 mod calls;
 #[cfg(any(not(test_modules), test_modules = "collect"))]
