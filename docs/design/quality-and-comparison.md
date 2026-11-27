@@ -7,9 +7,11 @@ level of confinement and what research adds; other ECMAScript engines from sever
 measured or quoted on the same terms; and a page of the site lets a reader pick engines and see
 them side by side.
 
-This document shares its harness with `docs/design/native-code.md` section 5 (one container image,
-one runner, one set of result files). It adds no second harness. Where the two touch, that section
-is named.
+This document shares its harness with `docs/design/native-code.md` section 5 (one set of pinned
+engines and suite files, one runner, one set of result files). It adds no second harness. Where the
+two touch, that section is named. The harness as built (`bench/`, 2026-11-27) uses no container:
+the build node runs none for the pool's user, so `bench/image/build.sh` downloads the pinned
+engines and suite files into one directory on the node and checks each against its sha256.
 
 Marks: UNVERIFIED is a fact that could not be read from the cited page. Every number carries its
 source: a URL, or `file:line` in this tree.
@@ -27,8 +29,9 @@ Common terms:
   tolerance, the runner and the load bound are part of the definition.
 - The runner for every sampled value is the build node, reached through the shared build pool
   (`slot --timeout 30m`), never the workstation (the owner's order of 2026-11-25). The record of a
-  run holds the 1-minute load average at start and end, CPU model, core count, kernel, container
-  runtime and image digest, no host name.
+  run holds the 1-minute load average at start and end, CPU model, core count, kernel, the
+  container runtime (it reads "none" with the reason, see above) and the image digest (the sha256
+  of the manifest of the download directory), no host name.
 - Load bound for sampled values: a sample set whose load per CPU is above 1.0 at start or end is
   marked `loaded` and is not the value the page shows by default. Proposed here; the first run
   confirms or changes it.
@@ -84,10 +87,11 @@ Common terms:
 
 ### K4. Memory
 
-- Peak RSS on a pinned workload: the highest reading of a run (GNU `time`, `%M`, in the image),
-  bytes, median over 10 runs, lower is better. Workloads: the empty script, and bench-v8 v7 Splay
-  at its default iteration count (proposed). Compared: this is the only memory row that exists for
-  peers.
+- Peak RSS on a pinned workload: the highest reading of a run (`ru_maxrss` of
+  `getrusage(RUSAGE_CHILDREN)`, read by `bench/tool` for the one child it ran; the same quantity
+  as GNU `time`, `%M`), bytes, median over 10 runs, lower is better. Workloads: the empty script,
+  and bench-v8 v7 Splay at the iteration count of `bench/suites/iterations.tsv` (20). Compared:
+  this is the only memory row that exists for peers.
 - Bytes of an empty realm, swell only: exact, from swell's own allocator count (the charge to
   `memory_bytes`, `crates/swell/src/host/limits.rs:15-17`); tolerance 0, can gate. The ratchet draft
   names it `fresh-realm-live-bytes`.
@@ -259,8 +263,10 @@ bench/engines.jsonl ──────────────┘
   on the build node through the pool:
   - one job per (engine, suite) or per (engine, test262 part), `slot --timeout 30m`; a job that does
     not fit is split, never given more time (the pool caps a job at 30 minutes);
-  - the container runs with `--network none`, a pinned cpuset and a memory limit; downloads happen
-    only when the image is built;
+  - each measured process runs without network (`unshare -rn`: a network namespace with only a
+    down loopback), on two named CPUs (`taskset -c`) and under a data limit of 4 GiB
+    (`prlimit --data`), as `bench/run.sh` sets them; downloads happen only when the download
+    directory is built;
   - one process per measurement; test262 at swell's pin, with swell's case list
     (`swell-test262 meta`), every case for every engine;
   - the job's script lies in the worktree, never under a cache directory of the home: the pool runs

@@ -55,6 +55,44 @@ Every number below comes from the gate, `task check`, on the released commit.
   delivered: `conformance/slices-delivered.txt` lists it, and no host requirement is pending
   for it.
 
+- `bench/`: the measurement harness of K2 to K5 and its first result
+  (`story:bench-image-and-first-measurements`).
+  - `bench/run.sh` (POSIX sh, jq and awk) runs one pool job per (configuration, suite) on the
+    build node, one at a time: 11 configurations of 8 engines (`bench/image/configs.tsv`) times
+    bench-v8 version 7, are-we-fast-yet and the start workloads. `bench/tool` times one process
+    and reads its peak RSS (`ru_maxrss` of `getrusage(RUSAGE_CHILDREN)`); it is the one crate
+    of the repository that takes a crate from outside (`nix`), and no engine crate depends on
+    it. The engines and suite files are pinned by sha256 and downloaded into one directory on
+    the node; no container is used. Each measured process runs without network
+    (`unshare -rn`), on two named CPUs (`taskset -c`) and under a data limit of 4 GiB
+    (`prlimit --data`). No measurement runs on the machine that starts the run.
+  - A job and `prepare` refuse an inner iteration count the suite does not verify, and a
+    failed benchmark's row is `not-measured` with the engine's own message as its reason.
+  - The run waits before each job until the build node runs no pool job (at most 600 s),
+    needs `BENCH_NODE_STATE` (a command that prints the node's job list) or
+    `BENCH_ALLOW_UNWATCHED=1`, and records the pool jobs that ran beside each job. Every row
+    measured beside another job, under a load over 1.0 per CPU, or without a record of the
+    node is `loaded: true` with `loaded_reason` (`neighbour`, `load`, `unwatched`, or a list).
+  - The result format `swell-bench/1` (`bench/schema/swell-bench-1.json`).
+    `task bench-schema-check`, a step of `task check`, refuses a result file with a row
+    without `version` or `runs`, a loaded row without its reason and a reason on a row that
+    is not loaded. `task bench-run` (manual) makes a run through the pool.
+  - The first result: `bench/results/2026-11-27-1d9989f.json`, 33 jobs, 314 rows. 214 rows
+    are `loaded: true` (`neighbour`: 23 of the 33 jobs had another pool job on the node), 94
+    are measured alone. 12 rows are `not-measured` with a reason: swell's 6 (swell gets its
+    configuration with `story:swell-in-the-benchmarks`), `are-we-fast-yet/DeltaBlue` of boa
+    0.20 and of hermes, `bench-v8/Crypto` of quickjs-ng, and the geomean of each of those
+    three suites.
+  - The compare page marks a figure measured while another job ran on the build node:
+    `site-data` copies a result row's `loaded` (and `loaded_reason`) into the figure's cell of
+    `website/data/engines.json`, and a geomean's cell is loaded when it or any row it is made
+    of is. A loaded figure does not rank: every figure of a result file carries `ranks`, and
+    the page marks no figure of a comparison "best of the picked" when one of its figures has
+    `ranks: false`. A geomean reads as "geometric mean of the benchmark medians, n
+    benchmarks, each the median of r runs", without runs, min and max of its own.
+  - The KPI page says where the result files are, what `loaded` means, that no container is
+    used, and that K4 reads `ru_maxrss`.
+
 ### Changed
 
 - Releases ship seven archives of the `swell` binary and `SHA256SUMS`: besides the five
