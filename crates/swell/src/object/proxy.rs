@@ -27,10 +27,12 @@
 //! RangeError and not in a Rust stack overflow. A trap call is the re-entry of the method that
 //! calls it, not a second one: the method hands its count to the call while the trap runs. What a
 //! method holds across a call into code (the target, the handler, the key, the receiver, the
-//! trap and its answer, the arguments and their Array) is kept on the kept stack until it
-//! returns; the arguments of [[Call]] and [[Construct]] in room of the kept stack charged before
-//! it grows. The record of a Proxy, and the Arrays of `apply` and `construct`, are charged when
-//! they are made (`Agent::allocate_object`, CreateArrayFromList).
+//! trap and its answer) is kept on the kept stack until it returns, the arguments of a trap call
+//! (and their Array) while the trap runs; the arguments of [[Call]] and [[Construct]] in room of
+//! the kept stack charged before it grows. Outside a room no method keeps more than 10 values at
+//! once (`docs/design/engine.md`, the values kept while the engine calls into script; counted
+//! in the tests of this module). The record of a Proxy, and the Arrays of `apply` and
+//! `construct`, are charged when they are made (`Agent::allocate_object`, CreateArrayFromList).
 //!
 //! Kind site of the collector: [`ProxyObject::trace`] reports the target and the handler.
 
@@ -249,7 +251,11 @@ impl<H: Host> Agent<H> {
     ) -> Completion<T> {
         self.enter_proxy()?;
         let mark = self.kept.len();
+        #[cfg(test)]
+        kept_count::enter(mark);
         let answer = steps(self);
+        #[cfg(test)]
+        kept_count::leave(self.kept.len());
         self.release(mark);
         self.interp.proxy_nesting = self.interp.proxy_nesting.saturating_sub(1);
         answer
@@ -265,16 +271,23 @@ impl<H: Host> Agent<H> {
         Ok(found)
     }
 
-    /// `? Call(trap, handler, args)`: the arguments kept, the method's count handed to the call
-    /// while the trap runs (a trap call is the re-entry of the method that calls it), the answer
-    /// kept.
+    /// `? Call(trap, handler, args)`: the arguments kept while the trap runs and released when
+    /// it returns (no step after the call reads an argument it did not keep itself), the
+    /// method's count handed to the call while the trap runs (a trap call is the re-entry of the
+    /// method that calls it), the answer kept. So a method keeps at most its own values, its
+    /// trap and the trap's arguments outside a room at once (`docs/design/engine.md`, at most
+    /// 10 per running builtin; the counts are in the tests of this module).
     fn call_trap(&mut self, trap: Value, handler: ObjectRef, args: &[Value]) -> Completion<Value> {
+        let mark = self.kept.len();
         for &arg in args {
             self.keep(arg);
         }
+        #[cfg(test)]
+        kept_count::note(self.kept.len());
         self.interp.proxy_nesting = self.interp.proxy_nesting.saturating_sub(1);
         let answer = self.call_value(trap, Value::Object(handler), args);
         self.interp.proxy_nesting = self.interp.proxy_nesting.saturating_add(1);
+        self.release(mark);
         if let Ok(value) = answer {
             self.keep(value);
         }
@@ -588,8 +601,9 @@ impl<H: Host> Agent<H> {
         };
         // 7. Let descObj be FromPropertyDescriptor(Desc). 8. Let booleanTrapResult be
         // ToBoolean(? Call(trap, handler, « target, P, descObj »)).
+        // descObj is held by `call_trap` while the trap runs; until then only `key_value`
+        // allocates, and an allocation is no safe point, so nothing collects it before.
         let object = self.descriptor_object(&descriptor)?;
-        self.keep(object);
         let name = self.key_value(key)?;
         let answer = self.call_trap(trap, handler, &[Value::Object(target), name, object])?;
         let answer = self.to_boolean(answer)?;
@@ -1113,6 +1127,189 @@ impl<H: Host> Agent<H> {
         match invariants::construct(answer) {
             Ok(object) => Ok(Value::Object(object)),
             Err(broken) => Err(self.broken_invariant(Trap::Construct, None, broken)),
+        }
+    }
+}
+
+/// The counting build: the most values each running internal method of a Proxy keeps above its
+/// mark on the kept stack, read at each trap call once its arguments are kept and when it
+/// returns. A method releases nothing before it returns but the arguments of a trap call, so
+/// these are its highest points. The outermost method's count is read by the tests.
+#[cfg(test)]
+pub(crate) mod kept_count {
+    use alloc::vec::Vec;
+    use core::cell::{Cell, RefCell};
+
+    std::thread_local! {
+        /// The mark and the count so far of each running method, the innermost last.
+        static RUNNING: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
+        /// The count of the last method that returned with no method running around it.
+        static OUTERMOST: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// A method starts, with `mark` the length of the kept stack then.
+    pub(crate) fn enter(mark: usize) {
+        RUNNING.with(|running| running.borrow_mut().push((mark, 0)));
+    }
+
+    /// The kept stack is `length` long in the innermost running method.
+    pub(crate) fn note(length: usize) {
+        RUNNING.with(|running| {
+            if let Some((mark, most)) = running.borrow_mut().last_mut() {
+                *most = (*most).max(length.saturating_sub(*mark));
+            }
+        });
+    }
+
+    /// The innermost method returns with the kept stack `length` long.
+    pub(crate) fn leave(length: usize) {
+        note(length);
+        RUNNING.with(|running| {
+            let mut running = running.borrow_mut();
+            if let Some((_, most)) = running.pop()
+                && running.is_empty()
+            {
+                OUTERMOST.with(|outermost| outermost.set(most));
+            }
+        });
+    }
+
+    /// The count of the last outermost method.
+    pub(crate) fn outermost() -> usize {
+        OUTERMOST.with(Cell::get)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::kept_count;
+    use crate::host::agent::Agent;
+    use crate::host::hooks::test_host::{NoHooks, agent_with_realm, enter};
+    use crate::host::{Outcome, Parsed, Source};
+    use crate::object::property::Descriptor;
+    use crate::value::{ObjectRef, Realm, Value};
+    use alloc::vec::Vec;
+
+    /// The object a script answers, evaluated in `realm`, which is entered again after it; kept
+    /// for the test.
+    fn script_object(agent: &mut Agent<NoHooks>, realm: &Realm, source: &str) -> ObjectRef {
+        let Ok(Parsed::Parsed(script)) = agent.parse_script(realm, Source::Utf8(source), None)
+        else {
+            panic!("{source} did not parse");
+        };
+        let Ok(Outcome::Normal(root)) = agent.evaluate_script(&script) else {
+            panic!("{source} did not answer");
+        };
+        enter(agent, realm);
+        let Ok(Value::Object(object)) = agent.heap.roots.get(&root) else {
+            panic!("{source} answered no object");
+        };
+        agent.keep(Value::Object(object));
+        object
+    }
+
+    /// `p` over `t`, whose `x` is an accessor with a getter and a setter, and `f` over a
+    /// function, both with a handler whose every trap answers so that the method takes its
+    /// longest way: the descriptors answered and read are accessors (two values each), every
+    /// answer passes the checks of its clause.
+    const PROXIES: &str = "var g = function () { return 1; }, s = function (v) {};\n\
+        var t = {}; Object.defineProperty(t, \"x\", { get: g, set: s, enumerable: true, configurable: true });\n\
+        var h = {\n\
+          getPrototypeOf: function () { return Object.prototype; },\n\
+          setPrototypeOf: function () { return true; },\n\
+          isExtensible: function () { return true; },\n\
+          preventExtensions: function () { return false; },\n\
+          getOwnPropertyDescriptor: function () { return { get: g, set: s, enumerable: true, configurable: true }; },\n\
+          defineProperty: function () { return true; },\n\
+          ownKeys: function () { return [\"x\"]; },\n\
+          has: function () { return true; },\n\
+          get: function () { return 1; },\n\
+          set: function () { return true; },\n\
+          deleteProperty: function () { return true; },\n\
+          apply: function () { return 1; },\n\
+          construct: function () { return {}; }\n\
+        };\n\
+        var p = new Proxy(t, h), f = new Proxy(function () {}, h);\n";
+
+    /// `docs/design/engine.md` (the values kept while the engine calls into script): outside a
+    /// room, at most 10 values per running builtin. Each of the 13 internal methods of a Proxy,
+    /// on its longest way ([`PROXIES`]), keeps at most 10 values above its mark at its trap call
+    /// and when it returns ([`kept_count`]); the counts are printed.
+    #[test]
+    fn no_method_of_a_proxy_keeps_more_than_ten_values_outside_a_room() {
+        let (mut agent, realm) = agent_with_realm();
+        enter(&mut agent, &realm);
+        let p = script_object(&mut agent, &realm, &alloc::format!("{PROXIES}p"));
+        let f = script_object(&mut agent, &realm, "f");
+        let g = script_object(&mut agent, &realm, "g");
+        let s = script_object(&mut agent, &realm, "s");
+        let other = script_object(&mut agent, &realm, "({})");
+        let x = agent.name_key("x").unwrap();
+        let accessor = Descriptor {
+            value: None,
+            writable: None,
+            get: Some(Some(g)),
+            set: Some(Some(s)),
+            enumerable: None,
+            configurable: None,
+        };
+        let mut counts: Vec<(&str, usize)> = Vec::new();
+        let mut count = |name: &'static str, ran: bool| {
+            assert!(ran, "{name} did not take its way");
+            counts.push((name, kept_count::outermost()));
+        };
+        count(
+            "getPrototypeOf",
+            agent.proxy_get_prototype_of(p).is_ok_and(|o| o.is_some()),
+        );
+        count(
+            "setPrototypeOf",
+            agent.proxy_set_prototype_of(p, Some(other)) == Ok(true),
+        );
+        count("isExtensible", agent.proxy_is_extensible(p) == Ok(true));
+        count(
+            "preventExtensions",
+            agent.proxy_prevent_extensions(p) == Ok(false),
+        );
+        count(
+            "getOwnProperty",
+            agent
+                .proxy_get_own_property(p, x)
+                .is_ok_and(|found| found.is_some()),
+        );
+        count(
+            "defineOwnProperty",
+            agent.proxy_define_own_property(p, x, accessor) == Ok(true),
+        );
+        let keys = agent.proxy_own_property_keys(p);
+        let listed = keys.as_ref().is_ok_and(|list| list.keys == [x]);
+        if let Ok(list) = keys {
+            agent.drop_key_list(list);
+        }
+        count("ownPropertyKeys", listed);
+        count("hasProperty", agent.proxy_has_property(p, x) == Ok(true));
+        count(
+            "get",
+            agent.proxy_get(p, x, Value::Object(p)) == Ok(Value::Number(1.0)),
+        );
+        count(
+            "set",
+            agent.proxy_set(p, x, Value::Number(2.0), Value::Object(p)) == Ok(true),
+        );
+        count("delete", agent.proxy_delete(p, x) == Ok(true));
+        count(
+            "call",
+            agent.proxy_call(f, Value::Undefined, &[]) == Ok(Value::Number(1.0)),
+        );
+        count(
+            "construct",
+            agent
+                .proxy_construct(f, &[], f)
+                .is_ok_and(|v| matches!(v, Value::Object(_))),
+        );
+        std::println!("values kept outside a room, per method: {counts:?}");
+        for (name, kept) in counts {
+            assert!(kept <= 10, "{name} keeps {kept} values outside a room");
         }
     }
 }
