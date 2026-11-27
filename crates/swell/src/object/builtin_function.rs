@@ -784,7 +784,80 @@ impl<H: Host> Agent<H> {
     }
 
     /// The steps of a builtin of this part.
+    ///
+    /// Every re-entry through a builtin passes this frame, and in an unoptimised build each arm
+    /// holds copies of `function`, `this` and `new_target` of its own in it (about 40 bytes an
+    /// arm). So this match keeps the arms of the groups a stack test re-enters through
+    /// (`STACK_BYTES_PER_REENTRY`, `host/limits.rs`), and the other groups take one arm into
+    /// [`Agent::run_other_builtin`]. With every arm here the frame was 1,424 bytes in the profile
+    /// `stack-debug` and the route through `toJSON` 12,704 bytes per re-entry, more than seven
+    /// eighths of `min_stack_bytes()` hold; with this split 960 and 12,240 (measured on x86_64).
     fn run_builtin(
+        &mut self,
+        id: BuiltinId,
+        function: ObjectRef,
+        this: Value,
+        args: &[Value],
+        new_target: Option<ObjectRef>,
+    ) -> Completion<Value> {
+        match id {
+            BuiltinId::Object(id) => self.run_object_builtin(id, function, this, args, new_target),
+            BuiltinId::Function(id) => {
+                self.run_function_builtin(id, function, this, args, new_target)
+            }
+            BuiltinId::Array(id) => self.run_array_builtin(id, function, this, args, new_target),
+            BuiltinId::String(id) => self.run_string_builtin(id, function, this, args, new_target),
+            BuiltinId::Json(id) => self.run_json_builtin(id, function, this, args, new_target),
+            BuiltinId::Map(id) => self.run_map_builtin(id, function, this, args, new_target),
+            BuiltinId::Set(id) => self.run_set_builtin(id, function, this, args, new_target),
+            BuiltinId::Global(id) => self.run_global_builtin(id, function, this, args, new_target),
+            BuiltinId::Iterator(id) => {
+                self.run_iterator_builtin(id, function, this, args, new_target)
+            }
+            BuiltinId::RegExp(id) => self.run_regexp_builtin(id, function, this, args, new_target),
+            BuiltinId::Generator(id) => {
+                self.run_generator_builtin(id, function, this, args, new_target)
+            }
+            BuiltinId::Await(kind) => {
+                let argument = args.first().copied().unwrap_or(Value::Undefined);
+                self.await_function(kind, function, argument)
+            }
+            BuiltinId::AsyncIteration(id) => {
+                self.run_async_iteration_builtin(id, function, this, args)
+            }
+            BuiltinId::AsyncGenerator(id) => {
+                self.run_async_generator_builtin(id, function, this, args)
+            }
+            BuiltinId::Reflect(id) => self.run_reflect_builtin(id, args),
+            BuiltinId::WeakMap(id) => self.run_weak_map_builtin(id, this, args, new_target),
+            BuiltinId::WeakSet(id) => self.run_weak_set_builtin(id, this, args, new_target),
+            BuiltinId::FunctionPrototype
+            | BuiltinId::ThrowTypeError
+            | BuiltinId::ErrorConstructor(_)
+            | BuiltinId::ErrorPrototypeToString
+            | BuiltinId::ErrorIsError
+            | BuiltinId::Math(_)
+            | BuiltinId::Date(_)
+            | BuiltinId::Number(_)
+            | BuiltinId::Boolean(_)
+            | BuiltinId::Symbol(_)
+            | BuiltinId::Proxy(_)
+            | BuiltinId::GeneratorFunction
+            | BuiltinId::Promise(_)
+            | BuiltinId::AsyncFunction
+            | BuiltinId::PromiseStatics(_)
+            | BuiltinId::AggregateErrorConstructor
+            | BuiltinId::AsyncGeneratorFunction
+            | BuiltinId::AsyncBuiltinAwait(_) => {
+                self.run_other_builtin(id, function, this, args, new_target)
+            }
+        }
+    }
+
+    /// The steps of the builtins of the groups no stack test re-enters through, out of the
+    /// frame of [`Agent::run_builtin`], which answers the others itself (an engine fault here).
+    #[inline(never)]
+    fn run_other_builtin(
         &mut self,
         id: BuiltinId,
         function: ObjectRef,
@@ -803,51 +876,24 @@ impl<H: Host> Agent<H> {
             }
             BuiltinId::ErrorPrototypeToString => self.error_prototype_to_string(this),
             BuiltinId::ErrorIsError => self.error_is_error(args),
-            BuiltinId::Object(id) => self.run_object_builtin(id, function, this, args, new_target),
-            BuiltinId::Function(id) => {
-                self.run_function_builtin(id, function, this, args, new_target)
-            }
-            BuiltinId::Array(id) => self.run_array_builtin(id, function, this, args, new_target),
-            BuiltinId::String(id) => self.run_string_builtin(id, function, this, args, new_target),
             BuiltinId::Math(id) => self.run_math_builtin(id, function, this, args, new_target),
             BuiltinId::Date(id) => self.run_date_builtin(id, &this, args, &new_target),
-            BuiltinId::Json(id) => self.run_json_builtin(id, function, this, args, new_target),
-            BuiltinId::Map(id) => self.run_map_builtin(id, function, this, args, new_target),
-            BuiltinId::Set(id) => self.run_set_builtin(id, function, this, args, new_target),
             BuiltinId::Number(id) => self.run_number_builtin(id, function, this, args, new_target),
             BuiltinId::Boolean(id) => {
                 self.run_boolean_builtin(id, function, this, args, new_target)
             }
-            BuiltinId::Global(id) => self.run_global_builtin(id, function, this, args, new_target),
             BuiltinId::Symbol(id) => self.run_symbol_builtin(id, function, this, args, new_target),
-            BuiltinId::Iterator(id) => {
-                self.run_iterator_builtin(id, function, this, args, new_target)
-            }
-            BuiltinId::RegExp(id) => self.run_regexp_builtin(id, function, this, args, new_target),
             BuiltinId::Proxy(id) => self.run_proxy_builtin(id, function, args, new_target),
-            BuiltinId::Generator(id) => {
-                self.run_generator_builtin(id, function, this, args, new_target)
-            }
             BuiltinId::GeneratorFunction => self.generator_function(function, args, new_target),
             BuiltinId::Promise(id) => {
                 self.run_promise_builtin(id, function, this, args, new_target)
             }
-            BuiltinId::Await(kind) => {
-                let argument = args.first().copied().unwrap_or(Value::Undefined);
-                self.await_function(kind, function, argument)
-            }
             BuiltinId::AsyncFunction => self.async_function(function, args, new_target),
-            BuiltinId::AsyncIteration(id) => {
-                self.run_async_iteration_builtin(id, function, this, args)
-            }
             BuiltinId::PromiseStatics(id) => {
                 self.run_promise_statics_builtin(id, function, this, args)
             }
             BuiltinId::AggregateErrorConstructor => {
                 self.aggregate_error_constructor(function, args, new_target)
-            }
-            BuiltinId::AsyncGenerator(id) => {
-                self.run_async_generator_builtin(id, function, this, args)
             }
             BuiltinId::AsyncGeneratorFunction => {
                 self.async_generator_function(function, args, new_target)
@@ -855,9 +901,23 @@ impl<H: Host> Agent<H> {
             BuiltinId::AsyncBuiltinAwait(kind) => {
                 self.async_builtin_await_function(kind, function, args)
             }
-            BuiltinId::Reflect(id) => self.run_reflect_builtin(id, args),
-            BuiltinId::WeakMap(id) => self.run_weak_map_builtin(id, this, args, new_target),
-            BuiltinId::WeakSet(id) => self.run_weak_set_builtin(id, this, args, new_target),
+            BuiltinId::Object(_)
+            | BuiltinId::Function(_)
+            | BuiltinId::Array(_)
+            | BuiltinId::String(_)
+            | BuiltinId::Json(_)
+            | BuiltinId::Map(_)
+            | BuiltinId::Set(_)
+            | BuiltinId::Global(_)
+            | BuiltinId::Iterator(_)
+            | BuiltinId::RegExp(_)
+            | BuiltinId::Generator(_)
+            | BuiltinId::Await(_)
+            | BuiltinId::AsyncIteration(_)
+            | BuiltinId::AsyncGenerator(_)
+            | BuiltinId::Reflect(_)
+            | BuiltinId::WeakMap(_)
+            | BuiltinId::WeakSet(_) => Err(self.fault()),
         }
     }
 
