@@ -203,17 +203,34 @@ impl<H: Host> Agent<H> {
 
     /// Fetch the running frame's next instruction and run it.
     fn execute_next(&mut self) -> Completion<Flow> {
-        let (instruction, strict) = {
-            let frame = self.top_frame()?;
-            let pc = frame.pc;
-            let instruction = frame.instructions().get(pc).copied();
-            frame.pc = pc.saturating_add(1);
-            (instruction, frame.strict)
-        };
-        match instruction {
-            Some(instruction) => self.execute(instruction, strict),
+        match self.next_instruction() {
+            Some((instruction, strict)) => self.execute(instruction, strict),
             None => Err(self.fault()),
         }
+    }
+
+    /// The running frame's next instruction, the one [`Frame::instructions`] holds at its
+    /// index, and whether its code is strict, with the index moved past it; read in one borrow
+    /// of the frame with no call of [`Frame::instructions`]: that function is not generic, so an
+    /// instance of this loop, made in the crate of its host (`swell-cli`, the test262 runner),
+    /// calls it in the library and cannot inline it. `None` with no frame, and past the end of
+    /// the code, where the index moves all the same.
+    ///
+    /// [`Frame::instructions`]: super::frame::Frame::instructions
+    fn next_instruction(&mut self) -> Option<(Instruction, bool)> {
+        let frame = self.interp.frames.last_mut()?;
+        let pc = frame.pc;
+        let code = &frame.compiled.code;
+        let instruction = match frame.template {
+            None => code.instructions.get(pc),
+            Some(index) => code
+                .functions
+                .get(usize::try_from(index).unwrap_or(usize::MAX))
+                .and_then(|template| template.instructions.get(pc)),
+        }
+        .copied();
+        frame.pc = pc.saturating_add(1);
+        Some((instruction?, frame.strict))
     }
 
     /// The String constant `index` of the running frame's code.
