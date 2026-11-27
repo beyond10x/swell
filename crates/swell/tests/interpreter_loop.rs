@@ -199,3 +199,33 @@ fn an_indexed_put_ends_at_the_step_budget_inside_its_prototype_walk() {
         ("normal", PUT_STEPS, "Number(1.0) Number(1.0)", expected)
     );
 }
+
+/// A write in the temporal dead zone throws and leaves the binding uninitialized: a read, an
+/// update and a `typeof` after it in the same activation throw as well, and the declaration
+/// initializes it. The defect it holds: a checked write that stores before it throws.
+#[test]
+fn a_write_in_the_temporal_dead_zone_leaves_the_binding_uninitialized() {
+    let source = "function f() { var r = []; \
+          try { x = 5 } catch (e) { r.push(e.name) } \
+          try { r.push(x) } catch (e) { r.push(e.name) } \
+          try { x++ } catch (e) { r.push(e.name) } \
+          try { r.push(typeof x) } catch (e) { r.push(e.name) } \
+          let x; r.push(x === undefined); return r.join() } f()";
+    let answer = normal("ReferenceError,ReferenceError,ReferenceError,ReferenceError,true");
+    assert_eq!(run_both(source), (answer.clone(), answer));
+}
+
+/// The `ReferenceError` of a checked read, of a checked write and of a compound assignment in
+/// the temporal dead zone names its own binding among three. The defect it holds: a message that
+/// names another String constant of the code.
+#[test]
+fn a_read_and_a_write_in_the_temporal_dead_zone_name_their_own_binding() {
+    let source = "function f() { var r = []; \
+          try { alpha } catch (e) { r.push(e.message) } \
+          try { beta = 1 } catch (e) { r.push(e.message) } \
+          try { gamma += 1 } catch (e) { r.push(e.message) } \
+          let alpha = 1, beta = 2, gamma = 3; return r.join('|') } f()";
+    let answer =
+        normal("alpha is not initialized|beta is not initialized|gamma is not initialized");
+    assert_eq!(run_both(source), (answer.clone(), answer));
+}
