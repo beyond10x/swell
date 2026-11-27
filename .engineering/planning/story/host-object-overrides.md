@@ -79,7 +79,7 @@ scope:
   path: crates/test262/src/host.rs
 - confidence: cited
   path: website/data/status.json
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T06:32:21Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T06:32:21Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
@@ -134,3 +134,53 @@ test262: no case (Context).
 ## Out of scope
 
 `is_html_dda` (slice 18, HOST-115); the Web IDL bindings that use the table (surf); `host_ensure_can_add_private_element` (slice 8, HOST-119); the Proxy traps (`story:proxy-objects-and-access-traps`, `story:proxy-descriptor-prototype-and-extensibility-traps`); a change of `spec/domains/host.yaml`.
+
+## As delivered
+
+The unit `overrides` of wave big-2 delivered the story on `impl/overrides` (two corrections,
+one after each of the adversary's two passes), merged into `wave/big-2`. Where the delivery
+differs from the text above:
+
+- What an answer is checked against. The story names "the checks the `Proxy` internal methods
+  use". Those compare an answer with the live state of a target, and a host object has no
+  target. The delivery checks an answer against facts of the object's own earlier answers
+  (`docs/design/host-interface.md` section 15 gives the facts and what was rejected): the
+  prototype and the extensibility it reported, each property it reported non-configurable,
+  each key it reported non-existent while not extensible, and, once it is not extensible, the
+  keys of its first key list. The facts of one object are a box of its own, charged to the
+  memory budget before it grows and credited when the object is swept.
+- An answer is the object's, whoever gives it: where the table leaves an override out, the
+  object's record answers and its answer goes through the same check and is recorded the
+  same way (`set_prototype_of_true`, `prevent_extensions_true`, `delete_true`,
+  `key_list_check` in `crates/swell/src/object/host_overrides.rs`).
+- A `has_property` false records nothing. It faults only for a non-configurable property,
+  one `get_own_property` reported or one the record holds, whether or not the object is
+  extensible: the clause binds [[HasProperty]] only for a key observed non-configurable.
+- The surface: `Overrides<H>` with eleven optional functions; `HostObjectSpec` became
+  `HostObjectSpec<H>` with the field `overrides`. A host that names the type or writes a
+  literal stops compiling once (`CHANGELOG.md`, "Host interface", **Breaking**).
+- The requirement lines HOST-41, HOST-112, HOST-113, HOST-114 and HOST-222 of
+  `conformance/host/requirements.txt` name tests of `swell::host_overrides`.
+- Sites outside the story's writes:
+  - `crates/swell/src/host/agent.rs`, `Agent::begin`: a `Cx` call made inside an override
+    spends from the entry that called it; before, it set the step counter to 0
+    (`host_overrides::a_cx_call_inside_an_override_spends_from_the_entry_that_called_it`).
+  - `crates/swell/src/object/ordinary.rs`: the walks of OrdinaryHasProperty, OrdinaryGet and
+    OrdinarySet keep the key, the value and the receiver from the first object whose methods
+    may run code (a Proxy, or a host object with a table: `Agent::methods_may_run_code`).
+  - `crates/swell/src/ops/objects.rs`: the walk of EnumerateObjectProperties does the same.
+  - `crates/swell/tests/collect.rs` and `crates/swell/tests/host_objects.rs`: a return type
+    became `HostObjectSpec<TestHost>`.
+  - `taskfiles/stack-profiles.yml`: the module `host_overrides` and its three tests that run
+    on a bounded stack are in the lists.
+- Left: the comments "HasProperty runs no code" in `crates/swell/src/builtins/array/search.rs`
+  are inaccurate (a Proxy's `has` trap or an override runs code there). The code is safe: each
+  callee keeps its key argument while it runs code.
+- The story has no test262 case. The part `built-ins/Reflect` and `built-ins/Proxy` reads 912
+  passed and 1 failed on the unit's head and on the base (the one failure is a module case).
+- The reviews: `review-result:adversary-overrides-pass-1` (red: a descriptor held across an
+  `is_extensible` override was freed by a collection; the walks of HasProperty, Get and Set
+  held their key and value across an override) and `review-result:adversary-overrides-pass-2`
+  (red: four invariants the record's answer broke, the question of `has_property` false).
+  Both corrected; the second correction is read by the coordinator
+  (`review-result:overrides-correction-2-coordinator-read`).

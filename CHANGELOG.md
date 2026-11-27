@@ -304,6 +304,14 @@ Every number below comes from the gate, `task check`, on the released commit.
   class`. The hold `private method is not supported before slice 8` is gone
   (`story:private-names-and-private-methods`).
 
+- Host object overrides, a story of the ninth slice: a host object may carry an override
+  table, `Overrides<H>`, with one optional function per essential internal method. An
+  override's answer, and an answer of the object's record where the table leaves an override
+  out, is checked against the invariants of ECMA-262 6.1.7.3, read as facts of the object's
+  own earlier answers; a broken invariant ends the run in `Terminated(EngineFault)`. "Host
+  interface" below names the surface and the one breaking change, `HostObjectSpec`
+  (`story:host-object-overrides`).
+
 ### Changed
 
 - The walk that calls every function of the realm with a Symbol in each place runs in 2
@@ -545,10 +553,38 @@ Every number below comes from the gate, `task check`, on the released commit.
   `swell::determinism::host_214_two_processes_print_the_same_map_order`. A `Map` and a `Set`
   give their keys in insertion order under every `hash_key`, and two child processes print
   the same order (`story:map-and-set`).
-- `HOST-222` (slice 9, pending): an override of a host object whose `Ok` or `Abrupt::Throw`
-  value holds a stale handle or a handle of another agent ends the run with
-  `Terminated(EngineFault)`. It is the start gate of `story:host-object-overrides`, which
-  moves it to a test.
+- `HOST-222` (slice 9): an override of a host object whose `Ok` or `Abrupt::Throw` value
+  holds a stale handle or a handle of another agent ends the run with
+  `Terminated(EngineFault)`. It was the start gate of `story:host-object-overrides`, which
+  holds it with a test.
+- `Overrides<H>`: the override table of a host object, with one optional function per
+  internal method: `Overrides::get_prototype_of`, `Overrides::set_prototype_of`,
+  `Overrides::is_extensible`, `Overrides::prevent_extensions`, `Overrides::get_own_property`,
+  `Overrides::define_own_property`, `Overrides::has_property`, `Overrides::get`,
+  `Overrides::set`, `Overrides::delete` and `Overrides::own_property_keys`, as
+  `docs/design/host-interface.md` section 15 states them.
+  - Each override given runs in place of the ordinary method; each one left `None` runs the
+    ordinary one (HOST-114).
+  - An override call is one re-entry and spends a step.
+  - The handles of its answer are checked first (HOST-222). Then the answer is checked
+    against the invariants of the essential internal methods, read as facts of the object's
+    own earlier answers.
+  - An answer of the object's record, where the table leaves an override out, is checked
+    and recorded the same way: an answer is the object's, whoever gives it.
+  - A `has_property` false records nothing and faults only for a non-configurable property
+    (reported by `get_own_property`, or held by the record), extensible or not.
+  - A stale or foreign handle, a descriptor that is not complete (HOST-113), or a broken
+    invariant (HOST-112) ends the run in `Terminated(EngineFault)` and faults the agent.
+    Nothing is thrown to the script.
+  - A global object whose `define_own_property` refuses a property of clause 19 makes
+    `create_realm` answer `Throw` of a `TypeError` (HOST-41).
+- `HostObjectSpec` changed: it takes the host type, `HostObjectSpec<H>`, and has the field
+  `HostObjectSpec::overrides`, of type `Option<&'static Overrides<H>>`.
+- `new_host_object` takes `HostObjectSpec<H>`.
+- **Breaking**: `HostObjectSpec`. A host that names the type or writes a literal stops
+  compiling once. A literal names `overrides` (`overrides: None` for no table), and a type
+  position names the host type (`HostObjectSpec<MyHost>`).
+- Requirements delivered: HOST-41, HOST-112, HOST-113, HOST-114, HOST-222.
 
 ## [0.12.0] - 2026-11-25
 
