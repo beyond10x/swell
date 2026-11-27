@@ -9,19 +9,20 @@
 # No test runs and nothing is built: the script plants a tree of its own
 # (.out/gate-tests/<name>/run) with the repository's Taskfile.yml and taskfiles/, a crate swell
 # whose tests/deep.rs holds a test that calls stack_with_room( and one that does not and whose
-# tests/plain.rs holds one test, and a stub cargo first on PATH. The stub answers cargo nextest
-# list from the default-filter line of the --config-file it is given (the names after "test(="
-# are the run at opt-level 1, a line "not (...)" the run at opt-level 0, no file the workspace),
-# over four tests of two binaries (swell::main and swell-num::main); it answers cargo nextest
-# run with a Starting and a Summary line and a JUnit file of its own per run, and logs each
-# run's profile, target, guard and default filter.
-# 1. The split as it is: task test exits 0 and prints "test: swell::main 2 at opt-level 1, 1 at
+# tests/plain.rs holds one test, whose tests/realm_padding.rs holds the test
+# TEST_OPT1_PROFILE_TEST names (the run at opt-level 1 must hold it), and a stub cargo first on
+# PATH. The stub answers cargo nextest list from the default-filter line of the --config-file it
+# is given (the names after "test(=" are the run at opt-level 1, a line "not (...)" the run at
+# opt-level 0, no file the workspace), over five tests of two binaries (swell::main and
+# swell-num::main); it answers cargo nextest run with a Starting and a Summary line and a JUnit
+# file of its own per run, and logs each run's profile, target, guard and default filter.
+# 1. The split as it is: task test exits 0 and prints "test: swell::main 3 at opt-level 1, 1 at
 #    opt-level 0", one line "2 test binaries: 4 passed, 0 failed, 1 ignored" for both runs (the
-#    ignored one is the test neither run ran, not the sum of what each filter skipped), and
-#    the slowest tests of both runs (the JUnit file of the first run is kept before the second
-#    writes its own); the run at opt-level 1 is --test main in the profile collect with
-#    SWELL_NO_STACK_TESTS=1 and the two tests printed other, the run at opt-level 0 is the
-#    workspace without the variable and without those two.
+#    stub's counts; the ignored one is the test neither run ran, not the sum of what each
+#    filter skipped), and the slowest tests of both runs (the JUnit file of the first run is
+#    kept before the second writes its own); the run at opt-level 1 is --test main in the
+#    profile collect with SWELL_NO_STACK_TESTS=1 and the three tests printed other, the run at
+#    opt-level 0 is the workspace without the variable and without those three.
 # 2. The planted defect: the stub's list of the run at opt-level 1 drops
 #    plain::outside_the_stack and adds deep::on_the_promised_stack, so one test is in neither
 #    run and one is in both: task test fails, naming each, and the stub ran no test.
@@ -54,7 +55,7 @@ printf '%s\n' '#!/bin/sh' \
   '  if grep -q "^default-filter = .not (" "$cfg"; then kind=not; else kind=only; fi' \
   '  names=$(grep "^default-filter = " "$cfg" | grep -o "test(=[^)]*)" | sed "s/^test(=//; s/)\$//" | tr "\n" " ")' \
   'fi' \
-  'all="swell::main deep::on_any_stack|swell::main deep::on_the_promised_stack|swell::main plain::outside_the_stack|swell-num::main num::adds"' \
+  'all="swell::main deep::on_any_stack|swell::main deep::on_the_promised_stack|swell::main plain::outside_the_stack|swell::main realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on|swell-num::main num::adds"' \
   'if [ "$2" = list ]; then' \
   '  printf "%s\n" "$all" | tr "|" "\n" | while read -r bin test; do' \
   '    case " $names " in *" $test "*) named=yes ;; *) named=no ;; esac' \
@@ -92,7 +93,7 @@ mkdir -p "$run/spec" "$run/conformance/test262" || fail "cannot make $run/spec"
 cp "$root/spec/ess-inputs.yaml" "$run/spec/" || fail "cannot copy spec/ess-inputs.yaml"
 cp "$root/conformance/test262/PIN" "$run/conformance/test262/" || fail "cannot copy conformance/test262/PIN"
 printf '[package]\nname = "swell"\n' > "$run/crates/swell/Cargo.toml"
-printf 'mod deep;\nmod plain;\nmod support;\n' > "$run/crates/swell/tests/main.rs"
+printf 'mod deep;\nmod plain;\nmod realm_padding;\nmod support;\n' > "$run/crates/swell/tests/main.rs"
 printf 'pub fn stack_with_room(bytes: usize) -> usize {\n    bytes / 8 * 7\n}\n' > "$run/crates/swell/tests/support/host.rs"
 printf '%s\n' \
   '#[test]' \
@@ -105,13 +106,14 @@ printf '%s\n' \
   '    assert_eq!(1 + 1, 2);' \
   '}' > "$run/crates/swell/tests/deep.rs"
 printf '#[test]\nfn outside_the_stack() {\n    assert_eq!(2 + 2, 4);\n}\n' > "$run/crates/swell/tests/plain.rs"
+printf '#[test]\nfn the_profile_keeps_debug_assertions_and_overflow_checks_on() {\n    assert!(cfg!(debug_assertions));\n}\n' > "$run/crates/swell/tests/realm_padding.rs"
 
 # 1. The split as it is.
 : > "$dir/stub-split.log"
 STUB_LOG="$root/$dir/stub-split.log" PATH="$root/$dir/bin:$PATH" task -d "$run" test > "$dir/split.out" 2>&1 ||
   fail "task test exited non-zero on a split that runs each test once ($dir/split.out)"
-grep -qxF 'test: swell::main 2 at opt-level 1, 1 at opt-level 0' "$dir/split.out" ||
-  fail "task test did not print the tests of swell::main at each opt-level, 2 and 1 ($dir/split.out)"
+grep -qxF 'test: swell::main 3 at opt-level 1, 1 at opt-level 0' "$dir/split.out" ||
+  fail "task test did not print the tests of swell::main at each opt-level, 3 and 1 ($dir/split.out)"
 grep -qxF '2 test binaries: 4 passed, 0 failed, 1 ignored' "$dir/split.out" ||
   fail "task test did not print one line of both runs, 2 binaries (swell::main once), 4 passed, 1 ignored (the test neither run ran) ($dir/split.out)"
 [ "$(grep -c 'test binaries:' "$dir/split.out")" = 1 ] ||
@@ -122,8 +124,8 @@ done
 high=$(grep '^run profile collect ' "$dir/stub-split.log")
 low=$(grep '^run profile test ' "$dir/stub-split.log")
 [ "$(grep -c '^run ' "$dir/stub-split.log")" = 2 ] || fail "the stub saw not two runs ($dir/stub-split.log)"
-case "$high" in "run profile collect target main guard 1 config-only deep::on_any_stack plain::outside_the_stack ") ;; *) fail "the run at opt-level 1 is not --test main in the profile collect with SWELL_NO_STACK_TESTS=1 and the two tests printed other: $high" ;; esac
-case "$low" in "run profile test target workspace guard unset config-not deep::on_any_stack plain::outside_the_stack ") ;; *) fail "the run at opt-level 0 is not the workspace without SWELL_NO_STACK_TESTS and without the tests printed other: $low" ;; esac
+case "$high" in "run profile collect target main guard 1 config-only deep::on_any_stack plain::outside_the_stack realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on ") ;; *) fail "the run at opt-level 1 is not --test main in the profile collect with SWELL_NO_STACK_TESTS=1 and the two tests printed other: $high" ;; esac
+case "$low" in "run profile test target workspace guard unset config-not deep::on_any_stack plain::outside_the_stack realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on ") ;; *) fail "the run at opt-level 0 is not the workspace without SWELL_NO_STACK_TESTS and without the tests printed other: $low" ;; esac
 
 # 2. The planted defect: one test in neither run, one in both.
 : > "$dir/stub-defect.log"
