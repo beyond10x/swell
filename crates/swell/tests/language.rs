@@ -340,3 +340,24 @@ fn the_parts_cover_every_script() {
         .sum();
     println!("{} script(s), {runs} run(s)", scripts.len());
 }
+
+/// Every entry directly in `tests/language/` is a file the parts run: a script `*.js`, the
+/// only kind the directory holds and the runner reads (it reads no file beside a script). A
+/// file of another kind (a `.mjs`, a `.txt`, a script without extension) or a directory would
+/// run in no part, so it fails this test by name.
+#[test]
+fn the_language_directory_holds_only_scripts_the_parts_run() {
+    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/language");
+    let mut others: Vec<String> = fs::read_dir(&directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| !(path.is_file() && path.extension().is_some_and(|e| e == "js")))
+        .map(|path| path.display().to_string())
+        .collect();
+    others.sort();
+    assert!(
+        others.is_empty(),
+        "tests/language/ holds entries no part runs (a part runs only the files *.js): {}",
+        others.join(", ")
+    );
+}
