@@ -22,6 +22,7 @@ use alloc::vec::Vec;
 use swell_compiler::bytecode::{Handler, Instruction};
 
 use crate::env::NameReference;
+use crate::heap::PrivateNameRef;
 use crate::heap::arena::Handle;
 use crate::heap::collect::{Item, Mark};
 use crate::object::property::Key;
@@ -78,11 +79,15 @@ impl Entry {
 /// What a local slot or a slot of a declarative record holds: a value, or the uninitialized
 /// state of a `let` or `const` binding before its declaration ran (`docs/design/engine.md`,
 /// decision 3, "Lexical bindings", item 2). A type of the engine that no host interface and no
-/// builtin receives; the same size as a [`Value`], so a slot costs what it cost before.
+/// builtin receives; the same size as a [`Value`], so a slot costs what it cost before. A slot of
+/// a private record holds a Private Name (`docs/design/engine.md`, "Private names", item 1),
+/// which is no value: read where a value is expected it is a logic error of the engine
+/// (section 13), which faults the agent.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum SlotValue {
     Value(Value),
     Uninitialized,
+    PrivateName(PrivateNameRef),
 }
 
 impl SlotValue {
@@ -90,7 +95,16 @@ impl SlotValue {
     pub(crate) fn value(self) -> Option<Value> {
         match self {
             SlotValue::Value(value) => Some(value),
-            SlotValue::Uninitialized => None,
+            SlotValue::Uninitialized | SlotValue::PrivateName(_) => None,
+        }
+    }
+
+    /// Report what the slot holds to the collector: a value's handle or a Private Name.
+    pub(crate) fn trace(self, mark: &mut Mark) {
+        match self {
+            SlotValue::Value(value) => mark.value(value),
+            SlotValue::PrivateName(name) => mark.push(Item::PrivateName(name.handle)),
+            SlotValue::Uninitialized => {}
         }
     }
 }
@@ -225,8 +239,8 @@ impl Frame {
                 Entry::Reference(_) | Entry::Tag(_) => {}
             }
         }
-        for value in self.locals.iter().filter_map(|slot| slot.value()) {
-            mark.value(value);
+        for slot in &self.locals {
+            slot.trace(mark);
         }
         if let Some(env) = self.env {
             mark.push(Item::Environment(env));

@@ -67,7 +67,6 @@ pub(crate) struct Parsed {
 pub const HOLDS: &[(&str, u32)] = &[
     ("class heritage", 8),
     ("class field", 8),
-    ("private method", 8),
     ("private field", 8),
     ("private name in", 8),
     ("class static block", 8),

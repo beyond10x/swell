@@ -167,6 +167,8 @@ mod object_patterns;
 mod objects;
 #[cfg(any(not(test_modules), test_modules = "parameters"))]
 mod parameters;
+#[cfg(any(not(test_modules), test_modules = "private_methods"))]
+mod private_methods;
 #[cfg(any(not(test_modules), test_modules = "promise_reads"))]
 mod promise_reads;
 #[cfg(any(not(test_modules), test_modules = "promise_statics"))]

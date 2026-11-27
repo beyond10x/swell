@@ -268,8 +268,8 @@ impl EnvironmentRecord {
         if let Some(outer) = self.outer {
             mark.push(Item::Environment(outer));
         }
-        for value in self.slots.iter().filter_map(|slot| slot.value()) {
-            mark.value(value);
+        for slot in &self.slots {
+            slot.trace(mark);
         }
         for (key, value) in self.added.bindings.iter() {
             key.trace(mark);
@@ -283,9 +283,7 @@ impl EnvironmentRecord {
             Some(RecordNames::Global(global)) => {
                 for (key, binding) in global.bindings.iter() {
                     key.trace(mark);
-                    if let Some(value) = binding.value.value() {
-                        mark.value(value);
-                    }
+                    binding.value.trace(mark);
                 }
             }
             None => {}
@@ -446,7 +444,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Value> {
         match self.slot_state(env, hops, slot)? {
             SlotValue::Value(value) => Ok(value),
-            SlotValue::Uninitialized => Err(self.fault()),
+            SlotValue::Uninitialized | SlotValue::PrivateName(_) => Err(self.fault()),
         }
     }
 
@@ -704,6 +702,9 @@ impl<H: Host> Agent<H> {
                         let name = self.key_text(key);
                         Err(self.not_initialized(&name))
                     }
+                    // A slot that holds a Private Name is named with its `#`, which no lookup
+                    // by name asks for: reaching it is a logic error.
+                    SlotValue::PrivateName(_) => Err(self.fault()),
                 },
                 Some(Bound::Added(index)) => self.added_value(env, index).map(Some),
                 None => Ok(None),
@@ -744,6 +745,7 @@ impl<H: Host> Agent<H> {
                         let name = self.key_text(key);
                         Err(self.not_initialized(&name))
                     }
+                    (SlotValue::PrivateName(_), _) => Err(self.fault()),
                     (_, SlotKind::Const) => {
                         let name = self.key_text(key);
                         self.assign_const(&name)

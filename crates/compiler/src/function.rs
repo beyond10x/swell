@@ -129,7 +129,7 @@ pub(crate) fn compile_function(
         (Some(slot), None, _) => generator_body(&mut c, f, slot)?,
         (None, _, Some((slot, start))) => async_body(&mut c, f, slot, start)?,
         (None, _, None) if f.kind == FunctionKind::FieldInitializer => {
-            crate::class::instance_initializer(&mut c, f)?;
+            crate::class::instance_initializer(&mut c, id, f)?;
         }
         (None, _, None) => {
             c.run(&f.body)?;

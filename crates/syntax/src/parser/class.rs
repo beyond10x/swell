@@ -351,7 +351,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// `computed` read before, or the PropertyName or PrivateIdentifier at the current token)
     /// and what follows it. Before `(` it is a method: numbers the element's function and
     /// appends the element to `target`, or, for the constructor, answers the function numbered
-    /// at the `{`; a private method holds `private method`. A plain name (no `get`, `set`,
+    /// at the `{`; a private method that is not static makes the class's initializer of its
+    /// instance elements, if it has none yet. A plain name (no `get`, `set`,
     /// `async` or `*` before it) followed by `=`, `;`, `}` or a line terminator is a field
     /// ([`Parser::field_head`]). Anything else is a grammar error.
     #[inline(never)]
@@ -392,11 +393,8 @@ impl<'a, 'm> Parser<'a, 'm> {
                 return Ok(Head::Method(id));
             }
         }
-        if matches!(key, ClassKey::Private(_)) {
-            self.hold("private method", 8, start);
-            if !modifiers.is_static {
-                self.instance_elements(target, start);
-            }
+        if matches!(key, ClassKey::Private(_)) && !modifiers.is_static {
+            self.instance_elements(target, start);
         }
         let id = self.begin_function(modifiers.kind, start, None);
         if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {

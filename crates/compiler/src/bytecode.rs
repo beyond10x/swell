@@ -191,6 +191,49 @@ pub enum Instruction {
     /// (`#sec-putvalue`; `#sec-evaluate-property-access-with-expression-key`: the key is converted
     /// after the value is evaluated).
     PutIndex,
+    /// `[o] -> [v]`: GetValue of the private reference `o.#x` (`#sec-getvalue`, step 3:
+    /// ToObject of `o`, then PrivateGet, `#sec-privateget`) whose Private Name is slot `slot` of
+    /// the environment `hops` outward, the private record of the class that declares `#x`
+    /// (`docs/design/engine.md`, "Private names", items 3 and 5): the field's value, the method,
+    /// or the getter called with `o` as `this`; a `TypeError` when `o` has no element of the
+    /// name or the accessor has no getter.
+    GetPrivate {
+        hops: u32,
+        slot: u32,
+    },
+    /// `[o, v] -> [v]`: PutValue of the private reference `o.#x` (`#sec-putvalue`, step 3:
+    /// ToObject of `o`, then PrivateSet, `#sec-privateset`), the Private Name found as
+    /// [`Instruction::GetPrivate`] finds it: a field takes `v`, the setter of an accessor is
+    /// called with `o` as `this` and `v`; a `TypeError` when `o` has no element of the name, for
+    /// a method, and for an accessor with no setter.
+    SetPrivate {
+        hops: u32,
+        slot: u32,
+    },
+    /// `[o] -> [o]`: PrivateMethodOrAccessorAdd (`#sec-privatemethodoraccessoradd`) of the method,
+    /// getter or setter whose function is slot `function_slot` of the environment
+    /// `function_hops` outward, keyed by the Private Name in slot `slot` of the environment
+    /// `hops` outward (both the private record), to `o`: a getter or a setter joins the
+    /// accessor of the name that lacks that half, which its partner added just before (the
+    /// combined element of ClassDefinitionEvaluation, step 27.e); otherwise an element of the
+    /// name already on `o` is a `TypeError`. The fields are 16 bits wide so the instruction
+    /// keeps the size of the others: a class with more private slots than that, or a record
+    /// that far out, is refused by the compiler.
+    AddPrivateMethod {
+        hops: u16,
+        slot: u16,
+        function_hops: u16,
+        function_slot: u16,
+    },
+    /// A new Private Name whose [[Description]] is `strings[name]` into slot `slot` of the
+    /// LexicalEnvironment, the private record the class's code just pushed: one per private
+    /// identifier the class declares, made at each evaluation of the class
+    /// (`#sec-runtime-semantics-classdefinitionevaluation`, step 7; `docs/design/engine.md`,
+    /// "Private names", item 3).
+    NewPrivateName {
+        slot: u32,
+        name: u32,
+    },
     /// `[o, key] -> [o, key']`: the first steps of GetValue of `o[key]` before the reference is
     /// read and written by a compound assignment or an update: a `TypeError` when `o` is
     /// `undefined` or `null` (ToObject), then `key'` is ToPropertyKey of `key`, so the key is
@@ -901,6 +944,10 @@ impl Instruction {
             | Instruction::PutNamed(_)
             | Instruction::GetIndex
             | Instruction::PutIndex
+            | Instruction::GetPrivate { .. }
+            | Instruction::SetPrivate { .. }
+            | Instruction::AddPrivateMethod { .. }
+            | Instruction::NewPrivateName { .. }
             | Instruction::PropertyKey
             | Instruction::DeleteNamed(_)
             | Instruction::DeleteIndex

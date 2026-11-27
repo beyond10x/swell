@@ -1,0 +1,125 @@
+script locals 0
+  lexical let "C"
+  0000 2:1 SetStrict true
+  0001 2:1 PushLexicalEnv 0 const "C"
+  0002 2:1 PushEnv 7
+  0003 2:1 NewPrivateName 0 "#m"
+  0004 2:1 NewPrivateName 2 "#a"
+  0005 2:1 NewPrivateName 5 "#s"
+  0006 2:1 ClassPrototype
+  0007 2:1 MakeClassConstructor 0 base
+  0008 2:11 Dup2
+  0009 2:11 Pop
+  0010 2:11 MakeMethod 2
+  0011 2:11 SetEnv 0 1
+  0012 2:11 Pop
+  0013 2:11 Pop
+  0014 2:36 Dup2
+  0015 2:36 Pop
+  0016 2:36 MakeMethod 3
+  0017 2:36 SetEnv 0 3
+  0018 2:36 Pop
+  0019 2:36 Pop
+  0020 2:59 Dup2
+  0021 2:59 Pop
+  0022 2:59 MakeMethod 4
+  0023 2:59 SetEnv 0 4
+  0024 2:59 Pop
+  0025 2:59 Pop
+  0026 2:72 Dup
+  0027 2:72 MakeMethod 5
+  0028 2:72 SetEnv 0 6
+  0029 2:72 Pop
+  0030 2:72 Pop
+  0031 2:87 Dup2
+  0032 2:87 Pop
+  0033 2:87 Closure 6
+  0034 2:87 DefineClassMethod "run"
+  0035 2:87 Pop
+  0036 2:134 Dup
+  0037 2:134 Closure 7
+  0038 2:134 DefineClassMethod "t"
+  0039 2:134 Pop
+  0040 2:1 SetEnv 1 0
+  0041 2:1 Nip 1
+  0042 2:1 StoreInitializer 1
+  0043 2:72 AddPrivateMethod 0 5 0 6
+  0044 2:1 PopEnv
+  0045 2:1 PopEnv
+  0046 2:1 SetStrict false
+  0047 2:1 InitGlobal "C"
+  0048 2:1 Pop
+  0049 0:0 LoadCompletion
+  0050 0:0 Return
+
+function 0 class constructor "C" length 0 locals 0 strict
+  0000 2:1 This
+  0001 2:1 InitInstance
+  0002 2:1 Pop
+  0003 2:1 Undefined
+  0004 2:1 Return
+
+function 1 field initializer "" length 0 locals 0 strict
+  0000 2:11 This
+  0001 2:11 AddPrivateMethod 0 0 0 1
+  0002 2:11 Pop
+  0003 2:11 This
+  0004 2:11 AddPrivateMethod 0 2 0 3
+  0005 2:11 Pop
+  0006 2:11 This
+  0007 2:11 AddPrivateMethod 0 2 0 4
+  0008 2:11 Pop
+  0009 2:11 Undefined
+  0010 2:11 Return
+
+function 2 method "#m" length 0 locals 0 strict
+  0000 2:25 This
+  0001 2:25 GetPrivate 0 2
+  0002 2:18 Return
+  0003 2:11 Undefined
+  0004 2:11 Return
+
+function 3 getter "get #a" length 0 locals 0 strict
+  0000 2:54 Number 1
+  0001 2:47 Return
+  0002 2:36 Undefined
+  0003 2:36 Return
+
+function 4 setter "set #a" length 1 locals 1 strict
+  params local 0
+  0000 2:59 Undefined
+  0001 2:59 Return
+
+function 5 method "#s" length 0 locals 0 strict
+  0000 2:72 Undefined
+  0001 2:72 Return
+
+function 6 method "run" length 1 locals 1 strict
+  params local 0
+  0000 2:96 GetLocal 0
+  0001 2:103 Number 2
+  0002 2:96 SetPrivate 0 2
+  0003 2:96 Pop
+  0004 2:106 GetLocal 0
+  0005 2:106 Dup
+  0006 2:106 GetPrivate 0 2
+  0007 2:114 Number 1
+  0008 2:106 Add
+  0009 2:106 SetPrivate 0 2
+  0010 2:106 Pop
+  0011 2:124 GetLocal 0
+  0012 2:124 Dup
+  0013 2:124 GetPrivate 0 0
+  0014 2:124 Call 0
+  0015 2:117 Return
+  0016 2:87 Undefined
+  0017 2:87 Return
+
+function 7 method "t" length 0 locals 0 strict
+  0000 2:154 GetEnvChecked 1 0
+  0001 2:154 Dup
+  0002 2:154 GetPrivate 0 5
+  0003 2:154 Call 0
+  0004 2:147 Return
+  0005 2:134 Undefined
+  0006 2:134 Return

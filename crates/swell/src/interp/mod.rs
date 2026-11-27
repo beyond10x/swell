@@ -47,6 +47,7 @@ mod lexical;
 mod object_literal;
 mod parameters;
 mod patterns;
+mod private;
 mod regexp;
 mod spread;
 mod super_ref;

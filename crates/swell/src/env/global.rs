@@ -258,6 +258,8 @@ impl<H: Host> Agent<H> {
                     let text = self.key_text(name);
                     Err(self.not_initialized(&text))
                 }
+                // Only a private record holds a Private Name: a logic error here.
+                SlotValue::PrivateName(_) => Err(self.fault()),
             };
         }
         let global = self.global_binding_object(realm)?;
