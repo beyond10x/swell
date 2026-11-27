@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T09:29:05Z",
+  "actor": "human:operator",
+  "artifact": "story:private-fields-and-private-in",
+  "kind": "story",
+  "revision": 12,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/privatefields at b30b6018, build node, before the merge into wave/big-2",
+    "reference": "swell-syntax main 80 passed (and 80 with SWELL_FULL_COUNTS=1); swell-compiler main 17 passed; swell main 1710 passed, 1 skipped (default build) and 1682 passed, 1 skipped (collect build); swell lib 285 passed; task test-stack-profiles 7 passed in each of the two profiles; task clippy exit 0; cargo fmt --all -- --check exit 0"
+  }
+}

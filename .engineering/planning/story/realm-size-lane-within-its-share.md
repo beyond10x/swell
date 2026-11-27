@@ -2,13 +2,14 @@
 format: aep.planning-md/3
 id: story:realm-size-lane-within-its-share
 kind: story
-status: active
+status: implemented
 title: The lane slow ends within 15 minutes on the forge and each of its parts within 10
 summary: 'task slow took 22 min 35 s on pull request 19; two profile builds are 433 s of it and test-realm-sizes 524 s. Bound: 900 s for the lane, 600 s per part.'
-revision: 7
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T20:04:08Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T20:04:08Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T08:38:03Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":10,"verification":5}}, executor: "agent:coordinator"}
 ---
 A defect of the lane `slow`, not a feature. Ordered ahead of the next feature units of wave
 big-2 on the operator's order of 2026-11-26; no feature unit of the wave merges before it.
@@ -114,12 +115,20 @@ separate. It took two of the four candidates and one change of how the lane runs
 - **(d) Not taken.** It needs a claim that no defect hides at the cut sizes. The record
   contradicts that claim.
 
-Estimated forge lane on the tree merged with wave big-2: about 848 s of 900, from 1,137.3 s
-(about 806 s before the merge); the unit's own aim of 800 s is not met by the estimate.
-Measured cold on the node: 444.2 s on 32 cores (424.1 s before the merge), 619.8 s on 4 CPUs
-before the merge.
+Measured on the forge on the tree merged with wave big-2 (`wave/big-2` at `b9adbe35`, run
+45963552396, started by hand, 2026-11-27, 09:09 to 09:24 CET, green): `slow-time lane 882.6
+of 900, longest part slow-test262 504.8 of 600`, the parts 504.8, 170.4, 185.2 and 22.2, the
+build of the profile `collect` 382.2 s beside the first part with `slow-tests` waiting 0 s.
+The story's bound holds with 17.4 s of margin, from 1,137.3 s. The unit's estimate for that
+tree was about 848 s and its own aim 800 s; neither is met. Measured on the build node: the
+same head as one job 454.4 s on 32 cores (parts 272.8, 76.9, 103.8 and 0.9); cold on the
+unit's head 444.2 s on 32 cores after its merge of the wave (424.1 s before it) and 619.8 s
+on 4 CPUs before it.
+
+On that margin `story:property-escape-cases-spend-less-in-the-interpreter-loop` entered the
+wave as a fifth unit of the lane (`approval-record:wave-big-2-lane-unit-5`); it is a story of
+its own and not a part of this one.
 
 The reviews of the fourth unit: `review-result:adversary-lanefour-pass-1`,
 `review-result:adversary-lanefour-pass-2` and the coordinator's read of its second correction
-(`review-result:lanefour-correction-2-coordinator-read`). The story's bound, 900 s for the lane
-on the forge, is shown only by a forge run; none exists yet for the merged tree.
+(`review-result:lanefour-correction-2-coordinator-read`).

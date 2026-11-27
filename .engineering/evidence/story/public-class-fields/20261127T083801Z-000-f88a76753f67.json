@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T08:38:01Z",
+  "actor": "human:operator",
+  "artifact": "story:public-class-fields",
+  "kind": "story",
+  "revision": 12,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at b9adbe35, exit 0, on the build node; the unit was merged by commit 9cfffd9, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/class_fields.rs (swell::class_fields::*) and the cases of docs/plan/slice-08/story-public-fields.cases.txt in conformance/test262/expected.txt"
+  }
+}

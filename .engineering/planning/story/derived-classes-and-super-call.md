@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:derived-classes-and-super-call
 kind: story
-status: active
+status: implemented
 title: 'Derived classes: heritage, super(), the this TDZ, super in class methods, arrows and eval code'
 summary: 331 cases (662 runs); lifts class heritage, super in an arrow function and super in eval code.
 relations:
@@ -71,10 +71,11 @@ scope:
   path: crates/syntax/tests/sources/refused/super-in-arrow.js
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/super-in-arrow.js
-revision: 16
+revision: 17
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 14, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 15, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T08:38:02Z", actor: "human:operator", revision: 17, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

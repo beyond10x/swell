@@ -27,7 +27,8 @@ session's scratch directory. The stage is kept current by the coordinator.
 | lane | slowlane | `story:realm-size-lane-within-its-share` | ordered ahead of the feature units on 2026-11-26 (`approval-record:wave-big-2-slow-lane`): the lane `slow` took 22 min 35 s on pull request 19; bound 15 minutes on the forge and 10 minutes per part; no feature unit merges before it; `impl/slowlane`, cut at `d382bb69`; dispatched on 2026-11-26, 21:10 CET; green at `949e906a` after one correction (`review-result:adversary-slowlane-pass-1`, `review-result:slowlane-correction-1-coordinator-read`); merged into `wave/big-2` at `11d92ae` on 2026-11-26 |
 | lane | lanebuilds | `story:realm-size-lane-within-its-share` (second unit) | `impl/lanebuilds`, cut from `impl/slowlane`; the stack tests are built with their modules only, the collect mode of `test-realm-sizes` runs at every size again; green at `d80db027` after one correction (`review-result:adversary-lanebuilds-pass-1`, `review-result:lanebuilds-correction-1-coordinator-read`); merged at `93e8105` on 2026-11-27, 00:31 CET; the lane on the build node: 503.9 s cold |
 | lane | lanetests | `story:realm-size-lane-within-its-share` (third unit) | `impl/lanetests`, cut from `impl/lanebuilds` at `d97404f`; dispatched on 2026-11-26, about 23:50 CET: the tests over 2 s in the lane's collect build; green at `4f4d1a28` after one correction (`review-result:adversary-lanetests-pass-1`, `review-result:lanetests-correction-1-coordinator-read`); merged at `7761c2a` on 2026-11-27, 01:38 CET; the collect runs of `test-realm-sizes` sum to 1,625.6 test-seconds on the build node (2,588.5 at the unit's base, at another load); correction 2 (`d89192ea`, one test file): `promise_statics::the_values_of_a_pending_promise_all_are_charged_until_it_settles`, a test of the unit setmethods that took 2.19 s alone in the collect build of the lane, runs 12 pending promises there (1.30 CPU s) and its earlier 20 with `SWELL_FULL_COUNTS=1` (2.2 CPU s), read by the coordinator (`review-result:lanetests-correction-2-coordinator-read`) and merged at `58790b9` on 2026-11-27, 02:03 CET |
-| lane | lanefour | `story:realm-size-lane-within-its-share` (fourth unit) | `impl/lanefour`, cut at `158888d9`; dispatched on 2026-11-27, about 03:25 CET, after the forge's run 45925590365 read `slow-time lane 1137.3 of 900` on `158888d9` (parts 419.3, 268.4, 431.2, 18.4); its target is 800 s or less on the forge without a shard, a raised bound, a skipped test or a build cache between runs; green at `826214f` after two adversary passes (`review-result:adversary-lanefour-pass-1`, `review-result:adversary-lanefour-pass-2`) and two corrections: the lane's collect mode at opt-level 1 except the stack tests, held by a guard at run time, the build of the profile `collect` beside `slow-test262`, a character class that keeps its last answer; one cold lane on a build node of 32 cores reads `slow-time lane 444.2 of 900`; estimated for the forge about 848 s of 900, not measured there; read by the coordinator (`review-result:lanefour-correction-2-coordinator-read`); merged at `1c8d802` on 2026-11-27, 08:41 CET |
+| lane | lanefour | `story:realm-size-lane-within-its-share` (fourth unit) | `impl/lanefour`, cut at `158888d9`; dispatched on 2026-11-27, about 03:25 CET, after the forge's run 45925590365 read `slow-time lane 1137.3 of 900` on `158888d9` (parts 419.3, 268.4, 431.2, 18.4); its target is 800 s or less on the forge without a shard, a raised bound, a skipped test or a build cache between runs; green at `826214f` after two adversary passes (`review-result:adversary-lanefour-pass-1`, `review-result:adversary-lanefour-pass-2`) and two corrections: the lane's collect mode at opt-level 1 except the stack tests, held by a guard at run time, the build of the profile `collect` beside `slow-test262`, a character class that keeps its last answer; one cold lane on a build node of 32 cores reads `slow-time lane 444.2 of 900`; estimated for the forge about 848 s of 900; read by the coordinator (`review-result:lanefour-correction-2-coordinator-read`); merged at `1c8d802` on 2026-11-27, 08:41 CET; the forge measured `slow-time lane 882.6 of 900` on `b9adbe35` (run 45963552396, 2026-11-27, 09:09 to 09:24 CET) |
+| lane | lanefive | `story:property-escape-cases-spend-less-in-the-interpreter-loop` | taken into the wave on 2026-11-27 (`approval-record:wave-big-2-lane-unit-5`) after the forge read `slow-time lane 882.6 of 900`; two plan critics read the story once and the coordinator decided their findings (`review-result:lanefive-plan-coordinator-read`); `impl/lanefive`, cut at the commit of this row; its bound is a ratio of at most 0.90 of the CPU seconds of the loop of `buildString` (`task perf-loop`), with no step count, heap reading or stack bound moved; it is in the wave's second pull request |
 | tests | randomcases | none (`story:math-random` is implemented) | `impl/randomcases`, cut at `b9bd2838`; dispatched on 2026-11-26, 21:10 CET: the four cases of `review-result:adversary-random-pass-2`, which passed and were never committed, are taken under the unit's names; tests only; green at `497fa1ff` (2 test files, 271 added lines; swell-num 153 and `math_random::` 15 tests green in both modes), read by the coordinator (`review-result:randomcases-coordinator-read`) and merged in the commit after this one |
 | tests | realmwalk | `story:realm-walk-in-parts-under-the-cpu-bound` | `impl/realmwalk`, cut at `158888d9`; its first unit stopped at the story's stop rule on 2026-11-27 (the list of the realm's 344 functions alone took 2.33 CPU s in the lane's collect build, and every part of the walk would pay it); the story was written again: the places of the functions are a committed file, `crates/swell/tests/fixtures/realm_places.txt`, which the parts read. The form of that file: it carries no digest of its sources; one test in the default build makes the list again at every gate run and compares it with the file line for line (0.05 CPU s). This differs from the two forms the folder's rule "An expensive product is made once" names (a committed file with a digest; a fixture built once per run), so it was put to the operator on 2026-11-27, 03:48 CET, with three options (this form as the default; a digest as form 1; a setup step under `target/`). No answer came within the 15 minutes of the rule "A default proceeds", and the default was taken at 04:04 CET. Three plan critics read the rewritten story twice (acceptance, design, parallel safety); each asked for a revision both times, and the coordinator decided the remaining findings and read the change (`review-result:realmwalk-plan-coordinator-read`, story revision 9); the branch was merged up to `wave/big-2` at `edfd254` (head `557206e2`, source code equal to `6f21df6d`) and the unit was dispatched on 2026-11-27, 04:13 CET; it is merged into `wave/big-2` when it is closed; its second start reported green at `542f9fe` (2 parts, 181 and 163 of 344 places; the equality test 0.061 CPU s alone); pass 1 of the adversary was green with one warning and twelve notes (`review-result:adversary-realmwalk-pass-1`); correction 1 at `fa63ea9` (the two variables of the gate's test build listed and checked by `test-vars-check`, what a part owes, at most 8 parts, one definition of the comment lines, a read-back before a write); read by the coordinator (`review-result:realmwalk-correction-1-coordinator-read`), who ran the whole gate on the head; merged at `1923715` on 2026-11-27, 06:23 CET |
 | 3 | weak | `story:weak-map-and-weak-set` | `impl/weak`, cut at `b9bd2838`, with the base run of `b9bd2838` (`test262 total 53801 8982 7 44812 27747 17062 3`); dispatched on 2026-11-26, 21:10 CET; the list reads `passed 156 bound 156 B 156 F 247 R 247` on the base; green at `7d6e94c5` after one correction (`review-result:adversary-weak-pass-1`, `review-result:weak-correction-1-coordinator-read`); merged at `6e9b7fa` on 2026-11-27, 00:36 CET |
@@ -37,7 +38,7 @@ session's scratch directory. The stage is kept current by the coordinator.
 | words | marks | none | `impl/marks`, cut at `2359923`: a comment of `crates/swell/src/interp/class.rs` and a summary line of `taskfiles/gate-time.yml` named a decision by a number of the coordinating session; both state the rule in words now (`176998f`, two files, four lines, no line of code); the coordinator read the diff; no adversary pass and no record in the store, since the unit has no story; merged at `758ad53` on 2026-11-27, 02:31 CET |
 | 4 | upsert | `story:map-upsert-and-group-by` | `impl/upsert`, cut at `d90c333` after the merge of the unit `realmwalk`, on whose story it depends; dispatched on 2026-11-27; green at `5458d2e` (11 tests; the part of 202 cases: 202 passed, 165 on the base); pass 1 of the adversary dispatched; pass 1 was green on the code (`review-result:adversary-upsert-pass-1`: two warnings and five notes, each a gap in the tests or texts; two planted defects passed all 11 tests), correction 1 at `5233731` (four tests more, two of them red with a defect planted, and a bound on the bytes per grouped element in the memory test; 15 tests); read by the coordinator (`review-result:upsert-correction-1-coordinator-read`); merged at `6e03591` on 2026-11-27, 08:21 CET |
 | 4 | overrides | `story:host-object-overrides` | `impl/overrides`, cut at `6f21df6d`, with the base run of `6f21df6d` (`test262 total 53801 8982 7 44812 33457 11353 2`); dispatched on 2026-11-27, 04:06 CET; the story has no test262 case; the design line HOST-222 is merged (`f3d194e2`); it is merged into `wave/big-2` when it is closed; green at `3d29fd7`; pass 1 of the adversary was red (`review-result:adversary-overrides-pass-1`: a descriptor held across an `is_extensible` override was freed by a collection, the walks of HasProperty, Get and Set held their key and value across an override), correction 1 at `046bfb6`; pass 2 was red (`review-result:adversary-overrides-pass-2`: four invariants broken where the object's record answers for an override the table leaves out, and the question whether a `has_property` false is a fact), correction 2 at `f28eb7c`, `4dccde9` and `2a91ce5` (the record's answer goes through the override's checks; a `has_property` false records nothing and faults only for a non-configurable property; the stack lists name the module); read by the coordinator (`review-result:overrides-correction-2-coordinator-read`); `swell::main` 1657 passed and 1630 with collect-every-safe-point on the unit's head; merged at `0680551` on 2026-11-27, 07:16 CET |
-| 5 | close9 | `story:slice-09-conformance-close` | `impl/close9`, cut at `bc45e92` (every other story of slice 9 merged), with the start run of `cf7f253` and the base run of `bc45e92` (`test262-slice 09 1787 3545 0 0 1787 1765 22 0`); dispatched on 2026-11-27; green at `66fe379` (`test262-slice 09 1864 3694 0 0 1864 1864 0 0`: 22 cases moved to slice 12, 99 taken in from slice 19); adversary pass 1 red on 32 more cases the rule takes in (`review-result:adversary-close9-pass-1`); correction 1 runs |
+| 5 | close9 | `story:slice-09-conformance-close` | `impl/close9`, cut at `bc45e92` (every other story of slice 9 merged), with the start run of `cf7f253` and the base run of `bc45e92` (`test262-slice 09 1787 3545 0 0 1787 1765 22 0`); dispatched on 2026-11-27; green at `66fe379` (`test262-slice 09 1864 3694 0 0 1864 1864 0 0`: 22 cases moved to slice 12, 99 taken in from slice 19); adversary pass 1 red on 32 more cases the rule takes in (`review-result:adversary-close9-pass-1`); correction 1 at `37aaed6` (31 of the 32 come in, 130 in all; one stays in slice 19); correction 2 at `6cc4ca7` moves the 37 cases that need slice 8 there, as the plan of slice 8 counts them (`test262-slice 09 1858 3678 0 0 1858 1858 0 0`); read by the coordinator in place of a second pass (`review-result:close9-correction-2-coordinator-read`); merged at `65b424e` on 2026-11-27, 09:45 CET |
 
 ## The stories of slice 8
 
@@ -58,9 +59,9 @@ story of slice 9 and starts beside slice 9's order 2.
 | 8.3 | privatemethods | `story:private-names-and-private-methods` | `impl/privatemethods`, cut at `f8406d5`, with the base run of `f8406d5`; dispatched on 2026-11-27, after 02:05 CET; its list has 1,977 cases; it is merged into `wave/big-2` when it is closed; green at `a3089e7`; pass 1 of the adversary was red (`review-result:adversary-privatemethods-pass-1`: the Proxy memory sweep at two realm sizes, the room of an instance's list, six findings), correction 1 at `e11fb57` (exact room per class level, the sweep's base read under its own budget, the merge of the units `fields` and `derived`); pass 2 was red (`review-result:adversary-privatemethods-pass-2`: the refusal of a private name in direct eval code rewrote the early error of undeclared names, 7 cases of test262 regressed; a refusal counted beside a thrown error), correction 2 at `d99234d` (refused only when an enclosing class declares the name; the part of 242 files: 211 of 445 runs pass, 193 on the base, none lost; the story's list and guard 2,500 of 2,500); read by the coordinator (`review-result:privatemethods-correction-2-coordinator-read`), whose read sent back one branch without a test, held by correction 3 at `3df8b6b`; merged at `6fcc0f2` on 2026-11-27, 06:18 CET |
 | 8.4 | staticblocks | `story:class-static-blocks` | `impl/staticblocks`, cut at `d90c333` after the merge of the unit `privatemethods`; dispatched on 2026-11-27; green at `d61a063` (19 tests; its list of 484 cases: 484 passed, 448 on the base); pass 1 of the adversary dispatched; pass 1 was green (`review-result:adversary-staticblocks-pass-1`: three notes, four planted defects red in both builds, one change of the code no test caught), correction 1 at `5f8a7d3` (a test for a method between static fields, red with the defect planted; 20 tests); read by the coordinator (`review-result:staticblocks-correction-1-coordinator-read`); merged at `a84725a` on 2026-11-27, 07:52 CET |
 | 8.4 | evalfields | `story:eval-in-class-field-initializers` | `impl/evalfields`, cut at `6f21df6d`, with the base run of `6f21df6d`; dispatched on 2026-11-27, 04:06 CET, once the two stories it depends on were merged (`fields`, `derived`); its list has 84 cases, of which 20 runs fail on the base (`passed 2610 bound 2610 B 2610 F 20 R 20`); it is merged into `wave/big-2` when it is closed; green at `5451f25` (13 tests; the part run reads `passed 2630 bound 2630 B 2610 F 20 R 0`); pass 1 of the adversary was green with no failing case (`review-result:adversary-evalfields-pass-1`) and left three single-line changes of the code that every test passed (the flag also set in a method, a function declaration looked into by the walk of ContainsArguments, the walk's stack not credited) and one note (the walk's error is answered before a held refusal of the eval code); correction 1 (`6547693`, tests and one doc sentence) holds each of the three with a test (14 tests under `class_field_eval::`, one more in the syntax suite); read by the coordinator (`review-result:evalfields-correction-1-coordinator-read`); merged at `0e336fd` on 2026-11-27, 05:09 CET |
-| 8.5 | privatefields | `story:private-fields-and-private-in` | `impl/privatefields`, cut at `a67d445` (after the merge of the unit `overrides`) with `impl/staticblocks` at `d61a063` merged in, base `8857ac25`, with the base run of that commit (`test262 total 53801 8982 7 44812 35989 8821 2`); dispatched on 2026-11-27 while the unit `staticblocks` is in its adversary pass; it is merged into `wave/big-2` only after `impl/staticblocks` is merged there |
+| 8.5 | privatefields | `story:private-fields-and-private-in` | `impl/privatefields`, cut at `a67d445` (after the merge of the unit `overrides`) with `impl/staticblocks` at `d61a063` merged in, base `8857ac25`, with the base run of that commit (`test262 total 53801 8982 7 44812 35989 8821 2`); dispatched on 2026-11-27 while the unit `staticblocks` is in its adversary pass; it is merged into `wave/big-2` only after `impl/staticblocks` is merged there; pass 1 was green (`review-result:adversary-privatefields-pass-1`: no failing case, eight findings on what the tests hold), correction 1 at `b30b601` (four tests, each red with its defect planted: the room of a level, the steps of `#x in`, the static fields left out of an instance's room, the static level reserved once; 17 tests); read by the coordinator (`review-result:privatefields-correction-1-coordinator-read`); merged at `91a6b56` on 2026-11-27, 10:29 CET |
 | 8.6 | evalprivate | `story:private-names-in-eval-code` | `impl/evalprivate`, cut at `bc45e92` with `impl/privatefields` at `3ebbc21` merged in, base `82688ae7`, with the base run of that commit (`test262-slice 08 9302 18455 0 0 9302 9281 21 0`); dispatched on 2026-11-27 while the unit `privatefields` is in its adversary pass; it is merged into `wave/big-2` only after that unit |
-| 8.6 | hook | `story:host-ensure-can-add-private-element` | `impl/hook`, cut at `bc45e92` with `impl/privatefields` at `3ebbc21` merged in, base `bcc10a4e` (the tree of the base of `evalprivate`), no base run: the story has no case of test262; dispatched on 2026-11-27 beside `evalprivate`; it is merged into `wave/big-2` only after the unit `privatefields` |
+| 8.6 | hook | `story:host-ensure-can-add-private-element` | `impl/hook`, cut at `bc45e92` with `impl/privatefields` at `3ebbc21` merged in, base `bcc10a4e` (the tree of the base of `evalprivate`), no base run: the story has no case of test262; dispatched on 2026-11-27 beside `evalprivate`; it is merged into `wave/big-2` only after the unit `privatefields`; built at `bd1dc46` (10 tests); the adversary's pass 1 was red (`review-result:adversary-hook-pass-1`: one failing case, a hook that refuses an object between the halves of an accessor after it allowed it, and five findings on what the tests hold); correction 1 at `167005b` states the host's same-kind duty in the hook's text and in HOST-119 and HOST-223, makes the case hold the behaviour stated and takes the adversary's cases in, with five planted defects each red (18 tests and two library tests); read by the coordinator (`review-result:hook-correction-1-coordinator-read`); merged at `43284b7` on 2026-11-27, 10:38 CET |
 | 8.7 | close8 | `story:slice-08-conformance-close` | waits for every other story and for the close of slice 9 |
 
 `aep plan artifact waves --status active`, read after the moves (aep 0.80.0): the verb puts
@@ -321,3 +322,193 @@ and the commit that merged its unit: `story:keyed-entry-table`, `story:reflect-n
 `story:realm-size-lane-within-its-share` stays active until the forge's run of the lane is
 read. Slice 8 and slice 9 are not delivered: `conformance/slices-delivered.txt` is unchanged,
 and the remaining stories of both epics follow on this branch.
+
+## The second part: the gate's lines, what went wrong, where each finding went
+
+This section is the close of the wave's second part: the orders 8.3 and 8.4 of slice 8, the
+order 4 of slice 9, the fourth unit of the lane `slow` and the unit of the realm walk. No
+pull request was opened on the first part, because the forge's run of the lane read
+1,137.3 s of its 900 there; the wave's first pull request is opened on the head of this
+part and holds both. Where the section above says "this pull request", it is that one. The
+units after this part (the orders 5 of slice 9 and 8.5 to 8.7 of slice 8, and a fifth unit
+of the lane) follow as a second pull request.
+
+### The gate
+
+`slot --timeout 30m task check-runner` on `wave/big-2` at `b9adbe35`, on the build node,
+2026-11-27, 08:54 to 09:00 CET: exit 0. Its lines are in `AGENTS.md`, "The gate's numbers";
+the ones this part moved:
+
+```
+nostd-symbols: 6 libraries, 57 object(s), 10248 undefined symbol(s): 10106 Rust's own, 55 memory functions, 87 compiler runtime routines; none from a C library or the system
+host-requirements: 222 requirement(s), 222 line(s): 172 test, 50 pending, 0 omitted; 53 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 8:1 11:32 12:3 13:2 14:6 16:5 18:1
+host-surface: 17 change(s) since 0.12.0, each named
+19 test binaries: 2445 passed, 0 failed, 1 ignored
+test-collect: 2 test binaries: 1944 passed, 0 failed, 1 ignored
+test262-refused 5369
+test262 total 53801 8982 7 44812 36027 8783 2
+test262-slice 08 9302 18455 0 0 9302 8242 1060 0
+test262-slice 09 1787 3545 0 0 1787 1765 22 0
+gate-selftest: 104 passed, 0 failed
+gate-time test-steps 65.5 of 120, cpu 315.0, load 14.17 on 32 cores
+```
+
+At the first part the total line read `test262 total 53801 8982 7 44812 32455 12355 2`,
+slice 8 passed 4,801 of its cases and slice 9 1,713, and `test262-refused` read 13154. The
+expected file and its digest are those of one full run on the branch at `0a290c5c` (`task
+test262-expected`, exit 0, sources digest `bb23016e...`); the commit `b9adbe35` holds the
+files that run and `task site-data` wrote and no other change.
+
+The lane `slow` as one job on the same head and node, 09:00 to 09:08 CET: exit 0.
+
+```
+slow-time slow-test262 272.8
+slow-time slow-tests 76.9
+slow-time test-realm-sizes 103.8
+slow-time stack-profiles 0.9
+slow-time lane 454.4 of 900, longest part slow-test262 272.8 of 600
+realm-sizes: 0 run(s) red
+```
+
+The forge's run on `b9adbe35` (run 45963552396, started by hand on the pushed branch,
+2026-11-27, 09:09 to 09:24 CET,
+<https://github.com/beyond10x/swell/actions/runs/45963552396>) ended green: `slow-tests: 4
+test binaries: 1067 passed`, the collect runs `383 passed` at opt-level 0 and `1066 passed`
+at opt-level 1, `realm-sizes: 304 of 1644 tests`, `realm-sizes: 0 run(s) red`, the build of
+the profile `collect` 382.2 s beside the first part with `slow-tests` waiting 0 s. Its
+lines:
+
+```
+slow-time slow-test262 504.8
+slow-time slow-tests 170.4
+slow-time test-realm-sizes 185.2
+slow-time stack-profiles 22.2
+slow-time lane 882.6 of 900, longest part slow-test262 504.8 of 600
+```
+
+The lane is 17.4 s under its 900 s and 254.7 s under the run on `158888d9`; each part is
+under 600 s. The pull request's own run of the lane (`slow.yml`, on `pull_request`) measures
+it once more on the head that is pushed.
+
+The gate was run on `b9adbe35`. The commits after it on this branch up to the push change
+`AGENTS.md`, `README.md`, this page and the store; the gate is run once more on the head
+that is pushed.
+
+### What went wrong
+
+- The first part had no pull request for one forge run: the lane read 473.3 s on the build
+  node and 1,137.3 s on the forge's runner, and the bound is the forge's. The fourth unit of
+  the lane, `lanefour`, was cut on that run. Its own aim was 800 s or less on the forge and
+  its estimate for the merged tree about 848 s; the forge measured 882.6 s. The bound of
+  `story:realm-size-lane-within-its-share` holds with 17.4 s of margin.
+- On that margin the operator took the backlog draft
+  `story:property-escape-cases-spend-less-in-the-interpreter-loop` into the wave as a fifth
+  unit of the lane (`approval-record:wave-big-2-lane-unit-5`): the property-escape cases of
+  test262 are 73 % of the CPU seconds of the test262 run. It is not in this pull request.
+- The first unit of `story:realm-walk-in-parts-under-the-cpu-bound` stopped at the story's
+  stop rule: the list of the realm's 344 functions alone took 2.33 CPU s in the lane's
+  collect build, and every part of the walk would have paid it. The story was written again
+  around a committed file of the places; three plan critics asked for a revision in both of
+  their reads, and the coordinator decided what was left
+  (`review-result:realmwalk-plan-coordinator-read`). The form of the file was put to the
+  operator and taken on the default of the rule "A default proceeds" (the row of the unit
+  says which).
+- The unit `overrides` was red in both adversary passes on memory the engine holds across a
+  host's override: a descriptor held across an `is_extensible` override was freed by a
+  collection, and the object's record answered for an override the table leaves out in four
+  places that broke an invariant of the essential internal methods. Both are corrected and
+  held by tests before the merge.
+- The unit `privatemethods` lost 7 cases of test262 in its first correction (the refusal of
+  a private name in direct eval code rewrote the early error of an undeclared name); pass 2
+  of the adversary found it, correction 2 gave them back, and none was lost at the merge.
+- The unit `fields` threw a ReferenceError for a direct eval of `arguments` in a field
+  initializer; its correction refused a direct eval there, and the unit `evalfields` of the
+  same part runs it.
+- A test that reads wall time failed once in the lane on a loaded node
+  (`class_elements_scale_linearly` of `crates/syntax/tests/sources.rs`) and passed when run
+  again. The draft `story:class-elements-scale-test-reads-no-wall-time` holds it.
+- The subject line of the commit `b9adbe35` has 75 columns, over the 72 this repository's
+  commits keep. It was pushed before it was seen, and a pushed commit is not rewritten.
+- The forge's `task check` on the pull request's head `d16fe575` went red after three green
+  runs of the same gate on the build node: `gate-selftest: 103 passed, 1 failed`, the planted
+  script `slow-collect-builds-beside-the-lane-and-ends-with-it` ("task slow ended without
+  slow-collect-stop ending the build"). The forge's `sh` is dash and the build node's is
+  bash. The lane's 17 kills of a process group had two dashes after the signal, which dash's
+  `kill` reads as a process number, so on the forge `slow-collect-stop` and the build's
+  watcher ended nothing. The unit `lanefix` wrote the kills in the form both shells read and
+  added the static check `kill-check` with its planted script, so the local gate refuses
+  that form (`gate-selftest: 105 passed`; merged at `175c17f` on 2026-11-27, 10:14 CET;
+  `review-result:lanefix-coordinator-read`). No dash is installed where the unit ran: the
+  forge's run of the corrected head is the check.
+- The forge's run of the lane `slow` on `d16fe575` read `slow-time lane 1142.0 of 900,
+  longest part slow-test262 634.0 of 600`, on code that read 882.6 s one run before (the two
+  heads differ in no file of code): single tests ran 1.4 to 1.56 times slower, builds 1.11
+  to 1.14 times, on the same runner image. The forge's log does not name the runner's CPU;
+  from `lanefix` on the lane prints it (`slow-runner`).
+
+### Where each finding went
+
+- Twelve adversary passes on nine units (`review-result:adversary-<unit>-pass-1` for each of
+  `derived`, `fields`, `privatemethods`, `staticblocks`, `evalfields`, `upsert`,
+  `overrides`, `realmwalk` and `lanefour`, and `-pass-2` for `privatemethods`, `overrides`
+  and `lanefour`). Three units got a second pass; for the other six the coordinator read the
+  correction's diff in place of it. Every finding introduced by a unit was corrected by that
+  unit before its merge; each story carries the outcome of each pass.
+- Seven passes are red: pass 1 on `fields`, and both passes on `privatemethods`, `overrides`
+  and `lanefour`. Three of them showed a defect a script or a host reaches: `fields` pass 1
+  (the direct eval of `arguments`), `overrides` pass 1 (the freed descriptor) and
+  `overrides` pass 2 (the four invariants). The five green passes left mutants no test held
+  (three on `derived`, three single-line changes on `evalfields`, two planted defects on
+  `upsert`, one on `staticblocks`); each is held by a test of the unit's correction.
+- Ten reads by the coordinator are in the store: `review-result:<unit>-correction-1-coordinator-read`
+  for `derived`, `fields`, `evalfields`, `staticblocks`, `upsert` and `realmwalk`,
+  `-correction-2-coordinator-read` for `privatemethods`, `overrides` and `lanefour`, and
+  `review-result:realmwalk-plan-coordinator-read`. The read of `privatemethods` sent back
+  one branch without a test (correction 3).
+- Findings older than the units, or outside a unit's story, are backlog drafts that no wave
+  takes before the planned waves are delivered:
+  `story:class-elements-scale-test-reads-no-wall-time`,
+  `story:gate-refuses-an-exported-rustflags` and
+  `story:realm-walk-reaches-hidden-intrinsics-and-holds-type-errors`. A fourth,
+  `story:moves-check-sees-a-block-move-without-its-line`, is from the first adversary pass
+  on the open unit `close9`.
+
+### The stories
+
+Implemented with the pull request, each with a `test_result` that names the gate run of this
+section and the commit that merged its unit: `story:public-class-fields`,
+`story:derived-classes-and-super-call`, `story:eval-in-class-field-initializers`,
+`story:private-names-and-private-methods`, `story:class-static-blocks`,
+`story:map-upsert-and-group-by`, `story:host-object-overrides`,
+`story:realm-walk-in-parts-under-the-cpu-bound` and
+`story:realm-size-lane-within-its-share`, whose `test_result` also names the forge's run
+above. With the twelve of the first part the pull request delivers 21 stories.
+
+Slice 8 and slice 9 are not delivered: `conformance/slices-delivered.txt` is unchanged. Open
+on this branch: `story:private-fields-and-private-in`, `story:private-names-in-eval-code`,
+`story:host-ensure-can-add-private-element`, `story:slice-09-conformance-close`,
+`story:slice-08-conformance-close` and the fifth unit of the lane.
+
+## The close of slice 9
+
+`story:slice-09-conformance-close`, the unit `close9`, on `wave/big-2` after the merge of the
+unit `upsert` (`bc45e92`) and, after its correction 1, of `lanefour` (`b9adbe35`). The full run
+of its head (`task test262-expected`, exit 0) prints:
+
+```
+test262 total 53801 8982 7 44812 36027 8783 2
+test262-slice 08 9339 18529 0 0 9339 8279 1060 0
+test262-slice 09 1858 3678 0 0 1858 1858 0 0
+test262-slice 12 381 760 0 0 381 39 342 0
+test262-slice 19 1233 2299 0 0 1233 736 495 2
+```
+
+Every case of slice 9 passes in every run. 59 cases that need a later slice move by lines of
+the block and of `conformance/test262/moves.tsv`: the 37 that need `class` or `new.target`
+to slice 8, which takes them as `docs/plan/slice-08/incoming.tsv` plans, and the 22 that need
+a BigInt literal to slice 12. 130 cases of `test/staging/` come in from slice 19
+(`docs/plan/slice-09/close-into-09.tsv`). The run changes no outcome against the run of
+`bc45e92`. With `9` delivered, `host-requirements-check` exits 0 (`pending by slice: 8:1 11:32
+12:3 13:2 14:6 16:5 18:1`). The paragraph "Slice 9's cases that need a later slice" of section
+12 of `docs/design/engine.md` gives the reasons.

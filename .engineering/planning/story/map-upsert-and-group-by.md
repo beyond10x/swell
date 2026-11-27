@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:map-upsert-and-group-by
 kind: story
-status: active
+status: implemented
 title: Map.prototype.getOrInsert, getOrInsertComputed and Map.groupBy
 summary: builtins/map/upsert.rs and GroupBy with the zero coercion shared with Object.groupBy; order 4; 46 cases.
 relations:
@@ -23,10 +23,11 @@ scope:
   path: crates/swell/tests/builtins_symbol_values.rs
 - confidence: cited
   path: crates/swell/tests/main.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T06:32:20Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T06:32:20Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T08:38:03Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

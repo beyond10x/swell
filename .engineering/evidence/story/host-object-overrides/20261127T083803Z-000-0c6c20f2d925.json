@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T08:38:03Z",
+  "actor": "human:operator",
+  "artifact": "story:host-object-overrides",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at b9adbe35, exit 0, on the build node; the unit was merged by commit 0680551, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/host_overrides.rs (swell::host_overrides::*) and the lines of conformance/host/requirements.txt they are named in"
+  }
+}

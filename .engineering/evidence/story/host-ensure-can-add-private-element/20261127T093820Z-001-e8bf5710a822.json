@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T09:38:20Z",
+  "actor": "human:operator",
+  "artifact": "story:host-ensure-can-add-private-element",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/hook at 716b3cff, build node, before the merge into wave/big-2",
+    "reference": "swell main 1728 passed, 1 skipped (default build) and 1700 passed, 1 skipped (collect build); swell lib 287 passed; task test-stack-profiles 7 passed in each of the two profiles; task clippy exit 0; cargo fmt --all -- --check exit 0"
+  }
+}

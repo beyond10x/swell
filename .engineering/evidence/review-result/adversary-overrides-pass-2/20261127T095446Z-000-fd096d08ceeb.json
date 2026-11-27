@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-27T09:54:46Z",
+  "actor": "human:operator",
+  "artifact": "review-result:adversary-overrides-pass-2",
+  "kind": "review-result",
+  "revision": 2,
+  "change": {
+    "change": "redaction",
+    "literal_sha256": "f3412ac287d69b7ebf981317e6a65275a123cad1acb5e41668b3ab28d1c38884",
+    "literal_chars": 16,
+    "replacement": "on the build node",
+    "count": 1,
+    "reason": "the name of a private host; the repository names no private host"
+  }
+}

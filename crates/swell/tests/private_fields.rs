@@ -17,7 +17,7 @@ use crate::support;
 
 use support::host::{TestHost, agent, agent_with, get_object, global, key, limits, object, realm};
 use support::script::{Outcome, describe, eval, eval_text, parse, run, run_both};
-use swell::{Agent, Outcome as HostOutcome, Termination, Value};
+use swell::{Agent, Outcome as HostOutcome, Parsed, Source, Termination, Value};
 
 /// What a script that checks its own results answers.
 fn passed() -> Outcome {
@@ -817,4 +817,131 @@ var l = new L3();
 derived && Default.read(new Default()) === 2 && Arrow.read(new Arrow()) === 3
   && L1.a(l) + L2.b(l) + L3.c(l) === 6;"##,
     );
+}
+
+/// `#x in o` charges its find as a read does (PrivateElementFind, a step per comparison past
+/// `SMALL`): on an object of 100 private fields, `#f99 in o` compares all 100 entries and `#f0 in
+/// o` one, so the first spends 100 - 8 = [`READ_STEPS_100`] steps more; both run the same
+/// instructions.
+#[test]
+fn private_in_charges_its_find_as_a_read_does() {
+    let mut agent = agent().unwrap();
+    let r = realm(&mut agent);
+    let fields: String = (0..100).map(|i| format!("#f{i}; ")).collect();
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &r,
+            &format!(
+                "var K = class {{ {fields}static first(o) {{ return #f0 in o; }} static last(o) {{ return #f99 in o; }} }}; var o = new K(); 0;"
+            )
+        ),
+        Outcome::Normal("0".to_string())
+    );
+    let mut steps = |call: &str| {
+        let outcome = eval(&mut agent, &r, &format!("K.{call}(o); 0;"));
+        assert!(matches!(outcome, HostOutcome::Normal(_)), "{call}");
+        agent.last_entry_steps().unwrap()
+    };
+    let (first, last) = (steps("first"), steps("last"));
+    println!(
+        "steps of `K.first(o); 0;` ({{#f0 in o}}) {first}, of `K.last(o); 0;` ({{#f99 in o}}) {last}"
+    );
+    assert_eq!(last - first, READ_STEPS_100);
+}
+
+/// The room of the instance level counts the instance's private elements only
+/// (`Resolution::private_rooms`): an instance of a class with one private field and three static
+/// private fields costs one entry and the box over a plain instance, as one with the private
+/// field alone does; F's static fields do not widen the instance's list. In the default build
+/// (200 objects a reading, as [`instances_with_100_private_fields_are_charged_and_freed`]).
+#[test]
+fn the_instance_room_leaves_out_the_static_fields() {
+    if cfg!(feature = "collect-every-safe-point") {
+        return;
+    }
+    let mut agent = agent().unwrap();
+    let r = realm(&mut agent);
+    let n = 200;
+    let plain = rise_of(
+        &mut agent,
+        &r,
+        "var K = class {}; var make = function () { return new K(); };",
+        n,
+    );
+    let mixed = rise_of(
+        &mut agent,
+        &r,
+        "var K = class { #a = 1; static #s = 1; static #t = 2; static #u = 3; }; var make = function () { return new K(); };",
+        n,
+    );
+    println!(
+        "heap rise of {n} instances: plain {plain}, one private field and three static {mixed}"
+    );
+    assert_eq!((mixed - plain) % n, 0);
+    assert_eq!((mixed - plain) / n, BOX_BYTES + ENTRY_BYTES);
+}
+
+/// The static private fields of a class are one level of F's own list, reserved once by the
+/// first add of the level (`AddPrivateField` of a static field carries the room of F's level,
+/// keyed by the constructor). The list's bytes are the box and three entries whether it grows
+/// once or at each add, so the test reads where a memory budget ends the run instead: each
+/// initializer calls `Date.now()`, which the test host counts with no charge to the heap, and the
+/// ballast made first puts the class past the peak of the script's parse. Then the run either
+/// ends before the level's first add is done, after one initializer, or gets past all three
+/// adds: the smallest budget with which two initializers run lets all three run, and the budget
+/// one byte lower lets one run. A level that grew one entry at each add, its second add charged,
+/// would end there after two.
+#[test]
+fn the_static_fields_of_a_class_reserve_their_level_once() {
+    let source = "var ballast = new Array(4096).fill(0);\n\
+                  var C = class { static #s = Date.now(); static #t = Date.now(); static #u = Date.now(); };\n\
+                  0;";
+    let parsed = {
+        let mut agent = agent().unwrap();
+        let r = realm(&mut agent);
+        let _script = parse(&mut agent, &r, source);
+        agent.heap_bytes().unwrap()
+    };
+    // The initializers that ran and the bytes held at the end, under `budget`.
+    let run_at = |budget: u64| {
+        let mut room = limits();
+        room.memory_bytes = budget;
+        let mut agent = agent_with(room).unwrap();
+        let r = realm(&mut agent);
+        if let Parsed::Parsed(script) = agent.parse_script(&r, Source::Utf8(source), None).unwrap()
+        {
+            let outcome = agent.evaluate_script(&script).unwrap();
+            assert!(
+                matches!(
+                    outcome,
+                    HostOutcome::Normal(_) | HostOutcome::Terminated(Termination::MemoryBudget)
+                ),
+                "{budget}: {outcome:?}"
+            );
+        }
+        (
+            agent.host().clock_globals.len(),
+            agent.heap_bytes().unwrap(),
+        )
+    };
+    // The smallest budget with which two initializers run, by halving.
+    let (mut short, mut enough) = (parsed, parsed + 256 * 1024);
+    assert_eq!(run_at(enough).0, 3);
+    while enough - short > 1 {
+        let mid = short + (enough - short) / 2;
+        if run_at(mid).0 >= 2 {
+            enough = mid;
+        } else {
+            short = mid;
+        }
+    }
+    let (ran, _) = run_at(enough);
+    let (ran_below, held) = run_at(enough - 1);
+    println!(
+        "from a budget of {enough} bytes {ran} static initializers run; at {} {ran_below} run, \
+         the run holding {held}",
+        enough - 1
+    );
+    assert_eq!((ran_below, ran), (1, 3));
 }

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:private-names-and-private-methods
 kind: story
-status: active
+status: implemented
 title: Private Names, [[PrivateElements]], and private methods and accessors
 summary: 1,977 cases (3,942 runs); lifts private method; one add function for every private element; every assignment form on a private target.
 relations:
@@ -61,10 +61,11 @@ scope:
   path: crates/syntax/src/parser/class.rs
 - confidence: cited
   path: crates/syntax/src/parser/mod.rs
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T08:38:02Z", actor: "human:operator", revision: 13, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
