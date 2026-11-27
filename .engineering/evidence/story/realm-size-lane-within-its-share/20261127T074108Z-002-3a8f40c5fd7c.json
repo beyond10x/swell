@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T07:41:08Z",
+  "actor": "human:operator",
+  "artifact": "story:realm-size-lane-within-its-share",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/lanefour at 826214f5, build node, before the merge into wave/big-2",
+    "reference": "swell-syntax main 80 passed (default and full counts); swell-compiler main 17 passed; swell main 1658 passed, 1 skipped (default) and 1631 passed, 1 skipped (collect); swell lib 283 passed; test-stack-profiles 7 passed in each profile; clippy exit 0; fmt exit 0"
+  }
+}

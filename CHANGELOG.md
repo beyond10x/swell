@@ -349,6 +349,27 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Changed
 
+- A character class outside `v` keeps its last answer together with the range of code
+  points around it that answer the same (`ClassSet::contains_around`, with
+  `swell_unicode::Property::contains_around` for the property tables). A run of characters
+  from one range costs one search instead of one per character. Steps, memory charges and
+  results are unchanged. On a sample of 37 of the 442 generated property-escape files of
+  test262, one worker: 52.7 s before, 49.2 to 49.6 s after.
+- The lane `slow` runs its collect mode in the profile `collect` (opt-level 1), except for
+  the tests that run on a bounded stack, the tests a macro writes and the library's unit
+  tests, which stay at opt-level 0. This covers `test-realm-sizes` and the full counts of
+  `slow-tests`. A stack test that the rule misses fails the run at opt-level 1 by itself:
+  that run sets `SWELL_NO_STACK_TESTS`, and `stack_with_room` and the new `stack_thread` of the
+  tests' support panic when it is set; the six direct `Builder::stack_size` calls of the
+  tests go through `stack_thread`. The lane builds the profile `collect` in the background
+  beside `slow-test262`, and ends that build when it ends. `taskfiles/realm-room-tests.awk`
+  gains `-v rule=stack` and reads more forms (a function nested in another, a function passed
+  by value, in an array or as a field's value, a path to another module or to the helpers,
+  every definition of a twice-defined name); the forms it does not read are listed at its
+  head. After the merge it prints 73 stack tests and 304 room tests of 1,644. The count line of
+  `slow-tests` counts what runs (a test compiled out of the collect build apart). The
+  workflow `slow` also starts on a change of `.cargo/collect-profile.toml`
+  (`story:realm-size-lane-within-its-share`).
 - The realm holds the three functions more: `heap_bytes()` after `create_realm` reads 394,751
   bytes, before 393,818; `live_bytes()` 282,792, before 281,115 (the test
   `realm_padding::a_padded_realm_holds_k_functions_more`, k = 0; at k = 200 645,964 and 428,053,
