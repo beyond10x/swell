@@ -276,6 +276,15 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   a core count without an entry, `gate-cpu test-steps: not read (...)`; and `gate-time: no
   file of <k> under <dir>/*/deps changed while the test steps ran` (`<k>` counts both
   directories).
+- Right after `gate-time-start`, before its first test step, `check` prints the machine it
+  runs on, `gate-runner: <n> cores, <model name>, <MemTotal> kB, sh is <sh>` (task
+  `slow-runner` with `LABEL` `gate-runner`; the lane `slow` calls the same task without a
+  label and prints `slow-runner: ...`; the `echo` is written once). Two runs of the gate on
+  the same code whose seconds differ are read against these lines: on 2026-11-27 the forge
+  ran the test steps of the same code in 77.2 s and 147.6 s, 1.94 times the CPU seconds, and
+  its log did not name the runner.
+  `tests/gate/check-prints-the-runner-line-before-its-first-test-step.sh` holds the order
+  (`task --dry --verbose check`) and both lines.
 - `check-runner` passes `GATE_CPU_BOUNDS`, the table `CPU_BOUNDS_BY_CORES` of
   `taskfiles/forge.yml`: pairs `<cores>:<CPU seconds>`, now `16:245` (provisional: its pair
   under this tree is recorded by the first two check-runner jobs on a 16-core machine after
@@ -284,7 +293,13 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   gets no CPU bound; there the CPU seconds are printed, and only the wall budget and the
   `deps` check decide. A green there says nothing of the forge's time. The pool's build node
   (32 cores, read from `nproc` in a pool job on 2026-11-27) and the forge (4 cores) have no
-  entry; on the forge the wall time decides.
+  entry; on the forge the wall time decides. The CPU seconds of one code are not steady on
+  the build node: across the gates of `story:gate-test-steps-hold-the-budget-on-the-slower-runner`
+  the step `test-collect` read 64.8 to 127.9 at loads of 10 to 38, and the test steps of one
+  base 294.0 and 476.5 in two gates run one after the other. Its pairs of base and head read
+  0.76, 0.78 and 0.73, and an entry needs at most 0.64, so 32 cores got none; a pair is read
+  beside an unchanged step of the same gates
+  (`story:local-gate-reads-the-cost-of-its-test-steps-on-a-steady-measure`, a backlog draft).
 - An entry of `CPU_BOUNDS_BY_CORES` is added or changed only together with a pair measured
   on that kind of machine, recorded in the same commit. The pair is the code before the
   change over the entry and the change under it, each a whole check-runner job. The entry is
@@ -410,6 +425,11 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   clock, and on the pool's 64-core node the step went from 168.5 to 33.3 and 34.0 CPU
   seconds. That flag is `COLLECT_CONFIG` in `taskfiles/collect-mode.yml`, used by
   test-collect, build-collect and test-doc's collect line; build-collect checks the file.
+  Since `story:gate-test-steps-hold-the-budget-on-the-slower-runner` the step `test` runs
+  1,647 of the 1,770 tests of `swell::main` at opt-level 1: on the build node the step went
+  from 231.9 to 141.7 CPU seconds (loads 36.7 and 38.5), from 191.6 to 118.7 (16.3 and 19.5)
+  and from 294.3 to 160.2 (15.4 and 14.1), the test steps from 416.9 to 315.9, from 314.1 to
+  245.6 and from 476.5 to 348.7.
   `gate-selftest` runs the planted scripts as a rolling pool (`xargs -P`), with `GOGC=off`
   and `GOMEMLIMIT=1GiB` for its many short go-task processes.
 - The lane `slow` runs the collect mode at opt-level 1 too, except for the stack tests: in
@@ -421,10 +441,12 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   test profile at opt-level 0.
 - The guard of that split: the run at opt-level 1 sets `SWELL_NO_STACK_TESTS=1`
   (`NO_STACK_TESTS` at the top of `Taskfile.yml`; it and `COLLECT_MAIN`, `COLLECT_RUSTFLAGS`
-  and `SLOW_COLLECT_WAIT` stand in `GATE_VARIABLES`, so the first line of the gate and of the
-  lane shows them). The two ways of swell's tests to a bounded stack, `stack_with_room` and
-  `stack_thread` of `crates/swell/tests/support/host.rs`, panic when it is set, naming the
-  way out: the rule did not find the test, so it must run at opt-level 0. A test that needs
+  and `SLOW_COLLECT_WAIT` stand in `GATE_VARIABLES`, as `TEST_OPT1_ARGS` and
+  `TEST_OPT1_PROFILE_TEST` do, so the first line of the gate and of the lane shows them). The
+  two ways of swell's tests to a bounded stack, `stack_with_room` and `stack_thread` of
+  `crates/swell/tests/support/host.rs`, panic when it is set, naming the way out and both
+  runs at opt-level 1, the gate's (task `test`) and the lane's (task `slow-tests`): the rule
+  did not find the test, so it must run at opt-level 0. A test that needs
   a thread of a given stack takes it from `stack_thread`, never from
   `std::thread::Builder::stack_size` directly. Forms the rule does not read, which the guard
   catches at run time, are listed at the head of the awk file: a helper imported by `use`, a
@@ -432,6 +454,57 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   and a function pointer made by a cast (`&(f as fn())`). The gate's `test-collect` and the
   collect runs of `test-realm-sizes` run stack tests at opt-level 1 on purpose and do not
   set the variable.
+- The gate's step `test` splits `swell::main` the same way
+  (`story:gate-test-steps-hold-the-budget-on-the-slower-runner`): the tests the stack rule
+  prints "other" run at opt-level 1 (`TEST_OPT1_ARGS` at the top of `Taskfile.yml`:
+  `--locked -p swell --test main --config .cargo/collect-profile.toml --cargo-profile collect
+  --profile default`, the default mode, no feature), with `SWELL_NO_STACK_TESTS=1`; every
+  other test of the workspace (the stack tests, the tests a macro writes, the library tests
+  of swell and every other crate) runs at opt-level 0 with `TEST_NEXTEST_ARGS` unchanged.
+  Each run's filter is a `default-filter` line in a copy of `.config/nextest.toml`
+  (`.out/test-opt1-nextest.toml`, `.out/test-opt0-nextest.toml`; the 1,647 names do not fit
+  one command-line argument). The steps `test` and `build-tests` refuse a caller's value of
+  `TEST_OPT1_ARGS`, `NO_STACK_TESTS` and `TEST_OPT1_PROFILE_TEST` (task
+  `test-opt1-vars-check`), as `test-vars-check` refuses one of `TEST_RUSTFLAGS`; the lane's
+  tasks do not call it.
+- The internal task `test-split` takes `cargo nextest list` of each run and of the workspace
+  and fails, naming the test, when one is in not exactly one run; it prints `test:
+  swell::main <a> at opt-level 1, <b> at opt-level 0` (1647 and 123 on `362b69b1`). It
+  fails, naming the test, when the list of the run at opt-level 1 does not hold
+  `TEST_OPT1_PROFILE_TEST`, the profile's test (a test the rule prints "stack", one in a
+  nested `mod` or one a macro writes would run at opt-level 0), and with a line of its own
+  when `crates/swell/tests/support/` holds no `.rs` file. A task's `env` does not reach the
+  tasks it calls: `test-split` sets `RUSTFLAGS` itself, and a list that compiles fails it
+  (`compile-check` on the three list logs). The internal task `test-sum` runs
+  `nextest-report` on each run into a file (by `TASK_EXE`, made absolute from
+  `USER_WORKING_DIR` when it names a directory: the command runs in the directory of
+  `Taskfile.yml`) and prints one line for both, `<b> test binaries: <p> passed, <f> failed,
+  <i> ignored`: b from the run at opt-level 0, whose Starting line counts every binary of
+  the workspace, p and f the sums, i the tests neither run ran (1). The ten `gate-slowest
+  test` lines are taken over both runs. Planted scripts under `tests/gate/`:
+  `test-runs-each-test-once-at-one-opt-level.sh` (with a failing run at opt-level 1 and a
+  list that compiles), `test-refuses-a-caller-value-of-its-run-at-opt-level-1.sh`,
+  `test-sums-its-runs-when-task-is-called-by-a-relative-path.sh`,
+  `test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh` and
+  `test-says-why-it-fails-when-the-stack-rule-has-no-support-file.sh`.
+- The profile `collect` keeps debug assertions and overflow checks (it inherits `test`,
+  where `Cargo.toml` sets `overflow-checks = true`), held by
+  `realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on`. That test reads
+  the profile of its own crate only. `build-tests` refuses, naming file and line, a profile
+  of one package or of build scripts in the profile `dev` or `test` (the run's `collect`
+  inherits `test`, `test` inherits `dev`), a definition of the profile `collect` and an
+  include of another configuration file, in `Cargo.toml`, `.cargo/config.toml` or
+  `.cargo/config`, and such a `CARGO_PROFILE_` variable in the environment (task
+  `test-opt1-profile-check`; planted script
+  `build-tests-refuses-a-profile-its-profile-test-does-not-see.sh`). A cargo configuration
+  file outside the tree is not read, nor a key written with an escape or an inline table
+  over several lines; a change of these files is read in review.
+- `build-tests` builds the binary of the run at opt-level 1 before the clock, after the
+  step's build at opt-level 0 and before `build-collect`, whose `.debug_` check of
+  `<target>/collect/deps` covers it (`build-tests opt-level 1: <Finished line>`;
+  `build-collect: 6 test executables in target/collect/deps`). On the build node that build
+  took 5 min 14 s to 8 min 44 s after a change of swell's tests (the binary compiles swell's
+  whole test crate); the forge's job `check` has 30 minutes for build and tests.
 - The lane builds the profile `collect` in the background from its start, beside
   `slow-test262` (`slow-collect-start`; `COLLECT_MAIN` and `COLLECT_RUSTFLAGS` at the top of
   `Taskfile.yml` are the one definition of its arguments and flags, read by the runs on it
@@ -892,7 +965,8 @@ session coordinates; this section is its procedure, taken from how surf is run
   is bounded too. Right after `gate-time-start` the lane prints the machine it runs on,
   `slow-runner: <n> cores, <model name>, <MemTotal> kB, sh is <sh>` (task `slow-runner`;
   "cpu not read" when `/proc/cpuinfo` is missing or has no model name; it never fails the
-  lane), so that two runs on the same code can be read against their machines: the forge ran
+  lane; `check` calls the same task with the label `gate-runner`), so that two runs on the
+  same code can be read against their machines: the forge ran
   the lane on one code in 882.6 s and 1,142.0 s, single tests 1.4 to 1.56 times slower in
   the second run, builds 1.11 to 1.14 times. On the build node it prints `slow-runner: 32
   cores, Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz, 64772604 kB, sh is bash`.
