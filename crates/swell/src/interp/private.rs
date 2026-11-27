@@ -1,7 +1,8 @@
-//! The instructions of private names (`swell_compiler::bytecode`, after `PutIndex`), each in a
-//! function of its own that one arm of `interp/dispatch.rs` calls, so the frame of the
-//! instruction loop stays as it was (`docs/design/engine.md`, "Private names", items 3 and 5).
-//! Written by `story:private-names-and-private-methods`.
+//! The instructions of private names (`swell_compiler::bytecode`, after `PutIndex`; `PrivateIn`
+//! after `In` and `AddPrivateField` after `DefineField`), each in a function of its own that one
+//! arm of `interp/dispatch.rs` calls, so the frame of the instruction loop stays as it was
+//! (`docs/design/engine.md`, "Private names", items 3 and 5). Written by
+//! `story:private-names-and-private-methods`.
 //!
 //! A Private Name lives in a slot of the private record of its class, which the class's code
 //! pushes inside the class scope and fills with `NewPrivateName`, one new Private Name per
@@ -13,8 +14,9 @@
 //! made; then PrivateGet or PrivateSet (`object/private_names.rs`), a getter or setter called
 //! as a property's is, with the object kept on the operand stack while it runs.
 //! `AddPrivateMethod` runs PrivateMethodOrAccessorAdd of the function kept in the private
-//! record. A slot that holds no Private Name where one is read is a logic error of the engine
-//! (section 13): the agent faults.
+//! record, `AddPrivateField` PrivateFieldAdd of the value on the stack, and `PrivateIn` the find
+//! of `#x in o` (`story:private-fields-and-private-in`). A slot that holds no Private Name where
+//! one is read is a logic error of the engine (section 13): the agent faults.
 
 use alloc::format;
 
@@ -58,6 +60,10 @@ impl<H: Host> Agent<H> {
                 usize::from(room),
             ),
             Some(I::NewPrivateName { slot, name }) => self.new_private_name_instruction(slot, name),
+            Some(I::PrivateIn { hops, slot }) => self.private_in(hops, slot),
+            Some(I::AddPrivateField { hops, slot, room }) => {
+                self.add_private_field(u32::from(hops), u32::from(slot), usize::from(room))
+            }
             _ => Err(self.fault()),
         }
     }
@@ -163,5 +169,40 @@ impl<H: Host> Agent<H> {
             Some(()) => Ok(Flow::Next),
             None => Err(self.fault()),
         }
+    }
+
+    /// `PrivateIn`: `[o] -> [b]`, `#x in o` (`#sec-relational-operators-runtime-semantics-evaluation`,
+    /// RelationalExpression : PrivateIdentifier `in` ShiftExpression, steps 4 to 8): a
+    /// `TypeError` when `o` is not an Object, otherwise whether PrivateElementFind finds the
+    /// Private Name in slot `slot` of the environment `hops` outward among the elements of `o`,
+    /// a find that spends a step per comparison past `SMALL`. No internal method of `o` runs.
+    #[inline(never)]
+    fn private_in(&mut self, hops: u32, slot: u32) -> Completion<Flow> {
+        let key = self.private_name_at(hops, slot)?;
+        let Value::Object(object) = self.peek_value(0)? else {
+            let name = self.private_name_text(key);
+            return Err(self.throw_error(
+                ErrorKind::TypeError,
+                &format!("cannot look for the private member {name} in a primitive value"),
+            ));
+        };
+        let found = self.private_element_find(object, key)?.is_some();
+        self.replace(1, Value::Boolean(found))
+    }
+
+    /// `AddPrivateField`: `[o, v] -> [o]`, PrivateFieldAdd of `v` keyed by the Private Name in
+    /// slot `slot` of the environment `hops` outward (`#sec-definefield`, step 6). `o` is `this`
+    /// of the initializer of the instance elements or of a run of static fields, always an
+    /// object. A list of `o` that is full gets room for `room` elements, the elements of this
+    /// class level.
+    #[inline(never)]
+    fn add_private_field(&mut self, hops: u32, slot: u32, room: usize) -> Completion<Flow> {
+        let key = self.private_name_at(hops, slot)?;
+        let object = self.peek_value(1)?;
+        let object = self.expect_object(object)?;
+        let value = self.peek_value(0)?;
+        self.private_field_add(object, key, value, room)?;
+        self.drop_entries(1)?;
+        Ok(Flow::Next)
     }
 }
