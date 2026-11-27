@@ -54,6 +54,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   `parts_script_sees_the_sign_of_each_zero` (the four functions of `Math`). Slice 4 is
   delivered: `conformance/slices-delivered.txt` lists it, and no host requirement is pending
   for it.
+- The close of slice 8, `classes` (`story:slice-08-conformance-close`): every case of the
+  slice passes in every run, `test262-slice 08 9478 18803 0 0 9478 9478 0 0`, and `8` is in
+  `conformance/slices-delivered.txt`. 9 cases that need a later slice move with evidence in
+  `conformance/test262/moves.tsv`: 5 to slice 13 (`ArrayBuffer` 2, `DataView` 2,
+  `Uint8Array` 1: the subclasses of `class/subclass/builtin-objects/ArrayBuffer/` and
+  `DataView/` and `class/subclass/builtins`) and 4 to slice 18 (`__lookupGetter__` 2,
+  `__lookupSetter__` 2: the `private-getter-` and `private-setter-is-not-a-own-property`
+  cases of `statements/class/` and `expressions/class/`). 148 cases of `test/staging/sm/`
+  that failed at the start of the slice and pass now come into slice 8 from slice 19 by
+  lines of the block (`docs/plan/slice-08/close-into-08.tsv`); 10 of them name later slices
+  only behind `typeof` in `harness/deepEqual.js` (3) or `harness/propertyHelper.js` (7).
+  The table of section 12 moves by them: slice 8 9,478 cases and 18,803 runs, slice 13
+  3,066 and 6,088, slice 18 1,138 and 1,459, slice 19 1,085 and 2,007; the sums do not
+  move. The whole run reads `test262 total 53801 8982 7 44812 37097 7713 2`: 37,097 of the
+  44,812 cases that run pass.
 - The close of slice 9, `collections-proxy-reflect` (`story:slice-09-conformance-close`):
   every case of the slice passes in every run, `test262-slice 09 1858 3678 0 0 1858 1858 0 0`.
   59 cases that need a later slice move with evidence in `conformance/test262/moves.tsv`:

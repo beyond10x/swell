@@ -4607,9 +4607,11 @@ every run at the start of slice 8, so it is no case of this close and stays in s
 the 148 hold no token of a later slice anywhere. By directory under `test/staging/sm/`: `class/`
 86, `PrivateName/` 16, `expressions/` 14, `Set/` 7, `Function/` 6, `Array/` 3, `fields/` 3, and 2
 each of `Proxy/`, `RegExp/`, `Reflect/`, `destructuring/` and `syntax/`, and 1 each of
-`Map/`, `Promise/` and `extensions/`. Every case of `test/staging/sm/PrivateName/` and of
-`test/staging/sm/Set/` comes in, and each of the two directories gets one line `dir <directory>/
-8`; each of the other 125 cases gets a line `dir <file> 8`. All 148 are listed in
+`Map/`, `Promise/` and `extensions/`. Every case of `test/staging/sm/PrivateName/` that runs
+(16 of its 17 files; `modify-non-extensible.js` carries the excluded feature
+`nonextensible-applies-to-private`, is not run and stays counted under `x-stage3`) and every
+case of `test/staging/sm/Set/` comes in, and each of the two directories gets one line `dir
+<directory>/ 8`; each of the other 125 cases gets a line `dir <file> 8`. All 148 are listed in
 `docs/plan/slice-08/close-into-08.tsv` with the slice they leave, the line that takes them, the
 runner's message of their first failed run at the start and the part of slice 8 they failed on;
 each passes in every one of its runs (the close's check (4) over that file), and none has a line

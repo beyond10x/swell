@@ -94,6 +94,16 @@ and the close, with 37 cases that need `class` or `new.target` moved to slice 8 
 need a BigInt literal moved to slice 12, each with evidence, and 130 cases of
 `test/staging/` taken in from slice 19: all 1,858 cases of slice 9 pass in all 3,678 runs
 (`test262-slice 09 1858 3678 0 0 1858 1858 0 0`), and no host requirement is pending for it.
+Slice 8, `classes` (`epic:slice-08-classes`), is delivered too (2026-11-27), in fourteen stories
+(`docs/plan/waves.md`, "Slice 8, `classes`"; `docs/plan/wave-big-2.md`): `new.target`,
+`super`, class syntax and its early errors, class definition evaluation, derived classes and
+`super()`, public fields, static blocks, private names, methods and fields, `#x in`, `eval`
+in field initializers and private names in eval code, and HOST-119 and HOST-223; and the
+close, with 9 cases moved, 5 to slice 13 (binary data) and 4 to slice 18
+(`__lookupGetter__`, `__lookupSetter__`), each with evidence, and 148 cases of
+`test/staging/sm/` taken in from slice 19: all 9,478 cases of slice 8 pass in all 18,803
+runs (`test262-slice 08 9478 18803 0 0 9478 9478 0 0`), and no host requirement is pending
+for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases

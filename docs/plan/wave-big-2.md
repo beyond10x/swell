@@ -63,7 +63,7 @@ story of slice 9 and starts beside slice 9's order 2.
 | 8.5 | privatefields | `story:private-fields-and-private-in` | `impl/privatefields`, cut at `a67d445` (after the merge of the unit `overrides`) with `impl/staticblocks` at `d61a063` merged in, base `8857ac25`, with the base run of that commit (`test262 total 53801 8982 7 44812 35989 8821 2`); dispatched on 2026-11-27 while the unit `staticblocks` is in its adversary pass; it is merged into `wave/big-2` only after `impl/staticblocks` is merged there; pass 1 was green (`review-result:adversary-privatefields-pass-1`: no failing case, eight findings on what the tests hold), correction 1 at `b30b601` (four tests, each red with its defect planted: the room of a level, the steps of `#x in`, the static fields left out of an instance's room, the static level reserved once; 17 tests); read by the coordinator (`review-result:privatefields-correction-1-coordinator-read`); merged at `91a6b56` on 2026-11-27, 10:29 CET |
 | 8.6 | evalprivate | `story:private-names-in-eval-code` | `impl/evalprivate`, cut at `bc45e92` with `impl/privatefields` at `3ebbc21` merged in, base `82688ae7`, with the base run of that commit (`test262-slice 08 9302 18455 0 0 9302 9281 21 0`); dispatched on 2026-11-27 while the unit `privatefields` is in its adversary pass; it is merged into `wave/big-2` only after that unit; built at `f6f4087`, its list of 2,653 cases passes (`passed 2653 bound 2653 B 2641 F 12 R 0`: the 12 cases that failed on the base pass); the adversary's pass 1 was red (`review-result:adversary-evalprivate-pass-1`: every direct eval read every named slot of its caller's records, 992 steps in a function of 1,000 `var`s); correction 1 at `5b6335d` walks only for an eval String that holds a `#` code unit; pass 2 was green with one warning (`review-result:adversary-evalprivate-pass-2`: the budget sweeps began after the walk's records); correction 2 at `0cbe31e` changes tests and comments only: five sweeps from the walk's first record to the answer, each named after what stops in its range, the adversary's six cases, the clause numbers of PerformEval read from the pinned text, and a library test of the syntax crate that was red on the wave since the unit `privatefields`; read by the coordinator (`review-result:evalprivate-correction-2-coordinator-read`); merged at `79ca8d3` on 2026-11-27, 11:41 CET |
 | 8.6 | hook | `story:host-ensure-can-add-private-element` | `impl/hook`, cut at `bc45e92` with `impl/privatefields` at `3ebbc21` merged in, base `bcc10a4e` (the tree of the base of `evalprivate`), no base run: the story has no case of test262; dispatched on 2026-11-27 beside `evalprivate`; it is merged into `wave/big-2` only after the unit `privatefields`; built at `bd1dc46` (10 tests); the adversary's pass 1 was red (`review-result:adversary-hook-pass-1`: one failing case, a hook that refuses an object between the halves of an accessor after it allowed it, and five findings on what the tests hold); correction 1 at `167005b` states the host's same-kind duty in the hook's text and in HOST-119 and HOST-223, makes the case hold the behaviour stated and takes the adversary's cases in, with five planted defects each red (18 tests and two library tests); read by the coordinator (`review-result:hook-correction-1-coordinator-read`); merged at `43284b7` on 2026-11-27, 10:38 CET |
-| 8.7 | close8 | `story:slice-08-conformance-close` | waits for every other story and for the close of slice 9 |
+| 8.7 | close8 | `story:slice-08-conformance-close` | waits for every other story and for the close of slice 9; `impl/close8`, cut at `2b074619` after the merge of the lane unit `lanesix`, with the start run of `edaf080` and the base run of `2b074619` made by the coordinator; built at `d61ed17b` in one commit: 9 cases move out with evidence (5 to slice 13: `ArrayBuffer` 2, `DataView` 2, `Uint8Array` 1; 4 to slice 18: `__lookupGetter__` 2, `__lookupSetter__` 2), 148 cases of `test/staging/sm/` come in from slice 19 (`docs/plan/slice-08/close-into-08.tsv`), and the full run reads `test262-slice 08 9478 18803 0 0 9478 9478 0 0` with no outcome changed against the base run; the adversary's pass 1 was green with six notes (`review-result:adversary-close8-pass-1`: 11 variants of the 9 moved cases with the later part taken out pass in both modes, and its own scan takes the same 148 of 155 candidates); read by the coordinator (`review-result:close8-coordinator-read`), who fixed one sentence of the paragraph with the delivery; merged at `7b43acbf` on 2026-11-27, 21:57 CET |
 
 `aep plan artifact waves --status active`, read after the moves (aep 0.80.0): the verb puts
 each of the three stories of order 8.1 in a wave of its own, since they name the same files
@@ -513,3 +513,45 @@ a BigInt literal to slice 12. 130 cases of `test/staging/` come in from slice 19
 `bc45e92`. With `9` delivered, `host-requirements-check` exits 0 (`pending by slice: 8:1 11:32
 12:3 13:2 14:6 16:5 18:1`). The paragraph "Slice 9's cases that need a later slice" of section
 12 of `docs/design/engine.md` gives the reasons.
+
+## The close of slice 8
+
+`story:slice-08-conformance-close`, the unit `close8`, on `wave/big-2` after the merge of the
+last other stories of the slice (the units `privatefields`, `evalprivate` and `hook`) and of
+the lane units `lanefive` and `lanesix` (`2b074619`). The full run of its head (`task
+test262-expected`, exit 0) prints:
+
+```
+test262 total 53801 8982 7 44812 37097 7713 2
+test262-slice 08 9478 18803 0 0 9478 9478 0 0
+test262-slice 13 3066 6088 0 0 3066 0 3066 0
+test262-slice 18 1138 1459 0 0 1138 172 966 0
+test262-slice 19 1085 2007 0 0 1085 607 476 2
+```
+
+Every case of slice 8 passes in every run. On the base run (`2b074619`) the slice read
+`test262-slice 08 9339 18529 0 0 9339 9330 9 0`; at its start (`edaf080`, the commit the
+first story of the slice was merged onto) `test262-slice 08 9302 18455 0 0 9302 5 9297 0`.
+The 9 cases that failed on the base need a later slice and move by lines of the block and of
+`conformance/test262/moves.tsv`: 5 to slice 13 (the subclasses of `ArrayBuffer`, `DataView`
+and `Uint8Array`) and 4 to slice 18 (the cases that call `__lookupGetter__` or
+`__lookupSetter__`). 148 cases of `test/staging/sm/` that failed at the start and pass now
+come in from slice 19 (`docs/plan/slice-08/close-into-08.tsv`). The run changes no outcome
+against the base run, and a second full run of the head gave the same run lines byte for
+byte. With `8` delivered, `host-requirements-check` exits 0 (`pending by slice: 11:32 12:3
+13:2 14:6 16:5 18:1`). The paragraph "Slice 8's cases that need a later slice" of section 12
+of `docs/design/engine.md` gives the reasons.
+
+The whole run: 37,097 of the 44,812 cases that run pass; 26,250 passed at the start of
+slice 8 and 36,027 on the head of the wave's first pull request.
+
+The lists of `docs/plan/slice-08/` describe the slice before its close:
+`sh docs/plan/slice-08/lists.sh` over the base run prints `slice 9339 lists 9339 incoming 0`
+and exits 0, as the story's check (7) asks; over the head's run it exits 1, since the 148
+cases that came in are on no list and the 9 that moved are on `close-later.tsv`
+(`review-result:close8-coordinator-read`, note 1).
+
+Filed from the adversary's pass, in the backlog: the moves check does not see a wrong field
+2 of a line of `moves.tsv` (added to `story:moves-check-sees-a-block-move-without-its-line`),
+and tests still hold text of a refusal before slice 8
+(`story:tests-name-no-refusal-of-a-delivered-slice`).
