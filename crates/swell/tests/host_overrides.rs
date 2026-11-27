@@ -924,10 +924,19 @@ const FACT_BYTES: u64 = 73;
 /// The object, rooted, and the [`FACTS`] keys `k0` to `k999` as atoms, rooted, made before the
 /// first reading, with every handle once handed out, so that the readings see the facts alone.
 fn facts_setup(agent: &mut Agent<TestHost>, realm: &Realm) -> (swell::Root, Vec<swell::Root>) {
+    facts_setup_with(agent, realm, &FIXED)
+}
+
+/// As [`facts_setup`], an object of `table`.
+fn facts_setup_with(
+    agent: &mut Agent<TestHost>,
+    realm: &Realm,
+    table: &'static Overrides<TestHost>,
+) -> (swell::Root, Vec<swell::Root>) {
     let made = agent
         .with_cx(realm, |cx| {
             let made = cx
-                .new_host_object(spec(Prototype::Null, None, Some(&FIXED)))
+                .new_host_object(spec(Prototype::Null, None, Some(table)))
                 .unwrap()
                 .unwrap();
             let object = cx.root(Value::Object(made)).unwrap();
@@ -967,6 +976,17 @@ fn report_facts(
     object: &swell::Root,
     keys: &[swell::Root],
 ) -> (usize, Completion<()>) {
+    report_values(agent, realm, object, keys, Value::Number(1.0))
+}
+
+/// As [`report_facts`], each read answering `expected`.
+fn report_values(
+    agent: &mut Agent<TestHost>,
+    realm: &Realm,
+    object: &swell::Root,
+    keys: &[swell::Root],
+    expected: Value,
+) -> (usize, Completion<()>) {
     agent
         .with_cx(realm, |cx| {
             let Value::Object(target) = cx.get(object).unwrap() else {
@@ -977,7 +997,7 @@ fn report_facts(
                     panic!("the root holds no String");
                 };
                 match cx.get_property(target, PropertyKey::String(atom)).unwrap() {
-                    Ok(value) => assert_eq!(value, Value::Number(1.0)),
+                    Ok(value) => assert_eq!(value, expected),
                     Err(abrupt) => return (read, Err(abrupt)),
                 }
             }
@@ -1279,4 +1299,1619 @@ fn an_array_write_reaches_the_set_override_of_a_host_prototype() {
             .collect::<Vec<_>>(),
         [Some(a)]
     );
+}
+
+// The facts as the clause `#sec-invariants-of-the-essential-internal-methods` words them, the
+// loop of `#sec-ordinarysetprototypeof`, and what the ordinary methods of a host object hold
+// across an override (the module documentation of `object/host_overrides.rs`).
+
+/// The value of the global property `name` of `realm`.
+fn global_value(agent: &mut Agent<TestHost>, realm: &Realm, name: &str) -> Value {
+    let global_root = global(agent, realm);
+    agent
+        .with_cx(realm, |cx| {
+            let global = object_of(cx, &global_root);
+            let name = key(cx, name);
+            cx.get_property(global, name).unwrap().unwrap()
+        })
+        .unwrap()
+}
+
+/// `own_property_keys` answering no key.
+fn no_keys(_cx: &mut Cx<'_, TestHost>, _object: ObjectRef) -> Completion<Vec<PropertyKey>> {
+    Ok(Vec::new())
+}
+
+static NO_KEYS: Overrides<TestHost> = Overrides {
+    own_property_keys: Some(no_keys),
+    ..NONE
+};
+
+/// `#sec-invariants-of-the-essential-internal-methods`, [[OwnPropertyKeys]]: "The returned List
+/// must contain at least the keys of all non-configurable own properties that have previously
+/// been observed." The table has no `get_own_property`, so the module documentation of
+/// `object/host_overrides.rs` makes the record's own properties the facts ("What a method
+/// without an override answers is a fact as it stands"). `x` is defined non-configurable on the
+/// record and observed so through [[GetOwnProperty]]; an `own_property_keys` answer without it
+/// must fault the agent.
+#[test]
+fn own_keys_must_list_a_non_configurable_property_of_the_record() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(&mut agent, &realm, "o", Some(&NO_KEYS), None);
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "Object.defineProperty(o, \"x\", { value: 1 });\n\
+         var observed = Object.getOwnPropertyDescriptor(o, \"x\").configurable;\n\
+         var r; try { r = observed + \"/\" + Reflect.ownKeys(o).length; } catch (e) { r = e.name; } r;",
+    );
+    assert_eq!(outcome, Outcome::Terminated(Termination::EngineFault));
+    assert_eq!(agent.state(), AgentState::Faulted);
+}
+
+/// `own_property_keys` answering the key `ghost`.
+fn ghost_key(cx: &mut Cx<'_, TestHost>, _object: ObjectRef) -> Completion<Vec<PropertyKey>> {
+    Ok(vec![PropertyKey::String(cx.new_string("ghost")?)])
+}
+
+static GHOST: Overrides<TestHost> = Overrides {
+    own_property_keys: Some(ghost_key),
+    ..NONE
+};
+
+/// [[OwnPropertyKeys]]: "If the target is non-extensible, the returned List must contain only
+/// the keys of all own properties of the target that are observable using [[GetOwnProperty]]."
+/// The object is made non-extensible by the ordinary [[PreventExtensions]] (no override), its
+/// ordinary [[GetOwnProperty]] answers `ghost` absent, and `own_property_keys` lists `ghost`:
+/// the answer must fault the agent.
+#[test]
+fn own_keys_of_a_non_extensible_record_list_only_its_own_properties() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(&mut agent, &realm, "o", Some(&GHOST), None);
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "Object.preventExtensions(o);\n\
+         var absent = Object.getOwnPropertyDescriptor(o, \"ghost\") === undefined;\n\
+         var r; try { r = absent + \"/\" + Reflect.ownKeys(o).join(); } catch (e) { r = e.name; } r;",
+    );
+    assert_eq!(outcome, Outcome::Terminated(Termination::EngineFault));
+    assert_eq!(agent.state(), AgentState::Faulted);
+}
+
+/// `is_extensible` answering false.
+fn not_extensible(_cx: &mut Cx<'_, TestHost>, _object: ObjectRef) -> Completion<bool> {
+    Ok(false)
+}
+
+/// `get_own_property` answering absent on its first call and a configurable data property
+/// after it.
+fn absent_then_present(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    _key: PropertyKey,
+) -> Completion<Option<PropertyDescriptor>> {
+    let host = cx.host_mut();
+    host.count += 1;
+    Ok((host.count > 1).then(|| data(Value::Number(1.0), true, true, true)))
+}
+
+static APPEARING: Overrides<TestHost> = Overrides {
+    is_extensible: Some(not_extensible),
+    get_own_property: Some(absent_then_present),
+    ..NONE
+};
+
+/// [[GetOwnProperty]]: "If the target is non-extensible and propertyKey is non-existent, then
+/// all future calls to [[GetOwnProperty]] (propertyKey) on the target must describe propertyKey
+/// as non-existent". `is_extensible` answered false, then `get_own_property` answered `x`
+/// absent, then present: the second answer must fault the agent.
+#[test]
+fn a_property_absent_from_a_non_extensible_host_object_stays_absent() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(&mut agent, &realm, "o", Some(&APPEARING), None);
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "var e = Object.isExtensible(o);\n\
+         var first = Object.getOwnPropertyDescriptor(o, \"x\");\n\
+         var second; try { second = typeof Object.getOwnPropertyDescriptor(o, \"x\"); } catch (err) { second = err.name; }\n\
+         e + \"/\" + first + \"/\" + second;",
+    );
+    assert_eq!(agent.host().count, 2);
+    assert_eq!(outcome, Outcome::Terminated(Termination::EngineFault));
+    assert_eq!(agent.state(), AgentState::Faulted);
+}
+
+/// `get_own_property` answering absent.
+fn always_absent(
+    _cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    _key: PropertyKey,
+) -> Completion<Option<PropertyDescriptor>> {
+    Ok(None)
+}
+
+/// `define_own_property` answering true.
+fn define_true(
+    _cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    _key: PropertyKey,
+    _descriptor: PropertyDescriptor,
+) -> Completion<bool> {
+    Ok(true)
+}
+
+static GROWING: Overrides<TestHost> = Overrides {
+    is_extensible: Some(not_extensible),
+    get_own_property: Some(always_absent),
+    define_own_property: Some(define_true),
+    ..NONE
+};
+
+/// [[DefineOwnProperty]]: "must return false if target is non-extensible and propertyKey is a
+/// non-existent own property". `is_extensible` answered false and `get_own_property` answered
+/// `y` absent, so `y` is non-existent; `define_own_property` answering true for it must fault
+/// the agent.
+#[test]
+fn define_true_for_a_key_absent_from_a_non_extensible_object_faults_the_agent() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(&mut agent, &realm, "o", Some(&GROWING), None);
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "var e = Object.isExtensible(o);\n\
+         var before = Object.getOwnPropertyDescriptor(o, \"y\");\n\
+         var r; try { r = Reflect.defineProperty(o, \"y\", { value: 1, writable: true, enumerable: true, configurable: true }); } catch (err) { r = err.name; }\n\
+         e + \"/\" + before + \"/\" + r;",
+    );
+    assert_eq!(outcome, Outcome::Terminated(Termination::EngineFault));
+    assert_eq!(agent.state(), AgentState::Faulted);
+}
+
+/// `get_own_property` of an object that has one configurable property `x` until it is deleted
+/// (the host's `count` set to 1).
+fn deletable_x(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    key: PropertyKey,
+) -> Completion<Option<PropertyDescriptor>> {
+    let name = key_text(cx, key);
+    let present = name == "x" && cx.host_mut().count == 0;
+    Ok(present.then(|| data(Value::Number(1.0), true, true, true)))
+}
+
+/// `own_property_keys` of that object.
+fn deletable_keys(cx: &mut Cx<'_, TestHost>, _object: ObjectRef) -> Completion<Vec<PropertyKey>> {
+    if cx.host_mut().count == 0 {
+        Ok(vec![PropertyKey::String(cx.new_string("x")?)])
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// `delete` of that object: `x` is deleted.
+fn delete_x(cx: &mut Cx<'_, TestHost>, _object: ObjectRef, key: PropertyKey) -> Completion<bool> {
+    let name = key_text(cx, key);
+    if name == "x" {
+        cx.host_mut().count = 1;
+    }
+    Ok(true)
+}
+
+static SHRINKING: Overrides<TestHost> = Overrides {
+    is_extensible: Some(not_extensible),
+    get_own_property: Some(deletable_x),
+    delete: Some(delete_x),
+    own_property_keys: Some(deletable_keys),
+    ..NONE
+};
+
+/// The invariants let a non-extensible object lose a configurable property: [[Delete]] must
+/// answer false only for a property "previously observed as a non-configurable own data or
+/// accessor property", and an ordinary object does it (`Object.preventExtensions(p); delete
+/// p.x` is true). A host object that behaves exactly as the ordinary object `p` must not fault
+/// the agent.
+#[test]
+fn a_non_extensible_host_object_may_delete_a_configurable_property() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(&mut agent, &realm, "o", Some(&SHRINKING), None);
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "var p = { x: 1 }; Object.preventExtensions(p); Reflect.ownKeys(p);\n\
+         var ordinary = [Object.isExtensible(p), delete p.x, Reflect.ownKeys(p).length, \"x\" in p].join();\n\
+         var host = [Object.isExtensible(o), Reflect.ownKeys(o).join()].join();\n\
+         host += \",\" + [delete o.x, Reflect.ownKeys(o).length, \"x\" in o].join();\n\
+         ordinary + \"/\" + host;",
+    );
+    assert_eq!(
+        outcome,
+        Outcome::Normal("\"false,true,0,false/false,x,true,0,false\"".to_string())
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// `get_prototype_of` answering null.
+fn null_prototype(_cx: &mut Cx<'_, TestHost>, _object: ObjectRef) -> Completion<Option<ObjectRef>> {
+    Ok(None)
+}
+
+static NULL_PROTOTYPE: Overrides<TestHost> = Overrides {
+    get_prototype_of: Some(null_prototype),
+    ..NONE
+};
+
+/// OrdinarySetPrototypeOf (`#sec-ordinarysetprototypeof`), step 7.c.i: "If p.[[GetPrototypeOf]]
+/// is not the ordinary object internal method defined in 10.1.1, set done to true." `h` has a
+/// `get_prototype_of` override (answering null) and its record's [[Prototype]] is `a`, so the
+/// loop of `Reflect.setPrototypeOf(a, h)` stops at `h` and the answer is true, as it is for
+/// `b`; reading `h`'s record past it finds `a` and answers false.
+#[test]
+fn set_prototype_of_stops_its_loop_at_an_overridden_get_prototype_of() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "var a = {}; 0;"),
+        Outcome::Normal("0".to_string())
+    );
+    let Value::Object(a) = global_value(&mut agent, &realm, "a") else {
+        panic!("a is no object");
+    };
+    let global_root = global(&mut agent, &realm);
+    agent
+        .with_cx(&realm, |cx| {
+            let made = cx
+                .new_host_object(spec(Prototype::Object(a), None, Some(&NULL_PROTOTYPE)))
+                .unwrap()
+                .unwrap();
+            let global = object_of(cx, &global_root);
+            let name = key(cx, "h");
+            cx.set(global, name, Value::Object(made), true)
+                .unwrap()
+                .unwrap();
+        })
+        .unwrap();
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var b = {};\n\
+             var other = Reflect.setPrototypeOf(b, h);\n\
+             var own = Reflect.setPrototypeOf(a, h);\n\
+             [other, own, Object.getPrototypeOf(a) === h].join();"
+        ),
+        Outcome::Normal("\"true,true,true\"".to_string())
+    );
+}
+
+thread_local! {
+    /// The script function the overrides below call before they answer.
+    static HOOK: Cell<Option<ObjectRef>> = const { Cell::new(None) };
+}
+
+/// Call [`HOOK`], if set: script runs (and, with `collect-every-safe-point`, collects at each
+/// of its instructions).
+fn run_hook(cx: &mut Cx<'_, TestHost>) -> Completion<()> {
+    if let Some(function) = HOOK.with(Cell::get) {
+        cx.call(Value::Object(function), Value::Undefined, &[])
+            .unwrap()?;
+    }
+    Ok(())
+}
+
+/// Set [`HOOK`] to the global function `name` of `realm`.
+fn set_hook(agent: &mut Agent<TestHost>, realm: &Realm, name: &str) {
+    let Value::Object(function) = global_value(agent, realm, name) else {
+        panic!("{name} is no object");
+    };
+    HOOK.with(|cell| cell.set(Some(function)));
+}
+
+/// `is_extensible` answering true after [`run_hook`].
+fn extensible_after_hook(cx: &mut Cx<'_, TestHost>, _object: ObjectRef) -> Completion<bool> {
+    run_hook(cx)?;
+    Ok(true)
+}
+
+static HOOKED_EXTENSIBLE: Overrides<TestHost> = Overrides {
+    is_extensible: Some(extensible_after_hook),
+    ..NONE
+};
+
+/// OrdinaryDefineOwnProperty (`#sec-ordinarydefineownproperty`) of a host object whose table
+/// has `is_extensible` and no `define_own_property`: step 2 calls the override while the engine
+/// holds the descriptor read from `d` and the key made from `"k" + n`. The override runs a
+/// script that deletes `d.value` and allocates; with `collect-every-safe-point` each of its
+/// instructions collects. The value defined must still be the object `{ tag: 7 }`.
+#[test]
+fn a_descriptor_held_across_an_is_extensible_override_survives_a_collection() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(&mut agent, &realm, "o", Some(&HOOKED_EXTENSIBLE), None);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var d = { value: { tag: 7 }, writable: true, enumerable: true, configurable: true };\n\
+             function hook() { delete d.value; var junk = []; for (var i = 0; i < 50; i++) junk.push({ i: i }); junk = null; }\n\
+             0;"
+        ),
+        Outcome::Normal("0".to_string())
+    );
+    set_hook(&mut agent, &realm, "hook");
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "var n = 3; var ok = Reflect.defineProperty(o, \"k\" + n, d);\n\
+         for (var j = 0; j < 20; j++) ({});\n\
+         var names = Object.getOwnPropertyNames(o).join();\n\
+         [ok, names, typeof o.k3, o.k3 && o.k3.tag].join();",
+    );
+    HOOK.with(|cell| cell.set(None));
+    assert_eq!(outcome, Outcome::Normal("\"true,k3,object,7\"".to_string()));
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// `Reflect.defineProperty(o, <key>, d)` on a host object of [`HOOKED_EXTENSIBLE`] whose hook
+/// runs `hook_body`, then the names of `o` and `o.k3.tag`.
+fn define_across_hook(hook_body: &str, key_source: &str) -> (Outcome, AgentState) {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(&mut agent, &realm, "o", Some(&HOOKED_EXTENSIBLE), None);
+    let setup = format!(
+        "var d = {{ value: {{ tag: 7 }}, writable: true, enumerable: true, configurable: true }};\n\
+         function hook() {{ {hook_body} var junk = []; for (var i = 0; i < 50; i++) junk.push({{ i: i }}); junk = null; }}\n\
+         0;"
+    );
+    assert_eq!(
+        eval_text(&mut agent, &realm, &setup),
+        Outcome::Normal("0".to_string())
+    );
+    set_hook(&mut agent, &realm, "hook");
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        &format!(
+            "var n = 3; var ok = Reflect.defineProperty(o, {key_source}, d);\n\
+             for (var j = 0; j < 20; j++) ({{}});\n\
+             [ok, Object.getOwnPropertyNames(o).join(), o.k3 && o.k3.tag].join();"
+        ),
+    );
+    HOOK.with(|cell| cell.set(None));
+    (outcome, agent.state())
+}
+
+/// As [`a_descriptor_held_across_an_is_extensible_override_survives_a_collection`],
+/// the descriptor's value alone: the key is the literal `"k3"`, the hook deletes `d.value`.
+#[test]
+fn a_descriptor_value_held_across_an_is_extensible_override_survives_a_collection() {
+    assert_eq!(
+        define_across_hook("delete d.value;", "\"k3\""),
+        (
+            Outcome::Normal("\"true,k3,7\"".to_string()),
+            AgentState::Alive
+        )
+    );
+}
+
+/// `get` reading `x` of the next object of its chain (host data [`Next`]) through
+/// `cx.get_property` up to twice [`STEPS`] times, counting each read in the host's `count`.
+fn get_through_cx(
+    cx: &mut Cx<'_, TestHost>,
+    object: ObjectRef,
+    key: PropertyKey,
+    _receiver: Value,
+) -> Completion<Value> {
+    let next = cx
+        .host_data::<Next>(object, BRAND)
+        .unwrap()
+        .and_then(|next| next.0);
+    let Some(next) = next else {
+        return Ok(Value::Undefined);
+    };
+    for _ in 0..2 * STEPS {
+        cx.get_property(next, key).unwrap()?;
+        cx.host_mut().count += 1;
+    }
+    Ok(Value::Number(2.0))
+}
+
+static LOOPING: Overrides<TestHost> = Overrides {
+    get: Some(get_through_cx),
+    ..NONE
+};
+
+/// `docs/design/host-interface.md`, "An entry made by host code that runs inside another entry
+/// ... is nested" (`Agent::begin`): a `Cx` call made inside an override spends from the entry
+/// that called the override. `with_cx` reads `x` of a host object whose `get` override reads a
+/// key of another one through `cx.get_property` twice [`STEPS`] times, with `steps_per_entry`
+/// [`STEPS`]: the read ends in `Terminated(StepBudget)` before the loop does, and the agent
+/// stays usable.
+#[test]
+fn a_cx_call_inside_an_override_spends_from_the_entry_that_called_it() {
+    let mut budget = limits();
+    budget.steps_per_entry = STEPS;
+    let mut agent = agent_with(budget).unwrap();
+    let realm = realm(&mut agent);
+    let answer = agent
+        .with_cx(&realm, |cx| {
+            let one = cx
+                .new_host_object(spec(Prototype::Null, None, Some(&ONE)))
+                .unwrap()
+                .unwrap();
+            let looping = cx
+                .new_host_object(spec(
+                    Prototype::Null,
+                    Some(Box::new(Next(Some(one)))),
+                    Some(&LOOPING),
+                ))
+                .unwrap()
+                .unwrap();
+            let name = key(cx, "x");
+            cx.get_property(looping, name).unwrap()
+        })
+        .unwrap();
+    let reads = u64::from(agent.host().count);
+    println!("{reads} reads inside the override, then {answer:?}");
+    assert_eq!(answer, Err(Abrupt::Terminated(Termination::StepBudget)));
+    assert!(reads < STEPS, "{reads} reads");
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// OrdinaryHasProperty (`#sec-ordinaryhasproperty`, step 4.a, "Return ? parent.[[HasProperty]]
+/// (P)"): `"x" in Object.create(o)` hands over to the `has_property` override of the host
+/// prototype `o` and calls no other override of it.
+#[test]
+fn an_in_walk_hands_over_to_the_has_property_override_of_a_host_prototype() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(&mut agent, &realm, "o", Some(&LOGGING), None);
+    take_calls(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &realm, "\"x\" in Object.create(o);"),
+        Outcome::Normal("true".to_string())
+    );
+    assert_eq!(take_calls(&mut agent), ["has_property x"]);
+}
+
+/// `own_property_keys` answering the key `a` twice.
+fn duplicate_keys(cx: &mut Cx<'_, TestHost>, _object: ObjectRef) -> Completion<Vec<PropertyKey>> {
+    let a = PropertyKey::String(cx.new_string("a")?);
+    Ok(vec![a, a])
+}
+
+static DUPLICATE: Overrides<TestHost> = Overrides {
+    own_property_keys: Some(duplicate_keys),
+    ..NONE
+};
+
+/// [[OwnPropertyKeys]]: "The returned List must not contain any duplicate entries." A key list
+/// that holds `a` twice faults the agent.
+#[test]
+fn a_key_list_with_a_key_twice_faults_the_agent() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(&mut agent, &realm, "o", Some(&DUPLICATE), None);
+    let script = parse(
+        &mut agent,
+        &realm,
+        "var r; try { r = Reflect.ownKeys(o).join(); } catch (e) { r = e.name; } r;",
+    );
+    let later = parse(&mut agent, &realm, "r;");
+    assert!(matches!(
+        agent.evaluate_script(&script),
+        Ok(HostOutcome::Terminated(Termination::EngineFault))
+    ));
+    assert_faulted(&mut agent, &realm, &later);
+}
+
+/// HOST-222 names a handle that reaches no record or one of another agent: a handle of another
+/// realm of the same agent is a handle of the agent. A `get` override answering an object made
+/// in another realm is answered to the script, and the agent stays usable.
+#[test]
+fn an_override_may_answer_an_object_of_another_realm_of_the_agent() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let other = realm_of(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &other, "var made = { tag: 7 }; 0;"),
+        Outcome::Normal("0".to_string())
+    );
+    let made = global_value(&mut agent, &other, "made");
+    ANSWER.with(|cell| cell.set(Some(Ok(made))));
+    bind_host(&mut agent, &realm, "o", Some(&ANSWERING), None);
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "[o.x.tag, o.x === o.x, Object.getPrototypeOf(o.x) === Object.prototype].join();",
+    );
+    ANSWER.with(|cell| cell.set(None));
+    assert_eq!(outcome, Outcome::Normal("\"7,true,false\"".to_string()));
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+thread_local! {
+    /// The Symbol [`symbol_keys`] answers.
+    static SYMBOL: Cell<Option<SymbolRef>> = const { Cell::new(None) };
+}
+
+/// `own_property_keys` answering the Symbol of [`SYMBOL`].
+fn symbol_keys(_cx: &mut Cx<'_, TestHost>, _object: ObjectRef) -> Completion<Vec<PropertyKey>> {
+    Ok(SYMBOL
+        .with(Cell::get)
+        .map(PropertyKey::Symbol)
+        .into_iter()
+        .collect())
+}
+
+static SYMBOL_KEYS: Overrides<TestHost> = Overrides {
+    own_property_keys: Some(symbol_keys),
+    ..NONE
+};
+
+/// HOST-222: a key list whose Symbol was collected (no root held it) faults the agent before
+/// any key is made of it.
+#[test]
+fn a_key_list_with_a_stale_symbol_faults_the_agent() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    let symbol = agent
+        .with_cx(&realm, |cx| {
+            let global = object_of(cx, &global_root);
+            let symbol_key = key(cx, "Symbol");
+            let constructor = cx.get_property(global, symbol_key).unwrap().unwrap();
+            let description = Value::String(cx.new_string("gone").unwrap());
+            let Value::Symbol(symbol) = cx
+                .call(constructor, Value::Undefined, &[description])
+                .unwrap()
+                .unwrap()
+            else {
+                panic!("Symbol() made no Symbol");
+            };
+            symbol
+        })
+        .unwrap();
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    SYMBOL.with(|cell| cell.set(Some(symbol)));
+    bind_host(&mut agent, &realm, "o", Some(&SYMBOL_KEYS), None);
+    let script = parse(
+        &mut agent,
+        &realm,
+        "var r; try { r = Reflect.ownKeys(o).length; } catch (e) { r = e.name; } r;",
+    );
+    let later = parse(&mut agent, &realm, "r;");
+    let outcome = agent.evaluate_script(&script);
+    SYMBOL.with(|cell| cell.set(None));
+    assert!(
+        matches!(
+            outcome,
+            Ok(HostOutcome::Terminated(Termination::EngineFault))
+        ),
+        "{outcome:?}"
+    );
+    assert_faulted(&mut agent, &realm, &later);
+}
+
+/// `get` calling [`HOOK`] (a script function that makes an object) and answering, for the key
+/// `ok`, what it returns, and for every other key throwing it.
+fn nested_run(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    key: PropertyKey,
+    _receiver: Value,
+) -> Completion<Value> {
+    let name = key_text(cx, key);
+    let Some(function) = HOOK.with(Cell::get) else {
+        return Ok(Value::Undefined);
+    };
+    let made = cx
+        .call(Value::Object(function), Value::Undefined, &[])
+        .unwrap()?;
+    if name == "ok" {
+        Ok(made)
+    } else {
+        Err(Abrupt::Throw(made))
+    }
+}
+
+static NESTED: Overrides<TestHost> = Overrides {
+    get: Some(nested_run),
+    ..NONE
+};
+
+/// HOST-222 and decision 6: a value made by a run nested in the override (a script function it
+/// calls), answered as its `Ok` value or thrown as its `Abrupt::Throw` value, is a live handle
+/// of the agent; it reaches the script, also when each instruction of the nested run collects.
+#[test]
+fn a_value_made_in_a_nested_run_is_answered_and_thrown() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(&mut agent, &realm, "o", Some(&NESTED), None);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "function make() { var junk = []; for (var i = 0; i < 20; i++) junk.push({ i: i }); return { tag: 7 }; }\n\
+             0;"
+        ),
+        Outcome::Normal("0".to_string())
+    );
+    set_hook(&mut agent, &realm, "make");
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "var r; try { o.thrown; r = \"none\"; } catch (e) { r = e.tag; }\n\
+         [o.ok.tag, r].join();",
+    );
+    HOOK.with(|cell| cell.set(None));
+    assert_eq!(outcome, Outcome::Normal("\"7,7\"".to_string()));
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// The fixed properties of the budget sweep.
+const SWEPT: usize = 300;
+
+/// The room under which the sweep lowers the budget by [`FINE`] bytes; above it by [`COARSE`].
+/// A run costs about 1.7 ms in the default build, so a step of 64 bytes over the whole range
+/// (591 runs) would go over the CPU bound of a test in the build that collects at every safe
+/// point; below this room the object, the box of facts and the first growths of its table are
+/// made.
+const FINE_ROOM: u64 = 4096;
+
+/// The steps of the sweep below and above [`FINE_ROOM`].
+const FINE: u64 = 64;
+const COARSE: u64 = 512;
+
+/// The keys of the sweep, as atoms, rooted.
+fn swept_keys(agent: &mut Agent<TestHost>, realm: &Realm) -> Vec<swell::Root> {
+    agent
+        .with_cx(realm, |cx| {
+            (0..SWEPT)
+                .map(|i| {
+                    let name = Value::String(cx.new_string(&format!("s{i}")).unwrap());
+                    let PropertyKey::String(atom) = cx.to_property_key(name).unwrap().unwrap()
+                    else {
+                        panic!("s{i} is no String key");
+                    };
+                    cx.root(Value::String(atom)).unwrap()
+                })
+                .collect()
+        })
+        .unwrap()
+}
+
+/// One run of the sweep with `room` bytes left under the budget: a new host object of
+/// [`FIXED`], its [`SWEPT`] properties reported; then, in the next entry, a property reported
+/// before answers as reported; then the object is freed and the agent collects. Answers the
+/// reports made, whether the run ended in `Terminated(MemoryBudget)`, and `heap_bytes()` after.
+fn sweep_run(
+    agent: &mut Agent<TestHost>,
+    realm: &Realm,
+    keys: &[swell::Root],
+    room: u64,
+) -> (usize, bool, u64) {
+    let used = agent.heap_bytes().unwrap();
+    let limit = limits().memory_bytes;
+    let (object, ballast, read, ended) = agent
+        .with_cx(realm, |cx| {
+            let ballast = cx
+                .charge_host_bytes(limit.saturating_sub(used).saturating_sub(room))
+                .unwrap();
+            let made = match cx
+                .new_host_object(spec(Prototype::Null, None, Some(&FIXED)))
+                .unwrap()
+            {
+                Ok(made) => made,
+                Err(abrupt) => return (None, ballast, 0, Err(abrupt)),
+            };
+            let object = cx.root(Value::Object(made)).unwrap();
+            let mut read = 0;
+            let mut ended = Ok(());
+            for root in keys {
+                let Value::String(atom) = cx.get(root).unwrap() else {
+                    panic!("the root holds no String");
+                };
+                match cx.get_property(made, PropertyKey::String(atom)).unwrap() {
+                    Ok(value) => assert_eq!(value, Value::Number(1.0)),
+                    Err(abrupt) => {
+                        ended = Err(abrupt);
+                        break;
+                    }
+                }
+                read += 1;
+            }
+            (Some(object), ballast, read, ended)
+        })
+        .unwrap();
+    let terminated = match ended {
+        Ok(()) => false,
+        Err(Abrupt::Terminated(Termination::MemoryBudget)) => true,
+        Err(other) => panic!("room {room}: {other:?}"),
+    };
+    if let Some(object) = object.as_ref().filter(|_| read > 0) {
+        agent
+            .with_cx(realm, |cx| {
+                let Value::Object(made) = cx.get(object).unwrap() else {
+                    panic!("the root holds no object");
+                };
+                let Value::String(atom) = cx.get(&keys[0]).unwrap() else {
+                    panic!("the root holds no String");
+                };
+                assert_eq!(
+                    cx.get_property(made, PropertyKey::String(atom)).unwrap(),
+                    Ok(Value::Number(1.0)),
+                    "room {room}"
+                );
+            })
+            .unwrap();
+    }
+    drop(ballast);
+    drop(object);
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    (read, terminated, agent.heap_bytes().unwrap())
+}
+
+/// Bounds, "Memory": the room left under the memory budget lowered from the bytes of a host
+/// object and its [`SWEPT`] facts down to none, in steps of 512 bytes, then of 64 bytes below
+/// 4 KiB (`FINE_ROOM`). Each run either reports
+/// every property or ends in `Terminated(MemoryBudget)` with the object as it was before the
+/// report that did not fit (a property reported before still answers); after the object is
+/// freed and a collection, `heap_bytes()` reads what it read before the run.
+#[test]
+fn the_facts_end_at_the_memory_budget_at_every_size_and_leave_no_byte() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let keys = swept_keys(&mut agent, &realm);
+    let (_, _, settled) = sweep_run(&mut agent, &realm, &keys, u64::MAX / 2);
+    let (read, terminated, before) = sweep_run(&mut agent, &realm, &keys, u64::MAX / 2);
+    assert_eq!((read, terminated, before), (SWEPT, false, settled));
+    let start = agent.heap_bytes().unwrap();
+    let full = agent
+        .with_cx(&realm, |cx| {
+            let made = cx
+                .new_host_object(spec(Prototype::Null, None, Some(&FIXED)))
+                .unwrap()
+                .unwrap();
+            for root in &keys {
+                let Value::String(atom) = cx.get(root).unwrap() else {
+                    panic!("the root holds no String");
+                };
+                cx.get_property(made, PropertyKey::String(atom))
+                    .unwrap()
+                    .unwrap();
+            }
+            cx.root(Value::Object(made)).unwrap()
+        })
+        .unwrap();
+    let needed = agent.heap_bytes().unwrap() - start;
+    drop(full);
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    let mut room = needed + 64;
+    let mut runs = 0;
+    let mut ended = 0;
+    let mut reports = Vec::new();
+    loop {
+        let (read, terminated, after) = sweep_run(&mut agent, &realm, &keys, room);
+        assert_eq!(after, before, "room {room}: {read} reports");
+        assert!(terminated || read == SWEPT, "room {room}: {read} reports");
+        runs += 1;
+        ended += usize::from(terminated);
+        if reports.last() != Some(&read) {
+            reports.push(read);
+        }
+        if room < FINE {
+            break;
+        }
+        room -= if room <= FINE_ROOM { FINE } else { COARSE };
+    }
+    println!(
+        "{runs} runs, {needed} bytes for the object and {SWEPT} facts, {ended} ended at the budget; reports made as the room fell: {reports:?}"
+    );
+    assert_eq!(reports.first(), Some(&SWEPT));
+    assert_eq!(reports.last(), Some(&0));
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// Host data: the keys of an object whose overrides read and change them, and the change the
+/// read of `a` makes.
+struct Changing(std::cell::RefCell<Vec<&'static str>>);
+
+impl HostData for Changing {
+    fn trace(&self, _tracer: &mut Tracer<'_>) {}
+}
+
+/// `get_own_property` of [`Changing`]: an enumerable, configurable data property of 1 for each
+/// listed key; reading `a` deletes `b` and adds `d`.
+fn changing_property(
+    cx: &mut Cx<'_, TestHost>,
+    object: ObjectRef,
+    key: PropertyKey,
+) -> Completion<Option<PropertyDescriptor>> {
+    let name = key_text(cx, key);
+    let keys = &cx.host_data::<Changing>(object, BRAND).unwrap().unwrap().0;
+    let present = keys.borrow().iter().any(|listed| *listed == name);
+    if name == "a" {
+        let mut keys = keys.borrow_mut();
+        keys.retain(|listed| *listed != "b");
+        if !keys.contains(&"d") {
+            keys.push("d");
+        }
+    }
+    Ok(present.then(|| data(Value::Number(1.0), true, true, true)))
+}
+
+/// `own_property_keys` of [`Changing`]: the keys listed now.
+fn changing_keys(cx: &mut Cx<'_, TestHost>, object: ObjectRef) -> Completion<Vec<PropertyKey>> {
+    let names = cx
+        .host_data::<Changing>(object, BRAND)
+        .unwrap()
+        .unwrap()
+        .0
+        .borrow()
+        .clone();
+    names
+        .into_iter()
+        .map(|name| Ok(PropertyKey::String(cx.new_string(name)?)))
+        .collect()
+}
+
+static CHANGING: Overrides<TestHost> = Overrides {
+    get_own_property: Some(changing_property),
+    own_property_keys: Some(changing_keys),
+    ..NONE
+};
+
+/// EnumerateObjectProperties (`#sec-enumerate-object-properties`): "A property that is deleted
+/// before it is processed is ignored. If new properties are added to the target object during
+/// enumeration, the newly added properties are not guaranteed to be processed". A for-in over a
+/// host object whose `get_own_property` override deletes `b` and adds `d` when `a` is read
+/// visits `a` and `c`; the object then lists `a,c,d`.
+#[test]
+fn a_for_in_over_keys_an_override_deletes_and_adds_skips_the_deleted() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(
+        &mut agent,
+        &realm,
+        "o",
+        Some(&CHANGING),
+        Some(Box::new(Changing(std::cell::RefCell::new(vec![
+            "a", "b", "c",
+        ])))),
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var r = []; for (var k in o) r.push(k); r.join() + \"/\" + Reflect.ownKeys(o).join();"
+        ),
+        Outcome::Normal("\"a,c/a,c,d\"".to_string())
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// Host data: the object `get_prototype_of` answers.
+struct Other(Cell<Option<ObjectRef>>);
+
+impl HostData for Other {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(other) = self.0.get() {
+            tracer.object(other);
+        }
+    }
+}
+
+/// `get_prototype_of` answering the object of the host data [`Other`].
+fn other_prototype(cx: &mut Cx<'_, TestHost>, object: ObjectRef) -> Completion<Option<ObjectRef>> {
+    Ok(cx
+        .host_data::<Other>(object, BRAND)
+        .unwrap()
+        .and_then(|other| other.0.get()))
+}
+
+static CYCLING: Overrides<TestHost> = Overrides {
+    get_prototype_of: Some(other_prototype),
+    ..NONE
+};
+
+/// The step budget of the prototype cycle, small so that each walk ends soon.
+const CYCLE_STEPS: u64 = 20_000;
+
+/// The body of [`a_prototype_cycle_of_two_overrides_ends_each_walk_at_the_step_budget`].
+fn prototype_cycle() {
+    let mut budget = stack_limits(BUILTINS_REENTRY);
+    budget.steps_per_entry = CYCLE_STEPS;
+    let mut agent = Agent::new(TestHost::default(), budget, seeds()).unwrap();
+    let realm = realm_of(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    agent
+        .with_cx(&realm, |cx| {
+            let made = [0, 1].map(|_| {
+                cx.new_host_object(spec(
+                    Prototype::Null,
+                    Some(Box::new(Other(Cell::new(None)))),
+                    Some(&CYCLING),
+                ))
+                .unwrap()
+                .unwrap()
+            });
+            for (index, name) in ["a", "b"].into_iter().enumerate() {
+                let other = made[1 - index];
+                cx.host_data::<Other>(made[index], BRAND)
+                    .unwrap()
+                    .unwrap()
+                    .0
+                    .set(Some(other));
+                let global = object_of(cx, &global_root);
+                let name = key(cx, name);
+                cx.set(global, name, Value::Object(made[index]), true)
+                    .unwrap()
+                    .unwrap();
+            }
+        })
+        .unwrap();
+    let walks = [
+        "for (var k in a) {} 0;",
+        "\"x\" in a;",
+        "a.x;",
+        "a instanceof Object;",
+        "Object.prototype.isPrototypeOf.call(Object.prototype, a);",
+    ];
+    for source in walks {
+        assert_eq!(
+            eval_text(&mut agent, &realm, source),
+            Outcome::Terminated(Termination::StepBudget),
+            "{source}"
+        );
+        assert_eq!(agent.state(), AgentState::Alive, "{source}");
+    }
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var p = {};\n\
+             [Object.setPrototypeOf(p, a) === p, Object.getPrototypeOf(p) === a,\n\
+              Reflect.setPrototypeOf(a, p), Reflect.setPrototypeOf(a, {}), Object.getPrototypeOf(a) === b].join();"
+        ),
+        Outcome::Normal("\"true,true,false,true,true\"".to_string())
+    );
+}
+
+/// Note 1 of [[GetPrototypeOf]] (`#sec-invariants-of-the-essential-internal-methods`): a chain
+/// through objects whose [[GetPrototypeOf]] is not the ordinary one may be circular. Two host
+/// objects whose `get_prototype_of` overrides answer each other: a for-in, `in`, a property
+/// read, `instanceof` and `isPrototypeOf` each walk the cycle a step per object and end in
+/// `Terminated(StepBudget)`, with no Rust stack growth, on seven eighths of `min_stack_bytes()`;
+/// `Object.setPrototypeOf` of an ordinary object `p` to one of them stops its loop there (step
+/// 7.c.i) and answers true; `Reflect.setPrototypeOf` of that one, which has no
+/// `set_prototype_of` override, runs OrdinarySetPrototypeOf on its record: to `p`, whose record
+/// leads back to it, false; to a new object, true, while its override still answers the other.
+#[test]
+fn a_prototype_cycle_of_two_overrides_ends_each_walk_at_the_step_budget() {
+    let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
+    on_bounded_stack(
+        test_path!("a_prototype_cycle_of_two_overrides_ends_each_walk_at_the_step_budget"),
+        stack,
+        prototype_cycle,
+    )
+    .unwrap();
+}
+
+/// Host data: the own properties of a host object whose overrides keep them, in the order
+/// they were defined.
+struct Stored(std::cell::RefCell<Vec<(PropertyKey, PropertyDescriptor)>>);
+
+impl HostData for Stored {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        for (key, descriptor) in self.0.borrow().iter() {
+            match *key {
+                PropertyKey::String(string) => tracer.value(Value::String(string)),
+                PropertyKey::Symbol(symbol) => tracer.value(Value::Symbol(symbol)),
+            }
+            for value in [descriptor.value, descriptor.get, descriptor.set]
+                .into_iter()
+                .flatten()
+            {
+                tracer.value(value);
+            }
+        }
+    }
+}
+
+/// The override of `define_own_property` of a global object that refuses `x`, `f` and `z`,
+/// recording each refusal, and keeps every other property in its host data [`Stored`]: a new
+/// one completed with the defaults, a known one with the fields given replaced.
+fn refuse_some(
+    cx: &mut Cx<'_, TestHost>,
+    object: ObjectRef,
+    key: PropertyKey,
+    given: PropertyDescriptor,
+) -> Completion<bool> {
+    let name = key_text(cx, key);
+    if matches!(name.as_str(), "x" | "f" | "z") {
+        log(cx, format!("refused {name}"));
+        return Ok(false);
+    }
+    let stored = &cx.host_data::<Stored>(object, BRAND).unwrap().unwrap().0;
+    let mut stored = stored.borrow_mut();
+    match stored.iter_mut().find(|(listed, _)| *listed == key) {
+        Some((_, current)) => {
+            let fields = [
+                (&mut current.value, given.value),
+                (&mut current.get, given.get),
+                (&mut current.set, given.set),
+            ];
+            for (field, new) in fields {
+                if new.is_some() {
+                    *field = new;
+                }
+            }
+            for (field, new) in [
+                (&mut current.writable, given.writable),
+                (&mut current.enumerable, given.enumerable),
+                (&mut current.configurable, given.configurable),
+            ] {
+                if new.is_some() {
+                    *field = new;
+                }
+            }
+        }
+        None => {
+            let accessor = given.get.is_some() || given.set.is_some();
+            let complete = if accessor {
+                PropertyDescriptor {
+                    get: given.get.or(Some(Value::Undefined)),
+                    set: given.set.or(Some(Value::Undefined)),
+                    ..given
+                }
+            } else {
+                PropertyDescriptor {
+                    value: given.value.or(Some(Value::Undefined)),
+                    writable: given.writable.or(Some(false)),
+                    ..given
+                }
+            };
+            stored.push((
+                key,
+                PropertyDescriptor {
+                    enumerable: complete.enumerable.or(Some(false)),
+                    configurable: complete.configurable.or(Some(false)),
+                    ..complete
+                },
+            ));
+        }
+    }
+    Ok(true)
+}
+
+/// `get_own_property` of [`Stored`].
+fn stored_property(
+    cx: &mut Cx<'_, TestHost>,
+    object: ObjectRef,
+    key: PropertyKey,
+) -> Completion<Option<PropertyDescriptor>> {
+    let stored = &cx.host_data::<Stored>(object, BRAND).unwrap().unwrap().0;
+    Ok(stored
+        .borrow()
+        .iter()
+        .find(|(listed, _)| *listed == key)
+        .map(|(_, descriptor)| *descriptor))
+}
+
+static REFUSING_SOME: Overrides<TestHost> = Overrides {
+    get_own_property: Some(stored_property),
+    define_own_property: Some(refuse_some),
+    ..NONE
+};
+
+/// A realm whose global object is a host object of [`REFUSING_SOME`].
+fn refusing_realm(agent: &mut Agent<TestHost>) -> Realm {
+    let mut setup = |cx: &mut HookCx<'_, TestHost>, realm: RealmRef| -> Completion<GlobalObjects> {
+        let global = cx
+            .new_host_object(spec(
+                Prototype::ObjectPrototypeOf(realm),
+                Some(Box::new(Stored(std::cell::RefCell::new(Vec::new())))),
+                Some(&REFUSING_SOME),
+            ))
+            .unwrap()?;
+        Ok(GlobalObjects { global, this: None })
+    };
+    match create_realm(agent, Some(&mut setup), None).unwrap() {
+        HostOutcome::Normal(realm) => realm,
+        other => panic!("create_realm answered {other:?}"),
+    }
+}
+
+/// GlobalDeclarationInstantiation (`#sec-globaldeclarationinstantiation`) with a global object
+/// whose `define_own_property` override refuses `x`, `f` and `z` and keeps every other
+/// property, which its `get_own_property` answers: CanDeclareGlobalFunction and
+/// CanDeclareGlobalVar find no such property on an extensible object and pass; the lexical `y` is created at
+/// step 15; CreateGlobalFunctionBinding of `f` (step 17) throws the TypeError of
+/// DefinePropertyOrThrow before `x` (step 18) is reached, so `y` stays uninitialized and `x`
+/// unbound. A script of `var x` alone throws at step 18. An undeclared assignment `z = 1`
+/// reaches the override through OrdinarySet's CreateDataProperty, whose false a sloppy script
+/// ignores; a strict one throws a ReferenceError before any define.
+#[test]
+fn a_host_global_object_that_refuses_declarations_throws_in_the_order_of_the_steps() {
+    let mut agent = agent().unwrap();
+    let realm = refusing_realm(&mut agent);
+    take_calls(&mut agent);
+    let cases: [(&str, &str, &[&str]); 5] = [
+        (
+            "let y = 1; function f() {} var x;",
+            "TypeError",
+            &["refused f"],
+        ),
+        (
+            "var r = []; try { y; } catch (e) { r.push(e.name); } r.push(typeof x); r.join();",
+            "\"ReferenceError,undefined\"",
+            &[],
+        ),
+        ("var x;", "TypeError", &["refused x"]),
+        ("z = 1; typeof z;", "\"undefined\"", &["refused z"]),
+        ("\"use strict\"; z = 1;", "ReferenceError", &[]),
+    ];
+    for (source, answer, calls) in cases {
+        let outcome = eval_text(&mut agent, &realm, source);
+        let shown = match &outcome {
+            Outcome::Normal(text) => text.clone(),
+            Outcome::Throw(text) => text.split(':').next().unwrap_or_default().to_string(),
+            other => format!("{other:?}"),
+        };
+        assert_eq!(shown, answer, "{source}: {outcome:?}");
+        assert_eq!(take_calls(&mut agent), calls, "{source}");
+    }
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// `get_prototype_of` running [`run_hook`], then answering the object of the host data
+/// [`Other`].
+fn hooked_prototype(cx: &mut Cx<'_, TestHost>, object: ObjectRef) -> Completion<Option<ObjectRef>> {
+    run_hook(cx)?;
+    Ok(cx
+        .host_data::<Other>(object, BRAND)
+        .unwrap()
+        .and_then(|other| other.0.get()))
+}
+
+static HOOKED_PROTOTYPE: Overrides<TestHost> = Overrides {
+    get_prototype_of: Some(hooked_prototype),
+    ..NONE
+};
+
+/// `get_own_property` answering `"v"` for the key `4294967295`, absent for every other key.
+fn far_element(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    key: PropertyKey,
+) -> Completion<Option<PropertyDescriptor>> {
+    if key_text(cx, key) != "4294967295" {
+        return Ok(None);
+    }
+    let v = Value::String(cx.new_string("v")?);
+    Ok(Some(data(v, true, true, true)))
+}
+
+static FAR_ELEMENT: Overrides<TestHost> = Overrides {
+    get_own_property: Some(far_element),
+    ..NONE
+};
+
+/// Bind as the global `h` a host object of [`HOOKED_PROTOTYPE`] whose `get_prototype_of`
+/// answers `next`, with `hook_body` as the body of the global function `hook` it runs.
+fn bind_hooked_prototype(
+    agent: &mut Agent<TestHost>,
+    realm: &Realm,
+    next: Option<&'static Overrides<TestHost>>,
+    hook_body: &str,
+) {
+    let global_root = global(agent, realm);
+    agent
+        .with_cx(realm, |cx| {
+            let next = next.map(|table| {
+                cx.new_host_object(spec(Prototype::Null, None, Some(table)))
+                    .unwrap()
+                    .unwrap()
+            });
+            let made = cx
+                .new_host_object(spec(
+                    Prototype::Null,
+                    Some(Box::new(Other(Cell::new(next)))),
+                    Some(&HOOKED_PROTOTYPE),
+                ))
+                .unwrap()
+                .unwrap();
+            let global = object_of(cx, &global_root);
+            let name = key(cx, "h");
+            cx.set(global, name, Value::Object(made), true)
+                .unwrap()
+                .unwrap();
+        })
+        .unwrap();
+    assert_eq!(
+        eval_text(
+            agent,
+            realm,
+            &format!(
+                "function hook() {{ {hook_body} var junk = []; for (var i = 0; i < 20; i++) junk.push({{ i: i }}); junk = null; }}\n\
+                 0;"
+            )
+        ),
+        Outcome::Normal("0".to_string())
+    );
+}
+
+/// OrdinaryHasProperty and OrdinaryGet (`object/ordinary.rs`) walk on past a host object
+/// without a `has_property` or `get` override and call its `get_prototype_of` override, which
+/// runs a script that allocates (with `collect-every-safe-point`, collecting at each
+/// instruction). `indexOf` and `lastIndexOf` at the index 2^32 - 1 hold the key of that index,
+/// a String made for the step and held by nothing else, across that call: the walk keeps it, so
+/// the next object of the chain, a host object whose `get_own_property` answers `"v"` for it, is
+/// asked for that key and the element is found.
+#[test]
+fn a_key_held_by_a_walk_across_a_get_prototype_of_override_survives_a_collection() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_hooked_prototype(&mut agent, &realm, Some(&FAR_ELEMENT), "");
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var al = Object.create(h); al.length = 4294967297; 0;"
+        ),
+        Outcome::Normal("0".to_string())
+    );
+    set_hook(&mut agent, &realm, "hook");
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "var at = 4294967295;\n\
+         [Array.prototype.indexOf.call(al, \"v\", at), Array.prototype.lastIndexOf.call(al, \"v\", at)].join();",
+    );
+    HOOK.with(|cell| cell.set(None));
+    assert_eq!(
+        outcome,
+        Outcome::Normal("\"4294967295,4294967295\"".to_string())
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// OrdinarySet (`object/ordinary.rs`) walks on past a host object without a `set` override and
+/// calls its `get_prototype_of` override, which runs a script that deletes the only other
+/// reference to the value being set and allocates (with `collect-every-safe-point`, collecting
+/// at each instruction). `copyWithin` reads element 0 of `o` and sets it as element 1 at once:
+/// the walk keeps the value, so element 1 is the object element 0 held.
+#[test]
+fn a_value_held_by_a_set_walk_across_a_get_prototype_of_override_survives_a_collection() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_hooked_prototype(&mut agent, &realm, None, "if (o) delete o[0];");
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var o = null; var made = Object.create(h); made[0] = { tag: 7 }; made.length = 2; o = made; made = null; 0;"
+        ),
+        Outcome::Normal("0".to_string())
+    );
+    set_hook(&mut agent, &realm, "hook");
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "Array.prototype.copyWithin.call(o, 1, 0);\n\
+         for (var j = 0; j < 20; j++) ({});\n\
+         [0 in o, typeof o[1], o[1] && o[1].tag].join();",
+    );
+    HOOK.with(|cell| cell.set(None));
+    assert_eq!(outcome, Outcome::Normal("\"false,object,7\"".to_string()));
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+static SEALED_ABSENT: Overrides<TestHost> = Overrides {
+    is_extensible: Some(not_extensible),
+    get_own_property: Some(always_absent),
+    ..NONE
+};
+
+/// The bytes of one key non-existent in the box of facts: an entry of its table, the key and
+/// itself (32 bytes), and its control byte. The unit test
+/// `object::host_overrides::tests::a_fact_has_the_bytes_the_tests_name` holds the 32.
+const ABSENT_BYTES: u64 = 33;
+
+/// `Object.isExtensible(target)` through the global `Object` of the realm of `global_root`.
+fn is_extensible_of(
+    cx: &mut Cx<'_, TestHost>,
+    global_root: &swell::Root,
+    target: ObjectRef,
+) -> Value {
+    let global = object_of(cx, global_root);
+    let name = key(cx, "Object");
+    let Value::Object(constructor) = cx.get_property(global, name).unwrap().unwrap() else {
+        panic!("Object is no object");
+    };
+    let name = key(cx, "isExtensible");
+    let function = cx.get_property(constructor, name).unwrap().unwrap();
+    cx.call(function, Value::Undefined, &[Value::Object(target)])
+        .unwrap()
+        .unwrap()
+}
+
+/// Bounds, "Memory", for the keys non-existent: once a host object reported itself not
+/// extensible, each of [`FACTS`] keys its `get_own_property` override reports absent is recorded
+/// in its box of facts, charged before it grows: `heap_bytes()` rises by at least [`FACTS`]
+/// times [`ABSENT_BYTES`], and falls back once the object is freed; asking the same keys again
+/// adds nothing.
+#[test]
+fn the_keys_absent_from_a_host_object_are_charged_and_credited() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    let (object, keys) = facts_setup_with(&mut agent, &realm, &SEALED_ABSENT);
+    agent
+        .with_cx(&realm, |cx| {
+            let target = object_of(cx, &object);
+            assert_eq!(
+                is_extensible_of(cx, &global_root, target),
+                Value::Boolean(false)
+            );
+        })
+        .unwrap();
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    let before = agent.heap_bytes().unwrap();
+    let (read, ended) = report_values(&mut agent, &realm, &object, &keys, Value::Undefined);
+    assert_eq!((read, ended), (FACTS, Ok(())));
+    let with_absent = agent.heap_bytes().unwrap();
+    let (read, ended) = report_values(&mut agent, &realm, &object, &keys, Value::Undefined);
+    assert_eq!((read, ended), (FACTS, Ok(())));
+    let again = agent.heap_bytes().unwrap();
+    drop(object);
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    let after = agent.heap_bytes().unwrap();
+    let facts = u64::try_from(FACTS).unwrap();
+    println!(
+        "heap_bytes: {before} before, {with_absent} with {FACTS} keys non-existent (+{}, at least {}), {again} after asking them again, {after} after the object is freed",
+        with_absent - before,
+        facts * ABSENT_BYTES
+    );
+    assert!(with_absent - before >= facts * ABSENT_BYTES);
+    assert_eq!(again, with_absent);
+    assert!(after < before, "{after} after, {before} before");
+}
+
+/// `get_own_property` answering, for the Symbol of the host data [`Unlisted`], absent, or a
+/// data property once `change` is set; absent for every other key.
+fn unlisted_absent(
+    cx: &mut Cx<'_, TestHost>,
+    object: ObjectRef,
+    key: PropertyKey,
+) -> Completion<Option<PropertyDescriptor>> {
+    let (symbol, change) = {
+        let held = cx.host_data::<Unlisted>(object, BRAND).unwrap().unwrap();
+        (held.symbol.get(), held.change.get())
+    };
+    let present = change && PropertyKey::Symbol(symbol.unwrap()) == key;
+    Ok(present.then(|| data(Value::Number(1.0), true, true, true)))
+}
+
+static UNLISTED_ABSENT: Overrides<TestHost> = Overrides {
+    is_extensible: Some(not_extensible),
+    get_own_property: Some(unlisted_absent),
+    ..NONE
+};
+
+/// The kind site traces the keys non-existent of the box of facts: a host object that reported
+/// itself not extensible reports a Symbol key absent, the Symbol held only by its host data,
+/// which does not list it; after `collect()` the Symbol still reaches its record (a read of it
+/// answers undefined, not `StaleHandle`), and a later answer that reports it present ends the
+/// run in `Terminated(EngineFault)`.
+#[test]
+fn the_keys_absent_from_a_host_object_survive_a_collection() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let global_root = global(&mut agent, &realm);
+    let holder = agent
+        .with_cx(&realm, |cx| {
+            let made = cx
+                .new_host_object(spec(
+                    Prototype::Null,
+                    Some(Box::new(Unlisted {
+                        value: Cell::new(None),
+                        symbol: Cell::new(None),
+                        change: Cell::new(false),
+                    })),
+                    Some(&UNLISTED_ABSENT),
+                ))
+                .unwrap()
+                .unwrap();
+            let global = object_of(cx, &global_root);
+            let symbol_key = key(cx, "Symbol");
+            let constructor = cx.get_property(global, symbol_key).unwrap().unwrap();
+            let description = Value::String(cx.new_string("absent").unwrap());
+            let Value::Symbol(symbol) = cx
+                .call(constructor, Value::Undefined, &[description])
+                .unwrap()
+                .unwrap()
+            else {
+                panic!("Symbol() made no Symbol");
+            };
+            cx.host_data::<Unlisted>(made, BRAND)
+                .unwrap()
+                .unwrap()
+                .symbol
+                .set(Some(symbol));
+            assert_eq!(
+                is_extensible_of(cx, &global_root, made),
+                Value::Boolean(false)
+            );
+            let read = cx
+                .get_property(made, PropertyKey::Symbol(symbol))
+                .unwrap()
+                .unwrap();
+            assert_eq!(read, Value::Undefined);
+            cx.root(Value::Object(made)).unwrap()
+        })
+        .unwrap();
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    agent
+        .with_cx(&realm, |cx| {
+            let Value::Object(made) = cx.get(&holder).unwrap() else {
+                panic!("the root holds no object");
+            };
+            let held = cx.host_data::<Unlisted>(made, BRAND).unwrap().unwrap();
+            let symbol = held.symbol.get().unwrap();
+            let read = cx.get_property(made, PropertyKey::Symbol(symbol)).unwrap();
+            assert_eq!(read, Ok(Value::Undefined));
+            cx.host_data::<Unlisted>(made, BRAND)
+                .unwrap()
+                .unwrap()
+                .change
+                .set(true);
+            let changed = cx.get_property(made, PropertyKey::Symbol(symbol)).unwrap();
+            assert_eq!(changed, Err(Abrupt::Terminated(Termination::EngineFault)));
+        })
+        .unwrap();
+    assert_eq!(agent.state(), AgentState::Faulted);
+}
+thread_local! {
+    /// The address of a local of each call of [`get_calls_back`], innermost last.
+    static DEPTHS: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// `get` calling the function its host data holds through `cx.call`, after recording the
+/// address of one of its locals.
+fn get_calls_back(
+    cx: &mut Cx<'_, TestHost>,
+    object: ObjectRef,
+    _key: PropertyKey,
+    _receiver: Value,
+) -> Completion<Value> {
+    let marker = 0_u8;
+    let address = std::hint::black_box(&marker) as *const u8 as usize;
+    DEPTHS.with(|depths| depths.borrow_mut().push(address));
+    let function = cx
+        .host_data::<Next>(object, BRAND)
+        .unwrap()
+        .and_then(|next| next.0);
+    match function {
+        Some(function) => cx
+            .call(Value::Object(function), Value::Undefined, &[])
+            .unwrap(),
+        None => Ok(Value::Undefined),
+    }
+}
+
+static CALLING_BACK: Overrides<TestHost> = Overrides {
+    get: Some(get_calls_back),
+    ..NONE
+};
+
+/// Bind as the global `o` a host object whose `get` calls the global function `name`.
+fn bind_calling_back(agent: &mut Agent<TestHost>, realm: &Realm, name: &str) {
+    let Value::Object(function) = global_value(agent, realm, name) else {
+        panic!("{name} is no object");
+    };
+    let global_root = global(agent, realm);
+    agent
+        .with_cx(realm, |cx| {
+            let made = cx
+                .new_host_object(spec(
+                    Prototype::Null,
+                    Some(Box::new(Next(Some(function)))),
+                    Some(&CALLING_BACK),
+                ))
+                .unwrap()
+                .unwrap();
+            let global = object_of(cx, &global_root);
+            let name = key(cx, "o");
+            cx.set(global, name, Value::Object(made), true)
+                .unwrap()
+                .unwrap();
+        })
+        .unwrap();
+}
+
+/// The bytes of the Rust stack between consecutive calls of [`get_calls_back`]: the median
+/// of the differences, and how many re-entries one cycle makes.
+fn bytes_per_cycle() -> usize {
+    let mut steps = DEPTHS.with(|depths| {
+        depths
+            .borrow()
+            .windows(2)
+            .map(|pair| pair[0].abs_diff(pair[1]))
+            .collect::<Vec<_>>()
+    });
+    steps.sort_unstable();
+    steps.get(steps.len() / 2).copied().unwrap_or(0)
+}
+
+/// The body of [`an_override_script_host_function_chain_ends_at_the_reentry_limit`].
+fn override_script_host_function_chain() {
+    let (mut agent, realm) = stack_agent(BUILTINS_REENTRY);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var n = 0; function g() { n++; return o.x; } function f() { return reenter(g); }\n\
+             function direct() { n++; return o.x; }\n\
+             0;"
+        ),
+        Outcome::Normal("0".to_string())
+    );
+    bind_calling_back(&mut agent, &realm, "f");
+    DEPTHS.with(|depths| depths.borrow_mut().clear());
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var caught;\n\
+             try { o.x; caught = \"none\"; }\n\
+             catch (e) { caught = e instanceof RangeError ? \"RangeError\" : String(e); }\n\
+             caught;"
+        ),
+        Outcome::Normal("\"RangeError\"".to_string())
+    );
+    let through_host_function = bytes_per_cycle();
+    let cycles = DEPTHS.with(|depths| depths.borrow().len());
+    bind_calling_back(&mut agent, &realm, "direct");
+    DEPTHS.with(|depths| depths.borrow_mut().clear());
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "var caught;\n\
+             try { o.x; caught = \"none\"; }\n\
+             catch (e) { caught = e instanceof RangeError ? \"RangeError\" : String(e); }\n\
+             caught;"
+        ),
+        Outcome::Normal("\"RangeError\"".to_string())
+    );
+    let through_script = bytes_per_cycle();
+    let direct_cycles = DEPTHS.with(|depths| depths.borrow().len());
+    println!(
+        "stack per cycle at reentry_depth {BUILTINS_REENTRY}: override -> script -> host function -> script -> override {through_host_function} bytes over {cycles} cycles; override -> script -> override {through_script} bytes over {direct_cycles} cycles; STACK_BYTES_PER_REENTRY 14336"
+    );
+    assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// `docs/design/engine.md`, decision 3, "Depth bounds", and the module documentation of
+/// `object/host_overrides.rs`: a chain override → script → host function → script → override
+/// … and a chain override → script → override … each end in the RangeError of the re-entry
+/// limit, caught by the script, on seven eighths of `min_stack_bytes()`, and the agent stays
+/// usable. The bytes of a cycle are printed.
+#[test]
+fn an_override_script_host_function_chain_ends_at_the_reentry_limit() {
+    let stack = stack_with_room(stack_limits(BUILTINS_REENTRY));
+    on_bounded_stack(
+        test_path!("an_override_script_host_function_chain_ends_at_the_reentry_limit"),
+        stack,
+        override_script_host_function_chain,
+    )
+    .unwrap();
 }
