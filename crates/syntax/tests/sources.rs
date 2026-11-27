@@ -261,7 +261,9 @@ fn held_constructs(path: &Path, result: &str) -> Result<Vec<String>, String> {
 }
 
 /// A source under `held/` holds constructs a story of slice 8 parses whole and refuses at the
-/// end of the parse (`Parser::hold`; "Held sources" of `story:class-syntax-and-early-errors`).
+/// end of the parse while the construct is a line of `HOLDS` ("Held sources" of
+/// `story:class-syntax-and-early-errors`; the list is empty since
+/// `story:private-fields-and-private-in`, so every held source parses).
 /// Its header names each of them, `held "<construct>", ...`, in the order of their first
 /// tokens. The first one that is still a line of [`swell_syntax::HOLDS`] is the one the source
 /// answers, as written and with a `"use strict";` prologue: exactly `<construct> is not
@@ -357,13 +359,12 @@ fn class_answer(text: &str) -> Result<String, String> {
 /// a `;`: before a token on a new line that its initializer or its name cannot take
 /// (`language/statements/class/elements/fields-asi-*.js`). `static`, `get`, `set` and `async`
 /// are field names where no element follows them on their line, and a name with an escape is
-/// never the word (`escaped-*-field-*.js`). Each source of the first list parses, or answers the
-/// hold of its first private field (a class and a public field are not held); each of the second
-/// is a grammar error.
+/// never the word (`escaped-*-field-*.js`). Each source of the first list parses (a private
+/// field too, since `story:private-fields-and-private-in`); each of the second is a grammar
+/// error.
 #[test]
 fn fields_end_where_a_semicolon_is_inserted() {
     let field = "parses";
-    let private = "private field is not supported before slice 8";
     for (text, held) in [
         ("class C { x\n y }", field),
         ("class C { x = 1\n ['a'] = 2 }", field),
@@ -374,8 +375,8 @@ fn fields_end_where_a_semicolon_is_inserted() {
         ("class C { static }", field),
         ("class C { static = 1; get; set; async\n x }", field),
         ("class C { static\n async\n *m() {} }", field),
-        ("class C { #x\n #y }", private),
-        ("class C { static #x = 1; static y; z }", private),
+        ("class C { #x\n #y }", field),
+        ("class C { static #x = 1; static y; z }", field),
         ("x = class { 'a'; 1 = 2; [b]; }", field),
     ] {
         assert_eq!(class_answer(text), Ok(held.to_string()), "{text:?}");
@@ -402,11 +403,12 @@ fn fields_end_where_a_semicolon_is_inserted() {
 /// `PrivateIdentifier in ShiftExpression` is a RelationalExpression
 /// (`#sec-relational-operators`): a private name stands only directly before `in`, where `in`
 /// is an operator, as the left operand at the precedence of `<`; its right operand is a
-/// ShiftExpression. Every source of the first list parses to the hold of its first element, the
-/// private field `#x`; each of the second is a grammar error at the private name.
+/// ShiftExpression. Every source of the first list parses (since
+/// `story:private-fields-and-private-in`); each of the second is a grammar error at the private
+/// name.
 #[test]
 fn a_private_name_stands_only_before_in() {
-    let held = "private field is not supported before slice 8";
+    let held = "parses";
     let class = |body: &str| format!("class C {{ #x; m(o, p) {{ {body} }} }}");
     for body in [
         "return #x in o;",
@@ -447,28 +449,30 @@ fn a_private_name_stands_only_before_in() {
 /// script, eval code and `Function` code, none of which has an enclosing class body with names
 /// for it (`#sec-performeval`, `#sec-createdynamicfunction`): through each entry a private
 /// reference outside a class is the early error, and one inside a class that declares the name
-/// answers the hold of that declaration, the private field `#x`.
+/// parses (the private field `#x`, since `story:private-fields-and-private-in`).
 #[test]
 fn a_private_name_outside_a_class_is_an_early_error_through_every_entry() {
-    let undeclared = "private name #x is not declared in an enclosing class";
-    let held = "private field is not supported before slice 8";
-    for (text, message) in [
-        ("o.#x;", undeclared),
-        ("o?.#x;", undeclared),
-        ("o?.a.#x();", undeclared),
-        ("#x in o;", undeclared),
-        ("(function () { return this.#x; });", undeclared),
-        ("x = () => o.#x;", undeclared),
-        ("class C { #y; m() { o.#x; } }", undeclared),
-        ("class C { #x; m() { class D { n() { o.#x; } } } }", held),
-        ("class C { #x; static { o.#x; } }", held),
-        ("class C { #x; y = o.#x; }", held),
+    let undeclared = Err(vec![
+        "private name #x is not declared in an enclosing class".to_string(),
+    ]);
+    let parses = Ok(());
+    for (text, wanted) in [
+        ("o.#x;", &undeclared),
+        ("o?.#x;", &undeclared),
+        ("o?.a.#x();", &undeclared),
+        ("#x in o;", &undeclared),
+        ("(function () { return this.#x; });", &undeclared),
+        ("x = () => o.#x;", &undeclared),
+        ("class C { #y; m() { o.#x; } }", &undeclared),
+        ("class C { #x; m() { class D { n() { o.#x; } } } }", &parses),
+        ("class C { #x; static { o.#x; } }", &parses),
+        ("class C { #x; y = o.#x; }", &parses),
     ] {
         for entry in ENTRIES {
             let answer = parse_through(entry, &units(text), LIMIT).map(|_| ());
             assert_eq!(
-                answer.map_err(|errors| messages(&errors)),
-                Err(vec![message.to_string()]),
+                &answer.map_err(|errors| messages(&errors)),
+                wanted,
                 "{entry:?} {text:?}"
             );
         }
@@ -1169,7 +1173,8 @@ fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec
 /// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
 /// nesting error alone (`Some(false)`), or fail otherwise (`None`). A source whose one error is
 /// the refusal of a line of [`swell_syntax::HOLDS`] counts as parsed: the parse and the early
-/// errors reached the end of the source before the hold was answered (`Parser::hold`).
+/// errors reached the end of the source before the hold was answered (the parser's rule on
+/// holds; no line of `HOLDS` is left since `story:private-fields-and-private-in`).
 fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     let source = nested(kind, n)?;
     let held = |message: &str| {
@@ -3008,12 +3013,12 @@ type Shape = (&'static str, &'static str, fn(usize) -> String);
 #[test]
 fn class_elements_scale_linearly() {
     let shapes: [Shape; 5] = [
-        ("private fields used once", "private field", |n| {
+        ("private fields used once", "", |n| {
             let fields: String = (0..n).map(|i| format!("#p{i};")).collect();
             let uses: String = (0..n).map(|i| format!("this.#p{i};")).collect();
             format!("class C {{ {fields} m() {{ {uses} }} }}")
         }),
-        ("one private name used n times", "private field", |n| {
+        ("one private name used n times", "", |n| {
             format!("class C {{ #x; m() {{ {} }} }}", "this.#x;".repeat(n))
         }),
         ("public fields with initializers", "", |n| {
@@ -3023,7 +3028,7 @@ fn class_elements_scale_linearly() {
         ("static blocks", "", |n| {
             format!("class C {{ {} }}", "static { var v = 1; }".repeat(n))
         }),
-        ("private names in nested classes", "private field", |n| {
+        ("private names in nested classes", "", |n| {
             let inner: String = (0..n)
                 .map(|i| format!("class D{i} {{ #y; m() {{ this.#x; this.#y; }} }}"))
                 .collect();

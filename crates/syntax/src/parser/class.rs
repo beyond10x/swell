@@ -472,10 +472,10 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// The FieldDefinition named `key` of `target`, which started at `start`, appended to its
-    /// elements; holds `private field` for a private name at `start` (a public field runs since
-    /// `story:public-class-fields`). Answers the function its initializer belongs to: for a
-    /// static field the function of the run of static fields the element before it began, or a
-    /// new one; for any other field the function of the instance elements.
+    /// elements (a public field runs since `story:public-class-fields`, a private one since
+    /// `story:private-fields-and-private-in`). Answers the function its initializer belongs to:
+    /// for a static field the function of the run of static fields the element before it began,
+    /// or a new one; for any other field the function of the instance elements.
     #[inline(never)]
     fn field_head(
         &mut self,
@@ -484,9 +484,6 @@ impl<'a, 'm> Parser<'a, 'm> {
         key: ClassKey,
         start: Span,
     ) -> R<FunctionId> {
-        if matches!(key, ClassKey::Private(_)) {
-            self.hold("private field", 8, start);
-        }
         let function = if is_static {
             let run = self
                 .class_mut(target)

@@ -2,15 +2,21 @@
 //! `docs/design/engine.md`, "Private names", item 2), written by
 //! `story:private-names-and-private-methods`: the one add function of every private element,
 //! PrivateElementFind (`#sec-privateelementfind`), PrivateGet (`#sec-privateget`) and PrivateSet
-//! (`#sec-privateset`).
+//! (`#sec-privateset`). Before an element is added to a host object with an override table, the
+//! add calls `host_ensure_can_add_private_element` (HOST-119, HOST-223;
+//! `story:host-ensure-can-add-private-element`), once per element; no other object calls it.
 //!
 //! The elements of an object are a list in the box `ObjectRecord::private_elements`, made at the
 //! first add, so an object without one pays the box's 8 bytes only. Each entry is a Private Name
-//! (`heap/mod.rs`, `PrivateNameRef`) with a method (its function) or an accessor (an optional
-//! getter and an optional setter); `story:private-fields-and-private-in` adds fields through the
-//! same add. The list grows only when it is full, by exactly the elements of the class level
-//! whose add found it full (the `room` of `AddPrivateMethod`, fixed when the class is compiled),
-//! so a construction reserves once per level and an instance holds no spare entry. The box and
+//! (`heap/mod.rs`, `PrivateNameRef`) with a field (its value), a method (its function) or an
+//! accessor (an optional getter and an optional setter); `story:private-fields-and-private-in`
+//! added the fields (PrivateFieldAdd, `#sec-privatefieldadd`) through the same add. The list
+//! grows only when it is full, by exactly the elements of the class level whose add found it
+//! full (the `room` of `AddPrivateMethod` and `AddPrivateField`, its methods, accessors and
+//! fields counted together, fixed when the class is compiled), so a construction reserves once
+//! per level and an instance holds no spare entry. An add to an object that is no instance of
+//! the class (a base constructor that returned another object) finds its list full like any
+//! other and reserves the level's room, charged before it is reserved. The box and
 //! every growth of its list are charged to the memory budget before they are made and recorded
 //! with the object (`Agent::record_grown`), so the sweep that frees it credits them; the list
 //! never shrinks. Elements are no properties: no internal method, no
@@ -20,8 +26,10 @@
 //! [`SMALL`] (`object/property.rs`), so a list of n elements costs at most n − `SMALL` steps per
 //! lookup, counted before the step is charged.
 //!
-//! The collector traces each entry's Private Name and its functions at the object record's site
-//! ([`PrivateElements::trace`], called by `ObjectRecord::trace`).
+//! The collector traces each entry's Private Name and its values (a field's value, a method's or
+//! an accessor's functions) at the object record's site ([`PrivateElements::trace`], called by
+//! `ObjectRecord::trace`). A field's value is reached through its object alone: no private
+//! record holds it, as one holds a method's function.
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -31,18 +39,19 @@ use alloc::vec::Vec;
 use crate::heap::PrivateNameRef;
 use crate::heap::collect::{Item, Mark};
 use crate::host::agent::Agent;
-use crate::host::outcome::Completion;
-use crate::host::{ErrorKind, Host, Termination};
+use crate::host::outcome::{Abrupt, Completion};
+use crate::host::{ErrorKind, HookCx, Host, Termination};
 use crate::object::ObjectKind;
 use crate::object::property::SMALL;
 use crate::value::{ObjectRef, Value};
 use swell_syntax::ast::FunctionKind;
 
 /// What a private element holds (`#sec-privateelement-specification-type`, [[Kind]] and its
-/// slots): a method's function, or an accessor's getter and setter, either of which may be
-/// missing.
+/// slots): a field's value, a method's function, or an accessor's getter and setter, either of
+/// which may be missing.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum PrivateValue {
+    Field(Value),
     Method(ObjectRef),
     Accessor {
         get: Option<ObjectRef>,
@@ -65,11 +74,12 @@ pub(crate) struct PrivateElements {
 
 impl PrivateElements {
     /// The part of the object record's site that reports the elements: each entry's Private
-    /// Name and its functions.
+    /// Name and its values.
     pub(crate) fn trace(&self, mark: &mut Mark) {
         for entry in &self.entries {
             mark.push(Item::PrivateName(entry.key.handle));
             match entry.value {
+                PrivateValue::Field(value) => mark.value(value),
                 PrivateValue::Method(function) => mark.object(function),
                 PrivateValue::Accessor { get, set } => {
                     for function in get.into_iter().chain(set) {
@@ -108,6 +118,32 @@ enum MethodKind {
     Method,
     Getter,
     Setter,
+}
+
+/// The accessor that `added`, one half of an accessor, makes with `existing`, the element of
+/// its key, when `existing` is the other half alone; `None` for any other pair, which is a
+/// second element of one key.
+fn joined(existing: PrivateValue, added: PrivateValue) -> Option<PrivateValue> {
+    match (existing, added) {
+        (
+            PrivateValue::Accessor { get: None, set },
+            PrivateValue::Accessor {
+                get: Some(get),
+                set: None,
+            },
+        )
+        | (
+            PrivateValue::Accessor {
+                get: Some(get),
+                set: None,
+            },
+            PrivateValue::Accessor { get: None, set },
+        ) if set.is_some() => Some(PrivateValue::Accessor {
+            get: Some(get),
+            set,
+        }),
+        _ => None,
+    }
 }
 
 impl<H: Host> Agent<H> {
@@ -155,9 +191,9 @@ impl<H: Host> Agent<H> {
             .unwrap_or_default()
     }
 
-    /// PrivateGet(`object`, `key`) (`#sec-privateget`): a method's function, or its getter
-    /// called with `object` as `this`; a `TypeError` when `object` has no element of `key` (step
-    /// 2) or the accessor has no getter (step 5.b).
+    /// PrivateGet(`object`, `key`) (`#sec-privateget`): a field's value (step 3), a method's
+    /// function, or its getter called with `object` as `this`; a `TypeError` when `object` has
+    /// no element of `key` (step 2) or the accessor has no getter (step 5.b).
     pub(crate) fn private_get(
         &mut self,
         object: ObjectRef,
@@ -173,6 +209,7 @@ impl<H: Host> Agent<H> {
             ));
         };
         match self.private_element(object, position)? {
+            PrivateValue::Field(value) => Ok(value),
             PrivateValue::Method(function) => Ok(Value::Object(function)),
             PrivateValue::Accessor {
                 get: Some(getter), ..
@@ -187,9 +224,10 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// PrivateSet(`object`, `key`, `value`) (`#sec-privateset`): the setter of an accessor
-    /// called with `object` as `this` and `value`; a `TypeError` when `object` has no element of
-    /// `key` (step 2), for a method (step 5) and for an accessor with no setter (step 6.b).
+    /// PrivateSet(`object`, `key`, `value`) (`#sec-privateset`): a field takes `value` (step 4),
+    /// the setter of an accessor is called with `object` as `this` and `value`; a `TypeError`
+    /// when `object` has no element of `key` (step 2), for a method (step 5) and for an accessor
+    /// with no setter (step 6.b).
     pub(crate) fn private_set(
         &mut self,
         object: ObjectRef,
@@ -206,6 +244,20 @@ impl<H: Host> Agent<H> {
             ));
         };
         let message = match self.private_element(object, position)? {
+            PrivateValue::Field(_) => {
+                let entry = self
+                    .engine_object_mut(object)?
+                    .private_elements
+                    .as_mut()
+                    .and_then(|elements| elements.entries.get_mut(position));
+                return match entry {
+                    Some(entry) => {
+                        entry.value = PrivateValue::Field(value);
+                        Ok(())
+                    }
+                    None => Err(self.fault()),
+                };
+            }
             PrivateValue::Accessor {
                 set: Some(setter), ..
             } => {
@@ -222,10 +274,12 @@ impl<H: Host> Agent<H> {
     /// PrivateMethodOrAccessorAdd(`object`, the method `function` keyed by `key`)
     /// (`#sec-privatemethodoraccessoradd`), through the one add of every private element
     /// ([`Agent::add_private_element`]). A getter or a setter joins the accessor of `key` that
-    /// lacks that half: the class's code adds the two halves of an accessor pair one after the
-    /// other, which together are the one element ClassDefinitionEvaluation combines (step
-    /// 27.e); an element of `key` that has that half already is there, and is a `TypeError`.
-    /// `room` is the number of elements the adds of this class level make.
+    /// lacks that half. ClassDefinitionEvaluation combines a getter and a setter of one name
+    /// into one element (step 27.e); the class's code adds each half where it stands in the
+    /// source, the first half as the element (one hook call per name) and the second joining
+    /// it, so an element between the halves is added between them. An element of `key` that
+    /// has that half already is there, and is a `TypeError`. `room` is the number of elements
+    /// the adds of this class level make.
     pub(crate) fn private_method_or_accessor_add(
         &mut self,
         object: ObjectRef,
@@ -247,6 +301,22 @@ impl<H: Host> Agent<H> {
         self.add_private_element(object, PrivateElement { key, value }, room)
     }
 
+    /// PrivateFieldAdd(`object`, `key`, `value`) (`#sec-privatefieldadd`), through the one add
+    /// of every private element ([`Agent::add_private_element`]): a `TypeError` when `object` has
+    /// an element of `key` already (step 3), otherwise the field is appended (step 4); the add
+    /// does not read [[Extensible]]. `room` is the number of elements the adds of this class
+    /// level make, its methods, accessors and fields together.
+    pub(crate) fn private_field_add(
+        &mut self,
+        object: ObjectRef,
+        key: PrivateNameRef,
+        value: Value,
+        room: usize,
+    ) -> Completion<()> {
+        let value = PrivateValue::Field(value);
+        self.add_private_element(object, PrivateElement { key, value }, room)
+    }
+
     /// The kind of the template of the ECMAScript function `function`.
     fn method_kind(&mut self, function: ObjectRef) -> Completion<MethodKind> {
         let kind = match &self.engine_object(function)?.kind {
@@ -264,57 +334,51 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// The one add of every private element ("Private names", item 2): an element of its key
-    /// already on `object` is a `TypeError`, unless the new one is the missing half of its
-    /// accessor; otherwise the element is appended, the box and the growth of the list charged
-    /// first. The add does not read [[Extensible]].
+    /// The one add of every private element ("Private names", item 2), a field, a method or an
+    /// accessor. The missing half of an accessor joins the element of its key where it stands
+    /// in the source: a getter and a setter of one name are one element, which
+    /// InitializeInstanceElements adds once (`#sec-initializeinstanceelements`), so the hook is
+    /// called once per name, for the first half, and the second half calls no hook. A host
+    /// whose hook answers two kinds for one object (which `host_ensure_can_add_private_element`
+    /// documents as the host's duty) can refuse an element between the halves: the first half
+    /// stays, the second is never added, and nothing is taken back. Any other add
+    /// calls the hook of a host object with an override table first
+    /// ([`Agent::ensure_can_add_private_element`], step 1; HOST-119, HOST-223), whose `Throw` is
+    /// the add's; then an element of its key already on `object` is a `TypeError` (step 2);
+    /// otherwise the element is appended, the box and the growth of the list charged first
+    /// (step 3). The find runs before the hook, which cannot change what it read: a `HookCx`
+    /// runs no code, so it adds no element. The add does not read [[Extensible]].
     pub(crate) fn add_private_element(
         &mut self,
         object: ObjectRef,
         element: PrivateElement,
         room: usize,
     ) -> Completion<()> {
-        if let Some(position) = self.private_element_find(object, element.key)? {
+        let found = self.private_element_find(object, element.key)?;
+        if let Some(position) = found {
             let existing = self.private_element(object, position)?;
-            let joined = match (existing, element.value) {
-                (
-                    PrivateValue::Accessor { get: None, set },
-                    PrivateValue::Accessor {
-                        get: Some(get),
-                        set: None,
-                    },
-                )
-                | (
-                    PrivateValue::Accessor {
-                        get: Some(get),
-                        set: None,
-                    },
-                    PrivateValue::Accessor { get: None, set },
-                ) if set.is_some() => Some(PrivateValue::Accessor {
-                    get: Some(get),
-                    set,
-                }),
-                _ => None,
-            };
-            let Some(joined) = joined else {
-                let name = self.private_name_text(element.key);
-                return Err(self.throw_error(
-                    ErrorKind::TypeError,
-                    &format!("the object already has the private element {name}"),
-                ));
-            };
-            let entry = self
-                .engine_object_mut(object)?
-                .private_elements
-                .as_mut()
-                .and_then(|elements| elements.entries.get_mut(position));
-            return match entry {
-                Some(entry) => {
-                    entry.value = joined;
-                    Ok(())
-                }
-                None => Err(self.fault()),
-            };
+            if let Some(joined) = joined(existing, element.value) {
+                let entry = self
+                    .engine_object_mut(object)?
+                    .private_elements
+                    .as_mut()
+                    .and_then(|elements| elements.entries.get_mut(position));
+                return match entry {
+                    Some(entry) => {
+                        entry.value = joined;
+                        Ok(())
+                    }
+                    None => Err(self.fault()),
+                };
+            }
+        }
+        self.ensure_can_add_private_element(object)?;
+        if found.is_some() {
+            let name = self.private_name_text(element.key);
+            return Err(self.throw_error(
+                ErrorKind::TypeError,
+                &format!("the object already has the private element {name}"),
+            ));
         }
         self.private_room(object, room)?;
         let pushed = self
@@ -326,6 +390,46 @@ impl<H: Host> Agent<H> {
             Some(()) => Ok(()),
             None => Err(self.fault()),
         }
+    }
+
+    /// HostEnsureCanAddPrivateElement(`object`) (`#sec-hostensurecanaddprivateelement`), step 1
+    /// of the one add: for a host object with an override table,
+    /// `host_ensure_can_add_private_element` through a `HookCx`, as `code_for_eval`
+    /// (`dynamic_code.rs`) calls its hook; any other
+    /// object (ordinary, a function, a host function, a proxy, a host object without a table)
+    /// calls nothing (HOST-119). The values the hook handed out leave the scope when it returns;
+    /// a terminated run ignores its answer (decision 10); a `Throw` whose value holds a stale
+    /// handle or a handle of another agent faults the agent (decision 6, HOST-223), any other is
+    /// the add's throw; a termination the hook answered ends the run; then the interrupt flag is
+    /// read, so a hook that set it ends the run before the element is added. What a hook can
+    /// reach: the `HookCx` methods, which read, make Strings and host objects, root and drop
+    /// roots, and charge the host's bytes; none runs code or is a safe point, so the hook adds
+    /// no element and collects nothing, and the object and the value of the add, which no root
+    /// may hold, stay as they were.
+    fn ensure_can_add_private_element(&mut self, object: ObjectRef) -> Completion<()> {
+        let overridden = matches!(
+            &self.engine_object(object)?.kind,
+            ObjectKind::Host(host) if host.overridden().is_some()
+        );
+        if !overridden {
+            return Ok(());
+        }
+        let start = self.scope.len();
+        let answer = H::host_ensure_can_add_private_element(&mut HookCx { agent: self }, object);
+        self.scope.truncate(start);
+        self.running()?;
+        let answer = match answer {
+            Ok(()) => Ok(()),
+            Err(Abrupt::Throw(value)) => {
+                if self.heap.check_value(value).is_err() {
+                    return Err(self.fault());
+                }
+                Err(Abrupt::Throw(value))
+            }
+            Err(Abrupt::Terminated(termination)) => return Err(self.terminate(termination)),
+        };
+        self.check_interrupt()?;
+        answer
     }
 
     /// Room for one more element of `object`: when its list is full (or there is none), the box
@@ -467,12 +571,187 @@ mod tests {
         assert_eq!(list(&agent), (6, 6));
     }
 
+    /// A level of methods and fields reserves its room once (`story:private-fields-and-private-in`):
+    /// the adds of one class level carry one room, its methods, accessors and fields counted
+    /// together, so the first add of a level of two methods and three fields makes the box and
+    /// room for five entries, charged as that many bytes, and the other four adds charge
+    /// nothing, whichever kind comes first; a level of two fields added to the full list (a
+    /// second class's stamp) reserves and charges two entries more. A field read and written by
+    /// PrivateGet and PrivateSet answers its value; a second add of a field's key fails (the
+    /// `TypeError`) and appends nothing. The entry of a field is the size of every
+    /// entry: the box is 24 bytes and an entry 48 (44 before fields: a `Value` aligns the entry to
+    /// 8 bytes), the figures `tests/private_fields.rs` reads per instance.
+    #[test]
+    fn a_level_of_methods_and_fields_reserves_its_room_once() {
+        use super::PrivateElements;
+        use crate::value::Value;
+        assert_eq!(size_of::<PrivateElements>(), 24);
+        assert_eq!(size_of::<PrivateElement>(), 48);
+        let mut agent = test_host::agent_with(test_host::limits());
+        let object = agent
+            .allocate_object(None, ObjectKind::Ordinary(Ordinary::for_test()))
+            .unwrap();
+        let function = agent
+            .allocate_object(None, ObjectKind::Ordinary(Ordinary::for_test()))
+            .unwrap();
+        let description = agent.heap.new_string_from_str("#f").unwrap();
+        let keys: alloc::vec::Vec<PrivateNameRef> = (0..7)
+            .map(|_| agent.heap.new_private_name(description).unwrap())
+            .collect();
+        let entry = size_of::<PrivateElement>() as u64;
+        let capacity = |agent: &crate::host::agent::Agent<test_host::NoHooks>| {
+            let record = agent.heap.objects.get(object.handle).unwrap();
+            let elements = record.private_elements.as_ref().unwrap();
+            (elements.len(), elements.capacity())
+        };
+        let add = |agent: &mut crate::host::agent::Agent<test_host::NoHooks>,
+                   key: PrivateNameRef,
+                   value: PrivateValue,
+                   room: usize| {
+            let before = agent.heap.bytes();
+            let added = agent.add_private_element(object, PrivateElement { key, value }, room);
+            (added.is_ok(), agent.heap.bytes() - before)
+        };
+        let field = |n: f64| PrivateValue::Field(Value::Number(n));
+        let method = PrivateValue::Method(function);
+        let first = add(&mut agent, keys[0], field(0.0), 5);
+        assert_eq!(
+            first,
+            (true, size_of::<PrivateElements>() as u64 + 5 * entry)
+        );
+        assert_eq!(add(&mut agent, keys[1], method, 5), (true, 0));
+        assert_eq!(add(&mut agent, keys[2], field(2.0), 5), (true, 0));
+        assert_eq!(add(&mut agent, keys[3], method, 5), (true, 0));
+        assert_eq!(add(&mut agent, keys[4], field(4.0), 5), (true, 0));
+        assert_eq!(capacity(&agent), (5, 5));
+        assert_eq!(add(&mut agent, keys[5], field(5.0), 2), (true, 2 * entry));
+        assert_eq!(add(&mut agent, keys[6], field(6.0), 2), (true, 0));
+        assert_eq!(capacity(&agent), (7, 7));
+        assert!(!add(&mut agent, keys[2], field(9.0), 1).0);
+        assert_eq!(capacity(&agent), (7, 7));
+        assert_eq!(
+            agent.private_get(object, keys[2]).unwrap(),
+            Value::Number(2.0)
+        );
+        agent
+            .private_set(object, keys[2], Value::Number(3.0))
+            .unwrap();
+        assert_eq!(
+            agent.private_get(object, keys[2]).unwrap(),
+            Value::Number(3.0)
+        );
+        assert_eq!(
+            agent.private_get(object, keys[6]).unwrap(),
+            Value::Number(6.0)
+        );
+    }
+
+    /// The value of an add is held by the add alone across the call of
+    /// `host_ensure_can_add_private_element` (`story:host-ensure-can-add-private-element`): an
+    /// add to a host object with an override table, whose value is a new object nothing roots and
+    /// whose key a second object holds, leaves the value alive and the field's; a collection
+    /// afterwards keeps it, through the object's list. No `HookCx` method is a safe point, so the
+    /// call collects nothing; with a collection at every safe point this test goes red when one
+    /// runs between the start of the add and the append.
+    #[test]
+    fn a_value_held_only_by_the_add_survives_the_hook() {
+        use crate::host::outcome::Outcome;
+        use crate::value::Value;
+        use crate::{Brand, HostObjectSpec, Overrides, Prototype};
+        static TABLE: Overrides<test_host::NoHooks> = Overrides {
+            get_prototype_of: None,
+            set_prototype_of: None,
+            is_extensible: None,
+            prevent_extensions: None,
+            get_own_property: None,
+            define_own_property: None,
+            has_property: None,
+            get: None,
+            set: None,
+            delete: None,
+            own_property_keys: None,
+        };
+        let (mut agent, realm) = test_host::agent_with_realm();
+        let (host, _held) = agent
+            .with_cx(&realm, |cx| {
+                let spec = HostObjectSpec {
+                    prototype: Prototype::Null,
+                    brand: Brand(0),
+                    data: None,
+                    error_kind: None,
+                    overrides: Some(&TABLE),
+                };
+                let made = cx.new_host_object(spec).unwrap().unwrap();
+                (made, cx.root(Value::Object(made)).unwrap())
+            })
+            .unwrap();
+        let holder = agent
+            .allocate_object(None, ObjectKind::Ordinary(Ordinary::for_test()))
+            .unwrap();
+        let _holder = agent.heap.roots.add(Value::Object(holder));
+        let description = agent.heap.new_string_from_str("#x").unwrap();
+        let key = agent.heap.new_private_name(description).unwrap();
+        let field = |value| PrivateElement {
+            key,
+            value: PrivateValue::Field(value),
+        };
+        agent
+            .add_private_element(holder, field(Value::Undefined), 1)
+            .unwrap();
+        let value = agent
+            .allocate_object(None, ObjectKind::Ordinary(Ordinary::for_test()))
+            .unwrap();
+        agent
+            .add_private_element(host, field(Value::Object(value)), 1)
+            .unwrap();
+        assert!(agent.heap.check_value(Value::Object(value)).is_ok());
+        assert_eq!(agent.private_get(host, key).unwrap(), Value::Object(value));
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        assert!(agent.heap.check_value(Value::Object(value)).is_ok());
+    }
+
+    /// The first field add of a level reserves room for the whole level (`private_field_add`
+    /// passes its `room` on): on a fresh object the first of a level of three fields makes the
+    /// box and room for three entries, charged at once, and the level's two other adds charge
+    /// nothing. An add that reserved room for itself alone would charge one entry at each.
+    #[test]
+    fn the_first_field_add_of_a_level_reserves_room_for_the_whole_level() {
+        use super::PrivateElements;
+        use crate::value::Value;
+        let mut agent = test_host::agent_with(test_host::limits());
+        let object = agent
+            .allocate_object(None, ObjectKind::Ordinary(Ordinary::for_test()))
+            .unwrap();
+        let description = agent.heap.new_string_from_str("#f").unwrap();
+        let keys: alloc::vec::Vec<PrivateNameRef> = (0..3)
+            .map(|_| agent.heap.new_private_name(description).unwrap())
+            .collect();
+        let mut charges = alloc::vec::Vec::new();
+        for &key in &keys {
+            let before = agent.heap.bytes();
+            agent
+                .private_field_add(object, key, Value::Number(1.0), 3)
+                .unwrap();
+            charges.push(agent.heap.bytes() - before);
+        }
+        let entry = size_of::<PrivateElement>() as u64;
+        assert_eq!(
+            charges,
+            [size_of::<PrivateElements>() as u64 + 3 * entry, 0, 0]
+        );
+        let record = agent.heap.objects.get(object.handle).unwrap();
+        let elements = record.private_elements.as_ref().unwrap();
+        assert_eq!((elements.len(), elements.capacity()), (3, 3));
+    }
+
     /// The collector reaches an object's private elements from the object alone
     /// (`ObjectRecord::trace`, [`super::PrivateElements::trace`]): with nothing else holding
-    /// them, a mark that starts at the object marks each element's Private Name, the method's
-    /// function and both halves of an accessor, and not an object no element names. Script
-    /// cannot see this while the class's private record holds the same names and functions, so
-    /// no test of `tests/private_methods.rs` goes red when the list is not traced; this one does.
+    /// them, a mark that starts at the object marks each element's Private Name, a field's value,
+    /// the method's function and both halves of an accessor, and not an object no element names.
+    /// Script cannot see this for a method while the class's private record holds the same names
+    /// and functions, so no test of `tests/private_methods.rs` goes red when the list is not
+    /// traced; this one does. A field's value no record holds
+    /// (`private_fields::a_private_field_survives_a_collection_between_add_and_read`).
     #[test]
     fn a_mark_from_the_object_reaches_every_element() {
         use crate::heap::collect::{Item, Mark, mark_phase};
@@ -482,7 +761,8 @@ mod tests {
                 .allocate_object(None, ObjectKind::Ordinary(Ordinary::for_test()))
                 .unwrap()
         };
-        let (object, method, getter, setter, other) = (
+        let (object, method, getter, setter, other, held) = (
+            new_object(),
             new_object(),
             new_object(),
             new_object(),
@@ -492,8 +772,13 @@ mod tests {
         let description = agent.heap.new_string_from_str("#m").unwrap();
         let m = agent.heap.new_private_name(description).unwrap();
         let a = agent.heap.new_private_name(description).unwrap();
+        let f = agent.heap.new_private_name(description).unwrap();
         let unused = agent.heap.new_private_name(description).unwrap();
         let elements = [
+            PrivateElement {
+                key: f,
+                value: PrivateValue::Field(crate::value::Value::Object(held)),
+            },
             PrivateElement {
                 key: m,
                 value: PrivateValue::Method(method),
@@ -507,12 +792,14 @@ mod tests {
             },
         ];
         for element in elements {
-            agent.add_private_element(object, element, 2).unwrap();
+            agent.add_private_element(object, element, 3).unwrap();
         }
         let mut mark = Mark::take(&mut agent.heap);
         mark.push(Item::Object(object.handle));
         mark_phase(&agent, &mut mark).unwrap();
         for item in [
+            Item::PrivateName(f.handle),
+            Item::Object(held.handle),
             Item::PrivateName(m.handle),
             Item::PrivateName(a.handle),
             Item::Object(method.handle),
@@ -529,5 +816,189 @@ mod tests {
             !mark.is_marked(Item::PrivateName(unused.handle)),
             "an unused name"
         );
+    }
+
+    /// A host whose `host_ensure_can_add_private_element` calls the `HookCx`
+    /// methods that make, root, drop, read and charge (each String method 100 times, 10,000 host
+    /// objects, each rooted, duplicated and dropped) and answers `Ok(())`.
+    struct BusyHook;
+
+    impl crate::Host for BusyHook {
+        fn host_ensure_can_add_private_element(
+            cx: &mut crate::HookCx<'_, Self>,
+            obj: crate::value::ObjectRef,
+        ) -> crate::Completion<()> {
+            use crate::value::Value;
+            use crate::{Brand, ErrorKind, HostObjectSpec, Prototype, WellKnownSymbol};
+            for _ in 0..100 {
+                let made = cx.new_string("made in the hook")?;
+                let units = cx.new_string_utf16(&[0xD800, 0x41])?;
+                assert!(cx.to_utf16(units).is_ok());
+                assert!(cx.to_utf16_len(units).is_ok());
+                assert!(cx.to_rust_string_lossy(made).is_ok());
+                let charge = cx.charge_host_bytes(64)?;
+                drop(charge);
+                assert!(cx.well_known_symbol(WellKnownSymbol::Iterator).is_ok());
+            }
+            for _ in 0..10_000 {
+                let spec = HostObjectSpec {
+                    prototype: Prototype::Object(obj),
+                    brand: Brand(1),
+                    data: None,
+                    error_kind: Some(ErrorKind::TypeError),
+                    overrides: None,
+                };
+                let Ok(made) = cx.new_host_object(spec) else {
+                    panic!("new_host_object refused");
+                };
+                let made = made?;
+                assert!(cx.error_summary(Value::Object(made)).is_ok());
+                assert!(cx.brand(made).is_ok());
+                let Ok(root) = cx.root(Value::Object(made)) else {
+                    panic!("root refused");
+                };
+                assert!(cx.get(&root).is_ok());
+                let Ok(second) = cx.duplicate(&root) else {
+                    panic!("duplicate refused");
+                };
+                drop(root);
+                drop(second);
+            }
+            Ok(())
+        }
+
+        fn host_enqueue_generic_job(_cx: &mut crate::HookCx<'_, Self>, _job: crate::Job) {}
+        fn host_enqueue_timeout_job(
+            _cx: &mut crate::HookCx<'_, Self>,
+            _job: crate::Job,
+            _milliseconds: f64,
+        ) {
+        }
+        fn host_enqueue_finalization_registry_cleanup_job(
+            _cx: &mut crate::HookCx<'_, Self>,
+            _job: crate::Job,
+        ) {
+        }
+        fn host_load_imported_module(
+            _cx: &mut crate::HookCx<'_, Self>,
+            _request: crate::LoadRequest,
+        ) {
+        }
+        fn host_system_utc_epoch_nanoseconds(
+            _cx: &mut crate::HookCx<'_, Self>,
+            _global: crate::value::ObjectRef,
+        ) -> i128 {
+            0
+        }
+    }
+
+    /// The values of three adds held by the adds alone (a field's new object,
+    /// a getter's and a setter's object) survive a hook that calls the making, rooting and
+    /// charging `HookCx` methods many times: none of them is a safe point. With a collection at
+    /// every safe point this test goes red when one of those methods becomes one, which
+    /// `a_value_held_only_by_the_add_survives_the_hook` does not see (its hook is the default,
+    /// which calls no `HookCx` method).
+    #[test]
+    fn values_held_only_by_the_adds_survive_a_hook_that_calls_hookcx() {
+        use crate::host::outcome::Outcome;
+        use crate::value::Value;
+        use crate::{Brand, HostObjectSpec, Overrides, Prototype};
+        static TABLE: Overrides<BusyHook> = Overrides {
+            get_prototype_of: None,
+            set_prototype_of: None,
+            is_extensible: None,
+            prevent_extensions: None,
+            get_own_property: None,
+            define_own_property: None,
+            has_property: None,
+            get: None,
+            set: None,
+            delete: None,
+            own_property_keys: None,
+        };
+        let Ok(mut agent) = crate::Agent::new(
+            BusyHook,
+            test_host::limits(),
+            crate::Seeds {
+                hash_key: [1; 16],
+                random_seed: [2; 32],
+            },
+        ) else {
+            panic!("Agent::new refused");
+        };
+        let Ok(Outcome::Normal(realm)) = agent.create_realm(None, None) else {
+            panic!("create_realm refused");
+        };
+        let (host, _held) = agent
+            .with_cx(&realm, |cx| {
+                let spec = HostObjectSpec {
+                    prototype: Prototype::Null,
+                    brand: Brand(0),
+                    data: None,
+                    error_kind: None,
+                    overrides: Some(&TABLE),
+                };
+                let made = cx.new_host_object(spec).unwrap().unwrap();
+                (made, cx.root(Value::Object(made)).unwrap())
+            })
+            .unwrap();
+        let fresh = |agent: &mut crate::Agent<BusyHook>| {
+            agent
+                .allocate_object(None, ObjectKind::Ordinary(Ordinary::for_test()))
+                .unwrap()
+        };
+        let description = agent.heap.new_string_from_str("#x").unwrap();
+        let x = agent.heap.new_private_name(description).unwrap();
+        let description = agent.heap.new_string_from_str("#a").unwrap();
+        let a = agent.heap.new_private_name(description).unwrap();
+        let value = fresh(&mut agent);
+        agent
+            .add_private_element(
+                host,
+                PrivateElement {
+                    key: x,
+                    value: PrivateValue::Field(Value::Object(value)),
+                },
+                2,
+            )
+            .unwrap();
+        let getter = fresh(&mut agent);
+        agent
+            .add_private_element(
+                host,
+                PrivateElement {
+                    key: a,
+                    value: PrivateValue::Accessor {
+                        get: Some(getter),
+                        set: None,
+                    },
+                },
+                2,
+            )
+            .unwrap();
+        let setter = fresh(&mut agent);
+        agent
+            .add_private_element(
+                host,
+                PrivateElement {
+                    key: a,
+                    value: PrivateValue::Accessor {
+                        get: None,
+                        set: Some(setter),
+                    },
+                },
+                2,
+            )
+            .unwrap();
+        for object in [value, getter, setter] {
+            assert!(
+                agent.heap.check_value(Value::Object(object)).is_ok(),
+                "{object:?} was freed during an add"
+            );
+        }
+        assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
+        for object in [value, getter, setter] {
+            assert!(agent.heap.check_value(Value::Object(object)).is_ok());
+        }
     }
 }

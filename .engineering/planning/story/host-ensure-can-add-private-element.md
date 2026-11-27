@@ -22,7 +22,7 @@ scope:
   path: crates/swell/tests/private_element_hook.rs
 - confidence: cited
   path: docs/design/host-interface.md
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:49Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:49Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
@@ -77,3 +77,42 @@ test262: no case reaches the hook; the coordinator's full run on the join passes
 ## Out of scope
 
 Override tables (slice 9, HOST-114, `story:host-object-overrides`); the other hook return sites (their slices); private elements of objects that are not host objects with an override table (no hook call, by HOST-119); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `hook` of wave big-2 delivered the story on `impl/hook` (one correction after the
+adversary's pass), merged into `wave/big-2`. Where the delivery differs from the text above:
+
+- The find runs before the hook. The story puts the hook at the head of the add function;
+  `add_private_element` first runs the charged find of its key. The second half of an
+  accessor whose first half is there joins that element and calls no hook. Otherwise the
+  order is: the hook, the duplicate `TypeError`, the room charge and the append. The hook is
+  called once per element, not once per add: InitializeInstanceElements adds each
+  PrivateElement once, a getter and a setter of one name are one element, and the engine adds
+  them as two halves. The hook cannot change what the find read: a `HookCx` runs no code.
+- The host's duty is stated and not checked: `#sec-hostensurecanaddprivateelement` requires
+  the same kind of completion for every call with one object. A host that refuses an object
+  after allowing it in one construction keeps the elements added before the refusal, in
+  source order, each half of an accessor where it stands; nothing is taken back and the run
+  does not fault. The adversary's failing case asked for the whole accessor before the
+  refused element; the compiler emits each half where it stands, and the case now holds the
+  behaviour stated
+  (`a_throw_between_the_halves_of_an_accessor_keeps_the_getter_added_before_it`). The text
+  is in the hook's documentation and in the paragraphs of HOST-119 and HOST-223.
+- 18 tests under `private_element_hook::`, not 10, and two library tests in
+  `object/private_names.rs`. Eight tests and one library test came with the adversary's
+  pass. Five planted defects are each red: a `Throw` value that is not checked (in the
+  collecting build, by the uncaught form of the two HOST-223 tests and the test of a string
+  handle), the hook's call without the check that the agent still runs, the scope of the
+  hook's values not cut back after the call, no join when the setter stands first, and a
+  safe point inside a `HookCx` method.
+- No value is kept across the hook, and no plant removes a keep: no method of `HookCx` is a
+  safe point, so nothing collects while the hook runs. The library test
+  `a_value_held_only_by_the_add_survives_the_hook` holds it, red with a collection planted
+  right after the hook.
+- A re-entrant add has no test: a `HookCx` cannot call, construct or evaluate (the
+  compile-fail doctests of HOST-4).
+- A host function cannot carry an override table (`new_host_function` takes none), so it
+  calls no hook; `other_kinds_call_no_hook` holds it.
+- The test file has 1,129 lines; the story estimated 220.
+- test262: no case reaches the hook.

@@ -55,19 +55,16 @@ pub(crate) struct Parsed {
     pub held: Option<SyntaxError>,
 }
 
-/// The constructs the parser holds ([`Parser::hold`]), one line each: the construct and the
-/// slice that brings it, in the order the stories of slice 8 add them (`docs/plan/waves.md`,
-/// "Slice 8, `classes`"). A source with one of them is parsed to its end, and when it has no
-/// grammar error and no early error its one error is the refusal `<construct> is not supported
-/// before slice <n>` of the first one it holds ([`Parser::held`]). A story that lifts a hold
-/// deletes its `hold` call and its line here in the same change. The test of the sources under
-/// `tests/sources/held/` reads this list to know which construct of a source is still held.
-/// `rustfmt` would join a short list on one line; it is skipped so each hold keeps its own.
-#[rustfmt::skip]
-pub const HOLDS: &[(&str, u32)] = &[
-    ("private field", 8),
-    ("private name in", 8),
-];
+/// The constructs the parser holds, one line each: the construct and the slice that brings it.
+/// A source with one of them is parsed to its end, and when it has no grammar error and no early
+/// error its one error is the refusal `<construct> is not supported before slice <n>` of the
+/// first one it holds ([`Parser::held`]). No construct holds one: the last two, `private field`
+/// and `private name in`, parse and run since `story:private-fields-and-private-in`. The list is
+/// kept for the holds of later slices: a story that holds a construct adds its line here and
+/// the call that holds it, and the story that lifts it deletes both. The test of the sources
+/// under `tests/sources/held/` reads this list to know which construct of a source is still
+/// held.
+pub const HOLDS: &[(&str, u32)] = &[];
 
 pub(crate) struct Parser<'a, 'm> {
     /// The ledger of the parse, shared with the lexer, the walks after the parser and the
@@ -142,9 +139,11 @@ pub(crate) struct Parser<'a, 'm> {
     /// the growth charged first.
     outer_field_code: Vec<bool>,
     /// The refusal of a construct whose parse goes on, held back to the end of the parse, at the
-    /// first token of the first such construct of the source ([`Parser::hold`]). The constructs
-    /// held are the lines of [`HOLDS`]. The parse answers it only when it ends without a
-    /// grammar error and without an early error (`lib.rs`, `analyse_parsed`).
+    /// first token of the first such construct of the source. No construct holds one: the last
+    /// two, `private field` and `private name in`, parse and run since
+    /// `story:private-fields-and-private-in` ([`HOLDS`] is empty). The parse answers it only
+    /// when it ends without a grammar error and without an early error (`lib.rs`,
+    /// `analyse_parsed`).
     held: Option<SyntaxError>,
     /// The operator stack of the binary expression parser, shared by its nested calls.
     operators: Vec<expression::Pending>,
@@ -524,23 +523,6 @@ impl<'a, 'm> Parser<'a, 'm> {
             span.line,
             span.column,
         ))
-    }
-
-    /// Holds the refusal of `construct`, which slice `slice` brings, at `span` back to the end
-    /// of the parse, which goes on: the first hold of a parse is kept ([`Parser::held`]), and the
-    /// parse answers it only when it ends without a grammar error and without an early error.
-    /// Every construct held is a line of [`HOLDS`]; the story that lifts one deletes its call
-    /// and its line.
-    #[inline(never)]
-    fn hold(&mut self, construct: &str, slice: u32, span: Span) {
-        if self.held.is_none() {
-            self.held = Some(SyntaxError::refused(
-                construct,
-                slice,
-                span.line,
-                span.column,
-            ));
-        }
     }
 
     #[inline(never)]

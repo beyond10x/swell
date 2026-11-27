@@ -1,0 +1,106 @@
+script locals 1
+  lexical let "C"
+  0000 2:1 SetStrict true
+  0001 2:1 PushEnv 5
+  0002 2:1 NewPrivateName 0 "#x"
+  0003 2:1 NewPrivateName 1 "#m"
+  0004 2:1 NewPrivateName 3 "#y"
+  0005 2:1 NewPrivateName 4 "#s"
+  0006 2:1 ClassPrototype
+  0007 2:1 MakeClassConstructor 0 base
+  0008 2:26 Dup2
+  0009 2:26 Pop
+  0010 2:26 MakeMethod 2
+  0011 2:26 SetEnv 0 2
+  0012 2:26 Pop
+  0013 2:26 Pop
+  0014 2:63 Dup
+  0015 2:63 Closure 4
+  0016 2:63 DefineClassMethod "has"
+  0017 2:63 Pop
+  0018 2:108 Dup2
+  0019 2:108 Pop
+  0020 2:108 Closure 5
+  0021 2:108 DefineClassMethod "run"
+  0022 2:108 Pop
+  0023 2:1 SetLocal 0
+  0024 2:1 Nip 1
+  0025 2:1 StoreInitializer 1
+  0026 2:1 Dup
+  0027 2:1 MakeMethod 3
+  0028 2:1 Call 0
+  0029 2:1 Pop
+  0030 2:1 PopEnv
+  0031 2:1 SetStrict false
+  0032 2:1 InitGlobal "C"
+  0033 2:1 Pop
+  0034 0:0 LoadCompletion
+  0035 0:0 Return
+
+function 0 class constructor "C" length 0 locals 0 strict
+  0000 2:1 This
+  0001 2:1 InitInstance
+  0002 2:1 Pop
+  0003 2:1 Undefined
+  0004 2:1 Return
+
+function 1 field initializer "" length 0 locals 0 strict
+  0000 2:11 This
+  0001 2:11 AddPrivateMethod 0 1 0 2 room 3
+  0002 2:11 Pop
+  0003 2:11 This
+  0004 2:15 Number 1
+  0005 2:11 DefineField "a"
+  0006 2:23 Number 2
+  0007 2:18 AddPrivateField 0 0 room 3
+  0008 2:34 Undefined
+  0009 2:34 AddPrivateField 0 3 room 3
+  0010 2:11 Pop
+  0011 2:11 Undefined
+  0012 2:11 Return
+
+function 2 method "#m" length 0 locals 0 strict
+  0000 2:26 Undefined
+  0001 2:26 Return
+
+function 3 field initializer "" length 0 locals 0 strict
+  0000 2:38 This
+  0001 2:50 Number 3
+  0002 2:38 AddPrivateField 0 4 room 1
+  0003 2:53 Undefined
+  0004 2:53 DefineField "b"
+  0005 2:38 Pop
+  0006 2:38 Undefined
+  0007 2:38 Return
+
+function 4 method "has" length 1 locals 1 strict
+  params local 0
+  0000 2:92 GetLocal 0
+  0001 2:86 PrivateIn 0 0
+  0002 2:86 Dup
+  0003 2:86 JumpIfFalse 0007
+  0004 2:86 Pop
+  0005 2:103 GetLocal 0
+  0006 2:97 PrivateIn 0 4
+  0007 2:79 Return
+  0008 2:63 Undefined
+  0009 2:63 Return
+
+function 5 method "run" length 0 locals 0 strict
+  0000 2:116 This
+  0001 2:126 This
+  0002 2:126 GetPrivate 0 0
+  0003 2:116 SetPrivate 0 3
+  0004 2:116 Pop
+  0005 2:135 This
+  0006 2:135 Dup
+  0007 2:135 GetPrivate 0 0
+  0008 2:146 Number 1
+  0009 2:135 Add
+  0010 2:135 SetPrivate 0 0
+  0011 2:135 Pop
+  0012 2:156 This
+  0013 2:156 GetPrivate 0 3
+  0014 2:149 Return
+  0015 2:108 Undefined
+  0016 2:108 Return

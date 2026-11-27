@@ -293,10 +293,10 @@ Every number below comes from the gate, `task check`, on the released commit.
   per private identifier (a heap record of its own, its description the identifier with its
   `#`), held by the class's private record, a lexical scope pushed after the heritage. An
   object holds its private elements in a list of its own, charged to the memory budget before
-  it grows: a box of 24 bytes and 44 bytes per element, reserved once per class level for
+  it grows: a box of 24 bytes and 48 bytes per element, reserved once per class level for
   exactly the elements that level adds (a getter and a setter of one name are one element), so
-  an instance of a class with one private method costs 68 bytes over a plain instance, with 4
-  methods 200, with 17 methods 772
+  an instance of a class with one private method costs 72 bytes over a plain instance, with 4
+  methods 216, with 17 methods 840
   (`private_methods::an_instance_pays_for_the_room_of_its_list`). The instance's private
   methods and accessors are added by the class's instance initializer before any other
   element, the static ones to the constructor before the first static element runs
@@ -361,6 +361,28 @@ Every number below comes from the gate, `task check`, on the released commit.
   the method (`Map.groupBy called on undefined or null`, `Map.groupBy: the callback is not a
   function`); those of `Object.groupBy` read as before. 15 tests in
   `tests/builtins_map_upsert.rs` (14 with `collect-every-safe-point`).
+
+- Private fields and `#x in` run (`#sec-privatefieldadd`,
+  `#sec-relational-operators-runtime-semantics-evaluation`). A private field is added by the
+  class's instance initializer after the private methods and accessors, in source order with
+  the public fields, and a static one to the constructor in its run of static elements; an
+  object a base constructor returns gets the fields too, a second add of the same name is a
+  `TypeError`, and the add does not read [[Extensible]], so a frozen or non-extensible object
+  gets them. `o.#x`, `o?.#x` and every assignment form on a private field (plain, compound,
+  logical with its short circuit, update, destructuring and the `for`-`in`/`of` head) run
+  PrivateGet and PrivateSet. `#x in o` throws a `TypeError` when `o` is not an object and
+  answers whether `o` has the element, for fields, methods and accessors alike, with no trap of
+  a Proxy called. A class level reserves room for its private methods and private fields
+  together, once. The holds `private field is not supported before slice 8` and
+  `private name in is not supported before slice 8` are gone: no construct is held any more
+  (`story:private-fields-and-private-in`).
+
+- HostEnsureCanAddPrivateElement, a story of the eighth slice: before a private field, a
+  private method or a private accessor is added to a host object with an override table, the
+  engine asks the host's hook `host_ensure_can_add_private_element`, once per element (a
+  getter and a setter of one name are one element). A `Throw` from the hook is the add's
+  throw, and the element is not added. Every other object calls no hook. "Host interface"
+  below has HOST-119 and HOST-223 (`story:host-ensure-can-add-private-element`).
 
 ### Changed
 
@@ -457,6 +479,9 @@ Every number below comes from the gate, `task check`, on the released commit.
   default mode). The workflow `slow` starts on a change of `taskfiles/gate-time.yml`,
   `taskfiles/realm-room-tests.awk` and `.config/nextest.toml` too
   (`story:realm-size-lane-within-its-share`).
+- The lane `slow` prints the machine it runs on, `slow-runner: <n> cores, <cpu>, <memory>,
+  sh is <sh>`, right after its clock starts, so that two runs on the same code can be read
+  against their machines. The forge ran the lane on one code in 882.6 s and in 1,142.0 s.
 - The lane `slow` builds the stack tests' binary with their modules only:
   `build-stack-profiles` passes `--cfg test_modules` and the modules of `STACK_MODULE_LIST`
   (`taskfiles/stack-profiles.yml`) to the test target of `swell` through `cargo rustc`, so
@@ -610,6 +635,12 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Fixed
 
+- The lane's background build of the profile collect ends with the lane on the forge too:
+  the kills of its process group had two dashes after the signal, which the forge's `sh`
+  (dash) refuses, so `slow-collect-stop` and the build's watcher ended nothing there, and
+  the forge's `task check` went red on the planted script that holds it. A new static check
+  of the gate, `kill-check`, refuses that form in `Taskfile.yml`, `taskfiles/`, `tests/gate/`
+  and `.github/workflows/`.
 - `JSON.parse` frees the room of its stack of open values when the parse ends, before the
   reviver is called; before, that room stayed allocated, uncharged, while the reviver ran
   (found by the review of `story:buffer-growth-outside-the-charged-list-is-listed`).
@@ -668,7 +699,20 @@ Every number below comes from the gate, `task check`, on the released commit.
 - **Breaking**: `HostObjectSpec`. A host that names the type or writes a literal stops
   compiling once. A literal names `overrides` (`overrides: None` for no table), and a type
   position names the host type (`HostObjectSpec<MyHost>`).
-- Requirements delivered: HOST-41, HOST-112, HOST-113, HOST-114, HOST-222.
+- `HOST-119` and `HOST-223` (slice 8): the engine calls `host_ensure_can_add_private_element`
+  only for a host object with an override table, before a private field, a private method or a
+  private accessor is added to it. It calls the hook once per element: a getter and a setter
+  of one name are one element. A `Throw` from the hook is the add's throw, and the element is
+  not added. A `Throw` value that holds a stale handle or a handle of another agent ends the
+  run with `Terminated(EngineFault)` and faults the agent. A hook that sets the interrupt flag
+  ends the run before the element is added. `HOST-223` is new. Tests:
+  `swell::private_element_hook::host_119_a_throw_from_the_hook_is_the_field_adds_throw` and
+  `swell::private_element_hook::host_223_a_stale_handle_in_the_throw_faults_the_agent`.
+  - The host's duty: the hook answers the same kind of completion for every call with one
+    object (`#sec-hostensurecanaddprivateelement`). The engine does not check it. A host that
+    breaks it keeps the elements added before the refusal, in source order; an accessor whose
+    second half stands after the refused element keeps only its first half.
+- Requirements delivered: HOST-41, HOST-112, HOST-113, HOST-114, HOST-119, HOST-222, HOST-223.
 
 ## [0.12.0] - 2026-11-25
 
