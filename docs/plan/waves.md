@@ -476,9 +476,6 @@ that slice reads its entries first.
 - The gate, any wave: about 15 planted scripts end a failure message with a path under `.out/`,
   which the log of a run on the forge does not show; the self-test prints the last 20 lines of
   the script's own log only.
-- Slice 6: the declarative part of the global environment (`RealmGlobalEnv` in
-  `crates/swell/src/realm/mod.rs` is an empty record until `let`, `const` and `class` arrive;
-  `crates/swell/src/env/global.rs` says what to add).
 
 ## After slice 4: bigger waves
 
