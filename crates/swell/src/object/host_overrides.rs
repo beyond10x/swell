@@ -23,7 +23,9 @@
 //!   or a key list that holds it is a broken invariant. Before that report an absent answer
 //!   binds nothing, and a key reported present and configurable may be reported absent, deleted
 //!   or answered false later, as an ordinary object's. A false from `has_property` records
-//!   nothing: the clause binds [[HasProperty]] only for a key observed non-configurable;
+//!   nothing and breaks an invariant only for a non-configurable property, fixed or of the
+//!   record, whether or not the object is extensible: the clause binds [[HasProperty]] only for
+//!   a key observed non-configurable;
 //! - once it is not extensible, the keys of the first key list: each later list holds only keys
 //!   of the one before it (a key it leaves out is non-existent).
 //!
@@ -1103,9 +1105,10 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// The `has_property` override: false for a fixed property breaks the invariant, and for
-    /// a property of the record the Proxy's checks; any other false records nothing (the clause
-    /// binds [[HasProperty]] only for a key observed non-configurable).
+    /// The `has_property` override: false for a non-configurable property, fixed or of the
+    /// record, breaks the invariant; any other false, also on an object that is not extensible,
+    /// is allowed and records nothing (the clause binds [[HasProperty]] only for a key observed
+    /// non-configurable).
     #[inline(never)]
     fn override_has_property(
         &mut self,
@@ -1126,20 +1129,11 @@ impl<H: Host> Agent<H> {
             return Ok(answer);
         }
         match self.known_property(object, table, key)? {
-            Known::Record(current) => match invariants::has_after_descriptor(current) {
-                Ok(Next::ReadExtensible) => {
-                    let extensible = self.known_extensible(object, table)?.unwrap_or(true);
-                    if invariants::has_after_extensible(extensible).is_err() {
-                        return Err(self.fault());
-                    }
-                }
-                Ok(_) => {}
-                Err(_) => return Err(self.fault()),
-            },
-            Known::Fixed(_) => return Err(self.fault()),
-            Known::Absent | Known::Listed | Known::Unknown => {}
+            Known::Record(Some(property)) | Known::Fixed(property) if !property.configurable => {
+                Err(self.fault())
+            }
+            _ => Ok(false),
         }
-        Ok(false)
     }
 
     /// [[Get]] of a host object.

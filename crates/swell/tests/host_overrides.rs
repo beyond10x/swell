@@ -3397,3 +3397,43 @@ fn the_current_value_held_across_an_is_extensible_override_survives_a_collection
     assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
     assert_eq!(agent.state(), AgentState::Alive);
 }
+
+static JS_HAS_ONLY: Overrides<TestHost> = Overrides {
+    has_property: Some(js_has_property),
+    ..NONE
+};
+
+/// [[HasProperty]] of a host object whose table has `has_property` and no `get_own_property`,
+/// so that the record answers [[GetOwnProperty]]: a false for a configurable property the
+/// record holds breaks no bullet of the clause, also once the object is not extensible, and
+/// runs as the same answers through a table with `get_own_property` do; a false for a
+/// non-configurable one faults the agent.
+#[test]
+fn has_property_false_for_a_property_of_the_record_faults_only_when_it_is_non_configurable() {
+    let configurable = js_run(
+        &JS_HAS_ONLY,
+        "base({})",
+        "Object.defineProperty(o, \"x\", { value: 1, writable: true, enumerable: true, configurable: true });\n\
+         Object.preventExtensions(o);\n\
+         [Object.isExtensible(o), \"x\" in o, o.x].join();",
+    );
+    let fixed = js_run(
+        &JS_HAS_ONLY,
+        "base({})",
+        "Object.defineProperty(o, \"x\", { value: 1, writable: true, enumerable: true, configurable: false });\n\
+         \"x\" in o;",
+    );
+    assert_eq!(
+        (configurable, fixed),
+        (
+            (
+                Outcome::Normal("\"false,false,1\"".to_string()),
+                AgentState::Alive
+            ),
+            (
+                Outcome::Terminated(Termination::EngineFault),
+                AgentState::Faulted
+            )
+        )
+    );
+}
