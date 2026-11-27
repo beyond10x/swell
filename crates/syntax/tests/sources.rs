@@ -755,7 +755,7 @@ fn message_kind_tells_refusals_from_early_errors() {
 }
 
 /// Every source under `eval/` is eval code: parsed through `parse_eval` as the code of a
-/// non-strict caller with no flag set (`#sec-performeval`, step 9), it answers its header:
+/// non-strict caller with no flag set (`#sec-performeval`, steps 7 to 11), it answers its header:
 /// `parses`, `SyntaxError "<message>"` (the first error) or `refused "<message>"` (the one
 /// error). The tests of scripts do not read these sources: what they show is the answer of eval
 /// code, whose flags (`EvalContext`) decide what a script cannot state.
@@ -1461,7 +1461,7 @@ fn eval_and_function_entries_share_the_nesting_bound() {
     assert!(parse_dynamic_function(&[], &[], zero).is_err());
 }
 
-/// PerformEval (`#sec-performeval`), steps 9 to 11: the eval code is strict when the caller is
+/// PerformEval (`#sec-performeval`), steps 13 and 14: the eval code is strict when the caller is
 /// strict or its own directive prologue holds a Use Strict Directive; `with` is an early error
 /// in strict code (`#sec-with-statement-static-semantics-early-errors`), so it parses through
 /// `parse_eval` with a non-strict caller and is a SyntaxError with a strict one.
@@ -1511,7 +1511,7 @@ fn eval_entry_returns_var_names_and_hoisted_functions() {
     assert_eq!(script.scope.var_names, vec!["a", "f", "b", "c", "g", "d"]);
     assert_eq!(script.scope.functions, vec![FunctionId(1), FunctionId(2)]);
     assert_eq!(script.ast.functions()[0].scope.var_names, vec!["inner"]);
-    // An empty source is an empty script (PerformEval, step 13: its result is undefined).
+    // An empty source is an empty script (PerformEval, step 12.c: its result is undefined).
     let script = parse_eval(&[], false, options).unwrap();
     assert!(script.body.is_empty() && script.scope.var_names.is_empty());
 }
@@ -3475,6 +3475,7 @@ fn contains_arguments_of_eval_code_holds_only_the_tree() {
         in_method: true,
         in_derived_constructor: false,
         in_class_field_initializer: true,
+        private_names: &[],
     };
     let options = ParseOptions { max_nesting: LIMIT };
     let without = units(&format!("{}0", "0, ".repeat(120)));

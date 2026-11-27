@@ -125,6 +125,8 @@ mod emulated_host;
 mod errors;
 #[cfg(any(not(test_modules), test_modules = "eval"))]
 mod eval;
+#[cfg(any(not(test_modules), test_modules = "eval_private_names"))]
+mod eval_private_names;
 #[cfg(any(not(test_modules), test_modules = "eval_stack"))]
 mod eval_stack;
 #[cfg(any(not(test_modules), test_modules = "exponentiation"))]
