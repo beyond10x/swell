@@ -1450,7 +1450,7 @@ fn the_parts_of_the_walk_cover_every_function_of_the_realm() {
 
 /// The partition of the committed file, read with FNV-1a 64 computed apart from [`place_hash`]:
 /// the product taken in u128 and reduced modulo 2^64, over each place line of [`REALM_PLACES`];
-/// each line is in the part [`walk_part_places`] gives it, and the parts hold 181 + 163 places,
+/// each line is in the part [`walk_part_places`] gives it, and the parts hold 183 + 164 places,
 /// pinned at 2 parts. A writer run that changes the file (a function the realm gains or loses)
 /// changes these two numbers, and so does a change of [`WALK_PARTS`]: the unit that makes it
 /// writes the new sizes here, as the cover test prints them.
@@ -1480,5 +1480,5 @@ fn the_partition_of_the_file_agrees_with_an_fnv_computed_apart() {
         );
     }
     println!("FNV-1a 64 computed apart, {n} parts: {sizes:?}");
-    assert_eq!(sizes, vec![181, 163]);
+    assert_eq!(sizes, vec![183, 164]);
 }

@@ -125,6 +125,7 @@ global.Promise.resolve
 global.Promise.try
 global.Promise.withResolvers
 global.Promise[Symbol(Symbol.species)] get
+global.Map.groupBy
 global.Map[Symbol(Symbol.species)] get
 global.Set[Symbol(Symbol.species)] get
 global.Date.now
@@ -270,6 +271,8 @@ global.Map.prototype.delete
 global.Map.prototype.entries
 global.Map.prototype.forEach
 global.Map.prototype.get
+global.Map.prototype.getOrInsert
+global.Map.prototype.getOrInsertComputed
 global.Map.prototype.has
 global.Map.prototype.keys
 global.Map.prototype.set
