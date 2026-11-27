@@ -356,11 +356,12 @@ fn class_answer(text: &str) -> Result<String, String> {
 /// a `;`: before a token on a new line that its initializer or its name cannot take
 /// (`language/statements/class/elements/fields-asi-*.js`). `static`, `get`, `set` and `async`
 /// are field names where no element follows them on their line, and a name with an escape is
-/// never the word (`escaped-*-field-*.js`). Each source of the first list parses to the hold of
-/// its first field (a class is not held); each of the second is a grammar error.
+/// never the word (`escaped-*-field-*.js`). Each source of the first list parses, or answers the
+/// hold of its first private field (a class and a public field are not held); each of the second
+/// is a grammar error.
 #[test]
 fn fields_end_where_a_semicolon_is_inserted() {
-    let field = "class field is not supported before slice 8";
+    let field = "parses";
     let private = "private field is not supported before slice 8";
     for (text, held) in [
         ("class C { x\n y }", field),
@@ -2891,7 +2892,7 @@ fn field_ends_answer_the_standard() {
 #[test]
 fn dynamic_function_entries_read_class_elements() {
     let options = ParseOptions { max_nesting: LIMIT };
-    let held = vec!["class field is not supported before slice 8".to_string()];
+    let parses: Vec<String> = Vec::new();
     let undeclared = vec!["private name #x is not declared in an enclosing class".to_string()];
     let mut wrong = Vec::new();
     let mut check =
@@ -2902,7 +2903,8 @@ fn dynamic_function_entries_read_class_elements() {
                 (Err(m), None) => m
                     .iter()
                     .all(|m| !m.contains("is not supported before slice")),
-                (Ok(()), _) => false,
+                (Ok(()), Some(e)) => e.is_empty(),
+                (Ok(()), None) => false,
             };
             if !ok {
                 wrong.push(format!("{what}: expected {expected:?}, got {got:?}"));
@@ -2926,12 +2928,12 @@ fn dynamic_function_entries_read_class_elements() {
     check(
         "AsyncFunction(\"\", \"class C { [await 1] = 1; }\")",
         parse_dynamic_async_function(&units(""), &units("class C { [await 1] = 1; }"), options),
-        Some(&held),
+        Some(&parses),
     );
     check(
         "AsyncFunction(\"\", \"class C { x = () => await; }\")",
         parse_dynamic_async_function(&units(""), &units("class C { x = () => await; }"), options),
-        Some(&held),
+        Some(&parses),
     );
     check(
         "GeneratorFunction(\"\", \"class C { x = yield; }\")",
@@ -2941,7 +2943,7 @@ fn dynamic_function_entries_read_class_elements() {
     check(
         "GeneratorFunction(\"\", \"class C { [yield] = 1; }\")",
         parse_dynamic_generator_function(&units(""), &units("class C { [yield] = 1; }"), options),
-        Some(&held),
+        Some(&parses),
     );
     assert!(
         wrong.is_empty(),
@@ -2993,8 +2995,8 @@ fn parse_cost(text: &str) -> (Vec<String>, usize, usize, std::time::Duration) {
     (errors, ledger.charged, ledger.peak, time)
 }
 
-/// A named shape of a class source, the construct its first element holds, and the source of it
-/// with n elements.
+/// A named shape of a class source, the construct its first element holds (empty for a source
+/// that parses), and the source of it with n elements.
 type Shape = (&'static str, &'static str, fn(usize) -> String);
 
 /// Hostile sizes of class elements: a class of n private fields each used once, one private
@@ -3013,7 +3015,7 @@ fn class_elements_scale_linearly() {
         ("one private name used n times", "private field", |n| {
             format!("class C {{ #x; m() {{ {} }} }}", "this.#x;".repeat(n))
         }),
-        ("public fields with initializers", "class field", |n| {
+        ("public fields with initializers", "", |n| {
             let fields: String = (0..n).map(|i| format!("f{i} = {i};")).collect();
             format!("class C {{ {fields} }}")
         }),
@@ -3029,7 +3031,11 @@ fn class_elements_scale_linearly() {
     ];
     let mut wrong = Vec::new();
     for (name, construct, make) in shapes {
-        let held = vec![format!("{construct} is not supported before slice 8")];
+        let held: Vec<String> = if construct.is_empty() {
+            Vec::new()
+        } else {
+            vec![format!("{construct} is not supported before slice 8")]
+        };
         let n = 2_500;
         let (small, small_charged, small_peak, small_time) = parse_cost(&make(n));
         let (large, large_charged, large_peak, large_time) = parse_cost(&make(4 * n));

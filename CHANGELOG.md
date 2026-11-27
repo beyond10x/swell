@@ -217,6 +217,25 @@ Every number below comes from the gate, `task check`, on the released commit.
   a trap answered are visited. A chain of ordinary objects costs the steps it cost before
   (`story:proxy-descriptor-prototype-and-extensibility-traps`).
 
+- Public class fields, instance and static (`#sec-class-definitions`,
+  `#sec-runtime-semantics-classfielddefinitionevaluation`, `#sec-definefield`): a computed field
+  key runs once, when the class is defined, in source order with the keys of the methods, is
+  converted by ToPropertyKey there and kept in a hidden binding of the class scope; each
+  construction defines the instance fields in source order on the new object before the
+  constructor's body runs, each initializer evaluated (or `undefined`) with the instance as
+  `this` and `new.target` undefined, by CreateDataPropertyOrThrow, so a field over a prototype
+  accessor is an own data property and a non-extensible object or a non-configurable property
+  throws a `TypeError`; the static fields are defined on the class in source order after every
+  method, each run of them a function called with the class as `this`; `super.x` in an
+  initializer reads through the prototype (or the class, for a static field); an anonymous
+  function or class takes the field's name. The initializers run as frames of the run loop
+  (`InitInstance`, `Call(0)`), so the step budget, the interrupt and the frame depth reach
+  them. No instruction is added. The refusal `class field is not supported before slice 8` is
+  gone. A direct `eval` in a field initializer (an arrow in one too) is refused with the
+  `SyntaxError` `eval in a class field initializer is not supported before slice 8` until
+  PerformEval's rule for an initializer is built; an indirect `eval` there runs
+  (`story:public-class-fields`).
+
 ### Changed
 
 - A realm reads larger. The collector's workspace holds a head word per slot of every arena
