@@ -17,6 +17,9 @@
 # 3. A macro writes the test (the rule does not print it): non-zero, the test named.
 # 4. The test in a nested mod (the binary's name is not the one the rule prints): non-zero, the
 #    test named.
+# 5. The test renamed in its Rust file only, to a name that holds the old one: non-zero, the old
+#    name named.
+# 6. The test marked #[ignore] (cargo nextest list leaves it out): non-zero, the test named.
 # Run from the repository root: sh tests/gate/test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh
 unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SWELL_NO_STACK_TESTS SWELL_NO_GUARD
 export NO_COLOR=1 CARGO_TERM_COLOR=never
@@ -137,5 +140,32 @@ STUB_LOG="$root/$dir/stub-nested.log" PATH="$root/$dir/bin:$PATH" task -d "$run"
   fail "task test exited 0 with the profile's test in a nested mod, out of the run at opt-level 1 ($dir/nested.out)"
 grep -qF "test: swell::main $profile_test is not in the run at opt-level 1" "$dir/nested.out" ||
   fail "task test did not name the profile's test in a nested mod ($dir/nested.out)"
+
+# 5. The profile's test renamed in its Rust file only (TEST_OPT1_PROFILE_TEST still names the old
+#    name): the run at opt-level 1 holds realm_padding::<old name>_in_collect, whose name holds
+#    the old one; the step fails naming the old name.
+sed "s/|swell::main realm_padding::inner::the_profile_keeps_debug_assertions_and_overflow_checks_on\"/|swell::main ${profile_test}_in_collect\"/" "$dir/bin/cargo" > "$dir/bin/cargo.new" &&
+  mv "$dir/bin/cargo.new" "$dir/bin/cargo" && chmod +x "$dir/bin/cargo" || fail "cannot rename the profile's test in the stub"
+grep -qF "${profile_test}_in_collect" "$dir/bin/cargo" || fail "the stub does not list the renamed profile's test"
+printf '%s\n' '#[test]' 'fn the_profile_keeps_debug_assertions_and_overflow_checks_on_in_collect() {' '    assert!(cfg!(debug_assertions));' '}' > "$run/crates/swell/tests/realm_padding.rs"
+: > "$dir/stub-renamed.log"
+STUB_LOG="$root/$dir/stub-renamed.log" PATH="$root/$dir/bin:$PATH" task -d "$run" test > "$dir/renamed.out" 2>&1 &&
+  fail "task test exited 0 with the profile's test renamed in its Rust file only ($dir/renamed.out)"
+grep -qF "test: swell::main $profile_test is not in the run at opt-level 1" "$dir/renamed.out" ||
+  fail "task test did not name the profile's test renamed in its Rust file only ($dir/renamed.out)"
+[ ! -s "$dir/stub-renamed.log" ] || fail "task test ran tests with the profile's test renamed in its Rust file only ($dir/stub-renamed.log)"
+
+# 6. The profile's test marked #[ignore]: cargo nextest list leaves an ignored test out of its
+#    list (faults::host_71_injected_fault_at_each_call_faults_the_agent, ignored without the
+#    feature fault-injection, is in no list of the step), so the stub lists it in no run.
+sed "s/|swell::main ${profile_test}_in_collect\"/\"/" "$dir/bin/cargo" > "$dir/bin/cargo.new" &&
+  mv "$dir/bin/cargo.new" "$dir/bin/cargo" && chmod +x "$dir/bin/cargo" || fail "cannot drop the profile's test from the stub"
+grep -qF "$profile_test" "$dir/bin/cargo" && fail "the stub still lists the profile's test"
+printf '%s\n' '#[test]' '#[ignore]' 'fn the_profile_keeps_debug_assertions_and_overflow_checks_on() {' '    assert!(cfg!(debug_assertions));' '}' > "$run/crates/swell/tests/realm_padding.rs"
+: > "$dir/stub-ignored.log"
+STUB_LOG="$root/$dir/stub-ignored.log" PATH="$root/$dir/bin:$PATH" task -d "$run" test > "$dir/ignored.out" 2>&1 &&
+  fail "task test exited 0 with the profile's test ignored ($dir/ignored.out)"
+grep -qF "test: swell::main $profile_test is not in the run at opt-level 1" "$dir/ignored.out" ||
+  fail "task test did not name the ignored profile's test ($dir/ignored.out)"
 
 echo "$name: ok"

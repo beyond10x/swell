@@ -13,6 +13,7 @@
 # 1. From <dir>, ./rel/task -d run test: exits 0 and prints "1 test binaries: 3 passed, 0
 #    failed, 0 ignored".
 # 2. The same with the link named by its absolute path.
+# 3. From <dir>, rel/task -d run test (no leading ./): the same.
 # Run from the repository root: sh tests/gate/test-sums-its-runs-when-task-is-called-by-a-relative-path.sh
 unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SWELL_NO_STACK_TESTS SWELL_NO_GUARD
 export NO_COLOR=1 CARGO_TERM_COLOR=never
@@ -109,5 +110,13 @@ grep -qxF '1 test binaries: 3 passed, 0 failed, 0 ignored' "$dir/rel.out" ||
   fail "<dir>/rel/task by its absolute path -d run test exited non-zero although every test passed ($dir/abs.out)"
 grep -qxF '1 test binaries: 3 passed, 0 failed, 0 ignored' "$dir/abs.out" ||
   fail "<dir>/rel/task by its absolute path -d run test did not print the summed line of both runs ($dir/abs.out)"
+
+# 3. The task executable named by a relative path without a leading ./ (rel/task): a path that
+#    names a directory is the caller's, whatever its first part.
+: > "$dir/stub-nodot.log"
+(cd "$dir" && STUB_LOG="$root/$dir/stub-nodot.log" PATH="$root/$dir/bin:$PATH" rel/task -d run test) > "$dir/nodot.out" 2>&1 ||
+  fail "rel/task -d run test exited non-zero although every test passed: $(grep -v '^test: swell::main' "$dir/nodot.out" | head -n 2 | tr '\n' ';') ($dir/nodot.out)"
+grep -qxF '1 test binaries: 3 passed, 0 failed, 0 ignored' "$dir/nodot.out" ||
+  fail "rel/task -d run test did not print the summed line of both runs ($dir/nodot.out)"
 
 echo "$name: ok"
