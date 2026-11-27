@@ -107,6 +107,8 @@ mod date_setters;
 mod date_text;
 #[cfg(any(not(test_modules), test_modules = "date_zone"))]
 mod date_zone;
+#[cfg(any(not(test_modules), test_modules = "derived_classes"))]
+mod derived_classes;
 #[cfg(any(not(test_modules), test_modules = "determinism"))]
 mod determinism;
 #[cfg(any(not(test_modules), test_modules = "dynamic_function"))]

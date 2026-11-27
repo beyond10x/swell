@@ -157,9 +157,9 @@ impl Failure {
 /// refusal stops the parse and is the only error; the early errors of a source that parses are
 /// all reported, in source order. Generator functions and methods, and `async` functions and
 /// arrow functions, and async generators with `yield*` in them, parse. So does a class, with its
-/// early errors; one without heritage is not held. A construct the parse holds back ([`HOLDS`],
-/// each with the slice that delivers it, `class heritage` among them) is refused at its first
-/// token only once the whole source parsed with no early error, as the one error.
+/// heritage and its early errors. A construct the parse holds back ([`HOLDS`], each with the
+/// slice that delivers it) is refused at its first token only once the whole source parsed with
+/// no early error, as the one error.
 pub fn parse_script(source: &[u16], options: ParseOptions) -> Result<Script, Vec<SyntaxError>> {
     parse_script_with(source, options, &mut Unlimited).map_err(Failure::into_errors)
 }
@@ -216,11 +216,14 @@ impl From<bool> for EvalContext {
 ///
 /// The checks of step 12 that read the flags: `new.target` in the body is a SyntaxError unless
 /// [`EvalContext::in_function`] is set, which the parser reads at the top of the eval code
-/// (`story:new-target-meta-property`). [`EvalContext::in_method`] (a SuperProperty) and
-/// [`EvalContext::in_derived_constructor`] (a SuperCall) are read by the rules
-/// `story:derived-classes-and-super-call` adds, and [`EvalContext::in_class_field_initializer`]
-/// (ContainsArguments) by those `story:eval-in-class-field-initializers` adds; until then this
-/// entry reads neither.
+/// (`story:new-target-meta-property`). A SuperProperty is a SyntaxError unless
+/// [`EvalContext::in_method`] is set, and a SuperCall unless
+/// [`EvalContext::in_derived_constructor`] is set: the parse starts with those flags as the
+/// code of such a method or constructor starts (an arrow function in the eval code keeps them,
+/// any other function sets its own), so where they are not set `super` answers the early errors
+/// a script answers (`story:derived-classes-and-super-call`).
+/// [`EvalContext::in_class_field_initializer`] (ContainsArguments) is read by the rules
+/// `story:eval-in-class-field-initializers` adds; until then this entry does not read it.
 pub fn parse_eval(
     source: &[u16],
     context: impl Into<EvalContext>,

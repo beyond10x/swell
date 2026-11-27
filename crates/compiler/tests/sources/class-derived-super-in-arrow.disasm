@@ -1,0 +1,41 @@
+script locals 1
+  lexical let "B"
+  0000 2:1 SetStrict true
+  0001 2:17 GetGlobal "A"
+  0002 2:17 ClassHeritage
+  0003 2:1 MakeClassConstructor 0 derived
+  0004 2:1 SetLocal 0
+  0005 2:1 Nip 1
+  0006 2:1 SetStrict false
+  0007 2:1 InitGlobal "B"
+  0008 2:1 Pop
+  0009 0:0 LoadCompletion
+  0010 0:0 Return
+
+function 0 class constructor "B" length 0 locals 1 strict
+  captured "this"
+  0000 2:1 UninitializeEnv 0 0
+  0001 2:45 ArrowClosure 1
+  0002 2:41 SetLocal 0
+  0003 2:41 Pop
+  0004 2:60 Undefined
+  0005 2:60 GetLocal 0
+  0006 2:60 Call 0
+  0007 2:60 Pop
+  0008 2:72 GetEnvChecked 0 0
+  0009 2:65 KeepThisEnv 0 0
+  0010 2:65 Return
+  0011 2:1 Undefined
+  0012 2:1 KeepThisEnv 0 0
+  0013 2:1 Return
+
+function 1 arrow "f" length 0 locals 0 strict
+  0000 2:51 GetSuperConstructor
+  0001 2:51 SuperCall 0
+  0002 2:51 BindThisEnv 0 0
+  0003 2:51 Dup
+  0004 2:51 InitInstance
+  0005 2:51 Pop
+  0006 2:51 Return
+  0007 2:45 Undefined
+  0008 2:45 Return

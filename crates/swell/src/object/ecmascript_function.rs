@@ -39,10 +39,12 @@ use crate::host::ErrorKind;
 use crate::host::Host;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
-use crate::interp::frame::{Frame, SlotValue, frame_bytes};
+use crate::interp::frame::{Constructed, Frame, SlotValue, frame_bytes};
 use crate::object::arguments::Mapping;
 use crate::object::builtin_function::Activation;
-use crate::object::class_constructor::{ClassConstructor, class_constructor_bytes};
+use crate::object::class_constructor::{
+    ClassConstructor, ConstructorKind, class_constructor_bytes,
+};
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::Property;
 use crate::object::{ObjectKind, ObjectRecord};
@@ -196,15 +198,18 @@ pub(crate) fn call<H: Host>(
         },
         args,
     )))?;
-    let result = agent.call_function(function, this, args, None, None);
+    let result = agent.call_function(function, this, args, Constructed::None, None);
     agent.leave_code(entered);
     result
 }
 
 /// [[Construct]] (`#sec-ecmascript-function-objects-construct-argumentslist-newtarget`) from
-/// Rust, of a base constructor (every constructor of slice 1): `this` is
-/// OrdinaryCreateFromConstructor(newTarget, "%Object.prototype%"), and the call answers it unless
-/// the code returns an object.
+/// Rust: of a base constructor `this` is OrdinaryCreateFromConstructor(newTarget,
+/// "%Object.prototype%"), and the call answers it unless the code returns an object; a derived
+/// one makes no object and answers by steps 10 to 12 ([`Agent::construct_function`]). Its
+/// errors are made after the activation of the callee is left, so in the caller's realm: a
+/// base construction always answers an object, so a value that is none is the answer of a
+/// derived one ([`Agent::derived_return`]).
 pub(crate) fn construct<H: Host>(
     agent: &mut Agent<H>,
     function: ObjectRef,
@@ -224,7 +229,10 @@ pub(crate) fn construct<H: Host>(
     )))?;
     let result = agent.construct_function(function, args, new_target);
     agent.leave_code(entered);
-    result
+    match result {
+        Ok(Value::Object(_)) | Err(_) => result,
+        Ok(value) => Err(agent.derived_return(value)),
+    }
 }
 
 impl<H: Host> Agent<H> {
@@ -274,14 +282,14 @@ impl<H: Host> Agent<H> {
     }
 
     /// [[Call]] of `function` in a loop of its own: the frame, then the run. `constructed` is
-    /// the `this` object and `new_target` the NewTarget of a [[Construct]], each `None` for a
-    /// call.
+    /// which [[Construct]] the frame runs and `new_target` its NewTarget, `Constructed::None`
+    /// and `None` for a call.
     fn call_function(
         &mut self,
         function: ObjectRef,
         this: Value,
         args: &[Value],
-        constructed: Option<ObjectRef>,
+        constructed: Constructed,
         new_target: Option<ObjectRef>,
     ) -> Completion<Value> {
         self.check_frame_depth()?;
@@ -313,7 +321,13 @@ impl<H: Host> Agent<H> {
         Err(Abrupt::Throw(Value::Object(error)))
     }
 
-    /// [[Construct]] of `function` in a loop of its own.
+    /// [[Construct]] of `function` in a loop of its own, the base frame of its run (a bound
+    /// function's [[Construct]], `Reflect.construct`, the host's construct call). A derived
+    /// constructor gets no object: its frame is `Constructed::Derived`, and the run answers the
+    /// object, or the frame's `this` for `undefined` when there is one
+    /// ([`Agent::return_from_frame`]); any other answer is returned as it is, and [`construct`]
+    /// makes its error once the callee's activation is left (`docs/design/engine.md`,
+    /// "Classes", item 8).
     fn construct_function(
         &mut self,
         function: ObjectRef,
@@ -321,6 +335,15 @@ impl<H: Host> Agent<H> {
         new_target: ObjectRef,
     ) -> Completion<Value> {
         self.check_frame_depth()?;
+        if self.is_derived_constructor(function)? {
+            return self.call_function(
+                function,
+                Value::Undefined,
+                args,
+                Constructed::Derived,
+                Some(new_target),
+            );
+        }
         let this = self.ordinary_create_from_constructor(
             new_target,
             Intrinsic::ObjectPrototype,
@@ -331,29 +354,41 @@ impl<H: Host> Agent<H> {
             function,
             Value::Undefined,
             args,
-            Some(this),
+            Constructed::Base(this),
             Some(new_target),
         );
         self.release(keep);
         result
     }
 
+    /// Whether `function` is a class constructor whose box says derived ([[ConstructorKind]],
+    /// `object/class_constructor.rs`).
+    pub(crate) fn is_derived_constructor(&mut self, function: ObjectRef) -> Completion<bool> {
+        Ok(match &self.engine_object(function)?.kind {
+            ObjectKind::EcmascriptFunction(f) => f
+                .class
+                .as_ref()
+                .is_some_and(|c| c.kind == ConstructorKind::Derived),
+            _ => false,
+        })
+    }
+
     /// The frame of a call of `function` (PrepareForOrdinaryCall, `#sec-prepareforordinarycall`,
     /// OrdinaryCallBindThis and the parameters of FunctionDeclarationInstantiation), not yet
-    /// pushed. `constructed` is the `this` of a [[Construct]] and `new_target` its NewTarget
+    /// pushed. `constructed` is which [[Construct]] it runs and `new_target` its NewTarget
     /// (`None` for a call). An arrow function's frame takes its `this`, its NewTarget and its
     /// function from the arrow's box. Runs no code; its allocations are charged, the frame's own
-    /// bytes with it. A call (no `constructed`) of a class constructor throws its `TypeError`
+    /// bytes with it. A call (`Constructed::None`) of a class constructor throws its `TypeError`
     /// instead ([`Agent::refuse_class_call`]).
     pub(crate) fn make_frame(
         &mut self,
         function: ObjectRef,
         this_argument: Value,
         args: &[Value],
-        constructed: Option<ObjectRef>,
+        constructed: Constructed,
         new_target: Option<ObjectRef>,
     ) -> Completion<Frame> {
-        if constructed.is_none() {
+        if constructed == Constructed::None {
             self.refuse_class_call(function)?;
         }
         let callee = self.function_parts(function)?;
@@ -372,9 +407,11 @@ impl<H: Host> Agent<H> {
         // An arrow function has no [[Construct]] and binds no `this` (OrdinaryCallBindThis,
         // step 2): its frame takes the values the function kept (decision 3, item 4).
         let (this, new_target, function_object) = match (constructed, callee.arrow) {
-            (Some(object), _) => (Value::Object(object), new_target, Some(function)),
-            (None, Some(arrow)) => (arrow.this, arrow.new_target, arrow.function),
-            (None, None) => (
+            (Constructed::Base(object), _) => (Value::Object(object), new_target, Some(function)),
+            // A derived constructor's `this` is the binding of its code ("Classes", item 6).
+            (Constructed::Derived, _) => (Value::Undefined, new_target, Some(function)),
+            (Constructed::None, Some(arrow)) => (arrow.this, arrow.new_target, arrow.function),
+            (Constructed::None, None) => (
                 self.ordinary_call_bind_this(&callee, this_argument)?,
                 new_target,
                 Some(function),

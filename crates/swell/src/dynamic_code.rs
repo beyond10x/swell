@@ -59,7 +59,7 @@ use crate::heap::arena::Handle;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{CompilationType, CompileStrings, Cx, HookCx, Host};
-use crate::interp::frame::{Frame, SlotValue, frame_bytes};
+use crate::interp::frame::{Constructed, Frame, SlotValue, frame_bytes};
 use crate::object::ObjectKind;
 use crate::object::builtin_function::{Activation, KeptRoom};
 use crate::object::class_constructor::ConstructorKind;
@@ -312,7 +312,11 @@ impl<H: Host> Agent<H> {
             return Ok(EvalStart::Done(Value::Undefined));
         }
         let strict = script.strict;
-        let compiled = swell_compiler::compile_eval_with(&script, &mut self.ledger());
+        let compiled = swell_compiler::compile_eval_with(
+            &script,
+            context.in_derived_constructor,
+            &mut self.ledger(),
+        );
         self.drop_tree(script);
         let (code, copy) = match self.compiled_with_source(realm, compiled, copy)? {
             Ok(made) => made,
@@ -458,7 +462,7 @@ impl<H: Host> Agent<H> {
             script,
             strict,
             completion: Value::Undefined,
-            constructed: None,
+            constructed: Constructed::None,
             charged,
         })
     }

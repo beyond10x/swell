@@ -163,11 +163,27 @@ pub(crate) struct Frame {
     pub(crate) strict: bool,
     /// The completion value register of a script.
     pub(crate) completion: Value,
-    /// For a [[Construct]], the `this` object the call answers when its code returns no object.
-    pub(crate) constructed: Option<ObjectRef>,
+    /// Which [[Construct]] the frame runs, if any ("Classes", item 8, `docs/design/engine.md`),
+    /// which decides what its return answers ([`Constructed`]).
+    pub(crate) constructed: Constructed,
     /// The bytes charged for the frame, the key lists of the enumerators and the Iterator
     /// Records on its operand stack, credited when it is popped.
     pub(crate) charged: u64,
+}
+
+/// Which [[Construct]] a frame runs (`#sec-ecmascript-function-objects-construct-argumentslist-newtarget`;
+/// `docs/design/engine.md`, "Classes", item 8), as large as an `Option<ObjectRef>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Constructed {
+    /// A call, eval code or a script: the return answers its value.
+    None,
+    /// The [[Construct]] of a base constructor, with the `this` object made for it: a return
+    /// with no object answers that object (step 10).
+    Base(ObjectRef),
+    /// The [[Construct]] of a derived constructor, which made no object: its `this` is the
+    /// binding of its code, which `KeepThis` copies into the frame's `this` before a return;
+    /// the return answers by steps 10 to 12 (`Agent::derived_result`).
+    Derived,
 }
 
 /// The bytes a frame charges besides its locals and its operand stack.
@@ -253,7 +269,7 @@ impl Frame {
         mark.push(Item::Realm(self.realm));
         mark.push(Item::Script(self.script));
         mark.value(self.completion);
-        if let Some(object) = self.constructed {
+        if let Constructed::Base(object) = self.constructed {
             mark.object(object);
         }
     }
@@ -270,5 +286,15 @@ mod tests {
     fn a_slot_is_as_large_as_a_value() {
         assert_eq!(size_of::<SlotValue>(), size_of::<Value>());
         assert_eq!(size_of::<SlotValue>(), 16);
+    }
+
+    /// "Classes", item 8: the three states of a frame's `constructed` (no [[Construct]], the
+    /// object of a base constructor, a derived constructor) take the room of an
+    /// `Option<ObjectRef>`, so `frame_bytes()` does not grow.
+    #[test]
+    fn constructed_is_as_large_as_an_option_of_an_object() {
+        use super::Constructed;
+        use crate::value::ObjectRef;
+        assert_eq!(size_of::<Constructed>(), size_of::<Option<ObjectRef>>());
     }
 }
