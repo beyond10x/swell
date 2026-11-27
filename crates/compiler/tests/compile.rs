@@ -1016,3 +1016,59 @@ fn an_async_function_reserves_its_last_slot_and_starts_before_its_parameters() {
         g.handlers
     );
 }
+
+/// `story:private-names-in-eval-code`: the public `compile_eval_with` keeps
+/// the first position of a text, as its resolver documents ("an entry of the map of them charged
+/// for each text, the first of a text kept"); a text the positions lack, hops past `u32::MAX`, an
+/// empty text and a text that is no identifier answer an error or are passed over, never a
+/// panic. Strict eval code without a top-level binding in a record counts one record of its own.
+#[test]
+fn eval_private_positions_keep_the_first_of_a_text() {
+    use swell_compiler::compile_eval_with;
+    use swell_syntax::EvalContext;
+    use swell_syntax::ledger::Unlimited;
+    let places = |text: &str,
+                  texts: &[&str],
+                  positions: &[(&str, u32, u32)]|
+     -> Result<Vec<(u32, u32)>, String> {
+        let context = EvalContext {
+            strict_caller: true,
+            in_function: true,
+            in_method: true,
+            private_names: texts,
+            ..EvalContext::default()
+        };
+        let script = parse_eval(&units(text), context, ParseOptions { max_nesting: LIMIT })
+            .map_err(|errors| format!("{errors:?}"))?;
+        let code = compile_eval_with(&script, false, positions, &mut Unlimited)
+            .map_err(|error| error.to_string())?;
+        let mut found: Vec<(u32, u32)> = code
+            .instructions
+            .iter()
+            .chain(code.functions.iter().flat_map(|f| f.instructions.iter()))
+            .filter_map(|i| match i {
+                Instruction::GetPrivate { hops, slot }
+                | Instruction::SetPrivate { hops, slot }
+                | Instruction::PrivateIn { hops, slot } => Some((*hops, *slot)),
+                _ => None,
+            })
+            .collect();
+        found.sort();
+        Ok(found)
+    };
+    assert_eq!(
+        places("this.#x;", &["#x"], &[("#x", 2, 0), ("#x", 5, 3)]),
+        Ok(vec![(3, 0)])
+    );
+    assert!(places("this.#x;", &["#x"], &[]).is_err());
+    assert!(places("this.#x;", &["#x"], &[("#x", u32::MAX, 0)]).is_err());
+    assert_eq!(
+        places(
+            "this.#x;",
+            &["", "x", "#", "#x", "#x"],
+            &[("", 1, 1), ("x", 1, 1), ("#", 1, 1), ("#x", 0, 0)]
+        ),
+        Ok(vec![(1, 0)])
+    );
+    assert!(places("this.#y;", &["", "x", "y", "#"], &[("y", 0, 0)]).is_err());
+}

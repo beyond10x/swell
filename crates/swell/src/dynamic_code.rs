@@ -36,11 +36,14 @@
 //! them (`script.rs`).
 //!
 //! A direct `eval` passes its parse and its compile the private names of the classes around
-//! the call (`#sec-performeval`, privateIdentifiers; `docs/design/engine.md`, "Private names",
-//! item 4; `story:private-names-in-eval-code`): `Agent::eval_private_names` walks the caller's
-//! environment chain once, the texts go to `parse_eval_with` (AllPrivateIdentifiersValid) and
-//! the positions (text, hops, slot) to `compile_eval_with`; both lists are charged while they
-//! live and dropped right after the compile. An indirect `eval` and `Function` code pass none.
+//! the call (`#sec-evaldeclarationinstantiation`, steps 4 to 7: privateIdentifiers from the
+//! privateEnv PerformEval passes, and AllPrivateIdentifiersValid; `docs/design/engine.md`,
+//! "Private names", item 4; `story:private-names-in-eval-code`): `Agent::eval_private_names`
+//! walks the caller's environment chain once, the texts go to `parse_eval_with` and the
+//! positions (text, hops, slot) to `compile_eval_with`; both lists are charged while they live
+//! and dropped right after the compile. A direct `eval` whose String holds no `#` code unit
+//! does not walk; an indirect `eval` and `Function` code pass none.
+//!
 //! The code is kept in a script record of its own, and the copy with it (`docs/design/engine.md`,
 //! decision 4, "Source text."): for eval code the String PerformEval parsed, for the `Function`
 //! constructor the whole text of its last parse, `function anonymous(` P `\n) {\n` body `\n}`
@@ -214,6 +217,16 @@ impl<H: Host> Agent<H> {
         }
     }
 
+    /// Whether the String `string` holds the code unit `#` (U+0023), which every private name
+    /// of eval code starts with ([`Agent::eval_code_of`]).
+    fn source_holds_hash(&mut self, string: StringRef) -> Completion<bool> {
+        match self.heap.strings.get(string.handle) {
+            Ok(crate::heap::string::HeapString::Latin1(bytes)) => Ok(bytes.contains(&b'#')),
+            Ok(crate::heap::string::HeapString::Utf16(units)) => Ok(units.contains(&0x23)),
+            Err(_) => Err(self.fault()),
+        }
+    }
+
     /// The code units of `string`, copied for a parse: the copy is charged to the memory budget
     /// until it is kept with the code made from it or credited (`script.rs`, [`SourceCopy`]).
     /// The interrupt flag is read first (decision 12): a set flag is cleared and ends the run in
@@ -286,6 +299,18 @@ impl<H: Host> Agent<H> {
 
     /// Steps 4 to 15 of PerformEval for the String `string`, made from `source`, the eval context
     /// derived from the caller's strictness and its function ([`Agent::eval_context`]).
+    ///
+    /// privateIdentifiers (`#sec-evaldeclarationinstantiation`, steps 4 to 7, which PerformEval
+    /// reaches with the caller's PrivateEnvironment as privateEnv): a direct `eval` walks the
+    /// caller's records for private names ([`Agent::eval_private_names`]) only when its String
+    /// holds a `#` code unit. Every PrivateIdentifier of eval code starts with a literal `#`, also
+    /// when its IdentifierName is written with escapes (`#\u{61}`; an escape such as `\u{23}` is
+    /// no `#`), so a String without one has no private name, and AllPrivateIdentifiersValid holds for it with
+    /// an empty list: the walk would find names nobody reads. The scan reads each code unit once;
+    /// `eval` charges a step per code unit of the same String in this entry
+    /// ([`Agent::parse_eval_code`], right after the walk), so the scan is covered by that charge.
+    /// A String with a `#` only in a string literal or a comment walks as one with a private
+    /// name does.
     fn eval_code_of(
         &mut self,
         string: StringRef,
@@ -312,17 +337,32 @@ impl<H: Host> Agent<H> {
         )?;
         // Steps 7 to 11: the flags.
         let context = self.eval_context(strict_caller, function)?;
-        // privateIdentifiers (step 12): for a direct `eval`, the private names of the caller's
-        // environment chain (`Agent::eval_private_names`), the texts for the parse and the
-        // positions for the compile; none for an indirect one. The direct `eval` pushed no frame
-        // before its parse: the running frame is the caller's. The lists are charged while they
-        // live and credited once the code is compiled.
+        // privateIdentifiers (`#sec-evaldeclarationinstantiation`, steps 4 to 7): for a direct
+        // `eval` whose String holds a `#`, the private names of the caller's environment chain
+        // (`Agent::eval_private_names`), the texts for the parse and the positions for the
+        // compile; none for an indirect one or a String without `#` (the doc of this function).
+        // The direct `eval` pushed no frame before its parse: the running frame is the caller's.
+        // The lists are charged while they live and credited once the code is compiled.
         let mut texts = ChargedVec::new();
         let mut places = ChargedVec::new();
-        if matches!(kind, CompilationType::DirectEval) {
+        if matches!(kind, CompilationType::DirectEval) && self.source_holds_hash(string)? {
             let env = self.top_frame()?.env;
             self.eval_private_names(env, &mut texts, &mut places)?;
         }
+        #[cfg(test)]
+        WALKED_PRIVATE_NAMES.with(|walked| {
+            let at = |n: u32| usize::try_from(n).unwrap_or(usize::MAX);
+            *walked.borrow_mut() = places
+                .iter()
+                .map(|&(start, end, hops, _)| {
+                    let text = texts.get(at(start)..at(end)).unwrap_or_default();
+                    (
+                        alloc::string::String::from_utf8_lossy(text).into_owned(),
+                        hops,
+                    )
+                })
+                .collect();
+        });
         let mut names = ChargedVec::new();
         let mut positions = ChargedVec::new();
         self.reserve_vec(&mut names, places.len())?;
@@ -426,7 +466,9 @@ impl<H: Host> Agent<H> {
     /// `realm`, the copy credited. A step per code unit of the String is charged before the copy
     /// (`Agent::charge_steps`, which reads the interrupt flag first). Not inlined into the run
     /// loop, whose frame stays as small as it was. The context's private names are the
-    /// privateIdentifiers of AllPrivateIdentifiersValid.
+    /// privateIdentifiers of AllPrivateIdentifiersValid (`#sec-evaldeclarationinstantiation`,
+    /// steps 4 to 7, checked here at the parse, before the var-conflict checks of its step 3 that
+    /// the run makes: both are a `SyntaxError` before any code of the eval runs).
     #[inline(never)]
     fn parse_eval_code(
         &mut self,
@@ -1065,10 +1107,65 @@ impl<H: Host> Agent<H> {
 }
 
 #[cfg(test)]
+std::thread_local! {
+    /// The list the last direct `eval` of the thread gave its parse and its compile, as
+    /// (text, hops), in the counting build of the tests; empty when it did not walk.
+    pub(crate) static WALKED_PRIVATE_NAMES: core::cell::RefCell<alloc::vec::Vec<(alloc::string::String, u32)>> =
+        const { core::cell::RefCell::new(alloc::vec::Vec::new()) };
+}
+
+#[cfg(test)]
 mod tests {
+    use super::WALKED_PRIVATE_NAMES;
     use crate::host::hooks::test_host::{agent_with_realm_and, limits};
     use crate::value::Value;
     use crate::{Outcome, Parsed, Source};
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    /// The answer of `source` in a fresh agent and realm, a Number.
+    fn number_of(source: &str) -> f64 {
+        let (mut agent, realm) = agent_with_realm_and(limits());
+        let Ok(Parsed::Parsed(script)) = agent.parse_script(&realm, Source::Utf8(source), None)
+        else {
+            panic!("{source} did not parse");
+        };
+        let answer = match agent.evaluate_script(&script) {
+            Ok(Outcome::Normal(answer)) => agent.heap.roots.get(&answer),
+            other => panic!("{other:?}"),
+        };
+        match answer {
+            Ok(Value::Number(n)) => n,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The walk's own shadow rule (`env/mod.rs`, `Agent::eval_private_names`; `docs/design/
+    /// engine.md`, "Private names", item 4: an inner name hides an outer one of the same text):
+    /// two private records on the chain of a direct `eval` hold `#x`, the inner class's and the
+    /// outer class's, and the list the walk gives holds `#x` once, at the inner record's hops,
+    /// and the outer class's `#y` at more hops. The resolver and the parse keep the first of a
+    /// text too, so this list is the only place the walk's rule shows.
+    #[test]
+    fn the_walk_lists_a_text_once_at_its_innermost_record() {
+        let source = "class O { #x = 1; #y = 2; m() { class I { #x = 3; n(o) { return eval(\"o.#y * 10 + this.#x\"); } } return new I().n(this); } }\nnew O().m();";
+        WALKED_PRIVATE_NAMES.with(|walked| walked.borrow_mut().clear());
+        assert_eq!(number_of(source), 23.0);
+        let walked: Vec<(String, u32)> =
+            WALKED_PRIVATE_NAMES.with(|walked| walked.borrow().clone());
+        let hops = |text: &str| -> Vec<u32> {
+            walked
+                .iter()
+                .filter(|(t, _)| t == text)
+                .map(|&(_, hops)| hops)
+                .collect()
+        };
+        let (x, y) = (hops("#x"), hops("#y"));
+        assert_eq!(x.len(), 1, "#x listed {} times: {walked:?}", x.len());
+        assert_eq!(y.len(), 1, "{walked:?}");
+        assert!(x[0] < y[0], "{walked:?}");
+        assert_eq!(walked.len(), 2, "{walked:?}");
+    }
 
     /// The code units of the String literal the eval code of
     /// [`a_collection_falls_between_the_walk_and_the_run_of_eval_code`] holds.

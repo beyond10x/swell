@@ -1,12 +1,14 @@
-//! Private names in direct eval code (PerformEval, `#sec-performeval`): the eval code is parsed
-//! with the names of the running PrivateEnvironment and its outer ones (privateIdentifiers, for
+//! Private names in direct eval code (`#sec-evaldeclarationinstantiation`, steps 4 to 7, with
+//! the privateEnv of PerformEval, `#sec-performeval`): the eval code is parsed with the names of
+//! the running PrivateEnvironment and its outer ones (privateIdentifiers, for
 //! AllPrivateIdentifiersValid), and `#x`, `o.#x`, `#x in o` and a private method's call in it
 //! evaluate against the Private Names of the classes around the call, as other code does: in
 //! methods, constructors, field initializers, static blocks, the arrows and functions in them,
 //! computed keys, default parameters and inner classes, each evaluation of a class seeing its own
 //! names. An indirect eval and `Function` code have no private names. The walk that lists the
 //! names (`Agent::eval_private_names`, `docs/design/engine.md`, "Private names", item 4) spends a
-//! step per record and lists texts and positions only. Written by
+//! step per record and lists texts and positions only; a direct eval whose String holds no `#`
+//! does not walk. Written by
 //! `story:private-names-in-eval-code`. Run also with the feature `collect-every-safe-point`.
 //!
 //! Each script lists what went wrong and answers the empty string, as written and with a
@@ -449,13 +451,19 @@ const LOOP_STEPS: u64 = if cfg!(feature = "collect-every-safe-point") {
 
 /// The steps of `c.m(true)` (a direct eval) and of `c.m(false)` (an indirect one) at the same
 /// place: in a method of a class with `names` private fields, under `depth` nested blocks whose
-/// `let` bindings live in records (the direct eval names every record around it).
+/// `let` bindings live in records (the direct eval names every record around it). The eval
+/// text is `'#'`, a string literal: a String with a `#` walks, though it names no private name.
 fn eval_steps(names: usize, depth: usize) -> (u64, u64) {
+    eval_steps_of(names, depth, "'#'")
+}
+
+/// [`eval_steps`] with the eval text `text`, written in a JavaScript String literal in `"`.
+fn eval_steps_of(names: usize, depth: usize, text: &str) -> (u64, u64) {
     let fields: String = (0..names).map(|k| format!("#p{k} = {k}; ")).collect();
     let open: String = (0..depth).map(|k| format!("{{ let b{k} = {k}; ")).collect();
     let close = "}".repeat(depth);
     let setup = format!(
-        "class C {{ {fields}m(direct) {{ {open}if (direct) eval(\"1\"); else (0, eval)(\"1\"); {close}return 0; }} }}\nvar c = new C();\n0;"
+        "class C {{ {fields}m(direct) {{ {open}if (direct) eval(\"{text}\"); else (0, eval)(\"{text}\"); {close}return 0; }} }}\nvar c = new C();\n0;"
     );
     let mut agent = agent().unwrap();
     let r = realm(&mut agent);
@@ -540,4 +548,599 @@ fn an_eval_loop_reading_a_private_field_ends_at_the_step_budget() {
         table.join("; ")
     );
     assert!(walk(100, 1) - walk(8, 1) >= 92, "{}", table.join("; "));
+}
+
+/// `source` defines `cases`, a list of `[eval text, wanted answer]`, and a
+/// class `C` whose method `run(src)` returns `eval(src)`; each text runs on a fresh instance and
+/// the script lists every answer that is not the wanted one.
+fn case_list(prelude: &str, cases: &str) -> String {
+    format!(
+        r##"var wrong = [];
+{prelude}
+var cases = [
+{cases}
+];
+cases.forEach(function (k) {{
+  var got;
+  try {{ got = new C().run(k[0]); }} catch (e) {{ got = "threw " + e; }}
+  if (got !== k[1]) wrong.push(JSON.stringify(k[0]) + " => " + String(got));
+}});
+wrong.join(" ;; ");"##
+    )
+}
+
+/// Every shape of eval code between a private reference and the caller's
+/// record (`#sec-performeval` step 16, `#sec-evaldeclarationinstantiation`): top-level `let`,
+/// `const`, `var`, function and class declarations, captured or not; a function declaration of
+/// eval code beside a captured `let` (its closure is the eval code's own record); blocks,
+/// `for (let ...)`, `switch`, `catch` with and without a binding, a generator after a `yield`,
+/// parameter expressions, computed keys, heritage, static blocks, field initializers, nested
+/// classes with their own private names and nested direct evals; and every write form.
+#[test]
+fn eval_code_shapes_count_their_records() {
+    let prelude = r##"class C {
+  #x = 1;
+  #m() { return 2; }
+  get #g() { return 3; }
+  set #g(v) { this.v = v; }
+  static #s = 4;
+  run(src) { return eval(src); }
+}"##;
+    let cases = r##"["this.#x", 1],
+["let a = 10; this.#x + a", 11],
+["let a = 10; (() => a)(); this.#x + a", 11],
+["const a = 10; (() => a)(); (() => this.#x)() + a", 11],
+["let a = 10; function f(o) { return o.#x + a; } f(this)", 11],
+["let a = 10; (() => a)(); function f(o) { return o.#x; } f(this)", 1],
+["function f(o) { return o.#x; } f(this)", 1],
+["var v = 5; function f(o) { return o.#x + v; } f(this)", 6],
+["var v = 5; (() => v)(); this.#x + v", 6],
+["let a = 1; (() => a)(); var v = 5; function f(o) { return o.#x + v + a; } f(this)", 7],
+["const k = 3; class K { #k = k; r(o) { return o.#x + this.#k; } } new K().r(this)", 4],
+["class K { static #y = 1; static r(o) { return o.#x + o.#m() + K.#y; } } K.r(this)", 4],
+["class K { r(o) { return o.#x; } } new K().r(this)", 1],
+["let r = []; for (let i = 0; i < 2; i++) r.push(() => this.#x + i); r[0]() + r[1]()", 3],
+["let s = 0; switch (1) { case 1: let z = 2; s = (() => this.#x + z)(); } s", 3],
+["let s; try { throw 5; } catch (e) { s = (() => this.#x + e)(); } s", 6],
+["let s; try { throw 5; } catch { let q = 1; s = (() => this.#x + q)(); } s", 2],
+["function* g(o) { let q = 1; yield q; return (() => o.#x + q)(); } var it = g(this); it.next(); it.next().value", 2],
+["(function (a = () => this.#x) { let q = 1; return a() + (() => q)(); }).call(this)", 2],
+["class K { [this.#x + 'k']() { return 1; } } typeof K.prototype['1k']", "function"],
+["class K extends (this.#x, Object) { #z = 1; } typeof K", "function"],
+["let o = this; class L { static #w = 1; static { L.got = o.#x + L.#w; } } L.got", 2],
+["class K { f = (o) => o.#x; } new K().f(this)", 1],
+["class K { #x = 5; f(o) { return this.#x; } } new K().f(this)", 5],
+["class K { #x = 5; f(o) { try { return o.#x; } catch (e) { return e instanceof TypeError; } } } new K().f(this)", true],
+["eval('this.#x')", 1],
+["eval('let z = 1; (() => z)(); this.#x + z')", 2],
+["{ let b = 1; (() => b)(); eval('this.#x + b'); }", 2],
+["let a = 1; (() => a)(); class K { #k = 2; m(o) { return eval('o.#x + this.#k + a'); } } new K().m(this)", 4],
+["this.#g = 7; this.v + this.#g", 10],
+["[this.#x] = [9]; ({ a: this.#x } = { a: 8 }); this.#x", 8],
+["this.#x += 4; this.#x", 5],
+["this.#x &&= 6; this.#x", 6],
+["#s in C", true],
+["C.#s", 4],
+["#m in this", true],
+["#g in this", true],
+["this.#m.call(this)", 2],
+["let f = this.#m; f()", 2],
+["`${this.#x}`", "1"],
+["this?.#x", 1],
+["(() => { let a = 1; return () => this.#x + a; })()()", 2],
+["label: { let a = 1; (() => a)(); break label; } this.#x", 1],
+["let a = 1, b = 2; (() => a + b)(); { const c = 3; { let d = 4; (() => c + d)(); this.#x; } }", 1],
+["new (class { #x = 'k'; m(o) { return [this.#x, o.#m()].join(); } })().m(this)", "k,2"],
+["class K extends (class { #h = 1; }) { #x = 2; m(o) { return this.#x + o.#m(); } } new K().m(this)", 4],
+["class K { static { this.z = 0; } } let q = 1; (() => q)(); (() => this.#x + q)()", 2],
+["let a = 1; (() => a)(); (function () { 'use strict'; return this.#x + a; }).call(this)", 2],
+["var o = this; let a = 1; (() => a)(); class K extends (o.#x, Object) { #x = 3; } typeof K", "function"],
+["let a = 1; (() => a)(); class K { static f = (() => a)() + (o => o.#x); } typeof K.f", "string"],
+["(eval)('this.#x')", 1],
+["eval(...['this.#x'])", 1],
+["class K { #x = 5; } this.#x", 1],
+["class K { get #x() { return 5; } set #x(v) {} } this.#x", 1],
+["C.#s = 9; C.#s", 9]"##;
+    // Class code is strict either way: one run, not two, keeps the collect build in its bound.
+    let source = case_list(prelude, cases);
+    assert_eq!(
+        support::script::run(limits(), &source),
+        nothing(),
+        "{source}"
+    );
+}
+
+/// The places of the call in the class (the caller's records between the
+/// eval and the private record): blocks, `for (let ...)`, `catch`, `switch`, parameter
+/// expressions, a generator after a `yield`, an inner class with other and with the same names,
+/// computed keys of an inner class, a class expression's name binding, a static block and a field
+/// initializer with lexical bindings of their own, and a closure eval code returns called after
+/// the method returned (and after a collection).
+#[test]
+fn caller_shapes_count_their_records() {
+    let source = r##"var wrong = [];
+class D {
+  #x = 1;
+  f = (() => { let q = 1; (() => q)(); return eval("this.#x + q"); })();
+  static { let q = 1; (() => q)(); D.sb = eval("new D().#x + q"); }
+  blk() { let b = 2; (() => b)(); { let c = 3; (() => c)(); return eval("this.#x + b + c"); } }
+  forl() { var r = []; for (let i = 0; i < 2; i++) { r.push(eval("(() => this.#x + i)")); } return r[0]() + r[1](); }
+  cat() { try { throw 2; } catch (e) { (() => e)(); return eval("this.#x + e"); } }
+  catnb() { try { throw 2; } catch { let q = 1; (() => q)(); return eval("this.#x + q"); } }
+  sw() { switch (1) { case 1: let z = 2; (() => z)(); return eval("this.#x + z"); } }
+  par(a, f = () => eval("this.#x + a")) { var a2 = 5; (() => a2)(); return f(); }
+  def(a = eval("this.#x")) { return a; }
+  *gen() { let q = 1; (() => q)(); yield 0; yield eval("this.#x + q"); }
+  nested() { class N { #y = 2; m(o) { return eval("o.#x + this.#y"); } } return new N().m(this); }
+  same() { class N { #x = 5; m() { let a = 1; (() => a)(); return eval("this.#x + a"); } } return new N().m(); }
+  ck() { var got; class N { #y; [(got = eval("this.#x"), "k")]() {} } return got; }
+  ckInner() { var got; class N { #x = 9; static [(got = eval("#x in this"), "k")]() {} } return got; }
+  closure() { let a = 1; (() => a)(); return eval("() => this.#x + a"); }
+  self() { var E = class Named { #n = 3; m(o) { return eval("o.#x + this.#n + typeof Named"); } }; return new E().m(this); }
+  her() { class I extends (eval("#x in this") ? Object : Array) { #x; } return Object.getPrototypeOf(I) === Object; }
+  herRead() { var got; class I extends (got = eval("this.#x"), Object) { #x = 7; } return got; }
+}
+var d = new D(), g = d.gen(), c = d.closure();
+g.next();
+var answers = [d.f, D.sb, d.blk(), d.forl(), d.cat(), d.catnb(), d.sw(), d.par(1), d.def(), g.next().value,
+  d.nested(), d.same(), d.ck(), d.ckInner(), c(), d.self(), d.her(), d.herRead()].join();
+var want = "2,2,6,3,3,2,3,2,1,2,3,6,1,false,2,4function,true,1";
+if (answers !== want) wrong.push(answers);
+wrong.join();"##;
+    lists_nothing(source);
+}
+
+/// A direct `eval` in the heritage of a class that declares the name
+/// (`#sec-runtime-semantics-classdefinitionevaluation`: the running PrivateEnvironment while
+/// ClassHeritage is evaluated is outerPrivateEnvironment) is the `SyntaxError` of
+/// AllPrivateIdentifiersValid, with the call directly in the heritage and not inside a function.
+#[test]
+fn a_direct_eval_in_the_heritage_does_not_see_the_class_names() {
+    let source = r##"var wrong = [], h;
+try { class D extends (eval("#d in {}") ? Object : Object) { #d; } h = "none"; }
+catch (e) { h = e instanceof SyntaxError ? "SE" : "other " + e; }
+if (h !== "SE") wrong.push("heritage " + h);
+wrong.join();"##;
+    lists_nothing(source);
+}
+
+/// What must stay an early error in direct eval code, thrown by the call as a
+/// `SyntaxError` before any of the eval text runs, and the forms of a call that are no direct
+/// `eval` (`#sec-function-calls-runtime-semantics-evaluation`).
+#[test]
+fn early_errors_of_direct_eval_code_stay_errors() {
+    let source = r##"var wrong = [];
+globalThis.side = 0;
+class E {
+  #x = 1;
+  m(src) { try { eval(src); return "none"; } catch (e) { return e instanceof SyntaxError ? "SE" : "other " + e; } }
+  alias(src) { var e = eval; try { e(src); return "none"; } catch (x) { return x instanceof SyntaxError ? "SE" : "other " + x; } }
+  opt(src) { try { eval?.(src); return "none"; } catch (x) { return x instanceof SyntaxError ? "SE" : "other " + x; } }
+  glob(src) { try { globalThis.eval(src); return "none"; } catch (x) { return x instanceof SyntaxError ? "SE" : "other " + x; } }
+  fn(src) { try { Function(src); return "none"; } catch (x) { return x instanceof SyntaxError ? "SE" : "other " + x; } }
+  fnEval(src) { try { return Function("s", "return eval(s);").call(this, src), "none"; } catch (x) { return x instanceof SyntaxError ? "SE" : "other " + x; } }
+}
+var e = new E();
+var cases = [
+  ["m", "side = 1; delete this.#x", "SE"],
+  ["m", "side = 1; class K { #x; #x; }", "SE"],
+  ["m", "side = 1; class K { #constructor; }", "SE"],
+  ["m", "side = 1; class K { #y; } this.#y", "SE"],
+  ["m", "side = 1; class K { #y; } (class { static m(o) { return o.#y; } })", "SE"],
+  ["m", "side = 1; #x", "SE"],
+  ["m", "side = 1; #y in this", "SE"],
+  ["m", "side = 1; super.#x", "SE"],
+  ["m", "side = 1; this.#x; let a; let a;", "SE"],
+  ["m", "class K { #x; get #x() {} }", "SE"],
+  ["m", "class K { #x; m() { return this.#x; } } 0", "none"],
+  ["m", "class K { m(o) { return o.#x; } } 0", "none"],
+  ["alias", "side = 1; this.#x", "SE"],
+  ["opt", "side = 1; this.#x", "SE"],
+  ["glob", "side = 1; this.#x", "SE"],
+  ["fn", "side = 1; return this.#x", "SE"],
+  ["fnEval", "side = 1; this.#x", "SE"],
+  ["m", "side = 1; (0, eval)('this.#x')", "other SyntaxError"],
+];
+cases.forEach(function (k) {
+  var got = e[k[0]](k[1]);
+  if (k[2] === "other SyntaxError") { if (side !== 1) wrong.push("no run " + k[1]); side = 0; return; }
+  if (got !== k[2]) wrong.push(k[0] + " " + JSON.stringify(k[1]) + " => " + got);
+  if (side !== 0) { wrong.push("ran " + k[0] + " " + k[1]); side = 0; }
+});
+wrong.join(" ;; ");"##;
+    lists_nothing(source);
+}
+
+/// An async method reads the name in a direct eval after an `await`, and an
+/// async function of eval code reads it after an `await` (the job runs after the eval returned).
+#[test]
+fn eval_after_an_await_reads_the_name() {
+    let source = r##"var got = [];
+class A {
+  #x = 1;
+  async m() { let q = 1; (() => q)(); await 0; return eval("this.#x + q"); }
+  run() { return eval("let a = 2; (() => a)(); (async () => { await 0; return this.#x + a; })()"); }
+}
+var a = new A();
+a.m().then(v => got.push(v), e => got.push("threw " + e));
+a.run().then(v => got.push(v), e => got.push("threw " + e));
+0;"##;
+    let mut agent = agent().unwrap();
+    let r = realm(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &r, source),
+        Outcome::Normal("0".to_string())
+    );
+    assert!(matches!(
+        agent.perform_microtask_checkpoint(),
+        Ok(HostOutcome::Normal(_))
+    ));
+    assert_eq!(
+        eval_text(&mut agent, &r, "got.sort().join();"),
+        Outcome::Normal("\"2,3\"".to_string())
+    );
+}
+
+/// The steps of the walk past the unit's table, and its wall time: one direct eval of `'#'`
+/// less an indirect one at 1,000 names and 1 block, 1 name and 300 blocks, 64 and 100 classes
+/// of one name each, and the cost of a direct `eval("1")`, which does not walk, in a function
+/// whose record has many named slots and under a script with many top-level `let`s.
+#[test]
+fn walk_cost_beyond_the_table() {
+    // A measurement: the default build only.
+    if cfg!(feature = "collect-every-safe-point") {
+        return;
+    }
+    let walk = |names: usize, depth: usize| {
+        let (direct, indirect) = eval_steps(names, depth);
+        direct as i64 - indirect as i64
+    };
+    let start = std::time::Instant::now();
+    let cells = [(0, 1), (8, 8), (100, 64), (1000, 1), (1, 300), (1000, 300)];
+    let measured: Vec<String> = cells
+        .iter()
+        .map(|&(n, d)| {
+            let t = std::time::Instant::now();
+            let w = walk(n, d);
+            format!("{n} names {d} blocks: {w} steps ({:?})", t.elapsed())
+        })
+        .collect();
+    println!("walk: {}", measured.join("; "));
+    // 64 and 100 nested classes, one name each, distinct texts: the eval in the innermost.
+    let nested = |levels: usize| {
+        let mut s = String::from("function chain(d) { ");
+        for k in 0..levels {
+            s.push_str(&format!("class K{k} {{ #n{k} = {k}; static m(d) {{ "));
+        }
+        s.push_str("return d ? eval(\"'#'\") : (0, eval)(\"'#'\");");
+        for k in (0..levels).rev() {
+            s.push_str(&format!(" }} }} return K{k}.m(d);"));
+        }
+        s.push_str(" }\n0;");
+        s
+    };
+    for levels in [64usize, 100] {
+        let mut agent = agent().unwrap();
+        let r = realm(&mut agent);
+        assert_eq!(
+            eval_text(&mut agent, &r, &nested(levels)),
+            Outcome::Normal("0".to_string())
+        );
+        let mut steps = |source: &str| {
+            let script = parse(&mut agent, &r, source);
+            let t = std::time::Instant::now();
+            assert!(matches!(
+                agent.evaluate_script(&script).unwrap(),
+                HostOutcome::Normal(_)
+            ));
+            (agent.last_entry_steps().unwrap() as i64, t.elapsed())
+        };
+        let (direct, td) = steps("chain(true);");
+        let (indirect, ti) = steps("chain(false);");
+        println!(
+            "{levels} nested classes: direct less indirect {} steps ({td:?} against {ti:?})",
+            direct - indirect
+        );
+        // Each class's text is compared with every text an inner class listed: those compares
+        // are steps past the first 8 of a record (`env/mod.rs`, `eval_private_names`).
+        let levels = levels as i64;
+        assert!(
+            direct - indirect >= levels * (levels - 1) / 2 - 8 * levels,
+            "{levels} nested classes: the compares of the walk are not charged ({})",
+            direct - indirect
+        );
+    }
+    // A sloppy function whose 1,000 `var`s live in a named record (a direct eval stands in it).
+    let vars: String = (0..1000).map(|k| format!("var v{k} = {k}; ")).collect();
+    let lets: String = (0..1000).map(|k| format!("let g{k} = {k}; ")).collect();
+    let mut agent = agent().unwrap();
+    let r = realm(&mut agent);
+    let setup = format!(
+        "{lets}\nfunction sloppy(direct) {{ {vars} return direct ? eval(\"1\") : (0, eval)(\"1\"); }}\nfunction top(direct) {{ return direct ? eval(\"1\") : (0, eval)(\"1\"); }}\n0;"
+    );
+    assert_eq!(
+        eval_text(&mut agent, &r, &setup),
+        Outcome::Normal("0".to_string())
+    );
+    let mut steps = |source: &str| {
+        let script = parse(&mut agent, &r, source);
+        assert!(matches!(
+            agent.evaluate_script(&script).unwrap(),
+            HostOutcome::Normal(_)
+        ));
+        agent.last_entry_steps().unwrap() as i64
+    };
+    let sloppy = steps("sloppy(true);") - steps("sloppy(false);");
+    let top = steps("top(true);") - steps("top(false);");
+    println!(
+        "no class: a direct eval less an indirect one in a function of 1,000 named vars {sloppy}, under 1,000 global lets {top}; total {:?}",
+        start.elapsed()
+    );
+}
+
+/// The class of [`step_budget_sweep`] and [`a_loop_of_500_evals_with_100_names_keeps_nothing`]:
+/// 100 private names, a method whose direct eval stands under 64 blocks, and a loop of evals.
+fn sweep_setup() -> String {
+    let fields: String = (0..100).map(|k| format!("#p{k} = {k}; ")).collect();
+    let open: String = (0..64)
+        .map(|k| format!("{{ let b{k} = {k}; (() => b{k}); "))
+        .collect();
+    let close = "}".repeat(64);
+    format!(
+        "class C {{ {fields}m() {{ {open}return eval(\"this.#p99 + this.#p0\"); {close} }} loop(n) {{ var s = 0; for (var i = 0; i < n; i++) s += eval(\"this.#p1\"); return s; }} }}\nvar c;\n0;"
+    )
+}
+
+/// The step budget lowered one step at a time across the walk, the parse
+/// and the compile of one direct eval in a class of 100 private names under 64 blocks: each run
+/// ends in `Terminated(StepBudget)` or answers the field, and a second run at the same budget
+/// leaves `heap_bytes()` after a collection where the first left it (nothing of a stopped walk,
+/// parse or compile is kept). The default build only (a fresh agent per budget); in three tests
+/// of one third of the budgets each (`part` 0, 1, 2), so that each stays in its time.
+fn step_budget_sweep(part: u64) {
+    const RUN: &str = "c = new C(); c.m();";
+    // The walk (157 steps), the parse of the eval text and the run of the eval code.
+    const SWEEP: u64 = 171;
+    if cfg!(feature = "collect-every-safe-point") {
+        return;
+    }
+    let setup = sweep_setup();
+    let (setup_steps, total) = {
+        let mut agent = agent().unwrap();
+        let r = realm(&mut agent);
+        let mut steps = |source: &str| {
+            let script = parse(&mut agent, &r, source);
+            assert!(matches!(
+                agent.evaluate_script(&script).unwrap(),
+                HostOutcome::Normal(_)
+            ));
+            agent.last_entry_steps().unwrap()
+        };
+        (steps(&setup), steps(RUN))
+    };
+    assert!(setup_steps + 10 < total - SWEEP, "{setup_steps} {total}");
+    println!("setup {setup_steps} steps, run {total}");
+    let mut ended = 0;
+    let mut answered = 0;
+    let third = SWEEP / 3;
+    let first = total - SWEEP + part * third;
+    let last = if part == 2 { total } else { first + third - 1 };
+    let budgets = first..=last;
+    for budget in budgets {
+        let mut l = limits();
+        l.steps_per_entry = budget;
+        let mut agent = agent_with(l).unwrap();
+        let r = realm(&mut agent);
+        assert_eq!(
+            eval_text(&mut agent, &r, &setup),
+            Outcome::Normal("0".to_string())
+        );
+        let run = parse(&mut agent, &r, RUN);
+        let mut readings = Vec::new();
+        for _ in 0..2 {
+            match agent.evaluate_script(&run).unwrap() {
+                HostOutcome::Terminated(Termination::StepBudget) => ended += 1,
+                HostOutcome::Normal(value) => {
+                    assert_eq!(
+                        support::script::describe(&mut agent, &r, HostOutcome::Normal(value)),
+                        Outcome::Normal("99".to_string()),
+                        "{budget}"
+                    );
+                    answered += 1;
+                }
+                other => panic!("{budget}: {other:?}"),
+            }
+            assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+            readings.push(agent.heap_bytes().unwrap());
+        }
+        assert_eq!(
+            readings[0], readings[1],
+            "{budget}: a stopped eval kept bytes"
+        );
+    }
+    println!("total {total}: {ended} runs ended at the budget, {answered} answered");
+    assert!(ended > 0, "{ended} {answered}");
+    if part == 2 {
+        assert!(answered > 0, "{ended} {answered}");
+    }
+}
+
+/// [`step_budget_sweep`], the lowest third of the budgets (the walk).
+#[test]
+fn step_budget_across_the_walk_keeps_nothing() {
+    step_budget_sweep(0);
+}
+
+/// [`step_budget_sweep`], the middle third of the budgets (the end of the walk).
+#[test]
+fn step_budget_across_the_end_of_the_walk_keeps_nothing() {
+    step_budget_sweep(1);
+}
+
+/// [`step_budget_sweep`], the top third of the budgets (the parse, the compile and the run).
+#[test]
+fn step_budget_across_the_parse_keeps_nothing() {
+    step_budget_sweep(2);
+}
+
+/// 500 direct evals in a loop, each walking a class of 100 private names, leave `heap_bytes()`
+/// after a collection where it was before the loop (the default build; the collect build's
+/// loop is `an_eval_loop_reading_a_private_field_ends_at_the_step_budget`).
+#[test]
+fn a_loop_of_500_evals_with_100_names_keeps_nothing() {
+    if cfg!(feature = "collect-every-safe-point") {
+        return;
+    }
+    let setup = sweep_setup();
+    let mut agent = agent().unwrap();
+    let r = realm(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &r, &setup),
+        Outcome::Normal("0".to_string())
+    );
+    let run = parse(&mut agent, &r, "c = new C(); c.loop(500);");
+    let mut readings = Vec::new();
+    for _ in 0..2 {
+        assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+        readings.push(agent.heap_bytes().unwrap());
+        let outcome = agent.evaluate_script(&run).unwrap();
+        assert_eq!(
+            support::script::describe(&mut agent, &r, outcome),
+            Outcome::Normal("500".to_string())
+        );
+    }
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    readings.push(agent.heap_bytes().unwrap());
+    assert_eq!(
+        readings[1], readings[2],
+        "500 evals kept bytes: {readings:?}"
+    );
+}
+
+/// No private name exists outside a class body, so a direct `eval("1")` in a
+/// non-strict function with no class around it should cost about what it cost before
+/// `story:private-names-in-eval-code` (a step per record at most, as `docs/design/engine.md`,
+/// "Private names", item 4, states the walk). The walk reads every slot of every record whose
+/// slots are named, and a function with a direct `eval` names all of its slots: with 1,000
+/// `var`s one direct eval spends 992 steps more than an indirect one at the same place, for a
+/// list it always finds empty.
+#[test]
+fn a_direct_eval_outside_every_class_pays_no_step_per_slot() {
+    // 1,000 `var`s; 200 with a collection at every safe point.
+    let count = if cfg!(feature = "collect-every-safe-point") {
+        200
+    } else {
+        1000
+    };
+    let vars: String = (0..count).map(|k| format!("var v{k} = {k}; ")).collect();
+    let mut agent = agent().unwrap();
+    let r = realm(&mut agent);
+    let setup = format!(
+        "function sloppy(direct) {{ {vars} return direct ? eval(\"1\") : (0, eval)(\"1\"); }}\n0;"
+    );
+    assert_eq!(
+        eval_text(&mut agent, &r, &setup),
+        Outcome::Normal("0".to_string())
+    );
+    let mut steps = |source: &str| {
+        let script = parse(&mut agent, &r, source);
+        assert!(matches!(
+            agent.evaluate_script(&script).unwrap(),
+            HostOutcome::Normal(_)
+        ));
+        agent.last_entry_steps().unwrap() as i64
+    };
+    let extra = steps("sloppy(true);") - steps("sloppy(false);");
+    assert!(
+        extra <= 16,
+        "a direct eval in a function of {count} vars and no class spends {extra} steps more than an indirect one"
+    );
+}
+
+/// The steps one direct eval of `text` spends more than an indirect one at the same place, in a
+/// non-strict function of `count` `var`s (a function with a direct eval names all of its slots)
+/// and no class around it; `text` is written in a JavaScript String literal in `"`.
+fn sloppy_extra_steps(count: usize, text: &str) -> i64 {
+    let vars: String = (0..count).map(|k| format!("var v{k} = {k}; ")).collect();
+    let mut agent = agent().unwrap();
+    let r = realm(&mut agent);
+    let setup = format!(
+        "function sloppy(direct) {{ {vars} return direct ? eval(\"{text}\") : (0, eval)(\"{text}\"); }}\n0;"
+    );
+    assert_eq!(
+        eval_text(&mut agent, &r, &setup),
+        Outcome::Normal("0".to_string())
+    );
+    let mut steps = |source: &str| {
+        let script = parse(&mut agent, &r, source);
+        assert!(matches!(
+            agent.evaluate_script(&script).unwrap(),
+            HostOutcome::Normal(_)
+        ));
+        agent.last_entry_steps().unwrap() as i64
+    };
+    steps("sloppy(true);") - steps("sloppy(false);")
+}
+
+/// A direct eval walks the caller's records whenever its String holds a `#` code unit, also
+/// when the `#` stands only in a string literal or a comment (the scan looks at code units, not
+/// tokens): in a function of 1,000 named `var`s (100 with a collection at every safe point) and
+/// no class, `eval("'#'")` and `eval("1 // #")` each spend a step per slot past the first 8 of
+/// the record and a step per record more than an indirect eval of the same text, where
+/// `eval("1")` spends none of them. A String without `#` costs the same at any number of
+/// private names and blocks around it.
+#[test]
+fn a_hash_in_a_string_literal_or_a_comment_walks_the_records() {
+    let count = if cfg!(feature = "collect-every-safe-point") {
+        100
+    } else {
+        1000
+    };
+    let plain = sloppy_extra_steps(count, "1");
+    let literal = sloppy_extra_steps(count, "'#'");
+    let comment = sloppy_extra_steps(count, "1 // #");
+    println!(
+        "{count} vars, no class: a direct eval less an indirect one: \"1\" {plain}, \"'#'\" {literal}, \"1 // #\" {comment}"
+    );
+    let floor = count as i64 - 8;
+    assert!(plain <= 16, "{plain}");
+    assert!(literal - plain >= floor, "{literal} against {plain}");
+    assert!(comment - plain >= floor, "{comment} against {plain}");
+    let no_hash = |names: usize, depth: usize| {
+        let (direct, indirect) = eval_steps_of(names, depth, "1");
+        direct as i64 - indirect as i64
+    };
+    let (near, far) = (no_hash(0, 1), no_hash(100, 64));
+    assert_eq!(
+        near, far,
+        "eval(\"1\") at 0 names, 1 block and 100 names, 64 blocks"
+    );
+}
+
+/// A direct eval whose text holds no `#` does not walk, and the direct eval its code makes with
+/// a text built at run time walks at its own time: the outer texts below have no `#`, the inner
+/// String gets it from `String.fromCharCode(35)`, and the inner eval reads, writes and tests
+/// the field of the class around the outer call, also from a function the outer eval code made
+/// and that runs after the outer eval returned. A `#` written as an escape (`\u{23}`) is no `#`:
+/// `this.\u{23}x` names no private name and is a `SyntaxError` in the class too.
+#[test]
+fn an_inner_eval_of_a_text_built_at_run_time_walks_at_its_own_time() {
+    lists_nothing(
+        r##"var wrong = [];
+class C {
+  #x = 1;
+  read() { return eval("eval(['this.', String.fromCharCode(35), 'x'].join(''))"); }
+  write() { return eval("var h = String.fromCharCode(35); eval('this.' + h + 'x = 5, this.' + h + 'x')"); }
+  has(o) { return eval("eval(String.fromCharCode(35) + 'x in o')"); }
+  later() { return eval("(function (o) { return eval('o.' + String.fromCharCode(35) + 'x'); })"); }
+  escaped() { try { eval("this.\\u{23}x"); return "no error"; } catch (e) { return e instanceof SyntaxError; } }
+}
+var c = new C(), f = c.later();
+if (c.escaped() !== true) wrong.push("escaped " + c.escaped());
+if (c.read() !== 1) wrong.push("read " + c.read());
+if (c.write() !== 5) wrong.push("write");
+if (c.has(c) !== true || c.has({}) !== false) wrong.push("has");
+if (f(c) !== 5) wrong.push("later " + f(c));
+wrong.join();"##,
+    );
 }

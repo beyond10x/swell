@@ -1203,10 +1203,8 @@ mod tests {
     /// `eval` charges a step per code unit of its source before it parses
     /// (`dynamic_code.rs`, `parse_eval_code`), so `f()` carries the 156 code units of its ten
     /// `eval` sources (72, eight times `delete b<i>` with 75 in sum, and 9) on top of its 341
-    /// there, and since `story:private-names-in-eval-code` each of its ten direct `eval`s walks
-    /// the caller's records for private names, a step per record (`env/mod.rs`,
-    /// `eval_private_names`; one record, `f`'s): 10 more. `o.x = 1` compacts the list (16
-    /// entries visited) and `o.y = 1`, the same instructions, does not.
+    /// there. `o.x = 1` compacts the list (16 entries visited) and `o.y = 1`, the same
+    /// instructions, does not.
     #[test]
     fn step_totals_are_unchanged() {
         const SETUP: &str = "var a0 = [0, 1, 2]; \
@@ -1236,7 +1234,7 @@ mod tests {
             ("a1000.length = 1", 2_010),
             ("o.x = 1", 24),
             ("o.y = 1", 8),
-            ("f()", 507),
+            ("f()", 497),
             ("b0x1()", 12),
             ("b1x1()", 14),
             ("b1000x1()", 2_012),

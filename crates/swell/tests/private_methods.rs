@@ -893,9 +893,9 @@ new C().f() === 4 && syntax(function () { Function("o", "return o.#x;"); })
     );
 }
 
-/// A direct `eval` with a private name (`#sec-performeval`, step 12, privateIdentifiers;
-/// `story:private-names-in-eval-code`, which replaced the refusal `private name #p in direct
-/// eval code is not supported before slice 8` here). A name that a class enclosing the call
+/// A direct `eval` with a private name (`#sec-evaldeclarationinstantiation`, steps 4 to 7,
+/// privateIdentifiers; `story:private-names-in-eval-code`, which replaced the refusal `private
+/// name #p in direct eval code is not supported before slice 8` here). A name that a class enclosing the call
 /// declares runs: in a method, a private method, a static method, an arrow in a method and a
 /// method of an inner class reading the outer class's name. A name no enclosing class declares
 /// is the early `SyntaxError` the standard gives: in a method, beside a declared name, outside

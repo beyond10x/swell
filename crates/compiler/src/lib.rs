@@ -140,8 +140,9 @@ pub fn compile_script_with(script: &Script, ledger: &mut dyn Ledger) -> Result<C
 /// "Classes", item 6).
 ///
 /// `private_names` are the positions of the private names of the caller of a direct `eval`
-/// (`#sec-performeval`, privateIdentifiers; `docs/design/engine.md`, "Private names", item 4),
-/// the names the parse took in its context: each its text (`#x`), the hops from the caller's
+/// (privateIdentifiers of `#sec-evaldeclarationinstantiation`, steps 4 to 7, from the privateEnv
+/// PerformEval passes; `docs/design/engine.md`, "Private names", item 4), the names the parse
+/// took in its context: each its text (`#x`), the hops from the caller's
 /// LexicalEnvironment to the private record that holds its Private Name, and the slot there. A
 /// private reference of the eval code that no class of the eval code declares resolves to it
 /// with the hops counted as the eval code's own records (the record of its top level, or the
@@ -1623,8 +1624,8 @@ mod tests {
         );
     }
 
-    /// The private names of the caller of a direct `eval` (`#sec-performeval`;
-    /// `story:private-names-in-eval-code`): a private reference the eval code does not declare
+    /// The private names of the caller of a direct `eval` (`#sec-evaldeclarationinstantiation`,
+    /// privateIdentifiers; `story:private-names-in-eval-code`): a private reference the eval code does not declare
     /// resolves to the caller's position, its hops counted as the eval code's own records (a
     /// block's record; the record of its top-level bindings; for strict code without that one
     /// the empty record PerformEval makes, step 16) plus the caller's hops; a name a class of the

@@ -193,10 +193,11 @@ pub struct EvalContext<'a> {
     pub in_derived_constructor: bool,
     /// inClassFieldInitializer: that function has a [[ClassFieldInitializerName]].
     pub in_class_field_initializer: bool,
-    /// privateIdentifiers: the descriptions (`#x`) of the Private Names of the running
-    /// PrivateEnvironment and its outer ones, each once, for a direct `eval`; empty for an
-    /// indirect one. AllPrivateIdentifiersValid of the eval code takes them as the names
-    /// declared around it.
+    /// privateIdentifiers (`#sec-evaldeclarationinstantiation`, steps 4 to 6): the
+    /// descriptions (`#x`) of the Private Names of the privateEnv PerformEval passes (the
+    /// caller's running PrivateEnvironment) and its outer ones, each once, for a direct `eval`;
+    /// empty for an indirect one. AllPrivateIdentifiersValid of the eval code (step 7 there)
+    /// takes them as the names declared around it.
     pub private_names: &'a [&'a str],
 }
 
@@ -235,10 +236,13 @@ impl From<bool> for EvalContext<'_> {
 /// static blocks are looked into, its methods are not) is a SyntaxError at the first such
 /// `arguments`, the one error of the parse (`story:eval-in-class-field-initializers`).
 ///
-/// AllPrivateIdentifiersValid (`#sec-static-semantics-allprivateidentifiersvalid`, PerformEval's
-/// step 12 with privateIdentifiers): each `a.#x`, `a?.#x` and `#x in a` of the body names a
-/// private name of [`EvalContext::private_names`] or of a class of the eval code around it, or it
-/// is a SyntaxError; an indirect `eval` passes none (`story:private-names-in-eval-code`).
+/// AllPrivateIdentifiersValid (`#sec-static-semantics-allprivateidentifiersvalid`, with
+/// privateIdentifiers, in `#sec-evaldeclarationinstantiation`, steps 4 to 7): each `a.#x`,
+/// `a?.#x` and `#x in a` of the body names a private name of [`EvalContext::private_names`] or
+/// of a class of the eval code around it, or it is a SyntaxError; an indirect `eval` passes none
+/// (`story:private-names-in-eval-code`). The draft checks it after the var-conflict checks of
+/// step 3 there; both are a SyntaxError before any of the eval code runs, and the var checks
+/// run only for non-strict eval code, so this parse checks it first.
 pub fn parse_eval<'a>(
     source: &[u16],
     context: impl Into<EvalContext<'a>>,

@@ -532,8 +532,10 @@ impl<H: Host> Agent<H> {
     }
 
     /// The private names a direct `eval` whose caller's LexicalEnvironment is `env` sees
-    /// (`#sec-performeval`, privateIdentifiers: the names of the running PrivateEnvironment and
-    /// its outer ones; `docs/design/engine.md`, "Private names", item 4). The walk goes from `env`
+    /// (`#sec-evaldeclarationinstantiation`, steps 4 to 6, privateIdentifiers: the names of the
+    /// privateEnv PerformEval passes, the caller's running PrivateEnvironment, and its outer
+    /// ones; `docs/design/engine.md`, "Private names", item 4). `Agent::eval_code_of` calls it
+    /// only for a direct `eval` whose String holds a `#`. The walk goes from `env`
     /// outward once and lists each slot that holds a Private Name, in a record whose slots are
     /// named: a class's private record names them whenever a direct `eval` stands in the class
     /// body (`swell-compiler`, `resolve.rs`, `mark_named`), and only such an `eval` starts this

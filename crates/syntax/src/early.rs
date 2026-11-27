@@ -88,8 +88,8 @@
 //!   names a private name a class body around it declares; the names in scope enter after the
 //!   heritage of a class and leave after its `}`, with no enclosing names in a script, a
 //!   function body, `Function` code or the code of an indirect `eval`, and the private names of
-//!   the classes around the call in the code of a direct `eval` (`#sec-performeval`,
-//!   privateIdentifiers, [`check`]'s `private_names`);
+//!   the classes around the call in the code of a direct `eval` (privateIdentifiers,
+//!   `#sec-evaldeclarationinstantiation`, steps 4 to 7; [`check`]'s `private_names`);
 //! - `#sec-delete-operator-static-semantics-early-errors`: `delete` of a private reference;
 //! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`:
 //!   IsValidRegularExpressionLiteral, the flags and then ParsePattern of `swell-regexp` with
@@ -274,8 +274,8 @@ const STRICT_RESERVED: [&str; 9] = [
 /// pattern of a regular expression literal is parsed with the nesting limit `max_nesting`.
 /// When a pattern is refused, the first refusal in source order is the only error.
 /// `private_names` are the private names declared around the code, in scope from its start
-/// (AllPrivateIdentifiersValid with eval code's privateIdentifiers, `#sec-performeval`); none
-/// for a script and `Function` code.
+/// (AllPrivateIdentifiersValid with eval code's privateIdentifiers,
+/// `#sec-evaldeclarationinstantiation`, steps 4 to 7); none for a script and `Function` code.
 ///
 /// Every structure of the walk is charged to `m` before it grows and credited when it is
 /// dropped: the frames of lexical names (an entry each, [`crate::ledger::map_entry_bytes`], and
