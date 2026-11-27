@@ -370,7 +370,8 @@ fn class_with_fields(n: u32) -> String {
 }
 
 /// How many instances each round of [`constructions_of_a_class_with_100_fields_are_charged_and_freed`]
-/// constructs: the story's 10,000 under `SWELL_FULL_COUNTS=1` and 500 in the gate; with a
+/// constructs: 3,000 under `SWELL_FULL_COUNTS=1` (the story's 10,000 took 6.5 CPU s, over the
+/// 2.5 s of a test there; about 0.32 ms a construction) and 500 in the gate; with a
 /// collection at every safe point, where each of the about 205 instructions of a construction
 /// marks the whole heap (the realm's, about 400 KB), [`COLLECT_FULL`] under
 /// `SWELL_FULL_COUNTS=1` (the story's 1,000 take far over the 2.5 s of a test there) and 4 in
@@ -380,7 +381,7 @@ fn class_with_fields(n: u32) -> String {
 fn constructions() -> u32 {
     let full = std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1");
     match (cfg!(feature = "collect-every-safe-point"), full) {
-        (false, true) => 10_000,
+        (false, true) => 3_000,
         (false, false) => 500,
         (true, true) => COLLECT_FULL,
         (true, false) => 4,
@@ -542,4 +543,102 @@ fn new_in_an_initializer_stops_at_frame_depth() {
     assert_eq!(run(limits, source), passed(), "{source}");
     let strict = format!("\"use strict\";\n{source}");
     assert_eq!(run(limits, &strict), passed(), "{strict}");
+}
+
+/// PerformEval (`#sec-performeval`) in a field initializer is refused until
+/// `story:eval-in-class-field-initializers` brings ContainsArguments: a direct eval whose
+/// GetThisEnvironment is a field initializer's, in an instance or a static field and through an
+/// arrow in one, throws the `SyntaxError` `eval in a class field initializer is not supported
+/// before slice 8`, whatever its code (`arguments`, an arrow naming it, `1`); an indirect eval
+/// in an initializer and a direct eval in a method of the same class run.
+#[test]
+fn a_direct_eval_in_an_initializer_is_refused() {
+    both_pass(
+        "function refused(f) {\n\
+           try { f(); return \"none\"; } catch (e) {\n\
+             return e instanceof SyntaxError\n\
+               && e.message === \"eval in a class field initializer is not supported before slice 8\"\n\
+               ? \"refused\" : String(e);\n\
+           }\n\
+         }\n\
+         var r = [\n\
+           refused(function () { new (class { x = eval(\"arguments\"); })(); }),\n\
+           refused(function () { new (class { x = eval(\"() => arguments\"); })(); }),\n\
+           refused(function () { new (class { x = eval(\"1\"); })(); }),\n\
+           refused(function () { new (class { x = (() => eval(\"1\"))(); })(); }),\n\
+           refused(function () { class S { static x = eval(\"arguments\"); } }),\n\
+           refused(function () { class S { static x = eval(\"() => arguments\"); } }),\n\
+           refused(function () { class S { static x = eval(\"1\"); } })\n\
+         ];\n\
+         class G { a = (0, eval)(\"1\"); static b = (0, eval)(\"2\"); m() { return eval(\"3\"); } static n() { return eval(\"4\"); } }\n\
+         var g = new G();\n\
+         r.join() === \"refused,refused,refused,refused,refused,refused,refused\"\n\
+           && g.a === 1 && G.b === 2 && g.m() === 3 && G.n() === 4;",
+    );
+}
+
+/// A computed key made at run time (a String or a Symbol made by the key's expression) lives in
+/// its hidden binding from the class's definition to every construction: three classes made in
+/// a loop, garbage made between, then each constructed; with a collection at every safe point a
+/// key the collector does not reach from its binding is freed before the construction reads it.
+#[test]
+fn a_computed_key_made_at_run_time_lives_until_the_constructions() {
+    both_pass(
+        "var cs = [];\n\
+         for (let i = 0; i < 3; i++)\n\
+           cs.push(class { ['k' + i] = i; [Symbol('s' + i)] = i; static ['s' + i] = i; });\n\
+         var junk = [];\n\
+         for (var j = 0; j < 20; j++) junk.push({ j: j });\n\
+         cs.map(function (C, i) {\n\
+           var o = new C();\n\
+           return Object.keys(o).join() + Object.getOwnPropertySymbols(o)[0].description + C['s' + i];\n\
+         }).join() === 'k0s00,k1s11,k2s22';",
+    );
+}
+
+/// The error site of a field (`Agent::last_entry_error_site`): the `TypeError` of a
+/// DefineField that the instance refuses is at the field (line 3, column 3), and the
+/// `TypeError` of a computed key's ToPropertyKey is at the key (line 3, column 4, after `[`).
+#[test]
+fn a_field_error_is_reported_at_the_field_and_at_its_key() {
+    for (source, site) in [
+        (
+            "class C {\n  a = 1;\n  b = Object.preventExtensions(this) && 0;\n  c = 2;\n}\nnew C();",
+            (3, 3),
+        ),
+        (
+            "class C {\n  a = 1;\n  [Object.create(null)] = 2;\n}\n0;",
+            (3, 4),
+        ),
+    ] {
+        let mut agent = agent().unwrap();
+        let realm = realm(&mut agent);
+        let script = parse(&mut agent, &realm, source);
+        let outcome = agent.evaluate_script(&script).unwrap();
+        let found = agent
+            .last_entry_error_site()
+            .unwrap()
+            .map(|s| (s.line, s.column));
+        assert_eq!(
+            describe(&mut agent, &realm, outcome),
+            Outcome::Throw("TypeError".to_string()),
+            "{source}"
+        );
+        assert_eq!(found, Some(site), "{source}");
+    }
+}
+
+/// A field named `__proto__` by a literal key is DefineField like any other: an own data
+/// property of the instance (or of the class, for a static field), the prototype unchanged; not
+/// the `__proto__: v` of an object literal.
+#[test]
+fn a_literal_proto_field_is_an_own_property() {
+    both_pass(
+        "class C { __proto__ = 5; }\n\
+         class S { static __proto__ = Array.prototype; }\n\
+         var c = new C();\n\
+         Object.getPrototypeOf(c) === C.prototype && Object.getOwnPropertyDescriptor(c, '__proto__').value === 5\n\
+           && Object.getPrototypeOf(S) === Function.prototype\n\
+           && Object.getOwnPropertyDescriptor(S, '__proto__').value === Array.prototype;",
+    );
 }
