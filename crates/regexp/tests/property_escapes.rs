@@ -9,7 +9,7 @@
 
 use swell_regexp::{
     Budget, Flags, MAX_GRANT, ParseError, Program, Stop, Subject, Unlimited, compile_pattern,
-    parse_pattern, search,
+    match_at, parse_pattern, search,
 };
 use swell_unicode::{Property, lone_property, property_value};
 
@@ -483,4 +483,352 @@ fn a_long_subject_of_one_property_matches_within_the_budget() {
         "{} steps for {points} code points",
         budget.steps
     );
+}
+
+// The class memo of the matcher (`ClassSet::contains_around`) against an oracle without it: a
+// search of `^(?:C)$` on the one character alone (a machine of its own, so no earlier answer),
+// over subjects read up, down, in a linear congruential order and back and forth, forwards,
+// inside a lookbehind and with backtracking.
+
+/// A linear congruential sequence (the constants of Numerical Recipes), no dependency.
+#[cfg(test)]
+fn lcg(seed: u32) -> impl FnMut() -> u32 {
+    let mut x = seed;
+    move || {
+        x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        x
+    }
+}
+
+/// U+0000, U+10FFFF, the ends of ASCII and of the surrogates, and for up to 50 ranges spread
+/// over the list of each of `properties` (its first and last range among them) the code points
+/// one before, at and one after each end of the range; sorted, each once.
+#[cfg(test)]
+fn edges(properties: &[Property]) -> Vec<u32> {
+    let mut points = vec![
+        0, 1, 0x7F, 0x80, 0xD7FF, 0xD800, 0xDBFF, 0xDC00, 0xDFFF, 0xE000, 0xFFFF, 0x10000,
+        0x10FFFE, 0x10FFFF,
+    ];
+    for property in properties {
+        let ranges: Vec<(u32, u32)> = property.ranges().collect();
+        let step = (ranges.len() / 50).max(1);
+        for &(first, last) in ranges.iter().step_by(step).chain(ranges.last()) {
+            for c in [
+                first.wrapping_sub(1),
+                first,
+                first + 1,
+                last.wrapping_sub(1),
+                last,
+                last + 1,
+            ] {
+                if c <= 0x10FFFF {
+                    points.push(c);
+                }
+            }
+        }
+    }
+    points.sort_unstable();
+    points.dedup();
+    points
+}
+
+/// `points` with a `-` put between a high and a low surrogate that would meet, so that each
+/// code point stays one character of the subject under `u`.
+#[cfg(test)]
+fn apart(points: &[u32]) -> Vec<u32> {
+    let mut out: Vec<u32> = Vec::with_capacity(points.len());
+    for &c in points {
+        if (0xDC00..=0xDFFF).contains(&c)
+            && out.last().is_some_and(|p| (0xD800..=0xDBFF).contains(p))
+        {
+            out.push(0x2D);
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// The orders a subject is read in: up, down, a linear congruential shuffle, and back and forth
+/// (of each three points in a row the middle one, the last, then the first).
+#[cfg(test)]
+fn orders(points: &[u32]) -> Vec<(&'static str, Vec<u32>)> {
+    let up = points.to_vec();
+    let down: Vec<u32> = points.iter().rev().copied().collect();
+    let mut shuffled = points.to_vec();
+    let mut next = lcg(0x5EED);
+    for i in (1..shuffled.len()).rev() {
+        let j = (next() as usize) % (i + 1);
+        shuffled.swap(i, j);
+    }
+    let mut zigzag = Vec::new();
+    for window in points.windows(3) {
+        zigzag.extend([window[1], window[2], window[0]]);
+    }
+    [
+        ("up", up),
+        ("down", down),
+        ("shuffled", shuffled),
+        ("zigzag", zigzag),
+    ]
+    .into_iter()
+    .map(|(name, order)| (name, apart(&order)))
+    .collect()
+}
+
+/// The classes the cases take, each with its complement and its flags: a negated class and its
+/// twin, `\P` inside a negated class, `i` with `u` (the answer for the folded character), own
+/// ranges beside property escapes (the gap between two ranges of the class), `\s` and `\w`,
+/// `\P{Any}`, and an escape outside a class under `v`.
+#[cfg(test)]
+const CLASSES: &[(&str, &str, &str)] = &[
+    ("[\\p{L}]", "[^\\p{L}]", "u"),
+    ("[^\\P{L}]", "[\\P{L}]", "u"),
+    ("\\P{Script=Greek}", "\\p{Script=Greek}", "u"),
+    ("[\\p{Lu}]", "[^\\p{Lu}]", "iu"),
+    ("[k-q\\p{Lu}]", "[^k-q\\p{Lu}]", "iu"),
+    (
+        "[a-zA-Z\\u{1F600}-\\u{1F64F}\\p{Nd}]",
+        "[^a-zA-Z\\u{1F600}-\\u{1F64F}\\p{Nd}]",
+        "u",
+    ),
+    (
+        "[\\u0370-\\u03FF\\P{Assigned}\\p{ASCII}]",
+        "[^\\u0370-\\u03FF\\P{Assigned}\\p{ASCII}]",
+        "u",
+    ),
+    ("[\\s\\p{N}]", "[^\\s\\p{N}]", "u"),
+    ("[\\w\\p{Cs}]", "[^\\w\\p{Cs}]", "iu"),
+    ("[\\p{scx=Grek}\\p{Lu}]", "[^\\p{scx=Grek}\\p{Lu}]", "u"),
+    ("[\\P{Any}x]", "[^\\P{Any}x]", "u"),
+    ("[0-9\\p{Any}]", "[^0-9\\p{Any}]", "u"),
+    ("\\p{L}", "\\P{L}", "v"),
+];
+
+/// The answer of `class` under `flags` for each of `points`, each asked alone; it checks that
+/// `complement` answers the other way.
+#[cfg(test)]
+fn oracle(
+    class: &str,
+    complement: &str,
+    flags: &str,
+    points: &[u32],
+) -> std::collections::BTreeMap<u32, bool> {
+    let alone = program(&format!("^(?:{class})$"), flags);
+    let other = program(&format!("^(?:{complement})$"), flags);
+    let mut oracle = std::collections::BTreeMap::new();
+    for &c in points {
+        if oracle.contains_key(&c) {
+            continue;
+        }
+        let subject = encode(c);
+        let held = answer(&alone, &subject) != "no";
+        assert_ne!(
+            held,
+            answer(&other, &subject) != "no",
+            "/{class}/{flags} and /{complement}/{flags} at U+{c:04X}"
+        );
+        oracle.insert(c, held);
+    }
+    oracle
+}
+
+/// The edges of the cases: of `L`, `Script=Greek`, `Any`, `ASCII`, `Assigned`, `Nd` and `Lu`.
+#[cfg(test)]
+fn case_points() -> Vec<u32> {
+    let lone = |name: &str| lone_property(&units(name)).unwrap_or_else(|| panic!("{name}"));
+    let greek = property_value(&units("Script"), &units("Greek")).expect("Greek");
+    let mut points = edges(&[
+        lone("L"),
+        greek,
+        lone("Any"),
+        lone("ASCII"),
+        lone("Assigned"),
+        lone("Nd"),
+        lone("Lu"),
+    ]);
+    points.push(0x2D);
+    points
+}
+
+#[test]
+fn a_class_answers_as_a_search_of_the_character_alone_in_every_order() {
+    // Each class of CLASSES as `(C+)|(D+)` over the edges read in four orders: the runs it
+    // finds end where the oracle's answer changes.
+    let points = case_points();
+    let orders = orders(&points);
+    for &(class, complement, flags) in CLASSES {
+        let oracle = oracle(class, complement, flags, &points);
+        let runs = program(&format!("({class}+)|({complement}+)"), flags);
+        for (name, order) in &orders {
+            let subject: Vec<u16> = order.iter().flat_map(|&c| encode(c)).collect();
+            assert_eq!(
+                runs_found(&runs, &subject),
+                runs_of(order, |c| oracle[&c]),
+                "/({class}+)|({complement}+)/{flags} read {name}"
+            );
+        }
+    }
+}
+
+/// The code unit index of each point of `points` in its UTF-16 form, and the end.
+#[cfg(test)]
+fn offsets(points: &[u32]) -> Vec<usize> {
+    let mut offsets = vec![0usize];
+    for &c in points {
+        let last = *offsets.last().expect("one");
+        offsets.push(last + encode(c).len());
+    }
+    offsets
+}
+
+#[test]
+fn a_class_in_a_lookbehind_answers_as_a_search_of_the_character_alone() {
+    // `(?<=(C+))` tried at each character boundary of a subject: the lookbehind reads the class
+    // backwards across the ranges' ends, and group 1 starts where the run of C that ends there
+    // starts.
+    let mut points: Vec<u32> = (0x0360..0x0400).collect();
+    let mut shuffled = case_points();
+    let mut next = lcg(0xB0B);
+    for i in (1..shuffled.len()).rev() {
+        let j = (next() as usize) % (i + 1);
+        shuffled.swap(i, j);
+    }
+    points.extend(shuffled.iter().take(600));
+    points.extend((0x1F5F0..0x1F660).rev());
+    let points = apart(&points);
+    let offsets = offsets(&points);
+    let subject: Vec<u16> = points.iter().flat_map(|&c| encode(c)).collect();
+    for &(class, complement, flags) in CLASSES {
+        let oracle = oracle(class, complement, flags, &points);
+        let behind = program(&format!("(?<=({class}+))"), flags);
+        for k in 0..=points.len() {
+            let mut j = k;
+            while j > 0 && oracle[&points[j - 1]] {
+                j -= 1;
+            }
+            let expected = (j < k).then(|| offsets[j]..offsets[k]);
+            let found = match_at(
+                &behind,
+                Subject::Utf16(&subject),
+                offsets[k],
+                &mut Unlimited,
+            )
+            .expect("no stop")
+            .map(|captures| captures.get(1).expect("group 1"));
+            assert_eq!(
+                found, expected,
+                "/(?<=({class}+))/{flags} at {}",
+                offsets[k]
+            );
+        }
+    }
+}
+
+#[test]
+fn a_class_asked_again_by_backtracking_answers_as_a_search_of_the_character_alone() {
+    // `(C*)(C)(D)` and `(C+?)(D)` from the start of each run of C: the greedy loop reads the run
+    // and the character after it, then backtracks one character and asks C again there; the lazy
+    // one asks D and C in turn at every character.
+    let points = apart(&orders(&case_points())[2].1);
+    let offsets = offsets(&points);
+    let subject: Vec<u16> = points.iter().flat_map(|&c| encode(c)).collect();
+    for &(class, complement, flags) in CLASSES {
+        let oracle = oracle(class, complement, flags, &points);
+        let greedy = program(&format!("({class}*)({class})({complement})"), flags);
+        let lazy = program(&format!("({class}+?)({complement})"), flags);
+        let mut k = 0;
+        while k < points.len() {
+            if !oracle[&points[k]] {
+                k += 1;
+                continue;
+            }
+            let mut e = k;
+            while e < points.len() && oracle[&points[e]] {
+                e += 1;
+            }
+            let found = match_at(
+                &greedy,
+                Subject::Utf16(&subject),
+                offsets[k],
+                &mut Unlimited,
+            )
+            .expect("no stop")
+            .map(|c| (c.get(1), c.get(2), c.get(3)));
+            let lazy_found = match_at(&lazy, Subject::Utf16(&subject), offsets[k], &mut Unlimited)
+                .expect("no stop")
+                .map(|c| (c.get(1), c.get(2)));
+            if e < points.len() {
+                assert_eq!(
+                    found,
+                    Some((
+                        Some(offsets[k]..offsets[e - 1]),
+                        Some(offsets[e - 1]..offsets[e]),
+                        Some(offsets[e]..offsets[e + 1]),
+                    )),
+                    "/({class}*)({class})({complement})/{flags} at {}",
+                    offsets[k]
+                );
+                assert_eq!(
+                    lazy_found,
+                    Some((
+                        Some(offsets[k]..offsets[e]),
+                        Some(offsets[e]..offsets[e + 1])
+                    )),
+                    "/({class}+?)({complement})/{flags} at {}",
+                    offsets[k]
+                );
+            } else {
+                assert_eq!(
+                    found, None,
+                    "/({class}*)({class})({complement})/{flags} at the end"
+                );
+                assert_eq!(
+                    lazy_found, None,
+                    "/({class}+?)({complement})/{flags} at the end"
+                );
+            }
+            k = e;
+        }
+    }
+}
+
+#[test]
+fn two_classes_asked_in_turn_on_neighbouring_code_points_answer_for_themselves() {
+    // `^(?:(C)(D))+$` and `^(?:(D)(C))+$` over pairs of neighbouring code points, one held by C
+    // and the next not (or the other way): the two classes are asked in turn, each about a code
+    // point inside the range the other just answered for.
+    let points = case_points();
+    for &(class, complement, flags) in CLASSES {
+        let oracle = oracle(class, complement, flags, &points);
+        let mut held_first: Vec<u32> = Vec::new();
+        let mut other_first: Vec<u32> = Vec::new();
+        for pair in points.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            // No pair starts with a low surrogate or ends with a high one, so no two code units
+            // of the subject join into one character.
+            if b != a + 1 || (0xDC00..=0xDFFF).contains(&a) || (0xD800..=0xDBFF).contains(&b) {
+                continue;
+            }
+            match (oracle[&a], oracle[&b]) {
+                (true, false) => held_first.extend([a, b]),
+                (false, true) => other_first.extend([a, b]),
+                _ => {}
+            }
+        }
+        for (pattern, list) in [
+            (format!("^(?:({class})({complement}))+$"), &held_first),
+            (format!("^(?:({complement})({class}))+$"), &other_first),
+        ] {
+            if list.is_empty() {
+                continue;
+            }
+            let subject: Vec<u16> = list.iter().flat_map(|&c| encode(c)).collect();
+            assert_eq!(
+                answer(&program(&pattern, flags), &subject),
+                format!("0..{}", subject.len()),
+                "/{pattern}/{flags} over {} pairs",
+                list.len() / 2
+            );
+        }
+    }
 }

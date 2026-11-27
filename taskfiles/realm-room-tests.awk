@@ -9,9 +9,16 @@
 #
 # The rule. A function reads the realm's room when its text names heap_bytes( or live_bytes(,
 # or, in a test file (not a helper file), memory_bytes or MemoryBudget: the readings a room is
-# taken from and the budget a room is cut from. A function also reads it when it calls one that
-# does: a function of its own file or of the helper files, by its name followed by "(" (a
-# function of its own file is taken before a helper of the same name). The default budget that
+# taken from and the budget a room is cut from. A function also reads it when it names one that
+# does, a function of its own file or of the helper files: by its name followed by "(" (a
+# call), or by its bare name where a value stands, after "=", "(" or "," and before ")", ","
+# or ";" (a function pointer, as in on_bounded_stack(..., body) or let f: fn() = run;), unless
+# the function binds that name itself (let, for, a match pattern, a parameter, a closure's
+# parameter). A path names the function of the module it names (crate::other::run() is run of
+# other.rs); otherwise a function of its own file is taken before a helper of the same name. A
+# name defined more than once in a file (a nested fn and a later top-level fn, a fn in a mod and
+# one outside) is one function whose text is that of every definition, so the rule marks it
+# when any of them reads the room, and a test is printed once. The default budget that
 # support::host::limits sets for every agent (memory_bytes 64 MiB) does not count by itself: it
 # is far above any realm, and the padding moves it only as it moves every reading, which a test
 # sees only through one of the names above. A function's text is its lines up to the next line
@@ -50,6 +57,16 @@ function indent(line) {
   match(line, /^[ \t]*/)
   return RLENGTH
 }
+# bound(t, n): the text t binds the name n itself (a let, a for or a match pattern, a parameter
+# or a typed name, a closure's parameter), so a bare n in t is that binding, not the function n.
+function bound(t, n,   w) {
+  w = "[^A-Za-z0-9_]"
+  return t ~ ("(^|" w ")let" w "([^=;]*" w ")?" n w "[^=;]*=") ||
+    t ~ ("(^|" w ")for" w "([^;{]*" w ")?" n w "([^;{]*" w ")?in" w) ||
+    t ~ (w n w "[^=;{}]*=>") ||
+    t ~ ("(^|[^A-Za-z0-9_:])" n "[ \t]*:([^:]|$)") ||
+    t ~ ("\\|([^|]*[^A-Za-z0-9_|])?" n "[ \t]*(:[^|]*)?\\|")
+}
 FNR == 1 {
   flush()
   scope = FILENAME
@@ -84,9 +101,8 @@ END {
   flush()
   for (o = occ; o >= 1; o--) if (occparent[o]) occtext[occparent[o]] = occtext[occparent[o]] occtext[o]
   for (o = 1; o <= occ; o++) {
-    if (occname[o] in text) continue
-    text[occname[o]] = occtext[o]
-    if (occtest[o]) { ntest++; tests[ntest] = occname[o] }
+    text[occname[o]] = text[occname[o]] occtext[o]
+    if (occtest[o] && !(occname[o] in listed)) { listed[occname[o]] = 1; ntest++; tests[ntest] = occname[o] }
   }
   for (f in text) {
     s = substr(f, 1, index(f, ":") - 1)
@@ -95,17 +111,23 @@ END {
       queue[++tail] = f
     }
     rest = text[f]
+    gsub(/(^|[^A-Za-z0-9_])fn[ \t]+[A-Za-z_][A-Za-z0-9_]*/, " ", rest)
     seen = " "
-    while (match(rest, /[A-Za-z_][A-Za-z0-9_]*(::<[^>]*>)?\(/)) {
-      callee = substr(rest, RSTART, RLENGTH - 1)
-      sub(/::<.*$/, "", callee)
-      rest = substr(rest, RSTART + RLENGTH)
-      if (index(seen, " " callee " ")) continue
-      seen = seen callee " "
-      if ((s ":" callee) in text) target = s ":" callee
+    while (match(rest, /([A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*(::<[^>]*>)?\(|[=(,][ \t\n]*([A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*[ \t\n]*[),;]/)) {
+      name = substr(rest, RSTART, RLENGTH)
+      rest = substr(rest, RSTART + RLENGTH - 1)
+      call = name ~ /\($/
+      sub(/^[=(,][ \t\n]*/, "", name)
+      sub(/(::<.*)?[ \t\n]*[),;(]$/, "", name)
+      if (index(seen, " " call name " ")) continue
+      seen = seen call name " "
+      k = split(name, seg, "::")
+      callee = seg[k]
+      if (k > 1 && (seg[k - 1] ":" callee) in text) target = seg[k - 1] ":" callee
+      else if ((s ":" callee) in text) target = s ":" callee
       else if (("support:" callee) in text) target = "support:" callee
       else continue
-      if (target == f) continue
+      if (target == f || (!call && k == 1 && bound(text[f], callee))) continue
       callers[target] = callers[target] " " f
     }
   }

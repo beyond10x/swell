@@ -691,3 +691,118 @@ fn the_properties_of_strings_resolve() {
         assert!(string_property(&units(name)).is_none(), "{name:?}");
     }
 }
+
+/// A linear congruential sequence (the constants of Numerical Recipes), no dependency.
+fn lcg(seed: u32) -> impl FnMut() -> u32 {
+    let mut x = seed;
+    move || {
+        x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        x
+    }
+}
+
+/// Whether the range `first..=last` that `contains_around` gave with the answer `held` lies,
+/// cut to U+10FFFF, inside one range of `union` when `held` and inside one gap when not.
+fn range_is_sound(union: &[(u32, u32)], held: bool, first: u32, last: u32) -> bool {
+    if first > 0x10FFFF {
+        return !held;
+    }
+    let top = last.min(0x10FFFF);
+    let at = union.partition_point(|&(_, end)| end < first);
+    match union.get(at) {
+        Some(&(start, end)) if start <= first => held && top <= end,
+        next => !held && next.is_none_or(|&(start, _)| top < start),
+    }
+}
+
+#[test]
+fn contains_around_kept_as_a_memo_answers_as_contains_in_three_orders() {
+    // A memo as the matcher keeps it (the last range and its answer, a code point inside it
+    // answered from it) over 20 properties, the code points asked up, down and in a linear
+    // congruential order: each answer equals `contains`, and each range asked lies inside one
+    // range or one gap of the property (so every code point of it, asked or not, answers as
+    // `contains`). The sample: every code point c with c % 61 == 0 (18,265 of 1,114,112) and,
+    // for every range of the property, the code points one before, at and one after each end.
+    // Not asked: the other code points (covered only through the ranges that hold them).
+    let properties: Vec<(&str, Property)> = vec![
+        ("L", lone("L").expect("L")),
+        ("Lu", lone("Lu").expect("Lu")),
+        ("Ll", lone("Ll").expect("Ll")),
+        ("Lt", lone("Lt").expect("Lt")),
+        ("Nd", lone("Nd").expect("Nd")),
+        ("Cn", lone("Cn").expect("Cn")),
+        ("C", lone("C").expect("C")),
+        ("sc=Greek", valued("sc", "Greek").expect("Greek")),
+        ("sc=Common", valued("sc", "Common").expect("Common")),
+        ("sc=Han", valued("sc", "Han").expect("Han")),
+        ("scx=Grek", valued("scx", "Grek").expect("Grek")),
+        ("scx=Latn", valued("scx", "Latn").expect("Latn")),
+        ("scx=Deva", valued("scx", "Deva").expect("Deva")),
+        ("Alphabetic", lone("Alphabetic").expect("Alphabetic")),
+        ("ID_Start", lone("ID_Start").expect("ID_Start")),
+        ("Emoji", lone("Emoji").expect("Emoji")),
+        ("White_Space", lone("White_Space").expect("White_Space")),
+        ("Any", lone("Any").expect("Any")),
+        ("ASCII", lone("ASCII").expect("ASCII")),
+        ("Assigned", lone("Assigned").expect("Assigned")),
+    ];
+    for (name, property) in &properties {
+        let union = ranges(*property);
+        let mut up: Vec<u32> = (0..=0x10FFFFu32).step_by(61).collect();
+        for &(first, last) in &union {
+            for c in [
+                first.wrapping_sub(1),
+                first,
+                first + 1,
+                last.wrapping_sub(1),
+                last,
+                last + 1,
+            ] {
+                if c <= 0x10FFFF {
+                    up.push(c);
+                }
+            }
+        }
+        up.extend([0, 0x10FFFF]);
+        up.sort_unstable();
+        up.dedup();
+        let down: Vec<u32> = up.iter().rev().copied().collect();
+        let mut shuffled = up.clone();
+        let mut next = lcg(0xC0DE);
+        for i in (1..shuffled.len()).rev() {
+            let j = (next() as usize) % (i + 1);
+            shuffled.swap(i, j);
+        }
+        for (order, list) in [("up", &up), ("down", &down), ("shuffled", &shuffled)] {
+            let mut memo: Option<(u32, u32, bool)> = None;
+            for &c in list.iter() {
+                let held = match memo {
+                    Some((first, last, held)) if first <= c && c <= last => held,
+                    _ => {
+                        let (held, first, last) = property.contains_around(c);
+                        assert!(
+                            first <= c && c <= last,
+                            "{name} {order}: U+{c:04X} outside {first:04X}..{last:04X}"
+                        );
+                        assert!(
+                            range_is_sound(&union, held, first, last),
+                            "{name} {order}: U+{c:04X} gives {held} for {first:04X}..{last:04X}"
+                        );
+                        memo = Some((first, last, held));
+                        held
+                    }
+                };
+                assert_eq!(held, property.contains(c), "{name} {order}: U+{c:04X}");
+            }
+        }
+        // Above U+10FFFF no property holds, and the range given reaches no code point that
+        // answers otherwise.
+        for c in [0x110000, 0x110001, 0x7FFF_FFFF, u32::MAX] {
+            let (held, first, last) = property.contains_around(c);
+            assert!(
+                first <= c && c <= last && range_is_sound(&union, held, first, last),
+                "{name}: {c:X} gives {held} for {first:X}..{last:X}"
+            );
+        }
+    }
+}

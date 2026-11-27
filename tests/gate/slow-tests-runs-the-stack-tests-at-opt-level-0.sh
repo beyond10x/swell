@@ -6,15 +6,20 @@
 # opt-level 1. A stack test proves the promised stack with frames whose size depends on the
 # optimization level, so a run that put it at opt-level 1 only would prove less, and say nothing.
 # No test runs: the script plants a tree of its own (.out/gate-tests/<name>/run-<case>) with the
-# repository's Taskfile.yml and taskfiles/, a crate swell whose tests/deep.rs reads
-# SWELL_FULL_COUNTS and holds two tests, and a stub cargo first on PATH that logs each run's
-# profile, its -E filter and the names of the default-filter line of its --config-file, and
-# answers with a Starting and a Summary line and a JUnit file.
+# repository's Taskfile.yml and taskfiles/, a crate swell whose library reads
+# SWELL_FULL_COUNTS, whose tests/deep.rs reads it and holds two tests and whose tests/plain.rs
+# holds one test and reads neither SWELL_FULL_COUNTS nor stack_with_room, and a stub cargo first
+# on PATH that logs each run's profile, whether it ignores the default filter, its -E filter and
+# the names of the default-filter line of its --config-file, and answers with a Starting and a
+# Summary line and a JUnit file.
 # 1. deep::runs_on_the_promised_stack calls stack_with_room( from a function nested in it (its
 #    body passed by value, as the stack tests of swell do), deep::runs_on_any_stack does not:
-#    task slow-tests exits 0, prints "1 of 2 tests of swell::main run on a bounded stack",
-#    the collect run at opt-level 0 leaves out deep::runs_on_any_stack alone, and the run with
-#    --cargo-profile collect and --test main leaves out deep::runs_on_the_promised_stack alone.
+#    task slow-tests exits 0, prints "1 of the 2 tests ... run at opt-level 0 with the unit
+#    tests of the library, the 1 others at opt-level 1; 1 test(s) ... in other modules run in
+#    neither", the collect run at opt-level 0 takes -E "binary_id(swell) | <module deep>" and
+#    leaves out deep::runs_on_any_stack alone, and the run with --cargo-profile collect and
+#    --test main takes -E "<module deep>" and leaves out deep::runs_on_the_promised_stack alone;
+#    neither run passes --ignore-default-filter.
 # 2. The planted defect: no test reaches stack_with_room (the module names it in a function no
 #    test calls), so the rule prints no test "stack" and every test of the module would run at
 #    opt-level 1 only: the task fails, saying it finds no test that runs on a bounded stack,
@@ -36,17 +41,18 @@ fail() {
 [ -f Taskfile.yml ] && [ -f taskfiles/realm-room-tests.awk ] || fail "run it from the repository root"
 
 printf '%s\n' '#!/bin/sh' \
-  'profile=test; prev=""; filter=""; cfg=""' \
+  'profile=test; prev=""; filter=""; cfg=""; ignore=no' \
   'for a in "$@"; do' \
   '  [ "$prev" = "--cargo-profile" ] && profile=$a' \
   '  [ "$prev" = "-E" ] && filter=$a' \
   '  [ "$prev" = "--config-file" ] && cfg=$a' \
+  '  [ "$a" = "--ignore-default-filter" ] && ignore=yes' \
   '  prev=$a' \
   'done' \
   'case " $* " in *" --test main "*) target=main ;; *) target=all ;; esac' \
   'case " $* " in *" collect-every-safe-point "*) mode=collect ;; *) mode=default ;; esac' \
   'names=none; [ -n "$cfg" ] && names=$(grep "^default-filter = " "$cfg" | grep -o "test(=[^)]*)" | tr "\n" " ")' \
-  'printf "run %s profile %s target %s filter %s config-not %s\n" "$mode" "$profile" "$target" "$filter" "$names" >> "$STUB_LOG"' \
+  'printf "run %s profile %s target %s ignore-default-filter %s filter [%s] config-not %s\n" "$mode" "$profile" "$target" "$ignore" "$filter" "$names" >> "$STUB_LOG"' \
   'mkdir -p target/nextest/default' \
   'printf "<testsuites><testsuite><testcase name=\"deep::t\" classname=\"swell::main\" time=\"0.1\"/></testsuite></testsuites>\n" > target/nextest/default/junit.xml' \
   'echo "    Starting 2 tests across 1 binary"' \
@@ -65,9 +71,10 @@ plant() {
   cp "$root/spec/ess-inputs.yaml" "$run/spec/" || fail "cannot copy spec/ess-inputs.yaml"
   cp "$root/conformance/test262/PIN" "$run/conformance/test262/" || fail "cannot copy conformance/test262/PIN"
   printf '[package]\nname = "swell"\n' > "$run/crates/swell/Cargo.toml"
-  printf '// nothing\n' > "$run/crates/swell/src/lib.rs"
-  printf 'mod deep;\nmod support;\n' > "$run/crates/swell/tests/main.rs"
+  printf '// a unit test reads SWELL_FULL_COUNTS\n' > "$run/crates/swell/src/lib.rs"
+  printf 'mod deep;\nmod plain;\nmod support;\n' > "$run/crates/swell/tests/main.rs"
   printf 'pub fn stack_with_room(bytes: usize) -> usize {\n    bytes / 8 * 7\n}\n' > "$run/crates/swell/tests/support/host.rs"
+  printf '#[test]\nfn outside_the_filter() {\n    assert_eq!(1 + 1, 2);\n}\n' > "$run/crates/swell/tests/plain.rs"
 }
 
 # 1. The stack test calls stack_with_room( in a function nested in it.
@@ -92,14 +99,18 @@ printf '%s\n' \
 : > "$dir/stub-split.log"
 STUB_LOG="$root/$dir/stub-split.log" PATH="$root/$dir/bin:$PATH" task -d "$dir/run-split" slow-tests > "$dir/split.out" 2>&1 ||
   fail "task slow-tests exited non-zero on a module with one stack test and one other ($dir/split.out)"
-grep -qF 'slow-tests collect-every-safe-point: 1 of 2 tests of swell::main run on a bounded stack' "$dir/split.out" ||
-  fail "slow-tests did not count 1 of 2 tests on a bounded stack ($dir/split.out)"
+grep -qF "slow-tests collect-every-safe-point: 1 of the 2 tests of swell::main in the collect filter's modules run on a bounded stack (taskfiles/realm-room-tests.awk -v rule=stack) and run at opt-level 0 with the unit tests of the library, the 1 others at opt-level 1; 1 test(s) of swell::main in other modules run in neither" "$dir/split.out" ||
+  fail "slow-tests did not count 1 stack test at opt-level 0, 1 test at opt-level 1 and 1 test outside the collect filter ($dir/split.out)"
 low=$(grep '^run collect profile test ' "$dir/stub-split.log")
 high=$(grep '^run collect profile collect ' "$dir/stub-split.log")
 [ "$(printf '%s\n' "$low" | grep -c .)" = 1 ] || fail "the stub saw not one collect run in the test profile ($dir/stub-split.log)"
 [ "$(printf '%s\n' "$high" | grep -c .)" = 1 ] || fail "the stub saw not one collect run in the profile collect ($dir/stub-split.log)"
 case "$low" in *"config-not test(=deep::runs_on_any_stack) "*) ;; *) fail "the collect run at opt-level 0 does not leave out deep::runs_on_any_stack alone: $low" ;; esac
 case "$high" in *"target main "*"config-not test(=deep::runs_on_the_promised_stack) "*) ;; *) fail "the collect run at opt-level 1 does not run --test main and leave out deep::runs_on_the_promised_stack alone: $high" ;; esac
+# Each run's -E filter and its default filter: the default filter leaves a test out only when
+# nextest reads it, and the -E filter names what the run takes from.
+case "$low" in *" ignore-default-filter no filter [binary_id(swell) | (binary_id(swell::main) & test(/^deep::/))] "*) ;; *) fail "the collect run at opt-level 0 does not take the library's tests and the module deep, with its default filter read: $low" ;; esac
+case "$high" in *" ignore-default-filter no filter [(binary_id(swell::main) & test(/^deep::/))] "*) ;; *) fail "the collect run at opt-level 1 does not take the module deep alone, with its default filter read: $high" ;; esac
 grep -q '^slow-tests collect-every-safe-point opt-level 1: 1 test binaries: 2 passed' "$dir/split.out" ||
   fail "slow-tests printed no count of its run at opt-level 1 ($dir/split.out)"
 

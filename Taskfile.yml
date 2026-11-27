@@ -326,8 +326,11 @@ tasks:
       .config/nextest.toml with one default-filter line, .out/slow-tests-collect-other-nextest.toml
       (not the tests printed "other") for the first part and
       .out/slow-tests-collect-stack-nextest.toml (not those printed "stack") for the second. It
-      prints "slow-tests collect-every-safe-point: <s> of <n> tests of swell::main run on a
-      bounded stack (...)" and fails when s is 0 or a file cannot be written. Prints
+      prints "slow-tests collect-every-safe-point: <s> of the <n> tests of swell::main in the
+      collect filter's modules run on a bounded stack (...) and run at opt-level 0, the <o>
+      others at opt-level 1; <x> test(s) of swell::main in other modules run in neither", each
+      number counted from the rule's lines and the filter's modules (a test a macro writes is not
+      among them), and fails when s is 0 or a file cannot be written. Prints
       "slow-tests: <b> test binaries: <p> passed, <f> failed, <i> ignored" and the same after
       "slow-tests collect-every-safe-point: " and "slow-tests collect-every-safe-point opt-level
       1: ", each with its ten slowest.
@@ -390,10 +393,11 @@ tasks:
         for f in crates/swell/tests/*.rs; do [ "$f" = crates/swell/tests/main.rs ] || set -- "$@" "$f"; done
         list=.out/slow-tests-stack.txt
         awk -v rule=stack -f taskfiles/realm-room-tests.awk "$@" > "$list" || { echo "slow-tests: taskfiles/realm-room-tests.awk -v rule=stack failed, or $list cannot be written"; exit 1; }
-        stack=$(grep -c '^stack ' "$list" || true)
-        other=$(grep -c '^other ' "$list" || true)
-        echo "slow-tests collect-every-safe-point: $stack of $((stack + other)) tests of swell::main run on a bounded stack (taskfiles/realm-room-tests.awk -v rule=stack); they run at opt-level 0, the $other others at opt-level 1"
-        [ "$stack" -gt 0 ] || { echo "slow-tests: taskfiles/realm-room-tests.awk -v rule=stack finds no test of swell::main that runs on a bounded stack ($list)"; exit 1; }
+        mods=$(awk '{ while (match($0, /test\(\/\^[A-Za-z0-9_]*::\//)) { printf " %s", substr($0, RSTART + 7, RLENGTH - 10); $0 = substr($0, RSTART + RLENGTH) } } END { print " " }' .out/slow-tests-collect.filter)
+        set -- $(awk -v mods="$mods" '{ m = $2; sub(/::.*$/, "", m); if (!index(mods, " " m " ")) out++; else if ($1 == "stack") low++; else high++ } END { print low + 0, high + 0, out + 0 }' "$list")
+        low=$1 high=$2 out=$3
+        echo "slow-tests collect-every-safe-point: $low of the $((low + high)) tests of swell::main in the collect filter's modules run on a bounded stack (taskfiles/realm-room-tests.awk -v rule=stack) and run at opt-level 0${lib:+ with the unit tests of the library}, the $high others at opt-level 1; $out test(s) of swell::main in other modules run in neither"
+        [ "$low" -gt 0 ] || { echo "slow-tests: taskfiles/realm-room-tests.awk -v rule=stack finds no test of swell::main that runs on a bounded stack ($list)"; exit 1; }
         for word in other stack; do
           cfg=.out/slow-tests-collect-$word-nextest.toml
           if [ -f .config/nextest.toml ]; then set -- "$list" .config/nextest.toml; else set -- "$list"; fi
