@@ -2199,3 +2199,47 @@ fn this_after_super_in_the_same_arrow() {
     ];
     all_pass(&cases);
 }
+
+/// A direct `eval` in a field initializer of a class with private methods (`#sec-performeval`
+/// with inClassFieldInitializer; the initializer's environment is the class's private record):
+/// a name the class declares is the refusal of a direct eval, counted once; a name it does not
+/// declare is the early `SyntaxError`; `arguments` is the error of ContainsArguments, also
+/// beside a declared name in either order, so the declared name's refusal is no error of the
+/// standard there and is neither thrown nor counted. In an instance field and a static one.
+#[test]
+fn a_direct_eval_in_a_field_initializer_meets_private_names() {
+    let script = r#"function said(e) { return (e instanceof SyntaxError ? "SyntaxError: " : "other: ") + e.message; }
+function tried(f) { try { f(); } catch (e) { return said(e); } return "none"; }
+[tried(() => new (class { #m() { return 1; } x = eval("this.#m()"); })()),
+ tried(() => new (class { #m() { return 1; } x = eval("this.#q"); })()),
+ tried(() => new (class { #m() { return 1; } x = eval("arguments"); })()),
+ tried(() => new (class { #m() {} x = eval("arguments; this.#m()"); })()),
+ tried(() => new (class { #m() {} x = eval("this.#m(); arguments"); })()),
+ tried(() => class { static #s() { return 1; } static x = eval("this.#s()"); }),
+ tried(() => class { static #s() {} static x = eval("this.#t"); })].join("|");"#;
+    let refused = |name: &str, at: &str| {
+        format!(
+            "SyntaxError: private name {name} in direct eval code is not supported before slice 8 ({at})"
+        )
+    };
+    let arguments = |at: &str| {
+        format!("SyntaxError: arguments in eval code in a class field initializer ({at})")
+    };
+    let wanted = [
+        refused("#m", "1:6"),
+        "SyntaxError: private name #q is not declared in an enclosing class (1:6)".to_string(),
+        arguments("1:1"),
+        arguments("1:1"),
+        arguments("1:12"),
+        refused("#s", "1:6"),
+        "SyntaxError: private name #t is not declared in an enclosing class (1:6)".to_string(),
+    ];
+    let expected = Outcome::Normal(format!("\"{}\"", wanted.join("|")));
+    for text in [script.to_string(), format!("\"use strict\";\n{script}")] {
+        let mut agent = agent().unwrap();
+        let r = realm(&mut agent);
+        let before = agent.refusals();
+        assert_eq!(eval_text(&mut agent, &r, &text), expected, "{text}");
+        assert_eq!(agent.refusals() - before, 2, "{text}");
+    }
+}
