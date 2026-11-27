@@ -394,3 +394,63 @@ fn host_53_parse_defines_no_global_binding() {
     );
     assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
 }
+
+/// The variable that tells the child of
+/// [`a_stack_test_fails_by_itself_where_no_stack_tests_is_set`] which way to a bounded stack it
+/// takes.
+const GUARD_CHILD: &str = "SWELL_STACK_GUARD_CHILD";
+
+/// The guard of the lane's run at opt-level 1 (task `slow-tests`): with `SWELL_NO_STACK_TESTS`
+/// set, both ways of the tests to a bounded stack, `stack_with_room` and `stack_thread`, panic
+/// with the line that names the way out, so a stack test that the rule of `slow-tests` does not
+/// find fails in that run by itself. Without the variable both pass. Each way runs in a child
+/// process (the test binary started again, this test alone).
+#[test]
+fn a_stack_test_fails_by_itself_where_no_stack_tests_is_set() {
+    use support::host::{NO_STACK_TESTS, NO_STACK_TESTS_LINE, stack_thread};
+    match std::env::var(GUARD_CHILD).as_deref() {
+        Ok("room") => {
+            let _ = stack_with_room(limits());
+            return;
+        }
+        Ok("thread") => {
+            stack_thread(1 << 20).spawn(|| ()).unwrap().join().unwrap();
+            return;
+        }
+        _ => {}
+    }
+    let exe = std::env::current_exe().unwrap();
+    let test = test_path!("a_stack_test_fails_by_itself_where_no_stack_tests_is_set");
+    for way in ["room", "thread"] {
+        for guarded in [true, false] {
+            let mut child = std::process::Command::new(&exe);
+            child
+                .args(["--exact", test.as_str(), "--nocapture", "--test-threads=1"])
+                .env(GUARD_CHILD, way)
+                .env_remove(NO_STACK_TESTS);
+            if guarded {
+                child.env(NO_STACK_TESTS, "1");
+            }
+            let out = child.output().unwrap();
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(
+                out.status.success(),
+                !guarded,
+                "{way}, guarded {guarded}: {text}"
+            );
+            assert_eq!(
+                text.contains(NO_STACK_TESTS_LINE),
+                guarded,
+                "{way}, guarded {guarded}: {text}"
+            );
+            assert!(
+                text.contains("1 passed") || guarded,
+                "{way}: the child ran no test: {text}"
+            );
+        }
+    }
+}

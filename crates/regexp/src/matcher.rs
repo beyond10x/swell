@@ -39,7 +39,10 @@
 //! searches (and without `u` and `v` one lookup of the uppercase mapping each), so one test
 //! of a class under `i` is at most four times its test without `i`: its ranges, `\s`, `\S`
 //! and its property escapes, each property still one step. No number of the pattern
-//! multiplies the work of a step. They are taken by grants of at most
+//! multiplies the work of a step. A class outside `v` keeps its last answer with the range of
+//! characters around the character it answered for that it answers the same for
+//! ([`crate::program::ClassSet::contains_around`]), and answers a character in that range
+//! from it: fewer searches, the same steps. They are taken by grants of at most
 //! [`MAX_GRANT`], a further grant asked when one is spent; a match that ends with a match, no
 //! match or a refused charge returns what it was granted and did not run, so the steps
 //! charged are the units run and the interrupt, which every grant reads, is read at least once
@@ -254,6 +257,20 @@ struct Machine<'p, 's, 'b> {
     found: Vec<(u32, usize)>,
     /// Set by an entry that resumes a class under `v`: its candidates below this length.
     below: Option<u32>,
+    /// The last answer of a class of [`Program::classes`] and its range.
+    known: Option<Known>,
+}
+
+/// What a class of [`Program::classes`] answered for a character
+/// ([`crate::program::ClassSet::contains_around`]): the class, the range of characters around it
+/// that the class answers the same for, and the answer. A field of the machine, no list: nothing
+/// to charge.
+#[derive(Clone, Copy, Debug)]
+struct Known {
+    class: u32,
+    first: u32,
+    last: u32,
+    holds: bool,
 }
 
 impl<'p, 's, 'b> Machine<'p, 's, 'b> {
@@ -278,6 +295,7 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
             matched: Vec::new(),
             found: Vec::new(),
             below: None,
+            known: None,
         }
     }
 
@@ -594,6 +612,32 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
         Some((u32::from(unit), pos + 1))
     }
 
+    /// Whether the class numbered `class` holds `c`: from the class's last answer when `c` lies
+    /// in its range, else [`crate::program::ClassSet::contains_around`], whose answer and range
+    /// are kept in its place. No class holds a character when the program has no class of that
+    /// number.
+    fn class_holds(&mut self, class: u32, c: u32) -> bool {
+        if let Some(known) = self.known
+            && known.class == class
+            && known.first <= c
+            && c <= known.last
+        {
+            return known.holds;
+        }
+        let program = self.program;
+        let Some(set) = program.classes.get(class as usize) else {
+            return false;
+        };
+        let (holds, first, last) = set.contains_around(program, c);
+        self.known = Some(Known {
+            class,
+            first,
+            last,
+            holds,
+        });
+        holds
+    }
+
     /// IsWordChar of the code unit at `index`, with the WordCharacters of `i` under `u` or `v`
     /// where `fold`; none outside the subject. Every word character is a single code unit.
     fn word_at(&self, index: Option<usize>, fold: bool) -> bool {
@@ -662,15 +706,18 @@ impl<'p, 's, 'b> Machine<'p, 's, 'b> {
                 .filter(|&(c, _)| dot_all || !is_line_terminator(c))
                 .map(|(_, to)| (next, to)),
             Inst::Class { class, back } => {
-                let program = self.program;
-                let set = program.classes.get(class as usize);
                 // One step per property escape of the class, this instruction's the first,
                 // charged before the test: each is a bounded number of binary searches.
-                let properties = set.map_or(0, |set| set.properties_len);
+                let properties = self
+                    .program
+                    .classes
+                    .get(class as usize)
+                    .map_or(0, |set| set.properties_len);
                 self.steps(properties.saturating_sub(1) as usize)?;
-                self.read(pos, back)
-                    .filter(|&(c, _)| set.is_some_and(|set| set.contains(program, c)))
-                    .map(|(_, to)| (next, to))
+                match self.read(pos, back) {
+                    Some((c, to)) if self.class_holds(class, c) => Some((next, to)),
+                    _ => None,
+                }
             }
             Inst::SetClass { class, back } => {
                 let below = self.below.take();

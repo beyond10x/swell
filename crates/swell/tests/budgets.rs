@@ -498,8 +498,7 @@ const STACK_CHILD: &str = "SWELL_STACK_CHILD";
 fn on_bounded_stack(test: TestPath, stack: usize, body: fn()) -> Result<(), String> {
     let done = format!("{STACK_CHILD}: {test} on {stack} bytes done");
     if std::env::var_os(STACK_CHILD).is_some() {
-        std::thread::Builder::new()
-            .stack_size(stack)
+        crate::support::host::stack_thread(stack)
             .spawn(body)
             .map_err(|e| e.to_string())?
             .join()

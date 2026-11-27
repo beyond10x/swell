@@ -2,6 +2,12 @@ version: '3'
 
 set: [pipefail]
 
+vars:
+  COLLECT_MAIN: --locked -p swell --features collect-every-safe-point --config .cargo/collect-profile.toml --cargo-profile collect --profile default --test main
+  COLLECT_RUSTFLAGS: -D warnings
+  SLOW_COLLECT_WAIT: '400'
+  NO_STACK_TESTS: SWELL_NO_STACK_TESTS
+
 includes:
   test-binaries:
     taskfile: taskfiles/test-binaries.yml
@@ -166,8 +172,9 @@ tasks:
       conformance/test262/expected.txt, and the digest of its sources checked against
       conformance/test262/expected.digest; slow-tests, the tests with a gate count at their
       full counts; test-realm-sizes, the tests of swell that read the realm's room with each
-      realm padded by k host functions for several k, in the default mode and with a
-      collection at every safe point at each k, on the two builds slow-tests made; and
+      realm padded by k host functions for several k, in the default mode (opt-level 0) and
+      with a collection at every safe point (the profile collect, opt-level 1) at each k, on
+      two builds slow-tests made; and
       test-stack-profiles, which builds first (build-stack-profiles), the stack tests in the
       release profile and in stack-debug, the dev profile with full debug information (the
       gate runs them in the dev profile without it), built with the modules of swell's tests
@@ -183,14 +190,28 @@ tasks:
       part and its seconds, the lane's sum or the clock's seconds, so a step without its own
       time line is bounded too. A part that fails stops the lane there, as before, and
       slow-time-sum does not run.
+
+      Right after gate-time-start the lane starts the build of the profile collect that
+      slow-tests and test-realm-sizes run on (slow-collect-start): it runs in the background
+      beside slow-test262, whose run keeps 4 workers busy while that build, which a 32-core node
+      does not make shorter than a 4-core runner (3 min 59 s against 3 min 33 s), runs mostly on
+      one core. slow-tests is called with SLOW_COLLECT=lane and waits for it; a part run alone
+      builds what it needs itself. The parts' slow-time lines stay each part's own wall time;
+      the build's own seconds are on the line "slow-build collect ..." that slow-tests prints.
+      Whatever way the lane ends (a part that fails, the end, an interrupt), the build does not
+      outlive it: the deferred slow-collect-stop ends it, and the build's own watcher ends it
+      when the lane's task process is gone.
     silent: true
     cmds:
       - task: gate-vars
       - task: gate-time-start
+      - defer: {task: slow-collect-stop}
+      - task: slow-collect-start
       - task: slow-test262
       - task: gate-time
         vars: {STEP: slow-test262, LABEL: slow-time}
       - task: slow-tests
+        vars: {SLOW_COLLECT: lane}
       - task: gate-time
         vars: {STEP: slow-tests, LABEL: slow-time}
       - task: test-realm-sizes
@@ -200,6 +221,99 @@ tasks:
       - task: gate-time
         vars: {STEP: stack-profiles, LABEL: slow-time}
       - task: slow-time-sum
+
+  slow-collect-start:
+    desc: Internal, called by slow after gate-time-start. Start the build of the profile collect that slow-tests and test-realm-sizes run on in the background, and return.
+    summary: |
+      Internal, called by the lane slow right after gate-time-start. Starts "cargo nextest run
+      --no-run" with COLLECT_MAIN and RUSTFLAGS=COLLECT_RUSTFLAGS (the variables at the top of
+      this file, which the run of slow-tests at opt-level 1, build-realm-sizes and
+      test-realm-sizes read too, so the build and the runs are one build for cargo), in the
+      background, and returns. Its files are under .out/slow-collect (emptied first, so a status
+      an earlier lane left is never read): log, the build's output; launch, what the start of
+      the process group printed; pid, the process that runs and watches it, the leader of a
+      process group of its own (setsid) that holds the build, whose command line names this
+      tree's .out/slow-collect by its absolute path; start and end, the clock at both ends;
+      status, the build's exit status, written last. The watcher ends the build's process group
+      when the process of the task that called slow-collect-start (the lane's go-task) is gone,
+      so an interrupted lane leaves no build; slow-collect-stop ends it when the lane ends
+      another way. Prints "slow-collect-start: the build of the profile collect runs in the
+      background, process <pid>, log .out/slow-collect/log"; fails with "slow-collect-start:
+      setsid is not on PATH ..." when there is no setsid, and with "... did not start ..." and
+      the launch's output when the process did not start. A part run alone does not need it:
+      slow-tests without SLOW_COLLECT=lane builds what it runs.
+      tests/gate/slow-collect-builds-beside-the-lane-and-ends-with-it.sh and
+      tests/gate/slow-collect-a-lane-reads-only-its-own-build.sh hold it.
+    silent: true
+    env:
+      RUSTFLAGS: '{{.COLLECT_RUSTFLAGS}}'
+    cmds:
+      - |
+        dir=.out/slow-collect
+        sh -c 'command -v setsid' > /dev/null || { echo "slow-collect-start: setsid is not on PATH (util-linux); the lane runs the build of the profile collect in a process group of its own, which setsid makes"; exit 1; }
+        rm -rf "$dir" && mkdir -p "$dir" || { echo "slow-collect-start: cannot make $dir"; exit 1; }
+        sh -c '
+          dir=$1; shift
+          lane=$PPID
+          setsid sh -c '\''
+            dir=$1 lane=$2; shift 2
+            echo $$ > "$dir/pid.tmp" && mv "$dir/pid.tmp" "$dir/pid"
+            date +%s.%N > "$dir/start"
+            "$@" > "$dir/log" 2>&1 < /dev/null &
+            build=$!
+            while kill -0 "$build" 2>/dev/null; do
+              if ! kill -0 "$lane" 2>/dev/null; then
+                echo "slow-collect: the lane (process $lane) is gone; the build ends with it" >> "$dir/log"
+                kill -TERM -- "-$$" 2>/dev/null
+                exit 1
+              fi
+              sleep 1
+            done
+            wait "$build"
+            st=$?
+            date +%s.%N > "$dir/end"
+            echo "$st" > "$dir/status.tmp" && mv "$dir/status.tmp" "$dir/status"
+          '\'' slow-collect "$dir" "$lane" "$@" > "$dir/launch" 2>&1 < /dev/null &
+        ' slow-collect-start "$(pwd)/$dir" cargo nextest run --no-run {{.COLLECT_MAIN}}
+        n=0
+        while [ ! -s "$dir/pid" ] && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+        [ -s "$dir/pid" ] || { cat "$dir/launch" 2>/dev/null; echo "slow-collect-start: the build of the profile collect did not start (no $dir/pid after 5 s; $dir/launch above)"; exit 1; }
+        echo "slow-collect-start: the build of the profile collect runs in the background, process $(cat "$dir/pid"), log $dir/log"
+
+  slow-collect-stop:
+    desc: Internal, deferred by slow. End the background build of slow-collect-start when it still runs, by its process group.
+    summary: |
+      Internal, deferred by the lane slow, so it runs when the lane ends, whether a part failed
+      or not. When .out/slow-collect/pid names a process and .out/slow-collect/status does not
+      exist (the build still runs), it sends TERM to that process's group (the build and its
+      watcher; never by name), waits up to 10 s for the group to be gone, then sends KILL, and
+      prints "slow-collect-stop: ended the build of the profile collect (process group <pid>),
+      which still ran when the lane ended". It ends only a group this tree's lane started: the
+      process must be a watcher of slow-collect-start whose command line
+      (/proc/<pid>/cmdline) names this tree's .out/slow-collect by its absolute path; a number
+      the system gave to another process since, or a lane of another tree, is left alone with
+      "slow-collect-stop: process <pid> ... is not the build this tree's lane started; nothing
+      ended". Otherwise it prints nothing.
+    silent: true
+    cmds:
+      - |
+        sh -c '
+          dir=.out/slow-collect
+          [ -s "$dir/pid" ] || exit 0
+          [ -f "$dir/status" ] && exit 0
+          pid=$(cat "$dir/pid")
+          case "$pid" in ""|*[!0-9]*) echo "slow-collect-stop: $dir/pid holds no process number"; exit 1 ;; esac
+          kill -0 -- "-$pid" 2>/dev/null || exit 0
+          if ! tr "\0" "\n" < "/proc/$pid/cmdline" 2>/dev/null | grep -qxF "$(pwd)/$dir"; then
+            echo "slow-collect-stop: process $pid of $dir/pid is not the build this tree'\''s lane started (its command line does not name $(pwd)/$dir); nothing ended"
+            exit 0
+          fi
+          kill -TERM -- "-$pid" 2>/dev/null
+          n=0
+          while kill -0 -- "-$pid" 2>/dev/null && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n + 1)); done
+          kill -KILL -- "-$pid" 2>/dev/null
+          echo "slow-collect-stop: ended the build of the profile collect (process group $pid), which still ran when the lane ended"
+        '
 
   slow-tests:
     desc: The lane slow's part of the tests. Run, at their full counts (SWELL_FULL_COUNTS=1), the test binaries whose gate count is a part, in both modes of swell.
@@ -214,17 +328,64 @@ tasks:
       and the library's test binary of swell when a file under crates/swell/src reads it; it
       runs them through cargo-nextest with SWELL_FULL_COUNTS=1, then those of swell again with
       the feature collect-every-safe-point, so that a test that takes the variable up runs here
-      with nothing to edit. The second run adds every module of swell's tests that calls
-      stack_with_room (crates/swell/tests/support/host.rs): its tests prove the promised stack
-      with a frame size that depends on the optimization level, and the gate's step test-collect
-      builds the collect mode at opt-level 1 (the profile collect, .cargo/collect-profile.toml),
-      so this run, in the test profile at opt-level 0 as before, is where the collect mode's
-      stack tests keep their unoptimized frames (story gate-test-steps-fit-four-cores). Prints
-      "slow-tests: <b> test binaries: <p> passed, <f> failed, <i> ignored" and the same after
-      "slow-tests collect-every-safe-point: ", each with its ten slowest.
+      with nothing to edit. The collect mode adds every module of swell's tests that calls
+      stack_with_room (crates/swell/tests/support/host.rs): a test that runs on a bounded stack
+      proves the promised stack with a frame size that depends on the optimization level, and
+      the gate's step test-collect builds the collect mode at opt-level 1 (the profile collect,
+      .cargo/collect-profile.toml), so the lane is where the collect mode's stack tests keep
+      their unoptimized frames (story gate-test-steps-fit-four-cores). The collect mode runs in
+      two parts (story realm-size-lane-within-its-share): taskfiles/realm-room-tests.awk -v
+      rule=stack prints each test of swell::main "stack" when its text, a function nested in it,
+      or a function of its file or of tests/support it calls names stack_with_room( or
+      .stack_size(, and "other" otherwise, into .out/slow-tests-stack.txt. The library's unit
+      tests and the tests of those modules not printed "other" (the stack tests, and a test a
+      macro writes, which the rule does not see and which may run on a bounded stack) run in
+      the test profile at opt-level 0; the tests of those modules printed "other" run in the
+      profile collect at opt-level 1 (--test main), the build test-realm-sizes runs its collect
+      mode on after this task, where a test of this mode runs about ten times faster. The
+      names reach nextest as test-realm-sizes hands its list over: in a copy of
+      .config/nextest.toml with one default-filter line,
+      .out/slow-tests-collect-not-other-nextest.toml (not the tests printed "other") for the
+      first part and .out/slow-tests-collect-only-other-nextest.toml (the tests printed "other"
+      alone) for the second. It
+      prints "slow-tests collect-every-safe-point: <s> of the <n> tests of swell::main in the
+      collect filter's modules that the collect build holds run on a bounded stack (...) and run
+      at opt-level 0, the <o> others at opt-level 1; <g> test(s) of those modules are not in the
+      collect build; <x> test(s) of swell::main in other modules run in neither", each number
+      counted from the rule's lines (a line that ends in " not-in-collect" is a test whose
+      attributes hold #[cfg(not(feature = "collect-every-safe-point"))]) and the filter's
+      modules (a test a macro writes is not among them), and fails when s is 0 or a file cannot
+      be written. Prints "slow-tests: <b> test binaries: <p> passed, <f> failed, <i> ignored"
+      and the same after "slow-tests collect-every-safe-point: " and "slow-tests
+      collect-every-safe-point opt-level 1: ", each with its ten slowest.
+
+      The guard of the split: the run at opt-level 1 sets NO_STACK_TESTS
+      (SWELL_NO_STACK_TESTS=1, the variable at the top of this file) for its test processes,
+      and the two ways of swell's tests to a bounded stack, stack_with_room and stack_thread
+      (crates/swell/tests/support/host.rs), panic when it is set, with a line that says the
+      rule did not find the test and it must run at opt-level 0. So a stack test in a form the
+      rule does not read (the list at the head of taskfiles/realm-room-tests.awk) fails the
+      lane instead of passing on frames of another size. The runs at opt-level 0 do not set it.
+      The gate's test-collect and the collect runs of test-realm-sizes run stack tests at
+      opt-level 1 on purpose and do not set it either.
+
+      The run at opt-level 1 is "cargo nextest run" with COLLECT_MAIN and RUSTFLAGS from
+      COLLECT_RUSTFLAGS, the definitions the lane's background build (slow-collect-start)
+      reads too. Run alone, this task builds it
+      there. In the lane (SLOW_COLLECT=lane) the build was started beside slow-test262; the task
+      first waits for .out/slow-collect/status, at most SLOW_COLLECT_WAIT seconds (400, under
+      the part's 600), then prints "slow-build collect <seconds> s, exit <status>, waited <s> s:
+      ..." (the build's own wall time, a line of its own, not a slow-time line: its seconds lie
+      inside those of slow-test262 and slow-tests). It fails with "slow-tests: the build of the
+      profile collect that the lane started failed, exit <n> (.out/slow-collect/log)" after the
+      log, with "... wrote no status within <bound> s of waiting ..." when the bound passes, and
+      with "... no build of the profile collect was started ..." when there is no
+      .out/slow-collect/pid.
     silent: true
+    vars:
+      SLOW_COLLECT: '{{.SLOW_COLLECT | default ""}}'
     env:
-      RUSTFLAGS: -D warnings
+      RUSTFLAGS: '{{.COLLECT_RUSTFLAGS}}'
     cmds:
       - mkdir -p .out
       - |
@@ -240,7 +401,8 @@ tasks:
           all="$all${all:+ | }$term"
           if [ "$pkg" = swell ]; then swell="$swell${swell:+ | }$term"; fi
         done
-        if grep -rqs SWELL_FULL_COUNTS crates/swell/src; then all="$all${all:+ | }binary_id(swell)"; swell="$swell${swell:+ | }binary_id(swell)"; fi
+        lib=""
+        if grep -rqs SWELL_FULL_COUNTS crates/swell/src; then all="$all${all:+ | }binary_id(swell)"; lib="binary_id(swell)"; fi
         for f in $(grep -l stack_with_room crates/swell/tests/*.rs | LC_ALL=C sort); do
           stem=${f##*/}
           stem=${stem%.rs}
@@ -250,6 +412,8 @@ tasks:
         if [ -z "$all" ]; then echo "slow-tests: no test reads SWELL_FULL_COUNTS"; exit 1; fi
         echo "$all" > .out/slow-tests.filter
         echo "$swell" > .out/slow-tests-collect.filter
+        echo "$lib" > .out/slow-tests-collect.lib
+        rm -f .out/slow-tests-collect.status .out/slow-tests-collect-opt1.status
         status=0
         SWELL_FULL_COUNTS=1 cargo nextest run --workspace --locked --profile default -E "$all" > .out/slow-tests.log 2>&1 || status=$?
         echo "$status" > .out/slow-tests.status
@@ -257,31 +421,102 @@ tasks:
         vars: {STEP: slow-tests, PREFIX: 'slow-tests: ', LOG: .out/slow-tests.log, STATUS: .out/slow-tests.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}
       - |
         swell=$(cat .out/slow-tests-collect.filter)
-        if [ -z "$swell" ]; then echo "slow-tests collect-every-safe-point: no test binary of swell reads SWELL_FULL_COUNTS"; exit 0; fi
+        lib=$(cat .out/slow-tests-collect.lib)
+        if [ -z "$swell$lib" ]; then echo "slow-tests collect-every-safe-point: no test binary of swell reads SWELL_FULL_COUNTS"; exit 0; fi
+        set --
+        for f in crates/swell/tests/support/*.rs; do [ -f "$f" ] && set -- "$@" "$f"; done
+        for f in crates/swell/tests/*.rs; do [ "$f" = crates/swell/tests/main.rs ] || set -- "$@" "$f"; done
+        list=.out/slow-tests-stack.txt
+        awk -v rule=stack -f taskfiles/realm-room-tests.awk "$@" > "$list" || { echo "slow-tests: taskfiles/realm-room-tests.awk -v rule=stack failed, or $list cannot be written"; exit 1; }
+        mods=$(awk '{ while (match($0, /test\(\/\^[A-Za-z0-9_]*::\//)) { printf " %s", substr($0, RSTART + 7, RLENGTH - 10); $0 = substr($0, RSTART + RLENGTH) } } END { print " " }' .out/slow-tests-collect.filter)
+        set -- $(awk -v mods="$mods" '{ m = $2; sub(/::.*$/, "", m); if (!index(mods, " " m " ")) out++; else if ($3 == "not-in-collect") gone++; else if ($1 == "stack") low++; else high++ } END { print low + 0, high + 0, gone + 0, out + 0 }' "$list")
+        low=$1 high=$2 gone=$3 out=$4
+        echo "slow-tests collect-every-safe-point: $low of the $((low + high)) tests of swell::main in the collect filter's modules that the collect build holds run on a bounded stack (taskfiles/realm-room-tests.awk -v rule=stack) and run at opt-level 0${lib:+ with the unit tests of the library}, the $high others at opt-level 1; $gone test(s) of those modules are not in the collect build; $out test(s) of swell::main in other modules run in neither"
+        [ "$low" -gt 0 ] || { echo "slow-tests: taskfiles/realm-room-tests.awk -v rule=stack finds no test of swell::main that runs on a bounded stack ($list)"; exit 1; }
+        want=$(grep -c "^other " "$list" || true)
+        for form in not only; do
+          cfg=.out/slow-tests-collect-$form-other-nextest.toml
+          if [ -f .config/nextest.toml ]; then set -- "$list" .config/nextest.toml; else set -- "$list"; fi
+          awk -v form="$form" '
+            function put(i) {
+              printf "default-filter = '\''"
+              if (!n) printf (form == "not" ? "all()" : "none()")
+              else {
+                printf (form == "not" ? "not (binary_id(swell::main) & (" : "binary_id(swell::main) & (")
+                for (i = 1; i <= n; i++) printf "%s%s", (i > 1 ? " | " : ""), "test(=" name[i] ")"
+                printf (form == "not" ? "))" : ")")
+              }
+              printf "'\''\n"
+            }
+            FILENAME == ARGV[1] { if ($1 == "other") name[++n] = $2; next }
+            { print }
+            /^[ \t]*\[profile\.default\][ \t]*$/ { put() }
+            END { if (ARGC == 2) { print "[profile.default]"; put() } }
+          ' "$@" > "$cfg" || { echo "slow-tests: cannot write $cfg, the nextest configuration that names the tests printed other"; exit 1; }
+          lines=$(awk '/^[ \t]*default-filter[ \t]*=/ { n++ } END { print n + 0 }' "$cfg")
+          named=$(awk '/^default-filter = / { c += gsub(/test\(=/, "&") } END { print c + 0 }' "$cfg")
+          if [ ! -s "$cfg" ] || [ "$lines" != 1 ] || [ "$named" != "$want" ]; then
+            echo "slow-tests: $cfg holds $lines default-filter line(s) naming $named of the $want tests printed other, not one line naming all of them (.config/nextest.toml has no line [profile.default], or a default-filter of its own)"
+            exit 1
+          fi
+        done
+        filter="$lib${lib:+${swell:+ | }}$swell"
         status=0
-        SWELL_FULL_COUNTS=1 cargo nextest run --locked -p swell --features collect-every-safe-point --profile default -E "$swell" > .out/slow-tests-collect.log 2>&1 || status=$?
+        SWELL_FULL_COUNTS=1 cargo nextest run --locked -p swell --features collect-every-safe-point --config-file "$(pwd)/.out/slow-tests-collect-not-other-nextest.toml" --profile default -E "$filter" > .out/slow-tests-collect.log 2>&1 || status=$?
         echo "$status" > .out/slow-tests-collect.status
       - task: nextest-report
+        if: '[ -f .out/slow-tests-collect.status ]'
         vars: {STEP: slow-tests-collect, PREFIX: 'slow-tests collect-every-safe-point: ', LOG: .out/slow-tests-collect.log, STATUS: .out/slow-tests-collect.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}
+      - |
+        swell=$(cat .out/slow-tests-collect.filter)
+        [ -n "$swell" ] || exit 0
+        if [ '{{.SLOW_COLLECT}}' = lane ]; then
+          dir=.out/slow-collect
+          bound='{{.SLOW_COLLECT_WAIT}}'
+          [ -s "$dir/pid" ] || { echo "slow-tests: SLOW_COLLECT=lane, but no build of the profile collect was started (no $dir/pid; slow-collect-start starts it)"; exit 1; }
+          began=$(date +%s)
+          while [ ! -f "$dir/status" ] && [ $(( $(date +%s) - began )) -lt "$bound" ]; do sleep 1; done
+          [ -f "$dir/status" ] || { echo "slow-tests: the build of the profile collect that the lane started wrote no status within $bound s of waiting ($dir/log)"; exit 1; }
+          st=$(cat "$dir/status")
+          secs=$(awk -v a="$(cat "$dir/start" 2>/dev/null)" -v b="$(cat "$dir/end" 2>/dev/null)" 'BEGIN { printf "%.1f", b - a }')
+          echo "slow-build collect $secs s, exit $st, waited $(( $(date +%s) - began )) s: cargo nextest run --no-run {{.COLLECT_MAIN}}, in the background from the lane's start (slow-collect-start), inside the slow-time lines of slow-test262 and slow-tests"
+          if [ "$st" != 0 ]; then
+            cat "$dir/log"
+            echo "slow-tests: the build of the profile collect that the lane started failed, exit $st ($dir/log)"
+            exit 1
+          fi
+        fi
+        status=0
+        {{.NO_STACK_TESTS}}=1 SWELL_FULL_COUNTS=1 cargo nextest run {{.COLLECT_MAIN}} --config-file "$(pwd)/.out/slow-tests-collect-only-other-nextest.toml" -E "$swell" > .out/slow-tests-collect-opt1.log 2>&1 || status=$?
+        echo "$status" > .out/slow-tests-collect-opt1.status
+      - task: nextest-report
+        if: '[ -f .out/slow-tests-collect-opt1.status ]'
+        vars: {STEP: slow-tests-collect-opt1, PREFIX: 'slow-tests collect-every-safe-point opt-level 1: ', LOG: .out/slow-tests-collect-opt1.log, STATUS: .out/slow-tests-collect-opt1.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1'}
 
   build-realm-sizes:
-    desc: Build, without running it, the integration-test binary of swell in the two builds of test-realm-sizes, the test profile with and without the feature collect-every-safe-point; the lane builds both for slow-tests already.
+    desc: Build, without running it, the integration-test binary of swell in the two builds of test-realm-sizes, the test profile and the profile collect with the feature collect-every-safe-point; the lane builds both for slow-tests already.
     summary: |
       The build step of test-realm-sizes: "cargo nextest run --no-run --locked -p swell
-      --profile default --test main" and the same with "--features collect-every-safe-point",
-      with RUSTFLAGS="-D warnings", into .out/realm-sizes-build.log; with "--lib" beside
-      "--test main" when a file under crates/swell/src reads SWELL_TEST_REALM_FUNCTIONS (none
-      does: the padding lies in crates/swell/tests/support/host.rs). Both are the test profile
-      at opt-level 0, the builds that slow-tests makes before it in the lane slow (its run of
-      every package and its run with the feature), so in the lane they compile nothing new;
-      the collect mode no longer builds the profile collect of the gate's step test-collect
-      (opt-level 1), which took 3 min 33 s of the lane's 22 min 35 s on the forge on 2026-11-26
-      (story realm-size-lane-within-its-share, point 2). The library's unit-test binary is not
+      --profile default --test main" and "cargo nextest run --no-run --locked -p swell
+      --features collect-every-safe-point --config .cargo/collect-profile.toml --cargo-profile
+      collect --profile default --test main" (COLLECT_MAIN, the definition the lane's
+      background build and slow-tests read too), with RUSTFLAGS="-D warnings", into
+      .out/realm-sizes-build.log; with "--lib" beside "--test main" when a file under
+      crates/swell/src reads SWELL_TEST_REALM_FUNCTIONS (none does: the padding lies in
+      crates/swell/tests/support/host.rs). The first is the test profile at opt-level 0 that
+      slow-tests builds for its run of every package; the second is the profile collect of the
+      gate's step test-collect (opt-level 1), which slow-tests builds for the tests of its
+      collect mode that run on no bounded stack; so in the lane they compile nothing new (story
+      realm-size-lane-within-its-share). The build of the profile collect took 3 min 33 s on the
+      forge on 2026-11-26 and 3 min 53 s on the build node (cold, 2026-11-27); the collect runs
+      it serves took about 312 s of the forge's 431 s of test-realm-sizes at opt-level 0, and
+      run about ten times faster on it (on 4 test threads on the build node, 31.3 s against
+      2.8 s at k = 4, 45.3 s against 4.7 s at k = 200). The library's unit-test binary is not
       built: its build reads SWELL_FULL_COUNTS, which slow-tests sets, so building it here
       would compile it again. Prints "build-realm-sizes: <cargo's Finished line>" for each;
       when cargo fails it prints the log and fails.
     env:
-      RUSTFLAGS: -D warnings
+      RUSTFLAGS: '{{.COLLECT_RUSTFLAGS}}'
     silent: true
     cmds:
       - mkdir -p .out
@@ -293,7 +528,7 @@ tasks:
           # shellcheck disable=SC2086
           cargo nextest run --no-run --locked -p swell --profile default $targets &&
           # shellcheck disable=SC2086
-          cargo nextest run --no-run --locked -p swell --features collect-every-safe-point --profile default $targets
+          cargo nextest run --no-run {{.COLLECT_MAIN}} ${targets%--test main}
         } > .out/realm-sizes-build.log 2>&1 || status=$?
         if [ "$status" -ne 0 ]; then cat .out/realm-sizes-build.log; echo "build-realm-sizes: cargo nextest run --no-run failed, exit $status"; exit 1; fi
         esc=$(printf '\033')
@@ -332,13 +567,14 @@ tasks:
       show at single sizes, and most of them in that mode alone: seven of the eight of story
       tests-hold-at-any-size-of-the-realm were red in the collect mode only, each at one growth
       of the realm; of the two of 5078361a, termination was red at 200 in the collect mode only;
-      the proxy test of 2026-11-26 is red at 128 alone. Both modes run in the test profile
-      (opt-level 0), the builds slow-tests makes, not in the profile collect of the step
-      test-collect (opt-level 1), which the lane would build for this part alone (story
-      realm-size-lane-within-its-share, point 2). There a test stays under 2 CPU seconds in
-      the collect mode too: builtins_json_parse::parse_gives_back_its_charges_on_every_way_out,
-      21.5 s of the 22.7 s collect run at k = 4 before, nests 200 levels in that mode and 2,000
-      under SWELL_FULL_COUNTS=1 (its way_out_depth). build-realm-sizes builds both.
+      the proxy test of 2026-11-26 is red at 128 alone. The default mode runs in the test
+      profile (opt-level 0), the collect mode in the profile collect of the step test-collect
+      (opt-level 1, .cargo/collect-profile.toml), the two builds slow-tests makes; the collect
+      mode's tests that run on a bounded stack keep their unoptimized frames in slow-tests
+      (story realm-size-lane-within-its-share). A test stays under 2 CPU seconds in the
+      collect mode: builtins_json_parse::parse_gives_back_its_charges_on_every_way_out, 21.5 s
+      of the 22.7 s collect run at k = 4 before, nests 200 levels in that mode and 2,000 under
+      SWELL_FULL_COUNTS=1 (its way_out_depth). build-realm-sizes builds both.
       First it prints "realm-sizes: <r> of <n> tests of swell::main read the realm's room
       (taskfiles/realm-room-tests.awk); <o> others do not run here" and fails when r is 0,
       then "realm-sizes: the default mode at k = <list>, the collect mode at k = <list>".
@@ -371,7 +607,7 @@ tasks:
       REALM_SIZES: '{{.REALM_SIZES | default "4 11 17 38 64 128 200"}}'
       REALM_COLLECT: '{{.REALM_COLLECT | default "all"}}'
     env:
-      RUSTFLAGS: -D warnings
+      RUSTFLAGS: '{{.COLLECT_RUSTFLAGS}}'
     silent: true
     cmds:
       - task: build-realm-sizes
@@ -447,7 +683,7 @@ tasks:
               SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run --locked -p swell --config-file "$cfg" --profile default $targets -E "$filter" > "$log" 2>&1 || status=$?
             else
               # shellcheck disable=SC2086
-              SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run --locked -p swell --features collect-every-safe-point --config-file "$cfg" --profile default $targets -E "$filter" > "$log" 2>&1 || status=$?
+              SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run {{.COLLECT_MAIN}} ${targets%--test main} --config-file "$cfg" -E "$filter" > "$log" 2>&1 || status=$?
             fi
             cp target/nextest/default/junit.xml ".out/realm-sizes-$k-$mode.junit.xml" 2>/dev/null || :
             LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" "$log" > "$log.plain"
@@ -494,9 +730,10 @@ tasks:
       task file's own defaults, as "gate: variables in effect: NAME=value ...". The SPEC_ ones,
       the SITE_DATA_ ones (taskfiles/site.yml, included flat) and TEST_RUSTFLAGS and
       TEST_NEXTEST_ARGS (taskfiles/realm-places.yml, included flat; the steps that read them
-      refuse a value that is not the file's, task test-vars-check) always show, with their
-      defaults; any other name on the line was set by the caller. A new gate variable is added
-      to GATE_VARIABLES in the change that adds it.
+      refuse a value that is not the file's, task test-vars-check) and the lane's COLLECT_MAIN,
+      COLLECT_RUSTFLAGS, SLOW_COLLECT_WAIT and NO_STACK_TESTS (the top of this file) always
+      show, with their defaults; any other name on the line was set by the caller. A new gate
+      variable is added to GATE_VARIABLES in the change that adds it.
 
       It fails in one case, after that line: a flag variable of cargo in the environment
       (RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS or a
@@ -526,6 +763,7 @@ tasks:
         GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_CPU_BOUNDS GATE_SELFTEST_DIR GATE_SELFTEST_JOBS GATE_SELFTEST_TREE
         GATE_RUNNER_ENV GATE_TEST_BUILD_JSON
         TEST_RUSTFLAGS TEST_NEXTEST_ARGS
+        COLLECT_MAIN COLLECT_RUSTFLAGS SLOW_COLLECT_WAIT NO_STACK_TESTS
         REALM_SIZES REALM_COLLECT SLOW_LANE_BUDGET SLOW_PART_BUDGET STACK_MODULES STACK_TESTS STACK_TESTS_DIR
         SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES SITE_DATA_ENGINES SITE_DATA_CATALOG SITE_DATA_PUBLISHED SITE_DATA_RESULTS SITE_DATA_PIN SITE_DATA_LIMITS SITE_DATA_INTERRUPT
     silent: true
