@@ -2915,3 +2915,485 @@ fn an_override_script_host_function_chain_ends_at_the_reentry_limit() {
     )
     .unwrap();
 }
+
+// A host object whose overrides ask a script handler, as a Proxy asks its handler; a table that
+// leaves one internal method out answers that method from the object's record, and that answer
+// is held to the facts as an override's is.
+
+thread_local! {
+    /// The script handler of [`JS_ALL`] and its variants.
+    static JS_HANDLER: Cell<Option<ObjectRef>> = const { Cell::new(None) };
+}
+
+/// The handle a key holds, as a value.
+fn js_key_value(key: PropertyKey) -> Value {
+    match key {
+        PropertyKey::String(string) => Value::String(string),
+        PropertyKey::Symbol(symbol) => Value::Symbol(symbol),
+    }
+}
+
+/// `undefined` or the Boolean of a field.
+fn js_flag(field: Option<bool>) -> Value {
+    field.map_or(Value::Undefined, Value::Boolean)
+}
+
+/// Call the method `name` of the script handler with `args`.
+fn js_trap(cx: &mut Cx<'_, TestHost>, name: &str, args: &[Value]) -> Completion<Value> {
+    let handler = JS_HANDLER.with(Cell::get).unwrap();
+    let name = key(cx, name);
+    let method = cx.get_property(handler, name).unwrap()?;
+    cx.call(method, Value::Object(handler), args).unwrap()
+}
+
+/// A descriptor object of a script as the host's descriptor; `undefined` is absent.
+fn js_descriptor(
+    cx: &mut Cx<'_, TestHost>,
+    value: Value,
+) -> Completion<Option<PropertyDescriptor>> {
+    let Value::Object(descriptor) = value else {
+        return Ok(None);
+    };
+    let mut out = PropertyDescriptor::default();
+    for name in [
+        "value",
+        "writable",
+        "get",
+        "set",
+        "enumerable",
+        "configurable",
+    ] {
+        let field = key(cx, name);
+        if !cx.has_property(descriptor, field).unwrap()? {
+            continue;
+        }
+        let read = cx.get_property(descriptor, field).unwrap()?;
+        let flag = Some(read == Value::Boolean(true));
+        match name {
+            "value" => out.value = Some(read),
+            "get" => out.get = Some(read),
+            "set" => out.set = Some(read),
+            "writable" => out.writable = flag,
+            "enumerable" => out.enumerable = flag,
+            _ => out.configurable = flag,
+        }
+    }
+    Ok(Some(out))
+}
+
+fn js_get_prototype_of(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+) -> Completion<Option<ObjectRef>> {
+    match js_trap(cx, "getPrototypeOf", &[])? {
+        Value::Object(prototype) => Ok(Some(prototype)),
+        _ => Ok(None),
+    }
+}
+
+fn js_set_prototype_of(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    prototype: Option<ObjectRef>,
+) -> Completion<bool> {
+    let given = prototype.map_or(Value::Null, Value::Object);
+    Ok(js_trap(cx, "setPrototypeOf", &[given])? == Value::Boolean(true))
+}
+
+fn js_is_extensible(cx: &mut Cx<'_, TestHost>, _object: ObjectRef) -> Completion<bool> {
+    Ok(js_trap(cx, "isExtensible", &[])? == Value::Boolean(true))
+}
+
+fn js_prevent_extensions(cx: &mut Cx<'_, TestHost>, _object: ObjectRef) -> Completion<bool> {
+    Ok(js_trap(cx, "preventExtensions", &[])? == Value::Boolean(true))
+}
+
+fn js_get_own_property(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    key: PropertyKey,
+) -> Completion<Option<PropertyDescriptor>> {
+    let answer = js_trap(cx, "getOwnPropertyDescriptor", &[js_key_value(key)])?;
+    js_descriptor(cx, answer)
+}
+
+fn js_define_own_property(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    key: PropertyKey,
+    descriptor: PropertyDescriptor,
+) -> Completion<bool> {
+    let args = [
+        js_key_value(key),
+        descriptor.value.unwrap_or(Value::Undefined),
+        js_flag(descriptor.configurable),
+        js_flag(descriptor.writable),
+    ];
+    Ok(js_trap(cx, "defineProperty", &args)? == Value::Boolean(true))
+}
+
+fn js_has_property(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    key: PropertyKey,
+) -> Completion<bool> {
+    Ok(js_trap(cx, "has", &[js_key_value(key)])? == Value::Boolean(true))
+}
+
+fn js_get(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    key: PropertyKey,
+    receiver: Value,
+) -> Completion<Value> {
+    js_trap(cx, "get", &[js_key_value(key), receiver])
+}
+
+fn js_set(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    key: PropertyKey,
+    value: Value,
+    receiver: Value,
+) -> Completion<bool> {
+    Ok(js_trap(cx, "set", &[js_key_value(key), value, receiver])? == Value::Boolean(true))
+}
+
+fn js_delete(cx: &mut Cx<'_, TestHost>, _object: ObjectRef, key: PropertyKey) -> Completion<bool> {
+    Ok(js_trap(cx, "deleteProperty", &[js_key_value(key)])? == Value::Boolean(true))
+}
+
+fn js_own_property_keys(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+) -> Completion<Vec<PropertyKey>> {
+    let Value::Object(list) = js_trap(cx, "ownKeys", &[])? else {
+        return Ok(Vec::new());
+    };
+    let length = key(cx, "length");
+    let Value::Number(length) = cx.get_property(list, length).unwrap()? else {
+        return Ok(Vec::new());
+    };
+    let mut keys = Vec::new();
+    for index in 0..(length as usize) {
+        let element = key(cx, &index.to_string());
+        let element = cx.get_property(list, element).unwrap()?;
+        keys.push(cx.to_property_key(element).unwrap()?);
+    }
+    Ok(keys)
+}
+
+/// Every override, each asking the script handler.
+const JS_ALL: Overrides<TestHost> = Overrides {
+    get_prototype_of: Some(js_get_prototype_of),
+    set_prototype_of: Some(js_set_prototype_of),
+    is_extensible: Some(js_is_extensible),
+    prevent_extensions: Some(js_prevent_extensions),
+    get_own_property: Some(js_get_own_property),
+    define_own_property: Some(js_define_own_property),
+    has_property: Some(js_has_property),
+    get: Some(js_get),
+    set: Some(js_set),
+    delete: Some(js_delete),
+    own_property_keys: Some(js_own_property_keys),
+};
+
+static JS_EVERY: Overrides<TestHost> = JS_ALL;
+static JS_NO_SET_PROTOTYPE_OF: Overrides<TestHost> = Overrides {
+    set_prototype_of: None,
+    ..JS_ALL
+};
+static JS_NO_PREVENT_EXTENSIONS: Overrides<TestHost> = Overrides {
+    prevent_extensions: None,
+    ..JS_ALL
+};
+static JS_NO_OWN_PROPERTY_KEYS: Overrides<TestHost> = Overrides {
+    own_property_keys: None,
+    ..JS_ALL
+};
+static JS_NO_DELETE: Overrides<TestHost> = Overrides {
+    delete: None,
+    ..JS_ALL
+};
+
+/// The functions every handler script below uses: `base(over)` is a handler with an answer
+/// for every trap (an empty extensible object with a null prototype) and the methods of
+/// `over`; `seq(list)` answers the next element of `list` on each call, its last one after;
+/// `D` and `A` make data and accessor descriptors.
+const JS_PRELUDE: &str = "var P1 = {}, P2 = {}, G1 = function () {}, G2 = function () {}, S1 = Symbol(\"a\");\n\
+     function seq(list) { var i = 0; return function () { var v = list[Math.min(i, list.length - 1)]; i++; return v; }; }\n\
+     function D(v, w, e, c) { return { value: v, writable: w, enumerable: e, configurable: c }; }\n\
+     function A(g, s, e, c) { return { get: g, set: s, enumerable: e, configurable: c }; }\n\
+     function base(over) {\n\
+       var h = { getPrototypeOf: function () { return null; }, setPrototypeOf: function () { return true; },\n\
+         isExtensible: function () { return true; }, preventExtensions: function () { return false; },\n\
+         getOwnPropertyDescriptor: function () { return undefined; }, defineProperty: function () { return true; },\n\
+         has: function () { return false; }, get: function () { return undefined; }, set: function () { return true; },\n\
+         deleteProperty: function () { return true; }, ownKeys: function () { return []; } };\n\
+       for (var k in over) h[k] = over[k];\n\
+       return h;\n\
+     }\n";
+
+/// A fresh agent with `o`, a host object of `table` whose handler is the script expression
+/// `handler`; then `script`: its outcome and the agent's state.
+fn js_run(
+    table: &'static Overrides<TestHost>,
+    handler: &str,
+    script: &str,
+) -> (Outcome, AgentState) {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    let setup = format!("{JS_PRELUDE}var H = {handler};\n0;");
+    assert_eq!(
+        eval_text(&mut agent, &realm, &setup),
+        Outcome::Normal("0".to_string()),
+        "{handler}"
+    );
+    let Value::Object(handler_object) = global_value(&mut agent, &realm, "H") else {
+        panic!("H is no object");
+    };
+    JS_HANDLER.with(|cell| cell.set(Some(handler_object)));
+    bind_host(&mut agent, &realm, "o", Some(table), None);
+    let outcome = eval_text(&mut agent, &realm, script);
+    JS_HANDLER.with(|cell| cell.set(None));
+    (outcome, agent.state())
+}
+
+/// [[SetPrototypeOf]]: "If target is non-extensible, [[SetPrototypeOf]] must return false,
+/// unless proto is the SameValue as the target's observed [[GetPrototypeOf]] value." The table
+/// has `is_extensible` (false) and `get_prototype_of` (`P1`) but no `set_prototype_of`, so
+/// OrdinarySetPrototypeOf answers for the object from its record, which is still extensible:
+/// `Reflect.setPrototypeOf(o, P2)` answers true after the object reported itself not extensible
+/// and its prototype `P1`. That answer must fault the agent.
+#[test]
+fn set_prototype_of_from_the_record_after_a_non_extensible_report_faults() {
+    let (outcome, state) = js_run(
+        &JS_NO_SET_PROTOTYPE_OF,
+        "base({ isExtensible: function () { return false; }, getPrototypeOf: function () { return P1; } })",
+        "[Object.isExtensible(o), Object.getPrototypeOf(o) === P1, Reflect.setPrototypeOf(o, P2)].join();",
+    );
+    assert_eq!(
+        (outcome, state),
+        (
+            Outcome::Terminated(Termination::EngineFault),
+            AgentState::Faulted
+        )
+    );
+}
+
+/// [[PreventExtensions]]: "If [[PreventExtensions]] returns true, all future calls to
+/// [[IsExtensible]] on the target must return false and the target is now considered
+/// non-extensible." The table has `is_extensible` but no `prevent_extensions`, so
+/// OrdinaryPreventExtensions answers true for the object; `is_extensible` answering true after
+/// it must fault the agent, and so must a key reported absent after it and then present.
+#[test]
+fn prevent_extensions_true_from_the_record_makes_the_object_non_extensible() {
+    let extensible_after = js_run(
+        &JS_NO_PREVENT_EXTENSIONS,
+        "base({ isExtensible: function () { return true; } })",
+        "[Reflect.preventExtensions(o), Object.isExtensible(o)].join();",
+    );
+    let absent_then_present = js_run(
+        &JS_NO_PREVENT_EXTENSIONS,
+        "base({ isExtensible: function () { return false; }, getOwnPropertyDescriptor: seq([undefined, D(1, true, true, true)]) })",
+        "[Reflect.preventExtensions(o), Object.getOwnPropertyDescriptor(o, \"x\"), Object.getOwnPropertyDescriptor(o, \"x\").value].join();",
+    );
+    let faulted = (
+        Outcome::Terminated(Termination::EngineFault),
+        AgentState::Faulted,
+    );
+    assert_eq!(
+        (extensible_after, absent_then_present),
+        (faulted.clone(), faulted)
+    );
+}
+
+/// [[OwnPropertyKeys]]: "The returned List must contain at least the keys of all
+/// non-configurable own properties that have previously been observed." The table has
+/// `get_own_property` (`x` non-configurable) but no `own_property_keys`, so
+/// OrdinaryOwnPropertyKeys answers the record's keys, which do not hold `x`. That list must
+/// fault the agent, as the same list from an override does (the module documentation: "every key
+/// list holds it").
+#[test]
+fn the_record_key_list_must_hold_an_observed_non_configurable_key() {
+    let (outcome, state) = js_run(
+        &JS_NO_OWN_PROPERTY_KEYS,
+        "base({ getOwnPropertyDescriptor: function () { return D(1, true, true, false); } })",
+        "[Object.getOwnPropertyDescriptor(o, \"x\").configurable, Reflect.ownKeys(o).length].join();",
+    );
+    assert_eq!(
+        (outcome, state),
+        (
+            Outcome::Terminated(Termination::EngineFault),
+            AgentState::Faulted
+        )
+    );
+}
+
+/// [[Delete]]: the `delete` override answering true for a configurable key of an object that
+/// reported itself not extensible makes the key non-existent, so a later `get_own_property`
+/// that describes it faults (the module's rule, as the Proxy's deleteProperty check). The table
+/// has no `delete`, so OrdinaryDelete answers true for the object from its record; the same
+/// later answer must fault the agent.
+#[test]
+fn delete_true_from_the_record_on_a_non_extensible_object_makes_the_key_absent() {
+    let handler = "base({ isExtensible: function () { return false; }, getOwnPropertyDescriptor: function () { return D(1, true, true, true); } })";
+    let script = "[Object.isExtensible(o), Reflect.deleteProperty(o, \"x\"), Object.getOwnPropertyDescriptor(o, \"x\").value].join();";
+    let faulted = (
+        Outcome::Terminated(Termination::EngineFault),
+        AgentState::Faulted,
+    );
+    assert_eq!(
+        (
+            js_run(&JS_EVERY, handler, script),
+            js_run(&JS_NO_DELETE, handler, script)
+        ),
+        (faulted.clone(), faulted)
+    );
+}
+
+/// [[HasProperty]] answering false is not one of the clause's observations of a non-existent
+/// property ("A non-existent property is a property that does not exist as an own property on
+/// a non-extensible target"; the one bullet of [[HasProperty]] binds only a non-configurable
+/// key). A host object that reported itself not extensible, hides a configurable `x` from
+/// `in`, and describes it through [[GetOwnProperty]] breaks no bullet.
+#[test]
+fn has_property_false_is_not_an_observation_of_a_non_existent_key() {
+    let (outcome, state) = js_run(
+        &JS_EVERY,
+        "base({ isExtensible: function () { return false; }, getOwnPropertyDescriptor: function () { return D(1, true, true, true); } })",
+        "[Object.isExtensible(o), \"x\" in o, Object.getOwnPropertyDescriptor(o, \"x\").value].join();",
+    );
+    assert_eq!(
+        (outcome, state),
+        (
+            Outcome::Normal("\"false,false,1\"".to_string()),
+            AgentState::Alive
+        )
+    );
+}
+
+/// [[HasProperty]]: "If P was previously observed as a non-configurable own data or accessor
+/// property of the target, [[HasProperty]] must return true." The object reports `x`
+/// non-configurable, then `in` answers false for it: the agent faults (the false of any other
+/// key records nothing).
+#[test]
+fn has_property_false_for_a_key_observed_non_configurable_faults_the_agent() {
+    let (outcome, state) = js_run(
+        &JS_EVERY,
+        "base({ getOwnPropertyDescriptor: function () { return D(1, true, true, false); } })",
+        "[Object.getOwnPropertyDescriptor(o, \"x\").configurable, \"x\" in o].join();",
+    );
+    assert_eq!(
+        (outcome, state),
+        (
+            Outcome::Terminated(Termination::EngineFault),
+            AgentState::Faulted
+        )
+    );
+}
+
+/// [[OwnPropertyKeys]] of an object that reported itself not extensible: the first list holds
+/// `a` and `b`, the second leaves `b` out, so `b` is non-existent; the third, which holds `b`
+/// again, faults the agent.
+#[test]
+fn a_key_a_later_list_leaves_out_does_not_come_back() {
+    let (outcome, state) = js_run(
+        &JS_EVERY,
+        "base({ isExtensible: function () { return false; }, ownKeys: seq([[\"a\", \"b\"], [\"a\"], [\"a\", \"b\"]]) })",
+        "Object.isExtensible(o); Reflect.ownKeys(o); Reflect.ownKeys(o); Reflect.ownKeys(o).length;",
+    );
+    assert_eq!(
+        (outcome, state),
+        (
+            Outcome::Terminated(Termination::EngineFault),
+            AgentState::Faulted
+        )
+    );
+}
+
+/// [[GetOwnProperty]] of an object that reported itself not extensible and listed `a`: `a`
+/// reported absent is non-existent from then on, so a later descriptor for it faults the agent.
+#[test]
+fn a_listed_key_reported_absent_does_not_come_back() {
+    let (outcome, state) = js_run(
+        &JS_EVERY,
+        "base({ isExtensible: function () { return false; }, ownKeys: function () { return [\"a\"]; }, getOwnPropertyDescriptor: seq([undefined, D(1, true, true, true)]) })",
+        "Object.isExtensible(o); Reflect.ownKeys(o); Object.getOwnPropertyDescriptor(o, \"a\"); Object.getOwnPropertyDescriptor(o, \"a\");",
+    );
+    assert_eq!(
+        (outcome, state),
+        (
+            Outcome::Terminated(Termination::EngineFault),
+            AgentState::Faulted
+        )
+    );
+}
+
+thread_local! {
+    /// The script function [`fresh_current`] calls for the value it answers.
+    static MAKE: Cell<Option<ObjectRef>> = const { Cell::new(None) };
+}
+
+/// `get_own_property` answering a configurable data property `x` whose value is a new object
+/// made by the script function [`MAKE`] for this answer, once the host's `count` is set; absent
+/// before.
+fn fresh_current(
+    cx: &mut Cx<'_, TestHost>,
+    _object: ObjectRef,
+    key: PropertyKey,
+) -> Completion<Option<PropertyDescriptor>> {
+    if cx.host_mut().count == 0 || key_text(cx, key) != "x" {
+        return Ok(None);
+    }
+    let make = MAKE.with(Cell::get).unwrap();
+    let value = cx
+        .call(Value::Object(make), Value::Undefined, &[])
+        .unwrap()?;
+    Ok(Some(data(value, true, true, true)))
+}
+
+static FRESH_CURRENT: Overrides<TestHost> = Overrides {
+    is_extensible: Some(extensible_after_hook),
+    get_own_property: Some(fresh_current),
+    ..NONE
+};
+
+/// OrdinaryDefineOwnProperty of a host object without `define_own_property`
+/// (`held_ordinary_define_own_property`) reads `current` from a `get_own_property` override,
+/// which answers a new object held by nothing else, then calls the `is_extensible` override,
+/// whose script allocates (with `collect-every-safe-point`, collecting at each instruction).
+/// `{ enumerable: false }` keeps the value of `current` (ValidateAndApplyPropertyDescriptor,
+/// step 6), which is written into the record; the next collection must find it alive.
+#[test]
+fn the_current_value_held_across_an_is_extensible_override_survives_a_collection() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    bind_host(&mut agent, &realm, "o", Some(&FRESH_CURRENT), None);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "function hook() { var junk = []; for (var i = 0; i < 20; i++) junk.push({ i: i }); junk = null; }\n\
+             function mk() { return { tag: 7 }; }\n\
+             Reflect.defineProperty(o, \"x\", { value: 1, writable: true, enumerable: true, configurable: true });"
+        ),
+        Outcome::Normal("true".to_string())
+    );
+    let Value::Object(make) = global_value(&mut agent, &realm, "mk") else {
+        panic!("mk is no object");
+    };
+    MAKE.with(|cell| cell.set(Some(make)));
+    set_hook(&mut agent, &realm, "hook");
+    agent.host_mut().count = 1;
+    let outcome = eval_text(
+        &mut agent,
+        &realm,
+        "var ok = Reflect.defineProperty(o, \"x\", { enumerable: false }); for (var j = 0; j < 20; j++) ({}); ok;",
+    );
+    HOOK.with(|cell| cell.set(None));
+    MAKE.with(|cell| cell.set(None));
+    assert_eq!(outcome, Outcome::Normal("true".to_string()));
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    assert_eq!(agent.state(), AgentState::Alive);
+}

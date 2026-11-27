@@ -339,8 +339,8 @@ impl<H: Host> Agent<H> {
 
     /// Keep `key` and `values` once, the first time a walk reaches an object `o` whose methods
     /// may run code: a host object with an override table, whose [[GetPrototypeOf]] or
-    /// [[GetOwnProperty]] the walk calls without handing over, or a Proxy as the receiver of
-    /// OrdinarySet. Each such method keeps its own arguments while it runs, not what the walk
+    /// [[GetOwnProperty]] the walk calls without handing over. Each such method keeps its own
+    /// arguments while it runs, not what the walk
     /// holds for later (the key, a value read from a record, the receiver); what is kept here
     /// is released by the walk's caller ([`Agent::release`] of the mark it took).
     fn hold_for_walk(
@@ -444,8 +444,7 @@ impl<H: Host> Agent<H> {
 
     /// OrdinarySet (`#sec-ordinaryset`) with OrdinarySetWithOwnDescriptor
     /// (`#sec-ordinarysetwithowndescriptor`), as a loop over the chain; the key, the value and
-    /// the receiver are kept from the first object whose methods may run code, the receiver
-    /// among them.
+    /// the receiver are kept from the first object of the chain whose methods may run code.
     pub(crate) fn ordinary_set(
         &mut self,
         object: ObjectRef,
@@ -503,7 +502,11 @@ impl<H: Host> Agent<H> {
                 let Value::Object(receiver) = receiver else {
                     return Ok(false);
                 };
-                self.hold_for_walk(&mut held, receiver, key, &[value])?;
+                // A receiver other than `object` whose methods may run code comes only from a
+                // caller that keeps the key and the value across this call: [[Set]] of a Proxy
+                // without a `set` trap (`proxy_set_steps`), `Reflect.set` (its arguments and the
+                // key it keeps), PutValue of a Super Reference (`interp/super_ref.rs`) and a `Cx`
+                // call (the host's scope).
                 match self.get_own_property(receiver, key)? {
                     Some(existing) => {
                         let Slot::Data { writable, .. } = existing.slot else {

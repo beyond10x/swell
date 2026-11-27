@@ -16,22 +16,30 @@
 //!   not reported absent, not deleted, `has_property` does not answer false for it, a
 //!   non-writable data value does not change, and every key list holds it);
 //! - that the object reported itself not extensible (`is_extensible` false or
-//!   `prevent_extensions` true), then the prototype it reported;
+//!   [[PreventExtensions]] true), then the prototype it reported;
 //! - once it is not extensible, each key reported non-existent: absent from `get_own_property`,
-//!   false from `has_property`, deleted by a `delete` that answered true, or left out of a key
-//!   list. It stays non-existent: a later descriptor for it, a `define_own_property` that answers
-//!   true for it, or a key list that holds it is a broken invariant. Before that report an
-//!   absent answer binds nothing, and a key reported present and configurable may be reported
-//!   absent, deleted or answered false later, as an ordinary object's;
-//! - once it is not extensible, the keys of the first list `own_property_keys` answered: each
-//!   later list holds only keys of the one before it (a key it leaves out is non-existent).
+//!   deleted by a [[Delete]] that answered true, or left out of a key list. It stays
+//!   non-existent: a later descriptor for it, a `define_own_property` that answers true for it,
+//!   or a key list that holds it is a broken invariant. Before that report an absent answer
+//!   binds nothing, and a key reported present and configurable may be reported absent, deleted
+//!   or answered false later, as an ordinary object's. A false from `has_property` records
+//!   nothing: the clause binds [[HasProperty]] only for a key observed non-configurable;
+//! - once it is not extensible, the keys of the first key list: each later list holds only keys
+//!   of the one before it (a key it leaves out is non-existent).
 //!
-//! A key list never holds a key twice. What a method without an override answers is a fact as
-//! it stands, the record being the target the Proxy checks of `object/invariants.rs` compare
-//! with: the record's own properties while the table has no `get_own_property` (a key list must
-//! hold each non-configurable one, and, while the object is not extensible, only the record's
-//! keys), its [[Extensible]] while it has no `is_extensible`, its [[Prototype]] while it has no
-//! `get_prototype_of`. A broken invariant, a descriptor that is not complete or a stale or
+//! An answer is the object's whoever gives it: where the table lacks `prevent_extensions`,
+//! `set_prototype_of`, `delete` or `own_property_keys`, the record's answer (OrdinaryPreventExtensions,
+//! OrdinarySetPrototypeOf, OrdinaryDelete, OrdinaryOwnPropertyKeys) is checked against the facts
+//! and recorded as the override's would be. A key list never holds a key twice. What a method
+//! without an override answers is a fact as it stands, the record being the target the Proxy
+//! checks of `object/invariants.rs` compare with: the record's own properties while the table
+//! has no `get_own_property` (a key list must hold each non-configurable one, and, while the
+//! object is not extensible, only the record's keys), its [[Extensible]] while it has no
+//! `is_extensible`, its [[Prototype]] while it has no `get_prototype_of`. The record's answers of
+//! the other methods are made from these and from the answers of the overrides the ordinary
+//! methods call (OrdinaryDefineOwnProperty, OrdinaryHasProperty, OrdinaryGet and OrdinarySet
+//! read [[GetOwnProperty]], [[IsExtensible]] and [[GetPrototypeOf]] through the object's own
+//! methods), so they are checked there. A broken invariant, a descriptor that is not complete or a stale or
 //! foreign handle ends the run in `Terminated(EngineFault)` and faults the agent (HOST-48), never
 //! a `TypeError` (section 15, "Rejected"). An override that answers `Abrupt::Throw` throws its
 //! value after the check of its handles.
@@ -44,9 +52,11 @@
 //! `Cx` call inside an override spends from the entry that called the internal method
 //! (`Agent::begin`). Memory: the box of facts and the growth of each of its tables are charged
 //! before they are made and recorded in the object's `Grown`, credited when the object is freed;
-//! a fact is recorded only from an override's answer, at most one per call (a key list's keys
-//! once, when it is the first after the report), so the step budget bounds the facts one entry
-//! adds and the memory budget all of them;
+//! a fact is recorded only from an answer of the object, at most one per call of an override (a
+//! key list's keys once, when it is the first after the report, a step per key; a key the
+//! record's OrdinaryDelete makes non-existent follows a call of the `get_own_property`
+//! override), so the step budget bounds the facts one entry adds and the memory budget all of
+//! them;
 //! the map of the keys of an answer of `own_property_keys` is charged before it is made and
 //! credited when the method returns, and the list answered is charged as every list of keys is
 //! ([`Agent::new_key_list`]). Each check of `own_property_keys` spends a step per key it visits.
@@ -66,7 +76,6 @@
 //! ([`Agent::held_ordinary_define_own_property`]).
 
 use alloc::boxed::Box;
-use alloc::vec::Vec;
 use core::any::Any;
 use core::hash::Hash;
 
@@ -585,8 +594,8 @@ impl<H: Host> Agent<H> {
         Ok(())
     }
 
-    /// After an answer that says `object` has no own property `key` (absent, false from
-    /// `has_property`, true from `delete`), with `known` what was known before: a fixed key
+    /// After an answer that says `object` has no own property `key` (absent from
+    /// `get_own_property`, true from [[Delete]]), with `known` what was known before: a fixed key
     /// breaks the invariant; otherwise, once the object is not extensible, the key is
     /// non-existent from now on.
     fn answered_absent(
@@ -750,7 +759,17 @@ impl<H: Host> Agent<H> {
             Some(table) if table.set_prototype_of.is_some() => self.in_override(object, |agent| {
                 agent.override_set_prototype_of(object, table, prototype)
             }),
-            _ => self.ordinary_set_prototype_of(object, prototype),
+            Some(table) => {
+                // The record answers; what the object said before the answer changed it.
+                let extensible = self.known_extensible(object, table)?;
+                let recorded = self.known_prototype(object, table)?;
+                let answer = self.ordinary_set_prototype_of(object, prototype)?;
+                if answer {
+                    self.set_prototype_of_true(object, extensible, recorded, prototype)?;
+                }
+                Ok(answer)
+            }
+            None => self.ordinary_set_prototype_of(object, prototype),
         }
     }
 
@@ -776,17 +795,35 @@ impl<H: Host> Agent<H> {
         if let Next::Answer(answer) = invariants::set_prototype_of_after_trap(answer) {
             return Ok(answer);
         }
-        if self.known_extensible(object, table)? == Some(false) {
-            match self.known_prototype(object, table)? {
-                Some(recorded) => {
-                    if invariants::set_prototype_of_after_prototype(prototype, recorded).is_err() {
-                        return Err(self.fault());
-                    }
-                }
-                None => self.with_facts(object, |facts| facts.prototype = Some(prototype))?,
-            }
-        }
+        let extensible = self.known_extensible(object, table)?;
+        let recorded = self.known_prototype(object, table)?;
+        self.set_prototype_of_true(object, extensible, recorded, prototype)?;
         Ok(true)
+    }
+
+    /// [[SetPrototypeOf]] of `object` answered true for `prototype`, from the override or the
+    /// record, with `extensible` and `recorded` what was known before the record answered:
+    /// while the object is not extensible, true only for the prototype recorded (I3), or the
+    /// value is recorded.
+    fn set_prototype_of_true(
+        &mut self,
+        object: ObjectRef,
+        extensible: Option<bool>,
+        recorded: Option<Option<ObjectRef>>,
+        prototype: Option<ObjectRef>,
+    ) -> Completion<()> {
+        if extensible != Some(false) {
+            return Ok(());
+        }
+        match recorded {
+            Some(recorded) => {
+                if invariants::set_prototype_of_after_prototype(prototype, recorded).is_err() {
+                    return Err(self.fault());
+                }
+                Ok(())
+            }
+            None => self.with_facts(object, |facts| facts.prototype = Some(prototype)),
+        }
     }
 
     /// [[IsExtensible]] of a host object.
@@ -833,7 +870,14 @@ impl<H: Host> Agent<H> {
                 .in_override(object, |agent| {
                     agent.override_prevent_extensions(object, table)
                 }),
-            _ => self.ordinary_prevent_extensions(object),
+            Some(table) => {
+                let answer = self.ordinary_prevent_extensions(object)?;
+                if answer {
+                    self.prevent_extensions_true(object, table)?;
+                }
+                Ok(answer)
+            }
+            None => self.ordinary_prevent_extensions(object),
         }
     }
 
@@ -855,15 +899,27 @@ impl<H: Host> Agent<H> {
         if let Next::Answer(answer) = invariants::prevent_extensions_after_trap(answer) {
             return Ok(answer);
         }
+        self.prevent_extensions_true(object, table)?;
+        Ok(true)
+    }
+
+    /// [[PreventExtensions]] of `object` answered true, from the override or the record: an
+    /// object known to be extensible breaks I5; otherwise the object is not extensible from now
+    /// on.
+    fn prevent_extensions_true(
+        &mut self,
+        object: ObjectRef,
+        table: &Overrides<H>,
+    ) -> Completion<()> {
         match self.known_extensible(object, table)? {
             Some(known) => {
                 if invariants::prevent_extensions_after_extensible(known).is_err() {
                     return Err(self.fault());
                 }
+                Ok(())
             }
-            None => self.with_facts(object, |facts| facts.sealed = true)?,
+            None => self.with_facts(object, |facts| facts.sealed = true),
         }
-        Ok(true)
     }
 
     /// [[GetOwnProperty]] of a host object.
@@ -1048,8 +1104,8 @@ impl<H: Host> Agent<H> {
     }
 
     /// The `has_property` override: false for a fixed property breaks the invariant, and for
-    /// a property of the record the Proxy's checks; otherwise false makes the key non-existent
-    /// once the object is not extensible.
+    /// a property of the record the Proxy's checks; any other false records nothing (the clause
+    /// binds [[HasProperty]] only for a key observed non-configurable).
     #[inline(never)]
     fn override_has_property(
         &mut self,
@@ -1080,7 +1136,8 @@ impl<H: Host> Agent<H> {
                 Ok(_) => {}
                 Err(_) => return Err(self.fault()),
             },
-            known => self.answered_absent(object, table, key, known)?,
+            Known::Fixed(_) => return Err(self.fault()),
+            Known::Absent | Known::Listed | Known::Unknown => {}
         }
         Ok(false)
     }
@@ -1189,7 +1246,14 @@ impl<H: Host> Agent<H> {
             Some(table) if table.delete.is_some() => {
                 self.in_override(object, |agent| agent.override_delete(object, table, key))
             }
-            _ => self.ordinary_delete(object, key),
+            Some(table) => {
+                let answer = self.ordinary_delete(object, key)?;
+                if answer {
+                    self.delete_true(object, table, key)?;
+                }
+                Ok(answer)
+            }
+            None => self.ordinary_delete(object, key),
         }
     }
 
@@ -1215,6 +1279,15 @@ impl<H: Host> Agent<H> {
         if let Next::Answer(answer) = invariants::delete_after_trap(answer) {
             return Ok(answer);
         }
+        self.delete_true(object, table, key)?;
+        Ok(true)
+    }
+
+    /// [[Delete]] of `object` answered true for `key`, from the override or the record: true
+    /// for a fixed property breaks the invariant, and for a property of the record the Proxy's
+    /// checks (the record after its own OrdinaryDelete no longer holds a configurable one);
+    /// otherwise the key is non-existent from now on once the object is not extensible.
+    fn delete_true(&mut self, object: ObjectRef, table: &Overrides<H>, key: Key) -> Completion<()> {
         match self.known_property(object, table, key)? {
             Known::Record(current) => match invariants::delete_after_descriptor(current) {
                 Ok(Next::ReadExtensible) => {
@@ -1228,22 +1301,37 @@ impl<H: Host> Agent<H> {
             },
             known => self.answered_absent(object, table, key, known)?,
         }
-        Ok(true)
+        Ok(())
     }
 
-    /// [[OwnPropertyKeys]] of a host object.
+    /// [[OwnPropertyKeys]] of a host object. Where the table has `get_own_property` and no
+    /// `own_property_keys`, the record's list is checked as an override's answer is; with
+    /// neither, the record answers both and its list is its own keys.
     pub(crate) fn host_own_property_keys(&mut self, object: ObjectRef) -> Completion<KeyList> {
         match self.override_table(object)? {
             Some(table) if table.own_property_keys.is_some() => self.in_override(object, |agent| {
                 agent.override_own_property_keys(object, table)
             }),
+            Some(table) if table.get_own_property.is_some() => {
+                let list = self.ordinary_own_property_keys(object)?;
+                let checked = self.with_seen(list.keys.len(), |agent, seen| {
+                    agent.key_list_check(object, table, &list.keys, seen)
+                });
+                match checked {
+                    Ok(()) => Ok(list),
+                    Err(abrupt) => {
+                        self.drop_key_list(list);
+                        Err(abrupt)
+                    }
+                }
+            }
             _ => self.ordinary_own_property_keys(object),
         }
     }
 
     /// The `own_property_keys` override: each key's handle checked (HOST-222), then the list
-    /// answered made, charged as every list of keys is, a step per key before it is read and
-    /// made a key; then the checks, credited on an abrupt completion.
+    /// answered made, charged as every list of keys is; then the checks, a step per key, the
+    /// list credited on an abrupt completion.
     #[inline(never)]
     fn override_own_property_keys(
         &mut self,
@@ -1263,24 +1351,14 @@ impl<H: Host> Agent<H> {
             }
         }
         let mut list = self.new_key_list(answer.len())?;
-        let bytes = KeyedMap::<Key, ()>::table_bytes_for(answer.len());
-        let checked = match self.charge_bytes(bytes) {
-            Ok(()) => {
-                let mut seen = KeyedMap::<Key, ()>::with_hasher(self.heap.hasher);
-                let mut charged = bytes;
-                let checked = self.override_keys_check(
-                    object,
-                    table,
-                    &answer,
-                    &mut seen,
-                    &mut charged,
-                    &mut list.keys,
-                );
-                self.heap.accounting.credit(charged);
-                checked
+        let keys = &mut list.keys;
+        let checked = self.with_seen(answer.len(), |agent, seen| {
+            for &key in &answer {
+                let key = agent.key_of(key)?;
+                keys.push(key);
             }
-            Err(abrupt) => Err(abrupt),
-        };
+            agent.key_list_check(object, table, keys, seen)
+        });
         match checked {
             Ok(()) => Ok(list),
             Err(abrupt) => {
@@ -1290,21 +1368,33 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// The checks of an answer of `own_property_keys`, with `seen`, the map of its keys,
-    /// `charged` bytes so far: each key made a key and pushed to `keys`, a step before each, a
-    /// key listed twice breaks the invariant (I18); each fixed key must be listed (I19), a step
-    /// per key; an object that is not extensible lists exactly the keys it listed first (I20,
-    /// I21), a step per key, or its first list is recorded.
-    fn override_keys_check(
+    /// Run `check` with a map for the keys of a list of `count` keys, its bytes charged before
+    /// it is made and credited when `check` returns.
+    fn with_seen(
         &mut self,
-        object: ObjectRef,
-        table: &'static Overrides<H>,
-        answer: &[PropertyKey],
-        seen: &mut KeyedMap<Key, ()>,
-        charged: &mut u64,
-        keys: &mut Vec<Key>,
+        count: usize,
+        check: impl FnOnce(&mut Self, &mut KeyedMap<Key, ()>) -> Completion<()>,
     ) -> Completion<()> {
-        if seen.reserve(answer.len()).is_err() {
+        let bytes = KeyedMap::<Key, ()>::table_bytes_for(count);
+        self.charge_bytes(bytes)?;
+        let mut seen = KeyedMap::<Key, ()>::with_hasher(self.heap.hasher);
+        let mut charged = bytes;
+        let checked = match self.reserve_seen(&mut seen, count, &mut charged) {
+            Ok(()) => check(self, &mut seen),
+            Err(abrupt) => Err(abrupt),
+        };
+        self.heap.accounting.credit(charged);
+        checked
+    }
+
+    /// Room for `count` keys in `seen`, `charged` bytes so far.
+    fn reserve_seen(
+        &mut self,
+        seen: &mut KeyedMap<Key, ()>,
+        count: usize,
+        charged: &mut u64,
+    ) -> Completion<()> {
+        if seen.reserve(count).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let table_bytes = seen.table_bytes();
@@ -1313,15 +1403,30 @@ impl<H: Host> Agent<H> {
             self.charge_bytes(table_bytes - *charged)?;
             *charged = table_bytes;
         }
-        for &key in answer {
+        Ok(())
+    }
+
+    /// The checks of a key list of `object`, from the override or the record, with `seen`, an
+    /// empty map with room for its keys: a key listed twice breaks the invariant (I18), a step
+    /// per key; each fixed key must be listed (I19), a step per key; an object that is not
+    /// extensible lists exactly the keys it listed first (I20, I21), a step per key, or its
+    /// first list is recorded.
+    fn key_list_check(
+        &mut self,
+        object: ObjectRef,
+        table: &Overrides<H>,
+        keys: &[Key],
+        seen: &mut KeyedMap<Key, ()>,
+    ) -> Completion<()> {
+        for &key in keys {
             self.charge_steps(1)?;
-            let key = self.key_of(key)?;
             match seen.insert(key, ()) {
-                Ok(None) => keys.push(key),
+                Ok(None) => {}
                 Ok(Some(())) => return Err(self.fault()),
                 Err(_) => return Err(self.terminate(Termination::MemoryBudget)),
             }
         }
+        let seen = &*seen;
         let sealed = self.known_extensible(object, table)? == Some(false);
         if table.get_own_property.is_none() {
             return self.record_keys_check(object, sealed, keys, seen);
