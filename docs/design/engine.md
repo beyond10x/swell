@@ -3645,17 +3645,17 @@ The rule:
 | 6 | `bindings-and-iteration` | 3,898 | 7,351 |
 | 7 | `generators` | 1,472 | 2,801 |
 | 8 | `classes` | 9,302 | 18,455 |
-| 9 | `collections-proxy-reflect` | 1,787 | 3,545 |
+| 9 | `collections-proxy-reflect` | 1,864 | 3,694 |
 | 10 | `promises-and-async` | 3,759 | 7,258 |
 | 11 | `modules` | 1,281 | 1,833 |
-| 12 | `bigint` | 359 | 716 |
+| 12 | `bigint` | 381 | 760 |
 | 13 | `binary-data` | 3,061 | 6,078 |
 | 14 | `shared-memory` | 598 | 1,192 |
 | 15 | `iterator-helpers-and-resources` | 1,094 | 2,170 |
 | 16 | `weak-references` | 82 | 164 |
 | 17 | `tail-calls` | 35 | 35 |
 | 18 | `annex-b` | 1,134 | 1,451 |
-| 19 | `staging` | 1,363 | 2,550 |
+| 19 | `staging` | 1,264 | 2,357 |
 | | slices 1 to 19 | 44,931 | 85,794 |
 | 20 | `temporal` (excluded at first) | 4,617 | 9,234 |
 | 21 | `intl402` (excluded at first) | 1,662 | 3,324 |
@@ -3743,6 +3743,17 @@ on 2026-11-26 with the same check (`awk -f slices.awk` over this block and the i
 code of the slice, every run passed. Every moved case goes to slice 9 or 12 and every case that
 comes in leaves slice 19, so slices 1 to 19 still hold 44,931 cases and 85,794 runs and the 22
 lines still sum to 53,801 and 103,360.
+
+Slice 9 had 1,787 cases and 3,545 runs by its rules (its `dir` and `feature` lines, the lines of
+the closes of slices 2, 3, 4, 5, 6 and 10 that gave it cases, and the order of delivery). 1,864
+cases and 3,694 runs are what slice 9 counts after its close: 22 cases (44 runs) that need slice
+12 move by the lines of the paragraph "Slice 9's cases that need a later slice", and 99 cases
+(193 runs) come into it from slice 19 by the lines of the same paragraph ("A case that comes into
+a slice from one delivered later" above). Measured on 2026-11-27 with the same check (`awk -f
+slices.awk` over this block and the inventory's `meta.tsv`, counting slice `09`): `09 1864
+3694`, the slice line of `slot task test262` on the code of the slice, every run passed. Every
+moved case goes to slice 12 and every case that comes in leaves slice 19, so slices 1 to 19 still
+hold 44,931 cases and 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
 
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
@@ -4399,6 +4410,77 @@ of them the `not-a-constructor` cases of the directories of slice 4; they stay i
 line, since each has the line `feature Reflect.construct 9` (slice 9 passes 170 cases at the
 start and 268 now). No case of another slice delivered after 4 failed at the start and passes
 in every run now.
+
+**Slice 9's cases that need a later slice.** Measured at the close of slice 9 (2026-11-27,
+`story:slice-09-conformance-close`), with the run lines of the runner on the code of the slice
+(`slot --timeout 30m task test262-expected`, its `runs.tsv`), on the wave branch after the last
+other story of the slice was merged (`bc45e92`): 22 of the 1,787 cases of slice 9 fail, each in
+every one of its runs (44 runs), and none on a part of slice 9: the first failure of each run is
+the refusal `BigInt literal is not supported before slice 12`. They are the 22 cases that
+`docs/plan/slice-09/close-later.tsv` sends to slice 12, and each was read: with its later part it
+needs nothing of slice 9 that its sibling cases without that part do not pass with.
+`Map/prototype/getOrInsertComputed/this-not-object-throw` calls the method with `1n` as its
+receiver; of each of the seven set methods of `Set/prototype/` (`difference`, `intersection`,
+`isDisjointFrom`, `isSubsetOf`, `isSupersetOf`, `symmetricDifference`, `union`),
+`called-with-object` passes `1n` as the other set, `require-internal-slot` calls the method with
+`1n` as its receiver, and `size-is-a-number` sets the `size` of the other set to `0n`; the other
+cases of those directories pass. The 37 cases that the same file sends to slice 8 (`class` or
+`super`, and `language/expressions/optional-chaining/new-target-optional-call`) pass in every run
+on this code, which holds the classes of slice 8 merged so far, and stay in slice 9 with no line.
+All 22 move, each a new line of `conformance/test262/moves.tsv` with `from` 9, kind `part` and a
+token of `conformance/test262/later-parts.tsv` as its evidence, held by `test262-moves-check`.
+The later parts gain no token. The block gains 22 lines `dir <file> 12`, one for a single file
+each, since every directory that holds one of them holds cases of slice 9 that stay. The groups,
+by target slice (lines of the list; in brackets the lines with `from` 9):
+
+- to slice 12, 22 (22): `1n` 15 (`Map/prototype/getOrInsertComputed/this-not-object-throw` and
+  the `called-with-object` and `require-internal-slot` cases of the seven set methods), `0n` 7
+  (their `size-is-a-number` cases).
+
+The counts sum to the 22 lines this change adds to the list, all with `from` 9.
+
+99 cases (193 runs) come into slice 9, by the rule "A case that comes into a slice from one
+delivered later" above. Each is counted by the block in slice 19 (`dir test/staging/ 19`), failed
+at the start of the slice (`cf7f253`, the commit the first story of the slice was merged onto) on
+a part of slice 9, passes in every run on the code of the slice, has no `feature` or `flag` line
+of a slice delivered after 9, and neither it nor a harness file it includes holds a token of a
+later slice of `conformance/test262/later-parts.tsv` (comments removed, as `test262-moves-check`
+reads a case). By directory under `test/staging/`: `sm/Proxy/` 16, `sm/Array/` 14, `sm/object/`
+12, `sm/RegExp/` 10, `sm/Map/` 6, `sm/Reflect/` 6, `sm/extensions/` 6, `sm/Function/` 5, the
+directory itself 4 (`set-is-subset-*`), `set-methods/` 3, `sm/Symbol/` 3, `sm/strict/` 2, and 1
+each of `sm/AsyncGenerators/`, `sm/Date/`, `sm/Error/`, `sm/String/`, `sm/WeakMap/`,
+`sm/async-functions/`, `sm/class/`, `sm/destructuring/`, `sm/expressions/`, `sm/generators/`,
+`sm/misc/` and `sm/regress/`. Every case of `test/staging/set-methods/` and of
+`test/staging/sm/WeakMap/` comes in, and each of the two directories gets one line `dir
+<directory>/ 9`; each of the other 95 cases gets a line `dir <file> 9`. All 99 are listed in
+`docs/plan/slice-09/close-into-09.tsv` with the slice they leave, the line that takes them, the
+runner's message of their first failed run at the start and the part of slice 9 they failed on;
+each passes in every one of its runs (the close's check (4) over that file), and none has a line
+of `moves.tsv`. The failure at the start is read case by case from the run lines of the full run
+of `cf7f253`. The message of 87 names the part: `Proxy` is not defined 63, `Set` 10, `Reflect` 8,
+`Map` 5, `WeakMap` 1. The message of 12 names none, and the part is read from the case's source
+(the fifth field of `close-into-09.tsv`): an `assert.throws` that got a `ReferenceError` for
+`Reflect` 5 (the four `create-function-parse-before-getprototype` cases, which call
+`Reflect.construct`, and `Reflect/argumentsList`), for `Proxy` 3 (`Function/has-instance`,
+`RegExp/source`, `regress/regress-1383630`) or for `Map` 1 (`Map/iterator-thisv-error`);
+`Reflect/surfaces`, whose `typeof Reflect` was `"undefined"`; `Array/isArray`, whose
+`new (pickGlobal()).Proxy(...)` threw `the value is not a constructor`; and
+`extensions/proxy-enumeration`, which looks for `Proxy` among the own names of the global
+object. Four other cases failed at the start, pass in every run now and have no `feature` or
+`flag` line and no token of a later slice, and stay in their slice with no line, since they
+failed on a part of slice 8: `language/expressions/new.target/escaped-target` (slice 8; the
+refusal `new.target is not supported before slice 8`; it spells `target` with a Unicode escape
+for its `a`, so no token matches) and `staging/sm/PrivateName/error-outside-class`,
+`illegal-in-identifier-context` and `illegal-in-object-context` (slice 19; a counted refusal of
+the private names they compile with `eval`). 8,401 other cases of slices delivered after 9
+failed at the start and pass in every run now, and stay in their slice with no line, each with a
+`feature` line of a slice delivered after 9 or a token of one: 8,236 of slice 8 (4,496 with a
+`feature` line of slice 8, 3,740 with a token of slice 8 only), 160 of slice 19 (2 with a
+`feature` line, 158 with a token, by the first of their tokens in the order of the later parts:
+`class` 109, `BigInt` 32, `new.target` 11, `super` 5, `.__proto__` 1), 2 of slice 18 and 1 each
+of slices 11, 15 and 17 (each with a `feature` line of its slice). Slice 19 passes 866 cases on
+the base of this close and 767 after it: the 99 that come in leave it, and no run changed its
+outcome between the two runs.
 
 ```swell-slices
 order delivery 1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21
@@ -6347,6 +6429,125 @@ dir test/staging/sm/global/parseFloat-01.js 4
 dir test/staging/sm/global/parseInt-01.js 4
 dir test/staging/sm/global/parseInt-default-to-decimal.js 4
 dir test/staging/sm/object/toPrimitive-callers.js 4
+dir test/built-ins/Map/prototype/getOrInsertComputed/this-not-object-throw.js 12
+dir test/built-ins/Set/prototype/difference/called-with-object.js 12
+dir test/built-ins/Set/prototype/difference/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/difference/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/intersection/called-with-object.js 12
+dir test/built-ins/Set/prototype/intersection/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/intersection/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/isDisjointFrom/called-with-object.js 12
+dir test/built-ins/Set/prototype/isDisjointFrom/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/isDisjointFrom/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/isSubsetOf/called-with-object.js 12
+dir test/built-ins/Set/prototype/isSubsetOf/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/isSubsetOf/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/isSupersetOf/called-with-object.js 12
+dir test/built-ins/Set/prototype/isSupersetOf/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/isSupersetOf/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/symmetricDifference/called-with-object.js 12
+dir test/built-ins/Set/prototype/symmetricDifference/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/symmetricDifference/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/union/called-with-object.js 12
+dir test/built-ins/Set/prototype/union/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/union/size-is-a-number.js 12
+dir test/staging/set-is-subset-of-empty-index.js 9
+dir test/staging/set-is-subset-on-set-like.js 9
+dir test/staging/set-is-subset-table-receiver-cleared.js 9
+dir test/staging/set-is-subset-table-transition.js 9
+dir test/staging/set-methods/ 9
+dir test/staging/sm/Array/concat-proxy.js 9
+dir test/staging/sm/Array/for_of_2.js 9
+dir test/staging/sm/Array/for_of_3.js 9
+dir test/staging/sm/Array/for_of_4.js 9
+dir test/staging/sm/Array/includes.js 9
+dir test/staging/sm/Array/indexOf-packed-array.js 9
+dir test/staging/sm/Array/isArray.js 9
+dir test/staging/sm/Array/join-no-has-trap.js 9
+dir test/staging/sm/Array/pop-no-has-trap.js 9
+dir test/staging/sm/Array/shift-no-has-trap.js 9
+dir test/staging/sm/Array/sort-delete-ascending-order.js 9
+dir test/staging/sm/Array/sort_proxy.js 9
+dir test/staging/sm/Array/to-length.js 9
+dir test/staging/sm/Array/unshift-with-enumeration.js 9
+dir test/staging/sm/AsyncGenerators/create-function-parse-before-getprototype.js 9
+dir test/staging/sm/Date/toString-generic.js 9
+dir test/staging/sm/Error/constructor-ordering.js 9
+dir test/staging/sm/Function/bound-length-and-name.js 9
+dir test/staging/sm/Function/bound-non-constructable.js 9
+dir test/staging/sm/Function/builtin-no-construct.js 9
+dir test/staging/sm/Function/create-function-parse-before-getprototype.js 9
+dir test/staging/sm/Function/has-instance.js 9
+dir test/staging/sm/Map/NaN-as-key.js 9
+dir test/staging/sm/Map/constructor-iterator-primitive.js 9
+dir test/staging/sm/Map/forEach-selfhosted-behavior.js 9
+dir test/staging/sm/Map/getter-name.js 9
+dir test/staging/sm/Map/iterable.js 9
+dir test/staging/sm/Map/iterator-thisv-error.js 9
+dir test/staging/sm/Proxy/define-writable-as-non-writable.js 9
+dir test/staging/sm/Proxy/delete-non-extensible.js 9
+dir test/staging/sm/Proxy/getPrototypeOf.js 9
+dir test/staging/sm/Proxy/hasInstance.js 9
+dir test/staging/sm/Proxy/json-stringify-replacer-array-revocable-proxy.js 9
+dir test/staging/sm/Proxy/ownkeys-allowed-types.js 9
+dir test/staging/sm/Proxy/ownkeys-linear.js 9
+dir test/staging/sm/Proxy/ownkeys-trap-duplicates.js 9
+dir test/staging/sm/Proxy/proxy-constructNonObject.js 9
+dir test/staging/sm/Proxy/proxy-no-receiver-overwrite.js 9
+dir test/staging/sm/Proxy/proxy-proto-lazy-props.js 9
+dir test/staging/sm/Proxy/proxy-with-revoked-arguments.js 9
+dir test/staging/sm/Proxy/report-writable-as-non-writable.js 9
+dir test/staging/sm/Proxy/revocable-proxy-prototype.js 9
+dir test/staging/sm/Proxy/revoke-as-side-effect.js 9
+dir test/staging/sm/Proxy/revoke-no-name.js 9
+dir test/staging/sm/Reflect/argumentsList.js 9
+dir test/staging/sm/Reflect/getPrototypeOf.js 9
+dir test/staging/sm/Reflect/has.js 9
+dir test/staging/sm/Reflect/setPrototypeOf.js 9
+dir test/staging/sm/Reflect/surfaces.js 9
+dir test/staging/sm/Reflect/target.js 9
+dir test/staging/sm/RegExp/constructor-constructor.js 9
+dir test/staging/sm/RegExp/constructor-ordering-2.js 9
+dir test/staging/sm/RegExp/flag-accessors.js 9
+dir test/staging/sm/RegExp/flags.js 9
+dir test/staging/sm/RegExp/match-trace.js 9
+dir test/staging/sm/RegExp/replace-trace.js 9
+dir test/staging/sm/RegExp/search-trace.js 9
+dir test/staging/sm/RegExp/source.js 9
+dir test/staging/sm/RegExp/split-trace.js 9
+dir test/staging/sm/RegExp/toString.js 9
+dir test/staging/sm/String/string-pad-start-end.js 9
+dir test/staging/sm/Symbol/enumeration-order.js 9
+dir test/staging/sm/Symbol/enumeration.js 9
+dir test/staging/sm/Symbol/toPrimitive.js 9
+dir test/staging/sm/WeakMap/ 9
+dir test/staging/sm/async-functions/create-function-parse-before-getprototype.js 9
+dir test/staging/sm/class/newTargetProxyNative.js 9
+dir test/staging/sm/destructuring/order.js 9
+dir test/staging/sm/expressions/destructuring-array-done.js 9
+dir test/staging/sm/extensions/array-pop-proxy.js 9
+dir test/staging/sm/extensions/proxy-array-target-length-definition.js 9
+dir test/staging/sm/extensions/proxy-enumeration.js 9
+dir test/staging/sm/extensions/proxy-strict.js 9
+dir test/staging/sm/extensions/reviver-mutates-holder-array.js 9
+dir test/staging/sm/extensions/reviver-mutates-holder-object.js 9
+dir test/staging/sm/generators/create-function-parse-before-getprototype.js 9
+dir test/staging/sm/misc/new-with-non-constructor.js 9
+dir test/staging/sm/object/bug-1206700.js 9
+dir test/staging/sm/object/defineProperties-order.js 9
+dir test/staging/sm/object/defineProperty-proxy.js 9
+dir test/staging/sm/object/freeze-proxy.js 9
+dir test/staging/sm/object/getOwnPropertySymbols-proxy.js 9
+dir test/staging/sm/object/getOwnPropertySymbols.js 9
+dir test/staging/sm/object/preventExtensions-proxy.js 9
+dir test/staging/sm/object/property-descriptor-order.js 9
+dir test/staging/sm/object/propertyIsEnumerable-proxy.js 9
+dir test/staging/sm/object/seal-proxy.js 9
+dir test/staging/sm/object/toPrimitive.js 9
+dir test/staging/sm/object/values.js 9
+dir test/staging/sm/regress/regress-1383630.js 9
+dir test/staging/sm/strict/primitive-assignment.js 9
+dir test/staging/sm/strict/primitive-this-getter.js 9
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
@@ -6821,17 +7022,17 @@ Its output on this document:
 06 3898 7351
 07 1472 2801
 08 9302 18455
-09 1787 3545
+09 1864 3694
 10 3759 7258
 11 1281 1833
-12 359 716
+12 381 760
 13 3061 6078
 14 598 1192
 15 1094 2170
 16 82 164
 17 35 35
 18 1134 1451
-19 1363 2550
+19 1264 2357
 20 4617 9234
 21 1662 3324
 x-stage3 2591 5008
