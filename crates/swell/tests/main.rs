@@ -145,6 +145,8 @@ mod generators;
 mod hooks;
 #[cfg(any(not(test_modules), test_modules = "host_objects"))]
 mod host_objects;
+#[cfg(any(not(test_modules), test_modules = "host_overrides"))]
+mod host_overrides;
 #[cfg(any(not(test_modules), test_modules = "index_stores"))]
 mod index_stores;
 #[cfg(any(not(test_modules), test_modules = "interrupt"))]

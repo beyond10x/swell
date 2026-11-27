@@ -521,6 +521,7 @@ fn pin_objects(agent: &mut Agent<Transcript>, realm: &Realm, roots: &PinRoots, c
                         brand: PIN_BRAND,
                         data: None,
                         error_kind: None,
+                        overrides: None,
                     })
                     .unwrap()
                     .unwrap();

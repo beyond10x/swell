@@ -6,11 +6,15 @@ vars:
   STACK_MODULE_LIST: |
     limits_scripts
     eval_stack
+    host_overrides
   STACK_TEST_LIST: |
     host_17_deepest_reentry_parses_at_full_nesting
     min_stack_bytes_is_enough_through_builtins
     host_152_deepest_reentry_evals_at_full_nesting
     host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting
+    overrides_recursing_through_each_other_end_at_the_reentry_limit
+    an_override_script_host_function_chain_ends_at_the_reentry_limit
+    a_prototype_cycle_of_two_overrides_ends_each_walk_at_the_step_budget
 
 tasks:
   stack-modules-check:
@@ -86,7 +90,7 @@ tasks:
     desc: Build the one test binary of swell with the modules of STACK_MODULES only, in the release profile and in the profile stack-debug (dev with full debug information).
     summary: |
       Build the one test binary of swell, tests/main.rs, whose modules of STACK_MODULES (today
-      limits_scripts and eval_stack) hold the stack tests (story
+      limits_scripts, eval_stack and host_overrides) hold the stack tests (story
       one-integration-test-binary-per-crate), in the two profiles whose frames the dev build of
       the gate does not show: release, and stack-debug, the dev profile with full debug
       information, cargo's default for a dev build and so an embedder's, whose frames are the
@@ -189,14 +193,17 @@ tasks:
         done
 
   test-stack-profiles:
-    desc: Run the stack tests of STACK_TESTS (HOST-17, HOST-152, HOST-163 and the builtins) in the release profile and in stack-debug, refuse a release binary of theirs with debug sections and a stack-debug one without.
+    desc: Run the stack tests of STACK_TESTS (HOST-17, HOST-152, HOST-163, the builtins and the host objects with an override table) in the release profile and in stack-debug, refuse a release binary of theirs with debug sections and a stack-debug one without.
     summary: |
-      Run the tests of STACK_TESTS, the four that say Limits::min_stack_bytes() is enough
+      Run the tests of STACK_TESTS, the seven that say Limits::min_stack_bytes() is enough
       (HOST-17 host_17_deepest_reentry_parses_at_full_nesting and
       min_stack_bytes_is_enough_through_builtins of the module limits_scripts, HOST-152
       host_152_deepest_reentry_evals_at_full_nesting and HOST-163
       host_163_deepest_reentry_calls_function_with_parameters_and_body_at_full_nesting of the
-      module eval_stack, both in the one test binary of swell, tests/main.rs) in the release
+      module eval_stack, and overrides_recursing_through_each_other_end_at_the_reentry_limit,
+      an_override_script_host_function_chain_ends_at_the_reentry_limit and
+      a_prototype_cycle_of_two_overrides_ends_each_walk_at_the_step_budget of the module
+      host_overrides, all in the one test binary of swell, tests/main.rs) in the release
       profile and in stack-debug, the dev profile with full debug information; the step test
       runs them in the dev profile without it. The promise is so shown in three builds: dev
       without debug information, dev with full debug information (the largest frames, an

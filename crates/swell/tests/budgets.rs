@@ -126,6 +126,7 @@ fn memory_budget_charges_utf16_strings_and_host_data() {
                 brand: Brand(1),
                 data: Some(Box::new(Big { _bytes: [0; 2_048] })),
                 error_kind: None,
+                overrides: None,
             })
             .unwrap()
             .map(|_| ())
@@ -732,6 +733,7 @@ fn host_176_a_host_charge_gives_back_what_it_charged() {
                 brand: Brand(1),
                 data: Some(Box::new(HeldCharge { _charge: charge })),
                 error_kind: None,
+                overrides: None,
             })
             .unwrap()
             .unwrap();
@@ -1010,6 +1012,7 @@ fn realm_charging(agent: &mut Agent<TestHost>, charge: Option<u64>) -> HostOutco
                 brand: Brand(1),
                 data: None,
                 error_kind: None,
+                overrides: None,
             })
             .unwrap()?;
         Ok(GlobalObjects { global, this: None })

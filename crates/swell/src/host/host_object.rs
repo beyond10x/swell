@@ -4,18 +4,26 @@
 //! `trace`, which the collector calls so that what the data holds stays alive exactly as long
 //! as the object. The host data is dropped by the sweep that frees its object.
 //!
-//! Kind site of the collector: [`HostObject::trace`]. `overrides` (slice 9) and `is_html_dda`
-//! (slice 18) are added to [`HostObjectSpec`] by the slices of their requirements. Written by
+//! A host object may have an override table, [`Overrides`] (section 15, "overrides";
+//! `story:host-object-overrides`): each internal method it gives runs in place of the ordinary
+//! one (`object/host_overrides.rs`), and the facts its answers fixed are kept in a box of the
+//! object, which its kind site traces.
+//!
+//! Kind site of the collector: [`HostObject::trace`]. `is_html_dda` (slice 18) is added to
+//! [`HostObjectSpec`] by the slice of its requirement. Written by
 //! `story:heap-values-and-host-surface`.
 
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::any::Any;
 
 use crate::heap::collect::Mark;
-use crate::host::ErrorKind;
+use crate::host::outcome::Completion;
+use crate::host::{Cx, ErrorKind, Host, PropertyDescriptor};
+use crate::object::host_overrides::Overridden;
 use crate::realm::WellKnown;
 use crate::realm::intrinsics::Intrinsic;
-use crate::value::{ObjectRef, RealmRef, SymbolRef, Value};
+use crate::value::{ObjectRef, PropertyKey, RealmRef, SymbolRef, Value};
 
 /// The brand of a host object: which Web IDL interface it implements, in the host's numbering
 /// (`webidl:is-a-platform-object`).
@@ -131,8 +139,37 @@ impl WellKnownSymbol {
     }
 }
 
+/// The internal methods a host object overrides (`docs/design/host-interface.md`, section 15):
+/// each one given runs in place of the ordinary method of that name, and each one left `None`
+/// runs the ordinary method. A table is shared by every object of one interface, so it is
+/// `&'static`. Each call is one re-entry and spends a step before it runs; the handles of its
+/// answer are checked, then the answer against the invariants of the essential internal
+/// methods (`#sec-invariants-of-the-essential-internal-methods`) with the facts the object's
+/// earlier answers fixed; a broken one ends the run in `Terminated(EngineFault)`.
+#[expect(
+    clippy::type_complexity,
+    reason = "each field's type as docs/design/host-interface.md section 15 states it; an alias would be a public name the design does not have"
+)]
+pub struct Overrides<H: Host> {
+    pub get_prototype_of: Option<fn(&mut Cx<'_, H>, ObjectRef) -> Completion<Option<ObjectRef>>>,
+    pub set_prototype_of:
+        Option<fn(&mut Cx<'_, H>, ObjectRef, Option<ObjectRef>) -> Completion<bool>>,
+    pub is_extensible: Option<fn(&mut Cx<'_, H>, ObjectRef) -> Completion<bool>>,
+    pub prevent_extensions: Option<fn(&mut Cx<'_, H>, ObjectRef) -> Completion<bool>>,
+    pub get_own_property: Option<
+        fn(&mut Cx<'_, H>, ObjectRef, PropertyKey) -> Completion<Option<PropertyDescriptor>>,
+    >,
+    pub define_own_property:
+        Option<fn(&mut Cx<'_, H>, ObjectRef, PropertyKey, PropertyDescriptor) -> Completion<bool>>,
+    pub has_property: Option<fn(&mut Cx<'_, H>, ObjectRef, PropertyKey) -> Completion<bool>>,
+    pub get: Option<fn(&mut Cx<'_, H>, ObjectRef, PropertyKey, Value) -> Completion<Value>>,
+    pub set: Option<fn(&mut Cx<'_, H>, ObjectRef, PropertyKey, Value, Value) -> Completion<bool>>,
+    pub delete: Option<fn(&mut Cx<'_, H>, ObjectRef, PropertyKey) -> Completion<bool>>,
+    pub own_property_keys: Option<fn(&mut Cx<'_, H>, ObjectRef) -> Completion<Vec<PropertyKey>>>,
+}
+
 /// What `new_host_object` makes.
-pub struct HostObjectSpec {
+pub struct HostObjectSpec<H: Host> {
     /// [[Prototype]].
     pub prototype: Prototype,
     pub brand: Brand,
@@ -142,6 +179,8 @@ pub struct HostObjectSpec {
     /// it, `Object.prototype.toString` gives it the builtin tag "Error", and `error_summary`
     /// reads the kind (decisions 13 and 15).
     pub error_kind: Option<ErrorKind>,
+    /// The internal methods the object overrides, or `None` for the ordinary ones.
+    pub overrides: Option<&'static Overrides<H>>,
 }
 
 /// The kind part of a host object's record.
@@ -153,11 +192,35 @@ pub(crate) struct HostObject {
 }
 
 impl HostObject {
-    /// Kind site of the collector: what the host data lists.
+    /// Kind site of the collector: what the host data lists. For an object with an override
+    /// table the data is the box of the table ([`Overridden`]), whose `trace` lists the host's
+    /// own data and the values, keys and prototype of the facts.
     pub(crate) fn trace(&self, mark: &mut Mark) {
         mark.count("host/host_object.rs HostObject::trace");
         if let Some(data) = &self.data {
             data.trace(&mut Tracer { mark });
+        }
+    }
+
+    /// The box of its override table, with the facts and the host's data, when it has a table:
+    /// the record of a host object keeps its size (`object/generator.rs`, `RECORD_BYTES`) and
+    /// so do the records that keep a [[HostDefined]] as a host object's data.
+    pub(crate) fn overridden(&self) -> Option<&Overridden> {
+        let data: &dyn Any = self.data.as_deref()?;
+        data.downcast_ref::<Overridden>()
+    }
+
+    /// As [`HostObject::overridden`], to change.
+    pub(crate) fn overridden_mut(&mut self) -> Option<&mut Overridden> {
+        let data: &mut dyn Any = self.data.as_deref_mut()?;
+        data.downcast_mut::<Overridden>()
+    }
+
+    /// The host's data: the data, or the data in the box of the override table.
+    fn host_data(&self) -> Option<&dyn HostData> {
+        match self.overridden() {
+            Some(overridden) => overridden.data(),
+            None => self.data.as_deref(),
         }
     }
 
@@ -166,7 +229,7 @@ impl HostObject {
         if self.brand != brand {
             return None;
         }
-        let data: &dyn Any = self.data.as_deref()?;
+        let data: &dyn Any = self.host_data()?;
         data.downcast_ref::<T>()
     }
 
@@ -175,7 +238,12 @@ impl HostObject {
         if self.brand != brand {
             return None;
         }
-        let data: &mut dyn Any = self.data.as_deref_mut()?;
+        let data: &mut dyn HostData = if self.overridden().is_some() {
+            self.overridden_mut()?.data_mut()?
+        } else {
+            self.data.as_deref_mut()?
+        };
+        let data: &mut dyn Any = data;
         data.downcast_mut::<T>()
     }
 

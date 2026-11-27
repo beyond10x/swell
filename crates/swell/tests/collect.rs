@@ -16,12 +16,13 @@ impl HostData for Payload {
     fn trace(&self, _tracer: &mut Tracer<'_>) {}
 }
 
-fn spec(data: Option<Box<dyn HostData>>) -> HostObjectSpec {
+fn spec<H: swell::Host>(data: Option<Box<dyn HostData>>) -> HostObjectSpec<H> {
     HostObjectSpec {
         prototype: Prototype::Null,
         brand: BRAND,
         data,
         error_kind: None,
+        overrides: None,
     }
 }
 

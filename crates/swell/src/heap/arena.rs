@@ -602,6 +602,7 @@ mod tests {
                         brand: Brand(1),
                         data: None,
                         error_kind: None,
+                        overrides: None,
                     })
                     .unwrap()
                     .unwrap();
