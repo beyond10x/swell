@@ -1264,6 +1264,8 @@ test/language/expressions/call/spread-sngl-empty.js	2	6	part	...
 test/language/expressions/call/spread-sngl-expr.js	2	6	part	...
 test/language/expressions/call/spread-sngl-literal.js	2	6	part	...
 test/language/expressions/call/trailing-comma.js	2	6	part	...
+test/language/expressions/class/elements/private-getter-is-not-a-own-property.js	8	18	part	__lookupGetter__
+test/language/expressions/class/elements/private-setter-is-not-a-own-property.js	8	18	part	__lookupSetter__
 test/language/expressions/coalesce/short-circuit-number-symbol.js	2	6	part	Symbol
 test/language/expressions/compound-assignment/11.13.2-45-s.js	2	3	part	Object.preventExtensions
 test/language/expressions/compound-assignment/11.13.2-46-s.js	2	3	part	Object.preventExtensions
@@ -1732,6 +1734,13 @@ test/language/statements/break/S12.8_A4_T3.js	2	6	part	function IN_DO_FUNC(){} }
 test/language/statements/break/S12.8_A5_T1.js	2	6	part	function IN_DO_FUNC(){} } while
 test/language/statements/break/S12.8_A5_T2.js	2	6	part	function IN_DO_FUNC(){} } while
 test/language/statements/break/S12.8_A5_T3.js	2	6	part	function IN_DO_FUNC(){} } while
+test/language/statements/class/elements/private-getter-is-not-a-own-property.js	8	18	part	__lookupGetter__
+test/language/statements/class/elements/private-setter-is-not-a-own-property.js	8	18	part	__lookupSetter__
+test/language/statements/class/subclass/builtin-objects/ArrayBuffer/regular-subclassing.js	8	13	part	ArrayBuffer
+test/language/statements/class/subclass/builtin-objects/ArrayBuffer/super-must-be-called.js	8	13	part	ArrayBuffer
+test/language/statements/class/subclass/builtin-objects/DataView/regular-subclassing.js	8	13	part	DataView
+test/language/statements/class/subclass/builtin-objects/DataView/super-must-be-called.js	8	13	part	DataView
+test/language/statements/class/subclass/builtins.js	8	13	part	Uint8Array
 test/language/statements/const/dstr/ary-ptrn-elem-id-init-fn-name-class.js	6	8	part	class
 test/language/statements/const/dstr/obj-ptrn-id-init-fn-name-class.js	6	8	part	class
 test/language/statements/continue/S12.7_A5_T1.js	2	6	part	function IN_DO_FUNC(){} } while

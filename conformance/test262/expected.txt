@@ -109,10 +109,10 @@ test262 language/expressions/bitwise-not 16 0 0 16 14 2 0
 test262 language/expressions/bitwise-or 30 0 0 30 24 6 0
 test262 language/expressions/bitwise-xor 30 0 0 30 24 6 0
 test262 language/expressions/call 92 0 0 92 86 6 0
-test262 language/expressions/class 4109 10 0 4099 3621 478 0
+test262 language/expressions/class 4109 10 0 4099 4075 24 0
 test262 language/expressions/coalesce 24 0 0 24 22 2 0
 test262 language/expressions/comma 6 0 0 6 5 1 0
-test262 language/expressions/compound-assignment 455 0 0 455 431 24 0
+test262 language/expressions/compound-assignment 455 0 0 455 455 0 0
 test262 language/expressions/concatenation 5 0 0 5 5 0 0
 test262 language/expressions/conditional 22 0 0 22 20 2 0
 test262 language/expressions/delete 69 0 0 69 69 0 0
@@ -127,13 +127,13 @@ test262 language/expressions/greater-than 49 0 0 49 41 8 0
 test262 language/expressions/greater-than-or-equal 43 0 0 43 37 6 0
 test262 language/expressions/grouping 9 0 0 9 9 0 0
 test262 language/expressions/import.meta 22 0 0 22 0 22 0
-test262 language/expressions/in 36 0 0 36 25 11 0
+test262 language/expressions/in 36 0 0 36 36 0 0
 test262 language/expressions/instanceof 43 0 0 43 43 0 0
 test262 language/expressions/left-shift 45 0 0 45 39 6 0
 test262 language/expressions/less-than 45 0 0 45 37 8 0
 test262 language/expressions/less-than-or-equal 47 0 0 47 41 6 0
 test262 language/expressions/logical-and 18 0 0 18 17 1 0
-test262 language/expressions/logical-assignment 81 0 0 81 69 12 0
+test262 language/expressions/logical-assignment 81 0 0 81 78 3 0
 test262 language/expressions/logical-not 19 0 0 19 18 1 0
 test262 language/expressions/logical-or 18 0 0 18 17 1 0
 test262 language/expressions/member-expression 1 0 0 1 1 0 0
@@ -167,7 +167,7 @@ test262 language/function-code 217 0 0 217 217 0 0
 test262 language/future-reserved-words 55 0 0 55 55 0 0
 test262 language/global-code 42 0 0 42 40 2 0
 test262 language/identifier-resolution 14 0 0 14 14 0 0
-test262 language/identifiers 268 0 0 268 208 60 0
+test262 language/identifiers 268 0 0 268 268 0 0
 test262 language/import 129 113 0 16 0 16 0
 test262 language/keywords 25 0 0 25 25 0 0
 test262 language/line-terminators 41 0 0 41 41 0 0
@@ -183,7 +183,7 @@ test262 language/statements/async-generator 301 0 0 301 301 0 0
 test262 language/statements/await-using 98 0 0 98 29 69 0
 test262 language/statements/block 21 0 0 21 19 2 0
 test262 language/statements/break 20 0 0 20 20 0 0
-test262 language/statements/class 4419 16 0 4403 3878 525 0
+test262 language/statements/class 4419 16 0 4403 4371 32 0
 test262 language/statements/const 136 0 0 136 136 0 0
 test262 language/statements/continue 24 0 0 24 24 0 0
 test262 language/statements/debugger 2 0 0 2 2 0 0
@@ -216,10 +216,10 @@ test262 staging/built-ins 8 0 0 8 5 3 0
 test262 staging/decorators 7 7 0 0 0 0 0
 test262 staging/explicit-resource-management 53 0 0 53 6 47 0
 test262 staging/set-methods 3 0 0 3 3 0 0
-test262 staging/sm 1406 2 0 1404 959 443 2
+test262 staging/sm 1406 2 0 1404 978 424 2
 test262 staging/source-phase-imports 2 2 0 0 0 0 0
 test262 staging/top-level-await 1 0 0 1 0 1 0
-test262 total 53801 8982 7 44812 36027 8783 2
+test262 total 53801 8982 7 44812 37097 7713 2
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
 test262-slice 03 7011 13829 0 0 7011 7010 1 0
@@ -227,18 +227,18 @@ test262-slice 04 1681 3320 0 0 1681 1681 0 0
 test262-slice 05 2724 5441 0 0 2724 2724 0 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
 test262-slice 07 1472 2801 0 0 1472 1472 0 0
-test262-slice 08 9339 18529 0 0 9339 8279 1060 0
+test262-slice 08 9478 18803 0 0 9478 9478 0 0
 test262-slice 09 1858 3678 0 0 1858 1858 0 0
 test262-slice 10 3759 7258 0 0 3759 3759 0 0
 test262-slice 11 1281 1833 0 0 1281 23 1258 0
 test262-slice 12 381 760 0 0 381 39 342 0
-test262-slice 13 3061 6078 0 0 3061 0 3061 0
+test262-slice 13 3066 6088 0 0 3066 0 3066 0
 test262-slice 14 598 1192 112 7 479 0 479 0
 test262-slice 15 1094 2170 0 0 1094 85 1009 0
 test262-slice 16 82 164 0 0 82 0 82 0
 test262-slice 17 35 35 0 0 35 1 34 0
-test262-slice 18 1134 1451 0 0 1134 172 962 0
-test262-slice 19 1233 2299 0 0 1233 736 495 2
+test262-slice 18 1138 1459 0 0 1138 172 966 0
+test262-slice 19 1085 2007 0 0 1085 607 476 2
 test262-slice 20 4617 9234 4617 0 0 0 0 0
 test262-slice 21 1662 3324 1662 0 0 0 0 0
 test262-slice x-stage3 2591 5008 2591 0 0 0 0 0
@@ -276,7 +276,7 @@ test262-section sec-asyncgeneratorfunction-objects complete 23 23 0
 test262-section sec-async-function-objects complete 18 18 0
 test262-section sec-reflect-object complete 153 153 0
 test262-section sec-proxy-objects incomplete 311 310 0
-test262-section sec-names-and-keywords incomplete 268 208 1
+test262-section sec-names-and-keywords incomplete 268 268 1
 test262-section sec-literals-regular-expression-literals incomplete 240 240 2
 test262-section sec-parse-script incomplete 42 40 1
 test262-section sec-performeval incomplete 347 343 1
