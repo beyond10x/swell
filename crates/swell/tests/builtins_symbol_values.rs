@@ -487,8 +487,24 @@ fn places_per_function() -> usize {
 /// [`the_realm_places_file_equals_the_walk`] holds it equal to the walk.
 const REALM_PLACES: &str = "crates/swell/tests/fixtures/realm_places.txt";
 
+/// The two comment lines of [`REALM_PLACES`]: the writing mode of
+/// [`the_realm_places_file_equals_the_walk`] writes them, and its comparing mode holds the file's
+/// first two lines equal to them. They are defined here only; the task `realm-places-expected`
+/// copies what the test wrote.
+#[cfg(not(feature = "collect-every-safe-point"))]
+const REALM_PLACES_HEADER: [&str; 2] = [
+    "# The places of the functions of the bare realm that the walk of \
+     crates/swell/tests/builtins_symbol_values.rs calls, one per line, in the order of the walk.",
+    "# Written by task realm-places-expected and by nothing else; the test \
+     the_realm_places_file_equals_the_walk holds it equal to the walk.",
+];
+
 /// The least number of places the file holds (the walk's old floor of 100 functions).
 const LEAST_PLACES: usize = 100;
+
+/// The most parts the walk may have: past them the walk is a defect that gets a story
+/// (`story:realm-walk-in-parts-under-the-cpu-bound`).
+const MOST_PARTS: usize = 8;
 
 /// The text of [`REALM_PLACES`], read at run time.
 fn realm_places_text() -> String {
@@ -499,15 +515,19 @@ fn realm_places_text() -> String {
     std::fs::read_to_string(path).unwrap_or_else(|error| panic!("{path}: {error}"))
 }
 
-/// The place lines of [`REALM_PLACES`], lines 3 to the end, each with its number, counted from
-/// 1 with the two comment lines.
-fn realm_places() -> Vec<(usize, String)> {
-    realm_places_text()
-        .lines()
+/// The place lines of `text`, lines 3 to the end, each with its number, counted from 1 with the
+/// two comment lines.
+fn place_lines(text: &str) -> Vec<(usize, String)> {
+    text.lines()
         .enumerate()
         .skip(2)
         .map(|(index, line)| (index + 1, line.to_string()))
         .collect()
+}
+
+/// The place lines of [`REALM_PLACES`] ([`place_lines`]).
+fn realm_places() -> Vec<(usize, String)> {
+    place_lines(&realm_places_text())
 }
 
 /// A step of a place after its root.
@@ -769,20 +789,25 @@ fn in_a_bare_realm<R>(
     (agent.state(), answer)
 }
 
-/// The places of the walk, made again, equal [`REALM_PLACES`] line for line, and every place
-/// line resolves ([`resolve_place`]) to the holder and the function the walk holds it on. In the
-/// default mode only, where the walk takes about 0.05 CPU seconds; in the collect mode the walk
-/// alone is over that mode's bound. With `SWELL_REALM_PLACES_OUT` set it writes the walk's
-/// places to that path, one per line, and compares nothing: the task `realm-places-expected`
-/// writes the file from it. It prints `realm places: <t> lines of <file> equal the walk`.
+/// The places of the walk, made again, equal [`REALM_PLACES`] line for line after its two
+/// comment lines, which are [`REALM_PLACES_HEADER`], and every place line resolves
+/// ([`resolve_place`]) to the holder and the function the walk holds it on. In the default mode
+/// only, where the walk takes about 0.06 CPU seconds; in the collect mode the walk alone is over
+/// that mode's bound. With `SWELL_REALM_PLACES_OUT` set it writes the file to that path, the two
+/// comment lines and the walk's places, one per line, after it has read every place back
+/// through [`parse_place`] and [`resolve_place`] to the function it came from, and fails naming
+/// a place that does not read back (a name with a dot, or one that ends in ` get`): so the
+/// writer writes only what the parts can read. The task `realm-places-expected` copies the
+/// file. It prints `realm places: <t> lines of <file> equal the walk`.
 #[cfg(not(feature = "collect-every-safe-point"))]
 #[test]
 fn the_realm_places_file_equals_the_walk() {
     let out = std::env::var("SWELL_REALM_PLACES_OUT").ok();
-    let file: Vec<(usize, String)> = match out {
-        Some(_) => Vec::new(),
-        None => realm_places(),
+    let text = match out {
+        Some(_) => String::new(),
+        None => realm_places_text(),
     };
+    let file = place_lines(&text);
     let (state, (walk, failure)) = in_a_bare_realm(|cx, global, roots| {
         let functions = functions_of_the_realm(cx, global, roots);
         let walk: Vec<String> = functions
@@ -790,6 +815,37 @@ fn the_realm_places_file_equals_the_walk() {
             .map(|(place, _, _)| place.clone())
             .collect();
         if out.is_some() {
+            let resolver = Resolver::new(cx, global, roots);
+            for (place, holder, function) in &functions {
+                let reason = match parse_place(place)
+                    .and_then(|parsed| resolve_place(cx, &resolver, &parsed))
+                {
+                    Ok((found_holder, found_function)) => {
+                        if found_holder == *holder && found_function == *function {
+                            continue;
+                        }
+                        format!(
+                            "it reads back as another holder or function (holder {}, function {})",
+                            if found_holder == *holder {
+                                "same"
+                            } else {
+                                "other"
+                            },
+                            if found_function == *function {
+                                "same"
+                            } else {
+                                "other"
+                            },
+                        )
+                    }
+                    Err(reason) => reason,
+                };
+                let failure = format!(
+                    "realm places: the walk's place \"{place}\" cannot be written: parse_place \
+                     and resolve_place do not read it back: {reason}"
+                );
+                return (walk, Some(failure));
+            }
             return (walk, None);
         }
         let lines: Vec<&String> = file.iter().map(|(_, line)| line).collect();
@@ -845,15 +901,32 @@ fn the_realm_places_file_equals_the_walk() {
         (walk, None)
     });
     assert_eq!(state, AgentState::Alive);
+    if let Some(failure) = failure {
+        panic!("{failure}");
+    }
     if let Some(path) = out {
-        let mut text = walk.join("\n");
-        text.push('\n');
-        std::fs::write(&path, text).unwrap_or_else(|error| panic!("{path}: {error}"));
+        let mut written = String::new();
+        for line in REALM_PLACES_HEADER
+            .iter()
+            .copied()
+            .chain(walk.iter().map(String::as_str))
+        {
+            written.push_str(line);
+            written.push('\n');
+        }
+        std::fs::write(&path, written).unwrap_or_else(|error| panic!("{path}: {error}"));
         println!("realm places: {} places written to {path}", walk.len());
         return;
     }
-    if let Some(failure) = failure {
-        panic!("{failure}");
+    for (index, expected) in REALM_PLACES_HEADER.iter().enumerate() {
+        let line = text.lines().nth(index).unwrap_or("");
+        assert_eq!(
+            line,
+            *expected,
+            "realm places: line {} of {REALM_PLACES} is not the comment line the writer writes; \
+             slot --timeout 30m task realm-places-expected writes the file again",
+            index + 1
+        );
     }
     println!(
         "realm places: {} lines of {REALM_PLACES} equal the walk",
@@ -1042,131 +1115,168 @@ fn to_length(number: f64) -> f64 {
 /// holds it, 0 before the Symbol), in as many of these places as [`places_per_function`] says.
 /// Each call answers or throws a TypeError, but for the calls of [`WALK_EXPECTED`] whose clauses
 /// throw another error before or without the Symbol, each met exactly when its condition holds:
-/// no termination, and the agent stays alive. The count of functions and of calls is printed:
-/// `walk part <p> of <n>: <f> of <t> places, <c> calls`.
+/// no termination, and the agent stays alive. What the part owes is read from the file before
+/// the walk, not from what it walked: its place lines by the hash rule, their calls, and the
+/// `Always` rows of [`WALK_EXPECTED`] whose place is among them; after the walk the places it
+/// walked, the calls it made and the rows it met are compared with that. No part is empty. The
+/// count of functions and of calls is printed: `walk part <p> of <n>: <f> of <t> places, <c>
+/// calls`.
 fn walk_part(part: usize) {
     let n = WALK_PARTS.len();
     let places = places_per_function();
     let all = realm_places();
+    let owed: Vec<&str> = all
+        .iter()
+        .filter(|(_, line)| place_hash(line) % n as u64 == part as u64)
+        .map(|(_, line)| line.as_str())
+        .collect();
+    let owed_calls = owed.len() * places;
+    let owed_rows: Vec<String> = WALK_EXPECTED
+        .iter()
+        .filter(|row| matches!(row.when, When::Always) && row.least <= places)
+        .filter(|row| owed.contains(&row.function))
+        .map(ToString::to_string)
+        .collect();
     let mine = walk_part_places(part, &all);
-    let (state, (called, found, expected, differences)) = in_a_bare_realm(|cx, global, roots| {
-        let resolver = Resolver::new(cx, global, roots);
-        let description = Value::String(cx.new_string("probe").unwrap());
-        let symbol = cx
-            .call(
-                Value::Object(resolver.symbol_constructor),
-                Value::Undefined,
-                &[description],
-            )
-            .unwrap()
-            .unwrap();
-        let symbol_root = cx.root(symbol).unwrap();
-        let mut functions = Vec::new();
-        for (k, line) in &mine {
-            let resolved = parse_place(line).and_then(|place| resolve_place(cx, &resolver, &place));
-            match resolved {
-                Ok((holder, function)) => functions.push((line.as_str(), holder, function)),
-                Err(reason) => panic!("walk part {part} of {n}: line {k} \"{line}\": {reason}"),
+    assert!(
+        !mine.is_empty(),
+        "walk part {part} of {n}: the part holds no place of {REALM_PLACES}"
+    );
+    let (state, (walked, called, found, expected, differences)) =
+        in_a_bare_realm(|cx, global, roots| {
+            let resolver = Resolver::new(cx, global, roots);
+            let description = Value::String(cx.new_string("probe").unwrap());
+            let symbol = cx
+                .call(
+                    Value::Object(resolver.symbol_constructor),
+                    Value::Undefined,
+                    &[description],
+                )
+                .unwrap()
+                .unwrap();
+            let symbol_root = cx.root(symbol).unwrap();
+            let mut functions = Vec::new();
+            for (k, line) in &mine {
+                let resolved =
+                    parse_place(line).and_then(|place| resolve_place(cx, &resolver, &place));
+                match resolved {
+                    Ok((holder, function)) => functions.push((line.as_str(), holder, function)),
+                    Err(reason) => panic!("walk part {part} of {n}: line {k} \"{line}\": {reason}"),
+                }
             }
-        }
-        let mut found = Vec::new();
-        let mut expected = Vec::new();
-        let mut differences = Vec::new();
-        let mut called = 0;
-        'functions: for (place, holder, function) in functions {
-            let symbol = cx.get(&symbol_root).unwrap();
-            let zero = Value::Number(0.0);
-            let this_holder = Value::Object(holder);
-            let calls: [(&str, Value, Vec<Value>); 4] = [
-                ("this", symbol, vec![]),
-                ("argument 1", this_holder, vec![symbol]),
-                ("argument 2", this_holder, vec![zero, symbol]),
-                ("argument 3", this_holder, vec![zero, zero, symbol]),
-            ];
-            for (what, this, args) in calls.into_iter().take(places) {
-                let row = WALK_EXPECTED
-                    .iter()
-                    .find(|row| row.function == place && row.symbol == what && row.least <= places);
-                // The condition of a row, read from the realm before the call.
-                let condition = match row {
-                    Some(
-                        row @ WalkRow {
-                            when: When::IndexAtLeastLength(index),
-                            ..
-                        },
-                    ) => {
-                        let length = get(cx, holder, "length");
-                        let Value::Number(number) = length else {
-                            panic!(
-                                "walk part {part} of {n}: the row {row} under {:?} read length \
+            let mut found = Vec::new();
+            let mut expected = Vec::new();
+            let mut differences = Vec::new();
+            let mut called = 0;
+            let mut walked = 0;
+            'functions: for (place, holder, function) in functions {
+                walked += 1;
+                let symbol = cx.get(&symbol_root).unwrap();
+                let zero = Value::Number(0.0);
+                let this_holder = Value::Object(holder);
+                let calls: [(&str, Value, Vec<Value>); 4] = [
+                    ("this", symbol, vec![]),
+                    ("argument 1", this_holder, vec![symbol]),
+                    ("argument 2", this_holder, vec![zero, symbol]),
+                    ("argument 3", this_holder, vec![zero, zero, symbol]),
+                ];
+                for (what, this, args) in calls.into_iter().take(places) {
+                    let row = WALK_EXPECTED.iter().find(|row| {
+                        row.function == place && row.symbol == what && row.least <= places
+                    });
+                    // The condition of a row, read from the realm before the call.
+                    let condition = match row {
+                        Some(
+                            row @ WalkRow {
+                                when: When::IndexAtLeastLength(index),
+                                ..
+                            },
+                        ) => {
+                            let length = get(cx, holder, "length");
+                            let Value::Number(number) = length else {
+                                panic!(
+                                    "walk part {part} of {n}: the row {row} under {:?} read length \
                                  {length:?}, not a Number",
-                                row.when
-                            );
-                        };
-                        let length = to_length(number);
-                        Some((length, f64::from(*index) >= length))
-                    }
-                    _ => None,
-                };
-                called += 1;
-                let completion = match cx.call(function, this, &args) {
-                    Ok(completion) => completion,
-                    Err(error) => {
-                        let line = format!("{place} ({what}): {error:?}");
-                        differences.push(format!(
-                            "walk part {part} of {n}: a row not in WALK_EXPECTED: {line}"
-                        ));
-                        found.push(line);
-                        break 'functions;
-                    }
-                };
-                let answer = answer(cx, completion);
-                let met = row.is_some_and(|row| row.error == answer);
-                let holds = condition.is_none_or(|(_, holds)| holds);
-                if let Some(row) = row {
-                    if holds {
-                        expected.push(row.to_string());
-                    }
-                    match condition {
-                        Some((length, holds)) if met != holds => differences.push(format!(
-                            "walk part {part} of {n}: the row {row} under {:?} read length \
+                                    row.when
+                                );
+                            };
+                            let length = to_length(number);
+                            Some((length, f64::from(*index) >= length))
+                        }
+                        _ => None,
+                    };
+                    called += 1;
+                    let completion = match cx.call(function, this, &args) {
+                        Ok(completion) => completion,
+                        Err(error) => {
+                            let line = format!("{place} ({what}): {error:?}");
+                            differences.push(format!(
+                                "walk part {part} of {n}: a row not in WALK_EXPECTED: {line}"
+                            ));
+                            found.push(line);
+                            break 'functions;
+                        }
+                    };
+                    let answer = answer(cx, completion);
+                    let met = row.is_some_and(|row| row.error == answer);
+                    let holds = condition.is_none_or(|(_, holds)| holds);
+                    if let Some(row) = row {
+                        if holds {
+                            expected.push(row.to_string());
+                        }
+                        match condition {
+                            Some((length, holds)) if met != holds => differences.push(format!(
+                                "walk part {part} of {n}: the row {row} under {:?} read length \
                              {length}: the condition is {holds} and the call answered {answer}",
-                            row.when
-                        )),
-                        None if !met => differences.push(format!(
-                            "walk part {part} of {n}: the row {row} was not met"
-                        )),
-                        _ => {}
+                                row.when
+                            )),
+                            None if !met => differences.push(format!(
+                                "walk part {part} of {n}: the row {row} was not met"
+                            )),
+                            _ => {}
+                        }
                     }
-                }
-                if answer != "normal" && answer != "TypeError" {
-                    let line = format!("{place} ({what}): {answer}");
-                    if !met {
-                        differences.push(format!(
-                            "walk part {part} of {n}: a row not in WALK_EXPECTED: {line}"
-                        ));
+                    if answer != "normal" && answer != "TypeError" {
+                        let line = format!("{place} ({what}): {answer}");
+                        if !met {
+                            differences.push(format!(
+                                "walk part {part} of {n}: a row not in WALK_EXPECTED: {line}"
+                            ));
+                        }
+                        found.push(line);
                     }
-                    found.push(line);
                 }
             }
-        }
-        (called, found, expected, differences)
-    });
+            (walked, called, found, expected, differences)
+        });
     println!(
-        "walk part {part} of {n}: {} of {} places, {called} calls",
-        mine.len(),
+        "walk part {part} of {n}: {walked} of {} places, {called} calls",
         all.len()
     );
     assert_eq!(state, AgentState::Alive, "{found:#?}");
     assert!(differences.is_empty(), "{}", differences.join("\n"));
     assert_eq!(
-        found, expected,
-        "walk part {part} of {n}: the rows in the order of its calls"
+        walked,
+        owed.len(),
+        "walk part {part} of {n}: walked {walked} places; the file gives the part {}",
+        owed.len()
     );
     assert_eq!(
         called,
-        mine.len() * places,
-        "walk part {part} of {n}: calls"
+        owed_calls,
+        "walk part {part} of {n}: made {called} calls; the part owes {owed_calls}, {} places \
+         times {places}",
+        owed.len()
+    );
+    for row in &owed_rows {
+        assert!(
+            found.contains(row),
+            "walk part {part} of {n}: the row {row} was not met"
+        );
+    }
+    assert_eq!(
+        found, expected,
+        "walk part {part} of {n}: the rows in the order of its calls"
     );
 }
 
@@ -1211,9 +1321,10 @@ walk_parts!(
 
 /// The parts of the walk cover the file of places: [`REALM_PLACES`] has its two comment lines
 /// first and no other, no blank line and a final newline; [`WALK_PARTS`] is numbered from 0
-/// without a gap and has at least 2 parts; every place line parses ([`parse_place`]) and is on
-/// one line only; the place lines of [`walk_part_places`] of all parts are the place lines of
-/// the file, each once, and no part holds more than twice the ceiling of their mean; each row
+/// without a gap and has at least 2 and at most [`MOST_PARTS`] parts; every place line parses
+/// ([`parse_place`]) and is on one line only; the place lines of [`walk_part_places`] of all
+/// parts are the place lines of the file, each once, no part is empty, and no part holds fewer
+/// than half the floor or more than twice the ceiling of their mean; each row
 /// of [`WALK_EXPECTED`] names a place the file holds exactly once, so that no part drops a row
 /// unseen, and a row with a condition names a call `argument <i>`, whose `this` is the holder;
 /// `%AsyncFunction.prototype%.constructor` is a place; and the file holds at least
@@ -1247,6 +1358,12 @@ fn the_parts_of_the_walk_cover_every_function_of_the_realm() {
         n.saturating_sub(1)
     );
     assert!(n >= 2, "WALK_PARTS has {n} part(s), at least 2");
+    assert!(
+        n <= MOST_PARTS,
+        "WALK_PARTS has {n} parts, more than {MOST_PARTS}, the limit of \
+         story:realm-walk-in-parts-under-the-cpu-bound: past {MOST_PARTS} parts the walk is a \
+         defect that gets a story"
+    );
     let places = realm_places();
     for (k, line) in &places {
         if let Err(reason) = parse_place(line) {
@@ -1286,7 +1403,15 @@ fn the_parts_of_the_walk_cover_every_function_of_the_realm() {
         "places of the file in no part: {in_no_part:?}; in more than one part: {in_more_parts:?}"
     );
     let ceiling = places.len().div_ceil(n);
+    let least = places.len() / n / 2;
     for (part, held) in parts.iter().enumerate() {
+        assert!(!held.is_empty(), "part {part} of {n} holds no place");
+        assert!(
+            held.len() >= least,
+            "part {part} of {n} holds {} places, fewer than {least}, half the floor of {} / {n}",
+            held.len(),
+            places.len()
+        );
         assert!(
             held.len() <= 2 * ceiling,
             "part {part} of {n} holds {} places, more than twice {ceiling}, the ceiling of {} / {n}",
@@ -1321,4 +1446,39 @@ fn the_parts_of_the_walk_cover_every_function_of_the_realm() {
         "the file holds {} places, at least {LEAST_PLACES}",
         places.len()
     );
+}
+
+/// The partition of the committed file, read with FNV-1a 64 computed apart from [`place_hash`]:
+/// the product taken in u128 and reduced modulo 2^64, over each place line of [`REALM_PLACES`];
+/// each line is in the part [`walk_part_places`] gives it, and the parts hold 181 + 163 places,
+/// pinned at 2 parts. A writer run that changes the file (a function the realm gains or loses)
+/// changes these two numbers, and so does a change of [`WALK_PARTS`]: the unit that makes it
+/// writes the new sizes here, as the cover test prints them.
+#[test]
+fn the_partition_of_the_file_agrees_with_an_fnv_computed_apart() {
+    fn fnv(line: &str) -> u64 {
+        let mut hash: u128 = 0xcbf2_9ce4_8422_2325;
+        for byte in line.as_bytes() {
+            hash ^= u128::from(*byte);
+            hash = (hash * 0x100_0000_01b3) % (1u128 << 64);
+        }
+        u64::try_from(hash).unwrap()
+    }
+    let places = realm_places();
+    let n = WALK_PARTS.len();
+    let mut sizes = vec![0usize; n];
+    for (k, line) in &places {
+        let part = usize::try_from(fnv(line) % n as u64).unwrap();
+        if let Some(size) = sizes.get_mut(part) {
+            *size += 1;
+        }
+        assert!(
+            walk_part_places(part, &places)
+                .iter()
+                .any(|(j, other)| j == k && other == line),
+            "line {k} {line:?}: FNV part {part}, not in walk_part_places({part})"
+        );
+    }
+    println!("FNV-1a 64 computed apart, {n} parts: {sizes:?}");
+    assert_eq!(sizes, vec![181, 163]);
 }

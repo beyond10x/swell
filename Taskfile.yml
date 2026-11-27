@@ -491,10 +491,12 @@ tasks:
       exported GATE_ROOT, TEST262_CACHE, SPEC_REFUSALS_MAX and the like changes what a check
       reads. The gate's variables carry a prefix so that this does not happen by accident; this
       task prints each of them that has a value from the command line, the environment or a
-      task file's own defaults, as "gate: variables in effect: NAME=value ...". The SPEC_ ones and
-      the SITE_DATA_ ones (taskfiles/site.yml, included flat) always show, with their defaults;
-      any other name on the line was set by the caller. A new gate variable is added to
-      GATE_VARIABLES in the change that adds it.
+      task file's own defaults, as "gate: variables in effect: NAME=value ...". The SPEC_ ones,
+      the SITE_DATA_ ones (taskfiles/site.yml, included flat) and TEST_RUSTFLAGS and
+      TEST_NEXTEST_ARGS (taskfiles/realm-places.yml, included flat; the steps that read them
+      refuse a value that is not the file's, task test-vars-check) always show, with their
+      defaults; any other name on the line was set by the caller. A new gate variable is added
+      to GATE_VARIABLES in the change that adds it.
 
       It fails in one case, after that line: a flag variable of cargo in the environment
       (RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS or a
@@ -523,6 +525,7 @@ tasks:
         TEST262_MOVES TEST262_LATER_PARTS
         GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_CPU_BOUNDS GATE_SELFTEST_DIR GATE_SELFTEST_JOBS GATE_SELFTEST_TREE
         GATE_RUNNER_ENV GATE_TEST_BUILD_JSON
+        TEST_RUSTFLAGS TEST_NEXTEST_ARGS
         REALM_SIZES REALM_COLLECT SLOW_LANE_BUDGET SLOW_PART_BUDGET STACK_MODULES STACK_TESTS STACK_TESTS_DIR
         SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES SITE_DATA_ENGINES SITE_DATA_CATALOG SITE_DATA_PUBLISHED SITE_DATA_RESULTS SITE_DATA_PIN SITE_DATA_LIMITS SITE_DATA_INTERRUPT
     silent: true
@@ -657,12 +660,46 @@ tasks:
           ' "$GATE_LOCK"
         } | tee .out/lock-check.log
 
+  test-vars-check:
+    desc: Internal. Fail a step when TEST_RUSTFLAGS or TEST_NEXTEST_ARGS is empty or is not the value taskfiles/realm-places.yml defines.
+    summary: |
+      Internal, the first command of build, build-tests, test, test-doc and
+      realm-places-expected, which take their RUSTFLAGS (and build-tests, test and the writer
+      their nextest arguments) from TEST_RUSTFLAGS and TEST_NEXTEST_ARGS of
+      taskfiles/realm-places.yml (story realm-walk-in-parts-under-the-cpu-bound), so that the
+      writer of the file of places and the gate's build and test steps share one build. go-task
+      lets a value given on the command line win over the file's, and takes an exported value
+      when that include is missing; neither may change what the gate builds or runs, and
+      gate-vars prints both names with their value. STEP names the step in the line. It fails
+      with "<step>: TEST_RUSTFLAGS or TEST_NEXTEST_ARGS is empty; taskfiles/realm-places.yml
+      defines them" when either is empty, and with "<step>: TEST_RUSTFLAGS=<value> or
+      TEST_NEXTEST_ARGS=<value> is not the value taskfiles/realm-places.yml defines; the steps
+      take both from that file only, not from the command line or the environment" when either
+      differs from its line "  <name>: <value>" in that file, a plain value. An exported
+      RUSTFLAGS still wins over a step's env in go-task; gate-vars refuses only one that names
+      test_modules.
+    silent: true
+    cmds:
+      - |
+        flags={{shellQuote .TEST_RUSTFLAGS}}
+        args={{shellQuote .TEST_NEXTEST_ARGS}}
+        file=taskfiles/realm-places.yml
+        if [ -z "$flags" ] || [ -z "$args" ]; then echo "{{.STEP}}: TEST_RUSTFLAGS or TEST_NEXTEST_ARGS is empty; $file defines them"; exit 1; fi
+        defined_flags=$(sed -n 's/^  TEST_RUSTFLAGS: //p' "$file" 2>/dev/null || true)
+        defined_args=$(sed -n 's/^  TEST_NEXTEST_ARGS: //p' "$file" 2>/dev/null || true)
+        if [ "$flags" != "$defined_flags" ] || [ "$args" != "$defined_args" ]; then
+          echo "{{.STEP}}: TEST_RUSTFLAGS=$flags or TEST_NEXTEST_ARGS=$args is not the value $file defines; the steps take both from that file only, not from the command line or the environment"
+          exit 1
+        fi
+
   build:
     desc: Build every crate and target of the workspace with warnings denied.
     env:
-      RUSTFLAGS: -D warnings
+      RUSTFLAGS: '{{.TEST_RUSTFLAGS}}'
     silent: true
     cmds:
+      - task: test-vars-check
+        vars: {STEP: build}
       - mkdir -p .out
       - cargo build --workspace --all-targets --locked > .out/build.log 2>&1 || { cat .out/build.log; exit 1; }
       - tail -n 1 .out/build.log
@@ -695,9 +732,10 @@ tasks:
       RUSTFLAGS: '{{.TEST_RUSTFLAGS}}'
     silent: true
     cmds:
+      - task: test-vars-check
+        vars: {STEP: build-tests}
       - mkdir -p .out
       - |
-        if [ -z '{{.TEST_RUSTFLAGS}}' ] || [ -z '{{.TEST_NEXTEST_ARGS}}' ]; then echo "build-tests: TEST_RUSTFLAGS or TEST_NEXTEST_ARGS is empty; taskfiles/realm-places.yml defines them"; exit 1; fi
         status=0
         cargo nextest run --no-run {{.TEST_NEXTEST_ARGS}} > .out/build-tests.log 2>&1 || status=$?
         if [ "$status" -ne 0 ]; then cat .out/build-tests.log; echo "build-tests: cargo nextest run --no-run failed, exit $status"; exit 1; fi
@@ -757,9 +795,10 @@ tasks:
       RUSTFLAGS: '{{.TEST_RUSTFLAGS}}'
     silent: true
     cmds:
+      - task: test-vars-check
+        vars: {STEP: test}
       - mkdir -p .out
       - |
-        if [ -z '{{.TEST_RUSTFLAGS}}' ] || [ -z '{{.TEST_NEXTEST_ARGS}}' ]; then echo "test: TEST_RUSTFLAGS or TEST_NEXTEST_ARGS is empty; taskfiles/realm-places.yml defines them"; exit 1; fi
         status=0
         cargo nextest run {{.TEST_NEXTEST_ARGS}} > .out/test.log 2>&1 || status=$?
         echo "$status" > .out/test.status
@@ -788,9 +827,11 @@ tasks:
       Compiling line, and no build task can make them ahead (cargo refuses --no-run with
       --doc).
     env:
-      RUSTFLAGS: -D warnings
+      RUSTFLAGS: '{{.TEST_RUSTFLAGS}}'
     silent: true
     cmds:
+      - task: test-vars-check
+        vars: {STEP: test-doc}
       - mkdir -p .out
       - |
         bad=0
