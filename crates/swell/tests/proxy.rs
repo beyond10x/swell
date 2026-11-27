@@ -1101,7 +1101,7 @@ chain_test!(for_in_chain_on_the_promised_stack, FOR_IN);
 
 /// The route of `for`-`in` over a trapless chain whose base's `getOwnPropertyDescriptor` trap
 /// calls `parseDeep`: the walk reaches the base through every Proxy for the key's descriptor,
-/// and so does the loop for that key's turn, which reads the chain the walk recorded (D66); the
+/// and so does the loop for that key's turn, which reads the chain the walk recorded; the
 /// parser runs at the deepest point of both.
 const FOR_IN: Route = route(
     "{}",

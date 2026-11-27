@@ -103,9 +103,9 @@ impl SlotValue {
 /// while the enumerator is on the operand stack, and credited when it leaves it
 /// (`Agent::truncate_stack`) or with the frame. `chain` is the chain of objects the walk went
 /// through when it met a Proxy, which the loop reads instead of asking [[GetPrototypeOf]] again
-/// (D66), traced with the enumerator; its charge is its own and is credited when it drops, with
-/// the entry or with the frame (a generator's frame with the generator). Empty for a chain
-/// without a Proxy.
+/// (each object of the chain is asked for its prototype once, by the walk), traced with the
+/// enumerator; its charge is its own and is credited when it drops, with the entry or with the
+/// frame (a generator's frame with the generator). Empty for a chain without a Proxy.
 pub(crate) struct Enumerator {
     pub(crate) object: Option<ObjectRef>,
     pub(crate) keys: Vec<Key>,

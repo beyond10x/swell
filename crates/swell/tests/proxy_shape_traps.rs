@@ -1278,10 +1278,11 @@ fn for_in_over_a_proxy_calls_no_has_trap() {
 /// `{ c: 3 }`, both with handlers that log each trap and forward it: the walk asks each object
 /// for its own keys, the descriptor of each String key and its prototype, once; then before
 /// each key's turn the loop asks [[GetOwnProperty]] of the objects of the chain the walk
-/// recorded, in order, until one has the key, and no object for its prototype again (D66).
-/// 11 trap calls; at `61b14ed2` there were 12 (the filter asked `p` for its prototype again
-/// before `c`), and the clause's informative definition makes 7 (it reads each object's keys
-/// and descriptors once, when it reaches them, and filters nothing).
+/// recorded, in order, until one has the key, and no object for its prototype again (the loop
+/// follows the chain its walk recorded, once). 11 trap calls; at `61b14ed2` there were 12 (the
+/// filter asked `p` for its prototype again before `c`), and the clause's informative
+/// definition makes 7 (it reads each object's keys and descriptors once, when it reaches them,
+/// and filters nothing).
 #[test]
 fn for_in_asks_each_object_of_the_chain_for_its_prototype_once() {
     answers(
@@ -1345,7 +1346,7 @@ fn a_key_an_earlier_object_gains_after_the_walk_is_visited() {
     );
 }
 
-/// The loop keeps the chain the walk found (D66): when the body cuts an ordinary object off it
+/// The loop keeps the chain the walk recorded: when the body cuts an ordinary object off it
 /// (`Object.setPrototypeOf` of the object before it to `null`), a key the walk found on the
 /// object cut off is still read there and visited, and that object, held by nothing but the
 /// loop, stays held while each key's [[GetOwnProperty]] of the Proxy runs a trap that collects.
@@ -1898,7 +1899,7 @@ fn define_property_checks_i12_before_i13() {
 /// never deleted, so the loop visits `a` (`#sec-enumerate-object-properties`: the iterator
 /// iterates over all the String keys of enumerable properties, its prototype's included; only
 /// a property deleted before it is processed is ignored). The filter of `ForInNext` reads the
-/// chain the walk recorded (D66) and does not ask the trap for the prototype a second time; at
+/// chain the walk recorded, once, and does not ask the trap for the prototype a second time; at
 /// `61b14ed2` it walked from the receiver again, got `{ b: 2 }` and dropped `a`.
 #[test]
 fn for_in_visits_the_keys_of_the_prototype_the_trap_answered_first() {
@@ -2165,9 +2166,9 @@ fn memory_budget_at_every_64_bytes_through_json_stringify_of_three_proxies() {
 /// `L` `for`-`in` loops in one entry over a Proxy whose `getPrototypeOf` trap answers a
 /// fresh Proxy of `{ a: 1, b: 2 }` at each call, whose handler holds a String of 262,144 code
 /// units. The walk of each loop holds the fresh Proxy it met and records it in the chain the
-/// loop reads (D66); when the walk ends it releases what it kept, and when the loop ends its
-/// chain goes with its enumerator, so the Proxy is garbage. The
-/// loops answer `2 * L` within `ROOM` over the reading of a realm that ran the setup, where
+/// loop reads instead of asking for prototypes again; when the walk ends it releases what it
+/// kept, and when the loop ends its chain goes with its enumerator, so the Proxy is garbage.
+/// The loops answer `2 * L` within `ROOM` over the reading of a realm that ran the setup, where
 /// `L` of them held to the end of the entry need more: an entry that keeps each fresh Proxy in
 /// an array ends in `Terminated(MemoryBudget)`. Its loop over an ordinary object, where each
 /// key's turn holds what it meets: [`for_in_in_a_loop_gives_back_what_each_filter_held`].

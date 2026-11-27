@@ -753,7 +753,7 @@ impl<H: Host> Agent<H> {
     /// keeps nothing and costs what it cost.
     ///
     /// From the first Proxy on the walk also records the chain it goes through, which the
-    /// `for`-`in` loop reads instead of asking [[GetPrototypeOf]] again (D66, "the loop follows
+    /// `for`-`in` loop reads instead of asking [[GetPrototypeOf]] again ("the loop follows
     /// the chain the walk found, once"): the ordinary objects before that Proxy, then each
     /// object it reaches, in the list [`Enumeration::chain`], charged by capacity before it
     /// grows ([`Agent::reserve_vec`]). Its charge is credited when it drops: here on an abrupt
@@ -1876,8 +1876,9 @@ mod tests {
     }
 
     /// EnumerateObjectProperties over a chain of ordinary objects (40 keys and their prototype)
-    /// records no chain and charges what it charged before D66: the account rises by the list
-    /// of keys found and nothing else, and the kept stack is as it was.
+    /// records no chain and charges what it charged before the walk recorded a chain: the
+    /// account rises by the list of keys found and nothing else, and the kept stack is as it
+    /// was.
     #[test]
     fn an_ordinary_chain_records_no_chain_and_charges_only_its_keys() {
         let (mut agent, realm) = roomy_agent();

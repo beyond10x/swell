@@ -1673,8 +1673,9 @@ impl<H: Host> Agent<H> {
     /// ("A property that is deleted before it is processed is ignored",
     /// `#sec-enumerate-object-properties`), a step per key passed over, or the jump when none
     /// is left. Whether it is still one is read by [[GetOwnProperty]], never by a `has` trap:
-    /// along the chain the walk recorded when it met a Proxy ([`Agent::recorded_chain_has`],
-    /// D66), else along [[GetPrototypeOf]] from the object (`Agent::enumeration_has_property`).
+    /// along the chain the walk recorded when it met a Proxy ([`Agent::recorded_chain_has`]:
+    /// the loop follows the chain its walk recorded, once), else along [[GetPrototypeOf]] from
+    /// the object (`Agent::enumeration_has_property`).
     fn for_in_next(&mut self, target: u32) -> Completion<Flow> {
         loop {
             let next = {
@@ -1708,7 +1709,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// Whether `key` is still a property when its turn comes, over the chain of objects the walk
-    /// of the enumerator on top of the running frame's operand stack recorded (D66: the loop
+    /// of the enumerator on top of the running frame's operand stack recorded (the loop
     /// follows the chain the walk found, once): [[GetOwnProperty]] of each object of it in order,
     /// and a step before each object after the first, as the walk along [[GetPrototypeOf]]
     /// charged a step per prototype; no [[GetPrototypeOf]] runs, so each object of the chain is
