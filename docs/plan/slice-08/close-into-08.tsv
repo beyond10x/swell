@@ -1,0 +1,148 @@
+test/staging/sm/Array/from-iterator-close.js	19	dir test/staging/sm/Array/from-iterator-close.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (74:1)	class
+test/staging/sm/Array/sort-non-function.js	19	dir test/staging/sm/Array/sort-non-function.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (22:61)	class
+test/staging/sm/Array/species.js	19	dir test/staging/sm/Array/species.js 8	threw ReferenceError: Proxy is not defined	class
+test/staging/sm/Function/function-name-assignment.js	19	dir test/staging/sm/Function/function-name-assignment.js 8	counted refusal: 1 refusal(s)	class
+test/staging/sm/Function/function-name-binding.js	19	dir test/staging/sm/Function/function-name-binding.js 8	counted refusal: 1 refusal(s)	class
+test/staging/sm/Function/function-name-class.js	19	dir test/staging/sm/Function/function-name-class.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:33)	class
+test/staging/sm/Function/function-name-computed-01.js	19	dir test/staging/sm/Function/function-name-computed-01.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (17:18)	class
+test/staging/sm/Function/function-name-computed-02.js	19	dir test/staging/sm/Function/function-name-computed-02.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (17:8)	class
+test/staging/sm/Function/function-name-method.js	19	dir test/staging/sm/Function/function-name-method.js 8	counted refusal: 1 refusal(s)	class
+test/staging/sm/Map/constructor-iterator-close.js	19	dir test/staging/sm/Map/constructor-iterator-close.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (94:1)	class
+test/staging/sm/PrivateName/constructor-args.js	19	dir test/staging/sm/PrivateName/ 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/PrivateName/error-outside-class.js	19	dir test/staging/sm/PrivateName/ 8	counted refusal: 3 refusal(s)	private name
+test/staging/sm/PrivateName/home-object-when-preceded-by-computed-key.js	19	dir test/staging/sm/PrivateName/ 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/PrivateName/illegal-in-class-context.js	19	dir test/staging/sm/PrivateName/ 8	counted refusal: 4 refusal(s)	class
+test/staging/sm/PrivateName/illegal-in-identifier-context.js	19	dir test/staging/sm/PrivateName/ 8	counted refusal: 16 refusal(s)	private name
+test/staging/sm/PrivateName/illegal-in-object-context.js	19	dir test/staging/sm/PrivateName/ 8	counted refusal: 8 refusal(s)	private name
+test/staging/sm/PrivateName/lexical-presence.js	19	dir test/staging/sm/PrivateName/ 8	parse: refused: SyntaxError: class is not supported before slice 8 (13:1)	class
+test/staging/sm/PrivateName/names.js	19	dir test/staging/sm/PrivateName/ 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:9)	class
+test/staging/sm/PrivateName/nested-class-in-computed-property-key.js	19	dir test/staging/sm/PrivateName/ 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/PrivateName/nested-class-name-used.js	19	dir test/staging/sm/PrivateName/ 8	parse: refused: SyntaxError: class is not supported before slice 8 (13:1)	class
+test/staging/sm/PrivateName/not-iterable.js	19	dir test/staging/sm/PrivateName/ 8	parse: refused: SyntaxError: class is not supported before slice 8 (12:1)	class
+test/staging/sm/PrivateName/parse-utf8-non-ascii-identifier.js	19	dir test/staging/sm/PrivateName/ 8	parse: refused: SyntaxError: class is not supported before slice 8 (13:1)	class
+test/staging/sm/PrivateName/proxy-1.js	19	dir test/staging/sm/PrivateName/ 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/PrivateName/proxy-init-set.js	19	dir test/staging/sm/PrivateName/ 8	parse: refused: SyntaxError: class is not supported before slice 8 (16:1)	class
+test/staging/sm/PrivateName/read-private-eval.js	19	dir test/staging/sm/PrivateName/ 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/PrivateName/unicode-names.js	19	dir test/staging/sm/PrivateName/ 8	counted refusal: 1 refusal(s)	class
+test/staging/sm/Promise/bug-1288382.js	19	dir test/staging/sm/Promise/bug-1288382.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (12:18)	class
+test/staging/sm/Proxy/setPrototypeOf.js	19	dir test/staging/sm/Proxy/setPrototypeOf.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (70:37)	class
+test/staging/sm/Proxy/trap-null.js	19	dir test/staging/sm/Proxy/trap-null.js 8	parse: refused: SyntaxError: new.target is not supported before slice 8 (44:10)	new.target
+test/staging/sm/Reflect/apply.js	19	dir test/staging/sm/Reflect/apply.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (18:29)	class
+test/staging/sm/Reflect/construct.js	19	dir test/staging/sm/Reflect/construct.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (41:1)	class
+test/staging/sm/RegExp/lastIndex-match-or-replace.js	19	dir test/staging/sm/RegExp/lastIndex-match-or-replace.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (12:1)	class
+test/staging/sm/RegExp/lastIndex-search.js	19	dir test/staging/sm/RegExp/lastIndex-search.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (12:1)	class
+test/staging/sm/Set/difference.js	19	dir test/staging/sm/Set/ 8	sm/non262-Set-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (39:3)	class
+test/staging/sm/Set/intersection.js	19	dir test/staging/sm/Set/ 8	sm/non262-Set-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (39:3)	class
+test/staging/sm/Set/is-disjoint-from.js	19	dir test/staging/sm/Set/ 8	sm/non262-Set-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (39:3)	class
+test/staging/sm/Set/is-subset-of.js	19	dir test/staging/sm/Set/ 8	sm/non262-Set-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (39:3)	class
+test/staging/sm/Set/is-superset-of.js	19	dir test/staging/sm/Set/ 8	sm/non262-Set-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (39:3)	class
+test/staging/sm/Set/symmetric-difference.js	19	dir test/staging/sm/Set/ 8	sm/non262-Set-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (39:3)	class
+test/staging/sm/Set/union.js	19	dir test/staging/sm/Set/ 8	sm/non262-Set-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (39:3)	class
+test/staging/sm/class/boundFunctionSubclassing.js	19	dir test/staging/sm/class/boundFunctionSubclassing.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/bytecodePatternMatching.js	19	dir test/staging/sm/class/bytecodePatternMatching.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (14:5)	class
+test/staging/sm/class/classConstructorNoCall.js	19	dir test/staging/sm/class/classConstructorNoCall.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/class/classHeritage.js	19	dir test/staging/sm/class/classHeritage.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (19:1)	class
+test/staging/sm/class/className.js	19	dir test/staging/sm/class/className.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (67:1)	class
+test/staging/sm/class/classPrototype.js	19	dir test/staging/sm/class/classPrototype.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:1)	class
+test/staging/sm/class/constructorCalled.js	19	dir test/staging/sm/class/constructorCalled.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (13:1)	class
+test/staging/sm/class/defaultConstructorBase.js	19	dir test/staging/sm/class/defaultConstructorBase.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/defaultConstructorDerivedSpread.js	19	dir test/staging/sm/class/defaultConstructorDerivedSpread.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (20:1)	class
+test/staging/sm/class/defaultConstructorNotCallable.js	19	dir test/staging/sm/class/defaultConstructorNotCallable.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/class/derivedConstructorArrowEvalBinding.js	19	dir test/staging/sm/class/derivedConstructorArrowEvalBinding.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:5)	class
+test/staging/sm/class/derivedConstructorArrowEvalClosed.js	19	dir test/staging/sm/class/derivedConstructorArrowEvalClosed.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:5)	class
+test/staging/sm/class/derivedConstructorArrowEvalEscape.js	19	dir test/staging/sm/class/derivedConstructorArrowEvalEscape.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:1)	class
+test/staging/sm/class/derivedConstructorArrowEvalEscapeUninitialized.js	19	dir test/staging/sm/class/derivedConstructorArrowEvalEscapeUninitialized.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (14:1)	class
+test/staging/sm/class/derivedConstructorArrowEvalGetThis.js	19	dir test/staging/sm/class/derivedConstructorArrowEvalGetThis.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:5)	class
+test/staging/sm/class/derivedConstructorArrowEvalNestedSuperCall.js	19	dir test/staging/sm/class/derivedConstructorArrowEvalNestedSuperCall.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:5)	class
+test/staging/sm/class/derivedConstructorArrowEvalSuperCall.js	19	dir test/staging/sm/class/derivedConstructorArrowEvalSuperCall.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:5)	class
+test/staging/sm/class/derivedConstructorInlining.js	19	dir test/staging/sm/class/derivedConstructorInlining.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/class/derivedConstructorName.js	19	dir test/staging/sm/class/derivedConstructorName.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/derivedConstructorReturnPrimitive.js	19	dir test/staging/sm/class/derivedConstructorReturnPrimitive.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/class/derivedConstructorTDZExplicitThis.js	19	dir test/staging/sm/class/derivedConstructorTDZExplicitThis.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/class/derivedConstructorTDZOffEdge.js	19	dir test/staging/sm/class/derivedConstructorTDZOffEdge.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/class/derivedConstructorTDZReturnAliasedTry.js	19	dir test/staging/sm/class/derivedConstructorTDZReturnAliasedTry.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/derivedConstructorTDZReturnObject.js	19	dir test/staging/sm/class/derivedConstructorTDZReturnObject.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/derivedConstructorTDZReturnTry.js	19	dir test/staging/sm/class/derivedConstructorTDZReturnTry.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/derivedConstructorTDZReturnUndefined.js	19	dir test/staging/sm/class/derivedConstructorTDZReturnUndefined.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/class/fields-instance-class-name-binding-eval.js	19	dir test/staging/sm/class/fields-instance-class-name-binding-eval.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:3)	class
+test/staging/sm/class/fields-instance-class-name-binding.js	19	dir test/staging/sm/class/fields-instance-class-name-binding.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:3)	class
+test/staging/sm/class/fields-static-class-name-binding-eval.js	19	dir test/staging/sm/class/fields-static-class-name-binding-eval.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:3)	class
+test/staging/sm/class/fields-static-class-name-binding.js	19	dir test/staging/sm/class/fields-static-class-name-binding.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:3)	class
+test/staging/sm/class/geterNoExprClosure.js	19	dir test/staging/sm/class/geterNoExprClosure.js 8	counted refusal: 2 refusal(s)	class
+test/staging/sm/class/innerBinding.js	19	dir test/staging/sm/class/innerBinding.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (12:1)	class
+test/staging/sm/class/methodInstallation.js	19	dir test/staging/sm/class/methodInstallation.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (19:1)	class
+test/staging/sm/class/methodName.js	19	dir test/staging/sm/class/methodName.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/methodOverwrites.js	19	dir test/staging/sm/class/methodOverwrites.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (14:5)	class
+test/staging/sm/class/newTargetArgumentsIntact.js	19	dir test/staging/sm/class/newTargetArgumentsIntact.js 8	parse: refused: SyntaxError: new.target is not supported before slice 8 (18:14)	new.target
+test/staging/sm/class/newTargetArrow.js	19	dir test/staging/sm/class/newTargetArrow.js 8	parse: refused: SyntaxError: new.target is not supported before slice 8 (16:27)	new.target
+test/staging/sm/class/newTargetBound.js	19	dir test/staging/sm/class/newTargetBound.js 8	parse: refused: SyntaxError: new.target is not supported before slice 8 (10:22)	new.target
+test/staging/sm/class/newTargetCCW.js	19	dir test/staging/sm/class/newTargetCCW.js 8	counted refusal: 1 refusal(s)	new.target
+test/staging/sm/class/newTargetDVG.js	19	dir test/staging/sm/class/newTargetDVG.js 8	parse: refused: SyntaxError: new.target is not supported before slice 8 (11:5)	new.target
+test/staging/sm/class/newTargetDefaults.js	19	dir test/staging/sm/class/newTargetDefaults.js 8	parse: refused: SyntaxError: new.target is not supported before slice 8 (11:35)	new.target
+test/staging/sm/class/newTargetDirectInvoke.js	19	dir test/staging/sm/class/newTargetDirectInvoke.js 8	parse: refused: SyntaxError: new.target is not supported before slice 8 (14:63)	new.target
+test/staging/sm/class/newTargetEval.js	19	dir test/staging/sm/class/newTargetEval.js 8	counted refusal: 4 refusal(s)	new.target
+test/staging/sm/class/newTargetGenerators.js	19	dir test/staging/sm/class/newTargetGenerators.js 8	parse: refused: SyntaxError: new.target is not supported before slice 8 (10:22)	new.target
+test/staging/sm/class/newTargetMethods.js	19	dir test/staging/sm/class/newTargetMethods.js 8	parse: refused: SyntaxError: new.target is not supported before slice 8 (14:62)	new.target
+test/staging/sm/class/parenExprToString.js	19	dir test/staging/sm/class/parenExprToString.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (12:19)	class
+test/staging/sm/class/staticConstructor.js	19	dir test/staging/sm/class/staticConstructor.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/staticMethods.js	19	dir test/staging/sm/class/staticMethods.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/class/strictExecution.js	19	dir test/staging/sm/class/strictExecution.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (12:1)	class
+test/staging/sm/class/stringConstructor.js	19	dir test/staging/sm/class/stringConstructor.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/subclassedArrayUnboxed.js	19	dir test/staging/sm/class/subclassedArrayUnboxed.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superCallBadDynamicSuperClass.js	19	dir test/staging/sm/class/superCallBadDynamicSuperClass.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superCallBadNewTargetPrototype.js	19	dir test/staging/sm/class/superCallBadNewTargetPrototype.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superCallBaseInvoked.js	19	dir test/staging/sm/class/superCallBaseInvoked.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:5)	class
+test/staging/sm/class/superCallIllegal.js	19	dir test/staging/sm/class/superCallIllegal.js 8	counted refusal: 2 refusal(s)	super
+test/staging/sm/class/superCallInvalidBase.js	19	dir test/staging/sm/class/superCallInvalidBase.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superCallOrder.js	19	dir test/staging/sm/class/superCallOrder.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:1)	class
+test/staging/sm/class/superCallProperBase.js	19	dir test/staging/sm/class/superCallProperBase.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superCallSpreadCall.js	19	dir test/staging/sm/class/superCallSpreadCall.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superCallThisInit.js	19	dir test/staging/sm/class/superCallThisInit.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:1)	class
+test/staging/sm/class/superElemDelete.js	19	dir test/staging/sm/class/superElemDelete.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (12:1)	class
+test/staging/sm/class/superPropBasicCalls.js	19	dir test/staging/sm/class/superPropBasicCalls.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:1)	class
+test/staging/sm/class/superPropBasicChain.js	19	dir test/staging/sm/class/superPropBasicChain.js 8	parse: refused: SyntaxError: super is not supported before slice 8 (11:9)	super
+test/staging/sm/class/superPropBasicGetter.js	19	dir test/staging/sm/class/superPropBasicGetter.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superPropBasicNew.js	19	dir test/staging/sm/class/superPropBasicNew.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superPropChains.js	19	dir test/staging/sm/class/superPropChains.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/class/superPropDVG.js	19	dir test/staging/sm/class/superPropDVG.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:1)	class
+test/staging/sm/class/superPropDelete.js	19	dir test/staging/sm/class/superPropDelete.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (12:1)	class
+test/staging/sm/class/superPropDerivedCalls.js	19	dir test/staging/sm/class/superPropDerivedCalls.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:1)	class
+test/staging/sm/class/superPropDestructuring.js	19	dir test/staging/sm/class/superPropDestructuring.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/class/superPropEvalInsideArrow.js	19	dir test/staging/sm/class/superPropEvalInsideArrow.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superPropEvalInsideNested.js	19	dir test/staging/sm/class/superPropEvalInsideNested.js 8	counted refusal: 1 refusal(s)	super
+test/staging/sm/class/superPropFor.js	19	dir test/staging/sm/class/superPropFor.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superPropHeavyweightArrow.js	19	dir test/staging/sm/class/superPropHeavyweightArrow.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superPropHomeObject.js	19	dir test/staging/sm/class/superPropHomeObject.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (18:1)	class
+test/staging/sm/class/superPropIncDecElem.js	19	dir test/staging/sm/class/superPropIncDecElem.js 8	parse: refused: SyntaxError: super is not supported before slice 8 (14:11)	super
+test/staging/sm/class/superPropLazyInnerFunction.js	19	dir test/staging/sm/class/superPropLazyInnerFunction.js 8	parse: refused: SyntaxError: super is not supported before slice 8 (14:11)	super
+test/staging/sm/class/superPropNoOverwriting.js	19	dir test/staging/sm/class/superPropNoOverwriting.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superPropOrdering.js	19	dir test/staging/sm/class/superPropOrdering.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superPropProtoChanges.js	19	dir test/staging/sm/class/superPropProtoChanges.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superPropProxies.js	19	dir test/staging/sm/class/superPropProxies.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superPropSkips.js	19	dir test/staging/sm/class/superPropSkips.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (13:1)	class
+test/staging/sm/class/superPropStatics.js	19	dir test/staging/sm/class/superPropStatics.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/superPropStrictAssign.js	19	dir test/staging/sm/class/superPropStrictAssign.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (18:1)	class
+test/staging/sm/class/superThisStrictNoBoxing.js	19	dir test/staging/sm/class/superThisStrictNoBoxing.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (9:1)	class
+test/staging/sm/class/uninitializedThisError.js	19	dir test/staging/sm/class/uninitializedThisError.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:1)	class
+test/staging/sm/destructuring/array-default-class.js	19	dir test/staging/sm/destructuring/array-default-class.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (12:7)	class
+test/staging/sm/destructuring/order-super.js	19	dir test/staging/sm/destructuring/order-super.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (52:1)	class
+test/staging/sm/expressions/ToPropertyKey-symbols.js	19	dir test/staging/sm/expressions/ToPropertyKey-symbols.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (51:5)	class
+test/staging/sm/expressions/computed-property-side-effects.js	19	dir test/staging/sm/expressions/computed-property-side-effects.js 8	parse: refused: SyntaxError: new.target is not supported before slice 8 (20:7)	new.target
+test/staging/sm/expressions/destructuring-array-default-call.js	19	dir test/staging/sm/expressions/destructuring-array-default-call.js 8	sm/non262-expressions-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (12:5)	class
+test/staging/sm/expressions/destructuring-array-default-class.js	19	dir test/staging/sm/expressions/destructuring-array-default-class.js 8	sm/non262-expressions-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (12:5)	class
+test/staging/sm/expressions/destructuring-array-default-function-nested.js	19	dir test/staging/sm/expressions/destructuring-array-default-function-nested.js 8	sm/non262-expressions-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (12:5)	class
+test/staging/sm/expressions/destructuring-array-default-function.js	19	dir test/staging/sm/expressions/destructuring-array-default-function.js 8	sm/non262-expressions-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (12:5)	class
+test/staging/sm/expressions/destructuring-array-default-simple.js	19	dir test/staging/sm/expressions/destructuring-array-default-simple.js 8	sm/non262-expressions-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (12:5)	class
+test/staging/sm/expressions/destructuring-array-default-yield.js	19	dir test/staging/sm/expressions/destructuring-array-default-yield.js 8	sm/non262-expressions-shell.js: parse: refused: SyntaxError: class is not supported before slice 8 (12:5)	class
+test/staging/sm/expressions/destructuring-pattern-parenthesized.js	19	dir test/staging/sm/expressions/destructuring-pattern-parenthesized.js 8	counted refusal: 1 refusal(s)	super
+test/staging/sm/expressions/inNotObjectError.js	19	dir test/staging/sm/expressions/inNotObjectError.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (33:1)	class
+test/staging/sm/expressions/optional-chain-class-heritage.js	19	dir test/staging/sm/expressions/optional-chain-class-heritage.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (13:1)	class
+test/staging/sm/expressions/optional-chain-super-elem.js	19	dir test/staging/sm/expressions/optional-chain-super-elem.js 8	parse: refused: SyntaxError: super is not supported before slice 8 (13:5)	super
+test/staging/sm/expressions/short-circuit-compound-assignment-property-key-evaluation.js	19	dir test/staging/sm/expressions/short-circuit-compound-assignment-property-key-evaluation.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (11:1)	class
+test/staging/sm/expressions/short-circuit-compound-assignment-tdz.js	19	dir test/staging/sm/expressions/short-circuit-compound-assignment-tdz.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (34:41)	class
+test/staging/sm/extensions/newer-type-functions-caller-arguments.js	19	dir test/staging/sm/extensions/newer-type-functions-caller-arguments.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (28:1)	class
+test/staging/sm/fields/bug1587574.js	19	dir test/staging/sm/fields/bug1587574.js 8	counted refusal: 1 refusal(s)	class
+test/staging/sm/fields/init-order.js	19	dir test/staging/sm/fields/init-order.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (17:1)	class
+test/staging/sm/fields/scopes.js	19	dir test/staging/sm/fields/scopes.js 8	parse: refused: SyntaxError: class is not supported before slice 8 (10:9)	class
+test/staging/sm/syntax/class-error.js	19	dir test/staging/sm/syntax/class-error.js 8	counted refusal: 1 refusal(s)	class
+test/staging/sm/syntax/keyword-unescaped-requirement.js	19	dir test/staging/sm/syntax/keyword-unescaped-requirement.js 8	counted refusal: 21 refusal(s)	class

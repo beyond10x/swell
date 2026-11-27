@@ -3669,18 +3669,18 @@ The rule:
 | 5 | `regexp` | 2,724 | 5,441 |
 | 6 | `bindings-and-iteration` | 3,898 | 7,351 |
 | 7 | `generators` | 1,472 | 2,801 |
-| 8 | `classes` | 9,339 | 18,529 |
+| 8 | `classes` | 9,478 | 18,803 |
 | 9 | `collections-proxy-reflect` | 1,858 | 3,678 |
 | 10 | `promises-and-async` | 3,759 | 7,258 |
 | 11 | `modules` | 1,281 | 1,833 |
 | 12 | `bigint` | 381 | 760 |
-| 13 | `binary-data` | 3,061 | 6,078 |
+| 13 | `binary-data` | 3,066 | 6,088 |
 | 14 | `shared-memory` | 598 | 1,192 |
 | 15 | `iterator-helpers-and-resources` | 1,094 | 2,170 |
 | 16 | `weak-references` | 82 | 164 |
 | 17 | `tail-calls` | 35 | 35 |
-| 18 | `annex-b` | 1,134 | 1,451 |
-| 19 | `staging` | 1,233 | 2,299 |
+| 18 | `annex-b` | 1,138 | 1,459 |
+| 19 | `staging` | 1,085 | 2,007 |
 | | slices 1 to 19 | 44,931 | 85,794 |
 | 20 | `temporal` (excluded at first) | 4,617 | 9,234 |
 | 21 | `intl402` (excluded at first) | 1,662 | 3,324 |
@@ -3780,6 +3780,20 @@ same paragraph ("A case that comes into a slice from one delivered later" above)
 code of the slice, every run passed. Every moved case goes to slice 8 or 12 and every case that
 comes in leaves slice 19, so slices 1 to 19 still hold 44,931 cases and 85,794 runs and the 22
 lines still sum to 53,801 and 103,360.
+
+Slice 8 had 9,302 cases and 18,455 runs by its rules (its `dir` and `feature` lines, the lines of
+the closes of slices 2, 3, 5, 6, 7 and 10 that gave it cases, and the order of delivery), and
+9,339 cases and 18,529 runs once the close of slice 9 gave it 37. 9,478 cases and 18,803 runs are
+what slice 8 counts after its close: 9 cases (18 runs) that need a later slice move by the lines
+of the paragraph "Slice 8's cases that need a later slice", 5 to slice 13 and 4 to 18, and 148
+cases (292 runs) come into it from slice 19 by the lines of the same paragraph ("A case that
+comes into a slice from one delivered later" above). Measured on 2026-11-27 with the slice line of
+`slot task test262` on the code of the slice, `test262-slice 08 9478 18803 0 0 9478 9478 0 0`,
+every run passed, and with this block read over the front matter of the pinned checkout as
+`test262-moves-check` reads it: against the run before the close, 148 cases go from slice 19 to 8,
+5 from 8 to 13 and 4 from 8 to 18, and no other case changes its slice. Every moved case goes to
+slice 13 or 18 and every case that comes in leaves slice 19, so slices 1 to 19 still hold 44,931
+cases and 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
 
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
@@ -4534,6 +4548,92 @@ first of their tokens in the order of the later parts: `class` 109, `new.target`
 and 1 each of slices 11, 15 and 17 (each with a `feature` line of its slice). Slice 19 passes 866
 cases on the base of this close and 736 after it: the 130 that come in leave it, and no run
 changed its outcome between the two runs.
+
+**Slice 8's cases that need a later slice.** Measured at the close of slice 8 (2026-11-27,
+`story:slice-08-conformance-close`), with the run lines of the runner on the code of the slice
+(`slot --timeout 30m task test262`, its `runs.tsv`), on the wave branch after the last other
+story of the slice was merged (`2b07461`): 9 of the 9,339 cases of slice 8 fail, each in every one
+of its runs (18 runs), and none on a part of slice 8: the first failure of each run is a
+`ReferenceError` for `ArrayBuffer` (4 runs), `DataView` (4) or `Uint8Array` (2), or `the value is
+not a function` (8) where the case calls `__lookupGetter__` or `__lookupSetter__`. They are the 9
+cases of `docs/plan/slice-08/close-later.tsv`, and each was read: with its later part it needs
+nothing of slice 8 that its sibling cases without that part do not pass with.
+`statements/class/subclass/builtin-objects/ArrayBuffer/` and `DataView/` (`regular-subclassing`
+and `super-must-be-called` each) subclass the constructor of binary data their directory names,
+and `statements/class/subclass/builtins` subclasses `Uint8Array`; the subclasses of the other
+built-ins of `subclass/builtin-objects/` pass, but for `TypedArray/`, which the block counts in
+slice 13 already. The four `private-getter-is-not-a-own-property`
+and `private-setter-is-not-a-own-property` cases of `statements/class/elements/` and
+`expressions/class/elements/` ask `this.__lookupGetter__("#m")` or `this.__lookupSetter__("#m")`,
+methods of `Object.prototype` of annex B, before they read `this.#m`; the other cases of those
+directories pass. All 9 move, each a new line of `conformance/test262/moves.tsv` with `from` 8,
+kind `part` and a token of `conformance/test262/later-parts.tsv` as its evidence, held by
+`test262-moves-check`. The later parts gain no token. The block gains 7 lines: `dir
+test/language/statements/class/subclass/builtin-objects/ArrayBuffer/ 13` and the same for
+`DataView/`, since every case of each of the two directories moves to slice 13, and 5 lines `dir
+<file> <slice>`, one for a single file each, since every other directory that holds one of them
+holds cases of slice 8 that stay. The groups, by target slice (lines of the list; in brackets the
+lines with `from` 8):
+
+- to slice 13, 5 (5): `ArrayBuffer` 2 and `DataView` 2 (`subclass/builtin-objects/ArrayBuffer/`
+  and `DataView/`), `Uint8Array` 1 (`subclass/builtins`);
+- to slice 18, 4 (4): `__lookupGetter__` 2 and `__lookupSetter__` 2 (the `private-getter-` and
+  `private-setter-is-not-a-own-property` cases of `statements/class/elements/` and
+  `expressions/class/elements/`).
+
+The counts sum to the 9 lines this change adds to the list, all with `from` 8. The other cases
+of slice 8 the plan of the slice set apart pass in every run: the 91 of
+`docs/plan/slice-08/close-slice-9.cases.txt` that use a part of slice 9 (the 37 that the close of
+slice 9 moved here among them) and the 5 of `close-pass.cases.txt`.
+
+148 cases (292 runs) come into slice 8, by the rule "A case that comes into a slice from one
+delivered later" above. Each is counted by the block in slice 19 (`dir test/staging/ 19`), failed
+at the start of the slice (`edaf080`, the commit the first story of the slice was merged onto),
+passes in every run on the code of the slice, has no `feature` or `flag` line of a slice delivered
+after 8, and needs no part of a later slice, read by the tokens of
+`conformance/test262/later-parts.tsv` as the close of slice 9 reads them (comments removed, as
+`test262-moves-check` reads a case; a token in the case excludes it, a token in a harness file
+it includes excludes it unless every line of that file that holds the token stands behind a
+`typeof` that asks for the later part). Two harness files have such tokens. `harness/deepEqual.js`,
+as the close of slice 9 reads it: 3 of the 148 (`sm/Reflect/construct`, `sm/class/classPrototype`
+and `sm/class/methodInstallation`) have their later tokens only there. `harness/propertyHelper.js`:
+7 of the 148 (the cases of `sm/Set/`) have their later tokens only there. Its `Uint8Array.prototype`
+(line 42) is the last operand of an `&&` whose operand in line 40 is `typeof Uint8Array !==
+"undefined"`, and its `BigInt(0)` (line 236) stands in the `case "bigint"` of `switch (typeof
+oldValue)` (line 223), which only a value of type `bigint` reaches, and a case makes such a value
+with a token of slice 12 of its own. This reads `propertyHelper.js` wider than the close of slice 9
+did above; the one case that reading kept in slice 19, `staging/sm/Array/unscopables`, passed in
+every run at the start of slice 8, so it is no case of this close and stays in slice 19. 138 of
+the 148 hold no token of a later slice anywhere. By directory under `test/staging/sm/`: `class/`
+86, `PrivateName/` 16, `expressions/` 14, `Set/` 7, `Function/` 6, `Array/` 3, `fields/` 3, and 2
+each of `Proxy/`, `RegExp/`, `Reflect/`, `destructuring/` and `syntax/`, and 1 each of
+`Map/`, `Promise/` and `extensions/`. Every case of `test/staging/sm/PrivateName/` and of
+`test/staging/sm/Set/` comes in, and each of the two directories gets one line `dir <directory>/
+8`; each of the other 125 cases gets a line `dir <file> 8`. All 148 are listed in
+`docs/plan/slice-08/close-into-08.tsv` with the slice they leave, the line that takes them, the
+runner's message of their first failed run at the start and the part of slice 8 they failed on;
+each passes in every one of its runs (the close's check (4) over that file), and none has a line
+of `moves.tsv`. The failure at the start is read case by case from the run lines of the full run
+of `edaf080`. The message of 130 names the part: the refusal of `class` 116 (13 of them in the
+shell file the case includes, `sm/non262-Set-shell.js` 7 and `sm/non262-expressions-shell.js`
+6), of `new.target` 10 and of `super` 4. The message of 18 names none, and the part is read from
+the case's source (the fifth field of `close-into-08.tsv`): 17 are a counted refusal of the code
+the case compiles with `eval` or `Function`, `class` 9, `super` 3, `new.target` 2 and a private
+name 3 (`sm/PrivateName/error-outside-class`, `illegal-in-identifier-context` and
+`illegal-in-object-context`, whose strings hold `#x` or `#a`, which no token matches); and
+`sm/Array/species` threw a `ReferenceError` for `Proxy`, which the start commit did not have yet
+(947 runs of the start failed on it), and builds `class ... extends Array` in the code it
+evaluates (line 161), so it needs slice 8 as well. By part: `class` 126, `new.target` 12, `super`
+7, a private name 3. Seven other cases of slices delivered after 8 failed at the start and pass in
+every run now, and stay in their slice with no line: 6 with a `feature` line of a slice delivered
+after 8 (`built-ins/Proxy/revocable/tco-fn-realm`, `tail-call-optimization`, slice 17;
+`built-ins/Proxy/set/call-parameters-prototype-dunder-proto` and
+`language/expressions/class/poisoned-underscore-proto`, `__proto__`, slice 18;
+`language/module-code/top-level-await/new-await-script-code`, `top-level-await`, slice 11;
+`language/statements/using/static-init-await-binding-invalid`, `explicit-resource-management`,
+slice 15; `staging/sm/Reflect/defineProperty`, `IsHTMLDDA`, slice 18), and
+`staging/sm/Array/for_of_1`, which holds the token `.__proto__` of slice 18. Slice 19 passes 755
+cases on the base of this close and 607 after it: the 148 that come in leave it.
 
 ```swell-slices
 order delivery 1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21
@@ -6668,6 +6768,140 @@ dir test/staging/sm/object/values.js 9
 dir test/staging/sm/regress/regress-1383630.js 9
 dir test/staging/sm/strict/primitive-assignment.js 9
 dir test/staging/sm/strict/primitive-this-getter.js 9
+dir test/language/expressions/class/elements/private-getter-is-not-a-own-property.js 18
+dir test/language/expressions/class/elements/private-setter-is-not-a-own-property.js 18
+dir test/language/statements/class/elements/private-getter-is-not-a-own-property.js 18
+dir test/language/statements/class/elements/private-setter-is-not-a-own-property.js 18
+dir test/language/statements/class/subclass/builtin-objects/ArrayBuffer/ 13
+dir test/language/statements/class/subclass/builtin-objects/DataView/ 13
+dir test/language/statements/class/subclass/builtins.js 13
+dir test/staging/sm/Array/from-iterator-close.js 8
+dir test/staging/sm/Array/sort-non-function.js 8
+dir test/staging/sm/Array/species.js 8
+dir test/staging/sm/Function/function-name-assignment.js 8
+dir test/staging/sm/Function/function-name-binding.js 8
+dir test/staging/sm/Function/function-name-class.js 8
+dir test/staging/sm/Function/function-name-computed-01.js 8
+dir test/staging/sm/Function/function-name-computed-02.js 8
+dir test/staging/sm/Function/function-name-method.js 8
+dir test/staging/sm/Map/constructor-iterator-close.js 8
+dir test/staging/sm/PrivateName/ 8
+dir test/staging/sm/Promise/bug-1288382.js 8
+dir test/staging/sm/Proxy/setPrototypeOf.js 8
+dir test/staging/sm/Proxy/trap-null.js 8
+dir test/staging/sm/Reflect/apply.js 8
+dir test/staging/sm/Reflect/construct.js 8
+dir test/staging/sm/RegExp/lastIndex-match-or-replace.js 8
+dir test/staging/sm/RegExp/lastIndex-search.js 8
+dir test/staging/sm/Set/ 8
+dir test/staging/sm/class/boundFunctionSubclassing.js 8
+dir test/staging/sm/class/bytecodePatternMatching.js 8
+dir test/staging/sm/class/classConstructorNoCall.js 8
+dir test/staging/sm/class/classHeritage.js 8
+dir test/staging/sm/class/className.js 8
+dir test/staging/sm/class/classPrototype.js 8
+dir test/staging/sm/class/constructorCalled.js 8
+dir test/staging/sm/class/defaultConstructorBase.js 8
+dir test/staging/sm/class/defaultConstructorDerivedSpread.js 8
+dir test/staging/sm/class/defaultConstructorNotCallable.js 8
+dir test/staging/sm/class/derivedConstructorArrowEvalBinding.js 8
+dir test/staging/sm/class/derivedConstructorArrowEvalClosed.js 8
+dir test/staging/sm/class/derivedConstructorArrowEvalEscape.js 8
+dir test/staging/sm/class/derivedConstructorArrowEvalEscapeUninitialized.js 8
+dir test/staging/sm/class/derivedConstructorArrowEvalGetThis.js 8
+dir test/staging/sm/class/derivedConstructorArrowEvalNestedSuperCall.js 8
+dir test/staging/sm/class/derivedConstructorArrowEvalSuperCall.js 8
+dir test/staging/sm/class/derivedConstructorInlining.js 8
+dir test/staging/sm/class/derivedConstructorName.js 8
+dir test/staging/sm/class/derivedConstructorReturnPrimitive.js 8
+dir test/staging/sm/class/derivedConstructorTDZExplicitThis.js 8
+dir test/staging/sm/class/derivedConstructorTDZOffEdge.js 8
+dir test/staging/sm/class/derivedConstructorTDZReturnAliasedTry.js 8
+dir test/staging/sm/class/derivedConstructorTDZReturnObject.js 8
+dir test/staging/sm/class/derivedConstructorTDZReturnTry.js 8
+dir test/staging/sm/class/derivedConstructorTDZReturnUndefined.js 8
+dir test/staging/sm/class/fields-instance-class-name-binding-eval.js 8
+dir test/staging/sm/class/fields-instance-class-name-binding.js 8
+dir test/staging/sm/class/fields-static-class-name-binding-eval.js 8
+dir test/staging/sm/class/fields-static-class-name-binding.js 8
+dir test/staging/sm/class/geterNoExprClosure.js 8
+dir test/staging/sm/class/innerBinding.js 8
+dir test/staging/sm/class/methodInstallation.js 8
+dir test/staging/sm/class/methodName.js 8
+dir test/staging/sm/class/methodOverwrites.js 8
+dir test/staging/sm/class/newTargetArgumentsIntact.js 8
+dir test/staging/sm/class/newTargetArrow.js 8
+dir test/staging/sm/class/newTargetBound.js 8
+dir test/staging/sm/class/newTargetCCW.js 8
+dir test/staging/sm/class/newTargetDVG.js 8
+dir test/staging/sm/class/newTargetDefaults.js 8
+dir test/staging/sm/class/newTargetDirectInvoke.js 8
+dir test/staging/sm/class/newTargetEval.js 8
+dir test/staging/sm/class/newTargetGenerators.js 8
+dir test/staging/sm/class/newTargetMethods.js 8
+dir test/staging/sm/class/parenExprToString.js 8
+dir test/staging/sm/class/staticConstructor.js 8
+dir test/staging/sm/class/staticMethods.js 8
+dir test/staging/sm/class/strictExecution.js 8
+dir test/staging/sm/class/stringConstructor.js 8
+dir test/staging/sm/class/subclassedArrayUnboxed.js 8
+dir test/staging/sm/class/superCallBadDynamicSuperClass.js 8
+dir test/staging/sm/class/superCallBadNewTargetPrototype.js 8
+dir test/staging/sm/class/superCallBaseInvoked.js 8
+dir test/staging/sm/class/superCallIllegal.js 8
+dir test/staging/sm/class/superCallInvalidBase.js 8
+dir test/staging/sm/class/superCallOrder.js 8
+dir test/staging/sm/class/superCallProperBase.js 8
+dir test/staging/sm/class/superCallSpreadCall.js 8
+dir test/staging/sm/class/superCallThisInit.js 8
+dir test/staging/sm/class/superElemDelete.js 8
+dir test/staging/sm/class/superPropBasicCalls.js 8
+dir test/staging/sm/class/superPropBasicChain.js 8
+dir test/staging/sm/class/superPropBasicGetter.js 8
+dir test/staging/sm/class/superPropBasicNew.js 8
+dir test/staging/sm/class/superPropChains.js 8
+dir test/staging/sm/class/superPropDVG.js 8
+dir test/staging/sm/class/superPropDelete.js 8
+dir test/staging/sm/class/superPropDerivedCalls.js 8
+dir test/staging/sm/class/superPropDestructuring.js 8
+dir test/staging/sm/class/superPropEvalInsideArrow.js 8
+dir test/staging/sm/class/superPropEvalInsideNested.js 8
+dir test/staging/sm/class/superPropFor.js 8
+dir test/staging/sm/class/superPropHeavyweightArrow.js 8
+dir test/staging/sm/class/superPropHomeObject.js 8
+dir test/staging/sm/class/superPropIncDecElem.js 8
+dir test/staging/sm/class/superPropLazyInnerFunction.js 8
+dir test/staging/sm/class/superPropNoOverwriting.js 8
+dir test/staging/sm/class/superPropOrdering.js 8
+dir test/staging/sm/class/superPropProtoChanges.js 8
+dir test/staging/sm/class/superPropProxies.js 8
+dir test/staging/sm/class/superPropSkips.js 8
+dir test/staging/sm/class/superPropStatics.js 8
+dir test/staging/sm/class/superPropStrictAssign.js 8
+dir test/staging/sm/class/superThisStrictNoBoxing.js 8
+dir test/staging/sm/class/uninitializedThisError.js 8
+dir test/staging/sm/destructuring/array-default-class.js 8
+dir test/staging/sm/destructuring/order-super.js 8
+dir test/staging/sm/expressions/ToPropertyKey-symbols.js 8
+dir test/staging/sm/expressions/computed-property-side-effects.js 8
+dir test/staging/sm/expressions/destructuring-array-default-call.js 8
+dir test/staging/sm/expressions/destructuring-array-default-class.js 8
+dir test/staging/sm/expressions/destructuring-array-default-function-nested.js 8
+dir test/staging/sm/expressions/destructuring-array-default-function.js 8
+dir test/staging/sm/expressions/destructuring-array-default-simple.js 8
+dir test/staging/sm/expressions/destructuring-array-default-yield.js 8
+dir test/staging/sm/expressions/destructuring-pattern-parenthesized.js 8
+dir test/staging/sm/expressions/inNotObjectError.js 8
+dir test/staging/sm/expressions/optional-chain-class-heritage.js 8
+dir test/staging/sm/expressions/optional-chain-super-elem.js 8
+dir test/staging/sm/expressions/short-circuit-compound-assignment-property-key-evaluation.js 8
+dir test/staging/sm/expressions/short-circuit-compound-assignment-tdz.js 8
+dir test/staging/sm/extensions/newer-type-functions-caller-arguments.js 8
+dir test/staging/sm/fields/bug1587574.js 8
+dir test/staging/sm/fields/init-order.js 8
+dir test/staging/sm/fields/scopes.js 8
+dir test/staging/sm/syntax/class-error.js 8
+dir test/staging/sm/syntax/keyword-unescaped-requirement.js 8
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
@@ -7141,18 +7375,18 @@ Its output on this document:
 05 2724 5441
 06 3898 7351
 07 1472 2801
-08 9339 18529
+08 9478 18803
 09 1858 3678
 10 3759 7258
 11 1281 1833
 12 381 760
-13 3061 6078
+13 3066 6088
 14 598 1192
 15 1094 2170
 16 82 164
 17 35 35
-18 1134 1451
-19 1233 2299
+18 1138 1459
+19 1085 2007
 20 4617 9234
 21 1662 3324
 x-stage3 2591 5008
