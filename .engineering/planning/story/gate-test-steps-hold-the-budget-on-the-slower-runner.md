@@ -5,7 +5,7 @@ kind: story
 status: active
 title: The gate's test steps hold 120 s on the forge's slower runner
 summary: 'The forge ran the gate''s test steps on the same code in 77.2 s and in 147.6 s of their 120: one runner took 1.94 times the CPU seconds. The steps end within 120 s on that runner (about 62 s on the faster one) with the budget unchanged, the log of check names the runner''s CPU, and the local gate bounds the CPU seconds on the build node. Lane unit 6 of wave big-2.'
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-27T10:38:23Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-27T10:38:24Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
@@ -50,79 +50,94 @@ The local gate did not see it: on the build node the same steps read 39.4 s and 
 120 (CPU 399.5 and 462.2, at loads 10 and 25), and `gate-cpu` printed `no bound for 32
 cores`. `AGENTS.md` ("check-runner passes GATE_CPU_BOUNDS") calls that node one of 64 cores.
 
+The unit's first part (2026-11-27, branch `impl/lanesix`, `92f3d55`) named the runner and
+measured the steps on the build node, each test and each script by the CPU seconds of its
+own process, at a load of 28 to 38 on 32 cores:
+
+| step | CPU seconds | what the list shows |
+|---|---|---|
+| `test` | 300.1 | 282.9 in 2,522 test processes: `swell::main` 201.3, the library tests of swell 24.1, the other crates 57.4 |
+| `test-collect` | 124.9 | 111.3 in 1,987 test processes |
+| `gate-selftest` | 67.2 | 106 scripts; 40.5 at a load of 14 |
+
+A cut to 80 % takes about 100 CPU seconds out. The median test costs 0.026 s and the 40
+costliest sum to about 70 s. The cuts the story's second body allowed (cases merged into one
+test function, a realm shared by merged cases, sweeps by a stride, planted scripts that read
+one product) sum to about 93 s with every one of them at its limit, and to well under half
+of that inside the story's other rules. The unit stopped there, as its brief said, and made
+no cut.
+
+The coordinator put three options to the operator: the step `test` at opt-level 1 with the
+stack tests kept at opt-level 0 behind a guard; the step `test-collect` out of the gate; no
+cut. The operator's decision of 2026-11-27, 12:19 CET
+(`approval-record:wave-big-2-lane-unit-6-cut`): the first, on the condition that debug
+assertions and overflow checks stay on in that profile. The gate's `test-collect` runs at
+opt-level 1 since `story:gate-test-steps-fit-four-cores` (168.5 to 33.3 CPU seconds), and
+the lane `slow` splits its collect mode the same way since
+`story:realm-size-lane-within-its-share`, with the rule and the guard this story takes over.
+
 ## Change
 
 The gate's test steps end within 120 s on a forge runner that takes 1.94 times the CPU
 seconds of run 45972624878 for the same work, with the budget as it is. `GATE_TIME_BUDGET`
-is not raised, no step leaves the clock, and no test leaves the gate without a place that
-still runs it. No test moves into the lane `slow` and no test of the lane changes: that
-lane has no room (`story:slow-lane-holds-its-bound-on-the-slower-runner`).
+is not raised, no step leaves the clock, and no test leaves the gate. No test moves into the
+lane `slow` and the lane does not change: it has no room
+(`story:slow-lane-holds-its-bound-on-the-slower-runner`).
 
-Order: item 1 is the unit's first commit. The lists of item 2 are taken on the unit's base
-with that commit. Item 4 is the last and may add nothing.
+1. Built (`92f3d55`). The runner is named: `check` prints, after `gate-time-start` and
+   before the first test step, one line `gate-runner: <n> cores, <model name>, <MemTotal> kB,
+   sh is <sh>`, from the task `slow-runner` with the label `gate-runner`; the `echo` exists
+   once; `tests/gate/check-prints-the-runner-line-before-its-first-test-step.sh` holds it.
 
-1. The runner is named. `check` prints, after `gate-time-start` and before the first test
-   step, one line `gate-runner: <n> cores, <model name>, <MemTotal> kB, sh is <sh>`. It
-   comes from the task `slow-runner` of `Taskfile.yml`, which gets a label (default
-   `slow-runner`, so the lane's line and
-   `tests/gate/slow-collect-builds-beside-the-lane-and-ends-with-it.sh` stay as they are);
-   the `echo` that prints the line exists once. Its `desc` and summary say that `check`
-   calls it too. A new planted script under `tests/gate/` holds the line of `check`; its
-   name says so. In `Taskfile.yml` the unit changes the tasks `check` and `slow-runner` and
-   nothing else: an include line for `taskfiles/perf.yml` is the coordinator's, at the join
-   with the interpreter-loop unit.
+2. Done. The lists of the step's tests and scripts by CPU seconds, on the base.
 
-2. The unit measures before it cuts. One pool job on the build node lists every test of the
-   steps `test` and `test-collect` with its CPU seconds (user plus system of the test's own
-   process: the runner starts one process per test; the report names the command that reads
-   them, and wall time is not used), and every script of `gate-selftest` with its CPU
-   seconds. The lists are summed per test module and per script and kept in the unit's work
-   directory.
-
-3. The cuts go where the lists put the seconds. What a cut may be:
-   - a product several tests build each for itself (a realm with the same setup, a compiled
-     source, a table) is made once and shared, in a form that holds under a runner that
-     starts one process per test (the organization's rule that an expensive product is made
-     once, never per test): a file made by a setup step, or one test function that runs the
-     cases in one process and names each case in its failure text;
-   - a sweep (a budget moved one step or 8 bytes at a time across a script) covers the same
-     range in fewer runs, by a stride or by stepping over budgets that stop at the same
-     charge, and reads no `SWELL_FULL_COUNTS`: each sweep the unit changes names its planted
-     defect and shows it red before and after, at the budget where it fails. A sweep that
-     would give up a part of its range is not changed;
-   - a script of `gate-selftest` that runs `cargo` or repeats a build reads a product made
-     once before the clock.
-   What a cut may not be: a test deleted or marked ignored, a test or module taken out of
-   the collect step, an assertion weakened, a plant that no test holds any more, a step
-   moved out of the clock, a count that reads `SWELL_FULL_COUNTS` (it would run full in the
-   lane), more shards or jobs on the forge. `.github/workflows/check.yml` does not change.
-
-   Files the cuts leave alone:
-   - a cut stays inside a test module; no module is merged, renamed or removed, so the
-     generated `crates/swell/tests/main.rs` does not change;
-   - a test named in `conformance/host/requirements.txt` and a test of `STACK_TESTS`
-     (`taskfiles/stack-profiles.yml`) keeps its path and its name;
-   - the files of the units that run beside this one: `crates/swell/tests/eval.rs`,
-     `eval_private_names.rs`, `dynamic_function.rs`, `budgets.rs`, `private_methods.rs`,
-     `private_fields.rs`, `private_element_hook.rs`, `interpreter_loop.rs`,
-     `crates/swell/src/dynamic_code.rs`, `crates/swell/src/interp/`, and the compiler and
-     syntax crates;
-   - a cut in a test module under `crates/*/src` changes the digest of the test262 sources:
-     `task test262-check` is then red on the unit's branch, the coordinator writes the
-     digest at the wave's close, and the report names each such file.
+3. The step `test` runs the tests of swell's integration-test binary (`swell::main`) at
+   opt-level 1, except those that run on a bounded stack.
+   - The split is the lane's: `taskfiles/realm-room-tests.awk -v rule=stack` over every
+     module of `crates/swell/tests/` prints each test "stack" or "other". The tests printed
+     "other" run at opt-level 1. Every other test of `swell::main` (the stack tests and the
+     tests a macro writes, which the rule does not see), the library tests of swell and the
+     tests of every other crate of the workspace run at opt-level 0, as now.
+   - The guard is the lane's: the run at opt-level 1 sets `SWELL_NO_STACK_TESTS=1`
+     (`NO_STACK_TESTS`), so `stack_with_room` and `stack_thread` of
+     `crates/swell/tests/support/host.rs` panic there. A stack test in a form the rule does
+     not read fails the gate instead of passing on frames of another size. The runs at
+     opt-level 0 do not set it.
+   - The profile at opt-level 1 inherits `test` and changes the opt-level only. Debug
+     assertions and overflow checks are on in it. It stands in a file under `.cargo/` that
+     the command names with `--config`, as `.cargo/collect-profile.toml` does, not in
+     `Cargo.toml` or `.cargo/config.toml` (sources of the digest of the test262 counts). The
+     unit may use the profile `collect` or add a second profile; the report says which and
+     why.
+   - One test of `swell::main` that the rule prints "other" holds the two checks: it fails
+     when `debug_assertions` is off, and it fails when an `i32` addition that overflows at
+     run time does not panic. It runs in the run at opt-level 1 (and so holds the profile
+     of the gate) and names what it holds.
+   - Every test runs once. The step counts the tests of `swell::main` in both runs and
+     fails when a test that nextest lists for the binary is in neither or in both, naming
+     it. The line `<b> test binaries: <p> passed, <f> failed, <i> ignored` sums the runs,
+     and the ten `gate-slowest test` lines are taken over all of them.
+   - The binary at opt-level 1 is built before the clock by `build-tests`. The step fails
+     when its log has a cargo Compiling line (`compile-check`), and the `deps` check of
+     `gate-time-sum` covers the profile's directory.
+   - `task test262-check`, `conformance/test262/expected.digest` and the lane `slow` do not
+     change. `.github/workflows/check.yml` does not change.
+   - In `Taskfile.yml` the unit changes the tasks `test`, `build-tests`, `check` and
+     `slow-runner`, the variables at its top and the list `GATE_VARIABLES` (a variable it
+     adds stands there), and nothing else; under `taskfiles/` what the step needs.
+     `AGENTS.md`, `CHANGELOG.md` and `README.md` are the coordinator's: the unit writes their
+     text into its notes.
 
 4. The local gate and the CPU seconds. `check-runner` gives `check` the table
    `GATE_CPU_BOUNDS` (`CPU_BOUNDS_BY_CORES`, `taskfiles/forge.yml`), which has no entry for
    the build node. The rule of an entry is `AGENTS.md`'s: the geometric mean of the highest
-   reading of the change and the lowest of the base, rounded to 5, the highest change ×
-   1.25 at most the entry and the entry × 1.25 at most the lowest base. The unit takes the
-   readings of the acceptance below and adds the entry for the core count that `nproc`
-   prints in a pool job when both margins hold, with the readings recorded in the same
-   commit. A cut to 80 % does not reach the margins (they need 64 %), and the same code
-   read 399.5 and 462.2 CPU seconds there at two loads: when a margin fails the unit adds
-   no entry, and the report gives the readings, the loads and the core count. The local
-   gate then still cannot see the forge's wall time; the report says so in one line, and
-   what is left is the coordinator's to file.
+   reading of the change and the lowest of the base, rounded to 5, the highest change × 1.25
+   at most the entry and the entry × 1.25 at most the lowest base. The unit takes the
+   readings of the acceptance below and adds the entry for 32 cores when both margins hold,
+   with the readings recorded in the same commit. When a margin fails it adds no entry, and
+   the report gives the readings and the loads. The local gate then still cannot see the
+   forge's wall time; the report says so in one line, and what is left is the
+   coordinator's to file.
 
 ## Acceptance
 
@@ -134,59 +149,66 @@ unit's report:
   its `gate-time test-steps <s> of 120` reads s at or under 29.5 times the seconds of its
   `gate-time yardstick` line (62 / 2.1), and at or under 120. The pull request names the
   run with the three lines.
+- The job `check` on the forge ends inside its limit of 30 minutes
+  (`.github/workflows/check.yml`); the pull request names its duration beside that of run
+  45972624878.
 - The lane's `slow-time slow-tests` on the forge reads no more than 175 s (168.8 and 167.6
   in the runs on `fd71252b` and `8d6cfebc`).
 
 Checked on the unit's report:
 
-- Base and head: the base is the commit of `wave/big-2` the unit's branch is cut from, with
-  item 1 on it; the head is the unit's last commit before it merges a later state of the
-  wave. Neither holds the interpreter-loop unit or the unit of the private names in eval
-  code; the report names both commits.
+- Base and head: the base is the merge of `wave/big-2` at `3d154437` into the unit's
+  branch (the wave with the interpreter-loop unit and the unit of the private names in
+  eval code, and item 1); the head is the unit's last commit. The report names both.
 - The CPU seconds: `slot --timeout 30m task check-runner` runs base, head, base, head, in
-  that order, one job at a time. The reading is the first number of the line `gate-cpu
-  test-steps <c>`; the load is that of the line `gate-time test-steps`. A pair (the k-th
-  base and the k-th head) counts when its two loads differ by at most 5. Two pairs that
-  count have head / base at most 0.80; a pair that does not count is taken again, at most
-  two more times, and then the report says what was read. The report quotes the `gate-cpu
-  test-steps` and `gate-time test-steps` lines of every run.
-- The lists of item 2: the 40 costliest tests and the 15 costliest scripts with their CPU
-  seconds and their share of the step, on base and head, and the command that made them.
-- The runner line: `task gate-selftest` passes with the new script; `git grep -n 'cores,
-  \$cpu, \$mem'` has one hit; the line of the lane `slow` and its script are unchanged.
+  that order, one job at a time. For these runs, and for no commit, the line
+  `test262-sources` of `conformance/test262/expected.digest` may be set in the tree to the
+  digest the check prints, and is put back after each (`git status --short` is empty before
+  the next commit). The reading is the first number of the line `gate-cpu test-steps <c>`;
+  the load is that of the line `gate-time test-steps`. A pair (the k-th base and the k-th
+  head) counts when its two loads differ by at most 5. Two pairs that count have head /
+  base at most 0.80; a pair that does not count is taken again, at most two more times,
+  and then the report says what was read. The report quotes the `gate-cpu test-steps` and
+  `gate-time test-steps` lines of every run, and the `gate-time` line of the step `test`.
+- The profile: the report quotes the profile's lines. With `debug-assertions = false`
+  planted in it the test of the two checks is red, and with `overflow-checks = false`
+  planted it is red; each red line is quoted, and the file is put back.
 - Nothing left the gate: the `passed` and `ignored` counts of `test`, `test-collect` and
-  `test-doc` on base and head (`<b> test binaries: <p> passed, <f> failed, <i> ignored`);
-  every difference is named test by test, with the test that runs its cases now and the
-  names of those cases. `ignored` stays 1 in `test` and 1 in `test-collect`.
-  `Taskfile.yml`'s `check` lists the same steps between `gate-time-start` and
-  `gate-time-sum`, plus the runner line.
+  `test-doc` on base and head; `test` differs by the one new test and by nothing else.
+  `ignored` stays 1 in `test` and 1 in `test-collect`. The report gives the count of tests
+  of `swell::main` at each opt-level; their sum is the count nextest lists for the binary.
+- The split holds: a new planted script under `tests/gate/` shows the step red, each with
+  the test named, when a test of `swell::main` is in neither run and when one is in both.
+  A stack test moved into the run at opt-level 1 (the rule's line changed in a copy)
+  panics with the guard's text; the report quotes it.
+- The stack tests: `slot --timeout 30m task test-stack-profiles` passes on the head, 7 in
+  each profile, and no stack bound of a test changes (`git diff <base>..<head> --
+  crates/` changes one test file, for the new test, and no file under `crates/*/src`).
+- The build before the clock: the wall seconds of `build-tests` on base and head, from one
+  cold job each (a new target directory), and the size of `target/` after each. Test
+  binaries stay one per crate and profile (`task test-binaries-check` passes).
 - The bounds: `git diff <base>..<head>` changes no line of `taskfiles/gate-time.yml` that
   holds `default "120"`, `default "900"` or `default "600"`, and
   `tests/gate/gate-time-refuses-test-steps-over-the-budget.sh` and
   `tests/gate/gate-time-refuses-test-steps-over-the-cpu-bound-or-building.sh` are
   byte-identical.
-- Each changed sweep: its plant red before and after, with the budget.
-- Each product made once: the line that makes it, the tests or scripts that read it, and
-  one plant that shows a reader fails when the product is wrong.
 - Each new or changed test and script with its seconds from the `gate-slowest` lines; one
   over 5 s is named. No test over 60 s.
-- Item 4: `CPU_BOUNDS_BY_CORES` holds an entry for the node's core count with its readings
-  in the commit, or the report says which margin failed, with the numbers. The report gives
-  the `nproc` of a pool job; the coordinator corrects the core count in `AGENTS.md`.
+- Item 4: `CPU_BOUNDS_BY_CORES` holds an entry for 32 cores with its readings in the
+  commit, or the report says which margin failed, with the numbers.
 - The lane: `slot --timeout 30m task slow-tests` once on base and once on head prints the
-  same counts (`slow-tests: <b> test binaries: <p> passed, ...`), but for the differences
-  named above.
-- `slot --timeout 30m task check-runner` exits 0 on the head and on the head merged with
-  the wave (but for `test262-check` where a file under `crates/*/src` changed).
+  same counts (`slow-tests: <b> test binaries: <p> passed, ...`).
+- `slot --timeout 30m task check-runner` exits 0 on the head with the digest line set as
+  above, and `task gate-selftest` passes with the new scripts.
 
 ## Out of scope
 
 - The forge's choice of runner, a larger or a paid runner, more jobs for `check`: the
   operator's.
-- A test or module that runs in one of the two steps `test` and `test-collect` only: it
-  narrows what the collect step covers and is the operator's decision. No module leaves
-  the collect step in this unit.
+- The tests of the other crates and the library tests of swell at opt-level 1: the syntax
+  crate's tests of the stack bound read unoptimized frames and have no rule and no guard.
+- The step `test-collect` and the collect step's modules: unchanged.
+- The cuts of the second body (merged cases, shared realms, sweeps by a stride, scripts
+  that read one product): not taken; their limit is in the context above.
 - The lane `slow`: `story:slow-lane-holds-its-bound-on-the-slower-runner`.
 - The interpreter's speed: `story:property-escape-cases-spend-less-in-the-interpreter-loop`.
-  Its gain and the tests the open units add are not counted in the 80 %.
-- The build before the clock (`build-tests`): it is not in the 120 s.
