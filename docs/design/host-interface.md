@@ -1927,6 +1927,8 @@ box is the host's to charge with `charge_host_bytes` (decision 14). Making one s
 
 **HOST-222** (swell:D6) An override of a host object whose `Ok` value or `Abrupt::Throw` value holds a stale handle or a handle of another agent ends the run with `Terminated(EngineFault)`; `state()` then reads `Faulted` and nothing panics. [slice 9]
 
+**HOST-223** (swell:D6) A `host_ensure_can_add_private_element` is called before a private method or accessor is added to a host object with an override table, as before a private field; a `Throw` from it is the add's throw and the element is not added; a `Throw` value that holds a stale handle or a handle of another agent ends the run with `Terminated(EngineFault)`, no element is added, `state()` then reads `Faulted`, every entry point and read but `state()` and `refusals()` answers `Err(HostError::Faulted)`, and nothing panics. [slice 8]
+
 **HOST-115** (ecma262:sec-IsHTMLDDA-internal-slot) For a host object with `is_html_dda`, the script `typeof o` answers `"undefined"`, `!o` answers `true` and `o == null` answers `true`. [slice 18]
 
 ## 16. The hook trait

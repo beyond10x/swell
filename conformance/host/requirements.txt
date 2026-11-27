@@ -220,3 +220,4 @@ HOST-219 pending slice 12
 HOST-220 test swell::values::host_220_to_utf16_len_counts_code_units
 HOST-221 test swell::interrupt::host_221_an_interrupt_set_in_a_host_function_reached_from_rust_ends_the_run
 HOST-222 test swell::host_overrides::host_222_an_override_result_with_a_stale_handle_faults_the_agent
+HOST-223 pending slice 8
