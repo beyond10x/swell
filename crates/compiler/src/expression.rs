@@ -450,8 +450,9 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 };
                 t.push(emit(make))?;
             }
-            // The parse holds a class back (`swell_syntax::HOLDS`): no tree to compile has one.
-            Expr::Class(_) => return Err(malformed("a class expression")),
+            // `#sec-class-definitions-runtime-semantics-evaluation`: ClassDefinitionEvaluation
+            // (`class.rs`), F the value.
+            Expr::Class(class) => self.class_definition(class, span, &mut t)?,
             Expr::Unary { op, operand } => self.unary(*op, *operand, span, &mut t)?,
             Expr::Update {
                 op,
@@ -1451,7 +1452,10 @@ impl<'a, 'm> Compiler<'a, 'm> {
         match p.value {
             PropertyValue::Init(e) => {
                 t.push(Task::Expr(e))?;
-                if anonymous_function(self.ast, e).is_some() {
+                // An anonymous class names itself from the key before its elements
+                // ([`Instruction::SetClassName`], `class.rs`); a function is named here.
+                let class = matches!(self.ast.expr(e).map(|x| &x.expr), Some(Expr::Class(_)));
+                if !class && anonymous_function(self.ast, e).is_some() {
                     t.push(Task::Emit(Instruction::SetFunctionName, p.span))?;
                 }
                 t.push(Task::Emit(Instruction::DefineComputedField, p.span))?;

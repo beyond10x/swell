@@ -61,9 +61,9 @@ mod tests {
     /// (`story:generator-functions-and-suspended-frames`): 200 bytes. 192 since
     /// `story:new-target-meta-property`, whose box `ArrowContext` (8 bytes) took the place of an
     /// arrow function's `Option<Value>` (16 bytes), so `EcmascriptFunction`, the largest kind,
-    /// shrank by 8; `story:class-definition-evaluation`, which adds the second box, sets it to
-    /// its measured value again.
-    const RECORD_BYTES: usize = 192;
+    /// shrank by 8. 200 again since `story:class-definition-evaluation`, whose box
+    /// `ClassConstructor` (8 bytes) is the second box of "Classes", item 3: measured.
+    const RECORD_BYTES: usize = 200;
 
     /// "Suspended frames", item 2 (`docs/design/engine.md`): the frame lies in a box in the
     /// generator's kind, so the record of every object keeps its size.

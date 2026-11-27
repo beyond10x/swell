@@ -92,8 +92,9 @@ use swell_num::literal::numeric_literal;
 use swell_num::to_string::number_to_string;
 use swell_syntax::Script;
 use swell_syntax::ast::{
-    Ast, BindingTarget, DeclKind, Expr, ExprId, ForInTarget, ForInit, FunctionId, FunctionKind,
-    LexicalName, PatternTarget, PropertyKey, PropertyValue, Stmt, StmtId, SuperKey,
+    Ast, BindingTarget, ClassElement, ClassKey, DeclKind, Expr, ExprId, ForInTarget, ForInit,
+    FunctionId, FunctionKind, LexicalName, PatternTarget, PropertyKey, PropertyValue, Stmt, StmtId,
+    SuperKey,
 };
 use swell_syntax::ledger::{HeapBytes, Meter, Stop, map_entry_bytes};
 
@@ -125,6 +126,10 @@ pub(crate) enum ScopeKey {
     Finally(StmtId),
     /// The top level of a function body, inside the function's scope.
     Body(FunctionId),
+    /// The class scope of ClassDefinitionEvaluation (`#sec-runtime-semantics-classdefinitionevaluation`,
+    /// steps 1 to 6), by the class's constructor: its own name, immutable and uninitialized
+    /// until step 4.
+    Class(FunctionId),
 }
 
 /// What the code does at the entry of a lexical scope.
@@ -171,6 +176,9 @@ pub(crate) enum Site {
     /// name: it starts with that binding's value (`#sec-functiondeclarationinstantiation`, step
     /// 28.f.i.4).
     BodyVar(FunctionId, u32),
+    /// The class's own name in its class scope, by the class's constructor, which step 4 of
+    /// ClassDefinitionEvaluation initializes with F (`class.rs`).
+    ClassName(FunctionId),
 }
 
 /// Where a name resolves to, from one site.
@@ -246,6 +254,15 @@ pub(crate) struct Resolution {
     /// Of eval code: the names of the slots of the record its lexical bindings need, in slot
     /// order, with whether each is `const`; empty when none needs one.
     pub eval_env: Vec<(String, bool)>,
+    /// The constructors of the classes that have instance elements (a field or a private
+    /// method that is not static): their template begins with `This; InitInstance; Pop`
+    /// (`class.rs`).
+    pub instance_elements: BTreeSet<FunctionId>,
+    /// The constructors of the anonymous classes whose name NamedEvaluation gives at run time,
+    /// from the property key right under the class's value on the operand stack: the value of
+    /// a computed key of an object literal. Their class code names F right after it is made
+    /// ([`crate::bytecode::Instruction::SetClassName`]).
+    pub named_by_key: BTreeSet<FunctionId>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -359,6 +376,10 @@ struct Resolver<'a, 'm> {
     work: Vec<Walk>,
     /// The `let` and `const` bindings in local slots that an access checks, by binding index.
     checked_locals: BTreeSet<usize>,
+    /// [`Resolution::instance_elements`].
+    instance_elements: BTreeSet<FunctionId>,
+    /// [`Resolution::named_by_key`].
+    named_by_key: BTreeSet<FunctionId>,
 }
 
 fn malformed(what: &str) -> CompileError {
@@ -399,6 +420,8 @@ pub(crate) fn resolve(
         script_adds_bindings: !script.strict && script.scope.contains_direct_eval,
         work: Vec::new(),
         checked_locals: BTreeSet::new(),
+        instance_elements: BTreeSet::new(),
+        named_by_key: BTreeSet::new(),
     };
     let resolution = resolve_with(&mut r, script, eval_code);
     // The resolver's own structures are dropped with it; on a stop the compile step credits
@@ -481,6 +504,8 @@ fn resolve_with(
         lexical_scopes,
         eval_lexical,
         eval_env,
+        instance_elements: core::mem::take(&mut r.instance_elements),
+        named_by_key: core::mem::take(&mut r.named_by_key),
     })
 }
 
@@ -735,6 +760,8 @@ impl<'a, 'm> Resolver<'a, 'm> {
             },
             // Entered by `Resolver::catch`, with the end of the pattern as each name's end.
             ScopeKey::CatchParameter(_) => (Vec::new(), true),
+            // Entered by `Resolver::class_scope`, with the end of the class as the name's end.
+            ScopeKey::Class(_) => (Vec::new(), false),
             ScopeKey::Try(id) | ScopeKey::Catch(id) | ScopeKey::Finally(id) => {
                 let list = match (key, stmt(id)) {
                     (ScopeKey::Try(_), Some(Stmt::Try { block, .. })) => Some(block.as_slice()),
@@ -1043,8 +1070,14 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 self.push_lexical_list(ScopeKey::Try(id), block);
             }
             Stmt::FunctionDeclaration(f) => self.work.push(Walk::Function(*f)),
-            // The parse holds a class back (`swell_syntax::HOLDS`): no tree to compile has one.
-            Stmt::Class(_) => return Err(malformed("a class declaration")),
+            // The name of a class declaration is a binding of the scope around it, initialized
+            // after ClassDefinitionEvaluation (`#sec-runtime-semantics-bindingclassdeclarationevaluation`).
+            Stmt::Class(class) => {
+                if let Some(name) = &class.name {
+                    self.occur(Site::VarDecl(id, 0), &name.name);
+                }
+                self.class_scope(class)?;
+            }
             // The object is evaluated outside the scope of the body.
             Stmt::With { object, body } => {
                 self.work.push(Walk::Leave);
@@ -1053,6 +1086,115 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 self.work.push(Walk::Expr(*object));
             }
         }
+        Ok(())
+    }
+
+    /// The class scope of `class` (`#sec-runtime-semantics-classdefinitionevaluation`, steps 1
+    /// to 6; `docs/design/engine.md`, "Classes", item 2, step 1), entered: the class's own name,
+    /// immutable, every access checked, its end the end of the class, initialized through
+    /// [`Site::ClassName`]; the hidden bindings of the computed field keys
+    /// ([`Resolver::field_key_bindings`]); then the heritage, the constructor and each element's
+    /// computed key and function, in source order, walked in it, after the heritage in the
+    /// private record ([`Resolver::private_record`]); the scope left after them. The constructor
+    /// is named by the class's name, a method by its literal key (a getter `get <key>`, a setter
+    /// `set <key>`); a computed key names its method when the class is evaluated.
+    fn class_scope(&mut self, class: &swell_syntax::ast::Class) -> Result<(), CompileError> {
+        let ctor = class.constructor;
+        let key = ScopeKey::Class(ctor);
+        let owner = self.scopes.get(self.current).and_then(|s| s.owner);
+        let scope = self.new_scope(Kind::Lexical { straight: false }, owner);
+        if let Some(s) = self.scopes.get_mut(scope) {
+            s.key = Some(key);
+        }
+        if let Some(name) = &class.name {
+            let data = LexicalData {
+                constant: true,
+                end: class.span.end,
+            };
+            self.declare_as(scope, &name.name, Some(data));
+            self.occur(Site::ClassName(ctor), &name.name);
+            let units = self.m.utf16(&name.name)?;
+            self.give_name(ctor, units)?;
+        }
+        self.field_key_bindings(scope, class)?;
+        let instance = class.elements.iter().any(|e| match e {
+            ClassElement::Field { is_static, .. } => !is_static,
+            ClassElement::Method { is_static, key, .. } => {
+                !is_static && matches!(key, ClassKey::Private(_))
+            }
+            ClassElement::StaticBlock { .. } => false,
+        });
+        if instance {
+            self.m.insert(&mut self.instance_elements, ctor)?;
+        }
+        // The children, pushed last first: the scope is left after them.
+        let mut children: Vec<Walk> = self
+            .m
+            .with_capacity(class.elements.len().saturating_mul(2).saturating_add(3))?;
+        children.extend(class.heritage.map(Walk::Expr));
+        children.push(Walk::Function(ctor));
+        for element in &class.elements {
+            match element {
+                ClassElement::Method {
+                    key,
+                    kind,
+                    function,
+                    ..
+                } => {
+                    match key {
+                        ClassKey::Computed(e) => children.push(Walk::Expr(*e)),
+                        ClassKey::Literal(k) => {
+                            let prefix = match kind {
+                                FunctionKind::Getter => "get ",
+                                FunctionKind::Setter => "set ",
+                                _ => "",
+                            };
+                            let units = property_key(k, self.m)?;
+                            let mut name = self.m.with_capacity(prefix.len() + units.len())?;
+                            name.extend(prefix.encode_utf16());
+                            name.extend_from_slice(&units);
+                            self.m.release(units);
+                            self.give_name(*function, name)?;
+                        }
+                        ClassKey::Private(_) => {}
+                    }
+                    children.push(Walk::Function(*function));
+                }
+                ClassElement::Field {
+                    key, initializer, ..
+                } => {
+                    if let ClassKey::Computed(e) = key {
+                        children.push(Walk::Expr(*e));
+                    }
+                    children.extend(initializer.map(Walk::Expr));
+                }
+                ClassElement::StaticBlock { function, .. } => {
+                    children.push(Walk::Function(*function));
+                }
+            }
+        }
+        children.push(Walk::LeaveLexical(key));
+        self.private_record(class)?;
+        self.m.grow_by(&mut self.work, children.len())?;
+        self.work.extend(children.drain(..).rev());
+        self.m.release(children);
+        Ok(())
+    }
+
+    /// One hidden binding per computed field key of `class` in its class scope `scope`
+    /// ("Classes", item 2, step 1). None here: `story:public-class-fields` fills it.
+    fn field_key_bindings(
+        &mut self,
+        _scope: usize,
+        _class: &swell_syntax::ast::Class,
+    ) -> Result<(), CompileError> {
+        Ok(())
+    }
+
+    /// The private record of `class` ("Private names", item 3), after the heritage: a binding
+    /// per private identifier the class declares. None here:
+    /// `story:private-names-and-private-methods` fills it.
+    fn private_record(&mut self, _class: &swell_syntax::ast::Class) -> Result<(), CompileError> {
         Ok(())
     }
 
@@ -1137,6 +1279,14 @@ impl<'a, 'm> Resolver<'a, 'm> {
                             {
                                 let key = property_key(&p.key, self.m)?;
                                 self.give_name(f, key)?;
+                            }
+                            // An anonymous class under a computed key is named from the key
+                            // before its elements (`class.rs`).
+                            if computed
+                                && let Some(Expr::Class(class)) = self.ast.expr(e).map(|n| &n.expr)
+                                && class.name.is_none()
+                            {
+                                self.m.insert(&mut self.named_by_key, class.constructor)?;
                             }
                             children.push(Walk::Expr(e));
                         }
@@ -1253,7 +1403,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 children.extend(argument.iter().map(|e| Walk::Expr(*e)))
             }
             Expr::Function(f) => children.push(Walk::Function(*f)),
-            Expr::Class(_) => return Err(malformed("a class expression")),
+            Expr::Class(class) => self.class_scope(class)?,
             Expr::Unary { operand, .. } | Expr::Update { operand, .. } => {
                 children.push(Walk::Expr(*operand));
             }
@@ -1643,7 +1793,11 @@ impl<'a, 'm> Resolver<'a, 'm> {
     ) -> Result<Option<Binding>, CompileError> {
         if matches!(
             site,
-            Site::VarDecl(..) | Site::ForInVar(_) | Site::Param(..) | Site::Bound(..)
+            Site::VarDecl(..)
+                | Site::ForInVar(_)
+                | Site::Param(..)
+                | Site::Bound(..)
+                | Site::ClassName(_)
         ) {
             return Ok(None);
         }
@@ -1937,7 +2091,8 @@ fn is_proto(key: &PropertyKey) -> bool {
 }
 
 /// The anonymous function definition `e` of `ast` is, if it is one
-/// (`#sec-isanonymousfunctiondefinition`).
+/// (`#sec-isanonymousfunctiondefinition`): an anonymous class answers its constructor, whose
+/// template's name is F's name.
 pub(crate) fn anonymous_function(ast: &Ast, e: ExprId) -> Option<FunctionId> {
     match ast.expr(e).map(|n| &n.expr) {
         Some(Expr::Function(f)) => ast
@@ -1946,6 +2101,7 @@ pub(crate) fn anonymous_function(ast: &Ast, e: ExprId) -> Option<FunctionId> {
                 x.name.is_none() && matches!(x.kind, FunctionKind::Expression | FunctionKind::Arrow)
             })
             .map(|_| *f),
+        Some(Expr::Class(class)) if class.name.is_none() => Some(class.constructor),
         _ => None,
     }
 }

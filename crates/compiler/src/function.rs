@@ -51,7 +51,7 @@
 
 use alloc::vec::Vec;
 use swell_syntax::Script;
-use swell_syntax::ast::{Ast, BindingTarget, ExprId, Function, FunctionId, Span};
+use swell_syntax::ast::{Ast, BindingTarget, ExprId, Function, FunctionId, FunctionKind, Span};
 use swell_syntax::ledger::Meter;
 
 use crate::bytecode::{FunctionTemplate, Handler, HandlerKind, Instruction, SlotName, TAG_RETURN};
@@ -67,7 +67,7 @@ pub(crate) fn compile_script_body(
     constants: &mut Constants,
     m: &Meter<'_>,
 ) -> Result<Body, CompileError> {
-    let mut c = Compiler::new(&script.ast, resolution, constants, true, m);
+    let mut c = Compiler::new(&script.ast, resolution, constants, true, script.strict, m);
     c.run(&script.body)?;
     let end = Span::default();
     c.emit(Instruction::LoadCompletion, end)?;
@@ -103,11 +103,12 @@ pub(crate) fn compile_function(
         .map_err(|_| CompileError::TooMany("parameters"))?;
     let params = m.copy(&info.params)?;
 
-    let mut c = Compiler::new(ast, resolution, constants, false, m);
+    let mut c = Compiler::new(ast, resolution, constants, false, f.strict, m);
     let region = match (info.async_slot, info.generator_slot) {
         (Some(slot), None) => Some((slot, async_start(&mut c, f, slot)?)),
         (Some(_), Some(_)) | (None, _) => None,
     };
+    crate::class::constructor_prologue(&mut c, id, f.span)?;
     if !f.is_simple() {
         bind_parameters(&mut c, id, info)?;
     }
@@ -127,6 +128,9 @@ pub(crate) fn compile_function(
         (Some(slot), Some(_), _) => async_generator_body(&mut c, f, slot)?,
         (Some(slot), None, _) => generator_body(&mut c, f, slot)?,
         (None, _, Some((slot, start))) => async_body(&mut c, f, slot, start)?,
+        (None, _, None) if f.kind == FunctionKind::FieldInitializer => {
+            crate::class::instance_initializer(&mut c, f)?;
+        }
         (None, _, None) => {
             c.run(&f.body)?;
             c.emit(Instruction::Undefined, f.span)?;
@@ -210,6 +214,7 @@ fn generator_body(c: &mut Compiler<'_, '_>, f: &Function, slot: u32) -> Result<(
         target: entry,
         items,
         envs,
+        strict: c.strict,
     })
 }
 
@@ -253,6 +258,7 @@ fn async_body(
         target: rejected,
         items: 0,
         envs: 0,
+        strict: c.strict,
     })
 }
 
@@ -292,6 +298,7 @@ fn async_generator_body(
         target: rejected,
         items,
         envs,
+        strict: c.strict,
     })
 }
 
@@ -445,6 +452,10 @@ fn expression_value(c: &mut Compiler<'_, '_>, e: ExprId) -> Result<(), CompileEr
             )?,
             Task::ChainCheck(depth, span) => c.chain_check(depth, span)?,
             Task::ChainClose(span) => c.chain_close(span)?,
+            // The class scope and the strictness of a class in the initializer (`class.rs`).
+            Task::EnvsUp => c.envs = c.envs.saturating_add(1),
+            Task::EnvsDown => c.envs = c.envs.saturating_sub(1),
+            Task::Strict(strict, span) => c.set_strict(strict, span)?,
             Task::Handler {
                 kind,
                 start,
@@ -459,6 +470,7 @@ fn expression_value(c: &mut Compiler<'_, '_>, e: ExprId) -> Result<(), CompileEr
                 target,
                 items,
                 envs,
+                strict: c.strict,
             })?,
             _ => return Err(malformed("a task no expression expands to")),
         }

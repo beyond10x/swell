@@ -268,6 +268,68 @@ pub enum Instruction {
     /// `[o, v] -> [o]`: `__proto__: v` in an object literal: o.[[SetPrototypeOf]](v) when `v` is
     /// an Object or `null`, nothing otherwise.
     InitProto,
+    /// `[] -> [p]`: the prototype of ClassDefinitionEvaluation
+    /// (`#sec-runtime-semantics-classdefinitionevaluation`, step 8 for a class without
+    /// heritage): OrdinaryObjectCreate(protoParent), protoParent `%Object.prototype%` of the
+    /// current realm.
+    ClassPrototype,
+    /// `[p] -> [p, F]`: the class constructor F made from template `functions[function]` in the
+    /// LexicalEnvironment (steps 14 to 18): its [[HomeObject]] `p`, its name and `length` from
+    /// the template, its box of kind derived when `derived` and base otherwise (MakeClassConstructor,
+    /// `#sec-makeclassconstructor`); then MakeConstructor(F, false, p), F's `prototype`
+    /// { [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: false }, and
+    /// CreateMethodProperty(p, "constructor", F) (step 19).
+    MakeClassConstructor {
+        function: u32,
+        derived: bool,
+    },
+    /// `[h, f] -> [h]`: ClassElementEvaluation of a method (`#sec-runtime-semantics-classelementevaluation`,
+    /// `#sec-runtime-semantics-methoddefinitionevaluation`): MakeMethod(f, h), then
+    /// DefineMethodProperty(h, `strings[k]`, f, false): a data property { [[Writable]]: true,
+    /// [[Enumerable]]: false, [[Configurable]]: true } by DefinePropertyOrThrow. `h` is the
+    /// prototype, or F for a static method.
+    DefineClassMethod(u32),
+    /// `[h, f] -> [h]`: the getter `f` of a class as property `strings[k]` of `h`, MakeMethod
+    /// with `h`, { [[Enumerable]]: false, [[Configurable]]: true }, by DefinePropertyOrThrow.
+    DefineClassGetter(u32),
+    /// `[h, f] -> [h]`: the setter `f` of a class, as [`Instruction::DefineClassGetter`].
+    DefineClassSetter(u32),
+    /// `[h, k, f] -> [h]`: [`Instruction::DefineClassMethod`] with the property key `k`
+    /// [`Instruction::ToPropertyKey`] made, after SetFunctionName(f, k).
+    DefineClassComputedMethod,
+    /// `[h, k, f] -> [h]`: [`Instruction::DefineClassGetter`] with the key `k`, after
+    /// SetFunctionName(f, k, "get").
+    DefineClassComputedGetter,
+    /// `[h, k, f] -> [h]`: [`Instruction::DefineClassSetter`] with the key `k`, after
+    /// SetFunctionName(f, k, "set").
+    DefineClassComputedSetter,
+    /// `[F] -> [F]`: the initializer of the instance elements of the class (`docs/design/engine.md`,
+    /// "Classes", item 4), made from template `functions[f]` as a method whose home object is
+    /// F's [[HomeObject]], the prototype, and stored in F's box.
+    StoreInitializer(u32),
+    /// `[h] -> [h, m]`: a method of template `functions[f]` with [[HomeObject]] `h`, made in the
+    /// LexicalEnvironment: the function of a run of static fields or of a static block, which
+    /// the class-definition code calls with `this` F ("Classes", item 4).
+    MakeMethod(u32),
+    /// `[o] -> [r]`: InitializeInstanceElements(o, F) (`#sec-initializeinstanceelements`), F the
+    /// running frame's function: a call frame of the initializer in F's box with `this` o and no
+    /// arguments, whose return pushes `undefined`; `undefined` at once when the box holds none.
+    InitInstance,
+    /// `[] -> []`: the running frame's code is strict mode code from the next instruction on
+    /// when the operand is `true`, and not when it is `false` (`#sec-strict-mode-code`: "All
+    /// parts of a ClassDeclaration or a ClassExpression are strict mode code";
+    /// `docs/design/engine.md`, "Classes"). Emitted only in non-strict code: `true` where the
+    /// code of a class starts, `false` where it ends and where a return completion leaves it
+    /// for a `finally` block or the end of the frame (the `return` of a `yield` in a computed
+    /// key). A class inside the code of a class emits none. The heritage, once compiled, lies
+    /// between the two.
+    SetStrict(bool),
+    /// `[k, p, F] -> [k, p, F]`: SetFunctionName(F, k) of the anonymous class F whose name
+    /// NamedEvaluation gives at run time, the property key `k` under its prototype `p`
+    /// (`#sec-runtime-semantics-classdefinitionevaluation`, SetFunctionName(F, className) after
+    /// MakeClassConstructor(F) and before any element is defined): the class under a computed
+    /// key of an object literal.
+    SetClassName,
     /// `[a, v] -> [a]`: CreateDataPropertyOrThrow(a, ToString(n), v)
     /// (`#sec-runtime-semantics-arrayaccumulation`).
     DefineIndex(u32),
@@ -857,6 +919,19 @@ impl Instruction {
             | Instruction::DefineSetter(_)
             | Instruction::DefineMethod(_)
             | Instruction::InitProto
+            | Instruction::ClassPrototype
+            | Instruction::MakeClassConstructor { .. }
+            | Instruction::DefineClassMethod(_)
+            | Instruction::DefineClassGetter(_)
+            | Instruction::DefineClassSetter(_)
+            | Instruction::DefineClassComputedMethod
+            | Instruction::DefineClassComputedGetter
+            | Instruction::DefineClassComputedSetter
+            | Instruction::StoreInitializer(_)
+            | Instruction::MakeMethod(_)
+            | Instruction::InitInstance
+            | Instruction::SetStrict(_)
+            | Instruction::SetClassName
             | Instruction::DefineIndex(_)
             | Instruction::ArrayLength(_)
             | Instruction::Typeof
@@ -1009,7 +1084,7 @@ pub enum HandlerKind {
 ///
 /// Before it continues at `target` the interpreter drops the operand stack down to `items`
 /// entries and the environments down to `envs` [`Instruction::PushEnv`]s made in this frame,
-/// the state of the frame at the try statement.
+/// the state of the frame at the try statement, and sets the frame's strictness to `strict`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Handler {
     pub kind: HandlerKind,
@@ -1018,6 +1093,11 @@ pub struct Handler {
     pub target: u32,
     pub items: u32,
     pub envs: u32,
+    /// Whether the code at `target` is strict mode code (`#sec-strict-mode-code`): the code's
+    /// own strictness, or `true` inside the code of a class in non-strict code
+    /// ([`Instruction::SetStrict`]). A throw from class code can reach a handler outside it,
+    /// and one inside it can be entered from a frame resumed there.
+    pub strict: bool,
 }
 
 /// The name of a slot of an environment the code makes ([`Instruction::PushNamedEnv`],

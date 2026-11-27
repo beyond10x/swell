@@ -15,7 +15,7 @@
 //! An `async` function declaration and an async generator declaration (slice 10) stand where a
 //! function declaration does, and neither stands as the body of a statement or as a labelled
 //! item, in any code (`parser/function.rs`).
-//! A class declaration stands where a declaration does and is parsed whole and held
+//! A class declaration stands where a declaration does and is parsed whole, its heritage held
 //! (`parser/class.rs`). Refused are the declarations of later slices: `import`
 //! and `export` (11), and the Annex B forms `if (x) function f() {}`, `L: function f() {}` and
 //! `for (var a = 0 in o)` (18); the `var` binding and the duplicate declarations Annex B gives

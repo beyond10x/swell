@@ -38,6 +38,7 @@ mod arrow;
 mod async_function;
 mod async_generator;
 pub(crate) mod budget;
+mod class;
 pub(crate) mod dispatch;
 mod for_of;
 pub(crate) mod frame;

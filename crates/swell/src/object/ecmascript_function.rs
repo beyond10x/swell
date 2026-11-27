@@ -35,12 +35,14 @@ use swell_syntax::ast::FunctionKind;
 use crate::env::{NameTable, SlotNames};
 use crate::heap::arena::Handle;
 use crate::heap::collect::{Item, Mark};
+use crate::host::ErrorKind;
 use crate::host::Host;
 use crate::host::agent::Agent;
-use crate::host::outcome::{Completion, Termination};
+use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::interp::frame::{Frame, SlotValue, frame_bytes};
 use crate::object::arguments::Mapping;
 use crate::object::builtin_function::Activation;
+use crate::object::class_constructor::{ClassConstructor, class_constructor_bytes};
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::Property;
 use crate::object::{ObjectKind, ObjectRecord};
@@ -68,7 +70,7 @@ pub(crate) struct EcmascriptFunction {
     pub(crate) compiled: Option<Rc<Compiled>>,
     pub(crate) template: u32,
     /// Whether it has a [[Construct]] (MakeConstructor): a function declaration or expression,
-    /// not an accessor or a method.
+    /// or a class constructor; not an accessor or a method.
     pub(crate) constructor: bool,
     /// [[Strict]]; [[ThisMode]] is strict exactly when it is, but for an arrow function.
     pub(crate) strict: bool,
@@ -78,6 +80,11 @@ pub(crate) struct EcmascriptFunction {
     /// with the record when the arrow is made and credited by the sweep that frees it. `None`
     /// for every other function.
     pub(crate) arrow: Option<Box<ArrowContext>>,
+    /// Of a class constructor: its box ([`ClassConstructor`], `docs/design/engine.md`,
+    /// "Classes", item 3), [[ConstructorKind]] and the initializer of the instance elements;
+    /// [[IsClassConstructor]] is that it is set. Its bytes are charged with the record when F is
+    /// made and credited by the sweep that frees it. `None` for every other function.
+    pub(crate) class: Option<Box<ClassConstructor>>,
 }
 
 /// What an arrow function takes from the frame that makes it (decision 3, "`this` and
@@ -101,7 +108,8 @@ fn arrow_context_bytes() -> u64 {
 
 impl EcmascriptFunction {
     /// Kind site of the collector: [[Environment]], [[Realm]], [[ScriptOrModule]] (which holds
-    /// the code's constants), [[HomeObject]] and the three values an arrow function keeps.
+    /// the code's constants), [[HomeObject]], the three values an arrow function keeps and the
+    /// initializer of a class constructor's box.
     pub(crate) fn trace(&self, mark: &mut Mark) {
         mark.count("object/ecmascript_function.rs EcmascriptFunction::trace");
         if let Some(environment) = self.environment {
@@ -124,6 +132,9 @@ impl EcmascriptFunction {
             if let Some(function) = arrow.function {
                 mark.object(function);
             }
+        }
+        if let Some(initializer) = self.class.as_ref().and_then(|c| c.instance_elements) {
+            mark.object(initializer);
         }
     }
 
@@ -150,6 +161,7 @@ impl EcmascriptFunction {
             constructor: false,
             strict: false,
             arrow: None,
+            class: None,
         }
     }
 }
@@ -278,6 +290,29 @@ impl<H: Host> Agent<H> {
         self.run_frame(frame, |_| Ok(()))
     }
 
+    /// [[Call]] of a class constructor (`#sec-ecmascript-function-objects-call-thisargument-argumentslist`,
+    /// step 2): a `TypeError` made in F's realm, before any of its code runs; nothing for every
+    /// other function. Called by [`Agent::make_frame`] for a frame with no constructed `this`,
+    /// so by [`Agent::call_function`] and by the call of the run loop (`Agent::push_call_frame`)
+    /// without a word in their frames, which stay on the Rust stack while the callee runs (a
+    /// re-entry). Not inlined, so that no frame of the call paths holds its locals.
+    #[inline(never)]
+    fn refuse_class_call(&mut self, function: ObjectRef) -> Completion<()> {
+        let realm = match &self.engine_object(function)?.kind {
+            ObjectKind::EcmascriptFunction(f) if f.class.is_some() => f.realm,
+            _ => return Ok(()),
+        };
+        let Some(realm) = realm else {
+            return Err(self.fault());
+        };
+        let error = self.new_error_in(
+            realm,
+            ErrorKind::TypeError,
+            "a class constructor cannot be called without new",
+        )?;
+        Err(Abrupt::Throw(Value::Object(error)))
+    }
+
     /// [[Construct]] of `function` in a loop of its own.
     fn construct_function(
         &mut self,
@@ -308,7 +343,8 @@ impl<H: Host> Agent<H> {
     /// pushed. `constructed` is the `this` of a [[Construct]] and `new_target` its NewTarget
     /// (`None` for a call). An arrow function's frame takes its `this`, its NewTarget and its
     /// function from the arrow's box. Runs no code; its allocations are charged, the frame's own
-    /// bytes with it.
+    /// bytes with it. A call (no `constructed`) of a class constructor throws its `TypeError`
+    /// instead ([`Agent::refuse_class_call`]).
     pub(crate) fn make_frame(
         &mut self,
         function: ObjectRef,
@@ -317,6 +353,9 @@ impl<H: Host> Agent<H> {
         constructed: Option<ObjectRef>,
         new_target: Option<ObjectRef>,
     ) -> Completion<Frame> {
+        if constructed.is_none() {
+            self.refuse_class_call(function)?;
+        }
         let callee = self.function_parts(function)?;
         let index = usize::try_from(callee.template).unwrap_or(usize::MAX);
         let Some(template) = callee.compiled.code.functions.get(index) else {
@@ -556,7 +595,9 @@ impl<H: Host> Agent<H> {
     /// `#sec-setfunctionlength`), SetFunctionName (`#sec-setfunctionname`), and MakeConstructor
     /// (`#sec-makeconstructor`) but for an accessor, a method or an arrow function, which have no
     /// [[Construct]] (an arrow function's record is charged for its box here, which
-    /// [`Agent::keep_arrow_context`] fills after).
+    /// [`Agent::keep_arrow_context`] fills after), and for a class constructor, which has a
+    /// [[Construct]] and the prototype of its class (its record is charged for its box here,
+    /// which [`Agent::keep_class_box`] fills after; `interp/class.rs`).
     /// A generator template, whatever its kind, is InstantiateGeneratorFunctionObject
     /// (`#sec-runtime-semantics-instantiategeneratorfunctionobject`),
     /// InstantiateGeneratorFunctionExpression
@@ -598,6 +639,9 @@ impl<H: Host> Agent<H> {
         };
         let generator = template.generator;
         let asynchronous = template.asynchronous;
+        // A class constructor has a [[Construct]]; its prototype is the class's
+        // (`Agent::make_class_constructor`), not one MakeConstructor makes here.
+        let class = template.kind == FunctionKind::ClassConstructor;
         let constructor = !generator
             && !asynchronous
             && matches!(
@@ -630,7 +674,15 @@ impl<H: Host> Agent<H> {
         };
         // An arrow function's record owns its box, charged here with the record and filled by
         // [`Agent::keep_arrow_context`].
-        let owned = if arrow { arrow_context_bytes() } else { 0 };
+        // A class constructor's record owns its box ([`ClassConstructor`]), charged here with
+        // the record and filled by [`Agent::keep_class_box`].
+        let owned = if arrow {
+            arrow_context_bytes()
+        } else if class {
+            class_constructor_bytes()
+        } else {
+            0
+        };
         let record = ObjectRecord::new(
             Some(prototype),
             ObjectKind::EcmascriptFunction(EcmascriptFunction {
@@ -640,9 +692,10 @@ impl<H: Host> Agent<H> {
                 home_object: None,
                 compiled: Some(Rc::clone(compiled)),
                 template: index,
-                constructor,
+                constructor: constructor || class,
                 strict,
                 arrow: None,
+                class: None,
             }),
         );
         let function = match self.heap.new_object(record, owned) {
@@ -730,6 +783,34 @@ impl<H: Host> Agent<H> {
             }
             _ => Err(self.fault()),
         }
+    }
+
+    /// The box of the class constructor `function` (MakeClassConstructor, `#sec-makeclassconstructor`,
+    /// and [[ConstructorKind]]): `boxed` in its record. The box's bytes were charged with the
+    /// record ([`Agent::instantiate_function`]), so nothing more is charged here.
+    pub(crate) fn keep_class_box(
+        &mut self,
+        function: ObjectRef,
+        boxed: ClassConstructor,
+    ) -> Completion<()> {
+        match &mut self.engine_object_mut(function)?.kind {
+            ObjectKind::EcmascriptFunction(f) => {
+                f.class = Some(Box::new(boxed));
+                Ok(())
+            }
+            _ => Err(self.fault()),
+        }
+    }
+
+    /// The box of `function` when it is a class constructor; `None` for every other object.
+    pub(crate) fn class_box(
+        &mut self,
+        function: ObjectRef,
+    ) -> Completion<Option<ClassConstructor>> {
+        Ok(match &self.engine_object(function)?.kind {
+            ObjectKind::EcmascriptFunction(f) => f.class.as_deref().copied(),
+            _ => None,
+        })
     }
 
     /// Whether `function` is an ECMAScript function object, which a call from the run loop
