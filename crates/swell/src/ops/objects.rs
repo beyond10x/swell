@@ -1802,6 +1802,79 @@ mod tests {
     /// An object of 40 keys made at run time, from a script.
     const FORTY_KEYS: &str = "var o = {}; for (var i = 0; i < 40; i++) o[\"k\" + i] = i;";
 
+    /// The bytes of `count` slots of the kept stack.
+    fn kept_bytes(count: usize) -> u64 {
+        u64::try_from(count * size_of::<Value>()).unwrap()
+    }
+
+    /// [`Agent::held_own_keys`] reserves room on the kept stack for every key it keeps: over 40
+    /// keys and a kept stack with no room to spare, so that the growth lands at the need (it is
+    /// more than twice the capacity and more than 16), the capacity above the room's start is
+    /// what the room was charged, and the account rose by the list and that charge; when the
+    /// list is dropped and the room ended, the account and the capacity are what they were.
+    /// A reservation one value short leaves the last key to grow the stack uncharged.
+    #[test]
+    fn held_own_keys_reserves_room_for_every_key_it_keeps() {
+        let (mut agent, realm) = roomy_agent();
+        let object = script_object(&mut agent, &realm, &format!("{FORTY_KEYS} o"));
+        agent.kept.shrink_to_fit();
+        let mark = agent.kept.len();
+        let used = agent.heap.accounting.used();
+        let mut room = agent.kept_room();
+        let list = agent.held_own_keys(object, &mut room).unwrap();
+        assert_eq!(list.len(), 40);
+        assert_eq!(agent.kept.len(), mark + 40);
+        assert_eq!(
+            kept_bytes(agent.kept.capacity() - room.capacity),
+            room.charge.bytes(),
+            "the capacity the room grew against its charge"
+        );
+        assert_eq!(
+            agent.heap.accounting.used(),
+            used + list.bytes + room.charge.bytes()
+        );
+        agent.drop_key_list(list);
+        agent.end_kept_room(mark, &room);
+        drop(room);
+        assert_eq!(agent.heap.accounting.used(), used);
+        assert_eq!((agent.kept.len(), agent.kept.capacity()), (mark, mark));
+    }
+
+    /// EnumerateObjectProperties over a Proxy (no trap) of 40 keys, which keeps what it walks in
+    /// a room of the kept stack, gives the stack back its length and its capacity when it
+    /// returns, and the account rose by the list found and the chain recorded (16 slots, the
+    /// least a list grows by) and nothing else: the room's charge was credited with the room.
+    /// Without `end_kept_room` the length and the grown capacity stay.
+    #[test]
+    fn enumerate_object_properties_gives_the_kept_stack_back_its_room() {
+        let (mut agent, realm) = roomy_agent();
+        let proxy = script_object(
+            &mut agent,
+            &realm,
+            &format!("{FORTY_KEYS} new Proxy(o, {{}})"),
+        );
+        agent.kept.shrink_to_fit();
+        let mark = agent.kept.len();
+        let capacity = agent.kept.capacity();
+        let used = agent.heap.accounting.used();
+        let enumeration = agent.enumerate_object_properties(proxy).unwrap();
+        assert_eq!(enumeration.found.len(), 40);
+        assert_eq!(
+            enumeration.chain.len(),
+            2,
+            "the Proxy and %Object.prototype%"
+        );
+        assert_eq!((agent.kept.len(), agent.kept.capacity()), (mark, capacity));
+        let chain = u64::try_from(16 * size_of::<ObjectRef>()).unwrap();
+        assert_eq!(
+            agent.heap.accounting.used(),
+            used + enumeration.found.bytes + chain
+        );
+        agent.drop_key_list(enumeration.found);
+        drop(enumeration.chain);
+        assert_eq!(agent.heap.accounting.used(), used);
+    }
+
     /// EnumerateObjectProperties over a chain of ordinary objects (40 keys and their prototype)
     /// records no chain and charges what it charged before D66: the account rises by the list
     /// of keys found and nothing else, and the kept stack is as it was.
