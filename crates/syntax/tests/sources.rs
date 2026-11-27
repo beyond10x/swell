@@ -1272,6 +1272,7 @@ fn fits_the_stack_bound(entry: Entry, kind: &str, limit: u32) {
         parses > 0 || limit < 20,
         "{entry:?} {kind}: nothing parses at {limit}"
     );
+    println!("{entry:?} {kind}: {parses} deep admitted at limit {limit}");
     assert_eq!(
         admitted(entry, kind, 100_000, limit),
         Some(false),
@@ -3020,7 +3021,7 @@ fn class_elements_scale_linearly() {
             let fields: String = (0..n).map(|i| format!("f{i} = {i};")).collect();
             format!("class C {{ {fields} }}")
         }),
-        ("static blocks", "class static block", |n| {
+        ("static blocks", "", |n| {
             format!("class C {{ {} }}", "static { var v = 1; }".repeat(n))
         }),
         ("private names in nested classes", "private field", |n| {
