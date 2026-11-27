@@ -291,6 +291,16 @@ Every number below comes from the gate, `task check`, on the released commit.
   group that holds it, an `expect` with a blank reason, and an attribute naming the lint in
   another crate of the workspace (`story:buffer-growth-outside-the-charged-list-is-listed`).
 
+- `Agent::run_builtin` picks one of four functions by the group of the builtin and makes one
+  call, where one match held the arms of every group. In the `stack-debug` profile a re-entry
+  through a builtin passes at most 736 bytes of dispatch (1,424 with the arms of `WeakMap`
+  and `WeakSet` in the one match), and the stack test through builtins needs 12,195,840 of
+  its 12,838,560 bytes at depth 1,000. In the release profile 27 of the 31 measured routes
+  are larger, by up to 1,184 bytes per re-entry; the largest takes 5,872 of the 14,336 bytes
+  promised per re-entry (measured on x86_64 with rustc 1.99.1).
+  `limits_scripts::min_stack_bytes_is_enough_through_builtins` runs a fifth route, `Math.max`
+  through a `valueOf`.
+
 ### Fixed
 
 - `JSON.parse` frees the room of its stack of open values when the parse ends, before the
