@@ -400,14 +400,21 @@ fn host_53_parse_defines_no_global_binding() {
 /// takes.
 const GUARD_CHILD: &str = "SWELL_STACK_GUARD_CHILD";
 
-/// The guard of the lane's run at opt-level 1 (task `slow-tests`): with `SWELL_NO_STACK_TESTS`
-/// set, both ways of the tests to a bounded stack, `stack_with_room` and `stack_thread`, panic
-/// with the line that names the way out, so a stack test that the rule of `slow-tests` does not
-/// find fails in that run by itself. Without the variable both pass. Each way runs in a child
+/// The guard of the two runs at opt-level 1 that take the rule's tests printed "other", the
+/// gate's (task `test`) and the lane's (task `slow-tests`): with `SWELL_NO_STACK_TESTS` set,
+/// both ways of the tests to a bounded stack, `stack_with_room` and `stack_thread`, panic with
+/// the line that names both runs and the way out, so a stack test that the rule does not find
+/// fails in either run by itself. Without the variable both pass. Each way runs in a child
 /// process (the test binary started again, this test alone).
 #[test]
 fn a_stack_test_fails_by_itself_where_no_stack_tests_is_set() {
     use support::host::{NO_STACK_TESTS, NO_STACK_TESTS_LINE, stack_thread};
+    for run in ["(task test)", "(task slow-tests)"] {
+        assert!(
+            NO_STACK_TESTS_LINE.contains(run),
+            "the guard's line names no run {run}: {NO_STACK_TESTS_LINE}"
+        );
+    }
     match std::env::var(GUARD_CHILD).as_deref() {
         Ok("room") => {
             let _ = stack_with_room(limits());
