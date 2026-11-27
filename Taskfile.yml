@@ -7,8 +7,9 @@ vars:
   COLLECT_RUSTFLAGS: -D warnings
   SLOW_COLLECT_WAIT: '400'
   NO_STACK_TESTS: SWELL_NO_STACK_TESTS
-  TEST_OPT1_ARGS: --locked -p swell --test main --config .cargo/collect-profile.toml --cargo-profile collect --profile default
+  TEST_OPT1_ARGS: --locked -p swell -p swell-num -p swell-test262 --config .cargo/collect-profile.toml --cargo-profile collect --profile default
   TEST_OPT1_PROFILE_TEST: realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on
+  TEST_OPT0_TESTS: swell-test262::main run::eval_script_cases_declare_throw_answer_and_fail_on_a_refusal_and_the_nesting_limit swell-test262::main run::runs_file_names_the_refusal_and_the_thrown_error
 
 includes:
   test-binaries:
@@ -791,9 +792,9 @@ tasks:
       TEST_NEXTEST_ARGS (taskfiles/realm-places.yml, included flat; the steps that read them
       refuse a value that is not the file's, task test-vars-check) and the lane's COLLECT_MAIN,
       COLLECT_RUSTFLAGS, SLOW_COLLECT_WAIT and NO_STACK_TESTS and the step test's
-      TEST_OPT1_ARGS and TEST_OPT1_PROFILE_TEST (the top of this file; the steps test and
-      build-tests refuse a value of those two and of NO_STACK_TESTS that is not the file's, task
-      test-opt1-vars-check) always show, with their defaults; any other name on the line was
+      TEST_OPT1_ARGS, TEST_OPT1_PROFILE_TEST and TEST_OPT0_TESTS (the top of this file; the
+      steps test and build-tests refuse a value of those three and of NO_STACK_TESTS that is
+      not the file's, task test-opt1-vars-check) always show, with their defaults; any other name on the line was
       set by the caller. A new gate
       variable is added to GATE_VARIABLES in the change that adds it.
 
@@ -829,6 +830,7 @@ tasks:
         COLLECT_MAIN COLLECT_RUSTFLAGS SLOW_COLLECT_WAIT NO_STACK_TESTS
         TEST_OPT1_ARGS
         TEST_OPT1_PROFILE_TEST
+        TEST_OPT0_TESTS
         REALM_SIZES REALM_COLLECT SLOW_LANE_BUDGET SLOW_PART_BUDGET STACK_MODULES STACK_TESTS STACK_TESTS_DIR
         SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES SITE_DATA_ENGINES SITE_DATA_CATALOG SITE_DATA_PUBLISHED SITE_DATA_RESULTS SITE_DATA_PIN SITE_DATA_LIMITS SITE_DATA_INTERRUPT
     silent: true
@@ -996,16 +998,18 @@ tasks:
         fi
 
   test-opt1-vars-check:
-    desc: Internal. Fail a step when TEST_OPT1_ARGS, NO_STACK_TESTS or TEST_OPT1_PROFILE_TEST is empty or is not the value its line at the top of Taskfile.yml defines.
+    desc: Internal. Fail a step when TEST_OPT1_ARGS, NO_STACK_TESTS, TEST_OPT1_PROFILE_TEST or TEST_OPT0_TESTS is empty or is not the value its line at the top of Taskfile.yml defines.
     summary: |
       Internal, a command of the steps test and build-tests, after test-vars-check (story
-      gate-test-steps-hold-the-budget-on-the-slower-runner, item 3). The step test's run at
-      opt-level 1 takes its arguments from TEST_OPT1_ARGS (the profile collect), the guard of its
-      test processes from NO_STACK_TESTS, and the test that must be in it from
-      TEST_OPT1_PROFILE_TEST (task test-split); build-tests builds that run's binary from
+      gate-test-steps-hold-the-budget-on-the-slower-runner, items 3 and 5). The step test's run
+      at opt-level 1 takes its arguments from TEST_OPT1_ARGS (the profile collect, the packages
+      it moves), the guard of its test processes from NO_STACK_TESTS, the test that must be in
+      it from TEST_OPT1_PROFILE_TEST, and the tests of those packages that stay at opt-level 0
+      from TEST_OPT0_TESTS (task test-split); build-tests builds that run's binaries from
       TEST_OPT1_ARGS. go-task lets a value given on the command line win over the file's; such a
-      value would run that run at opt-level 0, without its guard, or without the test that holds
-      its profile, under the same lines. For each of the three it fails, before any cargo runs,
+      value would run that run at opt-level 0, without its guard, without the test that holds
+      its profile, or with the tests kept at opt-level 0 at opt-level 1, under the same lines.
+      For each of the four it fails, before any cargo runs,
       with "<step>: <name>=<value> is not the value Taskfile.yml defines (<the file's value>);
       the step takes it from that line only, not from the command line or the environment" when
       the value is empty or differs from its line "  <name>: <value>" in Taskfile.yml, a plain
@@ -1026,6 +1030,7 @@ tasks:
         held TEST_OPT1_ARGS {{shellQuote .TEST_OPT1_ARGS}}
         held NO_STACK_TESTS {{shellQuote .NO_STACK_TESTS}}
         held TEST_OPT1_PROFILE_TEST {{shellQuote .TEST_OPT1_PROFILE_TEST}}
+        held TEST_OPT0_TESTS {{shellQuote .TEST_OPT0_TESTS}}
         exit "$bad"
 
   test-opt1-profile-check:
@@ -1145,11 +1150,12 @@ tasks:
         - the step test: "cargo nextest run --no-run --workspace --locked --profile default"
           into .out/build-tests.log; it prints "build-tests: <cargo's Finished line>". The
           workspace's libraries it builds are the ones test-doc's doc tests link. Then the
-          binary of the step's run at opt-level 1, "cargo nextest run --no-run
-          <TEST_OPT1_ARGS>" (swell::main in the profile collect, without the feature
+          binaries of the step's run at opt-level 1, "cargo nextest run --no-run
+          <TEST_OPT1_ARGS>" (the test binaries of swell, swell-num and swell-test262 and the
+          executable swell-test262 in the profile collect, without the feature
           collect-every-safe-point) into .out/build-tests-opt1.log; it prints "build-tests
           opt-level 1: <cargo's Finished line>". It comes before build-collect, whose check of
-          <target>/collect/deps for .debug_ sections then covers it;
+          <target>/collect/deps for .debug_ sections then covers them;
         - the step test-collect, and test-doc's doc tests of that mode: task build-collect
           (taskfiles/collect-mode.yml);
         - the step test-faults: task build-faults (taskfiles/fault-injection.yml);
@@ -1223,34 +1229,59 @@ tasks:
       - tail -n 1 .out/clippy.log
 
   test:
-    desc: Run every test of the workspace but the doc tests through cargo-nextest with warnings denied, the tests of swell::main the stack rule prints "other" at opt-level 1 and every other test at opt-level 0, and print the summed counts and the ten slowest tests.
+    desc: Run every test of the workspace but the doc tests through cargo-nextest with warnings denied, the tests of swell::main the stack rule prints "other" and the tests of swell's library, swell-num and swell-test262 at opt-level 1 and every other test at opt-level 0, and print the summed counts and the ten slowest tests.
     summary: |
       Run every test of the workspace but the doc tests (the step test-doc runs them) through
       cargo-nextest with warnings denied, each test once, in two runs, and print the summed
       counts and the ten slowest tests.
 
-      The split (story gate-test-steps-hold-the-budget-on-the-slower-runner, item 3): the tests
-      of swell's integration-test binary (swell::main) that taskfiles/realm-room-tests.awk -v
-      rule=stack prints "other" run at opt-level 1, every other test of the workspace at
+      The split (story gate-test-steps-hold-the-budget-on-the-slower-runner, items 3 and 5):
+      at opt-level 1 run the tests of swell's integration-test binary (swell::main) that
+      taskfiles/realm-room-tests.awk -v rule=stack prints "other", and every test of the other
+      binaries of the packages TEST_OPT1_ARGS names (swell's library tests, the binary swell;
+      swell-num and swell-num::main; swell-test262 and swell-test262::main) but for the pairs
+      "<binary> <test>" of TEST_OPT0_TESTS; every other test of the workspace runs at
       opt-level 0. The rule reads crates/swell/tests/support/*.rs and every
       crates/swell/tests/*.rs but main.rs, as slow-tests hands it them, and prints a line
       "stack <module>::<test>" or "other <module>::<test>" for each #[test] function whose fn
-      line names it (a third field is not read). A test it does not print (one a macro writes)
-      and a name it prints that the binary does not hold (a test behind a cfg) are not in the
-      run at opt-level 1. The task test-split writes the two nextest configurations, copies of
-      .config/nextest.toml with one default-filter line: .out/test-opt1-nextest.toml
-      (binary_id(swell::main) and the tests printed "other") and .out/test-opt0-nextest.toml
-      (not those), and from "cargo nextest list" of each run and of the workspace without a
-      filter it fails, naming the test, when a test is in not exactly one run; it prints "test:
-      swell::main <a> at opt-level 1, <b> at opt-level 0".
+      line names it (a third field is not read). A test of swell::main it does not print (one
+      a macro writes whose fn line has no literal name: those of reaches_the_reentry_limit! and
+      chain_test!, which call stack_with_room) and a name it prints that the binary does not
+      hold (a test behind a cfg) are not in the run at opt-level 1. The packages of the parser,
+      the compiler, the regexp and unicode crates and the command line stay at opt-level 0:
+      their tests of a stack bound read unoptimized frames and have no rule and no guard.
+      TEST_OPT0_TESTS names, at the top of this file, tests of a moved binary that stay at
+      opt-level 0, each for its reason:
+        - swell-test262::main
+          run::eval_script_cases_declare_throw_answer_and_fail_on_a_refusal_and_the_nesting_limit
+          and swell-test262::main run::runs_file_names_the_refusal_and_the_thrown_error: a
+          sample, one for each fixture tree that holds a case at the parser's nesting limit
+          (eval-script and refused), so that the gate still runs the runner's worker thread at
+          that limit with unoptimized frames. The other tests that read those trees move; what
+          they hold is what the runner prints. The bound of the stack itself is held at
+          opt-level 0 by the parser's tests and by the stack tests of swell::main.
+      The task test-split writes the two nextest configurations, copies of .config/nextest.toml
+      with one default-filter line: .out/test-opt1-nextest.toml ("(binary_id(swell::main) &
+      (test(=<name>) | ...)) | ((package(=<p>) | ...) & not binary_id(=swell::main) & not
+      (binary_id(=<binary>) & test(=<test>)) ...)", the tests printed "other", the packages of
+      TEST_OPT1_ARGS and the pairs of TEST_OPT0_TESTS) and .out/test-opt0-nextest.toml ("not
+      (...)" of the same), and from "cargo nextest list" of each run and of the workspace
+      without a filter it fails, naming the test, when a test is in not exactly one run, and
+      naming the pair, when a pair of TEST_OPT0_TESTS is not a test of that list; it prints
+      "test: swell::main <a> at opt-level 1, <b> at opt-level 0" and "test: <n> tests at
+      opt-level 1, <m> at opt-level 0" (the lines of each run's list; n plus m is the count of
+      the list without a filter).
         - The run at opt-level 1: "cargo nextest run <TEST_OPT1_ARGS>" with that
-          configuration, TEST_OPT1_ARGS being "--locked -p swell --test main --config
-          .cargo/collect-profile.toml --cargo-profile collect --profile default" (held, with
-          NO_STACK_TESTS and TEST_OPT1_PROFILE_TEST, by test-opt1-vars-check): the default
-          mode, without the feature collect-every-safe-point, in the profile collect (the test
-          profile at opt-level 1; it inherits test, so debug assertions and overflow checks
-          stay on, and the test TEST_OPT1_PROFILE_TEST at the top of this file holds both;
-          test-split fails, naming it, when the run's list does not hold it). Its test processes get NO_STACK_TESTS (SWELL_NO_STACK_TESTS=1): a stack
+          configuration, TEST_OPT1_ARGS being "--locked -p swell -p swell-num -p swell-test262
+          --config .cargo/collect-profile.toml --cargo-profile collect --profile default" (held,
+          with NO_STACK_TESTS, TEST_OPT1_PROFILE_TEST and TEST_OPT0_TESTS, by
+          test-opt1-vars-check): the default mode, without the feature
+          collect-every-safe-point, in the profile collect (the test profile at opt-level 1; it
+          inherits test, so debug assertions and overflow checks stay on, and the test
+          TEST_OPT1_PROFILE_TEST at the top of this file holds both; test-split fails, naming
+          it, when the run's list does not hold it). The executable swell-test262 that the
+          runner's tests start (CARGO_BIN_EXE_swell-test262) is the one cargo builds for this
+          run. Its test processes get NO_STACK_TESTS (SWELL_NO_STACK_TESTS=1): a stack
           test in a form the rule does not read panics there with the guard's line
           (NO_STACK_TESTS_LINE of crates/swell/tests/support/host.rs) instead of passing on
           frames of another size. The log is .out/test-opt1.log; its JUnit file is copied to
@@ -1261,11 +1292,13 @@ tasks:
       Each test runs in a process of its own, terminated at 60 s and counted failed
       (.config/nextest.toml; nextest-check holds it). The task test-sum prints one line for
       both runs, "<b> test binaries: <p> passed, <f> failed, <i> ignored": b is the count of
-      the run at opt-level 0, whose Starting line counts every binary of the workspace,
-      swell::main among them, so swell::main once; p and f are the sums of the runs (the task
-      nextest-report reads each); i is the count of tests neither run ran (the skipped of the
-      run at opt-level 0 less the tests the run at opt-level 1 ran), not the sum of what each
-      filter skipped. Then ten lines "gate-slowest test <seconds> <binary> <test>" over both
+      test binaries of the workspace, each once, and i the count of its tests (an ignored one
+      among them) less p and f, both from the list without a filter that test-split takes
+      (.out/test-list-all.count): the run at opt-level 0 no longer counts every binary, since
+      nextest skips a binary whose tests its filter leaves out whole and counts its tests
+      nowhere; p and f are the sums of the runs (the task nextest-report reads each); so i is
+      the count of tests neither run ran, not the sum of what each filter skipped. Then ten
+      lines "gate-slowest test <seconds> <binary> <test>" over both
       runs. It fails when a test fails or nextest does, and when no test ran; and when a log
       has a cargo Compiling line, naming build-tests, which builds both runs' binaries before
       the clock (task compile-check, on both logs).
@@ -1291,35 +1324,46 @@ tasks:
       - task: test-sum
 
   test-split:
-    desc: Internal. Write the two nextest configurations of the step test's runs from the stack rule, and fail, naming the test, when cargo nextest list puts a test in not exactly one run.
+    desc: Internal. Write the two nextest configurations of the step test's runs from the stack rule, the packages of TEST_OPT1_ARGS and TEST_OPT0_TESTS, and fail, naming the test, when cargo nextest list puts a test in not exactly one run.
     summary: |
       Internal, a command of the step test (story
-      gate-test-steps-hold-the-budget-on-the-slower-runner, item 3). Runs
+      gate-test-steps-hold-the-budget-on-the-slower-runner, items 3 and 5). Runs
       taskfiles/realm-room-tests.awk -v rule=stack over crates/swell/tests/support/*.rs and every
       crates/swell/tests/*.rs but main.rs into .out/test-stack.txt, and writes two copies of
       .config/nextest.toml with one default-filter line after [profile.default]:
-      .out/test-opt1-nextest.toml, "binary_id(swell::main) & (test(=<name>) | ...)" over the
-      names the rule prints "other" (fields 1 and 2 of its lines), and
-      .out/test-opt0-nextest.toml, "not (...)" of the same. It fails, with a line of its own,
-      when crates/swell/tests/support/ holds no .rs file, when the rule prints no test
-      "other" or when a file cannot be written. Then "cargo nextest list --message-format
-      oneline" three times, into .out/test-list-all.txt (TEST_NEXTEST_ARGS without a filter),
+      .out/test-opt1-nextest.toml, "(binary_id(swell::main) & (test(=<name>) | ...)) |
+      ((package(=<p>) | ...) & not binary_id(=swell::main) & not (binary_id(=<binary>) &
+      test(=<test>)) ...)" over the names the rule prints "other" (fields 1 and 2 of its lines),
+      the packages TEST_OPT1_ARGS names by -p (swell among them) and the pairs "<binary> <test>"
+      of TEST_OPT0_TESTS, and .out/test-opt0-nextest.toml, "not (...)" of the same. It fails,
+      with a line of its own, when crates/swell/tests/support/ holds no .rs file, when the rule
+      prints no test "other", when TEST_OPT1_ARGS names no -p swell, when TEST_OPT0_TESTS is not
+      a line of pairs of plain words, when a file cannot be written, and when the written line
+      does not name each name, package and pair. Then "cargo nextest list" three times: of the
+      workspace without a filter (TEST_NEXTEST_ARGS) as --message-format json-pretty into
+      .out/test-list-all.json, whose tests that match (an ignored test does not) it writes into
+      .out/test-list-all.txt and whose count of binaries and of tests (the ignored ones among
+      them) into .out/test-list-all.count, for test-sum; and with --message-format oneline into
       .out/test-list-opt1.txt (TEST_OPT1_ARGS with the first configuration) and
       .out/test-list-opt0.txt (TEST_NEXTEST_ARGS with the second), each line "<binary> <test>";
       a list that fails is printed with its log. It prints "test: <binary> <test> is in neither
       run" or "... is in both runs" for each test of the workspace's list that is not in
       exactly one of the two, "test: <binary> <test> is in a run but not in the workspace's
-      list" for a name of a run that list lacks, and "test: swell::main <TEST_OPT1_PROFILE_TEST>
+      list" for a name of a run that list lacks, "test: TEST_OPT0_TESTS names <binary> <test>,
+      a test cargo nextest list of the workspace does not hold ..." (or "... which is not in the
+      run at opt-level 0 ...") for a pair, and "test: swell::main <TEST_OPT1_PROFILE_TEST>
       is not in the run at opt-level 1 ..." when the list of that run does not hold the test
       that holds its profile (debug assertions and overflow checks on): a test the rule prints
       "stack", one in a nested mod or one a macro writes runs at opt-level 0, where it proves
       nothing of the profile collect. It fails after them, before any test runs; otherwise it
-      prints "test: swell::main <a> at opt-level 1, <b> at opt-level 0". The
+      prints "test: swell::main <a> at opt-level 1, <b> at opt-level 0" and "test: <n> tests
+      at opt-level 1, <m> at opt-level 0", n and m the lines of the two lists. The
       lists run with RUSTFLAGS from TEST_RUSTFLAGS, as the build and the runs do (a task's env
       does not reach the tasks it calls, so this task sets its own), and a list whose log has a
       cargo Compiling line fails naming build-tests (task compile-check): a list that built
       would build inside the clock. The planted scripts
       tests/gate/test-runs-each-test-once-at-one-opt-level.sh,
+      tests/gate/test-runs-each-test-of-a-moved-binary-once.sh,
       tests/gate/test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh and
       tests/gate/test-says-why-it-fails-when-the-stack-rule-has-no-support-file.sh hold the
       checks.
@@ -1336,14 +1380,26 @@ tasks:
         awk -v rule=stack -f taskfiles/realm-room-tests.awk "$@" > "$list" || { echo "test: taskfiles/realm-room-tests.awk -v rule=stack failed, or $list cannot be written"; exit 1; }
         want=$(awk '$1 == "other" { n++ } END { print n + 0 }' "$list")
         [ "$want" -gt 0 ] || { echo "test: taskfiles/realm-room-tests.awk -v rule=stack prints no test of swell::main \"other\" ($list)"; exit 1; }
+        pkgs=$(printf '%s\n' {{shellQuote .TEST_OPT1_ARGS}} | awk '{ for (i = 1; i < NF; i++) if ($i == "-p" || $i == "--package") printf "%s%s", (n++ ? " " : ""), $(i + 1) }')
+        case " $pkgs " in *" swell "*) ;; *) echo "test: TEST_OPT1_ARGS names no package swell (-p swell), whose binary swell::main the run at opt-level 1 takes by the stack rule; it names: $pkgs"; exit 1 ;; esac
+        keep0={{shellQuote .TEST_OPT0_TESTS}}
+        pairs=$(printf '%s\n' "$keep0" | awk '{ if (NF % 2) bad = 1; for (i = 1; i <= NF; i++) if ($i !~ /^[A-Za-z0-9_:\/.-]+$/) bad = 1 } END { if (bad) exit 1; print int(NF / 2) }') ||
+          { echo "test: TEST_OPT0_TESTS is not one line of pairs <binary> <test> of letters, digits and _ : / . - ($keep0)"; exit 1; }
+        npkgs=$(printf '%s\n' "$pkgs" | awk '{ print NF }')
         for form in opt1 opt0; do
           cfg=.out/test-$form-nextest.toml
           if [ -f .config/nextest.toml ]; then set -- "$list" .config/nextest.toml; else set -- "$list"; fi
-          awk -v form="$form" '
-            function put(i) {
-              printf "default-filter = '\''%s", (form == "opt0" ? "not (binary_id(swell::main) & (" : "binary_id(swell::main) & (")
+          awk -v form="$form" -v pkgs="$pkgs" -v keep0="$keep0" '
+            function put(i, np, p, nk, k) {
+              printf "default-filter = '\''%s(binary_id(swell::main) & (", (form == "opt0" ? "not (" : "")
               for (i = 1; i <= n; i++) printf "%s%s", (i > 1 ? " | " : ""), "test(=" name[i] ")"
-              printf "%s'\''\n", (form == "opt0" ? "))" : ")")
+              printf ")) | (("
+              np = split(pkgs, p, " ")
+              for (i = 1; i <= np; i++) printf "%spackage(=%s)", (i > 1 ? " | " : ""), p[i]
+              printf ") & not binary_id(=swell::main)"
+              nk = split(keep0, k, " ")
+              for (i = 1; i < nk; i += 2) printf " & not (binary_id(=%s) & test(=%s))", k[i], k[i + 1]
+              printf ")%s'\''\n", (form == "opt0" ? ")" : "")
             }
             FILENAME == ARGV[1] { if ($1 == "other") name[++n] = $2; next }
             { print }
@@ -1352,8 +1408,9 @@ tasks:
           ' "$@" > "$cfg" || { echo "test: cannot write $cfg, the nextest configuration of the run $form"; exit 1; }
           lines=$(awk '/^[ \t]*default-filter[ \t]*=/ { n++ } END { print n + 0 }' "$cfg")
           named=$(awk '/^default-filter = / { c += gsub(/test\(=/, "&") } END { print c + 0 }' "$cfg")
-          if [ ! -s "$cfg" ] || [ "$lines" != 1 ] || [ "$named" != "$want" ]; then
-            echo "test: $cfg holds $lines default-filter line(s) naming $named of the $want tests printed other, not one line naming all of them (.config/nextest.toml has no line [profile.default], or a default-filter of its own)"
+          moved=$(awk '/^default-filter = / { c += gsub(/package\(=/, "&") } END { print c + 0 }' "$cfg")
+          if [ ! -s "$cfg" ] || [ "$lines" != 1 ] || [ "$named" != "$((want + pairs))" ] || [ "$moved" != "$npkgs" ]; then
+            echo "test: $cfg holds $lines default-filter line(s) naming $named of the $want tests printed other and the $pairs test(s) of TEST_OPT0_TESTS, and $moved of the $npkgs package(s) of TEST_OPT1_ARGS, not one line naming all of them (.config/nextest.toml has no line [profile.default], or a default-filter of its own)"
             exit 1
           fi
         done
@@ -1367,7 +1424,23 @@ tasks:
           if [ "$status" -ne 0 ]; then cat "$out.log" "$out.raw"; echo "test: cargo nextest list $* failed, exit $status"; exit 1; fi
           LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" "$out.raw" | LC_ALL=C awk 'NF == 2' > "$out"
         }
-        listed .out/test-list-all.txt {{.TEST_NEXTEST_ARGS}}
+        rm -f .out/test-list-all.count
+        status=0
+        cargo nextest list --message-format json-pretty {{.TEST_NEXTEST_ARGS}} > .out/test-list-all.json 2> .out/test-list-all.txt.log || status=$?
+        if [ "$status" -ne 0 ]; then cat .out/test-list-all.txt.log .out/test-list-all.json; echo "test: cargo nextest list --message-format json-pretty {{.TEST_NEXTEST_ARGS}} failed, exit $status"; exit 1; fi
+        LC_ALL=C awk -v count=.out/test-list-all.count '
+          /^  "test-count": [0-9]+,?$/ { total = $2 + 0; seen = 1; next }
+          /^      "binary-id": "[^"]*",?$/ { bin = $2; gsub(/[",]/, "", bin); bins++; next }
+          /^        "[^"]*": \{$/ { name = $0; sub(/^ *"/, "", name); sub(/": \{$/, "", name); cand = 1; next }
+          cand && /^          "kind": "test",?$/ { cases++; incase = 1; cand = 0; next }
+          { cand = 0 }
+          incase && /^            "status": "matches",?$/ { print bin " " name; incase = 0; next }
+          incase && /^            "status": / { incase = 0; next }
+          END {
+            if (!seen || !bins || cases != total) { printf "test: cannot read the JSON of cargo nextest list (.out/test-list-all.json): %d binaries, %d test cases against a test-count of %d\n", bins, cases, total; exit 1 }
+            printf "%d %d\n", bins, total > count
+          }
+        ' .out/test-list-all.json > .out/test-list-all.txt || { tail -n 1 .out/test-list-all.txt; exit 1; }
         listed .out/test-list-opt1.txt {{.TEST_OPT1_ARGS}} --config-file "$(pwd)/.out/test-opt1-nextest.toml"
         listed .out/test-list-opt0.txt {{.TEST_NEXTEST_ARGS}} --config-file "$(pwd)/.out/test-opt0-nextest.toml"
       - task: compile-check
@@ -1377,10 +1450,10 @@ tasks:
       - task: compile-check
         vars: {STEP: test, LOG: .out/test-list-opt0.txt.log, BUILT_BY: build-tests}
       - |
-        LC_ALL=C awk -v keep={{shellQuote .TEST_OPT1_PROFILE_TEST}} '
+        LC_ALL=C awk -v keep={{shellQuote .TEST_OPT1_PROFILE_TEST}} -v keep0={{shellQuote .TEST_OPT0_TESTS}} '
           FILENAME == ARGV[1] { all[$0] = 1; order[++n] = $0; next }
-          FILENAME == ARGV[2] { one[$0]++; if (!($0 in all)) stray[$0] = 1; if ($1 == "swell::main") a++; if ($0 == "swell::main " keep) kept = 1; next }
-          { zero[$0]++; if (!($0 in all)) stray[$0] = 1; if ($1 == "swell::main") b++ }
+          FILENAME == ARGV[2] { one[$0]++; n1++; if (!($0 in all)) stray[$0] = 1; if ($1 == "swell::main") a++; if ($0 == "swell::main " keep) kept = 1; next }
+          { zero[$0]++; n0++; if (!($0 in all)) stray[$0] = 1; if ($1 == "swell::main") b++ }
           END {
             for (i = 1; i <= n; i++) {
               t = order[i]; c = one[t] + zero[t]
@@ -1389,10 +1462,17 @@ tasks:
             }
             for (t in stray) { print "test: " t " is in a run but not in the workspace'\''s list"; bad++ }
             if (!n) { print "test: cargo nextest list names no test of the workspace (.out/test-list-all.txt)"; exit 1 }
+            nk = split(keep0, k, " ")
+            for (i = 1; i < nk; i += 2) {
+              t = k[i] " " k[i + 1]
+              if (!(t in all)) { printf "test: TEST_OPT0_TESTS names %s, a test cargo nextest list of the workspace does not hold (.out/test-list-all.txt); each pair <binary> <test> names a test that stays at opt-level 0\n", t; pair++ }
+              else if (zero[t] + 0 == 0) { printf "test: TEST_OPT0_TESTS names %s, which is not in the run at opt-level 0 (.out/test-list-opt0.txt)\n", t; pair++ }
+            }
             if (!kept) printf "test: swell::main %s is not in the run at opt-level 1 (.out/test-list-opt1.txt); it holds that debug assertions and overflow checks are on in that run'\''s profile and proves it only there: the stack rule prints it \"other\" from a #[test] fn of a module file of crates/swell/tests/ whose text calls no stack_with_room( or stack_thread(\n", keep
             if (bad) printf "test: %d test(s) not in exactly one run of the %d the workspace lists; every test runs once, at opt-level 1 (.out/test-list-opt1.txt) or at opt-level 0 (.out/test-list-opt0.txt)\n", bad, n
-            if (bad || !kept) exit 1
+            if (bad || pair || !kept) exit 1
             printf "test: swell::main %d at opt-level 1, %d at opt-level 0\n", a, b
+            printf "test: %d tests at opt-level 1, %d at opt-level 0\n", n1, n0
           }
         ' .out/test-list-all.txt .out/test-list-opt1.txt .out/test-list-opt0.txt
 
@@ -1404,11 +1484,12 @@ tasks:
       .out/test-opt1.status and .out/test-opt1-junit.xml; .out/test.report with .out/test.log,
       .out/test.status and target/nextest/default/junit.xml), each with BUILT_BY build-tests,
       so that compile-check reads both logs. It prints one line "<b> test binaries: <p> passed,
-      <f> failed, <i> ignored": b is that of the run at opt-level 0, the workspace, whose
-      Starting line counts every binary, swell::main among them, so swell::main once; p and f
-      the sums of the two reports, i the ignored of the run at opt-level 0 (all it skipped)
-      less the tests the run at opt-level 1 ran (its passed and failed), so the tests neither
-      run ran. Then the ten
+      <f> failed, <i> ignored": b is the count of test binaries of the workspace and t the
+      count of its tests, an ignored one among them, from .out/test-list-all.count (test-split
+      writes both from cargo nextest list without a filter; since item 5 of the story the run
+      at opt-level 0 leaves whole binaries out, which nextest then neither counts nor skips);
+      p and f the sums of the two reports, i is t less p and f, so the tests neither run ran.
+      It fails, naming the file, when that count is missing. Then the ten
       slowest of both reports' gate-slowest lines, slowest first. When a report failed it is
       printed whole first (the log of its run, its counts, its slowest, a Compiling line), and
       the task fails after the lines. It starts nextest-report with the task executable it runs
@@ -1424,14 +1505,17 @@ tasks:
         case $exe in /*) ;; */*) exe={{shellQuote .USER_WORKING_DIR}}/$exe ;; esac
         "$exe" nextest-report STEP=test PREFIX= LOG=.out/test-opt1.log STATUS=.out/test-opt1.status JUNIT=.out/test-opt1-junit.xml MIN_PASSED=1 BUILT_BY=build-tests > .out/test-opt1.report 2>&1 || { cat .out/test-opt1.report; ok=0; }
         "$exe" nextest-report STEP=test PREFIX= LOG=.out/test.log STATUS=.out/test.status JUNIT=target/nextest/default/junit.xml MIN_PASSED=1 BUILT_BY=build-tests > .out/test.report 2>&1 || { cat .out/test.report; ok=0; }
-        LC_ALL=C awk '
+        listed=$(cat .out/test-list-all.count 2>/dev/null || true)
+        LC_ALL=C awk -v listed="$listed" '
           /^[0-9]+ test binaries: [0-9]+ passed, [0-9]+ failed, [0-9]+ ignored$/ {
             r = (FILENAME == ARGV[1]) ? 1 : 2
-            got[r] = 1; binaries[r] = $1; passed[r] = $4; failed[r] = $6; ignored[r] = $8
+            got[r] = 1; passed[r] = $4; failed[r] = $6
           }
           END {
             if (!got[1] || !got[2]) { printf "test: no line of counts in %s\n", (!got[1] ? ARGV[1] : ARGV[2]); exit 1 }
-            printf "%d test binaries: %d passed, %d failed, %d ignored\n", binaries[2], passed[1] + passed[2], failed[1] + failed[2], ignored[2] - passed[1] - failed[1]
+            if (split(listed, l, " ") != 2) { print "test: no count of the workspace'\''s binaries and tests in .out/test-list-all.count (task test-split writes it from cargo nextest list)"; exit 1 }
+            p = passed[1] + passed[2]; f = failed[1] + failed[2]
+            printf "%d test binaries: %d passed, %d failed, %d ignored\n", l[1], p, f, l[2] - p - f
           }
         ' .out/test-opt1.report .out/test.report || ok=0
         grep -h '^gate-slowest test ' .out/test-opt1.report .out/test.report | LC_ALL=C sort -k3,3gr -k4,4 -k5,5 | head -n 10

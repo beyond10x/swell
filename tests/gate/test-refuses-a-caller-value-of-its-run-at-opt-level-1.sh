@@ -20,6 +20,9 @@
 #    test-opt1-vars-check).
 # 4. task test TEST_OPT1_PROFILE_TEST=deep::on_any_stack: exits non-zero, names it, no test ran.
 # 5. task build-tests with the value of 1: exits non-zero, names it, and the stub built nothing.
+# 6. task test TEST_OPT0_TESTS='swell::main plain::outside_the_stack' (the tests TEST_OPT0_TESTS
+#    keeps at opt-level 0 would run at opt-level 1; item 5): exits non-zero, names it, no test
+#    ran.
 # Run from the repository root: sh tests/gate/test-refuses-a-caller-value-of-its-run-at-opt-level-1.sh
 unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SWELL_NO_STACK_TESTS SWELL_NO_GUARD
 export NO_COLOR=1 CARGO_TERM_COLOR=never
@@ -37,21 +40,42 @@ fail() {
 [ -f Taskfile.yml ] && [ -f taskfiles/realm-room-tests.awk ] || fail "run it from the repository root"
 
 printf '%s\n' '#!/bin/sh' \
-  'profile=test; prev=""; cfg=""' \
+  'profile=test; prev=""; cfg=""; fmt=""' \
   'for a in "$@"; do' \
   '  [ "$prev" = "--cargo-profile" ] && profile=$a' \
   '  [ "$prev" = "--config-file" ] && cfg=$a' \
+  '  [ "$prev" = "--message-format" ] && fmt=$a' \
   '  prev=$a' \
   'done' \
-  'kind=none; names=""' \
+  'kind=none; names=""; pkgs=""; pairs=""' \
   'if [ -n "$cfg" ]; then' \
   '  if grep -q "^default-filter = .not (" "$cfg"; then kind=not; else kind=only; fi' \
-  '  names=$(grep "^default-filter = " "$cfg" | grep -o "test(=[^)]*)" | sed "s/^test(=//; s/)\$//" | tr "\n" " ")' \
+  '  line=$(grep "^default-filter = " "$cfg")' \
+  '  names=$(printf "%s\n" "$line" | sed "s/binary_id(=[^)]*) & test(=[^)]*)//g" | grep -o "test(=[^)]*)" | sed "s/^test(=//; s/)\$//" | tr "\n" " ")' \
+  '  pkgs=$(printf "%s\n" "$line" | grep -o "package(=[^)]*)" | sed "s/^package(=//; s/)\$//" | tr "\n" " ")' \
+  '  pairs=$(printf "%s\n" "$line" | grep -o "binary_id(=[^)]*) & test(=[^)]*)" | sed "s/^binary_id(=//; s/) & test(=/ /; s/)\$//" | tr "\n" "|")' \
   'fi' \
   'all="swell::main deep::on_any_stack|swell::main deep::on_the_promised_stack|swell::main plain::outside_the_stack|swell::main realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on"' \
+  'extra=$(sed -n "s/^  TEST_OPT0_TESTS: //p" Taskfile.yml | tr " " "\n" | paste -d " " - - | tr "\n" "|")' \
+  'if [ "$2" = list ] && [ "$fmt" = json-pretty ]; then' \
+  '  printf "{\n  \"test-count\": %s,\n  \"rust-suites\": {\n" "$(printf "%s\n" "$all|$extra" | tr "|" "\n" | grep -c " ")"' \
+  '  printf "%s\n" "$all|$extra" | tr "|" "\n" | while read -r bin test; do' \
+  '    [ -n "$bin" ] || continue' \
+  '    [ "$bin" = "${last:-}" ] || printf "    \"%s\": {\n      \"binary-id\": \"%s\",\n      \"testcases\": {\n" "$bin" "$bin"' \
+  '    last=$bin' \
+  '    printf "        \"%s\": {\n          \"kind\": \"test\",\n          \"ignored\": false,\n          \"filter-match\": {\n            \"status\": \"matches\"\n          }\n        },\n" "$test"' \
+  '  done' \
+  '  exit 0' \
+  'fi' \
   'if [ "$2" = list ]; then' \
-  '  printf "%s\n" "$all" | tr "|" "\n" | while read -r bin test; do' \
-  '    case " $names " in *" $test "*) named=yes ;; *) named=no ;; esac' \
+  '  printf "%s\n" "$all|$extra" | tr "|" "\n" | while read -r bin test; do' \
+  '    [ -n "$bin" ] || continue' \
+  '    if [ "$bin" = swell::main ]; then' \
+  '      case " $names " in *" $test "*) named=yes ;; *) named=no ;; esac' \
+  '    else' \
+  '      case " $pkgs " in *" ${bin%%::*} "*) named=yes ;; *) named=no ;; esac' \
+  '      case "|$pairs" in *"|$bin $test|"*) named=no ;; esac' \
+  '    fi' \
   '    case $kind in' \
   '      none) echo "$bin $test" ;;' \
   '      only) [ "$named" = no ] || echo "$bin $test" ;;' \
@@ -139,5 +163,14 @@ STUB_LOG="$root/$dir/stub-build.log" PATH="$root/$dir/bin:$PATH" task -d "$run" 
 [ ! -s "$dir/stub-build.log" ] || fail "task build-tests built with TEST_OPT1_ARGS given on the command line ($dir/stub-build.log)"
 grep -qF 'build-tests: TEST_OPT1_ARGS=--locked -p swell --test main --profile default is not the value Taskfile.yml defines' "$dir/build.out" ||
   fail "task build-tests did not name the step, TEST_OPT1_ARGS, its value and Taskfile.yml ($dir/build.out)"
+
+# 6. TEST_OPT0_TESTS from the command line, naming a pair of its own: the tests the file's pairs
+#    name would run at opt-level 1.
+: > "$dir/stub-opt0.log"
+STUB_LOG="$root/$dir/stub-opt0.log" PATH="$root/$dir/bin:$PATH" task -d "$run" test TEST_OPT0_TESTS='swell::main plain::outside_the_stack' > "$dir/opt0.out" 2>&1 &&
+  fail "task test exited 0 with TEST_OPT0_TESTS given on the command line ($dir/opt0.out)"
+[ ! -s "$dir/stub-opt0.log" ] || fail "task test ran tests with TEST_OPT0_TESTS given on the command line ($dir/stub-opt0.log)"
+grep -qF 'test: TEST_OPT0_TESTS=swell::main plain::outside_the_stack is not the value Taskfile.yml defines' "$dir/opt0.out" ||
+  fail "task test did not name the step, TEST_OPT0_TESTS, its value and Taskfile.yml ($dir/opt0.out)"
 
 echo "$name: ok"
