@@ -108,6 +108,19 @@ fn get_or_insert_computed_calls_its_callback_only_for_a_missing_key() {
     );
 }
 
+/// `#sec-map.prototype.getorinsertcomputed`, step 5, and `#sec-map.prototype.getorinsert`,
+/// step 4: a key is present by its entry, not by its value, so a present key whose value is
+/// `undefined` answers `undefined`, calls no callback and adds no entry, in both methods.
+#[test]
+fn a_present_key_whose_value_is_undefined_is_found() {
+    answers(
+        "var m = new Map([[1, undefined]]), c = 0;\n\
+         [String(m.getOrInsertComputed(1, function () { c++; return 2; })), c, m.size,\n\
+          String(m.getOrInsert(1, 3)), m.size, String(m.get(1))].join();",
+        "undefined,0,1,undefined,1,undefined",
+    );
+}
+
 /// `#sec-map.prototype.getorinsertcomputed`, steps 7 and 8: the map is searched again after the
 /// callback, so a key the callback set keeps the place the callback gave it and takes the
 /// callback's answer, with no second entry; a key the callback set and deleted again, or a map
@@ -222,6 +235,28 @@ fn group_by_closes_the_iterator_when_the_callback_throws() {
     );
 }
 
+/// The messages of the steps `Map.groupBy` and `Object.groupBy` share, and of
+/// `getOrInsertComputed`'s IsCallable, as they read: each names the method that runs it.
+/// RequireObjectCoercible comes before IsCallable (`Map.groupBy(null, 1)` names the receiver),
+/// which only the message shows: GetIterator of `null` would throw a `TypeError` too. The
+/// third message of the shared loop, an index above 2^53 - 1, needs that many elements and is
+/// not reached by a test.
+#[test]
+fn the_shared_steps_name_the_method_in_their_messages() {
+    answers(
+        "function message(f) { try { f(); return \"none\"; } catch (e) { return e.name + \": \" + e.message; } }\n\
+         [message(function () { Map.groupBy(null, String); }), message(function () { Map.groupBy(undefined, 1); }),\n\
+          message(function () { Map.groupBy([], 1); }), message(function () { Object.groupBy(null, String); }),\n\
+          message(function () { Object.groupBy([], {}); }), message(function () { new Map().getOrInsertComputed(1, 1); })].join(\"|\");",
+        "TypeError: Map.groupBy called on undefined or null|\
+         TypeError: Map.groupBy called on undefined or null|\
+         TypeError: Map.groupBy: the callback is not a function|\
+         TypeError: Object.groupBy called on undefined or null|\
+         TypeError: Object.groupBy: the callback is not a function|\
+         TypeError: Map.prototype.getOrInsertComputed: the callback is not a function",
+    );
+}
+
 /// An agent with [`limits`] changed by `change` and its realm.
 fn agent_and_realm(change: impl FnOnce(&mut Limits)) -> (Agent<TestHost>, Realm) {
     let mut limits = limits();
@@ -309,23 +344,34 @@ const WARM_OBJECTS: usize = 4_096;
 /// and 76 to 134 at the others.
 const MEMORY_GROUPS: u64 = 16;
 
+/// The bytes the memory test may charge per grouped element at the most: its run charges
+/// `heap_bytes()` at the end less the reading before, over the elements it grouped. Measured at
+/// the eight sizes of `task test-realm-sizes` and with no padding: 624 in the default mode at
+/// each (261,340 bytes for 419 elements, the table's and the arenas' growths included), 451 to
+/// 545 in the collect mode. Twice the least of them is above this bound, so a run that charges
+/// each group twice is refused.
+const BYTES_PER_GROUP: u64 = 768;
+
 /// The memory budget (`docs/design/engine.md`, "Memory budget"): `Map.groupBy` over an iterable
 /// that is never done, each element its own key, so the result's table and a new group grow
 /// with every element, with a budget of the realm's reading plus 256 KiB (64 KiB in the collect
 /// mode: at 16 KiB the first script itself ended at the budget there), ends in
 /// `Terminated(MemoryBudget)` after grouping at least [`MEMORY_GROUPS`] elements, with
-/// `heap_bytes()` above the reading before it; once the host dropped the script, one `collect()`
-/// brings `heap_bytes()` back within the reading before the script. Before the reading a first
-/// script defines the helpers the second calls and runs the same shape over 8 elements, which
-/// grows the arenas a script needs (in the default mode with [`WARM_OBJECTS`] objects made at
-/// once); nothing is made between the readings. The readings are printed. How far into the room
-/// the reading at the end lies is not held: the run ends at the first growth the room cannot
-/// take, and where an arena of the heap doubles depends on the size of the realm (in the collect
-/// mode, at 38 and 64 padding functions, the end lay 25,544 and 15,432 bytes above the reading,
-/// under half the room). Objects made first in the collect mode, by one `JSON.parse`, did not
-/// make that hold: with 256 of them the first script ended at the budget at 128 padding
-/// functions in a room of 32 and of 48 KiB, and with 512 in a room of 64 KiB the test took 2.5 to
-/// 3.3 s of wall time.
+/// `heap_bytes()` above the reading before it and at most [`BYTES_PER_GROUP`] bytes charged per
+/// grouped element; once the host dropped the script, one `collect()` brings `heap_bytes()` back
+/// within the reading before the script. In the default mode the run gets at least room /
+/// [`BYTES_PER_GROUP`] elements far (342 of the 419 measured), so a run that stops with more
+/// than a fifth of the room unused is refused. Before the reading a first script defines the
+/// helpers the second calls and runs the same shape over 8 elements, which grows the arenas a
+/// script needs (in the default mode with [`WARM_OBJECTS`] objects made at once); nothing is
+/// made between the readings. The readings are printed. In the collect mode how far into the
+/// room the run gets is not held: it ends at the first growth of an arena the room cannot take,
+/// and where an arena doubles depends on the size of the realm (at 64 padding functions the end
+/// lay 15,804 bytes above the reading, 29 elements, with 49,732 bytes of the room unused; at 128
+/// it lay 64,412 bytes above it, 134 elements). Objects made first in the collect mode, by one
+/// `JSON.parse`, did not make that hold: with 256 of them the first script ended at the budget
+/// at 128 padding functions in a room of 32 and of 48 KiB, and with 512 in a room of 64 KiB the
+/// test took 2.5 to 3.3 s of wall time.
 #[test]
 fn group_by_over_an_endless_iterable_ends_at_the_memory_budget() {
     let room: u64 = if collect_mode() { 64 << 10 } else { 256 << 10 };
@@ -383,6 +429,70 @@ fn group_by_over_an_endless_iterable_ends_at_the_memory_budget() {
         grouped >= MEMORY_GROUPS,
         "{grouped} elements grouped before the budget"
     );
+    assert!(
+        at_the_end - before <= grouped * BYTES_PER_GROUP,
+        "{} bytes charged for {grouped} elements",
+        at_the_end - before
+    );
+    if !collect_mode() {
+        assert!(
+            grouped * BYTES_PER_GROUP >= room,
+            "{grouped} elements grouped in a room of {room} bytes"
+        );
+    }
+    assert!(after <= before, "{after} after collect(), {before} before");
+}
+
+/// The memory budget with one group that grows: `Map.groupBy` over an iterable that is never
+/// done, every element into the group `0`, so the group's Array grows with every element and
+/// each growth of its storage is charged; the run ends in `Terminated(MemoryBudget)` (realm
+/// reading plus 256 KiB), not at the step budget of 4,000,000, and once the host dropped the
+/// script, one `collect()` brings `heap_bytes()` back within the reading before it. With a growth
+/// of an Array's storage that charges nothing the run ends at the step budget after about
+/// 117,000 elements. Default mode only: in the collect mode the run takes a collection per
+/// element.
+#[cfg(not(feature = "collect-every-safe-point"))]
+#[test]
+fn one_growing_group_ends_at_the_memory_budget() {
+    let room: u64 = 256 << 10;
+    let warm = format!(
+        "{HELPERS}var grouped = 0;\n\
+         (function () {{ var a = []; for (var i = 0; i < {WARM_OBJECTS}; i++) a.push({{}}); }})();\n\
+         Map.groupBy(closing([0, 1, 2, 3, 4, 5, 6, 7]), function (v) {{ return 0; }}).size;"
+    );
+    let endless = "Map.groupBy(endless(function (i) { return i; }), function (v) { grouped = v + 1; return 0; });";
+    let warmed = |agent: &mut Agent<TestHost>, realm: &Realm| {
+        assert_eq!(
+            eval_text(agent, realm, &warm),
+            Outcome::Normal("1".to_string())
+        );
+        collected(agent)
+    };
+    let realm_reading = {
+        let (mut probe, realm) = agent_and_realm(|limits| limits.steps_per_entry = 4_000_000);
+        warmed(&mut probe, &realm)
+    };
+    let (mut agent, realm) = agent_and_realm(|limits| {
+        limits.steps_per_entry = 4_000_000;
+        limits.memory_bytes = realm_reading + room;
+    });
+    let before = warmed(&mut agent, &realm);
+    let script = support::script::parse(&mut agent, &realm, endless);
+    let outcome = agent.evaluate_script(&script).unwrap();
+    let steps = agent.last_entry_steps().unwrap();
+    drop(script);
+    let after = collected(&mut agent);
+    let Outcome::Normal(grouped) = eval_text(&mut agent, &realm, "grouped;") else {
+        panic!("grouped is not readable");
+    };
+    println!(
+        "Map.groupBy into one group: {outcome:?} after {steps} steps, {grouped} elements; \
+         heap_bytes(): {before} before the script, {after} after collect()"
+    );
+    assert!(
+        matches!(outcome, HostOutcome::Terminated(Termination::MemoryBudget)),
+        "{outcome:?} after {steps} steps, {grouped} elements"
+    );
     assert!(after <= before, "{after} after collect(), {before} before");
 }
 
@@ -420,6 +530,27 @@ fn map_group_by_reaches_the_reentry_limit_on_the_promised_stack() {
         body,
     )
     .unwrap();
+}
+
+/// The key of `getOrInsertComputed` while its callback runs and collects, held by nothing but
+/// the arguments of the running builtin: `Map.prototype.forEach` calls `getOrInsertComputed`
+/// with `m` as its this value, the entry's value `{ tag: 7 }` as the key and the entry's key, a
+/// strict function, as the callback; the callback clears the source Map, drops its own
+/// parameter and makes objects (safe points, a collection at each in the collect mode). The
+/// entry `m` holds afterwards has that key and the callback's answer. With an activation that
+/// keeps no copy of its arguments the collect mode ends in `Terminated(EngineFault)`.
+#[test]
+fn get_or_insert_computed_keeps_a_key_only_its_arguments_hold() {
+    answers(
+        "var m = new Map(), src = new Map(), out = [];\n\
+         function cb(k) { \"use strict\"; var t = k.tag; k = null; src.clear(); var junk = []; for (var i = 0; i < 20; i++) junk.push({ i: i, p: [i] }); return { v: t + 1 }; }\n\
+         src.set(cb, { tag: 7 });\n\
+         src.forEach(Map.prototype.getOrInsertComputed, m);\n\
+         var junk2 = []; for (var i = 0; i < 20; i++) junk2.push({ x: i, y: [i] });\n\
+         m.forEach(function (v, k) { out.push(k.tag + \":\" + v.v); });\n\
+         out.join();",
+        "7:8",
+    );
 }
 
 /// The elements of the test of the groups across a collection.
