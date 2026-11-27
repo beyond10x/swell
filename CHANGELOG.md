@@ -400,6 +400,14 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Changed
 
+- The interpreter spends fewer CPU seconds per instruction in a loop of the kind of the test262
+  harness's `buildString` (story property-escape-cases-spend-less-in-the-interpreter-loop): a
+  push of a value and a replace of the operand stack write in place, the next instruction is
+  read in the loop's own code, and the operands of an instruction and a checked local are read
+  in one borrow of the frame. The measurement `tests/perf/build-string-loop.js` takes 0.72 of
+  the CPU seconds of the base (`taskfiles/perf-loop.sh`, median of three runs each); the
+  property-escape cases of part 1/14 of the test262 run take 0.86 of the base's wall time with
+  one worker. No step count, heap reading, stack bound or test262 result changed.
 - A character class outside `v` keeps its last answer together with the range of code
   points around it that answer the same (`ClassSet::contains_around`, with
   `swell_unicode::Property::contains_around` for the property tables). A run of characters

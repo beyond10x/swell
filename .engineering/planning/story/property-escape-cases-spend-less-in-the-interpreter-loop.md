@@ -5,7 +5,7 @@ kind: story
 status: active
 title: The property-escape cases spend less in the interpreter loop
 summary: Three quarters of a property-escape case of test262 is the interpreter running the harness loop buildString; those cases are 73 % of the test262 run's test time. The loop's CPU seconds drop to 90 % or less (aim 80 %), with every step count, heap reading and stack bound unchanged. Lane unit 5 of wave big-2.
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-27T08:41:58Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-27T08:41:59Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
@@ -163,3 +163,49 @@ script or a host can observe changes.
 - A new column of CPU time in the part files of the test262 runner.
 - The forge's run of the lane: the coordinator starts it on the wave branch after the merge
   and reads `slow-time lane` there.
+
+## As delivered
+
+The unit `lanefive` of wave big-2 delivered the story on `impl/lanefive` (one correction after
+the adversary's pass), merged into `wave/big-2`. Where the delivery differs from the text
+above, and what was measured:
+
+- Three cuts were taken, each its own commit with its six run lines in the body:
+  - A (`a900baf`): `replace(0)` is a push, `replace(n)` for n of 1 or more writes in place,
+    and `Pop` and the conditional jumps drop the top entry. Ratio 0.809 against the binary
+    before it.
+  - B (`997628f`): `next_instruction` reads the instruction without a call of
+    `Frame::instructions`. Ratio 0.879.
+  - C (`167536e`): the operands of an instruction are read in one borrow, a checked local is
+    read once, `held_bytes` is inlined. Ratio 0.954.
+- A fourth candidate (`to_numeric` returns a Number unchanged) read 1.034 and 1.012 in two
+  runs and was reverted. A fifth (the indexed put) was not tried: the aim was reached.
+- The measurement `tests/perf/build-string-loop.js` runs 80 rounds over a range of 132,097
+  code points, not the whole range of Unicode: eight rounds over the whole range end at the
+  step budget, because the growth of the result String charges a step per code unit.
+- `sh taskfiles/perf-loop.sh` on the unit's head against the base `3e39e71`: head 3.76, base
+  5.19 CPU seconds (median of three runs each, alternating), ratio 0.724; the bound is 0.90.
+  It was read on a workstation of 20 cores with a pressure of 0.00 in every run, not on a
+  build node. The count of user instructions of one run fell from 67.30 to 51.82 thousand
+  million.
+- The test262 part: part 1/14 with one worker holds 34 property-escape files (68 runs); head
+  and base ran three times each on a build node, alternating. The medians of the summed time
+  of those cases: head 45.78 s, base 53.35 s, ratio 0.858; the bound is 0.93. The six part
+  files are equal in path, mode, outcome, cause and steps.
+- No step count, heap reading or stack bound of the tree's tests moved. No instruction was
+  added and no public item changed. The engine's diff ends before the first test module of
+  each file it touches.
+- Tests: four in `crates/swell/tests/interpreter_loop.rs` and two library tests in
+  `crates/swell/src/interp/loop_tests.rs` with the cuts, each red with a defect planted in
+  its cut; two more in `interpreter_loop.rs` with the correction, for a write in the temporal
+  dead zone, which no test of the tree held (the adversary's pass found it with a mutant).
+  The slowest takes 0.234 CPU seconds in the collect build.
+- The adversary ran 411 scripts on the base and on the head: the same completion, text,
+  steps, heap bytes and peak, and the same outcome at every step budget and at every memory
+  budget 8 bytes apart. A growth of the operand stack that the memory budget refuses leaves
+  the reserved capacity uncharged until the frame unwinds, on the base as on the head:
+  `story:operand-stack-charges-its-growth-before-it-reserves` (a backlog draft).
+- `taskfiles/perf-loop.sh` builds nothing, is in no gate and no lane and asserts nothing
+  about time. It is started by its path after the two release binaries are built.
+- What the story is for, the lane `slow` on the forge, is shown only by a forge run of the
+  merged tree; the wave's second pull request has it.
