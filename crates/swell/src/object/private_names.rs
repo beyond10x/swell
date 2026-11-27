@@ -710,6 +710,40 @@ mod tests {
         assert!(agent.heap.check_value(Value::Object(value)).is_ok());
     }
 
+    /// The first field add of a level reserves room for the whole level (`private_field_add`
+    /// passes its `room` on): on a fresh object the first of a level of three fields makes the
+    /// box and room for three entries, charged at once, and the level's two other adds charge
+    /// nothing. An add that reserved room for itself alone would charge one entry at each.
+    #[test]
+    fn the_first_field_add_of_a_level_reserves_room_for_the_whole_level() {
+        use super::PrivateElements;
+        use crate::value::Value;
+        let mut agent = test_host::agent_with(test_host::limits());
+        let object = agent
+            .allocate_object(None, ObjectKind::Ordinary(Ordinary::for_test()))
+            .unwrap();
+        let description = agent.heap.new_string_from_str("#f").unwrap();
+        let keys: alloc::vec::Vec<PrivateNameRef> = (0..3)
+            .map(|_| agent.heap.new_private_name(description).unwrap())
+            .collect();
+        let mut charges = alloc::vec::Vec::new();
+        for &key in &keys {
+            let before = agent.heap.bytes();
+            agent
+                .private_field_add(object, key, Value::Number(1.0), 3)
+                .unwrap();
+            charges.push(agent.heap.bytes() - before);
+        }
+        let entry = size_of::<PrivateElement>() as u64;
+        assert_eq!(
+            charges,
+            [size_of::<PrivateElements>() as u64 + 3 * entry, 0, 0]
+        );
+        let record = agent.heap.objects.get(object.handle).unwrap();
+        let elements = record.private_elements.as_ref().unwrap();
+        assert_eq!((elements.len(), elements.capacity()), (3, 3));
+    }
+
     /// The collector reaches an object's private elements from the object alone
     /// (`ObjectRecord::trace`, [`super::PrivateElements::trace`]): with nothing else holding
     /// them, a mark that starts at the object marks each element's Private Name, a field's value,

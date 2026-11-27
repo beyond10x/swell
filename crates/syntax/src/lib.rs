@@ -238,7 +238,8 @@ pub fn parse_eval(
 /// [`parse_eval`] charged to `ledger` (the module's documentation). The ContainsArguments error
 /// of [`EvalContext::in_class_field_initializer`] is answered before a refusal the parser held in
 /// the eval code, as the parser's rule on holds orders every error before a held refusal
-/// (`Parser::hold`), so such eval code counts no refusal.
+/// (the field `held` of the parser, set by no construct while `HOLDS` is empty), so such eval
+/// code counts no refusal.
 pub fn parse_eval_with(
     source: &[u16],
     context: impl Into<EvalContext>,

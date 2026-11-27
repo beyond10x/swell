@@ -94,6 +94,18 @@ go() {
   STUB_DIR="$root/$dir/run-$case_/stub" STUB_BUILD=$build PATH="$root/$dir/bin:$PATH" task -d "$dir/run-$case_" "$@" > "$dir/$case_.out" 2>&1
 }
 
+# group_alive <pgid>: 0 when a process of the group <pgid> runs, 1 when kill -0 answers "No such
+# process". Any other answer ends the test as failed: a group that is not a number (no pid file),
+# or a kill that refused its operand (dash's kill read "--" after the signal as a process
+# number, "Illegal number", and the group looked gone at once), is not a group that is gone.
+group_alive() {
+  case "$1" in ''|*[!0-9]*|0|1) echo "$name: FAIL process group [$1] is not the number of a group; kill -0 cannot have asked for it"; exit 1 ;; esac
+  err=$(LC_ALL=C; kill -0 "-$1" 2>&1) && return 0
+  case "$err" in *"No such process"*) return 1 ;; esac
+  echo "$name: FAIL kill -0 -$1 failed for another reason than a group that is gone: $err"
+  exit 1
+}
+
 # 2 starts first and runs beside 1 and 3: the build hangs; the wait ends at SLOW_COLLECT_WAIT.
 plant bound || { echo "$name: FAIL cannot plant run-bound"; exit 1; }
 go bound hang slow-collect-start slow-tests SLOW_COLLECT=lane SLOW_COLLECT_WAIT=1 &
@@ -131,15 +143,15 @@ while kill -0 "$tp" 2>/dev/null &&
 pg=$(cat "$dir/run-bound/.out/slow-collect/pid" 2>/dev/null)
 if kill -0 "$tp" 2>/dev/null; then
   kill -KILL "$tp" 2>/dev/null
-  [ -n "$pg" ] && kill -KILL -- "-$pg" 2>/dev/null
+  [ -n "$pg" ] && kill -KILL "-$pg" 2>/dev/null
   fail "slow-tests still waited 8 s after its start with SLOW_COLLECT_WAIT=1 and a build that hangs ($dir/bound.out)"
 else
   if wait "$tp"; then fail "the lane exited 0 when the build wrote no status within SLOW_COLLECT_WAIT ($dir/bound.out)"; fi
   grep -qF 'wrote no status within 1 s of waiting' "$dir/bound.out" || fail "slow-tests did not say that the build wrote no status within 1 s ($dir/bound.out)"
   n=0
-  while [ -n "$pg" ] && kill -0 -- "-$pg" 2>/dev/null && [ "$n" -lt 30 ]; do sleep 0.1; n=$((n + 1)); done
-  if [ -n "$pg" ] && kill -0 -- "-$pg" 2>/dev/null; then
-    kill -KILL -- "-$pg" 2>/dev/null
+  while group_alive "$pg" && [ "$n" -lt 30 ]; do sleep 0.1; n=$((n + 1)); done
+  if group_alive "$pg"; then
+    kill -KILL "-$pg" 2>/dev/null
     fail "the build (process group $pg) still ran 3 s after the lane ended on the wait's bound ($dir/bound.out)"
   fi
 fi

@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T08:38:03Z",
+  "actor": "human:operator",
+  "artifact": "story:realm-walk-in-parts-under-the-cpu-bound",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at b9adbe35, exit 0, on the build node; the unit was merged by commit 1923715, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/builtins_symbol_values.rs (swell::builtins_symbol_values::*) over the committed file crates/swell/tests/fixtures/realm_places.txt"
+  }
+}

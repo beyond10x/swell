@@ -40,7 +40,7 @@ scope:
   path: crates/syntax/src/parser/expression.rs
 - confidence: cited
   path: crates/syntax/src/parser/mod.rs
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
@@ -98,3 +98,49 @@ test262. The full run is not the unit's. With the list as committed on the wave 
 ## Out of scope
 
 Private names in eval code (`story:private-names-in-eval-code`); the call of HostEnsureCanAddPrivateElement (`story:host-ensure-can-add-private-element`); `nonextensible-applies-to-private` and decorators (excluded features); `Proxy` and `Reflect` (slice 9; a private element is no property, so no trap sees it); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `privatefields` of wave big-2 delivered the story on `impl/privatefields` (one
+correction after the adversary's pass), merged into `wave/big-2`. Where the delivery differs
+from the text above:
+
+- `Instruction::AddPrivateField { hops: u16, slot: u16, room: u16 }` carries the room of its
+  class level, like `AddPrivateMethod`; the story named `{ hops, slot }`. The resolver counts
+  the private fields into `Resolution::private_rooms` beside the private methods, keyed by the
+  instance initializer's function and, for the static level, by the constructor. A level
+  reserves the room of its methods and fields together, once.
+- An element of the private list holds 48 bytes, not 44: a field's value is one of its
+  kinds and is aligned to 8. An instance costs 24 + 48 f bytes over a plain one for f
+  private elements (`bytes per instance over a plain one, by private fields: [(1, 72), (4,
+  216), (17, 840), (100, 4824)]`); the changelog entry of `story:private-names-and-private-methods`
+  states the new figures.
+- 17 tests under `private_fields::`, not 14, and one more library test in
+  `object/private_names.rs`. The four came after the adversary's pass, each shown red with
+  its defect planted: `the_first_field_add_of_a_level_reserves_room_for_the_whole_level`
+  (charges `[168, 0, 0]`), `private_in_charges_its_find_as_a_read_does` (92 steps between
+  the last and the first of 100 fields), `the_instance_room_leaves_out_the_static_fields`
+  (72 bytes per instance beside three static fields) and
+  `the_static_fields_of_a_class_reserve_their_level_once`, which reads the boundary of a
+  memory budget because a count of bytes is the same with one reservation and with three.
+- Counts below the story's numbers: `instances_with_100_private_fields_are_charged_and_freed`
+  runs 500 constructions in the gate's default build and 5,000 under `SWELL_FULL_COUNTS=1`,
+  2 in a collect build and 8 at the full count (the story named 10,000 and 1,000); the loop
+  of `a_private_increment_loop_ends_at_the_step_budget` runs 1,000 steps in a collect build.
+  Each count was shown to catch its planted defect (the growth of the list not recorded, not
+  charged; no step charge in the find; a budget that never ends the run).
+- No construct is held any more: the list `HOLDS` of the syntax crate is empty and its
+  function `hold` is removed. Four tests of `crates/syntax/tests/sources.rs`, outside the
+  story's writes, expected the two holds and now expect a parse; five fixtures under
+  `crates/syntax/tests/sources/early-errors/` hold the early errors of `#x in`, each with the
+  same answer before and after.
+- The meeting cases needed no fix beyond the story's arms: the unit's part of test262 (1,507
+  cases, 984 of them of slice 8) passed all 3,006 runs on the first run, 559 cases on the
+  base. No case moved to `docs/plan/slice-08/close-later.tsv`.
+- A private name in direct eval code still meets the refusal `private name #x in direct eval
+  code is not supported before slice 8`, until `story:private-names-in-eval-code`.
+- The private find charges its steps after its scan (older than the story; the scan is
+  bounded by a list whose bytes are charged before it grows). Not changed.
+- The reviews: `review-result:adversary-privatefields-pass-1` (green: no failing case, eight
+  findings on what the tests hold) and the coordinator's read of the correction
+  (`review-result:privatefields-correction-1-coordinator-read`).

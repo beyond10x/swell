@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T08:38:02Z",
+  "actor": "human:operator",
+  "artifact": "story:eval-in-class-field-initializers",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at b9adbe35, exit 0, on the build node; the unit was merged by commit 0e336fd, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/class_field_eval.rs (swell::class_field_eval::*) and the cases of docs/plan/slice-08/story-eval-fields.cases.txt in conformance/test262/expected.txt"
+  }
+}

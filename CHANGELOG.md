@@ -54,6 +54,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   `parts_script_sees_the_sign_of_each_zero` (the four functions of `Math`). Slice 4 is
   delivered: `conformance/slices-delivered.txt` lists it, and no host requirement is pending
   for it.
+- The close of slice 9, `collections-proxy-reflect` (`story:slice-09-conformance-close`):
+  every case of the slice passes in every run, `test262-slice 09 1858 3678 0 0 1858 1858 0 0`.
+  59 cases that need a later slice move with evidence in `conformance/test262/moves.tsv`:
+  37 to slice 8, each refused at the start of the slice on `class` (36: subclasses and
+  set-like classes of the seven set methods of `Set/prototype/`) or `new.target` (1,
+  `optional-chaining/new-target-optional-call`), and 22 to slice 12 on a BigInt literal
+  (`1n` 15, `0n` 7: `Map/prototype/getOrInsertComputed/this-not-object-throw` and the
+  `called-with-object`, `require-internal-slot` and `size-is-a-number` cases of the set
+  methods). 130 cases of `test/staging/` that failed at the start of the slice on `Proxy`,
+  `Reflect`, `Map`, `Set` or `WeakMap` and pass now come into slice 9 from slice 19 by lines
+  of the block (`docs/plan/slice-09/close-into-09.tsv`). Each was read case by case against
+  the full run at the start commit of the slice; 31 of them name later slices only in the
+  `typeof` guards of `harness/deepEqual.js`. The table of section 12 moves by them: slice 8
+  9,339 cases and 18,529 runs, slice 9 1,858 and 3,678, slice 12 381 and 760, slice 19 1,233
+  and 2,299; the sums do not move.
 - `Reflect`, the first story of the ninth slice (`#sec-reflect-object`): the global `Reflect`,
   an ordinary object of `%Object.prototype%` with its 13 functions in the order of their
   clauses (`apply`, `construct`, `defineProperty`, `deleteProperty`, `get`,
@@ -278,10 +293,10 @@ Every number below comes from the gate, `task check`, on the released commit.
   per private identifier (a heap record of its own, its description the identifier with its
   `#`), held by the class's private record, a lexical scope pushed after the heritage. An
   object holds its private elements in a list of its own, charged to the memory budget before
-  it grows: a box of 24 bytes and 44 bytes per element, reserved once per class level for
+  it grows: a box of 24 bytes and 48 bytes per element, reserved once per class level for
   exactly the elements that level adds (a getter and a setter of one name are one element), so
-  an instance of a class with one private method costs 68 bytes over a plain instance, with 4
-  methods 200, with 17 methods 772
+  an instance of a class with one private method costs 72 bytes over a plain instance, with 4
+  methods 216, with 17 methods 840
   (`private_methods::an_instance_pays_for_the_room_of_its_list`). The instance's private
   methods and accessors are added by the class's instance initializer before any other
   element, the static ones to the constructor before the first static element runs
@@ -346,6 +361,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   the method (`Map.groupBy called on undefined or null`, `Map.groupBy: the callback is not a
   function`); those of `Object.groupBy` read as before. 15 tests in
   `tests/builtins_map_upsert.rs` (14 with `collect-every-safe-point`).
+
+- Private fields and `#x in` run (`#sec-privatefieldadd`,
+  `#sec-relational-operators-runtime-semantics-evaluation`). A private field is added by the
+  class's instance initializer after the private methods and accessors, in source order with
+  the public fields, and a static one to the constructor in its run of static elements; an
+  object a base constructor returns gets the fields too, a second add of the same name is a
+  `TypeError`, and the add does not read [[Extensible]], so a frozen or non-extensible object
+  gets them. `o.#x`, `o?.#x` and every assignment form on a private field (plain, compound,
+  logical with its short circuit, update, destructuring and the `for`-`in`/`of` head) run
+  PrivateGet and PrivateSet. `#x in o` throws a `TypeError` when `o` is not an object and
+  answers whether `o` has the element, for fields, methods and accessors alike, with no trap of
+  a Proxy called. A class level reserves room for its private methods and private fields
+  together, once. The holds `private field is not supported before slice 8` and
+  `private name in is not supported before slice 8` are gone: no construct is held any more
+  (`story:private-fields-and-private-in`).
 
 ### Changed
 
@@ -442,6 +472,9 @@ Every number below comes from the gate, `task check`, on the released commit.
   default mode). The workflow `slow` starts on a change of `taskfiles/gate-time.yml`,
   `taskfiles/realm-room-tests.awk` and `.config/nextest.toml` too
   (`story:realm-size-lane-within-its-share`).
+- The lane `slow` prints the machine it runs on, `slow-runner: <n> cores, <cpu>, <memory>,
+  sh is <sh>`, right after its clock starts, so that two runs on the same code can be read
+  against their machines. The forge ran the lane on one code in 882.6 s and in 1,142.0 s.
 - The lane `slow` builds the stack tests' binary with their modules only:
   `build-stack-profiles` passes `--cfg test_modules` and the modules of `STACK_MODULE_LIST`
   (`taskfiles/stack-profiles.yml`) to the test target of `swell` through `cargo rustc`, so
@@ -595,6 +628,12 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Fixed
 
+- The lane's background build of the profile collect ends with the lane on the forge too:
+  the kills of its process group had two dashes after the signal, which the forge's `sh`
+  (dash) refuses, so `slow-collect-stop` and the build's watcher ended nothing there, and
+  the forge's `task check` went red on the planted script that holds it. A new static check
+  of the gate, `kill-check`, refuses that form in `Taskfile.yml`, `taskfiles/`, `tests/gate/`
+  and `.github/workflows/`.
 - `JSON.parse` frees the room of its stack of open values when the parse ends, before the
   reviver is called; before, that room stayed allocated, uncharged, while the reviver ran
   (found by the review of `story:buffer-growth-outside-the-charged-list-is-listed`).
