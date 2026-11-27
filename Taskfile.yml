@@ -79,6 +79,10 @@ includes:
     taskfile: taskfiles/gate-time.yml
     flatten: true
     optional: true
+  realm-places:
+    taskfile: taskfiles/realm-places.yml
+    flatten: true
+    optional: true
 
 tasks:
   check:
@@ -688,13 +692,14 @@ tasks:
       test-doc and the cargo run of conform-engine fail when their log has a Compiling line,
       naming the build task (task compile-check).
     env:
-      RUSTFLAGS: -D warnings
+      RUSTFLAGS: '{{.TEST_RUSTFLAGS}}'
     silent: true
     cmds:
       - mkdir -p .out
       - |
+        if [ -z '{{.TEST_RUSTFLAGS}}' ] || [ -z '{{.TEST_NEXTEST_ARGS}}' ]; then echo "build-tests: TEST_RUSTFLAGS or TEST_NEXTEST_ARGS is empty; taskfiles/realm-places.yml defines them"; exit 1; fi
         status=0
-        cargo nextest run --no-run --workspace --locked --profile default > .out/build-tests.log 2>&1 || status=$?
+        cargo nextest run --no-run {{.TEST_NEXTEST_ARGS}} > .out/build-tests.log 2>&1 || status=$?
         if [ "$status" -ne 0 ]; then cat .out/build-tests.log; echo "build-tests: cargo nextest run --no-run failed, exit $status"; exit 1; fi
         esc=$(printf '\033')
         LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" .out/build-tests.log | awk '/^ *Finished / { sub(/^ */, ""); line = $0 } END { print "build-tests: " line }'
@@ -749,13 +754,14 @@ tasks:
       ran; and when its log has a cargo Compiling line, naming build-tests, which builds its
       binaries before the clock (task compile-check).
     env:
-      RUSTFLAGS: -D warnings
+      RUSTFLAGS: '{{.TEST_RUSTFLAGS}}'
     silent: true
     cmds:
       - mkdir -p .out
       - |
+        if [ -z '{{.TEST_RUSTFLAGS}}' ] || [ -z '{{.TEST_NEXTEST_ARGS}}' ]; then echo "test: TEST_RUSTFLAGS or TEST_NEXTEST_ARGS is empty; taskfiles/realm-places.yml defines them"; exit 1; fi
         status=0
-        cargo nextest run --workspace --locked --profile default > .out/test.log 2>&1 || status=$?
+        cargo nextest run {{.TEST_NEXTEST_ARGS}} > .out/test.log 2>&1 || status=$?
         echo "$status" > .out/test.status
       - task: nextest-report
         vars: {STEP: test, PREFIX: '', LOG: .out/test.log, STATUS: .out/test.status, JUNIT: target/nextest/default/junit.xml, MIN_PASSED: '1', BUILT_BY: build-tests}

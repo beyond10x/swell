@@ -7,7 +7,8 @@
 //! (`#sec-tostring`, step 2) that every method of `String.prototype` meets when its `this` or an
 //! argument is a Symbol; then Symbol keys, Symbol values, a Symbol `this` and Symbol objects
 //! through the other builtins of slice 3, and a walk that calls every function of the realm
-//! with a Symbol in each place.
+//! with a Symbol in each place, in parts that read the places of the functions from
+//! `tests/fixtures/realm_places.txt`.
 //!
 //! Scripts run in sloppy and in strict code. No test uses an iterator, `for`-`of` or a spread.
 //! Run also with the feature `collect-every-safe-point`.
@@ -347,7 +348,10 @@ const FURTHER_ROOTS: &[(&str, &str)] = &[
 /// which throws a TypeError for a `this` that is not callable
 /// (`#sec-function.prototype.tostring`, step 4). The walk runs no script, so that with the
 /// feature `collect-every-safe-point` it pays a collection per call of a builtin, not one per
-/// instruction of a walk in script.
+/// instruction of a walk in script. Only [`the_realm_places_file_equals_the_walk`] makes it,
+/// in the default mode: in the collect mode the walk alone is over that mode's bound, so the
+/// parts read its places from [`REALM_PLACES`] instead.
+#[cfg(not(feature = "collect-every-safe-point"))]
 fn functions_of_the_realm(
     cx: &mut Cx<'_, TestHost>,
     global: ObjectRef,
@@ -461,12 +465,12 @@ fn answer(cx: &mut Cx<'_, TestHost>, completion: swell::Completion<Value>) -> St
     }
 }
 
-/// How many of the four places of a Symbol the walk of
-/// [`every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error`] tries per
-/// function: all four, or the first two (`this` and the first argument) in the gate
-/// with the feature `collect-every-safe-point`, where every call of a builtin collects, unless
-/// `SWELL_FULL_COUNTS=1` (the lane `slow`) asks for all four. With all four that mode took
-/// 1.8 CPU seconds and 15 to 30 s of wall time at a load of 75 to 100 on 18 cores.
+/// How many of the four places of a Symbol a part of the walk ([`walk_part`]) tries per
+/// function: all four, or the first two (`this` and the first argument) in the gate with the
+/// feature `collect-every-safe-point`, where every call of a builtin collects, unless
+/// `SWELL_FULL_COUNTS=1` (the lane `slow`) asks for all four. On `557206e`, 344 places in 2
+/// parts, the slowest part took 0.021 CPU seconds alone in the default mode, 0.319 in the
+/// collect mode at this gate count and 0.687 there at the full count.
 fn places_per_function() -> usize {
     if cfg!(feature = "collect-every-safe-point")
         && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
@@ -477,22 +481,268 @@ fn places_per_function() -> usize {
     }
 }
 
-/// `#sec-tostring` and `#sec-tonumber`, step 2 of each: a builtin that converts a Symbol to a
-/// String or a Number throws a TypeError; one that converts it to an object or a property key,
-/// or keeps it, answers. Every function of the realm a walk reaches under a String or a Symbol
-/// key from the global object and from the [`FURTHER_ROOTS`] (144 functions on the base of
-/// `story:symbol-values-in-core-builtins`; the count is printed) is called with a Symbol as
-/// `this` and with a Symbol as its first, second and third argument (`this` the object that
-/// holds it, 0 before the Symbol), 576 calls (288 at the gate count of
-/// [`places_per_function`]), and each call answers or throws a TypeError, but for the ten
-/// calls below whose clauses throw another error before or without the Symbol: no termination,
-/// and the agent stays alive. `%AsyncFunction%` is among the functions reached.
-#[test]
-fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error() {
-    let places = places_per_function();
+/// The file of the places of the walk's functions, as the messages name it: two comment lines,
+/// then one place per line in the order of the list of `functions_of_the_realm`. The task
+/// `realm-places-expected` writes it and nothing else does;
+/// [`the_realm_places_file_equals_the_walk`] holds it equal to the walk.
+const REALM_PLACES: &str = "crates/swell/tests/fixtures/realm_places.txt";
+
+/// The least number of places the file holds (the walk's old floor of 100 functions).
+const LEAST_PLACES: usize = 100;
+
+/// The text of [`REALM_PLACES`], read at run time.
+fn realm_places_text() -> String {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/realm_places.txt"
+    );
+    std::fs::read_to_string(path).unwrap_or_else(|error| panic!("{path}: {error}"))
+}
+
+/// The place lines of [`REALM_PLACES`], lines 3 to the end, each with its number, counted from
+/// 1 with the two comment lines.
+fn realm_places() -> Vec<(usize, String)> {
+    realm_places_text()
+        .lines()
+        .enumerate()
+        .skip(2)
+        .map(|(index, line)| (index + 1, line.to_string()))
+        .collect()
+}
+
+/// A step of a place after its root.
+enum Step {
+    /// `.<name>`: a Get by the String key `<name>`.
+    Name(String),
+    /// `[Symbol(Symbol.<name>)]`: a Get by the well-known symbol `Symbol.<name>`.
+    Symbol(String),
+    /// `.[[Prototype]]`: [[GetPrototypeOf]].
+    Prototype,
+}
+
+impl core::fmt::Display for Step {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Step::Name(name) => write!(f, ".{name}"),
+            Step::Symbol(name) => write!(f, "[Symbol(Symbol.{name})]"),
+            Step::Prototype => write!(f, ".[[Prototype]]"),
+        }
+    }
+}
+
+/// A place parsed: its root (`None` for `global`, else the index of its entry of
+/// [`FURTHER_ROOTS`]), its steps, at least one, and the field of the accessor its last step
+/// names, `get` or `set`, if it ends at an accessor's function.
+struct Place {
+    root: Option<usize>,
+    steps: Vec<Step>,
+    accessor: Option<&'static str>,
+}
+
+/// `line` read into its root, its steps and its accessor suffix, or why it cannot be.
+fn parse_place(line: &str) -> Result<Place, String> {
+    let (body, accessor) = match line.rsplit_once(' ') {
+        Some((body, "get")) => (body, Some("get")),
+        Some((body, "set")) => (body, Some("set")),
+        _ => (line, None),
+    };
+    let (root, mut rest) = if let Some(rest) = body.strip_prefix("global") {
+        (None, rest)
+    } else if let Some((index, (_, path))) = FURTHER_ROOTS
+        .iter()
+        .enumerate()
+        .find(|(_, (_, path))| body.starts_with(path))
+    {
+        (Some(index), &body[path.len()..])
+    } else {
+        return Err("it starts neither with global nor with a path of FURTHER_ROOTS".to_string());
+    };
+    let mut steps = Vec::new();
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix(".[[Prototype]]") {
+            steps.push(Step::Prototype);
+            rest = after;
+        } else if let Some(after) = rest.strip_prefix('[') {
+            let Some((inner, after)) = after.split_once(']') else {
+                return Err(format!("the step {rest} has no ]"));
+            };
+            let Some(name) = inner
+                .strip_prefix("Symbol(Symbol.")
+                .and_then(|name| name.strip_suffix(')'))
+            else {
+                return Err(format!("the key [{inner}] is not Symbol(Symbol.<name>)"));
+            };
+            steps.push(Step::Symbol(name.to_string()));
+            rest = after;
+        } else if let Some(after) = rest.strip_prefix('.') {
+            let end = after.find(['.', '[']).unwrap_or(after.len());
+            if end == 0 {
+                return Err(format!("an empty name at {rest}"));
+            }
+            steps.push(Step::Name(after[..end].to_string()));
+            rest = &after[end..];
+        } else {
+            return Err(format!("no step at {rest}"));
+        }
+    }
+    match (steps.last(), accessor) {
+        (None, _) => Err("no step after the root".to_string()),
+        (Some(Step::Prototype), Some(field)) => Err(format!("a {field} of .[[Prototype]]")),
+        _ => Ok(Place {
+            root,
+            steps,
+            accessor,
+        }),
+    }
+}
+
+/// How a value a step reached is named in a message.
+fn described(cx: &Cx<'_, TestHost>, value: Value) -> String {
+    match value {
+        Value::Undefined => "undefined".to_string(),
+        Value::Null => "null".to_string(),
+        Value::Boolean(boolean) => boolean.to_string(),
+        Value::Number(number) => number.to_string(),
+        Value::String(_) => format!("the String {:?}", text(cx, value)),
+        Value::Symbol(_) => "a Symbol".to_string(),
+        Value::BigInt(_) => "a BigInt".to_string(),
+        Value::Object(_) => "an object".to_string(),
+    }
+}
+
+/// What [`resolve_place`] reads in a realm: its global object, the objects of
+/// [`FURTHER_ROOTS`], `Symbol`, `Object.getOwnPropertyDescriptor` and
+/// `Function.prototype.toString`.
+struct Resolver {
+    global: ObjectRef,
+    roots: Vec<ObjectRef>,
+    symbol_constructor: ObjectRef,
+    descriptor_of: Value,
+    to_string: Value,
+}
+
+impl Resolver {
+    fn new(cx: &mut Cx<'_, TestHost>, global: ObjectRef, roots: &[(ObjectRef, String)]) -> Self {
+        let symbol_constructor = get_object(cx, global, "Symbol");
+        let object_constructor = get_object(cx, global, "Object");
+        let descriptor_of = get(cx, object_constructor, "getOwnPropertyDescriptor");
+        let function_constructor = get_object(cx, global, "Function");
+        let function_prototype = get_object(cx, function_constructor, "prototype");
+        let to_string = get(cx, function_prototype, "toString");
+        Resolver {
+            global,
+            roots: roots.iter().map(|&(root, _)| root).collect(),
+            symbol_constructor,
+            descriptor_of,
+            to_string,
+        }
+    }
+
+    /// The key of a step that is a Get: a String, or the well-known symbol read as the Get of
+    /// its name on `Symbol`.
+    fn key(&self, cx: &mut Cx<'_, TestHost>, step: &Step) -> Value {
+        match step {
+            Step::Name(name) => Value::String(cx.new_string(name).unwrap()),
+            Step::Symbol(name) => get(cx, self.symbol_constructor, name),
+            Step::Prototype => Value::Undefined,
+        }
+    }
+
+    /// The value one step reaches from `from`; a Get that throws is a reason.
+    fn step(
+        &self,
+        cx: &mut Cx<'_, TestHost>,
+        from: ObjectRef,
+        step: &Step,
+    ) -> Result<Value, String> {
+        if let Step::Prototype = step {
+            return Ok(match cx.get_prototype_of(from).unwrap() {
+                Ok(Some(prototype)) => Value::Object(prototype),
+                Ok(None) => Value::Null,
+                Err(_) => return Err(format!("{step} threw")),
+            });
+        }
+        let key = self.key(cx, step);
+        let key = cx.to_property_key(key).unwrap().unwrap();
+        cx.get_property(from, key)
+            .unwrap()
+            .map_err(|_| format!("{step} threw"))
+    }
+}
+
+/// The holder and the function of `place` in the realm of `resolver`: the object its last step
+/// starts from, and what that step reaches, checked callable as the walk checks it (a call of
+/// `Function.prototype.toString` with it as `this`, which throws a TypeError for a `this` that
+/// is not callable, `#sec-function.prototype.tostring`; the host interface has no call that
+/// asks IsCallable). An accessor's function is read with one call of
+/// `Object.getOwnPropertyDescriptor` and the Get of `get` or `set` on the descriptor.
+fn resolve_place(
+    cx: &mut Cx<'_, TestHost>,
+    resolver: &Resolver,
+    place: &Place,
+) -> Result<(ObjectRef, Value), String> {
+    let mut at = match place.root {
+        None => resolver.global,
+        Some(index) => resolver.roots[index],
+    };
+    let Some((last, before)) = place.steps.split_last() else {
+        return Err("no step after the root".to_string());
+    };
+    for step in before {
+        match resolver.step(cx, at, step)? {
+            Value::Object(next) => at = next,
+            other => {
+                return Err(format!(
+                    "{step} reached {}, not an object",
+                    described(cx, other)
+                ));
+            }
+        }
+    }
+    let (reached, step) = match place.accessor {
+        None => (resolver.step(cx, at, last)?, last.to_string()),
+        Some(field) => {
+            let key = resolver.key(cx, last);
+            let descriptor = cx
+                .call(
+                    resolver.descriptor_of,
+                    Value::Undefined,
+                    &[Value::Object(at), key],
+                )
+                .unwrap()
+                .map_err(|_| format!("{last} {field}: Object.getOwnPropertyDescriptor threw"))?;
+            let Value::Object(descriptor) = descriptor else {
+                return Err(format!(
+                    "{last} {field} reached the descriptor {}, not an object",
+                    described(cx, descriptor)
+                ));
+            };
+            (get(cx, descriptor, field), format!("{last} {field}"))
+        }
+    };
+    if !matches!(reached, Value::Object(_)) {
+        return Err(format!(
+            "{step} reached {}, not an object",
+            described(cx, reached)
+        ));
+    }
+    match cx.call(resolver.to_string, reached, &[]) {
+        Ok(Ok(_)) => Ok((at, reached)),
+        Ok(Err(_)) => Err("reached an object that is not callable".to_string()),
+        Err(error) => Err(format!("the callable check ended with {error:?}")),
+    }
+}
+
+/// The agent, its bare realm, the objects of [`FURTHER_ROOTS`], and `f(cx, global, roots)` in
+/// the one entry of the realm; its answer is given back with the state of the agent after it.
+/// Every part of the walk ([`walk_part`]) and [`the_realm_places_file_equals_the_walk`] make
+/// their realm here, since [`REALM_PLACES`] holds the places of the bare realm.
+fn in_a_bare_realm<R>(
+    f: impl FnOnce(&mut Cx<'_, TestHost>, ObjectRef, &[(ObjectRef, String)]) -> R,
+) -> (AgentState, R) {
     let mut agent = agent().unwrap();
-    // The bare realm, never padded (an exception of `support::host::create_realm`): the walk
-    // asserts over every function of the realm and prints their count.
+    // The bare realm, never padded (an exception of `support::host::create_realm`): the file of
+    // places holds the functions of the bare realm, and the walk asserts over every one of them.
     let HostOutcome::Normal(realm) = agent.create_realm(None, None).unwrap() else {
         panic!("create_realm did not answer Normal");
     };
@@ -506,110 +756,569 @@ fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error() {
             (root, path.to_string())
         })
         .collect();
-    let mut reached = Vec::new();
-    let (called, found) = agent
+    let answer = agent
         .with_cx(&realm, |cx| {
             let global = object(cx, &global_root);
             let roots: Vec<(ObjectRef, String)> = further
                 .iter()
                 .map(|(root, path)| (object(cx, root), path.clone()))
                 .collect();
-            let symbol_constructor = get(cx, global, "Symbol");
-            let description = Value::String(cx.new_string("probe").unwrap());
-            let symbol = cx
-                .call(symbol_constructor, Value::Undefined, &[description])
-                .unwrap()
-                .unwrap();
-            let symbol_root = cx.root(symbol).unwrap();
-            let functions = functions_of_the_realm(cx, global, &roots);
-            reached = functions
-                .iter()
-                .map(|(place, _, _)| place.clone())
-                .collect();
-            let mut found = Vec::new();
-            let mut called = 0;
-            for (place, holder, function) in functions {
-                let symbol = cx.get(&symbol_root).unwrap();
-                let zero = Value::Number(0.0);
-                let holder = Value::Object(holder);
-                let calls: [(&str, Value, Vec<Value>); 4] = [
-                    ("this", symbol, vec![]),
-                    ("argument 1", holder, vec![symbol]),
-                    ("argument 2", holder, vec![zero, symbol]),
-                    ("argument 3", holder, vec![zero, zero, symbol]),
-                ];
-                for (what, this, args) in calls.into_iter().take(places) {
-                    called += 1;
-                    let completion = match cx.call(function, this, &args) {
-                        Ok(completion) => completion,
-                        Err(error) => {
-                            found.push(format!("{place} ({what}): {error:?}"));
-                            return (called, found);
-                        }
-                    };
-                    let answer = answer(cx, completion);
-                    if answer != "normal" && answer != "TypeError" {
-                        found.push(format!("{place} ({what}): {answer}"));
-                    }
-                }
-            }
-            (called, found)
+            f(cx, global, &roots)
         })
         .unwrap();
-    println!("functions of the realm: {}, calls: {called}", reached.len());
-    assert_eq!(agent.state(), AgentState::Alive, "{found:#?}");
-    assert!(
-        reached
+    (agent.state(), answer)
+}
+
+/// The places of the walk, made again, equal [`REALM_PLACES`] line for line, and every place
+/// line resolves ([`resolve_place`]) to the holder and the function the walk holds it on. In the
+/// default mode only, where the walk takes about 0.05 CPU seconds; in the collect mode the walk
+/// alone is over that mode's bound. With `SWELL_REALM_PLACES_OUT` set it writes the walk's
+/// places to that path, one per line, and compares nothing: the task `realm-places-expected`
+/// writes the file from it. It prints `realm places: <t> lines of <file> equal the walk`.
+#[cfg(not(feature = "collect-every-safe-point"))]
+#[test]
+fn the_realm_places_file_equals_the_walk() {
+    let out = std::env::var("SWELL_REALM_PLACES_OUT").ok();
+    let file: Vec<(usize, String)> = match out {
+        Some(_) => Vec::new(),
+        None => realm_places(),
+    };
+    let (state, (walk, failure)) = in_a_bare_realm(|cx, global, roots| {
+        let functions = functions_of_the_realm(cx, global, roots);
+        let walk: Vec<String> = functions
             .iter()
-            .any(|place| place == "%AsyncFunction.prototype%.constructor"),
-        "{reached:#?}"
+            .map(|(place, _, _)| place.clone())
+            .collect();
+        if out.is_some() {
+            return (walk, None);
+        }
+        let lines: Vec<&String> = file.iter().map(|(_, line)| line).collect();
+        if lines.len() != walk.len() || lines.iter().zip(&walk).any(|(line, place)| *line != place)
+        {
+            let missing: Vec<&String> =
+                walk.iter().filter(|place| !lines.contains(place)).collect();
+            let unreached: Vec<&String> = lines
+                .iter()
+                .copied()
+                .filter(|line| !walk.contains(*line))
+                .collect();
+            let first = (0..walk.len().max(lines.len()))
+                .find(|&index| walk.get(index) != lines.get(index).copied())
+                .unwrap_or(0);
+            let side = |line: Option<&String>| line.map_or("none".to_string(), String::clone);
+            let failure = format!(
+                "realm places: the walk reaches {} places, the file holds {}; missing from the \
+                 file: {missing:?}; not reached by the walk: {unreached:?}; first line that \
+                 differs: {} (walk {}, file {}); slot --timeout 30m task realm-places-expected \
+                 writes the file again",
+                walk.len(),
+                lines.len(),
+                first + 3,
+                side(walk.get(first)),
+                side(lines.get(first).copied()),
+            );
+            return (walk, Some(failure));
+        }
+        let resolver = Resolver::new(cx, global, roots);
+        for ((k, line), (_, holder, function)) in file.iter().zip(&functions) {
+            let resolved = parse_place(line).and_then(|place| resolve_place(cx, &resolver, &place));
+            let (found_holder, found_function) = match resolved {
+                Ok(found) => found,
+                Err(reason) => {
+                    return (
+                        walk,
+                        Some(format!("realm places: line {k} \"{line}\": {reason}")),
+                    );
+                }
+            };
+            if found_holder != *holder || found_function != *function {
+                let same = |same: bool| if same { "same" } else { "other" };
+                let failure = format!(
+                    "realm places: line {k} \"{line}\" resolves to another holder or function \
+                     than the walk's (holder {}, function {})",
+                    same(found_holder == *holder),
+                    same(found_function == *function),
+                );
+                return (walk, Some(failure));
+            }
+        }
+        (walk, None)
+    });
+    assert_eq!(state, AgentState::Alive);
+    if let Some(path) = out {
+        let mut text = walk.join("\n");
+        text.push('\n');
+        std::fs::write(&path, text).unwrap_or_else(|error| panic!("{path}: {error}"));
+        println!("realm places: {} places written to {path}", walk.len());
+        return;
+    }
+    if let Some(failure) = failure {
+        panic!("{failure}");
+    }
+    println!(
+        "realm places: {} lines of {REALM_PLACES} equal the walk",
+        walk.len()
     );
-    // The other errors the clauses give, none of them from the Symbol: `RegExp` with the flags
-    // 0, whose ToString "0" is no flag, so the SyntaxError of RegExpInitialize comes before any
-    // Symbol is read (`#sec-regexpinitialize`, steps 5 and 6); `JSON.parse` and
-    // `JSON.rawJSON` with no argument parse ToString(undefined), "undefined", which is no JSON
-    // text (`#sec-json.parse`, step 2; `#sec-json.rawjson`, step 4); `with` of a Symbol `this`
-    // reads the length 0 of its Symbol object, and the index 0 is not below it
-    // (`#sec-array.prototype.with`, step 7); `normalize` of `String.prototype` with the form 0,
-    // whose ToString "0" is no form name, so the RangeError of the form comes before any Symbol
-    // is read (`#sec-string.prototype.normalize`, step 4; `#sec-validatestringoption`); and
-    // `toString` of `Number.prototype` with the radix 0 (`#sec-number.prototype.tostring`, step
-    // 4) and its `toPrecision` with the precision 0 (`#sec-number.prototype.toprecision`, step
-    // 6).
-    let expected: Vec<&str> = [
-        ("global.RegExp (argument 3): SyntaxError", 4),
-        ("global.JSON.parse (this): SyntaxError", 1),
-        ("global.JSON.rawJSON (this): SyntaxError", 1),
-        ("global.Array.prototype.with (this): RangeError", 1),
-        (
-            "global.String.prototype.normalize (argument 2): RangeError",
-            3,
-        ),
-        (
-            "global.String.prototype.normalize (argument 3): RangeError",
-            4,
-        ),
-        (
-            "global.Number.prototype.toString (argument 2): RangeError",
-            3,
-        ),
-        (
-            "global.Number.prototype.toString (argument 3): RangeError",
-            4,
-        ),
-        (
-            "global.Number.prototype.toPrecision (argument 2): RangeError",
-            3,
-        ),
-        (
-            "global.Number.prototype.toPrecision (argument 3): RangeError",
-            4,
-        ),
-    ]
-    .into_iter()
-    .filter(|&(_, place)| place <= places)
-    .map(|(line, _)| line)
-    .collect();
-    assert_eq!(found, expected);
-    assert!(called >= 100 * places, "only {called} calls");
+}
+
+/// FNV-1a, 64 bit, over the UTF-8 bytes of `line`: offset basis `0xcbf29ce484222325`, prime
+/// `0x100000001b3`, each byte XORed in and then the product taken modulo 2^64.
+fn place_hash(line: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in line.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// The place lines of part `part` of [`WALK_PARTS`], in the order of the file: each line whose
+/// [`place_hash`] leaves `part` when divided by the number of parts. A function the realm gains
+/// or loses moves no other place to another part; only a change of the number of parts does.
+fn walk_part_places(part: usize, places: &[(usize, String)]) -> Vec<(usize, String)> {
+    places
+        .iter()
+        .filter(|(_, line)| place_hash(line) % WALK_PARTS.len() as u64 == part as u64)
+        .cloned()
+        .collect()
+}
+
+/// When a row of [`WALK_EXPECTED`] is met.
+#[derive(Clone, Copy, Debug)]
+enum When {
+    /// Always: the clause throws before the Symbol is read, whatever earlier calls left in the
+    /// realm.
+    Always,
+    /// When the index is at least the length of the call's `this`, the holder, read before the
+    /// call as LengthOfArrayLike reads it (`#sec-lengthofarraylike`): the length is what earlier
+    /// calls of the same realm left in the holder.
+    IndexAtLeastLength(u32),
+}
+
+/// A call of the walk whose clause throws an error other than a TypeError.
+struct WalkRow {
+    /// The place of the function.
+    function: &'static str,
+    /// The place of the Symbol: `this` or `argument <i>`.
+    symbol: &'static str,
+    /// The name of the error.
+    error: &'static str,
+    /// The least number of places of [`places_per_function`] that reaches the call.
+    least: usize,
+    /// When the row is met.
+    when: When,
+}
+
+impl core::fmt::Display for WalkRow {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} ({}): {}", self.function, self.symbol, self.error)
+    }
+}
+
+/// The calls of the walk whose clauses throw an error other than a TypeError, none of them from
+/// the Symbol. `RegExp` with the flags 0, whose ToString "0" is no flag, so the SyntaxError of
+/// RegExpInitialize comes before any Symbol is read (`#sec-regexpinitialize`, steps 5 and 6);
+/// `JSON.parse` and `JSON.rawJSON` with no argument parse ToString(undefined), "undefined",
+/// which is no JSON text (`#sec-json.parse`, step 2; `#sec-json.rawjson`, step 4); `with` of a
+/// Symbol `this` reads the length 0 of its Symbol object, and the index 0 is not below it
+/// (`#sec-array.prototype.with`, step 7); `normalize` of `String.prototype` with the form 0,
+/// whose ToString "0" is no form name, so the RangeError of the form comes before any Symbol is
+/// read (`#sec-string.prototype.normalize`, step 4; `#sec-validatestringoption`); and
+/// `toString` of `Number.prototype` with the radix 0 (`#sec-number.prototype.tostring`, step 4)
+/// and its `toPrecision` with the precision 0 (`#sec-number.prototype.toprecision`, step 6).
+///
+/// The two rows of `with` with the Symbol as argument 2 or 3 carry a condition: `with` with the
+/// index 0 throws a RangeError when the index is at least the length of its `this`
+/// (`#sec-array.prototype.with`, step 7: "If actualIndex ≥ len, throw a RangeError"), before
+/// the Symbol is read. That `this` is %Array.prototype%, whose length is what earlier calls left:
+/// `global.Array.prototype.push`, earlier in the file, stores the Symbol in it when it is called
+/// with it as `this` and the Symbol as argument 1, in the same part.
+const WALK_EXPECTED: &[WalkRow] = &[
+    WalkRow {
+        function: "global.RegExp",
+        symbol: "argument 3",
+        error: "SyntaxError",
+        least: 4,
+        when: When::Always,
+    },
+    WalkRow {
+        function: "global.JSON.parse",
+        symbol: "this",
+        error: "SyntaxError",
+        least: 1,
+        when: When::Always,
+    },
+    WalkRow {
+        function: "global.JSON.rawJSON",
+        symbol: "this",
+        error: "SyntaxError",
+        least: 1,
+        when: When::Always,
+    },
+    WalkRow {
+        function: "global.Array.prototype.with",
+        symbol: "this",
+        error: "RangeError",
+        least: 1,
+        when: When::Always,
+    },
+    WalkRow {
+        function: "global.Array.prototype.with",
+        symbol: "argument 2",
+        error: "RangeError",
+        least: 3,
+        when: When::IndexAtLeastLength(0),
+    },
+    WalkRow {
+        function: "global.Array.prototype.with",
+        symbol: "argument 3",
+        error: "RangeError",
+        least: 4,
+        when: When::IndexAtLeastLength(0),
+    },
+    WalkRow {
+        function: "global.String.prototype.normalize",
+        symbol: "argument 2",
+        error: "RangeError",
+        least: 3,
+        when: When::Always,
+    },
+    WalkRow {
+        function: "global.String.prototype.normalize",
+        symbol: "argument 3",
+        error: "RangeError",
+        least: 4,
+        when: When::Always,
+    },
+    WalkRow {
+        function: "global.Number.prototype.toString",
+        symbol: "argument 2",
+        error: "RangeError",
+        least: 3,
+        when: When::Always,
+    },
+    WalkRow {
+        function: "global.Number.prototype.toString",
+        symbol: "argument 3",
+        error: "RangeError",
+        least: 4,
+        when: When::Always,
+    },
+    WalkRow {
+        function: "global.Number.prototype.toPrecision",
+        symbol: "argument 2",
+        error: "RangeError",
+        least: 3,
+        when: When::Always,
+    },
+    WalkRow {
+        function: "global.Number.prototype.toPrecision",
+        symbol: "argument 3",
+        error: "RangeError",
+        least: 4,
+        when: When::Always,
+    },
+];
+
+/// ToLength (`#sec-tolength`) of a Number: its integer part, clamped to 0 and 2^53 - 1.
+fn to_length(number: f64) -> f64 {
+    const MOST: f64 = 9_007_199_254_740_991.0;
+    if number.is_nan() || number <= 0.0 {
+        0.0
+    } else if number >= MOST {
+        MOST
+    } else {
+        number as u64 as f64
+    }
+}
+
+/// `#sec-tostring` and `#sec-tonumber`, step 2 of each: a builtin that converts a Symbol to a
+/// String or a Number throws a TypeError; one that converts it to an object or a property key,
+/// or keeps it, answers. Part `part` of [`WALK_PARTS`] takes the place lines of
+/// [`REALM_PLACES`] that [`walk_part_places`] gives it, resolves each and checks it callable
+/// ([`resolve_place`]) before its first call, since a call can change a property on a later
+/// place's path, and then calls each function, in the order of the file, with a Symbol as
+/// `this` and with a Symbol as its first, second and third argument (`this` the object that
+/// holds it, 0 before the Symbol), in as many of these places as [`places_per_function`] says.
+/// Each call answers or throws a TypeError, but for the calls of [`WALK_EXPECTED`] whose clauses
+/// throw another error before or without the Symbol, each met exactly when its condition holds:
+/// no termination, and the agent stays alive. The count of functions and of calls is printed:
+/// `walk part <p> of <n>: <f> of <t> places, <c> calls`.
+fn walk_part(part: usize) {
+    let n = WALK_PARTS.len();
+    let places = places_per_function();
+    let all = realm_places();
+    let mine = walk_part_places(part, &all);
+    let (state, (called, found, expected, differences)) = in_a_bare_realm(|cx, global, roots| {
+        let resolver = Resolver::new(cx, global, roots);
+        let description = Value::String(cx.new_string("probe").unwrap());
+        let symbol = cx
+            .call(
+                Value::Object(resolver.symbol_constructor),
+                Value::Undefined,
+                &[description],
+            )
+            .unwrap()
+            .unwrap();
+        let symbol_root = cx.root(symbol).unwrap();
+        let mut functions = Vec::new();
+        for (k, line) in &mine {
+            let resolved = parse_place(line).and_then(|place| resolve_place(cx, &resolver, &place));
+            match resolved {
+                Ok((holder, function)) => functions.push((line.as_str(), holder, function)),
+                Err(reason) => panic!("walk part {part} of {n}: line {k} \"{line}\": {reason}"),
+            }
+        }
+        let mut found = Vec::new();
+        let mut expected = Vec::new();
+        let mut differences = Vec::new();
+        let mut called = 0;
+        'functions: for (place, holder, function) in functions {
+            let symbol = cx.get(&symbol_root).unwrap();
+            let zero = Value::Number(0.0);
+            let this_holder = Value::Object(holder);
+            let calls: [(&str, Value, Vec<Value>); 4] = [
+                ("this", symbol, vec![]),
+                ("argument 1", this_holder, vec![symbol]),
+                ("argument 2", this_holder, vec![zero, symbol]),
+                ("argument 3", this_holder, vec![zero, zero, symbol]),
+            ];
+            for (what, this, args) in calls.into_iter().take(places) {
+                let row = WALK_EXPECTED
+                    .iter()
+                    .find(|row| row.function == place && row.symbol == what && row.least <= places);
+                // The condition of a row, read from the realm before the call.
+                let condition = match row {
+                    Some(
+                        row @ WalkRow {
+                            when: When::IndexAtLeastLength(index),
+                            ..
+                        },
+                    ) => {
+                        let length = get(cx, holder, "length");
+                        let Value::Number(number) = length else {
+                            panic!(
+                                "walk part {part} of {n}: the row {row} under {:?} read length \
+                                 {length:?}, not a Number",
+                                row.when
+                            );
+                        };
+                        let length = to_length(number);
+                        Some((length, f64::from(*index) >= length))
+                    }
+                    _ => None,
+                };
+                called += 1;
+                let completion = match cx.call(function, this, &args) {
+                    Ok(completion) => completion,
+                    Err(error) => {
+                        let line = format!("{place} ({what}): {error:?}");
+                        differences.push(format!(
+                            "walk part {part} of {n}: a row not in WALK_EXPECTED: {line}"
+                        ));
+                        found.push(line);
+                        break 'functions;
+                    }
+                };
+                let answer = answer(cx, completion);
+                let met = row.is_some_and(|row| row.error == answer);
+                let holds = condition.is_none_or(|(_, holds)| holds);
+                if let Some(row) = row {
+                    if holds {
+                        expected.push(row.to_string());
+                    }
+                    match condition {
+                        Some((length, holds)) if met != holds => differences.push(format!(
+                            "walk part {part} of {n}: the row {row} under {:?} read length \
+                             {length}: the condition is {holds} and the call answered {answer}",
+                            row.when
+                        )),
+                        None if !met => differences.push(format!(
+                            "walk part {part} of {n}: the row {row} was not met"
+                        )),
+                        _ => {}
+                    }
+                }
+                if answer != "normal" && answer != "TypeError" {
+                    let line = format!("{place} ({what}): {answer}");
+                    if !met {
+                        differences.push(format!(
+                            "walk part {part} of {n}: a row not in WALK_EXPECTED: {line}"
+                        ));
+                    }
+                    found.push(line);
+                }
+            }
+        }
+        (called, found, expected, differences)
+    });
+    println!(
+        "walk part {part} of {n}: {} of {} places, {called} calls",
+        mine.len(),
+        all.len()
+    );
+    assert_eq!(state, AgentState::Alive, "{found:#?}");
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+    assert_eq!(
+        found, expected,
+        "walk part {part} of {n}: the rows in the order of its calls"
+    );
+    assert_eq!(
+        called,
+        mine.len() * places,
+        "walk part {part} of {n}: calls"
+    );
+}
+
+/// The parts of the walk, [`WALK_PARTS`] and one test each. The invocation writes each test as
+/// `#[test]` and `fn <name> = <part>;`, so that `taskfiles/realm-room-tests.awk` sees each part
+/// by its name.
+macro_rules! walk_parts {
+    ($(#[$meta:meta])* const WALK_PARTS; $(#[test] fn $name:ident = $part:literal;)*) => {
+        $(#[$meta])*
+        const WALK_PARTS: &[usize] = &[$($part),*];
+        $(
+            #[test]
+            fn $name() {
+                walk_part($part);
+            }
+        )*
+    };
+}
+
+walk_parts!(
+    /// The parts of the walk, one test each ([`walk_part`]); part 0 keeps the name of the walk
+    /// before it was cut, the others are `..._part_<q>`, `<q>` the part's number plus 1.
+    ///
+    /// The number of parts follows two rules. There are at least 2 parts, always, so that the
+    /// partition, its cover test and the line that adds a part are held by the gate from the
+    /// start. Above 2, it is the smallest number from 2 to 8 for which the slowest part, each
+    /// measured alone, is at most four fifths of its bound in each of three cells: 1.2 CPU
+    /// seconds in the default mode, 1.6 in the collect mode at its gate count, 2.0 there at its
+    /// full count. A unit whose part is over adds lines here, measuring every part again at each
+    /// number (a hash gives no balance); past 8 parts, or with
+    /// `the_realm_places_file_equals_the_walk` over 1.2, the walk is a defect that gets a story.
+    /// The readings that chose 2 on `557206e`, the slowest part in CPU seconds per cell (default,
+    /// collect at the gate count, collect at the full count), 2 runs each, the higher kept, on the
+    /// pool's build node of 32 cores at a load of 7 to 19: 2 parts (181 + 163 places) 0.021,
+    /// 0.319 and 0.687; 3 parts (119 + 104 + 121) 0.016, 0.196 and 0.414.
+    const WALK_PARTS;
+    #[test]
+    fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error = 0;
+    #[test]
+    fn every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error_part_2 = 1;
+);
+
+/// The parts of the walk cover the file of places: [`REALM_PLACES`] has its two comment lines
+/// first and no other, no blank line and a final newline; [`WALK_PARTS`] is numbered from 0
+/// without a gap and has at least 2 parts; every place line parses ([`parse_place`]) and is on
+/// one line only; the place lines of [`walk_part_places`] of all parts are the place lines of
+/// the file, each once, and no part holds more than twice the ceiling of their mean; each row
+/// of [`WALK_EXPECTED`] names a place the file holds exactly once, so that no part drops a row
+/// unseen, and a row with a condition names a call `argument <i>`, whose `this` is the holder;
+/// `%AsyncFunction.prototype%.constructor` is a place; and the file holds at least
+/// [`LEAST_PLACES`] places. It reads the file and makes no agent, and prints `places of the
+/// realm: <t>, in <n> parts: <f0> + <f1> + ...`.
+#[test]
+fn the_parts_of_the_walk_cover_every_function_of_the_realm() {
+    let text = realm_places_text();
+    let file = REALM_PLACES;
+    for (index, line) in text.lines().enumerate() {
+        let k = index + 1;
+        if k <= 2 {
+            assert!(
+                line.starts_with('#'),
+                "line {k} of {file} does not start with #"
+            );
+        } else {
+            assert!(
+                !line.starts_with('#'),
+                "line {k} of {file} starts with #; only lines 1 and 2 may"
+            );
+        }
+        assert!(!line.trim().is_empty(), "line {k} of {file} is blank");
+    }
+    assert!(text.ends_with('\n'), "{file} does not end with a newline");
+    let n = WALK_PARTS.len();
+    assert_eq!(
+        WALK_PARTS,
+        (0..n).collect::<Vec<usize>>(),
+        "WALK_PARTS is {WALK_PARTS:?}, not 0 to {}",
+        n.saturating_sub(1)
+    );
+    assert!(n >= 2, "WALK_PARTS has {n} part(s), at least 2");
+    let places = realm_places();
+    for (k, line) in &places {
+        if let Err(reason) = parse_place(line) {
+            panic!("line {k} of {file}: \"{line}\": {reason}");
+        }
+    }
+    for (_, place) in &places {
+        let lines = places.iter().filter(|(_, line)| line == place).count();
+        assert_eq!(
+            lines, 1,
+            "the place \"{place}\" is on {lines} lines of {file}"
+        );
+    }
+    let parts: Vec<Vec<(usize, String)>> = WALK_PARTS
+        .iter()
+        .map(|&part| walk_part_places(part, &places))
+        .collect();
+    let sizes: Vec<String> = parts.iter().map(|part| part.len().to_string()).collect();
+    println!(
+        "places of the realm: {}, in {n} parts: {}",
+        places.len(),
+        sizes.join(" + ")
+    );
+    let owners = |place: &(usize, String)| parts.iter().filter(|part| part.contains(place)).count();
+    let in_no_part: Vec<&String> = places
+        .iter()
+        .filter(|place| owners(place) == 0)
+        .map(|(_, line)| line)
+        .collect();
+    let in_more_parts: Vec<&String> = places
+        .iter()
+        .filter(|place| owners(place) > 1)
+        .map(|(_, line)| line)
+        .collect();
+    assert!(
+        in_no_part.is_empty() && in_more_parts.is_empty(),
+        "places of the file in no part: {in_no_part:?}; in more than one part: {in_more_parts:?}"
+    );
+    let ceiling = places.len().div_ceil(n);
+    for (part, held) in parts.iter().enumerate() {
+        assert!(
+            held.len() <= 2 * ceiling,
+            "part {part} of {n} holds {} places, more than twice {ceiling}, the ceiling of {} / {n}",
+            held.len(),
+            places.len()
+        );
+    }
+    for row in WALK_EXPECTED {
+        let lines = places
+            .iter()
+            .filter(|(_, line)| line == row.function)
+            .count();
+        assert_eq!(
+            lines, 1,
+            "the row \"{row}\" of WALK_EXPECTED names a place the file holds {lines} times"
+        );
+        if let When::IndexAtLeastLength(_) = row.when {
+            assert!(
+                row.symbol.starts_with("argument "),
+                "the row {row} carries a condition on a call whose this is not the holder"
+            );
+        }
+    }
+    assert!(
+        places
+            .iter()
+            .any(|(_, line)| line == "%AsyncFunction.prototype%.constructor"),
+        "the file has no line %AsyncFunction.prototype%.constructor"
+    );
+    assert!(
+        places.len() >= LEAST_PLACES,
+        "the file holds {} places, at least {LEAST_PLACES}",
+        places.len()
+    );
 }
