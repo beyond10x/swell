@@ -23,7 +23,7 @@ scope:
   path: crates/swell/tests/builtins_symbol_values.rs
 - confidence: cited
   path: crates/swell/tests/main.rs
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T06:32:20Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T06:32:20Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
@@ -73,3 +73,46 @@ test262. The full run is not the unit's: the unit runs the runner on a part of t
 ## Out of scope
 
 `WeakMap.prototype.getOrInsert*` (`story:weak-map-and-weak-set`); the rest of `Map` (`story:map-and-set`); the cases of these methods that use a BigInt (`docs/plan/slice-09/close-later.tsv`, the conformance close).
+
+## As delivered
+
+The unit `upsert` of wave big-2 delivered the story on `impl/upsert` (one correction after
+the adversary's pass), merged into `wave/big-2`. Where the delivery differs from the text
+above:
+
+- The key coercion of `Map.groupBy` is named `collection`, not `zero`: the pinned draft
+  (`#sec-groupby`, "keyCoercion (property or collection)") names it so, and the code follows
+  the draft (`KeyCoercion::Collection` in `builtins/object/from_entries.rs`).
+- 15 tests under `builtins_map_upsert::` (14 in a collect build), not 11. Added after the
+  adversary's pass: `get_or_insert_computed_keeps_a_key_only_its_arguments_hold` (red in a
+  collect build with an activation that keeps no copy of its arguments),
+  `one_growing_group_ends_at_the_memory_budget` (default build only; red with an Array's
+  dense storage grown without a charge: `Terminated(StepBudget) after 4000000 steps, 117646
+  elements`), `a_present_key_whose_value_is_undefined_is_found` and
+  `the_shared_steps_name_the_method_in_their_messages`.
+- "Each group and the table charged before they grow": the tests hold that both are charged
+  (a run with a new group per element and a run with one growing group each end at the
+  memory budget). That the table is charged before it grows, and not after, is held by
+  reading `object/keyed_entries.rs`; no reading of a test can tell the two orders apart.
+- The memory test `group_by_over_an_endless_iterable_ends_at_the_memory_budget` holds at
+  most 768 bytes charged per grouped element in both builds (measured 624 in the default
+  build at every realm size, 451 to 545 in a collect build) and, in the default build, at
+  least room / 768 = 342 grouped elements (419 measured). In a collect build how far the run
+  gets is not held: it ends at the first growth of an arena that the room of 64 KiB cannot
+  take, after 29 to 134 elements by the realm's size; the floor is 16 elements.
+- The messages of the steps `Object.groupBy` and `Map.groupBy` share are written with the
+  method's name; those of `Object.groupBy` read as before. The message of an index above
+  2^53 - 1 is pinned by no test: it needs that many elements.
+- The realm: `heap_bytes()` after `create_realm` 394,751 bytes (before 393,818),
+  `live_bytes()` 282,792 (before 281,115); the walk of `builtins_symbol_values` reads 347
+  places in parts of 183 + 164 (before 344, 181 + 163). No row of `WALK_EXPECTED` is added.
+- The part run: 202 cases, 389 runs, all passed; on the unit's base 165 cases passed and 37
+  failed (the story's 156 and 46 were counted on an earlier base).
+- Outside the story's writes: `crates/swell/tests/builtins_map_and_set.rs`, where
+  `the_surface_of_map_set_and_their_iterators` expects the two new own keys of
+  `%Map.prototype%` after `get`.
+- The reviews: `review-result:adversary-upsert-pass-1` (green on the code: two warnings and
+  five notes on the tests and texts; 100 cases of test262 that name `upsert` or
+  `array-grouping`, 196 of 198 runs passed, 123 on the base, none lost; the two that fail
+  need a BigInt literal) and the coordinator's read of the correction
+  (`review-result:upsert-correction-1-coordinator-read`).

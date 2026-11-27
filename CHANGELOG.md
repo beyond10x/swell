@@ -327,8 +327,40 @@ Every number below comes from the gate, `task check`, on the released commit.
   frame depth reach it. No instruction is added. The refusal `class static block is not supported
   before slice 8` is gone (`story:class-static-blocks`).
 
+- `Map.prototype.getOrInsert`, `Map.prototype.getOrInsertComputed` and `Map.groupBy`, a story
+  of the ninth slice (`story:map-upsert-and-group-by`), the group `builtins/map/upsert.rs`.
+  `getOrInsert` answers the value of a key the Map holds and appends the entry otherwise;
+  `getOrInsertComputed` checks that its callback is callable before the lookup, calls it only
+  for a missing key, with the key after CanonicalizeKeyedCollectionKey (`+0` for `-0`), and
+  stores its answer with one insertion of the entry table, so a key the callback set keeps its
+  place and takes the answer, with no second entry. A present key whose value is `undefined`
+  is found by both. `Map.groupBy` runs the loop of GroupBy that `Object.groupBy` runs, now with
+  the keyCoercion collection beside property: keys compared by SameValueZero (`-0` and `+0` one
+  group, every NaN one group, objects by identity), the result Map made and kept before the
+  first element is read, each group's Array stored in its table when its key first appears.
+  One step per element before the callback; the table and each group's Array charged to the
+  memory budget (a run with one growing group and a run with a new group per element both end
+  at the budget; that the table is charged before it grows is held by reading
+  `object/keyed_entries.rs`, not by a test); the callbacks and `next` counted against the
+  depth bounds; an abrupt callback closes the iterator. The messages of the shared steps name
+  the method (`Map.groupBy called on undefined or null`, `Map.groupBy: the callback is not a
+  function`); those of `Object.groupBy` read as before. 15 tests in
+  `tests/builtins_map_upsert.rs` (14 with `collect-every-safe-point`).
+
 ### Changed
 
+- The realm holds the three functions more: `heap_bytes()` after `create_realm` reads 394,751
+  bytes, before 393,818; `live_bytes()` 282,792, before 281,115 (the test
+  `realm_padding::a_padded_realm_holds_k_functions_more`, k = 0; at k = 200 645,964 and 428,053,
+  before 645,031 and 426,376). The reading of HOST-187 is 398,621 bytes, unchanged, its bound
+  `BINDINGS_REALM_HEAP_BYTES` (506,112) unchanged; `heap_bytes()` in `host_187` after the build
+  793,372 and 795,036 (792,439 and 794,103), after the scripts 799,499 in the default mode and
+  790,919 in the collect mode (798,566 and 789,986). `host_186` unchanged: a host function
+  512, a host object 208, with 4,096 bytes of data 4,624 and 4,304, 300 definitions 107,816.
+- The walk of `builtins_symbol_values` reads 347 places
+  (`crates/swell/tests/fixtures/realm_places.txt`), before 344, in 2 parts of 183 + 164
+  (181 + 163); no row of `WALK_EXPECTED` added (each of the three throws the `TypeError` of
+  RequireInternalSlot, RequireObjectCoercible or IsCallable before a Symbol is read).
 - The walk that calls every function of the realm with a Symbol in each place runs in 2
   parts and reads the places of the functions from a committed file,
   `crates/swell/tests/fixtures/realm_places.txt` (344 places), which the task
