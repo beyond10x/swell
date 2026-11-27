@@ -483,8 +483,8 @@ impl<H: Host> Agent<H> {
     }
 
     /// Steps 1 and 2 of `hasOwnProperty` and `propertyIsEnumerable`: ToPropertyKey of V, then
-    /// ToObject of the this value. Neither ToObject nor the caller's step 3 runs code, so the
-    /// key's atom needs no keep.
+    /// ToObject of the this value. ToObject runs no code, and the caller's step 3 on a Proxy
+    /// keeps the key before its trap runs, so the key's atom needs no keep here.
     fn key_and_this_object(&mut self, this: Value, args: &[Value]) -> Completion<(Key, ObjectRef)> {
         let key = self.to_property_key(argument(args, 0))?;
         let object = self.to_object(this)?;
