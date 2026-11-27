@@ -47,7 +47,7 @@ scope:
   path: crates/syntax/tests/sources/held/private-name-in.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/private-name.js
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
@@ -106,3 +106,46 @@ test262. The full run is not the unit's. With the list as committed on the wave 
 ## Out of scope
 
 Running fields, private methods, private fields, static blocks and `#x in` (their stories); private names in eval code (`story:private-names-in-eval-code`); decorators and `nonextensible-applies-to-private` (excluded features, `conformance/test262/features.txt`); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `elements` of wave big-2 delivered the story on `impl/elements` (`bd71f105`,
+correction at `ae0397e9`), merged into `wave/big-2` at `5b25b85`. Where the delivery differs
+from the text above:
+
+- A YieldExpression or an AwaitExpression in the code of a field initializer is a SyntaxError
+  at its `yield` or `await` (`yield expression in a class field initializer`, `await expression
+  in a class field initializer`), a stated difference from the pinned draft's
+  `Initializer[+In, ?Yield, ?Await]`: a field initializer is the body of a function of its own
+  that is neither a generator nor an `async` function. The computed keys beside it read `yield`
+  and `await` with the [Yield] and [Await] around the class, as the draft does. In a static
+  block the parser clears both, and the early errors refuse `await` there. Test:
+  `sources::a_field_initializer_refuses_yield_and_await_expressions`.
+- `await` as an identifier is named by the code whose [Await] reserves it: `await may not be an
+  identifier in a class static block` in a static block, in a class nested in it and its field
+  initializers and in an arrow function there that is not `async`; `await may not be an
+  identifier in an async function` in an `async` function or arrow function, a static block's
+  included. Test: `sources::await_as_an_identifier_names_the_code_that_reserves_it`.
+- A static block has an arguments object when a direct `eval` in it, or in an arrow function in
+  it, can observe one, and only then; a field initializer and an arrow function have none.
+  Test: `scope::tests::a_static_block_has_an_arguments_object_only_for_a_direct_eval`.
+- A static private method makes no function of the instance elements. Test:
+  `parser::class::tests::a_static_private_method_makes_no_instance_elements`.
+- The tree gained two fields the text does not name: `ClassElement::Field { function, .. }`
+  (the `FieldInitializer` of the field's run, or the one of the instance elements) and
+  `Class { instance_elements, .. }`. `Class::children` visits a field's initializer through its
+  run's function only, in the order of the function numbers. A field whose key is computed is
+  numbered after the functions inside its key.
+- `crates/syntax/src/token.rs` is written, outside the Writes line: `TokenKind::PrivateName`.
+  `parser/function.rs` is not written: the context of a field initializer and a static block
+  is saved and restored by `element_context_open` and `element_context_close` in
+  `parser/class.rs`.
+- `#x in` holds `private name in` at the private name in the parse of the binary operators
+  (`Parser::private_in`), not in a function of `parser/class.rs`.
+- Counts of the base that differ from the text: `NESTING_KINDS` was `[&str; 64]` on the unit's
+  base (the text: 63) and is `[&str; 66]`, so the acceptance's `grep -c` reads `[&str; 66]`;
+  `crates/syntax/tests/sources/held/` went from 16 files to 24 (the text: 6 more), the two more
+  being `class-new-target-in-field-initializer.js` and `class-new-target-in-static-block.js`;
+  `crates/syntax/tests/sources/refused/` went from 11 files to 10.
+- The adversary's pass added 14 cases, one of them red before the correction (the field
+  initializer's `yield` and `await`, 42 mismatches); all 14 stay.
