@@ -17,9 +17,8 @@
 //!    defines a method, a getter or a setter, static or not, with a literal or a computed key;
 //!    [`Compiler::compile_private_method`] makes a private one's function and stores it in the
 //!    private record; [`Compiler::compile_field`] keeps a field's computed key in its hidden
-//!    binding of the class scope (`story:public-class-fields`); [`Compiler::compile_static_block`]
-//!    answers [`CompileError::Tree`] here: a source with a static block is held by the parser
-//!    until the story that replaces the function (`story:class-static-blocks`).
+//!    binding of the class scope (`story:public-class-fields`); a static block makes nothing
+//!    here ([`Compiler::compile_static_block`] answers its function, `story:class-static-blocks`).
 //! 4. The class's own name initialized with F; the initializer of the instance elements stored
 //!    in F's box when the class has some ([`Instruction::StoreInitializer`]); the static private
 //!    methods added to F ([`Compiler::static_private_adds`]); then the static elements called in
@@ -430,14 +429,17 @@ impl<'a, 'm> Compiler<'a, 'm> {
         Ok(())
     }
 
-    /// The template of a ClassStaticBlock (`#sec-runtime-semantics-classstaticblockdefinitionevaluation`),
-    /// which [`Compiler::static_calls`] calls. `story:class-static-blocks` replaces it; a source
-    /// with a static block is held until then.
-    fn compile_static_block(
-        &mut self,
-        _element: &ClassElement,
-    ) -> Result<FunctionId, CompileError> {
-        Err(malformed("a class static block"))
+    /// The template of a ClassStaticBlock (`#sec-runtime-semantics-classstaticblockdefinitionevaluation`):
+    /// the block's own function of kind `StaticBlock`, whose body `compile_function` compiles as
+    /// any function's, with its `var` scope, its declarations and an arguments object only for a
+    /// direct `eval` in its code (the resolver's `function`). [`Compiler::static_calls`] makes it
+    /// as a method with home object F and calls it with `this` F where the block stands; step 3
+    /// makes nothing for it.
+    fn compile_static_block(&mut self, element: &ClassElement) -> Result<FunctionId, CompileError> {
+        match element {
+            ClassElement::StaticBlock { function, .. } => Ok(*function),
+            _ => Err(malformed("a class static block")),
+        }
     }
 
     /// The end of step 1 (`#sec-runtime-semantics-classdefinitionevaluation`, steps 6 and 7;
