@@ -567,9 +567,9 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// (RelationalExpression : PrivateIdentifier in ShiftExpression, `#sec-relational-operators`,
     /// with [+In]): when the current token is a private name, the operator before it binds more
     /// loosely than `in`, and `in` follows, the name and `in` are consumed and pushed as a
-    /// pending operator whose right operand is read next; the construct holds `private name
-    /// in`. A private name anywhere else in an operand is a grammar error at it. Whether the
-    /// operator was pushed.
+    /// pending operator whose right operand is read next (it runs since
+    /// `story:private-fields-and-private-in`). A private name anywhere else in an operand is a
+    /// grammar error at it. Whether the operator was pushed.
     #[inline(never)]
     fn private_in(&mut self, base: usize, no_in: bool) -> R<bool> {
         if !matches!(self.tok.kind, TokenKind::PrivateName(_)) {
@@ -591,7 +591,6 @@ impl<'a, 'm> Parser<'a, 'm> {
             _ => return self.unexpected(),
         };
         let name = self.charged(name)?;
-        self.hold("private name in", 8, span);
         self.advance()?;
         self.advance()?;
         let left = self.push_expr(

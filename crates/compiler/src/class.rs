@@ -156,8 +156,11 @@ fn initializer_private_methods(
 /// or the fields of one run of static fields. `This` once, then per field its value (the
 /// initializer, or `undefined`) and `DefineField(k)` for a literal key, or the key read from its
 /// hidden binding, the value, `SetFunctionName` for an anonymous function (an anonymous class
-/// names itself, `SetClassName`) and `DefineComputedField` for a computed one; then `Pop`. Each
-/// is CreateDataPropertyOrThrow, which throws a `TypeError` where `this` refuses the property.
+/// names itself, `SetClassName`) and `DefineComputedField` for a computed one, or the value and
+/// `AddPrivateField` for a private one (PrivateFieldAdd, its Private Name read from the private
+/// record, with the room of its level, [`private_field_room`]); then `Pop`. A public field is
+/// CreateDataPropertyOrThrow, which throws a `TypeError` where `this` refuses the property; a
+/// private one throws where `this` has the field already.
 fn initializer_fields(
     c: &mut Compiler<'_, '_>,
     id: FunctionId,
@@ -170,9 +173,11 @@ fn initializer_fields(
         .copied()
         .ok_or_else(|| malformed("a field initializer outside a class"))?;
     let ast = c.ast;
+    let class = at.class(ast)?;
     let mut receiver = false;
-    for element in initializer_fields_of(at.class(ast)?, id, first) {
+    for (n, element) in initializer_fields_of(class, id, first).enumerate() {
         let ClassElement::Field {
+            is_static,
             key,
             initializer,
             span,
@@ -210,14 +215,38 @@ fn initializer_fields(
                 }
                 c.emit(Instruction::DefineComputedField, span)?;
             }
-            // `story:private-fields-and-private-in` adds the private add.
-            ClassKey::Private(_) => return Err(malformed("a private field")),
+            ClassKey::Private(_) => {
+                field_value(c, *initializer, span)?;
+                let n = u32::try_from(n).map_err(|_| CompileError::TooMany("fields"))?;
+                let Binding::Env { hops, slot } = c.binding(Site::PrivateField(id, n))? else {
+                    return Err(malformed("a private field's binding"));
+                };
+                let room = private_field_room(c, class, id, *is_static);
+                c.emit(
+                    Instruction::AddPrivateField {
+                        hops: narrow_hops(hops)?,
+                        slot: narrow_private(slot)?,
+                        room: narrow_private(room)?,
+                    },
+                    span,
+                )?;
+            }
         }
     }
     if receiver {
         c.emit(Instruction::Pop, f.span)?;
     }
     Ok(())
+}
+
+/// The room of the class level a private field of `class` belongs to
+/// ([`crate::resolve::Resolution::private_rooms`]): the elements the adds of the instance make,
+/// keyed by the initializer `id` of the instance elements, or, for a static field, those the
+/// adds to F make, keyed by the constructor. The private methods' adds carry the same number,
+/// so whichever add of a level comes first reserves room for all of them once.
+fn private_field_room(c: &Compiler<'_, '_>, class: &Class, id: FunctionId, is_static: bool) -> u32 {
+    let key = if is_static { class.constructor } else { id };
+    c.resolution.private_rooms.get(&key).copied().unwrap_or(0)
 }
 
 /// The value of a field: its initializer `e`, or `undefined` at `span` without one.

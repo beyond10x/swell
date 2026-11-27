@@ -194,6 +194,10 @@ pub(crate) enum Site {
     PrivateAddName(FunctionId),
     /// The binding of the function of `f`, from the same code as [`Site::PrivateAddName`].
     PrivateAddFunction(FunctionId),
+    /// The Private Name of the `n`th field (counted from 0) of the `FieldInitializer` function
+    /// `f` when that field's key is private, from the code of `f`, which adds the field
+    /// (PrivateFieldAdd, `class.rs`, `initializer_fields`).
+    PrivateField(FunctionId, u32),
     /// The hidden binding `this` of a derived constructor (`docs/design/engine.md`, "Classes",
     /// item 6), from the top of the function: the constructor itself, or an arrow function whose
     /// nearest function that is not an arrow function is one (or eval code whose context has
@@ -361,10 +365,10 @@ pub(crate) struct Resolution {
     /// pass 1 of the initializer adds them (`class.rs`, `initializer_private_methods`).
     pub initializer_methods: BTreeMap<FunctionId, Vec<FunctionId>>,
     /// The number of private elements the adds of one class level make, keyed by the
-    /// initializer of the instance elements for the methods, getters and setters that are not
-    /// static, and by the constructor for the static ones: the private names among them, a
-    /// getter and a setter of one name counted once. Each add carries it as its `room`
-    /// (`crate::bytecode::Instruction::AddPrivateMethod`).
+    /// initializer of the instance elements for the methods, getters, setters and fields that
+    /// are not static, and by the constructor for the static ones: the private names among them,
+    /// a getter and a setter of one name counted once. Each add carries it as its `room`
+    /// (`crate::bytecode::Instruction::AddPrivateMethod`, `AddPrivateField`).
     pub private_rooms: BTreeMap<FunctionId, u32>,
     /// The constructors of the classes with a heritage: each has the hidden binding `this`
     /// ([`Site::This`]) and returns by the derived rule (`class.rs`).
@@ -1452,7 +1456,8 @@ impl<'a, 'm> Resolver<'a, 'm> {
     }
 
     /// The reads of the hidden bindings of the computed keys of the fields that the
-    /// `FieldInitializer` function `id` defines, from the current scope, its own.
+    /// `FieldInitializer` function `id` defines, and of the Private Names of its private fields
+    /// ([`Site::PrivateField`]), from the current scope, its own.
     fn field_key_reads(&mut self, id: FunctionId) -> Result<(), CompileError> {
         let (at, first) = self
             .field_classes
@@ -1460,15 +1465,24 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .copied()
             .ok_or_else(|| malformed("a field initializer outside a class"))?;
         let ast = self.ast;
-        for element in initializer_fields_of(at.class(ast)?, id, first) {
-            if let ClassElement::Field {
-                key: ClassKey::Computed(e),
-                ..
-            } = element
-            {
-                let name = field_key_name(*e, self.m)?;
-                self.occur(Site::FieldKeyRead(*e), &name);
-                self.m.release(name);
+        for (n, element) in initializer_fields_of(at.class(ast)?, id, first).enumerate() {
+            match element {
+                ClassElement::Field {
+                    key: ClassKey::Computed(e),
+                    ..
+                } => {
+                    let name = field_key_name(*e, self.m)?;
+                    self.occur(Site::FieldKeyRead(*e), &name);
+                    self.m.release(name);
+                }
+                ClassElement::Field {
+                    key: ClassKey::Private(name),
+                    ..
+                } => {
+                    let n = u32::try_from(n).map_err(|_| CompileError::TooMany("fields"))?;
+                    self.occur(Site::PrivateField(id, n), &name.name);
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -1500,9 +1514,13 @@ impl<'a, 'm> Resolver<'a, 'm> {
                     self.m.insert(&mut self.named_by_key, f)?;
                 }
             }
-            // A private name names its function at compile time:
-            // `story:private-fields-and-private-in`.
-            ClassKey::Private(_) => {}
+            // A private name names its function at compile time, by its description, the
+            // name with its `#` (`#sec-runtime-semantics-classfielddefinitionevaluation`, step
+            // 3.a.ii: NamedEvaluation with the Private Name).
+            ClassKey::Private(name) => {
+                let units = self.m.utf16(&name.name)?;
+                self.give_name(f, units)?;
+            }
         }
         Ok(())
     }
@@ -1557,10 +1575,19 @@ impl<'a, 'm> Resolver<'a, 'm> {
                     function,
                     ..
                 } => (*is_static, name, *kind, *function),
+                // A private field is an element of its level of its own: no other element has
+                // its name (an early error), and its add carries the same room.
                 ClassElement::Field {
+                    is_static,
                     key: ClassKey::Private(name),
                     ..
                 } => {
+                    let room = if *is_static {
+                        &mut rooms.1
+                    } else {
+                        &mut rooms.0
+                    };
+                    *room = room.saturating_add(1);
                     self.declare(scope, &name.name);
                     continue;
                 }
@@ -1896,9 +1923,11 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 self.occur(Site::Expr(id), &name.name);
                 children.push(Walk::Expr(*object));
             }
-            // No source with `#x in o` reaches the compiler while it is held:
-            // `story:private-fields-and-private-in` replaces this arm.
-            Expr::PrivateIn { .. } => return Err(malformed("a private name in")),
+            // `#x in o` resolves `#x` as `o.#x` does; its right operand is any expression.
+            Expr::PrivateIn { name, right } => {
+                self.occur(Site::Expr(id), &name.name);
+                children.push(Walk::Expr(*right));
+            }
             Expr::New { callee, arguments } => {
                 children.push(Walk::Expr(*callee));
                 children.extend(arguments.iter().flatten().map(|e| Walk::Expr(*e)));

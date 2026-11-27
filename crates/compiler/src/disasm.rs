@@ -289,6 +289,10 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
             function_slot,
             room,
         } => format!("AddPrivateMethod {hops} {slot} {function_hops} {function_slot} room {room}"),
+        I::PrivateIn { hops, slot } => format!("PrivateIn {hops} {slot}"),
+        I::AddPrivateField { hops, slot, room } => {
+            format!("AddPrivateField {hops} {slot} room {room}")
+        }
         I::NewPrivateName { slot, name } => format!("NewPrivateName {slot} {}", s(name)),
         I::AssignImmutable(k) => format!("AssignImmutable {}", s(k)),
         I::GetGlobal(k) => format!("GetGlobal {}", s(k)),
