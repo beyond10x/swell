@@ -1550,6 +1550,61 @@ fn a_cycle_of_get_prototype_of_answers_ends_at_the_memory_budget() {
     assert_eq!(readings[1].1, readings[2].1, "{readings:?}");
 }
 
+/// `L` `for`-`in` loops in one entry over an ordinary object whose chain has no Proxy when the
+/// walk runs, so the loop reads it along [[GetPrototypeOf]] (`enumeration_has_property`): the
+/// body of the first key deletes the second and puts a Proxy `P` into the chain, whose
+/// `getPrototypeOf` trap answers a fresh Proxy of `{ b: 2 }` whose handler holds a String of
+/// 262,144 code units. The second key's turn holds each Proxy it meets while its traps run and
+/// releases it when it ends; the loops answer `2 * L` within `ROOM` over the reading of a realm
+/// that ran the setup, where `L` fresh Proxies held to the end of the entry need more (as in
+/// [`for_in_in_a_loop_gives_back_what_each_loop_held`]).
+#[test]
+fn for_in_in_a_loop_gives_back_what_each_filter_held() {
+    let (loops, room): (u32, u64) = if cfg!(feature = "collect-every-safe-point") {
+        (12, 3 << 19)
+    } else {
+        (20, 3 << 20)
+    };
+    let setup = "var T = { b: 2 }, kept = [];\n\
+                 var P = new Proxy({}, { getPrototypeOf: function () { return new Proxy(T, { pad: \"x\".repeat(262144) }); } });\n\
+                 function loop() { var o = { a: 1, b: 2 }, n = 0; for (var k in o) { if (k === \"a\") { delete o.b; Object.setPrototypeOf(o, P); } n++; } return n; }\n\
+                 0;";
+    let mut budget = limits();
+    budget.steps_per_entry = 1 << 40;
+    let mut probe = agent_with(budget).unwrap();
+    let probe_realm = realm(&mut probe);
+    assert_eq!(
+        eval_text(&mut probe, &probe_realm, setup),
+        Outcome::Normal("0".to_string())
+    );
+    collect(&mut probe);
+    budget.memory_bytes = probe.heap_bytes().unwrap() + room;
+    let mut agent = agent_with(budget).unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &realm, setup),
+        Outcome::Normal("0".to_string())
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            &format!("var n = 0; for (var i = 0; i < {loops}; i++) n += loop(); n;")
+        ),
+        Outcome::Normal(format!("{}", 2 * loops))
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            &format!(
+                "for (var i = 0; i < {loops}; i++) kept.push(Object.getPrototypeOf(P)); kept.length;"
+            )
+        ),
+        Outcome::Terminated(Termination::MemoryBudget)
+    );
+}
+
 /// The steps of a `for`-`in` over an object with three own keys, and over a chain of three
 /// ordinary objects in which the body deletes a key before its turn: the walk that reads
 /// whether a key is still a property costs, for ordinary objects, what HasProperty cost (91 and
@@ -1857,6 +1912,50 @@ fn for_in_visits_the_keys_of_the_prototype_the_trap_answered_first() {
     );
 }
 
+/// The keys of an ordinary object before the first Proxy of the chain (found and
+/// visited), deleted by that Proxy's `ownKeys` trap, which then collects: the walk holds them
+/// (`keep_visited`), and the filter hands each to the Proxy's `getOwnPropertyDescriptor` trap,
+/// which reads it as a String and collects again. Both keys were deleted before their turn.
+/// The keys are made at run time and named by no literal of the script, so no code holds
+/// their atoms.
+#[test]
+fn for_in_holds_the_visited_keys_a_trap_deletes_from_an_object_before_it() {
+    answers_with_junk(
+        r#"var o = {}; o["o" + 1] = 1; o["o" + 2] = 2;
+        var log = [];
+        var q = new Proxy({}, {
+          ownKeys: function () { delete o["o" + 1]; delete o["o" + 2]; junk(); return []; },
+          getOwnPropertyDescriptor: function (t, k) { log.push(String(k)); junk(); return undefined; }
+        });
+        Object.setPrototypeOf(o, q);
+        var r = [];
+        for (var k in o) r.push(k);
+        r.join() + "|" + log.join() + "|" + Object.keys(o).length;"#,
+        "|o1,o2|0",
+    );
+}
+
+/// The keys of an ordinary object after the first Proxy of the chain (the prototype a
+/// `getPrototypeOf` trap answers), deleted by the `ownKeys` trap of the next Proxy, which then
+/// collects: the walk holds them (`held_own_keys` for every object from the first Proxy on).
+#[test]
+fn for_in_holds_the_keys_of_an_ordinary_object_after_the_first_proxy() {
+    answers_with_junk(
+        r#"var x = {}; x["x" + 1] = 1; x["x" + 2] = 2;
+        var log = [];
+        var q = new Proxy({}, {
+          ownKeys: function () { delete x["x" + 1]; delete x["x" + 2]; junk(); return []; },
+          getOwnPropertyDescriptor: function (t, k) { log.push(String(k)); junk(); return undefined; }
+        });
+        Object.setPrototypeOf(x, q);
+        var p = new Proxy({}, { getPrototypeOf: function () { return x; } });
+        var r = [];
+        for (var k in p) r.push(k);
+        r.join() + "|" + log.join() + "|" + Object.keys(x).length;"#,
+        "|x1,x2|0",
+    );
+}
+
 /// `c`, a chain of three Proxies of 20 keys each (`k<level>_<i>`), whose traps answer
 /// arrays and descriptor objects made once, so that a run makes little garbage; `pads` holds
 /// the Strings that take the room of the memory sweep.
@@ -2061,6 +2160,61 @@ fn memory_budget_at_every_64_bytes_through_for_in_over_three_proxies() {
 #[test]
 fn memory_budget_at_every_64_bytes_through_json_stringify_of_three_proxies() {
     memory_sweep("JSON.stringify(c).length");
+}
+
+/// `L` `for`-`in` loops in one entry over a Proxy whose `getPrototypeOf` trap answers a
+/// fresh Proxy of `{ a: 1, b: 2 }` at each call, whose handler holds a String of 262,144 code
+/// units. The walk of each loop holds the fresh Proxy it met and records it in the chain the
+/// loop reads (D66); when the walk ends it releases what it kept, and when the loop ends its
+/// chain goes with its enumerator, so the Proxy is garbage. The
+/// loops answer `2 * L` within `ROOM` over the reading of a realm that ran the setup, where
+/// `L` of them held to the end of the entry need more: an entry that keeps each fresh Proxy in
+/// an array ends in `Terminated(MemoryBudget)`. Its loop over an ordinary object, where each
+/// key's turn holds what it meets: [`for_in_in_a_loop_gives_back_what_each_filter_held`].
+#[test]
+fn for_in_in_a_loop_gives_back_what_each_loop_held() {
+    let (loops, room): (u32, u64) = if cfg!(feature = "collect-every-safe-point") {
+        (12, 3 << 19)
+    } else {
+        (20, 3 << 20)
+    };
+    let setup = "var T = { a: 1, b: 2 }, kept = [];\n\
+                 var P = new Proxy({}, { getPrototypeOf: function () { return new Proxy(T, { pad: \"x\".repeat(262144) }); } });\n\
+                 0;";
+    let mut budget = limits();
+    budget.steps_per_entry = 1 << 40;
+    let mut probe = agent_with(budget).unwrap();
+    let probe_realm = realm(&mut probe);
+    assert_eq!(
+        eval_text(&mut probe, &probe_realm, setup),
+        Outcome::Normal("0".to_string())
+    );
+    collect(&mut probe);
+    budget.memory_bytes = probe.heap_bytes().unwrap() + room;
+    let mut agent = agent_with(budget).unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &realm, setup),
+        Outcome::Normal("0".to_string())
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            &format!("var n = 0; for (var i = 0; i < {loops}; i++) for (var k in P) n++; n;")
+        ),
+        Outcome::Normal(format!("{}", 2 * loops))
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            &format!(
+                "for (var i = 0; i < {loops}; i++) kept.push(Object.getPrototypeOf(P)); kept.length;"
+            )
+        ),
+        Outcome::Terminated(Termination::MemoryBudget)
+    );
 }
 
 /// A `for`-`in` that meets a Proxy revoked by its body ends in the TypeError of the next
