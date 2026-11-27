@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slice-09-conformance-close
 kind: story
-status: active
+status: implemented
 title: 'Every run of slice 9 passes: the cases that need slice 8 or 12 move by rule lines, and passing cases of later slices come in'
 summary: At most 59 cases (118 runs) move to slices 8 and 12 with evidence in moves.tsv; the 2 incoming cases of slice 4 checked; close-into-09.tsv; section 12 and expected.txt; order 5.
 relations:
@@ -30,10 +30,11 @@ scope:
   path: docs/design/engine.md
 - confidence: inferred
   path: docs/plan/slice-09/close-into-09.tsv
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T06:32:21Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T06:32:21Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T08:55:31Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
