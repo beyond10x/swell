@@ -458,13 +458,13 @@ fn a_class_with_1000_private_methods() {
 
 /// How many instances [`instances_are_charged_to_the_memory_budget`] holds: the story's 10,000
 /// with `SWELL_FULL_COUNTS=1`, 2,000 in the gate (10,000 took 1.6 to 2.8 CPU s alone on the build
-/// node, over the 1.5 s bound), and 10 with a collection at every safe point, which marks the
+/// node, over the 1.5 s bound), and 3 with a collection at every safe point, which marks the
 /// whole heap at each of the loop's instructions (the story's 1,000 ran over 60 s there, 50 took
-/// 4.4 CPU s). Each instance adds the same two entries, so a list that is not charged fails at
-/// every count.
+/// 4.4 CPU s; with the three passes the test reads, 10 took 2.1 CPU s and 5 took 1.9). Each
+/// instance adds the same two entries, so a list that is not charged fails at every count.
 fn instances() -> u64 {
     if cfg!(feature = "collect-every-safe-point") {
-        10
+        3
     } else if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
         10_000
     } else {
@@ -486,7 +486,8 @@ const ROOM: u64 = if cfg!(feature = "collect-every-safe-point") {
 /// private methods holds its element list, charged with the object, so [`instances`] instances
 /// with two private methods take at least 16 bytes each more than as many instances of a class
 /// without (the list's charge: without it the two readings are equal); a loop that keeps such
-/// instances under a small budget ends in `Terminated(MemoryBudget)`, and leaks nothing.
+/// instances under a small budget, four per run of the loop (for the time), ends in
+/// `Terminated(MemoryBudget)`, and leaks nothing.
 #[test]
 fn instances_are_charged_to_the_memory_budget() {
     let count = instances();
@@ -552,7 +553,7 @@ fn instances_are_charged_to_the_memory_budget() {
         &mut agent,
         &small_realm,
         "(function () { class P { #m() {} get #a() { return 1; } }\n\
-           var keep = []; for (;;) keep.push(new P()); })();",
+           var keep = []; for (;;) keep.push(new P(), new P(), new P(), new P()); })();",
     );
     let mut readings = Vec::new();
     for _ in 0..3 {
@@ -1107,10 +1108,10 @@ fn budgets_never_leave_a_half_branded_instance() {
     }
 }
 
-/// How many instances [`an_instance_pays_for_the_room_of_its_list`] holds: 200, and 10 with a
-/// collection at every safe point (for the time).
+/// How many instances [`an_instance_pays_for_the_room_of_its_list`] holds: 200, and 4 with a
+/// collection at every safe point (for the time: 10 took 2.4 CPU s alone there).
 const ROOM_INSTANCES: u64 = if cfg!(feature = "collect-every-safe-point") {
-    10
+    4
 } else {
     200
 };
