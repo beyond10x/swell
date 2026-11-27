@@ -9,7 +9,10 @@ use crate::support;
 
 use support::host::{TestHost, agent_with, limits, realm};
 use support::script::{Outcome, define_function, eval_text};
-use swell::{Abrupt, Agent, AgentState, Completion, Cx, HostCall, Realm, Termination, Value};
+use swell::{
+    Abrupt, Agent, AgentState, Brand, Completion, Cx, HostCall, HostObjectSpec, PropertyKey,
+    Prototype, Realm, Root, Termination, Value,
+};
 
 /// HOST-69 (`html:killing-scripts`): `var f; try { while (true) {} } finally { f = 1; }` ends
 /// in `Terminated(StepBudget)`, and the script `f` then answers `Normal(undefined)`: the
@@ -162,6 +165,116 @@ fn host_70_agent_stays_alive_after_each_budget() {
 /// passed by 155 bytes in the collect gate.
 const AFTER_FILL_ROOM: u64 = 16 * 1024;
 
+/// The slots of the arena of objects that [`pin_objects`] leaves free in the collect mode: 16.
+const FREE_AFTER_THE_PINS: u64 = 16;
+
+/// The least rise of `heap_bytes()` that one object the host keeps cannot make by itself: 2 KiB.
+/// Such an object is charged its record's property table; an arena of objects that grows is
+/// charged its new slots, at least 16 of 212 bytes.
+const GROWTH_FLOOR: u64 = 2 * 1024;
+
+/// The brand of the objects [`pin_objects`] makes.
+const PIN_BRAND: Brand = Brand(188);
+
+/// The global object and the keys `pin` and `next` of a realm, rooted once, and the global `pin`
+/// declared (`null`), so that a call of [`pin_objects`] makes the objects it keeps and nothing
+/// else: no root, no string, no property of the global object.
+struct Pins {
+    global: Root,
+    pin: Root,
+    next: Root,
+}
+
+impl Pins {
+    fn new(agent: &mut Agent<TestHost>, realm: &Realm) -> Pins {
+        let global = support::host::global(agent, realm);
+        let (pin, next) = agent
+            .with_cx(realm, |cx| {
+                let object = support::host::object(cx, &global);
+                let pin = cx.new_string("pin").unwrap();
+                let next = cx.new_string("next").unwrap();
+                cx.set(object, PropertyKey::String(pin), Value::Null, true)
+                    .unwrap()
+                    .unwrap();
+                (
+                    cx.root(Value::String(pin)).unwrap(),
+                    cx.root(Value::String(next)).unwrap(),
+                )
+            })
+            .unwrap();
+        Pins { global, pin, next }
+    }
+}
+
+/// Keeps `count` more objects in the global `pin` of `realm`, as `count` runs of the script `pin
+/// = { next: pin };` would: each a host object with no prototype whose property `next` holds the
+/// one before it. The host makes them in one call, with no safe point, so that no collection runs
+/// while they are made.
+fn pin_objects(agent: &mut Agent<TestHost>, realm: &Realm, pins: &Pins, count: u64) {
+    agent
+        .with_cx(realm, |cx| {
+            let (Value::Object(global), Value::String(pin), Value::String(next)) = (
+                cx.get(&pins.global).unwrap(),
+                cx.get(&pins.pin).unwrap(),
+                cx.get(&pins.next).unwrap(),
+            ) else {
+                panic!("the roots of the pins");
+            };
+            let (pin, next) = (PropertyKey::String(pin), PropertyKey::String(next));
+            for _ in 0..count {
+                let previous = cx.get_property(global, pin).unwrap().unwrap();
+                let object = cx
+                    .new_host_object(HostObjectSpec {
+                        prototype: Prototype::Null,
+                        brand: PIN_BRAND,
+                        data: None,
+                        error_kind: None,
+                    })
+                    .unwrap()
+                    .unwrap();
+                cx.set(object, next, previous, true).unwrap().unwrap();
+                cx.set(global, pin, Value::Object(object), true)
+                    .unwrap()
+                    .unwrap();
+            }
+        })
+        .unwrap();
+}
+
+/// How many objects the host of
+/// [`an_agent_that_ended_in_memory_budget_runs_again_after_a_collection`] keeps before its probe
+/// and before its fill, so that [`FREE_AFTER_THE_PINS`] slots of the arena of objects of a fresh
+/// realm stay free: read in an agent of its own, which keeps one object at a time
+/// ([`pin_objects`]) until `heap_bytes()` rises by more than [`GROWTH_FLOOR`]. None in the
+/// default mode.
+///
+/// Why: the fill and the probe keep one object per iteration until the arena grows, and every
+/// instruction of theirs collects in the collect mode. On 2026-11-27 in that mode, in the test
+/// profile (opt-level 0), the arena of a fresh realm grew at 378,244 bytes, the fill made 645
+/// objects, most of them in the free slots below that growth, and the test took 5.1 s alone.
+/// The objects the host keeps take those slots with no safe point, so the probe and the fill
+/// meet the growth after about [`FREE_AFTER_THE_PINS`] objects, and the fill then makes what
+/// the room above the growth holds, as before.
+fn pins_before_the_fill() -> u64 {
+    if !cfg!(feature = "collect-every-safe-point") {
+        return 0;
+    }
+    let mut agent = support::host::agent().unwrap();
+    let realm = realm(&mut agent);
+    let pins = Pins::new(&mut agent, &realm);
+    let mut before = agent.heap_bytes().unwrap();
+    for kept in 0..1_u64 << 16 {
+        pin_objects(&mut agent, &realm, &pins, 1);
+        let after = agent.heap_bytes().unwrap();
+        if after.saturating_sub(before) > GROWTH_FLOOR {
+            // The objects kept before this one filled the arena.
+            return kept.saturating_sub(FREE_AFTER_THE_PINS);
+        }
+        before = after;
+    }
+    panic!("no growth of the arena of objects in 65,536 objects");
+}
+
 /// Where the arena of objects of `agent` grows next, as the fill below meets it: the script
 /// `a.push({});`, run once per entry on a global Array `a`, keeps one more object and one more
 /// element each time, as an iteration of the fill does, until one run raises `heap_bytes()` by
@@ -198,8 +311,9 @@ fn next_object_doubling(agent: &mut Agent<TestHost>, realm: &Realm) -> (u64, u64
 /// ([`next_object_doubling`]), until the arena of objects grows; the reading before that growth
 /// is `doubles_at` and the growth is
 /// `doubling`. The agent under test has `memory_bytes` `doubles_at + doubling` plus `room` (64
-/// KiB; 16 KiB in the gate with the collector at every safe point, where each safe point walks
-/// the whole heap; the lane `slow`, `SWELL_FULL_COUNTS=1`, gives 64 KiB there too) plus
+/// KiB; 4 KiB with the collector at every safe point, in the gate and in the lane `slow` alike,
+/// where each safe point walks the whole heap: with 64 KiB and the pins the test took 4.4 s
+/// alone in the lane's collect build on 2026-11-27, over its bound of 2.5) plus
 /// [`AFTER_FILL_ROOM`], which its host holds charged (`charge_host_bytes`) during the fill. So
 /// the fill below, which keeps every object it makes, passes that growth of the arena whatever
 /// the realm holds, and ends by memory about `room` further on (each iteration adds an element
@@ -212,6 +326,11 @@ fn next_object_doubling(agent: &mut Agent<TestHost>, realm: &Realm) -> (u64, u64
 /// [`AFTER_FILL_ROOM`] whatever the fill's last doublings did: `heap_bytes()` is at most
 /// `memory_bytes` after the termination (HOST-171), the collection lowers it, and the credit
 /// lowers it by that much.
+///
+/// In the collect mode the host of the probe and of the agent under test first keeps all but
+/// [`FREE_AFTER_THE_PINS`] of the free slots of the arena of objects
+/// ([`pins_before_the_fill`]), so that the probe and the fill meet the growth after a few
+/// objects rather than after every free slot of the realm.
 ///
 /// `n` and the answer of the second script are read with no allocation
 /// (`support::host::number_answer`): `eval_text` writes a Number as a String the engine makes,
@@ -237,17 +356,26 @@ fn next_object_doubling(agent: &mut Agent<TestHost>, realm: &Realm) -> (u64, u64
 /// the arena grew from 512 by 108,544 bytes at 286,682, and the fill made 760.
 #[test]
 fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
+    let kept = pins_before_the_fill();
     let (doubles_at, doubling) = {
         let mut probe = support::host::agent().unwrap();
         let realm = realm(&mut probe);
+        let pins = Pins::new(&mut probe, &realm);
+        pin_objects(&mut probe, &realm, &pins, kept);
         next_object_doubling(&mut probe, &realm)
     };
-    let room = if in_the_collect_gate() { 16 } else { 64 } * 1024;
+    let room = if cfg!(feature = "collect-every-safe-point") {
+        4
+    } else {
+        64
+    } * 1024;
     let mut limits = limits();
     limits.memory_bytes = doubles_at + doubling + room + AFTER_FILL_ROOM;
     let budget = limits.memory_bytes;
     let mut agent = agent_with(limits).unwrap();
     let realm = realm(&mut agent);
+    let pins = Pins::new(&mut agent, &realm);
+    pin_objects(&mut agent, &realm, &pins, kept);
     let held = agent
         .with_cx(&realm, |cx| cx.charge_host_bytes(AFTER_FILL_ROOM))
         .unwrap()

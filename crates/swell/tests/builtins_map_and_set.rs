@@ -759,11 +759,11 @@ fn answers_once(source: &str, expected: &str) {
 /// live iterators of every kind, one replaced and abandoned at random; `next` of one; and a
 /// `forEach` whose callback mutates both). Every answer is compared with the model: the
 /// order, the canonical key (`+0`), the value, `done` for ever, `size` and `delete`'s answer.
-#[test]
-fn random_operations_match_the_model_list_of_the_clauses() {
-    let ops = if collect_mode() { 12 } else { 2_000 };
+/// The script runs `ops` operations from `seed` and answers `mismatches <n>[ first: <what>],
+/// specials <r>`: `r` of the eight special keys were set at least once.
+fn random_operations(seed: u64, ops: u32) -> Outcome {
     let source = r#"
-var OPS = __OPS__, K = 40, seed = 20261126, i;
+var OPS = __OPS__, K = 40, seed = __SEED__, i, reached = 0, hit = [];
 function rnd(n) { seed = (seed * 48271) % 2147483647; return seed % n; }
 var syms = [], objs = [];
 for (i = 0; i < K; i++) { syms.push(Symbol("y" + i)); objs.push({ n: i }); }
@@ -796,7 +796,7 @@ function mset(id, v) { if (at[id] >= 0) list[at[id]].v = v; else { at[id] = list
 function mdel(id) { if (at[id] < 0) return false; list[at[id]].live = false; at[id] = -1; size--; return true; }
 function mclear() { var j; for (j = 0; j < list.length; j++) list[j].live = false; for (j = 0; j < K; j++) at[j] = -1; size = 0; }
 function mnext(c) { if (c.done) return null; while (c.idx < list.length) { var e = list[c.idx++]; if (e.live) return e; } c.done = true; return null; }
-function doSet(turn) { var id = rnd(K); m.set(keyOf(id), turn); s.add(keyOf(id)); mset(id, turn); }
+function doSet(turn) { var id = rnd(K); m.set(keyOf(id), turn); s.add(keyOf(id)); mset(id, turn); if (id % 5 === 4 && !hit[id]) { hit[id] = true; reached++; } }
 function doDelete(turn) {
   var id = rnd(K), a = m.delete(keyOf(id)), b = s.delete(keyOf(id)), e = mdel(id);
   check(a === e && b === e, "delete " + canon(id) + " at " + turn + ": " + a + b + e);
@@ -847,10 +847,43 @@ var all = []; m.forEach(function (v, k) { all.push(shown(k) + "=" + v); });
 var want = []; for (i = 0; i < list.length; i++) if (list[i].live) want.push(canon(list[i].id) + "=" + list[i].v);
 check(all.join() === want.join(), "final order " + all.join() + " want " + want.join());
 check([...s].map(shown).join() === [...m.keys()].map(shown).join(), "the Set's order differs from the Map's");
-"mismatches " + bad + (bad > 0 ? " first: " + first : "") + (compares >= OPS ? "" : " compares " + compares);
+"mismatches " + bad + (bad > 0 ? " first: " + first : "") + (compares >= OPS ? "" : " compares " + compares) + ", specials " + reached;
 "#
-    .replace("__OPS__", &ops.to_string());
-    answers_once(&source, "mismatches 0");
+    .replace("__OPS__", &ops.to_string())
+    .replace("__SEED__", &seed.to_string());
+    support::script::run(unbounded_steps(), &source)
+}
+
+/// The operations of each test of [`random_operations`] and the special keys it sets: 1,000
+/// and all eight in the default mode; 6 in the collect mode, which reach none (as the 12 of one
+/// test did before). One test of 2,000 operations took 2.1 s alone in the default build, and
+/// one of 12 took 2.15 s in the lane's collect build (test profile, opt-level 0), of which the
+/// script's setup with no operation took 0.88 s and each operation about 0.1 s (2026-11-27), so
+/// the story's 2,000 are two tests over two seeds.
+fn random_operations_count() -> (u32, u32) {
+    if collect_mode() { (6, 0) } else { (1_000, 8) }
+}
+
+/// [`random_operations`] from the seed 20261126, the story's seed: the first half of its 2,000
+/// operations ([`random_operations_count`]).
+#[test]
+fn random_operations_match_the_model_list_of_the_clauses() {
+    let (ops, specials) = random_operations_count();
+    assert_eq!(
+        random_operations(20_261_126, ops),
+        Outcome::Normal(format!("\"mismatches 0, specials {specials}\""))
+    );
+}
+
+/// [`random_operations`] from a second seed, 20261127, in place of the second half of the
+/// story's 2,000 operations ([`random_operations_count`]).
+#[test]
+fn random_operations_from_a_second_seed_match_the_model_list_of_the_clauses() {
+    let (ops, specials) = random_operations_count();
+    assert_eq!(
+        random_operations(20_261_127, ops),
+        Outcome::Normal(format!("\"mismatches 0, specials {specials}\""))
+    );
 }
 
 /// `story:map-and-set` and `story:keyed-entry-table`: a compaction in the middle of a
@@ -949,14 +982,11 @@ var thrower = function () { log.push("call return"); throw "return"; };
     );
 }
 
-/// The surface of `%Map%`, `%Set%`, their prototypes and both iterator prototypes against
-/// clauses 24.1 and 24.2: the own keys in the order of the clauses, every descriptor (`length`,
-/// `name`, attributes), the shared function objects, the prototype chains, and the brand check
-/// of every method, getter and `next` against nine other this values.
-#[test]
-fn the_surface_of_map_set_and_their_iterators() {
-    answers_once(
-        r#"function d(o, k) {
+/// The functions the tests of the surface of `%Map%` and `%Set%` share: `d(o, k)`, the
+/// descriptor of `o[k]` written out, `all(o)`, every own key of `o` with its descriptor, `MIP`,
+/// `SIP` and `IP`, the iterator prototypes, and `typeErrors(f, own)`, how many of the receivers
+/// but `own` make `f` throw a `TypeError`.
+const SURFACE: &str = r#"function d(o, k) {
   var x = Object.getOwnPropertyDescriptor(o, k);
   if (x === undefined) return "none";
   var flags = (x.writable ? "w" : "") + (x.enumerable ? "e" : "") + (x.configurable ? "c" : "");
@@ -966,7 +996,26 @@ fn the_surface_of_map_set_and_their_iterators() {
 function all(o) { return Reflect.ownKeys(o).map(function (k) { return String(k) + " " + d(o, k); }).join("; "); }
 var MIP = Object.getPrototypeOf(new Map().keys()), SIP = Object.getPrototypeOf(new Set().values());
 var IP = Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()));
-var r = [all(Map.prototype), all(Set.prototype), all(MIP), all(SIP),
+var receivers = [new Set(), new Map(), {}, 1, "s", undefined, null, Symbol(), new Map().keys(), new Set().values(), Map.prototype, Set.prototype];
+function typeErrors(f, own) {
+  var n = 0;
+  receivers.forEach(function (x) { if (x === own) return; try { f(x); } catch (e) { if (e instanceof TypeError) n++; } });
+  return n;
+}
+"#;
+
+/// The surface of `%Map%`, `%Set%`, their prototypes and both iterator prototypes against
+/// clauses 24.1 and 24.2: the own keys in the order of the clauses, every descriptor (`length`,
+/// `name`, attributes), the shared function objects and the prototype chains. The brand checks
+/// are [`the_methods_of_map_check_their_brand`] and [`the_methods_of_set_and_both_nexts_check_their_brand`]:
+/// one script of all three took 6.3 s alone with the feature `collect-every-safe-point` in the
+/// test profile (opt-level 0) on 2026-11-27.
+#[test]
+fn the_surface_of_map_set_and_their_iterators() {
+    answers_once(
+        &[
+            SURFACE,
+            r#"var r = [all(Map.prototype), all(Set.prototype), all(MIP), all(SIP),
   [d(Map, "length"), d(Map, "name"), d(Map, "prototype"), d(Map, Symbol.species)].join(";"),
   [d(Set, "length"), d(Set, "name"), d(Set, "prototype"), d(Set, Symbol.species)].join(";")];
 r.push([Map.prototype[Symbol.iterator] === Map.prototype.entries, Set.prototype.keys === Set.prototype.values,
@@ -976,27 +1025,9 @@ r.push([Map.prototype[Symbol.iterator] === Map.prototype.entries, Set.prototype.
   Object.getPrototypeOf(new Map().entries()) === MIP, Object.getPrototypeOf(new Map().values()) === MIP,
   Object.getPrototypeOf(new Set().entries()) === SIP, (function () { var it = new Map().keys(); return it[Symbol.iterator]() === it; })(),
   Object.prototype.toString.call(new Map()), Object.prototype.toString.call(new Set())].join());
-var receivers = [new Set(), new Map(), {}, 1, "s", undefined, null, Symbol(), new Map().keys(), new Set().values(), Map.prototype, Set.prototype];
-function typeErrors(f, own) {
-  var n = 0;
-  receivers.forEach(function (x) { if (x === own) return; try { f(x); } catch (e) { if (e instanceof TypeError) n++; } });
-  return n;
-}
-var mapSize = Object.getOwnPropertyDescriptor(Map.prototype, "size").get, setSize = Object.getOwnPropertyDescriptor(Set.prototype, "size").get;
-var counts = [];
-["clear", "delete", "entries", "forEach", "get", "has", "keys", "set", "values"].forEach(function (name) {
-  counts.push(name + typeErrors(function (x) { Map.prototype[name].call(x, function () {}); }, receivers[1]));
-});
-counts.push("size" + typeErrors(function (x) { mapSize.call(x); }, receivers[1]));
-["add", "clear", "delete", "entries", "forEach", "has", "values"].forEach(function (name) {
-  counts.push(name + typeErrors(function (x) { Set.prototype[name].call(x, function () {}); }, receivers[0]));
-});
-counts.push("size" + typeErrors(function (x) { setSize.call(x); }, receivers[0]));
-counts.push("mapnext" + typeErrors(function (x) { MIP.next.call(x); }, receivers[8]));
-counts.push("setnext" + typeErrors(function (x) { SIP.next.call(x); }, receivers[9]));
-counts.push("new" + typeErrors(function (x) { new Map.prototype.set(); }, {}) + typeErrors(function (x) { new MIP.next(); }, {}) + typeErrors(function (x) { Set(); }, {}));
-r.push(counts.join());
 r.join(" | ");"#,
+        ]
+        .concat(),
         "clear clear/0:wc; constructor Map/0:wc; delete delete/1:wc; entries entries/0:wc; forEach forEach/1:wc; \
          get get/1:wc; has has/1:wc; keys keys/0:wc; set set/2:wc; size get get size/0 set none:c; values values/0:wc; \
          Symbol(Symbol.iterator) entries/0:wc; Symbol(Symbol.toStringTag) Map:c | \
@@ -1010,9 +1041,51 @@ r.join(" | ");"#,
          next next/0:wc; Symbol(Symbol.toStringTag) Set Iterator:c | \
          0:c;Map:c;[object Map]:;get get [Symbol.species]/0 set none:c | \
          0:c;Set:c;[object Set]:;get get [Symbol.species]/0 set none:c | \
-         true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,[object Map],[object Set] | \
-         clear11,delete11,entries11,forEach11,get11,has11,keys11,set11,values11,size11,\
-         add11,clear11,delete11,entries11,forEach11,has11,values11,size11,mapnext11,setnext11,new121212",
+         true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,[object Map],[object Set]",
+    );
+}
+
+/// The brand check of every method and getter of `%Map.prototype%` against eleven other this
+/// values (`#sec-map.prototype.clear` and the clauses after it, each step "RequireInternalSlot").
+#[test]
+fn the_methods_of_map_check_their_brand() {
+    answers_once(
+        &[
+            SURFACE,
+            r#"var mapSize = Object.getOwnPropertyDescriptor(Map.prototype, "size").get;
+var counts = [];
+["clear", "delete", "entries", "forEach", "get", "has", "keys", "set", "values"].forEach(function (name) {
+  counts.push(name + typeErrors(function (x) { Map.prototype[name].call(x, function () {}); }, receivers[1]));
+});
+counts.push("size" + typeErrors(function (x) { mapSize.call(x); }, receivers[1]));
+counts.join();"#,
+        ]
+        .concat(),
+        "clear11,delete11,entries11,forEach11,get11,has11,keys11,set11,values11,size11",
+    );
+}
+
+/// The brand check of every method and getter of `%Set.prototype%` and of `next` of both
+/// iterator prototypes against eleven other this values, and `new` of a method, of `next` and a
+/// call of `Set` without it, each a `TypeError`.
+#[test]
+fn the_methods_of_set_and_both_nexts_check_their_brand() {
+    answers_once(
+        &[
+            SURFACE,
+            r#"var setSize = Object.getOwnPropertyDescriptor(Set.prototype, "size").get;
+var counts = [];
+["add", "clear", "delete", "entries", "forEach", "has", "values"].forEach(function (name) {
+  counts.push(name + typeErrors(function (x) { Set.prototype[name].call(x, function () {}); }, receivers[0]));
+});
+counts.push("size" + typeErrors(function (x) { setSize.call(x); }, receivers[0]));
+counts.push("mapnext" + typeErrors(function (x) { MIP.next.call(x); }, receivers[8]));
+counts.push("setnext" + typeErrors(function (x) { SIP.next.call(x); }, receivers[9]));
+counts.push("new" + typeErrors(function (x) { new Map.prototype.set(); }, {}) + typeErrors(function (x) { new MIP.next(); }, {}) + typeErrors(function (x) { Set(); }, {}));
+counts.join();"#,
+        ]
+        .concat(),
+        "add11,clear11,delete11,entries11,forEach11,has11,values11,size11,mapnext11,setnext11,new121212",
     );
 }
 
@@ -1091,9 +1164,13 @@ fn a_map_of_another_realm() {
 /// that holds itself as key and value survives; a Map reachable only through an iterator a
 /// suspended generator holds, and a Set reachable only through its iterator, survive two
 /// host collections with a heap churned between them and go on from where they were; a Map
-/// whose five iterators were dropped unfinished keeps its entries.
+/// whose five iterators were dropped unfinished keeps its entries. The churn makes 200 objects;
+/// 50 in the collect mode, still more than the objects the first script made, so they take every
+/// slot a missing trace would have freed (200 took 2.6 s alone in that mode in the test profile,
+/// opt-level 0, on 2026-11-27).
 #[test]
 fn the_collector_keeps_what_iterators_and_generators_hold() {
+    let junk = if collect_mode() { 50 } else { 200 };
     let (mut agent, realm) = agent_and_realm(|limits| limits.steps_per_entry = 1 << 40);
     steps_of(
         &mut agent,
@@ -1114,7 +1191,9 @@ fn the_collector_keeps_what_iterators_and_generators_hold() {
     steps_of(
         &mut agent,
         &realm,
-        "var junk = [], i; for (i = 0; i < 200; i++) junk.push({ i: i }); junk = null;",
+        &format!(
+            "var junk = [], i; for (i = 0; i < {junk}; i++) junk.push({{ i: i }}); junk = null;"
+        ),
     );
     collected(&mut agent);
     assert_eq!(
@@ -1133,14 +1212,19 @@ fn the_collector_keeps_what_iterators_and_generators_hold() {
 }
 
 /// The table's growth with no live entries (`story:keyed-entry-table`, compaction): a fresh
-/// key added and deleted N times (10,000; 100 in the collect mode), then the same with
-/// `clear` every 1,000 turns (25), then on a Map of 1,000 live keys (32) twice: the bytes
+/// key added and deleted N times (10,000; 40 in the collect mode), then the same with
+/// `clear` every 1,000 turns (20), then on a Map of 1,000 live keys (16) twice: the bytes
 /// charged right after each loop and after a collection stay bounded, and the second churn of
 /// the big Map leaves the reading where the first left it. The readings are printed.
+///
+/// The collect mode's counts: 40 keys pass 32, so a table that never compacts holds storage
+/// for 64 entries and their index map after the churn, and 16 live keys and 40 churned pass
+/// the 32 places of the big Map's storage. With 100, 25 and 32 the test took 4.8 s alone in
+/// the test profile (opt-level 0) on 2026-11-27.
 #[test]
 fn churn_without_live_entries_stays_bounded() {
     let (n, every, live) = if collect_mode() {
-        (100, 25, 32)
+        (40, 20, 16)
     } else {
         (10_000, 1_000, 1_000)
     };
@@ -1197,10 +1281,15 @@ fn churn_without_live_entries_stays_bounded() {
 /// `docs/design/host-interface.md`, section 10): a Map filled in a function's scope until the
 /// run ends in `Terminated(MemoryBudget)`, a `collect()`, the same script again, which ends the
 /// same way, and a `collect()`: both readings after a collection are the reading before the
-/// first run, and a third run of a small script answers normally.
+/// first run, and a third run of a small script answers normally. The fill calls `forEach` at
+/// every 64th entry; at every 256th in the collect mode, where each of its visits is a call whose
+/// every step marks the heap (a room of 16 KiB above the realm in that mode, 256 KiB in the
+/// default one; the test took 3.0 s alone with every 64th in the test profile, opt-level 0, on
+/// 2026-11-27, and with a room of 4 or 8 KiB the parse of the first script was refused).
 #[test]
 fn the_memory_budget_twice_in_one_agent_credits_both_runs() {
     let room: u64 = if collect_mode() { 16 << 10 } else { 256 << 10 };
+    let every = if collect_mode() { 256 } else { 64 };
     let warm = "(function () { var m = new Map(); for (var i = 0; i < 8; i++) m.set(i, i); var it = m.keys(); it.next(); m.forEach(function () {}); })();";
     let realm_reading = {
         let (mut probe, realm) = agent_and_realm(|limits| limits.steps_per_entry = 1 << 40);
@@ -1218,7 +1307,9 @@ fn the_memory_budget_twice_in_one_agent_credits_both_runs() {
         let outcome = eval_text(
             &mut agent,
             &realm,
-            "(function () { var m = new Map(), it = m.keys(), f = function () {}; for (var i = 0; ; i++) { m.set(i, i); if (i % 64 === 0) m.forEach(f); } })();",
+            &format!(
+                "(function () {{ var m = new Map(), it = m.keys(), f = function () {{}}; for (var i = 0; ; i++) {{ m.set(i, i); if (i % {every} === 0) m.forEach(f); }} }})();"
+            ),
         );
         assert_eq!(outcome, Outcome::Terminated(Termination::MemoryBudget));
         readings.push(collected(&mut agent));
@@ -1280,10 +1371,11 @@ fn an_interrupt_between_next_calls_and_in_the_adder() {
 /// The step budget (`docs/design/engine.md`, "The step budget"): a `forEach` whose callback
 /// adds one entry per visit, a `for`-`of` whose body does the same, and `new Set` of an
 /// iterable without end each end in `Terminated(StepBudget)` with `last_entry_steps()` at most
-/// the budget (100,000; 2,000 in the collect mode).
+/// the budget (100,000; 500 in the collect mode, where 2,000 took 2.9 s alone in the test
+/// profile, opt-level 0, on 2026-11-27).
 #[test]
 fn loops_that_add_an_entry_per_turn_end_at_the_step_budget() {
-    let budget = if collect_mode() { 2_000 } else { 100_000 };
+    let budget = if collect_mode() { 500 } else { 100_000 };
     for source in [
         "var m = new Map([[0, 0]]); m.forEach(function (v, k) { m.set(k + 1, 0); });",
         "var s = new Set([0]); for (var k of s) s.add(k + 1);",

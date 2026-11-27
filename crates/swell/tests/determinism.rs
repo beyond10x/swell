@@ -265,6 +265,15 @@ fn call_back(cx: &mut Cx<'_, Transcript>, call: HostCall<'_>) -> Completion<Valu
     answer
 }
 
+/// The script of the corpus that fills an Array in a loop and maps it: 50 elements (1,794
+/// steps); 5 with the feature `collect-every-safe-point`, where 50 would not end within that
+/// mode's step budget ([`corpus_limits`]).
+const SQUARES: &str = if cfg!(feature = "collect-every-safe-point") {
+    "var a = []; for (var i = 0; i < 5; i++) a.push(i * i); print(a.map(function (x) { return x % 7; }).join(''));"
+} else {
+    "var a = []; for (var i = 0; i < 50; i++) a.push(i * i); print(a.map(function (x) { return x % 7; }).join(''));"
+};
+
 /// The corpus: slice 1 scripts over the interpreter, the builtins, the budgets and the bounds,
 /// and the host functions above; each is run in this order in one agent, so that later scripts
 /// see what earlier ones left.
@@ -278,7 +287,7 @@ const CORPUS: &[&str] = &[
     "print(JSON.stringify({ a: 1, b: 2 }, function (k, v) { return typeof v === 'number' ? v + 1 : v; }));",
     "var fib = function (n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }; print(fib(15));",
     "function counter() { var c = 0; return function () { return ++c; }; } var next = counter(); next(); next(); print(next());",
-    "var a = []; for (var i = 0; i < 50; i++) a.push(i * i); print(a.map(function (x) { return x % 7; }).join(''));",
+    SQUARES,
     "print('hello world'.indexOf('o'), 'hello'.indexOf('z'), String(12.5), String(true));",
     "function P(x) { this.x = x; } var B = P.bind(null, 7); var p = new B(); print(p.x, p instanceof P, p instanceof B);",
     "print(callBack(function (a, b) { return a + b; }, 2, 3));",
@@ -302,11 +311,17 @@ const CORPUS: &[&str] = &[
 /// that the endless scripts reach their budgets fast (`fib(15)` takes about 27,000 steps). In
 /// the default mode they are 40,000 steps per entry, a `frame_depth` of 200 and a
 /// `string_length` of 4,096, in the gate and in the lane `slow` (`SWELL_FULL_COUNTS=1`) alike.
-/// With the feature `collect-every-safe-point` they are 2,000 steps per entry, a `frame_depth`
-/// of 30 and a `string_length` of 256: with 10,000 steps the test was terminated at 60 s in that
-/// mode, at a load of 100 to 110 on 17 cores (cargo-nextest), since this process runs the corpus
-/// twice and every step collects. The memory budget here is the test limits' own, wide enough
-/// that nothing the corpus does is refused; the probes of [`corpus_setup`] run under it.
+/// With the feature `collect-every-safe-point` they are 300 steps per entry, a `frame_depth` of
+/// 30 and a `string_length` of 100, and [`SQUARES`] fills 5 elements: every step collects and
+/// this process runs the corpus twice and most of it once more in the probe of
+/// [`keeping_loop_budget`], while a child runs it beside. With 10,000 steps the test was
+/// terminated at 60 s in that mode, at a load of 100 to 110 on 17 cores (cargo-nextest); with
+/// 2,000 steps, a `string_length` of 256 and 50 elements it took 6.2 s alone in the test
+/// profile (opt-level 0) on 2026-11-27, the corpus 8,100 steps a run, of them 5,794 in
+/// `fib(15)`, `while (true) {}` and [`SQUARES`] and 598 in the doubling String. Every script
+/// that ended normally there still does, the longest the 148 steps of the `for`-`in`, and each
+/// endless one still ends at its budget. The memory budget here is the test limits' own, wide
+/// enough that nothing the corpus does is refused; the probes of [`corpus_setup`] run under it.
 fn corpus_limits() -> Limits {
     let mut limits = limits();
     limits.steps_per_entry = 40_000;
@@ -314,21 +329,26 @@ fn corpus_limits() -> Limits {
     limits.reentry_depth = 20;
     limits.string_length = 1 << 12;
     if cfg!(feature = "collect-every-safe-point") {
-        limits.steps_per_entry = 2_000;
+        limits.steps_per_entry = 300;
         limits.frame_depth = 30;
-        limits.string_length = 1 << 8;
+        limits.string_length = 100;
     }
     limits
 }
 
-/// The slots of the arena of objects a corpus agent has free when the corpus starts: 48. More
-/// than the scripts before the loop that keeps its objects hold at once (with the collector at
-/// every safe point they hold the dozen objects they keep in globals and the few a statement
-/// makes; were it fewer, they would take the growth, and [`keeping_loop_budget`] would find
-/// none in the loop and fail), and few enough that the loop, which keeps one object per
-/// iteration at about 17 steps, fills them within half of the 2,000 steps it has with that
-/// collector.
-const FREE_OBJECT_SLOTS: u64 = 48;
+/// The slots of the arena of objects a corpus agent has free when the corpus starts: 48; 22
+/// with the feature `collect-every-safe-point`. More than the scripts before the loop that
+/// keeps its objects hold at once (with the collector at every safe point they hold the dozen
+/// objects they keep in globals and the few a statement makes, 15 on 2026-11-27, when 48 left
+/// the loop 33 iterations to the growth; were it fewer, they would take the growth, and
+/// [`keeping_loop_budget`] would find none in the loop and fail), and few enough that the loop,
+/// which keeps one object per iteration at about 17 steps, fills them within half of the steps
+/// it has (40,000; 300 with that collector, where 22 leave it about 7 iterations).
+const FREE_OBJECT_SLOTS: u64 = if cfg!(feature = "collect-every-safe-point") {
+    22
+} else {
+    48
+};
 
 /// The least rise of `heap_bytes()` that one kept object cannot make by itself: 2 KiB. An
 /// object of [`pin_objects`] or `{ a: h.length }` is charged its record's property table, and an
